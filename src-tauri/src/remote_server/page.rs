@@ -102,6 +102,19 @@ mod tests {
         assert!(html.contains("new TerminalCtor"));
         assert!(html.contains("new WebLinksAddonCtor"));
         assert!(html.contains("function openRemoteUrl(uri)"));
+        assert!(html.contains("function createRemotePrLinkProvider(term)"));
+        assert!(html.contains("/github-repo"));
+        assert!(
+            html.contains("terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));")
+        );
+        assert!(html.contains("terminalInfoById.get(terminalId)?.cwd !== cwd"));
+        assert!(html.contains("data.cwd !== cwd"));
+        assert!(html.contains("repoRevision !== githubRepoRequestRevision"));
+        assert!(html.contains("function activateTouchLink(term, element, point)"));
+        assert!(html.contains("const linkElement = element.querySelector(\".xterm-screen\");"));
+        assert!(html.contains("linkElement.classList.contains(\"xterm-cursor-pointer\")"));
+        assert!(html.contains("if (activateTouchLink(term, element, point)) return;"));
+        assert!(html.contains("event.pointerType === \"touch\" || event.pointerType === \"pen\""));
         assert!(html.contains("linkHandler: {"));
         assert!(html.contains("allowNonHttpProtocols: false"));
         assert!(html.contains("url.protocol !== \"http:\" && url.protocol !== \"https:\""));

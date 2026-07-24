@@ -69,12 +69,16 @@ const navigation = {
 
 const plainUrl = "https://links.example/plain";
 const oscUrl = "https://links.example/osc";
+const repoBase = "https://github.com/owner/repo";
 
 const snapshotText = [
   `Plain: ${plainUrl}`,
   "",
   `OSC: \x1b]8;;${oscUrl}\x07open\x1b]8;;\x07`,
   "Unsafe: \x1b]8;;javascript:alert(document.domain)\x07blocked\x1b]8;;\x07",
+  "Issue: #123",
+  "Ignored: abc#12 #fff v1.2#3",
+  "Wide: 가 #45",
   "",
 ].join("\r\n");
 
@@ -102,6 +106,9 @@ function snapshotFrames(text: string): { header: string; payload: Buffer } {
 
 async function installRemoteMocks(context: BrowserContext) {
   await context.route("https://links.example/**", (route) =>
+    route.fulfill({ contentType: "text/html; charset=utf-8", body: "<!doctype html>" }),
+  );
+  await context.route("https://github.com/owner/repo/issues/**", (route) =>
     route.fulfill({ contentType: "text/html; charset=utf-8", body: "<!doctype html>" }),
   );
   await context.route("http://remote.test/remote/**", async (route) => {
@@ -158,6 +165,9 @@ async function installRemoteMocks(context: BrowserContext) {
     if (url.pathname === "/remote/v1/terminals/terminal-1/resize") {
       return route.fulfill({ json: { resized: true } });
     }
+    if (url.pathname === "/remote/v1/terminals/terminal-1/github-repo") {
+      return route.fulfill({ json: { cwd: "C:\\work", repoBase } });
+    }
     return route.fulfill({ json: {} });
   });
 }
@@ -173,7 +183,10 @@ type RemoteTerminalWindow = typeof window & {
   };
 };
 
-test("Remote xterm opens plain and OSC 8 HTTP URLs in safe new tabs", async ({ context, page }) => {
+test("Remote xterm opens URL and GitHub issue/PR links in safe new tabs", async ({
+  context,
+  page,
+}) => {
   await installRemoteMocks(context);
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
     const { header, payload } = snapshotFrames(snapshotText);
@@ -236,11 +249,92 @@ test("Remote xterm opens plain and OSC 8 HTTP URLs in safe new tabs", async ({ c
 
   await openCellInSafeTab("Plain: https://".length, 0, plainUrl);
   await openCellInSafeTab("OSC: ".length, 2, oscUrl);
+  await openCellInSafeTab("Issue: ".length, 4, `${repoBase}/issues/123`);
+  // `가` occupies two xterm cells, so `#45` starts three cells after the
+  // ASCII prefix (wide lead + trailing cell + separating space).
+  await openCellInSafeTab("Wide: ".length + 3, 6, `${repoBase}/issues/45`);
 
   // OSC 8 text is controlled by terminal output. Non-web schemes must not gain
   // script execution or local-file navigation through the Remote browser.
   const pageCount = context.pages().length;
   await clickCell("Unsafe: ".length, 3);
-  await page.waitForTimeout(200);
+  await clickCell("Ignored: abc".length, 5);
+  await clickCell("Ignored: abc#12 ".length, 5);
+  await clickCell("Ignored: abc#12 #fff v1.2".length, 5);
+  await page.waitForTimeout(100);
   expect(context.pages()).toHaveLength(pageCount);
+});
+
+test.describe("touch URL activation", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("Remote xterm opens URL and GitHub issue/PR links from a touch tap", async ({
+    context,
+    page,
+  }) => {
+    await installRemoteMocks(context);
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
+      const { header, payload } = snapshotFrames(snapshotText);
+      socket.send(header);
+      socket.send(payload);
+    });
+
+    await page.goto("http://remote.test/remote/#token=remote-secret");
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const originalReset = target.Terminal.prototype.reset;
+      target.Terminal.prototype.reset = function resetCapturingInstance() {
+        target.__remoteTerm = this as never;
+        return originalReset.call(this);
+      };
+    });
+
+    await page.locator("#connect").click();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const buffer = (window as RemoteTerminalWindow).__remoteTerm?.buffer.active;
+          return Array.from(
+            { length: 10 },
+            (_, row) => buffer?.getLine(row)?.translateToString() || "",
+          ).join("\n");
+        }),
+      )
+      .toContain("Unsafe: blocked");
+
+    await page.waitForTimeout(250);
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const geometry = await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm;
+      return { cols: term?.cols || 1, rows: term?.rows || 1 };
+    });
+    const cellWidth = screenBox!.width / geometry.cols;
+    const cellHeight = screenBox!.height / geometry.rows;
+
+    const tapCell = async (column: number, row: number) => {
+      const x = screenBox!.x + (column + 0.5) * cellWidth;
+      const y = screenBox!.y + (row + 0.5) * cellHeight;
+      await page.touchscreen.tap(x, y);
+    };
+    const openCellFromTouchTap = async (column: number, row: number, expectedUrl: string) => {
+      const popupPromise = context.waitForEvent("page");
+      await tapCell(column, row);
+      const popup = await popupPromise;
+      await expect.poll(() => popup.url()).toBe(expectedUrl);
+      expect(await popup.evaluate(() => window.opener === null)).toBe(true);
+      await popup.close();
+    };
+
+    await openCellFromTouchTap("Plain: https://".length, 0, plainUrl);
+    await openCellFromTouchTap("OSC: ".length, 2, oscUrl);
+    await openCellFromTouchTap("Issue: ".length, 4, `${repoBase}/issues/123`);
+
+    const pageCount = context.pages().length;
+    await tapCell("Unsafe: ".length, 3);
+    await tapCell("Ignored: abc".length, 5);
+    await page.waitForTimeout(200);
+    expect(context.pages()).toHaveLength(pageCount);
+  });
 });

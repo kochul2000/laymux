@@ -23,6 +23,7 @@ use super::assets::{
     remote_addon_fit_js, remote_web_links_addon_js, remote_xterm_css, remote_xterm_js,
 };
 use super::auth::remote_guard;
+use super::github_repo_routes::remote_terminal_github_repo;
 use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
@@ -139,6 +140,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_workspace_switch_active),
         )
         .route("/remote/v1/terminals", get(remote_terminals_list))
+        .route(
+            "/remote/v1/terminals/{id}/github-repo",
+            get(remote_terminal_github_repo),
+        )
         .route(
             "/remote/v1/terminals/{id}/focus",
             post(remote_terminal_focus),

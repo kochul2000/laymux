@@ -504,15 +504,7 @@ pub fn get_git_branch(working_dir: String) -> Option<String> {
 /// issue/PR references clickable (issue #439).
 #[tauri::command]
 pub fn resolve_git_remote(path: String) -> Option<String> {
-    // The pane cwd arrives in Linux form on Windows; convert to a Windows
-    // access path first (see get_git_branch) or find_git_dir never matches (#441).
-    let resolved = crate::path_utils::resolve_address_path_following_symlinks(&path, None);
-    let p = std::path::Path::new(&resolved);
-    let git_dir = crate::git_watcher::find_git_dir(p)?;
-    let config_path = crate::git_watcher::find_git_config(&git_dir)?;
-    let config = std::fs::read_to_string(config_path).ok()?;
-    let url = crate::git_watcher::parse_remote_origin_url(&config)?;
-    crate::git_watcher::github_base_from_remote_url(&url)
+    crate::git_watcher::resolve_github_base_from_working_dir(&path)
 }
 
 #[tauri::command]
