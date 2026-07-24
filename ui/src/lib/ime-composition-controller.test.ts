@@ -15,6 +15,7 @@ const baseInput = {
   overlayActivity: true,
   syncOutputActive: false,
   isAltBufferActive: false,
+  viewportScrolledUp: false,
   compositionActive: false,
   cursorHidden: false,
   hasSyncFramePosition: false,
@@ -49,6 +50,17 @@ describe("resolveVisualCaretOwner", () => {
         isAltBufferActive: true,
       }),
     ).toBe("alt-buffer");
+  });
+
+  it("hides the caret while the user is viewing scrollback", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        viewportScrolledUp: true,
+        compositionActive: true,
+        hasSyncFramePosition: true,
+      }),
+    ).toBe("hidden");
   });
 
   it("prioritizes composition preview over sync-frame and shadow input", () => {

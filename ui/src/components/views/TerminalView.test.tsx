@@ -802,6 +802,115 @@ describe("TerminalView", () => {
     });
   });
 
+  it("hides the Codex overlay caret while the viewport is scrolled up", async () => {
+    render(
+      <TerminalView instanceId="t-shadow-scroll" profile="PowerShell" syncGroup="" isFocused />,
+    );
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-shadow-scroll", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-shadow-scroll");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-shadow-scroll");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: {
+        active: {
+          cursorX: number;
+          cursorY: number;
+          baseY: number;
+          viewportY: number;
+        };
+      };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    terminal.element.appendChild(screenEl);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    terminal.buffer.active.baseY = 100;
+    terminal.buffer.active.viewportY = 100;
+    terminal.buffer.active.cursorX = 2;
+    terminal.buffer.active.cursorY = 4;
+
+    await vi.waitFor(() => {
+      expect(capturedScrollHandler).not.toBeNull();
+    });
+    await act(async () => {
+      // Codex does not emit OSC 133. Seed the shadow cursor through its real
+      // DEC 2026 frame + out-of-frame DECTCEM cursor-park sequence.
+      await csiHandlers.get("?:h")?.([2026]);
+      await csiHandlers.get("?:l")?.([2026]);
+      await csiHandlers.get("?:l")?.([25]);
+      await csiHandlers.get("?:h")?.([25]);
+    });
+    await vi.waitFor(() => {
+      expect(overlay.style.opacity).toBe("1");
+    });
+
+    // A new footer frame has flushed, but its authoritative cursor park has
+    // not arrived yet. Scrolling must still hide the previously painted caret
+    // immediately instead of letting parkPending freeze it in place.
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+      terminal.buffer.active.cursorX = 20;
+      terminal.buffer.active.cursorY = 20;
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    terminal.buffer.active.viewportY = 80;
+    await act(async () => {
+      capturedScrollHandler?.();
+      const overlayFrame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
+        | FrameRequestCallback
+        | undefined;
+      overlayFrame?.(performance.now());
+    });
+    expect(overlay.style.opacity).toBe("0");
+
+    await act(async () => {
+      // Settle the frame while still viewing scrollback. The trusted shadow
+      // position may update, but it must remain hidden until live-bottom.
+      await csiHandlers.get("?:l")?.([25]);
+      terminal.buffer.active.cursorX = 2;
+      terminal.buffer.active.cursorY = 4;
+      await csiHandlers.get("?:h")?.([25]);
+    });
+
+    terminal.buffer.active.viewportY = 100;
+    await act(async () => {
+      capturedScrollHandler?.();
+    });
+    await vi.waitFor(() => {
+      expect(overlay.style.opacity).toBe("1");
+    });
+  });
+
   it("keeps the IME composition preview from covering text after a middle insert", async () => {
     render(<TerminalView instanceId="t-ime-middle" profile="PowerShell" syncGroup="" isFocused />);
 
