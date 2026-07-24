@@ -332,6 +332,15 @@ async function waitForTerminalInputReady(): Promise<void> {
   });
 }
 
+async function waitForLocalTerminalControl(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -2719,6 +2728,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -2737,6 +2747,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     // Regular key should pass through
     const event = new KeyboardEvent("keydown", { key: "a" });
@@ -2756,6 +2767,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -2774,6 +2786,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     const result = capturedKeyHandler!(event);
@@ -2806,6 +2819,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -3085,6 +3099,7 @@ describe("TerminalView", () => {
     render(
       <TerminalView instanceId="t-zoom1" paneId="pane-zoom1" profile="PowerShell" syncGroup="" />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled, preventDefault } = fireTerminalKey({ key: "=", ctrlKey: true });
 
@@ -3098,6 +3113,7 @@ describe("TerminalView", () => {
     render(
       <TerminalView instanceId="t-zoom2" paneId="pane-zoom2" profile="PowerShell" syncGroup="" />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled } = fireTerminalKey({ key: "-", ctrlKey: true });
 
@@ -3117,6 +3133,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled } = fireTerminalKey({ key: "0", ctrlKey: true });
 
@@ -3133,6 +3150,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     // ctrlKey false → xterm이 처리하도록 통과, override 그대로.
     fireTerminalKey({ key: "=", ctrlKey: false });
@@ -3153,6 +3171,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "-", ctrlKey: true });
 
@@ -3170,6 +3189,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "=", ctrlKey: true });
 
@@ -3178,6 +3198,7 @@ describe("TerminalView", () => {
 
   it("zoom on one pane does not affect another pane with the same profile", async () => {
     render(<TerminalView instanceId="t-zoomA" paneId="pane-A" profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
     // 각 TerminalView가 자신의 customKeyEventHandler를 등록하는데, 마지막에 등록된
     // handler가 capturedKeyHandler에 남는다. 그래서 두 번째 render는 pane-B의
     // handler로 capturedKeyHandler를 덮어쓴다. 이 테스트에서는 pane-A만 대상으로
@@ -3192,6 +3213,7 @@ describe("TerminalView", () => {
 
   it("zoom keybindings are a no-op when paneId prop is absent", async () => {
     render(<TerminalView instanceId="t-zoom-nopane" profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "=", ctrlKey: true });
     fireTerminalKey({ key: "-", ctrlKey: true });
@@ -3694,7 +3716,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("does not write or resize the backend while remote control is active", async () => {
+  it("blocks local keys and resize while remote control is active but forwards xterm protocol data", async () => {
     mockGetRemoteControlStatus.mockResolvedValue({
       active: true,
       leaseId: "remote-lease",
@@ -3719,14 +3741,52 @@ describe("TerminalView", () => {
       | undefined;
     expect(dataHandler).toBeDefined();
     expect(resizeHandler).toBeDefined();
+    expect(capturedKeyHandler).toBeTypeOf("function");
 
     act(() => {
-      dataHandler?.("x");
+      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
       resizeHandler?.({ cols: 120, rows: 40 });
     });
 
-    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(
+      "t-remote-owned",
+      "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+    );
     expect(mockResizeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("forwards xterm protocol responses before the initial remote status is known", async () => {
+    mockGetRemoteControlStatus.mockReturnValueOnce(new Promise(() => {}));
+
+    render(<TerminalView instanceId="t-protocol-pending" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+      expect(mockOnData).toHaveBeenCalled();
+      expect(capturedKeyHandler).toBeTypeOf("function");
+    });
+
+    const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+    expect(dataHandler).toBeTypeOf("function");
+    expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+
+    mockWriteToTerminal.mockClear();
+    act(() => {
+      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
+      dataHandler?.("\x1b]11;rgb:0000/0000/0000\x1b\\");
+    });
+
+    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+      1,
+      "t-protocol-pending",
+      "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+    );
+    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+      2,
+      "t-protocol-pending",
+      "\x1b]11;rgb:0000/0000/0000\x1b\\",
+    );
   });
 
   it("does not resize the backend before the initial remote status is known", async () => {

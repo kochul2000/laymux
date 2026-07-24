@@ -1798,6 +1798,7 @@ export function TerminalView({
     //   - Ctrl+C with empty selection → fall through so xterm sends SIGINT.
     terminal.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
+      if (!localTerminalControlAllowed()) return false;
       if (isLxShortcut(e)) return false;
 
       // In composer mode, keyboard focus belongs to the native textarea.
@@ -2001,9 +2002,11 @@ export function TerminalView({
     const wrapperEl = wrapperRef.current;
     wrapperEl?.addEventListener("mousedown", handleModifierLinkClick, true);
 
-    // Handle terminal data (user input) — send to backend PTY
+    // Forward xterm data to the authoritative backend owner gate. This channel
+    // also carries emulator-generated protocol replies (for example OSC 10/11),
+    // so the frontend's eventually-consistent remote status must not drop it.
+    // Local keyboard input is blocked at attachCustomKeyEventHandler above.
     terminal.onData((data) => {
-      if (!localTerminalControlAllowed()) return;
       trace("terminal-onData", {
         bytes: data.length,
         preview: JSON.stringify(data.slice(0, 80)),
