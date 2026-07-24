@@ -603,6 +603,9 @@ impl OutputActivityBurstSettings {
 pub struct TerminalSettings {
     #[serde(default)]
     pub output_activity_burst: OutputActivityBurstSettings,
+    /// Advertise xterm.js 24-bit color support to newly spawned PTY children.
+    #[serde(default = "default_true")]
+    pub advertise_true_color: bool,
     /// Automatically copy text to clipboard when selected in terminal.
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
@@ -630,6 +633,7 @@ impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             output_activity_burst: OutputActivityBurstSettings::default(),
+            advertise_true_color: true,
             copy_on_select: true,
             scrollbar_style: default_scrollbar_style(),
             path_link_enabled: true,

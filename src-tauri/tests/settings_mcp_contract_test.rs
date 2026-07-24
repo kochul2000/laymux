@@ -305,6 +305,22 @@ fn exit_metadata_is_live_applied() {
 }
 
 #[test]
+fn truecolor_advertising_metadata_is_next_use() {
+    let path = "/terminal/advertiseTrueColor";
+    let description = describe_settings(&[path.into()]).expect("known path");
+    assert_eq!(description["defaults"][path], json!(true));
+    assert_eq!(description["metadata"][path]["applyMode"], json!("nextUse"));
+
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "terminal": { "advertiseTrueColor": false } }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    assert!(prepared.next_use_required);
+    assert!(!prepared.restart_required);
+}
+
+#[test]
 fn duplicate_profiles_and_bad_extension_viewer_reference_are_rejected() {
     let duplicate = prepare_settings_update(
         &Settings::default(),

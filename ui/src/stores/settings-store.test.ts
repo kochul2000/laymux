@@ -564,6 +564,22 @@ describe("settings-store", () => {
 
   // -- Scrollbar style settings --
 
+  it("defaults truecolor capability advertising to enabled", () => {
+    expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(true);
+  });
+
+  it("fills a missing truecolor capability setting with the enabled default", () => {
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { copyOnSelect: false } as any,
+    });
+    expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(true);
+  });
+
+  it("can disable truecolor capability advertising", () => {
+    useSettingsStore.getState().setTerminal({ advertiseTrueColor: false });
+    expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(false);
+  });
+
   it("has default scrollbarStyle as overlay", () => {
     expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("overlay");
   });

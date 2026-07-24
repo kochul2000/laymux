@@ -230,7 +230,14 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   id: "t1",
   title: "Terminal",
-  config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
+  config: {
+    profile: "PowerShell",
+    cols: 80,
+    rows: 24,
+    sync_group: "",
+    env: [],
+    advertise_true_color: true,
+  },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
@@ -1460,7 +1467,14 @@ describe("TerminalView", () => {
       resolveSession({
         id: "terminal-pane-first",
         title: "Terminal",
-        config: { profile: "PowerShell", cols: 80, rows: 24, sync_group: "", env: [] },
+        config: {
+          profile: "PowerShell",
+          cols: 80,
+          rows: 24,
+          sync_group: "",
+          env: [],
+          advertise_true_color: true,
+        },
       });
       await Promise.resolve();
     });

@@ -88,6 +88,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/terminal/advertiseTrueColor",
+        description: "새 PTY 자식에 truecolor 지원을 광고합니다. 저장 후 새로 생성하거나 재시작한 터미널부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/paste",
         description: "클립보드와 smart paste 동작 설정입니다.",
         sensitive: false,

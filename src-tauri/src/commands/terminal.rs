@@ -196,6 +196,7 @@ pub fn create_terminal_session(
         rows,
         sync_group: sync_group.clone(),
         env,
+        advertise_true_color: settings.terminal.advertise_true_color,
     };
 
     let mut session = TerminalSession::new(id.clone(), config);
@@ -764,6 +765,7 @@ pub fn create_terminal_session(
             rows: session.config.rows,
             sync_group: session.config.sync_group.clone(),
             env: session.config.env.clone(),
+            advertise_true_color: session.config.advertise_true_color,
         },
     );
 

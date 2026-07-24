@@ -11,6 +11,7 @@ use crate::lock_ext::MutexExt;
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::terminal::TerminalSession;
+use crate::terminal_env::TerminalEnvPlan;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
 /// in a path string. Also expands `~` as a shorthand for the user's home directory.
@@ -440,30 +441,44 @@ where
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    // Collect all env vars (config + IDE vars) for shell script injection
-    let mut all_env: Vec<(String, String)> = session.config.env.clone();
-    all_env.push((ENV_LX_TERMINAL_ID.into(), session.id.clone()));
-    all_env.push((ENV_LX_GROUP_ID.into(), session.config.sync_group.clone()));
-
-    let (cmd_path, args) = if session.config.command_line.is_empty() {
-        // Fallback: legacy profile name-based resolution
-        TerminalSession::profile_to_command_with_env(&session.config.profile, &all_env)
+    let (command_line, startup_command) = if session.config.command_line.is_empty() {
+        // Fallback: legacy profile name-based resolution. Historically this
+        // path did not consume startup_command, so preserve that behavior.
+        (
+            TerminalSession::profile_command_line(&session.config.profile),
+            "",
+        )
     } else {
-        TerminalSession::command_line_to_command_with_startup(
-            &session.config.command_line,
-            &all_env,
-            &session.config.startup_command,
+        (
+            session.config.command_line.as_str(),
+            session.config.startup_command.as_str(),
         )
     };
+    let executable = command_line
+        .split_whitespace()
+        .next()
+        .unwrap_or("powershell.exe");
+    let is_wsl = is_wsl_command(executable);
+    let inherited_wslenv = is_wsl.then(|| std::env::var(ENV_WSLENV).ok()).flatten();
+    let env_plan = TerminalEnvPlan::for_session(
+        &session.config.env,
+        &session.id,
+        &session.config.sync_group,
+        session.config.advertise_true_color,
+        is_wsl,
+        inherited_wslenv.as_deref(),
+    );
+
+    let (cmd_path, args) = TerminalSession::command_line_to_command_with_env_plan(
+        command_line,
+        &env_plan,
+        startup_command,
+    );
     let mut cmd = CommandBuilder::new(&cmd_path);
     for arg in &args {
         cmd.arg(arg);
     }
-
-    // Also set env vars at the Windows process level (for PowerShell/CMD)
-    for (key, value) in &all_env {
-        cmd.env(key, value);
-    }
+    env_plan.apply_to_command(&mut cmd);
 
     // Set starting directory if configured
     if !session.config.starting_directory.is_empty() {
@@ -476,10 +491,7 @@ where
             for arg in &args {
                 cmd.arg(arg);
             }
-            // Re-apply env vars
-            for (key, value) in &all_env {
-                cmd.env(key, value);
-            }
+            env_plan.apply_to_command(&mut cmd);
         } else {
             // For non-WSL commands, convert /mnt/X/... back to Windows path
             let effective_dir = if is_unix_path(&dir) {
@@ -582,6 +594,7 @@ mod tests {
                 rows: 24,
                 sync_group: "test-group".into(),
                 env: vec![("TEST_VAR".into(), "hello".into())],
+                advertise_true_color: true,
             },
         )
     }
@@ -598,6 +611,7 @@ mod tests {
                 rows: 24,
                 sync_group: "test-group".into(),
                 env: vec![],
+                advertise_true_color: true,
             },
         )
     }
@@ -892,6 +906,7 @@ mod tests {
                 rows: 24,
                 sync_group: "test-group".into(),
                 env: vec![],
+                advertise_true_color: true,
             },
         );
         let (tx, rx) = mpsc::channel();
@@ -1136,6 +1151,7 @@ mod tests {
                 rows: 24,
                 sync_group: "test-group".into(),
                 env: vec![],
+                advertise_true_color: true,
             },
         );
         let (tx, rx) = mpsc::channel();

@@ -15,6 +15,7 @@ export interface TerminalSessionResult {
     rows: number;
     sync_group: string;
     env: [string, string][];
+    advertise_true_color: boolean;
   };
 }
 

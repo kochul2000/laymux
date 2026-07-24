@@ -54,6 +54,7 @@ describe("tauri-api", () => {
           rows: 24,
           sync_group: "default",
           env: [],
+          advertise_true_color: true,
         },
       };
       mockInvoke.mockResolvedValue(mockResult);
@@ -78,7 +79,14 @@ describe("tauri-api", () => {
       mockInvoke.mockResolvedValue({
         id: "t1",
         title: "Terminal",
-        config: { profile: "WSL", cols: 80, rows: 24, sync_group: "", env: [] },
+        config: {
+          profile: "WSL",
+          cols: 80,
+          rows: 24,
+          sync_group: "",
+          env: [],
+          advertise_true_color: true,
+        },
       });
       await createTerminalSession("t1", "WSL", 80, 24, "", false, false);
       expect(mockInvoke).toHaveBeenCalledWith("create_terminal_session", {
@@ -99,7 +107,14 @@ describe("tauri-api", () => {
       mockInvoke.mockResolvedValue({
         id: "viewer-1",
         title: "Terminal",
-        config: { profile: "Ubuntu", cols: 80, rows: 24, sync_group: "", env: [] },
+        config: {
+          profile: "Ubuntu",
+          cols: 80,
+          rows: 24,
+          sync_group: "",
+          env: [],
+          advertise_true_color: true,
+        },
       });
 
       await createTerminalSession("viewer-1", "Ubuntu", 80, 24, "", false, false, undefined, {
@@ -195,6 +210,7 @@ describe("tauri-api", () => {
           rows: 24,
           sync_group: "",
           env: [],
+          advertise_true_color: true,
         },
       };
       mockInvoke.mockImplementation((command) => {

@@ -259,6 +259,8 @@
       "defaultInputModeDesc": "Input mode a new terminal starts in. Switch anytime with Ctrl+Alt+M or the pane toolbar button.",
       "inputModeDirect": "Direct",
       "inputModeComposer": "Composer",
+      "advertiseTrueColor": "Advertise 24-bit Color",
+      "advertiseTrueColorDesc": "Tell CLI programs that new terminals support truecolor. Turn this off to compare compatibility or rendering performance; it applies to newly created terminals.",
       "composerHistoryPopup": "Composer History on Tab",
       "composerHistoryPopupDesc": "In Composer mode, press Tab in an empty focused input to list your recent inputs and pick one.",
       "composerAutocomplete": "Composer Autocomplete",

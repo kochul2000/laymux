@@ -1,6 +1,6 @@
 # 0051. PTY 자식은 laymux 터미널 정체성과 truecolor capability를 받는다
 
-- Status: Accepted
+- Status: Superseded by [0052](0052-truecolor-capability-advertising-setting.md)
 - Date: 2026-07-24
 - Source: 사용자 요구와 Windows Terminal/Codex 동작 비교; [architecture/data-flow.md §8.1–8.3](../architecture/data-flow.md); [architecture/api-contracts.md §10 Windows Terminal 호환 항목](../architecture/api-contracts.md); [ADR-0001](0001-osc-rust-single-pass.md); [OpenAI Codex #26181](https://github.com/openai/codex/commit/713192381b74f09f4b92f3ed410da067461d5cd0); [Windows Terminal #17729](https://github.com/microsoft/terminal/commit/3b4ee83ed1edd9fada5750155fce988d082a2821); [Windows Terminal `ConptyConnection.cpp`](https://github.com/microsoft/terminal/blob/4f225a56aff245bbb9d1400f266c20e1747cc580/src/cascadia/TerminalConnection/ConptyConnection.cpp#L55-L101)
 - Relation: [ADR-0001](0001-osc-rust-single-pass.md)의 Rust 단일 패스 범위를 laymux가 의미를 부여하는 OSC 훅·액션으로 명확히 하고, 터미널 에뮬레이터 자체의 프로토콜 응답은 그 범위와 구분한다.
