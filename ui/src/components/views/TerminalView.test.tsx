@@ -2353,12 +2353,14 @@ describe("TerminalView", () => {
 
   // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
   // Entering a workspace clears its alerts; typing is an even stronger "I'm
-  // responding here" signal, so onData must clear unread alerts (including
+  // responding here" signal, so onKey must clear unread alerts (including
   // requiresAction) with the *same granularity* as the focus/entry policy.
   describe("clears notifications on terminal input", () => {
-    const latestOnData = () => {
-      const calls = mockOnData.mock.calls;
-      return calls[calls.length - 1]?.[0] as ((data: string) => void) | undefined;
+    const latestOnKey = () => {
+      const calls = mockOnKey.mock.calls;
+      return calls[calls.length - 1]?.[0] as
+        | ((event: { key: string; domEvent: KeyboardEvent }) => void)
+        | undefined;
     };
     const waitForLocalControl = async () => {
       await vi.waitFor(() => {
@@ -2384,9 +2386,9 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-pf" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      const onData = latestOnData();
-      expect(onData).toBeTypeOf("function");
-      act(() => onData!("a"));
+      const onKey = latestOnKey();
+      expect(onKey).toBeTypeOf("function");
+      act(() => onKey!({ key: "a", domEvent: new KeyboardEvent("keydown", { key: "a" }) }));
 
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
@@ -2404,7 +2406,7 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-ws" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      act(() => latestOnData()!("x"));
+      act(() => latestOnKey()!({ key: "x", domEvent: new KeyboardEvent("keydown", { key: "x" }) }));
 
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
@@ -2421,7 +2423,27 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-manual" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      act(() => latestOnData()!("z"));
+      act(() => latestOnKey()!({ key: "z", domEvent: new KeyboardEvent("keydown", { key: "z" }) }));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+    });
+
+    it("does not clear alerts for emulator-generated protocol responses", async () => {
+      setDismiss("paneFocus");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-protocol",
+        workspaceId: wsId,
+        message: "Codex is waiting for your input",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-protocol" profile="PowerShell" syncGroup="" />);
+      await waitForLocalControl();
+      const onData = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+      expect(onData).toBeTypeOf("function");
+
+      act(() => onData!("\x1b]10;rgb:ffff/ffff/ffff\x1b\\"));
 
       expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
     });
@@ -3749,6 +3771,7 @@ describe("TerminalView", () => {
     });
 
     expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+    expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
     expect(mockWriteToTerminal).toHaveBeenCalledWith(
       "t-remote-owned",
       "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
@@ -3770,6 +3793,7 @@ describe("TerminalView", () => {
     const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
     expect(dataHandler).toBeTypeOf("function");
     expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+    expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
 
     mockWriteToTerminal.mockClear();
     act(() => {

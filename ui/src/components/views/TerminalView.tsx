@@ -1797,8 +1797,8 @@ export function TerminalView({
     //     → dispatch directly, no reliance on browser `copy`/`paste` events.
     //   - Ctrl+C with empty selection → fall through so xterm sends SIGINT.
     terminal.attachCustomKeyEventHandler((e) => {
-      if (e.type !== "keydown") return true;
       if (!localTerminalControlAllowed()) return false;
+      if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
 
       // In composer mode, keyboard focus belongs to the native textarea.
@@ -1860,6 +1860,11 @@ export function TerminalView({
     // DOM keydown for when focus is elsewhere (e.g., after clicking control bar).
     const outerEl = containerRef.current?.parentElement;
     terminal.onKey(() => {
+      // onKey is user input only; emulator-generated onData (OSC replies, focus
+      // reporting) must not dismiss requiresAction notifications as if the user
+      // had responded. Keep the entry policy aligned with ADR-0010/0012.
+      scheduleShadowCursorSync();
+      dismissTerminalResponseNotification(instanceId);
       if (outerEl) outerEl.style.cursor = "none";
       onKeyboardActivityRef.current?.();
     });
@@ -2012,18 +2017,7 @@ export function TerminalView({
         preview: JSON.stringify(data.slice(0, 80)),
         compositionActive: compositionPreviewRef.current.active,
       });
-      scheduleShadowCursorSync();
       writeToTerminal(instanceId, data).catch(() => {});
-
-      // Typing into a terminal is a direct "I'm responding here now" signal —
-      // an even stronger dismissal than focus (issue #365). A requiresAction
-      // alert that arrives in the active workspace stays put until the user
-      // acts; entering via keys/mouse, *or* typing, is that action. We clear
-      // with the same granularity as the focus/entry policy (AppLayout / ADR
-      // 0010·0012): "workspace" clears the whole workspace, "paneFocus" only
-      // this pane, "manual" never auto-clears. Guarded by a cheap unread read
-      // so the common no-unread keystroke path does no state write / re-render.
-      dismissTerminalResponseNotification(instanceId);
     });
 
     const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
