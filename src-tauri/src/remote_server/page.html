@@ -3580,7 +3580,11 @@
             );
             terminal.loadAddon(webLinksAddon);
           }
-          terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
+          // Link providers are additive. Keep the Remote terminal usable when
+          // a minimal or older xterm surface does not expose this optional API.
+          if (typeof terminal.registerLinkProvider === "function") {
+            terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
+          }
           terminal.open(terminalSizer);
           // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck
           // off but omits autocomplete, so mobile browsers offer password,

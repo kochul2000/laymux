@@ -104,6 +104,7 @@ mod tests {
         assert!(html.contains("function openRemoteUrl(uri)"));
         assert!(html.contains("function createRemotePrLinkProvider(term)"));
         assert!(html.contains("/github-repo"));
+        assert!(html.contains("typeof terminal.registerLinkProvider === \"function\""));
         assert!(
             html.contains("terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));")
         );
