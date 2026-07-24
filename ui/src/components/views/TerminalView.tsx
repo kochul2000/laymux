@@ -28,6 +28,7 @@ import {
   createTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
+  writeTerminalProtocolReply,
   writeTerminalInput,
   resizeTerminal,
   closeTerminalSession,
@@ -109,6 +110,16 @@ import {
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
+import {
+  NativeWindowsOutputStabilizer,
+  type StabilizedOutputEmission,
+} from "@/lib/native-windows-output-stabilizer";
+import { routeXtermData, type TerminalWriteSource } from "@/lib/terminal-data-route";
+import {
+  shouldStabilizeInitialExecutionHost,
+  type InitialExecutionHost,
+} from "@/lib/terminal-execution-host";
+import { DeferredParsedCallbackQueue } from "@/lib/deferred-parsed-callback-queue";
 import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
 import {
   beginComposerSubmission,
@@ -830,6 +841,12 @@ export function TerminalView({
   useEffect(() => {
     let cancelled = false;
     let terminalSessionReady = false;
+    let initialExecutionHost: InitialExecutionHost = "unknown";
+    let stabilizeNativeWindowsOutput = false;
+    let currentParsingWriteSource: TerminalWriteSource | undefined;
+    let currentParsingParkDeadline: number | undefined;
+    let currentParsingAttachEpoch: number | undefined;
+    let humanDataEmissionDepth = 0;
     let firstRenderReady = false;
     let startupSettled = false;
     const settleStartupIfReady = () => {
@@ -898,6 +915,10 @@ export function TerminalView({
       // #363: 선택한 경로 밑줄을 IDecoration(registerDecoration)으로 그린다.
       // 데코레이션은 xterm 의 proposed API 라 이 옵션이 없으면 throw 한다.
       allowProposedApi: true,
+      // xterm's CoreService still emits parser-generated replies when stdin is
+      // disabled, but blocks keyboard/IME/mouse/focus user input. Start closed
+      // until the remote-control owner snapshot is known.
+      disableStdin: true,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
       cursorInactiveStyle: inputModeRef.current === "composer" ? "none" : "outline",
@@ -1548,27 +1569,46 @@ export function TerminalView({
     });
 
     let parkSettleTimer: number | undefined;
+    let parkSettleDeadline: number | undefined;
+    let parkSettleUsesAbsoluteDeadline = false;
     let parkSettleDeferrals = 0;
-    const clearParkSettleTimer = () => {
+    const cancelParkSettleTimer = () => {
       if (parkSettleTimer !== undefined) {
         clearTimeout(parkSettleTimer);
         parkSettleTimer = undefined;
       }
     };
-    // NOTE: each DEC 2026 flush restarts this timer, so a TUI that
-    // streams frames at < PARK_SETTLE_TIMEOUT_MS intervals *without*
-    // ever parking would keep the overlay frozen indefinitely. Codex
+    const clearParkSettleTimer = () => {
+      cancelParkSettleTimer();
+      parkSettleDeadline = undefined;
+      parkSettleUsesAbsoluteDeadline = false;
+    };
+    // Legacy writes restart this timer for each DEC 2026 flush. Stabilized
+    // Native Windows transactions instead retain the absolute D_park
+    // deadline selected when their synchronized-output frame was recognized.
+    // A legacy TUI that streams frames at < PARK_SETTLE_TIMEOUT_MS intervals
+    // *without* ever parking would keep the overlay frozen indefinitely. Codex
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
     // today — revisit if another ratatui TUI joins the overlay set.
     const armParkSettleTimer = () => {
-      clearParkSettleTimer();
+      cancelParkSettleTimer();
+      const delay = Math.max(
+        0,
+        parkSettleUsesAbsoluteDeadline && parkSettleDeadline !== undefined
+          ? parkSettleDeadline - monotonicNow()
+          : PARK_SETTLE_TIMEOUT_MS,
+      );
       parkSettleTimer = window.setTimeout(() => {
         parkSettleTimer = undefined;
         const shadowCursor = shadowCursorRef.current;
-        if (!shadowCursor.parkPending) return;
+        if (!shadowCursor.parkPending) {
+          parkSettleDeadline = undefined;
+          parkSettleUsesAbsoluteDeadline = false;
+          return;
+        }
         if (shadowCursor.isDec2026FrameOpen) {
-          if (parkSettleDeferrals < PARK_SETTLE_MAX_DEFERRALS) {
+          if (!parkSettleUsesAbsoluteDeadline && parkSettleDeferrals < PARK_SETTLE_MAX_DEFERRALS) {
             // The next DEC 2026 frame is mid-flight. Firing now would
             // consume `parkPending` and schedule a paint that the
             // frame gate hides — a one-frame overlay blink. Defer and
@@ -1591,10 +1631,14 @@ export function TerminalView({
           cursorAbsY: shadowCursor.cursorAbsY,
         });
         scheduleOverlayCaretUpdate();
-      }, PARK_SETTLE_TIMEOUT_MS);
+        parkSettleDeadline = undefined;
+        parkSettleUsesAbsoluteDeadline = false;
+      }, delay);
     };
-    const startParkSettleTimer = () => {
+    const startParkSettleTimer = (deadline?: number) => {
       parkSettleDeferrals = 0;
+      parkSettleUsesAbsoluteDeadline = deadline !== undefined;
+      parkSettleDeadline = deadline ?? monotonicNow() + PARK_SETTLE_TIMEOUT_MS;
       armParkSettleTimer();
     };
     const syncOutputSetDisposable = parser?.registerCsiHandler?.(
@@ -1698,7 +1742,7 @@ export function TerminalView({
             // the last painted position until Codex's cursor park
             // arrives (authoritative) or the settle window expires
             // (fallback to the snapshot taken above).
-            startParkSettleTimer();
+            startParkSettleTimer(currentParsingParkDeadline);
             scheduleOverlayCaretUpdate();
           } else {
             scheduleShadowCursorSync();
@@ -2007,25 +2051,64 @@ export function TerminalView({
     const wrapperEl = wrapperRef.current;
     wrapperEl?.addEventListener("mousedown", handleModifierLinkClick, true);
 
-    // Forward xterm data to the authoritative backend owner gate. This channel
-    // also carries emulator-generated protocol replies (for example OSC 10/11),
-    // so the frontend's eventually-consistent remote status must not drop it.
-    // Local keyboard input is blocked at attachCustomKeyEventHandler above.
+    const markHumanDataEmission = () => {
+      humanDataEmissionDepth += 1;
+      queueMicrotask(() => {
+        humanDataEmissionDepth = Math.max(0, humanDataEmissionDepth - 1);
+      });
+    };
+    const humanDataEvents = [
+      "keydown",
+      "beforeinput",
+      "input",
+      "compositionstart",
+      "compositionupdate",
+      "compositionend",
+      "paste",
+      "mousedown",
+      "mouseup",
+      "wheel",
+      "focusin",
+      "focusout",
+    ] as const;
+    for (const eventName of humanDataEvents) {
+      wrapperEl?.addEventListener(eventName, markHumanDataEmission, true);
+    }
+
+    // Public xterm.onData omits CoreService's `wasUserInput`. Human events are
+    // marked before xterm handles them; otherwise the tracked parser-write
+    // source determines whether this is a live protocol reply or replay noise.
     terminal.onData((data) => {
       trace("terminal-onData", {
         bytes: data.length,
         preview: JSON.stringify(data.slice(0, 80)),
         compositionActive: compositionPreviewRef.current.active,
       });
-      writeToTerminal(instanceId, data).catch(() => {});
+      const route = routeXtermData({
+        writeSource:
+          currentParsingAttachEpoch === undefined || currentParsingAttachEpoch === outputAttachEpoch
+            ? currentParsingWriteSource
+            : "replay",
+        humanEventActive: humanDataEmissionDepth > 0,
+      });
+      if (route === "suppress") return;
+      const write = route === "protocol" ? writeTerminalProtocolReply : writeToTerminal;
+      write(instanceId, data).catch(() => {});
     });
 
     const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
       CONPTY_RESIZE_REPAINT_WINDOW_MS,
     );
+    const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
     let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputStabilizerDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let stabilizedRefreshFrame: number | undefined;
     let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
+    let deliverStabilizedEmissions:
+      | ((emissions: StabilizedOutputEmission[], onParsed?: () => void) => void)
+      | undefined;
+    const pendingStabilizerParsedCallbacks = new DeferredParsedCallbackQueue();
     let normalScrollbackBeforeFit: boolean | undefined;
     let suppressBackendResizeDuringFit = false;
     const clearConptyRepaintExpiryTimer = () => {
@@ -2046,6 +2129,35 @@ export function TerminalView({
         },
         Math.max(0, conptyResizeRepaintFilter.expiresAt - Date.now()),
       );
+    };
+    const clearOutputStabilizerDeadlineTimer = () => {
+      if (outputStabilizerDeadlineTimer !== undefined) {
+        clearTimeout(outputStabilizerDeadlineTimer);
+        outputStabilizerDeadlineTimer = undefined;
+      }
+    };
+    const scheduleOutputStabilizerDeadline = () => {
+      clearOutputStabilizerDeadlineTimer();
+      const deadline = nativeWindowsOutputStabilizer.deadline;
+      if (!stabilizeNativeWindowsOutput || deadline === undefined) return;
+      outputStabilizerDeadlineTimer = setTimeout(
+        () => {
+          outputStabilizerDeadlineTimer = undefined;
+          const emissions = nativeWindowsOutputStabilizer.flushExpired(monotonicNow());
+          deliverStabilizedEmissions?.(emissions, pendingStabilizerParsedCallbacks.drain());
+          scheduleOutputStabilizerDeadline();
+        },
+        Math.max(0, deadline - monotonicNow()),
+      );
+    };
+    const resetOutputStabilizer = () => {
+      clearOutputStabilizerDeadlineTimer();
+      nativeWindowsOutputStabilizer.reset();
+      pendingStabilizerParsedCallbacks.discard();
+      if (stabilizedRefreshFrame !== undefined) {
+        cancelAnimationFrame(stabilizedRefreshFrame);
+        stabilizedRefreshFrame = undefined;
+      }
     };
     const armConptyRepaintFilter = () => {
       const token = conptyResizeRepaintFilter.arm();
@@ -2135,12 +2247,19 @@ export function TerminalView({
     // Listen for terminal output from backend PTY
     let pendingTerminalWrites = 0;
     let outputAttachParserBusy = false;
-    type DeferredTerminalWrite = {
+    type TerminalWriteMetadata = {
+      source: TerminalWriteSource;
+      parkDeadline?: number;
+      stabilized?: boolean;
+      attachEpoch?: number;
+    };
+    type DeferredTerminalWrite = TerminalWriteMetadata & {
       data: string | Uint8Array;
       onParsed?: () => void;
       warned: boolean;
     };
     const deferredTerminalWrites: DeferredTerminalWrite[] = [];
+    const parsingTerminalWrites: DeferredTerminalWrite[] = [];
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
@@ -2363,11 +2482,55 @@ export function TerminalView({
     };
     const tryTerminalWrite = (request: DeferredTerminalWrite) => {
       pendingTerminalWrites += 1;
+      parsingTerminalWrites.push(request);
+      if (parsingTerminalWrites.length === 1) {
+        currentParsingWriteSource = request.source;
+        currentParsingParkDeadline = request.parkDeadline;
+        currentParsingAttachEpoch = request.attachEpoch;
+      }
       try {
         terminal.write(request.data, () => {
           pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
+          if (parsingTerminalWrites[0] === request) {
+            parsingTerminalWrites.shift();
+          } else {
+            const index = parsingTerminalWrites.indexOf(request);
+            if (index >= 0) parsingTerminalWrites.splice(index, 1);
+          }
+          currentParsingWriteSource = parsingTerminalWrites[0]?.source;
+          currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
+          currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
           try {
             request.onParsed?.();
+            if (
+              request.stabilized &&
+              !cancelled &&
+              request.attachEpoch === outputAttachEpoch &&
+              terminal.rows > 0
+            ) {
+              if (isContainerHiddenRef.current) {
+                reflowDirtyRef.current = true;
+              } else {
+                terminal.refresh(0, terminal.rows - 1);
+                if (stabilizedRefreshFrame !== undefined) {
+                  cancelAnimationFrame(stabilizedRefreshFrame);
+                }
+                stabilizedRefreshFrame = requestAnimationFrame(() => {
+                  stabilizedRefreshFrame = undefined;
+                  if (
+                    !cancelled &&
+                    request.attachEpoch === outputAttachEpoch &&
+                    terminal.rows > 0
+                  ) {
+                    if (isContainerHiddenRef.current) {
+                      reflowDirtyRef.current = true;
+                    } else {
+                      terminal.refresh(0, terminal.rows - 1);
+                    }
+                  }
+                });
+              }
+            }
           } finally {
             scheduleDeferredTerminalWriteRetry();
             flushDeferredTerminalFit();
@@ -2376,6 +2539,11 @@ export function TerminalView({
         return true;
       } catch (error) {
         pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
+        const index = parsingTerminalWrites.indexOf(request);
+        if (index >= 0) parsingTerminalWrites.splice(index, 1);
+        currentParsingWriteSource = parsingTerminalWrites[0]?.source;
+        currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
+        currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
         if (!request.warned) {
           request.warned = true;
           console.warn("[TerminalView] xterm write failed:", error);
@@ -2395,10 +2563,23 @@ export function TerminalView({
       clearTerminalWriteRetryTimer();
       flushDeferredTerminalFit();
     }
-    const trackedTerminalWrite = (data: string | Uint8Array, onParsed?: () => void) => {
+    const trackedTerminalWrite = (
+      data: string | Uint8Array,
+      onParsed?: () => void,
+      metadata: TerminalWriteMetadata = { source: "replay" },
+    ) => {
       const chunks: Array<string | Uint8Array> = [];
-      for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_CHUNK_SIZE) {
-        chunks.push(data.slice(offset, offset + TERMINAL_WRITE_CHUNK_SIZE) as string | Uint8Array);
+      if (metadata.stabilized) {
+        // The stabilizer already bounds this request to 1 MiB. Keep the frame
+        // end and exact cursor restore in one xterm write so its parser cannot
+        // paint the transient footer cursor between chunk callbacks.
+        chunks.push(data);
+      } else {
+        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_CHUNK_SIZE) {
+          chunks.push(
+            data.slice(offset, offset + TERMINAL_WRITE_CHUNK_SIZE) as string | Uint8Array,
+          );
+        }
       }
       if (chunks.length === 0) chunks.push(data);
       const queueWasEmpty = deferredTerminalWrites.length === 0;
@@ -2407,12 +2588,15 @@ export function TerminalView({
           data: chunk,
           onParsed: index === chunks.length - 1 ? onParsed : undefined,
           warned: false,
+          ...metadata,
         });
       });
       if (queueWasEmpty) flushDeferredTerminalWrites();
     };
-    const trackedTerminalWriteAsync = (data: string | Uint8Array) =>
-      new Promise<void>((resolve) => trackedTerminalWrite(data, resolve));
+    const trackedTerminalWriteAsync = (
+      data: string | Uint8Array,
+      metadata: TerminalWriteMetadata = { source: "replay" },
+    ) => new Promise<void>((resolve) => trackedTerminalWrite(data, resolve, metadata));
     let unlistenOutput: (() => void) | undefined;
     let outputListenerReady: Promise<void> = Promise.resolve();
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2456,15 +2640,23 @@ export function TerminalView({
     // CR is sent as a standalone write after the text has landed in the input
     // box so long custom messages still submit reliably.
     const SESSION_LIMIT_SUBMIT_CR_DELAY_MS = 150;
-    const processTerminalOutput = (data: Uint8Array, onParsed?: () => void) => {
+    const processTerminalOutput = (
+      data: Uint8Array,
+      onParsed?: () => void,
+      metadata: TerminalWriteMetadata = { source: "live" },
+    ) => {
       if (cancelled) return;
       if (data.length === 0) return;
       lastTerminalOutputAt = Date.now();
       clearDeferredResizeQuietTimer();
-      trackedTerminalWrite(data, () => {
-        startSyncOutputMonitor();
-        onParsed?.();
-      });
+      trackedTerminalWrite(
+        data,
+        () => {
+          startSyncOutputMonitor();
+          onParsed?.();
+        },
+        metadata,
+      );
       const text = streamDecoder.decode(data, { stream: true });
       const previousOutputTail = recentOutputTail;
       const combinedText = (recentOutputTail + text).slice(-1024);
@@ -2785,6 +2977,45 @@ export function TerminalView({
         });
       }
     };
+    deliverStabilizedEmissions = (emissions, onParsed) => {
+      if (emissions.length === 0) {
+        onParsed?.();
+        return;
+      }
+      emissions.forEach((emission, index) => {
+        processTerminalOutput(
+          emission.data,
+          index === emissions.length - 1 ? onParsed : undefined,
+          {
+            source: "live",
+            stabilized: emission.stabilized,
+            parkDeadline: emission.parkDeadline,
+            attachEpoch: outputAttachEpoch,
+          },
+        );
+      });
+    };
+    const processLiveTerminalOutput = (
+      data: Uint8Array,
+      onParsed?: () => void,
+      onDiscard?: () => void,
+    ) => {
+      if (!stabilizeNativeWindowsOutput) {
+        processTerminalOutput(data, onParsed, {
+          source: "live",
+          attachEpoch: outputAttachEpoch,
+        });
+        return;
+      }
+      if (onParsed) pendingStabilizerParsedCallbacks.push(onParsed, onDiscard);
+      const emissions = nativeWindowsOutputStabilizer.push(data, monotonicNow());
+      const parsed =
+        nativeWindowsOutputStabilizer.deadline === undefined
+          ? pendingStabilizerParsedCallbacks.drain()
+          : undefined;
+      deliverStabilizedEmissions?.(emissions, parsed);
+      scheduleOutputStabilizerDeadline();
+    };
     const setOutputReady = (ready: boolean) => {
       outputProtocolReadyRef.current = ready;
       if (!cancelled) setOutputProtocolReady(ready);
@@ -2799,6 +3030,7 @@ export function TerminalView({
       outputAttachInFlight = false;
       outputAttachParserBusy = true;
       setOutputReady(false);
+      resetOutputStabilizer();
       outputCoordinator.beginAttach();
       outputAttachRetryTimer = setTimeout(() => {
         outputAttachRetryTimer = undefined;
@@ -2810,6 +3042,7 @@ export function TerminalView({
       outputAttachInFlight = true;
       outputAttachParserBusy = true;
       const epoch = ++outputAttachEpoch;
+      resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
       try {
         const [rawAttachment, cached] = await Promise.all([
@@ -2832,7 +3065,7 @@ export function TerminalView({
           }
           if (attachment.snapshot.length > 0) {
             await new Promise<void>((resolve) =>
-              processTerminalOutput(attachment.snapshot, resolve),
+              processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }),
             );
             if (!isCurrentAttach()) return;
           }
@@ -2852,9 +3085,11 @@ export function TerminalView({
           for (let index = 0; index < buffered.chunks.length; index += 1) {
             const chunk = buffered.chunks[index];
             if (index === buffered.chunks.length - 1) {
-              await new Promise<void>((resolve) => processTerminalOutput(chunk, resolve));
+              await new Promise<void>((resolve) =>
+                processLiveTerminalOutput(chunk, resolve, resolve),
+              );
             } else {
-              processTerminalOutput(chunk);
+              processLiveTerminalOutput(chunk);
             }
             if (!isCurrentAttach()) return;
           }
@@ -2876,7 +3111,7 @@ export function TerminalView({
       }
     };
 
-    writeTerminalDisplayData = processTerminalOutput;
+    writeTerminalDisplayData = processLiveTerminalOutput;
     outputListenerReady = onTerminalOutputV2(instanceId, (payload) => {
       if (cancelled) return;
       let result;
@@ -2896,7 +3131,7 @@ export function TerminalView({
       for (const rawData of result.chunks) {
         const data = conptyResizeRepaintFilter.filter(rawData);
         scheduleConptyRepaintExpiry();
-        processTerminalOutput(data);
+        processLiveTerminalOutput(data);
       }
     }).then((unlisten) => {
       if (cancelled) {
@@ -3115,7 +3350,10 @@ export function TerminalView({
             shouldRestoreCwd ? lastCwd : undefined,
             viewerStartup ?? startupOverride,
           )
-            .then(() => {
+            .then((createdSession) => {
+              initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
+              stabilizeNativeWindowsOutput =
+                shouldStabilizeInitialExecutionHost(initialExecutionHost);
               terminalSessionReady = true;
               if (cancelled) return;
               useTerminalStore.getState().updateInstanceInfo(instanceId, {
@@ -3210,7 +3448,9 @@ export function TerminalView({
       if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);
       clearConptyRepaintExpiryTimer();
       conptyResizeRepaintFilter.disarm();
+      resetOutputStabilizer();
       writeTerminalDisplayData = undefined;
+      deliverStabilizedEmissions = undefined;
       if (guardedTerminalFitRef.current === requestGuardedTerminalFit) {
         guardedTerminalFitRef.current = null;
       }
@@ -3218,6 +3458,10 @@ export function TerminalView({
       deferredResizeRequestedAt = 0;
       clearDeferredResizeQuietTimer();
       deferredTerminalWrites.length = 0;
+      parsingTerminalWrites.length = 0;
+      currentParsingWriteSource = undefined;
+      currentParsingParkDeadline = undefined;
+      currentParsingAttachEpoch = undefined;
       clearTerminalWriteRetryTimer();
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;
@@ -3244,6 +3488,9 @@ export function TerminalView({
       outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
       window.removeEventListener("mouseup", handlePathLinkMouseUp);
       wrapperEl?.removeEventListener("mousedown", handleModifierLinkClick, true);
+      for (const eventName of humanDataEvents) {
+        wrapperEl?.removeEventListener(eventName, markHumanDataEmission, true);
+      }
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       compositionController.dispose();
       wrapperEl?.classList.remove("terminal-ime-composition-active");
@@ -3457,6 +3704,8 @@ export function TerminalView({
       remoteControlActiveRef.current = status.active;
       localControlAvailableRef.current = !status.active;
       setLocalControlAvailable(!status.active);
+      const term = terminalRef.current;
+      if (term) term.options.disableStdin = status.active;
       if (status.active) {
         if (pollTimer === undefined) {
           pollTimer = setInterval(() => {
@@ -3467,7 +3716,6 @@ export function TerminalView({
       }
       stopPolling();
       if (!wasActive) return;
-      const term = terminalRef.current;
       if (!term || !openedRef.current) return;
       if (isContainerHiddenRef.current) {
         reflowDirtyRef.current = true;
@@ -3534,6 +3782,8 @@ export function TerminalView({
           remoteControlStatusKnownRef.current = false;
           localControlAvailableRef.current = false;
           setLocalControlAvailable(false);
+          const term = terminalRef.current;
+          if (term) term.options.disableStdin = true;
           scheduleListenerRetry();
         });
     }
