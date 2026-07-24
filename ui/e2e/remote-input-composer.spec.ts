@@ -1295,6 +1295,16 @@ test("tapping the empty editor opens the recall popup — soft keyboards have no
   // owns the non-empty draft, and only while typing).
   await editor.click();
   await expect(list).toBeHidden();
+
+  // A tap mid-IME composition never opens the popup, even on an empty draft;
+  // it opens again once composition ends.
+  await editor.fill("");
+  await editor.dispatchEvent("compositionstart");
+  await editor.click();
+  await expect(list).toBeHidden();
+  await editor.dispatchEvent("compositionend");
+  await editor.click();
+  await expect(list).toBeVisible();
 });
 
 test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow+Enter picks (#505)", async ({

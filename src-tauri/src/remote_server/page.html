@@ -6409,6 +6409,10 @@
         // history, so a tap with nothing to recall is a no-op.
         composerInput.addEventListener("click", () => {
           if (composerHistoryOpen) return;
+          // Mirror the keydown guard: never surface the popup mid-IME
+          // composition (a click can land before the preedit reaches the
+          // draft, so the empty-draft check alone is not enough).
+          if (composerIsComposing) return;
           const historyEntries = currentComposerHistoryEntries();
           if (historyEntries.length === 0) return;
           composerHistoryIndex = 0;

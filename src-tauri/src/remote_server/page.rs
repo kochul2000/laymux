@@ -638,6 +638,7 @@ mod tests {
         );
         let click_region = &html[click_block..keydown_start];
         assert!(click_region.contains("if (composerHistoryOpen) return;"));
+        assert!(click_region.contains("if (composerIsComposing) return;"));
         assert!(click_region.contains("const historyEntries = currentComposerHistoryEntries();"));
         assert!(click_region.contains("if (historyEntries.length === 0) return;"));
         assert!(click_region.contains("composerHistoryOpen = true;"));
