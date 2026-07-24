@@ -190,9 +190,7 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 8,
       cursorAbsY: 10,
-      renderedText: "hello",
-      rowCount: 1,
-      maxRowCellWidth: 5,
+      rows: [{ text: "hello", startColumn: 3, rowOffset: 0, cellWidth: 5 }],
     });
   });
 
@@ -211,9 +209,7 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 5,
       cursorAbsY: 10,
-      renderedText: "\u3139",
-      rowCount: 1,
-      maxRowCellWidth: 2,
+      rows: [{ text: "\u3139", startColumn: 3, rowOffset: 0, cellWidth: 2 }],
     });
   });
 
@@ -232,9 +228,10 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 11,
-      renderedText: "ab\ncd",
-      rowCount: 2,
-      maxRowCellWidth: 2,
+      rows: [
+        { text: "ab", startColumn: 8, rowOffset: 0, cellWidth: 2 },
+        { text: "cd", startColumn: 0, rowOffset: 1, cellWidth: 2 },
+      ],
     });
   });
 
@@ -251,11 +248,72 @@ describe("getCompositionPreviewLayout", () => {
         10,
       ),
     ).toEqual({
-      cursorX: 1,
+      cursorX: 2,
       cursorAbsY: 5,
-      renderedText: "가\n나",
-      rowCount: 2,
-      maxRowCellWidth: 2,
+      rows: [
+        { text: "가", startColumn: 7, rowOffset: 0, cellWidth: 2 },
+        { text: "나", startColumn: 0, rowOffset: 1, cellWidth: 2 },
+      ],
+    });
+  });
+
+  it("moves a wide glyph wholly to the next row when only one cell remains", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "가",
+          anchorBufferX: 9,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 5,
+      rows: [{ text: "가", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("normalizes the caret to the next row when a wide glyph exactly fills the line", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "가",
+          anchorBufferX: 8,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 0,
+      cursorAbsY: 5,
+      rows: [{ text: "가", startColumn: 8, rowOffset: 0, cellWidth: 2 }],
+    });
+  });
+
+  it("uses terminal-width row fragments for the reported 73-column Hangul boundary", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "아아",
+          anchorBufferX: 71,
+          anchorBufferAbsY: 28,
+          caretCellOffset: 4,
+          textCellWidth: 4,
+        },
+        73,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 29,
+      rows: [
+        { text: "아", startColumn: 71, rowOffset: 0, cellWidth: 2 },
+        { text: "아", startColumn: 0, rowOffset: 1, cellWidth: 2 },
+      ],
     });
   });
 });

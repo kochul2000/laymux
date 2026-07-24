@@ -10,7 +10,7 @@ use crate::constants::*;
 use crate::lock_ext::MutexExt;
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
-use crate::terminal::TerminalSession;
+use crate::terminal::{InitialExecutionHost, TerminalSession};
 use crate::terminal_env::TerminalEnvPlan;
 
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
@@ -424,7 +424,22 @@ fn wait_for_child_with_master_close_retry(
 
 /// Spawn a PTY process for the given terminal session.
 /// Returns a PtyHandle and starts a reader thread that calls `on_output` with data chunks.
+pub struct SpawnedPty {
+    pub handle: PtyHandle,
+    pub initial_execution_host: InitialExecutionHost,
+}
+
 pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle, String>
+where
+    F: Fn(Vec<u8>) + Send + 'static,
+{
+    spawn_pty_with_metadata(session, on_output).map(|spawned| spawned.handle)
+}
+
+pub fn spawn_pty_with_metadata<F>(
+    session: &TerminalSession,
+    on_output: F,
+) -> Result<SpawnedPty, String>
 where
     F: Fn(Vec<u8>) + Send + 'static,
 {
@@ -474,6 +489,7 @@ where
         &env_plan,
         startup_command,
     );
+    let initial_execution_host = InitialExecutionHost::for_current_platform(Some(&cmd_path));
     let mut cmd = CommandBuilder::new(&cmd_path);
     for arg in &args {
         cmd.arg(arg);
@@ -571,13 +587,16 @@ where
         }
     });
 
-    Ok(handle)
+    Ok(SpawnedPty {
+        handle,
+        initial_execution_host,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::TerminalConfig;
+    use crate::terminal::{InitialExecutionHost, TerminalConfig};
     use std::cell::Cell;
     use std::sync::{mpsc, Condvar};
     use std::time::Duration;
@@ -614,6 +633,34 @@ mod tests {
                 advertise_true_color: true,
             },
         )
+    }
+
+    #[test]
+    fn initial_execution_host_uses_the_actual_spawn_target_basename() {
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(Some(r"C:\Windows\System32\wsl.EXE"), true,),
+            InitialExecutionHost::Wsl,
+        );
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(Some("/usr/bin/ssh"), true),
+            InitialExecutionHost::DirectSsh,
+        );
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(Some("pwsh.exe"), true),
+            InitialExecutionHost::NativeWindows,
+        );
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(Some("bash"), false),
+            InitialExecutionHost::NonWindows,
+        );
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(None, true),
+            InitialExecutionHost::Unknown,
+        );
+        assert_eq!(
+            InitialExecutionHost::classify_spawn_target(Some("  "), true),
+            InitialExecutionHost::Unknown,
+        );
     }
 
     #[test]

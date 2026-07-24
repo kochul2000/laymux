@@ -63,7 +63,12 @@ const mockOnScroll = vi.fn((handler: () => void) => {
   capturedScrollHandler = handler;
   return { dispose: vi.fn() };
 });
-const createdTerminals: Array<{ options: Record<string, unknown> }> = [];
+type MockTerminalInstance = {
+  options: Record<string, unknown>;
+  element: HTMLDivElement;
+  emitCoreData(data: string, wasUserInput?: boolean): void;
+};
+const createdTerminals: MockTerminalInstance[] = [];
 const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
@@ -118,6 +123,25 @@ vi.mock("@xterm/xterm", () => ({
     scrollToBottom = mockScrollToBottom;
     scrollLines = mockScrollLines;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
+    private readonly userInputListeners = new Set<() => void>();
+    _core = {
+      coreService: {
+        onUserInput: (listener: () => void) => {
+          this.userInputListeners.add(listener);
+          return { dispose: () => this.userInputListeners.delete(listener) };
+        },
+      },
+    };
+    emitCoreData = (data: string, wasUserInput = false) => {
+      // Mirrors the pinned xterm patch: disableStdin rejects human input but
+      // still lets parser-generated protocol replies reach public onData.
+      if (this.options.disableStdin && wasUserInput) return;
+      if (wasUserInput) {
+        for (const listener of this.userInputListeners) listener();
+      }
+      const handler = mockOnData.mock.calls.at(-1)?.[0] as ((value: string) => void) | undefined;
+      handler?.(data);
+    };
     focus = mockFocus;
     blur = mockBlur;
     paste = mockPaste;
@@ -230,6 +254,7 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   id: "t1",
   title: "Terminal",
+  initialExecutionHost: "unknown",
   config: {
     profile: "PowerShell",
     cols: 80,
@@ -240,6 +265,7 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalProtocolReply = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
@@ -281,6 +307,7 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalProtocolReply: (...args: unknown[]) => mockWriteTerminalProtocolReply(...args),
   writeTerminalInput: (...args: unknown[]) => mockWriteTerminalInput(...args),
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
@@ -1000,6 +1027,99 @@ describe("TerminalView", () => {
       expect(preview.style.transform).toBe("translate(30px, 80px)");
       expect(preview.style.width).toBe("20px");
       expect(overlay.style.transform).toBe("translate(50px, 80px)");
+    });
+  });
+
+  it("positions wrapped IME preview rows at the terminal left edge", async () => {
+    render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-wrap", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-wrap");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-wrap");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-wrap");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 78;
+    terminal.buffer.active.cursorY = 4;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    await act(async () => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "가나";
+      helper.selectionStart = 2;
+      helper.selectionEnd = 2;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가나" }));
+      helper.dispatchEvent(new Event("input"));
+    });
+
+    await vi.waitFor(() => {
+      const rows = preview.querySelectorAll(".terminal-composition-preview-row");
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toHaveTextContent("가");
+      expect(rows[0]).toHaveStyle({ transform: "translate(0px, 0px)" });
+      expect(rows[1]).toHaveTextContent("나");
+      expect(rows[1]).toHaveStyle({ transform: "translate(-780px, 20px)" });
+      expect(overlay.style.transform).toBe("translate(20px, 100px)");
+    });
+
+    await act(async () => {
+      helper.value = "가";
+      helper.selectionStart = 1;
+      helper.selectionEnd = 1;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("input"));
+    });
+
+    await vi.waitFor(() => {
+      const rows = preview.querySelectorAll(".terminal-composition-preview-row");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("가");
+      expect(rows[0]).toHaveStyle({ transform: "translate(0px, 0px)" });
     });
   });
 
@@ -2349,6 +2469,241 @@ describe("TerminalView", () => {
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
+  });
+
+  describe("terminal protocol reply ownership", () => {
+    const emitLive = (terminalId: string, value: string) => {
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      act(() => onOutput?.(new TextEncoder().encode(value)));
+    };
+
+    it("sends replies produced by a live parser write through the protocol path", async () => {
+      const terminalId = "t-live-protocol-reply";
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWriteTerminalProtocolReply.mockClear();
+      mockWriteToTerminal.mockClear();
+      const terminal = createdTerminals.at(-1)!;
+      const reply = "\x1b]10;rgb:ffff/ffff/ffff\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        terminal.emitCoreData(reply);
+        callback?.();
+      });
+
+      emitLive(terminalId, "LIVE_QUERY");
+
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    });
+
+    it("suppresses replies produced by snapshot replay", async () => {
+      const terminalId = "t-replay-protocol-reply";
+      const snapshot = new TextEncoder().encode("REPLAY_QUERY");
+      mockAttachTerminalOutput.mockResolvedValueOnce({
+        state: {
+          version: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: snapshot.length,
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+        },
+        snapshot: Array.from(snapshot),
+      });
+      const reply = "\x1b]11;rgb:0000/0000/0000\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        createdTerminals.at(-1)?.emitCoreData(reply);
+        callback?.();
+      });
+
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+
+      expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
+      expect(mockWriteToTerminal).not.toHaveBeenCalledWith(terminalId, reply);
+    });
+
+    it("keeps live protocol replies flowing while local human control is unknown", async () => {
+      const terminalId = "t-unknown-owner-protocol-reply";
+      mockGetRemoteControlStatus.mockImplementationOnce(() => new Promise(() => {}));
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => expect(mockOnTerminalOutput).toHaveBeenCalled());
+      const terminal = createdTerminals.at(-1)!;
+      expect(terminal.options.disableStdin).toBe(true);
+      const reply = "\x1b]10;rgb:aaaa/bbbb/cccc\x1b\\";
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        terminal.emitCoreData(reply);
+        callback?.();
+      });
+
+      emitLive(terminalId, "LIVE_QUERY");
+
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+    });
+
+    it("toggles xterm human stdin with the remote owner snapshot", async () => {
+      const terminalId = "t-owner-disable-stdin";
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForLocalTerminalControl();
+      const terminal = createdTerminals.at(-1)!;
+      expect(terminal.options.disableStdin).toBe(false);
+
+      act(() => capturedRemoteControlChanged?.({ active: true }));
+      expect(terminal.options.disableStdin).toBe(true);
+      expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "a" }))).toBe(false);
+
+      const reply = "\x1b]11;rgb:0000/0000/0000\x1b\\";
+      mockWriteTerminalProtocolReply.mockClear();
+      mockWriteToTerminal.mockClear();
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        terminal.emitCoreData(reply);
+        callback?.();
+      });
+      emitLive(terminalId, "LIVE_QUERY_WHILE_REMOTE");
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      terminal.emitCoreData("blocked-human", true);
+      expect(mockWriteToTerminal).not.toHaveBeenCalled();
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("native Windows synchronized-output transaction", () => {
+    const sessionResult = (initialExecutionHost: string) => ({
+      id: "t-native-stabilizer",
+      title: "Terminal",
+      initialExecutionHost,
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+
+    it("removes only the in-frame cursor show and refreshes after one atomic write", async () => {
+      const terminalId = "t-native-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce(sessionResult("nativeWindows"));
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      mockWrite.mockClear();
+      mockRefresh.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+      const expected = "\x1b[?2026hbody\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+      await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    });
+
+    it("keeps a large exact frame and restore in one xterm write", async () => {
+      const terminalId = "t-native-large-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+      mockRefresh.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw =
+        "\x1b[?2026h" + "x".repeat(70_000) + "\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      const written = new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array);
+      expect(written).toHaveLength(raw.length - "\x1b[?25h".length);
+      expect(written.endsWith("\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h")).toBe(true);
+      await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    });
+
+    it("keeps an async IME commit human while a live parser write is pending", async () => {
+      const terminalId = "t-native-ime-stabilizer";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />);
+      const wrapper = screen.getByTestId(`terminal-view-${terminalId}`);
+      const terminal = createdTerminals.at(-1)!;
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      wrapper.appendChild(terminal.element);
+      await waitForTerminalInputReady();
+
+      helper.focus();
+      helper.value = "\u3131";
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\u3131" }));
+      helper.dispatchEvent(new Event("input", { bubbles: true }));
+      mockWrite.mockClear();
+      mockWriteToTerminal.mockClear();
+      mockWriteTerminalProtocolReply.mockClear();
+      let finishLiveWrite: (() => void) | undefined;
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        finishLiveWrite = callback;
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+
+      act(() => {
+        onOutput?.(new TextEncoder().encode("\x1b[?2026hbody\x1b[?25h\x1b[?2026l"));
+      });
+      expect(mockWrite).not.toHaveBeenCalled();
+      act(() => {
+        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[3;4H\x1b[?25h"));
+      });
+
+      expect(document.activeElement).toBe(helper);
+      expect(helper.value).toBe("\u3131");
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uAC00" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        terminal.emitCoreData("\uAC00", true);
+      });
+
+      expect(mockWriteToTerminal).toHaveBeenCalledTimes(1);
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "\uAC00");
+      expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
+      act(() => finishLiveWrite?.());
+    });
+
+    it("passes direct WSL sessions through byte-for-byte", async () => {
+      const terminalId = "t-wsl-stabilizer-bypass";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("wsl"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(raw);
+    });
   });
 
   // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
@@ -3755,27 +4110,34 @@ describe("TerminalView", () => {
     });
 
     mockWriteToTerminal.mockClear();
+    mockWriteTerminalProtocolReply.mockClear();
     mockResizeTerminal.mockClear();
 
-    const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+    const terminal = createdTerminals.at(-1)!;
+    const onOutput = mockOnTerminalOutput.mock.calls.find(
+      ([id]) => id === "t-remote-owned",
+    )?.[1] as ((data: Uint8Array) => void) | undefined;
     const resizeHandler = mockOnResize.mock.calls.at(-1)?.[0] as
       | ((size: { cols: number; rows: number }) => void)
       | undefined;
-    expect(dataHandler).toBeDefined();
+    expect(onOutput).toBeDefined();
     expect(resizeHandler).toBeDefined();
     expect(capturedKeyHandler).toBeTypeOf("function");
 
+    const reply = "\x1b]10;rgb:ffff/ffff/ffff\x1b\\";
+    mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+      terminal.emitCoreData(reply);
+      callback?.();
+    });
     act(() => {
-      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
+      onOutput?.(new TextEncoder().encode("LIVE_QUERY"));
       resizeHandler?.({ cols: 120, rows: 40 });
     });
 
     expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
     expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
-    expect(mockWriteToTerminal).toHaveBeenCalledWith(
-      "t-remote-owned",
-      "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
-    );
+    expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith("t-remote-owned", reply);
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
     expect(mockResizeTerminal).not.toHaveBeenCalled();
   });
 
@@ -3790,27 +4152,36 @@ describe("TerminalView", () => {
       expect(capturedKeyHandler).toBeTypeOf("function");
     });
 
-    const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
-    expect(dataHandler).toBeTypeOf("function");
+    const terminal = createdTerminals.at(-1)!;
+    const onOutput = mockOnTerminalOutput.mock.calls.find(
+      ([id]) => id === "t-protocol-pending",
+    )?.[1] as ((data: Uint8Array) => void) | undefined;
+    expect(onOutput).toBeTypeOf("function");
     expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
     expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
 
     mockWriteToTerminal.mockClear();
+    mockWriteTerminalProtocolReply.mockClear();
+    const replies = ["\x1b]10;rgb:ffff/ffff/ffff\x1b\\", "\x1b]11;rgb:0000/0000/0000\x1b\\"];
+    mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+      for (const reply of replies) terminal.emitCoreData(reply);
+      callback?.();
+    });
     act(() => {
-      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
-      dataHandler?.("\x1b]11;rgb:0000/0000/0000\x1b\\");
+      onOutput?.(new TextEncoder().encode("LIVE_COLOR_QUERIES"));
     });
 
-    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+    expect(mockWriteTerminalProtocolReply).toHaveBeenNthCalledWith(
       1,
       "t-protocol-pending",
       "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
     );
-    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+    expect(mockWriteTerminalProtocolReply).toHaveBeenNthCalledWith(
       2,
       "t-protocol-pending",
       "\x1b]11;rgb:0000/0000/0000\x1b\\",
     );
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
   });
 
   it("does not resize the backend before the initial remote status is known", async () => {

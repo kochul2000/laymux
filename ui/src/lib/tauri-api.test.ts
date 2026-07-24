@@ -18,6 +18,7 @@ import {
   attachTerminalOutput,
   writeTerminalInput,
   writeToTerminal,
+  writeTerminalProtocolReply,
   resizeTerminal,
   closeTerminalSession,
   getSyncGroupTerminals,
@@ -48,6 +49,7 @@ describe("tauri-api", () => {
       const mockResult = {
         id: "t1",
         title: "Terminal",
+        initialExecutionHost: "nativeWindows",
         config: {
           profile: "PowerShell",
           cols: 80,
@@ -144,6 +146,17 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("write_to_terminal", {
         id: "t1",
         data: "ls\n",
+      });
+    });
+  });
+
+  describe("writeTerminalProtocolReply", () => {
+    it("invokes the owner-independent terminal protocol reply command", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      await writeTerminalProtocolReply("t1", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
+      expect(mockInvoke).toHaveBeenCalledWith("write_terminal_protocol_reply", {
+        id: "t1",
+        data: "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
       });
     });
   });

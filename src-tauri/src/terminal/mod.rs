@@ -3,6 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::terminal_env::TerminalEnvPlan;
 
+mod initial_execution_host;
+pub use initial_execution_host::InitialExecutionHost;
+
 /// Detected activity state of a terminal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -80,6 +83,9 @@ pub struct TerminalSession {
     pub id: String,
     pub title: String,
     pub config: TerminalConfig,
+    /// Spawn-time host classification used by surface-local renderer policy.
+    #[serde(default, rename = "initialExecutionHost")]
+    pub initial_execution_host: InitialExecutionHost,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -137,6 +143,7 @@ impl TerminalSession {
             id,
             title: String::from("Terminal"),
             config,
+            initial_execution_host: InitialExecutionHost::Unknown,
             cwd: None,
             branch: None,
             command_running: false,
@@ -448,6 +455,16 @@ mod tests {
         assert_eq!(config.rows, 24);
         assert!(config.sync_group.is_empty());
         assert!(config.starting_directory.is_empty());
+    }
+
+    #[test]
+    fn session_serializes_initial_execution_host_for_the_renderer_gate() {
+        let mut session = TerminalSession::new("t1".into(), TerminalConfig::default());
+        session.initial_execution_host = InitialExecutionHost::NativeWindows;
+
+        let value = serde_json::to_value(session).unwrap();
+        assert_eq!(value["initialExecutionHost"], "nativeWindows");
+        assert!(value.get("initial_execution_host").is_none());
     }
 
     #[test]
