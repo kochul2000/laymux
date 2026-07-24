@@ -6400,6 +6400,25 @@
           dismissComposerAutocomplete();
           renderComposerSuggestions();
         });
+        // Touch path for the #504 recall popup: soft keyboards have no Tab
+        // key, so tapping (or clicking) the EMPTY editor opens the same
+        // history popup the Tab gesture opens on hardware keyboards. A
+        // pointer tap is not a keyboard shortcut, so this stays outside the
+        // keybinding rule (api-contracts §15.5). currentComposerHistoryEntries
+        // already enforces the toggle, the empty draft, and a non-empty
+        // history, so a tap with nothing to recall is a no-op.
+        composerInput.addEventListener("click", () => {
+          if (composerHistoryOpen) return;
+          // Mirror the keydown guard: never surface the popup mid-IME
+          // composition (a click can land before the preedit reaches the
+          // draft, so the empty-draft check alone is not enough).
+          if (composerIsComposing) return;
+          const historyEntries = currentComposerHistoryEntries();
+          if (historyEntries.length === 0) return;
+          composerHistoryIndex = 0;
+          composerHistoryOpen = true;
+          renderComposerSuggestions();
+        });
         // Enter behavior follows the layout (ADR-0036):
         //   - mobile layout: Enter inserts a newline. Sending is the dedicated
         //     Send button only, so the unreliable soft-keyboard Enter (keyCode

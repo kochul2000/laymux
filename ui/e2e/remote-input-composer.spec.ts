@@ -1258,6 +1258,55 @@ test("Tab on an empty draft opens the newest-first recall popup and Enter fills 
   expect(remote.inputs).toHaveLength(3);
 });
 
+test("tapping the empty editor opens the recall popup — soft keyboards have no Tab key (#504)", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: true });
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  const list = page.locator("#composerHistoryList");
+
+  // Empty history: a tap must not open a popup.
+  await editor.click();
+  await expect(list).toBeHidden();
+
+  // Mobile layout sends with the dedicated Send button (ADR-0036).
+  await editor.fill("echo one");
+  await page.locator("#composerSend").click();
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  await expect(editor).toHaveValue("");
+  await editor.fill("echo two");
+  await page.locator("#composerSend").click();
+  await expect.poll(() => remote.inputs.length).toBe(2);
+  await expect(editor).toHaveValue("");
+
+  // A tap on the empty editor opens the same newest-first popup Tab opens.
+  await editor.click();
+  await expect(list).toBeVisible();
+  await expect(list.locator('[role="option"]')).toHaveText(["echo two", "echo one"]);
+
+  // Entries commit on mousedown (touch-friendly): fills the draft, no send.
+  await list.locator('[role="option"]').nth(1).dispatchEvent("mousedown");
+  await expect(list).toBeHidden();
+  await expect(editor).toHaveValue("echo one");
+  expect(remote.inputs).toHaveLength(2);
+
+  // A tap on a NON-empty draft never opens the recall popup (autocomplete
+  // owns the non-empty draft, and only while typing).
+  await editor.click();
+  await expect(list).toBeHidden();
+
+  // A tap mid-IME composition never opens the popup, even on an empty draft;
+  // it opens again once composition ends.
+  await editor.fill("");
+  await editor.dispatchEvent("compositionstart");
+  await editor.click();
+  await expect(list).toBeHidden();
+  await editor.dispatchEvent("compositionend");
+  await editor.click();
+  await expect(list).toBeVisible();
+});
+
 test("as-you-type autocomplete suggests prefixes; plain Enter still sends, arrow+Enter picks (#505)", async ({
   page,
 }) => {
