@@ -70,6 +70,7 @@ ADR 이 필요한 대표 기준:
 | [0050](0050-remote-github-reference-links.md) | Remote GitHub 참조 링크는 서버 terminal CWD로 저장소를 해석 | Accepted |
 | [0051](0051-terminal-capability-environment-contract.md) | PTY 자식은 laymux 터미널 정체성과 truecolor capability를 받는다 | Superseded by [0052](0052-truecolor-capability-advertising-setting.md) |
 | [0052](0052-truecolor-capability-advertising-setting.md) | Truecolor capability 광고는 기본 활성화된 전역 터미널 설정으로 제어한다 | Accepted |
+| [0053](0053-native-windows-synchronized-output-cursor-transaction.md) | 네이티브 Windows 동기화 출력은 xterm 쓰기 경계에서 커서 복원까지 원자화한다 | Accepted |
 
 ## 새 ADR 추가
 
