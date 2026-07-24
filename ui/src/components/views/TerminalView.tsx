@@ -1220,6 +1220,27 @@ export function TerminalView({
         return;
       }
 
+      const shadowCursor = shadowCursorRef.current;
+      const caretOwner = resolveVisualCaretOwner({
+        opened: openedRef.current,
+        focused: isFocusedRef.current,
+        stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
+        overlayActivity: isOverlayCaretActivity(activityRef.current),
+        syncOutputActive: syncOutputActiveRef.current,
+        isAltBufferActive: shadowCursor.isAltBufferActive,
+        viewportScrolledUp: isTerminalScrolledUp(term),
+        compositionActive: compositionPreviewRef.current.active,
+        cursorHidden: shadowCursor.isCursorHidden,
+        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
+        hasPromptBoundary: shadowCursor.hasPromptBoundary,
+        isInputPhase: shadowCursor.isInputPhase,
+      });
+      if (caretOwner === "alt-buffer" || caretOwner === "hidden") {
+        hideOverlay();
+        trace("overlay-hidden", { reason: caretOwner, shadowCursor });
+        return;
+      }
+
       // Skip when already cleared — assigning `textContent` replaces
       // child nodes even when the value is unchanged, and this runs on
       // every rAF paint outside composition.
@@ -1263,26 +1284,6 @@ export function TerminalView({
         cellHeight <= 0
       ) {
         hideOverlay();
-        return;
-      }
-
-      const shadowCursor = shadowCursorRef.current;
-      const caretOwner = resolveVisualCaretOwner({
-        opened: openedRef.current,
-        focused: isFocusedRef.current,
-        stabilizeInteractiveCursor: stabilizeInteractiveCursorRef.current,
-        overlayActivity: isOverlayCaretActivity(activityRef.current),
-        syncOutputActive: syncOutputActiveRef.current,
-        isAltBufferActive: shadowCursor.isAltBufferActive,
-        compositionActive: compositionPreviewRef.current.active,
-        cursorHidden: shadowCursor.isCursorHidden,
-        hasSyncFramePosition: shadowCursor.hasSyncFramePosition,
-        hasPromptBoundary: shadowCursor.hasPromptBoundary,
-        isInputPhase: shadowCursor.isInputPhase,
-      });
-      if (caretOwner === "alt-buffer" || caretOwner === "hidden") {
-        hideOverlay();
-        trace("overlay-hidden", { reason: caretOwner, shadowCursor });
         return;
       }
 
@@ -1757,14 +1758,16 @@ export function TerminalView({
       }
       scheduleOverlayCaretUpdate();
     });
-    // Issue #349: toggle the floating jump-to-bottom button as the viewport
-    // moves through the scrollback. xterm fires onScroll on every wheel
-    // step / scrollToBottom; reading baseY vs viewportY tells us whether the
-    // user is pinned to the live bottom.
-    const refreshScrollToBottom = () => {
+    // Keep viewport-dependent presentation in sync. xterm fires onScroll on
+    // every wheel step / scrollToBottom; reading baseY vs viewportY tells us
+    // whether the user is pinned to the live bottom. The Codex overlay caret
+    // is hidden in scrollback because its shadow coordinates describe the live
+    // screen, not an arbitrary historical viewport.
+    const refreshViewportPresentation = () => {
       setShowScrollToBottom(isTerminalScrolledUp(terminal));
+      scheduleOverlayCaretUpdate();
     };
-    const scrollDisposable = terminal.onScroll?.(refreshScrollToBottom);
+    const scrollDisposable = terminal.onScroll?.(refreshViewportPresentation);
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
@@ -3053,12 +3056,11 @@ export function TerminalView({
 
         performTerminalFit({});
         openedRef.current = true;
-        // Issue #349: sync the jump-to-bottom button once on mount. onScroll
-        // only fires on subsequent viewport moves, so a terminal restored
-        // (or reattached) while parked above the scrollback bottom would
-        // otherwise show no button until the first scroll event.
-        refreshScrollToBottom();
-        scheduleOverlayCaretUpdate();
+        // Sync viewport-dependent UI once on mount. onScroll only fires on
+        // subsequent viewport moves, so a terminal restored (or reattached)
+        // while parked above the scrollback bottom must initialize both the
+        // jump button and overlay-caret visibility here.
+        refreshViewportPresentation();
         if (isFocusedRef.current) {
           terminal.focus();
         }

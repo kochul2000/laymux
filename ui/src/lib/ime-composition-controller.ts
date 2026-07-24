@@ -521,6 +521,8 @@ type VisualCaretOwnerInput = {
   overlayActivity: boolean;
   syncOutputActive: boolean;
   isAltBufferActive: boolean;
+  /** The user is viewing scrollback instead of the live terminal bottom. */
+  viewportScrolledUp: boolean;
   compositionActive: boolean;
   /**
    * DECTCEM (`\e[?25l`) hidden state as the app last requested it.
@@ -540,6 +542,9 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   }
   if (input.isAltBufferActive) {
     return "alt-buffer";
+  }
+  if (input.viewportScrolledUp) {
+    return "hidden";
   }
   if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
     return "hidden";
