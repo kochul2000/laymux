@@ -35,6 +35,18 @@ pub const ENV_LX_TERMINAL_ID: &str = "LX_TERMINAL_ID";
 pub const ENV_LX_GROUP_ID: &str = "LX_GROUP_ID";
 pub const ENV_LX_AUTOMATION_PORT: &str = "LX_AUTOMATION_PORT";
 pub const ENV_LX_PROPAGATED: &str = "LX_PROPAGATED";
+pub const ENV_TERM_PROGRAM: &str = "TERM_PROGRAM";
+pub const ENV_TERM_PROGRAM_VERSION: &str = "TERM_PROGRAM_VERSION";
+pub const ENV_COLORTERM: &str = "COLORTERM";
+pub const ENV_TERM: &str = "TERM";
+pub const ENV_NO_COLOR: &str = "NO_COLOR";
+pub const ENV_FORCE_COLOR: &str = "FORCE_COLOR";
+pub const ENV_WT_SESSION: &str = "WT_SESSION";
+pub const ENV_WT_PROFILE_ID: &str = "WT_PROFILE_ID";
+pub const ENV_WSLENV: &str = "WSLENV";
+
+pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
+pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 
 /// Enable verbose PTY byte-stream tracing (pty↔ui directions, detected
 /// escape-sequence signals, printable preview). Off by default — the

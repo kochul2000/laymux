@@ -63,6 +63,9 @@
 - WSL, PowerShell 프로파일 지원
 - 환경변수 접근 및 설정 가능
 - xterm.js 렌더링, node-pty로 실제 PTY 연결
+- PTY 생성 시 `TerminalEnvPlan`이 laymux 소유 환경변수의 `Set`/`Unset`을 한 번 계산한다. native
+  `CommandBuilder`와 WSL rcfile은 같은 계획을 적용하며, `terminal.advertiseTrueColor`는 세션
+  생성 시 `TerminalConfig`에 snapshot되어 새 PTY에만 반영된다([ADR-0052](../adr/0052-truecolor-capability-advertising-setting.md)).
 
 ### 8.2 `lx` CLI
 
@@ -75,9 +78,19 @@ LX_SOCKET=...            # IDE IPC 엔드포인트 — Linux: /tmp/lx-{session}.
 LX_TERMINAL_ID=...       # 현재 터미널 인스턴스 ID (terminal-pane-{uuid8})
 LX_GROUP_ID=...          # 현재 SyncGroup ID
 LX_AUTOMATION_PORT=...   # Automation API 포트 (release 19280 / dev 19281)
+TERM_PROGRAM=laymux      # 실제 terminal emulator 정체성
+TERM_PROGRAM_VERSION=... # 현재 laymux package version
+COLORTERM=truecolor      # terminal.advertiseTrueColor=true(기본값)일 때만 광고
 ```
 
 PATH 는 수정하지 않는다 — `lx` 바이너리(진입점 `src-tauri/src/bin/lx.rs`, 파서 `src-tauri/src/cli/`)는 셸의 PATH 에서 찾을 수 있게 별도로 배치돼 있어야 한다.
+
+`TERM_PROGRAM`/`TERM_PROGRAM_VERSION`은 설정과 무관하게 laymux 값으로 덮어쓰고, 바깥
+Windows Terminal에서 상속될 수 있는 `WT_SESSION`/`WT_PROFILE_ID`는 제거한다.
+`terminal.advertiseTrueColor=false`이면 `COLORTERM`을 단순 미주입하지 않고 부모·세션 환경의
+기존 값까지 제거한다. `TERM`, `NO_COLOR`, `FORCE_COLOR`는 보존한다. WSL은 Windows 환경
+전체를 복사하지 않고 같은 mutation만 rcfile에서 `.bashrc` 전후로 `export`/`unset`하며,
+`WSLENV`에서는 제거 대상 두 키의 항목만 대소문자·flag를 고려해 정리한다.
 
 **커맨드 목록**
 
@@ -108,6 +121,10 @@ OSC 이스케이프 시퀀스는 **Rust PTY 콜백에서 단일 패스로 처리
 - **훅 매칭은 Rust 전용**: `osc_hooks.rs`의 선언적 `OscCondition`/`OscAction` 모델과 `match_hooks()`가 이벤트를 액션으로 변환한다. 프론트엔드에 `when` 조건 평가 로직을 두지 않는다.
 - **액션 디스패치는 Rust 전용**: `dispatch_osc_action()`이 `do_sync_cwd()`, `do_notify()` 등 공유 함수를 직접 호출한다. IPC 라운드트립(프론트엔드→lx→Rust) 없이 즉시 실행된다.
 - **프론트엔드는 이벤트 리스너만**: `useSyncEvents`에서 `terminal-title-changed`, `terminal-cwd-changed`, `sync-cwd`, `lx-notify` 등 구조화된 Tauri 이벤트를 구독하여 UI를 갱신한다.
+- **터미널 에뮬레이터 응답은 xterm.js 책임**: Rust 단일 패스는 laymux가 의미를 부여하는
+  semantic 훅·액션의 소유권이다. OSC 10/11 색상 질의처럼 terminal emulator가 생성하는
+  응답은 xterm.js core가 처리하고 기존 PTY 입력 경로로 돌려보내며, Rust에 중복 응답기를
+  추가하지 않는다([ADR-0052](../adr/0052-truecolor-capability-advertising-setting.md)).
 
 #### 데이터 흐름
 

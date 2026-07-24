@@ -1520,6 +1520,14 @@ function TerminalSection() {
         </SettingRow>
 
         <ToggleRow
+          label={t("terminal.advertiseTrueColor")}
+          desc={t("terminal.advertiseTrueColorDesc")}
+          testid="advertise-truecolor-toggle"
+          checked={terminal.advertiseTrueColor}
+          onChange={(v) => update({ advertiseTrueColor: v })}
+        />
+
+        <ToggleRow
           label={t("terminal.composerHistoryPopup")}
           desc={t("terminal.composerHistoryPopupDesc")}
           testid="composer-history-popup-toggle"

@@ -29,6 +29,7 @@ pub mod remote_session;
 pub mod settings;
 pub mod state;
 pub mod terminal;
+mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
 

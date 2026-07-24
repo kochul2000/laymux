@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::terminal_env::TerminalEnvPlan;
+
 /// Detected activity state of a terminal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -40,6 +42,9 @@ pub struct TerminalConfig {
     pub rows: u16,
     pub sync_group: String,
     pub env: Vec<(String, String)>,
+    /// Snapshot of `terminal.advertiseTrueColor` for this PTY spawn.
+    #[serde(default = "default_true")]
+    pub advertise_true_color: bool,
 }
 
 impl Default for TerminalConfig {
@@ -53,6 +58,7 @@ impl Default for TerminalConfig {
             rows: 24,
             sync_group: String::new(),
             env: Vec::new(),
+            advertise_true_color: true,
         }
     }
 }
@@ -157,12 +163,16 @@ impl TerminalSession {
         profile: &str,
         env: &[(String, String)],
     ) -> (String, Vec<String>) {
-        let command_line = match profile {
+        let command_line = Self::profile_command_line(profile);
+        Self::command_line_to_command_with_env(command_line, env)
+    }
+
+    pub(crate) fn profile_command_line(profile: &str) -> &str {
+        match profile {
             "WSL" | "wsl" => "wsl.exe",
             "PowerShell" | "powershell" => "powershell.exe -NoLogo",
             other => other,
-        };
-        Self::command_line_to_command_with_env(command_line, env)
+        }
     }
 
     /// Convenience wrapper without env injection.
@@ -186,6 +196,15 @@ impl TerminalSession {
         env: &[(String, String)],
         startup_command: &str,
     ) -> (String, Vec<String>) {
+        let env_plan = TerminalEnvPlan::set_only(env);
+        Self::command_line_to_command_with_env_plan(command_line, &env_plan, startup_command)
+    }
+
+    pub(crate) fn command_line_to_command_with_env_plan(
+        command_line: &str,
+        env_plan: &TerminalEnvPlan,
+        startup_command: &str,
+    ) -> (String, Vec<String>) {
         let parts: Vec<&str> = command_line.split_whitespace().collect();
         let executable = parts.first().copied().unwrap_or("powershell.exe");
         let extra_args: Vec<String> = if parts.len() > 1 {
@@ -196,7 +215,7 @@ impl TerminalSession {
 
         match detect_shell_type(executable) {
             ShellType::Wsl => {
-                let mut init = shell_integration_bash_with_env(env);
+                let mut init = shell_integration_bash_with_env_plan(env_plan);
                 if !startup_command.is_empty() {
                     init.push('\n');
                     init.push_str(startup_command);
@@ -326,15 +345,28 @@ fn shell_integration_bash() -> String {
 /// Bash shell integration script for WSL.
 /// Exports IDE env vars at the top so they are available inside WSL
 /// even when WSL interop is disabled (Windows env vars don't propagate).
+#[cfg(test)]
 fn shell_integration_bash_with_env(env: &[(String, String)]) -> String {
-    let mut script = String::new();
+    let env_plan = TerminalEnvPlan::set_only(env);
+    shell_integration_bash_with_env_plan(&env_plan)
+}
 
-    // Export IDE environment variables at the top of the script
-    for (key, value) in env {
+fn append_bash_env_mutations(script: &mut String, env_plan: &TerminalEnvPlan) {
+    for (key, value) in env_plan.set() {
         // Escape single quotes in value: replace ' with '\''
         let escaped = value.replace('\'', "'\\''");
-        script.push_str(&format!("export {}='{}'\n", key, escaped));
+        script.push_str(&format!("export {key}='{escaped}'\n"));
     }
+    for key in env_plan.unset() {
+        script.push_str(&format!("unset {key}\n"));
+    }
+}
+
+fn shell_integration_bash_with_env_plan(env_plan: &TerminalEnvPlan) -> String {
+    let mut script = String::new();
+
+    // Apply before .bashrc so its startup commands can observe the contract.
+    append_bash_env_mutations(&mut script, env_plan);
 
     // Set LX_AUTOMATION_HOST to the Windows host IP (gateway from WSL2 perspective)
     // so tools running inside WSL can reach the Automation API on the Windows side.
@@ -358,7 +390,14 @@ __laymux_preexec() {
     printf '\e]133;E;%s\a' "$BASH_COMMAND"
 }
 [ -f ~/.bashrc ] && source ~/.bashrc
-PROMPT_COMMAND="__laymux_prompt_pre;${PROMPT_COMMAND:+$PROMPT_COMMAND;}__laymux_prompt_post"
+"#,
+    );
+
+    // Re-assert after .bashrc so shell configuration cannot restore stale
+    // upstream terminal identity or an opted-out COLORTERM value.
+    append_bash_env_mutations(&mut script, env_plan);
+    script.push_str(
+        r#"PROMPT_COMMAND="__laymux_prompt_pre;${PROMPT_COMMAND:+$PROMPT_COMMAND;}__laymux_prompt_post"
 trap '__laymux_preexec' DEBUG
 "#,
     );
@@ -390,6 +429,7 @@ mod tests {
             rows: 40,
             sync_group: "project-a".into(),
             env: vec![("FOO".into(), "bar".into())],
+            advertise_true_color: true,
         };
         let session = TerminalSession::new("t1".into(), config);
         assert_eq!(session.id, "t1");
@@ -511,6 +551,66 @@ mod tests {
         };
         let content = std::fs::read_to_string(&win_path).unwrap();
         assert!(content.contains("export LX_AUTOMATION_PORT='19280'"));
+    }
+
+    #[test]
+    fn wsl_env_plan_is_reasserted_after_bashrc() {
+        use crate::constants::{
+            ENV_COLORTERM, ENV_TERM_PROGRAM, ENV_WSLENV, ENV_WT_PROFILE_ID, ENV_WT_SESSION,
+        };
+
+        let plan = TerminalEnvPlan::for_session(
+            &[(
+                ENV_WSLENV.into(),
+                "KEEP/u:WT_SESSION:WT_PROFILE_ID/p".into(),
+            )],
+            "terminal-1",
+            "group-1",
+            true,
+            true,
+            None,
+        );
+        let script = shell_integration_bash_with_env_plan(&plan);
+        let source_position = script.find("source ~/.bashrc").expect("bashrc source");
+        let before = &script[..source_position];
+        let after = &script[source_position..];
+
+        for mutation in [
+            format!("export {ENV_TERM_PROGRAM}='laymux'"),
+            format!("export {ENV_COLORTERM}='truecolor'"),
+            format!("unset {ENV_WT_SESSION}"),
+            format!("unset {ENV_WT_PROFILE_ID}"),
+            format!("export {ENV_WSLENV}='KEEP/u'"),
+        ] {
+            assert!(
+                before.contains(&mutation),
+                "missing before .bashrc: {mutation}"
+            );
+            assert!(
+                after.contains(&mutation),
+                "missing after .bashrc: {mutation}"
+            );
+        }
+    }
+
+    #[test]
+    fn wsl_env_plan_reasserts_truecolor_opt_out_after_bashrc() {
+        use crate::constants::ENV_COLORTERM;
+
+        let plan = TerminalEnvPlan::for_session(
+            &[(ENV_COLORTERM.into(), "inherited".into())],
+            "terminal-1",
+            "group-1",
+            false,
+            true,
+            None,
+        );
+        let script = shell_integration_bash_with_env_plan(&plan);
+        let source_position = script.find("source ~/.bashrc").expect("bashrc source");
+
+        assert!(script[..source_position].contains("unset COLORTERM"));
+        assert!(script[source_position..].contains("unset COLORTERM"));
+        assert!(!script.contains("export COLORTERM="));
     }
 
     #[test]

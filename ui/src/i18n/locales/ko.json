@@ -259,6 +259,8 @@
       "defaultInputModeDesc": "새 터미널이 시작할 때의 입력 방식. Ctrl+Alt+M 또는 pane 툴바 버튼으로 언제든 전환.",
       "inputModeDirect": "직접",
       "inputModeComposer": "입력칸",
+      "advertiseTrueColor": "24비트 색상 알림",
+      "advertiseTrueColorDesc": "새 터미널의 CLI에 truecolor 지원을 알립니다. 호환성·렌더링 성능을 비교하려면 끄세요. 새 터미널부터 적용됩니다.",
       "composerHistoryPopup": "Tab으로 과거 입력 보기",
       "composerHistoryPopupDesc": "입력칸(Composer) 모드에서 비어 있는 입력창에 포커스한 채 Tab을 누르면 최근 입력 목록을 보여주고 골라 넣을 수 있습니다.",
       "composerAutocomplete": "입력 자동완성",

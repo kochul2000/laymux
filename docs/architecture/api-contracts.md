@@ -29,6 +29,31 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - SettingsView를 Dock에 배치하여 열기 (선택, Dock only)
 - `settings.json` 직접 텍스트 편집
 
+### 터미널 capability 광고
+
+```jsonc
+{
+  "terminal": {
+    "advertiseTrueColor": true // 기본값. 새 PTY 자식에 COLORTERM=truecolor 광고
+  }
+}
+```
+
+`terminal.advertiseTrueColor`는 전역 Boolean 설정이며 Settings → Terminal에서 편집한다
+([ADR-0052](../adr/0052-truecolor-capability-advertising-setting.md)). Rust serde와 프론트엔드
+settings store 모두 누락값을 `true`로 보완한다. 저장 시점의 값은 터미널 세션 생성 때
+`TerminalConfig.advertise_true_color`로 snapshot되므로 실행 중 PTY 환경은 바뀌지 않고,
+저장 이후 새로 생성하거나 재시작한 PTY부터 적용된다. 프로필별 override는 없다.
+Automation/MCP settings metadata의 apply mode도 이 경계를 그대로 나타내는 `nextUse`다.
+
+`true`이면 PTY 환경 계획이 `COLORTERM=truecolor`를 Set한다. `false`이면 부모 프로세스나
+명시적 세션 환경에서 상속된 값까지 Unset하여 opt-out을 결정적으로 적용한다. 어느 값이든
+`TERM_PROGRAM=laymux`와 `TERM_PROGRAM_VERSION=<package version>`은 Set하고,
+`WT_SESSION`/`WT_PROFILE_ID`는 Unset하며, `TERM`/`NO_COLOR`/`FORCE_COLOR`는 보존한다.
+native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfile
+`export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
+버리지 않고 제거 대상 항목만 정리한다.
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).

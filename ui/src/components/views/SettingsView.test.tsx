@@ -979,6 +979,21 @@ describe("SettingsView", () => {
 
   // -- Terminal section: copy on select --
 
+  it("shows truecolor advertising enabled by default and saves an opt-out", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    const toggle = screen.getByTestId("advertise-truecolor-toggle") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+
+    await user.click(toggle);
+    expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(true);
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.advertiseTrueColor).toBe(false);
+  });
+
   it("does NOT update copy on select in store until Save is clicked", async () => {
     const user = userEvent.setup();
     render(<SettingsView />);
