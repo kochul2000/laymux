@@ -152,6 +152,21 @@ pub fn github_base_from_remote_url(url: &str) -> Option<String> {
     Some(format!("https://github.com/{}/{}", owner, repo))
 }
 
+/// Resolve a working directory's git `origin` to a normalized GitHub base URL.
+///
+/// The terminal store can expose Windows paths in a shell-specific form, so
+/// filesystem access must pass through the same path resolver used by terminal
+/// commands before walking up to `.git`. Both desktop and Remote link surfaces
+/// use this function to keep repository detection in one implementation.
+pub fn resolve_github_base_from_working_dir(working_dir: &str) -> Option<String> {
+    let resolved = crate::path_utils::resolve_address_path_following_symlinks(working_dir, None);
+    let git_dir = find_git_dir(Path::new(&resolved))?;
+    let config_path = find_git_config(&git_dir)?;
+    let config = fs::read_to_string(config_path).ok()?;
+    let url = parse_remote_origin_url(&config)?;
+    github_base_from_remote_url(&url)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +334,25 @@ mod tests {
         );
         assert_eq!(github_base_from_remote_url("https://github.com"), None);
         assert_eq!(github_base_from_remote_url(""), None);
+    }
+
+    #[test]
+    fn resolve_github_base_from_nested_working_dir() {
+        let dir = TempDir::new().unwrap();
+        let git_dir = dir.path().join(".git");
+        let working_dir = dir.path().join("src").join("nested");
+        fs::create_dir(&git_dir).unwrap();
+        fs::create_dir_all(&working_dir).unwrap();
+        fs::write(
+            git_dir.join("config"),
+            "[remote \"origin\"]\n\turl = git@github.com:owner/repo.git\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolve_github_base_from_working_dir(working_dir.to_str().unwrap()),
+            Some("https://github.com/owner/repo".into())
+        );
     }
 
     #[test]

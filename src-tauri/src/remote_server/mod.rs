@@ -2,6 +2,7 @@ mod access;
 mod appearance;
 mod assets;
 mod auth;
+mod github_repo_routes;
 mod lease;
 mod navigation;
 mod navigation_routes;

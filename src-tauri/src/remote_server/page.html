@@ -1621,6 +1621,7 @@
     </div>
     <script src="/remote/vendor/xterm.js"></script>
     <script src="/remote/vendor/addon-fit.js"></script>
+    <script src="/remote/vendor/addon-web-links.js"></script>
     <script>
       (() => {
         const $ = (id) => document.getElementById(id);
@@ -1729,6 +1730,9 @@
         let heartbeatInterrupted = false;
         let outputInterrupted = false;
         let activeTerminalId = null;
+        let activeGithubRepoBase = null;
+        let githubRepoRequestRevision = 0;
+        let githubRepoAbortController = null;
         // Keep the user's most recently attached pane across release/lease
         // loss within this document. The navigation snapshot remains the
         // authority for whether it is still live and eligible; this hint is
@@ -2007,6 +2011,43 @@
             throw error;
           }
           return response.json();
+        }
+
+        function clearActiveGithubRepo() {
+          githubRepoRequestRevision += 1;
+          githubRepoAbortController?.abort();
+          githubRepoAbortController = null;
+          activeGithubRepoBase = null;
+        }
+
+        function loadActiveGithubRepo(terminalId, cwd) {
+          clearActiveGithubRepo();
+          if (!terminalId || typeof cwd !== "string" || !cwd) return;
+          const revision = githubRepoRequestRevision;
+          const controller = typeof AbortController === "function" ? new AbortController() : null;
+          githubRepoAbortController = controller;
+          remoteFetch(
+            `/remote/v1/terminals/${encodeURIComponent(terminalId)}/github-repo`,
+            { signal: controller?.signal },
+          )
+            .then((data) => {
+              if (
+                revision !== githubRepoRequestRevision ||
+                activeTerminalId !== terminalId ||
+                terminalInfoById.get(terminalId)?.cwd !== cwd ||
+                data.cwd !== cwd
+              ) return;
+              activeGithubRepoBase = normalizeRemoteGithubRepoBase(data.repoBase);
+            })
+            .catch(() => {
+              // Missing/non-GitHub repos and transient lookup failures all use
+              // the natural off state: no provider links.
+            })
+            .finally(() => {
+              if (githubRepoAbortController === controller) {
+                githubRepoAbortController = null;
+              }
+            });
         }
 
         function renderFileViewerState(message = null, isError = false) {
@@ -2714,6 +2755,7 @@
             scrollToBottomButton.hidden = true;
           }
           activeTerminalId = nextId;
+          loadActiveGithubRepo(nextId, nextId ? terminalInfoById.get(nextId)?.cwd : null);
           if (nextId) {
             lastSelectedTerminalId = nextId;
             // Record this attach against its workspace so a later re-entry can
@@ -2780,6 +2822,113 @@
           };
         }
 
+        function openRemoteUrl(uri) {
+          try {
+            const url = new URL(uri);
+            if (url.protocol !== "http:" && url.protocol !== "https:") return;
+            window.open(url.href, "_blank", "noopener,noreferrer");
+          } catch (_) {
+            // Ignore malformed terminal-controlled links.
+          }
+        }
+
+        // Equivalent to desktop's `(?<!\w)#(\d+)\b`, without regex
+        // lookbehind so older iOS WebKit can parse the Remote page.
+        const REMOTE_PR_TOKEN_RE = /(^|[^\w])#(\d+)\b/g;
+
+        function findRemotePrTokens(text) {
+          const matches = [];
+          REMOTE_PR_TOKEN_RE.lastIndex = 0;
+          let match;
+          while ((match = REMOTE_PR_TOKEN_RE.exec(text)) !== null) {
+            const number = Number.parseInt(match[2], 10);
+            if (!Number.isSafeInteger(number)) continue;
+            const startOffset = match.index + match[1].length;
+            matches.push({
+              number,
+              startOffset,
+              endOffset: startOffset + match[2].length,
+            });
+          }
+          return matches;
+        }
+
+        function reconstructRemoteLinkLine(line) {
+          let text = "";
+          const columns = [];
+          for (let x = 0; x < line.length; x += 1) {
+            const cell = line.getCell(x);
+            const width = cell?.getWidth?.() ?? 1;
+            if (width === 0) continue;
+            const chars = cell?.getChars?.() || " ";
+            text += chars;
+            for (let offset = 0; offset < chars.length; offset += 1) {
+              columns.push(x + 1);
+            }
+          }
+          return { text, columns };
+        }
+
+        function createRemotePrLinkProvider(term) {
+          return {
+            provideLinks(bufferLineNumber, callback) {
+              const repoBase = activeGithubRepoBase;
+              const repoRevision = githubRepoRequestRevision;
+              if (!repoBase) {
+                callback(undefined);
+                return;
+              }
+              const line = term.buffer.active.getLine(bufferLineNumber - 1);
+              if (!line) {
+                callback(undefined);
+                return;
+              }
+              const { text, columns } = reconstructRemoteLinkLine(line);
+              const links = findRemotePrTokens(text).flatMap((match) => {
+                const startX = columns[match.startOffset];
+                const endX = columns[match.endOffset];
+                if (startX === undefined || endX === undefined) return [];
+                return [{
+                  range: {
+                    start: { x: startX, y: bufferLineNumber },
+                    end: { x: endX, y: bufferLineNumber },
+                  },
+                  text: `#${match.number}`,
+                  activate: () => {
+                    if (
+                      repoRevision !== githubRepoRequestRevision ||
+                      activeGithubRepoBase !== repoBase
+                    ) return;
+                    openRemoteUrl(`${repoBase}/issues/${match.number}`);
+                  },
+                }];
+              });
+              callback(links.length > 0 ? links : undefined);
+            },
+          };
+        }
+
+        function normalizeRemoteGithubRepoBase(value) {
+          if (typeof value !== "string") return null;
+          try {
+            const url = new URL(value);
+            const segments = url.pathname.split("/").filter(Boolean);
+            if (
+              url.protocol !== "https:" ||
+              url.hostname.toLowerCase() !== "github.com" ||
+              url.port ||
+              url.username ||
+              url.password ||
+              url.search ||
+              url.hash ||
+              segments.length !== 2
+            ) return null;
+            return `https://github.com/${segments[0]}/${segments[1]}`;
+          } catch (_) {
+            return null;
+          }
+        }
+
         function terminalOptionsForAppearance(appearance = {}) {
           const normalized = normalizeAppearance(appearance);
           const options = {
@@ -2797,6 +2946,13 @@
             scrollback: normalized.scrollback,
             convertEol: false,
             theme: normalized.theme,
+            // OSC 8 URIs are terminal-controlled input. Keep xterm's own
+            // non-HTTP rejection enabled and route accepted web links through
+            // the same safe browser opener as plain-text links.
+            linkHandler: {
+              activate: (_event, uri) => openRemoteUrl(uri),
+              allowNonHttpProtocols: false,
+            },
           };
           if (normalized.cursorWidth !== undefined) {
             options.cursorWidth = normalized.cursorWidth;
@@ -2959,7 +3115,13 @@
           return bufferType === "normal" && (!mouseTrackingMode || mouseTrackingMode === "none");
         }
 
-        function touchSelectionMouseEvent(type, point, forceSelection, detail = type === "mousedown" ? 1 : 0) {
+        function touchSelectionMouseEvent(
+          type,
+          point,
+          forceSelection,
+          detail = type === "mousedown" ? 1 : 0,
+          buttons = type === "mouseup" ? 0 : 1
+        ) {
           return new MouseEvent(type, {
             bubbles: true,
             cancelable: true,
@@ -2970,14 +3132,35 @@
             clientX: point.clientX,
             clientY: point.clientY,
             button: 0,
-            buttons: type === "mouseup" ? 0 : 1,
+            buttons,
             shiftKey: forceSelection,
             altKey: forceSelection,
           });
         }
 
-        function dispatchTouchSelectionMouse(target, type, point, forceSelection, detail) {
-          target.dispatchEvent(touchSelectionMouseEvent(type, point, forceSelection, detail));
+        function dispatchTouchSelectionMouse(target, type, point, forceSelection, detail, buttons) {
+          target.dispatchEvent(
+            touchSelectionMouseEvent(type, point, forceSelection, detail, buttons)
+          );
+        }
+
+        function activateTouchLink(term, element, point) {
+          const linkElement = element.querySelector(".xterm-screen");
+          if (!linkElement) return false;
+          const forceSelection = shouldForceTouchSelection(term);
+          // xterm discovers both OSC 8 and provider links on mousemove, then
+          // requires the same active link across mousedown -> mouseup. Touch
+          // pointers do not emit those compatibility events because this
+          // bridge cancels their native pointer events, so replay the sequence
+          // synchronously while the pointerup still carries user activation.
+          dispatchTouchSelectionMouse(linkElement, "mousemove", point, forceSelection, 0, 0);
+          if (!linkElement.classList.contains("xterm-cursor-pointer")) return false;
+          dispatchTouchSelectionMouse(linkElement, "mousedown", point, forceSelection);
+          dispatchTouchSelectionMouse(linkElement, "mouseup", point, forceSelection);
+          // Touch has no persistent hover. Clear xterm's underline/cursor state
+          // after activation so it cannot linger until the next gesture.
+          dispatchTouchSelectionMouse(linkElement, "mouseleave", point, forceSelection, 0, 0);
+          return true;
         }
 
         function clearTouchLongPressTimer() {
@@ -3111,6 +3294,8 @@
             lastTouchTap.count = 0;
             return;
           }
+
+          if (activateTouchLink(term, element, point)) return;
 
           if (term.hasSelection && term.hasSelection()) {
             term.clearSelection();
@@ -3378,12 +3563,28 @@
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
           const FitAddonCtor = window.FitAddon && window.FitAddon.FitAddon;
+          const WebLinksAddonCtor =
+            window.WebLinksAddon && window.WebLinksAddon.WebLinksAddon;
           if (!TerminalCtor || !FitAddonCtor) {
             throw new Error("xterm assets failed to load");
           }
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
+          // Keep the terminal usable if this non-core asset is unavailable;
+          // OSC 8 links still use linkHandler and the Rust asset test guards
+          // the production bundle. Plain-text link activation degrades only.
+          if (WebLinksAddonCtor) {
+            const webLinksAddon = new WebLinksAddonCtor((_event, uri) =>
+              openRemoteUrl(uri)
+            );
+            terminal.loadAddon(webLinksAddon);
+          }
+          // Link providers are additive. Keep the Remote terminal usable when
+          // a minimal or older xterm surface does not expose this optional API.
+          if (typeof terminal.registerLinkProvider === "function") {
+            terminal.registerLinkProvider(createRemotePrLinkProvider(terminal));
+          }
           terminal.open(terminalSizer);
           // xterm's helper textarea ships autocorrect/autocapitalize/spellcheck
           // off but omits autocomplete, so mobile browsers offer password,
