@@ -332,6 +332,15 @@ async function waitForTerminalInputReady(): Promise<void> {
   });
 }
 
+async function waitForLocalTerminalControl(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -2344,12 +2353,14 @@ describe("TerminalView", () => {
 
   // --- Issue #365 follow-up: typing dismisses notifications by focus, not key ---
   // Entering a workspace clears its alerts; typing is an even stronger "I'm
-  // responding here" signal, so onData must clear unread alerts (including
+  // responding here" signal, so onKey must clear unread alerts (including
   // requiresAction) with the *same granularity* as the focus/entry policy.
   describe("clears notifications on terminal input", () => {
-    const latestOnData = () => {
-      const calls = mockOnData.mock.calls;
-      return calls[calls.length - 1]?.[0] as ((data: string) => void) | undefined;
+    const latestOnKey = () => {
+      const calls = mockOnKey.mock.calls;
+      return calls[calls.length - 1]?.[0] as
+        | ((event: { key: string; domEvent: KeyboardEvent }) => void)
+        | undefined;
     };
     const waitForLocalControl = async () => {
       await vi.waitFor(() => {
@@ -2375,9 +2386,9 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-pf" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      const onData = latestOnData();
-      expect(onData).toBeTypeOf("function");
-      act(() => onData!("a"));
+      const onKey = latestOnKey();
+      expect(onKey).toBeTypeOf("function");
+      act(() => onKey!({ key: "a", domEvent: new KeyboardEvent("keydown", { key: "a" }) }));
 
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
@@ -2395,7 +2406,7 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-ws" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      act(() => latestOnData()!("x"));
+      act(() => latestOnKey()!({ key: "x", domEvent: new KeyboardEvent("keydown", { key: "x" }) }));
 
       expect(useNotificationStore.getState().notifications[0].readAt).not.toBeNull();
     });
@@ -2412,7 +2423,27 @@ describe("TerminalView", () => {
 
       render(<TerminalView instanceId="t-input-manual" profile="PowerShell" syncGroup="" />);
       await waitForLocalControl();
-      act(() => latestOnData()!("z"));
+      act(() => latestOnKey()!({ key: "z", domEvent: new KeyboardEvent("keydown", { key: "z" }) }));
+
+      expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
+    });
+
+    it("does not clear alerts for emulator-generated protocol responses", async () => {
+      setDismiss("paneFocus");
+      const wsId = useWorkspaceStore.getState().activeWorkspaceId;
+      useNotificationStore.getState().addNotification({
+        terminalId: "t-input-protocol",
+        workspaceId: wsId,
+        message: "Codex is waiting for your input",
+        requiresAction: true,
+      });
+
+      render(<TerminalView instanceId="t-input-protocol" profile="PowerShell" syncGroup="" />);
+      await waitForLocalControl();
+      const onData = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+      expect(onData).toBeTypeOf("function");
+
+      act(() => onData!("\x1b]10;rgb:ffff/ffff/ffff\x1b\\"));
 
       expect(useNotificationStore.getState().notifications[0].readAt).toBeNull();
     });
@@ -2719,6 +2750,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "v", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -2737,6 +2769,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     // Regular key should pass through
     const event = new KeyboardEvent("keydown", { key: "a" });
@@ -2756,6 +2789,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -2774,6 +2808,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     const result = capturedKeyHandler!(event);
@@ -2806,6 +2841,7 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
     });
+    await waitForLocalTerminalControl();
 
     const event = new KeyboardEvent("keydown", { key: "c", ctrlKey: true });
     Object.defineProperty(event, "preventDefault", { value: vi.fn() });
@@ -3085,6 +3121,7 @@ describe("TerminalView", () => {
     render(
       <TerminalView instanceId="t-zoom1" paneId="pane-zoom1" profile="PowerShell" syncGroup="" />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled, preventDefault } = fireTerminalKey({ key: "=", ctrlKey: true });
 
@@ -3098,6 +3135,7 @@ describe("TerminalView", () => {
     render(
       <TerminalView instanceId="t-zoom2" paneId="pane-zoom2" profile="PowerShell" syncGroup="" />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled } = fireTerminalKey({ key: "-", ctrlKey: true });
 
@@ -3117,6 +3155,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     const { handled } = fireTerminalKey({ key: "0", ctrlKey: true });
 
@@ -3133,6 +3172,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     // ctrlKey false → xterm이 처리하도록 통과, override 그대로.
     fireTerminalKey({ key: "=", ctrlKey: false });
@@ -3153,6 +3193,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "-", ctrlKey: true });
 
@@ -3170,6 +3211,7 @@ describe("TerminalView", () => {
         syncGroup=""
       />,
     );
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "=", ctrlKey: true });
 
@@ -3178,6 +3220,7 @@ describe("TerminalView", () => {
 
   it("zoom on one pane does not affect another pane with the same profile", async () => {
     render(<TerminalView instanceId="t-zoomA" paneId="pane-A" profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
     // 각 TerminalView가 자신의 customKeyEventHandler를 등록하는데, 마지막에 등록된
     // handler가 capturedKeyHandler에 남는다. 그래서 두 번째 render는 pane-B의
     // handler로 capturedKeyHandler를 덮어쓴다. 이 테스트에서는 pane-A만 대상으로
@@ -3192,6 +3235,7 @@ describe("TerminalView", () => {
 
   it("zoom keybindings are a no-op when paneId prop is absent", async () => {
     render(<TerminalView instanceId="t-zoom-nopane" profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
 
     fireTerminalKey({ key: "=", ctrlKey: true });
     fireTerminalKey({ key: "-", ctrlKey: true });
@@ -3694,7 +3738,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("does not write or resize the backend while remote control is active", async () => {
+  it("blocks local keys and resize while remote control is active but forwards xterm protocol data", async () => {
     mockGetRemoteControlStatus.mockResolvedValue({
       active: true,
       leaseId: "remote-lease",
@@ -3719,14 +3763,54 @@ describe("TerminalView", () => {
       | undefined;
     expect(dataHandler).toBeDefined();
     expect(resizeHandler).toBeDefined();
+    expect(capturedKeyHandler).toBeTypeOf("function");
 
     act(() => {
-      dataHandler?.("x");
+      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
       resizeHandler?.({ cols: 120, rows: 40 });
     });
 
-    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+    expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(
+      "t-remote-owned",
+      "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+    );
     expect(mockResizeTerminal).not.toHaveBeenCalled();
+  });
+
+  it("forwards xterm protocol responses before the initial remote status is known", async () => {
+    mockGetRemoteControlStatus.mockReturnValueOnce(new Promise(() => {}));
+
+    render(<TerminalView instanceId="t-protocol-pending" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockGetRemoteControlStatus).toHaveBeenCalled();
+      expect(mockOnData).toHaveBeenCalled();
+      expect(capturedKeyHandler).toBeTypeOf("function");
+    });
+
+    const dataHandler = mockOnData.mock.calls.at(-1)?.[0] as ((data: string) => void) | undefined;
+    expect(dataHandler).toBeTypeOf("function");
+    expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
+    expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
+
+    mockWriteToTerminal.mockClear();
+    act(() => {
+      dataHandler?.("\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
+      dataHandler?.("\x1b]11;rgb:0000/0000/0000\x1b\\");
+    });
+
+    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+      1,
+      "t-protocol-pending",
+      "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+    );
+    expect(mockWriteToTerminal).toHaveBeenNthCalledWith(
+      2,
+      "t-protocol-pending",
+      "\x1b]11;rgb:0000/0000/0000\x1b\\",
+    );
   });
 
   it("does not resize the backend before the initial remote status is known", async () => {
