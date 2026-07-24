@@ -66,6 +66,7 @@ ADR 이 필요한 대표 기준:
 | [0046](0046-remote-spatial-pane-exclusions.md) | Remote 공간순회 제외 상태는 Remote 클라이언트가 소유한다 | Accepted |
 | [0047](0047-remote-spatial-workspace-exclusions.md) | Remote 공간순회 워크스페이스 제외와 pane↔workspace 승격/강등 | Accepted |
 | [0048](0048-kill-terminals-on-exit.md) | 앱 종료 시 터미널 인터럽트(kill-on-exit)는 프론트엔드가 스크롤백 캐시 앞에서 조율 | Accepted |
+| [0049](0049-git-drop-in-read-only-html-plugin-runtime.md) | Git drop-in 플러그인은 신뢰된 self-contained HTML에 read-only hook API를 제공 | Deferred |
 | [0050](0050-remote-github-reference-links.md) | Remote GitHub 참조 링크는 서버 terminal CWD로 저장소를 해석 | Accepted |
 | [0051](0051-terminal-capability-environment-contract.md) | PTY 자식은 laymux 터미널 정체성과 truecolor capability를 받는다 | Superseded by [0052](0052-truecolor-capability-advertising-setting.md) |
 | [0052](0052-truecolor-capability-advertising-setting.md) | Truecolor capability 광고는 기본 활성화된 전역 터미널 설정으로 제어한다 | Accepted |
