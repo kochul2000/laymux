@@ -67,6 +67,7 @@ ADR 이 필요한 대표 기준:
 | [0047](0047-remote-spatial-workspace-exclusions.md) | Remote 공간순회 워크스페이스 제외와 pane↔workspace 승격/강등 | Accepted |
 | [0048](0048-kill-terminals-on-exit.md) | 앱 종료 시 터미널 인터럽트(kill-on-exit)는 프론트엔드가 스크롤백 캐시 앞에서 조율 | Accepted |
 | [0050](0050-remote-github-reference-links.md) | Remote GitHub 참조 링크는 서버 terminal CWD로 저장소를 해석 | Accepted |
+| [0051](0051-terminal-capability-environment-contract.md) | PTY 자식은 laymux 터미널 정체성과 truecolor capability를 받는다 | Proposed |
 
 ## 새 ADR 추가
 
