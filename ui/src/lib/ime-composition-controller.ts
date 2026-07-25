@@ -388,17 +388,38 @@ export function createImeCompositionController(
         cursorX: chainAnchor.cursorX + chainCommittedWidth,
         cursorAbsY: chainAnchor.cursorAbsY,
       };
-      // Adopt the live shadow cursor only when it is **not behind** the committed
-      // text. It still carries corrections arithmetic cannot reach — xterm pushes a
-      // whole wide glyph past the wrap boundary, landing the echoed cursor on the
-      // next row — so it is not simply discarded.
+      // A row change means the arithmetic origin is no longer valid, whatever the
+      // direction: xterm pushed a whole wide glyph past the wrap boundary, the shell
+      // reprinted its input line one row up (CUP / `ESC[A` — PSReadLine multi-line,
+      // a two-line zsh prompt), IL/DL/RI moved the row inside a scroll region, or
+      // the scrollback cap dropped old rows so a fixed row's absolute index fell.
+      // All of those keep the composition valid, so the live reading wins and
+      // becomes the new origin. Not re-basing was the bug: `derived` kept being
+      // computed from the dead origin, `liveIsAhead` then stayed true for the rest
+      // of the chain, and the anchor tracked the one-echo-behind live value again —
+      // the very regression this guard exists to stop.
+      //
+      // Lag is rejected only *within* a row, which is sound because an echo arriving
+      // late never changes rows — it is the same text landing at a larger column.
+      //
+      // Scope note: on panes whose anchor comes from the shadow cursor,
+      // `getShadowSyncEligibility` returns `composition-preview-active` while a
+      // composition is open, so the live reading is frozen and the row-change branch
+      // effectively never fires. It is the buffer-cursor (shell) path that actually
+      // exercises the re-base.
       const live = options.getAnchor();
-      const liveIsAhead =
-        live.cursorAbsY !== derived.cursorAbsY
-          ? live.cursorAbsY > derived.cursorAbsY
-          : live.cursorX >= derived.cursorX;
-      compositionAnchor = liveIsAhead ? live : derived;
-      const anchorSource = liveIsAhead ? "shadow-cursor" : "chain-committed-width";
+      const rowChanged = live.cursorAbsY !== chainAnchor.cursorAbsY;
+      const liveAhead = !rowChanged && live.cursorX > derived.cursorX;
+      let anchorSource: string;
+      if (rowChanged || liveAhead) {
+        chainAnchor = live;
+        chainBaseText = committedBase;
+        compositionAnchor = live;
+        anchorSource = rowChanged ? "shadow-cursor-rebase-row" : "shadow-cursor-rebase-ahead";
+      } else {
+        compositionAnchor = derived;
+        anchorSource = "chain-committed-width";
+      }
       // Re-base the per-syllable diff so `getChangedRange` yields only the new
       // syllable — the committed one has already gone to the PTY and must leave
       // the preview (issue #546).
@@ -408,9 +429,11 @@ export function createImeCompositionController(
         textareaValue: textarea?.value ?? "",
         chainBaseText,
         chainCommittedWidth,
-        chainAnchorX: chainAnchor.cursorX,
+        // The origin this carry-over derived from, before any re-base above.
+        chainAnchorX: derived.cursorX - chainCommittedWidth,
         derivedX: derived.cursorX,
         liveX: live.cursorX,
+        liveAbsY: live.cursorAbsY,
         anchorSource,
         anchorBufferX: compositionAnchor.cursorX,
         anchorBufferAbsY: compositionAnchor.cursorAbsY,

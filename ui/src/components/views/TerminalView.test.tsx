@@ -3815,6 +3815,12 @@ describe("TerminalView", () => {
       // (`hasSyncFramePosition`). That flag is what `computeUseShadowCursor` reads,
       // and the real Codex trace in issue #551 shows it set here. Without it the
       // shadow cursor is not trustworthy and the buffer cursor is the better anchor.
+      //
+      // Assert the handler is there: the call below is optional-chained, so a change
+      // in the registration key would make it a silent no-op and this test would
+      // fail as "helper at the wrong pixel" instead of naming the real cause.
+      expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      expect(csiHandlers.get("?:l")).toBeTypeOf("function");
       mockBufferActive.cursorX = 0;
       mockBufferActive.cursorY = 0;
       await act(async () => {
@@ -3853,7 +3859,10 @@ describe("TerminalView", () => {
       helper.style.left = "0px";
       helper.style.top = "0px";
       // Same DEC 2026 frame as the diverging case, so the shadow cursor at 0,0 is
-      // the authoritative anchor (see that test for why the frame is driven).
+      // the authoritative anchor (see that test for why the frame is driven, and why
+      // the handlers are asserted rather than optional-chained blindly).
+      expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      expect(csiHandlers.get("?:l")).toBeTypeOf("function");
       mockBufferActive.cursorX = 0;
       mockBufferActive.cursorY = 0;
       await act(async () => {

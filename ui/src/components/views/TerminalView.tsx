@@ -1259,8 +1259,16 @@ export function TerminalView({
         // previous row at column 0 — off where the user is typing, so it read as
         // "nothing appears". On a pristine prompt the two happened to coincide,
         // which is why it looked like it worked.
+        //
+        // `computeUseShadowCursor` alone is not the right test: it answers "is the
+        // shadow snapshot trustworthy", while this call site asks "which of the two
+        // is closer to the real input position". Those are not complements. A TUI
+        // mid-repaint has parked the public cursor on its footer row without
+        // necessarily having a sync frame or an input phase, and falling back to the
+        // buffer there would paint the preview on the footer — the exact failure the
+        // original comment warned about. `isRepaintInProgress` covers that gap.
         const shadow = shadowCursorRef.current;
-        if (computeUseShadowCursor(shadow)) {
+        if (computeUseShadowCursor(shadow) || shadow.isRepaintInProgress) {
           return {
             cursorX: shadow.cursorX,
             cursorAbsY: shadow.cursorAbsY,

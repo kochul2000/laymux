@@ -584,12 +584,15 @@ describe("createImeCompositionController", () => {
      * deliberately **not** equal to the arithmetic advance, so a test that wants
      * the live branch actually proves the live branch was taken.
      */
-    async function typeGaNaDa(liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>) {
+    async function typeGaNaDa(
+      liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>,
+      startAnchor: { cursorX: number; cursorAbsY: number } = { cursorX: 0, cursorAbsY: 5 },
+    ) {
       const snapshots: Array<{ text: string; anchorX: number; width: number }> = [];
       const carryOverTraces: Array<Record<string, unknown>> = [];
       // The shadow cursor cannot have advanced within the same tick, so the
       // default is a stale anchor. `shadowAdvances` covers the other ordering.
-      let anchor = { cursorX: 0, cursorAbsY: 5 };
+      let anchor = startAnchor;
       const controller = createImeCompositionController({
         getAnchor: () => anchor,
         onTrace: (event, payload) => {
@@ -658,9 +661,11 @@ describe("createImeCompositionController", () => {
         { cursorX: 7, cursorAbsY: 5 },
       ]);
       expect(final).toMatchObject({ text: "\ub2e4", anchorBufferX: 7, textCellWidth: 2 });
+      // Adopting also re-bases the chain origin, so the next carry-over derives from
+      // 7 rather than from the original 0 \u2014 see the wrap-boundary test for why.
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "shadow-cursor-rebase-ahead",
+        "shadow-cursor-rebase-ahead",
       ]);
     });
 
@@ -675,19 +680,21 @@ describe("createImeCompositionController", () => {
       expect(carryOverTraces.map((t) => t.chainCommittedWidth)).toEqual([2, 4]);
     });
 
-    it("rejects a shadow cursor that lags the committed text", async () => {
+    it("rejects a shadow cursor that lags the committed text within a row", async () => {
       // Issue #551, measured on a real Codex pane: typing ㄱㄱㄱ echoed only the
       // first jamo before the second carry-over, so the shadow cursor sat at
       // column 2 while two jamo (4 cells) were committed. Adopting it dragged the
       // third syllable back on top of the second and the preview looked frozen.
       //
-      // "The shadow cursor moved" is not "the shadow cursor caught up".
+      // "The shadow cursor moved" is not "the shadow cursor caught up". A late echo
+      // is the same text landing at a larger column, so it never changes rows —
+      // which is why lag is judged only within a row.
       const { final, carryOverTraces } = await typeGaNaDa([
-        { cursorX: 2, cursorAbsY: 5 }, // ahead of 가 (2) — tie, adopted
+        { cursorX: 2, cursorAbsY: 5 }, // level with 가 (2) — not ahead, derived
         { cursorX: 2, cursorAbsY: 5 }, // behind 가나 (4) — rejected
       ]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
+        "chain-committed-width",
         "chain-committed-width",
       ]);
       expect(carryOverTraces.map((t) => [t.derivedX, t.liveX])).toEqual([
@@ -697,21 +704,58 @@ describe("createImeCompositionController", () => {
       expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
     });
 
-    it("rejects a shadow cursor that moved backwards", async () => {
-      // Previously adopted on the reasoning that direction should not matter. It
-      // does: `cursorAbsY` is an absolute buffer row, so a viewport scroll cannot
-      // move it, and anything that genuinely moves the input position backwards
-      // mid-chain (a clear) has invalidated the composition anyway. Treating
-      // "moved" as "authoritative" is exactly what regressed the anchor above.
+    it("re-bases on a row change so the wrap boundary cannot resurrect the lag", async () => {
+      // The hole the first form of this guard left. Past the wrap boundary the live
+      // reading is on another row, so the lag test was skipped — and because the
+      // chain origin was never re-based, `derived` kept being computed from the dead
+      // pre-wrap row and every later carry-over adopted the lagging live value
+      // again. cols 75, chain starts at column 74, one echo of lag:
+      //
+      //   1st  derived (76, row 5)  live (2, row 6)  -> adopt + re-base
+      //   2nd  derived  (4, row 6)  live (2, row 6)  -> derived wins (2 is behind)
+      //
+      // Without re-basing the 2nd derived would be (78, row 5), the row difference
+      // would win again, and the third syllable would land on top of the second.
+      const { final, carryOverTraces } = await typeGaNaDa(
+        [
+          { cursorX: 2, cursorAbsY: 6 },
+          { cursorX: 2, cursorAbsY: 6 },
+        ],
+        { cursorX: 74, cursorAbsY: 5 },
+      );
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "shadow-cursor-rebase-row",
+        "chain-committed-width",
+      ]);
+      // Second carry-over derives from the re-based origin (2), not the dead 74.
+      expect(carryOverTraces.map((t) => [t.chainAnchorX, t.derivedX])).toEqual([
+        [74, 76],
+        [2, 4],
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
+    });
+
+    it("re-bases on a row change in either direction", async () => {
+      // A row change means the arithmetic origin is dead, whatever the direction, and
+      // every way the input row can move *up* mid-chain keeps the composition valid:
+      // a shell reprinting its input line one row up (CUP / `ESC[A` — PSReadLine
+      // multi-line, a two-line zsh prompt), IL/DL/RI inside a scroll region, or the
+      // scrollback cap dropping old rows so a fixed row's absolute index falls.
+      //
+      // An earlier form of this guard rejected those on the reasoning that a viewport
+      // scroll cannot change an absolute row. True, but it only rules out viewport
+      // scrolling — the three above are not that, and rejecting them left the preview
+      // on the abandoned row.
       const { final, carryOverTraces } = await typeGaNaDa([
         { cursorX: 0, cursorAbsY: 4 },
         { cursorX: 1, cursorAbsY: 4 },
       ]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "chain-committed-width",
+        "shadow-cursor-rebase-row",
         "chain-committed-width",
       ]);
-      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
+      // Re-based to (0, row 4), then 나's 2 cells: the live 1 is behind, so derived.
+      expect(final).toMatchObject({ anchorBufferX: 2, anchorBufferAbsY: 4 });
     });
 
     it("adopts a shadow cursor that wrapped to the next row", async () => {
@@ -722,9 +766,11 @@ describe("createImeCompositionController", () => {
         { cursorX: 2, cursorAbsY: 6 },
         { cursorX: 4, cursorAbsY: 6 },
       ]);
+      // Row change re-bases; the second carry-over then derives 2 + 나's 2 cells = 4
+      // from the new origin and the live 4 is no longer ahead of it.
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "shadow-cursor-rebase-row",
+        "chain-committed-width",
       ]);
       expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
     });
