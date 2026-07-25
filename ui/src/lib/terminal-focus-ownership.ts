@@ -38,6 +38,12 @@ export type TerminalFocusOwnershipOptions = {
 export type TerminalFocusOwnership = {
   /** Window blur: remember this pane's helper if it currently owns DOM focus. */
   captureOnAppBlur: () => boolean;
+  /**
+   * A `focusout` fired inside the pane surface. Records the helper as the blur
+   * fallback when focus went nowhere, so a webview that drops focus to `body`
+   * *before* emitting window `blur` is still covered.
+   */
+  noteFocusOut: (target: EventTarget | null, relatedTarget: EventTarget | null) => void;
   /** Window focus: schedule a next-frame restore of the remembered helper. */
   reclaimOnAppFocus: () => boolean;
   /** Pointer press anywhere: a press outside the surface hands focus away. */
@@ -105,6 +111,11 @@ export function createTerminalFocusOwnership(
   const trace: FocusOwnershipTrace = (event, payload) => options.onTrace?.(event, payload);
 
   let ownedHelper: HTMLTextAreaElement | null = null;
+  /**
+   * Last helper of this pane that lost focus *to nothing*. Fallback for the
+   * ordering where the webview blanks DOM focus before window `blur` arrives.
+   */
+  let lastFocusedOutHelper: HTMLTextAreaElement | null = null;
   /** Bumped by every ownership change so deferred restores can self-cancel. */
   let generation = 0;
   let disposed = false;
@@ -116,12 +127,29 @@ export function createTerminalFocusOwnership(
     trace("focus-ownership-cleared", { reason });
   };
 
+  /** A helper is only usable if it is still this pane's live helper. */
+  const isUsableHelper = (helper: HTMLTextAreaElement | null): helper is HTMLTextAreaElement => {
+    if (!helper || !helper.isConnected) return false;
+    const container = options.getContainer();
+    return !!container && container.contains(helper);
+  };
+
   return {
     captureOnAppBlur() {
       if (disposed) return false;
       const container = options.getContainer();
       const doc = container?.ownerDocument ?? null;
-      const helper = findActiveHelperTextarea(container, doc?.activeElement ?? null);
+      const activeElement = doc?.activeElement ?? null;
+      const helper =
+        findActiveHelperTextarea(container, activeElement) ??
+        // The webview may blank DOM focus before window `blur` reaches us. In
+        // that ordering the active element is already `body`/`null`, so fall
+        // back to the helper that most recently lost focus to nothing. Any
+        // element genuinely holding focus fails `isUnownedActiveElement` and
+        // keeps this from adopting a helper it no longer owns.
+        (isUnownedActiveElement(activeElement, doc) && isUsableHelper(lastFocusedOutHelper)
+          ? lastFocusedOutHelper
+          : null);
       if (!helper) {
         // Focus was elsewhere (another pane, composer, sidebar) — this pane
         // owns nothing and must not restore anything on return.
@@ -132,9 +160,30 @@ export function createTerminalFocusOwnership(
       ownedHelper = helper;
       trace("focus-ownership-captured", {
         helper: describeElement(helper),
-        activeElement: describeElement(doc?.activeElement ?? null),
+        activeElement: describeElement(activeElement),
+        viaFocusOut: helper !== activeElement,
       });
       return true;
+    },
+
+    noteFocusOut(target, relatedTarget) {
+      if (disposed) return;
+      if (!isXtermHelperTextarea(target) || !isUsableHelper(target)) return;
+      // A concrete `relatedTarget` means focus moved to a real element — that
+      // element owns focus now, and remembering this helper would let the wrong
+      // pane reclaim on the next reactivation.
+      const doc = target.ownerDocument;
+      const movedToRealElement =
+        relatedTarget !== null &&
+        !isUnownedActiveElement(relatedTarget as Element | null, doc) &&
+        typeof Node !== "undefined" &&
+        relatedTarget instanceof Node;
+      if (movedToRealElement) {
+        lastFocusedOutHelper = null;
+        return;
+      }
+      lastFocusedOutHelper = target;
+      trace("focus-ownership-focusout-recorded", { helper: describeElement(target) });
     },
 
     reclaimOnAppFocus() {
@@ -148,12 +197,12 @@ export function createTerminalFocusOwnership(
       }
       const doc = helper.ownerDocument;
       const activeElement = doc.activeElement;
-      if (activeElement === helper) {
-        // The webview kept DOM focus across deactivation — nothing to do.
-        clear("reclaim-already-focused");
-        return false;
-      }
-      if (!isUnownedActiveElement(activeElement, doc)) {
+      // `activeElement === helper` is deliberately *not* short-circuited here.
+      // The webview may still report the helper as focused at window `focus`
+      // and blank it immediately after, so the decision belongs to the frame
+      // below, which re-reads the active element. Re-focusing an element that
+      // already has focus is a no-op, so covering both orderings costs nothing.
+      if (activeElement !== helper && !isUnownedActiveElement(activeElement, doc)) {
         // Something else (modal, search, another pane) owns focus now.
         clear("reclaim-focus-elsewhere");
         trace("focus-ownership-reclaim-declined", {
@@ -198,16 +247,21 @@ export function createTerminalFocusOwnership(
     },
 
     releaseForPointerTarget(target) {
-      if (disposed || !ownedHelper) return;
+      if (disposed) return;
       const container = options.getContainer();
       const node = typeof Node !== "undefined" && target instanceof Node ? target : null;
       if (container && node && container.contains(node)) return;
+      // The press handed focus outside this surface, so neither the active
+      // record nor the focusout fallback may survive it.
+      lastFocusedOutHelper = null;
+      if (!ownedHelper) return;
       clear("pointer-handoff");
     },
 
     notifyHelperBound(helper) {
-      if (disposed || !ownedHelper) return;
-      if (ownedHelper === helper) return;
+      if (disposed) return;
+      if (lastFocusedOutHelper && lastFocusedOutHelper !== helper) lastFocusedOutHelper = null;
+      if (!ownedHelper || ownedHelper === helper) return;
       clear("helper-replaced");
     },
 
@@ -219,6 +273,7 @@ export function createTerminalFocusOwnership(
 
     dispose() {
       clear("disposed");
+      lastFocusedOutHelper = null;
       disposed = true;
     },
   };

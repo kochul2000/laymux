@@ -2902,6 +2902,31 @@ describe("TerminalView", () => {
     expect(document.activeElement).toBe(document.body);
   }
 
+  /**
+   * Run the frame the controller schedules on window focus.
+   *
+   * `TerminalView` does not inject `scheduleFrame`, so the restore is queued on
+   * `requestAnimationFrame`. jsdom implements that as a ~16ms timer, which a
+   * `setTimeout(0)` flush never reaches — a negative assertion made after one
+   * would pass simply because the frame had not run yet.
+   */
+  async function flushRestoreFrame() {
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+      });
+    });
+  }
+
+  /** Reactivate the app and let the scheduled restore frame run. */
+  async function reactivateApp(duringFocus?: () => void) {
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+      duringFocus?.();
+    });
+    await flushRestoreFrame();
+  }
+
   it("restores the same helper textarea focus after app blur/focus", async () => {
     const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership");
     await deactivateApp(helper);
@@ -2948,16 +2973,17 @@ describe("TerminalView", () => {
     document.body.appendChild(searchInput);
     await deactivateApp(helper);
 
-    await act(async () => {
-      fireEvent(window, new Event("focus"));
-      searchInput.focus();
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await reactivateApp(() => searchInput.focus());
 
     expect(document.activeElement).toBe(searchInput);
+
+    // Positive control: the same flush restores when nothing competes, so the
+    // assertion above is about the guard and not about an unrun frame.
     searchInput.remove();
+    helper.focus();
+    await deactivateApp(helper);
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
   });
 
   it("drops helper ownership when the pane loses focus while the app is inactive", async () => {
@@ -2973,14 +2999,55 @@ describe("TerminalView", () => {
       />,
     );
 
-    await act(async () => {
-      fireEvent(window, new Event("focus"));
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await reactivateApp();
 
     expect(document.activeElement).toBe(document.body);
+
+    // Positive control: with the pane focused again the same sequence restores,
+    // so the assertion above is about `clear("pane-unfocused")`.
+    rerender(
+      <TerminalView instanceId="t-focus-ownership-unfocus" profile="PowerShell" syncGroup="" />,
+    );
+    helper.focus();
+    await deactivateApp(helper);
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("restores after a webview that blanks DOM focus before window blur", async () => {
+    // The other ordering: `focusout` with no `relatedTarget` lands first and the
+    // active element is already `body` by the time window `blur` arrives.
+    const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-early-blank");
+
+    await act(async () => {
+      helper.blur();
+      fireEvent(window, new Event("blur"));
+    });
+    expect(document.activeElement).toBe(document.body);
+
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("does not adopt a helper whose focusout handed focus to another element", async () => {
+    await mountPaneWithFocusedHelper("t-focus-ownership-handoff");
+    const composer = document.createElement("input");
+    document.body.appendChild(composer);
+
+    // Focus moves helper -> composer, then the app is deactivated. The pane owns
+    // nothing, so reactivation must not pull focus back into the terminal.
+    await act(async () => {
+      composer.focus();
+    });
+    await act(async () => {
+      composer.blur();
+      fireEvent(window, new Event("blur"));
+    });
+    expect(document.activeElement).toBe(document.body);
+
+    await reactivateApp();
+    expect(document.activeElement).toBe(document.body);
+    composer.remove();
   });
 
   it("does not call terminal.focus() when isFocused is false", async () => {

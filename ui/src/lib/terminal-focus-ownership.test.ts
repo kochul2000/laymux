@@ -135,6 +135,103 @@ describe("createTerminalFocusOwnership", () => {
     expect(helper.ownerDocument.activeElement).toBe(outside);
   });
 
+  it("captures via focusout when the webview blanked focus before window blur", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      scheduleFrame: frames.schedule,
+    });
+
+    helper.focus();
+    // This ordering reaches us first: focus goes nowhere, *then* window blur.
+    helper.blur();
+    ownership.noteFocusOut(helper, null);
+    expect(document.activeElement).toBe(document.body);
+
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(ownership.getOwnedHelper()).toBe(helper);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+    frames.runAll();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("does not capture a helper whose focusout handed focus to a real element", () => {
+    const { container, helper } = buildPane();
+    const composer = document.createElement("input");
+    document.body.appendChild(composer);
+    const ownership = createTerminalFocusOwnership({ getContainer: () => container });
+
+    helper.focus();
+    // Focus moved to a concrete element, so this pane owns nothing even if the
+    // webview blanks focus afterwards.
+    ownership.noteFocusOut(helper, composer);
+    composer.focus();
+    composer.blur();
+
+    expect(ownership.captureOnAppBlur()).toBe(false);
+    expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("does not let another pane's focusout fallback win the reclaim", () => {
+    const mine = buildPane();
+    const other = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => mine.container,
+      scheduleFrame: frames.schedule,
+    });
+
+    // Focus left this pane's helper for the other pane's helper, then the app
+    // was deactivated with focus blanked. The fallback must not fire here.
+    mine.helper.focus();
+    ownership.noteFocusOut(mine.helper, other.helper);
+    other.helper.focus();
+    other.helper.blur();
+
+    expect(ownership.captureOnAppBlur()).toBe(false);
+    expect(ownership.reclaimOnAppFocus()).toBe(false);
+    expect(frames.pending).toBe(0);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("drops the focusout fallback when a pointer press lands outside the surface", () => {
+    const { container, helper } = buildPane();
+    const sidebar = document.createElement("button");
+    document.body.appendChild(sidebar);
+    const ownership = createTerminalFocusOwnership({ getContainer: () => container });
+
+    helper.focus();
+    helper.blur();
+    ownership.noteFocusOut(helper, null);
+    ownership.releaseForPointerTarget(sidebar);
+
+    expect(ownership.captureOnAppBlur()).toBe(false);
+    expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("still reclaims when the active element is the helper at window focus", () => {
+    // The webview can report the helper as focused at window `focus` and blank
+    // it immediately after, so the decision has to wait for the frame.
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      scheduleFrame: frames.schedule,
+    });
+
+    helper.focus();
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    // Focus still reads as the helper here.
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+    expect(frames.pending).toBe(1);
+
+    // ...and only then does the webview drop it.
+    helper.blur();
+    frames.runAll();
+    expect(document.activeElement).toBe(helper);
+  });
+
   it("declines the reclaim when another element already owns focus on return", () => {
     const { container, helper } = buildPane();
     const modalInput = document.createElement("input");

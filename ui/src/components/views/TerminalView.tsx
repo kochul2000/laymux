@@ -1895,9 +1895,18 @@ export function TerminalView({
     const handlePointerDownForFocusOwnership = (event: PointerEvent) => {
       focusOwnership.releaseForPointerTarget(event.target);
     };
+    // webview 가 window blur 를 발행하기 *전에* DOM focus 를 body 로 되돌리는
+    // 순서도 있다. 그 경우 blur 시점의 activeElement 만 보면 아무것도 기억하지
+    // 못하므로, "focus 를 아무데도 넘기지 않고" 빠진 helper 를 fallback 으로
+    // 들고 있는다. 실제 요소로 focus 가 옮겨간 focusout 은 기억하지 않는다.
+    const handleFocusOutForFocusOwnership = (event: FocusEvent) => {
+      focusOwnership.noteFocusOut(event.target, event.relatedTarget);
+    };
+    const focusOwnershipSurface = wrapperRef.current;
     window.addEventListener("blur", handleAppBlurForFocusOwnership);
     window.addEventListener("focus", handleAppFocusForFocusOwnership);
     window.addEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
+    focusOwnershipSurface?.addEventListener("focusout", handleFocusOutForFocusOwnership);
 
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
@@ -3603,6 +3612,7 @@ export function TerminalView({
       window.removeEventListener("blur", handleAppBlurForFocusOwnership);
       window.removeEventListener("focus", handleAppFocusForFocusOwnership);
       window.removeEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
+      focusOwnershipSurface?.removeEventListener("focusout", handleFocusOutForFocusOwnership);
       // unmount 후 stale helper 로 focus 를 되돌리지 않도록 소유권을 버린다.
       focusOwnership.dispose();
       if (focusOwnershipRef.current === focusOwnership) {
