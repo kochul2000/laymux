@@ -61,6 +61,7 @@ import {
 } from "@/lib/ime-composition-controller";
 import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
   createTerminalFocusOwnership,
@@ -352,6 +353,16 @@ export function _reserveWebglInitDelay(now = monotonicNow()): number {
 /** Reset the stagger timeline (for tests). */
 export function _resetWebglStagger(): void {
   webglNextInitAt = 0;
+}
+
+/**
+ * True on a Linux desktop host. WSL runs a Windows WebView, so its user agent
+ * reports Windows and must not enable Linux-only IME handling; the `Windows`
+ * exclusion is what keeps that correct.
+ */
+export function isLinuxHost(): boolean {
+  const ua = navigator.userAgent;
+  return ua.includes("Linux") && !ua.includes("Windows");
 }
 
 /**
@@ -1250,6 +1261,43 @@ export function TerminalView({
         }
       },
     });
+    // Sogou/fcitx 계열 Linux IME 는 후보 선택에 쓴 Space/숫자를 compositionend
+    // 전후에 일반 키 이벤트로 다시 내보낸다. xterm 의 조합 가드는 그 시점에 이미
+    // 끝나 있어 literal Space/숫자가 PTY 로 새어 나간다. Linux 에서만, 그리고
+    // "IME 가 소비했다는 표식(keyCode 229)" 또는 "선행 keydown 이 없는 orphan"
+    // 인 경우에만 막는다 — 조합 직후 사용자가 새로 누른 키는 그대로 통과한다
+    // (ADR-0060).
+    const linuxImeCandidateGuard = createLinuxImeCandidateGuard({
+      enabled: isLinuxHost(),
+      now: () => performance.now(),
+      onTrace: (event, payload) => trace(event, payload),
+    });
+    const handleCompositionStartForCandidate = () => linuxImeCandidateGuard.noteCompositionStart();
+    const handleCompositionUpdateForCandidate = (event: Event) =>
+      linuxImeCandidateGuard.noteCompositionUpdate((event as CompositionEvent).data ?? "");
+    const handleCompositionEndForCandidate = () => linuxImeCandidateGuard.noteCompositionEnd();
+    const handleInputForCandidate = (event: Event) =>
+      linuxImeCandidateGuard.noteTextInput({
+        isComposing: !!(event as InputEvent).isComposing,
+      });
+    const handleBlurForCandidate = () => linuxImeCandidateGuard.reset("helper-blur");
+    // 조합 lifecycle 은 xterm 의 CompositionHelper 가 계속 소유한다. 여기서는
+    // 관찰만 하고 조합 문자열·commit 경로는 건드리지 않는다.
+    const attachCandidateGuardListeners = (target: HTMLTextAreaElement) => {
+      target.addEventListener("compositionstart", handleCompositionStartForCandidate);
+      target.addEventListener("compositionupdate", handleCompositionUpdateForCandidate);
+      target.addEventListener("compositionend", handleCompositionEndForCandidate);
+      target.addEventListener("input", handleInputForCandidate);
+      target.addEventListener("blur", handleBlurForCandidate);
+    };
+    const detachCandidateGuardListeners = (target: HTMLTextAreaElement) => {
+      target.removeEventListener("compositionstart", handleCompositionStartForCandidate);
+      target.removeEventListener("compositionupdate", handleCompositionUpdateForCandidate);
+      target.removeEventListener("compositionend", handleCompositionEndForCandidate);
+      target.removeEventListener("input", handleInputForCandidate);
+      target.removeEventListener("blur", handleBlurForCandidate);
+    };
+
     let overlayCaretFrame: number | undefined;
     let helperTextarea: HTMLTextAreaElement | null = null;
     const updateOverlayCaret = () => {
@@ -1955,9 +2003,13 @@ export function TerminalView({
       if (helperTextarea) {
         helperTextarea.removeEventListener("beforeinput", handleBeforeInputForChord);
         helperTextarea.removeEventListener("blur", handleBlurForChord);
+        detachCandidateGuardListeners(helperTextarea);
       }
       helperTextarea = nextHelperTextarea;
       compositionController.bind(helperTextarea);
+      // helper 가 바뀌면 진행 중이던 후보 window 도 추적 불가 → 버린다.
+      linuxImeCandidateGuard.reset("helper-replaced");
+      attachCandidateGuardListeners(helperTextarea);
       // xterm 이 helper 를 교체하면 이전 helper 의 focus 소유권 기록은 stale 이다.
       focusOwnership.notifyHelperBound(helperTextarea);
       // helper 가 바뀌면 진행 중이던 chord press 도 추적 불가 → 버린다.
@@ -1988,10 +2040,11 @@ export function TerminalView({
     terminal.attachCustomKeyEventHandler((e) => {
       if (!localTerminalControlAllowed()) return false;
 
-      // keydown 전용 분기보다 앞에 온다. xterm 은 `_keyDown`/`_keyPress`/`_keyUp`
-      // 모두에서 이 핸들러를 보고, 아래의 `e.type !== "keydown"` 조기 반환은
-      // keypress·keyup 을 그대로 통과시킨다 — OS 입력 소스 전환 chord 의 companion
-      // keypress 가 literal Space/숫자를 PTY 로 보내는 경로가 바로 거기다.
+      // 모두에서 이 핸들러를 보지만 아래 `e.type !== "keydown"` 조기 반환은
+      // keypress·keyup 을 그대로 통과시킨다 — 두 guard 가 막는 누출 경로가 바로
+      // 거기다. 순서는 **명시 바인딩이 먼저**다: OS 전환 chord 는 사용자가 직접
+      // 지정한 키라 조합 문맥과 무관하게 소유권이 확정돼 있고, 후보 guard 는
+      // compositionend 문맥으로 추론한다. 추론이 명시 지정을 덮지 않게 한다.
       if (e.type === "keydown" || e.type === "keypress" || e.type === "keyup") {
         if (
           osInputSourceChord.shouldBlockKey({
@@ -2005,6 +2058,22 @@ export function TerminalView({
           })
         ) {
           // preventDefault 하지 않는다 — OS 가 입력 소스를 전환해야 한다.
+          return false;
+        }
+
+        const candidateDecision = linuxImeCandidateGuard.decideKey({
+          type: e.type,
+          code: e.code,
+          key: e.key,
+          keyCode: e.keyCode,
+          repeat: e.repeat,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          metaKey: e.metaKey,
+        });
+        if (candidateDecision.block) {
+          // preventDefault 는 helper textarea 를 변형시키는 이벤트에만 건다.
+          if (candidateDecision.preventDefault) e.preventDefault();
           return false;
         }
       }
@@ -3684,9 +3753,12 @@ export function TerminalView({
       focusOwnershipSurface?.removeEventListener("focusout", handleFocusOutForFocusOwnership);
       helperTextarea?.removeEventListener("beforeinput", handleBeforeInputForChord);
       helperTextarea?.removeEventListener("blur", handleBlurForChord);
+      if (helperTextarea) detachCandidateGuardListeners(helperTextarea);
       // unmount 시 진행 중이던 chord press 를 버린다 — 남겨두면 다음 마운트가
       // 아무 텍스트 삽입이나 삼킬 수 있다.
       osInputSourceChord.reset("unmount");
+      // unmount 시 열려 있던 후보 window 도 버린다.
+      linuxImeCandidateGuard.reset("unmount");
       // unmount 후 stale helper 로 focus 를 되돌리지 않도록 소유권을 버린다.
       focusOwnership.dispose();
       if (focusOwnershipRef.current === focusOwnership) {

@@ -205,7 +205,7 @@ backend raw output/cache/WebSocket 계약, xterm.js fork, Codex 자체 수정, �
   laymux의 xterm helper 경로에 동일 로직을 추가하면 정상적인 composition 직후 첫 글자를 버리거나
   xterm commit과 중복 전송할 수 있다. 공통적으로 입증된 “조합 키를 앱 handler가 가로채지
   않는다”는 소유권 불변식만 채택하고, post-composition suppression은 WebView2에서 같은
-  이벤트 순서와 유령 입력이 재현되는 별도 버그 PR에서 테스트를 먼저 추가하기로 했다.
+  이벤트 순서와 유령 입력이 재현되는 별도 버그 PR에서 테스트를 먼저 추가하기로 했다. 그 PR 은 issue #528 이며, 억제 범위는 [ADR-0060](0060-linux-ime-candidate-key-suppression.md) 이 "첫 printable 키" 가 아니라 "IME 소비 표식 또는 orphan companion" 으로 확정했다.
 - **플랫폼별 helper blur/focus refresh를 함께 도입:** stale input context를 고치는 별도 입력
   문제이며 output transaction의 책임이 아니다. 재현 근거 없이 적용하면 진행 중 composition을
   종료하거나 commit을 중복시킬 수 있으므로 이번 결정에서는 xterm의 기본 composition
