@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LAYMUX_UNICODE_VERSION,
+  WIDE_RANGES,
   activateTerminalUnicodeProvider,
   codePointCellWidth,
   splitCellClusters,
@@ -53,6 +54,38 @@ describe("codePointCellWidth", () => {
     expect(codePointCellWidth(0x20e3)).toBe(0); // combining enclosing keycap
     expect(codePointCellWidth(0xe0065)).toBe(0); // tag latin small letter e
     expect(codePointCellWidth(0xe0100)).toBe(0); // variation selector supplement
+  });
+
+  it("treats combining marks that sit inside a wide range as zero cells", () => {
+    // These are `Mn` **and** inside `WIDE_RANGES`, so the order of the two checks
+    // decides the answer. U+3099/U+309A are the Japanese voiced/semi-voiced sound
+    // marks, i.e. ordinary NFD Japanese text.
+    expect(codePointCellWidth(0x302a)).toBe(0); // ideographic level tone mark
+    expect(codePointCellWidth(0x302b)).toBe(0);
+    expect(codePointCellWidth(0x302c)).toBe(0);
+    expect(codePointCellWidth(0x302d)).toBe(0);
+    expect(codePointCellWidth(0x3099)).toBe(0); // combining katakana-hiragana voiced
+    expect(codePointCellWidth(0x309a)).toBe(0); // combining katakana-hiragana semi-voiced
+    expect(codePointCellWidth(0x16fe4)).toBe(0); // Khitan small script filler
+  });
+
+  it("has no code point that is both wide and zero-width by category", () => {
+    // The regression this guards against was introduced by an unverified claim
+    // that the two sets are disjoint. They are not — so assert the real
+    // intersection instead of trusting a comment. Exhaustive over WIDE_RANGES
+    // (~170k code points), which is fast enough for a unit test.
+    const zeroWidthCategory = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
+    const offenders: string[] = [];
+    for (const [first, last] of WIDE_RANGES) {
+      for (let cp = first; cp <= last; cp += 1) {
+        if (!zeroWidthCategory.test(String.fromCodePoint(cp))) continue;
+        // A code point in both sets must resolve to 0, whatever the check order.
+        if (codePointCellWidth(cp) !== 0) {
+          offenders.push(`U+${cp.toString(16).toUpperCase()}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("treats emoji and CJK extension planes as double width", () => {
@@ -123,6 +156,15 @@ describe("stringCellWidth", () => {
     expect(stringCellWidth(`\u{1f468}${SKIN_TONE}${ZWJ}\u{1f469}${SKIN_TONE}`)).toBe(2);
   });
 
+  it("counts NFD Japanese voiced syllables as one two-cell cluster", () => {
+    // が / ぱ in NFD: base kana + U+3099 / U+309A. The mark is Mn and sits inside
+    // a wide range, so a wide-first check makes each syllable 4 cells.
+    expect(stringCellWidth("が")).toBe(2);
+    expect(stringCellWidth("ぱ")).toBe(2);
+    expect(stringCellWidth("ざぎ")).toBe(4);
+    expect(stringCellWidth("中〪")).toBe(2);
+  });
+
   it("counts a family ZWJ sequence as one two-cell cluster", () => {
     expect(stringCellWidth(FAMILY)).toBe(2);
   });
@@ -162,6 +204,11 @@ describe("splitCellClusters", () => {
   it("keeps a regional indicator pair in one cluster and starts a new pair after it", () => {
     expect(clusterSegments(`${FLAG_KR}${FLAG_US}`)).toEqual([FLAG_KR, FLAG_US]);
     expect(clusterWidths(`${FLAG_KR}${FLAG_US}`)).toEqual([2, 2]);
+  });
+
+  it("keeps an NFD Japanese voiced mark attached to its base kana", () => {
+    expect(clusterSegments("がx")).toEqual(["が", "x"]);
+    expect(clusterWidths("がx")).toEqual([2, 1]);
   });
 
   it("keeps a keycap sequence in one cluster", () => {

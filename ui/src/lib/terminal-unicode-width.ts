@@ -90,7 +90,7 @@ const CLUSTER_FLAG_MASK = CLUSTER_FLAG_EMOJI_BASE | CLUSTER_FLAG_EMOJI_MODIFIER_
  * East Asian Wide / Fullwidth ranges (Unicode 11 baseline plus later emoji
  * blocks). Sorted and non-overlapping — `isWideCodePoint` binary searches it.
  */
-const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
+export const WIDE_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x1100, 0x115f],
   [0x231a, 0x231b],
   [0x2329, 0x232a],
@@ -278,11 +278,20 @@ function computeCodePointCellWidth(codePoint: number): 0 | 1 | 2 {
   if (codePoint < 0x20) return 0;
   if (codePoint < 0x7f) return 1;
   if (codePoint < 0xa0) return 0;
-  // Wide first: the wide ranges and the zero-width categories are disjoint, and
-  // checking the binary search first keeps the property-escape test off the
-  // first-touch path for the CJK extension planes.
-  if (isWideCodePoint(codePoint)) return 2;
+  // Zero-width first, and it must stay first: the two sets are **not** disjoint.
+  // Seven code points are both `Mn` and inside `WIDE_RANGES` — U+302A–U+302D
+  // (ideographic tone marks), U+3099/U+309A (the Japanese voiced/semi-voiced
+  // sound marks, i.e. ordinary NFD Japanese text) and U+16FE4. Checking wide
+  // first reports those as 2 cells, which also makes them fail
+  // `charProperties`'s `width === 0` join test and become their own clusters.
+  // `terminal-unicode-width.test.ts` asserts the intersection exhaustively so a
+  // future reorder fails loudly instead of relying on this comment.
+  //
+  // There is no hot-path cost to this order: `cacheEntry` memoizes every code
+  // point across the whole Unicode range, so the property escape runs at most
+  // once per code point per session.
   if (isZeroWidthCodePoint(codePoint)) return 0;
+  if (isWideCodePoint(codePoint)) return 2;
   return 1;
 }
 
