@@ -175,7 +175,17 @@ type TermWindow = typeof window & {
   __remoteTerm?: {
     cols: number;
     rows: number;
-    buffer: { active: { type: string } };
+    element?: HTMLElement;
+    buffer: {
+      active: {
+        type: string;
+        viewportY: number;
+        cursorY: number;
+        getLine: (
+          index: number,
+        ) => { translateToString: (trimRight?: boolean) => string } | undefined;
+      };
+    };
   };
 };
 
@@ -299,4 +309,68 @@ test("a crop shifts the sizer down to keep a top-row cursor visible", async ({ p
     () => document.getElementById("terminalSizer")?.style.transform ?? "",
   );
   expect(cleared).toBe("");
+});
+
+// Distance from the bottom of the live tail row — the cursor row, or a lower
+// non-blank row — to the bottom of the terminal host, in cells.
+async function tailGapCells(page: Page) {
+  return page.evaluate(() => {
+    const term = (window as TermWindow).__remoteTerm;
+    const screen = term?.element?.querySelector(".xterm-screen");
+    const host = document.getElementById("terminal");
+    if (!term || !screen || !host) return null;
+    const screenRect = screen.getBoundingClientRect();
+    const cellHeight = screenRect.height / term.rows;
+    const buffer = term.buffer.active;
+    let tailRow = Math.max(0, Math.min(term.rows - 1, buffer.cursorY));
+    for (let row = term.rows - 1; row > tailRow; row -= 1) {
+      const line = buffer.getLine(buffer.viewportY + row);
+      if (line && line.translateToString(true).trim() !== "") {
+        tailRow = row;
+        break;
+      }
+    }
+    const tailBottom = screenRect.top + (tailRow + 1) * cellHeight;
+    return (host.getBoundingClientRect().bottom - tailBottom) / cellHeight;
+  });
+}
+
+test("a crop drops the blank tail so short content sits at the host bottom", async ({ page }) => {
+  const harness: RemoteHarness = { resizeCalls: [], lineCount: 3 };
+  await installRemoteMocks(page, harness);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await connectRemote(page);
+
+  await expect.poll(() => harness.resizeCalls.length).toBeGreaterThanOrEqual(1);
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+
+  // A soft keyboard shrinks the host. With only 3 lines the fitted screen is
+  // mostly blank rows, so a bottom-anchored crop would show that blank tail
+  // and push the live content above the crop window.
+  await page.setViewportSize({ width: 800, height: 400 });
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+
+  const cropped = await tailGapCells(page);
+  expect(cropped).not.toBeNull();
+  // Only xterm's 4px padding may remain under the tail row.
+  expect(cropped!).toBeLessThan(0.5);
+  expect(cropped!).toBeGreaterThan(-0.5);
+
+  // Once output fills the screen there is no blank tail left to drop, so the
+  // window stays anchored at the last row as before (ADR-0038).
+  harness.sendDelta!(
+    Array.from(
+      { length: 80 },
+      (_, index) => `filler-${String(index + 1).padStart(4, "0")}\r\n`,
+    ).join(""),
+  );
+  await expect.poll(async () => (await tailGapCells(page)) ?? 99).toBeLessThan(0.5);
+
+  // Growing back refits the rows to the host: no crop, so no shift either.
+  await page.setViewportSize({ width: 800, height: 900 });
+  await page.waitForTimeout(RESIZE_SETTLE_MS);
+  const grown = await page.evaluate(
+    () => document.getElementById("terminalSizer")?.style.transform ?? "",
+  );
+  expect(grown).toBe("");
 });
