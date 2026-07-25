@@ -5,7 +5,10 @@ import {
   LAYMUX_UNICODE_VERSION,
   WIDE_RANGES,
   activateTerminalUnicodeProvider,
+  charProperties,
   codePointCellWidth,
+  extractCellWidth,
+  extractShouldJoin,
   splitCellClusters,
   stringCellWidth,
   terminalUnicodeProvider,
@@ -124,6 +127,30 @@ describe("codePointCellWidth", () => {
     expect(codePointCellWidth(0x16ff1)).toBe(2); // Vietnamese reading mark nhay
   });
 
+  it("does not let the Mc marks join the preceding cluster", () => {
+    // The other half of the claim. Width alone would still pass if someone wired
+    // `Mc` into the cluster-join condition while leaving the width at 2 — and the
+    // join bit is what #544/#546 showed actually bites. The contrast this issue
+    // starts from is U+3099 (Mn: 0 + joins) versus U+302E (Mc: 2 + does not).
+    const hangul = charProperties(0xd55c, 0); // 한
+    const toneMark = charProperties(0x302e, hangul);
+    expect(extractCellWidth(toneMark)).toBe(2);
+    expect(extractShouldJoin(toneMark)).toBe(false);
+
+    // And the Mn counterpart still joins at zero width.
+    const voiced = charProperties(0x3099, charProperties(0x304b, 0));
+    expect(extractShouldJoin(voiced)).toBe(true);
+  });
+
+  it("splits the Mc marks into their own clusters", () => {
+    // Observable form of the same rule.
+    expect(clusterSegments("\ud55c\u302e")).toEqual(["\ud55c", "\u302e"]);
+    expect(clusterWidths("\ud55c\u302e")).toEqual([2, 2]);
+    expect(stringCellWidth("\ud55c\u302e")).toBe(4);
+    // Contrast: the Mn mark stays attached and adds nothing.
+    expect(clusterSegments("\u304b\u3099")).toEqual(["\u304b\u3099"]);
+    expect(stringCellWidth("\u304b\u3099")).toBe(2);
+  });
   it("keeps representative Indic and SEA spacing marks at one cell", () => {
     expect(codePointCellWidth(0x0903)).toBe(1); // Devanagari sign visarga
     expect(codePointCellWidth(0x093b)).toBe(1); // Devanagari vowel sign ooe
