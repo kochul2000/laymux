@@ -477,7 +477,8 @@
       "pressKeys": "Press keys...",
       "changeShortcut": "Click to change shortcut",
       "actionPlaceholder": "action.name",
-      "addBinding": "+ Add new binding"
+      "addBinding": "+ Add new binding",
+      "unassigned": "Unassigned"
     },
     "recovery": {
       "pathUnavailable": "(Unable to get the path)",

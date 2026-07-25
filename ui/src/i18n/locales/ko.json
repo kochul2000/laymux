@@ -477,7 +477,8 @@
       "pressKeys": "키를 누르세요...",
       "changeShortcut": "단축키를 변경하려면 클릭",
       "actionPlaceholder": "action.name",
-      "addBinding": "+ 새 바인딩 추가"
+      "addBinding": "+ 새 바인딩 추가",
+      "unassigned": "미할당"
     },
     "recovery": {
       "pathUnavailable": "(경로를 가져올 수 없습니다)",

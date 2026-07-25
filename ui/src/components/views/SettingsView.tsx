@@ -44,6 +44,7 @@ import { persistSession } from "@/lib/persist-session";
 import {
   DEFAULT_KEYBINDINGS,
   coerceArrowWildcard,
+  isAssignedKeybinding,
   usesArrowWildcard,
 } from "@/lib/keybinding-registry";
 import { toSupportedCursorShape } from "@/lib/cursor-settings";
@@ -3646,11 +3647,17 @@ function KeybindingsSection() {
                   </div>
                 ) : (
                   <kbd
-                    style={{ ...kbdStyle, cursor: "pointer" }}
+                    style={{
+                      ...kbdStyle,
+                      cursor: "pointer",
+                      ...(isAssignedKeybinding(displayKeys) ? {} : { opacity: 0.5 }),
+                    }}
                     onClick={() => handleStartCapture(def.id, def.defaultKeys)}
                     title={t("keybindings.changeShortcut")}
                   >
-                    {displayKeys}
+                    {/* 의도적으로 미할당인 액션(`terminal.osInputSourceSwitch`)은 빈
+                        칸이 아니라 미할당임을 보여야 클릭 대상임을 알 수 있다. */}
+                    {isAssignedKeybinding(displayKeys) ? displayKeys : t("keybindings.unassigned")}
                   </kbd>
                 )}
 
