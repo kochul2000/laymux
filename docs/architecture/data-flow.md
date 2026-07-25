@@ -389,8 +389,9 @@ OS 입력 소스(키보드 레이아웃) 전환 chord 는 키바인딩 레지스
 
 - 판정은 `ui/src/lib/os-input-source-chord.ts` 의 `createOsInputSourceChordGuard` 가 전부 소유한다(DOM 이벤트 등록 없음, 순수 상태 기계). `TerminalView` 는 xterm 키 핸들러와 helper `beforeinput`/`blur` 배선만 한다.
 - **왜 keydown 만으로는 부족한가**: 설치된 xterm 은 `attachCustomKeyEventHandler` 를 `_keyDown`·`_keyPress`·`_keyUp` 모두에서 호출하는데 기존 핸들러는 `e.type !== "keydown"` 에서 즉시 `true` 를 반환한다. 그래서 (a) `_keyPress` 가 `triggerDataEvent` 로 literal Space/숫자를 보내고(우리가 keydown 에 `false` 를 반환하면 `_keyDownHandled` 가 `false` 로 남아 keypress 가 계속 진행된다), (b) textarea `input` 게이트 `(!e.composed || !_keyDownSeen)` 는 `_keyUp` 이 `_keyDownSeen` 을 커스텀 핸들러보다 **먼저** 내리므로 keyup 이후 삽입을 통과시킨다. guard 는 `e.type !== "keydown"` 조기 반환보다 **앞**에 놓인다.
-- **물리 키 범위**: 매칭된 keydown 에서 `event.code`(없으면 `key`)를 기억하고 같은 identity 의 keypress·keyup 만 삼킨다. 수식키가 먼저 떨어져 companion keypress 가 chord 와 일치하지 않아도 identity 로 묶인다. 다른 물리 키가 오면 소유권을 **버리고** 그 키를 통과시킨다.
-- **preventDefault 경계**: 키 이벤트에는 걸지 않는다(OS 가 전환을 수행해야 한다). helper `beforeinput` 은 취소한다 — 전환은 이미 keydown 에서 결정됐고 남은 것은 textarea 로 들어갈 문자뿐이다. `isComposing` 인 삽입은 IME 소유이므로 절대 막지 않는다.
+- **물리 키 범위**: 매칭된 keydown 에서 `code` 와 `key` 를 둘 다 기억하고(어느 쪽이든 일치하면 같은 press) 같은 press 의 keypress·keyup 만 삼킨다.
+- **해제는 keydown 쪽에만**: 수식키를 먼저 떼면 DOM 이 그 키의 keyup 을 발행하는데 우리 것도 아니고 해제 신호도 아니다(chord 키는 아직 눌려 있다). 같은 물리 키의 non-matching keydown(Shift 를 뗀 뒤의 auto-repeat)도 같은 press 의 연속이다. 소유권을 버리는 것은 다른 물리 키의 keydown + blur·helper 교체·unmount 뿐이다.
+- **preventDefault 경계**: 키 이벤트에는 걸지 않는다(OS 가 전환을 수행해야 한다). helper `beforeinput` 은 `inputType === "insertText"` + `data` 가 무장된 press 자신의 문자일 때만 취소한다 — 무장 구간이 무관한 삽입과 겹칠 수 있고, 특히 한글 IME 가 토글 시점에 커밋하는 음절까지 취소하면 사용자 텍스트가 사라진다. `isComposing` 인 삽입은 IME 소유이므로 애초에 막지 않는다.
 - **정리**: helper blur, helper 교체, unmount, 다른 물리 키에서 진행 중이던 press 를 버린다. 시간 기반 timeout 은 두지 않는다.
 - **미할당 계약**: `isAssignedKeybinding()`(`keybinding-registry.ts`)이 빈 combo 를 걸러 `matchesKeybinding` 이 어떤 이벤트와도 매치하지 않게 한다. 설정 UI 는 빈 칸 대신 `keybindings.unassigned` 를 표시한다. 조합 종료 직후 Space/숫자 보호는 이 절이 아니라 #528 소관이다.
 - **진단**: `os-input-source-chord-armed`/`-released`/`-text-input-blocked` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다.

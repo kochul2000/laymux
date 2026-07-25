@@ -1932,7 +1932,13 @@ export function TerminalView({
     // textarea 로 들어갈 문자뿐이다.
     const handleBeforeInputForChord = (event: Event) => {
       const inputEvent = event as InputEvent;
-      if (!osInputSourceChord.shouldBlockTextInput({ isComposing: !!inputEvent.isComposing })) {
+      if (
+        !osInputSourceChord.shouldBlockTextInput({
+          isComposing: !!inputEvent.isComposing,
+          data: inputEvent.data,
+          inputType: inputEvent.inputType,
+        })
+      ) {
         return;
       }
       event.preventDefault();

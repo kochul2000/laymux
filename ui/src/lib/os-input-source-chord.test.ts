@@ -18,6 +18,11 @@ function letterA(type: OsInputSourceChordKeyEvent["type"]): OsInputSourceChordKe
   return { type, code: "KeyA", key: "a", shiftKey: false, ctrlKey: false, altKey: false };
 }
 
+/** The modifier's own event — the DOM always emits its keydown and keyup. */
+function shiftLeft(type: OsInputSourceChordKeyEvent["type"]): OsInputSourceChordKeyEvent {
+  return { type, code: "ShiftLeft", key: "Shift", shiftKey: true, ctrlKey: false, altKey: false };
+}
+
 /** Guard bound to Shift+Space. */
 function boundGuard() {
   return createOsInputSourceChordGuard({
@@ -35,7 +40,7 @@ describe("createOsInputSourceChordGuard", () => {
       expect(guard.shouldBlockKey(shiftSpace("keydown"))).toBe(false);
       expect(guard.shouldBlockKey(shiftSpace("keypress"))).toBe(false);
       expect(guard.shouldBlockKey(shiftSpace("keyup"))).toBe(false);
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(false);
       expect(guard.isArmed()).toBe(false);
     });
   });
@@ -53,7 +58,7 @@ describe("createOsInputSourceChordGuard", () => {
       // The companion keypress is what leaks a literal Space into the PTY.
       expect(guard.shouldBlockKey(shiftSpace("keypress"))).toBe(true);
       // The textarea insertion that would otherwise reach xterm's `input` path.
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(true);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(true);
       expect(guard.shouldBlockKey(shiftSpace("keyup"))).toBe(true);
       // keyup ends the physical press, so nothing stays armed.
       expect(guard.isArmed()).toBe(false);
@@ -66,6 +71,39 @@ describe("createOsInputSourceChordGuard", () => {
       expect(guard.shouldBlockKey(plainSpace("keypress"))).toBe(true);
       expect(guard.shouldBlockKey(plainSpace("keyup"))).toBe(true);
       expect(guard.isArmed()).toBe(false);
+    });
+
+    it("stays armed when the modifier key itself is released first", () => {
+      // The DOM always emits the modifier's own keyup. Treating it as "another
+      // key released" disarmed the guard and let the Space companions through.
+      guard.shouldBlockKey(shiftLeft("keydown"));
+      expect(guard.shouldBlockKey(shiftSpace("keydown"))).toBe(true);
+
+      expect(guard.shouldBlockKey(shiftLeft("keyup"))).toBe(false);
+      expect(guard.isArmed()).toBe(true);
+
+      // ...so the rest of the chord press is still ours.
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(true);
+      expect(guard.shouldBlockKey(plainSpace("keypress"))).toBe(true);
+      expect(guard.shouldBlockKey(plainSpace("keyup"))).toBe(true);
+      expect(guard.isArmed()).toBe(false);
+    });
+
+    it("stays armed through auto-repeat after the modifier is released", () => {
+      // Holding Space and letting go of Shift produces repeating keydowns with
+      // shiftKey=false — the same physical press, not a new key.
+      guard.shouldBlockKey(shiftSpace("keydown"));
+      expect(guard.shouldBlockKey({ ...plainSpace("keydown"), repeat: true })).toBe(true);
+      expect(guard.isArmed()).toBe(true);
+      expect(guard.shouldBlockKey(plainSpace("keypress"))).toBe(true);
+      expect(guard.shouldBlockKey(plainSpace("keyup"))).toBe(true);
+      expect(guard.isArmed()).toBe(false);
+    });
+
+    it("does not release on an unrelated key's keyup", () => {
+      guard.shouldBlockKey(shiftSpace("keydown"));
+      expect(guard.shouldBlockKey(letterA("keyup"))).toBe(false);
+      expect(guard.isArmed()).toBe(true);
     });
 
     it("keeps blocking across auto-repeat and releases once", () => {
@@ -82,7 +120,7 @@ describe("createOsInputSourceChordGuard", () => {
     it("does not block a plain Space that never matched the chord", () => {
       expect(guard.shouldBlockKey(plainSpace("keydown"))).toBe(false);
       expect(guard.shouldBlockKey(plainSpace("keypress"))).toBe(false);
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(false);
       expect(guard.shouldBlockKey(plainSpace("keyup"))).toBe(false);
     });
 
@@ -91,7 +129,7 @@ describe("createOsInputSourceChordGuard", () => {
       guard.shouldBlockKey(shiftSpace("keyup"));
       expect(guard.shouldBlockKey(plainSpace("keydown"))).toBe(false);
       expect(guard.shouldBlockKey(plainSpace("keypress"))).toBe(false);
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(false);
     });
 
     it("releases on a different physical key instead of swallowing it", () => {
@@ -101,7 +139,7 @@ describe("createOsInputSourceChordGuard", () => {
       expect(guard.shouldBlockKey(letterA("keydown"))).toBe(false);
       expect(guard.isArmed()).toBe(false);
       expect(guard.shouldBlockKey(letterA("keypress"))).toBe(false);
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(false);
     });
 
     it("ignores an orphan keyup for a key that was never armed", () => {
@@ -113,9 +151,58 @@ describe("createOsInputSourceChordGuard", () => {
       // An IME composition must keep working even if the chord is held: the
       // composing insertion belongs to the IME, not to the chord.
       guard.shouldBlockKey(shiftSpace("keydown"));
-      expect(guard.shouldBlockTextInput({ isComposing: true })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: true, data: "가" })).toBe(false);
       // ...and the non-composing insertion from the same press is still blocked.
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(true);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(true);
+    });
+
+    it("only blocks the insertion the armed press itself would produce", () => {
+      // The armed window stays open while the chord key is held. Any insertion
+      // that is *not* the chord's own character belongs to something else — most
+      // importantly a Korean IME committing the syllable that was in flight when
+      // the user hit the toggle. Cancelling that would delete the user's text.
+      guard.shouldBlockKey(shiftSpace("keydown"));
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: "가" })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: "hello" })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(true);
+    });
+
+    it("only blocks insertText, not other input types", () => {
+      guard.shouldBlockKey(shiftSpace("keydown"));
+      expect(
+        guard.shouldBlockTextInput({ isComposing: false, data: " ", inputType: "insertText" }),
+      ).toBe(true);
+      // A paste or a deletion is never the chord's own character.
+      expect(
+        guard.shouldBlockTextInput({
+          isComposing: false,
+          data: " ",
+          inputType: "insertFromPaste",
+        }),
+      ).toBe(false);
+      expect(
+        guard.shouldBlockTextInput({
+          isComposing: false,
+          data: null,
+          inputType: "deleteContentBackward",
+        }),
+      ).toBe(false);
+    });
+
+    it("blocks the digit insertion for a digit chord", () => {
+      const digitGuard = createOsInputSourceChordGuard({
+        matchesChord: (event) => event.ctrlKey && event.code === "Digit1",
+      });
+      digitGuard.shouldBlockKey({
+        type: "keydown",
+        code: "Digit1",
+        key: "1",
+        shiftKey: false,
+        ctrlKey: true,
+        altKey: false,
+      });
+      expect(digitGuard.shouldBlockTextInput({ isComposing: false, data: "1" })).toBe(true);
+      expect(digitGuard.shouldBlockTextInput({ isComposing: false, data: "2" })).toBe(false);
     });
 
     it("releases on reset (blur, unmount, pane handoff)", () => {
@@ -125,7 +212,7 @@ describe("createOsInputSourceChordGuard", () => {
       expect(guard.isArmed()).toBe(false);
       // Nothing from the abandoned press may keep swallowing input.
       expect(guard.shouldBlockKey(shiftSpace("keypress"))).toBe(false);
-      expect(guard.shouldBlockTextInput({ isComposing: false })).toBe(false);
+      expect(guard.shouldBlockTextInput({ isComposing: false, data: " " })).toBe(false);
     });
 
     it("re-arms on a fresh chord press after a reset", () => {

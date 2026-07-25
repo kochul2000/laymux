@@ -3419,6 +3419,78 @@ describe("TerminalView", () => {
       expect(up.preventDefault).not.toHaveBeenCalled();
     });
 
+    it("keeps blocking when the modifier is released before the chord key", async () => {
+      // The DOM always emits the modifier's own keyup. Treating that as "another
+      // key released" disarmed the guard and let the Space companions reach the
+      // PTY — the exact symptom issue #533 is about.
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-modifier-first");
+
+      capturedKeyHandler!(keyEvent("keydown", { key: "Shift", code: "ShiftLeft", shiftKey: true }));
+      expect(
+        capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(false);
+
+      // Shift goes up first: not ours to block, and not a release signal.
+      expect(capturedKeyHandler!(keyEvent("keyup", { key: "Shift", code: "ShiftLeft" }))).toBe(
+        true,
+      );
+
+      // The rest of the chord press is still swallowed.
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space" }))).toBe(false);
+      expect(capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space" }))).toBe(false);
+    });
+
+    it("keeps blocking through auto-repeat after the modifier is released", async () => {
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-repeat");
+
+      expect(
+        capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(false);
+      // Holding Space and letting go of Shift repeats the keydown without shift.
+      const repeat = keyEvent("keydown", { key: " ", code: "Space" });
+      Object.defineProperty(repeat, "repeat", { value: true });
+      expect(capturedKeyHandler!(repeat)).toBe(false);
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space" }))).toBe(false);
+    });
+
+    it("does not cancel an IME commit that overlaps the chord press", async () => {
+      // A Korean IME can commit the in-flight syllable when the toggle is hit.
+      // Cancelling that insertion would delete the user's text.
+      bindChord("Shift+Space");
+
+      render(<TerminalView instanceId="t-chord-imecommit" profile="PowerShell" syncGroup="" />);
+      const host = screen.getByTestId("terminal-xterm-host-t-chord-imecommit");
+      const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      host.appendChild(terminal.element);
+
+      await vi.waitFor(() => {
+        expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+      });
+      await waitForLocalTerminalControl();
+
+      capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true }));
+
+      const commit = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(commit, "isComposing", { value: false });
+      Object.defineProperty(commit, "inputType", { value: "insertText" });
+      Object.defineProperty(commit, "data", { value: "가" });
+      helper.dispatchEvent(commit);
+      expect(commit.defaultPrevented).toBe(false);
+
+      // The chord's own character is still cancelled.
+      const leak = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(leak, "isComposing", { value: false });
+      Object.defineProperty(leak, "inputType", { value: "insertText" });
+      Object.defineProperty(leak, "data", { value: " " });
+      helper.dispatchEvent(leak);
+      expect(leak.defaultPrevented).toBe(true);
+    });
+
     it("keeps an ordinary Space typed after the chord", async () => {
       bindChord("Shift+Space");
       await mountForChord("t-chord-then-space");
@@ -3466,6 +3538,7 @@ describe("TerminalView", () => {
       const insertion = new Event("beforeinput", { cancelable: true, bubbles: true });
       Object.defineProperty(insertion, "isComposing", { value: false });
       Object.defineProperty(insertion, "inputType", { value: "insertText" });
+      Object.defineProperty(insertion, "data", { value: " " });
       helper.dispatchEvent(insertion);
       expect(insertion.defaultPrevented).toBe(true);
 
@@ -3481,6 +3554,7 @@ describe("TerminalView", () => {
       const after = new Event("beforeinput", { cancelable: true, bubbles: true });
       Object.defineProperty(after, "isComposing", { value: false });
       Object.defineProperty(after, "inputType", { value: "insertText" });
+      Object.defineProperty(after, "data", { value: " " });
       helper.dispatchEvent(after);
       expect(after.defaultPrevented).toBe(false);
     });

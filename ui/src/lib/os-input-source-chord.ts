@@ -19,10 +19,17 @@
  *   switch from the key press itself; suppressing the default would break the
  *   very feature the user bound. We only stop the events from reaching xterm.
  *   (Text insertion is different — see `shouldBlockTextInput`.)
- * - **Physical-key scoped.** Arming is keyed on `event.code` so only events from
- *   the *same* physical press are swallowed. Any other key releases the guard
- *   rather than being swallowed with it.
- * - **Composition is never touched.** A composing insertion belongs to the IME.
+ * - **Physical-key scoped.** Arming is keyed on the physical key (`event.code`,
+ *   falling back to `event.key`) so only events from the *same* press are
+ *   swallowed. A different key **keydown** releases the guard rather than being
+ *   swallowed with it; a different key **keyup** — the modifier's own release,
+ *   which the DOM always emits — is neither blocked nor a release signal.
+ * - **Modifier state may change mid-press.** Releasing Shift while Space is held
+ *   produces Space keydowns that no longer match the chord. Identity, not the
+ *   chord match, is what keeps the press together.
+ * - **Composition is never touched**, and only the character the armed press
+ *   itself would insert is cancelled — an IME commit that happens to overlap the
+ *   press keeps its text.
  */
 
 export type OsInputSourceChordKeyEvent = {
@@ -57,16 +64,40 @@ export type OsInputSourceChordGuard = {
    * `preventDefault()` by the caller: the OS has already acted on the key press,
    * and letting the character land in the textarea is exactly the leak.
    */
-  shouldBlockTextInput: (event: { isComposing: boolean }) => boolean;
+  shouldBlockTextInput: (event: {
+    isComposing: boolean;
+    /** The text about to be inserted. Only the armed press own character is a leak. */
+    data?: string | null;
+    /** `InputEvent.inputType`. Anything other than a plain insertion is not ours. */
+    inputType?: string;
+  }) => boolean;
   /** True while a chord press is in flight. */
   isArmed: () => boolean;
   /** Drop any in-flight press (blur, unmount, pane handoff). */
   reset: (reason: string) => void;
 };
 
-/** Identity used to tie companion events to the press that armed the guard. */
-function pressIdentity(event: OsInputSourceChordKeyEvent): string {
-  return event.code || `key:${event.key}`;
+/**
+ * Identity used to tie companion events to the press that armed the guard.
+ *
+ * Both `code` and `key` are kept: an environment that fills `code` on `keydown`
+ * but leaves it empty on `keypress` would otherwise split one press into two
+ * identities and let the companion through. Either half matching is enough.
+ */
+type PressIdentity = { code: string; key: string };
+
+function pressIdentity(event: OsInputSourceChordKeyEvent): PressIdentity {
+  return { code: event.code, key: event.key };
+}
+
+function isSamePress(armed: PressIdentity | null, event: PressIdentity): boolean {
+  if (!armed) return false;
+  if (armed.code && event.code) return armed.code === event.code;
+  return armed.key === event.key;
+}
+
+function describePress(identity: PressIdentity): string {
+  return identity.code || `key:${identity.key}`;
 }
 
 export function createOsInputSourceChordGuard(
@@ -75,11 +106,14 @@ export function createOsInputSourceChordGuard(
   const trace: OsInputSourceChordTrace = (event, payload) => options.onTrace?.(event, payload);
 
   /** Identity of the physical key whose events are being swallowed, if any. */
-  let armedPress: string | null = null;
+  let armedPress: PressIdentity | null = null;
+  /** `event.key` of the armed press — the only character it can insert. */
+  let armedKey: string | null = null;
 
   const release = (reason: string) => {
     if (armedPress === null) return;
     armedPress = null;
+    armedKey = null;
     trace("os-input-source-chord-released", { reason });
   };
 
@@ -89,21 +123,31 @@ export function createOsInputSourceChordGuard(
 
       if (event.type === "keydown") {
         if (options.matchesChord(event)) {
-          if (armedPress !== identity) {
+          if (!isSamePress(armedPress, identity)) {
+            // Ownership moving to a different physical key still ends the old
+            // press — trace it so a round trip is never silent.
+            release("rearmed");
             armedPress = identity;
-            trace("os-input-source-chord-armed", { press: identity });
+            armedKey = event.key;
+            trace("os-input-source-chord-armed", { press: describePress(identity) });
           }
           return true;
         }
-        // A different key during an armed press means we lost track of the
-        // release. Give up ownership instead of swallowing unrelated input.
-        release(identity === armedPress ? "keydown-no-longer-matching" : "other-key");
+        // The *same* physical key with a changed modifier state is the press we
+        // are already holding: releasing Shift while Space is down produces
+        // repeating Space keydowns without `shiftKey`, and they no longer match
+        // the chord. Disarming there would let the rest of the press through.
+        if (isSamePress(armedPress, identity)) return true;
+        // A genuinely different key means the chord press is over as far as we
+        // can tell. Give up ownership instead of swallowing unrelated input.
+        release("other-key");
         return false;
       }
 
-      if (armedPress === null || armedPress !== identity) {
-        // Orphan keypress/keyup, or one from another key — never ours to block.
-        if (armedPress !== null && event.type === "keyup") release("other-key-up");
+      if (!isSamePress(armedPress, identity)) {
+        // A companion of some other key — most often the modifier's own keyup,
+        // which the DOM always emits. It is not ours to block, and crucially it
+        // is **not** a release signal either: the chord key is still down.
         return false;
       }
 
@@ -121,6 +165,13 @@ export function createOsInputSourceChordGuard(
       if (armedPress === null) return false;
       // A composing insertion is the IME's, not the chord's.
       if (event.isComposing) return false;
+      // The armed window stays open for as long as the chord key is held, so it
+      // can overlap insertions that have nothing to do with the chord. The one
+      // that matters is a Korean IME committing the syllable that was in flight
+      // when the user hit the toggle: cancelling that would delete the user's
+      // text. Only the character this press would itself produce is a leak.
+      if (event.inputType !== undefined && event.inputType !== "insertText") return false;
+      if (armedKey === null || event.data !== armedKey) return false;
       return true;
     },
 
