@@ -10,8 +10,13 @@ import {
   clampComposerHeight,
   DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
+  clearComposerHistoryForWorkspace,
   clearRuntimeComposerState,
+  composerHistoryScopeKey,
+  COMPOSER_HISTORY_SCOPES,
   createComposerDraftState,
+  DEFAULT_COMPOSER_HISTORY_SCOPE,
+  isComposerHistoryScope,
   pushComposerHistory,
   readComposerHeight,
   readComposerHistory,
@@ -29,26 +34,140 @@ import {
   writeRuntimeInputMode,
 } from "./terminal-input-composer-state";
 
+/** Bucket key shorthands — the only sanctioned way to address a history bucket. */
+const paneBucket = (terminalId: string) => composerHistoryScopeKey("pane", { terminalId });
+const workspaceBucket = (terminalId: string, workspaceId?: string | null) =>
+  composerHistoryScopeKey("workspace", { terminalId, workspaceId });
+const globalBucket = (terminalId: string) => composerHistoryScopeKey("global", { terminalId });
+
 describe("composer sent-history", () => {
   beforeEach(() => {
     clearRuntimeComposerState();
   });
 
   it("appends entries, skipping blanks and consecutive duplicates", () => {
-    pushComposerHistory("t1", "one");
-    pushComposerHistory("t1", "one"); // duplicate — ignored
-    pushComposerHistory("t1", ""); // blank — ignored
-    pushComposerHistory("t1", "two");
-    expect(readComposerHistory("t1")).toEqual(["one", "two"]);
+    pushComposerHistory(paneBucket("t1"), "one");
+    pushComposerHistory(paneBucket("t1"), "one"); // duplicate — ignored
+    pushComposerHistory(paneBucket("t1"), ""); // blank — ignored
+    pushComposerHistory(paneBucket("t1"), "two");
+    expect(readComposerHistory(paneBucket("t1"))).toEqual(["one", "two"]);
   });
 
-  it("isolates history per terminal and clears it with runtime state", () => {
-    pushComposerHistory("a", "cmd-a");
-    pushComposerHistory("b", "cmd-b");
-    expect(readComposerHistory("a")).toEqual(["cmd-a"]);
+  it("isolates pane-scoped history per terminal and clears it with runtime state", () => {
+    pushComposerHistory(paneBucket("a"), "cmd-a");
+    pushComposerHistory(paneBucket("b"), "cmd-b");
+    expect(readComposerHistory(paneBucket("a"))).toEqual(["cmd-a"]);
     clearRuntimeComposerState("a");
-    expect(readComposerHistory("a")).toEqual([]);
-    expect(readComposerHistory("b")).toEqual(["cmd-b"]);
+    expect(readComposerHistory(paneBucket("a"))).toEqual([]);
+    expect(readComposerHistory(paneBucket("b"))).toEqual(["cmd-b"]);
+  });
+});
+
+describe("composer history scope keys (ADR-0054)", () => {
+  beforeEach(() => {
+    clearRuntimeComposerState();
+  });
+
+  it("defaults to global and accepts exactly the three documented scopes", () => {
+    expect(DEFAULT_COMPOSER_HISTORY_SCOPE).toBe("global");
+    expect([...COMPOSER_HISTORY_SCOPES]).toEqual(["global", "workspace", "pane"]);
+    for (const scope of COMPOSER_HISTORY_SCOPES) expect(isComposerHistoryScope(scope)).toBe(true);
+    for (const bad of ["Global", "workspaces", "", null, undefined, 1]) {
+      expect(isComposerHistoryScope(bad)).toBe(false);
+    }
+  });
+
+  it("gives every terminal the same bucket under global scope", () => {
+    expect(globalBucket("a")).toBe(globalBucket("b"));
+    pushComposerHistory(globalBucket("a"), "shared");
+    expect(readComposerHistory(globalBucket("b"))).toEqual(["shared"]);
+    // …and keeps the narrower buckets separate.
+    expect(readComposerHistory(paneBucket("b"))).toEqual([]);
+  });
+
+  it("shares one bucket per workspace under workspace scope", () => {
+    expect(workspaceBucket("a", "ws-1")).toBe(workspaceBucket("b", "ws-1"));
+    expect(workspaceBucket("a", "ws-1")).not.toBe(workspaceBucket("a", "ws-2"));
+    pushComposerHistory(workspaceBucket("a", "ws-1"), "in-ws-1");
+    expect(readComposerHistory(workspaceBucket("b", "ws-1"))).toEqual(["in-ws-1"]);
+    expect(readComposerHistory(workspaceBucket("c", "ws-2"))).toEqual([]);
+  });
+
+  it("falls back to the terminal's own bucket when the workspace is unresolvable", () => {
+    // Dock / app-global terminals have no workspace: unknown membership must
+    // never widen sharing to the global bucket (fail-narrow).
+    for (const missing of [undefined, null, ""]) {
+      expect(workspaceBucket("dock-1", missing)).toBe(paneBucket("dock-1"));
+    }
+    pushComposerHistory(workspaceBucket("dock-1", null), "dock-only");
+    expect(readComposerHistory(paneBucket("dock-1"))).toEqual(["dock-only"]);
+    expect(readComposerHistory(globalBucket("dock-1"))).toEqual([]);
+    expect(readComposerHistory(paneBucket("dock-2"))).toEqual([]);
+  });
+
+  it("treats an unknown scope value as pane-local rather than shared", () => {
+    const bogus = "everything" as unknown as Parameters<typeof composerHistoryScopeKey>[0];
+    expect(composerHistoryScopeKey(bogus, { terminalId: "a", workspaceId: "ws-1" })).toBe(
+      paneBucket("a"),
+    );
+  });
+
+  it("never collides between a workspace id and a terminal id", () => {
+    // Same raw id in both roles must still land in different buckets.
+    expect(workspaceBucket("x", "same")).not.toBe(paneBucket("same"));
+  });
+
+  it("does not merge or migrate entries when the scope changes", () => {
+    pushComposerHistory(paneBucket("a"), "pane-entry");
+    pushComposerHistory(globalBucket("a"), "global-entry");
+    // Switching scope just reads a different bucket; nothing is copied either way.
+    expect(readComposerHistory(globalBucket("a"))).toEqual(["global-entry"]);
+    expect(readComposerHistory(paneBucket("a"))).toEqual(["pane-entry"]);
+  });
+
+  it("keeps shared buckets alive when one pane closes", () => {
+    pushComposerHistory(globalBucket("a"), "global-entry");
+    pushComposerHistory(workspaceBucket("a", "ws-1"), "ws-entry");
+    pushComposerHistory(paneBucket("a"), "pane-entry");
+
+    clearRuntimeComposerState("a");
+
+    // Only the closing pane's own bucket goes away — other panes still recall.
+    expect(readComposerHistory(paneBucket("a"))).toEqual([]);
+    expect(readComposerHistory(globalBucket("a"))).toEqual(["global-entry"]);
+    expect(readComposerHistory(workspaceBucket("b", "ws-1"))).toEqual(["ws-entry"]);
+  });
+
+  it("drops a deleted workspace's bucket and nothing else", () => {
+    pushComposerHistory(workspaceBucket("a", "ws-1"), "ws-1-entry");
+    pushComposerHistory(workspaceBucket("b", "ws-2"), "ws-2-entry");
+    pushComposerHistory(globalBucket("a"), "global-entry");
+
+    clearComposerHistoryForWorkspace("ws-1");
+
+    expect(readComposerHistory(workspaceBucket("a", "ws-1"))).toEqual([]);
+    expect(readComposerHistory(workspaceBucket("b", "ws-2"))).toEqual(["ws-2-entry"]);
+    expect(readComposerHistory(globalBucket("a"))).toEqual(["global-entry"]);
+  });
+
+  it("clears every bucket on a full runtime reset (WebView reload)", () => {
+    pushComposerHistory(globalBucket("a"), "global-entry");
+    pushComposerHistory(workspaceBucket("a", "ws-1"), "ws-entry");
+    pushComposerHistory(paneBucket("a"), "pane-entry");
+
+    clearRuntimeComposerState();
+
+    expect(readComposerHistory(globalBucket("a"))).toEqual([]);
+    expect(readComposerHistory(workspaceBucket("a", "ws-1"))).toEqual([]);
+    expect(readComposerHistory(paneBucket("a"))).toEqual([]);
+  });
+
+  it("caps each bucket at 200 entries independently of scope", () => {
+    for (let i = 0; i < 250; i += 1) pushComposerHistory(globalBucket("a"), `cmd-${i}`);
+    const entries = readComposerHistory(globalBucket("a"));
+    expect(entries).toHaveLength(200);
+    expect(entries[0]).toBe("cmd-50");
+    expect(entries[entries.length - 1]).toBe("cmd-249");
   });
 });
 
@@ -414,10 +533,10 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
   }
 
   it("keeps sent-history recallable in memory yet absent from local/session storage", () => {
-    for (const secret of SECRETS) pushComposerHistory(TERMINAL_ID, secret);
+    for (const secret of SECRETS) pushComposerHistory(paneBucket(TERMINAL_ID), secret);
 
     // Recall works from the runtime Map...
-    expect(readComposerHistory(TERMINAL_ID)).toEqual(SECRETS);
+    expect(readComposerHistory(paneBucket(TERMINAL_ID))).toEqual(SECRETS);
 
     // ...but nothing landed in either web storage.
     const localDump = serializeStorage(localStorage);
@@ -429,7 +548,7 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
 
     // A WebView reload (runtime clear) erases the history entirely.
     clearRuntimeComposerState();
-    expect(readComposerHistory(TERMINAL_ID)).toEqual([]);
+    expect(readComposerHistory(paneBucket(TERMINAL_ID))).toEqual([]);
   });
 
   it("never passes draft or history content to Storage.setItem", () => {
@@ -442,7 +561,7 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
         TERMINAL_ID,
         updateComposerDraftText(createComposerDraftState(), secret),
       );
-      pushComposerHistory(TERMINAL_ID, secret);
+      pushComposerHistory(paneBucket(TERMINAL_ID), secret);
     }
     // Legitimate UI-only persistence (mode + height) may write to storage, but
     // the persisted *values* must never be the input content.
@@ -462,7 +581,7 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
       TERMINAL_ID,
       updateComposerDraftText(createComposerDraftState(), SECRETS[0]),
     );
-    pushComposerHistory(TERMINAL_ID, SECRETS[0]);
+    pushComposerHistory(paneBucket(TERMINAL_ID), SECRETS[0]);
 
     const localDump = serializeStorage(localStorage);
     // The two UI-only preference keys are the *only* things persisted.
@@ -495,8 +614,12 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
     useSettingsStore.getState().setTerminal({
       composerHistoryPopup: false,
       composerAutocomplete: true,
+      // The scope is a choice, not content — widening it must not pull any
+      // recalled text into the persisted snapshot either (ADR-0054).
+      composerHistoryScope: "global",
     });
-    for (const secret of SECRETS) pushComposerHistory(TERMINAL_ID, secret);
+    for (const secret of SECRETS) pushComposerHistory(globalBucket(TERMINAL_ID), secret);
+    for (const secret of SECRETS) pushComposerHistory(paneBucket(TERMINAL_ID), secret);
 
     // JSON.stringify drops the action functions, leaving exactly what serializes
     // to settings.json.
@@ -506,5 +629,9 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
     // The toggles themselves persist as plain booleans (feature on/off, not content).
     expect(typeof useSettingsStore.getState().terminal.composerHistoryPopup).toBe("boolean");
     expect(typeof useSettingsStore.getState().terminal.composerAutocomplete).toBe("boolean");
+    // The scope persists as one of the three enum strings, never as history text.
+    expect(COMPOSER_HISTORY_SCOPES).toContain(
+      useSettingsStore.getState().terminal.composerHistoryScope,
+    );
   });
 });

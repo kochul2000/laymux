@@ -621,6 +621,11 @@ pub struct TerminalSettings {
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
+    /// Composer: which terminals share one past-input history bucket —
+    /// "global" (default), "workspace", or "pane" (ADR-0054). The history text
+    /// itself is never persisted; only this scope choice is.
+    #[serde(default = "default_composer_history_scope")]
+    pub composer_history_scope: String,
     /// Composer: Tab on an empty, focused draft opens a past-input recall popup (issue #504).
     #[serde(default = "default_true")]
     pub composer_history_popup: bool,
@@ -639,6 +644,7 @@ impl Default for TerminalSettings {
             path_link_enabled: true,
             path_link_max_length: default_path_link_max_length(),
             show_scroll_to_bottom_button: true,
+            composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
             composer_autocomplete: true,
         }
@@ -647,6 +653,10 @@ impl Default for TerminalSettings {
 
 fn default_path_link_max_length() -> u32 {
     256
+}
+
+fn default_composer_history_scope() -> String {
+    "global".to_string()
 }
 
 /// App-wide appearance settings (theme + non-terminal font).

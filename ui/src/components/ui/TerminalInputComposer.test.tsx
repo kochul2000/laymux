@@ -343,6 +343,45 @@ describe("TerminalInputComposer", () => {
       expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
     });
 
+    it("closes the popup when the history scope switches buckets (ADR-0054)", () => {
+      const onTextChange = vi.fn();
+      const { rerender } = render(
+        <TerminalInputComposer
+          mode="composer"
+          text=""
+          labels={labels}
+          historyPopupEnabled
+          history={history}
+          historyScopeKey="pane:a"
+          onTextChange={onTextChange}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+      fireEvent.keyDown(textarea, { key: "Tab" });
+      expect(screen.getByTestId("composer-history")).toBeInTheDocument();
+
+      // Same entries, different bucket: the open list must not survive the swap,
+      // so no stale highlight can commit an entry from the previous bucket.
+      rerender(
+        <TerminalInputComposer
+          mode="composer"
+          text=""
+          labels={labels}
+          historyPopupEnabled
+          history={history}
+          historyScopeKey="global"
+          onTextChange={onTextChange}
+          onSend={vi.fn()}
+          testId="composer"
+        />,
+      );
+      expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Terminal input" }), { key: "Enter" });
+      expect(onTextChange).not.toHaveBeenCalled();
+    });
+
     it("navigates with arrows and fills the draft on Enter", () => {
       const onTextChange = vi.fn();
       const onSend = vi.fn();

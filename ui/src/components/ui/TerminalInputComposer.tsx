@@ -61,8 +61,14 @@ export interface TerminalInputComposerProps {
    * forwarding \t to the terminal.
    */
   historyPopupEnabled?: boolean;
-  /** Sent-input history for this terminal, oldest→newest. Used by both recall paths. */
+  /** Sent-input history for the active scope bucket, oldest→newest. Used by both recall paths. */
   history?: readonly string[];
+  /**
+   * Identity of the bucket `history` came from (ADR-0054). A change means the
+   * user switched the history scope, so both open lists close instead of
+   * indexing into entries that are no longer on screen.
+   */
+  historyScopeKey?: string;
   /** Maximum number of entries shown in the popup. */
   maxHistoryItems?: number;
   /**
@@ -110,6 +116,7 @@ export function TerminalInputComposer({
   onHistory,
   historyPopupEnabled = false,
   history,
+  historyScopeKey,
   maxHistoryItems = DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS,
   autocompleteEnabled = false,
   maxAutocompleteItems = DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS,
@@ -127,14 +134,30 @@ export function TerminalInputComposer({
     historyPopupEnabled && text.length === 0
       ? selectComposerHistoryEntries(history ?? [], maxHistoryItems)
       : [];
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  // Both lists tag their open/highlight state with the bucket it was opened
+  // against (ADR-0054). A scope switch swaps `history` underneath us, so tying
+  // the state to the bucket makes it close and reset by derivation — same
+  // "no reconciling effect" approach as the empty-list case below.
+  const historyBucket = historyScopeKey ?? null;
+  const [historyOpenBucket, setHistoryOpenBucket] = useState<{ key: string | null } | null>(null);
+  const [historyCursor, setHistoryCursor] = useState<{ key: string | null; index: number }>({
+    key: null,
+    index: 0,
+  });
+  const historyOpen = historyOpenBucket !== null && historyOpenBucket.key === historyBucket;
+  const historyIndex = historyCursor.key === historyBucket ? historyCursor.index : 0;
+  const setHistoryIndex = (next: number | ((prev: number) => number)) =>
+    setHistoryCursor((prev) => {
+      const base = prev.key === historyBucket ? prev.index : 0;
+      return { key: historyBucket, index: typeof next === "function" ? next(base) : next };
+    });
   // Derived so the popup can never linger once its list empties (draft typed
   // into, setting turned off, history cleared) — no reconciling effect needed.
   const historyVisible = historyOpen && historyEntries.length > 0;
-  const closeHistory = () => setHistoryOpen(false);
+  const openHistory = () => setHistoryOpenBucket({ key: historyBucket });
+  const closeHistory = () => setHistoryOpenBucket(null);
   const commitHistoryEntry = (entry: string | undefined) => {
-    setHistoryOpen(false);
+    closeHistory();
     if (entry != null) onTextChange(entry);
   };
 
@@ -147,10 +170,27 @@ export function TerminalInputComposer({
       ? selectComposerAutocompleteSuggestions(history ?? [], text, maxAutocompleteItems)
       : [];
   // Escape / blur dismiss the dropdown until the next keystroke reopens it.
-  const [autocompleteDismissed, setAutocompleteDismissed] = useState(false);
+  // Bucket-tagged like the popup state: a scope switch re-arms it.
+  const [autocompleteDismissedBucket, setAutocompleteDismissedBucket] = useState<{
+    key: string | null;
+  } | null>(null);
+  const autocompleteDismissed =
+    autocompleteDismissedBucket !== null && autocompleteDismissedBucket.key === historyBucket;
+  const setAutocompleteDismissed = (dismissed: boolean) =>
+    setAutocompleteDismissedBucket(dismissed ? { key: historyBucket } : null);
   // -1 means "no active suggestion": the dropdown is showing but has not stolen
   // Enter, so plain Enter still sends. Arrows move a real selection in.
-  const [autocompleteIndex, setAutocompleteIndex] = useState(-1);
+  const [autocompleteCursor, setAutocompleteCursor] = useState<{
+    key: string | null;
+    index: number;
+  }>({ key: null, index: -1 });
+  const autocompleteIndex =
+    autocompleteCursor.key === historyBucket ? autocompleteCursor.index : -1;
+  const setAutocompleteIndex = (next: number | ((prev: number) => number)) =>
+    setAutocompleteCursor((prev) => {
+      const base = prev.key === historyBucket ? prev.index : -1;
+      return { key: historyBucket, index: typeof next === "function" ? next(base) : next };
+    });
   const autocompleteVisible = !autocompleteDismissed && autocompleteSuggestions.length > 0;
   // Clamp defensively: the draft can shrink the list between renders.
   const activeAutocompleteIndex =
@@ -293,7 +333,7 @@ export function TerminalInputComposer({
       event.preventDefault();
       event.stopPropagation();
       setHistoryIndex(0);
-      setHistoryOpen(true);
+      openHistory();
       return;
     }
 
@@ -492,7 +532,7 @@ export function TerminalInputComposer({
         }}
         onChange={(event) => {
           // Any manual edit dismisses the recall popup so it never fights typing.
-          if (historyOpen) setHistoryOpen(false);
+          if (historyOpen) closeHistory();
           // Typing re-arms autocomplete (undo a prior Escape) and clears any active
           // selection so the fresh suggestion list never steals the next Enter.
           if (autocompleteDismissed) setAutocompleteDismissed(false);
@@ -508,7 +548,7 @@ export function TerminalInputComposer({
         onBlur={() => {
           compositionActiveRef.current = false;
           // Leaving the editor (pane/mode switch, clicking away) closes both lists.
-          setHistoryOpen(false);
+          closeHistory();
           dismissAutocomplete();
         }}
         onKeyDown={handleEditorKeyDown}

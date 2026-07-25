@@ -1372,6 +1372,17 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      /* Scope picker in the "Composer recall" popover section (ADR-0054). */
+      .key-set-select {
+        flex: 0 0 auto;
+        max-width: 56%;
+        padding: 3px 6px;
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--text);
+        font-size: var(--fs-xs);
+      }
       .key-chip-grid {
         display: flex;
         flex-wrap: wrap;
@@ -1697,6 +1708,9 @@
         // is kept in a runtime Map and never persisted (see composerHistory*).
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
+        // Which terminals share one recall bucket (ADR-0054). Only the scope
+        // choice is stored here; the recalled text stays in memory.
+        const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -1796,22 +1810,26 @@
         let terminalReplayDepth = 0;
         const inputModeByTerminalId = new Map();
         const composerDraftByTerminalId = new Map();
-        // Sent-input recall history, per terminal, oldest→newest. This holds the
-        // actual text the user submitted, so — like the composer draft (ADR-0029)
-        // — it lives ONLY in this runtime Map and is never written to
-        // localStorage / sessionStorage / disk / the network. Keeping it in
-        // memory means passwords or other secrets typed into a shell cannot leak
-        // through a recall surface after the page unloads.
-        const composerHistoryByTerminalId = new Map();
+        // Sent-input recall history, keyed by scope bucket (ADR-0054:
+        // "global" | "ws:{workspaceId}" | "pane:{terminalId}"), oldest→newest.
+        // This holds the actual text the user submitted, so — like the composer
+        // draft (ADR-0029) — it lives ONLY in this runtime Map and is never
+        // written to localStorage / sessionStorage / disk / the network. Keeping
+        // it in memory means passwords or other secrets typed into a shell
+        // cannot leak through a recall surface after the page unloads.
+        const composerHistoryByScopeKey = new Map();
         const MAX_COMPOSER_HISTORY = 200;
         const DEFAULT_COMPOSER_HISTORY_POPUP_ITEMS = 8;
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
+        const COMPOSER_HISTORY_SCOPES = ["global", "workspace", "pane"];
+        const DEFAULT_COMPOSER_HISTORY_SCOPE = "global";
         let preferredInputMode = loadPreferredInputMode();
         // Feature on/off toggles are configuration (not content), so they are
         // the only composer-recall state allowed in localStorage. Default on to
         // match the desktop composer and stay non-destructive.
         let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
         let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
+        let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
         // Tab recall popup (issue #504) UI state: open flag + highlighted row.
@@ -2409,23 +2427,61 @@
           } catch (_) {}
         }
 
-        // --- Runtime-only sent-input history (issues #504 / #505) ---
+        // Composer history sharing scope (ADR-0054). Same three values as the
+        // desktop setting; the scope CHOICE is configuration so it may live in
+        // localStorage, while the recalled text never does. Remote has no way to
+        // read the host settings.json, so this is surface-local by contract.
+        function loadComposerHistoryScope() {
+          try {
+            const stored = localStorage.getItem(composerHistoryScopeStorageKey);
+            return COMPOSER_HISTORY_SCOPES.includes(stored)
+              ? stored
+              : DEFAULT_COMPOSER_HISTORY_SCOPE;
+          } catch (_) {
+            return DEFAULT_COMPOSER_HISTORY_SCOPE;
+          }
+        }
+
+        function saveComposerHistoryScope(scope) {
+          try {
+            localStorage.setItem(composerHistoryScopeStorageKey, scope);
+          } catch (_) {}
+        }
+
+        // --- Runtime-only sent-input history (issues #504 / #505, ADR-0054) ---
         // readComposerHistory/pushComposerHistory only ever touch the in-memory
         // Map; there is deliberately no persistence path for this text.
+        //
+        // The single bucket-key derivation point: a read and a write disagreeing
+        // here would silently split the history. A "workspace" scope with no
+        // resolvable workspace (dock terminals are app-global) falls back to the
+        // terminal's own bucket — unknown membership never widens sharing.
+        function composerHistoryBucketKey(terminalId = activeTerminalId) {
+          if (!terminalId) return null;
+          if (composerHistoryScope === "global") return "global";
+          if (composerHistoryScope === "workspace") {
+            const workspaceId = terminalInfoById.get(terminalId)?.workspaceId;
+            if (workspaceId) return "ws:" + workspaceId;
+          }
+          return "pane:" + terminalId;
+        }
+
         function readComposerHistory(terminalId = activeTerminalId) {
-          if (!terminalId) return [];
-          return composerHistoryByTerminalId.get(terminalId) || [];
+          const bucket = composerHistoryBucketKey(terminalId);
+          if (!bucket) return [];
+          return composerHistoryByScopeKey.get(bucket) || [];
         }
 
         function pushComposerHistory(terminalId, text) {
-          if (!terminalId || !text) return;
-          const list = composerHistoryByTerminalId.get(terminalId) || [];
+          const bucket = composerHistoryBucketKey(terminalId);
+          if (!bucket || !text) return;
+          const list = composerHistoryByScopeKey.get(bucket) || [];
           if (list[list.length - 1] === text) return;
           list.push(text);
           if (list.length > MAX_COMPOSER_HISTORY) {
             list.splice(0, list.length - MAX_COMPOSER_HISTORY);
           }
-          composerHistoryByTerminalId.set(terminalId, list);
+          composerHistoryByScopeKey.set(bucket, list);
         }
 
         // Most-recent-first, de-duplicated, blank-skipping view of the history
@@ -2765,7 +2821,8 @@
             if (workspaceId) lastSelectedTerminalIdByWorkspace.set(workspaceId, nextId);
           }
           composerIsComposing = false;
-          // Each terminal has its own draft/history; drop any recall list left
+          // Each terminal has its own draft, and the recall bucket can differ per
+          // terminal too (pane / workspace scope), so drop any recall list left
           // open on the terminal we are leaving.
           resetComposerSuggestions();
           if (activeTerminalId) {
@@ -5237,7 +5294,7 @@
               draft.inFlight = null;
               // Record the text that was actually sent for the recall popup /
               // autocomplete. Runtime Map only — never persisted (see the
-              // composerHistoryByTerminalId declaration).
+              // composerHistoryByScopeKey declaration).
               pushComposerHistory(terminalId, submission.text);
               if (
                 draft.revision === submission.revision &&
@@ -5933,6 +5990,43 @@
             row.append(cb, name, desc);
             keyPopoverBody.append(row);
           };
+
+          // Scope picker (ADR-0054): which terminals share one recall bucket.
+          const scopeRow = document.createElement("label");
+          scopeRow.className = "key-set-row";
+          const scopeName = document.createElement("span");
+          scopeName.className = "key-set-name";
+          scopeName.textContent = "History sharing";
+          const scopeSelect = document.createElement("select");
+          scopeSelect.className = "key-set-select";
+          scopeSelect.id = "composerHistoryScopeSelect";
+          scopeSelect.setAttribute("aria-label", "Composer history sharing scope");
+          for (const [value, label] of [
+            ["global", "All workspaces"],
+            ["workspace", "This workspace"],
+            ["pane", "This pane only"],
+          ]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = label;
+            scopeSelect.append(option);
+          }
+          scopeSelect.value = composerHistoryScope;
+          scopeSelect.addEventListener("click", (event) => event.stopPropagation());
+          scopeSelect.addEventListener("change", (event) => {
+            event.stopPropagation();
+            const next = COMPOSER_HISTORY_SCOPES.includes(scopeSelect.value)
+              ? scopeSelect.value
+              : DEFAULT_COMPOSER_HISTORY_SCOPE;
+            composerHistoryScope = next;
+            saveComposerHistoryScope(next);
+            // The visible bucket just changed; drop any open list so a stale
+            // highlight cannot commit an entry from the previous bucket.
+            resetComposerSuggestions();
+            renderComposerSuggestions();
+          });
+          scopeRow.append(scopeName, scopeSelect);
+          keyPopoverBody.append(scopeRow);
 
           makeToggle(
             "composerHistoryPopupToggle",

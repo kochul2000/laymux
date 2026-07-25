@@ -2,9 +2,10 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 
 use crate::constants::{
-    APP_THEME_IDS, CONTROL_BAR_MODES, NOTIFICATION_DISMISS_MODES, PASTE_PATH_SEPARATORS,
-    PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
-    PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_SCROLLBAR_STYLES, WORKSPACE_SORT_ORDERS,
+    APP_THEME_IDS, COMPOSER_HISTORY_SCOPES, CONTROL_BAR_MODES, NOTIFICATION_DISMISS_MODES,
+    PASTE_PATH_SEPARATORS, PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES,
+    PROFILE_CLOSE_ON_EXIT_VALUES, PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES,
+    TERMINAL_SCROLLBAR_STYLES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -30,6 +31,12 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
         "/terminal/scrollbarStyle",
         &settings.terminal.scrollbar_style,
         TERMINAL_SCROLLBAR_STYLES,
+    );
+    enum_value(
+        &mut issues,
+        "/terminal/composerHistoryScope",
+        &settings.terminal.composer_history_scope,
+        COMPOSER_HISTORY_SCOPES,
     );
     enum_value(
         &mut issues,

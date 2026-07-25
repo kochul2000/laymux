@@ -88,26 +88,93 @@ export function writeComposerHeight(px: number, storage?: InputModeStorage | nul
   }
 }
 
-const MAX_COMPOSER_HISTORY = 200;
-const runtimeHistory = new Map<string, string[]>();
+/**
+ * Which terminals share one Composer past-input history bucket ([ADR-0054](../../../docs/adr/0054-composer-history-scope-setting.md)).
+ * `global` = every terminal in the app, `workspace` = the terminals of one
+ * workspace, `pane` = that terminal alone (the pre-ADR-0054 behavior).
+ */
+export type ComposerHistoryScope = "global" | "workspace" | "pane";
 
-/** Runtime-only per-terminal history of texts sent from the Composer. */
-export function readComposerHistory(terminalId: string): string[] {
-  return runtimeHistory.get(terminalId) ?? [];
+export const COMPOSER_HISTORY_SCOPES: readonly ComposerHistoryScope[] = [
+  "global",
+  "workspace",
+  "pane",
+];
+
+export const DEFAULT_COMPOSER_HISTORY_SCOPE: ComposerHistoryScope = "global";
+
+export function isComposerHistoryScope(value: unknown): value is ComposerHistoryScope {
+  return COMPOSER_HISTORY_SCOPES.includes(value as ComposerHistoryScope);
+}
+
+declare const composerHistoryKeyBrand: unique symbol;
+
+/**
+ * Opaque bucket key. Branded so history reads and writes cannot pass a raw
+ * terminal id: every caller must go through `composerHistoryScopeKey`, which is
+ * the single derivation point ADR-0054 requires (a read and a write disagreeing
+ * on the key would silently split the history).
+ */
+export type ComposerHistoryKey = string & { readonly [composerHistoryKeyBrand]: true };
+
+export interface ComposerHistoryScopeTarget {
+  terminalId: string;
+  /** Only consulted for the `workspace` scope. */
+  workspaceId?: string | null;
 }
 
 /**
- * Appends a sent draft to the terminal's Composer history. Blank entries and
+ * Resolves the history bucket key for one terminal under the selected scope.
+ * A `workspace` scope with no resolvable workspace (dock / app-global terminals)
+ * falls back to that terminal's own bucket rather than the shared global one —
+ * unknown membership must never widen sharing (ADR-0054 fail-narrow rule).
+ */
+export function composerHistoryScopeKey(
+  scope: ComposerHistoryScope,
+  target: ComposerHistoryScopeTarget,
+): ComposerHistoryKey {
+  const paneKey = `pane:${target.terminalId}` as ComposerHistoryKey;
+  if (!isComposerHistoryScope(scope)) return paneKey;
+  if (scope === "global") return "global" as ComposerHistoryKey;
+  if (scope === "pane") return paneKey;
+  return target.workspaceId
+    ? (`ws:${target.workspaceId}` as ComposerHistoryKey)
+    : /* unresolvable workspace → stay pane-local */ paneKey;
+}
+
+const MAX_COMPOSER_HISTORY = 200;
+const runtimeHistory = new Map<string, string[]>();
+
+/**
+ * Runtime-only history of texts sent from the Composer, per scope bucket. The
+ * cap is per bucket regardless of scope, so a `global` bucket ages out faster
+ * than a per-pane one would.
+ */
+export function readComposerHistory(scopeKey: ComposerHistoryKey): string[] {
+  return runtimeHistory.get(scopeKey) ?? [];
+}
+
+/**
+ * Appends a sent draft to the scope's Composer history. Blank entries and
  * consecutive duplicates are ignored; the list is capped so it cannot grow
  * without bound.
  */
-export function pushComposerHistory(terminalId: string, text: string): void {
+export function pushComposerHistory(scopeKey: ComposerHistoryKey, text: string): void {
   if (!text) return;
-  const list = runtimeHistory.get(terminalId) ?? [];
+  const list = runtimeHistory.get(scopeKey) ?? [];
   if (list[list.length - 1] === text) return;
   list.push(text);
   if (list.length > MAX_COMPOSER_HISTORY) list.splice(0, list.length - MAX_COMPOSER_HISTORY);
-  runtimeHistory.set(terminalId, list);
+  runtimeHistory.set(scopeKey, list);
+}
+
+/**
+ * Drops a deleted workspace's shared bucket. Called from the workspace store —
+ * shared buckets outlive individual panes, so nothing else would collect them
+ * before the next WebView reload.
+ */
+export function clearComposerHistoryForWorkspace(workspaceId: string): void {
+  runtimeHistory.delete(composerHistoryScopeKey("workspace", { terminalId: "", workspaceId }));
 }
 
 /**
@@ -270,7 +337,11 @@ export function writeRuntimeInputMode(terminalId: string, mode: InputMode): Inpu
   return mode;
 }
 
-/** Test and explicit terminal-close hook; never called for a temporary unmount. */
+/**
+ * Test and explicit terminal-close hook; never called for a temporary unmount.
+ * Closing one terminal drops only its own pane bucket — a `workspace`/`global`
+ * bucket is shared, so clearing it here would wipe other panes' recall.
+ */
 export function clearRuntimeComposerState(terminalId?: string): void {
   if (terminalId === undefined) {
     const subscribedTerminalIds = [...runtimeDraftListeners.keys()];
@@ -284,7 +355,7 @@ export function clearRuntimeComposerState(terminalId?: string): void {
   }
   runtimeDrafts.delete(terminalId);
   runtimeModes.delete(terminalId);
-  runtimeHistory.delete(terminalId);
+  runtimeHistory.delete(composerHistoryScopeKey("pane", { terminalId }));
   notifyRuntimeComposerDraft(terminalId, createComposerDraftState());
 }
 

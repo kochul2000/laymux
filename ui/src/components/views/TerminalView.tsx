@@ -112,6 +112,8 @@ import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
 import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
 import {
   beginComposerSubmission,
+  composerHistoryScopeKey,
+  DEFAULT_COMPOSER_HISTORY_SCOPE,
   pushComposerHistory,
   readComposerHistory,
   readRuntimeComposerDraft,
@@ -579,6 +581,21 @@ export function TerminalView({
     writeDesktopInputModePreference(next);
   };
 
+  /**
+   * The one place a Composer history bucket key is derived on this surface
+   * (ADR-0054). Reads the scope non-reactively because write-path callers run
+   * outside render; the rendered list uses the reactive selector below and both
+   * end up in `composerHistoryScopeKey`.
+   */
+  const resolveComposerHistoryKey = (terminalId = instanceId) => {
+    const scope =
+      useSettingsStore.getState().terminal.composerHistoryScope ?? DEFAULT_COMPOSER_HISTORY_SCOPE;
+    return composerHistoryScopeKey(scope, {
+      terminalId,
+      workspaceId: scope === "workspace" ? resolveWorkspaceId(terminalId) : undefined,
+    });
+  };
+
   const submitComposerDraft = () => {
     if (!localControlAvailableRef.current || !outputProtocolReadyRef.current) return;
     const started = beginComposerSubmission(composerDraftRef.current, {
@@ -590,7 +607,10 @@ export function TerminalView({
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
-        pushComposerHistory(started.submission.terminalId, started.submission.text);
+        pushComposerHistory(
+          resolveComposerHistoryKey(started.submission.terminalId),
+          started.submission.text,
+        );
         storeComposerDraft(
           settleComposerSubmission(readRuntimeComposerDraft(started.submission.terminalId), {
             token: started.submission.token,
@@ -668,7 +688,7 @@ export function TerminalView({
    * from the editor. Always returns true so the caller consumes the key.
    */
   const navigateComposerHistory = (direction: "prev" | "next"): boolean => {
-    const history = readComposerHistory(instanceId);
+    const history = readComposerHistory(resolveComposerHistoryKey());
     const nav = historyNavRef.current;
     if (direction === "prev") {
       if (history.length === 0) return true;
@@ -3760,6 +3780,21 @@ export function TerminalView({
     (s) => s.terminal.composerHistoryPopup ?? true,
   );
 
+  // ADR-0054: which terminals share one past-input bucket. Reactive so switching
+  // the setting re-renders the list from the newly selected bucket.
+  const composerHistoryScope = useSettingsStore(
+    (s) => s.terminal.composerHistoryScope ?? DEFAULT_COMPOSER_HISTORY_SCOPE,
+  );
+  const composerHistoryKey = composerHistoryScopeKey(composerHistoryScope, {
+    terminalId: instanceId,
+    workspaceId: composerHistoryScope === "workspace" ? resolveWorkspaceId(instanceId) : undefined,
+  });
+  // Switching buckets invalidates an in-progress edge ↑/↓ walk (its index points
+  // into the old list). The popup/autocomplete reset lives in the composer.
+  useEffect(() => {
+    historyNavRef.current = { index: null, stash: "" };
+  }, [composerHistoryKey]);
+
   // Issue #505: as-you-type Composer autocomplete is opt-out (default on).
   const composerAutocompleteEnabled = useSettingsStore(
     (s) => s.terminal.composerAutocomplete ?? true,
@@ -3902,7 +3937,8 @@ export function TerminalView({
         atShellPrompt={atShellPrompt}
         historyPopupEnabled={composerHistoryPopupEnabled}
         autocompleteEnabled={composerAutocompleteEnabled}
-        history={readComposerHistory(instanceId)}
+        history={readComposerHistory(composerHistoryKey)}
+        historyScopeKey={composerHistoryKey}
         onTextChange={(text) => {
           // A user edit ends history navigation (recall goes through storeComposerDraft).
           historyNavRef.current.index = null;

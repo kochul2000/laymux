@@ -1,6 +1,6 @@
 # 0054. Composer 과거 입력 recall 범위는 전역·워크스페이스·페인 중 고르는 설정이다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
 - Source: 사용자 요구(과거 입력이 pane 별로 격리되어 다른 pane 에서 재사용 못함) · [ADR-0029](0029-detached-terminal-input-composer.md) · [ADR-0034](0034-single-send-terminal-composer.md) · [data-flow §8.8](../architecture/data-flow.md) · [api-contracts §13.4](../architecture/api-contracts.md)
 
