@@ -622,7 +622,7 @@ pub struct TerminalSettings {
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
     /// Composer: which terminals share one past-input history bucket —
-    /// "global" (default), "workspace", or "pane" (ADR-0054). The history text
+    /// "global" (default), "workspace", or "pane" (ADR-0055). The history text
     /// itself is never persisted; only this scope choice is.
     #[serde(default = "default_composer_history_scope")]
     pub composer_history_scope: String,

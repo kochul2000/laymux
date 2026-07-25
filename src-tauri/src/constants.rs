@@ -83,7 +83,7 @@ pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
 pub const SETTINGS_LANGUAGES: &[&str] = &["system", "ko", "en"];
 pub const APP_THEME_IDS: &[&str] = &["catppuccin-mocha", "dracula", "wsl-dark", "github-light"];
 pub const TERMINAL_SCROLLBAR_STYLES: &[&str] = &["overlay", "separate"];
-/// Composer past-input history sharing scope (ADR-0054).
+/// Composer past-input history sharing scope (ADR-0055).
 pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];

@@ -145,7 +145,7 @@ fn semantic_enum_and_range_errors_are_rejected() {
     for path in [
         "/language",
         "/terminal/scrollbarStyle",
-        // ADR-0054: an unknown sharing scope must be rejected, not silently
+        // ADR-0055: an unknown sharing scope must be rejected, not silently
         // widened to a shared bucket.
         "/terminal/composerHistoryScope",
         "/profileDefaults/opacity",
@@ -554,7 +554,7 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert!(!settings.terminal.composer_autocomplete);
     // Both composer recall toggles default on when omitted from the JSON above.
     assert!(settings.terminal.composer_history_popup);
-    // ADR-0054: history sharing defaults to the whole app when omitted.
+    // ADR-0055: history sharing defaults to the whole app when omitted.
     assert_eq!(settings.terminal.composer_history_scope, "global");
 
     let serialized = serde_json::to_value(settings).unwrap();

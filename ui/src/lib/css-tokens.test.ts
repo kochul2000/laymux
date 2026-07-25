@@ -133,18 +133,27 @@ describe("CSS utility classes — focus", () => {
 });
 
 describe("CSS utility classes — terminal IME composition", () => {
+  it("keeps the preview root transparent and paints only row fragments", () => {
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview\s*\{[^}]*background:\s*transparent;/s,
+    );
+    expect(cssContent).toMatch(
+      /\.terminal-composition-preview-row\s*\{[^}]*background:\s*var\(--terminal-background-color,\s*#0c0c0c\);/s,
+    );
+  });
+
   it("underlines the active composition preview", () => {
     expect(cssContent).toMatch(
-      /\.terminal-composition-preview\s*\{[^}]*text-decoration-line:\s*underline;/s,
+      /\.terminal-composition-preview-row\s*\{[^}]*text-decoration-line:\s*underline;/s,
     );
     expect(cssContent).toMatch(
-      /\.terminal-composition-preview\s*\{[^}]*text-decoration-color:\s*var\(--terminal-composition-underline-color\);/s,
+      /\.terminal-composition-preview-row\s*\{[^}]*text-decoration-color:\s*var\(--terminal-composition-underline-color\);/s,
     );
     expect(cssContent).toMatch(
-      /\.terminal-composition-preview\s*\{[^}]*text-decoration-thickness:\s*1px;/s,
+      /\.terminal-composition-preview-row\s*\{[^}]*text-decoration-thickness:\s*1px;/s,
     );
     expect(cssContent).toMatch(
-      /\.terminal-composition-preview\s*\{[^}]*text-underline-offset:\s*2px;/s,
+      /\.terminal-composition-preview-row\s*\{[^}]*text-underline-offset:\s*2px;/s,
     );
   });
 });

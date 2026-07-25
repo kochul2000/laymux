@@ -566,7 +566,7 @@ mod tests {
         assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
 
         // History is a RUNTIME-ONLY Map keyed by scope bucket (ADR-0029
-        // non-persistence boundary, ADR-0054 scope key). The sent text must never
+        // non-persistence boundary, ADR-0055 scope key). The sent text must never
         // reach any persistent store — this keeps passwords/secrets typed into a
         // shell from leaking through recall.
         assert!(html.contains("const composerHistoryByScopeKey = new Map();"));
@@ -576,7 +576,7 @@ mod tests {
         assert!(!html.contains("laymux.remote.composerHistory\""));
         assert!(!html.contains("JSON.stringify([...composerHistoryByScopeKey"));
 
-        // ADR-0054: one derivation point for the bucket key, and a "workspace"
+        // ADR-0055: one derivation point for the bucket key, and a "workspace"
         // scope with no resolvable workspace stays pane-local (fail-narrow).
         assert!(html.contains("function composerHistoryBucketKey(terminalId = activeTerminalId)"));
         assert!(html.contains("if (composerHistoryScope === \"global\") return \"global\";"));

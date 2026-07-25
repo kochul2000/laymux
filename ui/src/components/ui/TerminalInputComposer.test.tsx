@@ -343,7 +343,7 @@ describe("TerminalInputComposer", () => {
       expect(screen.queryByTestId("composer-history")).not.toBeInTheDocument();
     });
 
-    it("closes the popup when the history scope switches buckets (ADR-0054)", () => {
+    it("closes the popup when the history scope switches buckets (ADR-0055)", () => {
       const onTextChange = vi.fn();
       const { rerender } = render(
         <TerminalInputComposer

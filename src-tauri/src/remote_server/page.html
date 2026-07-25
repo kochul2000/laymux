@@ -1372,7 +1372,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      /* Scope picker in the "Composer recall" popover section (ADR-0054). */
+      /* Scope picker in the "Composer recall" popover section (ADR-0055). */
       .key-set-select {
         flex: 0 0 auto;
         max-width: 56%;
@@ -1708,7 +1708,7 @@
         // is kept in a runtime Map and never persisted (see composerHistory*).
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
-        // Which terminals share one recall bucket (ADR-0054). Only the scope
+        // Which terminals share one recall bucket (ADR-0055). Only the scope
         // choice is stored here; the recalled text stays in memory.
         const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
@@ -1810,7 +1810,7 @@
         let terminalReplayDepth = 0;
         const inputModeByTerminalId = new Map();
         const composerDraftByTerminalId = new Map();
-        // Sent-input recall history, keyed by scope bucket (ADR-0054:
+        // Sent-input recall history, keyed by scope bucket (ADR-0055:
         // "global" | "ws:{workspaceId}" | "pane:{terminalId}"), oldest→newest.
         // This holds the actual text the user submitted, so — like the composer
         // draft (ADR-0029) — it lives ONLY in this runtime Map and is never
@@ -2427,7 +2427,7 @@
           } catch (_) {}
         }
 
-        // Composer history sharing scope (ADR-0054). Same three values as the
+        // Composer history sharing scope (ADR-0055). Same three values as the
         // desktop setting; the scope CHOICE is configuration so it may live in
         // localStorage, while the recalled text never does. Remote has no way to
         // read the host settings.json, so this is surface-local by contract.
@@ -2448,7 +2448,7 @@
           } catch (_) {}
         }
 
-        // --- Runtime-only sent-input history (issues #504 / #505, ADR-0054) ---
+        // --- Runtime-only sent-input history (issues #504 / #505, ADR-0055) ---
         // readComposerHistory/pushComposerHistory only ever touch the in-memory
         // Map; there is deliberately no persistence path for this text.
         //
@@ -5991,7 +5991,7 @@
             keyPopoverBody.append(row);
           };
 
-          // Scope picker (ADR-0054): which terminals share one recall bucket.
+          // Scope picker (ADR-0055): which terminals share one recall bucket.
           const scopeRow = document.createElement("label");
           scopeRow.className = "key-set-row";
           const scopeName = document.createElement("span");

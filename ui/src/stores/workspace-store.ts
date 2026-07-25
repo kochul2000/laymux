@@ -221,7 +221,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     if (victim) {
       // 워크스페이스 단위 Composer history 버킷은 pane 보다 오래 살기 때문에
-      // 워크스페이스가 사라질 때 여기서 폐기한다(ADR-0054 수명 규칙).
+      // 워크스페이스가 사라질 때 여기서 폐기한다(ADR-0055 수명 규칙).
       clearComposerHistoryForWorkspace(id);
       const overrides = useOverridesStore.getState();
       const cwdPropagate = useCwdPropagateStore.getState();

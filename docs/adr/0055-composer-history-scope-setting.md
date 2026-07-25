@@ -1,4 +1,4 @@
-# 0054. Composer 과거 입력 recall 범위는 전역·워크스페이스·페인 중 고르는 설정이다
+# 0055. Composer 과거 입력 recall 범위는 전역·워크스페이스·페인 중 고르는 설정이다
 
 - Status: Accepted
 - Date: 2026-07-25

@@ -128,7 +128,7 @@ export interface TerminalSettings {
   showScrollToBottomButton: boolean;
   /**
    * Composer: which terminals share one past-input history bucket — `global`
-   * (whole app), `workspace`, or `pane` (ADR-0054).
+   * (whole app), `workspace`, or `pane` (ADR-0055).
    */
   composerHistoryScope: ComposerHistoryScope;
   /** Composer: Tab on an empty, focused draft opens a past-input recall popup (issue #504). */

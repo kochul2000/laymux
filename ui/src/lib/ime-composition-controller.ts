@@ -161,45 +161,95 @@ export function getCompositionPreviewLayout(
 ): {
   cursorX: number;
   cursorAbsY: number;
-  renderedText: string;
-  rowCount: number;
-  maxRowCellWidth: number;
+  rows: Array<{
+    text: string;
+    startColumn: number;
+    rowOffset: number;
+    cellWidth: number;
+  }>;
 } {
-  const previewCursor = getCompositionPreviewCursor(state, cols);
   if (cols <= 0 || !state.text) {
     return {
-      ...previewCursor,
-      renderedText: state.text,
-      rowCount: 1,
-      maxRowCellWidth: state.textCellWidth,
+      ...getCompositionPreviewCursor(state, cols),
+      rows: state.text
+        ? [
+            {
+              text: state.text,
+              startColumn: state.anchorBufferX,
+              rowOffset: 0,
+              cellWidth: state.textCellWidth,
+            },
+          ]
+        : [],
     };
   }
 
   const segments = splitCodePoints(state.text);
+  const rows: Array<{
+    text: string;
+    startColumn: number;
+    rowOffset: number;
+    cellWidth: number;
+  }> = [];
   let currentCol = state.anchorBufferX;
-  let maxRowCellWidth = 0;
-  let rowCount = 1;
-  let renderedText = "";
+  let currentRowOffset = 0;
+  let currentRowStartColumn = state.anchorBufferX;
+  let currentRowText = "";
   let currentRowWidth = 0;
+  let consumedCellWidth = 0;
+  let cursorX = state.anchorBufferX;
+  let cursorAbsY = state.anchorBufferAbsY;
+  let cursorResolved = state.caretCellOffset <= 0;
+
+  const flushRow = () => {
+    if (!currentRowText) return;
+    rows.push({
+      text: currentRowText,
+      startColumn: currentRowStartColumn,
+      rowOffset: currentRowOffset,
+      cellWidth: currentRowWidth,
+    });
+    currentRowText = "";
+    currentRowWidth = 0;
+  };
+
+  const resolveCursor = (segmentStartColumn: number, segmentWidth: number) => {
+    if (cursorResolved || state.caretCellOffset > consumedCellWidth + segmentWidth) return;
+
+    const cellOffsetInSegment = Math.max(0, state.caretCellOffset - consumedCellWidth);
+    const absoluteColumn = segmentStartColumn + cellOffsetInSegment;
+    cursorX = absoluteColumn % cols;
+    cursorAbsY = state.anchorBufferAbsY + currentRowOffset + Math.floor(absoluteColumn / cols);
+    cursorResolved = true;
+  };
 
   for (const { segment, width } of segments) {
     if (width > 0 && currentCol + width > cols) {
-      renderedText += "\n";
-      rowCount += 1;
+      flushRow();
+      currentRowOffset += 1;
       currentCol = 0;
-      currentRowWidth = 0;
+      currentRowStartColumn = 0;
     }
-    renderedText += segment;
+
+    const segmentStartColumn = currentCol;
+    currentRowText += segment;
+    resolveCursor(segmentStartColumn, width);
     currentCol += width;
     currentRowWidth += width;
-    maxRowCellWidth = Math.max(maxRowCellWidth, currentRowWidth);
+    consumedCellWidth += width;
+  }
+  flushRow();
+
+  if (!cursorResolved) {
+    const fallbackCursor = getCompositionPreviewCursor(state, cols);
+    cursorX = fallbackCursor.cursorX;
+    cursorAbsY = fallbackCursor.cursorAbsY;
   }
 
   return {
-    ...previewCursor,
-    renderedText,
-    rowCount,
-    maxRowCellWidth,
+    cursorX,
+    cursorAbsY,
+    rows,
   };
 }
 

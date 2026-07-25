@@ -63,7 +63,7 @@ describe("composer sent-history", () => {
   });
 });
 
-describe("composer history scope keys (ADR-0054)", () => {
+describe("composer history scope keys (ADR-0055)", () => {
   beforeEach(() => {
     clearRuntimeComposerState();
   });
@@ -615,7 +615,7 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
       composerHistoryPopup: false,
       composerAutocomplete: true,
       // The scope is a choice, not content — widening it must not pull any
-      // recalled text into the persisted snapshot either (ADR-0054).
+      // recalled text into the persisted snapshot either (ADR-0055).
       composerHistoryScope: "global",
     });
     for (const secret of SECRETS) pushComposerHistory(globalBucket(TERMINAL_ID), secret);

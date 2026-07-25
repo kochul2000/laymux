@@ -64,7 +64,7 @@ export interface TerminalInputComposerProps {
   /** Sent-input history for the active scope bucket, oldest→newest. Used by both recall paths. */
   history?: readonly string[];
   /**
-   * Identity of the bucket `history` came from (ADR-0054). A change means the
+   * Identity of the bucket `history` came from (ADR-0055). A change means the
    * user switched the history scope, so both open lists close instead of
    * indexing into entries that are no longer on screen.
    */
@@ -135,7 +135,7 @@ export function TerminalInputComposer({
       ? selectComposerHistoryEntries(history ?? [], maxHistoryItems)
       : [];
   // Both lists tag their open/highlight state with the bucket it was opened
-  // against (ADR-0054). A scope switch swaps `history` underneath us, so tying
+  // against (ADR-0055). A scope switch swaps `history` underneath us, so tying
   // the state to the bucket makes it close and reset by derivation — same
   // "no reconciling effect" approach as the empty-list case below.
   const historyBucket = historyScopeKey ?? null;

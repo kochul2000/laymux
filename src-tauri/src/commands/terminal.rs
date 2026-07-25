@@ -235,7 +235,7 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
-    let pty_handle = pty::spawn_pty(&session, move |data| {
+    let spawned_pty = pty::spawn_pty_with_metadata(&session, move |data| {
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
             tracing::info!(
@@ -726,6 +726,8 @@ pub fn create_terminal_session(
 
         let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
     })?;
+    session.initial_execution_host = spawned_pty.initial_execution_host;
+    let pty_handle = spawned_pty.handle;
 
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
@@ -754,7 +756,7 @@ pub fn create_terminal_session(
     }
 
     // Store session and PTY handle
-    let result = TerminalSession::new(
+    let mut result = TerminalSession::new(
         id.clone(),
         TerminalConfig {
             profile: session.config.profile.clone(),
@@ -768,6 +770,7 @@ pub fn create_terminal_session(
             advertise_true_color: session.config.advertise_true_color,
         },
     );
+    result.initial_execution_host = session.initial_execution_host;
 
     // Publish every id-keyed table and commit the output generation while the
     // terminal catalog lock excludes close/create for this id. In particular,
@@ -933,6 +936,42 @@ pub fn write_to_terminal(
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
     write_to_terminal_inner(&state, &id, data.as_bytes(), HumanControlOrigin::Local)
+}
+
+/// Write an xterm-generated terminal protocol reply to the PTY. Unlike human
+/// keyboard, paste, mouse, focus, and resize input, this is a response to live
+/// PTY output and must continue while a remote client owns human control.
+#[tauri::command]
+pub fn write_terminal_protocol_reply(
+    id: String,
+    data: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_terminal_protocol_reply_inner(&state, &id, data.as_bytes())
+}
+
+pub fn write_terminal_protocol_reply_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui-protocol->pty",
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data),
+            preview = %pty_trace::summarize_terminal_bytes(data),
+            "terminal protocol reply"
+        );
+    }
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    handle.write(data)
 }
 
 /// Shutdown-only Ctrl+C (issue #451). Writes ETX (0x03) straight onto the PTY
@@ -1629,6 +1668,30 @@ mod tests {
         assert_eq!(
             &*written.lock().unwrap(),
             b"local-rawlocal-input\rremote-rawremote-input\r"
+        );
+    }
+
+    #[test]
+    fn terminal_protocol_reply_bypasses_human_owner_without_becoming_human_input() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        set_test_remote_lease(&state, "lease-1");
+        let written = Arc::new(Mutex::new(Vec::new()));
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(SharedTestWriter(Arc::clone(&written)))),
+        );
+
+        assert!(
+            write_to_terminal_inner(&state, "t1", b"blocked-human", HumanControlOrigin::Local,)
+                .is_err()
+        );
+        write_terminal_protocol_reply_inner(&state, "t1", b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
+            .unwrap();
+
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
         );
     }
 

@@ -89,9 +89,9 @@ export function writeComposerHeight(px: number, storage?: InputModeStorage | nul
 }
 
 /**
- * Which terminals share one Composer past-input history bucket ([ADR-0054](../../../docs/adr/0054-composer-history-scope-setting.md)).
+ * Which terminals share one Composer past-input history bucket ([ADR-0055](../../../docs/adr/0055-composer-history-scope-setting.md)).
  * `global` = every terminal in the app, `workspace` = the terminals of one
- * workspace, `pane` = that terminal alone (the pre-ADR-0054 behavior).
+ * workspace, `pane` = that terminal alone (the pre-ADR-0055 behavior).
  */
 export type ComposerHistoryScope = "global" | "workspace" | "pane";
 
@@ -112,7 +112,7 @@ declare const composerHistoryKeyBrand: unique symbol;
 /**
  * Opaque bucket key. Branded so history reads and writes cannot pass a raw
  * terminal id: every caller must go through `composerHistoryScopeKey`, which is
- * the single derivation point ADR-0054 requires (a read and a write disagreeing
+ * the single derivation point ADR-0055 requires (a read and a write disagreeing
  * on the key would silently split the history).
  */
 export type ComposerHistoryKey = string & { readonly [composerHistoryKeyBrand]: true };
@@ -127,7 +127,7 @@ export interface ComposerHistoryScopeTarget {
  * Resolves the history bucket key for one terminal under the selected scope.
  * A `workspace` scope with no resolvable workspace (dock / app-global terminals)
  * falls back to that terminal's own bucket rather than the shared global one —
- * unknown membership must never widen sharing (ADR-0054 fail-narrow rule).
+ * unknown membership must never widen sharing (ADR-0055 fail-narrow rule).
  */
 export function composerHistoryScopeKey(
   scope: ComposerHistoryScope,

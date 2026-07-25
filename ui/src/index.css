@@ -588,15 +588,24 @@
   position: absolute;
   top: 0;
   left: 0;
-  white-space: pre;
   color: var(--terminal-foreground-color, #f0f0f0);
+  background: transparent;
+  will-change: transform;
+  z-index: 2;
+}
+
+.terminal-composition-preview-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: pre;
+  color: inherit;
   background: var(--terminal-background-color, #0c0c0c);
   text-decoration-line: underline;
   text-decoration-color: var(--terminal-composition-underline-color);
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
   will-change: transform;
-  z-index: 2;
 }
 
 .terminal-background-layer {
