@@ -149,14 +149,30 @@ export function getCompositionPreviewLayout(
     rowOffset: number;
     cellWidth: number;
   }> = [];
-  let currentCol = state.anchorBufferX;
-  let currentRowOffset = 0;
-  let currentRowStartColumn = state.anchorBufferX;
+  // Normalize an anchor column that is at or past the right edge before laying
+  // anything out (issue #551). Two ways it gets there, both legitimate:
+  //
+  //  - xterm's pending-wrap cursor. Fill a row to its last column and
+  //    `buffer.active.cursorX` stays at `cols` until the next write wraps it, so
+  //    the live anchor is reported as column 150 on a 150-column terminal.
+  //  - the carry-over anchor is derived as origin + committed width, which runs
+  //    past the edge while the echo of the wrapping syllable has not arrived.
+  //
+  // The caret path already normalized (`getCompositionPreviewCursor` uses
+  // `% cols` and `floor(/ cols)`); this loop did not. Its wrap branch only ever
+  // resets to column 0, so *every* out-of-range anchor rendered at column 0 of
+  // the next row: 150 landed correctly, 152 landed on top of it, and the second
+  // syllable of a chain crossing the boundary simply vanished under the first.
+  const anchorRowOffset = Math.floor(state.anchorBufferX / cols);
+  const anchorColumn = state.anchorBufferX % cols;
+  let currentCol = anchorColumn;
+  let currentRowOffset = anchorRowOffset;
+  let currentRowStartColumn = anchorColumn;
   let currentRowText = "";
   let currentRowWidth = 0;
   let consumedCellWidth = 0;
-  let cursorX = state.anchorBufferX;
-  let cursorAbsY = state.anchorBufferAbsY;
+  let cursorX = anchorColumn;
+  let cursorAbsY = state.anchorBufferAbsY + anchorRowOffset;
   let cursorResolved = state.caretCellOffset <= 0;
 
   const flushRow = () => {

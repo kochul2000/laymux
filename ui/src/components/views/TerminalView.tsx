@@ -1529,8 +1529,18 @@ export function TerminalView({
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
         if (compositionPreview.text) {
-          const anchorX = compositionPreview.anchorBufferX;
-          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+          // Same normalization the layout applies (issue #551): the anchor column
+          // can sit at or past the right edge — xterm's pending-wrap cursor reports
+          // `cursorX === cols`, and the carry-over anchor is derived as origin +
+          // committed width. Placing the container at the raw column would put it
+          // outside the terminal box and rely on the per-row translate to drag it
+          // back, which risks clipping; normalizing keeps container and rows in the
+          // same coordinate space that `row.startColumn - anchorX` assumes.
+          const anchorX = compositionPreview.anchorBufferX % term.cols;
+          const anchorY =
+            compositionPreview.anchorBufferAbsY +
+            Math.floor(compositionPreview.anchorBufferX / term.cols) -
+            baseY;
           const previewRows = previewLayout.rows;
           previewEl.style.opacity = "1";
           previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(

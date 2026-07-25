@@ -226,6 +226,71 @@ describe("getCompositionPreviewLayout", () => {
     });
   });
 
+  it("normalizes an anchor sitting exactly on the right edge", () => {
+    // xterm's pending-wrap cursor: fill a row to its last column and
+    // `buffer.active.cursorX` stays at `cols` until the next write wraps it, so the
+    // live anchor arrives as column 150 on a 150-column terminal (issue #551).
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 150,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 186,
+      rows: [{ text: "ㄱ", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("normalizes an anchor past the right edge instead of collapsing it to column 0", () => {
+    // The carry-over anchor is derived as chain origin + committed width, so it runs
+    // past the edge while the echo of the wrapping syllable has not arrived. The wrap
+    // branch used to reset to column 0 for *any* out-of-range anchor, so 150 and 152
+    // both landed at column 0 and the second syllable of a chain crossing the
+    // boundary rendered on top of the first — it looked like it never appeared.
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 152,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 4,
+      cursorAbsY: 186,
+      rows: [{ text: "ㄱ", startColumn: 2, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("normalizes an anchor more than one row past the right edge", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 304,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 6,
+      cursorAbsY: 187,
+      rows: [{ text: "ㄱ", startColumn: 4, rowOffset: 2, cellWidth: 2 }],
+    });
+  });
+
   it("sizes the preview to the active composition, not the prefix before it", () => {
     expect(
       getCompositionPreviewLayout(
