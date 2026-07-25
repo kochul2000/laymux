@@ -18,6 +18,10 @@ import {
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
 import type { PastePathSeparator } from "../lib/smart-text";
+import {
+  DEFAULT_COMPOSER_HISTORY_SCOPE,
+  type ComposerHistoryScope,
+} from "../lib/terminal-input-composer-state";
 import type { LanguageSetting } from "../i18n/resolve-language";
 
 /** Re-export so settings consumers can import the language type from one place. */
@@ -122,6 +126,11 @@ export interface TerminalSettings {
   pathLinkMaxLength: number;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
+  /**
+   * Composer: which terminals share one past-input history bucket — `global`
+   * (whole app), `workspace`, or `pane` (ADR-0055).
+   */
+  composerHistoryScope: ComposerHistoryScope;
   /** Composer: Tab on an empty, focused draft opens a past-input recall popup (issue #504). */
   composerHistoryPopup: boolean;
   /** Composer: suggest matching past inputs as an autocomplete dropdown while typing (issue #505). */
@@ -545,6 +554,7 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
   showScrollToBottomButton: true,
+  composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,
   composerAutocomplete: true,
 };

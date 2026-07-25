@@ -50,6 +50,7 @@ import { toSupportedCursorShape } from "@/lib/cursor-settings";
 import {
   readDesktopInputModePreference,
   writeDesktopInputModePreference,
+  type ComposerHistoryScope,
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
@@ -1526,6 +1527,24 @@ function TerminalSection() {
           checked={terminal.advertiseTrueColor}
           onChange={(v) => update({ advertiseTrueColor: v })}
         />
+
+        <SettingRow
+          label={t("terminal.composerHistoryScope")}
+          desc={t("terminal.composerHistoryScopeDesc")}
+        >
+          <FocusSelect
+            data-testid="composer-history-scope-select"
+            className={inputCls}
+            value={terminal.composerHistoryScope}
+            onChange={(e) =>
+              update({ composerHistoryScope: e.target.value as ComposerHistoryScope })
+            }
+          >
+            <option value="global">{t("terminal.composerHistoryScopeGlobal")}</option>
+            <option value="workspace">{t("terminal.composerHistoryScopeWorkspace")}</option>
+            <option value="pane">{t("terminal.composerHistoryScopePane")}</option>
+          </FocusSelect>
+        </SettingRow>
 
         <ToggleRow
           label={t("terminal.composerHistoryPopup")}

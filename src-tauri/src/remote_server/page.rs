@@ -565,15 +565,41 @@ mod tests {
         assert!(html.contains("if (!entry || entry === query || seen.has(entry)) continue;"));
         assert!(html.contains("if (!entry.toLowerCase().startsWith(needle)) continue;"));
 
-        // History is a RUNTIME-ONLY per-terminal Map (ADR-0029 non-persistence
-        // boundary). The sent text must never reach any persistent store — this
-        // keeps passwords/secrets typed into a shell from leaking through recall.
-        assert!(html.contains("const composerHistoryByTerminalId = new Map();"));
+        // History is a RUNTIME-ONLY Map keyed by scope bucket (ADR-0029
+        // non-persistence boundary, ADR-0055 scope key). The sent text must never
+        // reach any persistent store — this keeps passwords/secrets typed into a
+        // shell from leaking through recall.
+        assert!(html.contains("const composerHistoryByScopeKey = new Map();"));
         assert!(html.contains("function readComposerHistory(terminalId = activeTerminalId)"));
         assert!(html.contains("function pushComposerHistory(terminalId, text)"));
         assert!(html.contains("pushComposerHistory(terminalId, submission.text);"));
         assert!(!html.contains("laymux.remote.composerHistory\""));
-        assert!(!html.contains("JSON.stringify([...composerHistoryByTerminalId"));
+        assert!(!html.contains("JSON.stringify([...composerHistoryByScopeKey"));
+
+        // ADR-0055: one derivation point for the bucket key, and a "workspace"
+        // scope with no resolvable workspace stays pane-local (fail-narrow).
+        assert!(html.contains("function composerHistoryBucketKey(terminalId = activeTerminalId)"));
+        assert!(html.contains("if (composerHistoryScope === \"global\") return \"global\";"));
+        assert!(html.contains("if (workspaceId) return \"ws:\" + workspaceId;"));
+        assert!(html.contains("return \"pane:\" + terminalId;"));
+        let bucket_start = html
+            .find("function composerHistoryBucketKey")
+            .expect("bucket key helper must exist");
+        let read_start = html.find("function readComposerHistory").unwrap();
+        assert!(
+            bucket_start < read_start,
+            "reads must go through the bucket key helper"
+        );
+        // Only the scope CHOICE is persisted, and unknown values fall back.
+        assert!(html.contains("laymux.remote.composerHistoryScope"));
+        assert!(
+            html.contains("const COMPOSER_HISTORY_SCOPES = [\"global\", \"workspace\", \"pane\"];")
+        );
+        assert!(html.contains("const DEFAULT_COMPOSER_HISTORY_SCOPE = \"global\";"));
+        assert!(html.contains("let composerHistoryScope = loadComposerHistoryScope();"));
+        assert!(html.contains("function saveComposerHistoryScope(scope)"));
+        assert!(html.contains("\"composerHistoryScopeSelect\""));
+
         // The history read/write helpers touch no persistent storage at all.
         let history_region_start = html.find("function readComposerHistory").unwrap();
         let history_region_end = history_region_start
