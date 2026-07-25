@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LAYMUX_UNICODE_VERSION,
+  WIDE_RANGES,
   activateTerminalUnicodeProvider,
   codePointCellWidth,
   splitCellClusters,
@@ -22,6 +23,20 @@ const THUMBS_UP = "\u{1f44d}";
 const FAMILY = `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}`;
 const FLAG_KR = "\u{1f1f0}\u{1f1f7}";
 const FLAG_US = "\u{1f1fa}\u{1f1f8}";
+// Japanese combining marks and their bases, written as escapes on purpose. As
+// literal decomposed text a single NFC pass by an editor, a formatter or git's
+// `core.precomposeunicode` folds base+mark into one precomposed code point, and
+// these tests would keep passing while no longer testing the decomposed form.
+const VOICED = "\u3099"; // combining katakana-hiragana voiced (Mn)
+const SEMI_VOICED = "\u309a"; // combining katakana-hiragana semi-voiced (Mn)
+const SPACING_VOICED = "\u309b"; // spacing voiced mark (gc=Sk) - width 2 is right
+const TONE_MARK = "\u302a"; // ideographic level tone mark (Mn)
+const KA = "\u304b";
+const HA = "\u306f";
+const SA = "\u3055";
+const KI = "\u304d";
+const KATAKANA_KA = "\u30ab";
+const CJK_MIDDLE = "\u4e2d";
 
 function clusterSegments(text: string): string[] {
   return splitCellClusters(text).map((cluster) => cluster.segment);
@@ -53,6 +68,38 @@ describe("codePointCellWidth", () => {
     expect(codePointCellWidth(0x20e3)).toBe(0); // combining enclosing keycap
     expect(codePointCellWidth(0xe0065)).toBe(0); // tag latin small letter e
     expect(codePointCellWidth(0xe0100)).toBe(0); // variation selector supplement
+  });
+
+  it("treats combining marks that sit inside a wide range as zero cells", () => {
+    // These are `Mn` **and** inside `WIDE_RANGES`, so the order of the two checks
+    // decides the answer. U+3099/U+309A are the Japanese voiced/semi-voiced sound
+    // marks, i.e. ordinary NFD Japanese text.
+    expect(codePointCellWidth(0x302a)).toBe(0); // ideographic level tone mark
+    expect(codePointCellWidth(0x302b)).toBe(0);
+    expect(codePointCellWidth(0x302c)).toBe(0);
+    expect(codePointCellWidth(0x302d)).toBe(0);
+    expect(codePointCellWidth(0x3099)).toBe(0); // combining katakana-hiragana voiced
+    expect(codePointCellWidth(0x309a)).toBe(0); // combining katakana-hiragana semi-voiced
+    expect(codePointCellWidth(0x16fe4)).toBe(0); // Khitan small script filler
+  });
+
+  it("has no code point that is both wide and zero-width by category", () => {
+    // The regression this guards against was introduced by an unverified claim
+    // that the two sets are disjoint. They are not — so assert the real
+    // intersection instead of trusting a comment. Exhaustive over WIDE_RANGES
+    // (~170k code points), which is fast enough for a unit test.
+    const zeroWidthCategory = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
+    const offenders: string[] = [];
+    for (const [first, last] of WIDE_RANGES) {
+      for (let cp = first; cp <= last; cp += 1) {
+        if (!zeroWidthCategory.test(String.fromCodePoint(cp))) continue;
+        // A code point in both sets must resolve to 0, whatever the check order.
+        if (codePointCellWidth(cp) !== 0) {
+          offenders.push(`U+${cp.toString(16).toUpperCase()}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it("treats emoji and CJK extension planes as double width", () => {
@@ -123,6 +170,15 @@ describe("stringCellWidth", () => {
     expect(stringCellWidth(`\u{1f468}${SKIN_TONE}${ZWJ}\u{1f469}${SKIN_TONE}`)).toBe(2);
   });
 
+  it("counts NFD Japanese voiced syllables as one two-cell cluster", () => {
+    // が / ぱ in NFD: base kana + U+3099 / U+309A. The mark is Mn and sits inside
+    // a wide range, so a wide-first check makes each syllable 4 cells.
+    expect(stringCellWidth(`${KA}${VOICED}`)).toBe(2);
+    expect(stringCellWidth(`${HA}${SEMI_VOICED}`)).toBe(2);
+    expect(stringCellWidth(`${SA}${VOICED}${KI}${VOICED}`)).toBe(4);
+    expect(stringCellWidth(`${CJK_MIDDLE}${TONE_MARK}`)).toBe(2);
+  });
+
   it("counts a family ZWJ sequence as one two-cell cluster", () => {
     expect(stringCellWidth(FAMILY)).toBe(2);
   });
@@ -162,6 +218,11 @@ describe("splitCellClusters", () => {
   it("keeps a regional indicator pair in one cluster and starts a new pair after it", () => {
     expect(clusterSegments(`${FLAG_KR}${FLAG_US}`)).toEqual([FLAG_KR, FLAG_US]);
     expect(clusterWidths(`${FLAG_KR}${FLAG_US}`)).toEqual([2, 2]);
+  });
+
+  it("keeps an NFD Japanese voiced mark attached to its base kana", () => {
+    expect(clusterSegments(`${KA}${VOICED}x`)).toEqual([`${KA}${VOICED}`, "x"]);
+    expect(clusterWidths(`${KA}${VOICED}x`)).toEqual([2, 1]);
   });
 
   it("keeps a keycap sequence in one cluster", () => {
@@ -207,6 +268,41 @@ describe("splitCellClusters", () => {
   });
 });
 
+describe("real xterm buffer cursor", () => {
+  /**
+   * The layer the other tests do not reach. Everything above exercises our own
+   * `charProperties` chain and is self-consistent by construction; issue #544
+   * showed up as the **buffer cursor** advancing 4 cells for one NFD syllable,
+   * so assert that directly through the provider xterm actually reads.
+   */
+  async function writeAndMeasure(text: string): Promise<number> {
+    const terminal = new Terminal({ allowProposedApi: true, cols: 20, rows: 5 });
+    activateTerminalUnicodeProvider(terminal);
+    // `write` is async — reading the cursor before the callback yields 0.
+    await new Promise<void>((resolve) => terminal.write(text, () => resolve()));
+    const cursorX = terminal.buffer.active.cursorX;
+    terminal.dispose();
+    return cursorX;
+  }
+
+  it("advances two cells for an NFD hiragana syllable", async () => {
+    expect(await writeAndMeasure(`${KA}${VOICED}`)).toBe(2);
+  });
+
+  it("advances two cells for an NFD katakana syllable", async () => {
+    expect(await writeAndMeasure(`${KATAKANA_KA}${VOICED}`)).toBe(2);
+  });
+
+  it("advances two cells for the spacing voiced mark", async () => {
+    // Boundary pair with U+3099: U+309B is gc=Sk, not a combining mark, so two
+    // cells is the right answer and must not be swept up by the zero-width check.
+    expect(await writeAndMeasure(SPACING_VOICED)).toBe(2);
+  });
+
+  it("advances four cells for two NFD syllables", async () => {
+    expect(await writeAndMeasure(`${SA}${VOICED}${KI}${VOICED}`)).toBe(4);
+  });
+});
 describe("activateTerminalUnicodeProvider", () => {
   it("registers the shared provider and makes it the active version", () => {
     const registered: string[] = [];

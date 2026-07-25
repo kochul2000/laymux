@@ -377,7 +377,7 @@ IME composition preview 는 같은 모듈의 `stringCellWidth`(총 폭)와 `spli
 
 extender 승격·결합은 **앞 셀의 base 속성을 본다**. VS16 은 앞이 `\p{Emoji}` 일 때만 폭 2 로 승격하고(키캡 base 인 ASCII 숫자·`#`·`*` 가 여기 들어오므로 `\p{Extended_Pictographic}` 이 아니라 `\p{Emoji}` 다), 그 밖에서는 폭 0 selector 로 결합만 한다 — `a` + VS16 은 1 셀이다. 스킨톤 modifier 는 앞이 `\p{Emoji_Modifier_Base}` 일 때만 결합하고, 아니면 자기 몫 2 셀을 갖는 독립 클러스터가 된다(`a` + 스킨톤 = 3 셀). 이 판정에 필요한 앞 코드포인트 속성은 property value 의 state 필드 상위 비트로 실어 보낸다 — `charProperties` 는 앞 코드포인트 자체를 받지 않기 때문이다.
 
-grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 조회는 Unicode 전 범위를 덮는 lazy `Uint8Array` 캐시(엔트리당 폭 + emoji base 속성)로 상시 O(1) 을 유지한다. 캐시 상한을 SMP 아래로 두면 CJK 확장 B–D 가 캐시를 우회해 코드포인트마다 정규식을 돌게 된다.
+grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 조회는 Unicode 전 범위를 덮는 lazy `Uint8Array` 캐시(엔트리당 폭 + emoji base 속성)로 상시 O(1) 을 유지한다. 캐시 상한을 SMP 아래로 두면 CJK 확장 B–D 가 캐시를 우회해 코드포인트마다 정규식을 돌게 된다. 판정 순서는 **zero-width 카테고리 먼저, wide 나중**이어야 한다 — 두 집합은 서로소가 아니고 `U+302A`–`U+302D`·`U+3099`·`U+309A`·`U+16FE4` 7개가 `Mn` 이면서 wide 구간 안에 있다(`U+3099`/`U+309A` 는 NFD 일본어의 濁点/半濁点이다). wide 를 먼저 보면 이 7개가 폭 2 가 되고 `charProperties` 의 `width === 0` 결합 조건도 통과하지 못해 독립 클러스터가 된다. 순서를 바꿔 얻을 성능 이득은 없다 — `computeCacheEntry` 가 폭 0 이 아닌 엔트리마다 emoji property escape 2개를 무조건 돌아 wide 코드포인트는 어느 순서에서도 first touch 에 정규식을 내고, 전 범위 캐시가 코드포인트당 1회로 묶는다. 교차 집합은 unit test 가 전수 순회로 고정한다.
 
 Direct Remote Mode 의 브라우저 클라이언트는 커밋된 xterm 번들을 그대로 쓰고 이 provider 를 받지 않으므로 xterm 기본 Unicode 6 폭을 유지한다. remote 표면은 composition preview overlay 를 쓰지 않는다.
 
