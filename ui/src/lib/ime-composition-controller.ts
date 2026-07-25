@@ -1,3 +1,5 @@
+import { splitCellClusters, stringCellWidth } from "./terminal-unicode-width";
+
 export type CompositionPreviewState = {
   active: boolean;
   text: string;
@@ -29,56 +31,6 @@ function createEmptyState(): CompositionPreviewState {
     anchorBufferX: 0,
     anchorBufferAbsY: 0,
   };
-}
-
-function codePointWidth(codePoint: number): number {
-  if (
-    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
-    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
-    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
-    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
-    (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
-  ) {
-    return 0;
-  }
-  if (
-    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
-    (codePoint >= 0x2329 && codePoint <= 0x232a) ||
-    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
-    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-    (codePoint >= 0xff01 && codePoint <= 0xff60) ||
-    (codePoint >= 0xffe0 && codePoint <= 0xffe6) ||
-    (codePoint >= 0x1f300 && codePoint <= 0x1faf6) ||
-    (codePoint >= 0x20000 && codePoint <= 0x3fffd)
-  ) {
-    return 2;
-  }
-  return 1;
-}
-
-function splitCodePoints(text: string): { segment: string; width: number }[] {
-  const out: { segment: string; width: number }[] = [];
-  for (let i = 0; i < text.length; i += 1) {
-    const codePoint = text.codePointAt(i);
-    if (codePoint === undefined) continue;
-    const segment = String.fromCodePoint(codePoint);
-    out.push({ segment, width: codePointWidth(codePoint) });
-    if (codePoint > 0xffff) {
-      i += 1;
-    }
-  }
-  return out;
-}
-
-export function stringCellWidth(text: string): number {
-  let width = 0;
-  for (const item of splitCodePoints(text)) {
-    width += item.width;
-  }
-  return width;
 }
 
 /**
@@ -184,7 +136,11 @@ export function getCompositionPreviewLayout(
     };
   }
 
-  const segments = splitCodePoints(state.text);
+  // Grapheme clusters, not code points: a ZWJ sequence, variation selector or
+  // combining mark must never be cut across a row boundary, and the wrap test
+  // below has to see the cluster's final cell width so it agrees with the width
+  // xterm's buffer will claim for the same text.
+  const clusters = splitCellClusters(state.text);
   const rows: Array<{
     text: string;
     startColumn: number;
@@ -213,17 +169,17 @@ export function getCompositionPreviewLayout(
     currentRowWidth = 0;
   };
 
-  const resolveCursor = (segmentStartColumn: number, segmentWidth: number) => {
-    if (cursorResolved || state.caretCellOffset > consumedCellWidth + segmentWidth) return;
+  const resolveCursor = (clusterStartColumn: number, clusterWidth: number) => {
+    if (cursorResolved || state.caretCellOffset > consumedCellWidth + clusterWidth) return;
 
-    const cellOffsetInSegment = Math.max(0, state.caretCellOffset - consumedCellWidth);
-    const absoluteColumn = segmentStartColumn + cellOffsetInSegment;
+    const cellOffsetInCluster = Math.max(0, state.caretCellOffset - consumedCellWidth);
+    const absoluteColumn = clusterStartColumn + cellOffsetInCluster;
     cursorX = absoluteColumn % cols;
     cursorAbsY = state.anchorBufferAbsY + currentRowOffset + Math.floor(absoluteColumn / cols);
     cursorResolved = true;
   };
 
-  for (const { segment, width } of segments) {
+  for (const { segment, width } of clusters) {
     if (width > 0 && currentCol + width > cols) {
       flushRow();
       currentRowOffset += 1;
@@ -231,9 +187,9 @@ export function getCompositionPreviewLayout(
       currentRowStartColumn = 0;
     }
 
-    const segmentStartColumn = currentCol;
+    const clusterStartColumn = currentCol;
     currentRowText += segment;
-    resolveCursor(segmentStartColumn, width);
+    resolveCursor(clusterStartColumn, width);
     currentCol += width;
     currentRowWidth += width;
     consumedCellWidth += width;

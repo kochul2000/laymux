@@ -59,6 +59,7 @@ import {
   resolveVisualCaretOwner,
   type CompositionPreviewState,
 } from "@/lib/ime-composition-controller";
+import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
 import {
   createTerminalFocusOwnership,
@@ -980,6 +981,13 @@ export function TerminalView({
         },
       },
     });
+
+    // Cell-width contract first: every pane must lay out its buffer with the
+    // same Unicode/grapheme widths the IME composition preview measures with.
+    // Activating here — before terminal.open(), any PTY write and any session
+    // restore write — means no row is ever printed with xterm's default
+    // Unicode 6 widths and then measured with this provider's.
+    activateTerminalUnicodeProvider(terminal);
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon((_event, uri) => {
