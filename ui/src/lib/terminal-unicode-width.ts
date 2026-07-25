@@ -58,12 +58,29 @@ export function extractClusterState(properties: number): number {
   return properties >> 3;
 }
 
-/** Cluster continuation states carried in the property value's state field. */
+/**
+ * Cluster continuation states carried in the low bits of the state field.
+ * Read them through `CLUSTER_CONTINUATION_MASK` — the state field also carries
+ * base-property flags in higher bits.
+ */
 const CLUSTER_STATE_NONE = 0;
 /** The previous code point was a ZWJ, so the next one continues the cluster. */
 const CLUSTER_STATE_AFTER_ZWJ = 1;
 /** An unpaired regional indicator is open; the next one completes the flag. */
 const CLUSTER_STATE_OPEN_REGIONAL_INDICATOR = 2;
+const CLUSTER_CONTINUATION_MASK = 0x3;
+
+/**
+ * Base-property flags describing the cluster's current attachment point, so the
+ * next code point can tell whether it may extend it. `charProperties` only
+ * receives the previous *property value*, never the previous code point, so the
+ * properties an extender has to check must travel inside the state field.
+ */
+/** The attachment point is an emoji, so a following VS16 selects emoji presentation. */
+const CLUSTER_FLAG_EMOJI_BASE = 0x4;
+/** The attachment point accepts a skin tone modifier. */
+const CLUSTER_FLAG_EMOJI_MODIFIER_BASE = 0x8;
+const CLUSTER_FLAG_MASK = CLUSTER_FLAG_EMOJI_BASE | CLUSTER_FLAG_EMOJI_MODIFIER_BASE;
 
 // ---------------------------------------------------------------------------
 // wcwidth
@@ -213,12 +230,28 @@ const CONJOINING_JAMO_LAST = 0x11ff;
 const ZERO_WIDTH_CATEGORY = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
 
 /**
- * Lazy per-code-point width cache. `charProperties` runs for every printed code
- * point, so the property-escape test must not be on the hot path. Values are
- * `width + 1`; 0 means "not computed yet".
+ * Emoji base properties, needed to decide whether an extender may promote or
+ * attach at all. `\p{Emoji}` (not `\p{Extended_Pictographic}`) is the VS16 gate
+ * because keycap bases are ASCII digits/`#`/`*` — emoji, but not pictographic.
  */
-const CACHE_LIMIT = 0x20000;
-const widthCache = new Uint8Array(CACHE_LIMIT);
+const EMOJI_CATEGORY = /^\p{Emoji}$/u;
+const EMOJI_MODIFIER_BASE_CATEGORY = /^\p{Emoji_Modifier_Base}$/u;
+
+/**
+ * Lazy per-code-point property cache covering the whole Unicode range, so the
+ * property-escape tests never run twice for a code point. `charProperties` runs
+ * for every printed code point, and the supplementary planes carry both hot
+ * content (CJK extension B–D) and emoji bases, so a cache that stops below
+ * U+20000 would leave regex work on the hot path for exactly those.
+ *
+ * Layout per entry: bits 0-1 = `width + 1` (0 means "not computed yet"),
+ * bit 2 = `\p{Emoji}`, bit 3 = `\p{Emoji_Modifier_Base}`.
+ */
+const CACHE_LIMIT = 0x110000;
+const CACHE_WIDTH_MASK = 0x3;
+const CACHE_FLAG_EMOJI = 0x4;
+const CACHE_FLAG_EMOJI_MODIFIER_BASE = 0x8;
+const propertyCache = new Uint8Array(CACHE_LIMIT);
 
 function isWideCodePoint(codePoint: number): boolean {
   let low = 0;
@@ -245,20 +278,38 @@ function computeCodePointCellWidth(codePoint: number): 0 | 1 | 2 {
   if (codePoint < 0x20) return 0;
   if (codePoint < 0x7f) return 1;
   if (codePoint < 0xa0) return 0;
-  if (isZeroWidthCodePoint(codePoint)) return 0;
+  // Wide first: the wide ranges and the zero-width categories are disjoint, and
+  // checking the binary search first keeps the property-escape test off the
+  // first-touch path for the CJK extension planes.
   if (isWideCodePoint(codePoint)) return 2;
+  if (isZeroWidthCodePoint(codePoint)) return 0;
   return 1;
+}
+
+function computeCacheEntry(codePoint: number): number {
+  let entry = computeCodePointCellWidth(codePoint) + 1;
+  // Only code points that can print can serve as a cluster attachment point,
+  // and the emoji properties are only ever read for such a base.
+  if (entry > 1) {
+    const char = String.fromCodePoint(codePoint);
+    if (EMOJI_CATEGORY.test(char)) entry |= CACHE_FLAG_EMOJI;
+    if (EMOJI_MODIFIER_BASE_CATEGORY.test(char)) entry |= CACHE_FLAG_EMOJI_MODIFIER_BASE;
+  }
+  return entry;
+}
+
+function cacheEntry(codePoint: number): number {
+  const cached = propertyCache[codePoint];
+  if (cached !== 0) return cached;
+  const entry = computeCacheEntry(codePoint);
+  propertyCache[codePoint] = entry;
+  return entry;
 }
 
 /** Cells one code point occupies, ignoring cluster context. */
 export function codePointCellWidth(codePoint: number): 0 | 1 | 2 {
-  if (codePoint < 0 || codePoint > 0x10ffff) return 1;
-  if (codePoint >= CACHE_LIMIT) return computeCodePointCellWidth(codePoint);
-  const cached = widthCache[codePoint];
-  if (cached !== 0) return (cached - 1) as 0 | 1 | 2;
-  const width = computeCodePointCellWidth(codePoint);
-  widthCache[codePoint] = width + 1;
-  return width;
+  if (codePoint < 0 || codePoint >= CACHE_LIMIT) return 1;
+  return ((cacheEntry(codePoint) & CACHE_WIDTH_MASK) - 1) as 0 | 1 | 2;
 }
 
 function isRegionalIndicator(codePoint: number): boolean {
@@ -267,6 +318,19 @@ function isRegionalIndicator(codePoint: number): boolean {
 
 function isEmojiModifier(codePoint: number): boolean {
   return codePoint >= EMOJI_MODIFIER_FIRST && codePoint <= EMOJI_MODIFIER_LAST;
+}
+
+/**
+ * Base flags to hand the next code point, describing what this one accepts as an
+ * extender. Out-of-range code points report nothing, matching their width 1.
+ */
+function baseFlagsFor(codePoint: number): number {
+  if (codePoint < 0 || codePoint >= CACHE_LIMIT) return 0;
+  const entry = cacheEntry(codePoint);
+  let flags = 0;
+  if ((entry & CACHE_FLAG_EMOJI) !== 0) flags |= CLUSTER_FLAG_EMOJI_BASE;
+  if ((entry & CACHE_FLAG_EMOJI_MODIFIER_BASE) !== 0) flags |= CLUSTER_FLAG_EMOJI_MODIFIER_BASE;
+  return flags;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,6 +351,8 @@ export function charProperties(codePoint: number, preceding: number): number {
   const width = codePointCellWidth(codePoint);
   const precedingWidth = extractCellWidth(preceding);
   const precedingState = extractClusterState(preceding);
+  const precedingContinuation = precedingState & CLUSTER_CONTINUATION_MASK;
+  const precedingFlags = precedingState & CLUSTER_FLAG_MASK;
   // A preceding cell can only absorb a continuation if it actually occupies
   // cells; a zero-width run start has nothing to attach to.
   const canJoin = preceding !== 0 && precedingWidth > 0;
@@ -299,15 +365,20 @@ export function charProperties(codePoint: number, preceding: number): number {
   }
 
   // Whatever follows a joining ZWJ belongs to the same cluster, however wide it
-  // would be on its own (family/profession emoji).
-  if (precedingState === CLUSTER_STATE_AFTER_ZWJ && canJoin) {
-    return createCharProperties(CLUSTER_STATE_NONE, Math.max(precedingWidth, width), true);
+  // would be on its own (family/profession emoji). It becomes the new attachment
+  // point, so a skin tone modifier can still follow each member of the sequence.
+  if (precedingContinuation === CLUSTER_STATE_AFTER_ZWJ && canJoin) {
+    return createCharProperties(
+      CLUSTER_STATE_NONE | baseFlagsFor(codePoint),
+      Math.max(precedingWidth, width),
+      true,
+    );
   }
 
   // Regional indicators pair up into one flag cell pair; a third one opens a
   // new pair instead of extending the previous flag.
   if (isRegionalIndicator(codePoint)) {
-    if (precedingState === CLUSTER_STATE_OPEN_REGIONAL_INDICATOR && canJoin) {
+    if (precedingContinuation === CLUSTER_STATE_OPEN_REGIONAL_INDICATOR && canJoin) {
       return createCharProperties(
         CLUSTER_STATE_NONE,
         Math.max(precedingWidth, EMOJI_PRESENTATION_WIDTH),
@@ -317,19 +388,36 @@ export function charProperties(codePoint: number, preceding: number): number {
     return createCharProperties(CLUSTER_STATE_OPEN_REGIONAL_INDICATOR, width, false);
   }
 
-  // Cluster extenders: combining marks, variation selectors, keycap enclosures,
-  // tag sequences (all zero width) and skin tone modifiers (wide on their own,
-  // but never a cell of their own).
-  if (canJoin && (width === 0 || isEmojiModifier(codePoint))) {
-    const promotesToEmojiPresentation =
-      codePoint === VARIATION_SELECTOR_EMOJI || isEmojiModifier(codePoint);
-    const clusterWidth = promotesToEmojiPresentation
-      ? Math.max(precedingWidth, EMOJI_PRESENTATION_WIDTH)
-      : Math.max(precedingWidth, width);
-    return createCharProperties(CLUSTER_STATE_NONE, clusterWidth, true);
+  // Skin tone modifiers extend an Emoji_Modifier_Base and nothing else. After a
+  // base that cannot take one (`a\u{1f3fb}`) the modifier is its own two-cell
+  // cluster, which is what a font draws — a standalone swatch.
+  if (isEmojiModifier(codePoint)) {
+    if (canJoin && (precedingFlags & CLUSTER_FLAG_EMOJI_MODIFIER_BASE) !== 0) {
+      return createCharProperties(
+        CLUSTER_STATE_NONE | precedingFlags,
+        Math.max(precedingWidth, EMOJI_PRESENTATION_WIDTH),
+        true,
+      );
+    }
+    return createCharProperties(CLUSTER_STATE_NONE | baseFlagsFor(codePoint), width, false);
   }
 
-  return createCharProperties(CLUSTER_STATE_NONE, width, false);
+  // Zero-width extenders: combining marks, variation selectors, keycap
+  // enclosures and tag sequences. They keep the cluster's attachment point, so
+  // `1️⃣` still knows the keycap encloses an emoji base.
+  if (canJoin && width === 0) {
+    // VS16 only selects emoji presentation for a base that has an emoji form.
+    // After a non-emoji base (`a️`) it is an inert zero-width selector, and
+    // widening that cell to two would leave a blank column the font never fills.
+    const promotesToEmojiPresentation =
+      codePoint === VARIATION_SELECTOR_EMOJI && (precedingFlags & CLUSTER_FLAG_EMOJI_BASE) !== 0;
+    const clusterWidth = promotesToEmojiPresentation
+      ? Math.max(precedingWidth, EMOJI_PRESENTATION_WIDTH)
+      : precedingWidth;
+    return createCharProperties(CLUSTER_STATE_NONE | precedingFlags, clusterWidth, true);
+  }
+
+  return createCharProperties(CLUSTER_STATE_NONE | baseFlagsFor(codePoint), width, false);
 }
 
 /** The provider both xterm and the composition preview read widths from. */

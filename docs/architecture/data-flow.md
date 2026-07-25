@@ -373,7 +373,11 @@ pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFoc
 
 IME composition preview 는 같은 모듈의 `stringCellWidth`(총 폭)와 `splitCellClusters`(클러스터+폭)만 사용한다. `getCompositionPreviewLayout` 은 코드포인트가 아니라 이 클러스터를 분할 단위로 삼으므로 ZWJ sequence·variation selector·combining mark·skin tone modifier·regional indicator pair 가 행 경계에서 쪼개지지 않고, 남은 셀보다 넓은 클러스터는 통째로 다음 행으로 내려간다. 정확히 줄을 채운 폭 2 문자는 같은 행에 남고 caret 만 다음 행 0열로 정규화하는 기존 규칙은 유지한다.
 
-폭 규칙: Unicode 11 기준 East Asian Wide/Fullwidth = 2, `\p{Mn}`/`\p{Me}`/`\p{Cf}` 와 conjoining Hangul jamo(`U+1160`–`U+11FF`) = 0, ambiguous = 1. `emoji + VS16` 은 클러스터 폭 2 로 승격하고 VS15 는 승격하지 않는다. grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 폭 조회는 lazy `Uint8Array` 캐시로 O(1) 을 유지한다.
+폭 규칙: Unicode 11 기준 East Asian Wide/Fullwidth = 2, `\p{Mn}`/`\p{Me}`/`\p{Cf}` 와 conjoining Hangul jamo(`U+1160`–`U+11FF`) = 0, ambiguous = 1. `emoji + VS16` 은 클러스터 폭 2 로 승격하고 VS15 는 승격하지 않는다.
+
+extender 승격·결합은 **앞 셀의 base 속성을 본다**. VS16 은 앞이 `\p{Emoji}` 일 때만 폭 2 로 승격하고(키캡 base 인 ASCII 숫자·`#`·`*` 가 여기 들어오므로 `\p{Extended_Pictographic}` 이 아니라 `\p{Emoji}` 다), 그 밖에서는 폭 0 selector 로 결합만 한다 — `a` + VS16 은 1 셀이다. 스킨톤 modifier 는 앞이 `\p{Emoji_Modifier_Base}` 일 때만 결합하고, 아니면 자기 몫 2 셀을 갖는 독립 클러스터가 된다(`a` + 스킨톤 = 3 셀). 이 판정에 필요한 앞 코드포인트 속성은 property value 의 state 필드 상위 비트로 실어 보낸다 — `charProperties` 는 앞 코드포인트 자체를 받지 않기 때문이다.
+
+grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 조회는 Unicode 전 범위를 덮는 lazy `Uint8Array` 캐시(엔트리당 폭 + emoji base 속성)로 상시 O(1) 을 유지한다. 캐시 상한을 SMP 아래로 두면 CJK 확장 B–D 가 캐시를 우회해 코드포인트마다 정규식을 돌게 된다.
 
 Direct Remote Mode 의 브라우저 클라이언트는 커밋된 xterm 번들을 그대로 쓰고 이 provider 를 받지 않으므로 xterm 기본 Unicode 6 폭을 유지한다. remote 표면은 composition preview overlay 를 쓰지 않는다.
 

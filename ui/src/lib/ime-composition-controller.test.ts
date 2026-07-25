@@ -142,21 +142,6 @@ describe("resolveVisualCaretOwner", () => {
   });
 });
 
-describe("stringCellWidth (shared width contract)", () => {
-  it("counts ASCII as width 1", () => {
-    expect(stringCellWidth("abc")).toBe(3);
-  });
-
-  it("counts Hangul syllables as width 2", () => {
-    expect(stringCellWidth("한")).toBe(2);
-    expect(stringCellWidth("한글")).toBe(4);
-  });
-
-  it("ignores combining marks for caret width", () => {
-    expect(stringCellWidth("e\u0301")).toBe(1);
-  });
-});
-
 describe("getCompositionPreviewCursor", () => {
   it("advances on the same row when the preview stays within the line", () => {
     expect(

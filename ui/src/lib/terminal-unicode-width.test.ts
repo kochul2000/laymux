@@ -60,6 +60,19 @@ describe("codePointCellWidth", () => {
     expect(codePointCellWidth(0x1f3fb)).toBe(2); // skin tone modifier
     expect(codePointCellWidth(0x20000)).toBe(2); // CJK extension B
   });
+
+  it("resolves supplementary planes above the former cache ceiling", () => {
+    // These used to bypass the cache entirely and re-run a property escape on
+    // every call. Correctness must hold on the first and on a repeated lookup.
+    for (const codePoint of [0x2fffd, 0x30000, 0x3fffd]) {
+      expect(codePointCellWidth(codePoint)).toBe(2);
+      expect(codePointCellWidth(codePoint)).toBe(2);
+    }
+    for (const codePoint of [0xe0065, 0xe01ef]) {
+      expect(codePointCellWidth(codePoint)).toBe(0);
+      expect(codePointCellWidth(codePoint)).toBe(0);
+    }
+  });
 });
 
 describe("stringCellWidth", () => {
@@ -89,6 +102,25 @@ describe("stringCellWidth", () => {
 
   it("counts a skin tone modifier as part of its base emoji", () => {
     expect(stringCellWidth(`${THUMBS_UP}${SKIN_TONE}`)).toBe(2);
+  });
+
+  it("leaves a non-emoji base at its own width when VS16 follows it", () => {
+    // VS16 has no emoji presentation to select after a plain letter, so the cell
+    // must not widen to two — the font would leave the second column blank.
+    expect(stringCellWidth(`a${VS16}`)).toBe(1);
+    expect(stringCellWidth(`한${VS16}`)).toBe(2);
+    expect(stringCellWidth(`a${VS16}b`)).toBe(2);
+  });
+
+  it("keeps a skin tone modifier separate from a base that cannot take one", () => {
+    // Emoji_Modifier only extends an Emoji_Modifier_Base; anywhere else it is a
+    // standalone swatch and owns its own two cells.
+    expect(stringCellWidth(`a${SKIN_TONE}`)).toBe(3);
+    expect(stringCellWidth(`${HEART}${SKIN_TONE}`)).toBe(3);
+  });
+
+  it("lets each member of a ZWJ sequence take its own skin tone", () => {
+    expect(stringCellWidth(`\u{1f468}${SKIN_TONE}${ZWJ}\u{1f469}${SKIN_TONE}`)).toBe(2);
   });
 
   it("counts a family ZWJ sequence as one two-cell cluster", () => {
@@ -137,6 +169,16 @@ describe("splitCellClusters", () => {
     expect(clusterWidths(`1${VS16}${KEYCAP}`)).toEqual([2]);
   });
 
+  it("keeps an inert VS16 attached without widening a non-emoji base", () => {
+    expect(clusterSegments(`a${VS16}b`)).toEqual([`a${VS16}`, "b"]);
+    expect(clusterWidths(`a${VS16}b`)).toEqual([1, 1]);
+  });
+
+  it("splits a skin tone modifier off a base that cannot take one", () => {
+    expect(clusterSegments(`a${SKIN_TONE}b`)).toEqual(["a", SKIN_TONE, "b"]);
+    expect(clusterWidths(`a${SKIN_TONE}b`)).toEqual([1, 2, 1]);
+  });
+
   it("keeps Hangul syllables as separate two-cell clusters", () => {
     expect(clusterSegments("한글")).toEqual(["한", "글"]);
     expect(clusterWidths("한글")).toEqual([2, 2]);
@@ -152,6 +194,9 @@ describe("splitCellClusters", () => {
       FLAG_KR,
       `e${ACCENT}`,
       `1${VS16}${KEYCAP}`,
+      `a${VS16}b`,
+      `a${SKIN_TONE}b`,
+      `\u{1f468}${SKIN_TONE}${ZWJ}\u{1f469}${SKIN_TONE}`,
     ];
     for (const sample of samples) {
       expect(clusterSegments(sample).join("")).toBe(sample);
