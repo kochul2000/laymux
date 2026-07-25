@@ -61,6 +61,10 @@ import {
 } from "@/lib/ime-composition-controller";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
 import {
+  createTerminalFocusOwnership,
+  type TerminalFocusOwnership,
+} from "@/lib/terminal-focus-ownership";
+import {
   applyActivityLeftTuiToShadowCursor,
   applyDec2026ResetToShadowCursor,
   applyDec2026SetToShadowCursor,
@@ -791,6 +795,10 @@ export function TerminalView({
   // pr-link-provider 는 provideLinks 안에서 이 ref 를 **동기로만** 읽는다
   // (invoke 는 async 이므로 provider 안에서 호출 금지).
   const repoBaseRef = useRef<string | null>(null);
+  // Issue #530: 앱 blur 시 실제 DOM focus 를 갖고 있던 helper textarea 의
+  // identity 를 기억해, 앱 복귀 다음 프레임에 focus 가 여전히 body/null 일 때만
+  // 같은 helper 로 복원한다. 메인 effect 가 생성하고 isFocused effect 도 참조한다.
+  const focusOwnershipRef = useRef<TerminalFocusOwnership | null>(null);
   // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
   // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
   const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkController> | null>(null);
@@ -1864,6 +1872,33 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
     const scrollDisposable = terminal.onScroll?.(refreshViewportPresentation);
+    // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
+    // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
+    // 어떤 effect 도 재실행되지 않는다 → 복귀 후 첫 키/첫 IME 조합이 유실된다.
+    // pane focus 를 DOM focus 와 동일시하지 않고, blur 시점에 이 pane 의 helper
+    // 가 정말 focus 를 갖고 있었을 때만 identity 를 기억해 복귀 다음 프레임에
+    // 복원한다. 복귀 사이 다른 UI(모달·검색·설정·다른 pane)가 focus 를 얻으면
+    // 절대 빼앗지 않는다 (ADR-0057).
+    const focusOwnership = createTerminalFocusOwnership({
+      getContainer: () => wrapperRef.current,
+      onTrace: (event, payload) => trace(event, payload),
+    });
+    focusOwnershipRef.current = focusOwnership;
+    const handleAppBlurForFocusOwnership = () => {
+      focusOwnership.captureOnAppBlur();
+    };
+    const handleAppFocusForFocusOwnership = () => {
+      focusOwnership.reclaimOnAppFocus();
+    };
+    // 재활성화 클릭이 다른 UI 로 향했을 때(포커스를 가져가지 않는 요소여도)
+    // 예약된 복원이 터미널로 focus 를 끌어오지 않게 소유권을 즉시 버린다.
+    const handlePointerDownForFocusOwnership = (event: PointerEvent) => {
+      focusOwnership.releaseForPointerTarget(event.target);
+    };
+    window.addEventListener("blur", handleAppBlurForFocusOwnership);
+    window.addEventListener("focus", handleAppFocusForFocusOwnership);
+    window.addEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
+
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
@@ -1871,6 +1906,8 @@ export function TerminalView({
       if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
       helperTextarea = nextHelperTextarea;
       compositionController.bind(helperTextarea);
+      // xterm 이 helper 를 교체하면 이전 helper 의 focus 소유권 기록은 stale 이다.
+      focusOwnership.notifyHelperBound(helperTextarea);
       scheduleOverlayCaretUpdate();
     };
 
@@ -3563,6 +3600,14 @@ export function TerminalView({
       }
       xtermUserInputOriginDisposable?.dispose();
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
+      window.removeEventListener("blur", handleAppBlurForFocusOwnership);
+      window.removeEventListener("focus", handleAppFocusForFocusOwnership);
+      window.removeEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
+      // unmount 후 stale helper 로 focus 를 되돌리지 않도록 소유권을 버린다.
+      focusOwnership.dispose();
+      if (focusOwnershipRef.current === focusOwnership) {
+        focusOwnershipRef.current = null;
+      }
       compositionController.dispose();
       wrapperEl?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
@@ -3640,6 +3685,10 @@ export function TerminalView({
 
   // Focus/blur terminal when pane focus state changes (only if terminal is opened)
   useEffect(() => {
+    // Issue #530: pane focus 가 다른 pane/워크스페이스로 넘어가면(앱이 비활성인
+    // 동안 automation 이 바꾼 경우 포함) 기억해 둔 helper 소유권은 stale 이다.
+    // 복귀 시 이 pane 이 focus 를 되찾아오지 않도록 즉시 버린다.
+    if (!isFocused) focusOwnershipRef.current?.clear("pane-unfocused");
     if (openedRef.current) {
       if (isFocused) {
         terminalRef.current?.focus();

@@ -356,6 +356,16 @@ terminal output의 생성·attach·retire는 id-only table 조합이 아니라 g
 
 human-control permit은 등록 시점의 owner epoch·absolute deadline·operation id와 pre-enqueue/enqueued phase를 가진다. 같은 terminal의 PTY enqueue는 permit 등록 순서를 따르므로, 먼저 등록된 structured input이 protocol mode를 캡처하는 동안 뒤의 raw Enter·Ctrl+C·soft key·resize가 FIFO를 앞지를 수 없다. Structured input이 protocol gate를 기다리는 동안 owner 전환이 시작되면 아직 물리 큐에 들어가지 않은 permit을 취소·분리해 transition barrier가 protocol lock 소유자를 기다리지 않는다. PTY enqueue는 owner gate에서 phase 전환과 함께 직렬화하여 transition이 pre-enqueue 취소와 queued cancellation 중 하나를 반드시 선택한다. 이미 queued/running인 작업은 terminal별 bounded FIFO worker가 owner token을 각 physical operation 전후에 확인하고, 취소가 grace를 넘기면 PTY를 input-fault 격리한 뒤 worker completion을 owner barrier에 quarantine한다. reclaim·release·access disable·sticky lease expiry는 epoch을 먼저 올리고 이 acknowledgement가 drain된 뒤에만 lease를 제거해 Local owner를 공개한다.
 
+### 8.9 앱 blur/focus 왕복의 helper textarea focus 소유권 (issue #530)
+
+pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFocused` **변화**에만 `terminal.focus()`/`blur()` 를 호출한다. 앱이 Alt-Tab 으로 비활성화되면 WebView 가 xterm helper textarea 의 실제 DOM focus 를 `body`/`null` 로 떨어뜨릴 수 있는데, store 값은 그대로이므로 복귀 시 어떤 effect 도 재실행되지 않아 첫 키/첫 한글 조합이 유실된다. 이를 pane-local focus 소유권 기록으로 좁혀 복구한다([ADR-0057](../adr/0057-terminal-helper-focus-ownership.md)).
+
+- 판정 로직은 `ui/src/lib/terminal-focus-ownership.ts` 의 `createTerminalFocusOwnership` 이 전부 소유한다(DOM 이벤트 등록 없음, 순수 컨트롤러). `TerminalView` 는 window `blur`/`focus`/capture `pointerdown` 배선과 helper 재바인딩·pane focus 해제 통지만 담당하며, IME 조합 컨트롤러(`ime-composition-controller.ts`)는 focus 소유권을 알지 않는다.
+- **기록(window blur)**: `document.activeElement` 가 helper textarea 이고 그 helper 가 이 pane 의 surface(`wrapperRef`) 안에 있을 때만 identity 를 기억한다. store 의 pane focus 만으로는 기록하지 않으므로 composer 모드(focus 가 composer textarea)는 이 경로가 no-op 다.
+- **복원(window focus)**: focus 시점에 다른 요소가 focus 를 쥐고 있으면 기록을 버리고 아무것도 하지 않는다. 주인 없는 상태(`null`/`body`/`documentElement`)면 다음 프레임에 재확인 후 `helper.focus()` 를 한 번 호출하고 기록을 소비한다. 프레임 사이에 모달·검색창·설정 입력·다른 pane helper 가 focus 를 얻었으면 복원을 취소한다 — 앱 활성화 시 전역 `terminal.focus()` 는 어디에서도 호출하지 않는다.
+- **stale 정리**: helper 미연결/surface 밖, xterm 의 helper 교체(`bindHelperTextareaEvents`), pane focus 해제(다른 pane·워크스페이스 전환·앱 비활성 중 automation 변경), surface 밖 pointer press(재활성화 클릭의 handoff), unmount(dispose) 중 하나라도 발생하면 기록을 버리고 되살리지 않는다. 멀티-pane 에서는 각 pane 이 자기 helper 만 복원하므로 DOM 순서상 첫 helper 로 잘못 돌아가지 않는다.
+- **진단**: `focus-ownership-captured`/`-reclaim-scheduled`/`-reclaimed`/`-reclaim-declined`/`-cleared` 이벤트를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 `activeElement` 문자열과 함께 남긴다. headful Alt-Tab 왕복은 이 trace 로 확인한다.
+
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)
