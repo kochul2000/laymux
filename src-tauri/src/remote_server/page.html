@@ -1638,6 +1638,10 @@
       </footer>
     </div>
     <script src="/remote/vendor/xterm.js"></script>
+    <!-- Shared cell-width provider (issue #538). Generated from
+         ui/src/lib/terminal-unicode-width.ts so the remote client wraps at the
+         same columns as the desktop instead of xterm default Unicode 6 widths. -->
+    <script src="/remote/vendor/unicode-provider.js"></script>
     <script src="/remote/vendor/addon-fit.js"></script>
     <script src="/remote/vendor/addon-web-links.js"></script>
     <script>
@@ -3644,6 +3648,19 @@
           }
           applyTerminalSurfaceBackground(appearance);
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
+          // Register the shared width provider before any write so no row is ever
+          // laid out with xterm default Unicode 6 widths and then measured with
+          // these (ADR-0058, issue #538). Degrade rather than break if the asset
+          // is unavailable: the terminal stays usable on xterm own widths.
+          const unicodeProvider = window.LaymuxUnicodeProvider;
+          if (unicodeProvider && terminal.unicode) {
+            try {
+              terminal.unicode.register(unicodeProvider);
+              terminal.unicode.activeVersion = unicodeProvider.version;
+            } catch (_) {
+              /* older or minimal xterm surface: keep default widths */
+            }
+          }
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           // Keep the terminal usable if this non-core asset is unavailable;

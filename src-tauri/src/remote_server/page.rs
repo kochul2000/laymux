@@ -93,6 +93,11 @@ mod tests {
         assert!(html.contains("Laymux Remote"));
         assert!(html.contains("/remote/vendor/xterm.js"));
         assert!(html.contains("/remote/vendor/addon-web-links.js"));
+        // Without the provider script the remote client silently falls back to
+        // xterm default Unicode 6 widths and wraps at different columns than the
+        // desktop for emoji and 89 BMP code points (issue #538).
+        assert!(html.contains("/remote/vendor/unicode-provider.js"));
+        assert!(html.contains("window.LaymuxUnicodeProvider"));
         assert!(html.contains("/remote/v1/session/claim"));
         assert!(html.contains("/remote/v1/navigation"));
         assert!(html.contains("/remote/v1/workspaces/active"));

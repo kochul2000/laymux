@@ -14,7 +14,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "build:remote-provider": "vite build --config vite.remote-provider.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",

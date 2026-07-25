@@ -383,7 +383,11 @@ extender 승격·결합은 **앞 셀의 base 속성을 본다**. VS16 은 앞이
 
 grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 조회는 Unicode 전 범위를 덮는 lazy `Uint8Array` 캐시(엔트리당 폭 + emoji base 속성)로 상시 O(1) 을 유지한다. 캐시 상한을 SMP 아래로 두면 CJK 확장 B–D 가 캐시를 우회해 코드포인트마다 정규식을 돌게 된다. 판정 순서는 **zero-width 카테고리 먼저, wide 나중**이어야 한다 — 두 집합은 서로소가 아니고 `U+302A`–`U+302D`·`U+3099`·`U+309A`·`U+16FE4` 7개가 `Mn` 이면서 wide 구간 안에 있다(`U+3099`/`U+309A` 는 NFD 일본어의 濁点/半濁点이다). wide 를 먼저 보면 이 7개가 폭 2 가 되고 `charProperties` 의 `width === 0` 결합 조건도 통과하지 못해 독립 클러스터가 된다. 순서를 바꿔 얻을 성능 이득은 없다 — `computeCacheEntry` 가 폭 0 이 아닌 엔트리마다 emoji property escape 2개를 무조건 돌아 wide 코드포인트는 어느 순서에서도 first touch 에 정규식을 내고, 전 범위 캐시가 코드포인트당 1회로 묶는다. 교차 집합은 unit test 가 전수 순회로 고정한다.
 
-Direct Remote Mode 의 브라우저 클라이언트는 커밋된 xterm 번들을 그대로 쓰고 이 provider 를 받지 않으므로 xterm 기본 Unicode 6 폭을 유지한다. remote 표면은 composition preview overlay 를 쓰지 않는다.
+Direct Remote Mode 의 브라우저 클라이언트도 **같은 provider 를 받는다**(issue #538). 브라우저는 TypeScript 를 import 할 수 없고 Rust 서버는 asset 을 `include_str!` 로 임베드하므로, `ui/src/remote/unicode-provider-entry.ts` 를 `npm run build:remote-provider` 로 빌드해 `src-tauri/src/remote_server/assets/unicode-provider.js` 로 커밋하고 `/remote/vendor/unicode-provider.js` 로 서빙한다. `page.html` 은 xterm 다음에 이 스크립트를 로드하고 `ensureTerminal` 에서 **첫 write 보다 앞에** `unicode.register` + `activeVersion` 을 세팅한다. asset 이 없으면 xterm 기본 폭으로 degrade 하되 터미널은 계속 쓸 수 있다.
+
+폭 테이블을 `page.html` 에 복제하지 않는다 — 그러면 ADR-0058 이 없애려던 이중 진실원이 되살아난다. 생성 asset 은 커밋되므로 소스만 고치고 재빌드하지 않으면 조용히 갈릴 수 있어, `remote-unicode-provider.test.ts` 가 **커밋된 asset 을 실행해** TS 소스와 폭·`charProperties` 결과를 비교한다(바이트 비교가 아니라 동작 비교라 번들러 상향에 깨지지 않는다). 수정 전 실측 불일치는 BMP 89개(Unicode 9+ 기호 + `U+A960`–`U+A97C` Hangul Jamo Extended-A)와 보조 평면 emoji 사실상 전부였다.
+
+remote 표면은 composition preview overlay 를 쓰지 않는다.
 
 회귀 테스트는 `terminal-unicode-width.test.ts`(폭·클러스터 경계, provider 등록)와 `ime-composition-controller.test.ts`(실제 `Terminal` 에 같은 텍스트를 write 해 buffer 커서와 preview layout 을 직접 비교), `TerminalView.test.tsx`(open/write 앞 활성화 순서)로 나눠 고정한다.
 
