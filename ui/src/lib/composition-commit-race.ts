@@ -61,14 +61,16 @@ export function resolvePendingCommitText(state: PendingCommitState): string {
 /**
  * True when a `keypress` would re-send text the pending commit already carries.
  *
- * Three shapes count, all of which the upstream reports describe:
- * - **identical** — the keypress carries exactly the committed text (the common
+ * Two shapes count:
+ * - **identical** the keypress carries exactly the committed text (the common
  *   single-syllable case).
- * - **contained** — the committed text contains the keypress character, which is
- *   what happens when several syllables commit at once and the IME still emits a
- *   keypress for the last one.
- * - **boundary overlap** — the committed text ends with the keypress character.
- *   Called out separately because it is the case a naive `===` check misses.
+ * - **trailing overlap** the committed text *ends with* the keypress character,
+ *   which happens when several syllables commit at once and the IME still emits a
+ *   keypress for the last one. A naive equality check misses this.
+ *
+ * Deliberately **not** a substring test. A character sitting in the middle of the
+ * commit is one the user typed separately; suppressing it would be the loss this
+ * module exists to avoid.
  *
  * Everything else is delivered. In particular an empty pending commit never
  * suppresses anything: with nothing to duplicate, suppressing would be pure loss.
@@ -79,7 +81,11 @@ export function isDuplicateOfPendingCommit(
 ): boolean {
   if (!pendingCommitText || !keypressText) return false;
   if (pendingCommitText === keypressText) return true;
-  return pendingCommitText.includes(keypressText);
+  // `endsWith`, not `includes`: the commit only re-sends the keypress character
+  // when that character is what the commit *ends* with. `includes` would also
+  // match a character sitting mid-commit, which is a character the user typed
+  // separately — suppressing that is the loss this module exists to avoid.
+  return pendingCommitText.endsWith(keypressText);
 }
 
 /** The character a `keypress` event would send, or `""` when it sends nothing. */
@@ -112,10 +118,17 @@ const DELIVER = (reason: string): CommitRaceDecision => ({ suppress: false, reas
  */
 export function decideCommitRace(input: {
   pending: boolean;
+  /** xterm's `_isComposing` at keypress time. */
+  composing: boolean;
   state: PendingCommitState | null;
   keypress: { key?: string; charCode?: number };
 }): CommitRaceDecision {
   if (!input.pending) return DELIVER("no-pending-commit");
+  // A new composition has already started, so the finalizer will send a
+  // **bounded** slice (`substring(start, _compositionPosition.start)`) whose
+  // upper bound cannot be known here. Judging against the unbounded slice would
+  // compare with text that never gets sent — exactly the "빠른 조합 전환" case.
+  if (input.composing) return DELIVER("new-composition-started");
   if (!input.state) return DELIVER("pending-state-unavailable");
 
   const text = keypressText(input.keypress);

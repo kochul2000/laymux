@@ -71,7 +71,7 @@ import {
   type AnchorCell,
 } from "@/lib/ime-anchor";
 import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
-import { readPendingCompositionSend } from "@/lib/xterm-pending-composition";
+import { readCompositionStart, readPendingCompositionSend } from "@/lib/xterm-pending-composition";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
   createTerminalFocusOwnership,
@@ -1298,12 +1298,24 @@ export function TerminalView({
       });
     };
     const handleBlurForCandidate = () => linuxImeCandidateGuard.reset("helper-blur");
+    // finalizer 가 클로저로 캡처하는 값과 같은 시점에 스냅샷한다(issue #527).
+    // keypress 시점에 라이브로 읽으면, 새 조합이 시작된 뒤에는
+    // compositionstart 가 이 필드를 textarea.value.length 로 덮어써 틀린 값이 된다.
+    let capturedCompositionStart: number | null = null;
+    const handleCompositionEndForCommitRace = () => {
+      capturedCompositionStart = readCompositionStart(terminal);
+    };
+    const handleCompositionStartForCommitRace = () => {
+      capturedCompositionStart = null;
+    };
     // 조합 lifecycle 은 xterm 의 CompositionHelper 가 계속 소유한다. 여기서는
     // 관찰만 하고 조합 문자열·commit 경로는 건드리지 않는다.
     const attachCandidateGuardListeners = (target: HTMLTextAreaElement) => {
       target.addEventListener("compositionstart", handleCompositionStartForCandidate);
       target.addEventListener("compositionupdate", handleCompositionUpdateForCandidate);
       target.addEventListener("compositionend", handleCompositionEndForCandidate);
+      target.addEventListener("compositionstart", handleCompositionStartForCommitRace);
+      target.addEventListener("compositionend", handleCompositionEndForCommitRace);
       target.addEventListener("input", handleInputForCandidate);
       target.addEventListener("blur", handleBlurForCandidate);
     };
@@ -1311,6 +1323,8 @@ export function TerminalView({
       target.removeEventListener("compositionstart", handleCompositionStartForCandidate);
       target.removeEventListener("compositionupdate", handleCompositionUpdateForCandidate);
       target.removeEventListener("compositionend", handleCompositionEndForCandidate);
+      target.removeEventListener("compositionstart", handleCompositionStartForCommitRace);
+      target.removeEventListener("compositionend", handleCompositionEndForCommitRace);
       target.removeEventListener("input", handleInputForCandidate);
       target.removeEventListener("blur", handleBlurForCandidate);
     };
@@ -2178,12 +2192,27 @@ export function TerminalView({
       // 전달해서 사용자가 그 사이에 새로 누른 문자를 삼키지 않는다 (ADR-0062).
       if (e.type === "keypress") {
         const pendingSend = readPendingCompositionSend(terminal);
+        const live = pendingSend?.live ?? null;
         const raceDecision = decideCommitRace({
           pending: !!pendingSend?.pending,
-          state: pendingSend?.state ?? null,
+          composing: !!pendingSend?.composing,
+          // `compositionStart` 는 compositionend 시점 스냅샷을 쓴다 — finalizer 가
+          // 클로저로 캡처한 값과 같은 시점이다. keypress 시점의 라이브 필드는
+          // 새 조합이 시작되면 이미 덮어써져 있다.
+          state:
+            live && capturedCompositionStart !== null
+              ? { ...live, compositionStart: capturedCompositionStart }
+              : null,
           keypress: e,
         });
         if (raceDecision.suppress) {
+          // preventDefault 가 필수다. xterm 의 `_keyPress` 는 커스텀 핸들러가
+          // false 면 즉시 return 해 `cancel(e)` 에 도달하지 않고, `cancel` 자체도
+          // 기본 옵션(`cancelEvents: false`)에서 no-op 이다. 취소하지 않으면
+          // 브라우저가 그 문자를 helper textarea 에 삽입하고, xterm 은
+          // compositionend 후 textarea 를 비우지 않으므로 deferred finalizer 의
+          // slice 가 "가가" 를 읽어 중복이 그대로 남는다.
+          e.preventDefault();
           trace("composition-commit-race-suppressed", { reason: raceDecision.reason });
           return false;
         }

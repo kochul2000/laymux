@@ -9,6 +9,7 @@ import {
 } from "./composition-commit-race";
 import {
   XTERM_PENDING_COMPOSITION_FIELDS,
+  readCompositionStart,
   readPendingCompositionSend,
 } from "./xterm-pending-composition";
 
@@ -70,8 +71,11 @@ describe("isDuplicateOfPendingCommit", () => {
     expect(isDuplicateOfPendingCommit("가", "가")).toBe(true);
   });
 
-  it("treats a contained character as a duplicate", () => {
-    expect(isDuplicateOfPendingCommit("안녕하", "녕")).toBe(true);
+  it("does not treat a mid-commit character as a duplicate", () => {
+    // Narrower than a substring test on purpose: a character in the middle of the
+    // commit is one the user typed separately, so suppressing it would be loss.
+    expect(isDuplicateOfPendingCommit("안녕하", "녕")).toBe(false);
+    expect(isDuplicateOfPendingCommit("가나", "가")).toBe(false);
   });
 
   it("treats a boundary overlap at the end as a duplicate", () => {
@@ -124,21 +128,27 @@ describe("decideCommitRace", () => {
 
   it("delivers when no commit is pending", () => {
     // The guard must be invisible to ordinary typing.
-    expect(decideCommitRace({ pending: false, state, keypress: { key: "가" } })).toMatchObject({
+    expect(
+      decideCommitRace({ pending: false, composing: false, state, keypress: { key: "가" } }),
+    ).toMatchObject({
       suppress: false,
       reason: "no-pending-commit",
     });
   });
 
   it("suppresses the duplicate while a commit is pending", () => {
-    expect(decideCommitRace({ pending: true, state, keypress: { key: "가" } })).toMatchObject({
+    expect(
+      decideCommitRace({ pending: true, composing: false, state, keypress: { key: "가" } }),
+    ).toMatchObject({
       suppress: true,
       reason: "duplicate-of-pending-commit",
     });
   });
 
   it("delivers a character the user typed during the pending window", () => {
-    expect(decideCommitRace({ pending: true, state, keypress: { key: "a" } })).toMatchObject({
+    expect(
+      decideCommitRace({ pending: true, composing: false, state, keypress: { key: "a" } }),
+    ).toMatchObject({
       suppress: false,
       reason: "not-in-pending-commit",
     });
@@ -146,16 +156,26 @@ describe("decideCommitRace", () => {
 
   it("delivers when the pending state could not be read", () => {
     // Better a possible duplicate than swallowing input on an unknown xterm shape.
-    expect(decideCommitRace({ pending: true, state: null, keypress: { key: "가" } })).toMatchObject(
-      {
-        suppress: false,
-        reason: "pending-state-unavailable",
-      },
-    );
+    expect(
+      decideCommitRace({ pending: true, composing: false, state: null, keypress: { key: "가" } }),
+    ).toMatchObject({
+      suppress: false,
+      reason: "pending-state-unavailable",
+    });
+  });
+
+  it("delivers once a new composition has started", () => {
+    // The finalizer then sends a bounded slice whose upper bound is unknowable
+    // here — the "빠른 조합 전환" case.
+    expect(
+      decideCommitRace({ pending: true, composing: true, state, keypress: { key: "가" } }),
+    ).toMatchObject({ suppress: false, reason: "new-composition-started" });
   });
 
   it("delivers a keypress that carries no text", () => {
-    expect(decideCommitRace({ pending: true, state, keypress: { key: "Enter" } })).toMatchObject({
+    expect(
+      decideCommitRace({ pending: true, composing: false, state, keypress: { key: "Enter" } }),
+    ).toMatchObject({
       suppress: false,
       reason: "keypress-sends-no-text",
     });
@@ -260,17 +280,16 @@ describe("xterm pending-composition contract", () => {
     const pending = readPendingCompositionSend(terminal);
     expect(pending).not.toBeNull();
     expect(pending!.pending).toBe(true);
-    expect(pending!.state).toEqual({
-      textareaValue: "가",
-      compositionStart: 0,
-      dataAlreadySentLength: 0,
-    });
+    expect(pending!.composing).toBe(false);
+    expect(pending!.live).toEqual({ textareaValue: "가", dataAlreadySentLength: 0 });
+    expect(readCompositionStart(terminal)).toBe(0);
   });
 
   it("names the fields it depends on so a break is readable", () => {
     expect(XTERM_PENDING_COMPOSITION_FIELDS).toEqual([
       "_compositionHelper",
       "_isSendingComposition",
+      "_isComposing",
       "_compositionPosition",
       "_dataAlreadySent",
       "_textarea",
@@ -292,22 +311,39 @@ describe("xterm pending-composition contract", () => {
 
 describe("the guard removes the duplicate without losing input", () => {
   /** Apply the guard the way `TerminalView` does. */
-  function attachGuard(terminal: Terminal) {
+  function attachGuard(terminal: Terminal, helper: HTMLTextAreaElement) {
+    // Snapshot at compositionend, exactly as TerminalView does — the finalizer
+    // closes over this value and compositionstart overwrites the live field.
+    let capturedStart: number | null = null;
+    helper.addEventListener("compositionstart", () => {
+      capturedStart = null;
+    });
+    helper.addEventListener("compositionend", () => {
+      capturedStart = readCompositionStart(terminal);
+    });
     terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== "keypress") return true;
       const pending = readPendingCompositionSend(terminal);
+      const live = pending?.live ?? null;
       const decision = decideCommitRace({
         pending: !!pending?.pending,
-        state: pending?.state ?? null,
+        composing: !!pending?.composing,
+        state: live && capturedStart !== null ? { ...live, compositionStart: capturedStart } : null,
         keypress: event,
       });
-      return !decision.suppress;
+      if (decision.suppress) {
+        // Without this the browser inserts the character into the textarea and
+        // the finalizer slice re-sends it — the whole point of the guard.
+        event.preventDefault();
+        return false;
+      }
+      return true;
     });
   }
 
   it("sends the committed syllable once when a duplicate keypress races", async () => {
     const { terminal, helper } = mountTerminal();
-    attachGuard(terminal);
+    attachGuard(terminal, helper);
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
 
@@ -320,7 +356,7 @@ describe("the guard removes the duplicate without losing input", () => {
 
   it("still delivers a different character typed during the pending window", async () => {
     const { terminal, helper } = mountTerminal();
-    attachGuard(terminal);
+    attachGuard(terminal, helper);
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
 
@@ -333,9 +369,41 @@ describe("the guard removes the duplicate without losing input", () => {
     expect(data).toContain("a");
   });
 
+  it("keeps the commit slice clean when the keypress would insert into the textarea", async () => {
+    // The path a synthetic KeyboardEvent cannot produce: a real browser inserts
+    // the character, so without preventDefault the finalizer slice becomes "가가"
+    // and re-sends the duplicate as one longer event.
+    const { terminal, helper } = mountTerminal();
+    attachGuard(terminal, helper);
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    composeAndCommit(helper);
+    const press = racingKeypress("가");
+    helper.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    await flushFinalizer();
+
+    expect(data).toEqual(["가"]);
+  });
+
+  it("shows the duplicate returning if the insertion is not prevented", async () => {
+    // Guard-free baseline for the same path.
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    composeAndCommit(helper);
+    helper.dispatchEvent(racingKeypress("가"));
+    helper.value = "가가";
+    await flushFinalizer();
+
+    expect(data).toEqual(["가", "가가"]);
+  });
+
   it("leaves ordinary typing untouched", async () => {
     const { terminal, helper } = mountTerminal();
-    attachGuard(terminal);
+    attachGuard(terminal, helper);
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
 
@@ -349,7 +417,7 @@ describe("the guard removes the duplicate without losing input", () => {
 
   it("repeats cleanly across consecutive compositions", async () => {
     const { terminal, helper } = mountTerminal();
-    attachGuard(terminal);
+    attachGuard(terminal, helper);
     const data: string[] = [];
     terminal.onData((d) => data.push(d));
 
