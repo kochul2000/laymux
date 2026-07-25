@@ -2865,6 +2865,191 @@ describe("TerminalView", () => {
     expect(mockBlur).toHaveBeenCalled();
   });
 
+  // -- issue #530: helper textarea focus ownership across app blur/focus --
+
+  /**
+   * Mount a focused pane and attach a live helper textarea inside the pane
+   * surface (the xterm mock never builds real DOM), then hand DOM focus to it.
+   * The helper is attached before the ResizeObserver tick so the mount effect
+   * adopts it (composition binding) exactly like the real xterm helper.
+   */
+  async function mountPaneWithFocusedHelper(instanceId: string) {
+    const view = render(
+      <TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" isFocused />,
+    );
+    const host = screen.getByTestId(`terminal-xterm-host-${instanceId}`);
+    const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(helper);
+    host.appendChild(terminal.element);
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    helper.focus();
+    expect(document.activeElement).toBe(helper);
+    return { ...view, helper, wrapper: screen.getByTestId(`terminal-view-${instanceId}`) };
+  }
+
+  /** Alt-Tab away: window blur + the webview dropping DOM focus to body. */
+  async function deactivateApp(helper: HTMLTextAreaElement) {
+    await act(async () => {
+      fireEvent(window, new Event("blur"));
+      helper.blur();
+    });
+    expect(document.activeElement).toBe(document.body);
+  }
+
+  /**
+   * Run the frame the controller schedules on window focus.
+   *
+   * `TerminalView` does not inject `scheduleFrame`, so the restore is queued on
+   * `requestAnimationFrame`. jsdom implements that as a ~16ms timer, which a
+   * `setTimeout(0)` flush never reaches — a negative assertion made after one
+   * would pass simply because the frame had not run yet.
+   */
+  async function flushRestoreFrame() {
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+      });
+    });
+  }
+
+  /** Reactivate the app and let the scheduled restore frame run. */
+  async function reactivateApp(duringFocus?: () => void) {
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+      duringFocus?.();
+    });
+    await flushRestoreFrame();
+  }
+
+  it("restores the same helper textarea focus after app blur/focus", async () => {
+    const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership");
+    await deactivateApp(helper);
+
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+    });
+
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(helper);
+    });
+  });
+
+  it("keeps the first IME composition after reactivation on the restored helper", async () => {
+    const { helper, wrapper } = await mountPaneWithFocusedHelper("t-focus-ownership-ime");
+    await deactivateApp(helper);
+
+    await act(async () => {
+      fireEvent(window, new Event("focus"));
+    });
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(helper);
+    });
+
+    // First Korean composition after coming back must reach this pane's
+    // composition pipeline (the restored helper is the bound one).
+    await act(async () => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "가";
+      helper.selectionStart = 1;
+      helper.selectionEnd = 1;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("input"));
+    });
+
+    await vi.waitFor(() => {
+      expect(wrapper).toHaveClass("terminal-ime-composition-active");
+    });
+  });
+
+  it("does not steal focus back when another element gained it during reactivation", async () => {
+    const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-steal");
+    const searchInput = document.createElement("input");
+    document.body.appendChild(searchInput);
+    await deactivateApp(helper);
+
+    await reactivateApp(() => searchInput.focus());
+
+    expect(document.activeElement).toBe(searchInput);
+
+    // Positive control: the same flush restores when nothing competes, so the
+    // assertion above is about the guard and not about an unrun frame.
+    searchInput.remove();
+    helper.focus();
+    await deactivateApp(helper);
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("drops helper ownership when the pane loses focus while the app is inactive", async () => {
+    const { helper, rerender } = await mountPaneWithFocusedHelper("t-focus-ownership-unfocus");
+    await deactivateApp(helper);
+
+    rerender(
+      <TerminalView
+        instanceId="t-focus-ownership-unfocus"
+        profile="PowerShell"
+        syncGroup=""
+        isFocused={false}
+      />,
+    );
+
+    await reactivateApp();
+
+    expect(document.activeElement).toBe(document.body);
+
+    // Positive control: with the pane focused again the same sequence restores,
+    // so the assertion above is about `clear("pane-unfocused")`.
+    rerender(
+      <TerminalView instanceId="t-focus-ownership-unfocus" profile="PowerShell" syncGroup="" />,
+    );
+    helper.focus();
+    await deactivateApp(helper);
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("restores after a webview that blanks DOM focus before window blur", async () => {
+    // The other ordering: `focusout` with no `relatedTarget` lands first and the
+    // active element is already `body` by the time window `blur` arrives.
+    const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-early-blank");
+
+    await act(async () => {
+      helper.blur();
+      fireEvent(window, new Event("blur"));
+    });
+    expect(document.activeElement).toBe(document.body);
+
+    await reactivateApp();
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("does not adopt a helper whose focusout handed focus to another element", async () => {
+    await mountPaneWithFocusedHelper("t-focus-ownership-handoff");
+    const composer = document.createElement("input");
+    document.body.appendChild(composer);
+
+    // Focus moves helper -> composer, then the app is deactivated. The pane owns
+    // nothing, so reactivation must not pull focus back into the terminal.
+    await act(async () => {
+      composer.focus();
+    });
+    await act(async () => {
+      composer.blur();
+      fireEvent(window, new Event("blur"));
+    });
+    expect(document.activeElement).toBe(document.body);
+
+    await reactivateApp();
+    expect(document.activeElement).toBe(document.body);
+    composer.remove();
+  });
+
   it("does not call terminal.focus() when isFocused is false", async () => {
     render(<TerminalView instanceId="t10" profile="PowerShell" syncGroup="" isFocused={false} />);
 
