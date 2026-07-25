@@ -1218,6 +1218,83 @@ describe("TerminalView", () => {
     });
   });
 
+  it("places the IME preview correctly when the anchor sits on the right edge", async () => {
+    // Issue #551, measured: xterm's pending-wrap cursor reports `cursorX === cols`
+    // after a row is filled to its last column. The layout normalizes that into
+    // `startColumn` + `rowOffset`, and each row is positioned relative to the *raw*
+    // container origin by `row.startColumn - anchorX`. Normalizing the container too
+    // double-counts the row offset and drops the preview a row below its own caret,
+    // which the unit tests on the layout alone cannot see.
+    render(<TerminalView instanceId="t-ime-edge" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-edge", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-edge");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-edge");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-edge");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // 80x24 over 800x480 → 10x20 px cells. Column 80 is one past the last column.
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 80;
+    terminal.buffer.active.cursorY = 4;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    act(() => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "가";
+      helper.selectionStart = 1;
+      helper.selectionEnd = 1;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("input"));
+    });
+
+    await vi.waitFor(() => {
+      const rows = preview.querySelectorAll(".terminal-composition-preview-row");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("가");
+      // Container stays on the raw anchor (column 80, row 4); the row pulls back to
+      // column 0 and down one row. Net: column 0 of row 5.
+      expect(preview.style.transform).toBe("translate(800px, 80px)");
+      expect(rows[0]).toHaveStyle({ transform: "translate(-800px, 20px)" });
+      // The caret must land on the same row as the glyph it follows.
+      expect(overlay.style.transform).toBe("translate(20px, 100px)");
+    });
+  });
+
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 

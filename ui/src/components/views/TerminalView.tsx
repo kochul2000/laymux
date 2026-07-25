@@ -1529,18 +1529,15 @@ export function TerminalView({
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
         if (compositionPreview.text) {
-          // Same normalization the layout applies (issue #551): the anchor column
-          // can sit at or past the right edge — xterm's pending-wrap cursor reports
-          // `cursorX === cols`, and the carry-over anchor is derived as origin +
-          // committed width. Placing the container at the raw column would put it
-          // outside the terminal box and rely on the per-row translate to drag it
-          // back, which risks clipping; normalizing keeps container and rows in the
-          // same coordinate space that `row.startColumn - anchorX` assumes.
-          const anchorX = compositionPreview.anchorBufferX % term.cols;
-          const anchorY =
-            compositionPreview.anchorBufferAbsY +
-            Math.floor(compositionPreview.anchorBufferX / term.cols) -
-            baseY;
+          // Raw anchor on purpose. `getCompositionPreviewLayout` already normalized
+          // an out-of-range anchor column into `startColumn` + `rowOffset` (issue
+          // #551), and each row is positioned relative to *this* origin by
+          // `row.startColumn - anchorX`. Normalizing here too double-counts the row
+          // offset — measured: anchor 150 on a 150-column terminal put the container
+          // one row below where the rows then added another, so the preview landed a
+          // row past the caret.
+          const anchorX = compositionPreview.anchorBufferX;
+          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
           const previewRows = previewLayout.rows;
           previewEl.style.opacity = "1";
           previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
