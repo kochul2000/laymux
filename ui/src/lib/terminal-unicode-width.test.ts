@@ -23,6 +23,20 @@ const THUMBS_UP = "\u{1f44d}";
 const FAMILY = `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}`;
 const FLAG_KR = "\u{1f1f0}\u{1f1f7}";
 const FLAG_US = "\u{1f1fa}\u{1f1f8}";
+// Japanese combining marks and their bases, written as escapes on purpose. As
+// literal decomposed text a single NFC pass by an editor, a formatter or git's
+// `core.precomposeunicode` folds base+mark into one precomposed code point, and
+// these tests would keep passing while no longer testing the decomposed form.
+const VOICED = "\u3099"; // combining katakana-hiragana voiced (Mn)
+const SEMI_VOICED = "\u309a"; // combining katakana-hiragana semi-voiced (Mn)
+const SPACING_VOICED = "\u309b"; // spacing voiced mark (gc=Sk) - width 2 is right
+const TONE_MARK = "\u302a"; // ideographic level tone mark (Mn)
+const KA = "\u304b";
+const HA = "\u306f";
+const SA = "\u3055";
+const KI = "\u304d";
+const KATAKANA_KA = "\u30ab";
+const CJK_MIDDLE = "\u4e2d";
 
 function clusterSegments(text: string): string[] {
   return splitCellClusters(text).map((cluster) => cluster.segment);
@@ -159,10 +173,10 @@ describe("stringCellWidth", () => {
   it("counts NFD Japanese voiced syllables as one two-cell cluster", () => {
     // が / ぱ in NFD: base kana + U+3099 / U+309A. The mark is Mn and sits inside
     // a wide range, so a wide-first check makes each syllable 4 cells.
-    expect(stringCellWidth("が")).toBe(2);
-    expect(stringCellWidth("ぱ")).toBe(2);
-    expect(stringCellWidth("ざぎ")).toBe(4);
-    expect(stringCellWidth("中〪")).toBe(2);
+    expect(stringCellWidth(`${KA}${VOICED}`)).toBe(2);
+    expect(stringCellWidth(`${HA}${SEMI_VOICED}`)).toBe(2);
+    expect(stringCellWidth(`${SA}${VOICED}${KI}${VOICED}`)).toBe(4);
+    expect(stringCellWidth(`${CJK_MIDDLE}${TONE_MARK}`)).toBe(2);
   });
 
   it("counts a family ZWJ sequence as one two-cell cluster", () => {
@@ -207,8 +221,8 @@ describe("splitCellClusters", () => {
   });
 
   it("keeps an NFD Japanese voiced mark attached to its base kana", () => {
-    expect(clusterSegments("がx")).toEqual(["が", "x"]);
-    expect(clusterWidths("がx")).toEqual([2, 1]);
+    expect(clusterSegments(`${KA}${VOICED}x`)).toEqual([`${KA}${VOICED}`, "x"]);
+    expect(clusterWidths(`${KA}${VOICED}x`)).toEqual([2, 1]);
   });
 
   it("keeps a keycap sequence in one cluster", () => {
@@ -254,6 +268,41 @@ describe("splitCellClusters", () => {
   });
 });
 
+describe("real xterm buffer cursor", () => {
+  /**
+   * The layer the other tests do not reach. Everything above exercises our own
+   * `charProperties` chain and is self-consistent by construction; issue #544
+   * showed up as the **buffer cursor** advancing 4 cells for one NFD syllable,
+   * so assert that directly through the provider xterm actually reads.
+   */
+  async function writeAndMeasure(text: string): Promise<number> {
+    const terminal = new Terminal({ allowProposedApi: true, cols: 20, rows: 5 });
+    activateTerminalUnicodeProvider(terminal);
+    // `write` is async — reading the cursor before the callback yields 0.
+    await new Promise<void>((resolve) => terminal.write(text, () => resolve()));
+    const cursorX = terminal.buffer.active.cursorX;
+    terminal.dispose();
+    return cursorX;
+  }
+
+  it("advances two cells for an NFD hiragana syllable", async () => {
+    expect(await writeAndMeasure(`${KA}${VOICED}`)).toBe(2);
+  });
+
+  it("advances two cells for an NFD katakana syllable", async () => {
+    expect(await writeAndMeasure(`${KATAKANA_KA}${VOICED}`)).toBe(2);
+  });
+
+  it("advances two cells for the spacing voiced mark", async () => {
+    // Boundary pair with U+3099: U+309B is gc=Sk, not a combining mark, so two
+    // cells is the right answer and must not be swept up by the zero-width check.
+    expect(await writeAndMeasure(SPACING_VOICED)).toBe(2);
+  });
+
+  it("advances four cells for two NFD syllables", async () => {
+    expect(await writeAndMeasure(`${SA}${VOICED}${KI}${VOICED}`)).toBe(4);
+  });
+});
 describe("activateTerminalUnicodeProvider", () => {
   it("registers the shared provider and makes it the active version", () => {
     const registered: string[] = [];

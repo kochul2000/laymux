@@ -287,9 +287,12 @@ function computeCodePointCellWidth(codePoint: number): 0 | 1 | 2 {
   // `terminal-unicode-width.test.ts` asserts the intersection exhaustively so a
   // future reorder fails loudly instead of relying on this comment.
   //
-  // There is no hot-path cost to this order: `cacheEntry` memoizes every code
-  // point across the whole Unicode range, so the property escape runs at most
-  // once per code point per session.
+  // Ordering costs nothing either way. `computeCacheEntry` runs the two emoji
+  // property escapes for every entry wider than zero, so a wide code point
+  // already pays a property-escape on first touch no matter which check comes
+  // first — the original "keeps the property-escape test off the first-touch
+  // path" goal was never reachable. On top of that `cacheEntry` memoizes the
+  // whole Unicode range, so any given code point pays at most once per session.
   if (isZeroWidthCodePoint(codePoint)) return 0;
   if (isWideCodePoint(codePoint)) return 2;
   return 1;
