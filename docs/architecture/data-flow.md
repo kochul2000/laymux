@@ -424,6 +424,16 @@ composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커�
 - **sync 는 viewport 체크 뒤**: 앞에 두면 shadow cursor 행이 뷰포트 밖일 때 매 프레임 이동 → 원복이 반복된다.
 - **원복 의무**: 조합 종료 · 두 커서 재일치 · overlay 가 숨는 모든 경로(비포커스·scrollback·geometry 미확정) · helper 교체 · unmount 에서 저장해 둔 원래 inline 값으로 되돌린다.
 - **진단**: `ime-anchor-hold-started`/`-reapplied`/`-restored` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다. native 후보창의 실제 위치는 OS 창이라 스크린샷에 잡히지 않아 이 trace 로 사람이 확인한다.
+### 8.14 조합 commit 과 pending keypress 경합 (issue #527)
+
+xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를 즉시 보내지 않는다 — 조합 범위를 캡처하고 `_isSendingComposition = true` 로 표시한 뒤 `setTimeout(0)` 안에서 `textarea.value.substring(start)` 를 읽어 `triggerDataEvent` 한다. `_keyPress` 는 그 창을 모르고 자기 문자를 독립적으로 보내므로, 그 사이 도착한 keypress 가 같은 음절을 **한 번 더** 보낸다([ADR-0062](../adr/0062-composition-commit-keypress-race.md)).
+
+- **재현됨**: 실제 `Terminal` 에 `compositionstart -> update -> end -> keypress -> flush` 를 태우면 `onData = ["가", "가"]`, keypress 를 빼면 `["가"]`. 경합은 플랫폼이 아니라 xterm 자신의 지연 전송 타이밍이라 Linux/IBus 실기 없이 재현된다.
+- **판정**: `ui/src/lib/composition-commit-race.ts` 가 소유한다. finalizer 가 읽을 슬라이스를 같은 식으로 재현하고(`value.slice(compositionStart + dataAlreadySent.length)`), keypress 문자가 그 텍스트와 동일/포함/끝 경계 중첩이면 중복으로 본다.
+- **보수성의 방향은 전달**: pending commit 이 비었거나 · 상태를 못 읽거나 · keypress 가 텍스트를 안 싣거나 · 문자가 commit 에 없으면 전달한다. 중복보다 유실이 나쁘고, pending 창 동안 사용자가 새로 누른 문자를 삼켜서는 안 된다.
+- **xterm 상태 읽기는 한 곳**: `ui/src/lib/xterm-pending-composition.ts` 가 private 필드 5개(`_compositionHelper`·`_isSendingComposition`·`_compositionPosition`·`_dataAlreadySent`·`_textarea`)를 방어적으로 읽고 목록을 상수로 노출한다. 형태가 달라지면 `null` → 판정은 전달로 떨어져 **guard 가 스스로 꺼진다**(입력을 삼키지 않는다). 동시에 실제 `Terminal` 계약 테스트가 필드 존재를 단정해 xterm 상향 시 읽을 수 있는 실패로 드러난다.
+- **번들 패치는 하지 않았다**: 상류 `_keyPress` 수정이 정론이지만 patch 인프라와 버전 상향 비용이 확정적으로 붙는다. 같은 판정 지점에서 xterm 자신의 pending 플래그를 읽어 없는 guard 를 적용하는 방식으로 대체했고, 상류에 guard 가 들어오면 제거 대상이다.
+- **미검증**: 실 IBus 이벤트열이 이 순서와 같은지, 그리고 **유실 방향**(pending 창 동안 textarea 값이 바뀌는 경로)은 재현하지 않았다 — 중복 방향만 재현했다.
 
 ---
 
