@@ -236,6 +236,10 @@ export function createImeCompositionController(
 
   // Anchor captured at the first compositionstart — preserved across carry-overs
   let compositionAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  // Last value actually read from `getAnchor()`. Carry-over compares the live
+  // shadow cursor against this — not against `compositionAnchor`, which may be an
+  // arithmetic value from an earlier carry-over.
+  let lastLiveAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
   // Textarea value snapshot at the start of the composition chain
   let compositionBaseText = "";
   // Latest compositionupdate event.data — used for Korean split-time display
@@ -362,26 +366,35 @@ export function createImeCompositionController(
       // current textarea value so `getChangedRange` yields only the new syllable.
       const committedBase = textarea?.value ?? "";
       const committedWidth = stringCellWidth(committedBase.slice(compositionBaseText.length));
-      // The chain continues, so `getAnchor()` is the authority **only if** it has
-      // already moved past the chain anchor. Within the same tick the PTY has not
-      // echoed yet and it still reports the pre-commit cell, so fall back to
-      // advancing by the committed text's own width — which needs no round trip.
+      // Whether the shadow cursor is usable is a question about **the shadow
+      // cursor**, not about our anchor: `compositionAnchor` may itself be an
+      // arithmetic value from an earlier carry-over, so comparing against it
+      // conflates "did the PTY echo?" with "is the anchor arithmetic?".
+      //
+      // Compare against the last value we actually read instead. Within the same
+      // tick the PTY has not echoed, so the shadow cursor has not moved and this
+      // is false — direction-agnostic, so a scroll or clear that moves it
+      // backwards is still treated as authoritative rather than ignored.
       const liveAnchor = options.getAnchor();
-      const advancedByLive =
-        liveAnchor.cursorAbsY !== compositionAnchor.cursorAbsY ||
-        liveAnchor.cursorX >= compositionAnchor.cursorX + committedWidth;
-      compositionAnchor = advancedByLive
-        ? liveAnchor
-        : {
-            cursorX: compositionAnchor.cursorX + committedWidth,
-            cursorAbsY: compositionAnchor.cursorAbsY,
-          };
+      const echoed =
+        liveAnchor.cursorX !== lastLiveAnchor.cursorX ||
+        liveAnchor.cursorAbsY !== lastLiveAnchor.cursorAbsY;
+      if (echoed) {
+        compositionAnchor = liveAnchor;
+        lastLiveAnchor = liveAnchor;
+      } else {
+        // No round trip yet: advance by the committed text's own cell width.
+        compositionAnchor = {
+          cursorX: compositionAnchor.cursorX + committedWidth,
+          cursorAbsY: compositionAnchor.cursorAbsY,
+        };
+      }
       compositionBaseText = committedBase;
       traceComposition(options, "ime-composition-start-carryover", {
         baseText: compositionBaseText,
         textareaValue: textarea?.value ?? "",
         committedWidth,
-        anchorSource: advancedByLive ? "shadow-cursor" : "committed-width",
+        anchorSource: echoed ? "shadow-cursor" : "committed-width",
         anchorBufferX: compositionAnchor.cursorX,
         anchorBufferAbsY: compositionAnchor.cursorAbsY,
       });
@@ -389,6 +402,7 @@ export function createImeCompositionController(
       // Fresh composition start
       isCarryOver = false;
       compositionAnchor = options.getAnchor();
+      lastLiveAnchor = compositionAnchor;
       compositionBaseText = textarea?.value ?? "";
       traceComposition(options, "ime-composition-start", {
         baseText: compositionBaseText,
