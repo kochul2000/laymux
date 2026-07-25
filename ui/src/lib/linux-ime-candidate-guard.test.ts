@@ -49,13 +49,13 @@ function replay(trace: CandidateTrace, enabled: boolean): number[] {
         guard.noteCompositionStart();
         break;
       case "compositionupdate":
-        guard.noteCompositionUpdate(step.data);
+        guard.noteCompositionUpdate();
         break;
       case "compositionend":
         guard.noteCompositionEnd();
         break;
       case "textinput":
-        guard.noteTextInput({ isComposing: step.isComposing });
+        guard.noteTextInput({ isComposing: step.isComposing, inputType: step.inputType });
         break;
       default: {
         const decision = guard.decideKey({
@@ -149,7 +149,7 @@ describe("createLinuxImeCandidateGuard", () => {
     const { guard } = buildGuard();
     expect(guard.isWindowOpen()).toBe(false);
     guard.noteCompositionStart();
-    guard.noteCompositionUpdate("ni");
+    guard.noteCompositionUpdate();
     expect(guard.isWindowOpen()).toBe(false);
     guard.noteCompositionEnd();
     expect(guard.isWindowOpen()).toBe(true);
@@ -158,7 +158,7 @@ describe("createLinuxImeCandidateGuard", () => {
   it("keeps composing through an empty compositionupdate", () => {
     const { guard } = buildGuard();
     guard.noteCompositionStart();
-    guard.noteCompositionUpdate("");
+    guard.noteCompositionUpdate();
     expect(guard.isWindowOpen()).toBe(false);
     // Still xterm's key while composing.
     expect(guard.decideKey(imeSpaceKey("keydown")).block).toBe(false);
@@ -315,7 +315,7 @@ describe("createLinuxImeCandidateGuard", () => {
 function buildGeneratedWindow(): { guard: LinuxImeCandidateGuard } {
   const { guard } = buildGuard();
   guard.noteCompositionStart();
-  guard.noteCompositionUpdate("ni");
+  guard.noteCompositionUpdate();
   guard.noteCompositionEnd();
   return { guard };
 }

@@ -1,3 +1,5 @@
+import { isCompositionSideInput } from "./ime-composition-events";
+
 /**
  * Linux IME candidate-selection key guard.
  *
@@ -90,11 +92,21 @@ export type LinuxImeCandidateGuardOptions = {
 
 export type LinuxImeCandidateGuard = {
   noteCompositionStart: () => void;
-  /** An **empty** `data` keeps the composition open — it is not an end marker. */
-  noteCompositionUpdate: (data: string) => void;
+  /**
+   * A `compositionupdate` of any shape — including an **empty** `data`, which
+   * several IMEs emit when clearing the preedit. It is not an end marker, so the
+   * payload is deliberately not inspected: treating an empty update as the end
+   * would open the window while the user is still composing.
+   */
+  noteCompositionUpdate: () => void;
   noteCompositionEnd: () => void;
-  /** A real (non-composition) text insertion closes the window for good. */
-  noteTextInput: (event: { isComposing: boolean }) => void;
+  /**
+   * An input-like event on the helper textarea. Only a **real** insertion closes
+   * the window; the composition commit itself must not, and that commit can
+   * arrive after `compositionend` reporting `isComposing === false` — which is
+   * why `inputType` has to come along.
+   */
+  noteTextInput: (event: { isComposing: boolean; inputType?: string }) => void;
   decideKey: (event: LinuxImeCandidateKeyEvent) => LinuxImeCandidateDecision;
   isWindowOpen: () => boolean;
   reset: (reason: string) => void;
@@ -158,21 +170,21 @@ export function createLinuxImeCandidateGuard(
     noteCompositionStart() {
       if (!options.enabled) return;
       composing = true;
-      // Observed keydowns are cleared here, not at `compositionend`: a key the
-      // user was already holding when the composition started must still count
-      // as "seen" when its keyup arrives after the end, or that legitimate
-      // release would be misread as the IME's orphan tail.
+      // Observed keydowns are cleared here, not at `compositionend`. What that
+      // preserves is a press that started **during** the composition (recorded
+      // by the `composing` branch of `decideKey`): its keyup arrives after the
+      // end, and clearing at `compositionend` would misread that legitimate
+      // release as the IME's orphan tail. A press from before the composition
+      // is never recorded at all — `decideKey` returns early outside a window.
       observedKeyDowns.clear();
       // A new composition supersedes any pending window from the previous one.
       closeWindow("composition-restart");
     },
 
-    noteCompositionUpdate(_data) {
+    noteCompositionUpdate() {
       if (!options.enabled) return;
-      // An empty `compositionupdate` is emitted mid-composition by several IMEs
-      // (and by fcitx when the preedit is cleared). Treating it as an end would
-      // open the window while the user is still composing, and every candidate
-      // key after that would be judged against a stale window.
+      // No payload inspection on purpose — see the type. Any update, empty or
+      // not, means the composition is still running.
       composing = true;
     },
 
@@ -185,7 +197,13 @@ export function createLinuxImeCandidateGuard(
 
     noteTextInput(event) {
       if (!options.enabled) return;
-      if (event.isComposing) return;
+      // The commit that lands the confirmed text in the textarea belongs to the
+      // composition, not to the user typing something new — and Chromium can
+      // deliver it *after* `compositionend`, where `isComposing` is already
+      // false. Closing the window there would make this guard a no-op for
+      // exactly the platforms it targets. The judgement is shared with
+      // `ime-composition-controller.ts` so the two cannot drift.
+      if (isCompositionSideInput(event)) return;
       // Real typed text means the IME is done with this press; anything still
       // arriving belongs to the user.
       closeWindow("real-text-input");
@@ -227,9 +245,9 @@ export function createLinuxImeCandidateGuard(
 
       if (event.type === "keydown") {
         // A real candidate keydown inside the window is the user pressing Space
-        // or a digit right after confirming. It must reach the terminal, and it
-        // ends the window so its own keypress/keyup are not treated as orphans.
-        observedKeyDowns.add(identity);
+        // or a digit right after confirming. It must reach the terminal, and
+        // closing the window is what lets its own keypress/keyup through: they
+        // return early at `!windowOpen()` instead of being judged as orphans.
         closeWindow("real-candidate-keydown");
         return PASS;
       }

@@ -1,3 +1,5 @@
+import { isCompositionSideInput } from "./ime-composition-events";
+
 import { splitCellClusters, stringCellWidth } from "./terminal-unicode-width";
 
 export type CompositionPreviewState = {
@@ -448,24 +450,8 @@ export function createImeCompositionController(
     reset();
   };
 
-  // Commit-side input events belong to the composition itself, not to the
-  // user typing something new. WebView2/Chromium can deliver the commit's
-  // beforeinput/input AFTER compositionend — counting those toward
-  // inputActivitySeq would break the quiescence check in the deferred
-  // finalize and leave the textarea residue (the accumulation this
-  // controller exists to remove) in place.
-  const isCompositionSideInput = (event: Event): boolean => {
-    const inputEvent = event as Partial<InputEvent>;
-    return (
-      inputEvent.isComposing === true ||
-      inputEvent.inputType === "insertCompositionText" ||
-      inputEvent.inputType === "insertFromComposition" ||
-      inputEvent.inputType === "deleteCompositionText"
-    );
-  };
-
   const handleInputLikeEvent = (event: Event) => {
-    if (!isCompositionSideInput(event)) {
+    if (!isCompositionSideInput(event as Partial<InputEvent>)) {
       inputActivitySeq += 1;
     }
     if (phase === "composing") {

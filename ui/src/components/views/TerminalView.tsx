@@ -356,13 +356,17 @@ export function _resetWebglStagger(): void {
 }
 
 /**
- * True on a Linux desktop host. WSL runs a Windows WebView, so its user agent
- * reports Windows and must not enable Linux-only IME handling; the `Windows`
- * exclusion is what keeps that correct.
+ * True on a Linux **desktop** host.
+ *
+ * Two exclusions matter. WSL runs a Windows WebView, so its user agent reports
+ * Windows and must not enable Linux-only IME handling. Android WebView reports
+ * `Linux; Android …` and is not a supported desktop target, so it is excluded
+ * too rather than being silently treated as Linux.
  */
 export function isLinuxHost(): boolean {
   const ua = navigator.userAgent;
-  return ua.includes("Linux") && !ua.includes("Windows");
+  if (!ua.includes("Linux")) return false;
+  return !ua.includes("Windows") && !ua.includes("Android");
 }
 
 /**
@@ -1273,13 +1277,16 @@ export function TerminalView({
       onTrace: (event, payload) => trace(event, payload),
     });
     const handleCompositionStartForCandidate = () => linuxImeCandidateGuard.noteCompositionStart();
-    const handleCompositionUpdateForCandidate = (event: Event) =>
-      linuxImeCandidateGuard.noteCompositionUpdate((event as CompositionEvent).data ?? "");
+    const handleCompositionUpdateForCandidate = () =>
+      linuxImeCandidateGuard.noteCompositionUpdate();
     const handleCompositionEndForCandidate = () => linuxImeCandidateGuard.noteCompositionEnd();
-    const handleInputForCandidate = (event: Event) =>
+    const handleInputForCandidate = (event: Event) => {
+      const inputEvent = event as InputEvent;
       linuxImeCandidateGuard.noteTextInput({
-        isComposing: !!(event as InputEvent).isComposing,
+        isComposing: !!inputEvent.isComposing,
+        inputType: inputEvent.inputType,
       });
+    };
     const handleBlurForCandidate = () => linuxImeCandidateGuard.reset("helper-blur");
     // 조합 lifecycle 은 xterm 의 CompositionHelper 가 계속 소유한다. 여기서는
     // 관찰만 하고 조합 문자열·commit 경로는 건드리지 않는다.

@@ -24,6 +24,7 @@ xterm 의 조합 가드는 그 시점에 이미 끝나 있다 — `compositionen
 - **신호 2 — orphan companion.** 이 window 안에서 `keydown` 을 관측하지 못한 물리 키의 `keypress`/`keyup` 은 여기서 시작된 press 에 속할 수 없다. IME 가 소비한 press 의 꼬리다.
 - **그 밖의 모든 것은 통과한다.** 완전한 `keydown(keyCode 32) → keypress → keyup` 은 실제 press 이므로 건드리지 않는다. 이것이 "확정 직후 사용자가 누른 Space 를 잃지 않는다" 를 성립시키는 근거다.
 - **window 는 안전 상한.** `compositionend` 에서 열리고, 실제 비조합 텍스트 삽입 / 실제 후보 keydown / 무관한 실제 키 / blur·unmount / timeout 중 **먼저 오는 것**에서 닫힌다. 어떤 동작도 "IME 가 몇 ms 걸리는가" 에 의존하지 않는다. 기본 상한은 사람의 연속 타이핑 간격보다 짧게 둔다.
+- **조합 commit 의 `input` 은 window 를 닫지 않는다.** 확정 텍스트가 textarea 에 들어가는 `beforeinput`/`input` 은 모든 조합에서 반드시 발생하고, Chromium 은 그것을 `compositionend` **뒤에** 보낼 수 있다 — 그 시점 이벤트는 `isComposing === false` 라 `isComposing` 만 보면 "사용자가 새로 입력했다" 로 오인해 window 가 열린 프레임에서 바로 닫힌다(= 대상 플랫폼에서 guard 가 통째로 no-op). 판정은 `isComposing` + `inputType`(`insertCompositionText`/`insertFromComposition`/`deleteCompositionText`) 네 조건이며, `ui/src/lib/ime-composition-events.ts` 한 곳이 소유해 `ime-composition-controller.ts` 와 공유한다 — 두 모듈이 같은 판정을 두 벌 들면 이 결함이 다시 갈라진다.
 - **빈 `compositionupdate` 는 조합 종료가 아니다.** 일부 IME 는 preedit 를 지울 때 빈 update 를 낸다. 이를 종료로 오인하면 사용자가 아직 조합 중인 상태에서 window 가 열리고, 이후 후보 키가 stale window 로 판정된다.
 - **관측 keydown 은 `compositionstart` 에서 초기화한다.** `compositionend` 가 아니다 — 조합이 시작될 때 이미 누르고 있던 키의 keyup 이 종료 후 도착하면 정상 release 인데, `compositionend` 에서 지우면 orphan 으로 오판한다.
 - **`preventDefault()` 는 helper textarea 를 변형시키는 이벤트에만.** 차단된 후보 `keydown`, 그리고 차단된 **orphan** `keypress`(orphan 은 취소할 keydown 이 없으므로 자기 default 를 막는 것이 유일한 지점)에만 적용한다. `keyup` 에는 걸지 않는다.
@@ -45,6 +46,6 @@ xterm 의 조합 가드는 그 시점에 이미 끝나 있다 — `compositionen
 - 키 핸들러가 keypress·keyup 도 보게 되어 기존 `e.type !== "keydown"` 조기 반환보다 앞에 guard 가 놓인다. 비활성(비-Linux)이거나 window 가 닫혀 있으면 즉시 통과하므로 일반 입력 경로의 추가 비용은 비교 몇 번이다.
 - helper 마다 리스너 5개(`compositionstart`/`compositionupdate`/`compositionend`/`input`/`blur`)가 추가되고 helper 교체·unmount 에서 해제된다. 모두 관찰 전용이며 조합 lifecycle 을 바꾸지 않는다.
 - ADR-0053 이 유보한 post-composition suppression 의 **범위가 이 결정으로 확정**됐다: "첫 printable 키" 가 아니라 "IME 소비 표식 또는 orphan companion" 만 억제 대상이다. 이후 유사 요구는 이 두 신호를 확장·정정하는 형태로만 들어와야 하며, 시간 임계값을 판별자로 승격하지 않는다.
-- 검증은 순수 상태 기계 unit test 29케이스 + `TerminalView` 통합 test 6케이스로 고정한다. 이벤트열은 `ui/src/lib/__fixtures__/linux-ime-candidate-traces.ts` 에 fixture 로 남기고, 각 fixture 는 자신이 플랫폼에 대해 무엇을 주장하는지(`platformClaim`)를 함께 기록한다.
+- 검증은 순수 상태 기계 unit test 31케이스 + `TerminalView` 통합 test 7케이스로 고정한다. 이벤트열은 `ui/src/lib/__fixtures__/linux-ime-candidate-traces.ts` 에 fixture 로 남기고, 각 fixture 는 자신이 플랫폼에 대해 무엇을 주장하는지(`platformClaim`)를 함께 기록한다. **조합 commit 의 `input` 은 플랫폼 주장의 대상이 아니라 모든 조합에 존재하는 이벤트**이므로, 누출 trace 는 `compositionend` 전후 두 순서를 모두 담는다.
 - **재현 근거의 한계**: fixture 는 Linux 실기에서 캡처한 것이 **아니라** 업스트림 보고(orca#7543/#7634)의 서술을 재구성한 것이다. 실기 캡처가 확보되면 fixture 를 조용히 교체하지 말고 diff 해서 `platformClaim` 이 맞는지 먼저 확인한다.
 - 재검토 조건: 실기 캡처가 `keyCode === 229` 표식을 주지 않는 IME 를 보여주면 신호 1이 무력해지고 orphan 규칙만 남는다(그 경우에도 trio 형태는 잡지 못한다) — 그때 시간 상한을 판별자로 승격할지 재검토한다. #527 이 xterm composition finalizer 를 고쳐 후보 꼬리가 조합 구간 안으로 들어오면 이 guard 의 일부가 불필요해질 수 있다.

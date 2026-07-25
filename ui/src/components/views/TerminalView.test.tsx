@@ -3680,12 +3680,36 @@ describe("TerminalView", () => {
       }
     });
 
+    it("keeps the window open across the composition commit input", async () => {
+      // Chromium can deliver the commit beforeinput/input AFTER compositionend,
+      // where isComposing is already false. Reading that as "the user typed
+      // something new" closed the window in the frame it opened and made this
+      // guard a no-op on exactly the platforms it targets.
+      const { helper, userAgent } = await mountWithHelper("t-cand-commit", LINUX_UA);
+      try {
+        runComposition(helper);
+
+        const commit = new Event("input", { bubbles: true });
+        Object.defineProperty(commit, "isComposing", { value: false });
+        Object.defineProperty(commit, "inputType", { value: "insertFromComposition" });
+        helper.dispatchEvent(commit);
+
+        // Window still open: the candidate tail is blocked.
+        expect(
+          capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 })),
+        ).toBe(false);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
     it("closes the window on a real text insertion", async () => {
       const { helper, userAgent } = await mountWithHelper("t-cand-input", LINUX_UA);
       try {
         runComposition(helper);
         const insertion = new Event("input", { bubbles: true });
         Object.defineProperty(insertion, "isComposing", { value: false });
+        Object.defineProperty(insertion, "inputType", { value: "insertText" });
         helper.dispatchEvent(insertion);
         // Window closed: even an IME-marked leftover now reaches the terminal.
         expect(

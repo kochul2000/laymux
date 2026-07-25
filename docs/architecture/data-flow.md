@@ -404,6 +404,7 @@ Sogou/fcitx 계열 Linux IME 는 후보를 선택하는 데 쓴 Space/숫자를 
 - **신호 2 — orphan companion**: window 안에서 `keydown` 을 관측하지 못한 물리 키의 `keypress`/`keyup`.
 - **그 밖은 통과**: 완전한 `keydown(32) → keypress → keyup` 은 실제 press 이므로 건드리지 않는다. "확정 직후 사용자가 누른 Space 를 잃지 않는다" 가 여기서 나온다. `compositionend` 이후 첫 printable 키를 버리는 방식은 채택하지 않았다.
 - **window 는 안전 상한**: `compositionend` 에서 열리고 실제 비조합 텍스트 삽입 / 실제 후보 keydown / 무관한 실제 키 / blur·unmount / timeout 중 먼저 오는 것에서 닫힌다. 어떤 동작도 IME 지연 ms 값에 의존하지 않는다.
+- **조합 commit 의 `input` 은 window 를 닫지 않는다**: 확정 텍스트 삽입은 모든 조합에서 발생하고 Chromium 은 `compositionend` 뒤에 보낼 수 있다(그 시점 `isComposing === false`). `isComposing` 만 보면 window 가 열린 프레임에서 바로 닫혀 guard 가 no-op 이 된다. 판정은 `ui/src/lib/ime-composition-events.ts` 의 `isCompositionSideInput`(네 조건) 한 곳이 소유하고 `ime-composition-controller.ts` 와 공유한다.
 - **빈 `compositionupdate` 는 종료가 아니다**. 관측 keydown 초기화는 `compositionstart` 에서 한다 — `compositionend` 에서 지우면 조합 시작 전부터 눌려 있던 키의 정상 release 를 orphan 으로 오판한다.
 - **preventDefault 경계**: 차단된 후보 `keydown` 과 차단된 orphan `keypress` 에만 건다(helper textarea 를 변형시키는 경우). `keyup` 에는 걸지 않는다.
 - **플랫폼 게이트**: `isLinuxHost()` = user agent 에 `Linux` 포함 + `Windows` 제외. WSL 은 Windows WebView 라 Windows 를 보고하므로 제외 조건이 필요하다. 비활성 시 전 경로 no-op.
