@@ -13,6 +13,19 @@ import path from "path";
  *
  * IIFE, not ESM: `page.html` loads classic `<script>` tags.
  */
+/**
+ * The output lives in the Rust source tree, so it reads like something to
+ * hand-edit. A hand edit would pass the drift test as long as behaviour matched,
+ * then vanish on the next rebuild — say so at the top of the file.
+ */
+const BANNER = [
+  "// GENERATED FILE - DO NOT EDIT.",
+  "// Source: ui/src/lib/terminal-unicode-width.ts",
+  "//         via ui/src/remote/unicode-provider-entry.ts",
+  "// Rebuild: cd ui && npm run build:remote-provider",
+  "// Drift from the source is caught by ui/src/lib/remote-unicode-provider.test.ts",
+].join("\n");
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -31,5 +44,13 @@ export default defineConfig({
     // The asset is committed and diffed, so keep it readable rather than minified.
     minify: false,
     sourcemap: false,
+    rolldownOptions: {
+      output: {
+        // The file lives in the Rust source tree, so it reads like something to
+        // hand-edit. A hand edit would pass the drift test as long as behaviour
+        // matched, then vanish on the next rebuild — say so at the top.
+        banner: BANNER,
+      },
+    },
   },
 });

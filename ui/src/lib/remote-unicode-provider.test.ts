@@ -100,14 +100,30 @@ describe("committed remote unicode provider asset", () => {
     expect(mismatches).toEqual([]);
   });
 
-  it("matches the source across a dense sweep of the BMP", () => {
-    // Catches drift the curated lists would miss. Every 7th code point keeps the
-    // test fast while still covering every block.
+  it("matches the source for every code point in the BMP", () => {
+    // Exhaustive, not sampled: a stride skips whole code points, and the ones
+    // this asset exists to fix (U+231A, U+2B50, U+A960) all fell outside a
+    // 7-step stride from U+20. Measured at ~16ms for both sides, so sampling
+    // buys nothing.
     const mismatches: string[] = [];
-    for (let cp = 0x20; cp < 0x10000; cp += 7) {
+    for (let cp = 0x20; cp < 0x10000; cp += 1) {
       if (cp >= 0xd800 && cp <= 0xdfff) continue;
       if (provider.wcwidth(cp) !== codePointCellWidth(cp)) {
         mismatches.push(`U+${cp.toString(16).toUpperCase()}`);
+      }
+    }
+    expect(mismatches).toEqual([]);
+  });
+
+  it("matches the source across the supplementary planes", () => {
+    // The widest divergence was here — effectively every emoji — so this is the
+    // area that most needs more than a curated list. Exhaustive over the
+    // supplementary planes; ~100ms for both sides.
+    const mismatches: string[] = [];
+    for (let cp = 0x10000; cp < 0x110000; cp += 1) {
+      if (provider.wcwidth(cp) !== codePointCellWidth(cp)) {
+        mismatches.push(`U+${cp.toString(16).toUpperCase()}`);
+        if (mismatches.length > 20) break;
       }
     }
     expect(mismatches).toEqual([]);
@@ -122,6 +138,8 @@ describe("committed remote unicode provider asset", () => {
       [0x1f44d, 0x1f3fb], // thumbs up + skin tone
       [0x1f468, 0x200d, 0x1f469], // ZWJ pair
       [0x1f1f0, 0x1f1f7], // flag pair
+      [0x1f1f0, 0x1f1f7, 0x1f1fa], // three in a row: the third opens a new pair
+      [0x304b, 0x3099, 0x304d, 0x3099], // two NFD syllables in one run
       [0x31, 0xfe0f, 0x20e3], // keycap
       [0x61, 0xfe0f], // inert VS16
       [0x61, 0x1f3fb], // standalone skin tone
@@ -143,5 +161,60 @@ describe("committed remote unicode provider asset", () => {
       }
     }
     expect(mismatches).toEqual([]);
+  });
+});
+
+describe("served remote xterm bundle honours a registered provider", () => {
+  /**
+   * What a remote-bundle-only bump can actually break is not V6 parity — once
+   * `activeVersion` is set the V6 tables are dead code on both surfaces, so
+   * pinning them would pin a path that only runs when this fix is already
+   * broken. What matters is that the **served** bundle still supports the
+   * proposed provider API at all.
+   *
+   * Assert that behaviourally with a stub provider rather than by comparing
+   * bytes or versions: register something that claims every code point is two
+   * cells and check the cursor moved two.
+   */
+  const BUNDLE_PATH = resolve(__dirname, "../../../src-tauri/src/remote_server/assets/xterm.js");
+
+  function loadServedTerminalCtor(): new (options: Record<string, unknown>) => {
+    unicode: { register: (p: unknown) => void; activeVersion: string };
+    buffer: { active: { cursorX: number } };
+    write: (data: string, cb?: () => void) => void;
+    dispose: () => void;
+  } {
+    const source = readFileSync(BUNDLE_PATH, "utf8");
+    const fakeWindow: Record<string, unknown> = {};
+    // The bundle is a UMD build: with no module system present it assigns to the
+    // global object, the same way the browser picks up `window.Terminal`.
+    const run = new Function(
+      "window",
+      "self",
+      "globalThis",
+      `${source}\nreturn window.Terminal || self.Terminal || globalThis.Terminal;`,
+    );
+    const ctor = run(fakeWindow, fakeWindow, fakeWindow);
+    if (typeof ctor !== "function") {
+      throw new Error("served xterm bundle did not export a Terminal constructor");
+    }
+    return ctor as never;
+  }
+
+  it("routes width decisions through the registered provider", async () => {
+    const TerminalCtor = loadServedTerminalCtor();
+    const terminal = new TerminalCtor({ allowProposedApi: true, cols: 20, rows: 4 });
+    // Every code point claims two cells; nothing joins.
+    terminal.unicode.register({
+      version: "stub-two-cells",
+      wcwidth: () => 2,
+      charProperties: () => (2 & 3) << 1,
+    });
+    terminal.unicode.activeVersion = "stub-two-cells";
+    await new Promise<void>((r) => terminal.write("a", () => r()));
+    const cursorX = terminal.buffer.active.cursorX;
+    terminal.dispose();
+    // 1 would mean the bundle ignored the provider and used its own table.
+    expect(cursorX).toBe(2);
   });
 });

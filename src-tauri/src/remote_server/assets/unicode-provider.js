@@ -1,3 +1,8 @@
+// GENERATED FILE - DO NOT EDIT.
+// Source: ui/src/lib/terminal-unicode-width.ts
+//         via ui/src/remote/unicode-provider-entry.ts
+// Rebuild: cd ui && npm run build:remote-provider
+// Drift from the source is caught by ui/src/lib/remote-unicode-provider.test.ts
 (function() {
 	//#region src/lib/terminal-unicode-width.ts
 	/**
