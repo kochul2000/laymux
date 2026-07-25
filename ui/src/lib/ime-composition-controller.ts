@@ -582,11 +582,26 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (input.viewportScrolledUp) {
     return "hidden";
   }
-  if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
-    return "hidden";
-  }
+  // Composition outranks the caret policy gate below (issue #551).
+  //
+  // The two decisions are not the same kind of thing. `stabilizeInteractiveCursor`
+  // and `overlayActivity` decide whether laymux owns the *caret* — a policy that
+  // exists because Codex parks its cursor on the footer during repaints, so only
+  // there is a shadow-cursor caret worth drawing. The composition preview is not a
+  // caret: it is the text the user is currently typing, and its native renderer is
+  // switched off unconditionally (`.xterm .composition-view { visibility: hidden }`
+  // in index.css). Gating it on the caret policy left non-Codex panes with no
+  // renderer at all for in-flight composition — invisible, no underline, in every
+  // shell and every non-Codex TUI.
+  //
+  // It stays *below* opened/focused/syncOutputActive, alt-buffer and
+  // viewportScrolledUp: those are genuine "not visible / geometry not trustworthy"
+  // conditions, and painting a preview against them would place it wrongly.
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
+    return "hidden";
   }
   if (input.cursorHidden) {
     return "hidden";

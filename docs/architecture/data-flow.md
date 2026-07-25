@@ -457,6 +457,19 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **번들 패치는 하지 않았다**: 상류 `_keyPress` 수정이 정론이지만 patch 인프라와 버전 상향 비용이 확정적으로 붙는다. 같은 판정 지점에서 xterm 자신의 pending 플래그를 읽어 없는 guard 를 적용하는 방식으로 대체했고, 상류에 guard 가 들어오면 제거 대상이다.
 - **미검증**: 실 IBus 이벤트열이 이 순서와 같은지, 그리고 **유실 방향**(pending 창 동안 textarea 값이 바뀌는 경로)은 재현하지 않았다 — 중복 방향만 재현했다.
 
+### 8.15 조합 프리뷰 가시성은 activity 와 무관하다 (issue #551)
+
+조합 프리뷰는 **caret 이 아니라 사용자가 입력 중인 텍스트**다. 두 결정이 한 게이트에 묶여 있어서, Codex 아닌 모든 페인(맨 셸 포함)에서 조합 중 자모가 **아무 데도 렌더되지 않았다** — 글리프도 밑줄도 없었다.
+
+- **렌더러가 하나뿐이다**: `ui/src/index.css` 의 `.xterm .composition-view { visibility: hidden !important }` 는 xterm 네이티브 조합 표시를 **무조건** 끈다(조합 활성 클래스에 묶으면 compositionend 누락 시 stale 텍스트가 노출되므로 의도된 무조건이다). 따라서 조합 중 텍스트를 그릴 주체는 laymux 오버레이(`.terminal-composition-preview`) **하나뿐**이고, 그것이 꺼지면 대체 렌더러가 없다.
+- **게이트가 두 겹이었다**: `TerminalView.tsx` 의 오버레이 rAF 조기 반환이 `stabilizeInteractiveCursor`·`isOverlayCaretActivity` 로 끊고, 통과해도 `resolveVisualCaretOwner` 안에서 같은 두 조건이 `compositionActive` 검사 **위**에 있어 `"hidden"` 으로 떨어졌다. 한쪽만 고치면 증상이 남는다.
+- **판정**: `compositionActive → "composition-preview"` 를 caret 정책 게이트 **위로** 올린다. `stabilizeInteractiveCursor`·`overlayActivity` 는 laymux 가 **caret** 을 소유하는지에 대한 정책이고(Codex 가 repaint 중 커서를 footer 로 주차하므로 shadow cursor 캐럿이 필요한 것), 조합 텍스트 가시성과는 다른 종류의 질문이다.
+- **경계는 유지한다**: `opened`/`focused`/`syncOutputActive`, `isAltBufferActive`, `viewportScrolledUp` **아래**에 둔다. 그것들은 "보이지 않는다 / 지오메트리를 신뢰할 수 없다" 는 진짜 조건이고, 그 상태에서 프리뷰를 그리면 잘못된 위치에 찍힌다.
+- **부수 효과(의도됨)**: 비-Codex 페인이 조합 중일 때 `caretOwner === "composition-preview"` 가 되므로 (1) 오버레이 캐럿이 프리뷰 커서에 그려지고 — 조합 중에는 `hideNativeCursor` 가 네이티브 커서를 배경색 1px bar 로 만들므로 이게 없으면 캐럿이 사라진다 — (2) `syncHelperAnchor` 가 실행되어 OS 후보창이 조합 커서에 앵커된다(§8.13 의 확장).
+- **결함이 테스트로 못박혀 있었다**: `ime-composition-controller.test.ts` 의 `"hides composition preview when overlay caret activity is off (non-Codex)"` 가 `"hidden"` 을 정답으로 단정하고 있었다. 교체했다.
+- **역검증**: 우선순위를 되돌리면 새 단위 테스트 2건이 실패하고(`expected 'hidden' to be 'composition-preview'`), 조기 반환을 되돌리면 컴포넌트 테스트에서 `preview.textContent` 가 `''` 로 떨어진다 — 신고된 증상 그대로다.
+- **미검증**: alt 버퍼는 건드리지 않았다. 확인된 두 케이스(맨 셸·Claude Code)는 모두 normal 버퍼이고, 전체화면 TUI(vim 등)에서 조합이 보이는지는 확인하지 않았다. `isAltBufferActive` 가 먼저 잡으므로 **거기서는 여전히 안 보인다** — 별 판정이 필요하다.
+- **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

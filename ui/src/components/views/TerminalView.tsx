@@ -1400,13 +1400,13 @@ export function TerminalView({
         restoreHelperAnchor("overlay-hidden");
       };
 
-      if (
-        !openedRef.current ||
-        !isFocusedRef.current ||
-        !stabilizeInteractiveCursorRef.current ||
-        !isOverlayCaretActivity(activityRef.current) ||
-        syncOutputActiveRef.current
-      ) {
+      // Only the conditions under which *nothing* may be painted belong here.
+      // `stabilizeInteractiveCursor` and `isOverlayCaretActivity` are caret-policy
+      // inputs, not visibility conditions — returning on them hid the composition
+      // preview in every non-Codex pane (issue #551). They are still passed to
+      // `resolveVisualCaretOwner` below, which returns "hidden" for them whenever no
+      // composition is in flight, so the caret behaviour is unchanged.
+      if (!openedRef.current || !isFocusedRef.current || syncOutputActiveRef.current) {
         hideOverlay();
         trace("overlay-hidden", {
           reason: "gating",

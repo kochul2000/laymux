@@ -1067,6 +1067,88 @@ describe("TerminalView", () => {
     });
   });
 
+  it("renders the IME composition preview in a non-Codex pane", async () => {
+    // Issue #551: the overlay gate required Codex activity, so a bare shell (and
+    // every non-Codex TUI) painted nothing for in-flight composition — no glyph and
+    // no underline, because xterm's own composition view is hidden unconditionally
+    // in index.css. Same driving sequence as the Codex tests, shell activity only.
+    render(<TerminalView instanceId="t-ime-shell" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-shell", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-shell");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-shell");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-shell");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 4;
+    terminal.buffer.active.cursorY = 2;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    // The reported case: two committed jamo plus one still composing.
+    helper.value = "ㄱㄱ";
+    helper.selectionStart = 2;
+    helper.selectionEnd = 2;
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱㄱㄱ";
+    helper.selectionStart = 3;
+    helper.selectionEnd = 3;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      expect(preview.style.opacity).toBe("1");
+      // The caret follows the preview here too: xterm's native cursor is hidden
+      // while composing, so without this the pane would have no caret at all.
+      expect(overlay.style.opacity).toBe("1");
+    });
+  });
+
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 

@@ -86,12 +86,48 @@ describe("resolveVisualCaretOwner", () => {
     ).toBe("composition-preview");
   });
 
-  it("hides composition preview when overlay caret activity is off (non-Codex)", () => {
+  // This case used to assert "hidden" — the defect in issue #551 was pinned as
+  // intended behaviour. The composition preview is the text the user is typing and
+  // its native renderer is switched off unconditionally in index.css, so hiding it
+  // outside Codex left shells and every non-Codex TUI with nothing rendering the
+  // in-flight jamo: no glyph, no underline.
+  it("keeps composition preview when overlay caret activity is off (non-Codex)", () => {
     expect(
       resolveVisualCaretOwner({
         ...baseInput,
         overlayActivity: false,
         compositionActive: true,
+      }),
+    ).toBe("composition-preview");
+  });
+
+  it("keeps composition preview when caret stabilization is off", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        stabilizeInteractiveCursor: false,
+        compositionActive: true,
+      }),
+    ).toBe("composition-preview");
+  });
+
+  it("still hides the caret outside Codex when no composition is in flight", () => {
+    // The caret policy itself is unchanged: only composition outranks it.
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        overlayActivity: false,
+        compositionActive: false,
+        hasPromptBoundary: true,
+        isInputPhase: true,
+      }),
+    ).toBe("hidden");
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        stabilizeInteractiveCursor: false,
+        compositionActive: false,
+        hasSyncFramePosition: true,
       }),
     ).toBe("hidden");
   });
