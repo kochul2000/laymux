@@ -16,6 +16,7 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
+import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -109,7 +110,26 @@ vi.mock("@xterm/xterm", () => ({
       this.options = { ...options };
       createdTerminals.push(this);
     }
-    open = vi.fn();
+    // The Unicode provider decides how many cells every printed code point
+    // claims, so the registration order relative to open()/write() is part of
+    // the contract — record it instead of just accepting the call.
+    unicodeActivations: Array<{ version: string; opened: boolean; writeCallsBefore: number }> = [];
+    unicode = {
+      register: (provider: { version: string }) => {
+        this.unicodeActivations.push({
+          version: provider.version,
+          opened: this.wasOpened,
+          writeCallsBefore: mockWrite.mock.calls.length,
+        });
+        this.unicode.versions.push(provider.version);
+      },
+      versions: [] as string[],
+      activeVersion: "6",
+    };
+    wasOpened = false;
+    open = vi.fn(() => {
+      this.wasOpened = true;
+    });
     write = mockWrite;
     onData = mockOnData;
     onResize = mockOnResize;
@@ -543,6 +563,23 @@ describe("TerminalView", () => {
       secondHandler?.();
     });
     expect(screen.getByTestId("terminal-loading-t-recreate")).not.toHaveClass("visible");
+  });
+
+  it("activates the shared Unicode cell-width provider before open and any write", () => {
+    render(<TerminalView instanceId="t-unicode-provider" profile="PowerShell" syncGroup="" />);
+
+    expect(createdTerminals).toHaveLength(1);
+    const terminal = createdTerminals[0] as unknown as {
+      options: Record<string, unknown>;
+      unicode: { activeVersion: string; versions: string[] };
+      unicodeActivations: Array<{ version: string; opened: boolean; writeCallsBefore: number }>;
+    };
+    // terminal.unicode is proposed API — without this option xterm throws.
+    expect(terminal.options.allowProposedApi).toBe(true);
+    expect(terminal.unicodeActivations).toEqual([
+      { version: LAYMUX_UNICODE_VERSION, opened: false, writeCallsBefore: 0 },
+    ]);
+    expect(terminal.unicode.activeVersion).toBe(LAYMUX_UNICODE_VERSION);
   });
 
   it("applies cursor shape and blink from profile settings", () => {

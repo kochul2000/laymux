@@ -283,7 +283,7 @@ Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모�
 - `isDectcemShowPark()`는 `isDec2026FrameOpen === false`이고 normal buffer일 때만 참이다. 따라서 장시간 프레임에서 모드 timeout이 발생해도 프레임 안 `?25h`는 visibility-only repaint tail로 남는다.
 - settle 재무장 상한은 `parkPending` fallback 동결만 해제한다. `isDec2026FrameOpen`은 타이머나 activity 전환이 닫지 않으며 실제 `?2026l` parser 경계에서만 닫힌다.
 - `?2026l` 뒤 `parkPending`이면 overlay 좌표 repaint를 동결하지만, IME composition이 종료되어 `active=false`가 되면 프리뷰 DOM의 opacity와 text를 동결 검사 전에 즉시 정리한다. 완료된 조합 문자열이 settle timeout까지 화면에 남아서는 안 된다.
-- 활성 IME composition preview는 터미널 셀 행별 fragment로 렌더링한다. 첫 fragment는 조합 anchor 열에서 시작하고 soft-wrap 이후 fragment는 다음 버퍼 행의 0열에서 시작한다. 폭 2 문자가 남은 한 셀에 걸치지 않도록 preview 행 배치와 composition caret 좌표는 같은 셀 폭 순회를 사용하며, xterm helper textarea의 focus·value·composition lifecycle 소유권은 변경하지 않는다.
+- 활성 IME composition preview는 터미널 셀 행별 fragment로 렌더링한다. 첫 fragment는 조합 anchor 열에서 시작하고 soft-wrap 이후 fragment는 다음 버퍼 행의 0열에서 시작한다. 폭 2 문자가 남은 한 셀에 걸치지 않도록 preview 행 배치와 composition caret 좌표는 같은 셀 폭 순회를 사용하며, xterm helper textarea의 focus·value·composition lifecycle 소유권은 변경하지 않는다. 이 순회의 폭·grapheme 경계는 §8.9 의 단일 provider 에서 온다.
 - stabilizer가 `?2026l`을 관찰한 시각으로 `D_park = frameEndAt + 50ms`를 write metadata에 기록한다. parser hook이 늦게 frame end를 보더라도 park settle은 이 deadline까지의 **남은 시간**만 사용하며 새 50ms를 시작하지 않는다. 정상 transaction에서는 같은 write 안의 최종 out-of-frame `?25h`가 권위 park를 확정해 settle timer를 즉시 해제한다. stabilizer를 거치지 않은 출력의 기존 parser settle 동작은 그대로 유지한다.
 - normal buffer의 `viewportY < baseY`이면 사용자가 scrollback을 보는 중이므로 Codex overlay caret과 composition preview를 숨긴다. shadow cursor 좌표 자체는 유지하고, `terminal.onScroll`에서 표시 상태만 다시 계산해 live bottom으로 복귀하면 즉시 복원한다. live 화면 기준 shadow 좌표를 과거 viewport에 고정 표시하지 않기 위함이다.
 
@@ -366,6 +366,18 @@ pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFoc
 - **복원(window focus)**: focus 시점에 다른 요소가 focus 를 쥐고 있으면 기록을 버리고 아무것도 하지 않는다. 주인 없는 상태(`null`/`body`/`documentElement`)거나 아직 helper 자신이면 다음 프레임에 재확인 후 `helper.focus()` 를 한 번 호출하고 기록을 소비한다 — `activeElement === helper` 를 동기 시점에 조기 종료하지 않는 것은 window `focus` 직후 webview 가 focus 를 떨어뜨리는 순서를 덮기 위해서다. 프레임 사이에 모달·검색창·설정 입력·다른 pane helper 가 focus 를 얻었으면 복원을 취소한다 — 앱 활성화 시 전역 `terminal.focus()` 는 어디에서도 호출하지 않는다.
 - **stale 정리**: helper 미연결/surface 밖, xterm 의 helper 교체(`bindHelperTextareaEvents`), pane focus 해제(다른 pane·워크스페이스 전환·앱 비활성 중 automation 변경), surface 밖 pointer press(재활성화 클릭의 handoff), unmount(dispose) 중 하나라도 발생하면 기록을 버리고 되살리지 않는다. 멀티-pane 에서는 각 pane 이 자기 helper 만 복원하므로 DOM 순서상 첫 helper 로 잘못 돌아가지 않는다.
 - **진단**: `focus-ownership-captured`/`-reclaim-scheduled`/`-reclaimed`/`-reclaim-declined`/`-cleared` 이벤트를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 `activeElement` 문자열과 함께 남긴다. headful Alt-Tab 왕복은 이 trace 로 확인한다.
+
+### 8.9 Unicode 셀 폭 / grapheme 계약
+
+터미널 셀 폭과 grapheme 클러스터 경계는 `ui/src/lib/terminal-unicode-width.ts` 한 곳이 소유한다([ADR-0057](../adr/0057-single-terminal-cell-width-provider.md)). 이 모듈이 xterm 의 `IUnicodeVersionProvider`(`wcwidth` + `charProperties`)를 구현하고, `TerminalView` 는 `new Terminal()` 직후 — `terminal.open()`·PTY write·세션 restore write 보다 앞에서 — `activateTerminalUnicodeProvider(terminal)` 로 등록·활성화한다. `allowProposedApi` 가 필요하며 실패를 삼켜 기본 provider 로 되돌아가지 않는다. 프로덕션 xterm 인스턴스는 `TerminalView` 한 곳에서만 만들어지므로 모든 데스크톱 pane 이 같은 provider 를 쓴다.
+
+IME composition preview 는 같은 모듈의 `stringCellWidth`(총 폭)와 `splitCellClusters`(클러스터+폭)만 사용한다. `getCompositionPreviewLayout` 은 코드포인트가 아니라 이 클러스터를 분할 단위로 삼으므로 ZWJ sequence·variation selector·combining mark·skin tone modifier·regional indicator pair 가 행 경계에서 쪼개지지 않고, 남은 셀보다 넓은 클러스터는 통째로 다음 행으로 내려간다. 정확히 줄을 채운 폭 2 문자는 같은 행에 남고 caret 만 다음 행 0열로 정규화하는 기존 규칙은 유지한다.
+
+폭 규칙: Unicode 11 기준 East Asian Wide/Fullwidth = 2, `\p{Mn}`/`\p{Me}`/`\p{Cf}` 와 conjoining Hangul jamo(`U+1160`–`U+11FF`) = 0, ambiguous = 1. `emoji + VS16` 은 클러스터 폭 2 로 승격하고 VS15 는 승격하지 않는다. grapheme 결합은 별도 segmenter 없이 `charProperties` 의 `shouldJoin` 비트로만 표현하며, property value 비트 배치는 xterm 내부 `UnicodeService` 와 호환을 유지해야 한다(xterm 버전 상향 시 확인 대상). `charProperties` 는 출력 코드포인트마다 호출되므로 폭 조회는 lazy `Uint8Array` 캐시로 O(1) 을 유지한다.
+
+Direct Remote Mode 의 브라우저 클라이언트는 커밋된 xterm 번들을 그대로 쓰고 이 provider 를 받지 않으므로 xterm 기본 Unicode 6 폭을 유지한다. remote 표면은 composition preview overlay 를 쓰지 않는다.
+
+회귀 테스트는 `terminal-unicode-width.test.ts`(폭·클러스터 경계, provider 등록)와 `ime-composition-controller.test.ts`(실제 `Terminal` 에 같은 텍스트를 write 해 buffer 커서와 preview layout 을 직접 비교), `TerminalView.test.tsx`(open/write 앞 활성화 순서)로 나눠 고정한다.
 
 ---
 

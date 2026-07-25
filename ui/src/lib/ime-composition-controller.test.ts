@@ -1,3 +1,4 @@
+import { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,8 +6,18 @@ import {
   getCompositionPreviewCursor,
   getCompositionPreviewLayout,
   resolveVisualCaretOwner,
-  stringCellWidth,
 } from "./ime-composition-controller";
+import { activateTerminalUnicodeProvider, stringCellWidth } from "./terminal-unicode-width";
+
+const ZWJ = "\u200d";
+const VS16 = "\ufe0f";
+const KEYCAP = "\u20e3";
+const ACCENT = "\u0301";
+const SKIN_TONE = "\u{1f3fb}";
+const HEART = "❤";
+const THUMBS_UP = "\u{1f44d}";
+const FAMILY = `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}`;
+const FLAG_KR = "\u{1f1f0}\u{1f1f7}";
 
 const baseInput = {
   opened: true,
@@ -131,7 +142,7 @@ describe("resolveVisualCaretOwner", () => {
   });
 });
 
-describe("stringCellWidth", () => {
+describe("stringCellWidth (shared width contract)", () => {
   it("counts ASCII as width 1", () => {
     expect(stringCellWidth("abc")).toBe(3);
   });
@@ -316,6 +327,184 @@ describe("getCompositionPreviewLayout", () => {
       ],
     });
   });
+
+  it("keeps a combining accent attached to its base character at the line end", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: `ae${ACCENT}`,
+          anchorBufferX: 8,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 0,
+      cursorAbsY: 5,
+      rows: [{ text: `ae${ACCENT}`, startColumn: 8, rowOffset: 0, cellWidth: 2 }],
+    });
+  });
+
+  it("moves an emoji presentation sequence wholly to the next row", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: `${HEART}${VS16}`,
+          anchorBufferX: 9,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 5,
+      rows: [{ text: `${HEART}${VS16}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("moves a skin tone emoji wholly to the next row", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: `${THUMBS_UP}${SKIN_TONE}`,
+          anchorBufferX: 9,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 5,
+      rows: [{ text: `${THUMBS_UP}${SKIN_TONE}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("never splits a family ZWJ sequence across the row boundary", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: `a${FAMILY}`,
+          anchorBufferX: 8,
+          anchorBufferAbsY: 4,
+          caretCellOffset: 3,
+          textCellWidth: 3,
+        },
+        10,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 5,
+      rows: [
+        { text: "a", startColumn: 8, rowOffset: 0, cellWidth: 1 },
+        { text: FAMILY, startColumn: 0, rowOffset: 1, cellWidth: 2 },
+      ],
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The preview must place its rows and caret on the cells the committed text
+// actually occupies, so the layout is compared against a real xterm buffer
+// printing the same text at the same anchor column.
+// ---------------------------------------------------------------------------
+
+function writeTerminal(terminal: Terminal, data: string): Promise<void> {
+  return new Promise((resolve) => terminal.write(data, resolve));
+}
+
+/**
+ * Print `text` at `startColumn` of the first row and report the resulting
+ * cursor cell. xterm parks a pending-wrap cursor at `cols`; normalize it into
+ * the next row so both sides speak the same coordinate space as the preview.
+ */
+async function measureXtermCursor(
+  text: string,
+  cols: number,
+  startColumn: number,
+): Promise<{ cursorX: number; cursorAbsY: number }> {
+  const terminal = new Terminal({ allowProposedApi: true, cols, rows: 8 });
+  activateTerminalUnicodeProvider(terminal);
+  await writeTerminal(terminal, `\u001b[1;${startColumn + 1}H${text}`);
+  const buffer = terminal.buffer.active;
+  let cursorX = buffer.cursorX;
+  let cursorAbsY = buffer.baseY + buffer.cursorY;
+  if (cursorX >= cols) {
+    cursorX -= cols;
+    cursorAbsY += 1;
+  }
+  terminal.dispose();
+  return { cursorX, cursorAbsY };
+}
+
+function previewLayout(text: string, cols: number, startColumn: number) {
+  const width = stringCellWidth(text);
+  return getCompositionPreviewLayout(
+    {
+      text,
+      anchorBufferX: startColumn,
+      anchorBufferAbsY: 0,
+      caretCellOffset: width,
+      textCellWidth: width,
+    },
+    cols,
+  );
+}
+
+describe("composition preview vs xterm buffer parity", () => {
+  const cases: Array<{ name: string; text: string; cols: number; startColumn: number }> = [
+    { name: "ASCII inside the line", text: "hello", cols: 20, startColumn: 3 },
+    { name: "ASCII crossing the line end", text: "abcd", cols: 10, startColumn: 8 },
+    { name: "Hangul inside the line", text: "한글", cols: 20, startColumn: 3 },
+    { name: "Hangul crossing the line end", text: "아아", cols: 10, startColumn: 7 },
+    { name: "Hangul with one cell left", text: "가", cols: 10, startColumn: 9 },
+    { name: "Hangul exactly filling the line", text: "가", cols: 10, startColumn: 8 },
+    { name: "combining accent", text: `e${ACCENT}`, cols: 10, startColumn: 3 },
+    { name: "combining accent at the line end", text: `e${ACCENT}`, cols: 10, startColumn: 9 },
+    { name: "emoji presentation sequence", text: `${HEART}${VS16}`, cols: 10, startColumn: 3 },
+    {
+      name: "emoji presentation sequence at the line end",
+      text: `${HEART}${VS16}`,
+      cols: 10,
+      startColumn: 9,
+    },
+    { name: "skin tone emoji", text: `${THUMBS_UP}${SKIN_TONE}`, cols: 10, startColumn: 3 },
+    {
+      name: "skin tone emoji at the line end",
+      text: `${THUMBS_UP}${SKIN_TONE}`,
+      cols: 10,
+      startColumn: 9,
+    },
+    { name: "family ZWJ sequence", text: FAMILY, cols: 10, startColumn: 3 },
+    { name: "family ZWJ sequence at the line end", text: FAMILY, cols: 10, startColumn: 9 },
+    { name: "keycap sequence", text: `1${VS16}${KEYCAP}`, cols: 10, startColumn: 4 },
+    { name: "flag pair", text: FLAG_KR, cols: 10, startColumn: 4 },
+    { name: "mixed run wrapping mid-text", text: "a한글b", cols: 8, startColumn: 5 },
+    { name: "73-column Hangul boundary", text: "아아", cols: 73, startColumn: 71 },
+  ];
+
+  for (const testCase of cases) {
+    it(`puts the caret on the committed cell — ${testCase.name}`, async () => {
+      const layout = previewLayout(testCase.text, testCase.cols, testCase.startColumn);
+      const measured = await measureXtermCursor(testCase.text, testCase.cols, testCase.startColumn);
+      expect({ cursorX: layout.cursorX, cursorAbsY: layout.cursorAbsY }).toEqual(measured);
+    });
+
+    it(`emits whole clusters per row — ${testCase.name}`, () => {
+      const layout = previewLayout(testCase.text, testCase.cols, testCase.startColumn);
+      expect(layout.rows.map((row) => row.text).join("")).toBe(testCase.text);
+      for (const row of layout.rows) {
+        // A row that ended mid-cluster would measure differently on its own.
+        expect(stringCellWidth(row.text)).toBe(row.cellWidth);
+        expect(row.startColumn + row.cellWidth).toBeLessThanOrEqual(testCase.cols);
+      }
+    });
+  }
 });
 
 describe("createImeCompositionController", () => {
