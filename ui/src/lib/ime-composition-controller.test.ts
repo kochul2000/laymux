@@ -531,6 +531,178 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
+  describe("carry-over drops the committed prefix (issue #546)", () => {
+    /**
+     * A Korean IME emits `compositionend` for the finished syllable and
+     * `compositionstart` for the next one **in the same tick** — the jamo that
+     * starts 나 is also the one that finalizes 가. The deferred finalize is a
+     * `setTimeout(0)`, so carry-over fires on ordinary typing.
+     *
+     * The committed syllable has already gone to the PTY, so it must leave the
+     * preview: otherwise it stays underlined and the preview grows across the
+     * whole sentence, overdrawing real buffer content.
+     */
+    /**
+     * `liveAnchors` supplies what the shadow cursor reports after each commit.
+     * `null` means it has not echoed yet (the same-tick case). Values are
+     * deliberately **not** equal to the arithmetic advance, so a test that wants
+     * the live branch actually proves the live branch was taken.
+     */
+    async function typeGaNaDa(liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>) {
+      const snapshots: Array<{ text: string; anchorX: number; width: number }> = [];
+      const carryOverTraces: Array<Record<string, unknown>> = [];
+      // The shadow cursor cannot have advanced within the same tick, so the
+      // default is a stale anchor. `shadowAdvances` covers the other ordering.
+      let anchor = { cursorX: 0, cursorAbsY: 5 };
+      const controller = createImeCompositionController({
+        getAnchor: () => anchor,
+        onTrace: (event, payload) => {
+          if (event === "ime-composition-start-carryover") carryOverTraces.push(payload);
+        },
+        onStateChange: (state) => {
+          if (!state.active) return;
+          snapshots.push({
+            text: state.text,
+            anchorX: state.anchorBufferX,
+            width: state.textCellWidth,
+          });
+        },
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+
+      const setValue = (v: string) => {
+        textarea.value = v;
+        textarea.selectionStart = v.length;
+        textarea.selectionEnd = v.length;
+      };
+      const compose = async (value: string, data: string) => {
+        setValue(value);
+        textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data }));
+        textarea.dispatchEvent(new Event("input"));
+        await tick();
+      };
+
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00", "\uac00"); // 가
+
+      // ㄴ finalizes 가 and starts 나, same tick.
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+      if (liveAnchors[0]) anchor = liveAnchors[0];
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00\ub098", "\ub098"); // 가나
+
+      // ㄷ finalizes 나 and starts 다.
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub098" }));
+      if (liveAnchors[1]) anchor = liveAnchors[1];
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00\ub098\ub2e4", "\ub2e4"); // 가나다
+
+      const final = controller.getState();
+      controller.dispose();
+      return { snapshots, final, carryOverTraces };
+    }
+
+    it("keeps only the active syllable in the preview with a stale shadow cursor", async () => {
+      const { final } = await typeGaNaDa([null, null]);
+      expect(final).toMatchObject({
+        active: true,
+        text: "\ub2e4", // 다 only — 가나 is committed
+        anchorBufferX: 4, // advanced by the committed 가나 = 4 cells
+        anchorBufferAbsY: 5,
+        textCellWidth: 2,
+      });
+    });
+
+    it("adopts the shadow cursor once it has echoed", async () => {
+      // 3 and 7 are not the arithmetic advance (2 and 4), so matching them proves
+      // the live branch was chosen rather than coinciding with the arithmetic one.
+      const { final, carryOverTraces } = await typeGaNaDa([
+        { cursorX: 3, cursorAbsY: 5 },
+        { cursorX: 7, cursorAbsY: 5 },
+      ]);
+      expect(final).toMatchObject({ text: "\ub2e4", anchorBufferX: 7, textCellWidth: 2 });
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "shadow-cursor",
+        "shadow-cursor",
+      ]);
+    });
+
+    it("uses the committed width while the shadow cursor is stale", async () => {
+      const { carryOverTraces } = await typeGaNaDa([null, null]);
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "committed-width",
+        "committed-width",
+      ]);
+      expect(carryOverTraces.map((t) => t.committedWidth)).toEqual([2, 2]);
+    });
+
+    it("adopts a shadow cursor that moved backwards", async () => {
+      // A scroll or clear can move it left or up. Direction must not matter: the
+      // question is whether the PTY echoed, not which way the cursor went.
+      const { final, carryOverTraces } = await typeGaNaDa([
+        { cursorX: 0, cursorAbsY: 4 },
+        { cursorX: 1, cursorAbsY: 4 },
+      ]);
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "shadow-cursor",
+        "shadow-cursor",
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 1, anchorBufferAbsY: 4 });
+    });
+
+    it("adopts a shadow cursor that wrapped to the next row", async () => {
+      // The wrap-boundary self-correction path: xterm pushes a whole wide glyph
+      // to the next row rather than splitting it, so the echoed cursor lands on
+      // row+1 column 2 — a place arithmetic on cursorX alone cannot reach.
+      const { final, carryOverTraces } = await typeGaNaDa([
+        { cursorX: 2, cursorAbsY: 6 },
+        { cursorX: 4, cursorAbsY: 6 },
+      ]);
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "shadow-cursor",
+        "shadow-cursor",
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
+    });
+
+    it("reports active with empty text between the commit and the next sync", async () => {
+      // A state combination this change introduces. `resolveVisualCaretOwner`
+      // gives composition-preview on `active` alone, and the renderer hides an
+      // empty preview while still placing the caret at the advanced anchor — so
+      // the empty snapshot must carry the *new* anchor, not the old one.
+      const { snapshots } = await typeGaNaDa([null, null]);
+      const empties = snapshots.filter((s) => s.text === "");
+      expect(empties.length).toBeGreaterThan(0);
+      // One per composition start: the fresh start at 0, then each carry-over at
+      // the advanced anchor.
+      expect(empties.map((s) => s.anchorX)).toEqual([0, 2, 4]);
+      expect(empties.every((s) => s.width === 0)).toBe(true);
+    });
+
+    it("advances the anchor one syllable at a time", async () => {
+      const { snapshots } = await typeGaNaDa([null, null]);
+      // One entry per syllable, each holding only that syllable.
+      const perSyllable = snapshots.filter((s) => s.text.length === 1);
+      expect(perSyllable.map((s) => `${s.text}@${s.anchorX}`)).toEqual([
+        "\uac00@0",
+        "\ub098@2",
+        "\ub2e4@4",
+      ]);
+    });
+
+    it("never lets the preview width grow past one syllable", async () => {
+      const { snapshots } = await typeGaNaDa([null, null]);
+      // The regression showed 2 → 4 → 6 as the chain accumulated.
+      expect(Math.max(...snapshots.map((s) => s.width))).toBe(2);
+    });
+
+    it("does not report committed text in any snapshot", async () => {
+      const { snapshots } = await typeGaNaDa([null, null]);
+      expect(snapshots.map((s) => s.text)).not.toContain("\uac00\ub098");
+      expect(snapshots.map((s) => s.text)).not.toContain("\uac00\ub098\ub2e4");
+    });
+  });
   it("resets after compositionend once the deferred finalize fires", async () => {
     const controller = createImeCompositionController({
       getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
@@ -586,15 +758,16 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
     await tick();
 
-    // Carry-over mode: full accumulated text shown at original anchor
+    // Carry-over: the committed 이 left the preview and the anchor advanced by
+    // its two cells, so only the active 대 is shown (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uC774\uB300",
-      anchorBufferX: 20,
+      text: "\uB300",
+      anchorBufferX: 22,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 2,
-      caretCellOffset: 4,
-      textCellWidth: 4,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 
@@ -624,14 +797,16 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
     await tick();
 
+    // Only the active 대 stays in the preview; the anchor moved past the
+    // committed 이 (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uC774\uB300",
-      anchorBufferX: 20,
+      text: "\uB300",
+      anchorBufferX: 22,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 2,
-      caretCellOffset: 4,
-      textCellWidth: 4,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 
@@ -802,14 +977,16 @@ describe("createImeCompositionController", () => {
     await tick();
 
     // Carry-over: accumulated text shown at original anchor
+    // Chain of three: only the last syllable is active, and the anchor sits
+    // past the two committed ones (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uB2E4\uB978\uB9D0",
-      anchorBufferX: 20,
+      text: "\uB9D0",
+      anchorBufferX: 24,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 3,
-      caretCellOffset: 6,
-      textCellWidth: 6,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 });
