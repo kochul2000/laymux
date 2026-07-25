@@ -61,6 +61,13 @@ import {
 } from "@/lib/ime-composition-controller";
 import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import {
+  clampAnchorCell,
+  computeCellMetrics,
+  computeHelperAnchorStyle,
+  shouldSyncHelperAnchor,
+  type AnchorCell,
+} from "@/lib/ime-anchor";
 import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
@@ -1307,6 +1314,72 @@ export function TerminalView({
 
     let overlayCaretFrame: number | undefined;
     let helperTextarea: HTMLTextAreaElement | null = null;
+
+    // -- native IME candidate window anchor (issue #532, ADR-0061) -------------
+    // helper textarea 의 **위치만** 임시로 옮긴다. value·focus·composition
+    // lifecycle 은 계속 xterm 소유(ADR-0053/0054)이며 여기서 읽지도 쓰지도
+    // 않는다. 옮긴 뒤에는 반드시 원래 inline style 로 되돌린다.
+    let helperAnchorSaved: { left: string; top: string } | null = null;
+    const restoreHelperAnchor = (reason: string) => {
+      if (!helperAnchorSaved || !helperTextarea) {
+        helperAnchorSaved = null;
+        return;
+      }
+      helperTextarea.style.left = helperAnchorSaved.left;
+      helperTextarea.style.top = helperAnchorSaved.top;
+      helperAnchorSaved = null;
+      trace("ime-anchor-restored", { reason });
+    };
+    const syncHelperAnchor = (input: {
+      anchorCell: AnchorCell;
+      publicCell: AnchorCell;
+      screenEl: HTMLElement | null;
+      targetRect: DOMRect;
+      cols: number;
+      rows: number;
+    }) => {
+      const helper = helperTextarea;
+      // 조합 중이 아니면 후보창도 없다 — 평소에는 xterm 배치를 건드리지 않는다.
+      if (!helper || !compositionPreviewRef.current.active || !input.screenEl) {
+        restoreHelperAnchor("not-composing");
+        return;
+      }
+      if (!shouldSyncHelperAnchor(input.publicCell, input.anchorCell)) {
+        // 두 커서가 일치하면 xterm 배치가 이미 맞다.
+        restoreHelperAnchor("cursors-agree");
+        return;
+      }
+      const metrics = computeCellMetrics(
+        input.targetRect.width,
+        input.targetRect.height,
+        input.cols,
+        input.rows,
+      );
+      if (!metrics) return;
+      const screenRect = input.screenEl.getBoundingClientRect();
+      const style = computeHelperAnchorStyle({
+        anchorCell: clampAnchorCell(input.anchorCell, input.cols, input.rows),
+        metrics,
+        // helper 는 `.xterm-screen` 안에 있으므로 그 기준으로 캔버스 원점을 잡는다.
+        originLeft: input.targetRect.left - screenRect.left,
+        originTop: input.targetRect.top - screenRect.top,
+        devicePixelRatio: window.devicePixelRatio,
+      });
+      if (!helperAnchorSaved) {
+        helperAnchorSaved = { left: helper.style.left, top: helper.style.top };
+      }
+      const nextLeft = `${style.left}px`;
+      const nextTop = `${style.top}px`;
+      if (helper.style.left === nextLeft && helper.style.top === nextTop) return;
+      helper.style.left = nextLeft;
+      helper.style.top = nextTop;
+      trace("ime-anchor-synced", {
+        anchorCell: input.anchorCell,
+        publicCell: input.publicCell,
+        left: style.left,
+        top: style.top,
+      });
+    };
     const updateOverlayCaret = () => {
       const overlay = overlayCaretRef.current;
       const previewEl = compositionPreviewRefEl.current;
@@ -1317,6 +1390,10 @@ export function TerminalView({
       const hideOverlay = () => {
         overlay.style.opacity = "0";
         previewEl.style.opacity = "0";
+        // 오버레이가 숨는 경로(비포커스·스크롤백·geometry 미확정)는 후보창 앵커도
+        // 신뢰할 수 없다. 옮겨둔 helper 위치를 여기서 반드시 원복한다 —
+        // 아래 sync 호출은 이 조기 반환들보다 뒤에 있다.
+        restoreHelperAnchor("overlay-hidden");
       };
 
       if (
@@ -1468,6 +1545,22 @@ export function TerminalView({
         previewEl.style.opacity = "0";
         previewEl.replaceChildren();
       }
+      // OS 후보창은 포커스된 helper textarea 의 DOM 위치에서 뜨고, xterm 은 그
+      // textarea 를 public buffer cursor 에 둔다. TUI repaint 로 두 커서가
+      // 갈리면 preview 는 맞아도 후보창만 다른 행에 뜬다. 여기서 같은
+      // cursorX/cursorY 를 넘겨 앵커 계약을 하나로 유지한다 (ADR-0061).
+      syncHelperAnchor({
+        anchorCell: { column: cursorX, row: cursorY },
+        publicCell: {
+          column: (term.buffer.active as { cursorX?: number }).cursorX ?? 0,
+          row: (term.buffer.active as { cursorY?: number }).cursorY ?? 0,
+        },
+        screenEl: screen,
+        targetRect,
+        cols: term.cols,
+        rows: term.rows,
+      });
+
       if (cursorY < 0 || cursorY >= term.rows) {
         hideOverlay();
         trace("overlay-hidden", {
@@ -2008,6 +2101,8 @@ export function TerminalView({
       ) as HTMLTextAreaElement | null;
       if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
       if (helperTextarea) {
+        // 옮겨둔 위치를 남긴 채 helper 를 바꾸면 stale inline style 이 남는다.
+        restoreHelperAnchor("helper-replaced");
         helperTextarea.removeEventListener("beforeinput", handleBeforeInputForChord);
         helperTextarea.removeEventListener("blur", handleBlurForChord);
         detachCandidateGuardListeners(helperTextarea);
@@ -3761,6 +3856,7 @@ export function TerminalView({
       helperTextarea?.removeEventListener("beforeinput", handleBeforeInputForChord);
       helperTextarea?.removeEventListener("blur", handleBlurForChord);
       if (helperTextarea) detachCandidateGuardListeners(helperTextarea);
+      restoreHelperAnchor("unmount");
       // unmount 시 진행 중이던 chord press 를 버린다 — 남겨두면 다음 마운트가
       // 아무 텍스트 삽입이나 삼킬 수 있다.
       osInputSourceChord.reset("unmount");
