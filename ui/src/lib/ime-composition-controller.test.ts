@@ -531,6 +531,107 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
+  describe("carry-over drops the committed prefix (issue #546)", () => {
+    /**
+     * A Korean IME emits `compositionend` for the finished syllable and
+     * `compositionstart` for the next one **in the same tick** — the jamo that
+     * starts 나 is also the one that finalizes 가. The deferred finalize is a
+     * `setTimeout(0)`, so carry-over fires on ordinary typing.
+     *
+     * The committed syllable has already gone to the PTY, so it must leave the
+     * preview: otherwise it stays underlined and the preview grows across the
+     * whole sentence, overdrawing real buffer content.
+     */
+    async function typeGaNaDa(shadowAdvances: boolean) {
+      const snapshots: Array<{ text: string; anchorX: number; width: number }> = [];
+      // The shadow cursor cannot have advanced within the same tick, so the
+      // default is a stale anchor. `shadowAdvances` covers the other ordering.
+      let anchor = { cursorX: 0, cursorAbsY: 5 };
+      const controller = createImeCompositionController({
+        getAnchor: () => anchor,
+        onStateChange: (state) => {
+          if (!state.active) return;
+          snapshots.push({
+            text: state.text,
+            anchorX: state.anchorBufferX,
+            width: state.textCellWidth,
+          });
+        },
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+
+      const setValue = (v: string) => {
+        textarea.value = v;
+        textarea.selectionStart = v.length;
+        textarea.selectionEnd = v.length;
+      };
+      const compose = async (value: string, data: string) => {
+        setValue(value);
+        textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data }));
+        textarea.dispatchEvent(new Event("input"));
+        await tick();
+      };
+
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00", "\uac00"); // 가
+
+      // ㄴ finalizes 가 and starts 나, same tick.
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+      if (shadowAdvances) anchor = { cursorX: 2, cursorAbsY: 5 };
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00\ub098", "\ub098"); // 가나
+
+      // ㄷ finalizes 나 and starts 다.
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\ub098" }));
+      if (shadowAdvances) anchor = { cursorX: 4, cursorAbsY: 5 };
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00\ub098\ub2e4", "\ub2e4"); // 가나다
+
+      const final = controller.getState();
+      controller.dispose();
+      return { snapshots, final };
+    }
+
+    it("keeps only the active syllable in the preview with a stale shadow cursor", async () => {
+      const { final } = await typeGaNaDa(false);
+      expect(final).toMatchObject({
+        active: true,
+        text: "\ub2e4", // 다 only — 가나 is committed
+        anchorBufferX: 4, // advanced by the committed 가나 = 4 cells
+        anchorBufferAbsY: 5,
+        textCellWidth: 2,
+      });
+    });
+
+    it("reaches the same anchor when the shadow cursor did advance", async () => {
+      const { final } = await typeGaNaDa(true);
+      expect(final).toMatchObject({ text: "\ub2e4", anchorBufferX: 4, textCellWidth: 2 });
+    });
+
+    it("advances the anchor one syllable at a time", async () => {
+      const { snapshots } = await typeGaNaDa(false);
+      // One entry per syllable, each holding only that syllable.
+      const perSyllable = snapshots.filter((s) => s.text.length === 1);
+      expect(perSyllable.map((s) => `${s.text}@${s.anchorX}`)).toEqual([
+        "\uac00@0",
+        "\ub098@2",
+        "\ub2e4@4",
+      ]);
+    });
+
+    it("never lets the preview width grow past one syllable", async () => {
+      const { snapshots } = await typeGaNaDa(false);
+      // The regression showed 2 → 4 → 6 as the chain accumulated.
+      expect(Math.max(...snapshots.map((s) => s.width))).toBe(2);
+    });
+
+    it("does not report committed text in any snapshot", async () => {
+      const { snapshots } = await typeGaNaDa(false);
+      expect(snapshots.map((s) => s.text)).not.toContain("\uac00\ub098");
+      expect(snapshots.map((s) => s.text)).not.toContain("\uac00\ub098\ub2e4");
+    });
+  });
   it("resets after compositionend once the deferred finalize fires", async () => {
     const controller = createImeCompositionController({
       getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
@@ -586,15 +687,16 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
     await tick();
 
-    // Carry-over mode: full accumulated text shown at original anchor
+    // Carry-over: the committed 이 left the preview and the anchor advanced by
+    // its two cells, so only the active 대 is shown (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uC774\uB300",
-      anchorBufferX: 20,
+      text: "\uB300",
+      anchorBufferX: 22,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 2,
-      caretCellOffset: 4,
-      textCellWidth: 4,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 
@@ -624,14 +726,16 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uB300" }));
     await tick();
 
+    // Only the active 대 stays in the preview; the anchor moved past the
+    // committed 이 (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uC774\uB300",
-      anchorBufferX: 20,
+      text: "\uB300",
+      anchorBufferX: 22,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 2,
-      caretCellOffset: 4,
-      textCellWidth: 4,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 
@@ -802,14 +906,16 @@ describe("createImeCompositionController", () => {
     await tick();
 
     // Carry-over: accumulated text shown at original anchor
+    // Chain of three: only the last syllable is active, and the anchor sits
+    // past the two committed ones (issue #546).
     expect(controller.getState()).toMatchObject({
       active: true,
-      text: "\uB2E4\uB978\uB9D0",
-      anchorBufferX: 20,
+      text: "\uB9D0",
+      anchorBufferX: 24,
       anchorBufferAbsY: 736,
-      caretUtf16Index: 3,
-      caretCellOffset: 6,
-      textCellWidth: 6,
+      caretUtf16Index: 1,
+      caretCellOffset: 2,
+      textCellWidth: 2,
     });
   });
 });

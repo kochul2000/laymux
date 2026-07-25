@@ -356,10 +356,32 @@ export function createImeCompositionController(
       // Cancel the deferred reset and continue the composition chain.
       cancelPendingFinalize();
       isCarryOver = true;
-      // Keep compositionAnchor and compositionBaseText from the first composition
+      // The committed syllable has already gone to the PTY, so it must leave the
+      // preview — keeping it would show confirmed text as still composing and
+      // grow the preview across the whole sentence (issue #546). Re-base on the
+      // current textarea value so `getChangedRange` yields only the new syllable.
+      const committedBase = textarea?.value ?? "";
+      const committedWidth = stringCellWidth(committedBase.slice(compositionBaseText.length));
+      // The chain continues, so `getAnchor()` is the authority **only if** it has
+      // already moved past the chain anchor. Within the same tick the PTY has not
+      // echoed yet and it still reports the pre-commit cell, so fall back to
+      // advancing by the committed text's own width — which needs no round trip.
+      const liveAnchor = options.getAnchor();
+      const advancedByLive =
+        liveAnchor.cursorAbsY !== compositionAnchor.cursorAbsY ||
+        liveAnchor.cursorX >= compositionAnchor.cursorX + committedWidth;
+      compositionAnchor = advancedByLive
+        ? liveAnchor
+        : {
+            cursorX: compositionAnchor.cursorX + committedWidth,
+            cursorAbsY: compositionAnchor.cursorAbsY,
+          };
+      compositionBaseText = committedBase;
       traceComposition(options, "ime-composition-start-carryover", {
         baseText: compositionBaseText,
         textareaValue: textarea?.value ?? "",
+        committedWidth,
+        anchorSource: advancedByLive ? "shadow-cursor" : "committed-width",
         anchorBufferX: compositionAnchor.cursorX,
         anchorBufferAbsY: compositionAnchor.cursorAbsY,
       });
@@ -381,6 +403,14 @@ export function createImeCompositionController(
       active: true,
       anchorBufferX: compositionAnchor.cursorX,
       anchorBufferAbsY: compositionAnchor.cursorAbsY,
+      // Clear the text too. On a carry-over the previous syllable is still in
+      // `state` and is already committed, so painting it once at the *new*
+      // anchor would draw it one syllable to the right of where it really is
+      // until the next sync replaces it.
+      text: "",
+      caretUtf16Index: 0,
+      caretCellOffset: 0,
+      textCellWidth: 0,
     });
   };
 
