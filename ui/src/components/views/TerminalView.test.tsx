@@ -3571,6 +3571,193 @@ describe("TerminalView", () => {
     });
   });
 
+  // -- Linux IME candidate key guard (issue #528) --
+
+  describe("Linux IME candidate key guard", () => {
+    function keyEvent(
+      type: "keydown" | "keypress" | "keyup",
+      init: { key: string; code: string; keyCode: number },
+    ): KeyboardEvent {
+      const event = new KeyboardEvent(type, { key: init.key, code: init.code });
+      // jsdom ignores `keyCode` in the event init, and `keyCode === 229` is the
+      // IME-consumed marker the guard keys off — define it explicitly.
+      Object.defineProperty(event, "keyCode", { value: init.keyCode });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      return event;
+    }
+
+    /** Mount with a helper textarea attached and a spoofed user agent. */
+    async function mountWithHelper(instanceId: string, ua: string) {
+      const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(ua);
+      render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" />);
+      const host = screen.getByTestId(`terminal-xterm-host-${instanceId}`);
+      const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      host.appendChild(terminal.element);
+
+      await vi.waitFor(() => {
+        expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+      });
+      await waitForLocalTerminalControl();
+      expect(capturedKeyHandler).not.toBeNull();
+
+      if (ua.includes("Linux")) {
+        // Helper binding (and with it the guard's composition listeners) happens
+        // asynchronously after the terminal opens. Probe until the wiring is
+        // live, then close the probe window so the test starts from a clean
+        // state — otherwise the first test in this block races the binding.
+        await vi.waitFor(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+          helper.dispatchEvent(new CompositionEvent("compositionend", { data: "x" }));
+          const probe = keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 });
+          expect(capturedKeyHandler!(probe)).toBe(false);
+        });
+        helper.dispatchEvent(new Event("blur"));
+      }
+      return { helper, userAgent };
+    }
+
+    /** Composition that ends by picking a candidate. */
+    function runComposition(helper: HTMLTextAreaElement) {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ni" }));
+      helper.dispatchEvent(new CompositionEvent("compositionend", { data: "你" }));
+    }
+
+    const LINUX_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36";
+    const WINDOWS_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+
+    it("blocks the IME-consumed candidate trio on Linux without touching the PTY", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-linux", LINUX_UA);
+      try {
+        runComposition(helper);
+
+        const down = keyEvent("keydown", { key: " ", code: "Space", keyCode: 229 });
+        const press = keyEvent("keypress", { key: " ", code: "Space", keyCode: 229 });
+        const up = keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 });
+
+        expect(capturedKeyHandler!(down)).toBe(false);
+        expect(capturedKeyHandler!(press)).toBe(false);
+        expect(capturedKeyHandler!(up)).toBe(false);
+        // Only the events that could insert into the textarea are cancelled.
+        expect(down.preventDefault).toHaveBeenCalled();
+        expect(press.preventDefault).toHaveBeenCalled();
+        expect(up.preventDefault).not.toHaveBeenCalled();
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("blocks an orphan digit keyup on Linux", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-orphan", LINUX_UA);
+      try {
+        runComposition(helper);
+        const up = keyEvent("keyup", { key: "2", code: "Digit2", keyCode: 50 });
+        expect(capturedKeyHandler!(up)).toBe(false);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("keeps a real Space the user types right after confirming", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-real", LINUX_UA);
+      try {
+        runComposition(helper);
+        // A genuine press: own keyCode, and it starts with a keydown.
+        const down = keyEvent("keydown", { key: " ", code: "Space", keyCode: 32 });
+        expect(capturedKeyHandler!(down)).toBe(true);
+        expect(down.preventDefault).not.toHaveBeenCalled();
+        expect(
+          capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space", keyCode: 32 })),
+        ).toBe(true);
+        expect(
+          capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", keyCode: 32 })),
+        ).toBe(true);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("keeps the window open across the composition commit input", async () => {
+      // Chromium can deliver the commit beforeinput/input AFTER compositionend,
+      // where isComposing is already false. Reading that as "the user typed
+      // something new" closed the window in the frame it opened and made this
+      // guard a no-op on exactly the platforms it targets.
+      const { helper, userAgent } = await mountWithHelper("t-cand-commit", LINUX_UA);
+      try {
+        runComposition(helper);
+
+        const commit = new Event("input", { bubbles: true });
+        Object.defineProperty(commit, "isComposing", { value: false });
+        Object.defineProperty(commit, "inputType", { value: "insertFromComposition" });
+        helper.dispatchEvent(commit);
+
+        // Window still open: the candidate tail is blocked.
+        expect(
+          capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 })),
+        ).toBe(false);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("closes the window on a real text insertion", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-input", LINUX_UA);
+      try {
+        runComposition(helper);
+        const insertion = new Event("input", { bubbles: true });
+        Object.defineProperty(insertion, "isComposing", { value: false });
+        Object.defineProperty(insertion, "inputType", { value: "insertText" });
+        helper.dispatchEvent(insertion);
+        // Window closed: even an IME-marked leftover now reaches the terminal.
+        expect(
+          capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 })),
+        ).toBe(true);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("does nothing on Windows — Korean input is unaffected", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-windows", WINDOWS_UA);
+      try {
+        // This assertion is deliberately about the wiring in `TerminalView`;
+        // that the guard itself blocks nothing when disabled is covered
+        // exhaustively at unit level (every fixture replayed with
+        // `enabled: false` blocks nothing).
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+        helper.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+
+        // The exact sequence that is blocked on Linux must pass here.
+        const down = keyEvent("keydown", { key: " ", code: "Space", keyCode: 229 });
+        expect(capturedKeyHandler!(down)).toBe(true);
+        expect(down.preventDefault).not.toHaveBeenCalled();
+        expect(
+          capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", keyCode: 229 })),
+        ).toBe(true);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+
+    it("does not open a window for an empty compositionupdate", async () => {
+      const { helper, userAgent } = await mountWithHelper("t-cand-empty", LINUX_UA);
+      try {
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "" }));
+        // Still composing — xterm's own guard owns this key, so it passes here.
+        expect(
+          capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", keyCode: 229 })),
+        ).toBe(true);
+      } finally {
+        userAgent.mockRestore();
+      }
+    });
+  });
+
   // -- terminal.copy keybinding --
 
   it("Ctrl+C with selection copies via clipboardWriteText (smartRemoveIndent default on)", async () => {

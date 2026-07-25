@@ -395,6 +395,21 @@ OS 입력 소스(키보드 레이아웃) 전환 chord 는 키바인딩 레지스
 - **정리**: helper blur, helper 교체, unmount, 다른 물리 키에서 진행 중이던 press 를 버린다. 시간 기반 timeout 은 두지 않는다.
 - **미할당 계약**: `isAssignedKeybinding()`(`keybinding-registry.ts`)이 빈 combo 를 걸러 `matchesKeybinding` 이 어떤 이벤트와도 매치하지 않게 한다. 설정 UI 는 빈 칸 대신 `keybindings.unassigned` 를 표시한다. 조합 종료 직후 Space/숫자 보호는 이 절이 아니라 #528 소관이다.
 - **진단**: `os-input-source-chord-armed`/`-released`/`-text-input-blocked` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다.
+### 8.12 Linux IME 후보 선택 키 억제 (issue #528)
+
+Sogou/fcitx 계열 Linux IME 는 후보를 선택하는 데 쓴 Space/숫자를 `compositionend` 전후에 일반 키 이벤트로 다시 내보낸다(전체 trio 또는 keydown 없는 orphan keyup). xterm 의 조합 가드는 그 시점에 이미 끝나 있어 literal 문자가 PTY 로 새므로, **Linux 에서만** 두 신호로 판정해 억제한다([ADR-0060](../adr/0060-linux-ime-candidate-key-suppression.md)).
+
+- 판정은 `ui/src/lib/linux-ime-candidate-guard.ts` 의 `createLinuxImeCandidateGuard` 가 전부 소유한다(DOM 등록 없음, 순수 상태 기계). `TerminalView` 는 xterm 키 핸들러와 helper 의 `compositionstart`/`compositionupdate`/`compositionend`/`input`/`blur` **관찰**만 배선하며, 조합 문자열·commit 경로·xterm `CompositionHelper` 소유권은 건드리지 않는다(§8.5, ADR-0053/0054 경계 유지).
+- **신호 1 — IME 소비 표식**: `keyCode === 229`(또는 `key === "Process"`). 사용자가 실제 누른 키는 자기 코드(Space 32, 숫자 48–57)를 보고한다.
+- **신호 2 — orphan companion**: window 안에서 `keydown` 을 관측하지 못한 물리 키의 `keypress`/`keyup`.
+- **그 밖은 통과**: 완전한 `keydown(32) → keypress → keyup` 은 실제 press 이므로 건드리지 않는다. "확정 직후 사용자가 누른 Space 를 잃지 않는다" 가 여기서 나온다. `compositionend` 이후 첫 printable 키를 버리는 방식은 채택하지 않았다.
+- **window 는 안전 상한**: `compositionend` 에서 열리고 실제 비조합 텍스트 삽입 / 실제 후보 keydown / 무관한 실제 키 / blur·unmount / timeout 중 먼저 오는 것에서 닫힌다. 어떤 동작도 IME 지연 ms 값에 의존하지 않는다.
+- **조합 commit 의 `input` 은 window 를 닫지 않는다**: 확정 텍스트 삽입은 모든 조합에서 발생하고 Chromium 은 `compositionend` 뒤에 보낼 수 있다(그 시점 `isComposing === false`). `isComposing` 만 보면 window 가 열린 프레임에서 바로 닫혀 guard 가 no-op 이 된다. 판정은 `ui/src/lib/ime-composition-events.ts` 의 `isCompositionSideInput`(네 조건) 한 곳이 소유하고 `ime-composition-controller.ts` 와 공유한다.
+- **빈 `compositionupdate` 는 종료가 아니다**. 관측 keydown 초기화는 `compositionstart` 에서 한다 — `compositionend` 에서 지우면 조합 시작 전부터 눌려 있던 키의 정상 release 를 orphan 으로 오판한다.
+- **preventDefault 경계**: 차단된 후보 `keydown` 과 차단된 orphan `keypress` 에만 건다(helper textarea 를 변형시키는 경우). `keyup` 에는 걸지 않는다.
+- **플랫폼 게이트**: `isLinuxHost()` = user agent 에 `Linux` 포함 + `Windows` 제외. WSL 은 Windows WebView 라 Windows 를 보고하므로 제외 조건이 필요하다. 비활성 시 전 경로 no-op.
+- **이벤트열 fixture**: `ui/src/lib/__fixtures__/linux-ime-candidate-traces.ts`. 업스트림 보고(orca#7543/#7634) 재구성이며 Linux 실기 캡처가 아니다 — 각 trace 가 `platformClaim` 으로 자신의 주장을 기록하므로 실기 캡처 확보 시 조용히 교체하지 말고 diff 한다.
+- **진단**: `linux-ime-candidate-window-opened`/`-closed`/`-blocked` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다.
 
 ---
 
