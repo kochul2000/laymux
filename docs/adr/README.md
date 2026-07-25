@@ -75,7 +75,7 @@ ADR 이 필요한 대표 기준:
 | [0055](0055-composer-history-scope-setting.md) | Composer 과거 입력 recall 범위는 전역·워크스페이스·페인 중 고르는 설정 (0029/0034 확장) | Accepted |
 | [0056](0056-remote-crop-window-anchors-live-tail.md) | Remote crop 창은 화면 바닥이 아니라 live tail 에 정렬 (0038 정정) | Proposed |
 | [0057](0057-terminal-helper-focus-ownership.md) | 터미널 helper textarea 의 DOM focus 소유권은 앱 blur 시점 기록으로 복원 | Proposed |
-| [0057](0057-single-terminal-cell-width-provider.md) | 터미널 셀 폭은 단일 Unicode/grapheme provider 가 소유하고 xterm 에 주입한다 | Proposed |
+| [0058](0058-single-terminal-cell-width-provider.md) | 터미널 셀 폭은 단일 Unicode/grapheme provider 가 소유하고 xterm 에 주입한다 | Proposed |
 
 ## 새 ADR 추가
 

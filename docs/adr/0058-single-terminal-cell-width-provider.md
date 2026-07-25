@@ -1,4 +1,4 @@
-# 0057. 터미널 셀 폭은 단일 Unicode/grapheme provider 가 소유한다
+# 0058. 터미널 셀 폭은 단일 Unicode/grapheme provider 가 소유한다
 
 - Status: Proposed
 - Date: 2026-07-25
