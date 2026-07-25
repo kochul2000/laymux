@@ -234,13 +234,15 @@ export function createImeCompositionController(
   let phase: "idle" | "composing" | "pending-finalize" = "idle";
   let isCarryOver = false;
 
-  // Anchor captured at the first compositionstart — preserved across carry-overs
+  // Where the *current* syllable is painted. Recomputed at every carry-over.
   let compositionAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
-  // Last value actually read from `getAnchor()`. Carry-over compares the live
-  // shadow cursor against this — not against `compositionAnchor`, which may be an
-  // arithmetic value from an earlier carry-over.
-  let lastLiveAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
-  // Textarea value snapshot at the start of the composition chain
+  // Anchor and textarea value as of the chain's *first* compositionstart. The
+  // per-syllable anchor is always `chainAnchor + width(committed since chainBase)`,
+  // never a live reading taken mid-chain — see `handleCompositionStart`.
+  let chainAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  let chainBaseText = "";
+  // Textarea value snapshot at the start of the *current syllable*, so the preview
+  // diff yields only the syllable being composed.
   let compositionBaseText = "";
   // Latest compositionupdate event.data — used for Korean split-time display
   let latestCompositionDisplayText = "";
@@ -288,6 +290,8 @@ export function createImeCompositionController(
     phase = "idle";
     isCarryOver = false;
     compositionAnchor = { cursorX: 0, cursorAbsY: 0 };
+    chainAnchor = { cursorX: 0, cursorAbsY: 0 };
+    chainBaseText = "";
     compositionBaseText = "";
     latestCompositionDisplayText = "";
     state = createEmptyState();
@@ -365,45 +369,61 @@ export function createImeCompositionController(
       // grow the preview across the whole sentence (issue #546). Re-base on the
       // current textarea value so `getChangedRange` yields only the new syllable.
       const committedBase = textarea?.value ?? "";
-      const committedWidth = stringCellWidth(committedBase.slice(compositionBaseText.length));
-      // Whether the shadow cursor is usable is a question about **the shadow
-      // cursor**, not about our anchor: `compositionAnchor` may itself be an
-      // arithmetic value from an earlier carry-over, so comparing against it
-      // conflates "did the PTY echo?" with "is the anchor arithmetic?".
+      // Anchor the syllable at the chain's start plus the width of **everything
+      // committed since the chain started** — not by nudging the previous anchor,
+      // and never by adopting a live shadow-cursor reading taken mid-chain.
       //
-      // Compare against the last value we actually read instead. Within the same
-      // tick the PTY has not echoed, so the shadow cursor has not moved and this
-      // is false — direction-agnostic, so a scroll or clear that moves it
-      // backwards is still treated as authoritative rather than ignored.
-      const liveAnchor = options.getAnchor();
-      const echoed =
-        liveAnchor.cursorX !== lastLiveAnchor.cursorX ||
-        liveAnchor.cursorAbsY !== lastLiveAnchor.cursorAbsY;
-      if (echoed) {
-        compositionAnchor = liveAnchor;
-        lastLiveAnchor = liveAnchor;
-      } else {
-        // No round trip yet: advance by the committed text's own cell width.
-        compositionAnchor = {
-          cursorX: compositionAnchor.cursorX + committedWidth,
-          cursorAbsY: compositionAnchor.cursorAbsY,
-        };
-      }
+      // The live reading is the trap (issue #551). It lags the committed text by
+      // as many syllables as the PTY has not echoed yet, so "the shadow cursor
+      // moved" does not mean "the shadow cursor caught up". Adopting it on the
+      // second carry-over of `ㄱㄱㄱ` regressed a correct arithmetic column 4 back
+      // to the one-echo-behind value 4 when the truth was 6: the third syllable
+      // painted on top of the second and the preview looked frozen at `ㄱㄱ`.
+      //
+      // Deriving from the chain start is monotonic and treats the first and Nth
+      // carry-over identically. `cursorAbsY` is an absolute buffer row, so it does
+      // not move when the viewport scrolls — the chain's row stays valid.
+      const chainCommittedWidth = stringCellWidth(committedBase.slice(chainBaseText.length));
+      const derived: BufferAnchor = {
+        cursorX: chainAnchor.cursorX + chainCommittedWidth,
+        cursorAbsY: chainAnchor.cursorAbsY,
+      };
+      // Adopt the live shadow cursor only when it is **not behind** the committed
+      // text. It still carries corrections arithmetic cannot reach — xterm pushes a
+      // whole wide glyph past the wrap boundary, landing the echoed cursor on the
+      // next row — so it is not simply discarded.
+      const live = options.getAnchor();
+      const liveIsAhead =
+        live.cursorAbsY !== derived.cursorAbsY
+          ? live.cursorAbsY > derived.cursorAbsY
+          : live.cursorX >= derived.cursorX;
+      compositionAnchor = liveIsAhead ? live : derived;
+      const anchorSource = liveIsAhead ? "shadow-cursor" : "chain-committed-width";
+      // Re-base the per-syllable diff so `getChangedRange` yields only the new
+      // syllable — the committed one has already gone to the PTY and must leave
+      // the preview (issue #546).
       compositionBaseText = committedBase;
       traceComposition(options, "ime-composition-start-carryover", {
         baseText: compositionBaseText,
         textareaValue: textarea?.value ?? "",
-        committedWidth,
-        anchorSource: echoed ? "shadow-cursor" : "committed-width",
+        chainBaseText,
+        chainCommittedWidth,
+        chainAnchorX: chainAnchor.cursorX,
+        derivedX: derived.cursorX,
+        liveX: live.cursorX,
+        anchorSource,
         anchorBufferX: compositionAnchor.cursorX,
         anchorBufferAbsY: compositionAnchor.cursorAbsY,
       });
     } else {
       // Fresh composition start
       isCarryOver = false;
-      compositionAnchor = options.getAnchor();
-      lastLiveAnchor = compositionAnchor;
-      compositionBaseText = textarea?.value ?? "";
+      // The only place a live anchor is read. Everything the chain paints after
+      // this is derived from it arithmetically.
+      chainAnchor = options.getAnchor();
+      chainBaseText = textarea?.value ?? "";
+      compositionAnchor = chainAnchor;
+      compositionBaseText = chainBaseText;
       traceComposition(options, "ime-composition-start", {
         baseText: compositionBaseText,
         anchorBufferX: compositionAnchor.cursorX,

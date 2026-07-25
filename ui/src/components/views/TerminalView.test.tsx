@@ -1149,6 +1149,75 @@ describe("TerminalView", () => {
     });
   });
 
+  it("anchors the IME preview on the buffer cursor when the shadow cursor is not trusted", async () => {
+    // Issue #551, measured on a real PowerShell pane: after `ls` the prompt emits
+    // OSC 133 `D` but no `B`, so `isInputPhase` stays false, the shadow sync is
+    // skipped ("inactive") and the shadow cursor sits a row behind the buffer.
+    // Reading it unconditionally painted the preview on the previous row at column
+    // 0 — off where the user types, which reads as "nothing appears".
+    //
+    // No OSC 133 `B` here, so `computeUseShadowCursor` is false and the live buffer
+    // cursor must win.
+    render(<TerminalView instanceId="t-ime-buf" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-buf", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-buf");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-buf");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // The shadow cursor is left at its initial 0,0 — the stale state the trace
+    // showed. The buffer cursor is where the user actually is.
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 3;
+
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      // 80x24 over 800x480 → 10x20 px cells. Column 5, row 3 — not 0,0.
+      expect(preview.style.transform).toBe("translate(50px, 60px)");
+    });
+  });
+
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 
@@ -3739,8 +3808,23 @@ describe("TerminalView", () => {
       helper.style.top = "320px";
       // A TUI repaint parked the public cursor on the footer row; the shadow
       // cursor (and therefore the composition anchor) is still at 0,0.
+      //
+      // Drive the DEC 2026 frame that actually produces that state instead of
+      // assuming it: the frame open snapshots the true input position, the TUI
+      // parks the public cursor, the frame close makes the snapshot authoritative
+      // (`hasSyncFramePosition`). That flag is what `computeUseShadowCursor` reads,
+      // and the real Codex trace in issue #551 shows it set here. Without it the
+      // shadow cursor is not trustworthy and the buffer cursor is the better anchor.
+      mockBufferActive.cursorX = 0;
+      mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
       mockBufferActive.cursorX = 40;
       mockBufferActive.cursorY = 20;
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
 
       startComposition(helper);
 
@@ -3768,10 +3852,20 @@ describe("TerminalView", () => {
       // would be visible.
       helper.style.left = "0px";
       helper.style.top = "0px";
+      // Same DEC 2026 frame as the diverging case, so the shadow cursor at 0,0 is
+      // the authoritative anchor (see that test for why the frame is driven).
+      mockBufferActive.cursorX = 0;
+      mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
       // Public cursor already sits on the composition caret cell (column 2 —
       // after the 2-cell Hangul syllable), so there is nothing to correct.
       mockBufferActive.cursorX = 2;
       mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
 
       startComposition(helper);
       // Give the overlay update the same number of frames the diverging case

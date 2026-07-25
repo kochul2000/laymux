@@ -664,27 +664,54 @@ describe("createImeCompositionController", () => {
       ]);
     });
 
-    it("uses the committed width while the shadow cursor is stale", async () => {
+    it("derives from the chain start while the shadow cursor is stale", async () => {
       const { carryOverTraces } = await typeGaNaDa([null, null]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "committed-width",
-        "committed-width",
+        "chain-committed-width",
+        "chain-committed-width",
       ]);
-      expect(carryOverTraces.map((t) => t.committedWidth)).toEqual([2, 2]);
+      // Accumulated from the chain's start, not nudged from the previous anchor:
+      // 가 = 2 cells, then 가나 = 4.
+      expect(carryOverTraces.map((t) => t.chainCommittedWidth)).toEqual([2, 4]);
     });
 
-    it("adopts a shadow cursor that moved backwards", async () => {
-      // A scroll or clear can move it left or up. Direction must not matter: the
-      // question is whether the PTY echoed, not which way the cursor went.
+    it("rejects a shadow cursor that lags the committed text", async () => {
+      // Issue #551, measured on a real Codex pane: typing ㄱㄱㄱ echoed only the
+      // first jamo before the second carry-over, so the shadow cursor sat at
+      // column 2 while two jamo (4 cells) were committed. Adopting it dragged the
+      // third syllable back on top of the second and the preview looked frozen.
+      //
+      // "The shadow cursor moved" is not "the shadow cursor caught up".
+      const { final, carryOverTraces } = await typeGaNaDa([
+        { cursorX: 2, cursorAbsY: 5 }, // ahead of 가 (2) — tie, adopted
+        { cursorX: 2, cursorAbsY: 5 }, // behind 가나 (4) — rejected
+      ]);
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "shadow-cursor",
+        "chain-committed-width",
+      ]);
+      expect(carryOverTraces.map((t) => [t.derivedX, t.liveX])).toEqual([
+        [2, 2],
+        [4, 2],
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
+    });
+
+    it("rejects a shadow cursor that moved backwards", async () => {
+      // Previously adopted on the reasoning that direction should not matter. It
+      // does: `cursorAbsY` is an absolute buffer row, so a viewport scroll cannot
+      // move it, and anything that genuinely moves the input position backwards
+      // mid-chain (a clear) has invalidated the composition anyway. Treating
+      // "moved" as "authoritative" is exactly what regressed the anchor above.
       const { final, carryOverTraces } = await typeGaNaDa([
         { cursorX: 0, cursorAbsY: 4 },
         { cursorX: 1, cursorAbsY: 4 },
       ]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "chain-committed-width",
+        "chain-committed-width",
       ]);
-      expect(final).toMatchObject({ anchorBufferX: 1, anchorBufferAbsY: 4 });
+      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
     });
 
     it("adopts a shadow cursor that wrapped to the next row", async () => {

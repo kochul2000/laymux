@@ -84,6 +84,7 @@ import {
   applyDectcemHideToShadowCursor,
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
+  computeUseShadowCursor,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -1244,14 +1245,31 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getAnchor: () => {
-        // Use the shadow cursor, not the buffer cursor.  TUI apps (Claude Code,
-        // Codex, etc.) move the buffer cursor to the footer/status-bar during
-        // repaints, so reading it here would place the composition preview in
-        // the wrong row.  The shadow cursor tracks the real input position.
+        // Prefer the shadow cursor only when it is actually the trusted position.
+        // TUI apps (Claude Code, Codex, …) move the buffer cursor to the
+        // footer/status-bar during repaints, which is why the shadow cursor exists
+        // — but that reasoning does not hold everywhere, and `computeUseShadowCursor`
+        // is this repo's existing predicate for "is the shadow snapshot trustworthy
+        // right now".
+        //
+        // Reading the shadow unconditionally broke plain shells (issue #551): a
+        // PowerShell prompt after `ls` emits OSC 133 `D` but no `B`, so
+        // `isInputPhase` stays false and `shadow-sync-skip { reason: "inactive" }`
+        // leaves the shadow a row behind the buffer. The preview then painted on the
+        // previous row at column 0 — off where the user is typing, so it read as
+        // "nothing appears". On a pristine prompt the two happened to coincide,
+        // which is why it looked like it worked.
         const shadow = shadowCursorRef.current;
+        if (computeUseShadowCursor(shadow)) {
+          return {
+            cursorX: shadow.cursorX,
+            cursorAbsY: shadow.cursorAbsY,
+          };
+        }
+        const buffer = terminal.buffer.active as { cursorX?: number };
         return {
-          cursorX: shadow.cursorX,
-          cursorAbsY: shadow.cursorAbsY,
+          cursorX: buffer.cursorX ?? 0,
+          cursorAbsY: getBufferCursorAbsY(terminal),
         };
       },
       onTrace: (event, payload) => {
