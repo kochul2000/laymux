@@ -238,6 +238,17 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     defaultKeys: "Ctrl+Alt+M",
     group: "Terminal",
   },
+  // OS 입력 소스(키보드 레이아웃) 전환용 chord. 기본값은 **미할당**이다 —
+  // Shift+Space·Ctrl+Space 를 전역 하드코딩하면 그 조합을 터미널 텍스트로 쓰는
+  // 사용자의 입력을 빼앗는다(issue #533). 사용자가 직접 바인딩한 경우에만
+  // 그 물리 키에서 파생된 keydown/keypress/keyup·비조합 텍스트 삽입이 xterm 에
+  // 들어가지 않게 막고, preventDefault 는 하지 않아 OS 전환은 그대로 동작한다.
+  {
+    id: "terminal.osInputSourceSwitch",
+    label: "OS 입력 소스 전환 (PTY 입력 제외, 기본 미할당)",
+    defaultKeys: "",
+    group: "Terminal",
+  },
   {
     id: "terminal.zoomIn",
     label: "터미널 폰트 확대 (view 인스턴스 오버라이드)",
@@ -344,6 +355,19 @@ export function coerceArrowWildcard(keys: string): string {
 }
 
 /**
+ * True when a combo string actually binds something.
+ *
+ * An action may ship deliberately unassigned (`defaultKeys: ""`), and the
+ * Settings capture UI writes an empty string while the user is still choosing.
+ * Neither may ever match a key event: an empty combo parses to "no modifiers +
+ * empty key", and treating that as a binding would make the action fire on
+ * events it was never bound to.
+ */
+export function isAssignedKeybinding(keys: string | undefined): keys is string {
+  return !!keys && keys.trim().length > 0;
+}
+
+/**
  * Resolve the effective key combo string for an action (user override > default).
  * Returns undefined if action is not registered.
  */
@@ -379,7 +403,7 @@ export function matchesKeybinding(
   actionId: string,
 ): boolean {
   const keys = resolveKeybinding(actionId);
-  if (!keys) return false;
+  if (!isAssignedKeybinding(keys)) return false;
 
   const parsed = parseShortcut(keys);
   const eventKey = normalizeKey(e.key);

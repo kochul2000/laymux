@@ -61,6 +61,7 @@ import {
 } from "@/lib/ime-composition-controller";
 import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
   createTerminalFocusOwnership,
   type TerminalFocusOwnership,
@@ -1916,15 +1917,53 @@ export function TerminalView({
     window.addEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
     focusOwnershipSurface?.addEventListener("focusout", handleFocusOutForFocusOwnership);
 
+    // 사용자가 OS 입력 소스 전환 chord 를 바인딩했을 때, 그 물리 키에서 파생된
+    // keydown/keypress/keyup 과 비조합 텍스트 삽입이 PTY 로 새지 않게 한다.
+    // 기본값은 미할당이라 아무것도 바인딩하지 않으면 완전한 no-op 이다 (ADR-0059).
+    const osInputSourceChord = createOsInputSourceChordGuard({
+      matchesChord: (event) =>
+        matchesKeybinding(event as unknown as KeyboardEvent, "terminal.osInputSourceSwitch"),
+      onTrace: (event, payload) => trace(event, payload),
+    });
+    // helper 의 비조합 텍스트 삽입은 keydown 을 건너뛴 뒤에도 남는다. xterm 은
+    // textarea `input` 을 듣고 `_keyUp` 이 `_keyDownSeen` 을 먼저 내리므로, keyup
+    // 이후 도착한 삽입은 xterm 자체 게이트를 통과해 PTY 로 간다. 여기서는
+    // preventDefault 를 한다 — OS 전환은 이미 keydown 에서 결정됐고, 남은 것은
+    // textarea 로 들어갈 문자뿐이다.
+    const handleBeforeInputForChord = (event: Event) => {
+      const inputEvent = event as InputEvent;
+      if (
+        !osInputSourceChord.shouldBlockTextInput({
+          isComposing: !!inputEvent.isComposing,
+          data: inputEvent.data,
+          inputType: inputEvent.inputType,
+        })
+      ) {
+        return;
+      }
+      event.preventDefault();
+      trace("os-input-source-chord-text-input-blocked", { inputType: inputEvent.inputType });
+    };
+    // 조합 중이 아니어도 chord 가 걸려 있지 않으면 위 핸들러는 즉시 반환한다.
+    const handleBlurForChord = () => osInputSourceChord.reset("helper-blur");
+
     const bindHelperTextareaEvents = () => {
       const nextHelperTextarea = terminal.element?.querySelector(
         ".xterm-helper-textarea",
       ) as HTMLTextAreaElement | null;
       if (!nextHelperTextarea || nextHelperTextarea === helperTextarea) return;
+      if (helperTextarea) {
+        helperTextarea.removeEventListener("beforeinput", handleBeforeInputForChord);
+        helperTextarea.removeEventListener("blur", handleBlurForChord);
+      }
       helperTextarea = nextHelperTextarea;
       compositionController.bind(helperTextarea);
       // xterm 이 helper 를 교체하면 이전 helper 의 focus 소유권 기록은 stale 이다.
       focusOwnership.notifyHelperBound(helperTextarea);
+      // helper 가 바뀌면 진행 중이던 chord press 도 추적 불가 → 버린다.
+      osInputSourceChord.reset("helper-replaced");
+      helperTextarea.addEventListener("beforeinput", handleBeforeInputForChord);
+      helperTextarea.addEventListener("blur", handleBlurForChord);
       scheduleOverlayCaretUpdate();
     };
 
@@ -1948,6 +1987,28 @@ export function TerminalView({
     //   - Ctrl+C with empty selection → fall through so xterm sends SIGINT.
     terminal.attachCustomKeyEventHandler((e) => {
       if (!localTerminalControlAllowed()) return false;
+
+      // keydown 전용 분기보다 앞에 온다. xterm 은 `_keyDown`/`_keyPress`/`_keyUp`
+      // 모두에서 이 핸들러를 보고, 아래의 `e.type !== "keydown"` 조기 반환은
+      // keypress·keyup 을 그대로 통과시킨다 — OS 입력 소스 전환 chord 의 companion
+      // keypress 가 literal Space/숫자를 PTY 로 보내는 경로가 바로 거기다.
+      if (e.type === "keydown" || e.type === "keypress" || e.type === "keyup") {
+        if (
+          osInputSourceChord.shouldBlockKey({
+            type: e.type,
+            code: e.code,
+            key: e.key,
+            shiftKey: e.shiftKey,
+            ctrlKey: e.ctrlKey,
+            altKey: e.altKey,
+            repeat: e.repeat,
+          })
+        ) {
+          // preventDefault 하지 않는다 — OS 가 입력 소스를 전환해야 한다.
+          return false;
+        }
+      }
+
       if (e.type !== "keydown") return true;
       if (isLxShortcut(e)) return false;
 
@@ -3621,6 +3682,11 @@ export function TerminalView({
       window.removeEventListener("focus", handleAppFocusForFocusOwnership);
       window.removeEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
       focusOwnershipSurface?.removeEventListener("focusout", handleFocusOutForFocusOwnership);
+      helperTextarea?.removeEventListener("beforeinput", handleBeforeInputForChord);
+      helperTextarea?.removeEventListener("blur", handleBlurForChord);
+      // unmount 시 진행 중이던 chord press 를 버린다 — 남겨두면 다음 마운트가
+      // 아무 텍스트 삽입이나 삼킬 수 있다.
+      osInputSourceChord.reset("unmount");
       // unmount 후 stale helper 로 focus 를 되돌리지 않도록 소유권을 버린다.
       focusOwnership.dispose();
       if (focusOwnershipRef.current === focusOwnership) {

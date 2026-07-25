@@ -3355,6 +3355,222 @@ describe("TerminalView", () => {
     expect(mockSmartPaste).not.toHaveBeenCalled();
   });
 
+  // -- terminal.osInputSourceSwitch (issue #533) --
+
+  describe("OS input source switch chord", () => {
+    function keyEvent(
+      type: "keydown" | "keypress" | "keyup",
+      init: { key: string; code: string; shiftKey?: boolean; ctrlKey?: boolean },
+    ): KeyboardEvent {
+      const event = new KeyboardEvent(type, {
+        key: init.key,
+        code: init.code,
+        shiftKey: !!init.shiftKey,
+        ctrlKey: !!init.ctrlKey,
+      });
+      Object.defineProperty(event, "preventDefault", { value: vi.fn() });
+      return event;
+    }
+
+    function bindChord(keys: string) {
+      useSettingsStore.setState({
+        keybindings: [{ keys, command: "terminal.osInputSourceSwitch" }],
+      });
+    }
+
+    async function mountForChord(instanceId: string) {
+      render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+      });
+      await waitForLocalTerminalControl();
+      expect(capturedKeyHandler).not.toBeNull();
+    }
+
+    it("leaves the whole Shift+Space sequence with the terminal when unassigned", async () => {
+      // Default is deliberately unassigned, so terminal input must be untouched.
+      await mountForChord("t-chord-unassigned");
+
+      const down = keyEvent("keydown", { key: " ", code: "Space", shiftKey: true });
+      const press = keyEvent("keypress", { key: " ", code: "Space", shiftKey: true });
+      const up = keyEvent("keyup", { key: " ", code: "Space", shiftKey: true });
+
+      expect(capturedKeyHandler!(down)).toBe(true);
+      expect(capturedKeyHandler!(press)).toBe(true);
+      expect(capturedKeyHandler!(up)).toBe(true);
+      expect(down.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("blocks keydown, keypress and keyup of a bound chord without preventDefault", async () => {
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-bound");
+
+      const down = keyEvent("keydown", { key: " ", code: "Space", shiftKey: true });
+      const press = keyEvent("keypress", { key: " ", code: "Space", shiftKey: true });
+      const up = keyEvent("keyup", { key: " ", code: "Space", shiftKey: true });
+
+      // false = xterm never sees it, so no PTY byte is produced.
+      expect(capturedKeyHandler!(down)).toBe(false);
+      expect(capturedKeyHandler!(press)).toBe(false);
+      expect(capturedKeyHandler!(up)).toBe(false);
+      // The OS must still perform the input-source switch.
+      expect(down.preventDefault).not.toHaveBeenCalled();
+      expect(press.preventDefault).not.toHaveBeenCalled();
+      expect(up.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("keeps blocking when the modifier is released before the chord key", async () => {
+      // The DOM always emits the modifier's own keyup. Treating that as "another
+      // key released" disarmed the guard and let the Space companions reach the
+      // PTY — the exact symptom issue #533 is about.
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-modifier-first");
+
+      capturedKeyHandler!(keyEvent("keydown", { key: "Shift", code: "ShiftLeft", shiftKey: true }));
+      expect(
+        capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(false);
+
+      // Shift goes up first: not ours to block, and not a release signal.
+      expect(capturedKeyHandler!(keyEvent("keyup", { key: "Shift", code: "ShiftLeft" }))).toBe(
+        true,
+      );
+
+      // The rest of the chord press is still swallowed.
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space" }))).toBe(false);
+      expect(capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space" }))).toBe(false);
+    });
+
+    it("keeps blocking through auto-repeat after the modifier is released", async () => {
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-repeat");
+
+      expect(
+        capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(false);
+      // Holding Space and letting go of Shift repeats the keydown without shift.
+      const repeat = keyEvent("keydown", { key: " ", code: "Space" });
+      Object.defineProperty(repeat, "repeat", { value: true });
+      expect(capturedKeyHandler!(repeat)).toBe(false);
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space" }))).toBe(false);
+    });
+
+    it("does not cancel an IME commit that overlaps the chord press", async () => {
+      // A Korean IME can commit the in-flight syllable when the toggle is hit.
+      // Cancelling that insertion would delete the user's text.
+      bindChord("Shift+Space");
+
+      render(<TerminalView instanceId="t-chord-imecommit" profile="PowerShell" syncGroup="" />);
+      const host = screen.getByTestId("terminal-xterm-host-t-chord-imecommit");
+      const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      host.appendChild(terminal.element);
+
+      await vi.waitFor(() => {
+        expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+      });
+      await waitForLocalTerminalControl();
+
+      capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true }));
+
+      const commit = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(commit, "isComposing", { value: false });
+      Object.defineProperty(commit, "inputType", { value: "insertText" });
+      Object.defineProperty(commit, "data", { value: "가" });
+      helper.dispatchEvent(commit);
+      expect(commit.defaultPrevented).toBe(false);
+
+      // The chord's own character is still cancelled.
+      const leak = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(leak, "isComposing", { value: false });
+      Object.defineProperty(leak, "inputType", { value: "insertText" });
+      Object.defineProperty(leak, "data", { value: " " });
+      helper.dispatchEvent(leak);
+      expect(leak.defaultPrevented).toBe(true);
+    });
+
+    it("keeps an ordinary Space typed after the chord", async () => {
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-then-space");
+
+      capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true }));
+      capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", shiftKey: true }));
+
+      // A plain Space is a different combo and must reach the shell.
+      expect(capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space" }))).toBe(true);
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space" }))).toBe(true);
+    });
+
+    it("keeps a plain Shift+Space when a different chord is bound", async () => {
+      bindChord("Ctrl+Space");
+      await mountForChord("t-chord-other");
+
+      expect(
+        capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(true);
+      expect(
+        capturedKeyHandler!(keyEvent("keypress", { key: " ", code: "Space", shiftKey: true })),
+      ).toBe(true);
+    });
+
+    it("blocks the non-composition text insertion from the bound chord", async () => {
+      bindChord("Shift+Space");
+
+      // The helper must exist before the view binds it, same as the focus
+      // ownership tests above.
+      render(<TerminalView instanceId="t-chord-textinput" profile="PowerShell" syncGroup="" />);
+      const host = screen.getByTestId("terminal-xterm-host-t-chord-textinput");
+      const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.appendChild(helper);
+      host.appendChild(terminal.element);
+
+      await vi.waitFor(() => {
+        expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+      });
+      await waitForLocalTerminalControl();
+
+      capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true }));
+
+      const insertion = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(insertion, "isComposing", { value: false });
+      Object.defineProperty(insertion, "inputType", { value: "insertText" });
+      Object.defineProperty(insertion, "data", { value: " " });
+      helper.dispatchEvent(insertion);
+      expect(insertion.defaultPrevented).toBe(true);
+
+      // Composition input is the IME's and must survive.
+      const composing = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(composing, "isComposing", { value: true });
+      Object.defineProperty(composing, "inputType", { value: "insertCompositionText" });
+      helper.dispatchEvent(composing);
+      expect(composing.defaultPrevented).toBe(false);
+
+      // After the press ends, insertions flow again.
+      capturedKeyHandler!(keyEvent("keyup", { key: " ", code: "Space", shiftKey: true }));
+      const after = new Event("beforeinput", { cancelable: true, bubbles: true });
+      Object.defineProperty(after, "isComposing", { value: false });
+      Object.defineProperty(after, "inputType", { value: "insertText" });
+      Object.defineProperty(after, "data", { value: " " });
+      helper.dispatchEvent(after);
+      expect(after.defaultPrevented).toBe(false);
+    });
+
+    it("releases the guard when a different physical key arrives", async () => {
+      bindChord("Shift+Space");
+      await mountForChord("t-chord-otherkey");
+
+      capturedKeyHandler!(keyEvent("keydown", { key: " ", code: "Space", shiftKey: true }));
+      // The other key is not swallowed...
+      expect(capturedKeyHandler!(keyEvent("keydown", { key: "a", code: "KeyA" }))).toBe(true);
+      // ...and the abandoned press stops swallowing its companions.
+      expect(capturedKeyHandler!(keyEvent("keypress", { key: "a", code: "KeyA" }))).toBe(true);
+    });
+  });
+
   // -- terminal.copy keybinding --
 
   it("Ctrl+C with selection copies via clipboardWriteText (smartRemoveIndent default on)", async () => {
