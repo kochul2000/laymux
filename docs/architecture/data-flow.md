@@ -377,7 +377,7 @@ pane focus 는 store 가 소유하고 `TerminalView` 의 focus effect 는 `isFoc
 
 IME composition preview 는 같은 모듈의 `stringCellWidth`(총 폭)와 `splitCellClusters`(클러스터+폭)만 사용한다. `getCompositionPreviewLayout` 은 코드포인트가 아니라 이 클러스터를 분할 단위로 삼으므로 ZWJ sequence·variation selector·combining mark·skin tone modifier·regional indicator pair 가 행 경계에서 쪼개지지 않고, 남은 셀보다 넓은 클러스터는 통째로 다음 행으로 내려간다. 정확히 줄을 채운 폭 2 문자는 같은 행에 남고 caret 만 다음 행 0열로 정규화하는 기존 규칙은 유지한다.
 
-폭 규칙: Unicode 11 기준 East Asian Wide/Fullwidth = 2, `\p{Mn}`/`\p{Me}`/`\p{Cf}` 와 conjoining Hangul jamo(`U+1160`–`U+11FF`) = 0, ambiguous = 1. `emoji + VS16` 은 클러스터 폭 2 로 승격하고 VS15 는 승격하지 않는다.
+폭 규칙: Unicode 11 기준 East Asian Wide/Fullwidth = 2, `\p{Mn}`/`\p{Me}`/`\p{Cf}` 와 conjoining Hangul jamo(`U+1160`–`U+11FF`) = 0, ambiguous = 1. **`\p{Mc}` 는 zero-width 집합에 넣지 않는다** — `Mc` 는 Spacing_Combining_Mark 라 정의상 커서를 전진시키고, wcwidth 관례도 `Mn`/`Me` 만 0 으로 둔다. 실측: `Mc` 471개 중 467개가 폭 1 이고 xterm V6 와 정확히 일치한다(데바나가리 `U+0903`/`U+093B`/`U+093E`, 타이 `U+0E33`, 라오 `U+0EB3`, 발리 `U+1B44` 등). 나머지 4개(`U+302E`/`U+302F` Hangul tone mark, `U+16FF0`/`U+16FF1` Vietnamese reading mark)는 EAW W 로 `WIDE_RANGES` 안에 있어 폭 2 다 — V6 는 `U+302A`–`U+302F` 를 `Mn`/`Mc` 구분 없이 뭉텅이로 0 처리해 이 둘에서 갈린다. V6 에 맞추려고 `Mc` 를 0 으로 접으면 467개 Indic/SEA 마크의 폭이 조용히 바뀌므로 하지 않는다. 네 개를 테스트가 고정한다(issue #547). `emoji + VS16` 은 클러스터 폭 2 로 승격하고 VS15 는 승격하지 않는다.
 
 extender 승격·결합은 **앞 셀의 base 속성을 본다**. VS16 은 앞이 `\p{Emoji}` 일 때만 폭 2 로 승격하고(키캡 base 인 ASCII 숫자·`#`·`*` 가 여기 들어오므로 `\p{Extended_Pictographic}` 이 아니라 `\p{Emoji}` 다), 그 밖에서는 폭 0 selector 로 결합만 한다 — `a` + VS16 은 1 셀이다. 스킨톤 modifier 는 앞이 `\p{Emoji_Modifier_Base}` 일 때만 결합하고, 아니면 자기 몫 2 셀을 갖는 독립 클러스터가 된다(`a` + 스킨톤 = 3 셀). 이 판정에 필요한 앞 코드포인트 속성은 property value 의 state 필드 상위 비트로 실어 보낸다 — `charProperties` 는 앞 코드포인트 자체를 받지 않기 때문이다.
 

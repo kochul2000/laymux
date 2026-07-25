@@ -83,6 +83,55 @@ describe("codePointCellWidth", () => {
     expect(codePointCellWidth(0x16fe4)).toBe(0); // Khitan small script filler
   });
 
+  it("keeps spacing combining marks (gc=Mc) out of the zero-width set", () => {
+    // `Mc` advances the cursor by definition, so the wcwidth convention only
+    // zeroes `Mn`/`Me`. Folding `Mc` in to match xterm's V6 table (which reports
+    // 0 for the two Hangul tone marks) would silently change the width of 467
+    // Indic/SEA marks — so assert both halves of that trade-off (issue #547).
+    const mc = /^\p{Mc}$/u;
+    const wide: number[] = [];
+    const narrow: number[] = [];
+    const zero: number[] = [];
+    for (let cp = 0; cp < 0x110000; cp += 1) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      if (!mc.test(String.fromCodePoint(cp))) continue;
+      const width = codePointCellWidth(cp);
+      if (width === 2) wide.push(cp);
+      else if (width === 1) narrow.push(cp);
+      else zero.push(cp);
+    }
+
+    // No Mc may be zero width — that is the whole point of the category.
+    expect(zero).toEqual([]);
+    // Exactly the four that sit inside WIDE_RANGES per East Asian Width W.
+    expect(wide.map((cp) => `U+${cp.toString(16).toUpperCase()}`)).toEqual([
+      "U+302E",
+      "U+302F",
+      "U+16FF0",
+      "U+16FF1",
+    ]);
+    // Everything else is one cell, matching V6. The count guards against a
+    // future change that quietly reclassifies a whole block.
+    expect(narrow.length).toBeGreaterThan(400);
+  });
+
+  it("gives the Hangul and Vietnamese Mc marks two cells", () => {
+    // Spelled out separately from the sweep so the intent survives even if the
+    // engine's Unicode data shifts the Mc set.
+    expect(codePointCellWidth(0x302e)).toBe(2); // Hangul single dot tone mark
+    expect(codePointCellWidth(0x302f)).toBe(2); // Hangul double dot tone mark
+    expect(codePointCellWidth(0x16ff0)).toBe(2); // Vietnamese reading mark ca
+    expect(codePointCellWidth(0x16ff1)).toBe(2); // Vietnamese reading mark nhay
+  });
+
+  it("keeps representative Indic and SEA spacing marks at one cell", () => {
+    expect(codePointCellWidth(0x0903)).toBe(1); // Devanagari sign visarga
+    expect(codePointCellWidth(0x093b)).toBe(1); // Devanagari vowel sign ooe
+    expect(codePointCellWidth(0x093e)).toBe(1); // Devanagari vowel sign aa
+    expect(codePointCellWidth(0x0e33)).toBe(1); // Thai sara am
+    expect(codePointCellWidth(0x0eb3)).toBe(1); // Lao sign am
+    expect(codePointCellWidth(0x1b44)).toBe(1); // Balinese adeg adeg
+  });
   it("has no code point that is both wide and zero-width by category", () => {
     // The regression this guards against was introduced by an unverified claim
     // that the two sets are disjoint. They are not — so assert the real

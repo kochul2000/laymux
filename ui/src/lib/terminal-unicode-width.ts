@@ -226,6 +226,22 @@ const CONJOINING_JAMO_LAST = 0x11ff;
  * Nonspacing/enclosing marks and format characters. Using Unicode property
  * escapes keeps the zero-width set in sync with the engine's Unicode data
  * instead of a hand-maintained range list that has to grow every release.
+ *
+ * `\p{Mc}` is deliberately **excluded**. `Mc` is Spacing_Combining_Mark — it
+ * advances the cursor by definition, and the wcwidth convention only zeroes
+ * `Mn`/`Me`. Measured over the whole range: 471 code points are `Mc`, and 467 of
+ * them resolve to width 1 here, matching xterm's default V6 table exactly
+ * (Devanagari `U+0903`/`U+093B`/`U+093E`, Thai `U+0E33`, Lao `U+0EB3`, Balinese
+ * `U+1B44`, …).
+ *
+ * The remaining 4 sit inside `WIDE_RANGES` and resolve to 2: `U+302E`/`U+302F`
+ * (Hangul tone marks) and `U+16FF0`/`U+16FF1` (Vietnamese alternate reading
+ * marks). V6 reports 0 for those because it zeroes the whole `U+302A`–`U+302F`
+ * run without separating `Mn` from `Mc`, while these ranges come from East Asian
+ * Width W/F. Keeping 2 is the consistent answer, and folding `Mc` into the
+ * zero-width set to match V6 would silently change the width of 467 Indic/SEA
+ * marks. `terminal-unicode-width.test.ts` pins all four so that change fails
+ * loudly (issue #547).
  */
 const ZERO_WIDTH_CATEGORY = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
 
