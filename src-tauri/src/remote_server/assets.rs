@@ -14,6 +14,11 @@ const XTERM_JS: &str = include_str!("assets/xterm.js");
 const XTERM_CSS: &str = include_str!("assets/xterm.css");
 const ADDON_FIT_JS: &str = include_str!("assets/addon-fit.js");
 const WEB_LINKS_ADDON_JS: &str = include_str!("assets/addon-web-links.js");
+/// Shared cell-width provider, generated from `ui/src/lib/terminal-unicode-width.ts`
+/// by `npm run build:remote-provider` (issue #538). Without it the remote client
+/// keeps xterm default Unicode 6 widths and wraps at different columns than the
+/// desktop for emoji and 89 BMP code points.
+const UNICODE_PROVIDER_JS: &str = include_str!("assets/unicode-provider.js");
 
 pub(crate) async fn remote_xterm_js(
     State(server): State<ServerState>,
@@ -25,6 +30,20 @@ pub(crate) async fn remote_xterm_js(
         addr,
         request_is_tunnel_authorized(&req),
         XTERM_JS,
+        "application/javascript; charset=utf-8",
+    )
+}
+
+pub(crate) async fn remote_unicode_provider_js(
+    State(server): State<ServerState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    req: Request,
+) -> Response {
+    remote_asset(
+        &server,
+        addr,
+        request_is_tunnel_authorized(&req),
+        UNICODE_PROVIDER_JS,
         "application/javascript; charset=utf-8",
     )
 }

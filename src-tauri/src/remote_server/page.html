@@ -1638,6 +1638,10 @@
       </footer>
     </div>
     <script src="/remote/vendor/xterm.js"></script>
+    <!-- Shared cell-width provider (issue #538). Generated from
+         ui/src/lib/terminal-unicode-width.ts so the remote client wraps at the
+         same columns as the desktop instead of xterm default Unicode 6 widths. -->
+    <script src="/remote/vendor/unicode-provider.js"></script>
     <script src="/remote/vendor/addon-fit.js"></script>
     <script src="/remote/vendor/addon-web-links.js"></script>
     <script>
@@ -3644,6 +3648,40 @@
           }
           applyTerminalSurfaceBackground(appearance);
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
+          // Register the shared width provider before any write so no row is ever
+          // laid out with xterm default Unicode 6 widths and then measured with
+          // these (ADR-0058, issue #538). Degrade rather than break if the asset
+          // is unavailable: the terminal stays usable on xterm own widths.
+          //
+          // Unlike the desktop, a silent fallback here does not resurrect a second
+          // source of truth — the asset is the only table on this surface. But it
+          // is undiagnosable, and the symptom ("only lines with emoji wrap at the
+          // wrong column") gives no path to the cause, so both miss paths warn.
+          //
+          // `terminal.unicode` is read outside the try on purpose: it is a
+          // proposed API and only exists because `terminalOptionsForAppearance`
+          // sets `allowProposedApi: true` (already required for IDecoration). If
+          // that option ever goes away this read throws during terminal creation
+          // rather than degrading, which is the louder and correct failure.
+          const unicodeProvider = window.LaymuxUnicodeProvider;
+          if (unicodeProvider && terminal.unicode) {
+            try {
+              terminal.unicode.register(unicodeProvider);
+              terminal.unicode.activeVersion = unicodeProvider.version;
+            } catch (error) {
+              console.warn(
+                "laymux: cell-width provider registration failed; falling back to xterm default widths",
+                error
+              );
+            }
+          } else {
+            // The more likely miss in practice: the asset 404d, was blocked, or a
+            // cached page.html predates the script tag.
+            console.warn(
+              "laymux: cell-width provider unavailable; falling back to xterm default widths",
+              { assetLoaded: !!unicodeProvider, unicodeApi: !!terminal.unicode }
+            );
+          }
           fitAddon = new FitAddonCtor();
           terminal.loadAddon(fitAddon);
           // Keep the terminal usable if this non-core asset is unavailable;
