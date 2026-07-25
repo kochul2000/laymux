@@ -1,5 +1,5 @@
 import { render, screen, act, fireEvent } from "@testing-library/react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   TerminalView,
   _resetWebglStagger,
@@ -3568,6 +3568,140 @@ describe("TerminalView", () => {
       expect(capturedKeyHandler!(keyEvent("keydown", { key: "a", code: "KeyA" }))).toBe(true);
       // ...and the abandoned press stops swallowing its companions.
       expect(capturedKeyHandler!(keyEvent("keypress", { key: "a", code: "KeyA" }))).toBe(true);
+    });
+  });
+
+  // -- native IME candidate window anchor (issue #532) --
+
+  describe("native IME candidate window anchor", () => {
+    /**
+     * Build a pane whose DOM matches what xterm produces: a `.xterm-screen`
+     * containing the render canvas and the helper textarea. jsdom reports zero
+     * rects, so both are stubbed — the geometry itself is covered by
+     * `ime-anchor.test.ts`; here we only assert the wiring and the restore.
+     */
+    async function mountPaneWithScreen(instanceId: string) {
+      render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" isFocused />);
+      const host = screen.getByTestId(`terminal-xterm-host-${instanceId}`);
+      const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      const canvas = document.createElement("canvas");
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      screenEl.appendChild(canvas);
+      screenEl.appendChild(helper);
+      terminal.element.appendChild(screenEl);
+      host.appendChild(terminal.element);
+
+      const rect = (left: number, top: number, width: number, height: number) =>
+        ({
+          left,
+          top,
+          width,
+          height,
+          right: left + width,
+          bottom: top + height,
+          x: left,
+          y: top,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      // 80x25 grid over an 800x400 canvas → 10x16 cells.
+      canvas.getBoundingClientRect = () => rect(0, 0, 800, 400);
+      screenEl.getBoundingClientRect = () => rect(0, 0, 800, 400);
+
+      // The overlay caret path only runs for a stabilized interactive app —
+      // same setup the existing shadow-cursor/IME overlay tests use.
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo(instanceId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+      });
+      return { helper, screenEl };
+    }
+
+    /** Drive a composition so the preview owns the caret. */
+    function startComposition(helper: HTMLTextAreaElement) {
+      helper.focus();
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "가";
+      helper.selectionStart = 1;
+      helper.selectionEnd = 1;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("input"));
+    }
+
+    afterEach(() => {
+      mockBufferActive.cursorX = 0;
+      mockBufferActive.cursorY = 0;
+      mockBufferActive.baseY = 0;
+      mockBufferActive.viewportY = 0;
+    });
+
+    it("leaves the helper where xterm put it while no composition is active", async () => {
+      const { helper } = await mountPaneWithScreen("t-anchor-idle");
+      expect(helper.style.left).toBe("");
+      expect(helper.style.top).toBe("");
+    });
+
+    it("moves the helper to the composition anchor when the cursors diverge, then restores", async () => {
+      const { helper } = await mountPaneWithScreen("t-anchor-diverge");
+      // xterm placed the helper on the public buffer cursor. Distinct values so
+      // both the move and the restore are observable.
+      helper.style.left = "400px";
+      helper.style.top = "320px";
+      // A TUI repaint parked the public cursor on the footer row; the shadow
+      // cursor (and therefore the composition anchor) is still at 0,0.
+      mockBufferActive.cursorX = 40;
+      mockBufferActive.cursorY = 20;
+
+      startComposition(helper);
+
+      // Moved onto the **composition caret** cell, which is the same cell the
+      // preview paints its caret on — the shared anchor contract. The composition
+      // is a 2-cell Hangul syllable starting at column 0, so the caret is at
+      // column 2 → 2 * 10px cell width. Row 0 → top 0.
+      await vi.waitFor(() => {
+        expect(helper.style.left).toBe("20px");
+        expect(helper.style.top).toBe("0px");
+      });
+
+      helper.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+
+      // Restored to xterm own inline values — never left at the moved offset.
+      await vi.waitFor(() => {
+        expect(helper.style.left).toBe("400px");
+        expect(helper.style.top).toBe("320px");
+      });
+    });
+
+    it("does not move the helper when the two cursors agree", async () => {
+      const { helper } = await mountPaneWithScreen("t-anchor-agree");
+      // xterm own placement, deliberately NOT the anchor pixel so a stray move
+      // would be visible.
+      helper.style.left = "0px";
+      helper.style.top = "0px";
+      // Public cursor already sits on the composition caret cell (column 2 —
+      // after the 2-cell Hangul syllable), so there is nothing to correct.
+      mockBufferActive.cursorX = 2;
+      mockBufferActive.cursorY = 0;
+
+      startComposition(helper);
+      // Give the overlay update the same number of frames the diverging case
+      // needed, so "no move" is a real observation and not just an early read.
+      await act(async () => {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => setTimeout(resolve, 0));
+        });
+      });
+
+      expect(helper.style.left).toBe("0px");
+      expect(helper.style.top).toBe("0px");
     });
   });
 

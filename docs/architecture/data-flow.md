@@ -411,6 +411,20 @@ Sogou/fcitx 계열 Linux IME 는 후보를 선택하는 데 쓴 Space/숫자를 
 - **이벤트열 fixture**: `ui/src/lib/__fixtures__/linux-ime-candidate-traces.ts`. 업스트림 보고(orca#7543/#7634) 재구성이며 Linux 실기 캡처가 아니다 — 각 trace 가 `platformClaim` 으로 자신의 주장을 기록하므로 실기 캡처 확보 시 조용히 교체하지 말고 diff 한다.
 - **진단**: `linux-ime-candidate-window-opened`/`-closed`/`-blocked` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다.
 
+### 8.13 native IME 후보창 앵커 (issue #532)
+
+composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커스된 helper textarea 의 DOM rect 에서 위치를 잡고 xterm 은 그 textarea 를 **public buffer cursor** 에 둔다. TUI repaint 로 두 커서가 갈리면 preview 는 맞아도 후보창만 다른 행·열에 뜬다. 두 커서가 **실제로 갈릴 때만** helper 의 위치를 앵커 셀로 옮긴다([ADR-0061](../adr/0061-native-ime-candidate-anchor.md), ADR-0053 의 "helper 를 이동하지 않음" 을 *무조건 이동 금지* 로 정정).
+
+- 기하 판정은 `ui/src/lib/ime-anchor.ts` 가 전부 소유한다(DOM 접근 없음). `TerminalView` 는 rect 읽기와 `left`/`top` 쓰기만 한다.
+- **게이트**: `shouldSyncHelperAnchor(publicCell, anchorCell)` — 조합 활성 + 두 셀 불일치. 일반 셸은 두 커서가 일치하므로 style 을 아예 쓰지 않는다.
+- **앵커 계약은 하나**: `updateOverlayCaret` 가 해결한 `cursorX`/`cursorY` 를 그대로 넘긴다. preview caret 셀과 후보창 앵커 셀이 같은 값이다 — 두 번 계산하면 wrap 규칙이 한쪽만 바뀌는 순간 갈라진다.
+- **좌표**: cell 크기는 렌더 rect 유도(`targetWidth / cols`, overlay caret 과 동일 식), 원점은 `.xterm-screen` 기준 캔버스 offset, 최종 px 는 device pixel grid 에 snap(후보창이 device-pixel rect 로 배치되므로 분수 offset 은 분수 DPR 에서 1px 어긋남을 만든다), 뷰포트 밖 앵커는 마지막 가시 셀로 clamp.
+- **위치만 건드린다**: value·focus·composition 이벤트·크기는 읽지도 쓰지도 않는다(ADR-0053/0054 경계).
+- **한 번 쓰는 것으로는 부족하다**: xterm 의 `CompositionHelper.updateCompositionElements()` 가 `_isComposing` 동안 같은 `left`/`top` 을 `buffer.x`/`buffer.y` 로 `onRender` 마다 + 자기 재예약 `setTimeout(0)` 으로 다시 쓴다(실측: 우리 값 뒤에 xterm 값이 남는다). `ime-anchor-keeper.ts` 가 `style` 속성 변경을 감시해 앵커를 재적용한다 — 쓰기 전에 비교하므로 자기 재트리거가 없고, 해제하면 관찰도 멈춘다. mock 터미널에는 이 두 번째 writer 가 없어 실제 `Terminal` 테스트로만 관측된다.
+- **sync 는 viewport 체크 뒤**: 앞에 두면 shadow cursor 행이 뷰포트 밖일 때 매 프레임 이동 → 원복이 반복된다.
+- **원복 의무**: 조합 종료 · 두 커서 재일치 · overlay 가 숨는 모든 경로(비포커스·scrollback·geometry 미확정) · helper 교체 · unmount 에서 저장해 둔 원래 inline 값으로 되돌린다.
+- **진단**: `ime-anchor-hold-started`/`-reapplied`/`-restored` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다. native 후보창의 실제 위치는 OS 창이라 스크린샷에 잡히지 않아 이 trace 로 사람이 확인한다.
+
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

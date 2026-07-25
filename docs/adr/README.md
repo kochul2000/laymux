@@ -78,6 +78,7 @@ ADR 이 필요한 대표 기준:
 | [0058](0058-single-terminal-cell-width-provider.md) | 터미널 셀 폭은 단일 Unicode/grapheme provider 가 소유하고 xterm 에 주입한다 | Proposed |
 | [0059](0059-os-input-source-chord-pty-exclusion.md) | OS 입력 소스 전환 chord 는 사용자 바인딩에서만 PTY 입력에서 제외 | Proposed |
 | [0060](0060-linux-ime-candidate-key-suppression.md) | Linux IME 후보 선택 키는 IME 소비 표식 + orphan companion 으로만 억제 (0053 유보 확정) | Proposed |
+| [0061](0061-native-ime-candidate-anchor.md) | native IME 후보창은 두 커서가 갈릴 때만 helper 위치를 shadow cursor 앵커로 옮김 (0053 정정) | Proposed |
 
 ## 새 ADR 추가
 
