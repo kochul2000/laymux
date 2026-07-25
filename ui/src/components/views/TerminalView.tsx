@@ -61,6 +61,7 @@ import {
 } from "@/lib/ime-composition-controller";
 import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { createHelperAnchorKeeper } from "@/lib/ime-anchor-keeper";
 import {
   clampAnchorCell,
   computeCellMetrics,
@@ -1319,17 +1320,10 @@ export function TerminalView({
     // helper textarea 의 **위치만** 임시로 옮긴다. value·focus·composition
     // lifecycle 은 계속 xterm 소유(ADR-0053/0054)이며 여기서 읽지도 쓰지도
     // 않는다. 옮긴 뒤에는 반드시 원래 inline style 로 되돌린다.
-    let helperAnchorSaved: { left: string; top: string } | null = null;
-    const restoreHelperAnchor = (reason: string) => {
-      if (!helperAnchorSaved || !helperTextarea) {
-        helperAnchorSaved = null;
-        return;
-      }
-      helperTextarea.style.left = helperAnchorSaved.left;
-      helperTextarea.style.top = helperAnchorSaved.top;
-      helperAnchorSaved = null;
-      trace("ime-anchor-restored", { reason });
-    };
+    const helperAnchorKeeper = createHelperAnchorKeeper({
+      onTrace: (event, payload) => trace(event, payload),
+    });
+    const restoreHelperAnchor = (reason: string) => helperAnchorKeeper.release(reason);
     const syncHelperAnchor = (input: {
       anchorCell: AnchorCell;
       publicCell: AnchorCell;
@@ -1355,30 +1349,24 @@ export function TerminalView({
         input.cols,
         input.rows,
       );
-      if (!metrics) return;
+      if (!metrics) {
+        // geometry 미확정도 앵커를 신뢰할 수 없는 상태다 — 옮겨둔 위치를 남기지 않는다.
+        restoreHelperAnchor("no-metrics");
+        return;
+      }
       const screenRect = input.screenEl.getBoundingClientRect();
       const style = computeHelperAnchorStyle({
         anchorCell: clampAnchorCell(input.anchorCell, input.cols, input.rows),
         metrics,
-        // helper 는 `.xterm-screen` 안에 있으므로 그 기준으로 캔버스 원점을 잡는다.
+        // helper 의 offsetParent 가 `.xterm-screen` 이므로 캔버스 원점을 그 기준으로 잡는다.
         originLeft: input.targetRect.left - screenRect.left,
         originTop: input.targetRect.top - screenRect.top,
         devicePixelRatio: window.devicePixelRatio,
       });
-      if (!helperAnchorSaved) {
-        helperAnchorSaved = { left: helper.style.left, top: helper.style.top };
-      }
-      const nextLeft = `${style.left}px`;
-      const nextTop = `${style.top}px`;
-      if (helper.style.left === nextLeft && helper.style.top === nextTop) return;
-      helper.style.left = nextLeft;
-      helper.style.top = nextTop;
-      trace("ime-anchor-synced", {
-        anchorCell: input.anchorCell,
-        publicCell: input.publicCell,
-        left: style.left,
-        top: style.top,
-      });
+      // xterm 의 CompositionHelper 는 조합 중 같은 style 을 매 렌더 + 자기 재예약
+      // setTimeout(0) 으로 다시 쓴다(실측). 한 번 쓰는 것으로는 last-writer-wins
+      // 경합에서 지므로 keeper 가 style 변경을 감시해 앵커를 유지한다 (ADR-0061).
+      helperAnchorKeeper.apply(helper, style);
     };
     const updateOverlayCaret = () => {
       const overlay = overlayCaretRef.current;
@@ -1545,22 +1533,6 @@ export function TerminalView({
         previewEl.style.opacity = "0";
         previewEl.replaceChildren();
       }
-      // OS 후보창은 포커스된 helper textarea 의 DOM 위치에서 뜨고, xterm 은 그
-      // textarea 를 public buffer cursor 에 둔다. TUI repaint 로 두 커서가
-      // 갈리면 preview 는 맞아도 후보창만 다른 행에 뜬다. 여기서 같은
-      // cursorX/cursorY 를 넘겨 앵커 계약을 하나로 유지한다 (ADR-0061).
-      syncHelperAnchor({
-        anchorCell: { column: cursorX, row: cursorY },
-        publicCell: {
-          column: (term.buffer.active as { cursorX?: number }).cursorX ?? 0,
-          row: (term.buffer.active as { cursorY?: number }).cursorY ?? 0,
-        },
-        screenEl: screen,
-        targetRect,
-        cols: term.cols,
-        rows: term.rows,
-      });
-
       if (cursorY < 0 || cursorY >= term.rows) {
         hideOverlay();
         trace("overlay-hidden", {
@@ -1573,6 +1545,23 @@ export function TerminalView({
         });
         return;
       }
+
+      // OS 후보창은 포커스된 helper textarea 의 DOM 위치에서 뜨고, xterm 은 그
+      // textarea 를 public buffer cursor 에 둔다. TUI repaint 로 두 커서가
+      // 갈리면 preview 는 맞아도 후보창만 다른 행에 뜬다. 여기서 같은
+      // cursorX/cursorY 를 넘겨 앵커 계약을 하나로 유지한다 (ADR-0061).
+      //
+      // viewport 범위 체크 **뒤**에 온다. 앞에 두면 shadow cursor 행이 뷰포트
+      // 밖일 때 매 프레임 이동 → hideOverlay 의 원복이 반복돼, 조합 중 IME
+      // 안정성이 가장 중요한 구간에서 불필요한 churn 이 생긴다.
+      syncHelperAnchor({
+        anchorCell: { column: cursorX, row: cursorY },
+        publicCell: { column: term.buffer.active.cursorX, row: term.buffer.active.cursorY },
+        screenEl: screen,
+        targetRect,
+        cols: term.cols,
+        rows: term.rows,
+      });
 
       const caretMetrics = getOverlayCaretMetrics(
         overlayCursorShapeRef.current,

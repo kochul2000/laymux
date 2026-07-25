@@ -4,7 +4,6 @@ import {
   clampAnchorCell,
   computeCellMetrics,
   computeHelperAnchorStyle,
-  resolveAnchorCellFromAbsolute,
   shouldSyncHelperAnchor,
   snapToDevicePixel,
 } from "./ime-anchor";
@@ -145,43 +144,23 @@ describe("computeHelperAnchorStyle", () => {
   });
 });
 
-describe("resolveAnchorCellFromAbsolute", () => {
-  it("converts an absolute buffer row to a viewport row", () => {
-    expect(resolveAnchorCellFromAbsolute(12, 140, 130)).toEqual({ column: 12, row: 10 });
-  });
-
-  it("reports a negative row for a cell scrolled above the viewport", () => {
-    // Left unclamped on purpose: the caller decides whether to clamp or skip, and
-    // conflating the two here would hide a scrollback case from the caller.
-    expect(resolveAnchorCellFromAbsolute(0, 100, 130)).toEqual({ column: 0, row: -30 });
-  });
-});
-
 describe("preview and candidate window share one anchor", () => {
-  it("resolves the same cell for both consumers from one input", () => {
-    // The point of the contract: given a composition layout result, the cell the
-    // preview paints and the cell the textarea moves to are the same value, not
-    // two independent derivations.
-    const previewLayout = { cursorX: 7, cursorAbsY: 143 };
-    const baseY = 140;
-
-    const anchorCell = resolveAnchorCellFromAbsolute(
-      previewLayout.cursorX,
-      previewLayout.cursorAbsY,
-      baseY,
-    );
-    expect(anchorCell).toEqual({ column: 7, row: 3 });
-
+  it("turns the cell the preview paints into the same pixel origin", () => {
+    // The contract is enforced by the caller passing the *same* resolved
+    // cursorX/cursorY it gave the overlay caret — not by a helper in this module.
+    // What this asserts is that the pixel origin derived from that cell matches
+    // the overlay caret formula (column * cellWidth, row * cellHeight).
+    const anchorCell = { column: 7, row: 3 };
     const metrics = computeCellMetrics(800, 400, 80, 25);
     expect(metrics).not.toBeNull();
-    const style = computeHelperAnchorStyle({
-      anchorCell,
-      metrics: metrics!,
-      originLeft: 0,
-      originTop: 0,
-      devicePixelRatio: 1,
-    });
-    // Same cell → same pixel origin the overlay caret uses (column * cellWidth).
-    expect(style).toEqual({ left: 70, top: 48 });
+    expect(
+      computeHelperAnchorStyle({
+        anchorCell,
+        metrics: metrics!,
+        originLeft: 0,
+        originTop: 0,
+        devicePixelRatio: 1,
+      }),
+    ).toEqual({ left: 7 * 10, top: 3 * 16 });
   });
 });

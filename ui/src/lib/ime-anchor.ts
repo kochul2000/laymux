@@ -16,6 +16,11 @@
  * and only its position is touched — never its value, focus, or composition
  * events, which stay xterm's (ADR-0053/0054).
  *
+ * One thing this module deliberately does **not** own: xterm rewrites the same
+ * `left`/`top` on every render while composing, so a single write loses a
+ * last-writer-wins race. Holding the anchor against that is
+ * `ime-anchor-keeper.ts`; here we only decide *where* it should be.
+ *
  * Everything here is pure geometry so the rules are testable without a headful
  * browser: cell size derivation, the disagreement gate, device-pixel rounding
  * and clamping. The caller owns all DOM reads and writes.
@@ -71,11 +76,14 @@ export function shouldSyncHelperAnchor(publicCell: AnchorCell, anchorCell: Ancho
 /**
  * Clamp an anchor cell into the viewport.
  *
- * A shadow cursor can legitimately sit outside the current viewport (scrollback,
- * a park that resolved to a row that has since scrolled). Placing the textarea
- * there would push the candidate window outside the pane, so the anchor is
- * clamped to the last visible cell instead — the popup stays attached to the
- * pane even when the exact cell is not on screen.
+ * The **column** clamp is the one that matters in practice: a pending-wrap cursor
+ * reports a column equal to `cols`, and placing the textarea a full cell past the
+ * last one would push the candidate window outside the pane.
+ *
+ * The **row** clamp is defence in depth only. The caller runs this after its own
+ * viewport check, so a row outside `[0, rows)` never reaches here — it hides the
+ * overlay and releases the anchor instead. Clamping anyway keeps this function
+ * total, but do not read it as "scrollback anchors are clamped into view".
  */
 export function clampAnchorCell(cell: AnchorCell, cols: number, rows: number): AnchorCell {
   const maxColumn = Math.max(0, cols - 1);
@@ -102,7 +110,10 @@ export function snapToDevicePixel(value: number, devicePixelRatio: number): numb
 export type HelperAnchorInput = {
   anchorCell: AnchorCell;
   metrics: CellMetrics;
-  /** Screen-rect origin relative to the textarea's offset parent. */
+  /**
+   * Canvas origin relative to the textarea offset parent (`.xterm-screen`).
+   * Not the screen rect itself — the glyph grid starts at the canvas.
+   */
   originLeft: number;
   originTop: number;
   devicePixelRatio: number;
@@ -126,21 +137,4 @@ export function computeHelperAnchorStyle(input: HelperAnchorInput): HelperAnchor
     left: snapToDevicePixel(originLeft + anchorCell.column * metrics.cellWidth, devicePixelRatio),
     top: snapToDevicePixel(originTop + anchorCell.row * metrics.cellHeight, devicePixelRatio),
   };
-}
-
-/**
- * The anchor cell the composition owns, in viewport coordinates.
- *
- * `absY` values come from the buffer's absolute row space; `baseY` converts them
- * to the viewport rows the DOM is laid out in. Both the preview and the
- * candidate window resolve their cell through this one function, which is the
- * "same anchor contract" the issue asks for — if it were computed twice the two
- * would drift the moment either wrap rule changed.
- */
-export function resolveAnchorCellFromAbsolute(
-  cursorX: number,
-  cursorAbsY: number,
-  baseY: number,
-): AnchorCell {
-  return { column: cursorX, row: cursorAbsY - baseY };
 }
