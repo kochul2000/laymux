@@ -3,12 +3,14 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import type { InitialExecutionHost } from "./terminal-execution-host";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
 export interface TerminalSessionResult {
   id: string;
   title: string;
+  initialExecutionHost: InitialExecutionHost;
   config: {
     profile: string;
     cols: number;
@@ -77,6 +79,10 @@ export async function createTerminalSession(
 
 export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
+}
+
+export async function writeTerminalProtocolReply(id: string, data: string): Promise<void> {
+  return invoke("write_terminal_protocol_reply", { id, data });
 }
 
 /**

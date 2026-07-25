@@ -243,6 +243,16 @@ Windows ConPTY는 폭 변경 뒤 현재 화면을 `ESC[?25l (ESC[8;<rows>;<cols>
 
 xterm 6.0.0의 wider reflow는 제거된 soft-wrap 행 주변에 stale `isWrapped`를 남길 수 있다. dependency는 6.0.0으로 고정하고 upstream commit `e9c648f`의 수정 패치를 `postinstall`에서 적용한다. patch target이 달라지면 설치를 실패시켜 검토 없이 다른 bundle에 부분 적용되지 않게 한다.
 
+#### Native Windows synchronized-output transaction
+
+PC WebView의 live PTY 출력은 `ConptyResizeRepaintFilter`를 통과한 뒤, 공통 tracked xterm write FIFO에 들어가기 직전에 terminal별 `NativeWindowsOutputStabilizer`를 지난다([ADR-0053](../adr/0053-native-windows-synchronized-output-cursor-transaction.md)). Rust는 실제 PTY spawn에 사용한 `cmd_path`의 basename과 target OS로 `InitialExecutionHost`를 한 번 분류해 `create_terminal_session` 결과의 `initialExecutionHost`로 반환한다. `nativeWindows`만 stabilizer를 활성화하며 `wsl`, `directSsh`, `nonWindows`, `unknown` 및 별도 browser Remote renderer는 pass-through다. UI가 user agent·profile 이름·런타임 activity로 이 값을 재추론하지 않는다.
+
+stabilizer는 문자열 디코딩이나 정규식 치환이 아니라 `Uint8Array` 스트림 상태 머신이다. 7-bit `CSI ? 2026 h/l`, `CSI ? 25 h/l`, CUP/HVP(`H`/`f`), CHA(`G`)만 의미 토큰으로 분류하고, OSC(BEL/ST)와 DCS/APC/PM/SOS(ST)는 framing만 추적해 payload 안의 CSI 모양 바이트를 해석하지 않는다. singleton `?2026h`부터 출력 후보를 보류하고 `?2026l` 직후의 정확한 `?25l` → 하나 이상의 CUP/HVP/CHA → `?25h` 복원까지 확인되면, frame 안의 singleton `?25h`만 제거한 frame+restore를 **tracked write 하나**로 enqueue한다. 이 정상 transaction은 이미 1 MiB 상한으로 제한되므로 일반 tracked writer의 청크 분할을 적용하지 않고 `terminal.write` 한 번으로 전달해 frame end와 restore 사이에 parser callback 경계가 생기지 않게 한다. cache·snapshot·복원 구분선·backend mode 합성은 stabilizer를 통과하지 않는다.
+
+첫 frame-start 바이트의 monotonic 시각부터 50ms인 `D_hold`를 frame body와 restore 대기가 공유하며 `?2026l`에서 다시 시작하지 않는다. 보류 상한은 1 MiB다. 문법 불일치·timeout·상한 초과는 보류한 원본을 순서와 바이트 그대로 fail-open한다. 이때 OSC/DCS/APC/PM/SOS 내부였다면 해당 control string의 실제 terminator까지 추가 바이트를 보류 없이 통과시키면서 lexical state만 유지하고, 끝난 뒤에만 새 transaction을 탐색한다. attach gap/교체·unmount는 이전 generation의 보류 바이트, parsed callback, timeout, 후속 animation frame을 폐기한다. 폐기된 parsed callback은 실행하지 않되 이전 attach 체인이 영구 대기하지 않도록 별도 lifecycle 취소 waiter만 해제한다.
+
+정상 transaction write callback 뒤에는 public `terminal.refresh(0, rows - 1)`를 즉시 한 번, 다음 `requestAnimationFrame`에 한 번 더 호출한다. 이 settle은 geometry를 바꾸지 않으므로 `fit()`, `clearTextureAtlas()`, xterm private renderer API를 호출하지 않는다. xterm의 helper textarea와 composition view는 기존 `CompositionHelper`/public render 경로가 계속 소유하며 stabilizer가 DOM 위치·focus·value·composition event를 조작하지 않는다.
+
 #### 테스트 요구사항
 
 TerminalView renderer 경로를 수정할 때는 다음 회귀 테스트를 유지하거나 추가한다.
@@ -259,6 +269,8 @@ TerminalView renderer 경로를 수정할 때는 다음 회귀 테스트를 유�
 - Windows의 120ms output quiet 대기는 지속 출력에서도 최초 보류 뒤 500ms 안에 끝나며, Linux resize에는 적용하지 않는다.
 - remote control 복귀는 visible/hidden과 same/changed geometry 모두에서 최종 크기를 보호된 backend resize 하나로 동기화하고, 거부·1초 timeout·in-flight geometry 변경 시 dirty를 유지해 최신 revision을 재시도한다.
 - Windows normal buffer의 scrollback 폭을 줄이거나 넓힐 때 청크 경계에서 분할된 직접 home marker와 `CSI 8;<rows>;<cols>t` 삽입형 marker를 인식하고, 탐색 창 끝에서 start marker가 완성된 frame에도 별도 완료 창을 적용한다. fit 중 `baseY`가 1에서 0으로 줄어드는 얕은 scrollback도 보호한다. start 전 또는 split start 보류 중 여러 번 재무장하면 arm 수만큼 frame을 제거하고, 제거 중 재무장하면 현재 frame의 완료 또는 만료 뒤 다음 frame을 탐색한다. 실패한 backend resize의 arm을 취소해도 앞선 arm의 자체 deadline은 유지한다.
+- Native Windows live delta만 DEC 2026 frame+restore transaction으로 안정화하고 WSL/직접 SSH/Linux/unknown, cache/snapshot replay는 byte-for-byte pass-through한다. exact restore 성공 시 in-frame singleton `?25h`만 빠지고, 일반 write 청크보다 큰 frame도 `terminal.write` 한 번으로 전달되며, write callback 뒤 public refresh가 정확히 두 번 실행된다. 활성 IME preedit의 focus/value는 유지되고 composition commit은 human-input 경로로 정확히 한 번만 전달된다.
+- split CSI/control string, payload 안의 fake marker, 문법 불일치, 50ms timeout, 1 MiB 초과, unterminated control string, attach generation 교체를 각각 회귀 테스트로 고정한다. fail-open 결과는 원본 바이트와 순서가 같아야 한다. lone ESC 또는 partial CSI/control string을 이미 방출한 뒤 timeout·상한 fail-open이 발생하면 prefix를 재출력하지 않는 `passEscape`/`passCsi`/`passControl` lexical 상태로 이어가며, 실제 terminator/final까지 payload 안의 marker 모양 바이트를 다시 해석하지 않는다.
 - terminal을 감싼 각 flex 경계는 `min-width: 0`과 overflow clipping을 가져 xterm canvas의 intrinsic width가 pane 축소를 막지 않는다.
 
 ### 8.5 Shadow cursor / DECTCEM 주차 상태
@@ -271,6 +283,8 @@ Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모�
 - `isDectcemShowPark()`는 `isDec2026FrameOpen === false`이고 normal buffer일 때만 참이다. 따라서 장시간 프레임에서 모드 timeout이 발생해도 프레임 안 `?25h`는 visibility-only repaint tail로 남는다.
 - settle 재무장 상한은 `parkPending` fallback 동결만 해제한다. `isDec2026FrameOpen`은 타이머나 activity 전환이 닫지 않으며 실제 `?2026l` parser 경계에서만 닫힌다.
 - `?2026l` 뒤 `parkPending`이면 overlay 좌표 repaint를 동결하지만, IME composition이 종료되어 `active=false`가 되면 프리뷰 DOM의 opacity와 text를 동결 검사 전에 즉시 정리한다. 완료된 조합 문자열이 settle timeout까지 화면에 남아서는 안 된다.
+- 활성 IME composition preview는 터미널 셀 행별 fragment로 렌더링한다. 첫 fragment는 조합 anchor 열에서 시작하고 soft-wrap 이후 fragment는 다음 버퍼 행의 0열에서 시작한다. 폭 2 문자가 남은 한 셀에 걸치지 않도록 preview 행 배치와 composition caret 좌표는 같은 셀 폭 순회를 사용하며, xterm helper textarea의 focus·value·composition lifecycle 소유권은 변경하지 않는다.
+- stabilizer가 `?2026l`을 관찰한 시각으로 `D_park = frameEndAt + 50ms`를 write metadata에 기록한다. parser hook이 늦게 frame end를 보더라도 park settle은 이 deadline까지의 **남은 시간**만 사용하며 새 50ms를 시작하지 않는다. 정상 transaction에서는 같은 write 안의 최종 out-of-frame `?25h`가 권위 park를 확정해 settle timer를 즉시 해제한다. stabilizer를 거치지 않은 출력의 기존 parser settle 동작은 그대로 유지한다.
 - normal buffer의 `viewportY < baseY`이면 사용자가 scrollback을 보는 중이므로 Codex overlay caret과 composition preview를 숨긴다. shadow cursor 좌표 자체는 유지하고, `terminal.onScroll`에서 표시 상태만 다시 계산해 live bottom으로 복귀하면 즉시 복원한다. live 화면 기준 shadow 좌표를 과거 viewport에 고정 표시하지 않기 위함이다.
 
 상태 전이는 `ui/src/lib/shadow-cursor-state.ts`, parser hook·settle timer·overlay paint 순서는 `TerminalView.tsx`가 담당한다.
@@ -321,6 +335,7 @@ PC attach 순서는 다음과 같다.
 ```
 terminal-output-v2 listener 등록
     → PTY session 생성 + cache load 병렬 시작
+    → create 결과의 immutable initialExecutionHost로 renderer gate 확정
     → attach_terminal_output
     → xterm reset
     → cache → restored 구분선 → live snapshot
@@ -331,7 +346,11 @@ terminal-output-v2 listener 등록
 
 `seqEnd <= snapshotSeq`인 delta는 중복으로 버리고 snapshot 끝을 가로지르는 delta는 suffix만 쓴다. 다음 expected sequence보다 큰 delta는 임의 보간하지 않고 새 attach를 시작한다. cache/snapshot/delta parser write가 끝날 때까지 geometry reflow도 `outputAttachParserBusy`로 보류한다. 지원하는 attach metadata와 snapshot parser 적용이 끝나기 전에는 composer commit과 Direct clipboard paste를 fail-closed한다.
 
-Composer와 clipboard paste는 Tauri `write_terminal_input(id, text, submit)` 또는 Remote `/remote/v1/terminals/{id}/input`으로 intent만 보낸다. Composer Send는 항상 `submit=true`, Direct clipboard paste는 `submit=false`다. 비동기 smart-paste 결과를 PTY로 보내기 직전에도 현재 모드가 `direct`인지 다시 확인하므로, clipboard 조회 중 Composer로 전환된 입력은 draft 경계를 우회하지 않는다. Rust가 줄바꿈을 CR로 정규화하고 authoritative bracketed-paste 상태가 켜져 있으면 text 부분만 `CSI 200~`/`CSI 201~`로 감싼 뒤 선택적 submit CR을 붙인다. 키 입력·focus reply·Remote soft key는 기존 raw write 경로를 사용한다. Local/Remote raw write, structured write, resize는 모두 backend human-control owner permit을 등록한 뒤 PTY table lock을 놓고 실제 I/O를 수행하므로 frontend lease status는 UX 표시일 뿐 권한 경계가 아니다.
+tracked xterm write는 각 요청에 `replay` 또는 `live` source를 붙이고 xterm callback FIFO와 같은 순서로 parse context를 유지한다. cache·snapshot·복원용 합성 write 중 xterm이 만든 terminal reply는 폐기하고, contiguous live PTY delta를 parse하며 만든 reply만 Tauri `write_terminal_protocol_reply`로 같은 PTY FIFO에 전달한다. 이 전용 경로는 human-control owner permit을 요구하지 않으므로 Remote lease가 활성 또는 Local owner 상태가 아직 unknown이어도 OSC 10/11 같은 emulator response가 유실되지 않는다. Rust가 같은 query에 중복 응답하거나 response byte allowlist로 출처를 추정하지 않는다.
+
+keyboard·IME·paste·mouse·focus에서 생기는 human input은 xterm data emission 전에 막는다. remote owner snapshot을 알기 전과 Remote 활성 중에는 xterm `disableStdin`을 켠다. 고정 버전 xterm 6.0.0의 ESM·CommonJS 번들은 postinstall에서 gate를 `disableStdin && wasUserInput`으로 좁혀 human data만 차단하고 parser-generated reply는 유지하며, exact pattern이 바뀌면 설치를 실패시킨다. custom key handler와 structured paste/composer도 같은 fail-closed 상태를 확인한다. 공개 `onData`가 버리는 `wasUserInput` origin은 고정 버전 private `CoreService.onUserInput` 동기 신호로 복원해 timer로 지연된 IME commit도 human으로 분류하고, wrapper capture event는 xterm이 user bit 없이 만드는 focus/mouse report를 보완한다. private origin adapter가 없으면 ambiguous live data도 human으로 fail-closed한다. replay reply는 폐기하고 신뢰 가능한 live parser reply만 전용 `write_terminal_protocol_reply`를 사용한다. human route는 전송 직전에 Local owner 상태를 다시 확인한 뒤 owner-gated `write_to_terminal`을 사용하며 backend permit이 최종 권한 경계다([ADR-0054](../adr/0054-xterm-human-and-protocol-data-origin.md)).
+
+Composer와 clipboard paste는 Tauri `write_terminal_input(id, text, submit)` 또는 Remote `/remote/v1/terminals/{id}/input`으로 intent만 보낸다. Composer Send는 항상 `submit=true`, Direct clipboard paste는 `submit=false`다. 비동기 smart-paste 결과를 PTY로 보내기 직전에도 현재 모드가 `direct`인지 다시 확인하므로, clipboard 조회 중 Composer로 전환된 입력은 draft 경계를 우회하지 않는다. Rust가 줄바꿈을 CR로 정규화하고 authoritative bracketed-paste 상태가 켜져 있으면 text 부분만 `CSI 200~`/`CSI 201~`로 감싼 뒤 선택적 submit CR을 붙인다. 사용자 키·mouse/focus reporting·Remote soft key는 기존 raw write 경로를 사용한다. Local/Remote raw write, structured write, resize는 모두 backend human-control owner permit을 등록한 뒤 PTY table lock을 놓고 실제 I/O를 수행하므로 frontend lease status는 UX fail-closed 장벽이고 backend permit이 최종 권한 경계다. live parser가 생성한 terminal protocol reply만 위 전용 non-human 경로를 사용한다.
 
 terminal output의 생성·attach·retire는 id-only table 조합이 아니라 generation-scoped `TerminalOutputSession` 하나가 protocol state, sequenced ring, subscriber 목록, retirement를 함께 소유한다. Direct/Cloud output은 session lock에서 bounded subscriber 등록과 snapshot 캡처를 원자적으로 수행한 뒤 polling 없이 event를 수신한다. 큐 overflow는 `Gap`, terminal close/재생성은 `Retired`로 전달되며 consumer는 두 경우 모두 기존 stream을 닫고 새 generation snapshot에 attach한다. terminal create는 session generation을 먼저 reserve하고 PTY spawn·table install 후 commit하며, 생성 중 close가 들어오면 reservation을 취소해 뒤늦은 commit이 고아 PTY를 남기지 못하게 한다.
 
@@ -780,11 +799,11 @@ MCP/REST 쓰기
 
 Pane을 가리키는 식별자는 용도가 다른 3가지가 공존한다. 혼동하지 말 것.
 
-| 식별자       | 형식                                  | 용도                                                                                            | 안정성                    |
-| ------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------- |
-| `terminalId` | `terminal-pane-{uuid8}`               | **안정 참조** — write/focus의 1차 식별자, `LX_TERMINAL_ID` env var                              | 세션 간 안정              |
+| 식별자       | 형식                                  | 용도                                                                               | 안정성                    |
+| ------------ | ------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------- |
+| `terminalId` | `terminal-pane-{uuid8}`               | **안정 참조** — write/focus의 1차 식별자, `LX_TERMINAL_ID` env var                 | 세션 간 안정              |
 | `paneIndex`  | `WorkspacePane[]` 0-based 배열 인덱스 | **레이아웃 조작** — `split_pane`/`remove_pane`/`resize_pane`/`swap_panes` 파라미터 | split 삽입 순서에 종속    |
-| `paneNumber` | 화면 읽기 순서 1..N                   | **표시 + 사람/AI 지칭** — 컨트롤바 배지, "N번 pane으로 보내"                                    | 레이아웃 따라 실시간 변동 |
+| `paneNumber` | 화면 읽기 순서 1..N                   | **표시 + 사람/AI 지칭** — 컨트롤바 배지, "N번 pane으로 보내"                       | 레이아웃 따라 실시간 변동 |
 
 - `paneNumber`는 `ui/src/lib/pane-numbers.ts`의 `computePaneNumbers()` **단일 함수**에서 (y 우선, 동일 y는 x 오름차순; eps 0.01) 도출하는 **파생값**이다. 어디에도 저장/캐시하지 않으며 panes가 바뀌면 재계산된다.
 - `WorkspaceSelectorView`의 pane 요약 행과 Direct Remote `/remote/v1/navigation`의 active workspace pane 배열도 이 `paneNumber` 오름차순으로 렌더/응답한다. 단, 표시 순서만 정렬하며 포커스와 `PaneMinimap.highlightIndex`, 원격 응답의 `paneIndex`는 레이아웃 조작용 원본 배열 인덱스를 계속 사용한다.
