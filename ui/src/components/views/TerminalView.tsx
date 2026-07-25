@@ -61,6 +61,7 @@ import {
 } from "@/lib/ime-composition-controller";
 import { activateTerminalUnicodeProvider } from "@/lib/terminal-unicode-width";
 import { shouldBlockTerminalKeyDuringIme, shouldDeferTerminalKeyToIme } from "@/lib/ime-key-policy";
+import { decideCommitRace } from "@/lib/composition-commit-race";
 import { createHelperAnchorKeeper } from "@/lib/ime-anchor-keeper";
 import {
   clampAnchorCell,
@@ -70,6 +71,7 @@ import {
   type AnchorCell,
 } from "@/lib/ime-anchor";
 import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
+import { readPendingCompositionSend } from "@/lib/xterm-pending-composition";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
   createTerminalFocusOwnership,
@@ -2165,6 +2167,24 @@ export function TerminalView({
         if (candidateDecision.block) {
           // preventDefault 는 helper textarea 를 변형시키는 이벤트에만 건다.
           if (candidateDecision.preventDefault) e.preventDefault();
+          return false;
+        }
+      }
+
+      // xterm 의 조합 finalizer 는 commit 텍스트를 setTimeout(0) 안에서 읽어
+      // 보낸다. 그 타이머가 돌기 전에 도착한 keypress 는 같은 문자를 한 번 더
+      // 보내 중복이 된다(issue #527, 실제 xterm 경로에서 재현됨). pending
+      // commit 이 이미 그 문자를 담고 있을 때만 keypress 를 막는다 — 애매하면
+      // 전달해서 사용자가 그 사이에 새로 누른 문자를 삼키지 않는다 (ADR-0062).
+      if (e.type === "keypress") {
+        const pendingSend = readPendingCompositionSend(terminal);
+        const raceDecision = decideCommitRace({
+          pending: !!pendingSend?.pending,
+          state: pendingSend?.state ?? null,
+          keypress: e,
+        });
+        if (raceDecision.suppress) {
+          trace("composition-commit-race-suppressed", { reason: raceDecision.reason });
           return false;
         }
       }
