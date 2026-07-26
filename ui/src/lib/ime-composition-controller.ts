@@ -116,6 +116,12 @@ export type ImeCompositionController = {
   bind(textarea: HTMLTextAreaElement): void;
   dispose(): void;
   getState(): CompositionPreviewState;
+  /**
+   * The buffer gained `rowDelta` rows of scrollback, so every absolute row below
+   * the top moved down by that much. Carries the open composition's anchor with
+   * it (issue #570).
+   */
+  notifyBufferScrolled(rowDelta: number): void;
 };
 
 /**
@@ -532,7 +538,10 @@ export function createImeCompositionController(
       // `getShadowSyncEligibility` returns `composition-preview-active` while a
       // composition is open, so the live reading is frozen and the row-change branch
       // effectively never fires. It is the buffer-cursor (shell) path that actually
-      // exercises the re-base.
+      // exercises the re-base. That still holds under `notifyBufferScrolled` only
+      // because the caller moves the frozen shadow by the same delta (issue #570):
+      // shifting the origin alone would leave the frozen reading a row behind, and
+      // this classifier would read that as `originMoved` and snap the anchor back.
       // Where the committed text says the live cursor should be once it has caught
       // up — straight out of the shared advance, no second wrap rule. Measured on a
       // 150-column shell: origin 148, three syllables committed, `derived` 154 — that
@@ -781,6 +790,37 @@ export function createImeCompositionController(
     },
     getState() {
       return state;
+    },
+    /**
+     * The anchor is an absolute buffer row, and the renderer turns it into a
+     * screen row with `anchorBufferAbsY - baseY`. That subtraction is what makes
+     * a *stationary* anchor drift: a TUI that keeps its input box at the bottom
+     * pushes its transcript up by emitting rows, `baseY` grows, and the preview
+     * rides the old content upward while the line it belongs to stays put
+     * (issue #570 — measured 9 rows of Claude output, preview 9 rows high).
+     *
+     * Nothing else re-anchors in that window. The anchor is recomputed on
+     * composition events only, so between two keystrokes — or during the long
+     * pause while an agent streams a reply — there is no other owner to correct
+     * it.
+     *
+     * Adding the same delta pins the anchor to its screen row, which is where
+     * the input line stays. When the scrollback cap is reached the delta is 0:
+     * rows are dropped from the top instead, the bottom-anchored input line
+     * keeps its absolute row, and the anchor must not move either.
+     */
+    notifyBufferScrolled(rowDelta) {
+      if (rowDelta === 0 || phase === "idle" || !state.active) return;
+      compositionAnchor = {
+        ...compositionAnchor,
+        cursorAbsY: compositionAnchor.cursorAbsY + rowDelta,
+      };
+      chainAnchor = { ...chainAnchor, cursorAbsY: chainAnchor.cursorAbsY + rowDelta };
+      traceComposition(options, "ime-composition-anchor-scrolled", {
+        rowDelta,
+        anchorBufferAbsY: compositionAnchor.cursorAbsY,
+      });
+      update({ anchorBufferAbsY: compositionAnchor.cursorAbsY });
     },
   };
 }

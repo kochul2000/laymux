@@ -225,12 +225,9 @@ describe("advanceCells", () => {
     [150, 147, 149, 0],
     [75, 74, 2, 1],
     [80, 79, 2, 1],
-  ])(
-    "cols %i, origin %i advances to column %i row +%i",
-    (cols, origin, column, rowOffset) => {
-      expect(advanceCells(origin, HANGUL, cols)).toEqual({ column, rowOffset });
-    },
-  );
+  ])("cols %i, origin %i advances to column %i row +%i", (cols, origin, column, rowOffset) => {
+    expect(advanceCells(origin, HANGUL, cols)).toEqual({ column, rowOffset });
+  });
 
   it("normalizes an origin already at or past the right edge", () => {
     // xterm's pending-wrap cursor reports `cols`, and a derived carry-over anchor can
@@ -736,6 +733,153 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
+  /**
+   * The preview's screen row is `anchorBufferAbsY - baseY`. A TUI that keeps its
+   * input box at the bottom (Claude Code, Codex) pushes its transcript up by
+   * emitting rows, so `baseY` grows while the input line stays put — and a
+   * stationary anchor drifts upward by exactly the rows emitted.
+   *
+   * Nothing else re-anchors in that window: the anchor is recomputed on
+   * composition events only, and an agent streaming a reply produces none.
+   * Measured on Claude Code — anchor pinned at 1683 while the input line reached
+   * 1692, preview nine rows high (issue #570).
+   */
+  describe("an open composition follows the buffer scroll (issue #570)", () => {
+    async function startComposition(anchor = { cursorX: 4, cursorAbsY: 100 }) {
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => anchor,
+      });
+      const textarea = document.createElement("textarea");
+      textarea.value = "";
+      controller.bind(textarea);
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "ㄱ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+      await tick();
+      return { controller, textarea };
+    }
+
+    it("moves the anchor down by the rows the TUI emitted", async () => {
+      const { controller } = await startComposition();
+      expect(controller.getState().anchorBufferAbsY).toBe(100);
+
+      controller.notifyBufferScrolled(9);
+
+      expect(controller.getState().anchorBufferAbsY).toBe(109);
+      controller.dispose();
+    });
+
+    it("accumulates across successive scrolls", async () => {
+      const { controller } = await startComposition();
+
+      controller.notifyBufferScrolled(3);
+      controller.notifyBufferScrolled(4);
+
+      expect(controller.getState().anchorBufferAbsY).toBe(107);
+      controller.dispose();
+    });
+
+    it("keeps the correction when the same syllable updates again", async () => {
+      // The next jamo re-emits the state from the stored anchor, so patching only
+      // the emitted state would snap the preview back to the pre-scroll row.
+      const { controller, textarea } = await startComposition();
+      controller.notifyBufferScrolled(9);
+
+      textarea.value = "가";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      await tick();
+
+      expect(controller.getState()).toMatchObject({ text: "가", anchorBufferAbsY: 109 });
+      controller.dispose();
+    });
+
+    it("puts the next syllable on the scrolled row with the committed column", async () => {
+      // End-to-end guard for the carry-over that follows a scroll: the caller moves
+      // the frozen shadow cursor by the same delta, so the live reading lands on the
+      // shifted row and the anchor must come out at the committed column on that row.
+      //
+      // This does not isolate the `chainAnchor` shift — with the live reading already
+      // correct, the classifier re-bases to it and reaches the same answer either
+      // way (verified by removing the shift: this still passes). The shift matters
+      // only when the live reading lags, and no covered scenario produces that.
+      const live = { cursorX: 2, cursorAbsY: 100 };
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => live,
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "ㄱ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+      await tick();
+      textarea.value = "가";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      await tick();
+
+      controller.notifyBufferScrolled(9);
+      live.cursorAbsY += 9; // the frozen shadow moves with it
+
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "가ㄴ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄴ" }));
+      await tick();
+
+      expect(controller.getState()).toMatchObject({
+        anchorBufferAbsY: 109,
+        anchorBufferX: 4,
+      });
+      controller.dispose();
+    });
+
+    it("ignores a scroll with no composition open", () => {
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => ({ cursorX: 4, cursorAbsY: 100 }),
+      });
+      controller.bind(document.createElement("textarea"));
+
+      controller.notifyBufferScrolled(9);
+
+      expect(controller.getState().active).toBe(false);
+      expect(controller.getState().anchorBufferAbsY).toBe(0);
+      controller.dispose();
+    });
+
+    it("does not move on a zero delta", async () => {
+      // The scrollback cap drops rows from the top instead of growing `baseY`;
+      // the bottom-anchored input line keeps its absolute row and so must the
+      // anchor.
+      const states: number[] = [];
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => ({ cursorX: 4, cursorAbsY: 100 }),
+        onStateChange: (state) => states.push(state.anchorBufferAbsY),
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "ㄱ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+      await tick();
+      const before = states.length;
+
+      controller.notifyBufferScrolled(0);
+
+      expect(states.length).toBe(before);
+      expect(controller.getState().anchorBufferAbsY).toBe(100);
+      controller.dispose();
+    });
+  });
+
   describe("carry-over drops the committed prefix (issue #546)", () => {
     /**
      * A Korean IME emits `compositionend` for the finished syllable and
@@ -765,7 +909,7 @@ describe("createImeCompositionController", () => {
       let anchor = startAnchor;
       const controller = createImeCompositionController({
         getCols: () => cols,
-      getAnchor: () => anchor,
+        getAnchor: () => anchor,
         onTrace: (event, payload) => {
           if (event === "ime-composition-start-carryover") carryOverTraces.push(payload);
         },
@@ -979,10 +1123,16 @@ describe("createImeCompositionController", () => {
       // The echo has not landed at all yet, so the live cursor is still the origin.
       await carryOver("\uac00", "\uac00\ub098", "\ub098", { cursorX: 148, cursorAbsY: chainRow });
       // One syllable echoed: pending-wrap column on the same row.
-      await carryOver("\ub098", "\uac00\ub098\ub2e4", "\ub2e4", { cursorX: 150, cursorAbsY: chainRow });
+      await carryOver("\ub098", "\uac00\ub098\ub2e4", "\ub2e4", {
+        cursorX: 150,
+        cursorAbsY: chainRow,
+      });
       // Two echoed: the shell wrapped, so the live cursor is on the next row while a
       // third syllable is already committed.
-      await carryOver("\ub2e4", "\uac00\ub098\ub2e4\ub77c", "\ub77c", { cursorX: 2, cursorAbsY: chainRow + 1 });
+      await carryOver("\ub2e4", "\uac00\ub098\ub2e4\ub77c", "\ub77c", {
+        cursorX: 2,
+        cursorAbsY: chainRow + 1,
+      });
 
       const final = controller.getState();
       controller.dispose();
