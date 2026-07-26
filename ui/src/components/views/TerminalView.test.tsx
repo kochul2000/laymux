@@ -54,11 +54,19 @@ const mockScrollLines = vi.fn((lines: number) => {
     Math.min(mockBufferActive.baseY, mockBufferActive.viewportY + lines),
   );
 });
-const mockBufferActive: { cursorX: number; cursorY: number; baseY: number; viewportY: number } = {
+const mockBufferActive: {
+  cursorX: number;
+  cursorY: number;
+  baseY: number;
+  viewportY: number;
+  // Real xterm reports which buffer is live. Composer passthrough keys off it.
+  type: "normal" | "alternate";
+} = {
   cursorX: 0,
   cursorY: 0,
   baseY: 0,
   viewportY: 0,
+  type: "normal",
 };
 const mockOnScroll = vi.fn((handler: () => void) => {
   capturedScrollHandler = handler;
@@ -414,6 +422,7 @@ describe("TerminalView", () => {
     mockBufferActive.cursorY = 0;
     mockBufferActive.baseY = 0;
     mockBufferActive.viewportY = 0;
+    mockBufferActive.type = "normal";
     mockGetRemoteControlStatus.mockResolvedValue({
       active: false,
       leaseId: null,
@@ -1378,7 +1387,9 @@ describe("TerminalView", () => {
     // Anchoring on a value the shadow machine stopped maintaining is incoherent, so
     // the alt buffer makes the buffer cursor authoritative unconditionally. vim only
     // escaped this by emitting neither OSC 133 nor DEC 2026 — a property of vim.
-    render(<TerminalView instanceId="t-ime-alt-sync" profile="PowerShell" syncGroup="" isFocused />);
+    render(
+      <TerminalView instanceId="t-ime-alt-sync" profile="PowerShell" syncGroup="" isFocused />,
+    );
 
     const container = screen.getByTestId("terminal-view-t-ime-alt-sync");
     const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt-sync");
@@ -1467,7 +1478,9 @@ describe("TerminalView", () => {
     // `rows`. That reaches the viewport guard, which hides — it does not paint on the
     // wrong line. The next carry-over re-bases on the new buffer cursor, so the error
     // is one syllable of invisibility rather than a misplaced glyph.
-    render(<TerminalView instanceId="t-ime-alt-switch" profile="PowerShell" syncGroup="" isFocused />);
+    render(
+      <TerminalView instanceId="t-ime-alt-switch" profile="PowerShell" syncGroup="" isFocused />,
+    );
 
     const container = screen.getByTestId("terminal-view-t-ime-alt-switch");
     const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt-switch");
@@ -7990,6 +8003,7 @@ describe("TerminalView desktop input composer", () => {
     useNotificationStore.setState({ notifications: [] });
     localStorage.clear();
     clearRuntimeComposerState();
+    mockBufferActive.type = "normal";
     mockOutputSequence = 0;
     capturedKeyHandler = null;
     capturedResizeHandler = null;
@@ -8229,6 +8243,55 @@ describe("TerminalView desktop input composer", () => {
 
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
+  });
+
+  // Issue #558. In the alternate screen the composer is a keyboard proxy: keys go to
+  // the PTY, which is why ASCII reaches a fullscreen app as it is typed. A composition
+  // cannot be proxied key by key, so the composed text used to pile up in the draft
+  // while Enter and Backspace kept going to the app — the draft was neither
+  // submittable nor erasable. Route the commit, not the keys.
+  it("writes a composition commit straight to a fullscreen app and drops it from the draft", async () => {
+    render(<TerminalView instanceId="t-composer-alt-ime" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode("t-composer-alt-ime");
+    const textarea = screen.getByTestId(
+      "terminal-input-composer-t-composer-alt-ime-textarea",
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+
+    // The IME owns the textarea while composing, so the composed run lands in the
+    // draft no matter what passthrough does.
+    fireEvent.compositionStart(textarea, { data: "" });
+    fireEvent.change(textarea, { target: { value: "가나다" } });
+    fireEvent.compositionEnd(textarea, { data: "다" });
+
+    expect(mockWriteToTerminal).toHaveBeenCalledWith("t-composer-alt-ime", "다");
+    // Enter must stay the app's, so the draft may not keep the committed syllable.
+    await vi.waitFor(() => expect(textarea.value).toBe("가나"));
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("keeps a composition commit in the draft on the normal buffer", async () => {
+    render(<TerminalView instanceId="t-composer-normal-ime" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode("t-composer-normal-ime");
+    const textarea = screen.getByTestId(
+      "terminal-input-composer-t-composer-normal-ime-textarea",
+    ) as HTMLTextAreaElement;
+
+    fireEvent.compositionStart(textarea, { data: "" });
+    fireEvent.change(textarea, { target: { value: "가나다" } });
+    fireEvent.compositionEnd(textarea, { data: "다" });
+
+    // Here the draft is a real drafting surface and Enter submits it, so diverting
+    // the commit would break composing a line before sending it.
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("가나다");
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-normal-ime", "가나다", true);
   });
 
   it("blocks duplicate Send while preserving edits made in flight", async () => {

@@ -150,6 +150,7 @@ import {
   pushComposerHistory,
   readComposerHistory,
   readRuntimeComposerDraft,
+  resolveComposerCompositionCommit,
   readRuntimeInputMode,
   settleComposerSubmission,
   subscribeRuntimeComposerDraft,
@@ -700,6 +701,30 @@ export function TerminalView({
    * menus work), or a full-screen (alternate-screen) app is running (pass all
    * keys, like Direct mode). Encoding defers to xterm's reported cursor-key mode.
    */
+  /**
+   * Route a finished composition to the PTY when this pane is proxying keys for a
+   * fullscreen app (issue #558). Keys cannot carry a composition, so the committed
+   * text is forwarded instead — through the same write path ASCII passthrough uses, so
+   * Korean reaches the app exactly the way typed characters already do.
+   */
+  const commitComposerComposition = (data: string) => {
+    if (!localTerminalControlAllowed()) return;
+    const term = terminalRef.current;
+    if (!term) return;
+    const decision = resolveComposerCompositionCommit({
+      altScreen: term.buffer?.active?.type === "alternate",
+      data,
+      draft: composerDraftRef.current.text,
+    });
+    if (!decision) return;
+    // Trim the draft first: if the write rejects, an untouched draft would still be
+    // unreachable (every key passes through), which is the orphan being fixed.
+    storeComposerDraft(updateComposerDraftText(composerDraftRef.current, decision.draft));
+    dismissTerminalResponseNotification(instanceId);
+    writeToTerminal(instanceId, decision.pty).catch((error) => {
+      console.warn("[TerminalView] composer composition passthrough failed:", error);
+    });
+  };
   const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
     if (!localTerminalControlAllowed()) return false;
     // laymux controls consume first (rebind-aware): any combo bound to a
@@ -1573,7 +1598,8 @@ export function TerminalView({
           // caret (issue #551). Reading `anchorBufferX` as a screen column is the
           // mistake to avoid — it can sit at or past the right edge.
           const anchorX = previewLayout.anchorColumn;
-          const anchorY = compositionPreview.anchorBufferAbsY + previewLayout.anchorRowOffset - baseY;
+          const anchorY =
+            compositionPreview.anchorBufferAbsY + previewLayout.anchorRowOffset - baseY;
           const previewRows = previewLayout.rows;
           previewEl.style.opacity = "1";
           previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
@@ -4666,6 +4692,7 @@ export function TerminalView({
         }}
         onSend={submitComposerDraft}
         onKeyPassthrough={passthroughComposerKey}
+        onCompositionCommit={commitComposerComposition}
         onHistory={navigateComposerHistory}
       />
     </div>

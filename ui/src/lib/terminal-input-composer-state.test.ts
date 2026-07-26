@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  resolveComposerCompositionCommit,
   DEFAULT_COMPOSER_HEIGHT,
   DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY,
   DESKTOP_INPUT_MODE_STORAGE_KEY,
@@ -633,5 +634,57 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
     expect(COMPOSER_HISTORY_SCOPES).toContain(
       useSettingsStore.getState().terminal.composerHistoryScope,
     );
+  });
+});
+
+describe("resolveComposerCompositionCommit", () => {
+  // Issue #558. In the alternate screen the composer forwards every key to the PTY,
+  // which is why ASCII lands in a fullscreen app as it is typed. A composition cannot
+  // be forwarded key by key, so its text piled up in the draft and then no key could
+  // reach the draft any more — Enter and Backspace both went to the app. The draft
+  // became unreachable: not submittable, not erasable.
+  it("routes an alternate-screen commit to the PTY and takes it out of the draft", () => {
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나다" }),
+    ).toEqual({ pty: "다", draft: "가나" });
+  });
+
+  it("leaves the normal buffer alone — there the draft is a real drafting surface", () => {
+    // Enter submits the draft in the normal composer flow, so nothing may be diverted.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: false, data: "다", draft: "가나다" }),
+    ).toBeNull();
+  });
+
+  it("writes nothing when the IME cancelled instead of committing", () => {
+    // Same rule as the terminal-side blur commit: `compositionend` with empty data is
+    // a cancel, and we never invent text the IME did not hand us.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "", draft: "가나" }),
+    ).toBeNull();
+  });
+
+  it("clears a draft whose tail does not match the commit", () => {
+    // The composed run sits at the caret, i.e. the end of the draft. If it does not,
+    // the draft cannot be described in terms of this commit — and leaving it would
+    // recreate the orphan, so it goes.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나 " }),
+    ).toEqual({ pty: "다", draft: "" });
+  });
+
+  it("keeps text that reached the draft by another route", () => {
+    // Shift+Enter newlines and pastes are not passthrough, so they can legitimately be
+    // in the draft ahead of the composed run. Trimming rather than clearing keeps them.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "line\n가" }),
+    ).toEqual({ pty: "가", draft: "line\n" });
+  });
+
+  it("empties the draft when the commit is the whole of it", () => {
+    expect(resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "가" })).toEqual({
+      pty: "가",
+      draft: "",
+    });
   });
 });

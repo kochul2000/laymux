@@ -417,6 +417,7 @@ OS 입력 소스(키보드 레이아웃) 전환 chord 는 키바인딩 레지스
 - **정리**: helper blur, helper 교체, unmount, 다른 물리 키에서 진행 중이던 press 를 버린다. 시간 기반 timeout 은 두지 않는다.
 - **미할당 계약**: `isAssignedKeybinding()`(`keybinding-registry.ts`)이 빈 combo 를 걸러 `matchesKeybinding` 이 어떤 이벤트와도 매치하지 않게 한다. 설정 UI 는 빈 칸 대신 `keybindings.unassigned` 를 표시한다. 조합 종료 직후 Space/숫자 보호는 이 절이 아니라 #528 소관이다.
 - **진단**: `os-input-source-chord-armed`/`-released`/`-text-input-blocked` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다.
+
 ### 8.12 Linux IME 후보 선택 키 억제 (issue #528)
 
 Sogou/fcitx 계열 Linux IME 는 후보를 선택하는 데 쓴 Space/숫자를 `compositionend` 전후에 일반 키 이벤트로 다시 내보낸다(전체 trio 또는 keydown 없는 orphan keyup). xterm 의 조합 가드는 그 시점에 이미 끝나 있어 literal 문자가 PTY 로 새므로, **Linux 에서만** 두 신호로 판정해 억제한다([ADR-0060](../adr/0060-linux-ime-candidate-key-suppression.md)).
@@ -435,7 +436,7 @@ Sogou/fcitx 계열 Linux IME 는 후보를 선택하는 데 쓴 Space/숫자를 
 
 ### 8.13 native IME 후보창 앵커 (issue #532)
 
-composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커스된 helper textarea 의 DOM rect 에서 위치를 잡고 xterm 은 그 textarea 를 **public buffer cursor** 에 둔다. TUI repaint 로 두 커서가 갈리면 preview 는 맞아도 후보창만 다른 행·열에 뜬다. 두 커서가 **실제로 갈릴 때만** helper 의 위치를 앵커 셀로 옮긴다([ADR-0061](../adr/0061-native-ime-candidate-anchor.md), ADR-0053 의 "helper 를 이동하지 않음" 을 *무조건 이동 금지* 로 정정).
+composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커스된 helper textarea 의 DOM rect 에서 위치를 잡고 xterm 은 그 textarea 를 **public buffer cursor** 에 둔다. TUI repaint 로 두 커서가 갈리면 preview 는 맞아도 후보창만 다른 행·열에 뜬다. 두 커서가 **실제로 갈릴 때만** helper 의 위치를 앵커 셀로 옮긴다([ADR-0061](../adr/0061-native-ime-candidate-anchor.md), ADR-0053 의 "helper 를 이동하지 않음" 을 _무조건 이동 금지_ 로 정정).
 
 - 기하 판정은 `ui/src/lib/ime-anchor.ts` 가 전부 소유한다(DOM 접근 없음). `TerminalView` 는 rect 읽기와 `left`/`top` 쓰기만 한다.
 - **게이트**: `shouldSyncHelperAnchor(publicCell, anchorCell)` — 조합 활성 + 두 셀 불일치. 일반 셸은 두 커서가 일치하므로 style 을 아예 쓰지 않는다.
@@ -446,6 +447,7 @@ composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커�
 - **sync 는 viewport 체크 뒤**: 앞에 두면 shadow cursor 행이 뷰포트 밖일 때 매 프레임 이동 → 원복이 반복된다.
 - **원복 의무**: 조합 종료 · 두 커서 재일치 · overlay 가 숨는 모든 경로(비포커스·scrollback·geometry 미확정) · helper 교체 · unmount 에서 저장해 둔 원래 inline 값으로 되돌린다.
 - **진단**: `ime-anchor-hold-started`/`-reapplied`/`-restored` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다. native 후보창의 실제 위치는 OS 창이라 스크린샷에 잡히지 않아 이 trace 로 사람이 확인한다.
+
 ### 8.14 조합 commit 과 pending keypress 경합 (issue #527)
 
 xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를 즉시 보내지 않는다 — 조합 범위를 캡처하고 `_isSendingComposition = true` 로 표시한 뒤 `setTimeout(0)` 안에서 `textarea.value.substring(start)` 를 읽어 `triggerDataEvent` 한다. `_keyPress` 는 그 창을 모르고 자기 문자를 독립적으로 보내므로, 그 사이 도착한 keypress 가 같은 음절을 **한 번 더** 보낸다([ADR-0062](../adr/0062-composition-commit-keypress-race.md)).
@@ -477,42 +479,45 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
   - **행 전진 규칙의 단일 소유자는 `advanceCells(originColumn, text, cols)` 다**: 처음에는 carry-over 가 `원점 + 폭` 로 앵커를 구하고 레이아웃이 `% cols` 로 접었는데, 그 둘은 **같은 규칙의 두 구현**이고 실제로 갈라져 있었다.
     리뷰가 커밋된 xterm 번들을 실행해 측정한 표가 근거다 — 남은 칸이 글리프 폭보다 작으면 xterm 은 **마지막 열을 pad 하고 글리프를 통째로 다음 행에** 놓는다:
 
-    | cols | 원점 | xterm 실측 | `% cols` 예측 |
-    |---|---|---|---|
-    | 75 | 73 | `(75, 0)` pending-wrap | 일치 |
-    | 150 | 148 | `(150, 0)` pending-wrap | 일치 |
-    | 150 | 147 | `(149, 0)` | 일치 |
-    | **75** | **74** | **`(2, +1)`** | `(1, +1)` — **1셀 불일치** |
-    | **80** | **79** | **`(2, +1)`** | `(1, +1)` — **1셀 불일치** |
+    | cols   | 원점   | xterm 실측              | `% cols` 예측              |
+    | ------ | ------ | ----------------------- | -------------------------- |
+    | 75     | 73     | `(75, 0)` pending-wrap  | 일치                       |
+    | 150    | 148    | `(150, 0)` pending-wrap | 일치                       |
+    | 150    | 147    | `(149, 0)`              | 일치                       |
+    | **75** | **74** | **`(2, +1)`**           | `(1, +1)` — **1셀 불일치** |
+    | **80** | **79** | **`(2, +1)`**           | `(1, +1)` — **1셀 불일치** |
 
     그 1셀은 다음 carry-over 의 라이브 채택이 덮어주므로 **경계 음절이 체인의 마지막일 때만** 드러난다 — 오른쪽 여백에서 한 음절 치고 스페이스로 확정하는 평범한 흐름이다. `advanceCells` 가 클러스터·pad 를 함께 인식해 이 케이스를 없애고, 그 결과 wrap 경계에서 **라이브 값을 아예 참조하지 않는다**. 실측 표 5행을 그대로 단위 테스트로 고정했다.
+
   - **행 변화의 분류**: `derivedRow = chainRow + advance.rowOffset` 와 라이브 행이 같으면 wrap 으로 설명된 것이라 산술을 유지하고, 다르면 원점이 실제로 움직인 것(셸의 상향 redraw, 스크롤 리전 `IL/DL/RI`, scrollback 상한)이라 라이브를 새 원점으로 삼는다. 뒤로 간 라이브가 wrap 으로 오분류될 수 없다 — `advance.rowOffset >= 0` 이므로 `live.absY < chainRow` 는 `derivedRow` 와 같아질 수 없다.
   - **리사이즈는 원점과 함께 `cols` 를 캡처해 강제 rebase 한다**: xterm 이 reflow 하면 원점이 가리키던 행 자체가 이동하고, 행 델타를 옛 `cols` 로 누적한 값에 새 `cols` 를 곱하게 된다. 분류가 우연히 `originMoved` 로 떨어져 자기치유하던 것을 `chainCols` 비교로 결정적으로 만들었다(`shadow-cursor-rebase-resize`).
   - **정규화된 앵커는 레이아웃이 반환한다**: `anchorColumn` / `anchorRowOffset` 를 함께 돌려주고 렌더러의 컨테이너와 행이 **둘 다 그것을** 쓴다. 한때 컨테이너만 렌더러에서 따로 정규화했다가 행 오프셋을 이중 계산해 프리뷰가 자기 캐럿보다 한 행 아래로 떨어졌다. 위험은 값이 아니라 암묵적 계약이었다 — `anchorBufferX` 를 화면 열로 직접 읽는 소비자가 생기면 즉시 틀린다. 이제 원시 앵커가 컴포넌트로 새지 않는다.
     - 예외 한 곳: `cols <= 0` 조기 반환은 정규화 기준이 없어 원시 앵커를 그대로 통과시킨다. 렌더러는 그 경로에 닿지 않는다.
-    캐럿 경로(`getCompositionPreviewCursor`)는 `% cols` · `Math.floor(/ cols)` 로 정규화했지만 rows 루프는 안 했다 — wrap 분기가 **무조건 열 0** 으로 접으므로 범위 밖 앵커가 전부 다음 행 열 0 에 그려졌다. 앵커 150 은 우연히 맞고 152 는 **그 위에 겹쳐서**, 경계를 걸치는 체인의 두 번째 음절이 첫 번째 아래로 사라졌다.
-    실측으로 잡았다 — cols 150, 앵커 150 → 152 → 재기준화 (2,186), 사용자 관측은 1번째 보임 / 2번째 안 보임 / 3번째에 2개. 이제 루프 진입에서 앵커를 정규화하고(`anchorRowOffset` / `anchorColumn`), TerminalView 의 프리뷰 컨테이너 배치도 같은 정규화를 쓴다 — 원시 열로 두면 컨테이너가 터미널 박스 밖에 놓이고 행별 translate 로 끌어오는 데 의존해 클리핑 위험이 있다.
+      캐럿 경로(`getCompositionPreviewCursor`)는 `% cols` · `Math.floor(/ cols)` 로 정규화했지만 rows 루프는 안 했다 — wrap 분기가 **무조건 열 0** 으로 접으므로 범위 밖 앵커가 전부 다음 행 열 0 에 그려졌다. 앵커 150 은 우연히 맞고 152 는 **그 위에 겹쳐서**, 경계를 걸치는 체인의 두 번째 음절이 첫 번째 아래로 사라졌다.
+      실측으로 잡았다 — cols 150, 앵커 150 → 152 → 재기준화 (2,186), 사용자 관측은 1번째 보임 / 2번째 안 보임 / 3번째에 2개. 이제 루프 진입에서 앵커를 정규화하고(`anchorRowOffset` / `anchorColumn`), TerminalView 의 프리뷰 컨테이너 배치도 같은 정규화를 쓴다 — 원시 열로 두면 컨테이너가 터미널 박스 밖에 놓이고 행별 translate 로 끌어오는 데 의존해 클리핑 위험이 있다.
   - 이것이 리뷰가 "`cols` 를 모르는 한 불가피한 한 음절 구간" 이라고 적은 구멍의 실제 정체였다. **컨트롤러에 `cols` 를 넘길 필요가 없다** — 레이아웃이 이미 받는다. #541 에서 기각된 API 확장 없이 닫혔다. 그리고 에코 지연과 무관하다: 천천히 입력해도 재현된다.
   - **적용 범위**: shadow cursor 를 앵커로 쓰는 페인에서는 조합 중 `getShadowSyncEligibility` 가 `composition-preview-active` 를 먼저 돌려주어 라이브가 얼어 있으므로 행 변화 분기가 사실상 발생하지 않는다. 재기준화를 실제로 태우는 것은 버퍼 커서(셸) 경로다.
+
 - **여기서도 결함이 테스트로 못박혀 있었다**: `"adopts a shadow cursor that moved backwards"` 와 helper 앵커 테스트 2건이 그렇다. 후자는 "TUI 가 커서를 footer 에 주차했고 shadow 가 진값" 이라는 상태를 **단정만** 하고 그 상태를 만드는 DEC 2026 프레임을 구동하지 않아서, `computeUseShadowCursor` 가 false 인 합성 상태였다. 실측이 보여준 실제 흐름(프레임 열기 → 커서 주차 → 프레임 닫기)을 구동하도록 고쳤다 — 단정이 아니라 재현이다.
 - **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
+
 ### 8.16 조합 중 포커스 아웃은 확정이다 (issue #555)
 
 조합 중에 페인 포커스를 잃으면 조합 중이던 글자가 **영구 유실**됐다. PTY 로 보낸 적이 없으므로 되살릴 데이터가 없고, 다시 포커스해도 방향키를 눌러도 나타나지 않는다. 한국어(그리고 CJK 일반)에서 포커스 이동은 취소가 아니라 **확정**이며 Windows IME 자체도 그렇게 동작한다.
 
 실제 `Terminal` 을 jsdom 에 띄워 측정한 계약(4케이스):
 
-| 순서 | blur 시점 xterm 상태 | 결과 |
-|---|---|---|
-| blur 만 (`compositionend` 없음) | `composing: true` | textarea 가 비워지고 **onData 없음** |
-| `compositionend` → blur → flush | `pending: true` | **onData 없음** — finalizer 가 빈 슬라이스를 읽는다 |
-| `compositionend` → flush → blur | `pending: false` | `onData ["가"]` — 이미 전송됨 |
-| 조합 없는 잔여물 | — | blur 에서 **무조건** 비운다 |
+| 순서                            | blur 시점 xterm 상태 | 결과                                                |
+| ------------------------------- | -------------------- | --------------------------------------------------- |
+| blur 만 (`compositionend` 없음) | `composing: true`    | textarea 가 비워지고 **onData 없음**                |
+| `compositionend` → blur → flush | `pending: true`      | **onData 없음** — finalizer 가 빈 슬라이스를 읽는다 |
+| `compositionend` → flush → blur | `pending: false`     | `onData ["가"]` — 이미 전송됨                       |
+| 조합 없는 잔여물                | —                    | blur 에서 **무조건** 비운다                         |
 
 - **xterm 은 blur 에서 아무것도 보내지 않고 지우며, 자기 `_isComposing` 을 true 로 남긴다.** `handleBlur` 의 기존 주석은 "compositionend 가 따라오거나, 아니면 xterm 이 지운다" 였는데 실측은 후자이고 **지우기만 한다**. blur 뒤에 오는 `compositionend` 로도 복구 불가 — 읽을 슬라이스가 이미 없다.
 - **phase 는 판별자가 아니다.** WebView2 + Windows IME 는 blur **전에** `compositionend` 를 보내므로 실제 순서는 `end → blur → flush` 이고, blur 가 xterm 의 deferred 창 **안에서** 도착한다. 그 시점 컨트롤러 phase 는 `pending-finalize` 이며, phase 만 보고 "xterm 이 보낼 것" 이라 판단하면 정확히 그 케이스에서 유실된다. (처음 이렇게 구현했고 실기에서 그대로 유실됐다 — 첫 계측이 `end → flush → blur` 만 재봤기 때문이다.)
 - **판별자는 xterm 의 pending 플래그다.** blur 시점에 `readPendingCompositionSend(terminal).pending` 이 참이면 전송이 아직 예약 상태이고 소스가 이미 비었으므로 **반드시 실패한다** → 우리가 보낸다. 거짓이면 이미 보냈거나 보낼 게 없다 → 보내지 않는다. #542 가 만든 private 상태 리더를 그대로 재사용한다.
-- **위험한 텍스트가 둘일 수 있다.** carry-over 는 한 음절을 끝내고 다음을 같은 tick 에 시작하므로 blur 가 *예약된 doomed 전송* 과 *진행 중 조합* 을 동시에 잡을 수 있다. doomed 쪽은 `state.text` 가 아니라 `compositionend` 시점에 따로 캡처한 `lastFinalizedText` 다 — 그때 `state.text` 는 이미 새 음절을 담고 있다.
+- **위험한 텍스트가 둘일 수 있다.** carry-over 는 한 음절을 끝내고 다음을 같은 tick 에 시작하므로 blur 가 _예약된 doomed 전송_ 과 _진행 중 조합_ 을 동시에 잡을 수 있다. doomed 쪽은 `state.text` 가 아니라 `compositionend` 시점에 따로 캡처한 `lastFinalizedText` 다 — 그때 `state.text` 는 이미 새 음절을 담고 있다.
 - **텍스트 출처는 textarea 가 아니다.** xterm 이 자기 blur 핸들러(`terminal.open()` 시점에 먼저 등록)에서 값을 비우므로 거기서 읽으면 리스너 순서에 의존한다.
 - **리셋은 유지한다.** xterm 이 `_isComposing` 을 true 로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막는 방어가 여전히 필요하다.
 - **리더가 `null` 이면 "pending 아님" 으로 떨어진다** — 그 빌드에서는 유실이 되살아나지만, 포커스 이동마다 음절이 중복되는 것보다 낫다. xterm 계약 테스트가 같은 필드를 읽으므로 형태 변경은 배포 전에 큰 소리로 실패한다.
@@ -524,6 +529,7 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **경계 기록**: 한 태스크에 `compositionend` 가 두 번 오면 xterm 의 타이머가 둘 큐잉되고 첫 타이머가 단일 슬롯 플래그를 내려 두 번째는 아무것도 보내지 않는다. 그 창에서 `lastFinalizedText` 는 두 번째 텍스트만 들고 있어 첫 번째는 살릴 수 없다 — xterm 자체의 단일 슬롯 한계이고 이 판정의 결함은 아니다.
 - **`pending` 이 안전을 만들고 캡처 수명은 load-bearing 이 아니다**: 정상 flush 후 blur 창은 실제로 존재한다(xterm 타이머가 먼저 전송하고 우리 deferred reset 전에 blur 가 끼어든다). 그때 캡처는 남아 있지만 `pending` 이 거짓이라 재전송되지 않는다. 그래서 테스트가 고정하는 것은 수명이 아니라 **조합**이다 — "pending 거짓 + 캡처 남아 있음 → 커밋 없음".
 - **미검증**: 실기 확인 필요
+
 ### 8.17 조합 프리뷰는 alt 버퍼에서도 그린다 (issue #553)
 
 전체화면 TUI(vim)에서 조합 중 자모가 **아예 보이지 않았다.** 스크롤과 무관하게, 라이브 하단에서 타이핑하는 동안이다.
@@ -540,15 +546,34 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **불변식 — 네이티브 커서를 끄는 조건과 오버레이를 켜는 조건이 갈리면 캐럿이 사라진다.** `applyNativeCursorVisibility` 의 `hideNativeCursor` 는 `compositionPreview.active` 만으로 켜지고 alt 버퍼 항이 없다. 그래서 이 수정 전에는 alt 버퍼 조합 중 vim 커서가 배경색으로 죽고 오버레이는 `"alt-buffer"` 에 막혀 **캐럿이 아무것도 없었다.** §8.15(#551), §8.16 에 이어 세 번째 같은 모양이다 — 한쪽 조건을 좁힐 때 반드시 다른 쪽을 함께 본다.
 - **네 분기 판정 (이 이슈 종료 시점)**:
 
-  | 분기 | 사용자 상황 | 판정 |
-  |---|---|---|
-  | `isAltBufferActive` | 라이브 하단에서 입력 중, 영구히 안 보임 | **고쳤다** (조합이 우선) |
-  | `viewportScrolledUp` | 스크롤백 보는 중, 복귀 시 그대로 돌아옴 | 숨김 유지 — 버퍼 행 앵커라 뷰포트 좌표로 그리면 틀린 행 |
-  | `syncOutputActive` | DEC 2026 프레임 단위, 순간적 | 숨김 유지 — 깜빡임 수준 |
-  | `!focused` | 다른 곳을 보는 중 | 숨김 유지 — **#556 이 blur 를 확정으로 처리하므로 유실이 아니다** |
+  | 분기                 | 사용자 상황                             | 판정                                                              |
+  | -------------------- | --------------------------------------- | ----------------------------------------------------------------- |
+  | `isAltBufferActive`  | 라이브 하단에서 입력 중, 영구히 안 보임 | **고쳤다** (조합이 우선)                                          |
+  | `viewportScrolledUp` | 스크롤백 보는 중, 복귀 시 그대로 돌아옴 | 숨김 유지 — 버퍼 행 앵커라 뷰포트 좌표로 그리면 틀린 행           |
+  | `syncOutputActive`   | DEC 2026 프레임 단위, 순간적            | 숨김 유지 — 깜빡임 수준                                           |
+  | `!focused`           | 다른 곳을 보는 중                       | 숨김 유지 — **#556 이 blur 를 확정으로 처리하므로 유실이 아니다** |
 
   구조 진단(CSS 무조건 hide × 렌더러 하나)은 참이지만 결론은 "일괄 차단" 이 아니라 **분기마다 심각도를 재서 각각 판정** 이다. 셋은 "보이지 않지만 잃지 않는다" 로 닫히고, alt 버퍼만 라이브 하단 입력 중 영구히 안 보이는 유일 케이스였다.
+
 - **미검증**: 다른 전체화면 TUI(less, htop, tmux)에서 실기 확인은 하지 않았다. 판정이 `isAltBufferActive` 하나에 걸려 있고 앵커도 버퍼 커서로 고정됐으므로 TUI 종류와 무관해졌지만, 실측은 vim 뿐이다.
+
+---
+
+### 8.18 프록시 모드에서는 조합 결과를 보내고 키를 보내지 않는다 (issue #558)
+
+composer 모드로 vim 을 쓰면 `가나다라` 를 친 뒤 **Enter 도 Backspace 도 듣지 않았다.** 초안에 글자는 남아 있는데 제출도 삭제도 안 되는 고아가 된다. 같은 자리에서 `abcd` 는 Enter 없이 `a` 를 누르는 순간 vim 에 들어간다.
+
+- **원인은 두 규칙의 교차**다. alt 화면에서 `passthroughComposerKey` 는 **모든 키**를 PTY 로 넘긴다(`if (!altScreen && !emptyPassthrough) return false;`) — 그래서 ASCII 가 타이핑하는 대로 앱에 들어간다. 반면 `TerminalInputComposer` 의 keydown 은 `isComposing || keyCode === 229` 인 동안 passthrough 를 **의도적으로 건너뛴다** — 조합은 textarea 소유라 키 단위로 중계할 수 없기 때문이다. 결과적으로 조합만 초안에 쌓이고, 그 다음부터 Enter·Backspace 는 초안이 아니라 앱으로 가서 초안에 손이 닿지 않는다.
+- **판정: 키가 아니라 결과를 보낸다.** `compositionend` 에서 확정 텍스트를 PTY 로 바로 쓰고 초안에서 그만큼 덜어낸다(`resolveComposerCompositionCommit`). 한글이 ASCII 와 같은 경로·같은 타이밍이 되므로, 조합을 키로 쪼개려는 시도(자모 단위 중계, 조합 중 초안 우회) 없이 대칭이 회복된다.
+- **판정 근거는 사용자가 이미 본 대비**다 — 같은 pane 에서 ASCII 는 즉시 들어가고 한글만 고아가 됐다. 즉 프록시 자체는 옳고 조합만 그 규칙 밖에 있었다.
+- **빈 `data` 는 취소이므로 아무것도 쓰지 않는다.** §8.16 의 blur 확정과 같은 규칙 — 확정/취소 판단은 IME 것이고, 우리는 IME 가 주지 않은 텍스트를 만들어내지 않는다. composer 는 `event.data` 를 그대로 host 로 넘길 뿐 판정하지 않는다.
+- **초안 tail 이 확정 텍스트와 안 맞으면 초안을 비운다.** 조합 구간은 캐럿 = 초안 끝에 있다. tail 이 일치할 때는 그만큼만 잘라 다른 경로로 들어온 텍스트(Shift+Enter 줄바꿈, 붙여넣기)를 보존하고, 일치하지 않으면 그 초안은 이 확정으로 설명할 수 없으므로 남기지 않는다 — 남기면 고아가 다시 생긴다.
+- **normal 버퍼는 건드리지 않는다.** 거기서 초안은 진짜 작성 표면이고 Enter 가 제출이므로(§8.8), 확정을 가로채면 "한 줄 다 쓰고 보내기" 가 깨진다. 판정을 `altScreen` 하나로 분기시켜 두 모드가 서로를 침범하지 않게 했다.
+- **불변식 — 프록시 모드에서 초안은 목적지가 아니다.** 키가 PTY 로 흐르는 동안 초안에 쌓이는 텍스트는 그것을 꺼낼 키가 없으므로 도달 불가 상태가 된다. 초안에 무엇이든 넣는 경로를 alt 화면에서 열 때는 **꺼내는 경로가 같이 있는지** 반드시 확인한다.
+- **역검증(3종)**: (1) composer 가 `onCompositionCommit` 을 안 부르면 → 확정이 PTY 로 가지 않고 초안에 남는다(고아 재현). (2) `altScreen` 가드를 빼면 → normal 버퍼 초안에서 글자가 새어나가 Enter 제출이 깨진다. (3) 초안을 덜어내지 않으면 → PTY 와 초안에 같은 글자가 이중으로 남는다. 셋 다 해당 테스트가 실패함을 확인했다.
+- **남은 한계(이 이슈 범위 밖)**: alt 화면에서 **붙여넣기나 history recall 로 채운 초안**은 여전히 제출·삭제 경로가 없다 — Enter 와 Backspace 가 앱 것이기 때문이다. 이 수정은 조합이 그 상태를 만들지 않게 했을 뿐 프록시 모드 초안 일반의 탈출구를 만들지는 않았다.
+- **미검증**: 실기 확인은 vim + Windows IME 한 조합만이다. macOS/Linux IME 의 `compositionend.data` 도 같은 계약이라고 보지만 측정하지 않았다.
+
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)
