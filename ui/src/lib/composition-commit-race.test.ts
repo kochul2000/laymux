@@ -431,3 +431,111 @@ describe("the guard removes the duplicate without losing input", () => {
     expect(data).toEqual(["가", "나", "다"]);
   });
 });
+
+describe("xterm blur contract during composition (issue #555)", () => {
+  /**
+   * The load-bearing assumption behind committing an interrupted composition
+   * ourselves. If a future xterm starts sending the in-flight text on blur, our
+   * commit becomes a duplicate — so these assertions have to fail loudly rather
+   * than let the duplication ship.
+   */
+  it("sends nothing and clears the textarea when a blur interrupts a composition", async () => {
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new Event("input"));
+    expect(helper.value).toBe("\uac00");
+
+    helper.dispatchEvent(new Event("blur"));
+    await flushFinalizer();
+
+    // Nothing reached the PTY, and the only copy of the text is gone.
+    expect(data).toEqual([]);
+    expect(helper.value).toBe("");
+    // xterm also leaves its own composition flag set, which is why the controller
+    // still has to reset on blur even now that it commits.
+    expect(readPendingCompositionSend(terminal).composing).toBe(true);
+  });
+
+  it("cannot recover the text from a compositionend that arrives after the blur", async () => {
+    // Slice source already empty, so the deferred finalizer has nothing to send.
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new Event("input"));
+    helper.dispatchEvent(new Event("blur"));
+    await flushFinalizer();
+
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    await flushFinalizer();
+
+    expect(data).toEqual([]);
+  });
+
+  it("loses the text when the blur lands inside the deferred send window", async () => {
+    // The ordering the real WebView2 + Windows IME produces, and the sole basis for
+    // keying the blur commit off xterm's pending flag: `compositionend` schedules the
+    // finalizer, the blur clears the textarea before it runs, and the slice comes out
+    // empty. If a future xterm ever sends here, the controller's commit becomes a
+    // duplicate on every focus change — so this has to fail loudly rather than let
+    // that ship.
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    helper.focus();
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "\uac00";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    helper.dispatchEvent(new Event("input"));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+
+    // The send is scheduled but has not run.
+    expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
+
+    helper.dispatchEvent(new Event("blur"));
+    // Still pending, and the source xterm would slice is already gone.
+    expect(readPendingCompositionSend(terminal)?.pending).toBe(true);
+    expect(helper.value).toBe("");
+
+    await flushFinalizer();
+    expect(data).toEqual([]);
+    expect(readPendingCompositionSend(terminal)?.pending).toBe(false);
+  });
+  it("does send it when compositionend comes before the blur", async () => {
+    // The ordering where xterm really does send. The controller stays out of this path
+    // by reading xterm's pending flag — NOT by its own phase, which is
+    // `pending-finalize` in both this ordering and the losing one above. An earlier form
+    // of this comment claimed the phase check was load-bearing; it was wrong, and the
+    // measurement in the previous test is what corrected it.
+    const { terminal, helper } = mountTerminal();
+    const data: string[] = [];
+    terminal.onData((d) => data.push(d));
+
+    composeAndCommit(helper, "\uac00");
+    await flushFinalizer();
+    expect(data).toEqual(["\uac00"]);
+
+    helper.dispatchEvent(new Event("blur"));
+    await flushFinalizer();
+
+    // Still exactly once — the blur itself adds nothing.
+    expect(data).toEqual(["\uac00"]);
+  });
+});

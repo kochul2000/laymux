@@ -1245,6 +1245,27 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
+      // A blur mid-composition would otherwise drop the syllable: xterm clears the
+      // helper textarea and sends nothing (measured). Route it exactly like typed
+      // input so the remote-control gate still applies (issue #555).
+      // `null` means the private shape moved under us (see xterm-pending-composition).
+      // Fall back to "not pending": that re-opens the #555 loss for that build rather
+      // than risking a duplicate syllable on every focus change, and the xterm contract
+      // tests read the same fields, so a shape change fails loudly before shipping.
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
+      onCommit: (text) => {
+        // The blur commit now runs on the main ordering, so both exits need to be
+        // visible: a gated-out commit and a failed write are silent syllable losses
+        // otherwise, and they look identical to the bug this fixes.
+        if (!localTerminalControlAllowed()) {
+          trace("ime-composition-commit-on-blur-blocked", { text, reason: "remote-control" });
+          return;
+        }
+        trace("ime-composition-commit-on-blur", { text });
+        writeToTerminal(instanceId, text).catch((error: unknown) => {
+          trace("ime-composition-commit-on-blur-failed", { text, error: String(error) });
+        });
+      },
       getAnchor: () => {
         // Prefer the shadow cursor only when it is actually the trusted position.
         // TUI apps (Claude Code, Codex, …) move the buffer cursor to the

@@ -496,6 +496,34 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
   - **적용 범위**: shadow cursor 를 앵커로 쓰는 페인에서는 조합 중 `getShadowSyncEligibility` 가 `composition-preview-active` 를 먼저 돌려주어 라이브가 얼어 있으므로 행 변화 분기가 사실상 발생하지 않는다. 재기준화를 실제로 태우는 것은 버퍼 커서(셸) 경로다.
 - **여기서도 결함이 테스트로 못박혀 있었다**: `"adopts a shadow cursor that moved backwards"` 와 helper 앵커 테스트 2건이 그렇다. 후자는 "TUI 가 커서를 footer 에 주차했고 shadow 가 진값" 이라는 상태를 **단정만** 하고 그 상태를 만드는 DEC 2026 프레임을 구동하지 않아서, `computeUseShadowCursor` 가 false 인 합성 상태였다. 실측이 보여준 실제 흐름(프레임 열기 → 커서 주차 → 프레임 닫기)을 구동하도록 고쳤다 — 단정이 아니라 재현이다.
 - **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
+### 8.16 조합 중 포커스 아웃은 확정이다 (issue #555)
+
+조합 중에 페인 포커스를 잃으면 조합 중이던 글자가 **영구 유실**됐다. PTY 로 보낸 적이 없으므로 되살릴 데이터가 없고, 다시 포커스해도 방향키를 눌러도 나타나지 않는다. 한국어(그리고 CJK 일반)에서 포커스 이동은 취소가 아니라 **확정**이며 Windows IME 자체도 그렇게 동작한다.
+
+실제 `Terminal` 을 jsdom 에 띄워 측정한 계약(4케이스):
+
+| 순서 | blur 시점 xterm 상태 | 결과 |
+|---|---|---|
+| blur 만 (`compositionend` 없음) | `composing: true` | textarea 가 비워지고 **onData 없음** |
+| `compositionend` → blur → flush | `pending: true` | **onData 없음** — finalizer 가 빈 슬라이스를 읽는다 |
+| `compositionend` → flush → blur | `pending: false` | `onData ["가"]` — 이미 전송됨 |
+| 조합 없는 잔여물 | — | blur 에서 **무조건** 비운다 |
+
+- **xterm 은 blur 에서 아무것도 보내지 않고 지우며, 자기 `_isComposing` 을 true 로 남긴다.** `handleBlur` 의 기존 주석은 "compositionend 가 따라오거나, 아니면 xterm 이 지운다" 였는데 실측은 후자이고 **지우기만 한다**. blur 뒤에 오는 `compositionend` 로도 복구 불가 — 읽을 슬라이스가 이미 없다.
+- **phase 는 판별자가 아니다.** WebView2 + Windows IME 는 blur **전에** `compositionend` 를 보내므로 실제 순서는 `end → blur → flush` 이고, blur 가 xterm 의 deferred 창 **안에서** 도착한다. 그 시점 컨트롤러 phase 는 `pending-finalize` 이며, phase 만 보고 "xterm 이 보낼 것" 이라 판단하면 정확히 그 케이스에서 유실된다. (처음 이렇게 구현했고 실기에서 그대로 유실됐다 — 첫 계측이 `end → flush → blur` 만 재봤기 때문이다.)
+- **판별자는 xterm 의 pending 플래그다.** blur 시점에 `readPendingCompositionSend(terminal).pending` 이 참이면 전송이 아직 예약 상태이고 소스가 이미 비었으므로 **반드시 실패한다** → 우리가 보낸다. 거짓이면 이미 보냈거나 보낼 게 없다 → 보내지 않는다. #542 가 만든 private 상태 리더를 그대로 재사용한다.
+- **위험한 텍스트가 둘일 수 있다.** carry-over 는 한 음절을 끝내고 다음을 같은 tick 에 시작하므로 blur 가 *예약된 doomed 전송* 과 *진행 중 조합* 을 동시에 잡을 수 있다. doomed 쪽은 `state.text` 가 아니라 `compositionend` 시점에 따로 캡처한 `lastFinalizedText` 다 — 그때 `state.text` 는 이미 새 음절을 담고 있다.
+- **텍스트 출처는 textarea 가 아니다.** xterm 이 자기 blur 핸들러(`terminal.open()` 시점에 먼저 등록)에서 값을 비우므로 거기서 읽으면 리스너 순서에 의존한다.
+- **리셋은 유지한다.** xterm 이 `_isComposing` 을 true 로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막는 방어가 여전히 필요하다.
+- **리더가 `null` 이면 "pending 아님" 으로 떨어진다** — 그 빌드에서는 유실이 되살아나지만, 포커스 이동마다 음절이 중복되는 것보다 낫다. xterm 계약 테스트가 같은 필드를 읽으므로 형태 변경은 배포 전에 큰 소리로 실패한다.
+- **결함이 테스트로 못박혀 있던 네 번째 사례.** `"resets when the textarea blurs mid-composition (missed compositionend defense)"` 가 리셋만 단정해 유실을 정답으로 고정했다. stuck 방어 단정은 유지하고 유실 쪽만 갈랐다.
+- **확정이냐 취소냐는 우리가 정하지 않는다 — IME 가 `compositionend` 의 `data` 로 말한다.** 실측(Windows 한글 IME): 조합 중 Esc 는 조합을 **확정하고** `data` 에 그 음절을 실어 보낸다. 그래서 그 경로는 커밋되고, 한글 사용자 기준으로 그것이 자연스러운 동작이다. `data` 가 빈 문자열인 경우에만 커밋하지 않는다 — 없는 텍스트를 만들어내지 않는다는 뜻이고, 어느 쪽이든 판단은 IME 가 한다.
+  - 관측 시 주의: PowerShell(PSReadLine)은 Esc 를 **줄 전체 삭제**로 해석하므로 확정이 일어났는지 화면으로 알 수 없다. WSL(readline)에서는 지우지 않으므로 그쪽이 정보가 있는 관측이다.
+- **확정되는 것은 "IME 가 들고 있던 것" 이 아니라 "화면에서 본 것" 이다.** `syncPreview` 의 previewText 분기가 `latestCompositionDisplayText` 를 승격하므로 `state.text` 는 textarea 변경 범위보다 긴 IME 표시 문자열일 수 있다. 한국어에서는 둘이 같고, 일본어 변환 중 blur 도 Windows IME 동작(확정)과 맞으므로 이 선택이 맞다. 반대 방향 보강도 필요하다 — `state.text` 는 deferred sync 대기값이라 마지막 `compositionupdate` 의 sync 전에 end/blur 가 오면 비어 있다. `latestCompositionDisplayText` 는 동기로 들어오고 위 의미론상 같은 소스라 `state.text || latestCompositionDisplayText` 로 받는다.
+- **취소는 `compositionend` 의 `data` 로 판정한다.** Esc 는 `data: ""` 로 조합을 끝낸다. 이벤트 인자를 읽지 않던 동안에는 낡은 `lastFinalizedText` 가 남아 있어 그 뒤 blur 가 오면 **취소한 음절이 주입됐다**. `compositionupdate` 의 `event.data` 는 이미 신뢰하므로 태도도 일관된다. 이벤트가 없는 경우(합성 dispatch 등)에만 프리뷰 텍스트로 떨어진다.
+- **경계 기록**: 한 태스크에 `compositionend` 가 두 번 오면 xterm 의 타이머가 둘 큐잉되고 첫 타이머가 단일 슬롯 플래그를 내려 두 번째는 아무것도 보내지 않는다. 그 창에서 `lastFinalizedText` 는 두 번째 텍스트만 들고 있어 첫 번째는 살릴 수 없다 — xterm 자체의 단일 슬롯 한계이고 이 판정의 결함은 아니다.
+- **`pending` 이 안전을 만들고 캡처 수명은 load-bearing 이 아니다**: 정상 flush 후 blur 창은 실제로 존재한다(xterm 타이머가 먼저 전송하고 우리 deferred reset 전에 blur 가 끼어든다). 그때 캡처는 남아 있지만 `pending` 이 거짓이라 재전송되지 않는다. 그래서 테스트가 고정하는 것은 수명이 아니라 **조합**이다 — "pending 거짓 + 캡처 남아 있음 → 커밋 없음".
+- **미검증**: 실기 확인 필요
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

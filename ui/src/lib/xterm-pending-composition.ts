@@ -30,6 +30,14 @@
  *   the break is a failing test with a readable name rather than a behaviour
  *   regression nobody notices (issue #527 completion criterion: "xterm 버전
  *   변경 시 패치 실패를 조용히 무시하지 않는다").
+  *
+ * Policy when a read fails (`null`): **do not act**. Both consumers follow it, even
+ * though the visible outcomes look opposite — issue #527's guard suppresses input, so
+ * turning it off lets the keypress through; issue #555's blur commit injects text, so
+ * turning it off lets the syllable drop. Each reverts to the behaviour from before its
+ * own intervention rather than guessing with an unreadable xterm. #527's loss was bad
+ * because our guard caused it; #555's loss is xterm's and our injection is the cure.
+ * A duplicated syllable can run the wrong shell command, so acting blind is worse.
  */
 
 import type { Terminal } from "@xterm/xterm";
