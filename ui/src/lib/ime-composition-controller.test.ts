@@ -744,6 +744,105 @@ describe("createImeCompositionController", () => {
    * Measured on Claude Code — anchor pinned at 1683 while the input line reached
    * 1692, preview nine rows high (issue #570).
    */
+  /**
+   * The anchor arithmetic predicts where *the terminal* would put text. An app
+   * that owns its input box does not have to agree: Codex wraps inside the box and
+   * indents the continuation two columns, so a syllable the arithmetic puts at
+   * column 0 of the next row is really drawn at column 2 — and the next syllable
+   * lands on top of it and erases it.
+   *
+   * The cursor the app leaves after it finishes drawing already accounts for that.
+   * Measured on Codex at cols 150, writing past the margin: after one wide glyph
+   * the buffer cursor read (4, row+1) and after two (6, row+1), matching the
+   * rendered continuation row. An earlier reading that said the cursor did not know was
+   * taken at composition-event time — before the app repaints.
+   */
+  describe("the anchor adopts the settled cursor (issue #569)", () => {
+    function makeController(settled: { cursorX: number; cursorAbsY: number } | null) {
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => ({ cursorX: 148, cursorAbsY: 201 }),
+        getSettledCursor: () => settled,
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+      return { controller, textarea };
+    }
+
+    async function startComposing(
+      controller: ReturnType<typeof makeController>["controller"],
+      textarea: HTMLTextAreaElement,
+    ) {
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "라";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "라" }));
+      await tick();
+    }
+
+    it("moves onto the indent the app used when it re-wrapped", async () => {
+      // Arithmetic says the next cell after column 148 is column 0 of the next row.
+      // Codex put it at column 4 — inset 2 plus the syllable it already drew.
+      const { controller, textarea } = makeController({ cursorX: 4, cursorAbsY: 202 });
+      await startComposing(controller, textarea);
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 148, anchorBufferAbsY: 201 });
+
+      controller.notifyEchoLanded();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 202 });
+      controller.dispose();
+    });
+
+    it("refuses a cursor that is behind the arithmetic", async () => {
+      // A cursor short of the prediction means the PTY has not echoed everything
+      // committed yet. Adopting it drags the anchor back onto text already drawn —
+      // the regression #551 documents.
+      const { controller, textarea } = makeController({ cursorX: 140, cursorAbsY: 201 });
+      await startComposing(controller, textarea);
+
+      controller.notifyEchoLanded();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 148, anchorBufferAbsY: 201 });
+      controller.dispose();
+    });
+
+    it("refuses a cursor on an earlier row", async () => {
+      const { controller, textarea } = makeController({ cursorX: 149, cursorAbsY: 200 });
+      await startComposing(controller, textarea);
+
+      controller.notifyEchoLanded();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 148, anchorBufferAbsY: 201 });
+      controller.dispose();
+    });
+
+    it("ignores a withheld cursor", async () => {
+      // A withheld (null) cursor means a DEC 2026 frame is open: parked mid-draw.
+      const { controller, textarea } = makeController(null);
+      await startComposing(controller, textarea);
+
+      controller.notifyEchoLanded();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 148, anchorBufferAbsY: 201 });
+      controller.dispose();
+    });
+
+    it("does nothing with no composition open", () => {
+      const settled = vi.fn(() => ({ cursorX: 4, cursorAbsY: 202 }));
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => ({ cursorX: 148, cursorAbsY: 201 }),
+        getSettledCursor: settled,
+      });
+      controller.bind(document.createElement("textarea"));
+
+      controller.notifyEchoLanded();
+
+      expect(settled).not.toHaveBeenCalled();
+      controller.dispose();
+    });
+  });
+
   describe("an open composition follows the buffer scroll (issue #570)", () => {
     async function startComposition(anchor = { cursorX: 4, cursorAbsY: 100 }) {
       const controller = createImeCompositionController({

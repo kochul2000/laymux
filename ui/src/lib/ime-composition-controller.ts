@@ -45,6 +45,27 @@ type CompositionControllerOptions = {
   getXtermPendingSend?: () => boolean;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
+  /**
+   * The cursor as of the last settled echo, or `null` when the app is mid-repaint
+   * (a DEC 2026 frame is open) and the position means nothing yet.
+   *
+   * This is the *raw buffer* cursor, not the shadow: the shadow is deliberately
+   * frozen for the duration of a composition, and it also lags the buffer by an
+   * echo. Measured on Codex at a wrap: buffer said (6, row+1) while the shadow
+   * still said (4, row+1).
+   *
+   * Why this is authoritative where arithmetic is not (issue #569): the anchor
+   * arithmetic predicts where *the terminal* would put text, but an app that owns
+   * its input box wraps at its own width and indents the continuation. Codex puts
+   * the continuation at column 2, so the arithmetic's column 0 lands two cells
+   * early and the next syllable overdraws the previous one. The cursor after the
+   * app finished drawing already accounts for that indent — measured (4, row+1)
+   * after one syllable, (6, row+1) after two.
+   *
+   * An earlier reading of this said the cursor did not know. That reading was
+   * taken at composition-event time, which is *before* the app repaints.
+   */
+  getSettledCursor?: () => { cursorX: number; cursorAbsY: number } | null;
 };
 
 type BufferAnchor = {
@@ -116,6 +137,11 @@ export type ImeCompositionController = {
   bind(textarea: HTMLTextAreaElement): void;
   dispose(): void;
   getState(): CompositionPreviewState;
+  /**
+   * A settled echo landed. Adopt the cursor the app left behind as the anchor,
+   * unless it is behind what the arithmetic already knows (issue #569).
+   */
+  notifyEchoLanded(): void;
   /**
    * The buffer gained `rowDelta` rows of scrollback, so every absolute row below
    * the top moved down by that much. Carries the open composition's anchor with
@@ -349,6 +375,9 @@ export function createImeCompositionController(
   // Column count captured with the origin. A reflow invalidates both the origin row
   // and any row delta measured in the old count, so a change forces a re-base.
   let chainCols = 0;
+  // True once the chain origin came from measuring the echoed text rather than
+  // from a cursor reading (issue #569).
+  let chainAnchorMeasured = false;
   // Textarea value snapshot at the start of the *current syllable*, so the preview
   // diff yields only the syllable being composed.
   let compositionBaseText = "";
@@ -405,6 +434,7 @@ export function createImeCompositionController(
     chainAnchor = { cursorX: 0, cursorAbsY: 0 };
     chainBaseText = "";
     chainCols = 0;
+    chainAnchorMeasured = false;
     compositionBaseText = "";
     latestCompositionDisplayText = "";
     lastFinalizedText = "";
@@ -560,14 +590,23 @@ export function createImeCompositionController(
       // wrapped live reading is not mistaken for a moved one.
       const liveAbs =
         live.cursorX + (cols > 0 ? (live.cursorAbsY - chainAnchor.cursorAbsY) * cols : 0);
+      // Once the origin has been read off the rendered text, the live cursor
+      // stops being evidence about it (issue #569). On an app-owned input box the
+      // two legitimately disagree — Codex leaves the cursor at the pre-wrap column
+      // while drawing the text two rows into its box — so letting the classifier
+      // "correct" a measured origin back to the cursor throws the measurement away
+      // and the overdraw returns. A resize still forces a re-base: the measured
+      // row itself does not survive a reflow.
       const originMoved =
-        colsChanged || (!rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY);
-      const liveAhead = !originMoved && liveAbs > derived.cursorX;
+        colsChanged ||
+        (!chainAnchorMeasured && !rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY);
+      const liveAhead = !originMoved && !chainAnchorMeasured && liveAbs > derived.cursorX;
       let anchorSource: string;
       if (originMoved || liveAhead) {
         chainAnchor = live;
         chainBaseText = committedBase;
         chainCols = cols;
+        chainAnchorMeasured = false;
         compositionAnchor = live;
         anchorSource = colsChanged
           ? "shadow-cursor-rebase-resize"
@@ -603,6 +642,9 @@ export function createImeCompositionController(
       chainAnchor = options.getAnchor();
       chainBaseText = textarea?.value ?? "";
       chainCols = options.getCols();
+      // A fresh chain starts from a cursor reading again, so the previous
+      // chain's measurement must not keep suppressing the classifier (#569).
+      chainAnchorMeasured = false;
       compositionAnchor = chainAnchor;
       compositionBaseText = chainBaseText;
       traceComposition(options, "ime-composition-start", {
@@ -790,6 +832,44 @@ export function createImeCompositionController(
     },
     getState() {
       return state;
+    },
+    notifyEchoLanded() {
+      if (phase === "idle" || !state.active) return;
+      const live = options.getSettledCursor?.();
+      if (!live) return;
+      const cols = options.getCols();
+      // The composing syllable is drawn at the cursor, so the settled cursor *is*
+      // the anchor — including whatever indent the app applied when it re-wrapped
+      // its own input box.
+      //
+      // Guarded by reading order, which is the #551 protection restated: a cursor
+      // behind the arithmetic means the PTY has not echoed everything committed
+      // yet, and adopting it there drags the anchor back onto text already drawn.
+      // A cursor at or past the prediction is either agreement or the app placing
+      // the text somewhere arithmetic could not have known.
+      const anchorRow =
+        compositionAnchor.cursorAbsY +
+        (cols > 0 ? Math.floor(compositionAnchor.cursorX / cols) : 0);
+      const anchorColumn = cols > 0 ? compositionAnchor.cursorX % cols : compositionAnchor.cursorX;
+      const behind =
+        live.cursorAbsY < anchorRow ||
+        (live.cursorAbsY === anchorRow && live.cursorX < anchorColumn);
+      if (behind) return;
+      if (live.cursorAbsY === anchorRow && live.cursorX === anchorColumn) return;
+      traceComposition(options, "ime-anchor-settled-cursor", {
+        fromX: anchorColumn,
+        fromAbsY: anchorRow,
+        toX: live.cursorX,
+        toAbsY: live.cursorAbsY,
+      });
+      // The observed cursor becomes the chain origin: everything committed so far
+      // is already behind it, so nothing is left to derive across.
+      chainAnchor = { cursorX: live.cursorX, cursorAbsY: live.cursorAbsY };
+      chainBaseText = compositionBaseText;
+      chainCols = cols;
+      chainAnchorMeasured = true;
+      compositionAnchor = chainAnchor;
+      syncPreview();
     },
     /**
      * The anchor is an absolute buffer row, and the renderer turns it into a

@@ -1329,6 +1329,19 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
+      // The cursor the app left after its last settled repaint. Raw buffer cursor,
+      // not the shadow: the shadow is frozen for the composition and lags an echo
+      // behind (measured on Codex at a wrap — buffer 6, shadow 4 on the same row).
+      // Withheld while a DEC 2026 frame is open or a repaint is in flight, because
+      // the cursor is parked mid-draw there and means nothing (issue #569).
+      getSettledCursor: () => {
+        const shadow = shadowCursorRef.current;
+        if (shadow.isDec2026FrameOpen || shadow.isRepaintInProgress) return null;
+        return {
+          cursorX: (terminal.buffer.active as { cursorX?: number }).cursorX ?? 0,
+          cursorAbsY: getBufferCursorAbsY(terminal),
+        };
+      },
       // A blur mid-composition would otherwise drop the syllable: xterm clears the
       // helper textarea and sends nothing (measured). Route it exactly like typed
       // input so the remote-control gate still applies (issue #555).
@@ -2175,7 +2188,13 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
-      if (compositionPreviewRef.current.active) return;
+      if (compositionPreviewRef.current.active) {
+        // The shadow cursor stays frozen for the composition, but the *text* the
+        // app just echoed is a fact, and it is the only thing that knows where an
+        // app-owned input box actually put it (issue #569).
+        compositionController.notifyEchoLanded();
+        return;
+      }
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
