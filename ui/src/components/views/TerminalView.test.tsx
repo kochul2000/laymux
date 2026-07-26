@@ -8263,13 +8263,170 @@ describe("TerminalView desktop input composer", () => {
     // The IME owns the textarea while composing, so the composed run lands in the
     // draft no matter what passthrough does.
     fireEvent.compositionStart(textarea, { data: "" });
-    fireEvent.change(textarea, { target: { value: "가나다" } });
-    fireEvent.compositionEnd(textarea, { data: "다" });
+    fireEvent.change(textarea, { target: { value: "가" } });
+    fireEvent.compositionEnd(textarea, { data: "가" });
 
-    expect(mockWriteToTerminal).toHaveBeenCalledWith("t-composer-alt-ime", "다");
-    // Enter must stay the app's, so the draft may not keep the committed syllable.
-    await vi.waitFor(() => expect(textarea.value).toBe("가나"));
+    expect(mockWriteToTerminal).toHaveBeenCalledWith("t-composer-alt-ime", "가");
+    // Enter belongs to the app while the draft is empty, so the draft may not keep the
+    // committed syllable — it would have no way out.
+    await vi.waitFor(() => expect(textarea.value).toBe(""));
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  // Issue #560. An empty draft lends the keyboard to the fullscreen app; a non-empty
+  // one keeps it. Without the second half, anything that reached the draft while the
+  // app ran was stranded — Enter and Backspace both went to the app, so the text could
+  // be neither submitted nor erased.
+  it("hands a fullscreen app the keys the draft would otherwise swallow", async () => {
+    render(<TerminalView instanceId="t-composer-alt-keys" profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode("t-composer-alt-keys");
+    const textarea = screen.getByTestId(
+      "terminal-input-composer-t-composer-alt-keys-textarea",
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    mockWriteToTerminal.mockClear();
+
+    // Tab would have opened the recall popup; Shift+Enter would have started a draft.
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
+    expect(mockWriteToTerminal).toHaveBeenCalledWith("t-composer-alt-keys", "\t");
+    expect(mockWriteToTerminal).toHaveBeenCalledWith("t-composer-alt-keys", "\r");
+    expect(textarea.value).toBe("");
+  });
+
+  it("writes a paste to a fullscreen app instead of the draft", async () => {
+    const terminalId = "t-composer-alt-paste";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    mockWriteTerminalInput.mockClear();
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (type: string) => (type === "text/plain" ? "first\nsecond" : ""),
+      },
+    });
+
+    // Same write path Direct mode's native paste uses, so both modes behave alike.
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith(terminalId, "first\nsecond", false);
+    expect(textarea.value).toBe("");
+  });
+
+  it("gives a non-empty draft its keys back so it can still be sent in a fullscreen app", async () => {
+    const terminalId = "t-composer-alt-leftover";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    // A draft can survive into a fullscreen app — typed at the shell, then Direct mode,
+    // then the app starts and Composer comes back. That draft needs a way out.
+    fireEvent.change(textarea, { target: { value: "leftover" } });
+    mockBufferActive.type = "alternate";
+    mockWriteToTerminal.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "Backspace" });
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith(terminalId, "leftover", true);
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+  });
+
+  it("keeps a paste in a non-empty draft in a fullscreen app", async () => {
+    const terminalId = "t-composer-alt-paste-draft";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "draft " } });
+    mockBufferActive.type = "alternate";
+    mockWriteTerminalInput.mockClear();
+
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    // The draft owns the keyboard here, so pasting into it is a normal edit: nothing
+    // goes to the PTY and the event is left alone for the textarea to insert.
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(false);
+  });
+
+  it("routes a paste typed-into-then-pasted in the same tick by the live draft value", async () => {
+    // The controlled `text` prop is one render behind an edit. Deciding emptiness from
+    // it would consume the event as a proxy paste while the host saw a non-empty draft,
+    // and the paste would reach neither the terminal nor the draft.
+    const terminalId = "t-composer-alt-paste-race";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    mockWriteTerminalInput.mockClear();
+
+    // Set the DOM value without letting React re-render with it first.
+    textarea.value = "typed";
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("proxies nothing while a remote client owns this terminal", async () => {
+    // Local control is the outer gate on every write path. With it withdrawn the keys
+    // stay with the draft rather than silently vanishing.
+    const terminalId = "t-composer-alt-remote";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    act(() => capturedRemoteControlChanged?.({ active: true }));
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalInput.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(false);
   });
 
   it("keeps a composition commit in the draft on the normal buffer", async () => {

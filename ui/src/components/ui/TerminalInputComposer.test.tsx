@@ -83,6 +83,124 @@ describe("TerminalInputComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  // Issue #560. Three gestures reach the draft without passing through the keydown
+  // passthrough: the Shift+Enter newline, the Tab recall popup, and paste. While the
+  // host owns the keyboard they must not fill the draft — the keys that would submit
+  // or erase it (Enter, Backspace) belong to the fullscreen app, so whatever lands
+  // there is stranded.
+  it("passes Shift+Enter through instead of starting a draft while the host owns keys", () => {
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+    const onTextChange = vi.fn();
+    renderComposer({
+      text: "",
+      onKeyPassthrough,
+      onTextChange,
+      isKeyProxyActive: () => true,
+    });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(event);
+
+    expect(onKeyPassthrough).toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
+    expect(onTextChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps Shift+Enter as the newline gesture when the host is not proxying", () => {
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+    renderComposer({ text: "", onKeyPassthrough, isKeyProxyActive: () => false });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    const event = new KeyboardEvent("keydown", {
+      key: "Enter",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(event);
+
+    // Never offered for passthrough: the textarea's own newline insertion stands.
+    expect(onKeyPassthrough).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("passes Tab through instead of opening the recall popup while proxying", () => {
+    const onKeyPassthrough = vi.fn().mockReturnValue(true);
+    renderComposer({
+      text: "",
+      onKeyPassthrough,
+      isKeyProxyActive: () => true,
+      historyPopupEnabled: true,
+      history: ["npm test"],
+    });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+
+    // \t is a real key for a fullscreen app, and a recalled entry would be stranded.
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(onKeyPassthrough).toHaveBeenCalled();
+  });
+
+  it("still opens the recall popup on Tab when the host is not proxying", () => {
+    renderComposer({
+      text: "",
+      isKeyProxyActive: () => false,
+      historyPopupEnabled: true,
+      history: ["npm test"],
+    });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("hands a paste to the terminal instead of the draft while proxying", () => {
+    const onProxyPaste = vi.fn();
+    const onTextChange = vi.fn();
+    renderComposer({ text: "", onProxyPaste, onTextChange, isKeyProxyActive: () => true });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.paste(textarea, {
+      clipboardData: { getData: (type: string) => (type === "text/plain" ? "npm run build" : "") },
+    });
+
+    expect(onProxyPaste).toHaveBeenCalledWith("npm run build");
+    expect(onTextChange).not.toHaveBeenCalled();
+  });
+
+  it("lets a paste land in the draft when the host is not proxying", () => {
+    const onProxyPaste = vi.fn();
+    renderComposer({ text: "", onProxyPaste, isKeyProxyActive: () => false });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.paste(textarea, {
+      clipboardData: { getData: () => "npm run build" },
+    });
+
+    expect(onProxyPaste).not.toHaveBeenCalled();
+  });
+
+  it("reports draft emptiness to the host, which owns the proxy rule", () => {
+    // The composer does not decide when proxying applies — it only knows whether its
+    // own draft is empty. Keeping the rule in one place (isComposerKeyProxyActive)
+    // is what keeps the keydown gate and these three gestures from drifting apart.
+    const isKeyProxyActive = vi.fn().mockReturnValue(false);
+    renderComposer({ text: "draft", isKeyProxyActive });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+
+    expect(isKeyProxyActive).toHaveBeenCalledWith({ empty: false });
+  });
+
   it("forwards the compositionend data so the host can route it (issue #558)", () => {
     // The composer does not decide where a commit goes — the host knows whether the
     // pane is proxying keys for a fullscreen app. Passing the event data through keeps

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  isComposerKeyProxyActive,
   resolveComposerCompositionCommit,
   DEFAULT_COMPOSER_HEIGHT,
   DESKTOP_COMPOSER_HEIGHT_STORAGE_KEY,
@@ -637,22 +638,46 @@ describe("입력 내용 in-memory only 보장 (보안: 비밀번호 등 누출 �
   });
 });
 
+describe("isComposerKeyProxyActive", () => {
+  // Issues #558/#560. One rule decides every routing question on this surface: an
+  // empty draft lends the keyboard out, a non-empty draft keeps it. The non-empty
+  // half is what gives text on screen a way out — Enter submits it, Backspace erases
+  // it — instead of stranding it while every key goes to the app.
+  it("lends the keyboard to a fullscreen app only while the draft is empty", () => {
+    expect(isComposerKeyProxyActive({ altScreen: true, draftEmpty: true })).toBe(true);
+    expect(isComposerKeyProxyActive({ altScreen: true, draftEmpty: false })).toBe(false);
+  });
+
+  it("never lends it on the normal buffer, where the draft is the drafting surface", () => {
+    // The shell case forwards a narrow key set (nav keys, Ctrl+C/D/Z/L) through its
+    // own check; whole-keyboard proxying is a fullscreen-app property.
+    expect(isComposerKeyProxyActive({ altScreen: false, draftEmpty: true })).toBe(false);
+    expect(isComposerKeyProxyActive({ altScreen: false, draftEmpty: false })).toBe(false);
+  });
+});
+
 describe("resolveComposerCompositionCommit", () => {
   // Issue #558. In the alternate screen the composer forwards every key to the PTY,
   // which is why ASCII lands in a fullscreen app as it is typed. A composition cannot
   // be forwarded key by key, so its text piled up in the draft and then no key could
   // reach the draft any more — Enter and Backspace both went to the app. The draft
   // became unreachable: not submittable, not erasable.
-  it("routes an alternate-screen commit to the PTY and takes it out of the draft", () => {
+  it("routes an alternate-screen commit to the PTY when it is the whole draft", () => {
+    expect(resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "가" })).toEqual({
+      pty: "가",
+    });
+  });
+
+  it("routes a multi-syllable commit the same way", () => {
     expect(
-      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나다" }),
-    ).toEqual({ pty: "다", draft: "가나" });
+      resolveComposerCompositionCommit({ altScreen: true, data: "가나다", draft: "가나다" }),
+    ).toEqual({ pty: "가나다" });
   });
 
   it("leaves the normal buffer alone — there the draft is a real drafting surface", () => {
     // Enter submits the draft in the normal composer flow, so nothing may be diverted.
     expect(
-      resolveComposerCompositionCommit({ altScreen: false, data: "다", draft: "가나다" }),
+      resolveComposerCompositionCommit({ altScreen: false, data: "가", draft: "가" }),
     ).toBeNull();
   });
 
@@ -664,27 +689,33 @@ describe("resolveComposerCompositionCommit", () => {
     ).toBeNull();
   });
 
-  it("clears a draft whose tail does not match the commit", () => {
-    // The composed run sits at the caret, i.e. the end of the draft. If it does not,
-    // the draft cannot be described in terms of this commit — and leaving it would
-    // recreate the orphan, so it goes.
+  it("keeps a syllable in a draft that already held text (issue #560)", () => {
+    // A non-empty draft owns the keyboard, so Enter will submit this whole line.
+    // Diverting the last syllable would tear one sentence across two destinations.
     expect(
-      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나 " }),
-    ).toEqual({ pty: "다", draft: "" });
-  });
-
-  it("keeps text that reached the draft by another route", () => {
-    // Shift+Enter newlines and pastes are not passthrough, so they can legitimately be
-    // in the draft ahead of the composed run. Trimming rather than clearing keeps them.
+      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나다" }),
+    ).toBeNull();
     expect(
       resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "line\n가" }),
-    ).toEqual({ pty: "가", draft: "line\n" });
+    ).toBeNull();
   });
 
-  it("empties the draft when the commit is the whole of it", () => {
-    expect(resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "가" })).toEqual({
+  it("keeps a draft whose tail does not match the commit", () => {
+    // Not describable in terms of this commit, so it is the user's text, not ours.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "다", draft: "가나 " }),
+    ).toBeNull();
+  });
+
+  it("routes a commit whose draft lags one keystroke behind", () => {
+    // Some IMEs deliver the final `input` event after `compositionend`, so the draft
+    // is a prefix of the commit. That is event ordering, not user text — treating it
+    // as a non-empty prior draft would strand the syllable in the draft instead.
+    expect(
+      resolveComposerCompositionCommit({ altScreen: true, data: "가나다", draft: "가나" }),
+    ).toEqual({ pty: "가나다" });
+    expect(resolveComposerCompositionCommit({ altScreen: true, data: "가", draft: "" })).toEqual({
       pty: "가",
-      draft: "",
     });
   });
 });

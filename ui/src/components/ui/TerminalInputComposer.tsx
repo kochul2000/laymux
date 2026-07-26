@@ -51,6 +51,19 @@ export interface TerminalInputComposerProps {
    */
   onKeyPassthrough?: (event: KeyboardEvent, ctx: { empty: boolean }) => boolean;
   /**
+   * Whether the host is currently proxying the keyboard to the terminal
+   * (`isComposerKeyProxyActive`). The gestures that reach the draft *without* going
+   * through `onKeyPassthrough` — the Shift+Enter newline, the Tab recall popup,
+   * paste — ask this first, so nothing lands in a draft that has no way out
+   * (issue #560).
+   */
+  isKeyProxyActive?: (ctx: { empty: boolean }) => boolean;
+  /**
+   * Paste arrived while the host owns the keyboard, so it belongs to the terminal,
+   * not the draft. Receives the clipboard text, as Direct mode's native paste does.
+   */
+  onProxyPaste?: (text: string) => void;
+  /**
    * A composition just committed. The host routes it to the PTY when the pane is
    * proxying keys for a fullscreen app, and trims it out of the draft (issue #558).
    */
@@ -118,6 +131,8 @@ export function TerminalInputComposer({
   onTextChange,
   onSend,
   onKeyPassthrough,
+  isKeyProxyActive,
+  onProxyPaste,
   onCompositionCommit,
   onHistory,
   historyPopupEnabled = false,
@@ -250,6 +265,15 @@ export function TerminalInputComposer({
     if (mode !== "composer") compositionActiveRef.current = false;
   }, [mode]);
 
+  /**
+   * See `isComposerKeyProxyActive`: an empty draft lends the keyboard to the host.
+   * `live` is the textarea's own value, used where an event carries it — a controlled
+   * `text` prop is one render behind an edit, and answering "is the draft empty" from
+   * a stale value routes the gesture to the wrong destination.
+   */
+  const keyProxyActive = (live?: string) =>
+    isKeyProxyActive?.({ empty: (live ?? text).length === 0 }) ?? false;
+
   const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // Composition keys always belong to the IME, never to passthrough or Send.
     const composing =
@@ -334,7 +358,10 @@ export function TerminalInputComposer({
       !composing &&
       plainKey &&
       event.key === "Tab" &&
-      historyEntries.length > 0
+      historyEntries.length > 0 &&
+      // \t is a real key for a fullscreen app, and a recalled entry would land in a
+      // draft with no way out while the host owns the keyboard (issue #560).
+      !keyProxyActive()
     ) {
       event.preventDefault();
       event.stopPropagation();
@@ -364,9 +391,11 @@ export function TerminalInputComposer({
       }
     }
 
-    // Shift+Enter is always the newline gesture (even on an empty draft, to start
-    // a multiline one) — never offer it for passthrough.
-    const newlineGesture = event.key === "Enter" && event.shiftKey;
+    // Shift+Enter is the newline gesture (even on an empty draft, to start a
+    // multiline one) — never offered for passthrough. Except while the host owns the
+    // keyboard: a draft started there would be stranded, since the keys that submit
+    // or erase it belong to the app (issue #560). Then it passes through as Enter.
+    const newlineGesture = event.key === "Enter" && event.shiftKey && !keyProxyActive();
 
     // Let the host forward empty-draft nav/control keys / full-screen-app keys
     // to the PTY. The host checks laymux keybindings first (rebind-aware).
@@ -544,6 +573,17 @@ export function TerminalInputComposer({
           if (autocompleteDismissed) setAutocompleteDismissed(false);
           if (autocompleteIndex !== -1) setAutocompleteIndex(-1);
           onTextChange(event.currentTarget.value);
+        }}
+        onPaste={(event) => {
+          // Paste never passes through keydown, so it needs its own check: while the
+          // host owns the keyboard the clipboard belongs to the terminal too, or the
+          // pasted text would sit in a draft with no key left to submit or erase it
+          // (issue #560). The host runs its own paste pipeline.
+          if (!keyProxyActive(event.currentTarget.value)) return;
+          const text = event.clipboardData.getData("text/plain");
+          event.preventDefault();
+          event.stopPropagation();
+          if (text) onProxyPaste?.(text);
         }}
         onCompositionStart={() => {
           compositionActiveRef.current = true;

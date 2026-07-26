@@ -150,6 +150,7 @@ import {
   pushComposerHistory,
   readComposerHistory,
   readRuntimeComposerDraft,
+  isComposerKeyProxyActive,
   resolveComposerCompositionCommit,
   readRuntimeInputMode,
   settleComposerSubmission,
@@ -679,28 +680,56 @@ export function TerminalView({
       });
   };
 
-  const writeStructuredPaste = (text: string) => {
-    if (
-      inputModeRef.current !== "direct" ||
-      !localControlAvailableRef.current ||
-      !outputProtocolReadyRef.current ||
-      !text
-    )
-      return;
+  const writePastedText = (text: string) => {
+    if (!localControlAvailableRef.current || !outputProtocolReadyRef.current || !text) return;
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, text, false).catch((error) => {
       console.warn("[TerminalView] terminal paste failed:", error);
     });
   };
+  const writeStructuredPaste = (text: string) => {
+    if (inputModeRef.current !== "direct") return;
+    writePastedText(text);
+  };
+  /**
+   * Composer paste while this pane proxies the keyboard (issue #560). Same write path
+   * as Direct mode's native paste, so a pasted prompt reaches a fullscreen app
+   * identically in both input modes.
+   */
+  const writeProxyPaste = (text: string) => {
+    if (inputModeRef.current !== "composer") return;
+    writePastedText(text);
+  };
   const localTerminalControlAllowed = () =>
     remoteControlStatusKnownRef.current && !remoteControlActiveRef.current;
 
   /**
-   * Forward a Composer keystroke to the PTY instead of the draft when either the
-   * draft is empty and the key is a non-text nav key (so shell history / inline
-   * menus work), or a full-screen (alternate-screen) app is running (pass all
-   * keys, like Direct mode). Encoding defers to xterm's reported cursor-key mode.
+   * Whether the keyboard currently belongs to the terminal rather than the draft
+   * (`isComposerKeyProxyActive`). The composer asks this for the gestures that reach
+   * the draft without passing through `passthroughComposerKey` — the Shift+Enter
+   * newline, the Tab recall popup, paste.
    */
+  const composerKeyProxyActive = (ctx: { empty: boolean }): boolean => {
+    if (!localTerminalControlAllowed()) return false;
+    const term = terminalRef.current;
+    if (!term) return false;
+    return isComposerKeyProxyActive({
+      altScreen: term.buffer?.active?.type === "alternate",
+      draftEmpty: ctx.empty,
+    });
+  };
+
+  const pasteComposerProxy = (text: string) => {
+    // Emptiness is deliberately NOT re-derived here. The composer already answered it
+    // from the textarea's live value and consumed the event on the strength of that
+    // answer; re-asking a ref that can be one edit behind would drop the paste on the
+    // floor — written to neither the terminal nor the draft.
+    if (!localTerminalControlAllowed()) return;
+    const term = terminalRef.current;
+    if (!term || term.buffer?.active?.type !== "alternate") return;
+    writeProxyPaste(text);
+  };
+
   /**
    * Route a finished composition to the PTY when this pane is proxying keys for a
    * fullscreen app (issue #558). Keys cannot carry a composition, so the committed
@@ -717,14 +746,23 @@ export function TerminalView({
       draft: composerDraftRef.current.text,
     });
     if (!decision) return;
-    // Trim the draft first: if the write rejects, an untouched draft would still be
+    // Empty the draft first: the decision only routes when the composition *was* the
+    // whole draft, and if the write rejects an untouched draft would still be
     // unreachable (every key passes through), which is the orphan being fixed.
-    storeComposerDraft(updateComposerDraftText(composerDraftRef.current, decision.draft));
+    storeComposerDraft(updateComposerDraftText(composerDraftRef.current, ""));
     dismissTerminalResponseNotification(instanceId);
     writeToTerminal(instanceId, decision.pty).catch((error) => {
       console.warn("[TerminalView] composer composition passthrough failed:", error);
     });
   };
+  /**
+   * Forward a Composer keystroke to the PTY instead of the draft. An empty draft lends
+   * the keyboard out (`isComposerKeyProxyActive`): to a fullscreen app it lends *every*
+   * key, like Direct mode, and at the shell only non-text nav keys and activity-control
+   * chords, so shell history and Ctrl+C keep working. A non-empty draft keeps the
+   * keyboard so the text on screen can always be submitted or erased (issue #560).
+   * Encoding defers to xterm's reported cursor-key mode.
+   */
   const passthroughComposerKey = (event: KeyboardEvent, ctx: { empty: boolean }): boolean => {
     if (!localTerminalControlAllowed()) return false;
     // laymux controls consume first (rebind-aware): any combo bound to a
@@ -734,12 +772,15 @@ export function TerminalView({
     if (matchesGlobalShortcut(event)) return false;
     const term = terminalRef.current;
     if (!term) return false;
-    const altScreen = term.buffer?.active?.type === "alternate";
+    const proxy = isComposerKeyProxyActive({
+      altScreen: term.buffer?.active?.type === "alternate",
+      draftEmpty: ctx.empty,
+    });
     // Empty draft forwards nav keys (menus, shell history) and activity-control
     // chords (Ctrl+C/D/Z/L) so a running command stays interruptible.
     const emptyPassthrough =
       ctx.empty && (isPassthroughNavKey(event) || isPassthroughControlChord(event));
-    if (!altScreen && !emptyPassthrough) return false;
+    if (!proxy && !emptyPassthrough) return false;
     const applicationCursor = Boolean(
       (term as unknown as { modes?: { applicationCursorKeysMode?: boolean } }).modes
         ?.applicationCursorKeysMode,
@@ -4692,6 +4733,8 @@ export function TerminalView({
         }}
         onSend={submitComposerDraft}
         onKeyPassthrough={passthroughComposerKey}
+        isKeyProxyActive={composerKeyProxyActive}
+        onProxyPaste={pasteComposerProxy}
         onCompositionCommit={commitComposerComposition}
         onHistory={navigateComposerHistory}
       />
