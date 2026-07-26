@@ -1530,15 +1530,15 @@ export function TerminalView({
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
         if (compositionPreview.text) {
-          // Raw anchor on purpose. `getCompositionPreviewLayout` already normalized
-          // an out-of-range anchor column into `startColumn` + `rowOffset` (issue
-          // #551), and each row is positioned relative to *this* origin by
-          // `row.startColumn - anchorX`. Normalizing here too double-counts the row
-          // offset — measured: anchor 150 on a 150-column terminal put the container
-          // one row below where the rows then added another, so the preview landed a
-          // row past the caret.
-          const anchorX = compositionPreview.anchorBufferX;
-          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+          // Both the container and the rows come from the layout's normalized anchor,
+          // so the offsets cancel by construction: container at `anchorColumn`, each
+          // row at `startColumn - anchorColumn`, absolute column `startColumn`. An
+          // earlier form derived the container's normalization here instead, which
+          // double-counted the row offset and dropped the preview a row below its own
+          // caret (issue #551). Reading `anchorBufferX` as a screen column is the
+          // mistake to avoid — it can sit at or past the right edge.
+          const anchorX = previewLayout.anchorColumn;
+          const anchorY = compositionPreview.anchorBufferAbsY + previewLayout.anchorRowOffset - baseY;
           const previewRows = previewLayout.rows;
           previewEl.style.opacity = "1";
           previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
@@ -1550,7 +1550,12 @@ export function TerminalView({
           )}px`;
           previewEl.style.height = `${Math.max(
             1,
-            (Math.max(0, ...previewRows.map((row) => row.rowOffset)) + 1) * cellHeight,
+            (Math.max(
+              0,
+              ...previewRows.map((row) => row.rowOffset - previewLayout.anchorRowOffset),
+            ) +
+              1) *
+              cellHeight,
           )}px`;
           previewEl.style.fontSize = `${term.options.fontSize ?? Math.max(1, cellHeight)}px`;
           previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
@@ -1570,7 +1575,7 @@ export function TerminalView({
             rowEl.style.height = `${Math.max(1, cellHeight)}px`;
             rowEl.style.transform = `translate(${Math.round(
               (row.startColumn - anchorX) * cellWidth,
-            )}px, ${Math.round(row.rowOffset * cellHeight)}px)`;
+            )}px, ${Math.round((row.rowOffset - previewLayout.anchorRowOffset) * cellHeight)}px)`;
           }
           while (previewEl.children.length > previewRows.length) {
             previewEl.lastElementChild?.remove();

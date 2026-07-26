@@ -1286,10 +1286,13 @@ describe("TerminalView", () => {
       const rows = preview.querySelectorAll(".terminal-composition-preview-row");
       expect(rows).toHaveLength(1);
       expect(rows[0]).toHaveTextContent("가");
-      // Container stays on the raw anchor (column 80, row 4); the row pulls back to
-      // column 0 and down one row. Net: column 0 of row 5.
-      expect(preview.style.transform).toBe("translate(800px, 80px)");
-      expect(rows[0]).toHaveStyle({ transform: "translate(-800px, 20px)" });
+      // Container and rows both come from the layout's normalized anchor, so the
+      // container already sits on column 0 of row 5 and the row adds nothing. The
+      // earlier form put the container on the raw column 80 and relied on the row to
+      // translate back by -800px; deriving that normalization in the renderer as well
+      // double-counted the row offset, which is what this test exists to pin.
+      expect(preview.style.transform).toBe("translate(0px, 100px)");
+      expect(rows[0]).toHaveStyle({ transform: "translate(0px, 0px)" });
       // The caret must land on the same row as the glyph it follows.
       expect(overlay.style.transform).toBe("translate(20px, 100px)");
     });

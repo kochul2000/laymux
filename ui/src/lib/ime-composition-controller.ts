@@ -107,6 +107,42 @@ export type ImeCompositionController = {
   getState(): CompositionPreviewState;
 };
 
+/**
+ * Where the cursor ends up after xterm writes `text` starting at `originColumn`.
+ *
+ * The single owner of the row-advance rule. Both the carry-over anchor arithmetic
+ * and the preview layout's anchor normalization go through here so the rule cannot
+ * drift between them — #541's objection to duplicating wrap logic applies even when
+ * the second copy is "only" a classifier.
+ *
+ * `originColumn` may be at or past `cols`: xterm's pending-wrap cursor stays at
+ * `cols` until the next write, and the carry-over anchor is derived arithmetically.
+ *
+ * Cluster-aware and pad-aware, matching xterm measured on the committed bundle: when
+ * the remaining space is narrower than the glyph, xterm pads the last column and puts
+ * the whole glyph on the next row. So `advanceCells(74, "가", 75)` is `(2, +1)`, not
+ * the `(1, +1)` that plain `% cols` arithmetic on a 2-cell width would give.
+ */
+export function advanceCells(
+  originColumn: number,
+  text: string,
+  cols: number,
+): { column: number; rowOffset: number } {
+  if (cols <= 0) {
+    return { column: originColumn + stringCellWidth(text), rowOffset: 0 };
+  }
+  let column = originColumn % cols;
+  let rowOffset = Math.floor(originColumn / cols);
+  for (const { width } of splitCellClusters(text)) {
+    if (width > 0 && column + width > cols) {
+      rowOffset += 1;
+      column = 0;
+    }
+    column += width;
+  }
+  return { column, rowOffset };
+}
+
 export function getCompositionPreviewCursor(
   state: Pick<CompositionPreviewState, "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset">,
   cols: number,
@@ -133,6 +169,15 @@ export function getCompositionPreviewLayout(
 ): {
   cursorX: number;
   cursorAbsY: number;
+  /**
+   * The anchor after normalization, in the same space as `rows[].startColumn` and
+   * `rows[].rowOffset`. Returned so the renderer places its container from these
+   * instead of re-deriving them from the raw `anchorBufferX`: doing that in two
+   * places is what double-counted the row offset and dropped the preview a row
+   * below its own caret.
+   */
+  anchorColumn: number;
+  anchorRowOffset: number;
   rows: Array<{
     text: string;
     startColumn: number;
@@ -143,6 +188,12 @@ export function getCompositionPreviewLayout(
   if (cols <= 0 || !state.text) {
     return {
       ...getCompositionPreviewCursor(state, cols),
+      // The one documented exception to the normalization contract: with no known
+      // column count there is nothing to normalize against, so the raw anchor is
+      // passed through here and in `startColumn` below. Only reachable when
+      // `cols <= 0`, which the renderer never does.
+      anchorColumn: state.anchorBufferX,
+      anchorRowOffset: 0,
       rows: state.text
         ? [
             {
@@ -181,8 +232,9 @@ export function getCompositionPreviewLayout(
   // resets to column 0, so *every* out-of-range anchor rendered at column 0 of
   // the next row: 150 landed correctly, 152 landed on top of it, and the second
   // syllable of a chain crossing the boundary simply vanished under the first.
-  const anchorRowOffset = Math.floor(state.anchorBufferX / cols);
-  const anchorColumn = state.anchorBufferX % cols;
+  const anchorAdvance = advanceCells(state.anchorBufferX, "", cols);
+  const anchorColumn = anchorAdvance.column;
+  const anchorRowOffset = anchorAdvance.rowOffset;
   let currentCol = anchorColumn;
   let currentRowOffset = anchorRowOffset;
   let currentRowStartColumn = anchorColumn;
@@ -241,6 +293,8 @@ export function getCompositionPreviewLayout(
   return {
     cursorX,
     cursorAbsY,
+    anchorColumn,
+    anchorRowOffset,
     rows,
   };
 }
@@ -275,6 +329,9 @@ export function createImeCompositionController(
   // never a live reading taken mid-chain — see `handleCompositionStart`.
   let chainAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
   let chainBaseText = "";
+  // Column count captured with the origin. A reflow invalidates both the origin row
+  // and any row delta measured in the old count, so a change forces a re-base.
+  let chainCols = 0;
   // Textarea value snapshot at the start of the *current syllable*, so the preview
   // diff yields only the syllable being composed.
   let compositionBaseText = "";
@@ -326,6 +383,7 @@ export function createImeCompositionController(
     compositionAnchor = { cursorX: 0, cursorAbsY: 0 };
     chainAnchor = { cursorX: 0, cursorAbsY: 0 };
     chainBaseText = "";
+    chainCols = 0;
     compositionBaseText = "";
     latestCompositionDisplayText = "";
     state = createEmptyState();
@@ -417,9 +475,27 @@ export function createImeCompositionController(
       // Deriving from the chain start is monotonic and treats the first and Nth
       // carry-over identically. `cursorAbsY` is an absolute buffer row, so it does
       // not move when the viewport scrolls — the chain's row stays valid.
-      const chainCommittedWidth = stringCellWidth(committedBase.slice(chainBaseText.length));
+      const live = options.getAnchor();
+      const cols = options.getCols();
+      const chainCommitted = committedBase.slice(chainBaseText.length);
+      const chainCommittedWidth = stringCellWidth(chainCommitted);
+      // Advance through the shared rule rather than adding the width, so `derived`
+      // knows what plain arithmetic cannot: when the remaining space is narrower than
+      // the glyph, xterm pads the last column and puts the whole glyph on the next
+      // row. Measured — origin 74 on a 75-column terminal advances to (2, +1), while
+      // `74 + 2` normalized by `% cols` claims column 1. That one cell was corrected
+      // by the next carry-over's live reading, so it only showed when the boundary
+      // syllable was the chain's *last* — typing one syllable at the right margin and
+      // confirming with space had no next carry-over to fix it.
+      // Captured before any re-base below so the trace reports the origin this
+      // carry-over actually derived from.
+      const originX = chainAnchor.cursorX;
+      const advance = advanceCells(chainAnchor.cursorX, chainCommitted, cols);
+      // Kept as cells measured from column 0 of the chain's origin row so it stays on
+      // one axis with `liveAbs` below. The layout normalizes it back into a column and
+      // a row offset with the same rule.
       const derived: BufferAnchor = {
-        cursorX: chainAnchor.cursorX + chainCommittedWidth,
+        cursorX: cols > 0 ? advance.column + advance.rowOffset * cols : advance.column,
         cursorAbsY: chainAnchor.cursorAbsY,
       };
       // A row change means the arithmetic origin is no longer valid, whatever the
@@ -441,29 +517,38 @@ export function createImeCompositionController(
       // composition is open, so the live reading is frozen and the row-change branch
       // effectively never fires. It is the buffer-cursor (shell) path that actually
       // exercises the re-base.
-      const live = options.getAnchor();
-      const cols = options.getCols();
       // Where the committed text says the live cursor should be once it has caught
-      // up. Measured on a 150-column shell: origin 148, three syllables committed,
-      // `derived` 154 — that is row+1 column 4, and the live cursor reported
-      // (2, row+1) because it had echoed only two. Adopting it there dropped a
-      // syllable of advance and, because the adoption also re-bases, the deficit
-      // then persisted for the rest of the chain: five jamo typed, four drawn.
-      const derivedRow =
-        chainAnchor.cursorAbsY + (cols > 0 ? Math.floor(derived.cursorX / cols) : 0);
+      // up — straight out of the shared advance, no second wrap rule. Measured on a
+      // 150-column shell: origin 148, three syllables committed, `derived` 154 — that
+      // is row+1 column 4, and the live cursor reported (2, row+1) because it had
+      // echoed only two. Adopting it there dropped a syllable of advance and, because
+      // adoption re-bases, the deficit then persisted for the rest of the chain: five
+      // jamo typed, four drawn.
+      const derivedRow = chainAnchor.cursorAbsY + advance.rowOffset;
       const rowExplainedByWrap = live.cursorAbsY === derivedRow;
+      // A reflow moves the row the origin pointed at, so neither the origin nor a row
+      // delta measured in the old column count survives it. Re-base unconditionally
+      // rather than relying on the classifier happening to fall through to
+      // `originMoved` — it does today, but by luck.
+      const colsChanged = chainCols !== 0 && cols !== chainCols;
       // Compare on one axis, in cells measured from the chain origin's row, so a
       // wrapped live reading is not mistaken for a moved one.
       const liveAbs =
         live.cursorX + (cols > 0 ? (live.cursorAbsY - chainAnchor.cursorAbsY) * cols : 0);
-      const originMoved = !rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY;
+      const originMoved =
+        colsChanged || (!rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY);
       const liveAhead = !originMoved && liveAbs > derived.cursorX;
       let anchorSource: string;
       if (originMoved || liveAhead) {
         chainAnchor = live;
         chainBaseText = committedBase;
+        chainCols = cols;
         compositionAnchor = live;
-        anchorSource = originMoved ? "shadow-cursor-rebase-row" : "shadow-cursor-rebase-ahead";
+        anchorSource = colsChanged
+          ? "shadow-cursor-rebase-resize"
+          : originMoved
+            ? "shadow-cursor-rebase-row"
+            : "shadow-cursor-rebase-ahead";
       } else {
         compositionAnchor = derived;
         anchorSource = "chain-committed-width";
@@ -477,8 +562,7 @@ export function createImeCompositionController(
         textareaValue: textarea?.value ?? "",
         chainBaseText,
         chainCommittedWidth,
-        // The origin this carry-over derived from, before any re-base above.
-        chainAnchorX: derived.cursorX - chainCommittedWidth,
+        chainAnchorX: originX,
         derivedX: derived.cursorX,
         liveX: live.cursorX,
         liveAbsY: live.cursorAbsY,
@@ -493,6 +577,7 @@ export function createImeCompositionController(
       // this is derived from it arithmetically.
       chainAnchor = options.getAnchor();
       chainBaseText = textarea?.value ?? "";
+      chainCols = options.getCols();
       compositionAnchor = chainAnchor;
       compositionBaseText = chainBaseText;
       traceComposition(options, "ime-composition-start", {

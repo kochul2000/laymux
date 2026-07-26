@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 
 import {
+  advanceCells,
   createImeCompositionController,
   getCompositionPreviewCursor,
   getCompositionPreviewLayout,
@@ -178,6 +179,49 @@ describe("resolveVisualCaretOwner", () => {
   });
 });
 
+describe("advanceCells", () => {
+  /**
+   * Pinned against real xterm, measured on the committed bundle in jsdom: fill a row
+   * with `a` up to the origin column, write a 2-cell Hangul syllable, read
+   * `buffer.active`. The last two rows are why plain `origin + width` normalized by
+   * `% cols` is not enough — when the remaining space is narrower than the glyph,
+   * xterm pads the final column and puts the whole glyph on the next row.
+   */
+  const HANGUL = "가";
+  it.each([
+    [75, 73, 75, 0],
+    [150, 148, 150, 0],
+    [150, 147, 149, 0],
+    [75, 74, 2, 1],
+    [80, 79, 2, 1],
+  ])(
+    "cols %i, origin %i advances to column %i row +%i",
+    (cols, origin, column, rowOffset) => {
+      expect(advanceCells(origin, HANGUL, cols)).toEqual({ column, rowOffset });
+    },
+  );
+
+  it("normalizes an origin already at or past the right edge", () => {
+    // xterm's pending-wrap cursor reports `cols`, and a derived carry-over anchor can
+    // be further still. Both must fold into a column plus a row offset.
+    expect(advanceCells(150, "", 150)).toEqual({ column: 0, rowOffset: 1 });
+    expect(advanceCells(152, "", 150)).toEqual({ column: 2, rowOffset: 1 });
+    expect(advanceCells(304, "", 150)).toEqual({ column: 4, rowOffset: 2 });
+  });
+
+  it("keeps a grapheme cluster whole across the boundary", () => {
+    // The width that matters is the cluster's, not the code point's — a ZWJ family or
+    // an emoji presentation sequence must not be split.
+    expect(advanceCells(79, FAMILY, 80)).toEqual({ column: 2, rowOffset: 1 });
+    expect(advanceCells(79, `${THUMBS_UP}`, 80)).toEqual({ column: 2, rowOffset: 1 });
+    // Exactly filling the row is not a wrap: the cursor is left pending-wrap on it.
+    expect(advanceCells(78, FAMILY, 80)).toEqual({ column: 80, rowOffset: 0 });
+  });
+
+  it("falls back to plain width when the column count is unknown", () => {
+    expect(advanceCells(10, HANGUL, 0)).toEqual({ column: 12, rowOffset: 0 });
+  });
+});
 describe("getCompositionPreviewCursor", () => {
   it("advances on the same row when the preview stays within the line", () => {
     expect(
@@ -222,6 +266,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 8,
       cursorAbsY: 10,
+      anchorColumn: 3,
+      anchorRowOffset: 0,
       rows: [{ text: "hello", startColumn: 3, rowOffset: 0, cellWidth: 5 }],
     });
   });
@@ -244,6 +290,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 186,
+      anchorColumn: 0,
+      anchorRowOffset: 1,
       rows: [{ text: "ㄱ", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -268,6 +316,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 4,
       cursorAbsY: 186,
+      anchorColumn: 2,
+      anchorRowOffset: 1,
       rows: [{ text: "ㄱ", startColumn: 2, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -287,6 +337,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 6,
       cursorAbsY: 187,
+      anchorColumn: 4,
+      anchorRowOffset: 2,
       rows: [{ text: "ㄱ", startColumn: 4, rowOffset: 2, cellWidth: 2 }],
     });
   });
@@ -306,6 +358,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 5,
       cursorAbsY: 10,
+      anchorColumn: 3,
+      anchorRowOffset: 0,
       rows: [{ text: "\u3139", startColumn: 3, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -325,6 +379,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 11,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [
         { text: "ab", startColumn: 8, rowOffset: 0, cellWidth: 2 },
         { text: "cd", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -347,6 +403,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 7,
+      anchorRowOffset: 0,
       rows: [
         { text: "가", startColumn: 7, rowOffset: 0, cellWidth: 2 },
         { text: "나", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -369,6 +427,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: "가", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -388,6 +448,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 0,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [{ text: "가", startColumn: 8, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -407,6 +469,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 29,
+      anchorColumn: 71,
+      anchorRowOffset: 0,
       rows: [
         { text: "아", startColumn: 71, rowOffset: 0, cellWidth: 2 },
         { text: "아", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -429,6 +493,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 0,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [{ text: `ae${ACCENT}`, startColumn: 8, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -448,6 +514,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: `${HEART}${VS16}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -467,6 +535,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: `${THUMBS_UP}${SKIN_TONE}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -486,6 +556,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [
         { text: "a", startColumn: 8, rowOffset: 0, cellWidth: 1 },
         { text: FAMILY, startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -772,18 +844,20 @@ describe("createImeCompositionController", () => {
       expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
     });
 
-    it("re-bases on a row change so the wrap boundary cannot resurrect the lag", async () => {
-      // The hole the first form of this guard left. Past the wrap boundary the live
-      // reading is on another row, so the lag test was skipped — and because the
-      // chain origin was never re-based, `derived` kept being computed from the dead
-      // pre-wrap row and every later carry-over adopted the lagging live value
-      // again. cols 75, chain starts at column 74, one echo of lag:
+    it("crosses the wrap boundary from arithmetic alone, without the live reading", async () => {
+      // cols 75, chain origin at column 74 — one cell left, so the first wide syllable
+      // cannot fit. Real xterm pads that last column and puts the glyph wholly on the
+      // next row, landing the cursor at (2, +1); the echo lags one syllable behind.
       //
-      //   1st  derived (76, row 5)  live (2, row 6)  -> adopt + re-base
-      //   2nd  derived  (4, row 6)  live (2, row 6)  -> derived wins (2 is behind)
+      //   1st  derived 77 (row+1 col 2)  live (2, row+1)  -> derived (tie, not ahead)
+      //   2nd  derived 79 (row+1 col 4)  live (2, row+1)  -> derived (live is behind)
       //
-      // Without re-basing the 2nd derived would be (78, row 5), the row difference
-      // would win again, and the third syllable would land on top of the second.
+      // `advanceCells` is what makes this work: adding the width would give 76, i.e.
+      // row+1 column 1, one cell short of where xterm actually put the glyph. That
+      // single cell used to be papered over by the next carry-over adopting the live
+      // reading — which left the error standing whenever the boundary syllable was the
+      // chain's last, the ordinary case of typing one syllable at the right margin and
+      // confirming with space.
       const { final, carryOverTraces } = await typeGaNaDa(
         [
           { cursorX: 2, cursorAbsY: 6 },
@@ -792,19 +866,35 @@ describe("createImeCompositionController", () => {
         { cursorX: 74, cursorAbsY: 5 },
         75,
       );
-      // The live reading is genuinely ahead here: xterm pushes the whole wide glyph
-      // to the next row rather than splitting it, leaving column 74 blank, so the
-      // echoed cursor is at row 6 column 2 while arithmetic says 76 (row 6 column 1).
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor-rebase-ahead",
+        "chain-committed-width",
         "chain-committed-width",
       ]);
-      // Second carry-over derives from the re-based origin (2), not the dead 74.
+      // Both derive from the original origin: nothing re-bases, because the row change
+      // is fully explained by the committed width.
       expect(carryOverTraces.map((t) => [t.chainAnchorX, t.derivedX])).toEqual([
-        [74, 76],
-        [2, 4],
+        [74, 77],
+        [74, 79],
       ]);
-      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
+      expect(final).toMatchObject({ anchorBufferX: 79, anchorBufferAbsY: 5 });
+      // 79 on a 75-column terminal is row+1 column 4 — after 가나 laid out at columns
+      // 0-1 and 2-3 of the wrapped row.
+      expect(
+        getCompositionPreviewLayout(
+          {
+            text: "\ub2e4",
+            anchorBufferX: 79,
+            anchorBufferAbsY: 5,
+            caretCellOffset: 2,
+            textCellWidth: 2,
+          },
+          75,
+        ),
+      ).toMatchObject({
+        anchorColumn: 4,
+        anchorRowOffset: 1,
+        rows: [{ text: "\ub2e4", startColumn: 4, rowOffset: 1, cellWidth: 2 }],
+      });
     });
 
     it("does not adopt a lagging live reading just because the row wrapped", async () => {
