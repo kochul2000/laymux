@@ -524,6 +524,17 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **경계 기록**: 한 태스크에 `compositionend` 가 두 번 오면 xterm 의 타이머가 둘 큐잉되고 첫 타이머가 단일 슬롯 플래그를 내려 두 번째는 아무것도 보내지 않는다. 그 창에서 `lastFinalizedText` 는 두 번째 텍스트만 들고 있어 첫 번째는 살릴 수 없다 — xterm 자체의 단일 슬롯 한계이고 이 판정의 결함은 아니다.
 - **`pending` 이 안전을 만들고 캡처 수명은 load-bearing 이 아니다**: 정상 flush 후 blur 창은 실제로 존재한다(xterm 타이머가 먼저 전송하고 우리 deferred reset 전에 blur 가 끼어든다). 그때 캡처는 남아 있지만 `pending` 이 거짓이라 재전송되지 않는다. 그래서 테스트가 고정하는 것은 수명이 아니라 **조합**이다 — "pending 거짓 + 캡처 남아 있음 → 커밋 없음".
 - **미검증**: 실기 확인 필요
+### 8.17 조합 프리뷰는 alt 버퍼에서도 그린다 (issue #553)
+
+전체화면 TUI(vim)에서 조합 중 자모가 **아예 보이지 않았다.** 스크롤과 무관하게, 라이브 하단에서 타이핑하는 동안이다.
+
+- **§8.15 와 같은 구조**: `.xterm .composition-view` 가 무조건 꺼져 있어 조합 텍스트의 렌더러는 laymux 오버레이 하나뿐인데, `resolveVisualCaretOwner` 가 `isAltBufferActive` 를 `compositionActive` **앞**에서 잡아 `hideOverlay()` 로 보냈다. PR #552 가 caret 정책 게이트를 열었지만 alt 버퍼는 그 위에 남아 있었다.
+- **판정**: `isAltBufferActive` 를 `compositionActive` **아래**로 내린다. alt 버퍼는 caret 정책과 같은 종류의 질문이다 — 전체화면 TUI 는 자기 커서를 직접 관리하므로 shadow cursor 캐럿이 의미 없다. 그것은 사용자가 입력 중인 **텍스트**에 대해 아무 말도 하지 않는다.
+- **앵커는 오히려 더 단순하다**: alt 버퍼는 스크롤백이 없어 `baseY` 가 항상 0 이므로 절대 행 변환이 항등이다. vim 은 OSC 133 프롬프트도 sync frame 도 내지 않으므로 `computeUseShadowCursor` 가 거짓이 되어 앵커가 **라이브 버퍼 커서**에서 오고, 그것이 vim 이 커서를 둔 자리다.
+- **스크롤 분기는 의도적으로 조합보다 위에 남긴다.** 실측으로 확인했다 — 조합 중 스크롤백을 올리면 프리뷰가 사라지지만 최하단으로 돌아오면 그대로 복귀하고 텍스트도 유실되지 않는다. 그리고 **숨기는 것이 옳다**: 프리뷰는 버퍼 행에 앵커돼 있어 히스토리를 보는 뷰포트 좌표로 그리면 엉뚱한 행에 찍히고, 사용자는 입력 줄을 보고 있지도 않다. 테스트로 못 박아 뒤집히지 않게 했다.
+- **일괄 탈출구는 넣지 않았다.** "프리뷰가 안 그려지는 프레임이면 네이티브 조합 표시를 되살린다" 는 형태는 스크롤 중에도 발동하고, 네이티브 표시는 xterm textarea 위치에 뜨므로 스크롤백 중 위치 보장이 없다 — 지금 무해한 분기에 위치 오류를 만든다.
+- **결함이 테스트로 못박혀 있던 다섯 번째 사례**: `"prioritizes alt buffer before all other visual owners"` 가 alt 버퍼가 조합보다 우선한다고 단정했다. 교체하고, caret 쪽(조합 없으면 여전히 `"alt-buffer"`)은 따로 고정했다.
+- **미검증**: 조합이 버퍼 전환 경계를 걸치는 경우(조합 중 TUI 가 alt 로 진입/이탈)는 확인하지 않았다.
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

@@ -53,7 +53,11 @@ describe("resolveVisualCaretOwner", () => {
     ).toBe("hidden");
   });
 
-  it("prioritizes alt buffer before all other visual owners", () => {
+  // This case used to assert "alt-buffer" — the defect in issue #553 was pinned as
+  // intended behaviour, the same way #551's was. In vim the composing jamo was
+  // invisible with no way to see it, because the alt buffer hid the only renderer the
+  // in-flight text has.
+  it("keeps composition preview in the alt buffer", () => {
     expect(
       resolveVisualCaretOwner({
         ...baseInput,
@@ -61,7 +65,34 @@ describe("resolveVisualCaretOwner", () => {
         hasSyncFramePosition: true,
         isAltBufferActive: true,
       }),
+    ).toBe("composition-preview");
+  });
+
+  it("still owns the alt buffer when no composition is in flight", () => {
+    // The caret side is unchanged: a fullscreen TUI drives its own cursor, so laymux
+    // must not draw one. Only composition outranks that.
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        isAltBufferActive: true,
+        hasSyncFramePosition: true,
+      }),
     ).toBe("alt-buffer");
+  });
+
+  it("keeps hiding a composition that is scrolled into the scrollback", () => {
+    // Non-goal of #553, pinned so it cannot drift: the preview is anchored to a buffer
+    // row, so painting it while the viewport shows history would put it on the wrong
+    // line. Measured — it comes back intact at the live bottom with nothing lost, so
+    // this branch outranks composition on purpose.
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        viewportScrolledUp: true,
+        compositionActive: true,
+        isAltBufferActive: true,
+      }),
+    ).toBe("hidden");
   });
 
   it("hides the caret while the user is viewing scrollback", () => {

@@ -1298,6 +1298,78 @@ describe("TerminalView", () => {
     });
   });
 
+  it("renders the IME composition preview in the alt buffer", async () => {
+    // Issue #553: a fullscreen TUI drives its own cursor, so the alt buffer branch
+    // stops laymux drawing a caret — but it also stopped the composition preview, and
+    // xterm's own composition view is hidden unconditionally in index.css. In vim the
+    // composing jamo was therefore invisible with no way to see it, before any
+    // scrolling. Anchoring is simpler here than in the normal buffer: the alt buffer
+    // has no scrollback, so `baseY` is 0 and the absolute-row conversion is identity.
+    render(<TerminalView instanceId="t-ime-alt" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-alt", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-alt");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // Enter the alt buffer the way a TUI does. Asserted rather than optional-chained so
+    // a registration-key change names itself instead of surfacing as a wrong pixel.
+    expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([1049]);
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 3;
+
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      // 80x24 over 800x480 → 10x20 px cells. Column 5, row 3 — the live buffer cursor,
+      // which is where vim put it.
+      expect(preview.style.transform).toBe("translate(50px, 60px)");
+    });
+  });
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 

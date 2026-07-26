@@ -819,13 +819,17 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (!input.opened || !input.focused || input.syncOutputActive) {
     return "hidden";
   }
-  if (input.isAltBufferActive) {
-    return "alt-buffer";
-  }
+  // Scrolled into the scrollback: nothing may paint, composition included. The
+  // preview is anchored to a buffer row, so drawing it against a viewport that is
+  // showing history puts it on the wrong line — and the user is not looking at the
+  // input line anyway. Measured: the preview disappears on scroll and comes back
+  // intact at the live bottom, with no text lost, so hiding here is correct rather
+  // than a gap to close (issue #553 non-goals).
   if (input.viewportScrolledUp) {
     return "hidden";
   }
-  // Composition outranks the caret policy gate below (issue #551).
+  // Composition outranks the caret policy gate below (issue #551) and the alt buffer
+  // (issue #553).
   //
   // The two decisions are not the same kind of thing. `stabilizeInteractiveCursor`
   // and `overlayActivity` decide whether laymux owns the *caret* — a policy that
@@ -837,11 +841,23 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   // renderer at all for in-flight composition — invisible, no underline, in every
   // shell and every non-Codex TUI.
   //
-  // It stays *below* opened/focused/syncOutputActive, alt-buffer and
-  // viewportScrolledUp: those are genuine "not visible / geometry not trustworthy"
-  // conditions, and painting a preview against them would place it wrongly.
+  // The alt buffer is the same kind of question as the caret policy: a fullscreen TUI
+  // drives its own cursor, so a shadow-cursor caret is meaningless there. That says
+  // nothing about the text the user is typing, and vim showed the consequence — the
+  // composing jamo was invisible with no way to see it, before any scrolling.
+  // Anchoring is in fact simpler in the alt buffer: it has no scrollback, so `baseY`
+  // is always 0 and the absolute-row conversion is the identity. vim emits neither an
+  // OSC 133 prompt nor a sync frame, so `computeUseShadowCursor` is false and the
+  // anchor comes from the live buffer cursor — which is exactly where vim put it.
+  //
+  // It stays *below* opened/focused/syncOutputActive and viewportScrolledUp: those are
+  // genuine "not visible / geometry not trustworthy" conditions, and painting a
+  // preview against them would place it wrongly.
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  if (input.isAltBufferActive) {
+    return "alt-buffer";
   }
   if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
     return "hidden";
