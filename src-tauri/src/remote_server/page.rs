@@ -87,6 +87,40 @@ mod tests {
         settings.remote
     }
 
+    /// Issue #561: leaving the page releases the lease (ADR-0037) and a long
+    /// background expires it, so returning always meant tapping Connect again.
+    /// The return trip is now armed — but only from a visible document, and a
+    /// definitive refusal disarms it (ADR-0027 stays intact for takeovers).
+    #[test]
+    fn remote_page_html_auto_reconnects_only_from_a_visible_document() {
+        let html = remote_page_html();
+        // Survives tab discard: a long mobile background usually throws the
+        // document away, which is exactly the trip this exists for.
+        assert!(html.contains("const autoConnectKey = \"laymux.remote.autoConnect\";"));
+        assert!(html.contains("function maybeAutoConnect()"));
+        assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
+        assert!(html.contains(
+            "if (leaseId || autoConnectInFlight || !autoConnectArmed() || !token()) return;"
+        ));
+        // Three signals for one moment: tab switch, bfcache restore, network back.
+        assert!(html.contains("document.addEventListener(\"visibilitychange\", () => {"));
+        assert!(html.contains("window.addEventListener(\"pageshow\", () => maybeAutoConnect());"));
+        assert!(html.contains("window.addEventListener(\"online\", () => maybeAutoConnect());"));
+        // Connecting arms the intent; releasing on purpose withdraws it.
+        assert!(html.contains("armAutoConnect();"));
+        assert!(html.contains("disarmAutoConnect();"));
+        // A host takeover ends the standing intent; a heartbeat timeout does not.
+        assert!(
+            html.contains("function loseRemoteControl(message, { hostTookOver = false } = {}) {")
+        );
+        assert!(html.contains("if (hostTookOver) disarmAutoConnect();"));
+        assert!(html.contains("hostTookOver: isFatalRemoteControlError(err),"));
+        // Definitive refusals (401/403/409) are answers, not hiccups.
+        assert!(html.contains("if (isFatalRemoteControlError(err)) {"));
+        assert!(html.contains("scheduleAutoConnectRetry();"));
+        assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
+    }
+
     #[test]
     fn remote_page_html_contains_remote_bootstrap() {
         let html = remote_page_html();
@@ -167,7 +201,7 @@ mod tests {
         assert!(html.contains("rect.width < 20 || rect.height < 20"));
         assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
         assert!(html.contains("function scheduleTerminalRefresh()"));
-        assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("function loseRemoteControl(message, { hostTookOver = false } = {})"));
         assert!(html.contains("const OUTPUT_RECONNECT_INITIAL_DELAY_MS"));
         assert!(html.contains("const OUTPUT_RECONNECT_MAX_DELAY_MS"));
         assert!(html.contains("function scheduleOutputReconnect(terminalId, outputLeaseId)"));

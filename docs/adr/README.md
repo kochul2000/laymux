@@ -80,6 +80,7 @@ ADR 이 필요한 대표 기준:
 | [0060](0060-linux-ime-candidate-key-suppression.md) | Linux IME 후보 선택 키는 IME 소비 표식 + orphan companion 으로만 억제 (0053 유보 확정) | Proposed |
 | [0061](0061-native-ime-candidate-anchor.md) | native IME 후보창은 두 커서가 갈릴 때만 helper 위치를 shadow cursor 앵커로 옮김 (0053 정정) | Proposed |
 | [0062](0062-composition-commit-keypress-race.md) | 조합 commit 중복은 pending commit 텍스트와의 포함 판정으로만 억제 | Proposed |
+| [0063](0063-remote-foreground-auto-reclaim.md) | Remote 재접속은 문서가 보일 때만 자동 claim (ADR-0027 마지막 항목을 이 범위로 좁힘) | Proposed |
 
 ## 새 ADR 추가
 

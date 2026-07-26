@@ -1731,16 +1731,25 @@
         // storage of a LIVE original — which is empty — so no clone can
         // present the capability and hijack the controller lease.
         const resumeTokenKey = "laymux.remote.resumeToken";
+        // Survives reload/tab discard: mobile usually throws the document away
+        // during a long background, so an in-memory flag would never see the
+        // return trip this exists for (issue #561).
+        const autoConnectKey = "laymux.remote.autoConnect";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
         const HEARTBEAT_INTERVAL_MAX_MS = 5000;
         const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;
+        const AUTO_CONNECT_RETRY_BASE_MS = 1000;
+        const AUTO_CONNECT_RETRY_MAX_MS = 15000;
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
         let leaseId = null;
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
+        let autoConnectTimer = null;
+        let autoConnectAttempt = 0;
+        let autoConnectInFlight = false;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
         let heartbeatInFlight = false;
@@ -3887,7 +3896,9 @@
         function handleHeartbeatError(err) {
           if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
-            loseRemoteControl(`Control returned to the host. ${err.message}`);
+            loseRemoteControl(`Control returned to the host. ${err.message}`, {
+              hostTookOver: isFatalRemoteControlError(err),
+            });
             return;
           }
           scheduleTransientConnectionNotice("heartbeat");
@@ -5267,7 +5278,77 @@
           throw new Error("Remote control claim was cancelled.");
         }
 
-        async function connect() {
+        // Reconnecting after a long background (issue #561). Leaving the page
+        // releases the lease (ADR-0037 pagehide release) and a long absence expires
+        // it anyway, so coming back always found a disconnected page and cost a
+        // deliberate Connect tap. Arm the return trip instead: connecting once says
+        // "I want this tab in control", pressing Release says the opposite.
+        //
+        // ADR-0027 refused to auto-claim after the server confirmed a loss, because a
+        // hidden tab must not take control back from someone at the PC. That still
+        // holds — every attempt here is tied to the document becoming *visible*, and
+        // a definitive refusal (401/403/409: bad token, remote disabled, someone else
+        // holds control, local reclaim lockout) disarms it until the user acts.
+        function armAutoConnect() {
+          autoConnectAttempt = 0;
+          try {
+            localStorage.setItem(autoConnectKey, "1");
+          } catch (_) {}
+        }
+
+        function disarmAutoConnect() {
+          cancelAutoConnectRetry();
+          autoConnectAttempt = 0;
+          try {
+            localStorage.removeItem(autoConnectKey);
+          } catch (_) {}
+        }
+
+        function autoConnectArmed() {
+          try {
+            return localStorage.getItem(autoConnectKey) === "1";
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function cancelAutoConnectRetry() {
+          if (autoConnectTimer) {
+            clearTimeout(autoConnectTimer);
+            autoConnectTimer = null;
+          }
+        }
+
+        function autoConnectRetryDelayMs() {
+          const delay = AUTO_CONNECT_RETRY_BASE_MS * 2 ** Math.min(autoConnectAttempt, 4);
+          return Math.min(delay, AUTO_CONNECT_RETRY_MAX_MS);
+        }
+
+        function maybeAutoConnect() {
+          cancelAutoConnectRetry();
+          // Visibility is the whole safety argument: never claim from the background.
+          if (document.visibilityState !== "visible") return;
+          if (leaseId || autoConnectInFlight || !autoConnectArmed() || !token()) return;
+          autoConnectInFlight = true;
+          connect({ auto: true })
+            .catch(() => {})
+            .finally(() => {
+              autoConnectInFlight = false;
+            });
+        }
+
+        function scheduleAutoConnectRetry() {
+          if (autoConnectTimer || !autoConnectArmed()) return;
+          if (document.visibilityState !== "visible") return;
+          const delay = autoConnectRetryDelayMs();
+          autoConnectAttempt += 1;
+          autoConnectTimer = setTimeout(() => {
+            autoConnectTimer = null;
+            maybeAutoConnect();
+          }, delay);
+        }
+
+        async function connect({ auto = false } = {}) {
           if (!token()) {
             setStatus("Remote token is required.", true);
             return;
@@ -5275,7 +5356,7 @@
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
           localStorage.setItem(tokenKey, token());
-          setStatus("Claiming remote control...");
+          setStatus(auto ? "Reconnecting..." : "Claiming remote control...");
           try {
             const status = await claimRemoteControl(attemptRevision);
             if (attemptRevision !== claimAttemptRevision) {
@@ -5283,6 +5364,7 @@
               return;
             }
             leaseId = status.leaseId;
+            armAutoConnect();
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
             fileViewerToken = status.fileViewerToken || null;
@@ -5296,6 +5378,22 @@
             const failedLease = leaseId;
             disconnect(false);
             if (failedLease) await releaseLease(failedLease).catch(() => {});
+            // A definitive refusal is an answer, not a hiccup: the host reclaimed,
+            // another client holds control, remote access is off, or the token is
+            // wrong. Retrying cannot change any of those, and quietly hammering the
+            // host would be exactly the takeover ADR-0027 refused. Requires the user.
+            if (isFatalRemoteControlError(err)) {
+              disarmAutoConnect();
+              setStatus(err.message, true);
+              return;
+            }
+            if (auto) {
+              scheduleAutoConnectRetry();
+              // Transient (offline, relay still down): keep the reason visible but
+              // do not paint it as a failure the user has to act on.
+              setStatus(`Reconnecting... ${err.message}`);
+              return;
+            }
             setStatus(err.message, true);
           }
         }
@@ -6355,6 +6453,8 @@
 
         async function release() {
           if (!leaseId) return;
+          // Releasing on purpose withdraws the standing intent to hold control.
+          disarmAutoConnect();
           const currentLease = leaseId;
           await releaseLease(currentLease);
           disconnect(false);
@@ -6430,8 +6530,14 @@
           }
         }
 
-        function loseRemoteControl(message) {
+        function loseRemoteControl(message, { hostTookOver = false } = {}) {
           const lostLeaseId = leaseId;
+          // Two very different losses arrive here. A definitive server answer means
+          // someone at the host took control — the standing intent to reconnect is
+          // over until the user says otherwise (ADR-0027). A heartbeat timeout means
+          // *we* went away (backgrounded, radio asleep, relay down), which is the
+          // case issue #561 is about: stay armed and take the lease back on return.
+          if (hostTookOver) disarmAutoConnect();
           // The server confirmed the loss; the capability must not seed a
           // takeover on the next claim (ADR-0027: no auto reclaim after loss).
           discardResumeToken();
@@ -6441,6 +6547,9 @@
           setStatus(message, true);
           setNavigationOpen(true);
           if (lostLeaseId) releaseLease(lostLeaseId).catch(() => {});
+          // Visible and still armed: the tab never left, so nothing will fire a
+          // visibility transition to retry on.
+          if (!hostTookOver) scheduleAutoConnectRetry();
         }
 
         emptyNav(workspaceListEl, "Not connected.");
@@ -6766,6 +6875,16 @@
         // pagehide (not beforeunload) is the only teardown event mobile
         // browsers fire reliably, and it also covers bfcache entry.
         window.addEventListener("pagehide", releaseLeaseOnPageHide);
+        // The mirror of the pagehide release: coming back re-claims. Three signals
+        // for the same moment — a tab switch (visibilitychange), a bfcache restore
+        // that fires no visibilitychange (pageshow), and a network that returns
+        // while the page is already open (online).
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") maybeAutoConnect();
+          else cancelAutoConnectRetry();
+        });
+        window.addEventListener("pageshow", () => maybeAutoConnect());
+        window.addEventListener("online", () => maybeAutoConnect());
         // A bfcache restore resumes this same document: reclaim the stashed
         // capability so it is back in memory only, out of any clone's reach.
         window.addEventListener("pageshow", (event) => {
