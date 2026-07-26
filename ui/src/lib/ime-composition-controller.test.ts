@@ -1439,6 +1439,73 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
+  it("does not commit a cancelled composition on blur", async () => {
+    // Esc ends the composition with `data: ""`. Nothing may be committed even though
+    // xterm's send is still pending and the previous syllable is still in the
+    // controller's captured text — reading the event's own data is what tells the two
+    // apart, and without it the cancelled syllable was injected (issue #555 review).
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 150,
+      getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
+      getXtermPendingSend: () => true,
+      onCommit: (text) => committed.push(text),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    // A syllable is composed and committed normally first, so the captured text is
+    // non-empty going into the cancel.
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uac00";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uac00\ub098";
+    textarea.selectionStart = 2;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub098" }));
+    await tick();
+
+    // Esc: the composition ends carrying nothing.
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "" }));
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("blur"));
+
+    expect(committed).toEqual([]);
+    controller.dispose();
+  });
+
+  it("does not re-send a finalized syllable whose send already went out", async () => {
+    // The window the review pointed at: xterm's timer runs first and sends, then a blur
+    // task lands before this controller's deferred reset has cleared its captured text.
+    // Nothing may go out — and what makes that true is `pending`, not the captured
+    // text's lifetime, so pin the combination rather than the lifetime.
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 150,
+      getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
+      getXtermPendingSend: () => false,
+      onCommit: (text) => committed.push(text),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uac00";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+
+    // Still in pending-finalize, captured text still present, but the send is done.
+    textarea.value = "";
+    textarea.dispatchEvent(new Event("blur"));
+
+    expect(committed).toEqual([]);
+    controller.dispose();
+  });
   it("does not commit an empty composition on blur", async () => {
     // The window between `compositionstart` and the first sync, and the same window
     // after a carry-over: active but nothing to show yet. Nothing to commit either.

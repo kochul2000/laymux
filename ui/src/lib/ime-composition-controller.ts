@@ -630,14 +630,25 @@ export function createImeCompositionController(
     schedulePreviewSync();
   };
 
-  const handleCompositionEnd = () => {
+  const handleCompositionEnd = (event?: CompositionEvent) => {
     // Don't finalize immediately — schedule a deferred reset.
     // If a new compositionstart arrives in the same event-loop tick
     // (Korean carry-over), we cancel this timeout and continue.
     // This mirrors WT's pattern where OnEndComposition decrements
     // the counter and only finalizes when it reaches 0.
     phase = "pending-finalize";
-    lastFinalizedText = state.text;
+    // Read the event's own data. It is the only thing that distinguishes a commit
+    // from a cancel: pressing Esc mid-composition ends it with `data: ""`, and
+    // without looking at that this would keep the previous syllable and inject it if
+    // a blur followed (issue #555 review). `compositionupdate` is already trusted
+    // the same way a few lines up, so the posture is consistent.
+    //
+    // Fall back to the preview text only when the event is absent — a synthetic
+    // dispatch, or a browser that omits `data`. `state.text` can still be empty when
+    // the last `compositionupdate` has not reached its deferred sync yet, so the
+    // synchronous `latestCompositionDisplayText` backs it up.
+    lastFinalizedText =
+      typeof event?.data === "string" ? event.data : state.text || latestCompositionDisplayText;
     latestCompositionDisplayText = "";
 
     traceComposition(options, "ime-composition-end", {
@@ -708,7 +719,11 @@ export function createImeCompositionController(
     // listener order.
     const xtermSendPending = options.getXtermPendingSend?.() ?? false;
     const doomedFinalized = xtermSendPending ? lastFinalizedText : "";
-    const inFlight = phase === "composing" ? state.text : "";
+    // `state.text` lags: the preview sync is deferred to a rAF/timeout, so a blur can
+    // arrive before the last `compositionupdate` has been applied. The display text from
+    // that update is synchronous and, per the preview logic, the same source — so it is a
+    // backstop, not a different value.
+    const inFlight = phase === "composing" ? state.text || latestCompositionDisplayText : "";
     const commitOnBlur = doomedFinalized + inFlight;
     traceComposition(options, "ime-composition-blur-reset", {
       phase,

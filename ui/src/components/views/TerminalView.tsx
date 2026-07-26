@@ -1254,9 +1254,17 @@ export function TerminalView({
       // tests read the same fields, so a shape change fails loudly before shipping.
       getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
       onCommit: (text) => {
-        if (!localTerminalControlAllowed()) return;
+        // The blur commit now runs on the main ordering, so both exits need to be
+        // visible: a gated-out commit and a failed write are silent syllable losses
+        // otherwise, and they look identical to the bug this fixes.
+        if (!localTerminalControlAllowed()) {
+          trace("ime-composition-commit-on-blur-blocked", { text, reason: "remote-control" });
+          return;
+        }
         trace("ime-composition-commit-on-blur", { text });
-        writeToTerminal(instanceId, text).catch(() => {});
+        writeToTerminal(instanceId, text).catch((error: unknown) => {
+          trace("ime-composition-commit-on-blur-failed", { text, error: String(error) });
+        });
       },
       getAnchor: () => {
         // Prefer the shadow cursor only when it is actually the trusted position.

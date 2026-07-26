@@ -518,6 +518,10 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **리더가 `null` 이면 "pending 아님" 으로 떨어진다** — 그 빌드에서는 유실이 되살아나지만, 포커스 이동마다 음절이 중복되는 것보다 낫다. xterm 계약 테스트가 같은 필드를 읽으므로 형태 변경은 배포 전에 큰 소리로 실패한다.
 - **결함이 테스트로 못박혀 있던 네 번째 사례.** `"resets when the textarea blurs mid-composition (missed compositionend defense)"` 가 리셋만 단정해 유실을 정답으로 고정했다. stuck 방어 단정은 유지하고 유실 쪽만 갈랐다.
 - **취소는 확정이 아니다.** blur 에만 적용되며 Esc 등 명시적 취소 경로는 건드리지 않는다.
+- **확정되는 것은 "IME 가 들고 있던 것" 이 아니라 "화면에서 본 것" 이다.** `syncPreview` 의 previewText 분기가 `latestCompositionDisplayText` 를 승격하므로 `state.text` 는 textarea 변경 범위보다 긴 IME 표시 문자열일 수 있다. 한국어에서는 둘이 같고, 일본어 변환 중 blur 도 Windows IME 동작(확정)과 맞으므로 이 선택이 맞다. 반대 방향 보강도 필요하다 — `state.text` 는 deferred sync 대기값이라 마지막 `compositionupdate` 의 sync 전에 end/blur 가 오면 비어 있다. `latestCompositionDisplayText` 는 동기로 들어오고 위 의미론상 같은 소스라 `state.text || latestCompositionDisplayText` 로 받는다.
+- **취소는 `compositionend` 의 `data` 로 판정한다.** Esc 는 `data: ""` 로 조합을 끝낸다. 이벤트 인자를 읽지 않던 동안에는 낡은 `lastFinalizedText` 가 남아 있어 그 뒤 blur 가 오면 **취소한 음절이 주입됐다**. `compositionupdate` 의 `event.data` 는 이미 신뢰하므로 태도도 일관된다. 이벤트가 없는 경우(합성 dispatch 등)에만 프리뷰 텍스트로 떨어진다.
+- **경계 기록**: 한 태스크에 `compositionend` 가 두 번 오면 xterm 의 타이머가 둘 큐잉되고 첫 타이머가 단일 슬롯 플래그를 내려 두 번째는 아무것도 보내지 않는다. 그 창에서 `lastFinalizedText` 는 두 번째 텍스트만 들고 있어 첫 번째는 살릴 수 없다 — xterm 자체의 단일 슬롯 한계이고 이 판정의 결함은 아니다.
+- **`pending` 이 안전을 만들고 캡처 수명은 load-bearing 이 아니다**: 정상 flush 후 blur 창은 실제로 존재한다(xterm 타이머가 먼저 전송하고 우리 deferred reset 전에 blur 가 끼어든다). 그때 캡처는 남아 있지만 `pending` 이 거짓이라 재전송되지 않는다. 그래서 테스트가 고정하는 것은 수명이 아니라 **조합**이다 — "pending 거짓 + 캡처 남아 있음 → 커밋 없음".
 - **미검증**: 실기 확인 필요
 ---
 
