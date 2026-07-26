@@ -602,7 +602,8 @@ composer 모드로 vim 을 쓰면 `가나다라` 를 친 뒤 **Enter 도 Backspa
 - **판정 소유자는 `webgl-atlas-rebuild.ts` 하나다.** "atlas 가 지워졌다 → 누가 다시 그려야 하는가" 를 이 모듈만 답한다. `TerminalView` 는 마운트에서 재구성 콜백을 등록(instance id 키)하고, `rebuildTerminalRenderer()` 에서 보고만 한다.
 - **리페인트로는 못 고친다.** `WebglRenderer._updateModel()` 은 code·색이 모델 캐시와 같은 셀을 건너뛴다. `refresh(0, rows-1)` 은 행을 훑되 vertex 를 다시 쓰지 않으므로 stale 좌표가 살아남는다. 그래서 재구성은 **`clearTextureAtlas()` + 전체 refresh** 다 — 모델을 비워야 모든 셀이 `updateCell()` 을 다시 통과한다. 이미 비어 있는 atlas 에 대한 `clearTexture()` 는 early-return 이라 전원 호출이 안전하다.
 - **왜 조용한 pane 만 깨지나.** 워크스페이스 복귀에서는 pane 들이 한 task 안에서 함께 지우므로 서로를 해치지 않는다. 문제는 출력이 많은 pane 의 fit 이 write drain 을 기다리다 **뒤늦게 혼자 지울 때**다(계측: 일괄 clear 3건 뒤 525ms 만에 1건 추가). 그 시점에 이미 리페인트를 끝낸 pane 이 stale 이 되고, 바쁜 pane 은 스스로 계속 다시 그려 낫는다. `watch` 처럼 부분만 갱신하는 pane 이 가장 오래 깨진 채 남는다.
-- **coalesce 는 microtask 하나.** 같은 task 의 clear 여러 건을 한 pass 로 덮고 다음 paint 전에 끝낸다. rAF 로 넓히면 clear 와 재구성 사이에 깨진 프레임이 한 번 보인다.
+- **coalesce 는 microtask 하나.** 같은 task 의 clear 여러 건을 한 pass 로 덮고 다음 paint 전에 끝낸다. pane 마다 `ResizeObserver` 가 따로 있으므로 워크스페이스 복귀는 **pane 당 pass 하나**가 되어 N pane 이면 O(N²) 재구성이다. rAF 로 넓히면 pass 는 줄지만 clear 와 재구성 사이에 깨진 프레임이 한 번 보인다 — 막으려던 그 화면이다.
+- **단독 보고자는 건너뛰되, 자기 재구성이 실패했으면 보고자로 안 쳐준다.** wipe 는 공유 atlas 에 닿았는데 자기 모델만 안 비워진 상태라 남들과 똑같이 stale 이기 때문이다. pass 중에 올라온 보고는 무시한다(재구성 콜백이 되보고하면 microtask 무한 재예약).
 - **범위: 공유 여부를 우리가 계산하지 않는다.** xterm 은 "누가 이 atlas 를 쓰는가" 를 노출하지 않고, `configEquals` 를 재현하면 같은 질문의 소유자가 둘이 된다(§8.19 의 실패 패턴). 통보는 등록된 전 터미널에 보낸다.
 - **역검증**: `notifyTextureAtlasCleared()` 를 제거하면 같은 재현 스크립트에서 조용한 pane 전체가 다시 조각난다(실기 확인). 단위 테스트도 실패한다.
 - **미검증**: 저사양 GPU·소프트웨어 렌더링 폴백, 폰트 config 가 서로 다른 pane 이 섞인 구성, 원격(브라우저) 렌더러.

@@ -39,7 +39,10 @@ laymux 는 `TerminalView` 의 `rebuildTerminalRenderer()` 에서 이 API 를 부
 
 - 새 모듈 `ui/src/lib/webgl-atlas-rebuild.ts` 가 "atlas 가 지워졌다 → 누가 다시 그려야 하는가" 판정을 **단독으로** 소유한다. `TerminalView` 는 마운트 시 자기 재구성 콜백을 등록하고, `rebuildTerminalRenderer()` 에서 `notifyTextureAtlasCleared()` 로 보고한다.
 - 재구성은 `refresh()` 가 아니라 **`clearTextureAtlas()` + 전체 viewport refresh** 다. 모델을 비워야 모든 셀이 `updateCell()` 을 다시 통과한다. `clearTexture()` 는 페이지가 이미 비어 있으면 early-return 하므로, 전원 호출은 첫 호출만 wipe 하고 나머지는 자기 모델만 비운다.
-- 보고는 **microtask 하나로 coalesce** 한다. 워크스페이스 복귀처럼 한 task 안에서 여러 pane 이 지우는 경우 한 번의 pass 로 덮고, 다음 paint 전에 끝난다.
+- 보고는 **microtask 하나로 coalesce** 한다. 같은 task 의 clear 는 한 pass 로 덮고 다음 paint 전에 끝난다. **task 가 다르면 pass 도 다르다** — `TerminalView` 는 pane 마다 자기 `ResizeObserver` 를 만들고 콜백 사이에 microtask checkpoint 가 돌므로, 워크스페이스 복귀는 pane 당 pass 하나씩 나온다(아래 Consequences).
+- **단독 보고자는 건너뛴다.** 보고자는 보고 직전에 자기 렌더러를 재구성했고, `renderRows` 는 rAF, `warmUp` 은 idle task 뒤라 그 사이 atlas 에 글리프가 들어갈 수 없다. 단 **자기 재구성이 실패했으면 보고자 자격을 주지 않는다**(`selfRebuilt=false`) — wipe 는 이미 공유 atlas 에 닿았는데 자기 모델만 안 비워진 상태라 남들과 똑같이 stale 이다.
+- 보고자가 둘 이상이면 보고자 포함 전원을 재구성한다. 첫 보고자가 stale 이라서가 아니라(그 모델은 비어 있다) — skip 은 최적화일 뿐이고, 그 정당성을 "두 번째 wipe 가 이미 빈 atlas 에 떨어진다" 는 추론 위에 세우지 않기 위해서다.
+- pass 중에 올라온 보고는 무시한다. 재구성 콜백이 되보고하면 microtask 가 무한 재예약돼 이벤트 루프가 굶는다. 콜백이 그러면 안 되지만, 가드가 있으면 실수 비용이 hang 이 아니라 무시가 된다.
 - 등록 키는 **terminal instance id 하나**다. paneId 로 두 번 등록하면 같은 터미널을 두 번 재구성한다.
 
 ## Alternatives Considered
@@ -52,6 +55,7 @@ laymux 는 `TerminalView` 의 `rebuildTerminalRenderer()` 에서 이 API 를 부
 ## Consequences
 
 - hide/show·resize·폰트/DPR 변경 때마다 **모든 터미널**이 모델을 비우고 한 번 다시 그린다. 이 사건들은 원래 리페인트를 동반하므로 추가 비용은 pane 수에 비례하는 모델 재구성 1회다. 상시 출력 경로에는 영향이 없다.
-- 한 task 안의 clear 는 한 pass 로 합쳐지지만, **task 가 다르면 pass 도 다르다.** 워크스페이스 복귀처럼 pane 별 ResizeObserver 콜백이 나뉘어 오면 pass 가 몇 번 더 돈다. 관측상 3 pass(6 터미널 × 3)였고, 이 정도는 허용한다 — rAF 로 넓히면 clear 와 재구성 사이에 프레임이 하나 끼어 깨진 프레임이 보일 수 있다.
+- 한 task 안의 clear 는 한 pass 로 합쳐지지만, **task 가 다르면 pass 도 다르다.** pane 마다 `ResizeObserver` 가 따로 있고 콜백 사이에 microtask checkpoint 가 돌므로, N pane 복귀는 **N pass × N 재구성 = O(N²)** 이다(관측: 6 터미널에서 3 pass). 한 프레임에 몰리는 vertex 배열 wipe 이므로 렌더는 debouncer 가 터미널당 1회로 합치지만, pane 이 아주 많아지면 이 비용이 먼저 보일 것이다. rAF 로 창을 넓히면 pass 는 1회로 줄지만 clear 와 재구성 사이에 paint 가 끼어 **깨진 프레임이 실제로 보인다** — 이 모듈이 막으려는 바로 그 화면이라 microtask 를 택했다.
+- 같은 이유로 "보고자 둘 이상" 가지는 실전에서 거의 타지 않는다. 남겨 둔 것은 보수적 안전판이다.
 - `atlas-rebuild` cursor-trace 이벤트를 남긴다. 이 결함은 계측 없이는 순서를 못 보므로(위 타임라인이 그 예) 게이트된 상태로 유지한다.
 - **미검증**: 저사양 GPU·소프트웨어 렌더링 폴백, 서로 다른 폰트 config 가 섞인 pane 구성, 원격(브라우저) 렌더러. 확인한 조합은 Windows 11 / WebView2 / 같은 프로파일 pane 3–6개다.

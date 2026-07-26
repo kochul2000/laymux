@@ -2919,19 +2919,29 @@ export function TerminalView({
     // must not report back into the coordinator.
     const rebuildRendererLocal = () => {
       trace("atlas-rebuild");
+      let cleared = true;
       try {
         (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
       } catch {
-        /* older xterm builds / mocks may lack this method */
+        // `?.()` already covers "method missing", so this is a real failure: the
+        // atlas may be wiped while this terminal's model was not cleared. Say so
+        // — a reporter that did not come back up must not be skipped (#571).
+        cleared = false;
       }
       terminal.refresh(0, terminal.rows - 1);
+      return cleared;
     };
     const rebuildTerminalRenderer = () => {
-      rebuildRendererLocal();
-      // The atlas is shared with every terminal on the same render config, and
-      // xterm re-syncs only the caller's model — the rest keep stale texture
-      // coordinates and draw glyph fragments (issue #571).
-      notifyTextureAtlasCleared(instanceId);
+      let selfRebuilt = false;
+      try {
+        selfRebuilt = rebuildRendererLocal();
+      } finally {
+        // The atlas is shared with every terminal on the same render config, and
+        // xterm re-syncs only the caller's model — the rest keep stale texture
+        // coordinates and draw glyph fragments (issue #571). Report even if the
+        // rebuild threw: the wipe may already have landed on the shared atlas.
+        notifyTextureAtlasCleared(instanceId, selfRebuilt);
+      }
       bindHelperTextareaEvents();
       scheduleOverlayCaretUpdate();
     };

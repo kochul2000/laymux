@@ -182,7 +182,9 @@ vi.mock("@xterm/xterm", () => ({
     getSelection = mockGetSelection;
     clearSelection = mockClearSelection;
     refresh = mockRefresh;
-    clearTextureAtlas = mockClearTextureAtlas;
+    // Passes itself so a test can tell *which* terminals were cleared, not just
+    // how many calls happened (issue #571).
+    clearTextureAtlas = () => mockClearTextureAtlas(this);
     reset = mockReset;
     dispose = vi.fn();
     loadAddon = vi.fn();
@@ -4961,6 +4963,50 @@ describe("TerminalView", () => {
     } finally {
       unregisterAtlasRebuilder("t-atlas-bystander");
     }
+  });
+
+  // The rebuild sent to the other terminals has to clear their atlas, not just
+  // repaint them: `_updateModel` skips cells whose contents are unchanged, so a
+  // refresh rewrites none of the stale vertices (issue #571).
+  it("clears the other terminal's atlas, not merely repaints it (issue #571)", async () => {
+    render(
+      <TerminalView
+        instanceId="t-atlas-a"
+        paneId="pane-atlas-a"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+    render(
+      <TerminalView
+        instanceId="t-atlas-b"
+        paneId="pane-atlas-b"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    // Both mounts do their own atlas rebuild; let that settle before measuring,
+    // otherwise the bystander looks cleared when nothing reached it.
+    await vi.waitFor(() => {
+      expect(new Set(mockClearTextureAtlas.mock.calls.map(([term]) => term)).size).toBe(2);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    mockClearTextureAtlas.mockClear();
+
+    act(() => {
+      useOverridesStore.getState().setViewOverride("pane-atlas-a", { fontSize: 20 });
+    });
+
+    // Both terminals must have had their atlas cleared: the one whose font
+    // changed, and the bystander reached through the coordinator. A
+    // refresh-only fan-out would only ever clear the first.
+    await vi.waitFor(() => {
+      const cleared = new Set(mockClearTextureAtlas.mock.calls.map(([term]) => term));
+      expect(cleared.size).toBe(2);
+    });
   });
 
   it("waits for write drain before font, DPR, and scrollbar geometry reflows", async () => {
