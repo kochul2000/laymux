@@ -1329,6 +1329,35 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
+      // The cursor the app left after its last settled repaint. Raw buffer cursor,
+      // not the shadow: the shadow is frozen for the composition and lags an echo
+      // behind (measured on Codex at a wrap — buffer 6, shadow 4 on the same row).
+      //
+      // Withheld wherever the position is not a settled caret (issue #569):
+      //  - a DEC 2026 frame is open, or a save/restore repaint is in flight — the
+      //    cursor is parked mid-draw;
+      //  - `parkPending`: Codex closes `?2026l` with the cursor still on its footer
+      //    and sends the real park ~15ms later in the next chunk, so the position
+      //    right after the flush is the footer row, not the input caret;
+      //  - the alt buffer, whose rows are a different coordinate space than the
+      //    scrollback-relative anchor, and sync-output, which is a repaint by
+      //    another name.
+      getSettledCursor: () => {
+        const shadow = shadowCursorRef.current;
+        if (
+          shadow.isDec2026FrameOpen ||
+          shadow.isRepaintInProgress ||
+          shadow.parkPending ||
+          shadow.isAltBufferActive ||
+          syncOutputActiveRef.current
+        ) {
+          return null;
+        }
+        return {
+          cursorX: (terminal.buffer.active as { cursorX?: number }).cursorX ?? 0,
+          cursorAbsY: getBufferCursorAbsY(terminal),
+        };
+      },
       // A blur mid-composition would otherwise drop the syllable: xterm clears the
       // helper textarea and sends nothing (measured). Route it exactly like typed
       // input so the remote-control gate still applies (issue #555).
@@ -2175,7 +2204,13 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
-      if (compositionPreviewRef.current.active) return;
+      if (compositionPreviewRef.current.active) {
+        // The shadow cursor stays frozen for the composition, but the *text* the
+        // app just echoed is a fact, and it is the only thing that knows where an
+        // app-owned input box actually put it (issue #569).
+        compositionController.notifyEchoLanded();
+        return;
+      }
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
