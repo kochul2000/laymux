@@ -597,6 +597,7 @@ describe("createImeCompositionController", () => {
   it("tracks only the active composition slice instead of the whole textarea value", async () => {
     const states: string[] = [];
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 4, cursorAbsY: 9 }),
       onStateChange: (state) => {
         states.push(state.text);
@@ -652,6 +653,7 @@ describe("createImeCompositionController", () => {
     async function typeGaNaDa(
       liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>,
       startAnchor: { cursorX: number; cursorAbsY: number } = { cursorX: 0, cursorAbsY: 5 },
+      cols = 150,
     ) {
       const snapshots: Array<{ text: string; anchorX: number; width: number }> = [];
       const carryOverTraces: Array<Record<string, unknown>> = [];
@@ -659,7 +661,8 @@ describe("createImeCompositionController", () => {
       // default is a stale anchor. `shadowAdvances` covers the other ordering.
       let anchor = startAnchor;
       const controller = createImeCompositionController({
-        getAnchor: () => anchor,
+        getCols: () => cols,
+      getAnchor: () => anchor,
         onTrace: (event, payload) => {
           if (event === "ime-composition-start-carryover") carryOverTraces.push(payload);
         },
@@ -787,9 +790,13 @@ describe("createImeCompositionController", () => {
           { cursorX: 2, cursorAbsY: 6 },
         ],
         { cursorX: 74, cursorAbsY: 5 },
+        75,
       );
+      // The live reading is genuinely ahead here: xterm pushes the whole wide glyph
+      // to the next row rather than splitting it, leaving column 74 blank, so the
+      // echoed cursor is at row 6 column 2 while arithmetic says 76 (row 6 column 1).
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor-rebase-row",
+        "shadow-cursor-rebase-ahead",
         "chain-committed-width",
       ]);
       // Second carry-over derives from the re-based origin (2), not the dead 74.
@@ -800,6 +807,87 @@ describe("createImeCompositionController", () => {
       expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
     });
 
+    it("does not adopt a lagging live reading just because the row wrapped", async () => {
+      // Measured on a 150-column shell (issue #551): origin 148, one echo of lag.
+      //
+      //   1st  derived 150  live (148, row)      -> derived
+      //   2nd  derived 152  live (150, row)      -> derived
+      //   3rd  derived 154  live (2, row + 1)    -> derived  (154 == row+1 col 4)
+      //
+      // The third is the one that used to break. A bare row-change test called it a
+      // moved origin and adopted (2, row + 1), which is one syllable behind — and
+      // because adoption re-bases, the deficit then persisted: five jamo typed, four
+      // drawn. The row change is fully explained by the committed width, so
+      // arithmetic wins and the layout normalizes 154 into row + 1 column 4.
+      const cols = 150;
+      const chainRow = 5;
+      const traces = [];
+      let anchor = { cursorX: 148, cursorAbsY: chainRow };
+      const controller = createImeCompositionController({
+        getCols: () => cols,
+        getAnchor: () => anchor,
+        onTrace: (event, payload) => {
+          if (event === "ime-composition-start-carryover") traces.push(payload);
+        },
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+
+      const setValue = (v) => {
+        textarea.value = v;
+        textarea.selectionStart = v.length;
+        textarea.selectionEnd = v.length;
+      };
+      const compose = async (value, data) => {
+        setValue(value);
+        textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data }));
+        textarea.dispatchEvent(new Event("input"));
+        await tick();
+      };
+      // Each syllable finalizes the previous one and starts the next in the same
+      // tick, which is what makes it a carry-over chain.
+      const carryOver = async (committed, value, data, liveAfterEcho) => {
+        textarea.dispatchEvent(new CompositionEvent("compositionend", { data: committed }));
+        anchor = liveAfterEcho;
+        textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        await compose(value, data);
+      };
+
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00", "\uac00");
+      // The echo has not landed at all yet, so the live cursor is still the origin.
+      await carryOver("\uac00", "\uac00\ub098", "\ub098", { cursorX: 148, cursorAbsY: chainRow });
+      // One syllable echoed: pending-wrap column on the same row.
+      await carryOver("\ub098", "\uac00\ub098\ub2e4", "\ub2e4", { cursorX: 150, cursorAbsY: chainRow });
+      // Two echoed: the shell wrapped, so the live cursor is on the next row while a
+      // third syllable is already committed.
+      await carryOver("\ub2e4", "\uac00\ub098\ub2e4\ub77c", "\ub77c", { cursorX: 2, cursorAbsY: chainRow + 1 });
+
+      const final = controller.getState();
+      controller.dispose();
+
+      expect(traces.map((x) => x.anchorSource)).toEqual([
+        "chain-committed-width",
+        "chain-committed-width",
+        "chain-committed-width",
+      ]);
+      expect(traces.map((x) => x.derivedX)).toEqual([150, 152, 154]);
+      expect(final).toMatchObject({ anchorBufferX: 154, anchorBufferAbsY: chainRow });
+      // 154 on a 150-column terminal is row + 1, column 4 — where the fourth
+      // syllable actually belongs.
+      expect(
+        getCompositionPreviewLayout(
+          {
+            text: "\ub77c",
+            anchorBufferX: 154,
+            anchorBufferAbsY: chainRow,
+            caretCellOffset: 2,
+            textCellWidth: 2,
+          },
+          cols,
+        ).rows,
+      ).toEqual([{ text: "\ub77c", startColumn: 4, rowOffset: 1, cellWidth: 2 }]);
+    });
     it("re-bases on a row change in either direction", async () => {
       // A row change means the arithmetic origin is dead, whatever the direction, and
       // every way the input row can move *up* mid-chain keeps the composition valid:
@@ -879,6 +967,7 @@ describe("createImeCompositionController", () => {
   });
   it("resets after compositionend once the deferred finalize fires", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
     });
     const textarea = document.createElement("textarea");
@@ -908,6 +997,7 @@ describe("createImeCompositionController", () => {
 
   it("detects carry-over when compositionstart fires before the deferred reset", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -947,6 +1037,7 @@ describe("createImeCompositionController", () => {
 
   it("detects carry-over even when compositionupdate data differs from finalized text", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -986,6 +1077,7 @@ describe("createImeCompositionController", () => {
 
   it("starts a fresh composition after the deferred reset fires", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -1023,6 +1115,7 @@ describe("createImeCompositionController", () => {
 
   it("clears helper-textarea residue after the deferred finalize", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -1044,6 +1137,7 @@ describe("createImeCompositionController", () => {
 
   it("still clears residue when the commit's own input event arrives after compositionend", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -1074,6 +1168,7 @@ describe("createImeCompositionController", () => {
 
   it("keeps the textarea untouched when input races in after compositionend", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -1099,6 +1194,7 @@ describe("createImeCompositionController", () => {
 
   it("resets when the textarea blurs mid-composition (missed compositionend defense)", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
     });
     const textarea = document.createElement("textarea");
@@ -1126,6 +1222,7 @@ describe("createImeCompositionController", () => {
 
   it("treats consecutive same-tick compositions as carry-over", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");

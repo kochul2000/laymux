@@ -14,6 +14,24 @@ export type CompositionPreviewState = {
 
 type CompositionControllerOptions = {
   getAnchor: () => { cursorX: number; cursorAbsY: number };
+  /**
+   * Live column count, used only to tell two kinds of row change apart at a
+   * carry-over (issue #551):
+   *
+   *  - the committed text wrapped, so the live cursor legitimately sits on
+   *    `chainRow + floor(derived / cols)`. Arithmetic already knows the answer and
+   *    the layout normalizes the out-of-range column, so the live reading — which
+   *    lags the echo — must NOT be adopted.
+   *  - something moved the input line itself (a shell reprinting one row up, IL/DL
+   *    inside a scroll region, the scrollback cap dropping rows). Arithmetic cannot
+   *    know that, so the live reading becomes the new origin.
+   *
+   * #541 rejected passing `cols` in to do the controller's own wrapping. This is a
+   * different use: wrapping stays in `getCompositionPreviewLayout`, and `cols` only
+   * classifies a row change. Return 0 when unknown — the classifier then treats
+   * every row change as unexplained, which is the pre-existing behaviour.
+   */
+  getCols: () => number;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
 };
@@ -424,14 +442,28 @@ export function createImeCompositionController(
       // effectively never fires. It is the buffer-cursor (shell) path that actually
       // exercises the re-base.
       const live = options.getAnchor();
-      const rowChanged = live.cursorAbsY !== chainAnchor.cursorAbsY;
-      const liveAhead = !rowChanged && live.cursorX > derived.cursorX;
+      const cols = options.getCols();
+      // Where the committed text says the live cursor should be once it has caught
+      // up. Measured on a 150-column shell: origin 148, three syllables committed,
+      // `derived` 154 — that is row+1 column 4, and the live cursor reported
+      // (2, row+1) because it had echoed only two. Adopting it there dropped a
+      // syllable of advance and, because the adoption also re-bases, the deficit
+      // then persisted for the rest of the chain: five jamo typed, four drawn.
+      const derivedRow =
+        chainAnchor.cursorAbsY + (cols > 0 ? Math.floor(derived.cursorX / cols) : 0);
+      const rowExplainedByWrap = live.cursorAbsY === derivedRow;
+      // Compare on one axis, in cells measured from the chain origin's row, so a
+      // wrapped live reading is not mistaken for a moved one.
+      const liveAbs =
+        live.cursorX + (cols > 0 ? (live.cursorAbsY - chainAnchor.cursorAbsY) * cols : 0);
+      const originMoved = !rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY;
+      const liveAhead = !originMoved && liveAbs > derived.cursorX;
       let anchorSource: string;
-      if (rowChanged || liveAhead) {
+      if (originMoved || liveAhead) {
         chainAnchor = live;
         chainBaseText = committedBase;
         compositionAnchor = live;
-        anchorSource = rowChanged ? "shadow-cursor-rebase-row" : "shadow-cursor-rebase-ahead";
+        anchorSource = originMoved ? "shadow-cursor-rebase-row" : "shadow-cursor-rebase-ahead";
       } else {
         compositionAnchor = derived;
         anchorSource = "chain-committed-width";

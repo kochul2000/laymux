@@ -1244,6 +1244,7 @@ export function TerminalView({
       overlayCaretUpdaterRef.current?.();
     };
     const compositionController = createImeCompositionController({
+      getCols: () => terminal.cols,
       getAnchor: () => {
         // Prefer the shadow cursor only when it is actually the trusted position.
         // TUI apps (Claude Code, Codex, …) move the buffer cursor to the
