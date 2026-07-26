@@ -457,6 +457,45 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **번들 패치는 하지 않았다**: 상류 `_keyPress` 수정이 정론이지만 patch 인프라와 버전 상향 비용이 확정적으로 붙는다. 같은 판정 지점에서 xterm 자신의 pending 플래그를 읽어 없는 guard 를 적용하는 방식으로 대체했고, 상류에 guard 가 들어오면 제거 대상이다.
 - **미검증**: 실 IBus 이벤트열이 이 순서와 같은지, 그리고 **유실 방향**(pending 창 동안 textarea 값이 바뀌는 경로)은 재현하지 않았다 — 중복 방향만 재현했다.
 
+### 8.15 조합 프리뷰 가시성은 activity 와 무관하다 (issue #551)
+
+조합 프리뷰는 **caret 이 아니라 사용자가 입력 중인 텍스트**다. 두 결정이 한 게이트에 묶여 있어서, Codex 아닌 모든 페인(맨 셸 포함)에서 조합 중 자모가 **아무 데도 렌더되지 않았다** — 글리프도 밑줄도 없었다.
+
+- **렌더러가 하나뿐이다**: `ui/src/index.css` 의 `.xterm .composition-view { visibility: hidden !important }` 는 xterm 네이티브 조합 표시를 **무조건** 끈다(조합 활성 클래스에 묶으면 compositionend 누락 시 stale 텍스트가 노출되므로 의도된 무조건이다). 따라서 조합 중 텍스트를 그릴 주체는 laymux 오버레이(`.terminal-composition-preview`) **하나뿐**이고, 그것이 꺼지면 대체 렌더러가 없다.
+- **게이트가 두 겹이었다**: `TerminalView.tsx` 의 오버레이 rAF 조기 반환이 `stabilizeInteractiveCursor`·`isOverlayCaretActivity` 로 끊고, 통과해도 `resolveVisualCaretOwner` 안에서 같은 두 조건이 `compositionActive` 검사 **위**에 있어 `"hidden"` 으로 떨어졌다. 한쪽만 고치면 증상이 남는다.
+- **판정**: `compositionActive → "composition-preview"` 를 caret 정책 게이트 **위로** 올린다. `stabilizeInteractiveCursor`·`overlayActivity` 는 laymux 가 **caret** 을 소유하는지에 대한 정책이고(Codex 가 repaint 중 커서를 footer 로 주차하므로 shadow cursor 캐럿이 필요한 것), 조합 텍스트 가시성과는 다른 종류의 질문이다.
+- **경계는 유지한다**: `opened`/`focused`/`syncOutputActive`, `isAltBufferActive`, `viewportScrolledUp` **아래**에 둔다. 그것들은 "보이지 않는다 / 지오메트리를 신뢰할 수 없다" 는 진짜 조건이고, 그 상태에서 프리뷰를 그리면 잘못된 위치에 찍힌다.
+- **부수 효과(의도됨)**: 비-Codex 페인이 조합 중일 때 `caretOwner === "composition-preview"` 가 되므로 (1) 오버레이 캐럿이 프리뷰 커서에 그려지고 — 조합 중에는 `hideNativeCursor` 가 네이티브 커서를 배경색 1px bar 로 만들므로 이게 없으면 캐럿이 사라진다 — (2) `syncHelperAnchor` 가 실행되어 OS 후보창이 조합 커서에 앵커된다(§8.13 의 확장).
+- **결함이 테스트로 못박혀 있었다**: `ime-composition-controller.test.ts` 의 `"hides composition preview when overlay caret activity is off (non-Codex)"` 가 `"hidden"` 을 정답으로 단정하고 있었다. 교체했다.
+- **역검증**: 우선순위를 되돌리면 새 단위 테스트 2건이 실패하고(`expected 'hidden' to be 'composition-preview'`), 조기 반환을 되돌리면 컴포넌트 테스트에서 `preview.textContent` 가 `''` 로 떨어진다 — 신고된 증상 그대로다.
+- **미검증**: alt 버퍼는 건드리지 않았다. 확인된 두 케이스(맨 셸·Claude Code)는 모두 normal 버퍼이고, 전체화면 TUI(vim 등)에서 조합이 보이는지는 확인하지 않았다. `isAltBufferActive` 가 먼저 잡으므로 **거기서는 여전히 안 보인다** — 별 판정이 필요하다.
+- **앵커 출처는 `computeUseShadowCursor` 가 정한다**: 게이트를 열자 앵커가 틀린 것이 드러났다. `getAnchor` 가 **무조건** shadow cursor 를 읽고 있었는데 그 근거("TUI 가 repaint 중 커서를 footer 로 옮긴다")는 Codex 계열에만 성립한다. 계측으로 확인: `ls` 뒤의 PowerShell 프롬프트는 OSC 133 `D` 만 보내고 `B` 를 안 보내므로 `isInputPhase` 가 false 로 남고, `shadow-sync-skip { reason: "inactive" }` 가 찍히며 shadow 가 버퍼보다 **한 행 뒤처진다**(shadowAbsY 256 / bufferAbsY 257). 프리뷰는 이전 행 열 0 에 그려졌다 — 숨은 게 아니라 **엉뚱한 곳에 그려진 것**이고, 사용자에게는 "안 보인다" 로 보였다. 깨끗한 프롬프트에서 되던 이유는 그때 두 값이 우연히 같았기 때문이다. 판정은 이 리포의 기존 술어 `computeUseShadowCursor = (hasPromptBoundary && isInputPhase) || hasSyncFramePosition` 를 따르고, false 면 라이브 버퍼 커서를 쓴다. 실측이 두 케이스를 정확히 가른다 — 셸은 false, Codex 는 `hasSyncFramePosition: true` 로 true.
+- **carry-over 앵커는 체인 시작에서 유도하고, 행이 바뀌면 원점을 다시 잡는다**: #546 수정(PR #548)이 넣은 `echoed` 판정에 결함이 있었다. 그 판정은 "shadow 가 움직였다" 를 "shadow 가 확정분을 다 따라잡았다" 로 취급한다. Codex 실측: `ㄱㄱㄱ` 에서 두 번째 carry-over 시점에 PTY 는 **첫 자모만** 에코했으므로 shadow 는 열 2 인데 확정분은 두 자모(4 셀)였다. 그걸 채택하며 산술로 맞춰둔 4 가 **뒤로 끌려가** 세 번째 자모가 두 번째 위에 겹쳐 그려졌고, 프리뷰가 `ㄱㄱ` 에 멈춘 것처럼 보였다.
+  - **판정**: 앵커는 `chainAnchor + width(체인 시작 이후 확정분)` 로 유도한다. lag 거부는 **같은 행 안에서만** 한다 — 늦게 도착한 에코는 같은 텍스트가 더 큰 열에 앉는 것이라 행을 바꾸지 않는다.
+  - **행 변화 = 산술 원점 무효 신호**이며 방향을 묻지 않는다. 채택할 때 `chainAnchor`·`chainBaseText` 를 **다시 잡는다**. 재기준화가 빠지면 wrap 경계를 넘은 직후부터 `derived` 가 죽은 원점에서 계산돼 조건이 영구 참이 되고, 위에서 없앤 "한 에코 뒤진 값 채택" 이 그대로 되살아난다(cols 75, 원점 열 74, 에코 1개 지연 → 2차에서 정답 (4,6) 대신 (2,6) 채택 → 세 번째 음절이 두 번째 위에 겹친다). 오른쪽 여백 근처 한글 입력에서 닿는다.
+  - 행이 **위로** 가는 경우도 전부 유효한 조합이므로 같이 따라간다 — 셸이 입력행을 한 줄 위에서 재출력(CUP·`ESC[A`; PSReadLine 멀티라인, 2줄 zsh 프롬프트), 스크롤 리전 내 IL/DL/RI, scrollback 상한 도달로 오래된 행 폐기 시 고정 행의 절대 인덱스 감소. 한때 "절대 행이라 스크롤로 안 변한다" 를 근거로 이 셋을 거부했는데, 그 근거는 **뷰포트 스크롤만** 배제한다.
+  - **행 전진 규칙의 단일 소유자는 `advanceCells(originColumn, text, cols)` 다**: 처음에는 carry-over 가 `원점 + 폭` 로 앵커를 구하고 레이아웃이 `% cols` 로 접었는데, 그 둘은 **같은 규칙의 두 구현**이고 실제로 갈라져 있었다.
+    리뷰가 커밋된 xterm 번들을 실행해 측정한 표가 근거다 — 남은 칸이 글리프 폭보다 작으면 xterm 은 **마지막 열을 pad 하고 글리프를 통째로 다음 행에** 놓는다:
+
+    | cols | 원점 | xterm 실측 | `% cols` 예측 |
+    |---|---|---|---|
+    | 75 | 73 | `(75, 0)` pending-wrap | 일치 |
+    | 150 | 148 | `(150, 0)` pending-wrap | 일치 |
+    | 150 | 147 | `(149, 0)` | 일치 |
+    | **75** | **74** | **`(2, +1)`** | `(1, +1)` — **1셀 불일치** |
+    | **80** | **79** | **`(2, +1)`** | `(1, +1)` — **1셀 불일치** |
+
+    그 1셀은 다음 carry-over 의 라이브 채택이 덮어주므로 **경계 음절이 체인의 마지막일 때만** 드러난다 — 오른쪽 여백에서 한 음절 치고 스페이스로 확정하는 평범한 흐름이다. `advanceCells` 가 클러스터·pad 를 함께 인식해 이 케이스를 없애고, 그 결과 wrap 경계에서 **라이브 값을 아예 참조하지 않는다**. 실측 표 5행을 그대로 단위 테스트로 고정했다.
+  - **행 변화의 분류**: `derivedRow = chainRow + advance.rowOffset` 와 라이브 행이 같으면 wrap 으로 설명된 것이라 산술을 유지하고, 다르면 원점이 실제로 움직인 것(셸의 상향 redraw, 스크롤 리전 `IL/DL/RI`, scrollback 상한)이라 라이브를 새 원점으로 삼는다. 뒤로 간 라이브가 wrap 으로 오분류될 수 없다 — `advance.rowOffset >= 0` 이므로 `live.absY < chainRow` 는 `derivedRow` 와 같아질 수 없다.
+  - **리사이즈는 원점과 함께 `cols` 를 캡처해 강제 rebase 한다**: xterm 이 reflow 하면 원점이 가리키던 행 자체가 이동하고, 행 델타를 옛 `cols` 로 누적한 값에 새 `cols` 를 곱하게 된다. 분류가 우연히 `originMoved` 로 떨어져 자기치유하던 것을 `chainCols` 비교로 결정적으로 만들었다(`shadow-cursor-rebase-resize`).
+  - **정규화된 앵커는 레이아웃이 반환한다**: `anchorColumn` / `anchorRowOffset` 를 함께 돌려주고 렌더러의 컨테이너와 행이 **둘 다 그것을** 쓴다. 한때 컨테이너만 렌더러에서 따로 정규화했다가 행 오프셋을 이중 계산해 프리뷰가 자기 캐럿보다 한 행 아래로 떨어졌다. 위험은 값이 아니라 암묵적 계약이었다 — `anchorBufferX` 를 화면 열로 직접 읽는 소비자가 생기면 즉시 틀린다. 이제 원시 앵커가 컴포넌트로 새지 않는다.
+    - 예외 한 곳: `cols <= 0` 조기 반환은 정규화 기준이 없어 원시 앵커를 그대로 통과시킨다. 렌더러는 그 경로에 닿지 않는다.
+    캐럿 경로(`getCompositionPreviewCursor`)는 `% cols` · `Math.floor(/ cols)` 로 정규화했지만 rows 루프는 안 했다 — wrap 분기가 **무조건 열 0** 으로 접으므로 범위 밖 앵커가 전부 다음 행 열 0 에 그려졌다. 앵커 150 은 우연히 맞고 152 는 **그 위에 겹쳐서**, 경계를 걸치는 체인의 두 번째 음절이 첫 번째 아래로 사라졌다.
+    실측으로 잡았다 — cols 150, 앵커 150 → 152 → 재기준화 (2,186), 사용자 관측은 1번째 보임 / 2번째 안 보임 / 3번째에 2개. 이제 루프 진입에서 앵커를 정규화하고(`anchorRowOffset` / `anchorColumn`), TerminalView 의 프리뷰 컨테이너 배치도 같은 정규화를 쓴다 — 원시 열로 두면 컨테이너가 터미널 박스 밖에 놓이고 행별 translate 로 끌어오는 데 의존해 클리핑 위험이 있다.
+  - 이것이 리뷰가 "`cols` 를 모르는 한 불가피한 한 음절 구간" 이라고 적은 구멍의 실제 정체였다. **컨트롤러에 `cols` 를 넘길 필요가 없다** — 레이아웃이 이미 받는다. #541 에서 기각된 API 확장 없이 닫혔다. 그리고 에코 지연과 무관하다: 천천히 입력해도 재현된다.
+  - **적용 범위**: shadow cursor 를 앵커로 쓰는 페인에서는 조합 중 `getShadowSyncEligibility` 가 `composition-preview-active` 를 먼저 돌려주어 라이브가 얼어 있으므로 행 변화 분기가 사실상 발생하지 않는다. 재기준화를 실제로 태우는 것은 버퍼 커서(셸) 경로다.
+- **여기서도 결함이 테스트로 못박혀 있었다**: `"adopts a shadow cursor that moved backwards"` 와 helper 앵커 테스트 2건이 그렇다. 후자는 "TUI 가 커서를 footer 에 주차했고 shadow 가 진값" 이라는 상태를 **단정만** 하고 그 상태를 만드는 DEC 2026 프레임을 구동하지 않아서, `computeUseShadowCursor` 가 false 인 합성 상태였다. 실측이 보여준 실제 흐름(프레임 열기 → 커서 주차 → 프레임 닫기)을 구동하도록 고쳤다 — 단정이 아니라 재현이다.
+- **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

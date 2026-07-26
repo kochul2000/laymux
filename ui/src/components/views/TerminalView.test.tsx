@@ -1067,6 +1067,237 @@ describe("TerminalView", () => {
     });
   });
 
+  it("renders the IME composition preview in a non-Codex pane", async () => {
+    // Issue #551: the overlay gate required Codex activity, so a bare shell (and
+    // every non-Codex TUI) painted nothing for in-flight composition — no glyph and
+    // no underline, because xterm's own composition view is hidden unconditionally
+    // in index.css. Same driving sequence as the Codex tests, shell activity only.
+    render(<TerminalView instanceId="t-ime-shell" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-shell", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-shell");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-shell");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-shell");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 4;
+    terminal.buffer.active.cursorY = 2;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    // The reported case: two committed jamo plus one still composing.
+    helper.value = "ㄱㄱ";
+    helper.selectionStart = 2;
+    helper.selectionEnd = 2;
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱㄱㄱ";
+    helper.selectionStart = 3;
+    helper.selectionEnd = 3;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      expect(preview.style.opacity).toBe("1");
+      // The caret follows the preview here too: xterm's native cursor is hidden
+      // while composing, so without this the pane would have no caret at all.
+      expect(overlay.style.opacity).toBe("1");
+    });
+  });
+
+  it("anchors the IME preview on the buffer cursor when the shadow cursor is not trusted", async () => {
+    // Issue #551, measured on a real PowerShell pane: after `ls` the prompt emits
+    // OSC 133 `D` but no `B`, so `isInputPhase` stays false, the shadow sync is
+    // skipped ("inactive") and the shadow cursor sits a row behind the buffer.
+    // Reading it unconditionally painted the preview on the previous row at column
+    // 0 — off where the user types, which reads as "nothing appears".
+    //
+    // No OSC 133 `B` here, so `computeUseShadowCursor` is false and the live buffer
+    // cursor must win.
+    render(<TerminalView instanceId="t-ime-buf" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-buf", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-buf");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-buf");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // The shadow cursor is left at its initial 0,0 — the stale state the trace
+    // showed. The buffer cursor is where the user actually is.
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 3;
+
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      // 80x24 over 800x480 → 10x20 px cells. Column 5, row 3 — not 0,0.
+      expect(preview.style.transform).toBe("translate(50px, 60px)");
+    });
+  });
+
+  it("places the IME preview correctly when the anchor sits on the right edge", async () => {
+    // Issue #551, measured: xterm's pending-wrap cursor reports `cursorX === cols`
+    // after a row is filled to its last column. The layout normalizes that into
+    // `startColumn` + `rowOffset`, and each row is positioned relative to the *raw*
+    // container origin by `row.startColumn - anchorX`. Normalizing the container too
+    // double-counts the row offset and drops the preview a row below its own caret,
+    // which the unit tests on the layout alone cannot see.
+    render(<TerminalView instanceId="t-ime-edge" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-edge", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-edge");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-edge");
+    const overlay = screen.getByTestId("terminal-overlay-caret-t-ime-edge");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // 80x24 over 800x480 → 10x20 px cells. Column 80 is one past the last column.
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 80;
+    terminal.buffer.active.cursorY = 4;
+    await act(async () => {
+      await oscHandlers.get("133")?.("B");
+    });
+
+    act(() => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "가";
+      helper.selectionStart = 1;
+      helper.selectionEnd = 1;
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("input"));
+    });
+
+    await vi.waitFor(() => {
+      const rows = preview.querySelectorAll(".terminal-composition-preview-row");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("가");
+      // Container and rows both come from the layout's normalized anchor, so the
+      // container already sits on column 0 of row 5 and the row adds nothing. The
+      // earlier form put the container on the raw column 80 and relied on the row to
+      // translate back by -800px; deriving that normalization in the renderer as well
+      // double-counted the row offset, which is what this test exists to pin.
+      expect(preview.style.transform).toBe("translate(0px, 100px)");
+      expect(rows[0]).toHaveStyle({ transform: "translate(0px, 0px)" });
+      // The caret must land on the same row as the glyph it follows.
+      expect(overlay.style.transform).toBe("translate(20px, 100px)");
+    });
+  });
+
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 
@@ -3657,8 +3888,29 @@ describe("TerminalView", () => {
       helper.style.top = "320px";
       // A TUI repaint parked the public cursor on the footer row; the shadow
       // cursor (and therefore the composition anchor) is still at 0,0.
+      //
+      // Drive the DEC 2026 frame that actually produces that state instead of
+      // assuming it: the frame open snapshots the true input position, the TUI
+      // parks the public cursor, the frame close makes the snapshot authoritative
+      // (`hasSyncFramePosition`). That flag is what `computeUseShadowCursor` reads,
+      // and the real Codex trace in issue #551 shows it set here. Without it the
+      // shadow cursor is not trustworthy and the buffer cursor is the better anchor.
+      //
+      // Assert the handler is there: the call below is optional-chained, so a change
+      // in the registration key would make it a silent no-op and this test would
+      // fail as "helper at the wrong pixel" instead of naming the real cause.
+      expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+      mockBufferActive.cursorX = 0;
+      mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
       mockBufferActive.cursorX = 40;
       mockBufferActive.cursorY = 20;
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
 
       startComposition(helper);
 
@@ -3686,10 +3938,23 @@ describe("TerminalView", () => {
       // would be visible.
       helper.style.left = "0px";
       helper.style.top = "0px";
+      // Same DEC 2026 frame as the diverging case, so the shadow cursor at 0,0 is
+      // the authoritative anchor (see that test for why the frame is driven, and why
+      // the handlers are asserted rather than optional-chained blindly).
+      expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+      mockBufferActive.cursorX = 0;
+      mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
       // Public cursor already sits on the composition caret cell (column 2 —
       // after the 2-cell Hangul syllable), so there is nothing to correct.
       mockBufferActive.cursorX = 2;
       mockBufferActive.cursorY = 0;
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
 
       startComposition(helper);
       // Give the overlay update the same number of frames the diverging case

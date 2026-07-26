@@ -84,6 +84,7 @@ import {
   applyDectcemHideToShadowCursor,
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
+  computeUseShadowCursor,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -1243,15 +1244,41 @@ export function TerminalView({
       overlayCaretUpdaterRef.current?.();
     };
     const compositionController = createImeCompositionController({
+      getCols: () => terminal.cols,
       getAnchor: () => {
-        // Use the shadow cursor, not the buffer cursor.  TUI apps (Claude Code,
-        // Codex, etc.) move the buffer cursor to the footer/status-bar during
-        // repaints, so reading it here would place the composition preview in
-        // the wrong row.  The shadow cursor tracks the real input position.
+        // Prefer the shadow cursor only when it is actually the trusted position.
+        // TUI apps (Claude Code, Codex, …) move the buffer cursor to the
+        // footer/status-bar during repaints, which is why the shadow cursor exists
+        // — but that reasoning does not hold everywhere, and `computeUseShadowCursor`
+        // is this repo's existing predicate for "is the shadow snapshot trustworthy
+        // right now".
+        //
+        // Reading the shadow unconditionally broke plain shells (issue #551): a
+        // PowerShell prompt after `ls` emits OSC 133 `D` but no `B`, so
+        // `isInputPhase` stays false and `shadow-sync-skip { reason: "inactive" }`
+        // leaves the shadow a row behind the buffer. The preview then painted on the
+        // previous row at column 0 — off where the user is typing, so it read as
+        // "nothing appears". On a pristine prompt the two happened to coincide,
+        // which is why it looked like it worked.
+        //
+        // `computeUseShadowCursor` alone is not the right test: it answers "is the
+        // shadow snapshot trustworthy", while this call site asks "which of the two
+        // is closer to the real input position". Those are not complements. A TUI
+        // mid-repaint has parked the public cursor on its footer row without
+        // necessarily having a sync frame or an input phase, and falling back to the
+        // buffer there would paint the preview on the footer — the exact failure the
+        // original comment warned about. `isRepaintInProgress` covers that gap.
         const shadow = shadowCursorRef.current;
+        if (computeUseShadowCursor(shadow) || shadow.isRepaintInProgress) {
+          return {
+            cursorX: shadow.cursorX,
+            cursorAbsY: shadow.cursorAbsY,
+          };
+        }
+        const buffer = terminal.buffer.active as { cursorX?: number };
         return {
-          cursorX: shadow.cursorX,
-          cursorAbsY: shadow.cursorAbsY,
+          cursorX: buffer.cursorX ?? 0,
+          cursorAbsY: getBufferCursorAbsY(terminal),
         };
       },
       onTrace: (event, payload) => {
@@ -1400,13 +1427,13 @@ export function TerminalView({
         restoreHelperAnchor("overlay-hidden");
       };
 
-      if (
-        !openedRef.current ||
-        !isFocusedRef.current ||
-        !stabilizeInteractiveCursorRef.current ||
-        !isOverlayCaretActivity(activityRef.current) ||
-        syncOutputActiveRef.current
-      ) {
+      // Only the conditions under which *nothing* may be painted belong here.
+      // `stabilizeInteractiveCursor` and `isOverlayCaretActivity` are caret-policy
+      // inputs, not visibility conditions — returning on them hid the composition
+      // preview in every non-Codex pane (issue #551). They are still passed to
+      // `resolveVisualCaretOwner` below, which returns "hidden" for them whenever no
+      // composition is in flight, so the caret behaviour is unchanged.
+      if (!openedRef.current || !isFocusedRef.current || syncOutputActiveRef.current) {
         hideOverlay();
         trace("overlay-hidden", {
           reason: "gating",
@@ -1503,8 +1530,15 @@ export function TerminalView({
         cursorX = previewLayout.cursorX;
         cursorY = previewLayout.cursorAbsY - baseY;
         if (compositionPreview.text) {
-          const anchorX = compositionPreview.anchorBufferX;
-          const anchorY = compositionPreview.anchorBufferAbsY - baseY;
+          // Both the container and the rows come from the layout's normalized anchor,
+          // so the offsets cancel by construction: container at `anchorColumn`, each
+          // row at `startColumn - anchorColumn`, absolute column `startColumn`. An
+          // earlier form derived the container's normalization here instead, which
+          // double-counted the row offset and dropped the preview a row below its own
+          // caret (issue #551). Reading `anchorBufferX` as a screen column is the
+          // mistake to avoid — it can sit at or past the right edge.
+          const anchorX = previewLayout.anchorColumn;
+          const anchorY = compositionPreview.anchorBufferAbsY + previewLayout.anchorRowOffset - baseY;
           const previewRows = previewLayout.rows;
           previewEl.style.opacity = "1";
           previewEl.style.transform = `translate(${Math.round(targetRect.left - hostRect.left + anchorX * cellWidth)}px, ${Math.round(
@@ -1516,7 +1550,12 @@ export function TerminalView({
           )}px`;
           previewEl.style.height = `${Math.max(
             1,
-            (Math.max(0, ...previewRows.map((row) => row.rowOffset)) + 1) * cellHeight,
+            (Math.max(
+              0,
+              ...previewRows.map((row) => row.rowOffset - previewLayout.anchorRowOffset),
+            ) +
+              1) *
+              cellHeight,
           )}px`;
           previewEl.style.fontSize = `${term.options.fontSize ?? Math.max(1, cellHeight)}px`;
           previewEl.style.lineHeight = `${Math.max(1, cellHeight)}px`;
@@ -1536,7 +1575,7 @@ export function TerminalView({
             rowEl.style.height = `${Math.max(1, cellHeight)}px`;
             rowEl.style.transform = `translate(${Math.round(
               (row.startColumn - anchorX) * cellWidth,
-            )}px, ${Math.round(row.rowOffset * cellHeight)}px)`;
+            )}px, ${Math.round((row.rowOffset - previewLayout.anchorRowOffset) * cellHeight)}px)`;
           }
           while (previewEl.children.length > previewRows.length) {
             previewEl.lastElementChild?.remove();

@@ -14,6 +14,24 @@ export type CompositionPreviewState = {
 
 type CompositionControllerOptions = {
   getAnchor: () => { cursorX: number; cursorAbsY: number };
+  /**
+   * Live column count, used only to tell two kinds of row change apart at a
+   * carry-over (issue #551):
+   *
+   *  - the committed text wrapped, so the live cursor legitimately sits on
+   *    `chainRow + floor(derived / cols)`. Arithmetic already knows the answer and
+   *    the layout normalizes the out-of-range column, so the live reading — which
+   *    lags the echo — must NOT be adopted.
+   *  - something moved the input line itself (a shell reprinting one row up, IL/DL
+   *    inside a scroll region, the scrollback cap dropping rows). Arithmetic cannot
+   *    know that, so the live reading becomes the new origin.
+   *
+   * #541 rejected passing `cols` in to do the controller's own wrapping. This is a
+   * different use: wrapping stays in `getCompositionPreviewLayout`, and `cols` only
+   * classifies a row change. Return 0 when unknown — the classifier then treats
+   * every row change as unexplained, which is the pre-existing behaviour.
+   */
+  getCols: () => number;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
 };
@@ -89,6 +107,42 @@ export type ImeCompositionController = {
   getState(): CompositionPreviewState;
 };
 
+/**
+ * Where the cursor ends up after xterm writes `text` starting at `originColumn`.
+ *
+ * The single owner of the row-advance rule. Both the carry-over anchor arithmetic
+ * and the preview layout's anchor normalization go through here so the rule cannot
+ * drift between them — #541's objection to duplicating wrap logic applies even when
+ * the second copy is "only" a classifier.
+ *
+ * `originColumn` may be at or past `cols`: xterm's pending-wrap cursor stays at
+ * `cols` until the next write, and the carry-over anchor is derived arithmetically.
+ *
+ * Cluster-aware and pad-aware, matching xterm measured on the committed bundle: when
+ * the remaining space is narrower than the glyph, xterm pads the last column and puts
+ * the whole glyph on the next row. So `advanceCells(74, "가", 75)` is `(2, +1)`, not
+ * the `(1, +1)` that plain `% cols` arithmetic on a 2-cell width would give.
+ */
+export function advanceCells(
+  originColumn: number,
+  text: string,
+  cols: number,
+): { column: number; rowOffset: number } {
+  if (cols <= 0) {
+    return { column: originColumn + stringCellWidth(text), rowOffset: 0 };
+  }
+  let column = originColumn % cols;
+  let rowOffset = Math.floor(originColumn / cols);
+  for (const { width } of splitCellClusters(text)) {
+    if (width > 0 && column + width > cols) {
+      rowOffset += 1;
+      column = 0;
+    }
+    column += width;
+  }
+  return { column, rowOffset };
+}
+
 export function getCompositionPreviewCursor(
   state: Pick<CompositionPreviewState, "anchorBufferX" | "anchorBufferAbsY" | "caretCellOffset">,
   cols: number,
@@ -115,6 +169,15 @@ export function getCompositionPreviewLayout(
 ): {
   cursorX: number;
   cursorAbsY: number;
+  /**
+   * The anchor after normalization, in the same space as `rows[].startColumn` and
+   * `rows[].rowOffset`. Returned so the renderer places its container from these
+   * instead of re-deriving them from the raw `anchorBufferX`: doing that in two
+   * places is what double-counted the row offset and dropped the preview a row
+   * below its own caret.
+   */
+  anchorColumn: number;
+  anchorRowOffset: number;
   rows: Array<{
     text: string;
     startColumn: number;
@@ -125,6 +188,12 @@ export function getCompositionPreviewLayout(
   if (cols <= 0 || !state.text) {
     return {
       ...getCompositionPreviewCursor(state, cols),
+      // The one documented exception to the normalization contract: with no known
+      // column count there is nothing to normalize against, so the raw anchor is
+      // passed through here and in `startColumn` below. Only reachable when
+      // `cols <= 0`, which the renderer never does.
+      anchorColumn: state.anchorBufferX,
+      anchorRowOffset: 0,
       rows: state.text
         ? [
             {
@@ -149,14 +218,31 @@ export function getCompositionPreviewLayout(
     rowOffset: number;
     cellWidth: number;
   }> = [];
-  let currentCol = state.anchorBufferX;
-  let currentRowOffset = 0;
-  let currentRowStartColumn = state.anchorBufferX;
+  // Normalize an anchor column that is at or past the right edge before laying
+  // anything out (issue #551). Two ways it gets there, both legitimate:
+  //
+  //  - xterm's pending-wrap cursor. Fill a row to its last column and
+  //    `buffer.active.cursorX` stays at `cols` until the next write wraps it, so
+  //    the live anchor is reported as column 150 on a 150-column terminal.
+  //  - the carry-over anchor is derived as origin + committed width, which runs
+  //    past the edge while the echo of the wrapping syllable has not arrived.
+  //
+  // The caret path already normalized (`getCompositionPreviewCursor` uses
+  // `% cols` and `floor(/ cols)`); this loop did not. Its wrap branch only ever
+  // resets to column 0, so *every* out-of-range anchor rendered at column 0 of
+  // the next row: 150 landed correctly, 152 landed on top of it, and the second
+  // syllable of a chain crossing the boundary simply vanished under the first.
+  const anchorAdvance = advanceCells(state.anchorBufferX, "", cols);
+  const anchorColumn = anchorAdvance.column;
+  const anchorRowOffset = anchorAdvance.rowOffset;
+  let currentCol = anchorColumn;
+  let currentRowOffset = anchorRowOffset;
+  let currentRowStartColumn = anchorColumn;
   let currentRowText = "";
   let currentRowWidth = 0;
   let consumedCellWidth = 0;
-  let cursorX = state.anchorBufferX;
-  let cursorAbsY = state.anchorBufferAbsY;
+  let cursorX = anchorColumn;
+  let cursorAbsY = state.anchorBufferAbsY + anchorRowOffset;
   let cursorResolved = state.caretCellOffset <= 0;
 
   const flushRow = () => {
@@ -207,6 +293,8 @@ export function getCompositionPreviewLayout(
   return {
     cursorX,
     cursorAbsY,
+    anchorColumn,
+    anchorRowOffset,
     rows,
   };
 }
@@ -234,13 +322,18 @@ export function createImeCompositionController(
   let phase: "idle" | "composing" | "pending-finalize" = "idle";
   let isCarryOver = false;
 
-  // Anchor captured at the first compositionstart — preserved across carry-overs
+  // Where the *current* syllable is painted. Recomputed at every carry-over.
   let compositionAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
-  // Last value actually read from `getAnchor()`. Carry-over compares the live
-  // shadow cursor against this — not against `compositionAnchor`, which may be an
-  // arithmetic value from an earlier carry-over.
-  let lastLiveAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
-  // Textarea value snapshot at the start of the composition chain
+  // Anchor and textarea value as of the chain's *first* compositionstart. The
+  // per-syllable anchor is always `chainAnchor + width(committed since chainBase)`,
+  // never a live reading taken mid-chain — see `handleCompositionStart`.
+  let chainAnchor: BufferAnchor = { cursorX: 0, cursorAbsY: 0 };
+  let chainBaseText = "";
+  // Column count captured with the origin. A reflow invalidates both the origin row
+  // and any row delta measured in the old count, so a change forces a re-base.
+  let chainCols = 0;
+  // Textarea value snapshot at the start of the *current syllable*, so the preview
+  // diff yields only the syllable being composed.
   let compositionBaseText = "";
   // Latest compositionupdate event.data — used for Korean split-time display
   let latestCompositionDisplayText = "";
@@ -288,6 +381,9 @@ export function createImeCompositionController(
     phase = "idle";
     isCarryOver = false;
     compositionAnchor = { cursorX: 0, cursorAbsY: 0 };
+    chainAnchor = { cursorX: 0, cursorAbsY: 0 };
+    chainBaseText = "";
+    chainCols = 0;
     compositionBaseText = "";
     latestCompositionDisplayText = "";
     state = createEmptyState();
@@ -365,45 +461,125 @@ export function createImeCompositionController(
       // grow the preview across the whole sentence (issue #546). Re-base on the
       // current textarea value so `getChangedRange` yields only the new syllable.
       const committedBase = textarea?.value ?? "";
-      const committedWidth = stringCellWidth(committedBase.slice(compositionBaseText.length));
-      // Whether the shadow cursor is usable is a question about **the shadow
-      // cursor**, not about our anchor: `compositionAnchor` may itself be an
-      // arithmetic value from an earlier carry-over, so comparing against it
-      // conflates "did the PTY echo?" with "is the anchor arithmetic?".
+      // Anchor the syllable at the chain's start plus the width of **everything
+      // committed since the chain started** — not by nudging the previous anchor,
+      // and never by adopting a live shadow-cursor reading taken mid-chain.
       //
-      // Compare against the last value we actually read instead. Within the same
-      // tick the PTY has not echoed, so the shadow cursor has not moved and this
-      // is false — direction-agnostic, so a scroll or clear that moves it
-      // backwards is still treated as authoritative rather than ignored.
-      const liveAnchor = options.getAnchor();
-      const echoed =
-        liveAnchor.cursorX !== lastLiveAnchor.cursorX ||
-        liveAnchor.cursorAbsY !== lastLiveAnchor.cursorAbsY;
-      if (echoed) {
-        compositionAnchor = liveAnchor;
-        lastLiveAnchor = liveAnchor;
+      // The live reading is the trap (issue #551). It lags the committed text by
+      // as many syllables as the PTY has not echoed yet, so "the shadow cursor
+      // moved" does not mean "the shadow cursor caught up". Adopting it on the
+      // second carry-over of `ㄱㄱㄱ` regressed a correct arithmetic column 4 back
+      // to the one-echo-behind value 4 when the truth was 6: the third syllable
+      // painted on top of the second and the preview looked frozen at `ㄱㄱ`.
+      //
+      // Deriving from the chain start is monotonic and treats the first and Nth
+      // carry-over identically. `cursorAbsY` is an absolute buffer row, so it does
+      // not move when the viewport scrolls — the chain's row stays valid.
+      const live = options.getAnchor();
+      const cols = options.getCols();
+      const chainCommitted = committedBase.slice(chainBaseText.length);
+      const chainCommittedWidth = stringCellWidth(chainCommitted);
+      // Advance through the shared rule rather than adding the width, so `derived`
+      // knows what plain arithmetic cannot: when the remaining space is narrower than
+      // the glyph, xterm pads the last column and puts the whole glyph on the next
+      // row. Measured — origin 74 on a 75-column terminal advances to (2, +1), while
+      // `74 + 2` normalized by `% cols` claims column 1. That one cell was corrected
+      // by the next carry-over's live reading, so it only showed when the boundary
+      // syllable was the chain's *last* — typing one syllable at the right margin and
+      // confirming with space had no next carry-over to fix it.
+      // Captured before any re-base below so the trace reports the origin this
+      // carry-over actually derived from.
+      const originX = chainAnchor.cursorX;
+      const advance = advanceCells(chainAnchor.cursorX, chainCommitted, cols);
+      // Kept as cells measured from column 0 of the chain's origin row so it stays on
+      // one axis with `liveAbs` below. The layout normalizes it back into a column and
+      // a row offset with the same rule.
+      const derived: BufferAnchor = {
+        cursorX: cols > 0 ? advance.column + advance.rowOffset * cols : advance.column,
+        cursorAbsY: chainAnchor.cursorAbsY,
+      };
+      // A row change means the arithmetic origin is no longer valid, whatever the
+      // direction: xterm pushed a whole wide glyph past the wrap boundary, the shell
+      // reprinted its input line one row up (CUP / `ESC[A` — PSReadLine multi-line,
+      // a two-line zsh prompt), IL/DL/RI moved the row inside a scroll region, or
+      // the scrollback cap dropped old rows so a fixed row's absolute index fell.
+      // All of those keep the composition valid, so the live reading wins and
+      // becomes the new origin. Not re-basing was the bug: `derived` kept being
+      // computed from the dead origin, `liveIsAhead` then stayed true for the rest
+      // of the chain, and the anchor tracked the one-echo-behind live value again —
+      // the very regression this guard exists to stop.
+      //
+      // Lag is rejected only *within* a row, which is sound because an echo arriving
+      // late never changes rows — it is the same text landing at a larger column.
+      //
+      // Scope note: on panes whose anchor comes from the shadow cursor,
+      // `getShadowSyncEligibility` returns `composition-preview-active` while a
+      // composition is open, so the live reading is frozen and the row-change branch
+      // effectively never fires. It is the buffer-cursor (shell) path that actually
+      // exercises the re-base.
+      // Where the committed text says the live cursor should be once it has caught
+      // up — straight out of the shared advance, no second wrap rule. Measured on a
+      // 150-column shell: origin 148, three syllables committed, `derived` 154 — that
+      // is row+1 column 4, and the live cursor reported (2, row+1) because it had
+      // echoed only two. Adopting it there dropped a syllable of advance and, because
+      // adoption re-bases, the deficit then persisted for the rest of the chain: five
+      // jamo typed, four drawn.
+      const derivedRow = chainAnchor.cursorAbsY + advance.rowOffset;
+      const rowExplainedByWrap = live.cursorAbsY === derivedRow;
+      // A reflow moves the row the origin pointed at, so neither the origin nor a row
+      // delta measured in the old column count survives it. Re-base unconditionally
+      // rather than relying on the classifier happening to fall through to
+      // `originMoved` — it does today, but by luck.
+      const colsChanged = chainCols !== 0 && cols !== chainCols;
+      // Compare on one axis, in cells measured from the chain origin's row, so a
+      // wrapped live reading is not mistaken for a moved one.
+      const liveAbs =
+        live.cursorX + (cols > 0 ? (live.cursorAbsY - chainAnchor.cursorAbsY) * cols : 0);
+      const originMoved =
+        colsChanged || (!rowExplainedByWrap && live.cursorAbsY !== chainAnchor.cursorAbsY);
+      const liveAhead = !originMoved && liveAbs > derived.cursorX;
+      let anchorSource: string;
+      if (originMoved || liveAhead) {
+        chainAnchor = live;
+        chainBaseText = committedBase;
+        chainCols = cols;
+        compositionAnchor = live;
+        anchorSource = colsChanged
+          ? "shadow-cursor-rebase-resize"
+          : originMoved
+            ? "shadow-cursor-rebase-row"
+            : "shadow-cursor-rebase-ahead";
       } else {
-        // No round trip yet: advance by the committed text's own cell width.
-        compositionAnchor = {
-          cursorX: compositionAnchor.cursorX + committedWidth,
-          cursorAbsY: compositionAnchor.cursorAbsY,
-        };
+        compositionAnchor = derived;
+        anchorSource = "chain-committed-width";
       }
+      // Re-base the per-syllable diff so `getChangedRange` yields only the new
+      // syllable — the committed one has already gone to the PTY and must leave
+      // the preview (issue #546).
       compositionBaseText = committedBase;
       traceComposition(options, "ime-composition-start-carryover", {
         baseText: compositionBaseText,
         textareaValue: textarea?.value ?? "",
-        committedWidth,
-        anchorSource: echoed ? "shadow-cursor" : "committed-width",
+        chainBaseText,
+        chainCommittedWidth,
+        chainAnchorX: originX,
+        derivedX: derived.cursorX,
+        liveX: live.cursorX,
+        liveAbsY: live.cursorAbsY,
+        anchorSource,
         anchorBufferX: compositionAnchor.cursorX,
         anchorBufferAbsY: compositionAnchor.cursorAbsY,
       });
     } else {
       // Fresh composition start
       isCarryOver = false;
-      compositionAnchor = options.getAnchor();
-      lastLiveAnchor = compositionAnchor;
-      compositionBaseText = textarea?.value ?? "";
+      // The only place a live anchor is read. Everything the chain paints after
+      // this is derived from it arithmetically.
+      chainAnchor = options.getAnchor();
+      chainBaseText = textarea?.value ?? "";
+      chainCols = options.getCols();
+      compositionAnchor = chainAnchor;
+      compositionBaseText = chainBaseText;
       traceComposition(options, "ime-composition-start", {
         baseText: compositionBaseText,
         anchorBufferX: compositionAnchor.cursorX,
@@ -582,11 +758,26 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   if (input.viewportScrolledUp) {
     return "hidden";
   }
-  if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
-    return "hidden";
-  }
+  // Composition outranks the caret policy gate below (issue #551).
+  //
+  // The two decisions are not the same kind of thing. `stabilizeInteractiveCursor`
+  // and `overlayActivity` decide whether laymux owns the *caret* — a policy that
+  // exists because Codex parks its cursor on the footer during repaints, so only
+  // there is a shadow-cursor caret worth drawing. The composition preview is not a
+  // caret: it is the text the user is currently typing, and its native renderer is
+  // switched off unconditionally (`.xterm .composition-view { visibility: hidden }`
+  // in index.css). Gating it on the caret policy left non-Codex panes with no
+  // renderer at all for in-flight composition — invisible, no underline, in every
+  // shell and every non-Codex TUI.
+  //
+  // It stays *below* opened/focused/syncOutputActive, alt-buffer and
+  // viewportScrolledUp: those are genuine "not visible / geometry not trustworthy"
+  // conditions, and painting a preview against them would place it wrongly.
   if (input.compositionActive) {
     return "composition-preview";
+  }
+  if (!input.stabilizeInteractiveCursor || !input.overlayActivity) {
+    return "hidden";
   }
   if (input.cursorHidden) {
     return "hidden";

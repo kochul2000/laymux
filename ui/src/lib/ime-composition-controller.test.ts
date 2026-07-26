@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
 
 import {
+  advanceCells,
   createImeCompositionController,
   getCompositionPreviewCursor,
   getCompositionPreviewLayout,
@@ -86,12 +87,48 @@ describe("resolveVisualCaretOwner", () => {
     ).toBe("composition-preview");
   });
 
-  it("hides composition preview when overlay caret activity is off (non-Codex)", () => {
+  // This case used to assert "hidden" — the defect in issue #551 was pinned as
+  // intended behaviour. The composition preview is the text the user is typing and
+  // its native renderer is switched off unconditionally in index.css, so hiding it
+  // outside Codex left shells and every non-Codex TUI with nothing rendering the
+  // in-flight jamo: no glyph, no underline.
+  it("keeps composition preview when overlay caret activity is off (non-Codex)", () => {
     expect(
       resolveVisualCaretOwner({
         ...baseInput,
         overlayActivity: false,
         compositionActive: true,
+      }),
+    ).toBe("composition-preview");
+  });
+
+  it("keeps composition preview when caret stabilization is off", () => {
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        stabilizeInteractiveCursor: false,
+        compositionActive: true,
+      }),
+    ).toBe("composition-preview");
+  });
+
+  it("still hides the caret outside Codex when no composition is in flight", () => {
+    // The caret policy itself is unchanged: only composition outranks it.
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        overlayActivity: false,
+        compositionActive: false,
+        hasPromptBoundary: true,
+        isInputPhase: true,
+      }),
+    ).toBe("hidden");
+    expect(
+      resolveVisualCaretOwner({
+        ...baseInput,
+        stabilizeInteractiveCursor: false,
+        compositionActive: false,
+        hasSyncFramePosition: true,
       }),
     ).toBe("hidden");
   });
@@ -142,6 +179,49 @@ describe("resolveVisualCaretOwner", () => {
   });
 });
 
+describe("advanceCells", () => {
+  /**
+   * Pinned against real xterm, measured on the committed bundle in jsdom: fill a row
+   * with `a` up to the origin column, write a 2-cell Hangul syllable, read
+   * `buffer.active`. The last two rows are why plain `origin + width` normalized by
+   * `% cols` is not enough — when the remaining space is narrower than the glyph,
+   * xterm pads the final column and puts the whole glyph on the next row.
+   */
+  const HANGUL = "가";
+  it.each([
+    [75, 73, 75, 0],
+    [150, 148, 150, 0],
+    [150, 147, 149, 0],
+    [75, 74, 2, 1],
+    [80, 79, 2, 1],
+  ])(
+    "cols %i, origin %i advances to column %i row +%i",
+    (cols, origin, column, rowOffset) => {
+      expect(advanceCells(origin, HANGUL, cols)).toEqual({ column, rowOffset });
+    },
+  );
+
+  it("normalizes an origin already at or past the right edge", () => {
+    // xterm's pending-wrap cursor reports `cols`, and a derived carry-over anchor can
+    // be further still. Both must fold into a column plus a row offset.
+    expect(advanceCells(150, "", 150)).toEqual({ column: 0, rowOffset: 1 });
+    expect(advanceCells(152, "", 150)).toEqual({ column: 2, rowOffset: 1 });
+    expect(advanceCells(304, "", 150)).toEqual({ column: 4, rowOffset: 2 });
+  });
+
+  it("keeps a grapheme cluster whole across the boundary", () => {
+    // The width that matters is the cluster's, not the code point's — a ZWJ family or
+    // an emoji presentation sequence must not be split.
+    expect(advanceCells(79, FAMILY, 80)).toEqual({ column: 2, rowOffset: 1 });
+    expect(advanceCells(79, `${THUMBS_UP}`, 80)).toEqual({ column: 2, rowOffset: 1 });
+    // Exactly filling the row is not a wrap: the cursor is left pending-wrap on it.
+    expect(advanceCells(78, FAMILY, 80)).toEqual({ column: 80, rowOffset: 0 });
+  });
+
+  it("falls back to plain width when the column count is unknown", () => {
+    expect(advanceCells(10, HANGUL, 0)).toEqual({ column: 12, rowOffset: 0 });
+  });
+});
 describe("getCompositionPreviewCursor", () => {
   it("advances on the same row when the preview stays within the line", () => {
     expect(
@@ -186,7 +266,80 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 8,
       cursorAbsY: 10,
+      anchorColumn: 3,
+      anchorRowOffset: 0,
       rows: [{ text: "hello", startColumn: 3, rowOffset: 0, cellWidth: 5 }],
+    });
+  });
+
+  it("normalizes an anchor sitting exactly on the right edge", () => {
+    // xterm's pending-wrap cursor: fill a row to its last column and
+    // `buffer.active.cursorX` stays at `cols` until the next write wraps it, so the
+    // live anchor arrives as column 150 on a 150-column terminal (issue #551).
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 150,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 2,
+      cursorAbsY: 186,
+      anchorColumn: 0,
+      anchorRowOffset: 1,
+      rows: [{ text: "ㄱ", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("normalizes an anchor past the right edge instead of collapsing it to column 0", () => {
+    // The carry-over anchor is derived as chain origin + committed width, so it runs
+    // past the edge while the echo of the wrapping syllable has not arrived. The wrap
+    // branch used to reset to column 0 for *any* out-of-range anchor, so 150 and 152
+    // both landed at column 0 and the second syllable of a chain crossing the
+    // boundary rendered on top of the first — it looked like it never appeared.
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 152,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 4,
+      cursorAbsY: 186,
+      anchorColumn: 2,
+      anchorRowOffset: 1,
+      rows: [{ text: "ㄱ", startColumn: 2, rowOffset: 1, cellWidth: 2 }],
+    });
+  });
+
+  it("normalizes an anchor more than one row past the right edge", () => {
+    expect(
+      getCompositionPreviewLayout(
+        {
+          text: "ㄱ",
+          anchorBufferX: 304,
+          anchorBufferAbsY: 185,
+          caretCellOffset: 2,
+          textCellWidth: 2,
+        },
+        150,
+      ),
+    ).toEqual({
+      cursorX: 6,
+      cursorAbsY: 187,
+      anchorColumn: 4,
+      anchorRowOffset: 2,
+      rows: [{ text: "ㄱ", startColumn: 4, rowOffset: 2, cellWidth: 2 }],
     });
   });
 
@@ -205,6 +358,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 5,
       cursorAbsY: 10,
+      anchorColumn: 3,
+      anchorRowOffset: 0,
       rows: [{ text: "\u3139", startColumn: 3, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -224,6 +379,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 11,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [
         { text: "ab", startColumn: 8, rowOffset: 0, cellWidth: 2 },
         { text: "cd", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -246,6 +403,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 7,
+      anchorRowOffset: 0,
       rows: [
         { text: "가", startColumn: 7, rowOffset: 0, cellWidth: 2 },
         { text: "나", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -268,6 +427,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: "가", startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -287,6 +448,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 0,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [{ text: "가", startColumn: 8, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -306,6 +469,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 29,
+      anchorColumn: 71,
+      anchorRowOffset: 0,
       rows: [
         { text: "아", startColumn: 71, rowOffset: 0, cellWidth: 2 },
         { text: "아", startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -328,6 +493,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 0,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [{ text: `ae${ACCENT}`, startColumn: 8, rowOffset: 0, cellWidth: 2 }],
     });
   });
@@ -347,6 +514,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: `${HEART}${VS16}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -366,6 +535,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 9,
+      anchorRowOffset: 0,
       rows: [{ text: `${THUMBS_UP}${SKIN_TONE}`, startColumn: 0, rowOffset: 1, cellWidth: 2 }],
     });
   });
@@ -385,6 +556,8 @@ describe("getCompositionPreviewLayout", () => {
     ).toEqual({
       cursorX: 2,
       cursorAbsY: 5,
+      anchorColumn: 8,
+      anchorRowOffset: 0,
       rows: [
         { text: "a", startColumn: 8, rowOffset: 0, cellWidth: 1 },
         { text: FAMILY, startColumn: 0, rowOffset: 1, cellWidth: 2 },
@@ -496,6 +669,7 @@ describe("createImeCompositionController", () => {
   it("tracks only the active composition slice instead of the whole textarea value", async () => {
     const states: string[] = [];
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 4, cursorAbsY: 9 }),
       onStateChange: (state) => {
         states.push(state.text);
@@ -548,14 +722,19 @@ describe("createImeCompositionController", () => {
      * deliberately **not** equal to the arithmetic advance, so a test that wants
      * the live branch actually proves the live branch was taken.
      */
-    async function typeGaNaDa(liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>) {
+    async function typeGaNaDa(
+      liveAnchors: Array<{ cursorX: number; cursorAbsY: number } | null>,
+      startAnchor: { cursorX: number; cursorAbsY: number } = { cursorX: 0, cursorAbsY: 5 },
+      cols = 150,
+    ) {
       const snapshots: Array<{ text: string; anchorX: number; width: number }> = [];
       const carryOverTraces: Array<Record<string, unknown>> = [];
       // The shadow cursor cannot have advanced within the same tick, so the
       // default is a stale anchor. `shadowAdvances` covers the other ordering.
-      let anchor = { cursorX: 0, cursorAbsY: 5 };
+      let anchor = startAnchor;
       const controller = createImeCompositionController({
-        getAnchor: () => anchor,
+        getCols: () => cols,
+      getAnchor: () => anchor,
         onTrace: (event, payload) => {
           if (event === "ime-composition-start-carryover") carryOverTraces.push(payload);
         },
@@ -622,33 +801,204 @@ describe("createImeCompositionController", () => {
         { cursorX: 7, cursorAbsY: 5 },
       ]);
       expect(final).toMatchObject({ text: "\ub2e4", anchorBufferX: 7, textCellWidth: 2 });
+      // Adopting also re-bases the chain origin, so the next carry-over derives from
+      // 7 rather than from the original 0 \u2014 see the wrap-boundary test for why.
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "shadow-cursor-rebase-ahead",
+        "shadow-cursor-rebase-ahead",
       ]);
     });
 
-    it("uses the committed width while the shadow cursor is stale", async () => {
+    it("derives from the chain start while the shadow cursor is stale", async () => {
       const { carryOverTraces } = await typeGaNaDa([null, null]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "committed-width",
-        "committed-width",
+        "chain-committed-width",
+        "chain-committed-width",
       ]);
-      expect(carryOverTraces.map((t) => t.committedWidth)).toEqual([2, 2]);
+      // Accumulated from the chain's start, not nudged from the previous anchor:
+      // 가 = 2 cells, then 가나 = 4.
+      expect(carryOverTraces.map((t) => t.chainCommittedWidth)).toEqual([2, 4]);
     });
 
-    it("adopts a shadow cursor that moved backwards", async () => {
-      // A scroll or clear can move it left or up. Direction must not matter: the
-      // question is whether the PTY echoed, not which way the cursor went.
+    it("rejects a shadow cursor that lags the committed text within a row", async () => {
+      // Issue #551, measured on a real Codex pane: typing ㄱㄱㄱ echoed only the
+      // first jamo before the second carry-over, so the shadow cursor sat at
+      // column 2 while two jamo (4 cells) were committed. Adopting it dragged the
+      // third syllable back on top of the second and the preview looked frozen.
+      //
+      // "The shadow cursor moved" is not "the shadow cursor caught up". A late echo
+      // is the same text landing at a larger column, so it never changes rows —
+      // which is why lag is judged only within a row.
+      const { final, carryOverTraces } = await typeGaNaDa([
+        { cursorX: 2, cursorAbsY: 5 }, // level with 가 (2) — not ahead, derived
+        { cursorX: 2, cursorAbsY: 5 }, // behind 가나 (4) — rejected
+      ]);
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "chain-committed-width",
+        "chain-committed-width",
+      ]);
+      expect(carryOverTraces.map((t) => [t.derivedX, t.liveX])).toEqual([
+        [2, 2],
+        [4, 2],
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 5 });
+    });
+
+    it("crosses the wrap boundary from arithmetic alone, without the live reading", async () => {
+      // cols 75, chain origin at column 74 — one cell left, so the first wide syllable
+      // cannot fit. Real xterm pads that last column and puts the glyph wholly on the
+      // next row, landing the cursor at (2, +1); the echo lags one syllable behind.
+      //
+      //   1st  derived 77 (row+1 col 2)  live (2, row+1)  -> derived (tie, not ahead)
+      //   2nd  derived 79 (row+1 col 4)  live (2, row+1)  -> derived (live is behind)
+      //
+      // `advanceCells` is what makes this work: adding the width would give 76, i.e.
+      // row+1 column 1, one cell short of where xterm actually put the glyph. That
+      // single cell used to be papered over by the next carry-over adopting the live
+      // reading — which left the error standing whenever the boundary syllable was the
+      // chain's last, the ordinary case of typing one syllable at the right margin and
+      // confirming with space.
+      const { final, carryOverTraces } = await typeGaNaDa(
+        [
+          { cursorX: 2, cursorAbsY: 6 },
+          { cursorX: 2, cursorAbsY: 6 },
+        ],
+        { cursorX: 74, cursorAbsY: 5 },
+        75,
+      );
+      expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
+        "chain-committed-width",
+        "chain-committed-width",
+      ]);
+      // Both derive from the original origin: nothing re-bases, because the row change
+      // is fully explained by the committed width.
+      expect(carryOverTraces.map((t) => [t.chainAnchorX, t.derivedX])).toEqual([
+        [74, 77],
+        [74, 79],
+      ]);
+      expect(final).toMatchObject({ anchorBufferX: 79, anchorBufferAbsY: 5 });
+      // 79 on a 75-column terminal is row+1 column 4 — after 가나 laid out at columns
+      // 0-1 and 2-3 of the wrapped row.
+      expect(
+        getCompositionPreviewLayout(
+          {
+            text: "\ub2e4",
+            anchorBufferX: 79,
+            anchorBufferAbsY: 5,
+            caretCellOffset: 2,
+            textCellWidth: 2,
+          },
+          75,
+        ),
+      ).toMatchObject({
+        anchorColumn: 4,
+        anchorRowOffset: 1,
+        rows: [{ text: "\ub2e4", startColumn: 4, rowOffset: 1, cellWidth: 2 }],
+      });
+    });
+
+    it("does not adopt a lagging live reading just because the row wrapped", async () => {
+      // Measured on a 150-column shell (issue #551): origin 148, one echo of lag.
+      //
+      //   1st  derived 150  live (148, row)      -> derived
+      //   2nd  derived 152  live (150, row)      -> derived
+      //   3rd  derived 154  live (2, row + 1)    -> derived  (154 == row+1 col 4)
+      //
+      // The third is the one that used to break. A bare row-change test called it a
+      // moved origin and adopted (2, row + 1), which is one syllable behind — and
+      // because adoption re-bases, the deficit then persisted: five jamo typed, four
+      // drawn. The row change is fully explained by the committed width, so
+      // arithmetic wins and the layout normalizes 154 into row + 1 column 4.
+      const cols = 150;
+      const chainRow = 5;
+      const traces = [];
+      let anchor = { cursorX: 148, cursorAbsY: chainRow };
+      const controller = createImeCompositionController({
+        getCols: () => cols,
+        getAnchor: () => anchor,
+        onTrace: (event, payload) => {
+          if (event === "ime-composition-start-carryover") traces.push(payload);
+        },
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+
+      const setValue = (v) => {
+        textarea.value = v;
+        textarea.selectionStart = v.length;
+        textarea.selectionEnd = v.length;
+      };
+      const compose = async (value, data) => {
+        setValue(value);
+        textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data }));
+        textarea.dispatchEvent(new Event("input"));
+        await tick();
+      };
+      // Each syllable finalizes the previous one and starts the next in the same
+      // tick, which is what makes it a carry-over chain.
+      const carryOver = async (committed, value, data, liveAfterEcho) => {
+        textarea.dispatchEvent(new CompositionEvent("compositionend", { data: committed }));
+        anchor = liveAfterEcho;
+        textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        await compose(value, data);
+      };
+
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      await compose("\uac00", "\uac00");
+      // The echo has not landed at all yet, so the live cursor is still the origin.
+      await carryOver("\uac00", "\uac00\ub098", "\ub098", { cursorX: 148, cursorAbsY: chainRow });
+      // One syllable echoed: pending-wrap column on the same row.
+      await carryOver("\ub098", "\uac00\ub098\ub2e4", "\ub2e4", { cursorX: 150, cursorAbsY: chainRow });
+      // Two echoed: the shell wrapped, so the live cursor is on the next row while a
+      // third syllable is already committed.
+      await carryOver("\ub2e4", "\uac00\ub098\ub2e4\ub77c", "\ub77c", { cursorX: 2, cursorAbsY: chainRow + 1 });
+
+      const final = controller.getState();
+      controller.dispose();
+
+      expect(traces.map((x) => x.anchorSource)).toEqual([
+        "chain-committed-width",
+        "chain-committed-width",
+        "chain-committed-width",
+      ]);
+      expect(traces.map((x) => x.derivedX)).toEqual([150, 152, 154]);
+      expect(final).toMatchObject({ anchorBufferX: 154, anchorBufferAbsY: chainRow });
+      // 154 on a 150-column terminal is row + 1, column 4 — where the fourth
+      // syllable actually belongs.
+      expect(
+        getCompositionPreviewLayout(
+          {
+            text: "\ub77c",
+            anchorBufferX: 154,
+            anchorBufferAbsY: chainRow,
+            caretCellOffset: 2,
+            textCellWidth: 2,
+          },
+          cols,
+        ).rows,
+      ).toEqual([{ text: "\ub77c", startColumn: 4, rowOffset: 1, cellWidth: 2 }]);
+    });
+    it("re-bases on a row change in either direction", async () => {
+      // A row change means the arithmetic origin is dead, whatever the direction, and
+      // every way the input row can move *up* mid-chain keeps the composition valid:
+      // a shell reprinting its input line one row up (CUP / `ESC[A` — PSReadLine
+      // multi-line, a two-line zsh prompt), IL/DL/RI inside a scroll region, or the
+      // scrollback cap dropping old rows so a fixed row's absolute index falls.
+      //
+      // An earlier form of this guard rejected those on the reasoning that a viewport
+      // scroll cannot change an absolute row. True, but it only rules out viewport
+      // scrolling — the three above are not that, and rejecting them left the preview
+      // on the abandoned row.
       const { final, carryOverTraces } = await typeGaNaDa([
         { cursorX: 0, cursorAbsY: 4 },
         { cursorX: 1, cursorAbsY: 4 },
       ]);
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "shadow-cursor-rebase-row",
+        "chain-committed-width",
       ]);
-      expect(final).toMatchObject({ anchorBufferX: 1, anchorBufferAbsY: 4 });
+      // Re-based to (0, row 4), then 나's 2 cells: the live 1 is behind, so derived.
+      expect(final).toMatchObject({ anchorBufferX: 2, anchorBufferAbsY: 4 });
     });
 
     it("adopts a shadow cursor that wrapped to the next row", async () => {
@@ -659,9 +1009,11 @@ describe("createImeCompositionController", () => {
         { cursorX: 2, cursorAbsY: 6 },
         { cursorX: 4, cursorAbsY: 6 },
       ]);
+      // Row change re-bases; the second carry-over then derives 2 + 나's 2 cells = 4
+      // from the new origin and the live 4 is no longer ahead of it.
       expect(carryOverTraces.map((t) => t.anchorSource)).toEqual([
-        "shadow-cursor",
-        "shadow-cursor",
+        "shadow-cursor-rebase-row",
+        "chain-committed-width",
       ]);
       expect(final).toMatchObject({ anchorBufferX: 4, anchorBufferAbsY: 6 });
     });
@@ -705,6 +1057,7 @@ describe("createImeCompositionController", () => {
   });
   it("resets after compositionend once the deferred finalize fires", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 1, cursorAbsY: 2 }),
     });
     const textarea = document.createElement("textarea");
@@ -734,6 +1087,7 @@ describe("createImeCompositionController", () => {
 
   it("detects carry-over when compositionstart fires before the deferred reset", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -773,6 +1127,7 @@ describe("createImeCompositionController", () => {
 
   it("detects carry-over even when compositionupdate data differs from finalized text", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -812,6 +1167,7 @@ describe("createImeCompositionController", () => {
 
   it("starts a fresh composition after the deferred reset fires", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
@@ -849,6 +1205,7 @@ describe("createImeCompositionController", () => {
 
   it("clears helper-textarea residue after the deferred finalize", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -870,6 +1227,7 @@ describe("createImeCompositionController", () => {
 
   it("still clears residue when the commit's own input event arrives after compositionend", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -900,6 +1258,7 @@ describe("createImeCompositionController", () => {
 
   it("keeps the textarea untouched when input races in after compositionend", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 0 }),
     });
     const textarea = document.createElement("textarea");
@@ -925,6 +1284,7 @@ describe("createImeCompositionController", () => {
 
   it("resets when the textarea blurs mid-composition (missed compositionend defense)", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
     });
     const textarea = document.createElement("textarea");
@@ -952,6 +1312,7 @@ describe("createImeCompositionController", () => {
 
   it("treats consecutive same-tick compositions as carry-over", async () => {
     const controller = createImeCompositionController({
+      getCols: () => 150,
       getAnchor: () => ({ cursorX: 20, cursorAbsY: 736 }),
     });
     const textarea = document.createElement("textarea");
