@@ -482,9 +482,13 @@ function getOscLinkUriAtCell(
   }
 }
 
+function getTerminalBaseY(terminal: Terminal): number {
+  return (terminal.buffer.active as { baseY?: number }).baseY ?? 0;
+}
+
 function getBufferCursorAbsY(terminal: Terminal): number {
-  const activeBuffer = terminal.buffer.active as { baseY?: number; cursorY?: number };
-  return (activeBuffer.baseY ?? 0) + (activeBuffer.cursorY ?? 0);
+  const activeBuffer = terminal.buffer.active as { cursorY?: number };
+  return getTerminalBaseY(terminal) + (activeBuffer.cursorY ?? 0);
 }
 
 /**
@@ -2184,7 +2188,22 @@ export function TerminalView({
       setShowScrollToBottom(isTerminalScrolledUp(terminal));
       scheduleOverlayCaretUpdate();
     };
-    const scrollDisposable = terminal.onScroll?.(refreshViewportPresentation);
+    // An open composition's anchor is an absolute row, and the preview's screen
+    // position subtracts `baseY` from it. A TUI that keeps its input box at the
+    // bottom grows `baseY` as it prints, so a stationary anchor drifts upward by
+    // exactly the rows emitted (issue #570). Carry it along; nothing else
+    // re-anchors between composition events.
+    let lastCompositionBaseY = getTerminalBaseY(terminal);
+    const followBufferScrollForComposition = () => {
+      const baseY = getTerminalBaseY(terminal);
+      const rowDelta = baseY - lastCompositionBaseY;
+      lastCompositionBaseY = baseY;
+      if (rowDelta !== 0) compositionController.notifyBufferScrolled(rowDelta);
+    };
+    const scrollDisposable = terminal.onScroll?.(() => {
+      followBufferScrollForComposition();
+      refreshViewportPresentation();
+    });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
     // 어떤 effect 도 재실행되지 않는다 → 복귀 후 첫 키/첫 IME 조합이 유실된다.
