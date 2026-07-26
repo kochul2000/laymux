@@ -38,6 +38,11 @@ type CompositionControllerOptions = {
    * cannot be relied on to send it and why this cannot double up (issue #555).
    */
   onCommit?: (text: string) => void;
+  /**
+   * Whether xterm still has a composition send scheduled. Measured discriminator
+   * for the blur commit — see `handleBlur` (issue #555).
+   */
+  getXtermPendingSend?: () => boolean;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
 };
@@ -343,6 +348,10 @@ export function createImeCompositionController(
   let compositionBaseText = "";
   // Latest compositionupdate event.data — used for Korean split-time display
   let latestCompositionDisplayText = "";
+  // Text handed to xterm at the last compositionend. xterm sends it from a deferred
+  // timeout, so a blur landing inside that window destroys the source and this is the
+  // only surviving copy (issue #555).
+  let lastFinalizedText = "";
 
   let pendingAnimationFrame: number | null = null;
   let pendingTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -392,6 +401,7 @@ export function createImeCompositionController(
     chainCols = 0;
     compositionBaseText = "";
     latestCompositionDisplayText = "";
+    lastFinalizedText = "";
     state = createEmptyState();
     emit();
   };
@@ -627,6 +637,7 @@ export function createImeCompositionController(
     // This mirrors WT's pattern where OnEndComposition decrements
     // the counter and only finalizes when it reaches 0.
     phase = "pending-finalize";
+    lastFinalizedText = state.text;
     latestCompositionDisplayText = "";
 
     traceComposition(options, "ime-composition-end", {
@@ -674,18 +685,37 @@ export function createImeCompositionController(
     // Korean — and CJK generally — a focus change is a commit, not a cancel, so the
     // text the user could see has to reach the PTY.
     //
-    // Sending it here cannot double up. When `compositionend` fires *before* the blur
-    // xterm does send (through its deferred finalizer), and in that ordering this
-    // controller is in `pending-finalize`, never `composing`. The phase alone
-    // discriminates the two orderings, so no xterm private state has to be read.
+    // Phase alone is NOT the discriminator — measured. WebView2 + Windows IME fires
+    // `compositionend` *before* the blur, so the real sequence is end → blur → flush:
+    // the blur lands inside xterm's deferred finalize window, clears the textarea, and
+    // the finalizer then slices an empty string. The controller is in
+    // `pending-finalize` there, and the syllable is lost exactly as if no
+    // `compositionend` had arrived at all.
     //
-    // The text comes from `state`, not from the textarea: xterm clears the textarea in
-    // its own blur handler, which is registered first, so reading it here would depend
-    // on listener order.
-    const commitOnBlur = phase === "composing" ? state.text : "";
+    // What separates "xterm will send it" from "xterm can no longer send it" is
+    // xterm's own pending flag at blur time:
+    //
+    //   end → blur → flush   pending true   textarea already ""   → doomed, commit
+    //   end → flush → blur   pending false  already on the wire   → do not commit
+    //
+    // Two texts can be in danger at once. A carry-over ends one syllable and starts the
+    // next in the same tick, so a blur can catch a doomed pending send *and* a live
+    // composition. The doomed one is `lastFinalizedText` — not `state.text`, which by
+    // then holds the newer syllable.
+    //
+    // Neither comes from the textarea: xterm clears it in its own blur handler, which
+    // is registered first (at `terminal.open()`), so reading it here would depend on
+    // listener order.
+    const xtermSendPending = options.getXtermPendingSend?.() ?? false;
+    const doomedFinalized = xtermSendPending ? lastFinalizedText : "";
+    const inFlight = phase === "composing" ? state.text : "";
+    const commitOnBlur = doomedFinalized + inFlight;
     traceComposition(options, "ime-composition-blur-reset", {
       phase,
       textareaValue: textarea?.value ?? "",
+      xtermSendPending,
+      doomedFinalized,
+      inFlight,
       commitOnBlur,
     });
     if (commitOnBlur) options.onCommit?.(commitOnBlur);

@@ -1248,6 +1248,11 @@ export function TerminalView({
       // A blur mid-composition would otherwise drop the syllable: xterm clears the
       // helper textarea and sends nothing (measured). Route it exactly like typed
       // input so the remote-control gate still applies (issue #555).
+      // `null` means the private shape moved under us (see xterm-pending-composition).
+      // Fall back to "not pending": that re-opens the #555 loss for that build rather
+      // than risking a duplicate syllable on every focus change, and the xterm contract
+      // tests read the same fields, so a shape change fails loudly before shipping.
+      getXtermPendingSend: () => readPendingCompositionSend(terminal)?.pending ?? false,
       onCommit: (text) => {
         if (!localTerminalControlAllowed()) return;
         trace("ime-composition-commit-on-blur", { text });

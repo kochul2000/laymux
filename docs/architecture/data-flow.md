@@ -502,22 +502,23 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 
 실제 `Terminal` 을 jsdom 에 띄워 측정한 계약(4케이스):
 
-| 순서 | 결과 |
-|---|---|
-| blur 만 | textarea `"가"` → `""`, **onData 없음**, xterm 의 `_isComposing` 은 **true 로 남는다** |
-| `compositionend` → blur | end 에서 `_isSendingComposition=true`, 다음 tick 에 `onData ["가"]`, blur 는 값만 비운다. **중복 없음** |
-| blur → 늦은 `compositionend` | blur 후 값이 이미 비어 finalizer 슬라이스가 공집합 → **onData 없음** |
-| 조합 없는 잔여물 | blur 에서 **무조건** 비운다 |
+| 순서 | blur 시점 xterm 상태 | 결과 |
+|---|---|---|
+| blur 만 (`compositionend` 없음) | `composing: true` | textarea 가 비워지고 **onData 없음** |
+| `compositionend` → blur → flush | `pending: true` | **onData 없음** — finalizer 가 빈 슬라이스를 읽는다 |
+| `compositionend` → flush → blur | `pending: false` | `onData ["가"]` — 이미 전송됨 |
+| 조합 없는 잔여물 | — | blur 에서 **무조건** 비운다 |
 
-- **xterm 은 blur 에서 아무것도 보내지 않고 지운다.** `handleBlur` 의 기존 주석은 "compositionend 가 따라오거나, 아니면 xterm 이 지운다" 였는데, 실측은 후자이고 **지우기만 한다**. 그리고 blur 뒤에 오는 `compositionend` 로는 복구가 불가능하다 — 읽을 슬라이스가 이미 없다.
-- **판정**: `phase === "composing"` 이고 프리뷰 텍스트가 있으면 컨트롤러가 `onCommit` 으로 그 텍스트를 올려보내고, 호출부가 타이핑과 같은 경로(`writeToTerminal`, 원격 제어 게이트 포함)로 PTY 에 보낸다.
-- **이중 전송이 불가능한 이유는 phase 하나다**: `compositionend` 가 blur 보다 먼저 오는 순서에서는 xterm 이 자기 deferred finalizer 로 보내고, 그때 컨트롤러 phase 는 `pending-finalize` 이지 `composing` 이 아니다. 그래서 #527/ADR-0062 처럼 xterm private 상태를 읽을 필요가 없다.
-- **텍스트 출처는 `state.text` 이고 textarea 가 아니다**: xterm 이 자기 blur 핸들러(먼저 등록됨)에서 값을 비우므로 거기서 읽으면 리스너 순서에 의존한다.
-- **carry-over 체인 중 blur 면 진행 중인 음절만** 보낸다. 앞 음절들은 이미 xterm 의 finalizer 로 PTY 에 갔으므로 다시 보내면 체인 전체가 중복된다.
-- **리셋은 그대로 유지한다**: xterm 이 `_isComposing` 을 true 로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막는 방어가 여전히 필요하다.
-- **결함이 테스트로 못박혀 있던 네 번째 사례**였다. `"resets when the textarea blurs mid-composition (missed compositionend defense)"` 가 리셋만 단정해 유실을 정답으로 고정했다. 리셋 단정(stuck 방어)은 유지하고 유실 쪽만 갈랐다.
-- **취소는 확정이 아니다**: 이 판정은 blur 에만 적용되며 Esc 등 명시적 취소 경로는 건드리지 않는다.
-- **미검증**: 실기 확인 필요. 그리고 blur 가 아니라 창 전체가 비활성화되는 경로(앱 blur, §8.9 의 focus 소유권 왕복)에서 같은 이벤트열이 오는지는 확인하지 않았다.
+- **xterm 은 blur 에서 아무것도 보내지 않고 지우며, 자기 `_isComposing` 을 true 로 남긴다.** `handleBlur` 의 기존 주석은 "compositionend 가 따라오거나, 아니면 xterm 이 지운다" 였는데 실측은 후자이고 **지우기만 한다**. blur 뒤에 오는 `compositionend` 로도 복구 불가 — 읽을 슬라이스가 이미 없다.
+- **phase 는 판별자가 아니다.** WebView2 + Windows IME 는 blur **전에** `compositionend` 를 보내므로 실제 순서는 `end → blur → flush` 이고, blur 가 xterm 의 deferred 창 **안에서** 도착한다. 그 시점 컨트롤러 phase 는 `pending-finalize` 이며, phase 만 보고 "xterm 이 보낼 것" 이라 판단하면 정확히 그 케이스에서 유실된다. (처음 이렇게 구현했고 실기에서 그대로 유실됐다 — 첫 계측이 `end → flush → blur` 만 재봤기 때문이다.)
+- **판별자는 xterm 의 pending 플래그다.** blur 시점에 `readPendingCompositionSend(terminal).pending` 이 참이면 전송이 아직 예약 상태이고 소스가 이미 비었으므로 **반드시 실패한다** → 우리가 보낸다. 거짓이면 이미 보냈거나 보낼 게 없다 → 보내지 않는다. #542 가 만든 private 상태 리더를 그대로 재사용한다.
+- **위험한 텍스트가 둘일 수 있다.** carry-over 는 한 음절을 끝내고 다음을 같은 tick 에 시작하므로 blur 가 *예약된 doomed 전송* 과 *진행 중 조합* 을 동시에 잡을 수 있다. doomed 쪽은 `state.text` 가 아니라 `compositionend` 시점에 따로 캡처한 `lastFinalizedText` 다 — 그때 `state.text` 는 이미 새 음절을 담고 있다.
+- **텍스트 출처는 textarea 가 아니다.** xterm 이 자기 blur 핸들러(`terminal.open()` 시점에 먼저 등록)에서 값을 비우므로 거기서 읽으면 리스너 순서에 의존한다.
+- **리셋은 유지한다.** xterm 이 `_isComposing` 을 true 로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막는 방어가 여전히 필요하다.
+- **리더가 `null` 이면 "pending 아님" 으로 떨어진다** — 그 빌드에서는 유실이 되살아나지만, 포커스 이동마다 음절이 중복되는 것보다 낫다. xterm 계약 테스트가 같은 필드를 읽으므로 형태 변경은 배포 전에 큰 소리로 실패한다.
+- **결함이 테스트로 못박혀 있던 네 번째 사례.** `"resets when the textarea blurs mid-composition (missed compositionend defense)"` 가 리셋만 단정해 유실을 정답으로 고정했다. stuck 방어 단정은 유지하고 유실 쪽만 갈랐다.
+- **취소는 확정이 아니다.** blur 에만 적용되며 Esc 등 명시적 취소 경로는 건드리지 않는다.
+- **미검증**: 실기 확인 필요
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)

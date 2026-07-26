@@ -1339,16 +1339,16 @@ describe("createImeCompositionController", () => {
     expect(controller.getState().active).toBe(false);
   });
 
-  it("does not commit on blur once compositionend has handed the text to xterm", async () => {
-    // The other ordering. When `compositionend` fires first, xterm's deferred
-    // finalizer sends the text itself (measured: it lands one tick later), and this
-    // controller is in `pending-finalize` rather than `composing`. Committing here
-    // too would duplicate the input — the phase is what keeps the two apart, which is
-    // why no xterm private state has to be read.
+  it("does not commit on blur once xterm has already sent the text", async () => {
+    // `compositionend` before the blur is NOT by itself a reason to stay quiet —
+    // measured, the real WebView2 sequence is end -> blur -> flush, and there the
+    // syllable is lost. What matters is whether xterm's send is still scheduled.
+    // Here it is not: the finalizer already ran, so committing would duplicate.
     const committed: string[] = [];
     const controller = createImeCompositionController({
       getCols: () => 150,
       getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
+      getXtermPendingSend: () => false,
       onCommit: (text) => committed.push(text),
     });
     const textarea = document.createElement("textarea");
@@ -1364,6 +1364,78 @@ describe("createImeCompositionController", () => {
     textarea.dispatchEvent(new Event("blur"));
 
     expect(committed).toEqual([]);
+    controller.dispose();
+  });
+
+  it("commits the finalized syllable when the blur lands inside xterm's send window", async () => {
+    // The sequence that actually loses text (issue #555), measured on a real
+    // `Terminal`: `compositionend` schedules xterm's deferred send, the blur clears
+    // the helper textarea, and the finalizer then slices an empty string. The
+    // controller sits in `pending-finalize`, so keying off the phase alone stayed
+    // silent and the syllable vanished.
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 150,
+      getAnchor: () => ({ cursorX: 5, cursorAbsY: 7 }),
+      getXtermPendingSend: () => true,
+      onCommit: (text) => committed.push(text),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "\uc0dd";
+    textarea.selectionStart = 1;
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uc0dd" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uc0dd" }));
+    // xterm clears the textarea in its own blur handler before ours runs.
+    textarea.value = "";
+
+    textarea.dispatchEvent(new Event("blur"));
+
+    expect(committed).toEqual(["\uc0dd"]);
+    controller.dispose();
+  });
+
+  it("commits both texts when a blur catches a doomed send and a live composition", async () => {
+    // A carry-over ends one syllable and starts the next in the same tick, so a blur
+    // can strand two at once: the finalized one whose send is still scheduled, and
+    // the one still composing. `state.text` only holds the newer one, which is why
+    // the finalized text is captured separately at `compositionend`.
+    const committed: string[] = [];
+    const controller = createImeCompositionController({
+      getCols: () => 150,
+      getAnchor: () => ({ cursorX: 0, cursorAbsY: 5 }),
+      getXtermPendingSend: () => true,
+      onCommit: (text) => committed.push(text),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    const setValue = (v: string) => {
+      textarea.value = v;
+      textarea.selectionStart = v.length;
+      textarea.selectionEnd = v.length;
+    };
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    setValue("\uac00");
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\uac00" }));
+    textarea.dispatchEvent(new Event("input"));
+    await tick();
+
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "\uac00" }));
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    setValue("\uac00\ub098");
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "\ub098" }));
+    textarea.dispatchEvent(new Event("input"));
+    await tick();
+    expect(controller.getState().text).toBe("\ub098");
+
+    textarea.dispatchEvent(new Event("blur"));
+
+    expect(committed).toEqual(["\uac00\ub098"]);
     controller.dispose();
   });
 
@@ -1388,14 +1460,15 @@ describe("createImeCompositionController", () => {
     controller.dispose();
   });
 
-  it("commits only the active syllable when a blur interrupts a carry-over chain", async () => {
-    // The syllables already committed went to the PTY through xterm's own finalizer,
-    // so only the one still composing may be sent — otherwise the blur would
-    // duplicate the whole chain.
+  it("commits only the active syllable when the earlier sends already landed", async () => {
+    // Same carry-over shape, but xterm has no send scheduled: the earlier syllables
+    // reached the PTY through its finalizer, so re-sending them would duplicate the
+    // whole chain. Only the one still composing may go.
     const committed: string[] = [];
     const controller = createImeCompositionController({
       getCols: () => 150,
       getAnchor: () => ({ cursorX: 0, cursorAbsY: 5 }),
+      getXtermPendingSend: () => false,
       onCommit: (text) => committed.push(text),
     });
     const textarea = document.createElement("textarea");
