@@ -265,8 +265,14 @@ export function TerminalInputComposer({
     if (mode !== "composer") compositionActiveRef.current = false;
   }, [mode]);
 
-  /** See `isComposerKeyProxyActive`: an empty draft lends the keyboard to the host. */
-  const keyProxyActive = () => isKeyProxyActive?.({ empty: text.length === 0 }) ?? false;
+  /**
+   * See `isComposerKeyProxyActive`: an empty draft lends the keyboard to the host.
+   * `live` is the textarea's own value, used where an event carries it — a controlled
+   * `text` prop is one render behind an edit, and answering "is the draft empty" from
+   * a stale value routes the gesture to the wrong destination.
+   */
+  const keyProxyActive = (live?: string) =>
+    isKeyProxyActive?.({ empty: (live ?? text).length === 0 }) ?? false;
 
   const handleEditorKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     // Composition keys always belong to the IME, never to passthrough or Send.
@@ -573,7 +579,7 @@ export function TerminalInputComposer({
           // host owns the keyboard the clipboard belongs to the terminal too, or the
           // pasted text would sit in a draft with no key left to submit or erase it
           // (issue #560). The host runs its own paste pipeline.
-          if (!keyProxyActive()) return;
+          if (!keyProxyActive(event.currentTarget.value)) return;
           const text = event.clipboardData.getData("text/plain");
           event.preventDefault();
           event.stopPropagation();

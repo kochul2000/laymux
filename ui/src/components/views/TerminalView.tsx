@@ -720,7 +720,13 @@ export function TerminalView({
   };
 
   const pasteComposerProxy = (text: string) => {
-    if (!composerKeyProxyActive({ empty: composerDraftRef.current.text.length === 0 })) return;
+    // Emptiness is deliberately NOT re-derived here. The composer already answered it
+    // from the textarea's live value and consumed the event on the strength of that
+    // answer; re-asking a ref that can be one edit behind would drop the paste on the
+    // floor — written to neither the terminal nor the draft.
+    if (!localTerminalControlAllowed()) return;
+    const term = terminalRef.current;
+    if (!term || term.buffer?.active?.type !== "alternate") return;
     writeProxyPaste(text);
   };
 

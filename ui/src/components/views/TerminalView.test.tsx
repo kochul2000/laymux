@@ -8356,12 +8356,77 @@ describe("TerminalView desktop input composer", () => {
     mockBufferActive.type = "alternate";
     mockWriteTerminalInput.mockClear();
 
-    fireEvent.paste(textarea, {
-      clipboardData: { getData: () => "tail" },
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
     });
 
-    // The draft owns the keyboard here, so pasting into it is a normal edit.
+    // The draft owns the keyboard here, so pasting into it is a normal edit: nothing
+    // goes to the PTY and the event is left alone for the textarea to insert.
     expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(false);
+  });
+
+  it("routes a paste typed-into-then-pasted in the same tick by the live draft value", async () => {
+    // The controlled `text` prop is one render behind an edit. Deciding emptiness from
+    // it would consume the event as a proxy paste while the host saw a non-empty draft,
+    // and the paste would reach neither the terminal nor the draft.
+    const terminalId = "t-composer-alt-paste-race";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    mockWriteTerminalInput.mockClear();
+
+    // Set the DOM value without letting React re-render with it first.
+    textarea.value = "typed";
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    expect(pasteEvent.defaultPrevented).toBe(false);
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+  });
+
+  it("proxies nothing while a remote client owns this terminal", async () => {
+    // Local control is the outer gate on every write path. With it withdrawn the keys
+    // stay with the draft rather than silently vanishing.
+    const terminalId = "t-composer-alt-remote";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    act(() => capturedRemoteControlChanged?.({ active: true }));
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalInput.mockClear();
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "tail" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(mockWriteTerminalInput).not.toHaveBeenCalled();
+    expect(pasteEvent.defaultPrevented).toBe(false);
   });
 
   it("keeps a composition commit in the draft on the normal buffer", async () => {
