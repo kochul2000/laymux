@@ -70,6 +70,7 @@ ADR 은 구현 설명서가 아니라 결정과 근거의 불변 기록이다. �
 UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. 스크린샷으로 못 보는 상태(모달 등)는 **Automation API 엔드포인트를 확장**해 프로그래밍적으로 트리거 후 검증한다. 기능 추가 시 항상 API 확장 + 자율 루프(API 조작→스크린샷→평가→수정) 구성 가능 여부를 고려한다. ([api-contracts.md §12](docs/architecture/api-contracts.md), [ADR-0002](docs/adr/0002-automation-api-fixed-port-ip-allowlist.md))
 
 - **포트 규칙:** release=19280, dev=19281. 빌드 타입당 1 인스턴스. 개발 중 스크린샷/API 는 **반드시 dev(19281)**, release(19280)는 사용자 소유이므로 건드리지 않는다. 인증 불필요(IP allowlist).
+- **화면으로만 보이는 결함**(키보드·IME·커서·렌더링)은 dev 에 재현 환경을 세팅하고 그 계층에서 측정한다 — 절차는 [`docs/dev-repro-methodology.md`](docs/dev-repro-methodology.md). 코드 독해만으로 진단 확정 금지.
 - **dev 종료는 반드시 `bash scripts/kill-dev.sh`** — release/dev 가 같은 `laymux.exe` 이므로 `tasklist | grep laymux` 로 수동 kill 금지. `automation.json` PID 로 dev 만 안전 종료.
 
 ## 작업 규칙 (코드 짜기 전 확인)
