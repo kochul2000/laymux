@@ -369,26 +369,51 @@ export function updateComposerDraftText(
 }
 
 /**
- * Where a just-finished IME composition belongs when the composer is proxying keys
- * for a fullscreen app (issue #558).
+ * Who owns the keyboard in composer mode — the single rule behind every routing
+ * decision on this surface (issues #558, #560).
  *
- * In the alternate screen the composer is a keyboard proxy: every key is forwarded
- * to the PTY, which is why ASCII lands in the app as it is typed with no Enter. IME
- * composition cannot be forwarded key by key — the composition belongs to the
- * textarea, so the composer's keydown handler deliberately skips passthrough while
- * `isComposing` is set. The consequence was an orphan: the composed text accumulated
- * in the draft, and from then on every key (Enter, Backspace) went to the app instead
- * of the draft, so the draft could neither be submitted nor erased.
+ * **An empty draft lends the keyboard out; a non-empty draft keeps it.** The empty
+ * case already forwarded nav keys and control chords so shell history and Ctrl+C
+ * kept working; a fullscreen (alternate-screen) app widens that set to *every* key,
+ * because such an app is the only thing on screen and every key is meant for it —
+ * that is why ASCII reaches vim as it is typed, with no Enter.
  *
- * Forward the *result* instead of the keys. On `compositionend` the committed text
- * goes straight to the PTY and leaves the draft, so a fullscreen app receives Korean
+ * Non-empty is what makes the rule safe. Text sitting in the draft is visible, and
+ * the keys that submit it (Enter) or erase it (Backspace) stay the draft's, so it
+ * always has a way out. Without that half, anything that reached the draft while a
+ * fullscreen app ran became an orphan: unsubmittable and unerasable, because every
+ * key went to the app (issue #560).
+ *
+ * The corollary is that every route *into* the draft must respect the same rule.
+ * Paste, the Shift+Enter newline gesture, and the Tab recall popup all bypass the
+ * keydown passthrough, so each one checks this predicate rather than assuming the
+ * draft is a valid destination.
+ */
+export function isComposerKeyProxyActive(input: {
+  /** A fullscreen app owns the screen (xterm reports the alternate buffer). */
+  altScreen: boolean;
+  draftEmpty: boolean;
+}): boolean {
+  return input.altScreen && input.draftEmpty;
+}
+
+/**
+ * Where a just-finished IME composition belongs (issue #558).
+ *
+ * A composition cannot be forwarded key by key — it belongs to the textarea, so the
+ * composer's keydown handler deliberately skips passthrough while `isComposing` is
+ * set. Forward the *result* instead: in a proxying pane the committed text goes
+ * straight to the PTY and leaves the draft, so a fullscreen app receives Korean
  * exactly the way it receives ASCII.
  *
- * Returns `null` when there is nothing to do:
+ * Returns `null` when the composition belongs to the draft after all:
  *  - not the alternate screen — the draft is a real drafting surface there, and Enter
  *    submits it (the normal composer flow).
  *  - empty `data` — the IME cancelled rather than committed. Same rule as the
  *    terminal-side blur commit: we never invent text the IME did not hand us.
+ *  - the draft held text before this composition — then the user is drafting, the
+ *    keyboard is the draft's (`isComposerKeyProxyActive`), and diverting the syllable
+ *    would tear one sentence across two destinations.
  */
 export function resolveComposerCompositionCommit(input: {
   altScreen: boolean;
@@ -396,17 +421,21 @@ export function resolveComposerCompositionCommit(input: {
   data: string;
   /** Current draft text, which still holds the composed run. */
   draft: string;
-}): { pty: string; draft: string } | null {
-  if (!input.altScreen || !input.data) return null;
-  // The composed run is at the caret, which in this path is the end of the draft.
-  // Trimming it rather than clearing outright preserves anything that reached the
-  // draft by another route (a Shift+Enter newline, a paste) instead of silently
-  // dropping it. If the tail does not match, the draft is not describable in terms of
-  // this commit, so clear it — leaving it would recreate the orphan.
-  const draft = input.draft.endsWith(input.data)
+}): { pty: string } | null {
+  if (!input.data) return null;
+  // What the draft held before this composition. The composed run is at the caret,
+  // i.e. the end of the draft — except that some IMEs deliver the final `input`
+  // event *after* `compositionend`, leaving the draft one keystroke behind. A draft
+  // that is a prefix of the commit is that lag, not user text.
+  const priorDraft = input.draft.endsWith(input.data)
     ? input.draft.slice(0, input.draft.length - input.data.length)
-    : "";
-  return { pty: input.data, draft };
+    : input.data.startsWith(input.draft)
+      ? ""
+      : input.draft;
+  if (!isComposerKeyProxyActive({ altScreen: input.altScreen, draftEmpty: priorDraft === "" })) {
+    return null;
+  }
+  return { pty: input.data };
 }
 /**
  * Atomically captures the current draft. A second action is rejected until
