@@ -125,6 +125,11 @@ import {
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
+import {
+  registerAtlasRebuilder,
+  unregisterAtlasRebuilder,
+  notifyTextureAtlasCleared,
+} from "@/lib/webgl-atlas-rebuild";
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
@@ -2909,13 +2914,24 @@ export function TerminalView({
         },
       );
     };
-    const rebuildTerminalRenderer = () => {
+    // Atlas clear + full repaint for this terminal alone. Also the callback the
+    // shared-atlas coordinator runs on every other terminal (issue #571), so it
+    // must not report back into the coordinator.
+    const rebuildRendererLocal = () => {
+      trace("atlas-rebuild");
       try {
         (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
       } catch {
         /* older xterm builds / mocks may lack this method */
       }
       terminal.refresh(0, terminal.rows - 1);
+    };
+    const rebuildTerminalRenderer = () => {
+      rebuildRendererLocal();
+      // The atlas is shared with every terminal on the same render config, and
+      // xterm re-syncs only the caller's model — the rest keep stale texture
+      // coordinates and draw glyph fragments (issue #571).
+      notifyTextureAtlasCleared(instanceId);
       bindHelperTextareaEvents();
       scheduleOverlayCaretUpdate();
     };
@@ -3826,6 +3842,11 @@ export function TerminalView({
         }
         registerTerminalScroller(instanceId, scrollViewport);
 
+        // Rebuild hook for a foreign atlas clear (issue #571). Registered under
+        // the instance id only — a second registration under paneId would
+        // rebuild this terminal twice per clear.
+        registerAtlasRebuilder(instanceId, rebuildRendererLocal);
+
         performTerminalFit({});
         openedRef.current = true;
         // Sync viewport-dependent UI once on mount. onScroll only fires on
@@ -4077,6 +4098,7 @@ export function TerminalView({
       unregisterTerminalSerializer(instanceId);
       unregisterTerminalInspector(instanceId);
       unregisterTerminalScroller(instanceId);
+      unregisterAtlasRebuilder(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();

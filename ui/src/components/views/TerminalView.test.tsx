@@ -17,6 +17,11 @@ import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
+import {
+  registerAtlasRebuilder,
+  unregisterAtlasRebuilder,
+  __resetAtlasRebuildersForTest,
+} from "@/lib/webgl-atlas-rebuild";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -409,6 +414,10 @@ describe("TerminalView", () => {
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
+    // Module-global like the stores above: terminals mounted by earlier tests
+    // would otherwise stay registered and fan a single atlas clear out to all
+    // of them, against the one shared xterm mock (issue #571).
+    __resetAtlasRebuildersForTest();
     webglInitTimes.length = 0;
     csiHandlers.clear();
     oscHandlers.clear();
@@ -4916,6 +4925,42 @@ describe("TerminalView", () => {
       expect(mockClearTextureAtlas).toHaveBeenCalled();
       expect(mockRequestAnimationFrame).toHaveBeenCalled();
     });
+  });
+
+  // The texture atlas is shared by every terminal on the same render config, but
+  // xterm re-syncs only the render model of the terminal that cleared it. The
+  // others keep vertex data pointing into atlas regions that now hold different
+  // glyphs, and a plain repaint cannot repair it — `_updateModel` skips cells
+  // whose contents are unchanged, so only clearing their model rewrites the
+  // stale coordinates (issue #571).
+  it("rebuilds other terminals' renderers when one clears the shared texture atlas (issue #571)", async () => {
+    const foreignRebuild = vi.fn();
+    registerAtlasRebuilder("t-atlas-bystander", foreignRebuild);
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-atlas-share"
+          paneId="pane-atlas-share"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+
+      mockClearTextureAtlas.mockClear();
+      foreignRebuild.mockClear();
+
+      act(() => {
+        useOverridesStore.getState().setViewOverride("pane-atlas-share", { fontSize: 20 });
+      });
+
+      await vi.waitFor(() => {
+        expect(mockClearTextureAtlas).toHaveBeenCalled();
+        expect(foreignRebuild).toHaveBeenCalled();
+      });
+    } finally {
+      unregisterAtlasRebuilder("t-atlas-bystander");
+    }
   });
 
   it("waits for write drain before font, DPR, and scrollbar geometry reflows", async () => {
