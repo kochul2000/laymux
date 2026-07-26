@@ -512,7 +512,11 @@
  * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
  */
 
-.terminal-sync-output-active .xterm-cursor-layer,
+/* `.xterm-cursor` is the DOM renderer's cursor element. Under the WebGL addon the
+   cursor is drawn into the canvas and these rules do nothing — but `onContextLoss`
+   disposes the addon and xterm falls back to the DOM renderer, where they are what
+   keeps the native cursor hidden. Not dead code. (The `.xterm-cursor-layer` selector
+   next to them *was* dead: the canvas renderer it belonged to is gone from xterm 6.) */
 .terminal-sync-output-active .xterm-cursor {
   opacity: 0 !important;
 }
@@ -521,7 +525,6 @@
   caret-color: transparent !important;
 }
 
-.terminal-native-cursor-hidden .xterm-cursor-layer,
 .terminal-native-cursor-hidden .xterm-cursor {
   opacity: 0 !important;
 }
@@ -530,7 +533,6 @@
   caret-color: transparent !important;
 }
 
-.terminal-composer-active .xterm-cursor-layer,
 .terminal-composer-active .xterm-cursor,
 .terminal-composer-active .terminal-overlay-caret,
 .terminal-composer-active .terminal-composition-preview {
@@ -549,7 +551,6 @@
   caret-color: transparent !important;
 }
 
-.terminal-ime-composition-active .xterm-cursor-layer,
 .terminal-ime-composition-active .xterm-cursor {
   opacity: 0 !important;
 }
