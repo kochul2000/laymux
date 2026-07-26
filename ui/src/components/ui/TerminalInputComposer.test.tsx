@@ -83,6 +83,32 @@ describe("TerminalInputComposer", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards the compositionend data so the host can route it (issue #558)", () => {
+    // The composer does not decide where a commit goes — the host knows whether the
+    // pane is proxying keys for a fullscreen app. Passing the event data through keeps
+    // commit-vs-cancel with the IME.
+    const onCompositionCommit = vi.fn();
+    renderComposer({ onCompositionCommit });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.compositionStart(textarea, { data: "" });
+    fireEvent.compositionEnd(textarea, { data: "한" });
+
+    expect(onCompositionCommit).toHaveBeenCalledWith("한");
+  });
+
+  it("forwards an empty compositionend so a cancel stays distinguishable", () => {
+    // Esc ends the composition with empty data. The host needs to see that rather than
+    // a missing call, so the cancel rule lives in one place.
+    const onCompositionCommit = vi.fn();
+    renderComposer({ onCompositionCommit });
+    const textarea = screen.getByRole("textbox", { name: "Terminal input" });
+
+    fireEvent.compositionStart(textarea, { data: "" });
+    fireEvent.compositionEnd(textarea, { data: "" });
+
+    expect(onCompositionCommit).toHaveBeenCalledWith("");
+  });
   it("does not submit Enter while IME composition is active", () => {
     const onSend = vi.fn();
     renderComposer({ onSend });

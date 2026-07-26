@@ -369,6 +369,46 @@ export function updateComposerDraftText(
 }
 
 /**
+ * Where a just-finished IME composition belongs when the composer is proxying keys
+ * for a fullscreen app (issue #558).
+ *
+ * In the alternate screen the composer is a keyboard proxy: every key is forwarded
+ * to the PTY, which is why ASCII lands in the app as it is typed with no Enter. IME
+ * composition cannot be forwarded key by key — the composition belongs to the
+ * textarea, so the composer's keydown handler deliberately skips passthrough while
+ * `isComposing` is set. The consequence was an orphan: the composed text accumulated
+ * in the draft, and from then on every key (Enter, Backspace) went to the app instead
+ * of the draft, so the draft could neither be submitted nor erased.
+ *
+ * Forward the *result* instead of the keys. On `compositionend` the committed text
+ * goes straight to the PTY and leaves the draft, so a fullscreen app receives Korean
+ * exactly the way it receives ASCII.
+ *
+ * Returns `null` when there is nothing to do:
+ *  - not the alternate screen — the draft is a real drafting surface there, and Enter
+ *    submits it (the normal composer flow).
+ *  - empty `data` — the IME cancelled rather than committed. Same rule as the
+ *    terminal-side blur commit: we never invent text the IME did not hand us.
+ */
+export function resolveComposerCompositionCommit(input: {
+  altScreen: boolean;
+  /** `compositionend`'s own data — the authority on commit vs cancel. */
+  data: string;
+  /** Current draft text, which still holds the composed run. */
+  draft: string;
+}): { pty: string; draft: string } | null {
+  if (!input.altScreen || !input.data) return null;
+  // The composed run is at the caret, which in this path is the end of the draft.
+  // Trimming it rather than clearing outright preserves anything that reached the
+  // draft by another route (a Shift+Enter newline, a paste) instead of silently
+  // dropping it. If the tail does not match, the draft is not describable in terms of
+  // this commit, so clear it — leaving it would recreate the orphan.
+  const draft = input.draft.endsWith(input.data)
+    ? input.draft.slice(0, input.draft.length - input.data.length)
+    : "";
+  return { pty: input.data, draft };
+}
+/**
  * Atomically captures the current draft. A second action is rejected until
  * the matching token settles, preventing key-repeat and double-click sends.
  */

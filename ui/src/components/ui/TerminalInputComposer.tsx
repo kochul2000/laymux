@@ -51,6 +51,11 @@ export interface TerminalInputComposerProps {
    */
   onKeyPassthrough?: (event: KeyboardEvent, ctx: { empty: boolean }) => boolean;
   /**
+   * A composition just committed. The host routes it to the PTY when the pane is
+   * proxying keys for a fullscreen app, and trims it out of the draft (issue #558).
+   */
+  onCompositionCommit?: (data: string) => void;
+  /**
    * Recall the Composer's own sent-history into the draft at the prompt (edge
    * ↑/↓). Returning true means the key was consumed.
    */
@@ -113,6 +118,7 @@ export function TerminalInputComposer({
   onTextChange,
   onSend,
   onKeyPassthrough,
+  onCompositionCommit,
   onHistory,
   historyPopupEnabled = false,
   history,
@@ -542,8 +548,12 @@ export function TerminalInputComposer({
         onCompositionStart={() => {
           compositionActiveRef.current = true;
         }}
-        onCompositionEnd={() => {
+        onCompositionEnd={(event) => {
           compositionActiveRef.current = false;
+          // The host decides whether this commit belongs to the PTY instead of the
+          // draft — see `resolveComposerCompositionCommit` (issue #558). Passing the
+          // event's own data keeps commit-vs-cancel with the IME.
+          onCompositionCommit?.(event.data ?? "");
         }}
         onBlur={() => {
           compositionActiveRef.current = false;
