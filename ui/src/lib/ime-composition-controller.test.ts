@@ -827,6 +827,42 @@ describe("createImeCompositionController", () => {
       controller.dispose();
     });
 
+    it("refuses a cursor more than one row ahead", async () => {
+      // Every parsed write reaches here. An app that streams a transcript (Claude
+      // Code emits neither DEC 2026 nor OSC 133, so nothing withholds the cursor)
+      // leaves it at the transcript tail, arbitrarily far below the input box.
+      // Only a re-wrap inside the app's own box is a legitimate forward move, and
+      // that cannot exceed one continuation row — without this bound the preview
+      // gets dragged down the transcript and #570 is undone.
+      const { controller, textarea } = makeController({ cursorX: 12, cursorAbsY: 240 });
+      await startComposing(controller, textarea);
+
+      controller.notifyEchoLanded();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 148, anchorBufferAbsY: 201 });
+      controller.dispose();
+    });
+
+    it("keeps the adopted origin across the next carry-over", async () => {
+      // The frozen shadow still reports the pre-adoption row, so without
+      // suppressing the classifier the next syllable re-bases straight back onto
+      // it and the indent correction is lost.
+      const { controller, textarea } = makeController({ cursorX: 4, cursorAbsY: 202 });
+      await startComposing(controller, textarea);
+      controller.notifyEchoLanded();
+      expect(controller.getState().anchorBufferAbsY).toBe(202);
+
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "라" }));
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "라시";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "시" }));
+      await tick();
+
+      expect(controller.getState()).toMatchObject({ anchorBufferX: 6, anchorBufferAbsY: 202 });
+      controller.dispose();
+    });
+
     it("does nothing with no composition open", () => {
       const settled = vi.fn(() => ({ cursorX: 4, cursorAbsY: 202 }));
       const controller = createImeCompositionController({

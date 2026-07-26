@@ -834,28 +834,35 @@ export function createImeCompositionController(
       return state;
     },
     notifyEchoLanded() {
-      if (phase === "idle" || !state.active) return;
+      // `pending-finalize` is excluded on purpose: there the committed syllable is
+      // already past the cursor but not yet in `compositionBaseText`, so adopting
+      // would set the origin after the syllable and the base text before it, and
+      // the next carry-over would add its width a second time.
+      if (phase !== "composing" || !state.active) return;
       const live = options.getSettledCursor?.();
       if (!live) return;
       const cols = options.getCols();
-      // The composing syllable is drawn at the cursor, so the settled cursor *is*
-      // the anchor — including whatever indent the app applied when it re-wrapped
-      // its own input box.
-      //
-      // Guarded by reading order, which is the #551 protection restated: a cursor
-      // behind the arithmetic means the PTY has not echoed everything committed
-      // yet, and adopting it there drags the anchor back onto text already drawn.
-      // A cursor at or past the prediction is either agreement or the app placing
-      // the text somewhere arithmetic could not have known.
       const anchorRow =
         compositionAnchor.cursorAbsY +
         (cols > 0 ? Math.floor(compositionAnchor.cursorX / cols) : 0);
       const anchorColumn = cols > 0 ? compositionAnchor.cursorX % cols : compositionAnchor.cursorX;
-      const behind =
-        live.cursorAbsY < anchorRow ||
-        (live.cursorAbsY === anchorRow && live.cursorX < anchorColumn);
-      if (behind) return;
-      if (live.cursorAbsY === anchorRow && live.cursorX === anchorColumn) return;
+      // Bounded on both sides, because "the cursor moved forward" is not by itself
+      // evidence about the input caret.
+      //
+      // Behind — the #551 protection restated: the PTY has not echoed everything
+      // committed yet, and adopting there drags the anchor back onto text already
+      // drawn.
+      //
+      // Too far ahead — the write that landed was not a redraw of the input box.
+      // Every parsed write reaches here, and an app that streams a transcript
+      // (Claude Code emits neither DEC 2026 nor OSC 133, so nothing withholds the
+      // cursor) leaves it at the transcript tail, arbitrarily far below. The only
+      // forward move this rule is meant to accept is the app re-wrapping inside its
+      // own box, which cannot exceed one continuation row.
+      const rowDelta = live.cursorAbsY - anchorRow;
+      const behind = rowDelta < 0 || (rowDelta === 0 && live.cursorX < anchorColumn);
+      if (behind || rowDelta > 1) return;
+      if (rowDelta === 0 && live.cursorX === anchorColumn) return;
       traceComposition(options, "ime-anchor-settled-cursor", {
         fromX: anchorColumn,
         fromAbsY: anchorRow,
@@ -869,7 +876,11 @@ export function createImeCompositionController(
       chainCols = cols;
       chainAnchorMeasured = true;
       compositionAnchor = chainAnchor;
-      syncPreview();
+      // Only the anchor is republished. Going through `syncPreview` would cancel
+      // the rAF the last `compositionupdate` scheduled — that deferral exists
+      // because `textarea.value` is not settled at event time — and nothing
+      // reschedules it.
+      update({ anchorBufferX: chainAnchor.cursorX, anchorBufferAbsY: chainAnchor.cursorAbsY });
     },
     /**
      * The anchor is an absolute buffer row, and the renderer turns it into a
