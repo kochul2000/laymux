@@ -70,7 +70,7 @@ export async function handleRemoteFileViewerRequest(
   }
 
   const source = params.source;
-  let path = "";
+  let path: string;
   if (source === "current") {
     const viewer = useFileViewerStore.getState();
     if (!viewer.open || !viewer.path) {

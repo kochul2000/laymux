@@ -30,6 +30,11 @@ export default tseslint.config(
       // the refactor lands in a dedicated PR; errors here would block every
       // unrelated change touching TerminalView.tsx.
       "react-hooks/refs": "warn",
+      // Same rationale as `react-hooks/refs` above: v7.1 added
+      // `set-state-in-effect`, which flags the existing "seed state from an
+      // external subscription, then subscribe" pattern in TerminalView /
+      // SettingsView. Downgrade to a warning until that refactor lands.
+      "react-hooks/set-state-in-effect": "warn",
     },
   },
   {
