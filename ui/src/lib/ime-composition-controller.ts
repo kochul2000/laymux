@@ -538,7 +538,10 @@ export function createImeCompositionController(
       // `getShadowSyncEligibility` returns `composition-preview-active` while a
       // composition is open, so the live reading is frozen and the row-change branch
       // effectively never fires. It is the buffer-cursor (shell) path that actually
-      // exercises the re-base.
+      // exercises the re-base. That still holds under `notifyBufferScrolled` only
+      // because the caller moves the frozen shadow by the same delta (issue #570):
+      // shifting the origin alone would leave the frozen reading a row behind, and
+      // this classifier would read that as `originMoved` and snap the anchor back.
       // Where the committed text says the live cursor should be once it has caught
       // up — straight out of the shared advance, no second wrap rule. Measured on a
       // 150-column shell: origin 148, three syllables committed, `derived` 154 — that

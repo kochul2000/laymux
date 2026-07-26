@@ -796,6 +796,49 @@ describe("createImeCompositionController", () => {
       controller.dispose();
     });
 
+    it("puts the next syllable on the scrolled row with the committed column", async () => {
+      // End-to-end guard for the carry-over that follows a scroll: the caller moves
+      // the frozen shadow cursor by the same delta, so the live reading lands on the
+      // shifted row and the anchor must come out at the committed column on that row.
+      //
+      // This does not isolate the `chainAnchor` shift — with the live reading already
+      // correct, the classifier re-bases to it and reaches the same answer either
+      // way (verified by removing the shift: this still passes). The shift matters
+      // only when the live reading lags, and no covered scenario produces that.
+      const live = { cursorX: 2, cursorAbsY: 100 };
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => live,
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "ㄱ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+      await tick();
+      textarea.value = "가";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      await tick();
+
+      controller.notifyBufferScrolled(9);
+      live.cursorAbsY += 9; // the frozen shadow moves with it
+
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "가ㄴ";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄴ" }));
+      await tick();
+
+      expect(controller.getState()).toMatchObject({
+        anchorBufferAbsY: 109,
+        anchorBufferX: 4,
+      });
+      controller.dispose();
+    });
+
     it("ignores a scroll with no composition open", () => {
       const controller = createImeCompositionController({
         getCols: () => 150,

@@ -953,6 +953,10 @@ export function TerminalView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setInputModeToggle, inputMode]);
   const syncOutputActiveRef = useRef(false);
+  // Re-seeds the composition scroll baseline (issue #570). Held in a ref because
+  // the composition state handler is created before the scroll bookkeeping it
+  // has to reset.
+  const compositionScrollBaselineRef = useRef<(() => void) | null>(null);
   const compositionPreviewRef = useRef<CompositionPreviewState>({
     active: false,
     text: "",
@@ -1401,6 +1405,10 @@ export function TerminalView({
       },
       onStateChange: (state) => {
         const wasActive = compositionPreviewRef.current.active;
+        // A composition just opened: start counting scroll from here, so a
+        // `baseY` jump that happened while nothing was composing (a reflow moves
+        // it without any scroll event) is not charged to this anchor.
+        if (!wasActive && state.active) compositionScrollBaselineRef.current?.();
         compositionPreviewRef.current = state;
         wrapperRef.current?.classList.toggle("terminal-ime-composition-active", state.active);
         applyNativeCursorVisibility();
@@ -2193,12 +2201,40 @@ export function TerminalView({
     // bottom grows `baseY` as it prints, so a stationary anchor drifts upward by
     // exactly the rows emitted (issue #570). Carry it along; nothing else
     // re-anchors between composition events.
+    //
+    // The baseline is re-seeded whenever a composition opens rather than kept
+    // running. `baseY` also moves without an `onScroll`: a cols change reflows
+    // the scrollback and can shift `ybase` by hundreds of rows, and only
+    // `onResize` fires. Carrying a stale baseline into the next composition
+    // would dump that whole jump into its first scroll.
     let lastCompositionBaseY = getTerminalBaseY(terminal);
+    let lastCompositionBufferType = terminal.buffer.active.type;
+    const seedCompositionScrollBaseline = () => {
+      lastCompositionBaseY = getTerminalBaseY(terminal);
+      lastCompositionBufferType = terminal.buffer.active.type;
+    };
+    compositionScrollBaselineRef.current = seedCompositionScrollBaseline;
     const followBufferScrollForComposition = () => {
+      const bufferType = terminal.buffer.active.type;
       const baseY = getTerminalBaseY(terminal);
+      // xterm forwards buffer activation and `clear()` through the same scroll
+      // event, and those move `baseY` by its whole value without moving the
+      // input line by that much. Re-seed instead of reporting a scroll.
+      if (bufferType !== lastCompositionBufferType) {
+        lastCompositionBufferType = bufferType;
+        lastCompositionBaseY = baseY;
+        return;
+      }
       const rowDelta = baseY - lastCompositionBaseY;
       lastCompositionBaseY = baseY;
-      if (rowDelta !== 0) compositionController.notifyBufferScrolled(rowDelta);
+      if (rowDelta === 0 || !compositionPreviewRef.current.active) return;
+      // The shadow cursor is frozen for the duration of a composition
+      // (`composition-preview-active`), so it holds the input line's row from
+      // before the scroll. Move it with the anchor: leaving it behind makes the
+      // next carry-over read a row that disagrees with the shifted origin,
+      // classify it as `originMoved`, and snap the preview back up.
+      shadowCursorRef.current.cursorAbsY += rowDelta;
+      compositionController.notifyBufferScrolled(rowDelta);
     };
     const scrollDisposable = terminal.onScroll?.(() => {
       followBufferScrollForComposition();
