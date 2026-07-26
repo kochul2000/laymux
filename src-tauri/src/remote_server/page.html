@@ -1731,9 +1731,11 @@
         // storage of a LIVE original — which is empty — so no clone can
         // present the capability and hijack the controller lease.
         const resumeTokenKey = "laymux.remote.resumeToken";
-        // Survives reload/tab discard: mobile usually throws the document away
-        // during a long background, so an in-memory flag would never see the
-        // return trip this exists for (issue #561).
+        // sessionStorage, not localStorage: the intent to hold control belongs to
+        // *this tab*. It still survives the reload/discard a long mobile background
+        // causes (the trip issue #561 is about), but a second tab does not inherit it
+        // — a stale tab that kept re-claiming turned a fresh "Connect" from the
+        // dashboard into a 409 lease conflict.
         const autoConnectKey = "laymux.remote.autoConnect";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
@@ -5307,7 +5309,7 @@
         function armAutoConnect() {
           autoConnectAttempt = 0;
           try {
-            localStorage.setItem(autoConnectKey, "1");
+            sessionStorage.setItem(autoConnectKey, "1");
           } catch (_) {}
         }
 
@@ -5315,13 +5317,13 @@
           cancelAutoConnectRetry();
           autoConnectAttempt = 0;
           try {
-            localStorage.removeItem(autoConnectKey);
+            sessionStorage.removeItem(autoConnectKey);
           } catch (_) {}
         }
 
         function autoConnectArmed() {
           try {
-            return localStorage.getItem(autoConnectKey) === "1";
+            return sessionStorage.getItem(autoConnectKey) === "1";
           } catch (_) {
             return false;
           }
@@ -5345,11 +5347,35 @@
           if (document.visibilityState !== "visible") return;
           if (leaseId || autoConnectInFlight || !autoConnectArmed() || !token()) return;
           autoConnectInFlight = true;
-          connect({ auto: true })
+          autoConnectWhenFree()
             .catch(() => {})
             .finally(() => {
               autoConnectInFlight = false;
             });
+        }
+
+        // Reconnecting is not a takeover. Another tab, another device, or the host
+        // may legitimately hold control now, and racing them turns the other
+        // session into a 409 fight the user did not ask for. Ask first, and stay out
+        // of the way — except when we hold the resume capability, which can only
+        // replace the lease this tab itself owned (ADR-0037).
+        async function autoConnectWhenFree() {
+          try {
+            const status = await remoteFetch("/remote/v1/session/status");
+            if (status && status.active && !resumeToken) {
+              setStatus("Another client has control.");
+              return;
+            }
+          } catch (err) {
+            if (isFatalRemoteControlError(err)) {
+              disarmAutoConnect();
+              setStatus(err.message, true);
+              return;
+            }
+            // Advisory only: a transport failure here must not block the reclaim.
+          }
+          if (document.visibilityState !== "visible" || leaseId) return;
+          await connect({ auto: true });
         }
 
         function scheduleAutoConnectRetry() {

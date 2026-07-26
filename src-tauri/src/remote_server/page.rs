@@ -94,9 +94,17 @@ mod tests {
     #[test]
     fn remote_page_html_auto_reconnects_only_from_a_visible_document() {
         let html = remote_page_html();
-        // Survives tab discard: a long mobile background usually throws the
-        // document away, which is exactly the trip this exists for.
+        // Tab-scoped intent. It survives the reload/discard a long background causes,
+        // but a second tab must not inherit it — a stale tab that kept re-claiming
+        // turned a fresh dashboard "Connect" into a 409 lease conflict.
         assert!(html.contains("const autoConnectKey = \"laymux.remote.autoConnect\";"));
+        assert!(html.contains("sessionStorage.setItem(autoConnectKey, \"1\");"));
+        assert!(html.contains("sessionStorage.removeItem(autoConnectKey);"));
+        assert!(html.contains("return sessionStorage.getItem(autoConnectKey) === \"1\";"));
+        // Reconnecting is not a takeover: ask who holds control before claiming.
+        assert!(html.contains("async function autoConnectWhenFree()"));
+        assert!(html.contains("if (status && status.active && !resumeToken) {"));
+        assert!(html.contains("setStatus(\"Another client has control.\");"));
         assert!(html.contains("function maybeAutoConnect()"));
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
         assert!(html.contains(
