@@ -33,7 +33,16 @@
 
 자동화로 만들 수 **없는** 입력이 있다. IME 조합(`compositionstart`/`update`/`end`)은 OS IME 가 만드는 것이라 PTY 쓰기로 재현되지 않는다. 포커스 아웃, 실제 클립보드, 물리 키의 modifier 조합도 마찬가지다.
 
-그래서 사용자에게 **정확한 시퀀스**를 준다 — 몇 번째 키에서 무엇을 봐야 하는지까지. 좋은 요청의 형태:
+이 중 일부는 **Windows 에서 도달 가능하다.** `scripts/devinput/` 이 SendInput 으로 OS 입력 큐에 진짜 키를
+넣는다(합성 DOM 이벤트가 아니다). 현재 1단계 — 물리 키·modifier 조합까지. 클립보드·포커스 아웃·IME 는
+아직 사람 몫이다. 쓰려면 사용자가 PC 를 명시적으로 넘겨야 한다(lease):
+`uv run scripts/devinput/cli.py lease 15m --focus-dev` → `doctor` → 시나리오. 사람이 키를 누르거나 마우스를
+움직이면 즉시 중단된다. 절차·안전 장치는 [`scripts/devinput/README.md`](../scripts/devinput/README.md).
+
+**하드웨어 조건**(저사양 GPU·소프트 렌더링), **시각 판단**("겹친 거냐 치환된 거냐"), **macOS/Linux IME** 는
+자동화 밖이다. 그리고 lease 가 없을 때는 아래 경로가 정본이다.
+
+사용자에게는 **정확한 시퀀스**를 준다 — 몇 번째 키에서 무엇을 봐야 하는지까지. 좋은 요청의 형태:
 
 > pane 3 (`lx:pane:Default:3`) 포커스 → Ctrl+Alt+M → `ㄱ` 을 세 번 → 세 번째에서 `ㄱㄱㄱ` 인지 `ㄱㄱ` 인지
 
@@ -80,6 +89,9 @@ LAYMUX_PTY_TRACE=1           # PTY 측 기록
 - **bash `node -e "..."` 안의 백틱**은 명령 치환이 된다. 스크립트 파일로 쓰거나 작은따옴표를 쓴다.
 - **테스트 목의 `viewportY` 와 `baseY` 불일치** → `isTerminalScrolledUp` 이 켜져 엉뚱한 분기를 탄다.
 - **MCP `escape` 의 제어문자 처리**가 일관되지 않다. 제출은 `\r`.
+- **`automation.json` 이 살아 있는 dev 인스턴스에서도 없을 수 있다.** `cargo test` 의
+  `write_and_remove_discovery_file` 이 실제 설정 경로에 port=19280 을 쓰고 지운다. dev pid 를 찾을 때는
+  포트 19281 LISTENING 소유자를 권위로 써라(`kill-dev.sh` 2순위 경로가 그것이다).
 
 ## 관련
 
