@@ -114,6 +114,12 @@ mod tests {
             html.contains("function loseRemoteControl(message, { hostTookOver = false } = {}) {")
         );
         assert!(html.contains("if (hostTookOver) disarmAutoConnect();"));
+        // Reclaiming our own expired lease is not a failure to paint red: the notice
+        // used to flash for the second before the reconnect replaced it.
+        assert!(html.contains("const reclaimingOurOwn ="));
+        assert!(html.contains("if (!reclaimingOurOwn) discardResumeToken();"));
+        assert!(html.contains("if (reclaimingOurOwn) {"));
+        assert!(html.contains("setConnectionHint(\"Reconnecting...\", false);"));
         assert!(html.contains("hostTookOver: isFatalRemoteControlError(err),"));
         // Definitive refusals (401/403/409) are answers, not hiccups.
         assert!(html.contains("if (isFatalRemoteControlError(err)) {"));

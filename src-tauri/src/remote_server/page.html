@@ -6537,19 +6537,31 @@
           // over until the user says otherwise (ADR-0027). A heartbeat timeout means
           // *we* went away (backgrounded, radio asleep, relay down), which is the
           // case issue #561 is about: stay armed and take the lease back on return.
+          const reclaimingOurOwn =
+            !hostTookOver && autoConnectArmed() && document.visibilityState === "visible";
           if (hostTookOver) disarmAutoConnect();
-          // The server confirmed the loss; the capability must not seed a
-          // takeover on the next claim (ADR-0027: no auto reclaim after loss).
-          discardResumeToken();
+          // The server confirmed the loss; the capability must not seed a takeover on
+          // the next claim (ADR-0027: no auto reclaim after loss). Taking our own
+          // lease back is the exception it was built for (ADR-0037) — the capability
+          // can only replace the lease *this tab* owned, never one the host holds.
+          if (!reclaimingOurOwn) discardResumeToken();
           disconnect(false);
+          if (reclaimingOurOwn) {
+            // Do not paint an expiry we are already undoing: the red notice used to
+            // flash for the second before the reconnect replaced it. Skipping the
+            // release matters too — releasing puts the server in a drain
+            // (`transitioning`) that would answer our own reclaim with 409, and a
+            // 409 disarms the intent.
+            setConnectionHint("Reconnecting...", false);
+            setStatus("Reconnecting...");
+            maybeAutoConnect();
+            return;
+          }
           terminalMetaEl.textContent = "Host has control.";
           setConnectionHint("Host has control. Connect again to request control.", true);
           setStatus(message, true);
           setNavigationOpen(true);
           if (lostLeaseId) releaseLease(lostLeaseId).catch(() => {});
-          // Visible and still armed: the tab never left, so nothing will fire a
-          // visibility transition to retry on.
-          if (!hostTookOver) scheduleAutoConnectRetry();
         }
 
         emptyNav(workspaceListEl, "Not connected.");
