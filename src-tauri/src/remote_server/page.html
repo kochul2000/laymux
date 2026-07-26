@@ -1751,7 +1751,7 @@
         let claimAttemptRevision = 0;
         let autoConnectTimer = null;
         let autoConnectAttempt = 0;
-        let autoConnectInFlight = false;
+        let claimInFlight = false;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
         let heartbeatInFlight = false;
@@ -5345,13 +5345,8 @@
           cancelAutoConnectRetry();
           // Visibility is the whole safety argument: never claim from the background.
           if (document.visibilityState !== "visible") return;
-          if (leaseId || autoConnectInFlight || !autoConnectArmed() || !token()) return;
-          autoConnectInFlight = true;
-          autoConnectWhenFree()
-            .catch(() => {})
-            .finally(() => {
-              autoConnectInFlight = false;
-            });
+          if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;
+          autoConnectWhenFree().catch(() => {});
         }
 
         // Reconnecting is not a takeover. Another tab, another device, or the host
@@ -5394,6 +5389,16 @@
             setStatus("Remote token is required.", true);
             return;
           }
+          // One claim at a time. The automatic reconnect and a user tapping Connect
+          // aim at the same lease: two claims meant the loser saw a 409 for a lease
+          // its own tab had just taken, and `claimAttemptRevision` then released the
+          // winner as stale — so both failed and the page waited for a backoff retry.
+          // Whoever is already trying will report the outcome (issue #561).
+          if (claimInFlight) {
+            if (!auto) setStatus("Claiming remote control...");
+            return;
+          }
+          claimInFlight = true;
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
           localStorage.setItem(tokenKey, token());
@@ -5441,6 +5446,8 @@
               return;
             }
             setStatus(err.message, true);
+          } finally {
+            claimInFlight = false;
           }
         }
 
@@ -6622,7 +6629,10 @@
         emptyNav(notificationListEl, "Not connected.");
         setDockPanelOpen(false);
         setNotificationPanelOpen(false);
-        setNavigationOpen(true);
+        // The drawer is the landing surface when the user has to connect by hand — it
+        // holds Connect and the "Not connected." hints. With the reconnect intent
+        // armed it would open only to slide shut a moment later, so start closed.
+        setNavigationOpen(!autoConnectArmed());
         renderInputSurface();
         renderKeyRow();
         setKeyBarVisible(keyBarConfig.visible, false);

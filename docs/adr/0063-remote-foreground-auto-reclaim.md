@@ -25,6 +25,9 @@ Remote page 는 **문서가 보이는 순간에만** 이전 세션의 제어권�
 - **claim 의 `409` 는 두 가지다.** 직전 소유권 handoff 가 아직 drain 중이면(`transitioning: true`) "아직" 이므로 backoff 후 재시도한다. 그 외(다른 controller 보유, PC reclaim lockout)는 "아니오" 이므로 의도를 해제한다. 그래서 conflict 본문의 `active`/`transitioning` 을 클라이언트 오류 객체로 올린다.
 - **되찾을 상실은 화면을 실패로 바꾸지 않는다 — 보이든 안 보이든.** 이 판정은 가시성으로 나누지 않는다. 상실은 대개 배경에서 일어나는데, 아무도 보지 않는 페이지에 빨간 문구와 네비게이션 메뉴를 열어두면 복귀 경로에서 **깜빡임으로만** 드러난다(실기: 메뉴가 열려 있다가 재연결과 함께 순식간에 닫힘). 자동 claim 자체는 여전히 `maybeAutoConnect` 의 가시성 가드에 막히고, 배경 문서는 visibilitychange 를 기다릴 뿐이다.
 - **되찾는 중인 만료는 실패로 그리지 않는다.** 자리를 비운 사이의 만료는 곧 되돌릴 상태이므로 빨간 오류 대신 `Reconnecting...` 만 보여준다(실기에서 빨강이 1초쯤 번쩍였다). 이 경로에서는 만료된 lease 를 반납하지 **않는다** — 반납은 서버를 drain(`transitioning`) 상태로 만들고, 그 동안 우리 자신의 재claim 이 409 를 받아 의도가 해제된다. 같은 이유로 resume capability 도 이 경로에서만 유지한다(ADR-0037 의 자기 zombie lease 대체 용도이며, 호스트가 가져간 경우에는 기존대로 폐기한다).
+- **claim 은 한 번에 하나다.** 자동 재접속과 사용자의 Connect 는 같은 lease 를 노리므로, 둘이 겹치면 늦은 쪽이 **자기 탭이 방금 잡은** lease 때문에 409 를 받고 `claimAttemptRevision` 이 먼저 성공한 쪽을 stale 로 판정해 반납한다 — 둘 다 실패하고 backoff 재시도까지 기다린다. 진행 중인 시도가 결과를 보고하게 두고 두 번째 진입은 무시한다.
+- **의도가 무장된 상태로 착지하면 서랍(navigation drawer)을 닫은 채 시작한다.** 서랍은 수동 연결의 착지면(Connect 버튼·"Not connected." 안내)이므로 무장돼 있지 않을 때만 열어둔다. 그러지 않으면 자동 연결이 붙는 순간 닫히는 애니메이션만 보인다.
+- 뒤로가기의 명시적 release 는 `pagehide` beacon 으로 이미 전송되지만 **완료를 기다릴 수는 없다**(문서가 즉시 사라진다). 서버는 자발적 release 를 drain 하므로 아주 빠른 재연결이 `transitioning` 409 를 만나는 창은 남는다 — handoff(resume token)로만 통과하며, 이 결정에서 더 좁히지 않았다.
 - 서버 계약은 바뀌지 않는다. 클라이언트 변경만으로 성립한다.
 
 ## Alternatives Considered

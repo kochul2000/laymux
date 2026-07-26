@@ -103,13 +103,19 @@ mod tests {
         assert!(html.contains("return sessionStorage.getItem(autoConnectKey) === \"1\";"));
         // Reconnecting is not a takeover: ask who holds control before claiming.
         assert!(html.contains("async function autoConnectWhenFree()"));
+        // One claim at a time: the automatic reconnect and a manual Connect aim at the
+        // same lease, and racing them made the loser see a 409 for its own tab s lease
+        // while the winner was released as stale.
+        assert!(html.contains("let claimInFlight = false;"));
+        assert!(html.contains("if (claimInFlight) {"));
+        assert!(html
+            .contains("if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;"));
+        // Landing with the intent armed: no drawer open-then-shut animation.
+        assert!(html.contains("setNavigationOpen(!autoConnectArmed());"));
         assert!(html.contains("if (status && status.active && !resumeToken) {"));
         assert!(html.contains("setStatus(\"Another client has control.\");"));
         assert!(html.contains("function maybeAutoConnect()"));
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
-        assert!(html.contains(
-            "if (leaseId || autoConnectInFlight || !autoConnectArmed() || !token()) return;"
-        ));
         // Three signals for one moment: tab switch, bfcache restore, network back.
         assert!(html.contains("document.addEventListener(\"visibilitychange\", () => {"));
         assert!(html.contains("window.addEventListener(\"pageshow\", () => maybeAutoConnect());"));
