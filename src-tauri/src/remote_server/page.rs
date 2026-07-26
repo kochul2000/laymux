@@ -113,6 +113,15 @@ mod tests {
         // Landing with the intent armed: no drawer open-then-shut animation.
         assert!(html.contains("setNavigationOpen(!autoConnectArmed());"));
         assert!(html.contains("if (status && status.active && !resumeToken) {"));
+        // The pre-check is advisory. Only a bad token or remote access being off are
+        // answers on their own; the claim judges ownership.
+        assert!(html.contains("if (err && (err.status === 401 || err.status === 403)) {"));
+        // A bfcache restore brings the document back with its variables intact, so a
+        // lingering leaseId after the pagehide release reads as "we still have
+        // control" and the reconnect skips its own return trip.
+        assert!(
+            html.contains("// capability above is what lets the reclaim follow the release drain.")
+        );
         assert!(html.contains("setStatus(\"Another client has control.\");"));
         assert!(html.contains("function maybeAutoConnect()"));
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));

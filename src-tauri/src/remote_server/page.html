@@ -5362,12 +5362,15 @@
               return;
             }
           } catch (err) {
-            if (isFatalRemoteControlError(err)) {
+            // Only a bad token or remote access being off are answers on their own.
+            // Everything else — including a 409, which ownership-wise this endpoint
+            // has no business emitting — is advisory: the claim is what judges
+            // ownership, so a failed pre-check must not block or disarm the reclaim.
+            if (err && (err.status === 401 || err.status === 403)) {
               disarmAutoConnect();
               setStatus(err.message, true);
               return;
             }
-            // Advisory only: a transport failure here must not block the reclaim.
           }
           if (document.visibilityState !== "visible" || leaseId) return;
           await connect({ auto: true });
@@ -6551,6 +6554,12 @@
               keepalive: true,
             }).catch(() => {});
           }
+          // The server no longer considers this lease ours, so neither may we. A
+          // bfcache restore brings the whole document back with its variables intact,
+          // and a lingering `leaseId` reads as "we still hold control" — the auto
+          // reconnect would skip its own return trip (issue #561). The stashed resume
+          // capability above is what lets the reclaim follow the release drain.
+          leaseId = null;
         }
 
         async function requestDesktopMode() {
