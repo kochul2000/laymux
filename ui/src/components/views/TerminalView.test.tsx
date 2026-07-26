@@ -1298,6 +1298,249 @@ describe("TerminalView", () => {
     });
   });
 
+  it("renders the IME composition preview in the alt buffer", async () => {
+    // Issue #553: a fullscreen TUI drives its own cursor, so the alt buffer branch
+    // stops laymux drawing a caret — but it also stopped the composition preview, and
+    // xterm's own composition view is hidden unconditionally in index.css. In vim the
+    // composing jamo was therefore invisible with no way to see it, before any
+    // scrolling. Anchoring is simpler here than in the normal buffer: the alt buffer
+    // has no scrollback, so `baseY` is 0 and the absolute-row conversion is identity.
+    render(<TerminalView instanceId="t-ime-alt" profile="PowerShell" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-alt", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-alt");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    // Enter the alt buffer the way a TUI does. Asserted rather than optional-chained so
+    // a registration-key change names itself instead of surfacing as a wrong pixel.
+    expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([1049]);
+    });
+
+    terminal.buffer.active.baseY = 0;
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 3;
+
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      // 80x24 over 800x480 → 10x20 px cells. Column 5, row 3 — the live buffer cursor,
+      // which is where vim put it.
+      expect(preview.style.transform).toBe("translate(50px, 60px)");
+    });
+  });
+  it("anchors the alt-buffer preview on the buffer cursor even with a sync frame", async () => {
+    // Issue #553 review: `baseY === 0` only makes the row conversion the identity, it
+    // does not decide *which* cursor is read. A fullscreen TUI that emits DEC 2026
+    // sets `hasSyncFramePosition`, so `computeUseShadowCursor` is true — while
+    // `getShadowSyncEligibility` returns "alt-buffer" and skips the sync outright.
+    // Anchoring on a value the shadow machine stopped maintaining is incoherent, so
+    // the alt buffer makes the buffer cursor authoritative unconditionally. vim only
+    // escaped this by emitting neither OSC 133 nor DEC 2026 — a property of vim.
+    render(<TerminalView instanceId="t-ime-alt-sync" profile="PowerShell" syncGroup="" isFocused />);
+
+    const container = screen.getByTestId("terminal-view-t-ime-alt-sync");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt-sync");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-alt-sync", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+    expect(csiHandlers.get("?:l")).toBeTypeOf("function");
+
+    // Order matters: entering the alt buffer resets `hasSyncFramePosition`, so the
+    // frame has to come *after* the switch — which is also what a real fullscreen TUI
+    // does, alt buffer first and then render frames.
+    terminal.buffer.active.baseY = 0;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([1049]);
+    });
+
+    // A DEC 2026 frame inside the alt buffer captures a shadow position, then the TUI
+    // parks its cursor somewhere else while rendering.
+    terminal.buffer.active.cursorX = 10;
+    terminal.buffer.active.cursorY = 5;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    terminal.buffer.active.cursorX = 40;
+    terminal.buffer.active.cursorY = 20;
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+
+    // The user types: the live buffer cursor is the only trustworthy position.
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 3;
+
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+      // Column 5, row 3 — the live buffer cursor. The captured shadow was (10, 5),
+      // which would be translate(100px, 100px).
+      expect(preview.style.transform).toBe("translate(50px, 60px)");
+    });
+  });
+
+  it("hides the preview instead of mispainting it across a buffer switch", async () => {
+    // Issue #553 review: the anchor captured in the normal buffer is an absolute row,
+    // and the alt buffer resets `baseY` to 0, so the viewport row comes out past
+    // `rows`. That reaches the viewport guard, which hides — it does not paint on the
+    // wrong line. The next carry-over re-bases on the new buffer cursor, so the error
+    // is one syllable of invisibility rather than a misplaced glyph.
+    render(<TerminalView instanceId="t-ime-alt-switch" profile="PowerShell" syncGroup="" isFocused />);
+
+    const container = screen.getByTestId("terminal-view-t-ime-alt-switch");
+    const preview = screen.getByTestId("terminal-composition-preview-t-ime-alt-switch");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+    };
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-alt-switch", {
+        activity: { type: "shell" },
+      });
+    });
+
+    // Compose in the normal buffer with scrollback above. `viewportY` matches `baseY`
+    // so the viewport is at the live bottom — otherwise `isTerminalScrolledUp` hides the
+    // preview for the unrelated scroll reason.
+    (terminal.buffer.active as { viewportY?: number }).viewportY = 100;
+    terminal.buffer.active.baseY = 100;
+    terminal.buffer.active.cursorX = 5;
+    terminal.buffer.active.cursorY = 20;
+    helper.value = "";
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => {
+      expect(preview.textContent).toBe("ㄱ");
+    });
+
+    // The TUI switches to the alt buffer: same absolute anchor, `baseY` now 0.
+    expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([1049]);
+    });
+    terminal.buffer.active.baseY = 0;
+    await act(async () => {
+      const frame = mockRequestAnimationFrame.mock.calls.at(-1)?.[0] as
+        | FrameRequestCallback
+        | undefined;
+      frame?.(performance.now());
+    });
+
+    await vi.waitFor(() => {
+      expect(preview.style.opacity).toBe("0");
+    });
+  });
   it("positions wrapped IME preview rows at the terminal left edge", async () => {
     render(<TerminalView instanceId="t-ime-wrap" profile="PowerShell" syncGroup="" isFocused />);
 
