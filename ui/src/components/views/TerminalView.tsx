@@ -770,6 +770,11 @@ export function TerminalView({
     // Ctrl+Alt+…, or whatever the user rebound them to) is never forwarded — it
     // bubbles to the document shortcut handler. No hardcoded modifier rules.
     if (matchesGlobalShortcut(event)) return false;
+    // The paste chord is a clipboard gesture, not a key for the app. Forwarding it
+    // would send the raw control byte (a fullscreen app shows `^V`) *and* cancel the
+    // browser's default action, so the `paste` event that carries the clipboard text
+    // would never fire. Leave it alone and let `pasteComposerProxy` route the text.
+    if (matchesKeybinding(event, "terminal.paste")) return false;
     const term = terminalRef.current;
     if (!term) return false;
     const proxy = isComposerKeyProxyActive({
