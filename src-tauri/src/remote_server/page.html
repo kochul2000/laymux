@@ -6557,8 +6557,13 @@
           // over until the user says otherwise (ADR-0027). A heartbeat timeout means
           // *we* went away (backgrounded, radio asleep, relay down), which is the
           // case issue #561 is about: stay armed and take the lease back on return.
-          const reclaimingOurOwn =
-            !hostTookOver && autoConnectArmed() && document.visibilityState === "visible";
+          // Deliberately not gated on visibility. Losing the lease while hidden is the
+          // normal case — and painting the failure screen (red notice, navigation
+          // menu popped open) into a page nobody is looking at only shows up as a
+          // flash on the way back, right before the reconnect undoes it.
+          // `maybeAutoConnect` keeps the "never claim from the background" rule; a
+          // hidden document just waits for the visibilitychange to fire it.
+          const reclaimingOurOwn = !hostTookOver && autoConnectArmed();
           if (hostTookOver) disarmAutoConnect();
           // The server confirmed the loss; the capability must not seed a takeover on
           // the next claim (ADR-0027: no auto reclaim after loss). Taking our own
@@ -6574,6 +6579,8 @@
             // 409 disarms the intent.
             setConnectionHint("Reconnecting...", false);
             setStatus("Reconnecting...");
+            // Leaves the navigation menu as the user had it: this is not a state that
+            // needs their attention.
             maybeAutoConnect();
             return;
           }
