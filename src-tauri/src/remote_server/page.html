@@ -1731,16 +1731,27 @@
         // storage of a LIVE original — which is empty — so no clone can
         // present the capability and hijack the controller lease.
         const resumeTokenKey = "laymux.remote.resumeToken";
+        // sessionStorage, not localStorage: the intent to hold control belongs to
+        // *this tab*. It still survives the reload/discard a long mobile background
+        // causes (the trip issue #561 is about), but a second tab does not inherit it
+        // — a stale tab that kept re-claiming turned a fresh "Connect" from the
+        // dashboard into a 409 lease conflict.
+        const autoConnectKey = "laymux.remote.autoConnect";
         const DEFAULT_HEARTBEAT_TIMEOUT_SECONDS = 45;
         const HEARTBEAT_INTERVAL_MIN_MS = 1000;
         const HEARTBEAT_INTERVAL_MAX_MS = 5000;
         const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;
+        const AUTO_CONNECT_RETRY_BASE_MS = 1000;
+        const AUTO_CONNECT_RETRY_MAX_MS = 15000;
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
         let leaseId = null;
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
+        let autoConnectTimer = null;
+        let autoConnectAttempt = 0;
+        let claimInFlight = false;
         let heartbeatTimer = null;
         let heartbeatAbortController = null;
         let heartbeatInFlight = false;
@@ -2035,7 +2046,17 @@
             const body = await response.json().catch(() => ({}));
             const error = new Error(body.error || `${response.status} ${response.statusText}`);
             error.status = response.status;
-            for (const field of ["code", "claimReservationId", "retryAfterMs", "reservationTtlMs"]) {
+            // `active`/`transitioning` ride the 409 conflict-status body and are what
+            // separates "someone else has control" from "the owner handoff is still
+            // draining" (issue #561).
+            for (const field of [
+              "code",
+              "claimReservationId",
+              "retryAfterMs",
+              "reservationTtlMs",
+              "active",
+              "transitioning",
+            ]) {
               if (Object.prototype.hasOwnProperty.call(body, field)) error[field] = body[field];
             }
             throw error;
@@ -3887,7 +3908,14 @@
         function handleHeartbeatError(err) {
           if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
-            loseRemoteControl(`Control returned to the host. ${err.message}`);
+            // A heartbeat `409` is literally "your lease is not active" — it does not
+            // say who has control now, and an expiry while we were away answers it the
+            // same way a host takeover does. Only `401`/`403` (bad token, remote
+            // access off) are answers on their own; ownership is what the next claim
+            // asks, and its reply decides whether to keep trying (issue #561).
+            loseRemoteControl(`Control returned to the host. ${err.message}`, {
+              hostTookOver: err && (err.status === 401 || err.status === 403),
+            });
             return;
           }
           scheduleTransientConnectionNotice("heartbeat");
@@ -5267,15 +5295,117 @@
           throw new Error("Remote control claim was cancelled.");
         }
 
-        async function connect() {
+        // Reconnecting after a long background (issue #561). Leaving the page
+        // releases the lease (ADR-0037 pagehide release) and a long absence expires
+        // it anyway, so coming back always found a disconnected page and cost a
+        // deliberate Connect tap. Arm the return trip instead: connecting once says
+        // "I want this tab in control", pressing Release says the opposite.
+        //
+        // ADR-0027 refused to auto-claim after the server confirmed a loss, because a
+        // hidden tab must not take control back from someone at the PC. That still
+        // holds — every attempt here is tied to the document becoming *visible*, and
+        // a definitive refusal (401/403/409: bad token, remote disabled, someone else
+        // holds control, local reclaim lockout) disarms it until the user acts.
+        function armAutoConnect() {
+          autoConnectAttempt = 0;
+          try {
+            sessionStorage.setItem(autoConnectKey, "1");
+          } catch (_) {}
+        }
+
+        function disarmAutoConnect() {
+          cancelAutoConnectRetry();
+          autoConnectAttempt = 0;
+          try {
+            sessionStorage.removeItem(autoConnectKey);
+          } catch (_) {}
+        }
+
+        function autoConnectArmed() {
+          try {
+            return sessionStorage.getItem(autoConnectKey) === "1";
+          } catch (_) {
+            return false;
+          }
+        }
+
+        function cancelAutoConnectRetry() {
+          if (autoConnectTimer) {
+            clearTimeout(autoConnectTimer);
+            autoConnectTimer = null;
+          }
+        }
+
+        function autoConnectRetryDelayMs() {
+          const delay = AUTO_CONNECT_RETRY_BASE_MS * 2 ** Math.min(autoConnectAttempt, 4);
+          return Math.min(delay, AUTO_CONNECT_RETRY_MAX_MS);
+        }
+
+        function maybeAutoConnect() {
+          cancelAutoConnectRetry();
+          // Visibility is the whole safety argument: never claim from the background.
+          if (document.visibilityState !== "visible") return;
+          if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;
+          autoConnectWhenFree().catch(() => {});
+        }
+
+        // Reconnecting is not a takeover. Another tab, another device, or the host
+        // may legitimately hold control now, and racing them turns the other
+        // session into a 409 fight the user did not ask for. Ask first, and stay out
+        // of the way — except when we hold the resume capability, which can only
+        // replace the lease this tab itself owned (ADR-0037).
+        async function autoConnectWhenFree() {
+          try {
+            const status = await remoteFetch("/remote/v1/session/status");
+            if (status && status.active && !resumeToken) {
+              setStatus("Another client has control.");
+              return;
+            }
+          } catch (err) {
+            // Only a bad token or remote access being off are answers on their own.
+            // Everything else — including a 409, which ownership-wise this endpoint
+            // has no business emitting — is advisory: the claim is what judges
+            // ownership, so a failed pre-check must not block or disarm the reclaim.
+            if (err && (err.status === 401 || err.status === 403)) {
+              disarmAutoConnect();
+              setStatus(err.message, true);
+              return;
+            }
+          }
+          if (document.visibilityState !== "visible" || leaseId) return;
+          await connect({ auto: true });
+        }
+
+        function scheduleAutoConnectRetry() {
+          if (autoConnectTimer || !autoConnectArmed()) return;
+          if (document.visibilityState !== "visible") return;
+          const delay = autoConnectRetryDelayMs();
+          autoConnectAttempt += 1;
+          autoConnectTimer = setTimeout(() => {
+            autoConnectTimer = null;
+            maybeAutoConnect();
+          }, delay);
+        }
+
+        async function connect({ auto = false } = {}) {
           if (!token()) {
             setStatus("Remote token is required.", true);
             return;
           }
+          // One claim at a time. The automatic reconnect and a user tapping Connect
+          // aim at the same lease: two claims meant the loser saw a 409 for a lease
+          // its own tab had just taken, and `claimAttemptRevision` then released the
+          // winner as stale — so both failed and the page waited for a backoff retry.
+          // Whoever is already trying will report the outcome (issue #561).
+          if (claimInFlight) {
+            if (!auto) setStatus("Claiming remote control...");
+            return;
+          }
+          claimInFlight = true;
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
           localStorage.setItem(tokenKey, token());
-          setStatus("Claiming remote control...");
+          setStatus(auto ? "Reconnecting..." : "Claiming remote control...");
           try {
             const status = await claimRemoteControl(attemptRevision);
             if (attemptRevision !== claimAttemptRevision) {
@@ -5283,6 +5413,7 @@
               return;
             }
             leaseId = status.leaseId;
+            armAutoConnect();
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
             fileViewerToken = status.fileViewerToken || null;
@@ -5296,7 +5427,30 @@
             const failedLease = leaseId;
             disconnect(false);
             if (failedLease) await releaseLease(failedLease).catch(() => {});
+            // A definitive refusal is an answer, not a hiccup: the host reclaimed,
+            // another client holds control, remote access is off, or the token is
+            // wrong. Retrying cannot change any of those, and quietly hammering the
+            // host would be exactly the takeover ADR-0027 refused. Requires the user.
+            // The claim is where ownership is settled. A `409` while the previous
+            // owner handoff drains is a "not yet", not a "no" — everything else
+            // (another controller holds it, the host reclaimed, bad token, remote off)
+            // cannot be changed by trying again.
+            const drainInProgress = err && err.status === 409 && err.transitioning === true;
+            if (isFatalRemoteControlError(err) && !drainInProgress) {
+              disarmAutoConnect();
+              setStatus(err.message, true);
+              return;
+            }
+            if (auto) {
+              scheduleAutoConnectRetry();
+              // Transient (offline, relay still down): keep the reason visible but
+              // do not paint it as a failure the user has to act on.
+              setStatus(`Reconnecting... ${err.message}`);
+              return;
+            }
             setStatus(err.message, true);
+          } finally {
+            claimInFlight = false;
           }
         }
 
@@ -6355,6 +6509,8 @@
 
         async function release() {
           if (!leaseId) return;
+          // Releasing on purpose withdraws the standing intent to hold control.
+          disarmAutoConnect();
           const currentLease = leaseId;
           await releaseLease(currentLease);
           disconnect(false);
@@ -6398,6 +6554,12 @@
               keepalive: true,
             }).catch(() => {});
           }
+          // The server no longer considers this lease ours, so neither may we. A
+          // bfcache restore brings the whole document back with its variables intact,
+          // and a lingering `leaseId` reads as "we still hold control" — the auto
+          // reconnect would skip its own return trip (issue #561). The stashed resume
+          // capability above is what lets the reclaim follow the release drain.
+          leaseId = null;
         }
 
         async function requestDesktopMode() {
@@ -6430,12 +6592,40 @@
           }
         }
 
-        function loseRemoteControl(message) {
+        function loseRemoteControl(message, { hostTookOver = false } = {}) {
           const lostLeaseId = leaseId;
-          // The server confirmed the loss; the capability must not seed a
-          // takeover on the next claim (ADR-0027: no auto reclaim after loss).
-          discardResumeToken();
+          // Two very different losses arrive here. A definitive server answer means
+          // someone at the host took control — the standing intent to reconnect is
+          // over until the user says otherwise (ADR-0027). A heartbeat timeout means
+          // *we* went away (backgrounded, radio asleep, relay down), which is the
+          // case issue #561 is about: stay armed and take the lease back on return.
+          // Deliberately not gated on visibility. Losing the lease while hidden is the
+          // normal case — and painting the failure screen (red notice, navigation
+          // menu popped open) into a page nobody is looking at only shows up as a
+          // flash on the way back, right before the reconnect undoes it.
+          // `maybeAutoConnect` keeps the "never claim from the background" rule; a
+          // hidden document just waits for the visibilitychange to fire it.
+          const reclaimingOurOwn = !hostTookOver && autoConnectArmed();
+          if (hostTookOver) disarmAutoConnect();
+          // The server confirmed the loss; the capability must not seed a takeover on
+          // the next claim (ADR-0027: no auto reclaim after loss). Taking our own
+          // lease back is the exception it was built for (ADR-0037) — the capability
+          // can only replace the lease *this tab* owned, never one the host holds.
+          if (!reclaimingOurOwn) discardResumeToken();
           disconnect(false);
+          if (reclaimingOurOwn) {
+            // Do not paint an expiry we are already undoing: the red notice used to
+            // flash for the second before the reconnect replaced it. Skipping the
+            // release matters too — releasing puts the server in a drain
+            // (`transitioning`) that would answer our own reclaim with 409, and a
+            // 409 disarms the intent.
+            setConnectionHint("Reconnecting...", false);
+            setStatus("Reconnecting...");
+            // Leaves the navigation menu as the user had it: this is not a state that
+            // needs their attention.
+            maybeAutoConnect();
+            return;
+          }
           terminalMetaEl.textContent = "Host has control.";
           setConnectionHint("Host has control. Connect again to request control.", true);
           setStatus(message, true);
@@ -6448,7 +6638,10 @@
         emptyNav(notificationListEl, "Not connected.");
         setDockPanelOpen(false);
         setNotificationPanelOpen(false);
-        setNavigationOpen(true);
+        // The drawer is the landing surface when the user has to connect by hand — it
+        // holds Connect and the "Not connected." hints. With the reconnect intent
+        // armed it would open only to slide shut a moment later, so start closed.
+        setNavigationOpen(!autoConnectArmed());
         renderInputSurface();
         renderKeyRow();
         setKeyBarVisible(keyBarConfig.visible, false);
@@ -6766,6 +6959,16 @@
         // pagehide (not beforeunload) is the only teardown event mobile
         // browsers fire reliably, and it also covers bfcache entry.
         window.addEventListener("pagehide", releaseLeaseOnPageHide);
+        // The mirror of the pagehide release: coming back re-claims. Three signals
+        // for the same moment — a tab switch (visibilitychange), a bfcache restore
+        // that fires no visibilitychange (pageshow), and a network that returns
+        // while the page is already open (online).
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") maybeAutoConnect();
+          else cancelAutoConnectRetry();
+        });
+        window.addEventListener("pageshow", () => maybeAutoConnect());
+        window.addEventListener("online", () => maybeAutoConnect());
         // A bfcache restore resumes this same document: reclaim the stashed
         // capability so it is back in memory only, out of any clone's reach.
         window.addEventListener("pageshow", (event) => {

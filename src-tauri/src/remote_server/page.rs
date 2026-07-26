@@ -87,6 +87,77 @@ mod tests {
         settings.remote
     }
 
+    /// Issue #561: leaving the page releases the lease (ADR-0037) and a long
+    /// background expires it, so returning always meant tapping Connect again.
+    /// The return trip is now armed — but only from a visible document, and a
+    /// definitive refusal disarms it (ADR-0027 stays intact for takeovers).
+    #[test]
+    fn remote_page_html_auto_reconnects_only_from_a_visible_document() {
+        let html = remote_page_html();
+        // Tab-scoped intent. It survives the reload/discard a long background causes,
+        // but a second tab must not inherit it — a stale tab that kept re-claiming
+        // turned a fresh dashboard "Connect" into a 409 lease conflict.
+        assert!(html.contains("const autoConnectKey = \"laymux.remote.autoConnect\";"));
+        assert!(html.contains("sessionStorage.setItem(autoConnectKey, \"1\");"));
+        assert!(html.contains("sessionStorage.removeItem(autoConnectKey);"));
+        assert!(html.contains("return sessionStorage.getItem(autoConnectKey) === \"1\";"));
+        // Reconnecting is not a takeover: ask who holds control before claiming.
+        assert!(html.contains("async function autoConnectWhenFree()"));
+        // One claim at a time: the automatic reconnect and a manual Connect aim at the
+        // same lease, and racing them made the loser see a 409 for its own tab s lease
+        // while the winner was released as stale.
+        assert!(html.contains("let claimInFlight = false;"));
+        assert!(html.contains("if (claimInFlight) {"));
+        assert!(html
+            .contains("if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;"));
+        // Landing with the intent armed: no drawer open-then-shut animation.
+        assert!(html.contains("setNavigationOpen(!autoConnectArmed());"));
+        assert!(html.contains("if (status && status.active && !resumeToken) {"));
+        // The pre-check is advisory. Only a bad token or remote access being off are
+        // answers on their own; the claim judges ownership.
+        assert!(html.contains("if (err && (err.status === 401 || err.status === 403)) {"));
+        // A bfcache restore brings the document back with its variables intact, so a
+        // lingering leaseId after the pagehide release reads as "we still have
+        // control" and the reconnect skips its own return trip.
+        assert!(
+            html.contains("// capability above is what lets the reclaim follow the release drain.")
+        );
+        assert!(html.contains("setStatus(\"Another client has control.\");"));
+        assert!(html.contains("function maybeAutoConnect()"));
+        assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
+        // Three signals for one moment: tab switch, bfcache restore, network back.
+        assert!(html.contains("document.addEventListener(\"visibilitychange\", () => {"));
+        assert!(html.contains("window.addEventListener(\"pageshow\", () => maybeAutoConnect());"));
+        assert!(html.contains("window.addEventListener(\"online\", () => maybeAutoConnect());"));
+        // Connecting arms the intent; releasing on purpose withdraws it.
+        assert!(html.contains("armAutoConnect();"));
+        assert!(html.contains("disarmAutoConnect();"));
+        // A host takeover ends the standing intent; a heartbeat timeout does not.
+        assert!(
+            html.contains("function loseRemoteControl(message, { hostTookOver = false } = {}) {")
+        );
+        assert!(html.contains("if (hostTookOver) disarmAutoConnect();"));
+        // Reclaiming our own expired lease is not a failure to paint red: the notice
+        // used to flash for the second before the reconnect replaced it.
+        // Not visibility-gated: painting the failure screen into a hidden page only
+        // shows up as a flash on the way back (menu popped open, red notice).
+        assert!(html.contains("const reclaimingOurOwn = !hostTookOver && autoConnectArmed();"));
+        assert!(html.contains("if (!reclaimingOurOwn) discardResumeToken();"));
+        assert!(html.contains("if (reclaimingOurOwn) {"));
+        assert!(html.contains("setConnectionHint(\"Reconnecting...\", false);"));
+        // A heartbeat 409 (\"lease is not active\") does not name an owner, so it must
+        // not be read as a takeover — an expiry while the phone was away answers the
+        // same way. The claim settles ownership.
+        assert!(html.contains("hostTookOver: err && (err.status === 401 || err.status === 403),"));
+        assert!(html.contains(
+            "const drainInProgress = err && err.status === 409 && err.transitioning === true;"
+        ));
+        assert!(html.contains("if (isFatalRemoteControlError(err) && !drainInProgress) {"));
+        assert!(html.contains("\"transitioning\","));
+        assert!(html.contains("scheduleAutoConnectRetry();"));
+        assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
+    }
+
     #[test]
     fn remote_page_html_contains_remote_bootstrap() {
         let html = remote_page_html();
@@ -167,7 +238,7 @@ mod tests {
         assert!(html.contains("rect.width < 20 || rect.height < 20"));
         assert!(html.contains("function scheduleTerminalFit(sendResize = true)"));
         assert!(html.contains("function scheduleTerminalRefresh()"));
-        assert!(html.contains("function loseRemoteControl(message)"));
+        assert!(html.contains("function loseRemoteControl(message, { hostTookOver = false } = {})"));
         assert!(html.contains("const OUTPUT_RECONNECT_INITIAL_DELAY_MS"));
         assert!(html.contains("const OUTPUT_RECONNECT_MAX_DELAY_MS"));
         assert!(html.contains("function scheduleOutputReconnect(terminalId, outputLeaseId)"));
