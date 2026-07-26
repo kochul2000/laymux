@@ -17,6 +17,11 @@ import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
+import {
+  registerAtlasRebuilder,
+  unregisterAtlasRebuilder,
+  __resetAtlasRebuildersForTest,
+} from "@/lib/webgl-atlas-rebuild";
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
@@ -177,7 +182,9 @@ vi.mock("@xterm/xterm", () => ({
     getSelection = mockGetSelection;
     clearSelection = mockClearSelection;
     refresh = mockRefresh;
-    clearTextureAtlas = mockClearTextureAtlas;
+    // Passes itself so a test can tell *which* terminals were cleared, not just
+    // how many calls happened (issue #571).
+    clearTextureAtlas = () => mockClearTextureAtlas(this);
     reset = mockReset;
     dispose = vi.fn();
     loadAddon = vi.fn();
@@ -409,6 +416,10 @@ describe("TerminalView", () => {
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
+    // Module-global like the stores above: terminals mounted by earlier tests
+    // would otherwise stay registered and fan a single atlas clear out to all
+    // of them, against the one shared xterm mock (issue #571).
+    __resetAtlasRebuildersForTest();
     webglInitTimes.length = 0;
     csiHandlers.clear();
     oscHandlers.clear();
@@ -4915,6 +4926,86 @@ describe("TerminalView", () => {
       expect(mockFit).toHaveBeenCalled();
       expect(mockClearTextureAtlas).toHaveBeenCalled();
       expect(mockRequestAnimationFrame).toHaveBeenCalled();
+    });
+  });
+
+  // The texture atlas is shared by every terminal on the same render config, but
+  // xterm re-syncs only the render model of the terminal that cleared it. The
+  // others keep vertex data pointing into atlas regions that now hold different
+  // glyphs, and a plain repaint cannot repair it — `_updateModel` skips cells
+  // whose contents are unchanged, so only clearing their model rewrites the
+  // stale coordinates (issue #571).
+  it("rebuilds other terminals' renderers when one clears the shared texture atlas (issue #571)", async () => {
+    const foreignRebuild = vi.fn();
+    registerAtlasRebuilder("t-atlas-bystander", foreignRebuild);
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-atlas-share"
+          paneId="pane-atlas-share"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+
+      mockClearTextureAtlas.mockClear();
+      foreignRebuild.mockClear();
+
+      act(() => {
+        useOverridesStore.getState().setViewOverride("pane-atlas-share", { fontSize: 20 });
+      });
+
+      await vi.waitFor(() => {
+        expect(mockClearTextureAtlas).toHaveBeenCalled();
+        expect(foreignRebuild).toHaveBeenCalled();
+      });
+    } finally {
+      unregisterAtlasRebuilder("t-atlas-bystander");
+    }
+  });
+
+  // The rebuild sent to the other terminals has to clear their atlas, not just
+  // repaint them: `_updateModel` skips cells whose contents are unchanged, so a
+  // refresh rewrites none of the stale vertices (issue #571).
+  it("clears the other terminal's atlas, not merely repaints it (issue #571)", async () => {
+    render(
+      <TerminalView
+        instanceId="t-atlas-a"
+        paneId="pane-atlas-a"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+    render(
+      <TerminalView
+        instanceId="t-atlas-b"
+        paneId="pane-atlas-b"
+        profile="PowerShell"
+        syncGroup=""
+      />,
+    );
+
+    // Both mounts do their own atlas rebuild; let that settle before measuring,
+    // otherwise the bystander looks cleared when nothing reached it.
+    await vi.waitFor(() => {
+      expect(new Set(mockClearTextureAtlas.mock.calls.map(([term]) => term)).size).toBe(2);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    mockClearTextureAtlas.mockClear();
+
+    act(() => {
+      useOverridesStore.getState().setViewOverride("pane-atlas-a", { fontSize: 20 });
+    });
+
+    // Both terminals must have had their atlas cleared: the one whose font
+    // changed, and the bystander reached through the coordinator. A
+    // refresh-only fan-out would only ever clear the first.
+    await vi.waitFor(() => {
+      const cleared = new Set(mockClearTextureAtlas.mock.calls.map(([term]) => term));
+      expect(cleared.size).toBe(2);
     });
   });
 
