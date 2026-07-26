@@ -2044,7 +2044,17 @@
             const body = await response.json().catch(() => ({}));
             const error = new Error(body.error || `${response.status} ${response.statusText}`);
             error.status = response.status;
-            for (const field of ["code", "claimReservationId", "retryAfterMs", "reservationTtlMs"]) {
+            // `active`/`transitioning` ride the 409 conflict-status body and are what
+            // separates "someone else has control" from "the owner handoff is still
+            // draining" (issue #561).
+            for (const field of [
+              "code",
+              "claimReservationId",
+              "retryAfterMs",
+              "reservationTtlMs",
+              "active",
+              "transitioning",
+            ]) {
               if (Object.prototype.hasOwnProperty.call(body, field)) error[field] = body[field];
             }
             throw error;
@@ -3896,8 +3906,13 @@
         function handleHeartbeatError(err) {
           if (!leaseId) return;
           if (isFatalRemoteControlError(err) || heartbeatTimedOut()) {
+            // A heartbeat `409` is literally "your lease is not active" — it does not
+            // say who has control now, and an expiry while we were away answers it the
+            // same way a host takeover does. Only `401`/`403` (bad token, remote
+            // access off) are answers on their own; ownership is what the next claim
+            // asks, and its reply decides whether to keep trying (issue #561).
             loseRemoteControl(`Control returned to the host. ${err.message}`, {
-              hostTookOver: isFatalRemoteControlError(err),
+              hostTookOver: err && (err.status === 401 || err.status === 403),
             });
             return;
           }
@@ -5382,7 +5397,12 @@
             // another client holds control, remote access is off, or the token is
             // wrong. Retrying cannot change any of those, and quietly hammering the
             // host would be exactly the takeover ADR-0027 refused. Requires the user.
-            if (isFatalRemoteControlError(err)) {
+            // The claim is where ownership is settled. A `409` while the previous
+            // owner handoff drains is a "not yet", not a "no" — everything else
+            // (another controller holds it, the host reclaimed, bad token, remote off)
+            // cannot be changed by trying again.
+            const drainInProgress = err && err.status === 409 && err.transitioning === true;
+            if (isFatalRemoteControlError(err) && !drainInProgress) {
               disarmAutoConnect();
               setStatus(err.message, true);
               return;

@@ -120,9 +120,15 @@ mod tests {
         assert!(html.contains("if (!reclaimingOurOwn) discardResumeToken();"));
         assert!(html.contains("if (reclaimingOurOwn) {"));
         assert!(html.contains("setConnectionHint(\"Reconnecting...\", false);"));
-        assert!(html.contains("hostTookOver: isFatalRemoteControlError(err),"));
-        // Definitive refusals (401/403/409) are answers, not hiccups.
-        assert!(html.contains("if (isFatalRemoteControlError(err)) {"));
+        // A heartbeat 409 (\"lease is not active\") does not name an owner, so it must
+        // not be read as a takeover — an expiry while the phone was away answers the
+        // same way. The claim settles ownership.
+        assert!(html.contains("hostTookOver: err && (err.status === 401 || err.status === 403),"));
+        assert!(html.contains(
+            "const drainInProgress = err && err.status === 409 && err.transitioning === true;"
+        ));
+        assert!(html.contains("if (isFatalRemoteControlError(err) && !drainInProgress) {"));
+        assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
         assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
     }
