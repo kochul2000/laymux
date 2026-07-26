@@ -1290,7 +1290,21 @@ export function TerminalView({
         // buffer there would paint the preview on the footer — the exact failure the
         // original comment warned about. `isRepaintInProgress` covers that gap.
         const shadow = shadowCursorRef.current;
-        if (computeUseShadowCursor(shadow) || shadow.isRepaintInProgress) {
+        //
+        // In the alt buffer the buffer cursor is always the authority (issue #553).
+        // The shadow machine exists for the normal buffer's prompt/footer parking and
+        // it *gives up* there: `getShadowSyncEligibility` returns `"alt-buffer"` and
+        // skips the sync outright. But `computeUseShadowCursor` still returns true
+        // whenever `hasSyncFramePosition` is set, so without this term a fullscreen TUI
+        // that emits DEC 2026 would be anchored on a value the shadow machine stopped
+        // maintaining — frozen at best, and if it was captured before the alt-buffer
+        // switch its absolute row exceeds `rows` and the viewport guard hides the
+        // preview entirely. vim happens to escape this by emitting neither OSC 133 nor
+        // DEC 2026, which is a property of vim, not of the alt buffer.
+        if (
+          !shadow.isAltBufferActive &&
+          (computeUseShadowCursor(shadow) || shadow.isRepaintInProgress)
+        ) {
           return {
             cursorX: shadow.cursorX,
             cursorAbsY: shadow.cursorAbsY,
