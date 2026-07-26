@@ -32,6 +32,12 @@ type CompositionControllerOptions = {
    * every row change as unexplained, which is the pre-existing behaviour.
    */
   getCols: () => number;
+  /**
+   * Commit text the controller is dropping so the caller can send it to the PTY.
+   * Only used when a blur ends a live composition — see `handleBlur` for why xterm
+   * cannot be relied on to send it and why this cannot double up (issue #555).
+   */
+  onCommit?: (text: string) => void;
   onStateChange?: (state: CompositionPreviewState) => void;
   onTrace?: (event: string, payload: Record<string, unknown>) => void;
 };
@@ -658,15 +664,31 @@ export function createImeCompositionController(
 
   const handleBlur = () => {
     if (phase === "idle") return;
-    // A blur mid-composition means the browser force-committed or aborted
-    // the composition. compositionend normally follows, but WebView2 +
-    // Windows IME can drop it — leaving this controller (and the preview
-    // box) stuck in "composing" until the next focus cycle. Reset here;
-    // xterm clears the textarea itself on blur.
+    // A blur mid-composition leaves this controller (and the preview box) stuck in
+    // "composing" until the next focus cycle, so it still has to reset.
+    //
+    // But resetting alone *loses the syllable* (issue #555). Measured against a real
+    // `Terminal`: on blur xterm clears the helper textarea and sends nothing, leaving
+    // its own `_isComposing` true; a `compositionend` arriving after the blur cannot
+    // recover it either, because the finalizer's slice source is already empty. For
+    // Korean — and CJK generally — a focus change is a commit, not a cancel, so the
+    // text the user could see has to reach the PTY.
+    //
+    // Sending it here cannot double up. When `compositionend` fires *before* the blur
+    // xterm does send (through its deferred finalizer), and in that ordering this
+    // controller is in `pending-finalize`, never `composing`. The phase alone
+    // discriminates the two orderings, so no xterm private state has to be read.
+    //
+    // The text comes from `state`, not from the textarea: xterm clears the textarea in
+    // its own blur handler, which is registered first, so reading it here would depend
+    // on listener order.
+    const commitOnBlur = phase === "composing" ? state.text : "";
     traceComposition(options, "ime-composition-blur-reset", {
       phase,
       textareaValue: textarea?.value ?? "",
+      commitOnBlur,
     });
+    if (commitOnBlur) options.onCommit?.(commitOnBlur);
     reset();
   };
 

@@ -1245,6 +1245,14 @@ export function TerminalView({
     };
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
+      // A blur mid-composition would otherwise drop the syllable: xterm clears the
+      // helper textarea and sends nothing (measured). Route it exactly like typed
+      // input so the remote-control gate still applies (issue #555).
+      onCommit: (text) => {
+        if (!localTerminalControlAllowed()) return;
+        trace("ime-composition-commit-on-blur", { text });
+        writeToTerminal(instanceId, text).catch(() => {});
+      },
       getAnchor: () => {
         // Prefer the shadow cursor only when it is actually the trusted position.
         // TUI apps (Claude Code, Codex, …) move the buffer cursor to the

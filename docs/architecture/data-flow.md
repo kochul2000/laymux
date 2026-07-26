@@ -496,6 +496,28 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
   - **적용 범위**: shadow cursor 를 앵커로 쓰는 페인에서는 조합 중 `getShadowSyncEligibility` 가 `composition-preview-active` 를 먼저 돌려주어 라이브가 얼어 있으므로 행 변화 분기가 사실상 발생하지 않는다. 재기준화를 실제로 태우는 것은 버퍼 커서(셸) 경로다.
 - **여기서도 결함이 테스트로 못박혀 있었다**: `"adopts a shadow cursor that moved backwards"` 와 helper 앵커 테스트 2건이 그렇다. 후자는 "TUI 가 커서를 footer 에 주차했고 shadow 가 진값" 이라는 상태를 **단정만** 하고 그 상태를 만드는 DEC 2026 프레임을 구동하지 않아서, `computeUseShadowCursor` 가 false 인 합성 상태였다. 실측이 보여준 실제 흐름(프레임 열기 → 커서 주차 → 프레임 닫기)을 구동하도록 고쳤다 — 단정이 아니라 재현이다.
 - **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
+### 8.16 조합 중 포커스 아웃은 확정이다 (issue #555)
+
+조합 중에 페인 포커스를 잃으면 조합 중이던 글자가 **영구 유실**됐다. PTY 로 보낸 적이 없으므로 되살릴 데이터가 없고, 다시 포커스해도 방향키를 눌러도 나타나지 않는다. 한국어(그리고 CJK 일반)에서 포커스 이동은 취소가 아니라 **확정**이며 Windows IME 자체도 그렇게 동작한다.
+
+실제 `Terminal` 을 jsdom 에 띄워 측정한 계약(4케이스):
+
+| 순서 | 결과 |
+|---|---|
+| blur 만 | textarea `"가"` → `""`, **onData 없음**, xterm 의 `_isComposing` 은 **true 로 남는다** |
+| `compositionend` → blur | end 에서 `_isSendingComposition=true`, 다음 tick 에 `onData ["가"]`, blur 는 값만 비운다. **중복 없음** |
+| blur → 늦은 `compositionend` | blur 후 값이 이미 비어 finalizer 슬라이스가 공집합 → **onData 없음** |
+| 조합 없는 잔여물 | blur 에서 **무조건** 비운다 |
+
+- **xterm 은 blur 에서 아무것도 보내지 않고 지운다.** `handleBlur` 의 기존 주석은 "compositionend 가 따라오거나, 아니면 xterm 이 지운다" 였는데, 실측은 후자이고 **지우기만 한다**. 그리고 blur 뒤에 오는 `compositionend` 로는 복구가 불가능하다 — 읽을 슬라이스가 이미 없다.
+- **판정**: `phase === "composing"` 이고 프리뷰 텍스트가 있으면 컨트롤러가 `onCommit` 으로 그 텍스트를 올려보내고, 호출부가 타이핑과 같은 경로(`writeToTerminal`, 원격 제어 게이트 포함)로 PTY 에 보낸다.
+- **이중 전송이 불가능한 이유는 phase 하나다**: `compositionend` 가 blur 보다 먼저 오는 순서에서는 xterm 이 자기 deferred finalizer 로 보내고, 그때 컨트롤러 phase 는 `pending-finalize` 이지 `composing` 이 아니다. 그래서 #527/ADR-0062 처럼 xterm private 상태를 읽을 필요가 없다.
+- **텍스트 출처는 `state.text` 이고 textarea 가 아니다**: xterm 이 자기 blur 핸들러(먼저 등록됨)에서 값을 비우므로 거기서 읽으면 리스너 순서에 의존한다.
+- **carry-over 체인 중 blur 면 진행 중인 음절만** 보낸다. 앞 음절들은 이미 xterm 의 finalizer 로 PTY 에 갔으므로 다시 보내면 체인 전체가 중복된다.
+- **리셋은 그대로 유지한다**: xterm 이 `_isComposing` 을 true 로 남기므로 프리뷰가 다음 포커스 사이클까지 살아 있는 것을 막는 방어가 여전히 필요하다.
+- **결함이 테스트로 못박혀 있던 네 번째 사례**였다. `"resets when the textarea blurs mid-composition (missed compositionend defense)"` 가 리셋만 단정해 유실을 정답으로 고정했다. 리셋 단정(stuck 방어)은 유지하고 유실 쪽만 갈랐다.
+- **취소는 확정이 아니다**: 이 판정은 blur 에만 적용되며 Esc 등 명시적 취소 경로는 건드리지 않는다.
+- **미검증**: 실기 확인 필요. 그리고 blur 가 아니라 창 전체가 비활성화되는 경로(앱 blur, §8.9 의 focus 소유권 왕복)에서 같은 이벤트열이 오는지는 확인하지 않았다.
 ---
 
 ## 9. WorkspaceSelectorView (cmux 클론)
