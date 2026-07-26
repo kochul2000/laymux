@@ -8370,6 +8370,45 @@ describe("TerminalView desktop input composer", () => {
     expect(pasteEvent.defaultPrevented).toBe(false);
   });
 
+  it("never proxies the paste chord itself, or the clipboard would never be read", async () => {
+    // Real-device defect: Ctrl+V was forwarded like any other key, so a fullscreen app
+    // received the raw control byte ( → `^V` on screen) and preventDefault kept the
+    // browser from ever firing the paste event that carries the text.
+    const terminalId = "t-composer-alt-paste-chord";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const textarea = screen.getByTestId(
+      `terminal-input-composer-${terminalId}-textarea`,
+    ) as HTMLTextAreaElement;
+    mockBufferActive.type = "alternate";
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalInput.mockClear();
+
+    const chord = new KeyboardEvent("keydown", {
+      key: "v",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    textarea.dispatchEvent(chord);
+
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(chord.defaultPrevented).toBe(false);
+
+    // The default action stands, so the browser paste event follows and routes.
+    const pasteEvent = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: { getData: () => "pasted" },
+    });
+    act(() => {
+      textarea.dispatchEvent(pasteEvent);
+    });
+
+    expect(mockWriteTerminalInput).toHaveBeenCalledWith(terminalId, "pasted", false);
+  });
+
   it("routes a paste typed-into-then-pasted in the same tick by the live draft value", async () => {
     // The controlled `text` prop is one render behind an edit. Deciding emptiness from
     // it would consume the event as a proxy paste while the host saw a non-empty draft,
