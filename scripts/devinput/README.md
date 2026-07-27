@@ -40,7 +40,9 @@ uv run --with pytest python -m pytest scripts/devinput/tests -q
 
 ## 안전 장치 4층 — 전부 필수
 
-1. **lease.** `lease` 명령 없이는 어떤 주입도 거부한다. 만료 시각이 있고(최대 1시간) 만료되면
+1. **lease.** `lease` 명령 없이는 어떤 주입도 거부한다. 발급은 대상 검증(`TargetLock.resolve`,
+   `--focus-dev` 포커스 전환)이 **성공한 뒤에만** 유효하다 — 실패를 보고하는 경로는 lease 를
+   남기지 않는다(이미 발급됐으면 되감는다). 만료 시각이 있고(최대 1시간) 만료되면
    실행 중에도 중단된다. 파일은 `%LOCALAPPDATA%\laymux-devinput\lease.json`. `LAYMUX_DEVINPUT_DISABLE=1`
    은 lease 를 무시하고 전부 차단한다. lease 는 **이벤트마다 다시 읽는다** — 실행 중에 `unlease`
    로 파일을 지우거나 `LAYMUX_DEVINPUT_DISABLE=1` 을 켜면 그 즉시 진행 중인 런도 멈춘다.
@@ -57,9 +59,16 @@ uv run --with pytest python -m pytest scripts/devinput/tests -q
 
 추가로 `doctor`/`keys` 는 `activity.type == "shell"` 인 pane 만 대상으로 삼는다. Claude·Codex·vim 이
 돌고 있는 pane 에 타이핑하는 것은 남의 세션에 입력을 넣는 것이므로 거부한다.
-`keys --no-focus` 는 HTTP 포커스 이동을 건너뛰므로 **실제로 포커스를 가진 pane**(`/api/v1/grid` 의
-`focusedPaneIndex`)을 조회해 그 pane 이 shell 인지 검증한다. 아니면 거부한다 — 검증한 pane 과
-키가 들어가는 pane 이 달라지는 경로를 남기지 않는다.
+포커스 판정은 항상 `/api/v1/grid` 의 **`focusedTerminalId`** 로 한다. laymux 의 키보드 포커스는
+grid pane 과 dock pane **두 축**이고 한 번에 하나만 가지므로(dock 에 들어가면 `focusedPaneIndex`
+가 `null` 이 된다), 프론트엔드가 두 축을 합쳐 내려주는 이 필드만 신뢰할 수 있다. `focusedPaneIndex`
+단독으로 유추하면 dock 터미널이 포커스일 때 엉뚱한 pane 을 대상으로 삼는다.
+
+- `keys --no-focus`: 포커스 이동을 건너뛰므로 **실제 포커스 pane** 을 조회해 shell 인지 검증하고,
+  `--terminal` 과 다르면 거부한다. 검증한 pane 과 키가 들어가는 pane 이 달라지는 경로를 남기지 않는다.
+- `keys`(기본)·`doctor`: HTTP 포커스 요청은 "접수" 만 알려주므로, 포커스가 실제로 그 pane 에
+  넘어갈 때까지 최대 2초 폴링하고 안 넘어가면 거부한다. UI 가 멈춘 상황(이 도구의 주 표적)에서
+  고정 대기만 하면 키가 직전 pane 으로 들어간다.
 
 ## doctor 가 검증하는 것
 

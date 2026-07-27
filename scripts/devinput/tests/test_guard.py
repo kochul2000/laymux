@@ -125,7 +125,9 @@ def test_matching_dev_pid_passes():
 # -- dead man: synthetic input that is not ours -----------------------------
 
 
-def _feed_key(dead: guard.DeadMan, *, injected: bool, ours: bool) -> None:
+def _feed_key(
+    dead: guard.DeadMan, *, injected: bool, ours: bool, msg: int = win32.WM_KEYDOWN
+) -> None:
     info = win32.KBDLLHOOKSTRUCT(
         vkCode=0x41,
         scanCode=0x1E,
@@ -133,7 +135,7 @@ def _feed_key(dead: guard.DeadMan, *, injected: bool, ours: bool) -> None:
         time=0,
         dwExtraInfo=win32.DEVINPUT_SIGNATURE if ours else 0,
     )
-    dead._on_keyboard(0, 0x0100, ctypes.addressof(info))
+    dead._on_keyboard(0, msg, ctypes.addressof(info))
 
 
 def test_real_keystroke_trips_immediately():
@@ -157,3 +159,43 @@ def test_foreign_synthetic_keys_trip_after_the_tolerance():
     assert not dead.tripped
     _feed_key(dead, injected=True, ours=False)
     assert dead.tripped and "not ours" in dead.reason
+
+
+def test_the_tolerance_counts_presses_not_events():
+    """Every key yields KEYDOWN+KEYUP; counting both would halve the tolerance."""
+    dead = guard.DeadMan(foreign_key_limit=3)
+    for _ in range(2):
+        _feed_key(dead, injected=True, ours=False, msg=win32.WM_KEYDOWN)
+        _feed_key(dead, injected=True, ours=False, msg=0x0101)  # WM_KEYUP
+    assert not dead.tripped
+    _feed_key(dead, injected=True, ours=False, msg=win32.WM_KEYDOWN)
+    assert dead.tripped
+
+
+def test_syskeydown_counts_too():
+    dead = guard.DeadMan(foreign_key_limit=1)
+    _feed_key(dead, injected=True, ours=False, msg=win32.WM_SYSKEYDOWN)
+    assert dead.tripped
+
+
+# -- lease writes are atomic ------------------------------------------------
+
+
+def test_write_lease_replaces_atomically_and_leaves_no_temp(monkeypatch, tmp_path):
+    """checkpoint() reads this file per event — a half-written file would abort a run."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.delenv("LAYMUX_DEVINPUT_DISABLE", raising=False)
+    guard.write_lease(300, note="first")
+    guard.write_lease(600, note="second")
+
+    lease_dir = guard.lease_path().parent
+    assert [p.name for p in lease_dir.iterdir()] == ["lease.json"]
+    assert guard.read_lease().note == "second"
+
+
+def test_write_lease_keeps_the_old_lease_if_the_new_one_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    guard.write_lease(300, note="kept")
+    with pytest.raises(guard.GuardError):
+        guard.write_lease(guard.LEASE_MAX_SECONDS + 1)
+    assert guard.read_lease().note == "kept"

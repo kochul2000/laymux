@@ -35,9 +35,10 @@ RELEASE_CONFIG_DIR = "laymux"
 # Real mouse travel (px, manhattan) tolerated before we call the human back.
 MOUSE_MOVE_ABORT_PX = 40
 LEASE_MAX_SECONDS = 60 * 60
-# Synthetic key events that are not ours tolerated before we abort. A human
-# typing over RDP/Parsec/VNC arrives with LLKHF_INJECTED set and no signature of
-# ours, so it is indistinguishable from another automation tool — abort either way.
+# Foreign synthetic *keypresses* (KEYDOWN only — a keyup is the same press) we
+# tolerate before aborting: roughly "two stray characters". A human typing over
+# RDP/Parsec/VNC arrives with LLKHF_INJECTED set and no signature of ours, so it
+# is indistinguishable from another automation tool — abort either way.
 FOREIGN_INJECTED_KEYS_ABORT = 3
 
 
@@ -94,12 +95,17 @@ def write_lease(seconds: float, note: str = "") -> Lease:
     lease = Lease(expires_at=now + seconds, granted_at=now, note=note)
     path = lease_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    # Atomic: `checkpoint()` reads this file before every event, so an in-place
+    # rewrite (re-leasing from another window mid-run) could be read half-written
+    # and abort the run with a bogus "no lease".
+    tmp = path.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(
         json.dumps(
             {"expiresAt": lease.expires_at, "grantedAt": now, "note": note}, indent=2
         ),
         encoding="utf-8",
     )
+    os.replace(tmp, path)
     return lease
 
 
@@ -345,11 +351,12 @@ class DeadMan:
             if not ours:
                 if not injected:
                     self._trip(f"human pressed a key (vk=0x{info.vkCode:02X})")
-                else:
+                elif wparam in (win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN):
+                    # Count presses, not events: every key produces a KEYUP too.
                     self._foreign_keys += 1
                     if self._foreign_keys >= self._foreign_key_limit:
                         self._trip(
-                            f"{self._foreign_keys} synthetic key events are not ours "
+                            f"{self._foreign_keys} synthetic keypresses are not ours "
                             f"(last vk=0x{info.vkCode:02X}) — remote desktop session "
                             "or another automation tool is typing"
                         )

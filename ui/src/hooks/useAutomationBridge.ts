@@ -421,7 +421,37 @@ const handlers: HandlerMap = {
         focusedPaneIndex != null && ws
           ? (paneNumbers.get(ws.panes[focusedPaneIndex]?.id) ?? null)
           : null;
-      return ok({ editMode, focusedPaneIndex, focusedPaneNumber, activeWorkspaceId, panes });
+      // Keyboard focus lives on two axes — grid pane and dock pane — and only one
+      // holds it at a time (entering a dock nulls focusedPaneIndex and vice versa).
+      // Resolve the winner here so callers never have to join the two stores; a
+      // caller that guesses from focusedPaneIndex alone would target the wrong
+      // pane whenever a dock terminal is focused.
+      const { focusedDock, focusedDockPaneId } = useDockStore.getState();
+      const focusedDockPane =
+        focusedDock !== null
+          ? (useDockStore
+              .getState()
+              .getDock(focusedDock)
+              ?.panes.find((p) => p.id === focusedDockPaneId) ?? null)
+          : null;
+      const focusedTerminalId =
+        focusedDock !== null
+          ? focusedDockPane?.view.type === "TerminalView"
+            ? toTerminalId(focusedDockPane.id)
+            : null
+          : focusedPaneIndex != null
+            ? (panes.find((p) => p.paneIndex === focusedPaneIndex)?.terminalId ?? null)
+            : null;
+      return ok({
+        editMode,
+        focusedPaneIndex,
+        focusedPaneNumber,
+        focusedDock,
+        focusedDockPaneId,
+        focusedTerminalId,
+        activeWorkspaceId,
+        panes,
+      });
     },
     setEditMode: (p) => {
       useGridStore.getState().setEditMode(p.enabled as boolean);

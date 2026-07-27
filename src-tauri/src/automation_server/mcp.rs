@@ -2109,7 +2109,9 @@ impl McpHandler {
 
     // ── Grid/Pane ──
 
-    /// Get grid state: editMode, focusedPaneIndex, and activeWorkspaceId.
+    /// Get grid state: editMode, focusedPaneIndex, activeWorkspaceId, and the
+    /// focus pair focusedDock/focusedTerminalId (focus lives on the grid axis or
+    /// the dock axis; focusedTerminalId is the resolved winner, null if neither).
     #[tool]
     async fn get_grid_state(&self) -> Result<CallToolResult, ErrorData> {
         self.bridge("query", "grid", "getState", json!({})).await

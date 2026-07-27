@@ -39,31 +39,49 @@ def _grid(monkeypatch, payload):
     monkeypatch.setattr(probe, "request", lambda port, path, **kw: payload)
 
 
-def test_focused_terminal_id_maps_index_to_terminal(monkeypatch):
+def test_focused_terminal_id_uses_the_resolved_field(monkeypatch):
+    """Both focus axes (grid pane, dock pane) are resolved frontend-side."""
     _grid(
         monkeypatch,
         {
-            "focusedPaneIndex": 1,
-            "panes": [
-                {"paneIndex": 0, "terminalId": "t0"},
-                {"paneIndex": 1, "terminalId": "t1"},
-            ],
+            "focusedPaneIndex": 0,
+            "focusedDock": "bottom",
+            "focusedTerminalId": "terminal-dp-1",
+            "panes": [{"paneIndex": 0, "terminalId": "terminal-g1"}],
         },
     )
-    assert probe.focused_terminal_id(guard.DEV_PORT) == "t1"
+    assert probe.focused_terminal_id(guard.DEV_PORT) == "terminal-dp-1"
 
 
 def test_focused_terminal_id_is_none_without_focus(monkeypatch):
-    _grid(monkeypatch, {"focusedPaneIndex": None, "panes": []})
+    _grid(monkeypatch, {"focusedPaneIndex": None, "focusedTerminalId": None, "panes": []})
     assert probe.focused_terminal_id(guard.DEV_PORT) is None
 
 
-def test_focused_terminal_id_is_none_for_a_non_terminal_pane(monkeypatch):
-    _grid(
-        monkeypatch,
-        {"focusedPaneIndex": 0, "panes": [{"paneIndex": 0, "terminalId": None}]},
-    )
-    assert probe.focused_terminal_id(guard.DEV_PORT) is None
+def test_focused_terminal_id_refuses_a_dev_build_without_the_field(monkeypatch):
+    """Falling back to focusedPaneIndex would be blind to dock focus — refuse."""
+    _grid(monkeypatch, {"focusedPaneIndex": 0, "panes": [{"paneIndex": 0, "terminalId": "t0"}]})
+    with pytest.raises(guard.GuardError, match="predates it"):
+        probe.focused_terminal_id(guard.DEV_PORT)
+
+
+# -- wait_for_focus ---------------------------------------------------------
+
+
+def test_wait_for_focus_returns_once_the_pane_takes_focus(monkeypatch):
+    answers = iter(["t-other", "t-other", "t-target"])
+    monkeypatch.setattr(probe, "focused_terminal_id", lambda port: next(answers))
+    monkeypatch.setattr(probe.time, "sleep", lambda _s: None)
+    assert probe.wait_for_focus(guard.DEV_PORT, "t-target", timeout=5) is True
+
+
+def test_wait_for_focus_gives_up_on_a_stalled_ui(monkeypatch):
+    """`focus_terminal` only queues the change; a frozen frontend never applies it."""
+    monkeypatch.setattr(probe, "focused_terminal_id", lambda port: "t-other")
+    monkeypatch.setattr(probe.time, "sleep", lambda _s: None)
+    clock = iter([0.0, 0.1, 0.2, 0.3, 99.0, 99.0])
+    monkeypatch.setattr(probe.time, "monotonic", lambda: next(clock))
+    assert probe.wait_for_focus(guard.DEV_PORT, "t-target", timeout=1.0) is False
 
 
 # -- keys --no-focus --------------------------------------------------------
@@ -75,12 +93,16 @@ class _Lock:
     dev_hwnd = 1
 
 
-def _patch_keys(monkeypatch, *, focused, picked=None):
+def _patch_keys(monkeypatch, *, focused, picked=None, seen=None):
     monkeypatch.setattr(guard, "require_lease", lambda: None)
     monkeypatch.setattr(guard.TargetLock, "resolve", classmethod(lambda cls: _Lock()))
     monkeypatch.setattr(probe, "focused_terminal_id", lambda port: focused)
+    monkeypatch.setattr(probe, "focus_terminal", lambda port, tid: {})
+    monkeypatch.setattr(probe, "wait_for_focus", lambda port, tid, timeout=2.0: tid == focused)
 
     def _pick(port, terminal_id=None):
+        if seen is not None:
+            seen.append(terminal_id)
         if picked is None:
             raise guard.GuardError(f"terminal {terminal_id} is running 'interactiveApp'")
         return picked
@@ -123,20 +145,33 @@ def test_no_focus_refuses_when_the_focused_pane_runs_an_agent(monkeypatch, capsy
 
 def test_no_focus_vets_the_focused_pane_not_an_arbitrary_shell(monkeypatch):
     seen: list[str | None] = []
-    _patch_keys(monkeypatch, focused="t-shell", picked={"id": "t-shell"})
-    real_pick = probe.pick_shell_terminal
-
-    def _spy(port, terminal_id=None):
-        seen.append(terminal_id)
-        return real_pick(port, terminal_id)
-
-    monkeypatch.setattr(probe, "pick_shell_terminal", _spy)
+    _patch_keys(monkeypatch, focused="t-shell", picked={"id": "t-shell"}, seen=seen)
     monkeypatch.setattr(
         guard, "InputSession", lambda **kw: (_ for _ in ()).throw(_Done())
     )
     with pytest.raises(_Done):
         cli.cmd_keys(_args())
     assert seen == ["t-shell"]
+
+
+# -- keys --focus: the focus change must actually land ----------------------
+
+
+def test_focus_path_refuses_when_focus_never_lands(monkeypatch, capsys):
+    """A stalled UI accepts the focus request and keeps the old pane focused."""
+    _patch_keys(monkeypatch, focused="t-old", picked={"id": "t-target"})
+    assert cli.cmd_keys(_args(focus=True, terminal="t-target")) == 1
+    out = capsys.readouterr().out
+    assert "focus did not land on t-target" in out
+
+
+def test_focus_path_proceeds_once_focus_lands(monkeypatch):
+    _patch_keys(monkeypatch, focused="t-target", picked={"id": "t-target"})
+    monkeypatch.setattr(
+        guard, "InputSession", lambda **kw: (_ for _ in ()).throw(_Done())
+    )
+    with pytest.raises(_Done):
+        cli.cmd_keys(_args(focus=True, terminal="t-target"))
 
 
 class _Done(BaseException):

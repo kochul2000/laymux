@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 
@@ -84,18 +85,35 @@ def strip_ansi(text: str) -> str:
 def focused_terminal_id(port: int) -> str | None:
     """Terminal id of the pane that actually owns keyboard focus, or None.
 
-    `/api/v1/grid` reports the focused pane of the *active* workspace, which is
-    the pane keystrokes reach. `isFocused` on the terminal list is per-workspace
-    and therefore true for several terminals at once — not usable here.
+    `focusedTerminalId` is resolved by the frontend across *both* focus axes —
+    grid pane and dock pane. Deriving it here from `focusedPaneIndex` would miss
+    dock focus, and `isFocused` on the terminal list is per-workspace (several
+    terminals carry it at once), so neither substitutes for it.
     """
     grid = request(port, "/api/v1/grid")
-    index = grid.get("focusedPaneIndex")
-    if not isinstance(index, int):
-        return None
-    for pane in grid.get("panes") or []:
-        if pane.get("paneIndex") == index:
-            return pane.get("terminalId")
-    return None
+    if "focusedTerminalId" not in grid:
+        raise GuardError(
+            "dev's /api/v1/grid has no focusedTerminalId — the running build "
+            "predates it. Restart `cargo tauri dev` on this branch."
+        )
+    return grid["focusedTerminalId"]
+
+
+def wait_for_focus(port: int, terminal_id: str, timeout: float = 2.0) -> bool:
+    """Poll until `terminal_id` owns focus. The HTTP focus call only queues it.
+
+    `terminals.setFocus` returns as soon as the bridge accepted the request; the
+    frontend still has to render. This helper exists because a stalled UI — one
+    of the very defects this tool reproduces — would otherwise let keys land in
+    whichever pane was focused before.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        if focused_terminal_id(port) == terminal_id:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
 
 
 def focus_terminal(port: int, terminal_id: str) -> dict:
@@ -125,6 +143,10 @@ def pick_shell_terminal(port: int, terminal_id: str | None = None) -> dict:
 
     Typing into an `interactiveApp` pane (Claude, Codex, vim) would submit
     text to somebody else's session, so those are refused outright.
+
+    Without an explicit id the pick is *arbitrary among shells* — the currently
+    focused shell first if it is one, then the lowest pane index. Callers that
+    care which pane receives the keys must pass `terminal_id`.
     """
     instances = terminals(port)
     if not instances:
@@ -146,7 +168,10 @@ def pick_shell_terminal(port: int, terminal_id: str | None = None) -> dict:
                 "no idle shell pane in dev — every pane runs an interactive app. "
                 "Open a fresh pane, or pass --terminal explicitly."
             )
-        shells.sort(key=lambda t: (not t.get("isFocused", False), t.get("paneIndex", 0)))
+        # `isFocused` is per-workspace and true for several terminals at once, so
+        # it cannot rank anything. Ask which terminal really has focus instead.
+        focused = focused_terminal_id(port)
+        shells.sort(key=lambda t: (t["id"] != focused, t.get("paneIndex", 0)))
         target = shells[0]
 
     activity = (target.get("activity") or {}).get("type")

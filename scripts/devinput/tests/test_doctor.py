@@ -49,6 +49,7 @@ def _patch_doctor(monkeypatch, *, output: str, held: list[str]):
         lambda port, terminal_id=None: {"id": "t1", "paneNumber": 1, "label": "pwsh"},
     )
     monkeypatch.setattr(probe, "focus_terminal", lambda port, tid: {})
+    monkeypatch.setattr(probe, "wait_for_focus", lambda port, tid, timeout=2.0: True)
     monkeypatch.setattr(probe, "terminal_output", lambda port, tid, lines=40: output)
     monkeypatch.setattr(win32, "modifier_held_physically", lambda: list(held))
     monkeypatch.setattr(guard, "InputSession", lambda **kw: _FakeSession())
@@ -172,3 +173,12 @@ def test_doctor_still_fails_on_a_modifier_we_left_down(monkeypatch, capsys):
 
     assert _run_doctor() == 1
     assert "modifiers left down after cleanup: ctrl" in capsys.readouterr().out
+
+
+def test_doctor_fails_when_the_focus_request_never_lands(monkeypatch, capsys):
+    """`focus_terminal` returning 200 is not proof the pane took focus."""
+    _patch_doctor(monkeypatch, output="", held=[])
+    monkeypatch.setattr(probe, "wait_for_focus", lambda port, tid, timeout=2.0: False)
+    monkeypatch.setattr(probe, "focused_terminal_id", lambda port: "t-other")
+    assert _run_doctor() == 1
+    assert "never took focus" in capsys.readouterr().out

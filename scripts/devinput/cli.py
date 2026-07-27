@@ -104,7 +104,11 @@ def cmd_lease(args: argparse.Namespace) -> int:
         if win32.force_foreground(lock.dev_hwnd):
             print(f"{OK}dev window brought to the foreground")
         else:
-            print(f"{BAD}could not focus dev — click its window once, then run doctor")
+            # Same rule as the resolve failure above: a command that reports
+            # failure hands the keyboard back instead of leaving it delegated.
+            guard.clear_lease()
+            print(f"{BAD}could not focus dev — click its window once, then re-run lease")
+            print(f"{INFO}lease revoked (nothing is delegated right now)")
             return 1
     try:
         target = probe.pick_shell_terminal(lock.dev_port)
@@ -171,7 +175,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     try:
         probe.focus_terminal(lock.dev_port, target["id"])
-        print(f"{OK}focused target pane over HTTP")
+        if not probe.wait_for_focus(lock.dev_port, target["id"]):
+            print(f"{BAD}focus request accepted but the pane never took focus "
+                  f"(dev reports {probe.focused_terminal_id(lock.dev_port)!r})")
+            return 1
+        print(f"{OK}focused target pane over HTTP (confirmed)")
     except probe.ApiError as exc:
         print(f"{BAD}focus failed: {exc}")
         return 1
@@ -248,7 +256,15 @@ def cmd_keys(args: argparse.Namespace) -> int:
         if args.focus:
             target = probe.pick_shell_terminal(lock.dev_port, args.terminal)
             probe.focus_terminal(lock.dev_port, target["id"])
-            time.sleep(0.1)
+            # The HTTP call only queues the focus change. Confirm it landed —
+            # a stalled UI (one of the defects this tool reproduces) would
+            # otherwise leave the keys going to the previously focused pane.
+            if not probe.wait_for_focus(lock.dev_port, target["id"]):
+                raise guard.GuardError(
+                    f"focus did not land on {target['id']} within 2s "
+                    f"(dev reports {probe.focused_terminal_id(lock.dev_port)!r}) — "
+                    "refusing; is the UI stalled?"
+                )
         else:
             # Without the focus step the keys land in whatever pane already has
             # focus, so that is the pane we must vet — picking a nice-looking
