@@ -169,11 +169,19 @@ async function installBrowserMocks(
         written: Array<string | Uint8Array> = [];
         parser = {
           csiHandlers: [] as Array<{ prefix?: string; intermediates?: string; final: string }>,
+          oscHandlers: [] as Array<{
+            ident: number;
+            handler: (data: string) => boolean;
+          }>,
           registerCsiHandler(
             id: { prefix?: string; intermediates?: string; final: string },
             _handler: () => boolean,
           ) {
             this.csiHandlers.push(id);
+            return { dispose() {} };
+          },
+          registerOscHandler(ident: number, handler: (data: string) => boolean) {
+            this.oscHandlers.push({ ident, handler });
             return { dispose() {} };
           },
         };
@@ -275,6 +283,15 @@ async function installBrowserMocks(
           );
           if (suppressed) return;
           this.dataListener?.(reply);
+        }
+        emitOscQueryReply(ident: number, data: string, reply: string) {
+          if (this.isOscHandled(ident, data)) return;
+          this.dataListener?.(reply);
+        }
+        isOscHandled(ident: number, data: string) {
+          return [...this.parser.oscHandlers]
+            .reverse()
+            .some((entry) => entry.ident === ident && entry.handler(data));
         }
         emitResize() {
           this.resizeListener?.({ cols: this.cols, rows: this.rows });
@@ -935,6 +952,52 @@ test("the mirror never answers terminal protocol queries, even in steady state (
   );
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "echo hi" });
+});
+
+test("the mirror suppresses pure OSC color queries without swallowing color setters", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false });
+  await connect(page);
+
+  await page.evaluate(() => {
+    const terminal = (
+      window as Window & {
+        __mockTerminal: {
+          emitOscQueryReply: (ident: number, data: string, reply: string) => void;
+        };
+      }
+    ).__mockTerminal;
+    terminal.emitOscQueryReply(10, "?", "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\");
+    terminal.emitOscQueryReply(11, "?", "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\");
+  });
+
+  await page.waitForTimeout(20);
+  expect(remote.writes).toHaveLength(0);
+  expect(
+    await page.evaluate(() => {
+      const terminal = (
+        window as Window & {
+          __mockTerminal: {
+            isOscHandled: (ident: number, data: string) => boolean;
+          };
+        }
+      ).__mockTerminal;
+      return {
+        indexedQuery: terminal.isOscHandled(4, "7;?"),
+        cursorQuery: terminal.isOscHandled(12, "?"),
+        foregroundSet: terminal.isOscHandled(10, "#123456"),
+        indexedSet: terminal.isOscHandled(4, "7;#123456"),
+        mixedQueryAndSet: terminal.isOscHandled(10, "?;#123456"),
+      };
+    }),
+  ).toEqual({
+    indexedQuery: true,
+    cursorQuery: true,
+    foregroundSet: false,
+    indexedSet: false,
+    mixedQueryAndSet: false,
+  });
 });
 
 test("an in-flight snapshot is sent once and only clears the unchanged revision", async ({
