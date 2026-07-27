@@ -512,7 +512,7 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **게이트가 두 겹이었다**: `TerminalView.tsx` 의 오버레이 rAF 조기 반환이 `stabilizeInteractiveCursor`·`isOverlayCaretActivity` 로 끊고, 통과해도 `resolveVisualCaretOwner` 안에서 같은 두 조건이 `compositionActive` 검사 **위**에 있어 `"hidden"` 으로 떨어졌다. 한쪽만 고치면 증상이 남는다.
 - **판정**: `compositionActive → "composition-preview"` 를 caret 정책 게이트 **위로** 올린다. `stabilizeInteractiveCursor`·`overlayActivity` 는 laymux 가 **caret** 을 소유하는지에 대한 정책이고(Codex 가 repaint 중 커서를 footer 로 주차하므로 shadow cursor 캐럿이 필요한 것), 조합 텍스트 가시성과는 다른 종류의 질문이다.
 - **경계는 유지한다**: `opened`/`focused`/`syncOutputActive`, `isAltBufferActive`, `viewportScrolledUp` **아래**에 둔다. 그것들은 "보이지 않는다 / 지오메트리를 신뢰할 수 없다" 는 진짜 조건이고, 그 상태에서 프리뷰를 그리면 잘못된 위치에 찍힌다.
-- **부수 효과(의도됨)**: 비-Codex 페인이 조합 중일 때 `caretOwner === "composition-preview"` 가 되므로 (1) 오버레이 캐럿이 프리뷰 커서에 그려지고 — 조합 중에는 `hideNativeCursor` 가 네이티브 커서를 배경색 1px bar 로 만들므로 이게 없으면 캐럿이 사라진다 — (2) `syncHelperAnchor` 가 실행되어 OS 후보창이 조합 커서에 앵커된다(§8.13 의 확장).
+- **부수 효과(의도됨)**: 비-Codex 페인이 조합 중일 때 `caretOwner === "composition-preview"` 가 되므로 (1) 오버레이 캐럿이 프리뷰 커서에 그려지고 — 조합 중에는 `hideNativeCursor` 가 네이티브 커서를 렌더러 게이트에서 끄므로(§8.21) 이게 없으면 캐럿이 사라진다 — (2) `syncHelperAnchor` 가 실행되어 OS 후보창이 조합 커서에 앵커된다(§8.13 의 확장).
 - **결함이 테스트로 못박혀 있었다**: `ime-composition-controller.test.ts` 의 `"hides composition preview when overlay caret activity is off (non-Codex)"` 가 `"hidden"` 을 정답으로 단정하고 있었다. 교체했다.
 - **역검증**: 우선순위를 되돌리면 새 단위 테스트 2건이 실패하고(`expected 'hidden' to be 'composition-preview'`), 조기 반환을 되돌리면 컴포넌트 테스트에서 `preview.textContent` 가 `''` 로 떨어진다 — 신고된 증상 그대로다.
 - **미검증**: alt 버퍼는 건드리지 않았다. 확인된 두 케이스(맨 셸·Claude Code)는 모두 normal 버퍼이고, 전체화면 TUI(vim 등)에서 조합이 보이는지는 확인하지 않았다. `isAltBufferActive` 가 먼저 잡으므로 **거기서는 여전히 안 보인다** — 별 판정이 필요하다.
@@ -555,7 +555,7 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
   - **앵커는 스크롤을 따라간다 — 재기준화가 닿지 않는 구간이 있다 (issue #570)**: 위 분기는 전부 **조합 이벤트**에서만 돈다. 키를 누르지 않는 동안에는 앵커를 다시 잡는 주체가 없는데, 프리뷰의 화면행은 `anchorBufferAbsY - baseY` 다. 입력 상자를 바닥에 두는 TUI(Claude Code·Codex)가 출력하면 `baseY` 만 커지므로 **가만히 있는 앵커가 출력한 줄 수만큼 위로 밀린다.** 실측: Claude 스트리밍 중 앵커 1683 고정, 확정 시점 입력줄 1692 — 프리뷰가 9행 위. `onScroll` 에서 `baseY` 증가분을 앵커(`compositionAnchor`·`chainAnchor`)에 더해 **화면행에 고정**한다. 스크롤백 상한에 닿으면 delta 가 0 인데, 그때는 위에서 행이 버려지고 바닥 앵커 입력줄의 절대행도 그대로이므로 앵커도 움직이면 안 된다 — 같은 규칙이 두 경우를 모두 맞춘다. 뷰포트 스크롤(사용자가 위로 스크롤)은 별개 축이고 `viewportScrolledUp` 가 프리뷰를 이미 숨긴다.
 
 - **여기서도 결함이 테스트로 못박혀 있었다**: `"adopts a shadow cursor that moved backwards"` 와 helper 앵커 테스트 2건이 그렇다. 후자는 "TUI 가 커서를 footer 에 주차했고 shadow 가 진값" 이라는 상태를 **단정만** 하고 그 상태를 만드는 DEC 2026 프레임을 구동하지 않아서, `computeUseShadowCursor` 가 false 인 합성 상태였다. 실측이 보여준 실제 흐름(프레임 열기 → 커서 주차 → 프레임 닫기)을 구동하도록 고쳤다 — 단정이 아니라 재현이다.
-- **미검증**: `active` 가 true 인데도 네이티브 커서가 bar 형태로 계속 보이는 것을 사용자가 관측했다. `hideNativeCursor` 는 배경색을 쓰므로 보이지 않아야 한다. WebGL 이 커서 색 변경을 반영하지 않는 것인지 별도 확인이 필요하다 — 이 판정의 근거는 아니지만 남은 결함일 수 있다.
+- **해소됨(issue #598)**: "`active` 가 true 인데도 네이티브 커서가 계속 보인다" 는 관측은 WebGL 이 커서 색을 무시한 것이 아니라 **숨김 수단 자체의 결함**이었다. §8.21 참조 — 배경색 위장과 옵션 경합을 버리고 렌더러 게이트로 옮겼다.
 
 ### 8.16 조합 중 포커스 아웃은 확정이다 (issue #555)
 
@@ -599,7 +599,7 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **alt 버퍼에서는 버퍼 커서가 언제나 권위다.** `baseY === 0` 은 행 변환이 항등이라는 뜻일 뿐 **어느 커서를 읽느냐**를 정하지 않는다. `computeUseShadowCursor` 는 `hasSyncFramePosition` 이면 참이 되는데, `getShadowSyncEligibility` 는 alt 버퍼에서 `"alt-buffer"` 를 돌려주며 **sync 를 통째로 스킵한다** — 포기한 값을 앵커로 쓰는 건 앞뒤가 안 맞는다. 그래서 `getAnchor` 에 `!shadow.isAltBufferActive` 를 더했다. vim 이 이 문제를 안 겪은 것은 OSC 133 도 DEC 2026 도 내지 않기 때문이고, 그건 **vim 의 성질이지 alt 버퍼의 성질이 아니다** — 처음에 "TUI 종류와 무관" 이라고 적은 것이 틀렸다.
   - 역검증: 조건을 빼면 alt 버퍼 안에서 DEC 2026 프레임을 낸 TUI 의 프리뷰가 얼어붙은 shadow 위치(`translate(100px, 100px)`)에 그려진다. 정답은 라이브 버퍼 커서(`translate(50px, 60px)`)다. 테스트 순서가 중요하다 — alt 버퍼 진입이 `hasSyncFramePosition` 을 초기화하므로 프레임은 진입 **뒤**에 와야 하고, 실제 TUI 순서도 그쪽이다.
 - **버퍼 전환 경계는 안전하게 실패한다**(미검증 아님): normal 버퍼에서 잡은 앵커는 절대 행이고 alt 버퍼는 `baseY` 를 0 으로 만들므로 뷰포트 행이 `rows` 를 넘는다 → 뷰포트 가드가 **숨긴다**. 이탈은 부호가 반대(alt 의 작은 절대 행 − normal 의 큰 `baseY` → 음수)로 같은 가드에 걸린다. 양방향 모두 엉뚱한 행에 그리는 것이 아니라 숨기고, 다음 carry-over 가 새 버퍼 커서로 재기준화하므로 오차는 한 음절의 비가시성이다. 테스트로 고정했다.
-- **불변식 — 네이티브 커서를 끄는 조건과 오버레이를 켜는 조건이 갈리면 캐럿이 사라진다.** `applyNativeCursorVisibility` 의 `hideNativeCursor` 는 `compositionPreview.active` 만으로 켜지고 alt 버퍼 항이 없다. 그래서 이 수정 전에는 alt 버퍼 조합 중 vim 커서가 배경색으로 죽고 오버레이는 `"alt-buffer"` 에 막혀 **캐럿이 아무것도 없었다.** §8.15(#551), §8.16 에 이어 세 번째 같은 모양이다 — 한쪽 조건을 좁힐 때 반드시 다른 쪽을 함께 본다.
+- **불변식 — 네이티브 커서를 끄는 조건과 오버레이를 켜는 조건이 갈리면 캐럿이 사라진다.** `applyNativeCursorVisibility` 의 `hideNativeCursor` 는 `compositionPreview.active` 만으로 켜지고 alt 버퍼 항이 없다. 그래서 이 수정 전에는 alt 버퍼 조합 중 vim 커서가 (당시 수단인) 배경색으로 죽고 오버레이는 `"alt-buffer"` 에 막혀 **캐럿이 아무것도 없었다.** §8.15(#551), §8.16 에 이어 세 번째 같은 모양이다 — 한쪽 조건을 좁힐 때 반드시 다른 쪽을 함께 본다.
 - **네 분기 판정 (이 이슈 종료 시점)**:
 
   | 분기                 | 사용자 상황                             | 판정                                                              |
@@ -666,6 +666,27 @@ composer 모드로 vim 을 쓰면 `가나다라` 를 친 뒤 **Enter 도 Backspa
 - **미검증**: 저사양 GPU·소프트웨어 렌더링 폴백, 폰트 config 가 서로 다른 pane 이 섞인 구성, 원격(브라우저) 렌더러. #573 의 비용 축소는 단위 테스트로만 고정했고 #571 실기 재현은 사람이 다시 확인해야 한다.
 
 판정과 대안 비교는 [ADR-0064](../adr/0064-shared-webgl-atlas-clear-fanout.md).
+
+---
+
+### 8.21 네이티브 커서 숨김은 렌더러 게이트에서 한다 (issue #598)
+
+overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블록이 하나 더** 보였다. #596 캡처의 픽셀 측정: 열 20 은 의도된 `.terminal-overlay-caret`(`#FFFFFF`), 열 39 는 꽉 찬 `#0C0C0C` — 즉 "숨겼다" 고 가정한 네이티브 커서가 테마 배경색으로 그려진 블록이었다.
+
+- **원인은 소유권이다.** 예전 `hideNativeCursor` 는 앱이 언제든 되돌릴 수 있는 두 채널에 숨김을 걸고 있었다.
+  - **색**: `theme.cursor`/`cursorAccent` 를 테마 배경색으로 칠하는 것은 "커서 셀의 배경 = 테마 배경" 일 때만 성립한다. codex 는 입력박스 행을 `ESC[48;2;41;41;41m`(`#292929`)로 칠하므로 `#0C0C0C` 커서가 **대비로 드러난다**. 밝은 스킴은 반대 방향으로 튄다.
+  - **모양**: `options.cursorStyle` 은 권위가 아니다. xterm 6.0.0 의 두 렌더러 모두 `coreService.decPrivateModes.cursorStyle ?? options.cursorStyle` 순서로 읽고 DECSCUSR(`CSI Ps SP q`)가 그 DEC 모드를 쓴다 — 계약 테스트로 고정했다(`ESC[2 q` → `decPrivateModes.cursorStyle === "block"` 이고 `options.cursorStyle` 은 `"bar"` 그대로, `ESC[0 q` → `undefined`). 해결된 모양이 `block` 이면 렌더러는 셀을 커서 색으로 칠하고 글리프를 `cursorAccent` 로 그리므로, 위 색 위장과 겹쳐 **배경색으로 꽉 찬 1셀**이 된다. 캡처의 열 39 가 그것이고, `terminal.refresh()` 로 덮어도 다음 프레임에 되돌아온다.
+- **판정: `coreService.isCursorHidden` 게이트에서 끈다.** 두 렌더러가 커서를 그릴지 정하는 유일한 조건이 `isCursorInitialized && !isCursorHidden` 이다(WebGL 은 model 빌드에서, DOM 렌더러는 row factory 에서 같은 필드를 읽는다). SGR·DECSCUSR·테마는 여기에 닿지 못하므로 경합이 없어진다. 포커스 없는 커서도 같은 게이트 아래라 `cursorInactiveStyle` 을 따로 맞출 필요가 없다.
+- **계약**: 셀 배경이 무엇이든, 앱이 DECSCUSR 를 몇 번 보내든, 포커스가 있든 없든 숨김 구간에서 네이티브 커서는 그려지지 않는다.
+- **앱의 DECTCEM 은 여전히 권위다.** 같은 필드를 DECTCEM(`?25h/l`)이 쓰고, §8.5/[ADR-0011](../adr/0011-dectcem-cursor-park-fifth-layer.md) 은 프레임 밖 `?25h` 를 앱의 최우선 커서 신호로 쓴다. 그래서 `ui/src/lib/native-cursor-suppression.ts` 는 필드를 accessor 로 감싸 **앱의 쓰기를 기록**하고 우리가 숨기는 동안만 hidden 을 보고한다. 앱 값은 `appCursorHidden` 으로 보존되고 해제·`dispose()` 시 그대로 복원된다. 우리 쓰기는 파서를 거치지 않으므로 shadow cursor 의 DECTCEM CSI 추적에 보이지 않는다 — 보여서는 안 된다.
+- **테마·모양·`cursorWidth` 는 숨김 여부와 무관하게 사용자 설정이다.** 숨김 구간에서 달라지는 유일한 옵션은 `cursorBlink = false` 다(안 보이는 커서의 깜빡임은 repaint 낭비).
+- **조건의 소유자는 하나다.** `applyNativeCursorVisibility` 만 `hideNativeCursor`(composer 모드 · 조합 중 · `stabilizeInteractiveCursor` + overlay caret activity)를 계산한다. 조합 상태는 ref 에만 있어 React 가 볼 수 없으므로 React 는 `nativeCursorVisibilityRef` 를 **호출만** 하고 조건을 다시 계산하지 않는다. 두 곳에서 계산하는 형태가 §8.15/§8.16/§8.17 이 세 번 기록한 "캐럿이 사라졌다" 의 모양이다.
+- **`isCursorHidden` 은 옵션이 아니라 쓰기 뒤에 xterm 의 옵션 변경 repaint 가 따라오지 않는다.** 전이에서 `refresh(0, rows-1)` 를 한 번 호출하고, 전이가 아니면(dedupe) 호출하지 않는다 — §8.4 의 "활동 전이마다 repaint/atlas 를 유발하지 않는다" 를 유지한다.
+- **실패하면 스스로 꺼진다.** private 필드 형태가 달라지면 `supported: false` 로 아무것도 하지 않고 네이티브 커서가 사용자 설정대로 보인다(overlay 와 겹친 이중 캐럿). #598 을 만든 배경색 위장으로 되돌아가지 않는다. `XTERM_NATIVE_CURSOR_FIELDS` 와 실제 `Terminal` 계약 테스트가 xterm 상향 시 읽을 수 있는 실패를 만든다 — §8.14 의 `xterm-pending-composition.ts` 와 같은 정책.
+- **DOM 렌더러용 CSS 는 그대로 둔다.** `.terminal-native-cursor-hidden .xterm-cursor { opacity: 0 }` 는 `onContextLoss` 폴백 경로의 방어선이다(§8.4). 게이트가 그 경로도 덮지만 CSS 는 유지한다.
+- **미검증**: 실기 확인은 하지 않았다(테스트만). codex pane 에서 열 39 블록이 실제로 사라지는지, 그리고 DECRQM 25 조회 응답이 숨김 구간에 "hidden" 으로 바뀌는 것(게이트가 필드 하나이므로 불가피)에 반응하는 앱이 있는지는 사람이 확인해야 한다.
+
+판정과 대안 비교는 [ADR-0072](../adr/0072-native-cursor-renderer-level-suppression.md).
 
 ---
 
