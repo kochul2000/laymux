@@ -426,6 +426,18 @@ async function waitForTerminalInputReady(): Promise<void> {
   });
 }
 
+/**
+ * The output attach chain ends in `terminal.reset()`, which also rebuilds the
+ * pane's stream-derived cursor state (issue #596). Tests that drive the parser
+ * handlers directly — rather than through the buffered live stream that gates
+ * them in production — must let that land first.
+ */
+async function waitForStreamAttachReset(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockReset).toHaveBeenCalled();
+  });
+}
+
 async function waitForLocalTerminalControl(): Promise<void> {
   await vi.waitFor(() => {
     expect(mockGetRemoteControlStatus).toHaveBeenCalled();
@@ -1802,6 +1814,12 @@ describe("TerminalView", () => {
       render(
         <TerminalView instanceId="t-frame-before-activity" profile="PowerShell" syncGroup="" />,
       );
+      // The attach chain ends in `terminal.reset()`, which discards the pane's
+      // stream-derived cursor state along with the stream (issue #596). Live
+      // bytes are buffered behind it in production, so a frame can never open
+      // before it — but a test that drives parser handlers directly can, and
+      // would then watch its own frame get wiped.
+      await waitForStreamAttachReset();
 
       await act(async () => {
         await csiHandlers.get("?:h")?.([2026]);
@@ -1906,6 +1924,9 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(csiHandlers.get("?:l")).toBeTypeOf("function");
       });
+      // See `waitForStreamAttachReset` — the attach reset must land before this
+      // test arms a park settle timer of its own.
+      await waitForStreamAttachReset();
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-park-stale", {
           activity: { type: "interactiveApp", name: "Codex" },
@@ -1948,6 +1969,66 @@ describe("TerminalView", () => {
       expect(traces("dectcem-park").length).toBeGreaterThan(0);
     } finally {
       vi.useRealTimers();
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
+  it("rebuilds the shadow cursor when a sequence gap replaces the stream", async () => {
+    // Issue #596: heavy output fills the backend subscriber queue, the backend
+    // reports a sequence gap, and TerminalView reattaches with
+    // `terminal.reset()` + a fresh snapshot. If the frame that was open when
+    // the gap hit never gets its `?2026l`, `isDec2026FrameOpen` stays true
+    // forever: shadow syncs report `dec-2026-frame-open`, Codex's cursor parks
+    // are demoted to visibility-only, and the overlay caret stays pinned where
+    // the frame opened while the real cursor keeps advancing.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(<TerminalView instanceId="t-gap-reattach" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array | Record<string, unknown>) => void)
+        | undefined;
+      expect(onOutput).toBeTypeOf("function");
+      await waitForStreamAttachReset();
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-gap-reattach", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      // A frame opens, and the gap swallows its `?2026l`.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      const resetsBefore = mockReset.mock.calls.length;
+      act(() => {
+        // seqStart far past what the coordinator expects — the exact shape the
+        // backend's `Gap` produces once the subscriber queue overflows.
+        onOutput?.({ seqStart: 4096, seqEnd: 4099, data: [0x61, 0x62, 0x63] });
+      });
+      await vi.waitFor(() => {
+        expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBefore);
+      });
+
+      // The replacement stream owns the cursor beliefs now: the very next park
+      // has to be recognized.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
       logSpy.mockRestore();
       localStorage.removeItem("laymux:cursor-trace");
     }
@@ -7673,9 +7754,9 @@ describe("TerminalView", () => {
       // in-box conhost, and the bundled ConPTY runtime (ADR-0067) emits no
       // such frame. Nothing on this path may write a bare newline run again.
       const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
-      expect(
-        calls.some((data) => typeof data === "string" && /^(?:\r\n){4,}$/.test(data)),
-      ).toBe(false);
+      expect(calls.some((data) => typeof data === "string" && /^(?:\r\n){4,}$/.test(data))).toBe(
+        false,
+      );
     });
 
     it("repairs a cache saved while the alternate buffer was active", async () => {
