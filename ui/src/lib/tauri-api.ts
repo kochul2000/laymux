@@ -128,6 +128,19 @@ export async function attachTerminalOutput(id: string): Promise<TerminalOutputAt
   return invoke("attach_terminal_output", { id });
 }
 
+/**
+ * Pull the exact byte range this surface lost to a `terminal-output-v2` delivery
+ * gap (ADR-0072). `null` means the backend ring can no longer bridge `seq` — the
+ * caller must fall back to `attachTerminalOutput`.
+ */
+export async function resumeTerminalOutput(
+  id: string,
+  generation: number,
+  seq: number,
+): Promise<TerminalOutputDeltaPayload | null> {
+  return invoke("resume_terminal_output", { id, generation, seq });
+}
+
 export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
   return invoke("resize_terminal", { id, cols, rows });
 }

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
@@ -236,6 +236,16 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
+    // Monotonic discard counters for the sequenced output path (ADR-0072).
+    // `emit` losing a delta is recoverable (the ring keeps the bytes), but
+    // `record_output` failing is not — those bytes never enter the ring and no
+    // sequence gap ever reveals them. Both are counted so a real reproduction
+    // can tell which one, if either, actually fires.
+    //
+    // Owned by the callback (no `Arc`): the closure is the only reader, and
+    // `fetch_add` needs nothing more than `&AtomicU64`.
+    let output_emit_discards = AtomicU64::new(0);
+    let output_record_failures = AtomicU64::new(0);
     let spawned_pty = pty::spawn_pty_with_metadata(&session, move |data| {
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
@@ -257,10 +267,30 @@ pub fn create_terminal_session(
         // event carries the exact byte range for listener-before-attach clients.
         match pty_output_session.record_output(&data) {
             Ok(Some(delta)) => {
-                let _ = app_clone.emit(
+                let (seq_start, seq_end) = (delta.seq_start, delta.seq_end);
+                if let Err(error) = app_clone.emit(
                     &format!("{EVENT_TERMINAL_OUTPUT_V2_PREFIX}{terminal_id}"),
                     delta,
-                );
+                ) {
+                    // Never `let _` this away. The bytes stay in the ring, so the
+                    // surface repairs itself through `resume_terminal_output` on
+                    // the next delivered delta (ADR-0072) — but a discard that is
+                    // silent is a discard nobody can count, and counting is the
+                    // only way to tell a shutdown race from a systematic delivery
+                    // failure. `discarded_total` is monotonic so the real number
+                    // survives log rotation.
+                    let discarded_total = output_emit_discards.fetch_add(1, Ordering::Relaxed) + 1;
+                    tracing::warn!(
+                        terminal_id = %terminal_id,
+                        generation = pty_output_session.generation(),
+                        seq_start,
+                        seq_end,
+                        bytes = seq_end - seq_start,
+                        discarded_total,
+                        %error,
+                        "discarded a terminal output delta event"
+                    );
+                }
             }
             Ok(None) => {
                 tracing::debug!(
@@ -271,7 +301,16 @@ pub fn create_terminal_session(
                 return;
             }
             Err(err) => {
-                tracing::warn!(terminal_id = %terminal_id, error = %err, "failed to record PTY output");
+                // These bytes never reached the ring, so no sequence gap will
+                // ever expose them and no repair can recover them.
+                let dropped_total = output_record_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                tracing::warn!(
+                    terminal_id = %terminal_id,
+                    bytes = data.len(),
+                    dropped_total,
+                    error = %err,
+                    "failed to record PTY output"
+                );
             }
         }
 
@@ -1107,6 +1146,21 @@ pub fn attach_terminal_output(
         &id,
         TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
     )
+}
+
+/// Splice the exact byte range a surface lost to a `terminal-output-v2`
+/// delivery gap ([ADR-0072]). `None` means the range is no longer bridgeable
+/// and the caller must fall back to `attach_terminal_output`.
+///
+/// [ADR-0072]: ../../../docs/adr/0072-terminal-output-gap-sequence-exact-repair.md
+#[tauri::command]
+pub fn resume_terminal_output(
+    id: String,
+    generation: u64,
+    seq: u64,
+    state: State<Arc<AppState>>,
+) -> Result<Option<terminal_output::TerminalOutputDelta>, String> {
+    terminal_output::resume_terminal_output(&state.terminal_protocol_states, &id, generation, seq)
 }
 
 #[tauri::command]

@@ -42,6 +42,7 @@ import {
   resizeTerminal,
   closeTerminalSession,
   attachTerminalOutput,
+  resumeTerminalOutput,
   onTerminalOutputV2,
   smartPaste,
   clipboardWriteText,
@@ -191,8 +192,15 @@ import {
   normalizeTerminalOutputAttachment,
   normalizeTerminalOutputDelta,
   TerminalOutputAttachCoordinator,
+  TerminalOutputRepairError,
+  type TerminalOutputAppliedSegment,
+  type TerminalOutputApplyResult,
   type TerminalOutputDelta,
 } from "@/lib/terminal-output-attach-coordinator";
+import {
+  recordTerminalOutputRecovery,
+  type TerminalOutputRecoveryEvent,
+} from "@/lib/terminal-output-recovery-metrics";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -3286,8 +3294,12 @@ export function TerminalView({
     let unlistenOutput: (() => void) | undefined;
     let outputListenerReady: Promise<void> = Promise.resolve();
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputRepairRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputAttachEpoch = 0;
     let outputAttachInFlight = false;
+    let outputRepairInFlight = false;
+    /** Generation of the attachment the coordinator is currently applying. */
+    let outputGeneration: number | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
     const renderCheckpointModel = new TerminalRenderCheckpointModel();
@@ -3729,6 +3741,143 @@ export function TerminalView({
         void startOutputAttach();
       }, TERMINAL_WRITE_RETRY_MS);
     };
+    const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
+      // Enqueue every checkpoint write synchronously: listener callbacks can
+      // interleave with the awaits inside the model, and the visible xterm's own
+      // FIFO already fixes the order for the surface.
+      for (const segment of segments) {
+        void renderCheckpointModel.apply(segment).catch((error) => {
+          console.warn("[TerminalView] render checkpoint update failed:", error);
+        });
+        processLiveTerminalOutput(segment.data);
+      }
+    };
+    const scheduleOutputRepairRetry = (
+      gap: { expectedSeq: number; actualSeq: number },
+      epoch: number,
+    ) => {
+      if (cancelled || outputRepairRetryTimer !== undefined) return;
+      outputRepairRetryTimer = setTimeout(() => {
+        outputRepairRetryTimer = undefined;
+        if (cancelled || epoch !== outputAttachEpoch) return;
+        void startOutputRepair(gap);
+      }, TERMINAL_WRITE_RETRY_MS);
+    };
+    /**
+     * Repair a `terminal-output-v2` delivery gap by pulling the exact missing
+     * range out of the backend ring (ADR-0072).
+     *
+     * The visible xterm is authoritative up to `expectedSeq`, so nothing is
+     * reset, no attach epoch is burned, and the ADR-0069 checkpoint model keeps
+     * its `reconstructable` flag. Only a range the ring can no longer bridge —
+     * or one that spans a resize, which a single delta cannot describe —
+     * escalates to the screen-losing full reattach.
+     *
+     * Deliberately does **not** call `resetStreamDerivedCursorState()` (issue
+     * #596). That call is paired with `terminal.reset()` because a reset voids
+     * every belief inferred from the discarded bytes. A repair discards nothing:
+     * the buffer survives, so `cursorAbsY` / `commandStartLine` / the frame
+     * snapshot still name live rows, and the stream stays byte-exact. In
+     * particular `isDec2026FrameOpen` must stay open — the frame's `?2026l` was
+     * undelivered, not destroyed, and it is inside the repair range, so it
+     * reaches the same parser handler and closes the latch exactly as it would
+     * have without the gap. Rebuilding here would instead promote the next
+     * in-frame `?25h` to an authoritative cursor park.
+     */
+    const startOutputRepair = async (gap: { expectedSeq: number; actualSeq: number }) => {
+      // An in-flight repair already owns this hole; its own pending drain picks
+      // up whatever arrived behind it.
+      if (cancelled || outputRepairInFlight) return;
+      const epoch = outputAttachEpoch;
+      if (outputAttachInFlight || !outputCoordinator.ready) {
+        // A gap that lands inside an attach must not be dropped: the buffered
+        // delta would then wait for output that may never come. Retry once the
+        // attach settles, and let the epoch guard cancel the retry if the attach
+        // turned into a full reattach that owns recovery itself.
+        scheduleOutputRepairRetry(gap, epoch);
+        return;
+      }
+      const generation = outputGeneration;
+      if (generation === undefined) {
+        scheduleOutputReattach();
+        return;
+      }
+      outputRepairInFlight = true;
+      const resumeSeq = outputCoordinator.beginRepair();
+      // Each failure mode gets its own counter, and which counter is decided by
+      // *where* the round-trip failed rather than by matching an error message.
+      // `ringEscalation` in particular must stay reserved for the one thing
+      // ADR-0072 hangs a revisit condition on: the backend answering `null`.
+      const escalate = (event: TerminalOutputRecoveryEvent, message: string, detail: unknown) => {
+        console.warn(`[TerminalView] ${message}`, detail, {
+          gap,
+          counters: recordTerminalOutputRecovery(instanceId, event),
+        });
+        scheduleOutputReattach();
+      };
+      try {
+        let raw: Awaited<ReturnType<typeof resumeTerminalOutput>>;
+        try {
+          raw = await resumeTerminalOutput(instanceId, generation, resumeSeq);
+        } catch (error) {
+          if (cancelled || epoch !== outputAttachEpoch) return;
+          escalate("repairFailure", "terminal output repair request failed:", error);
+          return;
+        }
+        if (cancelled || epoch !== outputAttachEpoch) return;
+        if (!raw) {
+          escalate(
+            "ringEscalation",
+            "terminal output ring cannot bridge the gap; reattaching",
+            null,
+          );
+          return;
+        }
+        let repair: TerminalOutputDelta;
+        try {
+          repair = normalizeTerminalOutputDelta(raw);
+        } catch (error) {
+          escalate("malformedDelta", "malformed terminal output repair range:", error);
+          return;
+        }
+        let result: TerminalOutputApplyResult;
+        try {
+          result = outputCoordinator.completeRepair(repair);
+        } catch (error) {
+          const spansResize =
+            error instanceof TerminalOutputRepairError && error.reason === "geometry-change";
+          escalate(
+            spansResize ? "geometryEscalation" : "repairFailure",
+            "terminal output repair was refused:",
+            error,
+          );
+          return;
+        }
+        if (result.kind === "gap") {
+          // A second hole opened behind the repaired one. Nothing to do with
+          // ring retention, so it must not land in `ringEscalation`.
+          escalate(
+            "nestedGap",
+            "terminal output repair did not reach the surface sequence",
+            result,
+          );
+          return;
+        }
+        console.warn(
+          "[TerminalView] terminal output gap repaired",
+          { ...gap, repairedBytes: raw.data.length },
+          recordTerminalOutputRecovery(instanceId, "repair"),
+        );
+        applyOutputSegments(result.segments);
+      } catch (error) {
+        // Safety net: every classified failure returned above, so anything here
+        // is unexpected and must not be filed as a ring escalation either.
+        if (cancelled || epoch !== outputAttachEpoch) return;
+        escalate("repairFailure", "terminal output repair failed unexpectedly:", error);
+      } finally {
+        outputRepairInFlight = false;
+      }
+    };
     const startOutputAttach = async () => {
       if (cancelled || !terminalSessionReady || outputAttachInFlight) return;
       outputAttachInFlight = true;
@@ -3778,9 +3927,14 @@ export function TerminalView({
             attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
           );
           if (!isCurrentAttach()) return;
+          outputGeneration = attachment.state.generation;
           const buffered = outputCoordinator.completeAttach(attachment);
           if (buffered.kind === "gap") {
-            console.warn("[TerminalView] terminal output gap during attach", buffered);
+            console.warn(
+              "[TerminalView] terminal output gap during attach",
+              buffered,
+              recordTerminalOutputRecovery(instanceId, "gap"),
+            );
             scheduleOutputReattach();
             return;
           }
@@ -3808,7 +3962,11 @@ export function TerminalView({
         await terminalOutputWriteChain;
       } catch (error) {
         if (!cancelled && epoch === outputAttachEpoch) {
-          console.warn("[TerminalView] terminal output attach failed:", error);
+          console.warn(
+            "[TerminalView] terminal output attach failed:",
+            error,
+            recordTerminalOutputRecovery(instanceId, "attachFailure"),
+          );
           scheduleOutputReattach();
         }
       } finally {
@@ -3828,21 +3986,26 @@ export function TerminalView({
         const delta: TerminalOutputDelta = normalizeTerminalOutputDelta(payload);
         result = outputCoordinator.ingest(delta);
       } catch (error) {
-        console.warn("[TerminalView] malformed terminal output delta:", error);
+        console.warn(
+          "[TerminalView] malformed terminal output delta:",
+          error,
+          recordTerminalOutputRecovery(instanceId, "malformedDelta"),
+        );
         scheduleOutputReattach();
         return;
       }
       if (result.kind === "gap") {
-        console.warn("[TerminalView] terminal output gap", result);
-        scheduleOutputReattach();
+        // The lost bytes are still in the backend ring, so repair the stream in
+        // place instead of resetting the screen (ADR-0072).
+        console.warn(
+          "[TerminalView] terminal output gap",
+          result,
+          recordTerminalOutputRecovery(instanceId, "gap"),
+        );
+        void startOutputRepair(result);
         return;
       }
-      for (const segment of result.segments) {
-        void renderCheckpointModel.apply(segment).catch((error) => {
-          console.warn("[TerminalView] render checkpoint update failed:", error);
-        });
-        processLiveTerminalOutput(segment.data);
-      }
+      applyOutputSegments(result.segments);
     }).then((unlisten) => {
       if (cancelled) {
         unlisten();
@@ -4161,6 +4324,7 @@ export function TerminalView({
       outputAttachEpoch += 1;
       outputProtocolReadyRef.current = false;
       if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);
+      if (outputRepairRetryTimer !== undefined) clearTimeout(outputRepairRetryTimer);
       resetOutputStabilizer();
       deliverStabilizedEmissions = undefined;
       if (guardedTerminalFitRef.current === requestGuardedTerminalFit) {

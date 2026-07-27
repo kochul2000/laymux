@@ -455,6 +455,52 @@ impl TerminalOutputSession {
         })
     }
 
+    /// Serve the exact byte range a surface lost to a delivery gap.
+    ///
+    /// `terminal-output-v2` delivery is a notification, not a guarantee; the
+    /// ring is the single source of truth for sequenced bytes ([ADR-0072]). A
+    /// surface that observed `seqStart > expectedSeq` asks for `[seq, write_seq)`
+    /// and splices it in without touching its screen.
+    ///
+    /// `Ok(None)` means the range is no longer bridgeable — the generation was
+    /// replaced or the ring evicted past `seq` — and the caller must perform a
+    /// fresh attach. Clamping to a shorter prefix is forbidden: it would hand
+    /// back a hole disguised as a contiguous repair.
+    ///
+    /// [ADR-0072]: ../../docs/adr/0072-terminal-output-gap-sequence-exact-repair.md
+    pub fn resume_output(
+        &self,
+        generation: u64,
+        seq: u64,
+    ) -> Result<Option<TerminalOutputDelta>, String> {
+        // Same protocol → runtime gate order as `record_output`, so the range
+        // and the geometry that explains it come from one consistent prefix.
+        let _protocol = self.protocol.lock_or_err()?;
+        let runtime = self.runtime.lock_or_err()?;
+        if runtime.retired {
+            return Err(format!("Session '{}' not found", self.terminal_id));
+        }
+        if runtime.creating {
+            return Err(format!(
+                "Session '{}' is still being created",
+                self.terminal_id
+            ));
+        }
+        if generation != self.generation {
+            return Ok(None);
+        }
+        let Some(slice) = self.output.delta_since(seq) else {
+            return Ok(None);
+        };
+        Ok(Some(TerminalOutputDelta {
+            generation: self.generation,
+            seq_start: slice.seq_start,
+            seq_end: slice.seq_end,
+            data: slice.data,
+            geometry: runtime.geometry,
+        }))
+    }
+
     fn checkpoint_target(&self) -> Result<TerminalRenderCheckpointTarget, String> {
         let _protocol = self.protocol.lock_or_err()?;
         let runtime = self.runtime.lock_or_err()?;

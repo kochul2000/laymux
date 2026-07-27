@@ -356,3 +356,115 @@ fn render_checkpoint_attach_rejects_stale_generation_geometry_and_ring_gap() {
         .contains("fell behind"));
     assert_eq!(session.subscriber_count(), 0);
 }
+
+#[test]
+fn resume_returns_the_exact_missing_range_for_a_delivery_gap() {
+    let states = SharedTerminalProtocolStates::default();
+    let buffers = empty_buffers();
+    let geometry = TerminalGeometry::new(80, 24).unwrap();
+    let registration =
+        register_terminal_output_session_with_geometry(&states, &buffers, "t1", geometry).unwrap();
+    let session = registration.commit().unwrap();
+
+    let delivered = session.record_output(b"frame-one").unwrap().unwrap();
+    // Two chunks whose `terminal-output-v2` events never reached the surface.
+    session.record_output(b"-lost-a").unwrap().unwrap();
+    session.record_output(b"-lost-b").unwrap().unwrap();
+
+    let resumed = resume_terminal_output(&states, "t1", session.generation(), delivered.seq_end)
+        .unwrap()
+        .expect("the ring still retains the gap range");
+
+    assert_eq!(resumed.generation, session.generation());
+    assert_eq!(resumed.seq_start, delivered.seq_end);
+    assert_eq!(resumed.seq_end, 9 + 7 + 7);
+    assert_eq!(resumed.data, b"-lost-a-lost-b");
+    assert_eq!(resumed.geometry, geometry);
+    assert_eq!(
+        resumed.data.len() as u64,
+        resumed.seq_end - resumed.seq_start,
+        "the wire range must match the byte length exactly"
+    );
+}
+
+#[test]
+fn resume_refuses_to_clamp_a_range_the_ring_no_longer_retains() {
+    let geometry = TerminalGeometry::new(80, 24).unwrap();
+    let session = Arc::new(TerminalOutputSession::new(
+        "t1".into(),
+        4,
+        TerminalOutputBuffer::new(5),
+        geometry,
+    ));
+    session.commit_creation().unwrap();
+    session.record_output(b"abcdefgh").unwrap().unwrap();
+
+    // Ring retains [3, 8). Anything older must escalate to a fresh attach
+    // instead of silently returning a shorter prefix.
+    assert!(session.resume_output(4, 2).unwrap().is_none());
+    assert_eq!(session.resume_output(4, 3).unwrap().unwrap().data, b"defgh");
+    // A sequence ahead of the ring is a surface bug, never a clamp.
+    assert!(session.resume_output(4, 9).unwrap().is_none());
+    // A replaced generation can never be bridged by byte sequence.
+    assert!(session.resume_output(3, 3).unwrap().is_none());
+}
+
+#[test]
+fn resume_reports_the_current_authoritative_geometry() {
+    let geometry = TerminalGeometry::new(80, 24).unwrap();
+    let session = Arc::new(TerminalOutputSession::new(
+        "t1".into(),
+        1,
+        TerminalOutputBuffer::new(64),
+        geometry,
+    ));
+    session.commit_creation().unwrap();
+    let delivered = session.record_output(b"before").unwrap().unwrap();
+    let resized = session.update_geometry(100, 30).unwrap();
+    session.record_output(b"after").unwrap().unwrap();
+
+    let resumed = session
+        .resume_output(1, delivered.seq_end)
+        .unwrap()
+        .expect("the ring retains the range");
+
+    assert_eq!(resumed.data, b"after");
+    assert_eq!(resumed.geometry, resized);
+    assert_ne!(
+        resumed.geometry.revision, geometry.revision,
+        "a resize inside the gap must be visible to the surface so it can refuse the repair"
+    );
+}
+
+#[test]
+fn resume_rejects_a_retired_or_still_creating_generation() {
+    let geometry = TerminalGeometry::new(80, 24).unwrap();
+    let creating = Arc::new(TerminalOutputSession::new(
+        "t1".into(),
+        1,
+        TerminalOutputBuffer::new(64),
+        geometry,
+    ));
+    assert!(creating
+        .resume_output(1, 0)
+        .err()
+        .unwrap()
+        .contains("still being created"));
+
+    creating.commit_creation().unwrap();
+    creating.retire(false).unwrap();
+    assert!(creating
+        .resume_output(1, 0)
+        .err()
+        .unwrap()
+        .contains("not found"));
+}
+
+#[test]
+fn resume_reports_a_missing_terminal_instead_of_an_empty_range() {
+    let states = SharedTerminalProtocolStates::default();
+    assert!(resume_terminal_output(&states, "missing", 1, 0)
+        .err()
+        .unwrap()
+        .contains("not found"));
+}
