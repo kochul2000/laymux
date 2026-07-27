@@ -6369,11 +6369,14 @@ describe("TerminalView", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(mockFit).not.toHaveBeenCalled();
 
-      for (let index = 0; index < 4; index += 1) {
+      // Three restore writes drain in order: cached content, the marker, and
+      // the bracketed-paste mode reset. Each must clear before the deferred
+      // reflow runs.
+      for (let index = 0; index < 3; index += 1) {
         const finish = finishWrites.shift();
         expect(finish).toBeTypeOf("function");
         act(() => finish?.());
-        if (index < 3) {
+        if (index < 2) {
           await vi.waitFor(() => expect(finishWrites).toHaveLength(1));
           expect(mockFit).not.toHaveBeenCalled();
         }
@@ -7602,7 +7605,7 @@ describe("TerminalView", () => {
       });
     });
 
-    it("pushes restored content into scrollback with padding newlines", async () => {
+    it("ends the restored block with a marker and no screen-height padding", async () => {
       mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
 
       render(
@@ -7618,12 +7621,22 @@ describe("TerminalView", () => {
         expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-scroll");
       });
 
-      // Should write: cached content, separator, then padding newlines (rows=24)
+      // Writes: cached content, then the marker terminated by one newline.
       await vi.waitFor(() => {
         const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
         expect(calls).toContain("cached-terminal-output");
-        expect(calls).toContain("\r\n".repeat(24));
+        expect(calls).toContain("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
       });
+
+      // Regression guard for the screenful of blank rows above the prompt.
+      // Issue #87 padded the restore with `"\r\n".repeat(rows)` to outrun a
+      // clear-screen it credited to shell init; the clearing party was really
+      // in-box conhost, and the bundled ConPTY runtime (ADR-0067) emits no
+      // such frame. Nothing on this path may write a bare newline run again.
+      const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
+      expect(
+        calls.some((data) => typeof data === "string" && /^(?:\r\n){4,}$/.test(data)),
+      ).toBe(false);
     });
 
     it("repairs a cache saved while the alternate buffer was active", async () => {
