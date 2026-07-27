@@ -411,7 +411,9 @@ mod tests {
     fn write_and_remove_discovery_file_uses_given_base() {
         let dir = tempfile::tempdir().unwrap();
         let live = discovery_file_path_in(&discovery_dir());
-        let live_before = live.exists();
+        // 존재 여부만으로는 #574 의 실제 피해(파일을 지우지 않고 port 19280 으로 덮어씀)를
+        // 못 잡는다. 내용까지 스냅샷해야 "지우고 다시 만든" 경우도 같이 걸린다.
+        let live_before = std::fs::read(&live).ok();
 
         write_discovery_file_in(dir.path(), 19280);
         let path = discovery_file_path_in(dir.path());
@@ -428,9 +430,9 @@ mod tests {
 
         // The live dev instance's discovery file must be untouched (issue #574).
         assert_eq!(
-            live.exists(),
+            std::fs::read(&live).ok(),
             live_before,
-            "test must not create or delete {}",
+            "test must not create, delete, or rewrite {}",
             live.display()
         );
     }
