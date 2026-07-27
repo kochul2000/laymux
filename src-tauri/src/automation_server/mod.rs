@@ -56,7 +56,31 @@ pub fn automation_port() -> u16 {
 
 /// Write discovery file so external tools can find the automation port.
 pub fn write_discovery_file(port: u16) {
-    let path = discovery_file_path();
+    write_discovery_file_in(&discovery_dir(), port);
+}
+
+/// Remove discovery file on shutdown.
+pub fn remove_discovery_file() {
+    remove_discovery_file_in(&discovery_dir());
+}
+
+/// Directory that owns the discovery file — the settings directory
+/// (`%APPDATA%\laymux[-dev]`, `~/.config/laymux[-dev]`). See api-contracts §12.2.
+fn discovery_dir() -> std::path::PathBuf {
+    crate::settings::settings_path()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+fn discovery_file_path_in(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("automation.json")
+}
+
+/// Base-relative write. Tests pass a temp directory so they never touch the
+/// live dev instance's discovery file (issue #574).
+fn write_discovery_file_in(base: &std::path::Path, port: u16) {
+    let path = discovery_file_path_in(base);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -71,17 +95,8 @@ pub fn write_discovery_file(port: u16) {
     );
 }
 
-/// Remove discovery file on shutdown.
-pub fn remove_discovery_file() {
-    let _ = std::fs::remove_file(discovery_file_path());
-}
-
-fn discovery_file_path() -> std::path::PathBuf {
-    crate::settings::settings_path()
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("automation.json")
+fn remove_discovery_file_in(base: &std::path::Path) {
+    let _ = std::fs::remove_file(discovery_file_path_in(base));
 }
 
 /// Start the automation HTTP server on a fixed port.
@@ -305,7 +320,6 @@ pub fn build_router(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     #[test]
     fn automation_port_returns_dev_in_debug() {
@@ -382,22 +396,59 @@ mod tests {
 
     #[test]
     fn discovery_file_path_ends_with_automation_json() {
-        let path = discovery_file_path();
-        assert!(path.to_string_lossy().ends_with("automation.json"));
+        // Real path (api-contracts §12.2) — read only, never written by tests.
+        assert!(discovery_file_path_in(&discovery_dir())
+            .to_string_lossy()
+            .ends_with("automation.json"));
+        // Base-relative form used by tests.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(discovery_file_path_in(dir.path())
+            .to_string_lossy()
+            .ends_with("automation.json"));
     }
 
     #[test]
-    #[serial]
-    fn write_and_remove_discovery_file() {
-        write_discovery_file(19280);
-        let path = discovery_file_path();
+    fn write_and_remove_discovery_file_uses_given_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let live = discovery_file_path_in(&discovery_dir());
+        // 존재 여부만으로는 #574 의 실제 피해(파일을 지우지 않고 port 19280 으로 덮어씀)를
+        // 못 잡는다. 내용까지 스냅샷해야 "지우고 다시 만든" 경우도 같이 걸린다.
+        let live_before = std::fs::read(&live).ok();
+
+        write_discovery_file_in(dir.path(), 19280);
+        let path = discovery_file_path_in(dir.path());
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(parsed["port"], 19280);
         assert!(parsed.get("key").is_none());
         assert!(parsed["pid"].as_u64().unwrap() > 0);
-        remove_discovery_file();
+        assert_eq!(parsed["version"], env!("CARGO_PKG_VERSION"));
+
+        remove_discovery_file_in(dir.path());
         assert!(!path.exists());
+
+        // The live dev instance's discovery file must be untouched (issue #574).
+        assert_eq!(
+            std::fs::read(&live).ok(),
+            live_before,
+            "test must not create, delete, or rewrite {}",
+            live.display()
+        );
+    }
+
+    #[test]
+    fn write_discovery_file_creates_missing_parent_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("nested").join("config");
+        assert!(!base.exists());
+
+        write_discovery_file_in(&base, DEV_PORT);
+
+        let path = discovery_file_path_in(&base);
+        assert!(path.exists());
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["port"], DEV_PORT);
     }
 }
