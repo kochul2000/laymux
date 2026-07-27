@@ -1,6 +1,6 @@
 # 0076. Codex 인프레임 커서 주차를 동기화 출력의 최종 상태로 인정한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-28
 - Source: 사용자 보고(Codex 출력 중 커서가 위로 이동하고 줄 끝 한글 조합 순서가 겹침); Codex CLI 0.145.0 dev 실측; [architecture/data-flow.md §8.5](../architecture/data-flow.md); [ADR-0008](0008-shell-cursor-shadow-cursor.md); [ADR-0011](0011-dectcem-cursor-park-fifth-layer.md); [ADR-0053](0053-native-windows-synchronized-output-cursor-transaction.md)
 - Relation: ADR-0053을 대체한다. 아래에서 명시적으로 바꾸는 frame-tail 문법·shadow cursor 정착 규칙 외의 ADR-0053 결정(네이티브 Windows host gate, surface-local 소유권, bounded byte parser, fail-open, tracked write/refresh, 입력·프로토콜 응답 분리)은 그대로 재채택한다. ADR-0008·0011의 shadow cursor/DECTCEM 소유권은 바꾸지 않고, 새 Codex가 같은 권위 신호를 프레임 안에서 내는 경우를 추가한다.
