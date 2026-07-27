@@ -5,6 +5,8 @@ import {
   captureScreenshot,
   handleAutomationRequest,
   handleAsyncAutomationRequest,
+  BRIDGE_REQUEST_BUDGET_MS,
+  WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
 } from "./useAutomationBridge";
 import html2canvas from "html2canvas";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -67,6 +69,52 @@ function addCanvasElement() {
   document.documentElement.appendChild(canvas);
 }
 
+/**
+ * Active workspace with a live terminal + a never-visited one whose panes have
+ * no session yet (lazy mount, ADR-0043). Landing focus is index 0 in both.
+ */
+function seedColdWorkspaces() {
+  useWorkspaceStore.setState({
+    workspaces: [
+      {
+        id: "ws-live",
+        name: "Live",
+        panes: [{ id: "live-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+      },
+      {
+        id: "ws-cold",
+        name: "Cold",
+        panes: [
+          { id: "cold-1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          { id: "cold-2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+        ],
+      },
+    ],
+    activeWorkspaceId: "ws-live",
+    workspaceDisplayOrder: [],
+  });
+  useTerminalStore.getState().registerInstance({
+    id: "terminal-live-1",
+    profile: "WSL",
+    syncGroup: "Default",
+    workspaceId: "ws-live",
+  });
+  useTerminalStore.getState().updateInstanceInfo("terminal-live-1", { sessionReady: true });
+  useGridStore.getState().setFocusedPane(0);
+}
+
+// #578 review: the 3.5s landing wait and the Rust bridge's 5s request budget
+// live in different languages. Both sides mirror the other's number and assert
+// the slack (`helpers.rs` has the twin test), so moving one without the other
+// fails a test instead of silently turning switches into 504s.
+describe("bridge timing budget", () => {
+  it("keeps the landing wait inside the Rust request budget with slack", () => {
+    expect(WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS + 1_000).toBeLessThanOrEqual(
+      BRIDGE_REQUEST_BUDGET_MS,
+    );
+  });
+});
+
 describe("handleAutomationRequest", () => {
   beforeEach(() => {
     useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
@@ -121,6 +169,182 @@ describe("handleAutomationRequest", () => {
       expect(useDockStore.getState().focusedDock).toBeNull();
       expect(useDockStore.getState().focusedDockPaneId).toBeNull();
     }
+  });
+
+  // #578: the grid's focusedPaneIndex describes the workspace being left, so a
+  // switch that inherits it lands the surface on an unrelated pane — or on no
+  // pane when the index falls past the target's last one. Remote clients read
+  // the landing pane back through `workspaces.getActive.focusedPaneNumber`.
+  it("switching active workspace lands on a pane of the target workspace", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-wide",
+          name: "Wide",
+          panes: [
+            { id: "w1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "w2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "w3", x: 0, y: 0.5, w: 1, h: 0.5, view: { type: "TerminalView" } },
+          ],
+        },
+        {
+          id: "ws-solo",
+          name: "Solo",
+          panes: [{ id: "s1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+      activeWorkspaceId: "ws-wide",
+      workspaceDisplayOrder: [],
+    });
+    useGridStore.getState().setFocusedPane(2);
+
+    const result = handleAutomationRequest({
+      requestId: "r3-landing",
+      category: "action",
+      target: "workspaces",
+      method: "switchActive",
+      params: { id: "ws-solo" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      switched: "ws-solo",
+      landingPaneIndex: 0,
+      landingPaneNumber: 1,
+      landingTerminalId: "terminal-s1",
+    });
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    expect(
+      (
+        handleAutomationRequest({
+          requestId: "r3-landing-read",
+          category: "query",
+          target: "workspaces",
+          method: "getActive",
+          params: {},
+        }).data as { workspace: { focusedPaneNumber: number | null } }
+      ).workspace.focusedPaneNumber,
+    ).toBe(1);
+  });
+
+  // #578: workspaces mount lazily and terminal startup is serialized
+  // (ADR-0043), so a switch that answers immediately reports a workspace whose
+  // terminals do not exist yet. A remote client attaches its main output to a
+  // dock terminal at that instant instead of the pane it switched to.
+  it("switchActive waits for the landing terminal's session before answering", async () => {
+    seedColdWorkspaces();
+
+    let settled = false;
+    const pending = handleAsyncAutomationRequest({
+      requestId: "r3-cold",
+      category: "action",
+      target: "workspaces",
+      method: "switchActive",
+      params: { id: "ws-cold" },
+    }).then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-cold-1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-cold",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-cold-1", { sessionReady: true });
+
+    const result = await pending;
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      switched: "ws-cold",
+      landingTerminalId: "terminal-cold-1",
+      landingReady: true,
+    });
+  });
+
+  it("switchActive stays successful when the landing session never arrives", async () => {
+    seedColdWorkspaces();
+    vi.useFakeTimers();
+    try {
+      const pending = handleAsyncAutomationRequest({
+        requestId: "r3-cold-timeout",
+        category: "action",
+        target: "workspaces",
+        method: "switchActive",
+        params: { id: "ws-cold" },
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      const result = await pending;
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({ switched: "ws-cold", landingReady: false });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-cold");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #578 review: `setActiveWorkspace` ignores an unknown id silently, so a
+  // switch that does not verify it would clear dock focus and re-resolve the
+  // landing pane inside the workspace that stayed active — moving focus in a
+  // workspace nobody asked about, then reporting success.
+  it("switchActive rejects an unknown workspace id without touching focus", () => {
+    seedColdWorkspaces();
+    useDockStore.getState().setFocusedDock("left", "dock-pane");
+
+    const result = handleAutomationRequest({
+      requestId: "r3-missing",
+      category: "action",
+      target: "workspaces",
+      method: "switchActive",
+      params: { id: "ws-gone" },
+    });
+
+    expect(result).toEqual({ success: false, error: "Workspace 'ws-gone' not found" });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-live");
+    expect(useDockStore.getState().focusedDock).toBe("left");
+    expect(useDockStore.getState().focusedDockPaneId).toBe("dock-pane");
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
+  // #578 review: `landingReady` is tri-state. Omitting it when there is no
+  // session to wait for makes "nothing to wait for" read the same as "waited
+  // and it never came" for a caller checking `!landingReady`.
+  it("switchActive reports landingReady null when the landing pane is not a terminal", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-live",
+          name: "Live",
+          panes: [{ id: "live-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+        {
+          id: "ws-memo",
+          name: "Memo",
+          panes: [{ id: "memo-1", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+        },
+      ],
+      activeWorkspaceId: "ws-live",
+      workspaceDisplayOrder: [],
+    });
+    useGridStore.getState().setFocusedPane(0);
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "r3-memo",
+      category: "action",
+      target: "workspaces",
+      method: "switchActive",
+      params: { id: "ws-memo" },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.data).toMatchObject({
+      switched: "ws-memo",
+      landingTerminalId: null,
+      landingReady: null,
+    });
   });
 
   it("returns grid state", () => {

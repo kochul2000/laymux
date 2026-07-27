@@ -10,6 +10,23 @@ use crate::lock_ext::MutexExt;
 use super::types::AutomationRequest;
 use super::ServerState;
 
+/// How long a bridge request waits for the frontend to answer.
+///
+/// This is the ceiling every async bridge handler shares, including the waits a
+/// handler performs itself before answering. Shrinking it below
+/// `LONGEST_HANDLER_WAIT` + render slack turns slow-but-successful handlers into
+/// `504 Frontend response timeout`.
+const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The longest wait a single async bridge handler performs inside one request:
+/// `WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS` in `ui/src/hooks/useAutomationBridge.ts`
+/// (issue #578), where `workspaces.switchActive` waits for the landing
+/// terminal's session. Mirrored here — and asserted against the budget below —
+/// because the two numbers live in different languages with nothing else tying
+/// them together. `BRIDGE_REQUEST_BUDGET_MS` mirrors this budget on that side.
+#[cfg(test)]
+const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
+
 /// Send a request to the frontend via Tauri event and wait for the response.
 pub async fn bridge_request(
     state: &ServerState,
@@ -61,7 +78,7 @@ pub async fn bridge_request(
         })?;
 
     // Wait for response with timeout
-    match tokio::time::timeout(Duration::from_secs(5), rx).await {
+    match tokio::time::timeout(FRONTEND_RESPONSE_TIMEOUT, rx).await {
         Ok(Ok(data)) => Ok(data),
         Ok(Err(_)) => {
             // Channel dropped without response — clean up orphaned entry
@@ -249,6 +266,20 @@ pub fn unescape_terminal_input(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frontend's own waits happen *inside* this budget, and the handler
+    /// still has to switch workspaces (lazy mount + React render) before its
+    /// wait starts. Keep visible slack so that work cannot push a successful
+    /// handler past the budget and into a `504`.
+    #[test]
+    fn frontend_response_timeout_leaves_slack_for_the_longest_handler_wait() {
+        assert!(
+            FRONTEND_RESPONSE_TIMEOUT >= LONGEST_HANDLER_WAIT + Duration::from_millis(1_000),
+            "bridge budget {FRONTEND_RESPONSE_TIMEOUT:?} leaves no slack over the longest \
+             handler wait {LONGEST_HANDLER_WAIT:?} — shrink WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS \
+             in ui/src/hooks/useAutomationBridge.ts first (and its mirror above)"
+        );
+    }
 
     #[test]
     fn ok_json_format() {

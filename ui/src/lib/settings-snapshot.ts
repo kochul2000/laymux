@@ -1,3 +1,4 @@
+import { toTerminalId } from "@/lib/pane-ids";
 import { getClaudeSessionIds, getTerminalCwds, saveSettings, type Settings } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -116,7 +117,7 @@ export async function collectSettingsSnapshot(
       panes: workspace.panes.map((pane) => {
         const viewExtra: Record<string, unknown> = {};
         if (pane.view.type === "TerminalView") {
-          const terminalId = `terminal-${pane.id}`;
+          const terminalId = toTerminalId(pane.id);
           const cwd = backendCwds[terminalId];
           if (cwd) viewExtra.lastCwd = cwd;
           const claudeSession = claudeSessionIds[terminalId];
@@ -159,7 +160,7 @@ export async function collectSettingsSnapshot(
       panes: dock.panes.map((pane) => {
         const viewExtra: Record<string, unknown> = {};
         if (pane.view.type === "TerminalView") {
-          const terminalId = `terminal-${pane.id}`;
+          const terminalId = toTerminalId(pane.id);
           const cwd = backendCwds[terminalId];
           if (cwd) viewExtra.lastCwd = cwd;
           const claudeSession = claudeSessionIds[terminalId];

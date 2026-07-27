@@ -29,6 +29,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
 import { getPaneDragData, isPaneDrag } from "@/lib/pane-dnd";
 import { markNotificationsRead } from "@/lib/tauri-api";
+import { toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
@@ -444,7 +445,7 @@ function WorkspaceItem({
                   const paneIndex = paneIndexById.get(pane.id) ?? -1;
                   const isFocusedPane = isActive && gridFocused === paneIndex;
                   if (pane.view.type === "TerminalView") {
-                    const termId = `terminal-${pane.id}`;
+                    const termId = toTerminalId(pane.id);
                     const ts = summary.terminalSummaries.find((t) => t.id === termId);
                     if (!ts) return null;
                     const paneStatusSettings = getStatusDisplaySettings(
@@ -1152,7 +1153,7 @@ export function WorkspaceSelectorView() {
       workspaces
         .find((ws) => ws.id === wsId)
         ?.panes.filter((p) => p.view.type === "TerminalView")
-        .map((p) => `terminal-${p.id}`) ?? [];
+        .map((p) => toTerminalId(p.id)) ?? [];
     if (wsTerminalIds.length > 0) {
       markNotificationsRead(wsTerminalIds).catch(() => {});
     }
@@ -1324,7 +1325,7 @@ export function WorkspaceSelectorView() {
           const wsTerminals = ws.panes
             .filter((p) => p.view.type === "TerminalView")
             .map((p) => {
-              const termId = `terminal-${p.id}`;
+              const termId = toTerminalId(p.id);
               const inst = terminalInstances.find((t) => t.id === termId);
               if (inst) {
                 // Instance exists but no CWD yet — use lastCwd from settings

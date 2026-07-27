@@ -13,6 +13,7 @@ import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
+import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
 import type { Settings } from "@/lib/tauri-api";
@@ -38,6 +39,25 @@ type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
 const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
+/**
+ * The Rust bridge's per-request budget (`FRONTEND_RESPONSE_TIMEOUT` in
+ * `src-tauri/src/automation_server/helpers.rs`). Every wait an async handler
+ * does here has to fit inside it or the caller gets a `504` instead of an
+ * answer. Mirrored as a constant — not a comment — so the assertion below can
+ * fail when either side moves without the other.
+ */
+export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
+
+/**
+ * How long `workspaces.switchActive` waits for the landing terminal's session
+ * (issue #578). Shorter than `TERMINAL_SESSION_READY_TIMEOUT_MS` on purpose: a
+ * switch must answer inside `BRIDGE_REQUEST_BUDGET_MS`, and unlike
+ * `terminals.setFocus` it stays successful when the wait runs out — the
+ * workspace really did become active either way. The remaining slack also has
+ * to cover the switch itself (lazy workspace mount + React render), which
+ * happens before the wait starts.
+ */
+export const WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS = 3_500;
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -48,12 +68,6 @@ function err(message: string): HandlerResult {
 }
 
 // ── Shared helpers ────────────────────────────────────────────────
-
-/** Construct terminal ID from pane ID. */
-const toTerminalId = (paneId: string) => `terminal-${paneId}`;
-
-/** Extract pane ID from terminal ID. */
-const toPaneId = (terminalId: string) => terminalId.replace(/^terminal-/, "");
 
 /** Get active workspace and validate pane index, returning the workspace and pane or an error. */
 function getActivePaneCtx(paneIndex: number): ActivePaneCtx {
@@ -327,10 +341,23 @@ const handlers: HandlerMap = {
       };
       return ok({ workspace: enriched });
     },
+    // Landing focus is resolved by the shared rule, never inherited: the grid's
+    // focusedPaneIndex describes the workspace we are leaving, so carrying it
+    // over pointed the surface at an unrelated pane — or at none at all — in the
+    // target workspace (issue #578).
     switchActive: (p) => {
-      useWorkspaceStore.getState().setActiveWorkspace(p.id as string);
-      useDockStore.getState().setFocusedDock(null);
-      return ok({ switched: p.id });
+      const result = navigationActions.switchActiveWorkspace(p.id as string);
+      // An unknown id must not answer `switched` — it changed nothing, and the
+      // async path below would otherwise wait on a terminal of the workspace
+      // that stayed active. Same contract as `remove`/`rename`.
+      if (!result.switched) return err(`Workspace '${p.id}' not found`);
+      const { landing } = result;
+      return ok({
+        switched: p.id,
+        landingPaneIndex: landing?.paneIndex ?? null,
+        landingPaneNumber: landing?.paneNumber ?? null,
+        landingTerminalId: landing?.terminalId ?? null,
+      });
     },
     add: (p) => {
       const { layouts } = useWorkspaceStore.getState();
@@ -1176,6 +1203,30 @@ export async function handleAsyncAutomationRequest(
     }
     useTerminalStore.getState().setTerminalFocus(terminalId);
     return result;
+  }
+  if (request.target === "workspaces" && request.method === "switchActive") {
+    const result = handleAutomationRequest(request);
+    if (!result.success) return result;
+    // Workspaces mount lazily and terminal startup is serialized (ADR-0043), so
+    // right after the switch the target workspace can own terminal panes with no
+    // session yet. A remote client reading state at that instant sees nothing
+    // live in the workspace and attaches its main output to a dock terminal
+    // instead of the pane it switched to (issue #578) — so wait for the landing
+    // terminal the same way the step-navigation landing does (ADR-0039).
+    const { landingTerminalId } = result.data as { landingTerminalId: string | null };
+    // `landingReady` is tri-state: there was no session to wait for (null), the
+    // session arrived (true), or the wait ran out (false). Answering `undefined`
+    // here would collapse the first two for a caller reading `!landingReady`.
+    if (!landingTerminalId) {
+      return ok({ ...(result.data as Record<string, unknown>), landingReady: null });
+    }
+    // Never fail the switch on a slow start: it already happened, and the caller
+    // needs to know the workspace changed more than it needs the session.
+    const landingReady = await waitForTerminalSessionReady(
+      landingTerminalId,
+      WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
+    );
+    return ok({ ...(result.data as Record<string, unknown>), landingReady });
   }
   if (
     request.target === "navigation" &&

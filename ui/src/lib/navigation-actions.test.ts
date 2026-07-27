@@ -8,7 +8,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { Workspace, WorkspacePane } from "@/stores/types";
 
-import { notificationStep, spatialStep } from "./navigation-actions";
+import { notificationStep, spatialStep, switchActiveWorkspace } from "./navigation-actions";
 
 function term(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
   return { id, x, y, w, h, view: { type: "TerminalView" } };
@@ -196,6 +196,104 @@ describe("navigation-actions", () => {
       useGridStore.getState().setFocusedPane(0);
 
       expect(spatialStep("next")).toEqual({ moved: false, reason: "no_other_target" });
+    });
+  });
+
+  describe("switchActiveWorkspace", () => {
+    it("keeps the position when the target workspace has that pane", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(1); // pane b of ws1
+
+      // ws3 also has two panes, so index 1 stays valid.
+      useWorkspaceStore.setState({
+        workspaces: [
+          ws("ws1", "One", [term("a", 0, 0), term("b", 0.5, 0)]),
+          ws("ws3", "Three", [term("x", 0, 0), term("y", 0.5, 0)]),
+        ],
+        activeWorkspaceId: "ws1",
+        workspaceDisplayOrder: [],
+      });
+
+      expect(switchActiveWorkspace("ws3")).toEqual({
+        switched: true,
+        landing: { paneIndex: 1, paneId: "y", paneNumber: 2, terminalId: "terminal-y" },
+      });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws3");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    });
+
+    // #578: the grid index describes the workspace being left. Carried over
+    // untouched it pointed past ws2's only pane, so the surface landed on no
+    // pane at all and callers had to guess where they were.
+    it("clamps a stale index that falls past the target workspace's last pane", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(1); // pane b of ws1; ws2 has one pane
+
+      expect(switchActiveWorkspace("ws2")).toEqual({
+        switched: true,
+        landing: { paneIndex: 0, paneId: "c", paneNumber: 1, terminalId: "terminal-c" },
+      });
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    });
+
+    it("lands on the first pane and clears dock focus when the dock had it", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(1);
+      useDockStore.getState().setFocusedDock("left", "dock-pane");
+
+      expect(switchActiveWorkspace("ws1")).toMatchObject({
+        switched: true,
+        landing: { paneIndex: 0, paneId: "a" },
+      });
+      expect(useDockStore.getState().focusedDock).toBeNull();
+      expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+    });
+
+    it("focuses no pane in an empty workspace", () => {
+      useWorkspaceStore.setState({
+        workspaces: [ws("ws1", "One", [term("a", 0, 0, 1, 1)]), ws("ws-empty", "Empty", [])],
+        activeWorkspaceId: "ws1",
+        workspaceDisplayOrder: [],
+      });
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(switchActiveWorkspace("ws-empty")).toEqual({ switched: true, landing: null });
+      expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+    });
+
+    // Review of #578: `setActiveWorkspace` drops an unknown id silently, so
+    // continuing past it rewrote focus inside the workspace that stayed active
+    // — a switch nobody requested — and still reported success.
+    it("leaves every store untouched when the workspace id does not exist", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(1);
+      useDockStore.getState().setFocusedDock("left", "dock-pane");
+
+      expect(switchActiveWorkspace("ws-gone")).toEqual({
+        switched: false,
+        reason: "workspace_not_found",
+      });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws1");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+      expect(useDockStore.getState().focusedDock).toBe("left");
+      expect(useDockStore.getState().focusedDockPaneId).toBe("dock-pane");
+    });
+
+    it("reports no landing terminal when the landing pane is not a terminal", () => {
+      useWorkspaceStore.setState({
+        workspaces: [
+          ws("ws1", "One", [term("a", 0, 0, 1, 1)]),
+          ws("ws2", "Two", [memo("m", 0, 0, 1, 1)]),
+        ],
+        activeWorkspaceId: "ws1",
+        workspaceDisplayOrder: [],
+      });
+      useGridStore.getState().setFocusedPane(0);
+
+      expect(switchActiveWorkspace("ws2")).toEqual({
+        switched: true,
+        landing: { paneIndex: 0, paneId: "m", paneNumber: 1, terminalId: null },
+      });
     });
   });
 
