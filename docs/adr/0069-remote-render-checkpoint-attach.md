@@ -1,6 +1,6 @@
 # 0069. Remote attach는 raw tail이 아니라 xterm 화면 체크포인트에서 시작한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-27
 - Source: 사용자 보고(Remote에서 출력 중인 터미널로 워크스페이스 이동 시 화면 대부분이 비는 문제) · [architecture/api-contracts.md §13](../architecture/api-contracts.md) · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [ADR-0015](0015-remote-terminal-state-ownership.md) · [ADR-0029](0029-detached-terminal-input-composer.md) · [ADR-0058](0058-single-terminal-cell-width-provider.md)
 - Relation: ADR-0015의 surface 상태 분리를 유지하면서 Remote attach의 초기 상태 계약을 확장하고, ADR-0029의 V1 `snapshot` payload가 반드시 PTY raw byte 구간이라는 결정을 정정한다. ADR-0058의 단일 셀 폭 provider를 Remote 체크포인트에도 직접 적용한다.
