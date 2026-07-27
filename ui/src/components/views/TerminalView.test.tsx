@@ -341,6 +341,7 @@ const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
   },
   snapshot: [],
 });
+const mockResumeTerminalOutput = vi.fn().mockResolvedValue(null);
 let mockOutputSequence = 0;
 const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
   active: false,
@@ -373,6 +374,7 @@ vi.mock("@/lib/tauri-api", () => ({
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
   attachTerminalOutput: (...args: unknown[]) => mockAttachTerminalOutput(...args),
+  resumeTerminalOutput: (...args: unknown[]) => mockResumeTerminalOutput(...args),
   onTerminalOutputV2: (terminalId: string, callback: (payload: unknown) => void) => {
     const forward = (data: Uint8Array | Record<string, unknown>) => {
       if ("seqStart" in data) {
@@ -1975,13 +1977,17 @@ describe("TerminalView", () => {
   });
 
   it("rebuilds the shadow cursor when a sequence gap replaces the stream", async () => {
-    // Issue #596: heavy output fills the backend subscriber queue, the backend
-    // reports a sequence gap, and TerminalView reattaches with
-    // `terminal.reset()` + a fresh snapshot. If the frame that was open when
-    // the gap hit never gets its `?2026l`, `isDec2026FrameOpen` stays true
-    // forever: shadow syncs report `dec-2026-frame-open`, Codex's cursor parks
-    // are demoted to visibility-only, and the overlay caret stays pinned where
-    // the frame opened while the real cursor keeps advancing.
+    // Issue #596: a sequence gap the ring can no longer bridge escalates to
+    // `terminal.reset()` + a fresh snapshot (ADR-0071), which throws away the
+    // bytes the pane's cursor beliefs were inferred from. If the frame that was
+    // open when the gap hit never gets its `?2026l`, `isDec2026FrameOpen` stays
+    // true forever: shadow syncs report `dec-2026-frame-open`, Codex's cursor
+    // parks are demoted to visibility-only, and the overlay caret stays pinned
+    // where the frame opened while the real cursor keeps advancing.
+    //
+    // The `null` resume below is what makes this the escalation path rather
+    // than the repair path — see the repaired-gap test right after this one.
+    mockResumeTerminalOutput.mockResolvedValue(null);
     localStorage.setItem("laymux:cursor-trace", "1");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const traces = (needle: string) =>
@@ -2028,6 +2034,87 @@ describe("TerminalView", () => {
         await csiHandlers.get("?:h")?.([25]);
       });
       expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
+  it("keeps the shadow cursor across a repaired sequence gap", async () => {
+    // ADR-0071 vs issue #596: a repaired gap is the opposite case. The visible
+    // buffer is untouched and the byte stream stays continuous, so every
+    // stream-derived belief is still valid and rebuilding them would be wrong —
+    // `cursorAbsY`, `commandStartLine` and the frame snapshot all still name
+    // live rows. `isDec2026FrameOpen` in particular must stay open: the frame's
+    // `?2026l` was not destroyed, it was merely undelivered, and the repair
+    // range carries it to the same parser handlers that would have seen it.
+    mockResumeTerminalOutput.mockResolvedValue(null);
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(<TerminalView instanceId="t-gap-repair-shadow" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array | Record<string, unknown>) => void)
+        | undefined;
+      expect(onOutput).toBeTypeOf("function");
+      await waitForStreamAttachReset();
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-gap-repair-shadow", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      // A frame opens, and the gap swallows its `?2026l`.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      const resetsBefore = mockReset.mock.calls.length;
+      const geometry = { revision: 0, cols: 80, rows: 24 };
+      mockResumeTerminalOutput.mockClear();
+      mockResumeTerminalOutput.mockResolvedValueOnce({
+        generation: 1,
+        seqStart: 0,
+        seqEnd: 6,
+        data: [0x61, 0x62, 0x63, 0x64, 0x65, 0x66],
+        geometry,
+      });
+      act(() => {
+        onOutput?.({ generation: 1, seqStart: 6, seqEnd: 9, data: [0x67, 0x68, 0x69], geometry });
+      });
+      await vi.waitFor(() => {
+        expect(mockResumeTerminalOutput).toHaveBeenCalledWith("t-gap-repair-shadow", 1, 0);
+      });
+
+      // The stream was repaired in place: no reset, so the open frame is still
+      // open and the in-frame show stays visibility-only. A rebuild here would
+      // clear the latch and promote this show to an authoritative park.
+      expect(mockReset.mock.calls.length).toBe(resetsBefore);
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      // The `?2026l` the repair delivered closes the frame exactly as it would
+      // have without the gap, and the next park is authoritative again.
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+      expect(mockReset.mock.calls.length).toBe(resetsBefore);
     } finally {
       logSpy.mockRestore();
       localStorage.removeItem("laymux:cursor-trace");
@@ -8501,6 +8588,105 @@ describe("TerminalView desktop input composer", () => {
       expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(
         attachCallsBeforeMalformedDelta,
       );
+    });
+  });
+
+  // issue #600: a lost `terminal-output-v2` event used to cost screen cells for
+  // good, because recovery reset xterm and replayed a ring window that a
+  // differential-render TUI never repaints. The ring still holds those bytes, so
+  // the gap is repaired in place (ADR-0071).
+  const geometry = { revision: 0, cols: 80, rows: 24 };
+  const outputDelta = (seqStart: number, text: string) => ({
+    generation: 1,
+    seqStart,
+    seqEnd: seqStart + text.length,
+    data: Array.from(new TextEncoder().encode(text)),
+    geometry,
+  });
+  async function attachedOutputEmitter(terminalId: string) {
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const registered = mockOnTerminalOutput.mock.calls.find(
+      ([registeredTerminalId]) => registeredTerminalId === terminalId,
+    );
+    const emitOutput = registered?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+    return emitOutput as (data: Uint8Array | Record<string, unknown>) => void;
+  }
+  const decodedWrites = () =>
+    mockWrite.mock.calls.map((call: unknown[]) =>
+      typeof call[0] === "string" ? call[0] : new TextDecoder().decode(call[0] as Uint8Array),
+    );
+
+  it("repairs an output delta gap from the ring without resetting the screen", async () => {
+    const terminalId = "t-output-gap-repair";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+
+    act(() => emitOutput(outputDelta(0, "AAAAA")));
+
+    mockWrite.mockClear();
+    mockReset.mockClear();
+    const attachCallsBeforeGap = mockAttachTerminalOutput.mock.calls.length;
+    mockResumeTerminalOutput.mockClear();
+    mockResumeTerminalOutput.mockResolvedValueOnce(outputDelta(5, "BBB"));
+
+    // The `[5, 8)` event never arrived; the surface sees `[8, 10)` instead.
+    act(() => emitOutput(outputDelta(8, "CC")));
+
+    expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 5);
+    await vi.waitFor(() => {
+      const written = decodedWrites();
+      expect(written).toContain("BBB");
+      expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("BBB"));
+    });
+    expect(mockReset).not.toHaveBeenCalled();
+    expect(mockAttachTerminalOutput.mock.calls.length).toBe(attachCallsBeforeGap);
+
+    // The repaired stream stays contiguous: the next delta is not another gap.
+    mockResumeTerminalOutput.mockClear();
+    act(() => emitOutput(outputDelta(10, "DD")));
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(decodedWrites()).toContain("DD"));
+  });
+
+  it("falls back to a full attach when the ring can no longer bridge the gap", async () => {
+    const terminalId = "t-output-gap-escalation";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+
+    act(() => emitOutput(outputDelta(0, "AAAAA")));
+
+    const attachCallsBeforeGap = mockAttachTerminalOutput.mock.calls.length;
+    mockResumeTerminalOutput.mockClear();
+    mockResumeTerminalOutput.mockResolvedValueOnce(null);
+
+    act(() => emitOutput(outputDelta(8, "CC")));
+
+    expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 5);
+    await vi.waitFor(() => {
+      expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(attachCallsBeforeGap);
+    });
+  });
+
+  it("falls back to a full attach when the gap spans a PTY resize", async () => {
+    const terminalId = "t-output-gap-resize";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+
+    act(() => emitOutput(outputDelta(0, "AAAAA")));
+
+    const attachCallsBeforeGap = mockAttachTerminalOutput.mock.calls.length;
+    mockResumeTerminalOutput.mockClear();
+    // One delta cannot describe bytes written on two different grids.
+    mockResumeTerminalOutput.mockResolvedValueOnce({
+      ...outputDelta(5, "BBB"),
+      geometry: { revision: 1, cols: 100, rows: 30 },
+    });
+
+    act(() => emitOutput(outputDelta(8, "CC")));
+
+    await vi.waitFor(() => {
+      expect(mockAttachTerminalOutput.mock.calls.length).toBeGreaterThan(attachCallsBeforeGap);
     });
   });
 

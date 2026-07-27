@@ -88,6 +88,7 @@ ADR 이 필요한 대표 기준:
 | [0068](0068-remote-terminal-query-single-responder.md) | Remote 터미널 query 응답자는 PC xterm 하나로 제한한다 | Accepted |
 | [0069](0069-remote-render-checkpoint-attach.md) | Remote attach는 raw tail이 아니라 xterm 화면 체크포인트에서 시작 | Accepted |
 | [0070](0070-unmatched-route-boundary-ownership.md) | 합성 라우터가 미등록 경로 fallback·최외곽 CORS·경계 적용 순서를 소유 | Accepted |
+| [0071](0071-terminal-output-gap-sequence-exact-repair.md) | output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다 | Accepted |
 
 ## 새 ADR 추가
 
