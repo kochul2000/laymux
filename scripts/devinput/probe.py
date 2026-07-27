@@ -8,6 +8,7 @@ for what the API physically cannot produce.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.request
 
@@ -59,8 +60,42 @@ def terminals(port: int) -> list[dict]:
 
 
 def terminal_output(port: int, terminal_id: str, lines: int = 40) -> str:
+    """Raw ring-buffer text — ANSI escapes included. Use `strip_ansi` to match."""
     payload = request(port, f"/api/v1/terminals/{terminal_id}/output?lines={lines}")
     return payload.get("output", "")
+
+
+# CSI/OSC/two-char escapes. `/output` hands back unfiltered PTY bytes, and
+# PSReadLine re-emits the input line with colour sequences *inside* a token, so
+# substring matching on raw output gives false negatives.
+_ANSI = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC ... BEL / ST
+    r"|\x1b\[[0-9;:<=>?]*[ -/]*[@-~]"  # CSI
+    r"|\x1b[()][0-9A-Za-z]"  # charset select
+    r"|\x1b[=>NOc78]"  # misc two-char
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Drop escape sequences so a marker split by colour codes still matches."""
+    return _ANSI.sub("", text)
+
+
+def focused_terminal_id(port: int) -> str | None:
+    """Terminal id of the pane that actually owns keyboard focus, or None.
+
+    `/api/v1/grid` reports the focused pane of the *active* workspace, which is
+    the pane keystrokes reach. `isFocused` on the terminal list is per-workspace
+    and therefore true for several terminals at once — not usable here.
+    """
+    grid = request(port, "/api/v1/grid")
+    index = grid.get("focusedPaneIndex")
+    if not isinstance(index, int):
+        return None
+    for pane in grid.get("panes") or []:
+        if pane.get("paneIndex") == index:
+            return pane.get("terminalId")
+    return None
 
 
 def focus_terminal(port: int, terminal_id: str) -> dict:

@@ -35,6 +35,10 @@ RELEASE_CONFIG_DIR = "laymux"
 # Real mouse travel (px, manhattan) tolerated before we call the human back.
 MOUSE_MOVE_ABORT_PX = 40
 LEASE_MAX_SECONDS = 60 * 60
+# Synthetic key events that are not ours tolerated before we abort. A human
+# typing over RDP/Parsec/VNC arrives with LLKHF_INJECTED set and no signature of
+# ours, so it is indistinguishable from another automation tool — abort either way.
+FOREIGN_INJECTED_KEYS_ABORT = 3
 
 
 class GuardError(RuntimeError):
@@ -272,6 +276,11 @@ class TargetLock:
     def assert_foreground(self) -> None:
         """Cheap per-event check: is the dev instance still the input target?"""
         hwnd, pid, title = self.foreground_state()
+        # First: no foreground window at all. Checked before the pid comparison
+        # because window_pid(0) yields pid 0, which would otherwise be reported
+        # as a pid mismatch and hide the real cause.
+        if hwnd == 0:
+            raise GuardError("no foreground window — aborted")
         if pid in self.forbidden_pids:
             raise GuardError(
                 f"foreground is a RELEASE window (pid {pid}, {title!r}) — aborted"
@@ -280,18 +289,29 @@ class TargetLock:
             raise GuardError(
                 f"foreground pid {pid} ({title!r}) != dev pid {self.dev_pid} — aborted"
             )
-        if hwnd == 0:
-            raise GuardError("no foreground window — aborted")
 
 
 # -- dead man switch --------------------------------------------------------
 
 
 class DeadMan:
-    """Trips on the first non-injected keyboard/mouse event: the human is back."""
+    """Trips on the first non-injected keyboard/mouse event: the human is back.
 
-    def __init__(self, *, move_threshold_px: int = MOUSE_MOVE_ABORT_PX) -> None:
+    Synthetic input that is not ours also trips, after a small tolerance: a human
+    on a remote desktop (RDP/Parsec/Sunshine/VNC, phone keyboard apps) reaches
+    the hook with LLKHF_INJECTED set, so treating "injected" as "safe to ignore"
+    would let their typing interleave with ours. See README "함정".
+    """
+
+    def __init__(
+        self,
+        *,
+        move_threshold_px: int = MOUSE_MOVE_ABORT_PX,
+        foreign_key_limit: int = FOREIGN_INJECTED_KEYS_ABORT,
+    ) -> None:
         self._move_threshold = move_threshold_px
+        self._foreign_key_limit = foreign_key_limit
+        self._foreign_keys = 0
         self._tripped = threading.Event()
         self._ready = threading.Event()
         self._reason = ""
@@ -322,8 +342,17 @@ class DeadMan:
             info = ctypes.cast(lparam, ctypes.POINTER(win32.KBDLLHOOKSTRUCT)).contents
             ours = info.dwExtraInfo == win32.DEVINPUT_SIGNATURE
             injected = bool(info.flags & win32.LLKHF_INJECTED)
-            if not ours and not injected:
-                self._trip(f"human pressed a key (vk=0x{info.vkCode:02X})")
+            if not ours:
+                if not injected:
+                    self._trip(f"human pressed a key (vk=0x{info.vkCode:02X})")
+                else:
+                    self._foreign_keys += 1
+                    if self._foreign_keys >= self._foreign_key_limit:
+                        self._trip(
+                            f"{self._foreign_keys} synthetic key events are not ours "
+                            f"(last vk=0x{info.vkCode:02X}) — remote desktop session "
+                            "or another automation tool is typing"
+                        )
         return win32.user32.CallNextHookEx(None, ncode, wparam, lparam)
 
     def _on_mouse(self, ncode, wparam, lparam):
@@ -415,9 +444,16 @@ class InputSession:
                 self._deadman.stop()
 
     def checkpoint(self) -> None:
-        """Run before every single injected event. Cheap: 2 syscalls + a flag."""
-        if not self.lease.alive:
-            raise GuardError("lease expired mid-run — aborted")
+        """Run before every single injected event. Cheap: a stat + 2 syscalls.
+
+        The lease is re-read, not cached: `unlease` (deleting the file) and
+        `LAYMUX_DEVINPUT_DISABLE=1` are the most direct "give me my keyboard
+        back" levers there are, and both must stop an in-flight run.
+        """
+        try:
+            self.lease = require_lease()
+        except GuardError as exc:
+            raise GuardError(f"{exc} — aborted mid-run") from exc
         if self._deadman:
             self._deadman.assert_ok()
         self.lock.assert_foreground()
@@ -451,7 +487,12 @@ class InputSession:
         for vk in self.touched_modifiers:
             if win32.user32.GetAsyncKeyState(vk) & 0x8000:
                 try:
-                    win32.send_inputs([win32.key_input(vk, up=True, extended=False)])
+                    # `extended` matters: LWIN/RWIN are scancode E0 5B/E0 5C, and
+                    # key_input sends scancodes, so a KEYUP without the extended
+                    # flag translates to a different key and the Win key stays down.
+                    win32.send_inputs(
+                        [win32.key_input(vk, up=True, extended=vk in win32.EXTENDED_VKS)]
+                    )
                 except OSError:
                     pass
 

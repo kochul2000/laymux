@@ -80,16 +80,25 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 def cmd_lease(args: argparse.Namespace) -> int:
     seconds = parse_duration(args.duration)
-    lease = guard.write_lease(seconds, note=args.note or "")
-    print(f"{OK}lease granted for {fmt_remaining(lease.remaining)}")
-    print(f"{INFO}stored at {guard.lease_path()}")
-    print(f"{INFO}any real keypress or {guard.MOUSE_MOVE_ABORT_PX}px of mouse travel aborts a run")
 
+    # Resolve *before* granting: a command that reports failure must not leave the
+    # keyboard handed over. Otherwise the user reads `[FAIL]` and still has a live
+    # lease sitting in %LOCALAPPDATA%.
     try:
         lock = guard.TargetLock.resolve()
     except guard.GuardError as exc:
         print(f"{BAD}dev not usable yet: {exc}")
+        print(f"{INFO}no lease granted")
         return 1
+
+    try:
+        lease = guard.write_lease(seconds, note=args.note or "")
+    except guard.GuardError as exc:
+        print(f"{BAD}{exc}")
+        return 1
+    print(f"{OK}lease granted for {fmt_remaining(lease.remaining)}")
+    print(f"{INFO}stored at {guard.lease_path()}")
+    print(f"{INFO}any real keypress or {guard.MOUSE_MOVE_ABORT_PX}px of mouse travel aborts a run")
 
     if args.focus_dev:
         if win32.force_foreground(lock.dev_hwnd):
@@ -175,7 +184,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"{OK}dev window is foreground (hwnd=0x{hwnd:X})")
 
     marker = f"dvprobe{int(time.time()) % 100000}"
-    before = probe.terminal_output(lock.dev_port, target["id"], lines=10)
+    before = probe.strip_ansi(probe.terminal_output(lock.dev_port, target["id"], lines=10))
+    # Modifiers the user is already holding are not ours to release, so they must
+    # not be counted as "left stuck" either (guard.release_all_modifiers agrees).
+    held_before = set(win32.modifier_held_physically())
 
     try:
         with guard.InputSession() as session:
@@ -185,7 +197,9 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                   f"(marker {marker!r}, no Enter sent)")
 
             time.sleep(0.35)
-            after = probe.terminal_output(lock.dev_port, target["id"], lines=10)
+            after = probe.strip_ansi(
+                probe.terminal_output(lock.dev_port, target["id"], lines=10)
+            )
             landed = marker in after and marker not in before
             if landed:
                 print(f"{OK}marker echoed back through the PTY — SendInput reaches WebView2")
@@ -195,9 +209,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 print(f"{INFO}  likely UIPI: is dev running elevated while this script is not?")
                 print(f"{INFO}  (also check the pane really had keyboard focus)")
 
-            for _ in range(len(marker)):
-                send.tap(session, "backspace")
-            print(f"{OK}marker erased ({len(marker)} backspaces)")
+            # Only erase what we can prove we typed. Blind backspaces would eat
+            # whatever the user had already typed at the prompt.
+            if landed:
+                for _ in range(len(marker)):
+                    send.tap(session, "backspace")
+                print(f"{OK}marker erased ({len(marker)} backspaces)")
+            else:
+                print(f"{INFO}no backspaces sent — check the prompt and clear it yourself")
     except guard.AbortedByHuman as exc:
         print(f"{BAD}{exc}")
         return 2
@@ -208,12 +227,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"{BAD}SendInput failed: {exc}")
         return 1
 
-    held = win32.modifier_held_physically()
-    if held:
+    stuck = [n for n in win32.modifier_held_physically() if n not in held_before]
+    if stuck:
         failures += 1
-        print(f"{BAD}modifiers left down after cleanup: {', '.join(held)}")
+        print(f"{BAD}modifiers left down after cleanup: {', '.join(stuck)}")
     else:
         print(f"{OK}no modifier left stuck")
+        if held_before:
+            print(f"{INFO}  (you were already holding {', '.join(sorted(held_before))} — ignored)")
 
     print()
     print("doctor: PASS" if failures == 0 else f"doctor: {failures} FAILURE(S)")
@@ -224,10 +245,27 @@ def cmd_keys(args: argparse.Namespace) -> int:
     try:
         guard.require_lease()
         lock = guard.TargetLock.resolve()
-        target = probe.pick_shell_terminal(lock.dev_port, args.terminal)
         if args.focus:
+            target = probe.pick_shell_terminal(lock.dev_port, args.terminal)
             probe.focus_terminal(lock.dev_port, target["id"])
             time.sleep(0.1)
+        else:
+            # Without the focus step the keys land in whatever pane already has
+            # focus, so that is the pane we must vet — picking a nice-looking
+            # shell elsewhere would validate one pane and type into another.
+            focused = probe.focused_terminal_id(lock.dev_port)
+            if focused is None:
+                raise guard.GuardError(
+                    "--no-focus: dev reports no focused terminal pane — "
+                    "refusing to type blind (drop --no-focus, or focus a shell pane)"
+                )
+            if args.terminal and args.terminal != focused:
+                raise guard.GuardError(
+                    f"--no-focus: focus is on {focused}, not --terminal {args.terminal} — "
+                    "refusing (drop --no-focus to move focus first)"
+                )
+            # Raises unless the focused pane is a plain shell.
+            probe.pick_shell_terminal(lock.dev_port, focused)
         with guard.InputSession(event_delay=args.delay) as session:
             for line in send.run_spec(session, args.tokens):
                 print(f"{OK}{line}")
