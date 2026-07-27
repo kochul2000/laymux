@@ -146,6 +146,24 @@ async function waitForStreamAttachReset(): Promise<void> {
   } finally {
     if (bail !== undefined) realClearTimeout(bail);
   }
+  // Losing the race means this test ran a parser handler without an attach reset
+  // ever landing, so it is back to the pre-gate ordering luck. Record it — the
+  // value of the gate is determinism, and a silent bail restores exactly the
+  // nondeterminism it exists to remove. `console.warn` alone does not work here:
+  // this project's vitest run does not surface test-side console output at all
+  // (verified), so the bail would stay invisible. The `afterEach` below turns it
+  // into a failing assertion on the test that bailed instead. The handler itself
+  // still runs ungated, so the escape hatch keeps degrading to the old behaviour
+  // rather than aborting mid-test.
+  if (!streamAttachResetSeen) streamAttachResetBails.push(currentTestNameForBail());
+}
+const streamAttachResetBails: string[] = [];
+function currentTestNameForBail(): string {
+  try {
+    return expect.getState().currentTestName ?? "(unknown test)";
+  } catch {
+    return "(unknown test)";
+  }
 }
 /** Registered parser handlers only run once the attach reset has landed. */
 function gateOnStreamAttachReset<Args extends unknown[]>(
@@ -503,6 +521,21 @@ async function waitForLocalTerminalControl(): Promise<void> {
   });
 }
 
+// File level, not per-`describe`: `streamAttachResetSeen` is module-global, so a
+// `describe` without this arming inherits an already-open gate from whichever
+// test ran last and the ordering rule silently stops applying there. Every
+// `describe` in this file must get the gate, including ones added later.
+beforeEach(() => {
+  armStreamAttachResetGate();
+  streamAttachResetBails.length = 0;
+});
+
+// A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
+// luck. Reported here so the bailing test names itself.
+afterEach(() => {
+  expect(streamAttachResetBails).toEqual([]);
+});
+
 describe("TerminalView", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
@@ -524,8 +557,6 @@ describe("TerminalView", () => {
     csiHandlers.clear();
     oscHandlers.clear();
     escHandlers.clear();
-    // A previous test's `terminal.reset()` must not pre-open this test's gate.
-    armStreamAttachResetGate();
     mockModes.synchronizedOutputMode = false;
     capturedRemoteControlChanged = null;
     mockOutputSequence = 0;
