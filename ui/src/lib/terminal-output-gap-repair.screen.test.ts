@@ -12,13 +12,15 @@
  * So these tests stream the bytes into a real `@xterm/xterm` and read the
  * buffer back. They run in the screen suite (`npm run test:screen`, ADR-0074).
  *
- * The three tests form one argument:
+ * The tests form one argument:
  *
- * 1. repair restores the screen **exactly** — cell for cell, cursor included;
+ * 1. repair restores the screen **exactly** — cell for cell, cursor included —
+ *    whether the hole opened mid-stream, inside the attach round-trip, or
+ *    behind an already-applied repair range (issue #607);
  * 2. the pre-ADR-0072 recovery (`reset()` + truncated replay) **does not** —
  *    the rows the program painted once and never repainted stay blank;
- * 3. and the comparison is not vacuous: double-applying one frame's bytes is
- *    caught, so test 1 passing means something.
+ * 3. and the comparison is not vacuous: a repair that splices its range in
+ *    twice is caught, so test 1 passing means something.
  */
 
 import { describe, expect, it } from "vitest";
@@ -29,6 +31,7 @@ import {
 import { createOutputRing } from "@/test/screen/output-ring";
 import {
   createOutputSurfaceDriver,
+  SCREEN_REPAIR_MAX_ROUNDS,
   type RecoveryCounters,
   type RecoveryStrategy,
 } from "@/test/screen/output-surface-driver";
@@ -42,13 +45,13 @@ import {
 } from "@/test/screen/xterm-screen";
 
 const script = createDifferentialFrameScript({ updates: 12 });
+/** Long enough for one reopened hole per repair round plus the cap. */
+const longScript = createDifferentialFrameScript({ updates: 24 });
 const encoder = new TextEncoder();
-const frameBytes = script.frames.map((frame) => encoder.encode(frame).length);
 
-/** Sequence one past the last byte of frame `index`. */
-function seqAfterFrame(index: number): number {
-  return frameBytes.slice(0, index + 1).reduce((sum, length) => sum + length, 0);
-}
+/** Frames the attach round-trip is open for; the middle one is dropped. */
+const ATTACH_WINDOW_FRAMES = [0, 1, 2];
+const ATTACH_WINDOW_DROP = 1;
 
 interface RunOptions {
   strategy?: RecoveryStrategy;
@@ -62,13 +65,38 @@ interface RunOptions {
   evictThroughFrame?: number;
   /** Record and deliver `dropIndex + 2` while the repair round-trip is open. */
   deliverDuringRepair?: boolean;
-  /** Re-apply this frame's bytes straight to xterm — sabotage control. */
-  duplicateFrame?: number;
+  /**
+   * Record frames 0–2 while the *attach* round-trip is open and drop frame 1,
+   * so `completeAttach()` reports a gap with a non-empty applied prefix.
+   */
+  gapDuringAttach?: boolean;
+  /**
+   * Reopen a hole behind the range served in each of the first `n` repair
+   * rounds: two more frames are recorded after the ring answered, and only the
+   * second is delivered. Models the flood losing another delta while the repair
+   * response is in transit (issue #607).
+   */
+  reopenGapRounds?: number;
+  /** Make the repair path write the range it applies twice — sabotage control. */
+  sabotageDuplicateRepairWrite?: boolean;
 }
 
 interface RunResult {
   snapshot: ScreenSnapshot;
   counters: Readonly<RecoveryCounters>;
+}
+
+/** Frames the hooks record out of band, so the main loop must skip them. */
+function outOfBandFrames(options: RunOptions): Set<number> {
+  const frames = new Set<number>();
+  if (options.gapDuringAttach) for (const index of ATTACH_WINDOW_FRAMES) frames.add(index);
+  if (options.dropIndex === undefined) return frames;
+  if (options.deliverDuringRepair) frames.add(options.dropIndex + 2);
+  for (let round = 1; round <= (options.reopenGapRounds ?? 0); round += 1) {
+    frames.add(options.dropIndex + 2 * round);
+    frames.add(options.dropIndex + 2 * round + 1);
+  }
+  return frames;
 }
 
 async function runScript(
@@ -77,27 +105,47 @@ async function runScript(
 ): Promise<RunResult> {
   const surface = createScreenTerminal({ cols: frames.cols, rows: frames.rows, scrollback: 200 });
   const ring = createOutputRing({ cols: frames.cols, rows: frames.rows });
-  const duringRepairIndex =
-    options.deliverDuringRepair && options.dropIndex !== undefined
-      ? options.dropIndex + 2
-      : undefined;
+  const frameBytes = frames.frames.map((frame) => encoder.encode(frame).length);
+  /** Sequence one past the last byte of frame `index`. */
+  const seqAfterFrame = (index: number): number =>
+    frameBytes.slice(0, index + 1).reduce((sum, length) => sum + length, 0);
+  const outOfBand = outOfBandFrames(options);
+  const dropIndex = options.dropIndex;
   const driver = createOutputSurfaceDriver({
     surface,
     ring,
     strategy: options.strategy,
+    sabotageDuplicateRepairWrite: options.sabotageDuplicateRepairWrite,
     hooks: {
-      beforeResume: async () => {
-        if (duringRepairIndex === undefined) return;
-        await driver.deliver(ring.record(frames.frames[duringRepairIndex]));
+      duringAttach: async () => {
+        if (!options.gapDuringAttach) return;
+        for (const index of ATTACH_WINDOW_FRAMES) {
+          const delta = ring.record(frames.frames[index]);
+          // The bytes stay in the ring; only the notification is lost.
+          if (index === ATTACH_WINDOW_DROP) continue;
+          await driver.deliver(delta);
+        }
+      },
+      beforeResume: async (round) => {
+        if (!options.deliverDuringRepair || round !== 1 || dropIndex === undefined) return;
+        await driver.deliver(ring.record(frames.frames[dropIndex + 2]));
+      },
+      afterResume: async (round) => {
+        if (round > (options.reopenGapRounds ?? 0) || dropIndex === undefined) return;
+        // Recorded after the ring answered, so the served range cannot contain
+        // them: the first is lost and the second reopens the hole behind the
+        // range this round is about to apply.
+        ring.record(frames.frames[dropIndex + 2 * round]);
+        await driver.deliver(ring.record(frames.frames[dropIndex + 2 * round + 1]));
       },
     },
   });
   await driver.attach();
   for (let index = 0; index < frames.frames.length; index += 1) {
-    // Already recorded and delivered from inside the repair round-trip.
-    if (index === duringRepairIndex) continue;
+    // Already recorded and delivered from inside a round-trip hook.
+    if (outOfBand.has(index)) continue;
     const delta = ring.record(frames.frames[index]);
-    if (index === options.dropIndex) {
+    if (index === dropIndex) {
       if (options.evictThroughFrame !== undefined) {
         ring.evictTo(seqAfterFrame(options.evictThroughFrame));
       }
@@ -105,7 +153,6 @@ async function runScript(
       continue;
     }
     await driver.deliver(delta);
-    if (index === options.duplicateFrame) await surface.write(frames.frames[index]);
   }
   await driver.idle();
   const snapshot = surface.capture();
@@ -119,6 +166,7 @@ const noRecovery: RecoveryCounters = {
   ringEscalation: 0,
   geometryEscalation: 0,
   nestedGap: 0,
+  nestedGapEscalation: 0,
   repairFailure: 0,
   reattach: 0,
 };
@@ -158,6 +206,45 @@ describe("differential render frames survive a delivery gap (ADR-0072 (7))", () 
     const repaired = await runScript(script, { dropIndex: 6, evictThroughFrame: 0 });
     expect(diffScreens(lossless.snapshot, repaired.snapshot)).toBeNull();
     expect(repaired.counters).toEqual({ ...noRecovery, gap: 1, repair: 1 });
+  });
+
+  it("is cell-identical when the hole opened inside the attach round-trip", async () => {
+    // Where the hole opened does not change the verdict (issue #607): the
+    // snapshot is the whole ring, so the lost range is still retained and one
+    // `resume` repays it. Escalating here would reattach a second time and only
+    // widen the window for the same loss.
+    const lossless = await runScript(script);
+    const repaired = await runScript(script, { gapDuringAttach: true });
+    expect(diffScreens(lossless.snapshot, repaired.snapshot)).toBeNull();
+    expect(repaired.counters).toEqual({ ...noRecovery, gap: 1, repair: 1 });
+  });
+
+  it("is cell-identical when a hole reopens behind the repaired range", async () => {
+    // The flood that lost the first delta can lose another one while the repair
+    // is being served. Another exact range repays that too, so the round is
+    // retried instead of escalated — and the bytes the gapped round *did* bridge
+    // must still be written, or `expectedSeq` would run ahead of the screen.
+    const lossless = await runScript(script);
+    const repaired = await runScript(script, { dropIndex: 6, reopenGapRounds: 1 });
+    expect(diffScreens(lossless.snapshot, repaired.snapshot)).toBeNull();
+    expect(repaired.counters).toEqual({ ...noRecovery, gap: 1, nestedGap: 1, repair: 1 });
+  });
+
+  it("gives up on the round cap when the hole keeps reopening", async () => {
+    // The cap is the only thing that ends a stream losing deltas faster than
+    // repairs land. `nestedGap` counts rounds — including the ones the next
+    // round repaid — so the give-up needs its own bucket to be readable.
+    const escalated = await runScript(longScript, {
+      dropIndex: 6,
+      reopenGapRounds: SCREEN_REPAIR_MAX_ROUNDS,
+    });
+    expect(escalated.counters).toEqual({
+      ...noRecovery,
+      gap: 1,
+      nestedGap: SCREEN_REPAIR_MAX_ROUNDS,
+      nestedGapEscalation: 1,
+      reattach: 1,
+    });
   });
 });
 
@@ -205,12 +292,18 @@ describe("reset() + truncated replay does not restore the screen (issue #600)", 
 });
 
 describe("the cell comparison is sensitive enough to be worth trusting", () => {
-  it("catches one frame applied twice", async () => {
+  it("catches a repair that splices its range in twice", async () => {
     // Sabotage control (dev-repro-methodology §5). The coordinator's job on a
-    // repair is to splice bytes in *exactly once*; if applying a frame twice
-    // were invisible here, the equality above would be vacuous.
+    // repair is to splice bytes in *exactly once*; if applying the repaired
+    // range twice were invisible here, the equality above would be vacuous.
+    // The duplicate goes through the recovery path rather than straight to
+    // xterm, so what this pins is the claim the equality actually makes.
     const lossless = await runScript(script);
-    const doubled = await runScript(script, { duplicateFrame: 6 });
+    const doubled = await runScript(script, {
+      dropIndex: 6,
+      sabotageDuplicateRepairWrite: true,
+    });
+    expect(doubled.counters).toEqual({ ...noRecovery, gap: 1, repair: 1 });
     expect(diffScreens(lossless.snapshot, doubled.snapshot)).not.toBeNull();
   });
 });
