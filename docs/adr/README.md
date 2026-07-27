@@ -85,7 +85,10 @@ ADR 이 필요한 대표 기준:
 | [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
 | [0066](0066-bundled-conpty-runtime.md) | Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 실행 | Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md) |
 | [0067](0067-bundled-conpty-output-and-staging-contract.md) | 번들 ConPTY의 출력·배치 계약을 하나로 고정 (resize repaint filter 제거) | Proposed |
-| [0068](0068-pane-resize-single-boundary-owner.md) | Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다 (드래그·Automation 공용) | Proposed |
+| [0068](0068-remote-terminal-query-single-responder.md) | Remote 터미널 query 응답자는 PC xterm 하나로 제한한다 | Accepted |
+| [0069](0069-remote-render-checkpoint-attach.md) | Remote attach는 raw tail이 아니라 xterm 화면 체크포인트에서 시작 | Accepted |
+| [0070](0070-unmatched-route-boundary-ownership.md) | 합성 라우터가 미등록 경로 fallback·최외곽 CORS·경계 적용 순서를 소유 | Accepted |
+| [0071](0071-pane-resize-single-boundary-owner.md) | Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다 (드래그·Automation 공용) | Proposed |
 
 ## 새 ADR 추가
 

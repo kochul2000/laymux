@@ -16,7 +16,7 @@ use crate::automation_server::ServerState;
 use crate::commands::{resize_terminal_inner, write_terminal_input_inner, write_to_terminal_inner};
 use crate::constants::{REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS};
 use crate::lock_ext::MutexExt;
-use crate::terminal_output::{self, TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
+use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
 use super::assets::{
@@ -177,7 +177,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/file-viewer/path-link",
             post(remote_file_viewer_path_link),
         )
-        .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
+        // `route_layer`, not `layer`: `Router::layer` wraps the router's
+        // fallback too, and `merge` donates that fallback to the combined
+        // automation router — every unknown path of the whole server then
+        // answered 401 "remote token is invalid" instead of 404 (issue #591).
+        // The same applies to the cloud tunnel, which serves this router alone.
+        // Authorization belongs to the routes it protects, so it must not
+        // decide what happens to a path nobody registered.
+        .route_layer(middleware::from_fn_with_state(state.clone(), remote_guard))
+        // CORS stays on `layer` deliberately: it is a response decoration, not
+        // a gate, and preflights must keep working. Whether it also covers the
+        // fallback is harmless either way — the combined router replaces this
+        // fallback with its own 404.
         .layer(CorsLayer::permissive());
 
     Router::new()
@@ -637,7 +648,7 @@ async fn remote_terminal_output_ws(
     ws.on_upgrade(move |socket| {
         stream_terminal_output(
             socket,
-            server.app_state,
+            server,
             id,
             lease_id,
             timeout_seconds,
@@ -648,28 +659,52 @@ async fn remote_terminal_output_ws(
 
 async fn stream_terminal_output(
     mut socket: WebSocket,
-    app_state: std::sync::Arc<crate::state::AppState>,
+    server: ServerState,
     id: String,
     lease_id: String,
     timeout_seconds: u64,
     snapshot_max_bytes: usize,
 ) {
-    let subscribed = match terminal_output::attach_and_subscribe_terminal_output(
-        &app_state.terminal_protocol_states,
-        &id,
-        snapshot_max_bytes,
+    let subscribed =
+        match super::attach_and_subscribe_render_checkpoint(&server, &id, snapshot_max_bytes).await
+        {
+            Ok(subscribed) => subscribed,
+            Err(err) => {
+                tracing::warn!(terminal_id = %id, error = %err, "remote output attach failed");
+                if err.kind() == super::RenderCheckpointAttachErrorKind::NotFound {
+                    let _ = socket
+                        .send(Message::Text("terminal session not found".into()))
+                        .await;
+                } else {
+                    let _ = socket.send(Message::Close(None)).await;
+                }
+                return;
+            }
+        };
+
+    // Checkpoint creation crosses the frontend bridge and may take several
+    // seconds. Never disclose the newly reconstructed screen to a controller
+    // whose lease was released, expired, or reclaimed during that wait.
+    match active_lease_matches_with_timeout(
+        &server.app_state,
+        &lease_id,
+        Duration::from_secs(timeout_seconds),
     ) {
-        Ok(subscribed) => subscribed,
-        Err(err) => {
-            tracing::warn!(terminal_id = %id, error = %err, "remote output attach failed");
-            let _ = socket
-                .send(Message::Text("terminal session not found".into()))
-                .await;
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(terminal_id = %id, "remote output lease changed during attach");
+            let _ = socket.send(Message::Close(None)).await;
             return;
         }
-    };
+        Err(err) => {
+            tracing::warn!(terminal_id = %id, error = %err, "remote output lease recheck failed");
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+    }
     let attachment = subscribed.attachment;
     let generation = subscribed.generation;
+    let wire_seq_offset = subscribed.wire_seq_offset;
     let mut subscription = subscribed.subscription;
     if send_output_pair(
         &mut socket,
@@ -698,16 +733,22 @@ async fn stream_terminal_output(
             event = subscription.recv() => {
                 match event {
                     Some(TerminalOutputSubscriptionEvent::Delta(delta)) => {
-                    if send_output_pair(
-                        &mut socket,
-                        TerminalOutputFrameHeaderV1::delta(&delta),
-                        delta.data,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        break;
-                    }
+                        let header = match TerminalOutputFrameHeaderV1::delta_with_offset(
+                            &delta,
+                            wire_seq_offset,
+                        ) {
+                            Ok(header) => header,
+                            Err(err) => {
+                                tracing::warn!(terminal_id = %id, error = %err, "remote output wire sequence failed");
+                                break;
+                            }
+                        };
+                        if send_output_pair(&mut socket, header, delta.data)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     Some(TerminalOutputSubscriptionEvent::Gap {
                         generation,
@@ -739,7 +780,7 @@ async fn stream_terminal_output(
             }
             _ = lease_check.tick() => {
                 match active_lease_matches_with_timeout(
-                    &app_state,
+                    &server.app_state,
                     &lease_id,
                     Duration::from_secs(timeout_seconds),
                 ) {
@@ -824,10 +865,15 @@ mod tests {
         terminal_size_is_positive, ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlState,
     };
     use crate::settings::models::RemoteSettings;
-    use axum::body::to_bytes;
+    use axum::body::{to_bytes, Body};
+    use axum::extract::Request;
     use axum::http::StatusCode;
-    use axum::response::Response;
+    use axum::middleware::Next;
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use axum::{middleware, Router};
     use std::time::{Duration, Instant};
+    use tower::ServiceExt;
 
     fn enabled_settings() -> RemoteSettings {
         RemoteSettings {
@@ -862,6 +908,38 @@ mod tests {
                 panic!("expected a rejected claim, got AwaitHandoff")
             }
         }
+    }
+
+    /// Pins the axum behaviour `build_router` relies on: a guard attached with
+    /// `route_layer` runs for matched routes only, so an unregistered path is
+    /// still a 404. `layer` would answer it with the guard's rejection, which
+    /// is how issue #591 surfaced. `remote_guard` itself needs a Tauri
+    /// `AppHandle`, so the guard is stood in for here.
+    #[tokio::test]
+    async fn route_layer_guards_matched_routes_without_owning_the_fallback() {
+        async fn deny(_req: Request, _next: Next) -> Response {
+            (StatusCode::UNAUTHORIZED, "remote token is invalid").into_response()
+        }
+
+        async fn status_of(router: Router, path: &str) -> StatusCode {
+            let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+            router.oneshot(request).await.unwrap().status()
+        }
+
+        let guarded = || {
+            Router::new()
+                .route("/remote/v1/health", get(|| async { "health" }))
+                .route_layer(middleware::from_fn(deny))
+        };
+
+        assert_eq!(
+            status_of(guarded(), "/remote/v1/health").await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of(guarded(), "/remote/v1/nonexistent").await,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]

@@ -57,6 +57,23 @@ pub fn register_terminal_output_session(
     output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
     terminal_id: &str,
 ) -> Result<TerminalOutputRegistration, String> {
+    register_terminal_output_session_with_geometry(
+        protocol_states,
+        output_buffers,
+        terminal_id,
+        TerminalGeometry::default(),
+    )
+}
+
+pub fn register_terminal_output_session_with_geometry(
+    protocol_states: &SharedTerminalProtocolStates,
+    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
+    terminal_id: &str,
+    geometry: TerminalGeometry,
+) -> Result<TerminalOutputRegistration, String> {
+    if geometry.cols == 0 || geometry.rows == 0 {
+        return Err("terminal size must be positive".into());
+    }
     let mut registry = protocol_states.sessions.lock_or_err()?;
     if registry.active.contains_key(terminal_id) {
         return Err(format!("Session '{terminal_id}' already exists"));
@@ -75,6 +92,7 @@ pub fn register_terminal_output_session(
         terminal_id.to_string(),
         generation,
         output.clone(),
+        geometry,
     ));
     gates.insert(terminal_id.to_string(), session.protocol_gate());
     buffers.insert(terminal_id.to_string(), output);
@@ -234,9 +252,11 @@ pub fn record_terminal_output(
         .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
     let written = buffer.push_sequenced(data);
     Ok(TerminalOutputDelta {
+        generation: 0,
         seq_start: written.seq_start,
         seq_end: written.seq_end,
         data: written.data,
+        geometry: TerminalGeometry::default(),
     })
 }
 
@@ -260,7 +280,12 @@ pub fn attach_terminal_output(
         .get(terminal_id)
         .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
     let snapshot = buffer.snapshot(max_snapshot_bytes);
-    Ok(attachment_from_snapshot(protocol_snapshot, snapshot))
+    Ok(attachment_from_snapshot(
+        0,
+        TerminalGeometry::default(),
+        protocol_snapshot,
+        snapshot,
+    ))
 }
 
 /// Atomically capture attach state/snapshot and register a bounded subscriber.
@@ -288,19 +313,70 @@ pub fn attach_and_subscribe_terminal_output_with_capacity(
         .attach_and_subscribe(max_snapshot_bytes, queue_capacity)
 }
 
+pub fn terminal_render_checkpoint_target(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+) -> Result<TerminalRenderCheckpointTarget, String> {
+    terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
+        .checkpoint_target()
+}
+
+pub fn update_terminal_output_geometry(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    cols: u16,
+    rows: u16,
+) -> Result<TerminalGeometry, String> {
+    terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
+        .update_geometry(cols, rows)
+}
+
+pub fn attach_and_subscribe_terminal_output_from_render_checkpoint(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    checkpoint: TerminalRenderCheckpoint,
+) -> Result<TerminalOutputSubscribedAttachment, String> {
+    attach_and_subscribe_terminal_output_from_render_checkpoint_with_capacity(
+        protocol_states,
+        terminal_id,
+        checkpoint,
+        TERMINAL_OUTPUT_SUBSCRIBER_CAPACITY,
+    )
+}
+
+pub fn attach_and_subscribe_terminal_output_from_render_checkpoint_with_capacity(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    checkpoint: TerminalRenderCheckpoint,
+    queue_capacity: usize,
+) -> Result<TerminalOutputSubscribedAttachment, String> {
+    terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
+        .attach_and_subscribe_from_render_checkpoint(checkpoint, queue_capacity)
+}
+
 pub(super) fn attachment_from_snapshot(
+    generation: u64,
+    geometry: TerminalGeometry,
     protocol: TerminalProtocolSnapshot,
     snapshot: TerminalOutputSlice,
 ) -> TerminalOutputAttachment {
     TerminalOutputAttachment {
         state: TerminalAttachState {
             version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+            generation,
             snapshot_start_seq: snapshot.seq_start,
             snapshot_seq: snapshot.seq_end,
+            source_start_seq: snapshot.seq_start,
+            source_seq: snapshot.seq_end,
+            snapshot_kind: TerminalSnapshotKind::Raw,
             protocol_revision: protocol.revision,
             modes: TerminalAttachModes {
                 bracketed_paste: protocol.bracketed_paste,
             },
+            geometry,
         },
         snapshot: snapshot.data,
     }

@@ -8,6 +8,7 @@ mod navigation;
 mod navigation_routes;
 mod navigation_step_routes;
 mod page;
+mod render_checkpoint;
 mod routes;
 mod terminal_info;
 mod viewer_page;
@@ -35,6 +36,10 @@ pub(crate) use lease::{
 pub use lease::{
     get_remote_control_status, reclaim_remote_control, RemoteControlLease, RemoteControlState,
     RemoteControlStatus,
+};
+pub(crate) use render_checkpoint::{
+    attach_and_subscribe_render_checkpoint, RenderCheckpointAttachError,
+    RenderCheckpointAttachErrorKind,
 };
 pub use routes::build_router;
 

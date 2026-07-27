@@ -4,6 +4,7 @@ pub mod helpers;
 pub mod mcp;
 pub mod mcp_resources;
 pub mod settings_bridge;
+mod surface_router;
 pub mod types;
 
 // Re-export key types used by other modules
@@ -13,18 +14,11 @@ pub use types::{AutomationRequest, AutomationResponse};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use std::net::IpAddr;
-
-use axum::extract::ConnectInfo;
-use axum::extract::Request;
-use axum::http::StatusCode;
-use axum::middleware::{self, Next};
-use axum::response::{IntoResponse, Response};
+use axum::middleware;
 use axum::routing::{delete, get, post, put};
-use axum::{Json, Router};
+use axum::Router;
 use tauri::AppHandle;
 use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
 
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
@@ -32,6 +26,7 @@ use crate::state::AppState;
 use handlers_backend::*;
 use handlers_bridge::*;
 use mcp_resources::{SharedSubscriptionRegistry, SubscriptionRegistry};
+use surface_router::{compose_surfaces, ip_allowlist_middleware};
 
 /// Shared state for the axum server.
 #[derive(Clone)]
@@ -148,68 +143,6 @@ pub async fn start(app_state: Arc<AppState>, app_handle: AppHandle) -> Result<u1
     Ok(port)
 }
 
-/// Check if an IP address is allowed to access the automation API.
-/// Allows only loopback, link-local, and Hyper-V/WSL2 bridge (172.16.0.0/12).
-/// Broader RFC 1918 ranges (10.0.0.0/8, 192.168.0.0/16) are excluded to prevent
-/// LAN/VPN peers from accessing the API without authentication.
-fn is_local_ip(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()            // 127.0.0.0/8
-                || (v4.octets()[0] == 172 && (16..=31).contains(&v4.octets()[1])) // 172.16.0.0/12 (WSL2/Hyper-V)
-                || (v4.octets()[0] == 169 && v4.octets()[1] == 254) // 169.254.0.0/16 link-local
-        }
-        IpAddr::V6(v6) => {
-            // Handle IPv4-mapped IPv6 (::ffff:x.x.x.x) — OS may use these when bound to 0.0.0.0
-            if let Some(mapped) = v6.to_ipv4_mapped() {
-                return is_local_ip(&IpAddr::V4(mapped));
-            }
-            v6.is_loopback()  // ::1
-                || (v6.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
-        }
-    }
-}
-
-fn observed_client_ip(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(v6) => v6
-            .to_ipv4_mapped()
-            .map(IpAddr::V4)
-            .unwrap_or(IpAddr::V6(v6)),
-        other => other,
-    }
-}
-
-fn ip_allowlist_denied_body(client_ip: IpAddr) -> serde_json::Value {
-    let message = format!(
-        "Access denied: only local/private network connections are allowed; client IP: {client_ip}"
-    );
-    serde_json::json!({
-        "error": message,
-        "clientIp": client_ip.to_string(),
-    })
-}
-
-/// IP allowlist middleware — only permits requests from local/private networks.
-/// Replaces Bearer token auth: since this is localhost/WSL communication,
-/// IP restriction provides equivalent security without key management overhead.
-async fn ip_allowlist_middleware(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    req: Request,
-    next: Next,
-) -> Response {
-    let client_ip = observed_client_ip(addr.ip());
-    if is_local_ip(&client_ip) {
-        next.run(req).await
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(ip_allowlist_denied_body(client_ip)),
-        )
-            .into_response()
-    }
-}
-
 pub fn build_router(
     state: ServerState,
     subscriptions: SharedSubscriptionRegistry,
@@ -309,12 +242,13 @@ pub fn build_router(
             "/api/v1/ui/hidden/pane/{id}/toggle",
             post(ui_toggle_pane_hidden),
         )
-        .layer(middleware::from_fn(ip_allowlist_middleware))
-        .layer(CorsLayer::permissive());
+        .layer(middleware::from_fn(ip_allowlist_middleware));
 
-    automation_routes
-        .merge(crate::remote_server::build_router(state.clone()))
-        .with_state(state)
+    compose_surfaces(
+        automation_routes,
+        crate::remote_server::build_router(state.clone()),
+    )
+    .with_state(state)
 }
 
 #[cfg(test)]
@@ -330,68 +264,6 @@ mod tests {
     #[test]
     fn port_constants_are_adjacent() {
         assert_eq!(DEV_PORT, RELEASE_PORT + 1);
-    }
-
-    #[test]
-    fn is_local_ip_allows_loopback() {
-        assert!(is_local_ip(&"127.0.0.1".parse().unwrap()));
-        assert!(is_local_ip(&"127.0.0.2".parse().unwrap()));
-        assert!(is_local_ip(&"::1".parse().unwrap()));
-    }
-
-    #[test]
-    fn is_local_ip_allows_wsl2_and_link_local() {
-        // 172.16.0.0/12 (WSL2/Hyper-V bridge)
-        assert!(is_local_ip(&"172.16.0.1".parse().unwrap()));
-        assert!(is_local_ip(&"172.31.255.255".parse().unwrap()));
-        // link-local
-        assert!(is_local_ip(&"169.254.1.1".parse().unwrap()));
-    }
-
-    #[test]
-    fn is_local_ip_rejects_lan_and_vpn_ranges() {
-        // 10.0.0.0/8 (corporate VPN)
-        assert!(!is_local_ip(&"10.0.0.1".parse().unwrap()));
-        assert!(!is_local_ip(&"10.255.255.255".parse().unwrap()));
-        // 192.168.0.0/16 (home LAN)
-        assert!(!is_local_ip(&"192.168.1.1".parse().unwrap()));
-        assert!(!is_local_ip(&"192.168.0.1".parse().unwrap()));
-    }
-
-    #[test]
-    fn is_local_ip_rejects_public() {
-        assert!(!is_local_ip(&"8.8.8.8".parse().unwrap()));
-        assert!(!is_local_ip(&"172.32.0.1".parse().unwrap()));
-        assert!(!is_local_ip(&"172.15.255.255".parse().unwrap()));
-        assert!(!is_local_ip(&"192.169.0.1".parse().unwrap()));
-    }
-
-    #[test]
-    fn is_local_ip_handles_ipv4_mapped_ipv6() {
-        // ::ffff:127.0.0.1 → loopback
-        assert!(is_local_ip(&"::ffff:127.0.0.1".parse().unwrap()));
-        // ::ffff:172.20.0.1 → WSL2 range
-        assert!(is_local_ip(&"::ffff:172.20.0.1".parse().unwrap()));
-        // ::ffff:192.168.1.1 → rejected (LAN)
-        assert!(!is_local_ip(&"::ffff:192.168.1.1".parse().unwrap()));
-        // ::ffff:8.8.8.8 → rejected (public)
-        assert!(!is_local_ip(&"::ffff:8.8.8.8".parse().unwrap()));
-    }
-
-    #[test]
-    fn ip_allowlist_denied_body_includes_observed_client_ip() {
-        let body = ip_allowlist_denied_body("192.168.1.20".parse().unwrap());
-
-        assert_eq!(body["clientIp"], "192.168.1.20");
-        assert!(body["error"].as_str().unwrap().contains("192.168.1.20"));
-    }
-
-    #[test]
-    fn observed_client_ip_normalizes_ipv4_mapped_ipv6() {
-        assert_eq!(
-            observed_client_ip("::ffff:192.168.1.20".parse().unwrap()).to_string(),
-            "192.168.1.20"
-        );
     }
 
     #[test]

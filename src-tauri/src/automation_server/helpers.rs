@@ -18,12 +18,12 @@ use super::ServerState;
 /// `504 Frontend response timeout`.
 const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// The longest wait a single async bridge handler performs inside one request:
-/// `WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS` in `ui/src/hooks/useAutomationBridge.ts`
-/// (issue #578), where `workspaces.switchActive` waits for the landing
-/// terminal's session. Mirrored here — and asserted against the budget below —
-/// because the two numbers live in different languages with nothing else tying
-/// them together. `BRIDGE_REQUEST_BUDGET_MS` mirrors this budget on that side.
+/// The longest wait a single async bridge handler performs inside one request
+/// is 3.5 seconds: `WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS`, or Remote render
+/// checkpoint provider discovery (0.5s) plus model catch-up (3s). Mirrored here
+/// — and asserted against the budget below — because the numbers live in
+/// different languages with nothing else tying them together.
+/// `BRIDGE_REQUEST_BUDGET_MS` mirrors this budget on that side.
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
 
@@ -276,8 +276,8 @@ mod tests {
         assert!(
             FRONTEND_RESPONSE_TIMEOUT >= LONGEST_HANDLER_WAIT + Duration::from_millis(1_000),
             "bridge budget {FRONTEND_RESPONSE_TIMEOUT:?} leaves no slack over the longest \
-             handler wait {LONGEST_HANDLER_WAIT:?} — shrink WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS \
-             in ui/src/hooks/useAutomationBridge.ts first (and its mirror above)"
+             handler wait {LONGEST_HANDLER_WAIT:?} — shrink the frontend workspace/checkpoint \
+             wait constants first (and this mirror)"
         );
     }
 
