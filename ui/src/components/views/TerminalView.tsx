@@ -230,6 +230,56 @@ const REMOTE_RETURN_RESIZE_RETRY_MS = 100;
 const TERMINAL_WRITE_CHUNK_SIZE = 1024 * 1024;
 const TERMINAL_WRITE_RETRY_MS = 16;
 
+/**
+ * How long one `resume_terminal_output` round-trip may stay unsettled before the
+ * pane gives up on sequence-exact repair and pays for a full reattach.
+ *
+ * A repair suspends delta application (`expectedSeq === null`), so a promise
+ * that never settles — dead webview↔backend IPC, a collapsed channel — would
+ * freeze that pane's output permanently and pile every later delta into the
+ * coordinator's `pending`. The round-trip is local IPC (tens of milliseconds
+ * even under a 1.2 MB/s flood), so seconds of silence means the channel is gone
+ * rather than slow, and the screen-losing reattach is the better outcome than a
+ * pane that never prints again (issue #607).
+ */
+const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
+
+/**
+ * How many `resume` round-trips a single hole may take before escalating.
+ *
+ * A gap that reopens behind an applied repair range is still repayable by
+ * another exact range (ADR-0072's "repeated loss during a flood" case), so it is
+ * retried rather than escalated. The cap exists only so a stream losing deltas
+ * faster than repairs land cannot loop forever (issue #607).
+ */
+const TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS = 4;
+
+/** Watchdog verdict for a repair round-trip that outran its window. */
+const TERMINAL_OUTPUT_REPAIR_TIMED_OUT = Symbol("terminal-output-repair-timed-out");
+
+/**
+ * Race a repair round-trip against the watchdog window without leaving a live
+ * timer behind when the round-trip wins.
+ */
+async function withTerminalOutputRepairWatchdog<T>(
+  request: Promise<T>,
+): Promise<T | typeof TERMINAL_OUTPUT_REPAIR_TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request,
+      new Promise<typeof TERMINAL_OUTPUT_REPAIR_TIMED_OUT>((resolve) => {
+        timer = setTimeout(
+          () => resolve(TERMINAL_OUTPUT_REPAIR_TIMED_OUT),
+          TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 /** Byte-size threshold for the large paste warning dialog. */
 const LARGE_PASTE_THRESHOLD = 5120;
 
@@ -3765,6 +3815,35 @@ export function TerminalView({
         processLiveTerminalOutput(segment.data);
       }
     };
+    /**
+     * Write the buffered prefix an attach produced, awaiting the last segment so
+     * the caller only publishes readiness once the bytes reached the parser.
+     *
+     * Returns `false` when a newer attach took over mid-write.
+     */
+    const writeAttachedSegments = async (
+      segments: TerminalOutputAppliedSegment[],
+      isCurrentAttach: () => boolean,
+    ) => {
+      // Queue the whole buffered prefix synchronously. Listener callbacks can
+      // fire between awaits; enqueueing one-by-one would let a newer live delta
+      // jump ahead of the second buffered segment in the checkpoint model even
+      // though the visible xterm stayed ordered.
+      const checkpointWrites = segments.map((segment) => renderCheckpointModel.apply(segment));
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index];
+        await checkpointWrites[index];
+        if (index === segments.length - 1) {
+          await new Promise<void>((resolve) =>
+            processLiveTerminalOutput(segment.data, resolve, resolve),
+          );
+        } else {
+          processLiveTerminalOutput(segment.data);
+        }
+        if (!isCurrentAttach()) return false;
+      }
+      return isCurrentAttach();
+    };
     const scheduleOutputRepairRetry = (
       gap: { expectedSeq: number; actualSeq: number },
       epoch: number,
@@ -3785,6 +3864,13 @@ export function TerminalView({
      * its `reconstructable` flag. Only a range the ring can no longer bridge —
      * or one that spans a resize, which a single delta cannot describe —
      * escalates to the screen-losing full reattach.
+     *
+     * A hole can need more than one round-trip, because the flood that lost the
+     * first delta can lose another one while the repair is being served. Those
+     * rounds loop here (up to `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS`) instead of
+     * escalating, and every round is guarded by a watchdog: a round-trip that
+     * never settles would otherwise leave `expectedSeq === null` forever, which
+     * freezes the pane's output and grows `pending` without bound (issue #607).
      *
      * Deliberately does **not** call `resetStreamDerivedCursorState()` (issue
      * #596). That call is paired with `terminal.reset()` because a reset voids
@@ -3816,72 +3902,124 @@ export function TerminalView({
         return;
       }
       outputRepairInFlight = true;
-      const resumeSeq = outputCoordinator.beginRepair();
+      let currentGap = gap;
       // Each failure mode gets its own counter, and which counter is decided by
       // *where* the round-trip failed rather than by matching an error message.
       // `ringEscalation` in particular must stay reserved for the one thing
       // ADR-0072 hangs a revisit condition on: the backend answering `null`.
       const escalate = (event: TerminalOutputRecoveryEvent, message: string, detail: unknown) => {
         console.warn(`[TerminalView] ${message}`, detail, {
-          gap,
+          gap: currentGap,
           counters: recordTerminalOutputRecovery(instanceId, event),
         });
         scheduleOutputReattach();
       };
       try {
-        let raw: Awaited<ReturnType<typeof resumeTerminalOutput>>;
-        try {
-          raw = await resumeTerminalOutput(instanceId, generation, resumeSeq);
-        } catch (error) {
+        // One hole may need several round-trips: the flood can reopen a gap
+        // behind a range that was already served. Each round is another exact
+        // query, so it keeps the screen — only the cap escalates (issue #607).
+        for (let round = 1; ; round += 1) {
+          const resumeSeq = outputCoordinator.beginRepair();
+          let raw: Awaited<ReturnType<typeof resumeTerminalOutput>>;
+          try {
+            const request = resumeTerminalOutput(instanceId, generation, resumeSeq);
+            const answer = await withTerminalOutputRepairWatchdog(request);
+            if (answer === TERMINAL_OUTPUT_REPAIR_TIMED_OUT) {
+              // The round-trip is orphaned but may still reject later; swallow
+              // that so a dead channel does not surface as an unhandled
+              // rejection after the pane already recovered by reattaching.
+              void request.catch(() => {});
+              if (cancelled || epoch !== outputAttachEpoch) return;
+              escalate("repairTimeout", "terminal output repair timed out; reattaching", {
+                timeoutMs: TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS,
+                resumeSeq,
+                round,
+              });
+              return;
+            }
+            raw = answer;
+          } catch (error) {
+            if (cancelled || epoch !== outputAttachEpoch) return;
+            escalate("repairFailure", "terminal output repair request failed:", error);
+            return;
+          }
           if (cancelled || epoch !== outputAttachEpoch) return;
-          escalate("repairFailure", "terminal output repair request failed:", error);
-          return;
-        }
-        if (cancelled || epoch !== outputAttachEpoch) return;
-        if (!raw) {
-          escalate(
-            "ringEscalation",
-            "terminal output ring cannot bridge the gap; reattaching",
-            null,
+          if (!raw) {
+            escalate(
+              "ringEscalation",
+              "terminal output ring cannot bridge the gap; reattaching",
+              null,
+            );
+            return;
+          }
+          let repair: TerminalOutputDelta;
+          try {
+            repair = normalizeTerminalOutputDelta(raw);
+          } catch (error) {
+            escalate("malformedDelta", "malformed terminal output repair range:", error);
+            return;
+          }
+          let result: TerminalOutputApplyResult;
+          try {
+            result = outputCoordinator.completeRepair(repair);
+          } catch (error) {
+            const spansResize =
+              error instanceof TerminalOutputRepairError && error.reason === "geometry-change";
+            escalate(
+              spansResize ? "geometryEscalation" : "repairFailure",
+              "terminal output repair was refused:",
+              error,
+            );
+            return;
+          }
+          if (result.kind === "gap") {
+            // A second hole opened behind the repaired one. Nothing to do with
+            // ring retention, so it must not land in `ringEscalation`.
+            //
+            // Whatever the round *did* bridge is already accounted for by the
+            // coordinator — `expectedSeq` moved past those bytes — so writing
+            // the segments is mandatory, not optional. Dropping them would break
+            // the invariant that `expectedSeq` only advances over bytes the
+            // caller actually wrote, and would leave the very cell loss this
+            // path exists to prevent.
+            applyOutputSegments(result.segments);
+            const counters = recordTerminalOutputRecovery(instanceId, "nestedGap");
+            const nextGap = { expectedSeq: result.expectedSeq, actualSeq: result.actualSeq };
+            // `ready` is false when the served range never reached the surface
+            // sequence at all: nothing was applied and `beginRepair()` would
+            // throw, so that shape can only escalate.
+            const repayable = outputCoordinator.ready && round < TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS;
+            if (!repayable) {
+              // `nestedGap` alone cannot say whether the screen survived — it is
+              // counted per round, and most rounds are repaid by the next one.
+              // The give-up gets its own bucket for the reason ADR-0072 gave
+              // `ringEscalation` one: `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` is a
+              // cap this code invented, and this counter is the only evidence
+              // that could ever justify moving it (issue #607).
+              console.warn(
+                "[TerminalView] terminal output gap could not be repaired; reattaching",
+                { ...currentGap, nextGap, round },
+                recordTerminalOutputRecovery(instanceId, "nestedGapEscalation"),
+              );
+              scheduleOutputReattach();
+              return;
+            }
+            console.warn(
+              "[TerminalView] terminal output gap reopened behind the repair; repairing again",
+              { ...currentGap, nextGap, round },
+              counters,
+            );
+            currentGap = nextGap;
+            continue;
+          }
+          console.warn(
+            "[TerminalView] terminal output gap repaired",
+            { ...currentGap, repairedBytes: raw.data.length, round },
+            recordTerminalOutputRecovery(instanceId, "repair"),
           );
+          applyOutputSegments(result.segments);
           return;
         }
-        let repair: TerminalOutputDelta;
-        try {
-          repair = normalizeTerminalOutputDelta(raw);
-        } catch (error) {
-          escalate("malformedDelta", "malformed terminal output repair range:", error);
-          return;
-        }
-        let result: TerminalOutputApplyResult;
-        try {
-          result = outputCoordinator.completeRepair(repair);
-        } catch (error) {
-          const spansResize =
-            error instanceof TerminalOutputRepairError && error.reason === "geometry-change";
-          escalate(
-            spansResize ? "geometryEscalation" : "repairFailure",
-            "terminal output repair was refused:",
-            error,
-          );
-          return;
-        }
-        if (result.kind === "gap") {
-          // A second hole opened behind the repaired one. Nothing to do with
-          // ring retention, so it must not land in `ringEscalation`.
-          escalate(
-            "nestedGap",
-            "terminal output repair did not reach the surface sequence",
-            result,
-          );
-          return;
-        }
-        console.warn(
-          "[TerminalView] terminal output gap repaired",
-          { ...gap, repairedBytes: raw.data.length },
-          recordTerminalOutputRecovery(instanceId, "repair"),
-        );
-        applyOutputSegments(result.segments);
       } catch (error) {
         // Safety net: every classified failure returned above, so anything here
         // is unexpected and must not be filed as a ring escalation either.
@@ -3898,6 +4036,11 @@ export function TerminalView({
       const epoch = ++outputAttachEpoch;
       resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
+      // A hole the attach itself uncovered. Handed to the repair from the
+      // `finally` below rather than from inside the write chain, because
+      // `outputAttachInFlight` is still true in there and `startOutputRepair`
+      // would bounce off it into `scheduleOutputRepairRetry`'s timer.
+      let attachWindowGap: { expectedSeq: number; actualSeq: number } | undefined;
       try {
         const [rawAttachment, cached] = await Promise.all([
           attachTerminalOutput(instanceId),
@@ -3948,29 +4091,29 @@ export function TerminalView({
               buffered,
               recordTerminalOutputRecovery(instanceId, "gap"),
             );
-            scheduleOutputReattach();
+            // The snapshot is the whole 1 MiB ring, so a delta lost during the
+            // attach round-trip is still in the ring: repair the exact range
+            // instead of escalating to another screen-losing reattach that would
+            // only widen the window for the same loss (issue #607). The prefix
+            // that arrived before the hole is applied first — the coordinator has
+            // already moved `expectedSeq` past it.
+            if (!(await writeAttachedSegments(buffered.segments, isCurrentAttach))) return;
+            // Readiness belongs to the attach, not to the repair: from here the
+            // hole is an ordinary mid-stream gap, and live deltas keep buffering
+            // in the coordinator until the repair splices in front of them.
+            setOutputReady(true);
+            // Kicked from the attach's `finally`, one statement after
+            // `outputAttachInFlight` drops: the round-trip then starts directly
+            // instead of hopping through the retry timer, so the start latency
+            // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
+            // arriving in that window cannot race the attach for who owns the
+            // hole.
+            attachWindowGap = buffered;
             return;
           }
-          // Queue the whole buffered prefix synchronously. Listener callbacks
-          // can fire between awaits; enqueueing one-by-one would let a newer
-          // live delta jump ahead of the second buffered segment in the
-          // checkpoint model even though the visible xterm stayed ordered.
-          const checkpointWrites = buffered.segments.map((segment) =>
-            renderCheckpointModel.apply(segment),
-          );
-          for (let index = 0; index < buffered.segments.length; index += 1) {
-            const segment = buffered.segments[index];
-            await checkpointWrites[index];
-            if (index === buffered.segments.length - 1) {
-              await new Promise<void>((resolve) =>
-                processLiveTerminalOutput(segment.data, resolve, resolve),
-              );
-            } else {
-              processLiveTerminalOutput(segment.data);
-            }
-            if (!isCurrentAttach()) return;
+          if (await writeAttachedSegments(buffered.segments, isCurrentAttach)) {
+            setOutputReady(true);
           }
-          if (isCurrentAttach()) setOutputReady(true);
         });
         await terminalOutputWriteChain;
       } catch (error) {
@@ -3988,6 +4131,10 @@ export function TerminalView({
           outputAttachParserBusy = false;
           flushDeferredTerminalFit();
           if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach();
+          // `startOutputRepair` claims `outputRepairInFlight` synchronously, so
+          // no listener delta can slip in front of this and start the same
+          // round-trip from the other side.
+          else if (attachWindowGap) void startOutputRepair(attachWindowGap);
         }
       }
     };

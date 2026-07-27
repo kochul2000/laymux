@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
+import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery-metrics";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
@@ -146,7 +147,19 @@ export async function resizeTerminal(id: string, cols: number, rows: number): Pr
 }
 
 export async function closeTerminalSession(id: string): Promise<void> {
-  return enqueueTerminalLifecycle(id, () => invoke("close_terminal_session", { id }));
+  return enqueueTerminalLifecycle(id, async () => {
+    try {
+      await invoke<void>("close_terminal_session", { id });
+    } finally {
+      // The output ring, the generation and every sequence the recovery totals
+      // describe die with the session, so the diagnostic entry has nothing left
+      // to describe. Dropped in `finally` because a failed close still means
+      // this id's session is gone as far as the surface is concerned, and a
+      // surviving entry would leak one map slot per terminal the window ever
+      // opened (issue #607).
+      forgetTerminalOutputRecoveryCounters(id);
+    }
+  });
 }
 
 export async function getSyncGroupTerminals(groupName: string): Promise<string[]> {

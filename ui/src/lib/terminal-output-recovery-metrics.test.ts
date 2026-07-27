@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  forgetTerminalOutputRecoveryCounters,
   recordTerminalOutputRecovery,
   resetTerminalOutputRecoveryCounters,
+  terminalOutputRecoveryCounterCount,
   terminalOutputRecoveryCounters,
 } from "./terminal-output-recovery-metrics";
 
@@ -14,6 +16,8 @@ describe("terminalOutputRecoveryCounters", () => {
     ringEscalation: 0,
     geometryEscalation: 0,
     nestedGap: 0,
+    nestedGapEscalation: 0,
+    repairTimeout: 0,
     repairFailure: 0,
     malformedDelta: 0,
     attachFailure: 0,
@@ -31,17 +35,64 @@ describe("terminalOutputRecoveryCounters", () => {
 
   // ADR-0072 hangs a revisit condition on `ringEscalation` alone, so the buckets
   // that share its "escalated to a full reattach" outcome must stay distinct.
-  it.each(["nestedGap", "repairFailure", "geometryEscalation"] as const)(
-    "keeps %s out of the ringEscalation bucket",
-    (event) => {
-      recordTerminalOutputRecovery("t1", event);
+  it.each([
+    "nestedGap",
+    "nestedGapEscalation",
+    "repairFailure",
+    "repairTimeout",
+    "geometryEscalation",
+  ] as const)("keeps %s out of the ringEscalation bucket", (event) => {
+    recordTerminalOutputRecovery("t1", event);
 
-      expect(terminalOutputRecoveryCounters("t1")).toEqual({ ...zeros, [event]: 1 });
-    },
-  );
+    expect(terminalOutputRecoveryCounters("t1")).toEqual({ ...zeros, [event]: 1 });
+  });
+
+  // `nestedGap` is a per-round observation, so on its own it cannot say whether
+  // the screen survived. The round cap that ended the loop needs its own bucket
+  // for the same reason ADR-0072 reserved one for `ringEscalation`: it is the
+  // only evidence that could justify moving
+  // `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` (issue #607).
+  it("separates a repaid nested gap from one that exhausted the round cap", () => {
+    recordTerminalOutputRecovery("repaid", "nestedGap");
+    recordTerminalOutputRecovery("repaid", "repair");
+
+    recordTerminalOutputRecovery("escalated", "nestedGap");
+    recordTerminalOutputRecovery("escalated", "nestedGapEscalation");
+
+    expect(terminalOutputRecoveryCounters("repaid")).toEqual({
+      ...zeros,
+      nestedGap: 1,
+      repair: 1,
+    });
+    expect(terminalOutputRecoveryCounters("escalated")).toEqual({
+      ...zeros,
+      nestedGap: 1,
+      nestedGapEscalation: 1,
+    });
+  });
 
   it("reports zeros for a terminal that never recovered", () => {
     expect(terminalOutputRecoveryCounters("unknown")).toEqual(zeros);
+  });
+
+  // Diagnostic state must not outlive what it describes: without this the map
+  // grows one entry per terminal the window ever opened (issue #607).
+  it("forgets a terminal's totals and keeps the others", () => {
+    recordTerminalOutputRecovery("t1", "gap");
+    recordTerminalOutputRecovery("t2", "gap");
+
+    forgetTerminalOutputRecoveryCounters("t1");
+
+    expect(terminalOutputRecoveryCounters("t1")).toEqual(zeros);
+    expect(terminalOutputRecoveryCounters("t2").gap).toBe(1);
+    expect(terminalOutputRecoveryCounterCount()).toBe(1);
+  });
+
+  it("keeps no entry for a terminal that only ever reported zeros", () => {
+    expect(terminalOutputRecoveryCounters("never-seen")).toEqual(zeros);
+    forgetTerminalOutputRecoveryCounters("never-seen");
+
+    expect(terminalOutputRecoveryCounterCount()).toBe(0);
   });
 
   it("returns snapshots that cannot mutate the stored counters", () => {

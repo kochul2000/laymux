@@ -65,6 +65,23 @@ Remote/Cloud attach 경계(ADR-0069), PTY 입력·resize 소유권, raw ring 을
 - gap 구간이 geometry revision 을 가로지르면 sequence-exact 복구를 포기한다. ring 은 바이트별
   geometry 를 보존하지 않으므로 복구 delta 하나에 두 격자의 바이트를 담을 수 없다. 이 경우와
   `resume` 이 `null` 을 준 경우만 기존 전체 재부착으로 승격한다.
+- **gap 이 어느 창에서 났는지는 승격 여부를 바꾸지 않는다.** 복구 구간을 적용한 뒤 그 뒤에서
+  또 구멍이 보이면(폭주가 복구 왕복 중에 delta 를 하나 더 잃은 경우) 그 구멍도 `resume` 한
+  번으로 갚을 수 있으므로 재부착이 아니라 복구를 다시 돌린다. attach 왕복 중에 난 gap 도
+  마찬가지다 — 데스크톱 snapshot 은 1 MiB ring 전체이므로 그 구간은 반드시 ring 안에 있다.
+  attach 가 발견한 구멍은 attach 가 `outputAttachInFlight` 를 내려놓는 자리에서 복구에 직접
+  넘긴다. 재시도 타이머를 거치지 않으므로 복구 시작 지연이 `TERMINAL_WRITE_RETRY_MS` 에
+  걸리지 않고, 그 창에 도착한 live delta 가 같은 구멍의 소유권을 두고 attach 와 경합하지 않는다.
+  복구 루프에는 회수 상한(`TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS`)만 둔다: 복구가 따라잡지 못할
+  속도로 계속 잃는 스트림은 무한히 도는 대신 재부착으로 끝낸다. 상한을 넘긴 승격은
+  `nestedGapEscalation` 으로 따로 세어 상한 값 자체를 재검토할 근거로 남긴다.
+- **복구 왕복에는 watchdog 이 있다.** 복구 중에는 `expectedSeq === null` 이라 delta 적용이
+  멈춰 있으므로, 왕복이 영영 정착하지 않으면 그 pane 은 출력이 정지한 채 얼고 pending 이
+  무한히 자란다. 로컬 IPC 왕복이 수 초 침묵한다는 것은 느린 것이 아니라 채널이 죽은 것이므로,
+  `TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS` 뒤에는 화면을 잃더라도 재부착으로 탈출한다.
+- **`expectedSeq` 는 caller 가 실제로 쓴 바이트만 넘어간다.** 복구가 중첩 gap 으로 끝나도
+  그 회차가 이미 적용한 `segments` 는 반드시 xterm/checkpoint 에 쓴다. 버리면 coordinator 의
+  sequence 와 화면이 어긋나 이 결정이 없애려는 셀 손실을 스스로 만든다.
 - gap·복구·승격·malformed delta·attach 실패는 각각 별개의 사건으로 센다. backend 는 폐기한
   delta 의 sequence 구간과 누적 폐기 수를 `tracing::warn!` 으로 남기고, 프론트는 terminal 별 누적
   카운터를 경고에 실어 출력한다. `emit` 실패를 `let _` 로 삼키는 것은 금지한다.
@@ -104,8 +121,11 @@ Remote/Cloud attach 경계(ADR-0069), PTY 입력·resize 소유권, raw ring 을
   출력이 많던 터미널로 Remote 가 attach 하는 경로도 함께 개선된다.
 - Tauri 명령이 하나 늘고(`resume_terminal_output`) coordinator 에 복구 상태가 하나 늘어난다.
   복구 중 도착한 delta 는 pending 에 쌓이므로, 복구 RPC 가 오래 걸리면 그만큼 메모리를 쓴다.
-  왕복은 로컬 IPC 이고 복구가 끝나면 즉시 배출되므로 상한을 두지 않는다 — 대신 gap 이 반복되면
-  카운터가 그것을 드러낸다.
+  왕복은 로컬 IPC 이고 복구가 끝나면 즉시 배출되므로 pending 자체에는 상한을 두지 않는다 —
+  대신 gap 이 반복되면 카운터가 그것을 드러낸다. **다만 "왕복이 짧다"는 가정은 코드로 방어한다**
+  (watchdog, issue #607): 가정이 깨지는 경우는 느린 왕복이 아니라 죽은 채널이고, 그때는 pending
+  이 무한히 자라기 전에 재부착으로 끝낸다. pending 재삽입은 spread 호출(`push(...rest)`)이 아닌
+  루프로 한다 — 6자리 대기열에서 `RangeError: Maximum call stack size exceeded` 가 난다.
 - gap 이 resize 와 겹치면 여전히 전체 재부착으로 승격하고 그때는 화면이 손실될 수 있다. ring 에
   바이트별 geometry 를 붙이는 것은 이 결정의 범위 밖이다. 카운터에서 이 승격이 유의미하게
   관측되면 그때 재검토한다.
@@ -123,11 +143,23 @@ Remote/Cloud attach 경계(ADR-0069), PTY 입력·resize 소유권, raw ring 을
   `?25h` 가 권위 park 로 승격되는 정반대 결함이 생긴다(issue #596 과 대칭).
 - 복구 실패는 **원인별로 다른 카운터**에 들어간다. `ringEscalation` 은 오직 backend 가 `null` 을
   답한 경우만 세며, 아래 재검토 조건이 그 칸 하나에만 걸려 있기 때문에 다른 사건을 섞으면 결정을
-  검증할 수단이 사라진다. 복구 구간 뒤에 또 구멍이 있으면 `nestedGap`, resize 를 가로지르면
-  `geometryEscalation`, 서브 payload 검증 실패는 `malformedDelta`, 그 외 거절·예외는
-  `repairFailure` 다. 분류는 오류 **메시지 매칭이 아니라** round-trip 의 실패 지점과
+  검증할 수단이 사라진다. 복구 구간 뒤에 또 구멍이 있으면 `nestedGap`(재부착이 아니라 회차마다
+  한 번씩 세는 **순수 관측치**다 — 대부분의 회차는 다음 회차가 갚는다), 그 루프가 회차 상한을
+  넘겨 재부착으로 끝나면 `nestedGapEscalation`, 왕복이 watchdog 창을 넘기면 `repairTimeout`,
+  resize 를 가로지르면 `geometryEscalation`, 서브 payload 검증 실패는 `malformedDelta`,
+  그 외 거절·예외는 `repairFailure` 다. 분류는 오류 **메시지 매칭이 아니라** round-trip 의 실패 지점과
   `TerminalOutputRepairError.reason` 으로 결정한다 — 리터럴 하나가 바뀌어도 조용히 오분류되지
   않아야 한다.
+- **`nestedGapEscalation` 이 `ringEscalation` 과 같은 이유로 자기 칸을 가진다.**
+  `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` 는 이 결정이 새로 만든 튜닝 상수인데, `nestedGap` 만으로는
+  "중첩 gap 이 났지만 다음 회차가 갚아 화면을 지켰다"와 "상한을 넘겨 화면을 잃었다"를 구분할 수
+  없다. 상한 값을 올리거나 내릴 근거는 이 칸 하나뿐이므로 다른 사건을 섞지 않는다.
+- **카운터 수명은 백엔드 세션 하나다.** `closeTerminalSession` 이 그 id 의 엔트리를 지우는데, 그
+  호출처가 `TerminalView` 의 xterm 생성 effect cleanup 이므로 unmount·profile 변경·hidden pane
+  회수도 카운터를 0 으로 되돌린다. "이 pane 이 계속 놓친다"는 한 mount 안에서 읽어야 한다.
+  remount 를 넘겨 살리려면 명시적 pane 파괴 경로(`removePane`·`removeWorkspace`·
+  `removeDockPane`·`setPaneView`)마다 따로 지워야 하는데, 단일 지점이 없어 그 결합을 사는 대신
+  짧은 수명을 택했다. 진단 값이 실제로 부족해지면 그때 재검토한다.
 - 테스트는 (1) ring 이 보존하는 gap 의 sequence-exact 복구, (2) ring 이 밀린 gap 의 `null` 승격,
   (3) generation 교체 시 `null`, (4) 복구 중 도착한 delta 의 중복·경계 교차 정리, (5) geometry
   revision 을 가로지르는 gap 의 재부착 승격, (6) gap 이 `terminal.reset()` 을 유발하지 않고 shadow
