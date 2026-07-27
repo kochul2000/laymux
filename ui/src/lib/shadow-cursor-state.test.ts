@@ -359,6 +359,35 @@ describe("Codex footer-frame regression — DEC 2026 set/reset pre-frame snapsho
     expect(state.hasSyncFramePosition).toBe(true);
   });
 
+  it("adopts a cursor parked at the end of a Codex 0.145 frame", () => {
+    let state: ShadowCursorState = {
+      ...baseState,
+      cursorX: PRE_FRAME_BUFFER_CURSOR.x,
+      cursorAbsY: PRE_FRAME_BUFFER_CURSOR.absY,
+      isCursorHidden: true,
+    };
+    state = applyDec2026SetToShadowCursor(
+      state,
+      codex,
+      PRE_FRAME_BUFFER_CURSOR.x,
+      PRE_FRAME_BUFFER_CURSOR.absY,
+    );
+
+    state = applyDec2026ResetToShadowCursor(
+      state,
+      codex,
+      PARK_BUFFER_CURSOR.x,
+      PARK_BUFFER_CURSOR.absY,
+      true,
+    );
+
+    expect(state.cursorX).toBe(PARK_BUFFER_CURSOR.x);
+    expect(state.cursorAbsY).toBe(PARK_BUFFER_CURSOR.absY);
+    expect(state.parkPending).toBe(false);
+    expect(state.isCursorHidden).toBe(false);
+    expect(state.isDec2026FrameOpen).toBe(false);
+  });
+
   it("falls back to buffer cursor when no DEC 2026 set fired (orphan reset)", () => {
     // Defensive: if for some reason the set was never observed (e.g.
     // it arrived in a chunk before the parser hooks were attached),

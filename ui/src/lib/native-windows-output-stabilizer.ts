@@ -16,6 +16,7 @@ type LexicalState =
 
 type TransactionPhase = "holdingFrame" | "awaitingRestore";
 type RestoreStage = "hide" | "position" | "show";
+type InFrameParkStage = "none" | "shown" | "positioned";
 
 interface Transaction {
   phase: TransactionPhase;
@@ -25,12 +26,15 @@ interface Transaction {
   frameStartAt: number;
   deadline: number;
   frameEndAt?: number;
+  inFrameParkStage: InFrameParkStage;
 }
 
 export interface StabilizedOutputEmission {
   data: Uint8Array;
   stabilized: boolean;
   parkDeadline?: number;
+  /** The frame itself ended on the app's authoritative input-caret CUP. */
+  frameEndCursorAuthoritative?: boolean;
 }
 
 export interface NativeWindowsOutputStabilizerOptions {
@@ -40,7 +44,8 @@ export interface NativeWindowsOutputStabilizerOptions {
 
 /**
  * Surface-local byte stream stabilizer for native Windows synchronized-output
- * frames. It only recognizes the narrow DEC 2026 + DECTCEM restore grammar;
+ * frames. It only recognizes the two narrow DEC 2026 + DECTCEM park grammars
+ * pinned by ADR-0076 (legacy out-of-frame restore and Codex 0.145 in-frame park);
  * every malformed, late, or oversized candidate is emitted byte-for-byte.
  */
 export class NativeWindowsOutputStabilizer {
@@ -128,7 +133,13 @@ export class NativeWindowsOutputStabilizer {
 
     if (this.transaction) {
       if (!this.appendHeld(byte, output)) return;
-      if (this.transaction?.phase === "awaitingRestore") this.failOpen(output);
+      if (this.transaction.phase === "awaitingRestore") {
+        this.failOpen(output);
+      } else if (this.transaction.inFrameParkStage !== "none") {
+        // Only accept `?25h`, position command(s), then `?2026l` with no
+        // printable payload between them as an in-frame cursor park.
+        this.transaction.inFrameParkStage = "none";
+      }
       return;
     }
     output.append(byte);
@@ -155,13 +166,20 @@ export class NativeWindowsOutputStabilizer {
 
     if (control) {
       if (!this.transaction) output.appendMany(escape.bytes);
+      if (this.transaction?.phase === "holdingFrame") {
+        this.transaction.inFrameParkStage = "none";
+      }
       this.lexical = { kind: "control", control, previousEsc: false };
       return;
     }
 
     if (this.transaction) {
       this.lexical = { kind: "normal" };
-      if (this.transaction.phase === "awaitingRestore") this.failOpen(output);
+      if (this.transaction.phase === "awaitingRestore") {
+        this.failOpen(output);
+      } else if (this.transaction.inFrameParkStage !== "none") {
+        this.transaction.inFrameParkStage = "none";
+      }
     } else {
       output.appendMany(escape.bytes);
       this.lexical = { kind: "normal" };
@@ -272,12 +290,28 @@ export class NativeWindowsOutputStabilizer {
     if (transaction.phase === "holdingFrame") {
       if (kind === "cursorShow") {
         transaction.omitOnSuccess.push({ start: tokenStart, end: transaction.bytes.length });
+        transaction.inFrameParkStage = "shown";
+      } else if (
+        kind === "position" &&
+        (transaction.inFrameParkStage === "shown" || transaction.inFrameParkStage === "positioned")
+      ) {
+        transaction.inFrameParkStage = "positioned";
       } else if (kind === "frameEnd") {
+        if (transaction.inFrameParkStage === "positioned") {
+          // The show belongs to the final caret, not to a transient footer.
+          // Keep it in the atomic write so xterm's application DECTCEM state
+          // stays current; DEC 2026 prevents a paint before the following CUP.
+          transaction.omitOnSuccess.pop();
+          this.completeTransaction(output, true);
+          return;
+        }
         transaction.phase = "awaitingRestore";
         transaction.restoreStage = "hide";
         transaction.frameEndAt = now;
       } else if (kind === "frameStart") {
         this.failOpen(output);
+      } else if (transaction.inFrameParkStage !== "none") {
+        transaction.inFrameParkStage = "none";
       }
       return;
     }
@@ -313,6 +347,7 @@ export class NativeWindowsOutputStabilizer {
       omitOnSuccess: [],
       frameStartAt: startedAt,
       deadline: startedAt + this.holdMs,
+      inFrameParkStage: "none",
     };
     if (this.transaction.bytes.length > this.maxBufferedBytes) this.failOpen(output);
   }
@@ -326,7 +361,7 @@ export class NativeWindowsOutputStabilizer {
     return false;
   }
 
-  private completeTransaction(output: EmissionBuilder): void {
+  private completeTransaction(output: EmissionBuilder, frameEndCursorAuthoritative = false): void {
     const transaction = this.transaction;
     if (!transaction) return;
     const visible: number[] = [];
@@ -340,7 +375,12 @@ export class NativeWindowsOutputStabilizer {
     for (let index = cursor; index < transaction.bytes.length; index += 1) {
       visible.push(transaction.bytes[index]);
     }
-    output.emit(visible, true, parkDeadline(transaction, this.holdMs));
+    output.emit(
+      visible,
+      true,
+      frameEndCursorAuthoritative ? undefined : parkDeadline(transaction, this.holdMs),
+      frameEndCursorAuthoritative,
+    );
     this.transaction = undefined;
   }
 
@@ -383,13 +423,19 @@ class EmissionBuilder {
     this.pending.push(...bytes);
   }
 
-  emit(bytes: readonly number[], stabilized: boolean, parkDeadline?: number): void {
+  emit(
+    bytes: readonly number[],
+    stabilized: boolean,
+    parkDeadline?: number,
+    frameEndCursorAuthoritative = false,
+  ): void {
     this.flushPending();
     if (bytes.length === 0) return;
     this.emissions.push({
       data: Uint8Array.from(bytes),
       stabilized,
       ...(parkDeadline === undefined ? {} : { parkDeadline }),
+      ...(frameEndCursorAuthoritative ? { frameEndCursorAuthoritative: true } : {}),
     });
   }
 
