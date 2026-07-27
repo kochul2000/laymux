@@ -25,7 +25,7 @@ laymux 는 overlay caret 이 캐럿을 소유하는 구간(composer 모드, IME 
 **네이티브 커서 숨김은 앱이 닿을 수 없는 렌더러 게이트(`coreService.isCursorHidden`)에서 하고, 색·모양 옵션은 사용자 설정 그대로 둔다.**
 
 - **수단**: 두 렌더러가 커서를 그릴지 판정하는 유일한 게이트가 `isCursorInitialized && !isCursorHidden` 이다. laymux 는 그 필드를 accessor 로 감싸 **앱의 모든 쓰기를 기록하고, 자신이 숨기는 동안에는 hidden 을 보고**한다. SGR·DECSCUSR·테마는 이 게이트에 닿지 못하므로 경합이 원천적으로 없다. 포커스 없는 커서(`cursorInactiveStyle`)도 같은 게이트 아래라 따로 맞출 필요가 없다.
-- **불변식**: 셀 배경이 무엇이든, 앱이 DECSCUSR 를 몇 번 보내든, 포커스가 있든 없든 숨김 구간에서 네이티브 커서는 그려지지 않는다.
+- **불변식**: 셀 배경이 무엇이든, 앱이 DECSCUSR 를 몇 번 보내든, 포커스가 있든 없든 숨김 구간에서 네이티브 커서는 그려지지 않는다. **"숨김 구간" 은 `applyNativeCursorVisibility` 가 계산하는 조건이다** — synchronized-output 구간의 커서 숨김은 이 결정의 적용 대상이 아니다(아래 Consequences).
 - **앱의 DECTCEM 권위는 유지한다.** DECTCEM(`CSI ?25h/l`)이 쓰는 필드가 바로 이 게이트다. [ADR-0011](0011-dectcem-cursor-park-fifth-layer.md) 은 프레임 밖 DECTCEM show 를 "보이는 커서는 여기" 라는 앱의 최우선 신호로 채택했으므로, 숨김이 그 값을 덮으면 shadow cursor 의 근거가 사라진다. 따라서 accessor 는 앱 값을 **별도로 보존**하고, 해제·`dispose()` 시 앱이 마지막으로 쓴 값을 그대로 돌려준다. 우리가 보내지 않은 hide 를 앱이 보낸 것처럼 만들지 않는다(shadow cursor 는 자기 CSI 핸들러로 DECTCEM 을 추적하므로 이 필드를 읽지 않는다 — 파서를 거치지 않는 이 쓰기는 추적에 보이지 않아야 하고, 실제로 보이지 않는다).
 - **테마·모양·`cursorWidth` 는 숨김 여부와 무관하게 사용자 설정이다.** 숨김 구간에서 유일하게 달라지는 것은 `cursorBlink = false` 다 — 안 보이는 커서를 깜빡이는 것은 repaint 낭비다.
 - **소유자는 하나다.** 숨김 조건(`composer` 모드 · 조합 중 · `stabilizeInteractiveCursor` + overlay caret activity)은 `TerminalView` 의 `applyNativeCursorVisibility` 만 계산한다. 조합 상태는 ref 에만 있어 React 가 볼 수 없으므로, React 는 조건을 다시 계산하지 않고 이 소유자를 호출만 한다. 조건을 두 곳에서 계산하는 형태는 data-flow.md §8.15/§8.16/§8.17 이 세 번 연속 "캐럿이 사라졌다" 로 기록한 실패 모양이다.
@@ -47,4 +47,5 @@ laymux 는 overlay caret 이 캐럿을 소유하는 구간(composer 모드, IME 
 - **비용: private 필드 의존이 하나 늘었다.** `_core.coreService.isCursorHidden` 은 공개 API 가 아니다. 대가로 (a) 접근을 한 모듈로 격리했고, (b) 실패 시 동작을 "아무것도 안 함" 으로 고정했고, (c) 실제 `Terminal` 계약 테스트로 xterm 상향 시 실패가 드러나게 했다. 상류에 공개 커서 비활성화 옵션이 생기면 이 모듈은 제거 대상이다.
 - **비용: DECRQM 25 응답이 숨김 구간에서 "hidden" 을 보고한다.** 게이트가 필드 하나이므로 앱이 모드 25 를 조회하면 우리 상태를 본다. 앱이 그에 반응해 `?25h` 를 보내도 숨김은 유지되므로 무해하지만, 커서 가시성을 조회해 분기하는 앱이 있다면 관측 가능한 차이다. 실측한 사례는 없다.
 - `isCursorHidden` 은 옵션이 아니라서 쓰기 뒤에 xterm 의 옵션 변경 repaint 가 따라오지 않는다. 숨김 전이에서는 `refresh()` 를 명시적으로 한 번 호출해야 하고, 전이가 아닐 때는 호출하지 않는다(활동 전이마다 repaint 를 유발하지 않는다는 기존 제약 유지).
+- **한계: synchronized-output 구간은 여전히 CSS-only 이고 WebGL 에 닿지 않는다.** `setSyncOutputCursorVisibility` 는 `.terminal-sync-output-active` 클래스만 토글하며, 그 CSS 는 이 ADR 이 CSS 를 기각한 것과 **같은 이유로** 기본(WebGL) 렌더러에서 무력하다. 따라서 DEC 2026 프레임 동안 네이티브 커서는 계속 그려진다 — #598 과 원인·렌더러가 같은 남은 구멍이다. 이 결정에 합류시키지 않은 이유는 비용이다: sync 상태는 프레임 경계마다 토글되므로 게이트에 넣으려면 프레임마다 `refresh(0, rows-1)` 가 붙고, 그 경로는 #606 이 "폭주 중 레이아웃 변경" 으로 측정한 repaint 비용과 같은 곳이다. 측정 없이 합류시키면 결함 하나를 성능 회귀로 바꾸게 된다. issue #610 으로 분리했다.
 - 재검토 조건: xterm 이 커서 비활성화를 공개 API 로 노출하거나, `isCursorHidden` 이 DECTCEM 전용이 아닌 다른 의미를 갖게 되거나, 앱의 모드 25 조회 결과에 의존하는 실기 결함이 관측되면 이 결정을 다시 본다.

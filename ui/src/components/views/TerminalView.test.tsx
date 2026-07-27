@@ -8561,6 +8561,38 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  it("re-suppresses the native cursor when the xterm instance is replaced", async () => {
+    // Issue #598. A replaced xterm arrives with a fresh gate (`suppressed: false`)
+    // and a fresh dedupe baseline, while `inputMode`/`activity`/`stabilize` are
+    // unchanged by the swap — so without the xterm generation in the poke effect's
+    // deps nobody re-applies, and Composer mode gets the native cursor back under
+    // the overlay caret (the doubled caret this suppression removes).
+    const terminalId = "t-composer-regen-cursor";
+    const { rerender } = render(
+      <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const first = createdTerminals.at(-1)!;
+    await vi.waitFor(() => {
+      expect(first._core.coreService.isCursorHidden).toBe(true);
+    });
+
+    // A profile change rebuilds the xterm instance. Composer mode persists.
+    const before = createdTerminals.length;
+    rerender(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(before);
+    });
+
+    const replaced = createdTerminals.at(-1)!;
+    expect(replaced).not.toBe(first);
+    await vi.waitFor(() => {
+      expect(replaced._core.coreService.isCursorHidden).toBe(true);
+    });
+  });
+
   it("drops an async Direct smart paste that resolves after switching to Composer", async () => {
     const terminalId = "t-composer-stale-paste";
     let resolvePaste!: (value: { pasteType: string; content: string }) => void;

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   XTERM_NATIVE_CURSOR_FIELDS,
   installNativeCursorSuppression,
+  resolveNativeCursorGate,
 } from "./native-cursor-suppression";
 
 function stubMatchMedia() {
@@ -37,11 +38,19 @@ function mountTerminal() {
   return terminal;
 }
 
-/** The exact field the renderers gate the cursor on. */
+/**
+ * The exact field the renderers gate the cursor on, reached by walking the
+ * exported field list rather than a second hardcoded path — so this helper and
+ * the module cannot drift apart.
+ */
 function rendererSeesCursorHidden(terminal: Terminal): boolean {
-  const core = (terminal as Terminal & { _core?: { coreService?: { isCursorHidden?: boolean } } })
-    ._core;
-  return core?.coreService?.isCursorHidden === true;
+  const path = XTERM_NATIVE_CURSOR_FIELDS as readonly string[];
+  let value: unknown = terminal;
+  for (const hop of path) {
+    if (value === null || typeof value !== "object") return false;
+    value = (value as Record<string, unknown>)[hop];
+  }
+  return value === true;
 }
 
 function decPrivateCursorStyle(terminal: Terminal): string | undefined {
@@ -71,8 +80,43 @@ describe("installNativeCursorSuppression", () => {
     expect(suppression.suppressed).toBe(false);
   });
 
-  it("names the fields it depends on so an xterm bump breaks readably", () => {
-    expect(XTERM_NATIVE_CURSOR_FIELDS).toEqual(["_core", "coreService", "isCursorHidden"]);
+  it("resolves XTERM_NATIVE_CURSOR_FIELDS against a real Terminal down to a boolean gate", () => {
+    // Asserting the constant against its own literal would prove nothing about
+    // xterm. Walk it on a live instance instead: if a bump moves or renames any
+    // hop, this fails naming the constant, which is what the ADR and the module
+    // docstring claim happens.
+    const terminal = mountTerminal();
+    const path = XTERM_NATIVE_CURSOR_FIELDS as readonly string[];
+    let value: unknown = terminal;
+    for (const hop of path) {
+      expect(value, `XTERM_NATIVE_CURSOR_FIELDS: no object to read "${hop}" from`).toBeTypeOf(
+        "object",
+      );
+      expect(value, `XTERM_NATIVE_CURSOR_FIELDS: no object to read "${hop}" from`).not.toBeNull();
+      expect(
+        Object.prototype.hasOwnProperty.call(value as object, hop) ||
+          hop in (value as Record<string, unknown>),
+        `XTERM_NATIVE_CURSOR_FIELDS: xterm no longer exposes "${hop}"`,
+      ).toBe(true);
+      value = (value as Record<string, unknown>)[hop];
+    }
+    expect(value, "XTERM_NATIVE_CURSOR_FIELDS: the gate is no longer a boolean").toBeTypeOf(
+      "boolean",
+    );
+
+    // The resolver the installer itself uses agrees, and points at the owner of
+    // the leaf rather than the leaf.
+    const gate = resolveNativeCursorGate(terminal);
+    expect(gate).not.toBeNull();
+    expect(gate?.field).toBe(path[path.length - 1]);
+    expect(gate?.owner[gate.field]).toBe(value);
+  });
+
+  it("refuses to resolve a gate when a hop is missing", () => {
+    expect(resolveNativeCursorGate({} as Terminal)).toBeNull();
+    expect(
+      resolveNativeCursorGate({ _core: { coreService: {} } } as unknown as Terminal),
+    ).toBeNull();
   });
 
   it("hides the cursor for the renderer without claiming the app hid it", () => {

@@ -47,8 +47,35 @@
 
 import type { Terminal } from "@xterm/xterm";
 
-/** Private fields this module depends on, in read order. Asserted by tests. */
+/**
+ * Private fields this module depends on, in read order — the last one is the
+ * gate itself, the ones before it are the path to its owner. This is not
+ * documentation: the resolver below walks exactly this list, and a contract test
+ * walks it against a real `Terminal`, so an xterm bump that moves the field
+ * fails with this name in the message instead of silently.
+ */
 export const XTERM_NATIVE_CURSOR_FIELDS = ["_core", "coreService", "isCursorHidden"] as const;
+
+/** The object that owns the cursor gate, plus the gate's field name. */
+export type NativeCursorGate = { owner: Record<string, unknown>; field: string };
+
+/**
+ * Walk `XTERM_NATIVE_CURSOR_FIELDS` to the object that owns the gate. Returns
+ * `null` unless every hop is an object and the leaf is a boolean — the single
+ * shape check both the installer and the tests use.
+ */
+export function resolveNativeCursorGate(terminal: Terminal): NativeCursorGate | null {
+  const path = XTERM_NATIVE_CURSOR_FIELDS.slice(0, -1);
+  const field = XTERM_NATIVE_CURSOR_FIELDS[XTERM_NATIVE_CURSOR_FIELDS.length - 1];
+  let owner: unknown = terminal;
+  for (const hop of path) {
+    if (owner === null || typeof owner !== "object") return null;
+    owner = (owner as Record<string, unknown>)[hop];
+  }
+  if (owner === null || typeof owner !== "object") return null;
+  if (typeof (owner as Record<string, unknown>)[field] !== "boolean") return null;
+  return { owner: owner as Record<string, unknown>, field };
+}
 
 export type NativeCursorSuppression = {
   /** Whether the renderer-level gate was actually installed. */
@@ -66,8 +93,6 @@ export type NativeCursorSuppression = {
   dispose(): void;
 };
 
-type CoreServiceLike = { isCursorHidden?: unknown };
-
 const UNSUPPORTED: NativeCursorSuppression = {
   supported: false,
   appCursorHidden: false,
@@ -81,16 +106,16 @@ const UNSUPPORTED: NativeCursorSuppression = {
  * `supported: false` handle when xterm's internals are not the expected shape.
  */
 export function installNativeCursorSuppression(terminal: Terminal): NativeCursorSuppression {
-  const core = (terminal as Terminal & { _core?: { coreService?: CoreServiceLike } })._core;
-  const coreService = core?.coreService;
-  if (!coreService || typeof coreService.isCursorHidden !== "boolean") return UNSUPPORTED;
+  const gate = resolveNativeCursorGate(terminal);
+  if (!gate) return UNSUPPORTED;
+  const { owner: coreService, field } = gate;
 
-  let appCursorHidden: boolean = coreService.isCursorHidden;
+  let appCursorHidden: boolean = coreService[field] === true;
   let suppressed = false;
   let disposed = false;
 
   try {
-    Object.defineProperty(coreService, "isCursorHidden", {
+    Object.defineProperty(coreService, field, {
       configurable: true,
       enumerable: true,
       get: () => suppressed || appCursorHidden,
@@ -123,7 +148,7 @@ export function installNativeCursorSuppression(terminal: Terminal): NativeCursor
       disposed = true;
       suppressed = false;
       try {
-        Object.defineProperty(coreService, "isCursorHidden", {
+        Object.defineProperty(coreService, field, {
           configurable: true,
           enumerable: true,
           writable: true,

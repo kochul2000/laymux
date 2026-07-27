@@ -4808,9 +4808,16 @@ export function TerminalView({
   // Splitting that condition across two writers is what §8.15/§8.16/§8.17 of
   // data-flow.md keep reporting as a vanished caret, so React only pokes the
   // single owner and the owner dedupes.
+  // `terminalGeneration` is a dep because a new xterm arrives with a fresh gate
+  // (`suppressed: false`) and a fresh dedupe baseline, and none of the other deps
+  // change when the instance is replaced. Without it a profile/instance change
+  // during composer mode — or Codex with `stabilizeInteractiveCursor` — leaves
+  // the native cursor drawn under the overlay caret until the next inputMode /
+  // activity transition, i.e. exactly the doubled caret this suppression exists
+  // to remove.
   useEffect(() => {
     nativeCursorVisibilityRef.current?.();
-  }, [inputMode, activity, stabilizeInteractiveCursor]);
+  }, [inputMode, activity, stabilizeInteractiveCursor, terminalGeneration]);
 
   // Cell-geometry reflow: only fontSize/fontFamily changes move xterm's
   // measured cell width/height, so the texture atlas only needs invalidation

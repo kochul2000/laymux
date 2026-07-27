@@ -689,6 +689,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - **`isCursorHidden` 은 옵션이 아니라 쓰기 뒤에 xterm 의 옵션 변경 repaint 가 따라오지 않는다.** 전이에서 `refresh(0, rows-1)` 를 한 번 호출하고, 전이가 아니면(dedupe) 호출하지 않는다 — §8.4 의 "활동 전이마다 repaint/atlas 를 유발하지 않는다" 를 유지한다.
 - **실패하면 스스로 꺼진다.** private 필드 형태가 달라지면 `supported: false` 로 아무것도 하지 않고 네이티브 커서가 사용자 설정대로 보인다(overlay 와 겹친 이중 캐럿). #598 을 만든 배경색 위장으로 되돌아가지 않는다. `XTERM_NATIVE_CURSOR_FIELDS` 와 실제 `Terminal` 계약 테스트가 xterm 상향 시 읽을 수 있는 실패를 만든다 — §8.14 의 `xterm-pending-composition.ts` 와 같은 정책.
 - **DOM 렌더러용 CSS 는 그대로 둔다.** `.terminal-native-cursor-hidden .xterm-cursor { opacity: 0 }` 는 `onContextLoss` 폴백 경로의 방어선이다(§8.4). 게이트가 그 경로도 덮지만 CSS 는 유지한다.
+- **위 계약의 적용 범위는 `applyNativeCursorVisibility` 가 계산하는 숨김 구간이다. synchronized-output 구간의 커서 숨김은 아직 이 게이트를 쓰지 않는다** — `setSyncOutputCursorVisibility` 는 `.terminal-sync-output-active` 클래스 토글이 전부이고, 그 CSS 는 위와 같은 이유로 **WebGL 렌더러에 닿지 않는다**(issue #610). 즉 DEC 2026 프레임 동안 기본 렌더러에서는 네이티브 커서가 계속 그려진다. 게이트에 합류시키려면 프레임 경계마다 `refresh(0, rows-1)` 가 필요해지고 그 경로가 #606 이 측정한 폭주 중 레이아웃 비용과 같은 곳이라, 비용 측정을 붙여 별도로 다룬다.
 - **미검증**: 실기 확인은 하지 않았다(테스트만). codex pane 에서 열 39 블록이 실제로 사라지는지, 그리고 DECRQM 25 조회 응답이 숨김 구간에 "hidden" 으로 바뀌는 것(게이트가 필드 하나이므로 불가피)에 반응하는 앱이 있는지는 사람이 확인해야 한다.
 
 판정과 대안 비교는 [ADR-0073](../adr/0073-native-cursor-renderer-level-suppression.md).
