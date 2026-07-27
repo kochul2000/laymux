@@ -94,6 +94,7 @@ import {
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
+  createShadowCursorState,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -1031,20 +1032,7 @@ export function TerminalView({
     anchorBufferX: 0,
     anchorBufferAbsY: 0,
   });
-  const shadowCursorRef = useRef<ShadowCursorState>({
-    commandStartLine: 0,
-    commandStartX: 0,
-    cursorX: 0,
-    cursorAbsY: 0,
-    isCursorHidden: false,
-    parkPending: false,
-    isDec2026FrameOpen: false,
-    hasPromptBoundary: false,
-    hasSyncFramePosition: false,
-    isInputPhase: false,
-    isRepaintInProgress: false,
-    isAltBufferActive: false,
-  });
+  const shadowCursorRef = useRef<ShadowCursorState>(createShadowCursorState());
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
@@ -2838,6 +2826,24 @@ export function TerminalView({
         stabilizedRefreshFrame = undefined;
       }
     };
+    // Discards every cursor belief this pane inferred from the byte stream that
+    // `terminal.reset()` is about to throw away (issue #596). A backend
+    // sequence gap — the subscriber queue filling under heavy output — is
+    // exactly how a DEC 2026 frame's `?2026l` disappears, and
+    // `isDec2026FrameOpen` has no other route back to false: it would then
+    // report `dec-2026-frame-open` on every sync, downgrade Codex's cursor
+    // parks to visibility-only, and leave the overlay caret pinned where the
+    // frame opened while the real cursor keeps advancing. Paired with the
+    // reset call so the two states cannot drift apart.
+    // See `createShadowCursorState`.
+    const resetStreamDerivedCursorState = () => {
+      Object.assign(shadowCursorRef.current, createShadowCursorState());
+      clearParkSettleTimer();
+      // `baseY` is about to drop to 0; an open composition must not charge that
+      // jump to its anchor as a scroll (issue #570).
+      compositionScrollBaselineRef.current?.();
+      scheduleOverlayCaretUpdate();
+    };
     // No repaint filter is armed around a backend resize: the bundled ConPTY
     // runtime never emits the legacy host repaint frame, so live PTY output
     // reaches xterm unfiltered (ADR-0067).
@@ -3734,6 +3740,7 @@ export function TerminalView({
         terminalOutputWriteChain = terminalOutputWriteChain.then(async () => {
           if (!isCurrentAttach()) return;
           terminal.reset();
+          resetStreamDerivedCursorState();
           if (cached) {
             await trackedTerminalWriteAsync(cached);
             if (!isCurrentAttach()) return;

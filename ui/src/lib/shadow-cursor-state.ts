@@ -66,6 +66,41 @@ export interface ShadowCursorState {
   isAltBufferActive: boolean;
 }
 
+/**
+ * The pane's stream-derived cursor beliefs, all cleared.
+ *
+ * Every field above is inferred from the PTY byte stream this pane feeds
+ * xterm, so the stream owns them. Whenever that stream is replaced — a
+ * sequence gap makes `TerminalView` call `terminal.reset()` and replay a
+ * fresh snapshot — the beliefs formed from the discarded bytes are void and
+ * have to be rebuilt from here rather than carried across (issue #596).
+ *
+ * `isDec2026FrameOpen` is the field that makes carrying them over fatal: only
+ * a real `\e[?2026l` (or alt-buffer entry) clears it, and the park settle
+ * timeout deliberately refuses to. A gap that swallows a frame's `?2026l`
+ * therefore latches it `true` for the rest of the pane's life, which makes
+ * every later shadow sync report `dec-2026-frame-open`, demotes Codex's
+ * authoritative cursor parks to visibility-only (`isDectcemShowPark`), and
+ * pins the overlay caret where the frame opened. `cursorAbsY` is void for a
+ * simpler reason: it names a scrollback row the reset deleted.
+ */
+export function createShadowCursorState(): ShadowCursorState {
+  return {
+    commandStartLine: 0,
+    commandStartX: 0,
+    cursorX: 0,
+    cursorAbsY: 0,
+    isCursorHidden: false,
+    parkPending: false,
+    isDec2026FrameOpen: false,
+    hasPromptBoundary: false,
+    hasSyncFramePosition: false,
+    isInputPhase: false,
+    isRepaintInProgress: false,
+    isAltBufferActive: false,
+  };
+}
+
 export type ShadowSyncEligibility =
   | "eligible"
   | "composition-preview-active"

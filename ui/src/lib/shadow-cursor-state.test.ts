@@ -15,6 +15,7 @@ import {
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
+  createShadowCursorState,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -22,24 +23,55 @@ import {
   type ShadowCursorState,
 } from "./shadow-cursor-state";
 
-const baseState: ShadowCursorState = {
-  commandStartLine: 0,
-  commandStartX: 0,
-  cursorX: 0,
-  cursorAbsY: 0,
-  isCursorHidden: false,
-  parkPending: false,
-  isDec2026FrameOpen: false,
-  hasPromptBoundary: false,
-  hasSyncFramePosition: false,
-  isInputPhase: false,
-  isRepaintInProgress: false,
-  isAltBufferActive: false,
-};
+const baseState: ShadowCursorState = createShadowCursorState();
 
 const codex: TerminalActivityInfo = { type: "interactiveApp", name: "Codex" };
 const claude: TerminalActivityInfo = { type: "interactiveApp", name: "Claude" };
 const shell: TerminalActivityInfo = { type: "shell" };
+
+describe("createShadowCursorState", () => {
+  it("returns an independent all-clear state on every call", () => {
+    const first = createShadowCursorState();
+    const second = createShadowCursorState();
+    expect(first).not.toBe(second);
+    expect(first).toEqual(second);
+    expect(Object.values(first).every((value) => value === 0 || value === false)).toBe(true);
+  });
+
+  /**
+   * The failure #596 reported: a sequence gap swallowed a frame's `\e[?2026l`,
+   * so `isDec2026FrameOpen` stayed `true` after the stream behind it was
+   * replaced. From then on the pane could neither sync the shadow cursor nor
+   * accept Codex's authoritative cursor park, and the overlay caret sat where
+   * the frame had opened while the real cursor kept advancing. No transition in
+   * this module undoes that — only rebuilding the state does.
+   */
+  it("undoes the latch a swallowed `?2026l` leaves behind", () => {
+    const latched = applyDec2026SetToShadowCursor(baseState, codex, 20, 7);
+    expect(latched.isDec2026FrameOpen).toBe(true);
+    expect(
+      getShadowSyncEligibility(latched, {
+        bufferAbsY: 7,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("dec-2026-frame-open");
+    expect(isDectcemShowPark(latched)).toBe(false);
+    // The park settle timeout deliberately keeps the parser frame open, so it
+    // is not an escape hatch either.
+    expect(applyParkSettleTimeoutToShadowCursor(latched).isDec2026FrameOpen).toBe(true);
+
+    const rebuilt = createShadowCursorState();
+    expect(
+      getShadowSyncEligibility(rebuilt, {
+        bufferAbsY: 7,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("eligible");
+    expect(isDectcemShowPark(rebuilt)).toBe(true);
+  });
+});
 
 describe("isOverlayCaretActivity", () => {
   it("matches only Codex (intentional — see shadow-cursor-state.ts docblock)", () => {
@@ -633,5 +665,10 @@ describe("applyActivityLeftTuiToShadowCursor", () => {
     // overwrite them synchronously, and computeUseShadowCursor now
     // returns false until then.
     expect(computeUseShadowCursor(out)).toBe(false);
+  });
+
+  it("cannot clear the parser frame — only a stream reset rebuilds that", () => {
+    const inFrame = applyDec2026SetToShadowCursor(baseState, codex, 20, 7);
+    expect(applyActivityLeftTuiToShadowCursor(inFrame).isDec2026FrameOpen).toBe(true);
   });
 });
