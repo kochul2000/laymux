@@ -3737,9 +3737,16 @@ export function TerminalView({
           if (cached) {
             await trackedTerminalWriteAsync(cached);
             if (!isCurrentAttach()) return;
-            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m");
-            if (!isCurrentAttach()) return;
-            await trackedTerminalWriteAsync("\r\n".repeat(terminal.rows));
+            // The marker ends the restored block; the new session's first
+            // output starts on the next row. No screen-height padding here:
+            // issue #87 added `"\r\n".repeat(rows)` to push the restore into
+            // scrollback ahead of a clear-screen it attributed to shell init,
+            // but a PTY trace shows the clearing party was in-box conhost,
+            // which emitted `ESC[?25l ESC[2J ESC[m ESC[H` at every session
+            // start. The bundled ConPTY runtime (ADR-0067) emits no such
+            // frame, so the padding survived as a screenful of blank rows
+            // above the prompt. Linux never had a clearing party at all.
+            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
             if (!isCurrentAttach()) return;
           }
           if (attachment.snapshot.length > 0) {
