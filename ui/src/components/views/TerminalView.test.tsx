@@ -95,7 +95,87 @@ const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
 });
 const mockRefresh = vi.fn();
 const mockClearTextureAtlas = vi.fn();
-const mockReset = vi.fn();
+
+// ── stream attach reset gate ────────────────────────────────────────────────
+// The output attach chain ends in `terminal.reset()`, which also rebuilds the
+// pane's stream-derived cursor state (issue #596). Production buffers live bytes
+// behind that reset, so no parser sequence can ever be observed before it — but
+// a test driving the parser handlers directly can, and would then watch its own
+// shadow-cursor state get wiped.
+//
+// No individual test should have to remember that (issue #603): the mock funnels
+// every registered parser handler through `waitForStreamAttachReset()` below, so
+// the ordering rule is enforced by the harness instead of by convention.
+//
+// The gate is armed by the `terminal.reset()` call itself rather than by polling
+// or by counting event-loop turns, so it stays correct however many awaits the
+// attach chain gains or loses.
+let streamAttachResetSeen = false;
+let resolveStreamAttachReset: (() => void) | undefined;
+let streamAttachResetArrived = new Promise<void>((resolve) => {
+  resolveStreamAttachReset = resolve;
+});
+function armStreamAttachResetGate(): void {
+  streamAttachResetSeen = false;
+  streamAttachResetArrived = new Promise<void>((resolve) => {
+    resolveStreamAttachReset = resolve;
+  });
+}
+const mockReset = vi.fn(() => {
+  streamAttachResetSeen = true;
+  resolveStreamAttachReset?.();
+});
+// Captured before any test installs fake timers, so the bail-out below still
+// measures wall clock while `vi.useFakeTimers()` is active.
+const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
+// Escape hatch for panes that never attach (hung/failed attach fixtures) and for
+// fake-timer sections, where the attach chain cannot advance at all. Waiting
+// longer there would only stall; the gate then degrades to the old behaviour.
+const STREAM_ATTACH_RESET_BAIL_MS = 1000;
+async function waitForStreamAttachReset(): Promise<void> {
+  if (streamAttachResetSeen) return;
+  let bail: ReturnType<typeof realSetTimeout> | undefined;
+  try {
+    await Promise.race([
+      streamAttachResetArrived,
+      new Promise<void>((resolve) => {
+        bail = realSetTimeout(resolve, STREAM_ATTACH_RESET_BAIL_MS);
+      }),
+    ]);
+  } finally {
+    if (bail !== undefined) realClearTimeout(bail);
+  }
+  // Losing the race means this test ran a parser handler without an attach reset
+  // ever landing, so it is back to the pre-gate ordering luck. Record it — the
+  // value of the gate is determinism, and a silent bail restores exactly the
+  // nondeterminism it exists to remove. `console.warn` alone does not work here:
+  // this project's vitest run does not surface test-side console output at all
+  // (verified), so the bail would stay invisible. The `afterEach` below turns it
+  // into a failing assertion on the test that bailed instead. The handler itself
+  // still runs ungated, so the escape hatch keeps degrading to the old behaviour
+  // rather than aborting mid-test.
+  if (!streamAttachResetSeen) streamAttachResetBails.push(currentTestNameForBail());
+}
+const streamAttachResetBails: string[] = [];
+function currentTestNameForBail(): string {
+  try {
+    return expect.getState().currentTestName ?? "(unknown test)";
+  } catch {
+    return "(unknown test)";
+  }
+}
+/** Registered parser handlers only run once the attach reset has landed. */
+function gateOnStreamAttachReset<Args extends unknown[]>(
+  callback: (...args: Args) => boolean | Promise<boolean>,
+): (...args: Args) => Promise<boolean> {
+  return async (...args: Args) => {
+    await waitForStreamAttachReset();
+    return callback(...args);
+  };
+}
+// ───────────────────────────────────────────────────────────────────────────
+
 const mockRegisterCsiHandler = vi.fn();
 const mockRegisterOscHandler = vi.fn();
 const mockRegisterEscHandler = vi.fn();
@@ -197,13 +277,13 @@ vi.mock("@xterm/xterm", () => ({
     parser = {
       registerOscHandler: mockRegisterOscHandler.mockImplementation(
         (ident: number, callback: (data: string) => boolean | Promise<boolean>) => {
-          oscHandlers.set(String(ident), callback);
+          oscHandlers.set(String(ident), gateOnStreamAttachReset(callback));
           return { dispose: vi.fn() };
         },
       ),
       registerEscHandler: mockRegisterEscHandler.mockImplementation(
         (id: { final: string }, callback: () => boolean | Promise<boolean>) => {
-          escHandlers.set(id.final, callback);
+          escHandlers.set(id.final, gateOnStreamAttachReset(callback));
           return { dispose: vi.fn() };
         },
       ),
@@ -212,7 +292,7 @@ vi.mock("@xterm/xterm", () => ({
           id: { prefix?: string; final: string },
           callback: (params: readonly (number | number[])[]) => boolean | Promise<boolean>,
         ) => {
-          csiHandlers.set(`${id.prefix ?? ""}:${id.final}`, callback);
+          csiHandlers.set(`${id.prefix ?? ""}:${id.final}`, gateOnStreamAttachReset(callback));
           return { dispose: vi.fn() };
         },
       ),
@@ -427,18 +507,9 @@ async function waitForTerminalInputReady(): Promise<void> {
     expect(mockAttachTerminalOutput).toHaveBeenCalled();
     expect(mockOnTerminalOutput).toHaveBeenCalled();
   });
-}
-
-/**
- * The output attach chain ends in `terminal.reset()`, which also rebuilds the
- * pane's stream-derived cursor state (issue #596). Tests that drive the parser
- * handlers directly — rather than through the buffered live stream that gates
- * them in production — must let that land first.
- */
-async function waitForStreamAttachReset(): Promise<void> {
-  await vi.waitFor(() => {
-    expect(mockReset).toHaveBeenCalled();
-  });
+  // "Ready" includes the attach reset that rebuilds stream-derived cursor state
+  // (issue #603) — see the stream attach reset gate above.
+  await waitForStreamAttachReset();
 }
 
 async function waitForLocalTerminalControl(): Promise<void> {
@@ -449,6 +520,21 @@ async function waitForLocalTerminalControl(): Promise<void> {
     await Promise.resolve();
   });
 }
+
+// File level, not per-`describe`: `streamAttachResetSeen` is module-global, so a
+// `describe` without this arming inherits an already-open gate from whichever
+// test ran last and the ordering rule silently stops applying there. Every
+// `describe` in this file must get the gate, including ones added later.
+beforeEach(() => {
+  armStreamAttachResetGate();
+  streamAttachResetBails.length = 0;
+});
+
+// A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
+// luck. Reported here so the bailing test names itself.
+afterEach(() => {
+  expect(streamAttachResetBails).toEqual([]);
+});
 
 describe("TerminalView", () => {
   beforeEach(() => {
@@ -496,6 +582,66 @@ describe("TerminalView", () => {
   it("renders terminal container", () => {
     render(<TerminalView instanceId="t1" profile="PowerShell" syncGroup="default" />);
     expect(screen.getByTestId("terminal-view-t1")).toBeInTheDocument();
+  });
+
+  // Harness self-check for the stream attach reset gate (issue #603). Every test
+  // that drives `csiHandlers` / `oscHandlers` / `escHandlers` leans on it, so it
+  // is asserted here instead of trusting that the event-loop order works out.
+  it("holds parser handlers until the stream attach reset lands", async () => {
+    const attachPayload = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    let releaseAttach = () => {};
+    const attachHeld = new Promise<void>((resolve) => {
+      releaseAttach = resolve;
+    });
+    mockAttachTerminalOutput.mockImplementationOnce(async () => {
+      await attachHeld;
+      return attachPayload;
+    });
+
+    render(<TerminalView instanceId="t-attach-gate" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(mockAttachTerminalOutput).toHaveBeenCalled();
+      expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+    });
+    // Attach is parked, so the only `terminal.reset()` call site cannot have run.
+    expect(mockReset).not.toHaveBeenCalled();
+
+    // Control: the raw parser callback the gate wraps still runs straight away.
+    // This is what every handler-driving test used to get, and why their shadow
+    // state survived only when the reset happened to land first.
+    const rawShow = mockRegisterCsiHandler.mock.calls.find(
+      (call) =>
+        (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+        (call[0] as { prefix?: string; final: string }).final === "h",
+    )?.[1] as ((params: readonly number[]) => boolean | Promise<boolean>) | undefined;
+    expect(rawShow).toBeTypeOf("function");
+    let rawRan = false;
+    await act(async () => {
+      await rawShow?.([2026]);
+      rawRan = true;
+    });
+    expect(rawRan).toBe(true);
+    expect(mockReset).not.toHaveBeenCalled();
+
+    // Gated: the same callback, reached the way tests reach it, blocks on the
+    // reset itself — not on a guessed number of event-loop turns.
+    let gatedRan = false;
+    const gated = (async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+      gatedRan = true;
+    })();
+    for (let turn = 0; turn < 50; turn += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(gatedRan).toBe(false);
+    expect(mockReset).not.toHaveBeenCalled();
+
+    releaseAttach();
+    await act(async () => {
+      await gated;
+    });
+    expect(gatedRan).toBe(true);
+    expect(mockReset).toHaveBeenCalled();
   });
 
   it("shows a loading overlay until the first render event arrives", async () => {
@@ -1817,12 +1963,6 @@ describe("TerminalView", () => {
       render(
         <TerminalView instanceId="t-frame-before-activity" profile="PowerShell" syncGroup="" />,
       );
-      // The attach chain ends in `terminal.reset()`, which discards the pane's
-      // stream-derived cursor state along with the stream (issue #596). Live
-      // bytes are buffered behind it in production, so a frame can never open
-      // before it — but a test that drives parser handlers directly can, and
-      // would then watch its own frame get wiped.
-      await waitForStreamAttachReset();
 
       await act(async () => {
         await csiHandlers.get("?:h")?.([2026]);
@@ -1927,9 +2067,6 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(csiHandlers.get("?:l")).toBeTypeOf("function");
       });
-      // See `waitForStreamAttachReset` — the attach reset must land before this
-      // test arms a park settle timer of its own.
-      await waitForStreamAttachReset();
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-park-stale", {
           activity: { type: "interactiveApp", name: "Codex" },
@@ -2005,7 +2142,6 @@ describe("TerminalView", () => {
         | ((data: Uint8Array | Record<string, unknown>) => void)
         | undefined;
       expect(onOutput).toBeTypeOf("function");
-      await waitForStreamAttachReset();
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-gap-reattach", {
           activity: { type: "interactiveApp", name: "Codex" },
