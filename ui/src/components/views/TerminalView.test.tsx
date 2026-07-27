@@ -130,12 +130,30 @@ const mockReset = vi.fn(() => {
 // measures wall clock while `vi.useFakeTimers()` is active.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis);
 const realClearTimeout = globalThis.clearTimeout.bind(globalThis);
-// Escape hatch for panes that never attach (hung/failed attach fixtures) and for
-// fake-timer sections, where the attach chain cannot advance at all. Waiting
-// longer there would only stall; the gate then degrades to the old behaviour.
+// Stops a handler from hanging forever when the attach chain cannot advance at
+// all (a hung/failed attach fixture, or fake timers holding it). The handler then
+// runs ungated — but that is a fixture bug, not a supported mode: every bail is
+// recorded below and the `afterEach` fails the test that bailed. There is no
+// silent path through this timeout.
 const STREAM_ATTACH_RESET_BAIL_MS = 1000;
+/** Tests that ran a parser handler without an attach reset, named at gate entry. */
+const streamAttachResetBails: string[] = [];
+function currentTestNameForBail(): string {
+  try {
+    return expect.getState().currentTestName ?? "(unknown test)";
+  } catch {
+    return "(unknown test)";
+  }
+}
 async function waitForStreamAttachReset(): Promise<void> {
   if (streamAttachResetSeen) return;
+  // Captured before the await, not after: a gated handler whose promise outlives
+  // its test would otherwise be recorded under whichever test is running when the
+  // bail resolves, and `afterEach` would fail an innocent test by that name.
+  // A late bail still fails whichever test is running when it lands — vitest has no
+  // way to fail an already-finished test after the fact. What this name buys is that
+  // the message points at the culprit, which is what a human needs to fix it.
+  const testAtGateEntry = currentTestNameForBail();
   let bail: ReturnType<typeof realSetTimeout> | undefined;
   try {
     await Promise.race([
@@ -154,17 +172,8 @@ async function waitForStreamAttachReset(): Promise<void> {
   // this project's vitest run does not surface test-side console output at all
   // (verified), so the bail would stay invisible. The `afterEach` below turns it
   // into a failing assertion on the test that bailed instead. The handler itself
-  // still runs ungated, so the escape hatch keeps degrading to the old behaviour
-  // rather than aborting mid-test.
-  if (!streamAttachResetSeen) streamAttachResetBails.push(currentTestNameForBail());
-}
-const streamAttachResetBails: string[] = [];
-function currentTestNameForBail(): string {
-  try {
-    return expect.getState().currentTestName ?? "(unknown test)";
-  } catch {
-    return "(unknown test)";
-  }
+  // still runs, so the timeout never aborts a test mid-flight — it only reports.
+  if (!streamAttachResetSeen) streamAttachResetBails.push(testAtGateEntry);
 }
 /** Registered parser handlers only run once the attach reset has landed. */
 function gateOnStreamAttachReset<Args extends unknown[]>(
