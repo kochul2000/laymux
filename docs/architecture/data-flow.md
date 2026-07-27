@@ -29,6 +29,13 @@
 - 경계선 드래그 (자유 비율, 0.0~1.0 백분율로 저장)
 - Pane 최소 크기: 100px (이하 드래그 불가)
 
+**리사이즈는 언제나 "공유 경계를 옮기는 것"이고 판정은 `ui/src/hooks/usePaneResize.ts` 한 곳이 소유한다**([ADR-0068](../adr/0068-pane-resize-single-boundary-owner.md)). 경계선 드래그(`PaneBoundaryHandles`)와 Automation `panes.resize`(`POST /api/v1/panes/:index/resize`, MCP `resize_pane`)가 같은 순수 함수를 부르며, 각자의 산술을 갖지 않는다.
+
+- `boundaryResizeUpdates(boundary, rawDelta, panes)` 가 단위 연산이다. `calcResizeDelta` 로 `PANE_MIN_RATIO` 클램프를 건 뒤 경계의 left/top 그룹에 `w+delta`(`h+delta`), right/bottom 그룹에 `x+delta, w-delta`(`y+delta, h-delta`) 를 담은 절대 rect 목록을 만든다. 양쪽이 같은 델타를 쓰므로 두 면이 항상 맞닿아 겹침·틈이 생기지 않는다. 클램프 후 델타가 무시할 수준이면 빈 목록이다.
+- 경계는 `findPaneBoundaries` 가 만든 **병합된 세그먼트**다. T-junction(한 이웃이 여러 pane 에 걸친 경우)에서는 한쪽 그룹에 여러 인덱스가 들어가고 그 pane 들이 함께 움직인다.
+- Automation 의 `dw`/`dh` 는 `planPaneResize` 가 축→경계로 해석한다. 대상 pane 의 **trailing 경계**(오른쪽/아래)를 먼저 쓰고, 그리드 끝에 붙어 없으면 **leading 경계**(왼쪽/위)를 부호 반전해 쓴다. 두 축은 독립이며 두 번째 축은 첫 축을 반영한 상태에서 경계를 다시 찾는다. 해당 축에 경계가 하나도 없으면(그 축으로 그리드 전체를 차지) 조용히 깨뜨리지 않고 **오류를 반환**한다.
+- `workspace-store.resizePane` 은 계산하지 않는 setter 다 — 인덱스 하나에 절대 rect 를 쓰는 것이 전부이고, 불변식 보장은 호출자(위 함수)의 몫이다.
+
 ### 병합 (Pane 제거)
 
 | 방법                              | 동작                            |

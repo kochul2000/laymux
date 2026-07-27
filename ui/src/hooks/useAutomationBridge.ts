@@ -15,6 +15,7 @@ import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
+import { planPaneResize } from "@/hooks/usePaneResize";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
 import type { Settings } from "@/lib/tauri-api";
 import type {
@@ -598,17 +599,21 @@ const handlers: HandlerMap = {
       return ok({ viewSet: true });
     },
     resize: (p) => {
-      const ctx = getActivePaneCtx(p.paneIndex as number);
+      const paneIndex = p.paneIndex as number;
+      const ctx = getActivePaneCtx(paneIndex);
       if ("err" in ctx) return ctx.err;
-      const { pane } = ctx;
-      const delta = p.delta as Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">>;
-      const absolute: Partial<Pick<WorkspacePane, "x" | "y" | "w" | "h">> = {};
-      if (delta.x != null) absolute.x = pane.x + delta.x;
-      if (delta.y != null) absolute.y = pane.y + delta.y;
-      if (delta.w != null) absolute.w = pane.w + delta.w;
-      if (delta.h != null) absolute.h = pane.h + delta.h;
-      useWorkspaceStore.getState().resizePane(p.paneIndex as number, absolute);
-      return ok({ resized: true });
+      // Resize is *against the neighbor*: the shared boundary moves and both
+      // sides follow, exactly like a divider drag. Resizing the target pane
+      // alone would overlap or gap its neighbors (issue #590). The transport
+      // only carries dw/dh, so x/y deltas are not part of this contract.
+      const delta = p.delta as Partial<Pick<WorkspacePane, "w" | "h">>;
+      const plan = planPaneResize(ctx.ws.panes, paneIndex, delta);
+      if (!plan.ok) return err(plan.error);
+      const store = useWorkspaceStore.getState();
+      for (const { index, rect } of plan.updates) {
+        store.resizePane(index, rect);
+      }
+      return ok({ resized: true, panesChanged: plan.updates.length });
     },
     swap: (p) => {
       const srcCtx = getActivePaneCtx(p.sourceIndex as number);

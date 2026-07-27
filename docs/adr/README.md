@@ -85,6 +85,7 @@ ADR 이 필요한 대표 기준:
 | [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
 | [0066](0066-bundled-conpty-runtime.md) | Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 실행 | Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md) |
 | [0067](0067-bundled-conpty-output-and-staging-contract.md) | 번들 ConPTY의 출력·배치 계약을 하나로 고정 (resize repaint filter 제거) | Proposed |
+| [0068](0068-pane-resize-single-boundary-owner.md) | Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다 (드래그·Automation 공용) | Proposed |
 
 ## 새 ADR 추가
 
