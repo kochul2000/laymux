@@ -3646,23 +3646,43 @@
           { prefix: ">", final: "q" }, // XTVERSION
         ];
 
-        // OSC 4/10/11/12 can either mutate colors or query them. Claim only
-        // pure query payloads so the mirror never sends a second report while
-        // color-setting sequences still reach xterm's built-in handlers.
+        // OSC 4/10/11/12 can stack color setters and queries in one payload.
+        // Parser handlers are all-or-nothing, so claim every payload containing
+        // a query and replay only its setter slots through xterm afterwards.
         const MIRROR_SUPPRESSED_COLOR_OSC = [4, 10, 11, 12];
 
-        function isPureColorQuery(ident, data) {
+        function mirrorColorSetterWrites(ident, data) {
           const fields = data.split(";");
           if (ident === 4) {
-            return (
-              fields.length >= 2 &&
-              fields.length % 2 === 0 &&
-              fields.every((field, index) =>
-                index % 2 === 0 ? /^\d+$/.test(field) : field === "?",
-              )
-            );
+            let containsQuery = false;
+            const setterFields = [];
+            for (let index = 0; index + 1 < fields.length; index += 2) {
+              const colorIndex = fields[index];
+              const specification = fields[index + 1];
+              const parsedIndex = /^\d+$/.test(colorIndex) ? Number(colorIndex) : -1;
+              if (parsedIndex >= 0 && parsedIndex <= 255 && specification === "?") {
+                containsQuery = true;
+              } else {
+                setterFields.push(colorIndex, specification);
+              }
+            }
+            if (!containsQuery) return null;
+            return setterFields.length
+              ? [`\x1b]4;${setterFields.join(";")}\x1b\\`]
+              : [];
           }
-          return fields.length > 0 && fields.every((field) => field === "?");
+
+          let containsQuery = false;
+          const setterWrites = [];
+          for (let offset = 0; offset < fields.length && ident + offset <= 12; offset += 1) {
+            const specification = fields[offset];
+            if (specification === "?") {
+              containsQuery = true;
+            } else if (specification) {
+              setterWrites.push(`\x1b]${ident + offset};${specification}\x1b\\`);
+            }
+          }
+          return containsQuery ? setterWrites : null;
         }
 
         // A running program's queries are answered once, by the desktop pane.
@@ -3679,7 +3699,14 @@
           }
           if (typeof parser.registerOscHandler === "function") {
             for (const ident of MIRROR_SUPPRESSED_COLOR_OSC) {
-              parser.registerOscHandler(ident, (data) => isPureColorQuery(ident, data));
+              parser.registerOscHandler(ident, (data) => {
+                const setterWrites = mirrorColorSetterWrites(ident, data);
+                if (setterWrites === null) return false;
+                for (const setterWrite of setterWrites) {
+                  term.write(setterWrite);
+                }
+                return true;
+              });
             }
           }
         }

@@ -1023,3 +1023,141 @@ test.describe("remote mobile layout", () => {
     expect((await app.boundingBox())?.height).toBe(844);
   });
 });
+
+test.describe("remote terminal protocol query ownership", () => {
+  test("real xterm suppresses mixed and trailing OSC color queries while applying setters", async ({
+    page,
+  }) => {
+    const writes: string[] = [];
+    let outputSocket: WebSocketRoute | null = null;
+
+    await page.addInitScript(() => {
+      localStorage.setItem("laymux.remote.inputMode", "direct");
+      let capturedConstructor: typeof window.Terminal | undefined;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        get: () => capturedConstructor,
+        set: (TerminalConstructor: typeof window.Terminal) => {
+          capturedConstructor = class extends TerminalConstructor {
+            constructor(options?: ConstructorParameters<typeof TerminalConstructor>[0]) {
+              super(options);
+              Object.defineProperty(window, "__realRemoteTerminal", {
+                configurable: true,
+                value: this,
+              });
+            }
+          };
+        },
+      });
+    });
+
+    await page.route("http://remote.test/remote/", (route) =>
+      route.fulfill({
+        path: `${remoteRoot}page.html`,
+        contentType: "text/html; charset=utf-8",
+      }),
+    );
+    for (const [asset, contentType] of [
+      ["xterm.js", "application/javascript; charset=utf-8"],
+      ["addon-fit.js", "application/javascript; charset=utf-8"],
+      ["xterm.css", "text/css; charset=utf-8"],
+    ] as const) {
+      await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
+        route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
+      );
+    }
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [{ id: "term-1", title: "Shell", appearance: {} }],
+            activeWorkspace: {
+              id: "ws-1",
+              name: "Main",
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/terminals/term-1/write") {
+        const body = route.request().postDataJSON() as { data: string };
+        writes.push(body.data);
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, (socket) => {
+      outputSocket = socket;
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#focusTerminal")).toBeEnabled();
+    await expect.poll(() => outputSocket).not.toBeNull();
+
+    outputSocket!.send(
+      Buffer.from(
+        [
+          "\x1b]10;?\x1b\\",
+          "\x1b]11;?\x07",
+          "\x1b]10;?;#123456\x1b\\",
+          "\x1b]10;#654321;?\x1b\\",
+          "\x1b]4;7;?;8;#abcdef\x1b\\",
+          "\x1b]12;?;\x07",
+          "OSC-QUERIES-PARSED",
+        ].join(""),
+      ),
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("OSC-QUERIES-PARSED");
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          // xterm is deliberately pinned to 6.0.0; inspect its fixed internal
+          // theme state so the regression proves replayed setters took effect.
+          const terminal = (
+            window as Window & {
+              __realRemoteTerminal: {
+                _core: {
+                  _themeService: {
+                    colors: {
+                      foreground: { css: string };
+                      background: { css: string };
+                      ansi: Array<{ css: string }>;
+                    };
+                  };
+                };
+              };
+            }
+          ).__realRemoteTerminal;
+          return {
+            foreground: terminal._core._themeService.colors.foreground.css,
+            background: terminal._core._themeService.colors.background.css,
+            ansi8: terminal._core._themeService.colors.ansi[8].css,
+          };
+        }),
+      )
+      .toEqual({ foreground: "#654321", background: "#123456", ansi8: "#abcdef" });
+
+    const helperTextarea = page.locator(".xterm-helper-textarea");
+    await helperTextarea.focus();
+    await page.keyboard.type("q");
+    await expect.poll(() => writes).toEqual(["q"]);
+  });
+});

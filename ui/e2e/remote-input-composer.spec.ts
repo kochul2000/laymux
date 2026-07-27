@@ -954,7 +954,7 @@ test("the mirror never answers terminal protocol queries, even in steady state (
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "echo hi" });
 });
 
-test("the mirror suppresses pure OSC color queries without swallowing color setters", async ({
+test("the mirror claims every OSC color query while replaying setter-only payloads", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: false });
@@ -980,23 +980,40 @@ test("the mirror suppresses pure OSC color queries without swallowing color sett
         window as Window & {
           __mockTerminal: {
             isOscHandled: (ident: number, data: string) => boolean;
+            written: Array<string | Uint8Array>;
           };
         }
       ).__mockTerminal;
       return {
         indexedQuery: terminal.isOscHandled(4, "7;?"),
+        indexedMixed: terminal.isOscHandled(4, "7;?;8;#abcdef"),
+        indexedTrailing: terminal.isOscHandled(4, "7;?;"),
         cursorQuery: terminal.isOscHandled(12, "?"),
+        cursorTrailing: terminal.isOscHandled(12, "?;"),
         foregroundSet: terminal.isOscHandled(10, "#123456"),
         indexedSet: terminal.isOscHandled(4, "7;#123456"),
+        specialSetAndQuery: terminal.isOscHandled(10, "#654321;?"),
         mixedQueryAndSet: terminal.isOscHandled(10, "?;#123456"),
+        syntheticSetterWrites: terminal.written.filter(
+          (data): data is string => typeof data === "string" && data.startsWith("\x1b]"),
+        ),
       };
     }),
   ).toEqual({
     indexedQuery: true,
+    indexedMixed: true,
+    indexedTrailing: true,
     cursorQuery: true,
+    cursorTrailing: true,
     foregroundSet: false,
     indexedSet: false,
-    mixedQueryAndSet: false,
+    specialSetAndQuery: true,
+    mixedQueryAndSet: true,
+    syntheticSetterWrites: [
+      "\x1b]4;8;#abcdef\x1b\\",
+      "\x1b]10;#654321\x1b\\",
+      "\x1b]11;#123456\x1b\\",
+    ],
   });
 });
 
