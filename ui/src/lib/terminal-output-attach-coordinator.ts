@@ -51,6 +51,33 @@ export type TerminalOutputApplyResult =
       actualSeq: number;
     };
 
+/** Why a served repair range could not be spliced into the stream. */
+export type TerminalOutputRepairRejection =
+  /** The range covers bytes written on two different PTY grids. */
+  | "geometry-change"
+  /** The attachment was replaced while the repair was in flight. */
+  | "generation-change"
+  /** No repair was pending — `beginRepair()` never ran, or an attach took over. */
+  | "not-pending";
+
+/**
+ * A repair the coordinator refused, tagged with a machine-readable reason.
+ *
+ * The caller routes each reason to its own recovery counter, and ADR-0071 hangs
+ * its revisit conditions on those counters. Classifying by `error.message`
+ * instead would silently misfile every bucket the moment a message is reworded,
+ * which is exactly the kind of instrumentation rot this PR exists to prevent.
+ */
+export class TerminalOutputRepairError extends Error {
+  readonly reason: TerminalOutputRepairRejection;
+
+  constructor(reason: TerminalOutputRepairRejection, message: string) {
+    super(message);
+    this.name = "TerminalOutputRepairError";
+    this.reason = reason;
+  }
+}
+
 /**
  * Reconciles listener-before-RPC output without guessing across a sequence gap.
  * The caller owns xterm write ordering; this class only decides exact byte suffixes.
@@ -120,20 +147,31 @@ export class TerminalOutputAttachCoordinator {
    * Apply the backend-served range for the pending repair, then the deltas that
    * arrived while it was in flight. `kind: "gap"` means the repair did not reach
    * the sequence the surface holds and the caller must fall back to a full attach.
+   *
+   * Every refusal is a {@link TerminalOutputRepairError} carrying a `reason`, so
+   * the caller never has to inspect a message to pick a counter.
    */
   completeRepair(repair: TerminalOutputDelta): TerminalOutputApplyResult {
     validateDelta(repair);
     const resumeSeq = this.repairSeq;
-    if (resumeSeq === null) throw new Error("terminal output repair is not pending");
+    if (resumeSeq === null) {
+      throw new TerminalOutputRepairError("not-pending", "terminal output repair is not pending");
+    }
     this.repairSeq = null;
     if (repair.generation !== this.generation) {
-      throw new Error("terminal output generation changed");
+      throw new TerminalOutputRepairError(
+        "generation-change",
+        "terminal output generation changed",
+      );
     }
     // The ring stores bytes, not per-byte geometry, so one repair delta cannot
     // describe bytes written on two different grids. Refuse instead of parsing
     // pre-resize bytes at the post-resize size.
     if (repair.geometry.revision !== this.geometryRevision) {
-      throw new Error("terminal output repair spans a geometry change");
+      throw new TerminalOutputRepairError(
+        "geometry-change",
+        "terminal output repair spans a geometry change",
+      );
     }
     if (repair.seqStart > resumeSeq) {
       return {

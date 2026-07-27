@@ -241,8 +241,11 @@ pub fn create_terminal_session(
     // `record_output` failing is not — those bytes never enter the ring and no
     // sequence gap ever reveals them. Both are counted so a real reproduction
     // can tell which one, if either, actually fires.
-    let output_emit_discards = Arc::new(AtomicU64::new(0));
-    let output_record_failures = Arc::new(AtomicU64::new(0));
+    //
+    // Owned by the callback (no `Arc`): the closure is the only reader, and
+    // `fetch_add` needs nothing more than `&AtomicU64`.
+    let output_emit_discards = AtomicU64::new(0);
+    let output_record_failures = AtomicU64::new(0);
     let spawned_pty = pty::spawn_pty_with_metadata(&session, move |data| {
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);

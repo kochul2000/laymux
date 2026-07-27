@@ -192,10 +192,15 @@ import {
   normalizeTerminalOutputAttachment,
   normalizeTerminalOutputDelta,
   TerminalOutputAttachCoordinator,
+  TerminalOutputRepairError,
   type TerminalOutputAppliedSegment,
+  type TerminalOutputApplyResult,
   type TerminalOutputDelta,
 } from "@/lib/terminal-output-attach-coordinator";
-import { recordTerminalOutputRecovery } from "@/lib/terminal-output-recovery-metrics";
+import {
+  recordTerminalOutputRecovery,
+  type TerminalOutputRecoveryEvent,
+} from "@/lib/terminal-output-recovery-metrics";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -3799,26 +3804,63 @@ export function TerminalView({
       }
       outputRepairInFlight = true;
       const resumeSeq = outputCoordinator.beginRepair();
+      // Each failure mode gets its own counter, and which counter is decided by
+      // *where* the round-trip failed rather than by matching an error message.
+      // `ringEscalation` in particular must stay reserved for the one thing
+      // ADR-0071 hangs a revisit condition on: the backend answering `null`.
+      const escalate = (event: TerminalOutputRecoveryEvent, message: string, detail: unknown) => {
+        console.warn(`[TerminalView] ${message}`, detail, {
+          gap,
+          counters: recordTerminalOutputRecovery(instanceId, event),
+        });
+        scheduleOutputReattach();
+      };
       try {
-        const raw = await resumeTerminalOutput(instanceId, generation, resumeSeq);
-        if (cancelled || epoch !== outputAttachEpoch) return;
-        if (!raw) {
-          console.warn(
-            "[TerminalView] terminal output ring cannot bridge the gap; reattaching",
-            gap,
-            recordTerminalOutputRecovery(instanceId, "ringEscalation"),
-          );
-          scheduleOutputReattach();
+        let raw: Awaited<ReturnType<typeof resumeTerminalOutput>>;
+        try {
+          raw = await resumeTerminalOutput(instanceId, generation, resumeSeq);
+        } catch (error) {
+          if (cancelled || epoch !== outputAttachEpoch) return;
+          escalate("repairFailure", "terminal output repair request failed:", error);
           return;
         }
-        const result = outputCoordinator.completeRepair(normalizeTerminalOutputDelta(raw));
-        if (result.kind === "gap") {
-          console.warn(
-            "[TerminalView] terminal output repair did not reach the surface sequence",
-            result,
-            recordTerminalOutputRecovery(instanceId, "ringEscalation"),
+        if (cancelled || epoch !== outputAttachEpoch) return;
+        if (!raw) {
+          escalate(
+            "ringEscalation",
+            "terminal output ring cannot bridge the gap; reattaching",
+            null,
           );
-          scheduleOutputReattach();
+          return;
+        }
+        let repair: TerminalOutputDelta;
+        try {
+          repair = normalizeTerminalOutputDelta(raw);
+        } catch (error) {
+          escalate("malformedDelta", "malformed terminal output repair range:", error);
+          return;
+        }
+        let result: TerminalOutputApplyResult;
+        try {
+          result = outputCoordinator.completeRepair(repair);
+        } catch (error) {
+          const spansResize =
+            error instanceof TerminalOutputRepairError && error.reason === "geometry-change";
+          escalate(
+            spansResize ? "geometryEscalation" : "repairFailure",
+            "terminal output repair was refused:",
+            error,
+          );
+          return;
+        }
+        if (result.kind === "gap") {
+          // A second hole opened behind the repaired one. Nothing to do with
+          // ring retention, so it must not land in `ringEscalation`.
+          escalate(
+            "nestedGap",
+            "terminal output repair did not reach the surface sequence",
+            result,
+          );
           return;
         }
         console.warn(
@@ -3828,18 +3870,10 @@ export function TerminalView({
         );
         applyOutputSegments(result.segments);
       } catch (error) {
+        // Safety net: every classified failure returned above, so anything here
+        // is unexpected and must not be filed as a ring escalation either.
         if (cancelled || epoch !== outputAttachEpoch) return;
-        const spansResize =
-          error instanceof Error && error.message.includes("spans a geometry change");
-        console.warn(
-          "[TerminalView] terminal output repair failed:",
-          error,
-          recordTerminalOutputRecovery(
-            instanceId,
-            spansResize ? "geometryEscalation" : "ringEscalation",
-          ),
-        );
-        scheduleOutputReattach();
+        escalate("repairFailure", "terminal output repair failed unexpectedly:", error);
       } finally {
         outputRepairInFlight = false;
       }

@@ -18,11 +18,24 @@ export type TerminalOutputRecoveryEvent =
   | "gap"
   /** A gap repaired byte-exactly from the ring; the screen was kept. */
   | "repair"
-  /** The ring could no longer bridge the gap → full reattach, screen lost. */
+  /**
+   * The ring could no longer bridge the gap → full reattach, screen lost.
+   *
+   * ADR-0071 hangs a revisit condition (ring size / checkpoint reuse) on this
+   * bucket alone, so nothing else may be filed here. It counts exactly one
+   * thing: `resume_terminal_output` answered `null`.
+   */
   | "ringEscalation"
   /** The gap spanned a resize → full reattach, screen lost. */
   | "geometryEscalation"
-  /** A delta failed range/metadata validation. */
+  /**
+   * The repair applied, but a second hole opened behind it inside the same
+   * pending drain → full reattach. Unrelated to ring retention.
+   */
+  | "nestedGap"
+  /** The repair round-trip failed for any other reason → full reattach. */
+  | "repairFailure"
+  /** A live delta or a served repair range failed metadata/range validation. */
   | "malformedDelta"
   /** `attach_terminal_output` or its replay failed. */
   | "attachFailure";
@@ -34,6 +47,8 @@ const EVENTS: readonly TerminalOutputRecoveryEvent[] = [
   "repair",
   "ringEscalation",
   "geometryEscalation",
+  "nestedGap",
+  "repairFailure",
   "malformedDelta",
   "attachFailure",
 ];

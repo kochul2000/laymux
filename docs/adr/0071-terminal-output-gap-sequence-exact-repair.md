@@ -114,17 +114,32 @@ Remote/Cloud attach 경계(ADR-0069), PTY 입력·resize 소유권, raw ring 을
 - `emit` 실패를 더 이상 삼키지 않으므로, 종료 경합에서 나던 조용한 폐기가 로그에 보인다. 카운터가
   단조 증가 값이므로 로그 회전과 무관하게 실제 폐기 횟수를 셀 수 있다.
 - 복구 경로는 [ADR-0008](0008-shell-cursor-shadow-cursor.md) 의 stream-derived cursor 상태를
-  **재생성하지 않는다**. 재생성은 `terminal.reset()` 이 바이트를 버릴 때만 정당하다. 복구는 버퍼를
-  보존하고 스트림을 byte-exact 로 유지하므로 파생 상태가 여전히 유효하며, `isDec2026FrameOpen`
-  래치는 복구 구간에 실재하는 `?2026l` 이 같은 parser 경계에서 닫는다. 여기서 재생성하면 프레임 안
+  **재생성하지 않는다**. 재생성은 `terminal.reset()` 이 바이트를 버릴 때만 정당하다. 근거는
+  "복구 바이트도 파서를 탄다" 보다 강하다 — 복구 바이트는 `applyOutputSegments` →
+  `processLiveTerminalOutput` 으로 **일반 live delta 와 완전히 동일한 함수**를 통과한다(같은
+  `source:"live"`, 같은 stabilizer, 같은 `attachEpoch`). 따라서 `isDec2026FrameOpen` 래치뿐
+  아니라 `cursorAbsY`·`commandStartLine`·`frameSavedCursorAbsY`·alt buffer 플래그·
+  `syncOutputActiveRef` 가 gap 이 없었을 때와 같은 순서로 구동된다. 여기서 재생성하면 프레임 안
   `?25h` 가 권위 park 로 승격되는 정반대 결함이 생긴다(issue #596 과 대칭).
+- 복구 실패는 **원인별로 다른 카운터**에 들어간다. `ringEscalation` 은 오직 backend 가 `null` 을
+  답한 경우만 세며, 아래 재검토 조건이 그 칸 하나에만 걸려 있기 때문에 다른 사건을 섞으면 결정을
+  검증할 수단이 사라진다. 복구 구간 뒤에 또 구멍이 있으면 `nestedGap`, resize 를 가로지르면
+  `geometryEscalation`, 서브 payload 검증 실패는 `malformedDelta`, 그 외 거절·예외는
+  `repairFailure` 다. 분류는 오류 **메시지 매칭이 아니라** round-trip 의 실패 지점과
+  `TerminalOutputRepairError.reason` 으로 결정한다 — 리터럴 하나가 바뀌어도 조용히 오분류되지
+  않아야 한다.
 - 테스트는 (1) ring 이 보존하는 gap 의 sequence-exact 복구, (2) ring 이 밀린 gap 의 `null` 승격,
   (3) generation 교체 시 `null`, (4) 복구 중 도착한 delta 의 중복·경계 교차 정리, (5) geometry
   revision 을 가로지르는 gap 의 재부착 승격, (6) gap 이 `terminal.reset()` 을 유발하지 않고 shadow
-  cursor 상태도 보존한다는 회귀를 담당한다.
-- (7) "차분 렌더 프레임 시퀀스가 복구 뒤 원래 화면과 셀 단위로 같아진다"는 셀 단위 검증은 데스크톱
-  터미널 테스트가 xterm 을 mock 하므로 지금 작성할 수 없다. **후속 이슈로 분리**한다(실제 xterm
-  인스턴스를 쓰는 별도 harness 가 선행 작업).
+  cursor 상태도 보존한다는 회귀, (7) 다섯 실패 원인이 각각 자기 카운터에만 들어간다는 검증을
+  담당한다. (5)(6)(7) 은 모두 "전체 재부착"이라는 같은 가시적 결과로 끝나므로 attach 호출 수만
+  보는 단정으로는 오분류를 잡을 수 없다.
+- **현 harness 로 검증할 수 없는 주장 두 개**는 후속 이슈 #605(실제 xterm 인스턴스를 쓰는 셀 격자
+  harness)로 분리한다. 데스크톱 터미널 테스트가 xterm 을 mock 하므로 (a) "차분 렌더 프레임
+  시퀀스가 복구 뒤 원래 화면과 셀 단위로 같아진다", (b) "복구 구간 안의 `?2026l` 이 파서를 타고
+  래치를 닫는다" 둘 다 지금은 단정할 수 없다. mock 에서는 write 가 파서에 닿지 않아 CSI handler 를
+  직접 호출해야 하고, 그러면 "핸들러를 부르면 래치가 닫힌다"는 동어반복만 검증된다. 현재 회귀
+  테스트가 실제로 고정하는 것은 "복구가 래치를 미리 닫지도, 닫을 수 없게 만들지도 않는다" 이다.
 - **실기 스트레스에서 복구 경로는 한 번도 발화하지 않았다.** dev 인스턴스(19281) 실측: base64
   폭주 약 30 MB(ring wrap), `yes` 2 pane 동시 25초 + 프론트 동기 버퍼 덤프 120회, 폭주 중 resize
   12회 + 워크스페이스 flip 3회 — 세 시나리오 모두 gap 0, `repair`/`ringEscalation`/
