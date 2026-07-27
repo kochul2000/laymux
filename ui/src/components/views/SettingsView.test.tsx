@@ -132,6 +132,19 @@ describe("SettingsView", () => {
       act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
       expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
     });
+
+    it("does not replay the target after the settings modal is closed and reopened", () => {
+      act(() => useUiStore.getState().openSettingsModal());
+      act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
+      const first = render(<SettingsView />);
+      expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
+
+      first.unmount();
+      act(() => useUiStore.getState().closeSettingsModal());
+
+      render(<SettingsView />);
+      expect(screen.queryByTestId("fe-padding-top")).not.toBeInTheDocument();
+    });
   });
 
   it("requires an explicit terminal profile for each extension viewer", async () => {

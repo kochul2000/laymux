@@ -496,7 +496,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `open_settings` | `ui.openSettings` | Settings 모달 열기 |
 | `close_settings` | `ui.closeSettings` | Settings 모달 닫기 |
 | `toggle_settings` | `ui.toggleSettings` | Settings 모달 토글 |
-| `navigate_settings` | `ui.navigateSettings` | Settings 내부 섹션 이동. `uiStore.settingsNavTarget` 에 요청을 남기고, `SettingsView` 는 이 값을 활성 섹션으로 **파생**한다(로컬 state 복사 없음). 사용자가 사이드바에서 섹션을 직접 고르면 target 이 `null` 로 해제되고 그때부터 로컬 선택이 이긴다 |
+| `navigate_settings` | `ui.navigateSettings` | Settings 내부 섹션 이동 |
 | `toggle_remote_access` | `ui.toggleRemoteAccess` | Remote Access 모달 토글 |
 | `open_remote_access` | `ui.openRemoteAccess` | Remote Access 모달 열기 |
 | `close_remote_access` | `ui.closeRemoteAccess` | Remote Access 모달 닫기 |

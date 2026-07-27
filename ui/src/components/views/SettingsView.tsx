@@ -2,6 +2,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   createContext,
   useContext,
   useCallback,
@@ -1868,10 +1869,16 @@ function RemoteSection() {
   // Mirror the latest dirty state into a ref so async cloud callbacks (which
   // capture the value at click time) branch on the current draft state after a
   // long-running OAuth await instead of a stale closure snapshot. The mirror is
-  // written from an effect, never during render: refs are not render input, and
-  // every reader here runs after an await, long past the commit.
+  // written from an effect, never during render: refs are not render input.
+  //
+  // `useLayoutEffect`, not `useEffect`: layout effects run synchronously inside
+  // the same commit, before passive effects and before any DOM event or async
+  // continuation can observe the new UI. A passive effect would leave a window
+  // in which anything running during the commit phase (this component's or a
+  // child's layout effect) still reads the previous value. The cost is nil and
+  // it matches the guarantee the render-phase write used to give.
   const remoteDraftChangedRef = useRef(remoteDraftChanged);
-  useEffect(() => {
+  useLayoutEffect(() => {
     remoteDraftChangedRef.current = remoteDraftChanged;
   }, [remoteDraftChanged]);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
@@ -3891,7 +3898,9 @@ export function SettingsView() {
   // lives in the ui store and is *derived* here rather than copied into local
   // state by an effect — mirroring would need a setState-in-effect cascade and
   // would split the "which section is open" truth across two owners. The
-  // external target wins until the user picks a section, which releases it.
+  // external target wins until the user picks a section, which releases it;
+  // closing the settings modal releases it too (see `closeSettingsPatch`), so
+  // reopening never replays a stale request.
   const activeNav = settingsNavTarget ?? navChoice;
   const setActiveNav = (id: string) => {
     setNavChoice(id);
@@ -3936,9 +3945,16 @@ export function SettingsView() {
     dirtySetRef.current.delete(id);
     setDirty(dirtySetRef.current.size > 0);
   }, []);
-  // Every member is stable (useCallback with no deps, or a ref object), so this
-  // memo never re-creates — the context value keeps a single identity without
-  // parking it in a ref and reading `.current` during render.
+  // Context value for the section draft registry. Every member is stable today
+  // (useCallback with no deps, or a ref object), so in practice this memo runs
+  // once and the context keeps a single identity — without parking the object
+  // in a ref and reading `.current` during render.
+  //
+  // The deps are listed rather than left empty on purpose: an empty array would
+  // assert stability that only `exhaustive-deps` suppression could express, and
+  // would silently serve a stale closure if one of these ever grows a dep. With
+  // the deps listed, a member turning unstable costs a context re-creation
+  // (children re-render) instead of a wrong callback — a loud, correct failure.
   const draftCtx = useMemo<SettingsDraftCtx>(
     () => ({
       registerFlush,
