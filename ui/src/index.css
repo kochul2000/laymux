@@ -514,9 +514,13 @@
 
 /* `.xterm-cursor` is the DOM renderer's cursor element. Under the WebGL addon the
    cursor is drawn into the canvas and these rules do nothing — but `onContextLoss`
-   disposes the addon and xterm falls back to the DOM renderer, where they are what
-   keeps the native cursor hidden. Not dead code. (The `.xterm-cursor-layer` selector
-   next to them *was* dead: the canvas renderer it belonged to is gone from xterm 6.) */
+   disposes the addon and xterm falls back to the DOM renderer, where they are a
+   second line of defence. Not dead code. (The `.xterm-cursor-layer` selector next
+   to them *was* dead: the canvas renderer it belonged to is gone from xterm 6.)
+   Since issue #598 the primary suppression is the renderer gate in
+   `native-cursor-suppression.ts`, which covers both renderers and cannot be
+   overridden by the application. The sync-output rule below is a different
+   condition and has no gate equivalent. */
 .terminal-sync-output-active .xterm-cursor {
   opacity: 0 !important;
 }
