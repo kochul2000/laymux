@@ -389,6 +389,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - IP allowlist 거절 응답은 laymux 가 관측한 클라이언트 주소를 포함한다: `{ "error": "... client IP: <ip>", "clientIp": "<ip>" }`
 - **등록되지 않은 경로는 404** 다. Automation 라우터와 remote 라우터를 merge 한 뒤 서버 전체가 명시적 fallback 하나를 소유하며, 응답은 `{ "error": "no such route: <METHOD> <path>", "method", "path", "docs": "/api/v1/docs" }` 다. 라우트 인증 게이트가 미등록 경로를 대신 답하면 경로 오타가 인증 실패로 오진된다([#591](https://github.com/kochul2000/laymux/issues/591)) — `axum::Router::layer` 는 fallback 까지 감싸고 `merge` 는 그 fallback 을 합쳐진 라우터에 넘기므로, 라우트 인증은 반드시 `route_layer` 로 붙인다.
 - 이 404 fallback 에도 IP allowlist 는 그대로 적용한다. IP allowlist 는 라우트 인증이 아니라 네트워크 경계이므로, 허용 밖 peer 가 404/401 차이로 라우트 존재 여부를 스캔하지 못하게 한다. 즉 허용 밖 peer 는 미등록 경로에서도 403 을 받는다.
+- 합성 라우터는 fallback 을 등록한 뒤 최외곽에 `CorsLayer`를 적용한다. 따라서 등록 라우트뿐 아니라 공용 404와 allowlist 403도 `Access-Control-Allow-Origin`을 포함해 브라우저·WebView가 JSON 본문을 읽을 수 있다([ADR-0070](../adr/0070-unmatched-route-boundary-ownership.md)).
 
 ### 12.7 내장 MCP 서버
 
@@ -874,7 +875,8 @@ src-tauri/src/
 │   ├── semantic_validation.rs # MCP/Automation 쓰기용 엄격 의미 검증
 │   └── (목표) io.rs · migration.rs · memo.rs  # 아직 분할 전 — 점진 전환 대상
 ├── automation_server/        # Automation HTTP API (axum)
-│   ├── mod.rs                # 서버 시작, 라우터 빌드, IP allowlist 미들웨어
+│   ├── mod.rs                # 서버 시작, Automation 라우트 빌드
+│   ├── surface_router.rs     # 표면 합성, 공용 fallback, IP allowlist, 최외곽 CORS
 │   ├── types.rs              # 요청/응답 타입, REGISTERED_ROUTES
 │   ├── handlers_backend.rs   # 백엔드 직접 처리 핸들러
 │   ├── handlers_bridge.rs    # 프론트엔드 브릿지 핸들러
