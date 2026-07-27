@@ -611,13 +611,6 @@ export function TerminalView({
   const remoteControlStatusKnownRef = useRef(false);
   const [localControlAvailable, setLocalControlAvailable] = useState(false);
   const localControlAvailableRef = useRef(false);
-  // Readiness records *which* terminal published it rather than a bare boolean.
-  // Switching `instanceId` then reads as "not ready" by derivation, so no reset
-  // effect is needed — an effect that seeds state is what cascades renders.
-  const [outputProtocolReadyInstanceId, setOutputProtocolReadyInstanceId] = useState<string | null>(
-    null,
-  );
-  const outputProtocolReady = outputProtocolReadyInstanceId === instanceId;
   const outputProtocolReadyRef = useRef(false);
   // Input mode and the composer draft live in a module-level runtime store so a
   // remount keeps them (`terminal-input-composer-state.ts`). `useSyncExternalStore`
@@ -669,14 +662,25 @@ export function TerminalView({
 
   const storeComposerDraft = (next: ComposerDraftState, terminalId = instanceId) => {
     const stored = writeRuntimeComposerDraft(terminalId, next);
-    // The store subscription above normally mirrors this synchronously. Keep the
-    // direct write for the tiny pre-subscription window on the first render.
+    // Handlers that chain edits — history recall, the composition commit — read
+    // `composerDraftRef` again before React can re-render, so this pane's ref has
+    // to be current the instant the write returns. The store subscription above
+    // does mirror synchronously once React has subscribed, which makes this write
+    // usually redundant; it stays because the guarantee belongs to the writer, not
+    // to whether a subscription happens to be attached (`useSyncExternalStore`
+    // subscribes from a passive effect, so the first commit has a window without
+    // one). Guarded on the id because callers may target another terminal.
     if (currentInstanceIdRef.current === terminalId) composerDraftRef.current = stored;
   };
 
   const changeInputMode = (next: InputMode) => {
     // Writing the runtime store notifies this component's own
-    // `useSyncExternalStore` subscription, which is what re-renders it.
+    // `useSyncExternalStore` subscription, which is what re-renders it. The
+    // notification only *schedules* that render, though, and the input-mode
+    // listener carries no value (unlike the draft one), so `inputModeRef` would
+    // stay stale until the next commit. The toggle handler decides the next mode
+    // from `inputModeRef.current`, so it is assigned here for readers that run
+    // before the commit lands.
     inputModeRef.current = writeRuntimeInputMode(instanceId, next);
     writeDesktopInputModePreference(next);
   };
@@ -880,8 +884,10 @@ export function TerminalView({
 
   // Non-render bookkeeping that has to follow `instanceId`. The rendered values
   // are re-seeded by the external-store reads above, so nothing here sets state.
+  // `inputModeRef` is deliberately absent: the dependency-free layout effect
+  // below mirrors it on *every* commit, and layout effects flush before passive
+  // ones in the same commit, so it is already current by the time this runs.
   useEffect(() => {
-    inputModeRef.current = readRuntimeInputMode(instanceId);
     historyNavRef.current = { index: null, stash: "" };
     composerDraftRef.current = readRuntimeComposerDraft(instanceId);
     outputProtocolReadyRef.current = false;
@@ -920,6 +926,16 @@ export function TerminalView({
   }
   const [readyGeneration, setReadyGeneration] = useState(-1);
   const readyGenerationRef = useRef(-1);
+  // Output-protocol readiness records *which xterm generation* published it
+  // rather than a bare boolean, so a terminal swap reads as "not ready" by
+  // derivation and needs no reset effect (an effect that seeds state is what
+  // cascades renders). It has to be the generation, not `instanceId`: a
+  // profile-only switch keeps the id, and an A → B → A round trip returns to
+  // the same id — both would let the new terminal inherit the previous one's
+  // ready state before its first paint, exactly the trap the counter above
+  // exists to avoid.
+  const [outputProtocolReadyGeneration, setOutputProtocolReadyGeneration] = useState(-1);
+  const outputProtocolReady = outputProtocolReadyGeneration === terminalGeneration;
   // Issue #349: floating "jump to bottom" button. Shown while the user has
   // scrolled up into the scrollback; hidden once pinned to the live bottom.
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -3726,9 +3742,9 @@ export function TerminalView({
     };
     const setOutputReady = (ready: boolean) => {
       outputProtocolReadyRef.current = ready;
-      // Readiness is published as the owning terminal id, so a later switch to
-      // another `instanceId` reads as "not ready" without a reset effect.
-      if (!cancelled) setOutputProtocolReadyInstanceId(ready ? instanceId : null);
+      // Readiness is published as the owning xterm generation, so any later
+      // rebuild reads as "not ready" without a reset effect.
+      if (!cancelled) setOutputProtocolReadyGeneration(ready ? terminalGeneration : -1);
     };
     const scheduleOutputReattach = () => {
       if (cancelled || outputAttachRetryTimer !== undefined) return;

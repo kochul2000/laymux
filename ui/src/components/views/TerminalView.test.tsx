@@ -8688,6 +8688,14 @@ describe("TerminalView desktop input composer", () => {
     expect(screen.getByTestId("terminal-input-composer-t-swap-a-textarea")).toHaveValue(
       "draft for A",
     );
+    // …but the readiness that the *first* A terminal published must not carry
+    // over: this is a brand new xterm whose output protocol has not attached.
+    // Keying readiness by `instanceId` alone would report ready here (the draft
+    // is non-empty, so `data-can-send` is gated purely by readiness).
+    expect(screen.getByTestId("terminal-input-composer-t-swap-a")).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
   });
 
   it("keeps the desktop draft but disables editing while Remote owns the PTY", async () => {
