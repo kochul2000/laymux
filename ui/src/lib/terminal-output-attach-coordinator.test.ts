@@ -13,28 +13,45 @@ function attachment(snapshotStartSeq: number, text: string): TerminalOutputAttac
   return {
     state: {
       version: 1,
+      generation: 7,
       snapshotStartSeq,
       snapshotSeq: snapshotStartSeq + snapshot.length,
+      sourceStartSeq: snapshotStartSeq,
+      sourceSeq: snapshotStartSeq + snapshot.length,
+      snapshotKind: "raw",
       protocolRevision: 2,
       modes: { bracketedPaste: true },
+      geometry: { revision: 3, cols: 80, rows: 24 },
     },
     snapshot,
+  };
+}
+
+function delta(seqStart: number, text: string, geometryRevision = 3) {
+  const data = bytes(text);
+  return {
+    generation: 7,
+    seqStart,
+    seqEnd: seqStart + data.length,
+    data,
+    geometry: { revision: geometryRevision, cols: 80, rows: 24 },
   };
 }
 
 describe("TerminalOutputAttachCoordinator", () => {
   it("drops a buffered delta already covered by the snapshot", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
-    coordinator.ingest({ seqStart: 4, seqEnd: 7, data: bytes("def") });
+    coordinator.ingest(delta(4, "def"));
     expect(coordinator.completeAttach(attachment(0, "abcdefg"))).toEqual({
       kind: "duplicate",
       chunks: [],
+      segments: [],
     });
   });
 
   it("keeps only a buffered delta suffix crossing snapshotSeq", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
-    coordinator.ingest({ seqStart: 4, seqEnd: 9, data: bytes("efghi") });
+    coordinator.ingest(delta(4, "efghi"));
     const result = coordinator.completeAttach(attachment(0, "abcdef"));
     expect(result.kind).toBe("apply");
     expect(new TextDecoder().decode(result.chunks[0])).toBe("ghi");
@@ -42,8 +59,8 @@ describe("TerminalOutputAttachCoordinator", () => {
 
   it("sorts buffered deltas and applies an exact contiguous stream", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
-    coordinator.ingest({ seqStart: 5, seqEnd: 7, data: bytes("fg") });
-    coordinator.ingest({ seqStart: 3, seqEnd: 5, data: bytes("de") });
+    coordinator.ingest(delta(5, "fg"));
+    coordinator.ingest(delta(3, "de"));
     const result = coordinator.completeAttach(attachment(0, "abc"));
     expect(result.chunks.map((chunk) => new TextDecoder().decode(chunk))).toEqual(["de", "fg"]);
   });
@@ -51,7 +68,7 @@ describe("TerminalOutputAttachCoordinator", () => {
   it("reports a gap instead of silently clamping", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
     coordinator.completeAttach(attachment(0, "abc"));
-    expect(coordinator.ingest({ seqStart: 5, seqEnd: 6, data: bytes("f") })).toMatchObject({
+    expect(coordinator.ingest(delta(5, "f"))).toMatchObject({
       kind: "gap",
       expectedSeq: 3,
       actualSeq: 5,
@@ -60,7 +77,7 @@ describe("TerminalOutputAttachCoordinator", () => {
 
   it("rejects malformed ranges and unsupported versions", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
-    expect(() => coordinator.ingest({ seqStart: 0, seqEnd: 2, data: bytes("x") })).toThrow(
+    expect(() => coordinator.ingest({ ...delta(0, "x"), seqEnd: 2 })).toThrow(
       "invalid terminal output delta range",
     );
     expect(() =>
@@ -71,6 +88,32 @@ describe("TerminalOutputAttachCoordinator", () => {
     ).toThrow("unsupported terminal output protocol");
   });
 
+  it("returns generation and geometry on each exact applied segment", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+
+    const result = coordinator.ingest(delta(3, "def", 4));
+
+    expect(result.segments).toEqual([
+      {
+        generation: 7,
+        seqStart: 3,
+        seqEnd: 6,
+        data: bytes("def"),
+        geometry: { revision: 4, cols: 80, rows: 24 },
+      },
+    ]);
+  });
+
+  it("rejects a delta from another generation", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+
+    expect(() => coordinator.ingest({ ...delta(3, "d"), generation: 8 })).toThrow(
+      "terminal output generation changed",
+    );
+  });
+
   it.each([
     ["negative protocol revision", { protocolRevision: -1 }],
     ["fractional protocol revision", { protocolRevision: 1.5 }],
@@ -79,6 +122,9 @@ describe("TerminalOutputAttachCoordinator", () => {
     ["null modes", { modes: null }],
     ["array modes", { modes: [] }],
     ["non-boolean bracketed paste", { modes: { bracketedPaste: "true" } }],
+    ["missing geometry", { geometry: undefined }],
+    ["zero columns", { geometry: { revision: 0, cols: 0, rows: 24 } }],
+    ["screen snapshot on the raw desktop attach path", { snapshotKind: "screen" }],
   ])("rejects malformed attach metadata: %s", (_name, statePatch) => {
     const coordinator = new TerminalOutputAttachCoordinator();
     coordinator.completeAttach(attachment(0, "old"));

@@ -86,6 +86,7 @@ ADR 이 필요한 대표 기준:
 | [0066](0066-bundled-conpty-runtime.md) | Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 실행 | Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md) |
 | [0067](0067-bundled-conpty-output-and-staging-contract.md) | 번들 ConPTY의 출력·배치 계약을 하나로 고정 (resize repaint filter 제거) | Proposed |
 | [0068](0068-remote-terminal-query-single-responder.md) | Remote 터미널 query 응답자는 PC xterm 하나로 제한한다 | Accepted |
+| [0069](0069-remote-render-checkpoint-attach.md) | Remote attach는 raw tail이 아니라 xterm 화면 체크포인트에서 시작 | Proposed |
 
 ## 새 ADR 추가
 

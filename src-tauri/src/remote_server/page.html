@@ -1825,6 +1825,11 @@
         let terminalSelectionRevision = 0;
         let terminalOutputWriteChain = Promise.resolve();
         let terminalOutputGeneration = 0;
+        // While an output attach is being prepared, keep the browser grid at
+        // the exact geometry that was synchronously sent through /resize.
+        // Deferred rAF/ResizeObserver fits resume only after the checkpoint has
+        // been replayed at its authoritative source geometry.
+        let outputAttachGeometryGeneration = null;
         // Raised around replay writes (snapshot / reset / synthetic mode) so
         // any onData xterm emits while parsing them is swallowed rather than
         // forwarded to the PTY. Known query replies are already suppressed at
@@ -3892,6 +3897,7 @@
 
         function stopSocket(resetReconnect = true) {
           terminalOutputGeneration += 1;
+          outputAttachGeometryGeneration = null;
           stopOutputReconnect(resetReconnect);
           if (resetReconnect) clearTransientConnectionNotice("output");
           composerReady = false;
@@ -5057,7 +5063,7 @@
           }, delayMs);
         }
 
-        function openOutput(terminalId, options = {}) {
+        async function openOutput(terminalId, options = {}) {
           const terminalInfo = terminalInfoById.get(terminalId);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
           const reconnecting = options.reconnect === true;
@@ -5077,10 +5083,53 @@
           renderInputSurface();
           updateTerminalControls();
           lastResizeKey = "";
+
+          // Establish the Remote grid as the PTY geometry before asking the
+          // desktop renderer for a checkpoint. resizeTerminal waits for the
+          // physical resize, so a geometry-only reflow or the resulting TUI
+          // redraw is sequenced ahead of the snapshot target in both Direct
+          // and Cloud paths.
+          fitTerminal(false);
+          stopResizeFlush();
+          const attachCols = term.cols;
+          const attachRows = term.rows;
+          outputAttachGeometryGeneration = outputGeneration;
+          try {
+            await resizeTerminal(terminalId, outputLeaseId, attachCols, attachRows);
+          } catch (err) {
+            if (
+              outputGeneration === terminalOutputGeneration &&
+              outputLeaseId === leaseId &&
+              activeTerminalId === terminalId
+            ) {
+              outputAttachGeometryGeneration = null;
+              if (err.status === 404) {
+                setStatus("Terminal session ended. Refreshing navigation...", true);
+                loadNavigation(null).catch((loadError) =>
+                  setStatus(`Refresh failed: ${loadError.message}`, true)
+                );
+              } else {
+                setStatus(`Resize before output attach failed: ${err.message}`, true);
+                scheduleOutputReconnect(terminalId, outputLeaseId);
+              }
+            }
+            return;
+          }
+          if (
+            outputGeneration !== terminalOutputGeneration ||
+            outputLeaseId !== leaseId ||
+            activeTerminalId !== terminalId
+          ) {
+            return;
+          }
+          lastResizeKey = `${terminalId}:${attachCols}x${attachRows}`;
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}`;
           const outputSocket = new WebSocket(url);
           let outputTerminalMissing = false;
-          let resetOnNextPayload = reconnecting;
+          // Keep the previous surface visible until the replacement snapshot
+          // has actually arrived. A checkpoint bridge/reconnect delay must not
+          // turn a workspace switch into an eagerly blank terminal.
+          let resetOnNextPayload = true;
           let pendingOutputHeader = null;
           let outputPhase = "awaiting-snapshot";
           let expectedOutputSeq = null;
@@ -5155,7 +5204,19 @@
             return terminalOutputWriteChain;
           };
 
-          if (!reconnecting) queueTerminalReset();
+          const queueTerminalGeometry = (geometry) => {
+            terminalOutputWriteChain = terminalOutputWriteChain.then(() => {
+              if (
+                !outputProtocolFailed &&
+                outputGeneration === terminalOutputGeneration &&
+                socket === outputSocket &&
+                (term.cols !== geometry.cols || term.rows !== geometry.rows)
+              ) {
+                term.resize(geometry.cols, geometry.rows);
+              }
+            });
+            return terminalOutputWriteChain;
+          };
 
           // Old hosts may still stream unsequenced bytes. Keep them viewable so
           // reconnect remains graceful, but never mark structured input ready:
@@ -5165,7 +5226,12 @@
               queueTerminalReset();
               resetOnNextPayload = false;
             }
-            queueTerminalWrite(payload);
+            queueTerminalWrite(payload).then(() => {
+              if (outputAttachGeometryGeneration === outputGeneration) {
+                outputAttachGeometryGeneration = null;
+                scheduleTerminalFit(true);
+              }
+            });
           };
 
           const acceptOutputHeader = (header) => {
@@ -5206,6 +5272,37 @@
                 failOutputProtocol("invalid snapshot attach state");
                 return;
               }
+              // Extended state is mandatory for renderer checkpoints. Accept a
+              // pre-extension raw V1 state only as the documented legacy path;
+              // it replays at the geometry synchronously established above.
+              const hasExtendedAttachState =
+                state.generation !== undefined ||
+                state.sourceStartSeq !== undefined ||
+                state.sourceSeq !== undefined ||
+                state.snapshotKind !== undefined ||
+                state.geometry !== undefined;
+              if (
+                hasExtendedAttachState &&
+                (
+                  !Number.isSafeInteger(state.generation) ||
+                  state.generation < 0 ||
+                  !Number.isSafeInteger(state.sourceStartSeq) ||
+                  !Number.isSafeInteger(state.sourceSeq) ||
+                  state.sourceStartSeq < 0 ||
+                  state.sourceSeq < state.sourceStartSeq ||
+                  (state.snapshotKind !== "raw" && state.snapshotKind !== "screen") ||
+                  !state.geometry ||
+                  !Number.isSafeInteger(state.geometry.revision) ||
+                  state.geometry.revision < 0 ||
+                  !Number.isSafeInteger(state.geometry.cols) ||
+                  state.geometry.cols <= 0 ||
+                  !Number.isSafeInteger(state.geometry.rows) ||
+                  state.geometry.rows <= 0
+                )
+              ) {
+                failOutputProtocol("invalid extended snapshot attach state");
+                return;
+              }
               pendingOutputHeader = { ...header, trimPrefix: 0 };
               return;
             }
@@ -5239,6 +5336,11 @@
             if (header.phase === "snapshot") {
               outputPhase = "attached";
               expectedOutputSeq = header.seqEnd;
+              // SerializeAddon output is geometry-sensitive: replay it only at
+              // the exact grid that produced it. The pre-attach /resize should
+              // already make these equal; this is the fail-safe for a racing
+              // viewport or an older host.
+              if (header.state.geometry) queueTerminalGeometry(header.state.geometry);
               if (resetOnNextPayload) {
                 queueTerminalReset();
                 resetOnNextPayload = false;
@@ -5261,8 +5363,12 @@
                 // the fit/reflow race left the viewport.
                 term.scrollToBottom();
                 updateScrollToBottomButton(term);
+                if (outputAttachGeometryGeneration === outputGeneration) {
+                  outputAttachGeometryGeneration = null;
+                }
                 composerReady = true;
                 updateComposerControls();
+                scheduleTerminalFit(true);
                 focusCurrentInputSurface();
               });
               return;
@@ -5285,7 +5391,6 @@
                 `Connected to ${terminalId}`;
               clearTransientConnectionNotice("output", attachTitle);
               if (!reconnecting) setStatus(attachTitle);
-              scheduleTerminalFit(true);
               focusCurrentInputSurface();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
@@ -5326,6 +5431,9 @@
           outputSocket.onclose = () => {
             if (socket === outputSocket) {
               socket = null;
+              if (outputAttachGeometryGeneration === outputGeneration) {
+                outputAttachGeometryGeneration = null;
+              }
               composerReady = false;
               updateComposerControls();
               if (outputTerminalMissing) {
@@ -6511,6 +6619,7 @@
 
         function fitTerminal(sendResize = true) {
           if (!terminal || !fitAddon) return;
+          if (outputAttachGeometryGeneration !== null) return;
           const rect = terminalHost.getBoundingClientRect();
           if (rect.width < 20 || rect.height < 20) return;
           // PTY rows/cols are global state (ADR-0015) and Codex-class TUIs
@@ -6575,6 +6684,7 @@
         }
 
         function queueResize(cols, rows) {
+          if (outputAttachGeometryGeneration !== null) return;
           if (!leaseId || !activeTerminalId || !Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
           const resizeTerminalId = activeTerminalId;
           const resizeLeaseId = leaseId;

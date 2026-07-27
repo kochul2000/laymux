@@ -100,10 +100,15 @@ export async function writeTerminalInput(id: string, text: string, submit: boole
 
 export interface TerminalAttachState {
   version: number;
+  generation: number;
   snapshotStartSeq: number;
   snapshotSeq: number;
+  sourceStartSeq: number;
+  sourceSeq: number;
+  snapshotKind: "raw";
   protocolRevision: number;
   modes: { bracketedPaste: boolean };
+  geometry: { revision: number; cols: number; rows: number };
 }
 
 export interface TerminalOutputAttachmentPayload {
@@ -112,9 +117,11 @@ export interface TerminalOutputAttachmentPayload {
 }
 
 export interface TerminalOutputDeltaPayload {
+  generation: number;
   seqStart: number;
   seqEnd: number;
   data: number[];
+  geometry: { revision: number; cols: number; rows: number };
 }
 
 export async function attachTerminalOutput(id: string): Promise<TerminalOutputAttachmentPayload> {

@@ -1,3 +1,8 @@
+import type {
+  TerminalRenderCheckpoint,
+  TerminalRenderCheckpointTarget,
+} from "./terminal-render-checkpoint";
+
 type SerializeFn = () => string;
 
 const registry = new Map<string, SerializeFn>();
@@ -12,6 +17,30 @@ export function unregisterTerminalSerializer(paneId: string): void {
 
 export function getTerminalSerializeMap(): ReadonlyMap<string, SerializeFn> {
   return new Map(registry);
+}
+
+export type TerminalRenderCheckpointProvider = (
+  target: TerminalRenderCheckpointTarget,
+  maxBytes: number,
+) => Promise<TerminalRenderCheckpoint>;
+
+const renderCheckpointRegistry = new Map<string, TerminalRenderCheckpointProvider>();
+
+export function registerTerminalRenderCheckpointProvider(
+  terminalId: string,
+  provider: TerminalRenderCheckpointProvider,
+): void {
+  renderCheckpointRegistry.set(terminalId, provider);
+}
+
+export function unregisterTerminalRenderCheckpointProvider(terminalId: string): void {
+  renderCheckpointRegistry.delete(terminalId);
+}
+
+export function getTerminalRenderCheckpointProvider(
+  terminalId: string,
+): TerminalRenderCheckpointProvider | undefined {
+  return renderCheckpointRegistry.get(terminalId);
 }
 
 /**

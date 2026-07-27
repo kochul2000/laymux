@@ -128,12 +128,15 @@ import { loadTerminalOutputCache } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
+  registerTerminalRenderCheckpointProvider,
+  unregisterTerminalRenderCheckpointProvider,
   registerTerminalInspector,
   registerTerminalScroller,
   unregisterTerminalInspector,
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
+import { TerminalRenderCheckpointModel } from "@/lib/terminal-render-checkpoint";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
@@ -3281,6 +3284,10 @@ export function TerminalView({
     let outputAttachInFlight = false;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
+    const renderCheckpointModel = new TerminalRenderCheckpointModel();
+    registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
+      renderCheckpointModel.capture(target, maxBytes),
+    );
     let terminalOutputWriteChain = Promise.resolve();
     let inAltScreen = false;
     let recentOutputTail = "";
@@ -3730,6 +3737,8 @@ export function TerminalView({
         ]);
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
+        await renderCheckpointModel.attach(attachment);
+        if (!isCurrentAttach()) return;
 
         terminalOutputWriteChain = terminalOutputWriteChain.then(async () => {
           if (!isCurrentAttach()) return;
@@ -3768,14 +3777,22 @@ export function TerminalView({
             scheduleOutputReattach();
             return;
           }
-          for (let index = 0; index < buffered.chunks.length; index += 1) {
-            const chunk = buffered.chunks[index];
-            if (index === buffered.chunks.length - 1) {
+          // Queue the whole buffered prefix synchronously. Listener callbacks
+          // can fire between awaits; enqueueing one-by-one would let a newer
+          // live delta jump ahead of the second buffered segment in the
+          // checkpoint model even though the visible xterm stayed ordered.
+          const checkpointWrites = buffered.segments.map((segment) =>
+            renderCheckpointModel.apply(segment),
+          );
+          for (let index = 0; index < buffered.segments.length; index += 1) {
+            const segment = buffered.segments[index];
+            await checkpointWrites[index];
+            if (index === buffered.segments.length - 1) {
               await new Promise<void>((resolve) =>
-                processLiveTerminalOutput(chunk, resolve, resolve),
+                processLiveTerminalOutput(segment.data, resolve, resolve),
               );
             } else {
-              processLiveTerminalOutput(chunk);
+              processLiveTerminalOutput(segment.data);
             }
             if (!isCurrentAttach()) return;
           }
@@ -3813,8 +3830,11 @@ export function TerminalView({
         scheduleOutputReattach();
         return;
       }
-      for (const data of result.chunks) {
-        processLiveTerminalOutput(data);
+      for (const segment of result.segments) {
+        void renderCheckpointModel.apply(segment).catch((error) => {
+          console.warn("[TerminalView] render checkpoint update failed:", error);
+        });
+        processLiveTerminalOutput(segment.data);
       }
     }).then((unlisten) => {
       if (cancelled) {
@@ -4220,12 +4240,14 @@ export function TerminalView({
         unregisterTerminalScroller(paneId);
       }
       unregisterTerminalSerializer(instanceId);
+      unregisterTerminalRenderCheckpointProvider(instanceId);
       unregisterTerminalInspector(instanceId);
       unregisterTerminalScroller(instanceId);
       unregisterAtlasRebuilder(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
+      renderCheckpointModel.dispose();
       unregisterInstance(instanceId);
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT

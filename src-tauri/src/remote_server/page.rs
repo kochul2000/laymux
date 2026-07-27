@@ -860,10 +860,21 @@ mod tests {
         assert!(output_stream.contains("scheduleOutputReconnect(terminalId, outputLeaseId);"));
         assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
         assert!(output_stream.contains("scheduleTransientConnectionNotice"));
-        assert!(output_stream.contains("let resetOnNextPayload = reconnecting;"));
-        assert!(output_stream.contains("if (!reconnecting) queueTerminalReset();"));
+        assert!(output_stream.contains("let resetOnNextPayload = true;"));
+        assert!(!output_stream.contains("if (!reconnecting) queueTerminalReset();"));
         assert!(output_stream.contains("if (resetOnNextPayload)"));
         assert!(output_stream.contains("queueTerminalReset();"));
+        let resize_before_attach = output_stream
+            .find("await resizeTerminal(terminalId, outputLeaseId, attachCols, attachRows);")
+            .unwrap();
+        let websocket_attach = output_stream
+            .find("const outputSocket = new WebSocket(url);")
+            .unwrap();
+        assert!(resize_before_attach < websocket_attach);
+        assert!(output_stream.contains("queueTerminalGeometry(header.state.geometry);"));
+        assert!(output_stream.contains("Number.isSafeInteger(state.geometry.cols)"));
+        assert!(html.contains("if (outputAttachGeometryGeneration !== null) return;"));
+        assert!(output_stream.contains("if (err.status === 404)"));
         assert!(output_stream.contains("terminalOutputGeneration"));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));

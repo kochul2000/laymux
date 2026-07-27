@@ -215,10 +215,11 @@ pub fn create_terminal_session(
         // Install one generation-scoped protocol/ring session before PTY
         // output can arrive. Any error before `commit()` rolls this exact
         // generation back without touching a replacement session.
-        terminal_output::register_terminal_output_session(
+        terminal_output::register_terminal_output_session_with_geometry(
             &state.terminal_protocol_states,
             &state.output_buffers,
             &id,
+            terminal_output::TerminalGeometry::new(session.config.cols, session.config.rows)?,
         )?
     };
     let output_session = output_registration.session();
@@ -887,6 +888,16 @@ pub fn resize_terminal_inner(
         session.config.cols = cols;
         session.config.rows = rows;
     }
+    // Sequence PTY geometry against output callbacks before asking the OS to
+    // resize. The first callback that wins after this boundary carries the new
+    // geometry, so rendererless Remote checkpoint xterms resize before parsing
+    // those bytes.
+    terminal_output::update_terminal_output_geometry(
+        &state.terminal_protocol_states,
+        id,
+        cols,
+        rows,
+    )?;
 
     let handle = state.pty_handles.lock_or_err()?.get(id).cloned();
     permit.ensure_current()?;
@@ -1614,11 +1625,14 @@ mod tests {
             .lock_or_err()
             .unwrap()
             .insert("t1".into(), test_session());
-        state
-            .terminal_protocol_states
-            .lock_or_err()
-            .unwrap()
-            .insert("t1".into(), terminal_output::new_protocol_gate());
+        terminal_output::register_terminal_output_session(
+            &state.terminal_protocol_states,
+            &state.output_buffers,
+            "t1",
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
         let written = Arc::new(Mutex::new(Vec::new()));
         state.pty_handles.lock_or_err().unwrap().insert(
             "t1".into(),
@@ -1665,6 +1679,19 @@ mod tests {
         let session = state.terminals.lock_or_err().unwrap();
         let session = session.get("t1").unwrap();
         assert_eq!((session.config.cols, session.config.rows), (120, 40));
+        assert_eq!(
+            terminal_output::terminal_render_checkpoint_target(
+                &state.terminal_protocol_states,
+                "t1"
+            )
+            .unwrap()
+            .geometry,
+            terminal_output::TerminalGeometry {
+                revision: 1,
+                cols: 120,
+                rows: 40,
+            }
+        );
         assert_eq!(
             &*written.lock().unwrap(),
             b"local-rawlocal-input\rremote-rawremote-input\r"
