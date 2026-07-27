@@ -89,7 +89,8 @@ ADR 이 필요한 대표 기준:
 | [0069](0069-remote-render-checkpoint-attach.md) | Remote attach는 raw tail이 아니라 xterm 화면 체크포인트에서 시작 | Accepted |
 | [0070](0070-unmatched-route-boundary-ownership.md) | 합성 라우터가 미등록 경로 fallback·최외곽 CORS·경계 적용 순서를 소유 | Accepted |
 | [0071](0071-pane-resize-single-boundary-owner.md) | Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다 (드래그·Automation 공용) | Accepted |
-| [0072](0072-native-cursor-renderer-level-suppression.md) | 네이티브 커서 숨김은 렌더러 게이트에서 한다 (배경색 위장·옵션 경합 폐기) | Accepted |
+| [0072](0072-terminal-output-gap-sequence-exact-repair.md) | output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다 | Accepted |
+| [0073](0073-native-cursor-renderer-level-suppression.md) | 네이티브 커서 숨김은 렌더러 게이트에서 한다 (배경색 위장·옵션 경합 폐기) | Accepted |
 
 ## 새 ADR 추가
 
