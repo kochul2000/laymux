@@ -150,6 +150,9 @@ async function waitForStreamAttachReset(): Promise<void> {
   // Captured before the await, not after: a gated handler whose promise outlives
   // its test would otherwise be recorded under whichever test is running when the
   // bail resolves, and `afterEach` would fail an innocent test by that name.
+  // A late bail still fails whichever test is running when it lands — vitest has no
+  // way to fail an already-finished test after the fact. What this name buys is that
+  // the message points at the culprit, which is what a human needs to fix it.
   const testAtGateEntry = currentTestNameForBail();
   let bail: ReturnType<typeof realSetTimeout> | undefined;
   try {
