@@ -69,12 +69,15 @@
 - Windows 자식은 in-box conhost 가 아니라 실행 파일 옆에 배치한 Microsoft ConPTY
   재배포본(`conpty.dll` + `OpenConsole.exe`)으로 뜬다. `portable-pty` 가
   `LoadLibrary("conpty.dll")` 로 사이드로드본을 kernel32 보다 먼저 찾으므로 PTY 코드에는
-  분기가 없다 — 벤더 트리는 `src-tauri/vendor/conpty/<version>/`, 배치는 `build.rs`
-  (dev·`cargo run` 용 `target/<profile>/`)와 `tauri.windows.conf.json` resources(설치본)가
-  맡는다. in-box conhost 는 자식이 보낸 `OSC 10/11` 색상 질의를 소비하고 응답하지 않아
-  WSL 안의 앱이 터미널 색을 알 방법이 없었다. 사이드로드본에서는 질의가 xterm 까지
-  도달하며, 같은 이유로 `CSI 6n`·`CSI c` 응답 주체도 conhost 가 아닌 xterm.js 다
-  ([ADR-0066](../adr/0066-bundled-conpty-runtime.md), issue #580).
+  분기가 없다. 벤더 트리 `src-tauri/vendor/conpty/<version>/`가 정본이고, `build.rs`가
+  dev·`cargo run`용 `target/<profile>/`과 installer용 `gen/conpty/`에 바이트가 정확히
+  같은 파일만 배치한다. build script 내부의 `tauri-build` resource 재복사는 제외하고
+  부모 Tauri CLI bundling만 `tauri.windows.conf.json` resource map을 사용한다. 지원하지
+  않는 Windows 아키텍처나 벤더 누락은 빌드 실패이며 in-box conhost로 조용히 폴백하지
+  않는다. in-box conhost는 자식이 보낸 `OSC 10/11` 색상 질의를 소비하고 응답하지 않아
+  WSL 안의 앱이 터미널 색을 알 방법이 없었다. 사이드로드본에서는 질의가 xterm까지
+  도달하며, 같은 이유로 `CSI 6n`·`CSI c` 응답 주체도 conhost가 아닌 xterm.js다
+  ([ADR-0067](../adr/0067-bundled-conpty-output-and-staging-contract.md), issue #580).
 
 ### 8.2 `lx` CLI
 
@@ -250,13 +253,13 @@ Remote xterm의 선택 파일 링크도 같은 FileViewer 권한 경계와 명�
 
 `FileViewer`의 외부 터미널 뷰어 root는 flex 부모 안에서 `min-width: 0`과 `flex: 1`을 유지해 초기 관찰 폭이 0으로 축소되지 않게 한다(#446). 이 폭이 0이면 `TerminalView`의 `ResizeObserver`가 세션 spawn 조건인 nonzero 분기에 진입하지 못해 vi 프로세스 자체가 시작되지 않는다. `PaneControlBar`의 root/content slot, `ViewRenderer`의 terminal wrapper, `TerminalView`의 최상위 wrapper도 모두 `min-width: 0`과 overflow clipping을 유지한다. xterm canvas의 이전 고정 폭이 flex item의 intrinsic minimum으로 역전파되면 pane이 좁아져도 관찰 대상 host가 줄지 않아 `ResizeObserver`와 `fit()`이 새 열 수를 계산하지 못하고, 오래된 넓은 canvas가 잘리면서 scrollback이 좌우에 반복된 것처럼 보인다. 각 flex 경계가 실제 pane 폭까지 줄어들어야 buffer reflow와 renderer 크기 갱신이 같은 geometry를 사용한다.
 
-Windows ConPTY는 폭 변경 뒤 현재 화면을 `ESC[?25l (ESC[8;<rows>;<cols>t)? ESC[H ... ESC[?25h` 프레임으로 다시 출력한다. xterm이 먼저 새 폭으로 scrollback을 reflow하면 이 프레임이 viewport 경계로 이동한 과거 행을 덮어쓰므로, 각 fit 직전 active normal buffer의 scrollback 존재 여부를 스냅샷으로 보존하고 열 수가 달라질 때 500ms resize repaint 탐색 창을 활성화한다. wider reflow가 얕은 scrollback의 `baseY`를 1에서 0으로 줄여도 fit 전 스냅샷을 사용한다. 필터는 PTY 청크 경계와 무관하게 직접 home 및 window-size 제어 시퀀스가 끼어 있는 start marker와 end marker를 스트리밍 탐지해 각 폭 변경에 대응하는 exact frame을 xterm write에서 제외하고 앞뒤 출력은 유지한다. 추가 폭 변경은 고유 arm token과 각 arm의 자체 deadline으로 누적하며, backend resize가 실패하면 그 token만 취소해 기존 arm의 창을 연장하거나 단축하지 않는다. 탐색 중인 split start 후보와 제거 중인 frame은 새 arm이 reset하지 않는다. start marker를 찾으면 청크로 분할된 end marker를 위해 별도의 500ms 완료 창을 시작한다. 불완전한 start marker 후보는 불일치하거나 최종 탐색 창이 만료되면 정상 출력으로 방출하고, end marker 없이 완료 창이 만료된 프레임은 폐기한 뒤 다음 arm을 탐색한다. Rust OSC 파이프라인과 raw output ring은 그대로이며 Linux와 alternate buffer에는 적용하지 않는다([ADR-0026](../adr/0026-conpty-width-resize-repaint-filter.md)).
+Legacy in-box ConPTY는 폭 변경 뒤 현재 화면을 `ESC[?25l (ESC[8;<rows>;<cols>t)? ESC[H ... ESC[?25h` 프레임으로 다시 출력하지만, 번들 `1.23.251008001`은 normal buffer+scrollback 폭 변경에서도 이 host repaint를 내보내지 않는다. 따라서 resize repaint 필터의 활성 계산은 열 수 변경·Windows·active normal buffer·fit 전 scrollback 존재에 더해 **번들 런타임이 아님**을 요구한다. 현재 지원 Windows 빌드는 번들 배치를 필수로 하므로 이 필터는 무장하지 않고 live PTY 출력을 그대로 통과시킨다. legacy 런타임을 명시적으로 다시 지원할 경우에만 500ms 탐색 창을 열며, 기존 스트리밍 상태 머신은 PTY 청크 경계와 무관하게 직접 home 및 선택적 window-size 시퀀스가 있는 start marker부터 end marker까지 exact frame만 제외하고 앞뒤 출력은 유지한다. 고유 arm token·자체 deadline·실패한 resize token 취소·split marker 보존 규칙도 legacy 경로에 그대로 남는다. Rust OSC 파이프라인과 raw output ring, Linux와 alternate buffer 동작은 변경하지 않는다([ADR-0067](../adr/0067-bundled-conpty-output-and-staging-contract.md)).
 
 xterm 6.0.0의 wider reflow는 제거된 soft-wrap 행 주변에 stale `isWrapped`를 남길 수 있다. dependency는 6.0.0으로 고정하고 upstream commit `e9c648f`의 수정 패치를 `postinstall`에서 적용한다. patch target이 달라지면 설치를 실패시켜 검토 없이 다른 bundle에 부분 적용되지 않게 한다.
 
 #### Native Windows synchronized-output transaction
 
-PC WebView의 live PTY 출력은 `ConptyResizeRepaintFilter`를 통과한 뒤, 공통 tracked xterm write FIFO에 들어가기 직전에 terminal별 `NativeWindowsOutputStabilizer`를 지난다([ADR-0053](../adr/0053-native-windows-synchronized-output-cursor-transaction.md)). Rust는 실제 PTY spawn에 사용한 `cmd_path`의 basename과 target OS로 `InitialExecutionHost`를 한 번 분류해 `create_terminal_session` 결과의 `initialExecutionHost`로 반환한다. `nativeWindows`만 stabilizer를 활성화하며 `wsl`, `directSsh`, `nonWindows`, `unknown` 및 별도 browser Remote renderer는 pass-through다. UI가 user agent·profile 이름·런타임 activity로 이 값을 재추론하지 않는다.
+PC WebView의 live PTY 출력은 legacy `ConptyResizeRepaintFilter` 경계를 통과한 뒤(번들 계약에서는 항상 pass-through), 공통 tracked xterm write FIFO에 들어가기 직전에 terminal별 `NativeWindowsOutputStabilizer`를 지난다([ADR-0053](../adr/0053-native-windows-synchronized-output-cursor-transaction.md)). Rust는 실제 PTY spawn에 사용한 `cmd_path`의 basename과 target OS로 `InitialExecutionHost`를 한 번 분류해 `create_terminal_session` 결과의 `initialExecutionHost`로 반환한다. `nativeWindows`만 stabilizer를 활성화하며 `wsl`, `directSsh`, `nonWindows`, `unknown` 및 별도 browser Remote renderer는 pass-through다. UI가 user agent·profile 이름·런타임 activity로 이 값을 재추론하지 않는다.
 
 stabilizer는 문자열 디코딩이나 정규식 치환이 아니라 `Uint8Array` 스트림 상태 머신이다. 7-bit `CSI ? 2026 h/l`, `CSI ? 25 h/l`, CUP/HVP(`H`/`f`), CHA(`G`)만 의미 토큰으로 분류하고, OSC(BEL/ST)와 DCS/APC/PM/SOS(ST)는 framing만 추적해 payload 안의 CSI 모양 바이트를 해석하지 않는다. singleton `?2026h`부터 출력 후보를 보류하고 `?2026l` 직후의 정확한 `?25l` → 하나 이상의 CUP/HVP/CHA → `?25h` 복원까지 확인되면, frame 안의 singleton `?25h`만 제거한 frame+restore를 **tracked write 하나**로 enqueue한다. 이 정상 transaction은 이미 1 MiB 상한으로 제한되므로 일반 tracked writer의 청크 분할을 적용하지 않고 `terminal.write` 한 번으로 전달해 frame end와 restore 사이에 parser callback 경계가 생기지 않게 한다. cache·snapshot·복원 구분선·backend mode 합성은 stabilizer를 통과하지 않는다.
 

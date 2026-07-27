@@ -1,6 +1,6 @@
 # 0066. Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 띄운다
 
-- Status: Accepted
+- Status: Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md)
 - Date: 2026-07-27
 - Source: issue #580; dev(19281) `LAYMUX_PTY_TRACE=1` 실측; [ADR-0052](0052-truecolor-capability-advertising-setting.md)(선행: [ADR-0051](0051-terminal-capability-environment-contract.md)); [ADR-0054](0054-xterm-human-and-protocol-data-origin.md); [ADR-0026](0026-conpty-width-resize-repaint-filter.md); [portable-pty `win/psuedocon.rs`](https://github.com/wez/wezterm/blob/main/pty/src/win/psuedocon.rs); [Microsoft ConPTY 재배포본](https://github.com/microsoft/terminal)
 - Relation: [ADR-0052](0052-truecolor-capability-advertising-setting.md)가 광고한 색상 capability 를 자식이 **되물을 수 있게** 하여 계약을 완성한다. [ADR-0054](0054-xterm-human-and-protocol-data-origin.md)가 만든 프로토콜 응답 경로가 Windows 에서 실제로 도달 가능해진다.

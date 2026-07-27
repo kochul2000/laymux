@@ -1,6 +1,6 @@
 # 0026. ConPTY width resize repaint filter
 
-- Status: Accepted
+- Status: Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md)
 - Date: 2026-07-11
 - Source: 사용자 보고(스크롤백 반복 및 가로 정렬 손상) · issue #285 · ADR-0001 · ADR-0008 · [Microsoft Terminal #16911](https://github.com/microsoft/terminal/issues/16911) · [xterm.js #5997](https://github.com/xtermjs/xterm.js/pull/5997)
 

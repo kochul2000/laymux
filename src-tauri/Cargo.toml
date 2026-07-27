@@ -6,6 +6,7 @@ description = "A terminal-focused IDE built with Tauri"
 default-run = "laymux"
 
 [build-dependencies]
+serde_json = "1"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]

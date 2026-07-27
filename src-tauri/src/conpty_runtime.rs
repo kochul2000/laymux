@@ -1,4 +1,4 @@
-//! Windows ConPTY 런타임 사이드로드 (issue #580, ADR-0066).
+//! Windows ConPTY 런타임 사이드로드 (issue #580, ADR-0067).
 //!
 //! in-box conhost 는 자식이 보낸 `OSC 10/11`(전경/배경색 질의)을 **소비하고
 //! 응답하지 않는다.** DSR·DA1 은 자기 상태로 답할 수 있어 답하고, 모르는
@@ -22,8 +22,8 @@ pub const CONPTY_RUNTIME_FILES: [&str; 2] = ["conpty.dll", "OpenConsole.exe"];
 
 /// `CARGO_CFG_TARGET_ARCH` 값을 벤더 디렉터리 이름으로 옮긴다.
 ///
-/// 표에 없는 아키텍처는 `None` 이다. 그 경우 사이드로드를 건너뛰고 in-box
-/// conhost 로 동작한다 — 색상 질의는 다시 막히지만 터미널 자체는 정상이다.
+/// 표에 없는 아키텍처는 `None` 이다. Windows build script는 이를 지원하지 않는
+/// 타깃으로 취급해 빌드를 중단한다. 조용한 in-box conhost 폴백은 허용하지 않는다.
 pub fn conpty_runtime_arch_dir(target_arch: &str) -> Option<&'static str> {
     match target_arch {
         "x86_64" => Some("win10-x64"),
@@ -56,8 +56,8 @@ mod tests {
         assert_eq!(conpty_runtime_arch_dir("riscv64"), None);
     }
 
-    /// 벤더 트리가 표와 어긋나면 빌드는 통과하고 실기에서만 조용히 깨진다
-    /// (in-box conhost 로 폴백). 여기서 못박는다.
+    /// 벤더 트리가 표와 어긋나면 build script가 실패해야 한다. 이 테스트도
+    /// 지원 아키텍처 표와 파일 쌍의 불일치를 더 이른 단계에서 잡는다.
     #[test]
     fn every_mapped_arch_has_both_vendored_files() {
         for arch in ["x86_64", "aarch64"] {

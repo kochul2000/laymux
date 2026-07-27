@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ConptyResizeRepaintFilter } from "./conpty-resize-repaint-filter";
+import {
+  ConptyResizeRepaintFilter,
+  shouldArmConptyResizeRepaintFilter,
+} from "./conpty-resize-repaint-filter";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -9,6 +12,28 @@ function bytes(value: string): Uint8Array {
 }
 
 describe("ConptyResizeRepaintFilter", () => {
+  it("does not arm for the bundled ConPTY output contract", () => {
+    expect(
+      shouldArmConptyResizeRepaintFilter({
+        backendWidthMayChange: true,
+        isWindowsHost: true,
+        usesBundledConptyRuntime: true,
+        activeBufferIsNormal: true,
+        hadNormalScrollback: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldArmConptyResizeRepaintFilter({
+        backendWidthMayChange: true,
+        isWindowsHost: true,
+        usesBundledConptyRuntime: false,
+        activeBufferIsNormal: true,
+        hadNormalScrollback: true,
+      }),
+    ).toBe(true);
+  });
+
   it("passes output through while disarmed", () => {
     const filter = new ConptyResizeRepaintFilter(500);
 

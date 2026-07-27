@@ -133,7 +133,10 @@ import {
 } from "@/lib/webgl-atlas-rebuild";
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
-import { ConptyResizeRepaintFilter } from "@/lib/conpty-resize-repaint-filter";
+import {
+  ConptyResizeRepaintFilter,
+  shouldArmConptyResizeRepaintFilter,
+} from "@/lib/conpty-resize-repaint-filter";
 import {
   NativeWindowsOutputStabilizer,
   type StabilizedOutputEmission,
@@ -2741,6 +2744,8 @@ export function TerminalView({
     );
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
+    // Supported Windows builds fail before compilation unless this runtime was staged.
+    const usesBundledConptyRuntime = isWindowsHost;
     let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputStabilizerDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let stabilizedRefreshFrame: number | undefined;
@@ -2826,11 +2831,13 @@ export function TerminalView({
 
       const normalBuffer = terminal.buffer.normal;
       const hadNormalScrollback = normalScrollbackBeforeFit ?? normalBuffer.baseY > 0;
-      const protectConptyRepaint =
-        widthChanged &&
-        isWindowsHost &&
-        terminal.buffer.active === normalBuffer &&
-        hadNormalScrollback;
+      const protectConptyRepaint = shouldArmConptyResizeRepaintFilter({
+        backendWidthMayChange: widthChanged,
+        isWindowsHost,
+        usesBundledConptyRuntime,
+        activeBufferIsNormal: terminal.buffer.active === normalBuffer,
+        hadNormalScrollback,
+      });
       resizeBackendTerminal(cols, rows, protectConptyRepaint).catch(() => {});
     });
 
@@ -3065,8 +3072,15 @@ export function TerminalView({
       }
 
       if (syncBackendResize) {
-        const protectConptyRepaint =
-          isWindowsHost && terminal.buffer.active === normalBuffer && hadNormalScrollback;
+        const protectConptyRepaint = shouldArmConptyResizeRepaintFilter({
+          // The PC grid can be unchanged while the PTY is returning from a different
+          // remote width, so an explicit sync may still resize the legacy backend.
+          backendWidthMayChange: true,
+          isWindowsHost,
+          usesBundledConptyRuntime,
+          activeBufferIsNormal: terminal.buffer.active === normalBuffer,
+          hadNormalScrollback,
+        });
         startRemoteResizeSync(protectConptyRepaint);
       }
 

@@ -5,6 +5,27 @@ const CURSOR_HOME = encoder.encode("\x1b[H");
 const WINDOW_SIZE_PREFIX = encoder.encode("\x1b[8;");
 const REPAINT_END = encoder.encode("\x1b[?25h");
 
+export interface ConptyResizeRepaintArmContext {
+  backendWidthMayChange: boolean;
+  isWindowsHost: boolean;
+  usesBundledConptyRuntime: boolean;
+  activeBufferIsNormal: boolean;
+  hadNormalScrollback: boolean;
+}
+
+/** The bundled runtime does not emit the legacy host repaint this filter removes. */
+export function shouldArmConptyResizeRepaintFilter(
+  context: ConptyResizeRepaintArmContext,
+): boolean {
+  return (
+    context.backendWidthMayChange &&
+    context.isWindowsHost &&
+    !context.usesBundledConptyRuntime &&
+    context.activeBufferIsNormal &&
+    context.hadNormalScrollback
+  );
+}
+
 function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from = 0): number {
   const lastStart = haystack.length - needle.length;
   for (let i = from; i <= lastStart; i++) {

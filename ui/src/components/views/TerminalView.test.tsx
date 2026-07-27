@@ -5198,7 +5198,7 @@ describe("TerminalView", () => {
     });
   });
 
-  it("arms the repaint filter for a same-size remote-return backend resize", async () => {
+  it("preserves bundled output for a same-size remote-return backend resize", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -5227,16 +5227,18 @@ describe("TerminalView", () => {
         expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-repaint", 80, 24);
       });
 
+      const redraw = "\x1b[?25l\x1b[Hremote repaint\x1b[?25h";
       act(() => {
-        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[Hremote repaint\x1b[?25h"));
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(redraw);
     } finally {
       userAgent.mockRestore();
     }
   });
 
-  it("sends one protected backend resize when remote-return fit changes geometry", async () => {
+  it("sends one unfiltered backend resize when remote-return fit changes geometry", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -5268,10 +5270,12 @@ describe("TerminalView", () => {
         expect(mockResizeTerminal).toHaveBeenCalledWith("t-remote-resized-fit", 100, 24);
       });
 
+      const redraw = "\x1b[?25l\x1b[Hremote repaint\x1b[?25h";
       act(() => {
-        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[Hremote repaint\x1b[?25h"));
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(redraw);
     } finally {
       mockFit.mockImplementation(() => {});
       userAgent.mockRestore();
@@ -5383,7 +5387,7 @@ describe("TerminalView", () => {
     );
   });
 
-  it("preserves remote-return backend sync when a deferred fit becomes hidden", async () => {
+  it("preserves remote-return sync and bundled redraw after a deferred fit becomes hidden", async () => {
     type Observer = {
       target: Element | null;
       callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
@@ -5467,10 +5471,14 @@ describe("TerminalView", () => {
       });
 
       const writesBeforeRepaint = mockWrite.mock.calls.length;
+      const redraw = "\x1b[?25l\x1b[Hremote repaint\x1b[?25h";
       act(() => {
-        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[Hremote repaint\x1b[?25h"));
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).toHaveBeenCalledTimes(writesBeforeRepaint);
+      expect(mockWrite).toHaveBeenCalledTimes(writesBeforeRepaint + 1);
+      expect(
+        new TextDecoder().decode(mockWrite.mock.calls[writesBeforeRepaint][0] as Uint8Array),
+      ).toBe(redraw);
     } finally {
       mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
         callback?.();
@@ -6382,7 +6390,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("filters the ConPTY screen repaint after widening normal-buffer scrollback", async () => {
+  it("preserves a bundled ConPTY TUI redraw after widening normal-buffer scrollback", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -6409,18 +6417,18 @@ describe("TerminalView", () => {
         expect(mockResizeTerminal).toHaveBeenCalledWith("t-conpty-widen", 100, 24);
       });
 
+      const redraw = "\x1b[?25l\x1b[Happlication redraw\x1b[19;19H\x1b[?25h";
       act(() => {
-        onOutput?.(
-          new TextEncoder().encode("\x1b[?25l\x1b[Hduplicated historical rows\x1b[19;19H\x1b[?25h"),
-        );
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(redraw);
 
       act(() => {
         onOutput?.(new TextEncoder().encode("real output after repaint"));
       });
-      expect(mockWrite).toHaveBeenCalledTimes(1);
-      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(
+      expect(mockWrite).toHaveBeenCalledTimes(2);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[1][0] as Uint8Array)).toBe(
         "real output after repaint",
       );
     } finally {
@@ -6428,7 +6436,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("filters the ConPTY window-size repaint after narrowing normal-buffer scrollback", async () => {
+  it("preserves a window-size-shaped TUI redraw after narrowing bundled ConPTY", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -6454,20 +6462,18 @@ describe("TerminalView", () => {
         expect(mockResizeTerminal).toHaveBeenCalledWith("t-conpty-narrow", 60, 24);
       });
 
+      const redraw = "\x1b[?25l\x1b[8;24;60t\x1b[Happlication narrow redraw\x1b[24;7H\x1b[?25h";
       act(() => {
-        onOutput?.(
-          new TextEncoder().encode(
-            "\x1b[?25l\x1b[8;24;60t\x1b[Hduplicated narrow rows\x1b[24;7H\x1b[?25h",
-          ),
-        );
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(redraw);
     } finally {
       userAgent.mockRestore();
     }
   });
 
-  it("filters a widen repaint when shallow scrollback reflows to baseY zero", async () => {
+  it("preserves a bundled redraw when shallow scrollback reflows to baseY zero", async () => {
     type Observer = {
       target: Element | null;
       callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
@@ -6530,10 +6536,12 @@ describe("TerminalView", () => {
         expect(mockFit).toHaveBeenCalledTimes(1);
       });
 
+      const redraw = "\x1b[?25l\x1b[Happlication redraw\x1b[?25h";
       act(() => {
-        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[Hold screen\x1b[?25h"));
+        onOutput?.(new TextEncoder().encode(redraw));
       });
-      expect(mockWrite).not.toHaveBeenCalled();
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(redraw);
     } finally {
       mockFit.mockImplementation(() => {});
       userAgent.mockRestore();
@@ -6541,7 +6549,7 @@ describe("TerminalView", () => {
     }
   });
 
-  it("keeps dropping the first repaint when a second widen rearms the filter", async () => {
+  it("does not arm legacy repaint expectations across bundled width changes", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -6558,27 +6566,24 @@ describe("TerminalView", () => {
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
 
+      const first = "\x1b[?25l\x1b[Hfirst frame";
+      const second = " tail\x1b[?25hbetween\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter";
       act(() => {
         capturedResizeHandler?.({ cols: 100, rows: 24 });
-        onOutput?.(new TextEncoder().encode("\x1b[?25l\x1b[Hfirst frame"));
+        onOutput?.(new TextEncoder().encode(first));
         capturedResizeHandler?.({ cols: 120, rows: 24 });
-        onOutput?.(
-          new TextEncoder().encode(
-            " tail\x1b[?25hbetween\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter",
-          ),
-        );
+        onOutput?.(new TextEncoder().encode(second));
       });
 
-      expect(mockWrite).toHaveBeenCalledTimes(1);
-      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(
-        "betweenafter",
-      );
+      expect(mockWrite).toHaveBeenCalledTimes(2);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(first);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[1][0] as Uint8Array)).toBe(second);
     } finally {
       userAgent.mockRestore();
     }
   });
 
-  it("keeps a split repaint start private when a second widen rearms scanning", async () => {
+  it("does not buffer a split legacy start marker on bundled ConPTY", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
@@ -6595,21 +6600,19 @@ describe("TerminalView", () => {
       mockBufferActive.baseY = 40;
       mockWrite.mockClear();
 
+      const first = "\x1b[?25";
+      const second =
+        "l\x1b[Hfirst frame\x1b[?25hbetween" + "\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter";
       act(() => {
         capturedResizeHandler?.({ cols: 100, rows: 24 });
-        onOutput?.(new TextEncoder().encode("\x1b[?25"));
+        onOutput?.(new TextEncoder().encode(first));
         capturedResizeHandler?.({ cols: 120, rows: 24 });
-        onOutput?.(
-          new TextEncoder().encode(
-            "l\x1b[Hfirst frame\x1b[?25hbetween" + "\x1b[?25l\x1b[Hsecond frame\x1b[?25hafter",
-          ),
-        );
+        onOutput?.(new TextEncoder().encode(second));
       });
 
-      expect(mockWrite).toHaveBeenCalledTimes(1);
-      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(
-        "betweenafter",
-      );
+      expect(mockWrite).toHaveBeenCalledTimes(2);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(first);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[1][0] as Uint8Array)).toBe(second);
     } finally {
       userAgent.mockRestore();
     }
