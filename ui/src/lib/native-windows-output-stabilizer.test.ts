@@ -16,6 +16,37 @@ function text(emissions: StabilizedOutputEmission[]): string {
 }
 
 describe("NativeWindowsOutputStabilizer", () => {
+  it("flushes Codex 0.145's in-frame cursor park without waiting for another chunk", () => {
+    const stabilizer = new NativeWindowsOutputStabilizer();
+    // Captured on Codex 0.145.0: unlike the older two-chunk grammar, the final
+    // input-caret CUP now lands after DECTCEM show but before DEC 2026 reset.
+    const emissions = stabilizer.push(
+      bytes("\x1b[?2026hframe\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l"),
+      10,
+    );
+
+    expect(text(emissions)).toBe("\x1b[?2026hframe\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l");
+    expect(emissions).toHaveLength(1);
+    expect(emissions[0]).toMatchObject({
+      stabilized: true,
+      frameEndCursorAuthoritative: true,
+    });
+    expect(emissions[0].parkDeadline).toBeUndefined();
+    expect(stabilizer.deadline).toBeUndefined();
+  });
+
+  it.each([
+    ["printable payload", "X"],
+    ["another CSI", "\x1b[0m"],
+    ["an OSC", "\x1b]0;title\x07"],
+  ])("does not widen the strict in-frame park across %s", (_label, interruption) => {
+    const stabilizer = new NativeWindowsOutputStabilizer();
+    const input = "\x1b[?2026hframe\x1b[?25h\x1b[24;3H" + interruption + "\x1b[?2026l";
+
+    expect(text(stabilizer.push(bytes(input), 0))).toBe("");
+    expect(text(stabilizer.flushExpired(50))).toBe(input);
+  });
+
   it("holds a split synchronized-output frame through its exact cursor restore", () => {
     const stabilizer = new NativeWindowsOutputStabilizer();
 

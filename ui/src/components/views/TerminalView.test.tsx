@@ -3590,6 +3590,128 @@ describe("TerminalView", () => {
       await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
     });
 
+    it("flushes Codex 0.145's in-frame cursor park in the same xterm write", async () => {
+      const terminalId = "t-native-in-frame-park";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const raw = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
+      const expected = "\x1b[?2026hbody\x1b[26;58H\x1b[?25h\x1b[24;3H\x1b[?2026l";
+
+      act(() => onOutput?.(new TextEncoder().encode(raw)));
+
+      expect(mockWrite).toHaveBeenCalledTimes(1);
+      expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+    });
+
+    it("lets an open IME composition adopt Codex 0.145's in-frame park", async () => {
+      const terminalId = "t-native-in-frame-ime";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />);
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+        buffer: { active: typeof mockBufferActive };
+      };
+      const container = screen.getByTestId(`terminal-view-${terminalId}`);
+      const preview = screen.getByTestId(`terminal-composition-preview-${terminalId}`);
+      const rect = () =>
+        ({
+          left: 0,
+          top: 0,
+          width: 800,
+          height: 480,
+          right: 800,
+          bottom: 480,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      screenEl.getBoundingClientRect = rect;
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.append(screenEl, helper);
+      container.getBoundingClientRect = rect;
+      await waitForTerminalInputReady();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // Start the active syllable at the last two cells of the input row. The
+      // arithmetic preview remains there until a settled app redraw is observed.
+      terminal.buffer.active.baseY = 0;
+      terminal.buffer.active.cursorX = 78;
+      terminal.buffer.active.cursorY = 4;
+      act(() => {
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.value = "라";
+        helper.selectionStart = 1;
+        helper.selectionEnd = 1;
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "라" }));
+        helper.dispatchEvent(new Event("input"));
+      });
+      await vi.waitFor(() => expect(preview.textContent).toBe("라"));
+
+      const rawSet = mockRegisterCsiHandler.mock.calls.find(
+        (call) =>
+          (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+          (call[0] as { prefix?: string; final: string }).final === "h",
+      )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+      const rawReset = mockRegisterCsiHandler.mock.calls.find(
+        (call) =>
+          (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+          (call[0] as { prefix?: string; final: string }).final === "l",
+      )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+      const writeParsed = mockOnWriteParsed.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+      expect(rawSet).toBeTypeOf("function");
+      expect(rawReset).toBeTypeOf("function");
+
+      mockWrite.mockImplementationOnce(function (_data, callback?: () => void) {
+        rawSet?.([2026]);
+        // Footer show is still in-frame and therefore not a settled caret.
+        terminal.buffer.active.cursorX = 58;
+        terminal.buffer.active.cursorY = 23;
+        rawSet?.([25]);
+        // Final CUP after the show: Codex's indented continuation caret.
+        terminal.buffer.active.cursorX = 4;
+        terminal.buffer.active.cursorY = 5;
+        rawReset?.([2026]);
+        writeParsed?.();
+        callback?.();
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+
+      act(() => {
+        onOutput?.(
+          new TextEncoder().encode("\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"),
+        );
+      });
+
+      await vi.waitFor(() => {
+        // 80x24 over 800x480 => 10x20 cells. The measured app caret (4,5)
+        // wins over the stale edge anchor (78,4), unblocking issue #569's path.
+        expect(preview.style.transform).toBe("translate(40px, 100px)");
+      });
+    });
+
     it("keeps a large exact frame and restore in one xterm write", async () => {
       const terminalId = "t-native-large-stabilizer";
       mockCreateTerminalSession.mockResolvedValueOnce({

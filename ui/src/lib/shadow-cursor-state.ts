@@ -20,7 +20,7 @@ export interface ShadowCursorState {
   cursorAbsY: number;
   /**
    * Cursor position captured the instant a DEC 2026 (synchronized
-   * output) frame opened. Codex footer-update frames do not restore
+   * output) frame opened. Legacy Codex footer-update frames do not restore
    * the cursor before sending `\e[?2026l`, so reading the buffer at
    * the reset instant lands on the footer row. The pre-frame snapshot
    * is the cursor as Codex actually intends it to look to the user
@@ -41,7 +41,7 @@ export interface ShadowCursorState {
    */
   isCursorHidden: boolean;
   /**
-   * True between a DEC 2026 frame flush and the cursor "park" that
+   * True between a legacy DEC 2026 frame flush and the cursor "park" that
    * Codex sends shortly after (`\e[?25l` + CUP + `\e[?25h` outside any
    * sync frame). While pending, the overlay keeps its previous painted
    * position: the at-reset shadow position is only a fallback estimate
@@ -233,11 +233,13 @@ export function applyDec2026SetToShadowCursor(
  * Applied when a DEC 2026 (synchronized output) *reset* sequence fires
  * — i.e. an app just flushed a frame. We use the cursor snapshot taken
  * at the matching `applyDec2026SetToShadowCursor` if one is available,
- * because Codex's footer-update frames leave the buffer cursor on the
+ * because legacy Codex footer-update frames leave the buffer cursor on the
  * footer row at reset time (not on the input row). When no snapshot
  * exists — orphan reset, set lost to a chunk boundary, etc. — we fall
  * back to the live buffer cursor, which is still the best estimate.
- * Outside an overlay-caret activity only the parser frame is closed and
+ * ADR-0076's strict in-frame park instead marks the reset-time buffer cursor
+ * authoritative; the optional flag below selects that path without weakening
+ * the legacy fallback. Outside an overlay-caret activity only the parser frame is closed and
  * the caller schedules the regular OSC 133 sync.
  *
  * Critically, this clears any lingering OSC-133 flags (`hasPromptBoundary`,
@@ -251,13 +253,22 @@ export function applyDec2026ResetToShadowCursor(
   activity: TerminalActivityInfo | undefined,
   bufferCursorX: number,
   bufferCursorAbsY: number,
+  frameEndCursorAuthoritative = false,
 ): ShadowCursorState {
   if (!isOverlayCaretActivity(activity)) {
     if (!state.isDec2026FrameOpen) return state;
     return { ...state, isDec2026FrameOpen: false };
   }
-  const cursorX = state.frameSavedCursorX ?? bufferCursorX;
-  const cursorAbsY = state.frameSavedCursorAbsY ?? bufferCursorAbsY;
+  // Codex 0.145 introduced a second valid tail: `?25h`, a final CUP, then
+  // `?2026l`. The byte stabilizer recognizes that strict grammar and marks the
+  // buffer position at reset time as authoritative. Older Codex leaves the
+  // cursor on its footer here, so its pre-frame snapshot remains the fallback.
+  const cursorX = frameEndCursorAuthoritative
+    ? bufferCursorX
+    : (state.frameSavedCursorX ?? bufferCursorX);
+  const cursorAbsY = frameEndCursorAuthoritative
+    ? bufferCursorAbsY
+    : (state.frameSavedCursorAbsY ?? bufferCursorAbsY);
   return {
     ...state,
     hasPromptBoundary: false,
@@ -269,11 +280,14 @@ export function applyDec2026ResetToShadowCursor(
     frameSavedCursorX: undefined,
     frameSavedCursorAbsY: undefined,
     isDec2026FrameOpen: false,
-    // The at-reset position above is a fallback estimate. Codex parks
+    // The at-reset position above is a fallback estimate for the legacy grammar. Codex parks
     // the real input cursor in a follow-up chunk (`?25l` CUP `?25h`
     // outside the frame) — hold overlay repaints until that park or a
     // settle timeout. See `applyDectcemShowToShadowCursor`.
-    parkPending: true,
+    parkPending: !frameEndCursorAuthoritative,
+    // The strict tail includes `?25h`; mirror that final visibility even when a
+    // test or replay applies the state transition without driving DECTCEM first.
+    isCursorHidden: frameEndCursorAuthoritative ? false : state.isCursorHidden,
   };
 }
 

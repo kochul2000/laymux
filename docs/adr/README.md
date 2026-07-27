@@ -70,7 +70,7 @@ ADR 이 필요한 대표 기준:
 | [0050](0050-remote-github-reference-links.md) | Remote GitHub 참조 링크는 서버 terminal CWD로 저장소를 해석 | Accepted |
 | [0051](0051-terminal-capability-environment-contract.md) | PTY 자식은 laymux 터미널 정체성과 truecolor capability를 받는다 | Superseded by [0052](0052-truecolor-capability-advertising-setting.md) |
 | [0052](0052-truecolor-capability-advertising-setting.md) | Truecolor capability 광고는 기본 활성화된 전역 터미널 설정으로 제어한다 | Accepted |
-| [0053](0053-native-windows-synchronized-output-cursor-transaction.md) | 네이티브 Windows 동기화 출력은 xterm 쓰기 경계에서 커서 복원까지 원자화한다 | Accepted |
+| [0053](0053-native-windows-synchronized-output-cursor-transaction.md) | 네이티브 Windows 동기화 출력은 xterm 쓰기 경계에서 커서 복원까지 원자화한다 | Superseded by [0076](0076-codex-in-frame-cursor-park.md) |
 | [0054](0054-xterm-human-and-protocol-data-origin.md) | xterm 사용자 입력과 터미널 프로토콜 응답의 출처를 분리한다 | Accepted |
 | [0055](0055-composer-history-scope-setting.md) | Composer 과거 입력 recall 범위는 전역·워크스페이스·페인 중 고르는 설정 (0029/0034 확장) | Accepted |
 | [0056](0056-remote-crop-window-anchors-live-tail.md) | Remote crop 창은 화면 바닥이 아니라 live tail 에 정렬 (0038 정정) | Proposed |
@@ -93,6 +93,7 @@ ADR 이 필요한 대표 기준:
 | [0073](0073-native-cursor-renderer-level-suppression.md) | 네이티브 커서 숨김은 렌더러 게이트에서 한다 (배경색 위장·옵션 경합 폐기) | Accepted |
 | [0074](0074-xterm-cell-grid-screen-test-tier.md) | 화면 주장은 mock 이 아니라 실제 xterm 셀 격자로 검증한다 (별도 `*.screen.test.ts` 스위트) | Proposed |
 | [0075](0075-session-restore-live-screen-origin.md) | 세션 복원 출력은 새 PTY 화면 원점 뒤의 scrollback으로 둔다 | Accepted |
+| [0076](0076-codex-in-frame-cursor-park.md) | Codex 인프레임 커서 주차를 동기화 출력의 최종 상태로 인정 | Accepted |
 
 ## 새 ADR 추가
 

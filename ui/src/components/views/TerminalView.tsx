@@ -1112,6 +1112,7 @@ export function TerminalView({
     let stabilizeNativeWindowsOutput = false;
     let currentParsingWriteSource: TerminalWriteSource | undefined;
     let currentParsingParkDeadline: number | undefined;
+    let currentParsingFrameEndCursorAuthoritative = false;
     let currentParsingAttachEpoch: number | undefined;
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
@@ -1467,7 +1468,7 @@ export function TerminalView({
       // Withheld wherever the position is not a settled caret (issue #569):
       //  - a DEC 2026 frame is open, or a save/restore repaint is in flight — the
       //    cursor is parked mid-draw;
-      //  - `parkPending`: Codex closes `?2026l` with the cursor still on its footer
+      //  - `parkPending`: legacy Codex closes `?2026l` with the cursor still on its footer
       //    and sends the real park ~15ms later in the next chunk, so the position
       //    right after the flush is the footer row, not the input caret;
       //  - the alt buffer, whose rows are a different coordinate space than the
@@ -2135,7 +2136,8 @@ export function TerminalView({
     // *without* ever parking would keep the overlay frozen indefinitely. Codex
     // parks after every frame (the whole reason this layer exists) and
     // `isOverlayCaretActivity` is Codex-only, so there is no exposure
-    // today — revisit if another ratatui TUI joins the overlay set.
+    // today. Codex 0.145's authoritative in-frame park never enters this
+    // pending state — revisit if another ratatui TUI joins the overlay set.
     const armParkSettleTimer = () => {
       cancelParkSettleTimer();
       const delay = Math.max(
@@ -2274,6 +2276,7 @@ export function TerminalView({
               activityRef.current,
               activeBuffer.cursorX ?? 0,
               bufferCursorAbsY,
+              currentParsingFrameEndCursorAuthoritative,
             ),
           );
           if (overlayActivity) {
@@ -2287,7 +2290,13 @@ export function TerminalView({
             // the last painted position until Codex's cursor park
             // arrives (authoritative) or the settle window expires
             // (fallback to the snapshot taken above).
-            startParkSettleTimer(currentParsingParkDeadline);
+            if (shadowCursorRef.current.parkPending) {
+              startParkSettleTimer(currentParsingParkDeadline);
+            } else {
+              // Codex 0.145 parks inside the frame, so there is no follow-up
+              // chunk to await and no prior settle timer may survive it.
+              clearParkSettleTimer();
+            }
             scheduleOverlayCaretUpdate();
           } else {
             scheduleShadowCursorSync();
@@ -2990,6 +2999,7 @@ export function TerminalView({
     type TerminalWriteMetadata = {
       source: TerminalWriteSource;
       parkDeadline?: number;
+      frameEndCursorAuthoritative?: boolean;
       stabilized?: boolean;
       attachEpoch?: number;
     };
@@ -3247,6 +3257,7 @@ export function TerminalView({
       if (parsingTerminalWrites.length === 1) {
         currentParsingWriteSource = request.source;
         currentParsingParkDeadline = request.parkDeadline;
+        currentParsingFrameEndCursorAuthoritative = request.frameEndCursorAuthoritative === true;
         currentParsingAttachEpoch = request.attachEpoch;
       }
       try {
@@ -3260,6 +3271,8 @@ export function TerminalView({
           }
           currentParsingWriteSource = parsingTerminalWrites[0]?.source;
           currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
+          currentParsingFrameEndCursorAuthoritative =
+            parsingTerminalWrites[0]?.frameEndCursorAuthoritative === true;
           currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
           try {
             request.onParsed?.();
@@ -3304,6 +3317,8 @@ export function TerminalView({
         if (index >= 0) parsingTerminalWrites.splice(index, 1);
         currentParsingWriteSource = parsingTerminalWrites[0]?.source;
         currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
+        currentParsingFrameEndCursorAuthoritative =
+          parsingTerminalWrites[0]?.frameEndCursorAuthoritative === true;
         currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
         if (!request.warned) {
           request.warned = true;
@@ -3759,6 +3774,7 @@ export function TerminalView({
             source: "live",
             stabilized: emission.stabilized,
             parkDeadline: emission.parkDeadline,
+            frameEndCursorAuthoritative: emission.frameEndCursorAuthoritative,
             attachEpoch: outputAttachEpoch,
           },
         );
@@ -4496,6 +4512,7 @@ export function TerminalView({
       parsingTerminalWrites.length = 0;
       currentParsingWriteSource = undefined;
       currentParsingParkDeadline = undefined;
+      currentParsingFrameEndCursorAuthoritative = false;
       currentParsingAttachEpoch = undefined;
       clearTerminalWriteRetryTimer();
       remoteResizeSyncAttempt += 1;
