@@ -167,6 +167,15 @@ async function installBrowserMocks(
         };
         selection = "";
         written: Array<string | Uint8Array> = [];
+        appliedColorSetters: Array<{ ident: number; data: string }> = [];
+        _core = {
+          _inputHandler: {
+            setOrReportIndexedColor: (data: string) => this.applyColorSetter(4, data),
+            setOrReportFgColor: (data: string) => this.applyColorSetter(10, data),
+            setOrReportBgColor: (data: string) => this.applyColorSetter(11, data),
+            setOrReportCursorColor: (data: string) => this.applyColorSetter(12, data),
+          },
+        };
         parser = {
           csiHandlers: [] as Array<{ prefix?: string; intermediates?: string; final: string }>,
           oscHandlers: [] as Array<{
@@ -252,6 +261,10 @@ async function installBrowserMocks(
             return;
           }
           callback?.();
+        }
+        private applyColorSetter(ident: number, data: string) {
+          this.appliedColorSetters.push({ ident, data });
+          return true;
         }
         releaseDelayedWrite() {
           const callback = this.delayedWriteCallback;
@@ -954,7 +967,7 @@ test("the mirror never answers terminal protocol queries, even in steady state (
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "echo hi" });
 });
 
-test("the mirror claims every OSC color query while replaying setter-only payloads", async ({
+test("the mirror claims every OSC color query while applying setters synchronously", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: false });
@@ -980,7 +993,7 @@ test("the mirror claims every OSC color query while replaying setter-only payloa
         window as Window & {
           __mockTerminal: {
             isOscHandled: (ident: number, data: string) => boolean;
-            written: Array<string | Uint8Array>;
+            appliedColorSetters: Array<{ ident: number; data: string }>;
           };
         }
       ).__mockTerminal;
@@ -994,9 +1007,7 @@ test("the mirror claims every OSC color query while replaying setter-only payloa
         indexedSet: terminal.isOscHandled(4, "7;#123456"),
         specialSetAndQuery: terminal.isOscHandled(10, "#654321;?"),
         mixedQueryAndSet: terminal.isOscHandled(10, "?;#123456"),
-        syntheticSetterWrites: terminal.written.filter(
-          (data): data is string => typeof data === "string" && data.startsWith("\x1b]"),
-        ),
+        appliedColorSetters: terminal.appliedColorSetters,
       };
     }),
   ).toEqual({
@@ -1009,10 +1020,10 @@ test("the mirror claims every OSC color query while replaying setter-only payloa
     indexedSet: false,
     specialSetAndQuery: true,
     mixedQueryAndSet: true,
-    syntheticSetterWrites: [
-      "\x1b]4;8;#abcdef\x1b\\",
-      "\x1b]10;#654321\x1b\\",
-      "\x1b]11;#123456\x1b\\",
+    appliedColorSetters: [
+      { ident: 4, data: "8;#abcdef" },
+      { ident: 10, data: "#654321" },
+      { ident: 11, data: "#123456" },
     ],
   });
 });

@@ -1111,49 +1111,112 @@ test.describe("remote terminal protocol query ownership", () => {
     await expect(page.locator("#focusTerminal")).toBeEnabled();
     await expect.poll(() => outputSocket).not.toBeNull();
 
-    outputSocket!.send(
-      Buffer.from(
-        [
-          "\x1b]10;?\x1b\\",
-          "\x1b]11;?\x07",
-          "\x1b]10;?;#123456\x1b\\",
-          "\x1b]10;#654321;?\x1b\\",
-          "\x1b]4;7;?;8;#abcdef\x1b\\",
-          "\x1b]12;?;\x07",
-          "OSC-QUERIES-PARSED",
-        ].join(""),
-      ),
+    let outputSeq = 0;
+    const sendOutput = (text: string, phase: "snapshot" | "delta") => {
+      const payload = Buffer.from(text);
+      const seqStart = outputSeq;
+      outputSeq += payload.byteLength;
+      outputSocket!.send(
+        JSON.stringify({
+          type: "terminal.output",
+          version: 1,
+          phase,
+          seqStart,
+          seqEnd: outputSeq,
+          byteLength: payload.byteLength,
+          ...(phase === "snapshot"
+            ? {
+                state: {
+                  version: 1,
+                  snapshotStartSeq: seqStart,
+                  snapshotSeq: outputSeq,
+                  protocolRevision: 0,
+                  modes: { bracketedPaste: false },
+                },
+              }
+            : {}),
+        }),
+      );
+      outputSocket!.send(payload);
+    };
+    const terminalColors = () =>
+      page.evaluate(() => {
+        // xterm is deliberately pinned to 6.0.0; inspect its fixed internal
+        // theme state so the regression proves setters execute in stream order.
+        const terminal = (
+          window as Window & {
+            __realRemoteTerminal: {
+              _core: {
+                _themeService: {
+                  colors: {
+                    foreground: { css: string };
+                    background: { css: string };
+                    ansi: Array<{ css: string }>;
+                  };
+                };
+              };
+            };
+          }
+        ).__realRemoteTerminal;
+        return {
+          foreground: terminal._core._themeService.colors.foreground.css,
+          background: terminal._core._themeService.colors.background.css,
+          ansi8: terminal._core._themeService.colors.ansi[8].css,
+        };
+      });
+
+    sendOutput("SNAPSHOT-READY", "snapshot");
+    await expect(page.locator(".xterm-rows")).toContainText("SNAPSHOT-READY");
+    const initialColors = await terminalColors();
+
+    sendOutput(
+      [
+        "\x1b]10;?\x1b\\",
+        "\x1b]11;?\x07",
+        "\x1b]10;?;#123456\x1b\\",
+        "\x1b]10;#654321;?\x1b\\",
+        "\x1b]4;7;?;8;#abcdef\x1b\\",
+        "\x1b]12;?;\x07",
+        "OSC-QUERIES-PARSED",
+      ].join(""),
+      "delta",
     );
     await expect(page.locator(".xterm-rows")).toContainText("OSC-QUERIES-PARSED");
 
     await expect
-      .poll(() =>
-        page.evaluate(() => {
-          // xterm is deliberately pinned to 6.0.0; inspect its fixed internal
-          // theme state so the regression proves replayed setters took effect.
-          const terminal = (
-            window as Window & {
-              __realRemoteTerminal: {
-                _core: {
-                  _themeService: {
-                    colors: {
-                      foreground: { css: string };
-                      background: { css: string };
-                      ansi: Array<{ css: string }>;
-                    };
-                  };
-                };
-              };
-            }
-          ).__realRemoteTerminal;
-          return {
-            foreground: terminal._core._themeService.colors.foreground.css,
-            background: terminal._core._themeService.colors.background.css,
-            ansi8: terminal._core._themeService.colors.ansi[8].css,
-          };
-        }),
-      )
+      .poll(terminalColors)
       .toEqual({ foreground: "#654321", background: "#123456", ansi8: "#abcdef" });
+
+    sendOutput(
+      [
+        "\x1b]10;#ff0000;?\x1b\\",
+        "\x1b]10;#0000ff\x1b\\",
+        "\x1b]4;8;#ff0000;7;?\x1b\\",
+        "\x1b]4;8;#0000ff\x1b\\",
+        "OSC-ORDER-PARSED",
+      ].join(""),
+      "delta",
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("OSC-ORDER-PARSED");
+    await expect.poll(terminalColors).toEqual({
+      foreground: "#0000ff",
+      background: "#123456",
+      ansi8: "#0000ff",
+    });
+
+    sendOutput(
+      [
+        "\x1b]10;#00ff00;?\x1b\\",
+        "\x1b]110\x1b\\",
+        "\x1b]111\x1b\\",
+        "\x1b]4;8;#00ff00;7;?\x1b\\",
+        "\x1b]104;8\x1b\\",
+        "OSC-RESET-PARSED",
+      ].join(""),
+      "delta",
+    );
+    await expect(page.locator(".xterm-rows")).toContainText("OSC-RESET-PARSED");
+    await expect.poll(terminalColors).toEqual(initialColors);
 
     const helperTextarea = page.locator(".xterm-helper-textarea");
     await helperTextarea.focus();
