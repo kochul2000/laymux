@@ -20,6 +20,7 @@ import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
+  notifyTextureAtlasCleared,
   __resetAtlasRebuildersForTest,
 } from "@/lib/webgl-atlas-rebuild";
 
@@ -5007,6 +5008,78 @@ describe("TerminalView", () => {
       const cleared = new Set(mockClearTextureAtlas.mock.calls.map(([term]) => term));
       expect(cleared.size).toBe(2);
     });
+  });
+
+  // A pane in a `display: none` workspace must not be touched by the fan-out
+  // (issue #573). §8.4 already forbids working on a hidden terminal, and the
+  // hide→show return owns that rebuild — doing it from the fan-out too would
+  // pay for a pane nobody can see, twice.
+  it("skips hidden panes in the atlas fan-out and rebuilds once on return (issue #573)", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    const resize = (obs: Observer, width: number, height: number) => {
+      obs.callback(
+        [{ target: obs.target as Element, contentRect: { width, height } } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    };
+    globalThis.ResizeObserver = class {
+      private obs: Observer;
+      constructor(cb: (entries: ResizeObserverEntry[], obs: ResizeObserver) => void) {
+        this.obs = { target: null, callback: cb };
+        observers.push(this.obs);
+      }
+      observe(target: Element) {
+        this.obs.target = target;
+        setTimeout(() => resize(this.obs, 800, 600), 0);
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    try {
+      render(
+        <TerminalView
+          instanceId="t-atlas-hidden"
+          paneId="pane-atlas-hidden"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
+        expect(observers[0]?.target).toBeTruthy();
+      });
+      const obs = observers[0];
+
+      // The workspace goes away: PaneGrid collapses the box to 0×0.
+      act(() => resize(obs, 0, 0));
+      mockClearTextureAtlas.mockClear();
+
+      // Another pane clears the shared atlas while this one is hidden.
+      await act(async () => {
+        notifyTextureAtlasCleared("t-atlas-foreign", true);
+        await Promise.resolve();
+      });
+      expect(mockClearTextureAtlas).not.toHaveBeenCalled();
+
+      // Coming back is what repairs it — exactly once, through the hide→show
+      // path that would have run anyway.
+      await act(async () => resize(obs, 800, 600));
+      await vi.waitFor(() => {
+        expect(mockClearTextureAtlas).toHaveBeenCalledTimes(1);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      });
+      expect(mockClearTextureAtlas).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it("waits for write drain before font, DPR, and scrollbar geometry reflows", async () => {
