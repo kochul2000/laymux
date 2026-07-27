@@ -83,6 +83,16 @@ export interface ShadowCursorState {
  * authoritative cursor parks to visibility-only (`isDectcemShowPark`), and
  * pins the overlay caret where the frame opened. `cursorAbsY` is void for a
  * simpler reason: it names a scrollback row the reset deleted.
+ *
+ * **Every field must be named here, optional ones included.** The caller applies
+ * this with `Object.assign`, so an omitted key is not cleared — it keeps its
+ * pre-reset value. `frameSavedCursorX`/`frameSavedCursorAbsY` are the ones that
+ * bite: the replayed ring snapshot is cut at a line boundary, so its first
+ * `?2026l` is an orphan reset, and `applyDec2026ResetToShadowCursor` would adopt
+ * the pre-gap snapshot through `state.frameSavedCursorX ?? bufferCursorX` — a row
+ * that no longer exists after the reset, which then blocks every sync with
+ * `row-mismatch`. `createShadowCursorState.test` pins the field set with
+ * `toStrictEqual` so a future field cannot be forgotten here.
  */
 export function createShadowCursorState(): ShadowCursorState {
   return {
@@ -90,6 +100,8 @@ export function createShadowCursorState(): ShadowCursorState {
     commandStartX: 0,
     cursorX: 0,
     cursorAbsY: 0,
+    frameSavedCursorX: undefined,
+    frameSavedCursorAbsY: undefined,
     isCursorHidden: false,
     parkPending: false,
     isDec2026FrameOpen: false,
