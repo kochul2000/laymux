@@ -30,6 +30,14 @@
  * judgment that silently drifts from upstream. Rebuilding a model on an event
  * that already repaints (hide/show, resize, font change) is the cheaper
  * mistake.
+ *
+ * Cost (issue #573): each pane's `ResizeObserver` callback opens its own pass,
+ * so a workspace return produces one pass per pane. A terminal that already
+ * answered a pass in the current frame is skipped by the next one — its model
+ * is still empty, because only `renderRows` refills it and xterm runs that from
+ * `requestAnimationFrame`. That turns N passes × N rebuilds into N rebuilds.
+ * The set expires at the next animation frame, and early for any terminal that
+ * reports a paint through `noteTerminalRendered`.
  */
 
 type RendererRebuild = () => void;
@@ -38,8 +46,42 @@ const rebuilders = new Map<string, RendererRebuild>();
 
 /** Reports collected for the next flush: instance id → did it rebuild itself. */
 const pendingReports = new Map<string, boolean>();
+/**
+ * Terminals that already answered the fan-out in the current frame (issue
+ * #573). Asking them again before they render changes nothing, so the pass
+ * skips them and N panes returning together cost N rebuilds instead of N².
+ */
+const answeredThisFrame = new Set<string>();
 let flushScheduled = false;
 let flushing = false;
+let frameResetScheduled = false;
+/** Invalidates an in-flight frame reset after `__resetAtlasRebuildersForTest`. */
+let frameResetGeneration = 0;
+
+/**
+ * Expire the frame set at the next animation frame.
+ *
+ * A frame is the right window because a render model is only refilled by
+ * `renderRows`, which xterm always runs from `requestAnimationFrame`. Until
+ * that happens, a terminal the pass already rebuilt still has an empty model
+ * and nothing a later wipe could invalidate.
+ */
+function scheduleFrameReset(): void {
+  if (frameResetScheduled || answeredThisFrame.size === 0) return;
+  if (typeof globalThis.requestAnimationFrame !== "function") {
+    // No frame clock (non-browser host): nothing would ever expire the set, so
+    // skipping would become permanent. Fall back to a rebuild per pass.
+    answeredThisFrame.clear();
+    return;
+  }
+  frameResetScheduled = true;
+  const generation = frameResetGeneration;
+  globalThis.requestAnimationFrame(() => {
+    if (generation !== frameResetGeneration) return;
+    frameResetScheduled = false;
+    answeredThisFrame.clear();
+  });
+}
 
 function flush(): void {
   flushScheduled = false;
@@ -60,8 +102,12 @@ function flush(): void {
   try {
     for (const [instanceId, rebuild] of [...rebuilders]) {
       if (instanceId === skip) continue;
+      if (answeredThisFrame.has(instanceId)) continue;
       try {
         rebuild();
+        // Only a callback that returned counts as answered. One that threw did
+        // nothing, so the next pass in this frame must reach it again.
+        answeredThisFrame.add(instanceId);
       } catch {
         // A terminal disposed between the notify and the flush — the next mount
         // rebuilds its own atlas anyway.
@@ -70,19 +116,40 @@ function flush(): void {
   } finally {
     flushing = false;
   }
+  scheduleFrameReset();
 }
 
 /**
  * Register a terminal's renderer rebuild (atlas clear + full repaint). Keyed by
  * the terminal instance id so a pane that also registers under its paneId
  * elsewhere is not rebuilt twice.
+ *
+ * The callback may decline the work — a hidden terminal defers it to its
+ * hide→show return instead (issue #573). Declining still counts as answering
+ * for this frame: the decision cannot change until the container resizes, and
+ * that path rebuilds on its own.
  */
 export function registerAtlasRebuilder(instanceId: string, rebuild: RendererRebuild): void {
+  // A profile switch replaces the xterm instance under the same id. The new
+  // terminal owns a different model, so the old one's answer says nothing.
+  answeredThisFrame.delete(instanceId);
   rebuilders.set(instanceId, rebuild);
 }
 
 export function unregisterAtlasRebuilder(instanceId: string): void {
+  answeredThisFrame.delete(instanceId);
   rebuilders.delete(instanceId);
+}
+
+/**
+ * Report that this terminal painted (xterm's `onRender`).
+ *
+ * That is the moment its render model is refilled with coordinates into the
+ * *current* atlas, so whatever it answered earlier in this frame no longer
+ * holds and the next clear has to reach it again.
+ */
+export function noteTerminalRendered(instanceId: string): void {
+  answeredThisFrame.delete(instanceId);
 }
 
 /**
@@ -96,9 +163,10 @@ export function unregisterAtlasRebuilder(instanceId: string): void {
  * in the same task share one pass; clears in separate tasks do not. A workspace
  * returning from `display: none` is the latter case — every `TerminalView`
  * observes its own container, and a microtask checkpoint runs between
- * `ResizeObserver` callbacks — so N panes cost N passes. That is accepted:
- * widening the window to an animation frame would put a paint between the clear
- * and the rebuild, which is the corrupted frame this module exists to prevent.
+ * `ResizeObserver` callbacks — so N panes still open N passes. Widening the
+ * window to an animation frame would put a paint between the clear and the
+ * rebuild, which is the corrupted frame this module exists to prevent; the
+ * frame set above is what keeps those N passes at N rebuilds instead of N².
  */
 export function notifyTextureAtlasCleared(instanceId: string, selfRebuilt: boolean): void {
   // A rebuild callback reporting back would re-arm the microtask from inside
@@ -115,6 +183,11 @@ export function notifyTextureAtlasCleared(instanceId: string, selfRebuilt: boole
 export function __resetAtlasRebuildersForTest(): void {
   rebuilders.clear();
   pendingReports.clear();
+  answeredThisFrame.clear();
   flushScheduled = false;
   flushing = false;
+  // An animation frame already queued would otherwise clear the next test's
+  // frame set out from under it.
+  frameResetScheduled = false;
+  frameResetGeneration += 1;
 }

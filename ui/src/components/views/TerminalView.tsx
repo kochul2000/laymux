@@ -129,6 +129,7 @@ import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
   notifyTextureAtlasCleared,
+  noteTerminalRendered,
 } from "@/lib/webgl-atlas-rebuild";
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
@@ -2214,6 +2215,10 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const renderDisposable = terminal.onRender(() => {
+      // A paint refills the render model with coordinates into the current
+      // atlas, so a foreign clear from here on has to reach this terminal even
+      // if the fan-out already visited it this frame (issue #573).
+      noteTerminalRendered(instanceId);
       firstRenderReady = true;
       settleStartupIfReady();
       if (readyGenerationRef.current !== terminalGeneration) {
@@ -3004,9 +3009,9 @@ export function TerminalView({
         },
       );
     };
-    // Atlas clear + full repaint for this terminal alone. Also the callback the
-    // shared-atlas coordinator runs on every other terminal (issue #571), so it
-    // must not report back into the coordinator.
+    // Atlas clear + full repaint for this terminal alone. Reached both from our
+    // own reflow paths and, through the wrapper below, from the shared-atlas
+    // coordinator (issue #571) — so it must not report back into it.
     const rebuildRendererLocal = () => {
       trace("atlas-rebuild");
       let cleared = true;
@@ -3020,6 +3025,17 @@ export function TerminalView({
       }
       terminal.refresh(0, terminal.rows - 1);
       return cleared;
+    };
+    // What the shared-atlas coordinator runs on this terminal when *someone
+    // else* cleared the atlas (issue #571). It must not report back.
+    const rebuildRendererForForeignClear = () => {
+      // A hidden terminal is never worked on (§8.4). Nothing it draws is
+      // visible, and the hide→show return already rebuilds it unconditionally
+      // — so the fan-out stays out and the repair still happens exactly once
+      // (issue #573). Marking `reflowDirtyRef` here would instead force the
+      // guarded-fit branch on return and pay for a second rebuild.
+      if (isContainerHiddenRef.current) return;
+      rebuildRendererLocal();
     };
     const rebuildTerminalRenderer = () => {
       let selfRebuilt = false;
@@ -3945,7 +3961,7 @@ export function TerminalView({
         // Rebuild hook for a foreign atlas clear (issue #571). Registered under
         // the instance id only — a second registration under paneId would
         // rebuild this terminal twice per clear.
-        registerAtlasRebuilder(instanceId, rebuildRendererLocal);
+        registerAtlasRebuilder(instanceId, rebuildRendererForForeignClear);
 
         performTerminalFit({});
         openedRef.current = true;

@@ -615,18 +615,20 @@ composer 모드로 vim 을 쓰면 `가나다라` 를 친 뒤 **Enter 도 Backspa
 - **역검증(4종)**: (1) 판정에서 `draftEmpty` 를 빼면 → 잔여 초안이 다시 고아가 되고 #558 의 "조합만 확정" 동작도 무너진다. (2) Shift+Enter 의 프록시 검사를 빼면 → alt 화면에서 줄바꿈이 초안에 들어간다. (3) Tab 의 프록시 검사를 빼면 → 앱이 `\t` 를 못 받고 팝업이 열린다. (4) 붙여넣기 검사를 빼면 → 붙여넣기가 초안에 남는다. 넷 다 해당 테스트가 실패함을 확인했다.
 - **미검증**: 붙여넣기는 bracketed paste(`ESC[200~`) 로 감싸지 않는다 — Direct 모드 네이티브 붙여넣기와 동일한 동작이므로 의도적으로 맞췄지만, 그래서 vim insert 모드에 여러 줄을 붙여넣으면 autoindent 가 개입한다. 두 모드 공통 문제이므로 이 이슈에서 손대지 않았다.
 
-### 8.20 WebGL atlas 는 pane 사이에서 공유된다 — 지운 쪽이 전원에게 알린다 (issue #571)
+### 8.20 WebGL atlas 는 pane 사이에서 공유된다 — 지운 쪽이 전원에게 알린다 (issue #571, #573)
 
 `@xterm/addon-webgl` 의 texture atlas 는 render config(폰트·셀 크기·색·DPR)가 같은 **Terminal 인스턴스끼리 공유**된다(`CharAtlasCache.acquireTextureAtlas`). §8.4 가 부르는 `clearTextureAtlas()` 는 그 공유 atlas 를 지우면서 **호출한 터미널의 모델만** 다시 맞춘다. 나머지 터미널의 vertex 에는 지워진 페이지의 옛 좌표가 남고, 그 자리에 다른 문자가 다시 rasterize 되면 옛 좌표는 경계에 걸친 **glyph 조각**을 그린다.
 
 - **판정 소유자는 `webgl-atlas-rebuild.ts` 하나다.** "atlas 가 지워졌다 → 누가 다시 그려야 하는가" 를 이 모듈만 답한다. `TerminalView` 는 마운트에서 재구성 콜백을 등록(instance id 키)하고, `rebuildTerminalRenderer()` 에서 보고만 한다.
 - **리페인트로는 못 고친다.** `WebglRenderer._updateModel()` 은 code·색이 모델 캐시와 같은 셀을 건너뛴다. `refresh(0, rows-1)` 은 행을 훑되 vertex 를 다시 쓰지 않으므로 stale 좌표가 살아남는다. 그래서 재구성은 **`clearTextureAtlas()` + 전체 refresh** 다 — 모델을 비워야 모든 셀이 `updateCell()` 을 다시 통과한다. 이미 비어 있는 atlas 에 대한 `clearTexture()` 는 early-return 이라 전원 호출이 안전하다.
 - **왜 조용한 pane 만 깨지나.** 워크스페이스 복귀에서는 pane 들이 한 task 안에서 함께 지우므로 서로를 해치지 않는다. 문제는 출력이 많은 pane 의 fit 이 write drain 을 기다리다 **뒤늦게 혼자 지울 때**다(계측: 일괄 clear 3건 뒤 525ms 만에 1건 추가). 그 시점에 이미 리페인트를 끝낸 pane 이 stale 이 되고, 바쁜 pane 은 스스로 계속 다시 그려 낫는다. `watch` 처럼 부분만 갱신하는 pane 이 가장 오래 깨진 채 남는다.
-- **coalesce 는 microtask 하나.** 같은 task 의 clear 여러 건을 한 pass 로 덮고 다음 paint 전에 끝낸다. pane 마다 `ResizeObserver` 가 따로 있으므로 워크스페이스 복귀는 **pane 당 pass 하나**가 되어 N pane 이면 O(N²) 재구성이다. rAF 로 넓히면 pass 는 줄지만 clear 와 재구성 사이에 깨진 프레임이 한 번 보인다 — 막으려던 그 화면이다.
+- **coalesce 는 microtask 하나.** 같은 task 의 clear 여러 건을 한 pass 로 덮고 다음 paint 전에 끝낸다. pane 마다 `ResizeObserver` 가 따로 있으므로 워크스페이스 복귀는 여전히 **pane 당 pass 하나**다. rAF 로 넓히면 pass 는 줄지만 clear 와 재구성 사이에 깨진 프레임이 한 번 보인다 — 막으려던 그 화면이다.
+- **pass 는 많아도 재구성은 프레임당 터미널 하나** (#573). 이번 프레임에 이미 응답한 터미널은 다음 pass 가 건너뛰므로 N pane 복귀는 O(N²) 가 아니라 **O(N)** 이다. 근거는 모델 상태다 — 재구성 직후 모델은 비어 있고, 그것을 다시 채우는 것은 `renderRows` 뿐이며 xterm 은 그것을 항상 rAF 에서 돌린다. 프레임 집합은 **다음 animation frame 에 비우고**, 그 전에 그린 터미널은 `noteTerminalRendered()`(xterm `onRender` → `TerminalView`) 로 즉시 빠진다. rAF 없는 호스트에서는 skip 하지 않는다.
+- **숨은 pane 은 팬아웃에서 빠진다** (#573). §8.4 가 hidden 터미널을 건드리지 않는 것과 같은 규약이고, hide→show 복귀가 `recoveringFromHidden` 에서 무조건 재구성하므로 **복귀 시 정확히 한 번**이 유지된다. 여기서 `reflowDirtyRef` 를 세우면 복귀가 guarded-fit 분기로 넘어가 재구성이 두 번이 되므로 세우지 않는다. "숨었나" 는 `TerminalView` 판정이라 코디네이터가 아니라 등록된 콜백이 답한다.
 - **단독 보고자는 건너뛰되, 자기 재구성이 실패했으면 보고자로 안 쳐준다.** wipe 는 공유 atlas 에 닿았는데 자기 모델만 안 비워진 상태라 남들과 똑같이 stale 이기 때문이다. pass 중에 올라온 보고는 무시한다(재구성 콜백이 되보고하면 microtask 무한 재예약).
 - **범위: 공유 여부를 우리가 계산하지 않는다.** xterm 은 "누가 이 atlas 를 쓰는가" 를 노출하지 않고, `configEquals` 를 재현하면 같은 질문의 소유자가 둘이 된다(§8.19 의 실패 패턴). 통보는 등록된 전 터미널에 보낸다.
-- **역검증**: `notifyTextureAtlasCleared()` 를 제거하면 같은 재현 스크립트에서 조용한 pane 전체가 다시 조각난다(실기 확인). 단위 테스트도 실패한다.
-- **미검증**: 저사양 GPU·소프트웨어 렌더링 폴백, 폰트 config 가 서로 다른 pane 이 섞인 구성, 원격(브라우저) 렌더러.
+- **역검증**: `notifyTextureAtlasCleared()` 를 제거하면 같은 재현 스크립트에서 조용한 pane 전체가 다시 조각난다(실기 확인). 단위 테스트도 실패한다. hidden 가드를 빼면 숨은 pane 이 팬아웃에서 `clearTextureAtlas()` 를 받고, 프레임 집합을 빼면 6 pane / 6 pass 호출 횟수가 6 에서 30 으로 돌아간다(둘 다 해당 테스트 실패 확인).
+- **미검증**: 저사양 GPU·소프트웨어 렌더링 폴백, 폰트 config 가 서로 다른 pane 이 섞인 구성, 원격(브라우저) 렌더러. #573 의 비용 축소는 단위 테스트로만 고정했고 #571 실기 재현은 사람이 다시 확인해야 한다.
 
 판정과 대안 비교는 [ADR-0064](../adr/0064-shared-webgl-atlas-clear-fanout.md).
 

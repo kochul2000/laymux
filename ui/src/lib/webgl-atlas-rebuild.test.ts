@@ -1,17 +1,36 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
   notifyTextureAtlasCleared,
+  noteTerminalRendered,
   __resetAtlasRebuildersForTest,
 } from "./webgl-atlas-rebuild";
 
 /** Let the queued microtask run. */
 const flushMicrotasks = () => Promise.resolve();
 
+/** Animation-frame callbacks the module queued, drained by `advanceFrame()`. */
+let frameCallbacks: FrameRequestCallback[] = [];
+
+/** Run what the browser would run at the start of the next frame. */
+function advanceFrame(): void {
+  const due = frameCallbacks;
+  frameCallbacks = [];
+  for (const callback of due) callback(0);
+}
+
 describe("webgl-atlas-rebuild (issue #571)", () => {
   beforeEach(() => {
+    frameCallbacks = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
+      frameCallbacks.push(callback),
+    );
     __resetAtlasRebuildersForTest();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("rebuilds every other terminal when one clears the shared atlas", async () => {
@@ -75,12 +94,13 @@ describe("webgl-atlas-rebuild (issue #571)", () => {
     expect(rebuild).toHaveBeenCalledTimes(1);
   });
 
-  it("rebuilds again for a clear that arrives after the previous flush", async () => {
+  it("rebuilds again for a clear that arrives in a later frame", async () => {
     const rebuild = vi.fn();
     registerAtlasRebuilder("t-1", rebuild);
 
     notifyTextureAtlasCleared("t-other", true);
     await flushMicrotasks();
+    advanceFrame();
     notifyTextureAtlasCleared("t-other", true);
     await flushMicrotasks();
 
@@ -165,6 +185,97 @@ describe("webgl-atlas-rebuild (issue #571)", () => {
     await flushMicrotasks();
 
     expect(rebuild).not.toHaveBeenCalled();
+  });
+
+  // -- issue #573: the fan-out must cost O(N), not O(N²) --
+
+  it("asks each terminal at most once per frame across separate passes (issue #573)", async () => {
+    const ids = ["t-0", "t-1", "t-2", "t-3", "t-4", "t-5"];
+    const rebuilds = ids.map((id) => {
+      const rebuild = vi.fn();
+      registerAtlasRebuilder(id, rebuild);
+      return rebuild;
+    });
+
+    // A workspace returning from display:none: every pane's ResizeObserver
+    // callback clears the atlas in its own task, so each one opens its own
+    // pass. Before #573 that was N passes × N rebuilds.
+    for (const id of ids) {
+      notifyTextureAtlasCleared(id, true);
+      await flushMicrotasks();
+    }
+
+    for (const rebuild of rebuilds) {
+      expect(rebuild.mock.calls.length).toBeLessThanOrEqual(1);
+    }
+    const total = rebuilds.reduce((sum, rebuild) => sum + rebuild.mock.calls.length, 0);
+    expect(total).toBe(ids.length);
+  });
+
+  it("asks a terminal again once it has rendered into the fresh atlas (issue #573)", async () => {
+    const rebuild = vi.fn();
+    registerAtlasRebuilder("t-1", rebuild);
+
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+    // The rebuild left an empty render model, which is why a second clear in
+    // the same frame is a no-op for this terminal. A render refills that model
+    // with coordinates into the current atlas, so the next clear does reach it.
+    noteTerminalRendered("t-1");
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+
+    expect(rebuild).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks a re-registered terminal again within the same frame (issue #573)", async () => {
+    const first = vi.fn();
+    registerAtlasRebuilder("t-1", first);
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+
+    // A profile switch disposes the xterm instance and builds a new one under
+    // the same instance id. The new terminal has its own model, so what the
+    // previous one did this frame says nothing about it.
+    const second = vi.fn();
+    registerAtlasRebuilder("t-1", second);
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks a terminal that threw again in the same frame (issue #573)", async () => {
+    // A throwing rebuild answered nothing, so it must not be counted as done
+    // for this frame.
+    const throwing = vi.fn(() => {
+      throw new Error("rebuild failed");
+    });
+    registerAtlasRebuilder("t-throwing", throwing);
+
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+
+    expect(throwing).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to per-pass rebuilds without a frame clock (issue #573)", async () => {
+    // Non-browser hosts have no requestAnimationFrame to expire the frame set
+    // with; skipping would then be permanent, so the coordinator must not skip
+    // at all there.
+    vi.stubGlobal("requestAnimationFrame", undefined);
+    const rebuild = vi.fn();
+    registerAtlasRebuilder("t-1", rebuild);
+
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+
+    expect(rebuild).toHaveBeenCalledTimes(2);
   });
 
   it("keeps iterating past an entry removed during the flush", async () => {
