@@ -251,6 +251,140 @@ export function calcResizeDelta(
   return delta;
 }
 
+/** One pane's new absolute rect fields, shaped for `resizePane(index, rect)`. */
+export type PaneResizeUpdate = { index: number; rect: Partial<GridRect> };
+
+/** Axis a resize request targets: `w` moves a vertical boundary, `h` a horizontal one. */
+export type PaneResizeAxis = "w" | "h";
+
+export type PaneResizePlan =
+  | { ok: true; updates: PaneResizeUpdate[] }
+  | { ok: false; error: string };
+
+/**
+ * Translate a boundary move into per-pane absolute rects: the left/top group
+ * grows by `delta`, the right/bottom group shifts by the same amount and gives
+ * up the same size. The two sides stay flush, so panes can neither overlap nor
+ * leave a gap. `rawDelta` is clamped by {@link calcResizeDelta} first.
+ *
+ * This is the single owner of the "move a boundary" verdict — both the drag
+ * handles and the automation `panes.resize` action go through it (issue #590).
+ */
+export function boundaryResizeUpdates(
+  boundary: PaneBoundary,
+  rawDelta: number,
+  panes: GridRect[],
+): PaneResizeUpdate[] {
+  const delta = calcResizeDelta(boundary, rawDelta, panes);
+  if (Math.abs(delta) < EPSILON) return [];
+
+  const vertical = boundary.direction === "vertical";
+  const updates: PaneResizeUpdate[] = [];
+
+  for (const index of boundary.leftPaneIndices) {
+    const p = panes[index];
+    updates.push({ index, rect: vertical ? { w: p.w + delta } : { h: p.h + delta } });
+  }
+  for (const index of boundary.rightPaneIndices) {
+    const p = panes[index];
+    updates.push({
+      index,
+      rect: vertical ? { x: p.x + delta, w: p.w - delta } : { y: p.y + delta, h: p.h - delta },
+    });
+  }
+
+  return updates;
+}
+
+/** Apply {@link PaneResizeUpdate}s to a pane list, returning a new array. */
+export function applyPaneResizeUpdates<T extends GridRect>(
+  panes: T[],
+  updates: PaneResizeUpdate[],
+): T[] {
+  if (updates.length === 0) return panes;
+  const next = [...panes];
+  for (const { index, rect } of updates) next[index] = { ...next[index], ...rect };
+  return next;
+}
+
+/**
+ * The boundary that a "resize pane N along `axis`" request has to move, plus
+ * the sign converting the requested size delta into a boundary delta.
+ *
+ * Prefers the pane's trailing edge (right/bottom), where moving the boundary
+ * outward grows the pane (`sign = 1`). A pane flush against the grid edge owns
+ * no such boundary, so it falls back to its leading edge, where moving the
+ * boundary toward the origin is what grows it (`sign = -1`).
+ */
+export function findPaneAxisBoundary(
+  panes: GridRect[],
+  paneIndex: number,
+  axis: PaneResizeAxis,
+): { boundary: PaneBoundary; sign: 1 | -1 } | null {
+  if (paneIndex < 0 || paneIndex >= panes.length) return null;
+
+  const direction = axis === "w" ? "vertical" : "horizontal";
+  const boundaries = findPaneBoundaries(panes).filter((b) => b.direction === direction);
+
+  const trailing = boundaries.find((b) => b.leftPaneIndices.includes(paneIndex));
+  if (trailing) return { boundary: trailing, sign: 1 };
+
+  const leading = boundaries.find((b) => b.rightPaneIndices.includes(paneIndex));
+  if (leading) return { boundary: leading, sign: -1 };
+
+  return null;
+}
+
+/**
+ * Plan a neighbor-aware pane resize from a size delta (the automation
+ * `dw`/`dh` contract). Each axis is resolved independently against the state
+ * left by the previous one, so `w` and `h` never fight over the same boundary.
+ *
+ * Fails loudly instead of breaking the tiling: a pane that spans the full grid
+ * on the requested axis has nothing to resize against.
+ */
+export function planPaneResize(
+  panes: GridRect[],
+  paneIndex: number,
+  delta: { w?: number; h?: number },
+): PaneResizePlan {
+  if (paneIndex < 0 || paneIndex >= panes.length) {
+    return { ok: false, error: `Pane index out of range (0-${panes.length - 1})` };
+  }
+
+  const axes = (["w", "h"] as const).filter((axis) => delta[axis] != null);
+  if (axes.length === 0) {
+    return { ok: false, error: "Resize delta requires at least one of 'w' or 'h'" };
+  }
+
+  let current: GridRect[] = panes;
+  const updates: PaneResizeUpdate[] = [];
+
+  for (const axis of axes) {
+    const resolved = findPaneAxisBoundary(current, paneIndex, axis);
+    if (!resolved) {
+      const span = axis === "w" ? "width" : "height";
+      const kind = axis === "w" ? "vertical" : "horizontal";
+      return {
+        ok: false,
+        error: `Pane ${paneIndex} spans the full grid ${span} — no ${kind} boundary to resize against`,
+      };
+    }
+
+    const axisUpdates = boundaryResizeUpdates(
+      resolved.boundary,
+      resolved.sign * (delta[axis] as number),
+      current,
+    );
+    if (axisUpdates.length === 0) continue; // clamped to a no-op
+
+    updates.push(...axisUpdates);
+    current = applyPaneResizeUpdates(current, axisUpdates);
+  }
+
+  return { ok: true, updates };
+}
+
 /**
  * Check if a pane should be merged after drag ends.
  * Returns the indices of panes to remove (the side at minimum size),
