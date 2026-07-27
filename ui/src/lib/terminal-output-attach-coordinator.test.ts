@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeTerminalOutputAttachment,
   TerminalOutputAttachCoordinator,
+  TerminalOutputRepairError,
   type TerminalAttachState,
   type TerminalOutputAttachment,
 } from "./terminal-output-attach-coordinator";
@@ -73,6 +74,109 @@ describe("TerminalOutputAttachCoordinator", () => {
       expectedSeq: 3,
       actualSeq: 5,
     });
+  });
+
+  it("keeps the gapped delta buffered so a repair can splice it back in", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+
+    expect(coordinator.ingest(delta(5, "fg"))).toMatchObject({ kind: "gap" });
+
+    expect(coordinator.beginRepair()).toBe(3);
+    const result = coordinator.completeRepair(delta(3, "de"));
+
+    expect(result.kind).toBe("apply");
+    expect(result.chunks.map((chunk) => new TextDecoder().decode(chunk))).toEqual(["de", "fg"]);
+    expect(coordinator.ready).toBe(true);
+  });
+
+  it("trims a repair range that overlaps bytes the surface already applied", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+    coordinator.ingest(delta(6, "g"));
+    coordinator.beginRepair();
+
+    // The backend serves `[3, 7)`; the buffered `[6, 7)` delta is a duplicate.
+    const result = coordinator.completeRepair(delta(3, "defg"));
+
+    expect(result.chunks.map((chunk) => new TextDecoder().decode(chunk))).toEqual(["defg"]);
+    expect(coordinator.ingest(delta(7, "h")).kind).toBe("apply");
+  });
+
+  it("reports a gap when the repair itself does not reach the expected sequence", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+    coordinator.ingest(delta(5, "f"));
+    coordinator.beginRepair();
+
+    expect(coordinator.completeRepair(delta(4, "e"))).toMatchObject({
+      kind: "gap",
+      expectedSeq: 3,
+      actualSeq: 4,
+    });
+    expect(coordinator.ready).toBe(false);
+  });
+
+  // Each refusal carries a machine-readable `reason` because the caller files a
+  // different recovery counter per reason, and ADR-0072 hangs revisit conditions
+  // on those counters. Matching messages instead would misfile every bucket the
+  // moment a string is reworded.
+  it.each([
+    [
+      "geometry revision it cannot attribute",
+      "geometry-change" as const,
+      "terminal output repair spans a geometry change",
+      () => delta(3, "de", 4),
+    ],
+    [
+      "generation that was replaced",
+      "generation-change" as const,
+      "terminal output generation changed",
+      () => ({ ...delta(3, "de"), generation: 8 }),
+    ],
+  ])("refuses a repair with a %s", (_name, reason, message, build) => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+    coordinator.ingest(delta(5, "f", 3));
+    coordinator.beginRepair();
+
+    let caught: unknown;
+    try {
+      coordinator.completeRepair(build());
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(TerminalOutputRepairError);
+    expect((caught as TerminalOutputRepairError).reason).toBe(reason);
+    expect((caught as Error).message).toBe(message);
+    expect(coordinator.ready).toBe(false);
+  });
+
+  it("cannot start a repair before the first attach completes", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    expect(() => coordinator.beginRepair()).toThrow("terminal output attach is not ready");
+    expect(() => coordinator.completeRepair(delta(0, "a"))).toThrow(TerminalOutputRepairError);
+    expect(() => coordinator.completeRepair(delta(0, "a"))).toThrow(
+      "terminal output repair is not pending",
+    );
+  });
+
+  it("drops a pending repair when a full attach takes over", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+    coordinator.ingest(delta(5, "f"));
+    coordinator.beginRepair();
+
+    coordinator.beginAttach();
+
+    let caught: unknown;
+    try {
+      coordinator.completeRepair(delta(3, "de"));
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as TerminalOutputRepairError).reason).toBe("not-pending");
   });
 
   it("rejects malformed ranges and unsupported versions", () => {
