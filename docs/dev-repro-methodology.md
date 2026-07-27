@@ -65,6 +65,24 @@ LAYMUX_PTY_TRACE=1           # PTY 측 기록
 
 **판정 소유자는 하나여야 한다.** 같은 질문에 두 곳이 답하면 반드시 갈라진다 — #552 의 앵커(shadow vs 버퍼), #560 의 "초안이 비었나"(prop vs ref)가 각각 그 실패였다.
 
+## 4.5. 셀 격자로 판정한다 — 화면 주장은 실제 xterm 에 흘려서 본다
+
+순수 함수로 못 빼는 판정이 있다. **"이 바이트를 흘리면 화면이 이렇게 된다"** 는 파서와 버퍼가 있어야 답이 나온다. `TerminalView.test.tsx` 는 xterm 을 mock 하므로 여기서는 아무것도 단정할 수 없다 — mock 의 `write` 는 문자열을 기록할 뿐 파서에 닿지 않고, `reset` 은 버퍼를 비우지도 `onScroll` 을 쏘지도 않는다.
+
+그래서 `open()` 하지 않은 **실제 `@xterm/xterm`** 에 바이트를 흘려 `buffer.active` 를 읽는 계층을 따로 둔다([ADR-0074](adr/0074-xterm-cell-grid-screen-test-tier.md)).
+
+```bash
+cd ui && npm run test:screen     # *.screen.test.ts 만 — 기본 vitest run 에서는 제외된다
+```
+
+- 하니스: `ui/src/test/screen/` — 표면(`xterm-screen.ts`), 백엔드 ring 대역(`output-ring.ts`), 차분 프레임 스크립트(`differential-frames.ts`), output 경로 드라이버(`output-surface-driver.ts`).
+- 셀 단위로 비교한다(문자·폭·색·속성·커서). 행 문자열만 보면 SGR 손실과 전각 continuation 붕괴를 놓친다.
+- 폭은 프로덕션과 같은 provider 를 쓴다(`activateTerminalUnicodeProvider`, ADR-0058). 첫 write 앞에서 등록하지 않으면 출하되는 것과 다른 격자를 재게 된다.
+- **결함의 존재 증명이 1급 시민이다.** 비교 함수는 던지지 않고 차이를 돌려주므로 "이 경로로는 복원되지 않는다" 를 그대로 단정할 수 있고, 그러려면 **폐기한 경로를 실행 가능한 상태로 유지**해야 한다(대조군).
+- 컴포넌트를 렌더하지 않는다. `TerminalView` 가 그 순서로 배선했는지는 계속 `TerminalView.test.tsx` 가 소유한다. 어느 쪽에 쓸지는 "xterm 실동작이 주장의 일부인가" 로 가른다.
+
+실기(§1–§3)를 대체하지 않는다. 이 계층은 **반복 가능한 회귀**를 담당하고, 폰트·렌더러·OS IME 는 여전히 dev 실기의 몫이다.
+
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 
 수정을 되돌려 **의도한 테스트가 실제로 실패하는지** 확인한다. 통과하면 그 테스트는 아무것도 지키지 않는다.
