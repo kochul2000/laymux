@@ -83,6 +83,7 @@ ADR 이 필요한 대표 기준:
 | [0063](0063-remote-foreground-auto-reclaim.md) | Remote 재접속은 문서가 보일 때만 자동 claim (ADR-0027 마지막 항목을 이 범위로 좁힘) | Proposed |
 | [0064](0064-shared-webgl-atlas-clear-fanout.md) | 공유 WebGL atlas 를 지운 쪽이 모든 터미널의 렌더 모델을 무효화 | Proposed |
 | [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
+| [0066](0066-bundled-conpty-runtime.md) | Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 실행 | Accepted |
 
 ## 새 ADR 추가
 

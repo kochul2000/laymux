@@ -3,6 +3,9 @@
 src-tauri/target/
 src-tauri/target-review/
 
+# build.rs 가 벤더 트리에서 채우는 ConPTY 번들 스테이징 (ADR-0066)
+src-tauri/gen/conpty/
+
 # Node
 node_modules/
 dist/

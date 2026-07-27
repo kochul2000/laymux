@@ -8,6 +8,7 @@ pub mod clipboard;
 pub mod cloud;
 pub mod codex_activity;
 pub mod commands;
+pub mod conpty_runtime;
 pub mod constants;
 pub mod crash_reporter;
 pub mod error;

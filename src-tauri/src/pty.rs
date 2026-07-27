@@ -599,7 +599,41 @@ mod tests {
     use crate::terminal::{InitialExecutionHost, TerminalConfig};
     use std::cell::Cell;
     use std::sync::{mpsc, Condvar};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    /// PTY 출력을 `needle` 이 보일 때까지(또는 `timeout` 까지) 모은다.
+    ///
+    /// 청크 **개수**로 예산을 잡으면 콘솔 호스트가 시작 시퀀스를 잘게 쪼개 보낼 때
+    /// 정작 기다리던 본문이 오기 전에 예산이 소진된다 — 번들 ConPTY 로 바꾸면서
+    /// 실제로 겪었다([ADR-0066](../../docs/adr/0066-bundled-conpty-runtime.md)).
+    /// 예산은 시간으로만 잡는다. 비교는 대소문자를 구분하지 않는다.
+    fn collect_pty_output_until(
+        rx: &mpsc::Receiver<Vec<u8>>,
+        needle: &str,
+        timeout: Duration,
+    ) -> String {
+        let deadline = Instant::now() + timeout;
+        let needle = needle.to_lowercase();
+        let mut output = String::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return output;
+            }
+            match rx.recv_timeout(remaining.min(Duration::from_millis(500))) {
+                Ok(data) => {
+                    output.push_str(&String::from_utf8_lossy(&data));
+                    if output.to_lowercase().contains(&needle) {
+                        return output;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return output,
+            }
+        }
+    }
+
+    const PTY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(15);
 
     fn make_test_session(profile: &str) -> TerminalSession {
         TerminalSession::new(
@@ -783,16 +817,8 @@ mod tests {
         let _ = handle.write(b"echo PTY_TEST_OK\r\n");
 
         // Wait for some output
-        let mut got_output = false;
-        for _ in 0..20 {
-            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
-                if !data.is_empty() {
-                    got_output = true;
-                    break;
-                }
-            }
-        }
-        assert!(got_output, "Should receive output from PTY");
+        let output = collect_pty_output_until(&rx, "PTY_TEST_OK", PTY_OUTPUT_TIMEOUT);
+        assert!(!output.is_empty(), "Should receive output from PTY");
 
         // Close by writing exit
         let _ = handle.write(b"exit\r\n");
@@ -832,19 +858,7 @@ mod tests {
         // Ask PowerShell for its current directory
         let _ = handle.write(b"(Get-Location).Path\r\n");
 
-        let mut output = String::new();
-        for _ in 0..30 {
-            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
-                output.push_str(&String::from_utf8_lossy(&data));
-                // temp dir path should appear (case-insensitive check)
-                if output
-                    .to_lowercase()
-                    .contains(&temp_str.to_lowercase().replace('\\', "\\"))
-                {
-                    break;
-                }
-            }
-        }
+        let output = collect_pty_output_until(&rx, &temp_str, PTY_OUTPUT_TIMEOUT);
         // The output should contain the temp directory path
         assert!(
             output.to_lowercase().contains("temp"),
@@ -868,15 +882,7 @@ mod tests {
         // Check that LX_TERMINAL_ID is set
         let _ = handle.write(b"echo $env:LX_TERMINAL_ID\r\n");
 
-        let mut output = String::new();
-        for _ in 0..20 {
-            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
-                output.push_str(&String::from_utf8_lossy(&data));
-                if output.contains("test-pty") {
-                    break;
-                }
-            }
-        }
+        let output = collect_pty_output_until(&rx, "test-pty", PTY_OUTPUT_TIMEOUT);
         assert!(
             output.contains("test-pty"),
             "LX_TERMINAL_ID should be set. Got: {output}"
@@ -970,15 +976,7 @@ mod tests {
 
         let _ = handle.write(b"(Get-Location).Path\r\n");
 
-        let mut output = String::new();
-        for _ in 0..30 {
-            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
-                output.push_str(&String::from_utf8_lossy(&data));
-                if output.to_lowercase().contains(&temp_str.to_lowercase()) {
-                    break;
-                }
-            }
-        }
+        let output = collect_pty_output_until(&rx, &temp_str, PTY_OUTPUT_TIMEOUT);
         assert!(
             output.to_lowercase().contains("temp"),
             "PowerShell should start in converted temp dir. Got: {output}"
@@ -1213,15 +1211,7 @@ mod tests {
         // Ask for current directory
         let _ = handle.write(b"pwd\n");
 
-        let mut output = String::new();
-        for _ in 0..30 {
-            if let Ok(data) = rx.recv_timeout(Duration::from_millis(500)) {
-                output.push_str(&String::from_utf8_lossy(&data));
-                if output.contains("/tmp") {
-                    break;
-                }
-            }
-        }
+        let output = collect_pty_output_until(&rx, "/tmp", PTY_OUTPUT_TIMEOUT);
         assert!(
             output.contains("/tmp"),
             "WSL should start in /tmp. Got: {output}"
