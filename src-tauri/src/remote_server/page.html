@@ -3646,15 +3646,106 @@
           { prefix: ">", final: "q" }, // XTVERSION
         ];
 
+        // OSC 4/10/11/12 can stack color setters and queries in one payload.
+        // Parser handlers are all-or-nothing, so claim every payload containing
+        // a query and apply only its setter slots synchronously at that parser
+        // position. Re-entering term.write here would append the setter behind
+        // the current write buffer and reverse it with later setters/resets.
+        const MIRROR_SUPPRESSED_COLOR_OSC = [4, 10, 11, 12];
+
+        function mirrorColorSetterCalls(ident, data) {
+          const fields = data.split(";");
+          if (ident === 4) {
+            let containsQuery = false;
+            const setterFields = [];
+            for (let index = 0; index + 1 < fields.length; index += 2) {
+              const colorIndex = fields[index];
+              const specification = fields[index + 1];
+              const parsedIndex = /^\d+$/.test(colorIndex)
+                ? Number(colorIndex)
+                : -1;
+              if (
+                parsedIndex >= 0 &&
+                parsedIndex <= 255 &&
+                specification === "?"
+              ) {
+                containsQuery = true;
+              } else {
+                setterFields.push(colorIndex, specification);
+              }
+            }
+            if (!containsQuery) return null;
+            return setterFields.length
+              ? [{ ident: 4, data: setterFields.join(";") }]
+              : [];
+          }
+
+          let containsQuery = false;
+          const setterCalls = [];
+          for (
+            let offset = 0;
+            offset < fields.length && ident + offset <= 12;
+            offset += 1
+          ) {
+            const specification = fields[offset];
+            if (specification === "?") {
+              containsQuery = true;
+            } else if (specification) {
+              setterCalls.push({ ident: ident + offset, data: specification });
+            }
+          }
+          return containsQuery ? setterCalls : null;
+        }
+
+        function applyMirrorColorSetter(term, ident, data) {
+          // xterm 6.0.0 exposes the built-in OSC color handlers through this
+          // pinned private adapter. Calling them directly keeps the mutation at
+          // the exact parser position while the custom handler suppresses only
+          // REPORT events. A missing/changed adapter must fail loudly rather
+          // than silently reordering or dropping a setter.
+          const inputHandler = term && term._core && term._core._inputHandler;
+          let setter = null;
+          if (ident === 4) setter = inputHandler && inputHandler.setOrReportIndexedColor;
+          else if (ident === 10) setter = inputHandler && inputHandler.setOrReportFgColor;
+          else if (ident === 11) setter = inputHandler && inputHandler.setOrReportBgColor;
+          else if (ident === 12) setter = inputHandler && inputHandler.setOrReportCursorColor;
+          if (
+            typeof setter !== "function" ||
+            setter.call(inputHandler, data) !== true
+          ) {
+            throw new Error(
+              `xterm color setter adapter unavailable for OSC ${ident}`,
+            );
+          }
+        }
+
         // A running program's queries are answered once, by the desktop pane.
         // Without this the mirror answers them a second time — every prompt
         // render emits DSR, and reconnect replays the whole scrollback at once —
         // and those replies land on the shell prompt as stray input (issue #480).
         function suppressMirrorQueryReplies(term) {
           const parser = term.parser;
-          if (!parser || typeof parser.registerCsiHandler !== "function") return;
-          for (const id of MIRROR_SUPPRESSED_CSI) {
-            parser.registerCsiHandler(id, () => true);
+          if (!parser) return;
+          if (typeof parser.registerCsiHandler === "function") {
+            for (const id of MIRROR_SUPPRESSED_CSI) {
+              parser.registerCsiHandler(id, () => true);
+            }
+          }
+          if (typeof parser.registerOscHandler === "function") {
+            for (const ident of MIRROR_SUPPRESSED_COLOR_OSC) {
+              parser.registerOscHandler(ident, (data) => {
+                const setterCalls = mirrorColorSetterCalls(ident, data);
+                if (setterCalls === null) return false;
+                for (const setterCall of setterCalls) {
+                  applyMirrorColorSetter(
+                    term,
+                    setterCall.ident,
+                    setterCall.data,
+                  );
+                }
+                return true;
+              });
+            }
           }
         }
 

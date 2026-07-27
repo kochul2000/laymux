@@ -167,13 +167,30 @@ async function installBrowserMocks(
         };
         selection = "";
         written: Array<string | Uint8Array> = [];
+        appliedColorSetters: Array<{ ident: number; data: string }> = [];
+        _core = {
+          _inputHandler: {
+            setOrReportIndexedColor: (data: string) => this.applyColorSetter(4, data),
+            setOrReportFgColor: (data: string) => this.applyColorSetter(10, data),
+            setOrReportBgColor: (data: string) => this.applyColorSetter(11, data),
+            setOrReportCursorColor: (data: string) => this.applyColorSetter(12, data),
+          },
+        };
         parser = {
           csiHandlers: [] as Array<{ prefix?: string; intermediates?: string; final: string }>,
+          oscHandlers: [] as Array<{
+            ident: number;
+            handler: (data: string) => boolean;
+          }>,
           registerCsiHandler(
             id: { prefix?: string; intermediates?: string; final: string },
             _handler: () => boolean,
           ) {
             this.csiHandlers.push(id);
+            return { dispose() {} };
+          },
+          registerOscHandler(ident: number, handler: (data: string) => boolean) {
+            this.oscHandlers.push({ ident, handler });
             return { dispose() {} };
           },
         };
@@ -245,6 +262,10 @@ async function installBrowserMocks(
           }
           callback?.();
         }
+        private applyColorSetter(ident: number, data: string) {
+          this.appliedColorSetters.push({ ident, data });
+          return true;
+        }
         releaseDelayedWrite() {
           const callback = this.delayedWriteCallback;
           this.delayedWriteCallback = null;
@@ -275,6 +296,15 @@ async function installBrowserMocks(
           );
           if (suppressed) return;
           this.dataListener?.(reply);
+        }
+        emitOscQueryReply(ident: number, data: string, reply: string) {
+          if (this.isOscHandled(ident, data)) return;
+          this.dataListener?.(reply);
+        }
+        isOscHandled(ident: number, data: string) {
+          return [...this.parser.oscHandlers]
+            .reverse()
+            .some((entry) => entry.ident === ident && entry.handler(data));
         }
         emitResize() {
           this.resizeListener?.({ cols: this.cols, rows: this.rows });
@@ -935,6 +965,67 @@ test("the mirror never answers terminal protocol queries, even in steady state (
   );
   await expect.poll(() => remote.writes.length).toBe(1);
   expect(remote.writes[0]).toEqual({ leaseId: "lease-1", data: "echo hi" });
+});
+
+test("the mirror claims every OSC color query while applying setters synchronously", async ({
+  page,
+}) => {
+  const remote = await installRemotePage(page, { coarse: false });
+  await connect(page);
+
+  await page.evaluate(() => {
+    const terminal = (
+      window as Window & {
+        __mockTerminal: {
+          emitOscQueryReply: (ident: number, data: string, reply: string) => void;
+        };
+      }
+    ).__mockTerminal;
+    terminal.emitOscQueryReply(10, "?", "\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\");
+    terminal.emitOscQueryReply(11, "?", "\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\");
+  });
+
+  await page.waitForTimeout(20);
+  expect(remote.writes).toHaveLength(0);
+  expect(
+    await page.evaluate(() => {
+      const terminal = (
+        window as Window & {
+          __mockTerminal: {
+            isOscHandled: (ident: number, data: string) => boolean;
+            appliedColorSetters: Array<{ ident: number; data: string }>;
+          };
+        }
+      ).__mockTerminal;
+      return {
+        indexedQuery: terminal.isOscHandled(4, "7;?"),
+        indexedMixed: terminal.isOscHandled(4, "7;?;8;#abcdef"),
+        indexedTrailing: terminal.isOscHandled(4, "7;?;"),
+        cursorQuery: terminal.isOscHandled(12, "?"),
+        cursorTrailing: terminal.isOscHandled(12, "?;"),
+        foregroundSet: terminal.isOscHandled(10, "#123456"),
+        indexedSet: terminal.isOscHandled(4, "7;#123456"),
+        specialSetAndQuery: terminal.isOscHandled(10, "#654321;?"),
+        mixedQueryAndSet: terminal.isOscHandled(10, "?;#123456"),
+        appliedColorSetters: terminal.appliedColorSetters,
+      };
+    }),
+  ).toEqual({
+    indexedQuery: true,
+    indexedMixed: true,
+    indexedTrailing: true,
+    cursorQuery: true,
+    cursorTrailing: true,
+    foregroundSet: false,
+    indexedSet: false,
+    specialSetAndQuery: true,
+    mixedQueryAndSet: true,
+    appliedColorSetters: [
+      { ident: 4, data: "8;#abcdef" },
+      { ident: 10, data: "#654321" },
+      { ident: 11, data: "#123456" },
+    ],
+  });
 });
 
 test("an in-flight snapshot is sent once and only clears the unchanged revision", async ({
