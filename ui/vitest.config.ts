@@ -14,6 +14,8 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     css: true,
-    exclude: ["e2e/**", "node_modules/**"],
+    // `*.screen.test.ts` drives a real xterm instance and belongs to the screen
+    // suite (`vitest.screen.config.ts`, `npm run test:screen`, ADR-0074).
+    exclude: ["e2e/**", "node_modules/**", "src/**/*.screen.test.{ts,tsx}"],
   },
 });

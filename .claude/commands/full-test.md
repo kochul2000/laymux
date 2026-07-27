@@ -18,6 +18,12 @@ description: "전체 테스트 스위트 실행: unit + e2e + build + 실행 검
 cd D:/PycharmProjects/laymux/ui && npx vitest run
 ```
 
+**프론트엔드 화면(셀 격자) 스위트** — 실제 xterm 인스턴스에 바이트를 흘리는 `*.screen.test.ts` 로,
+기본 `vitest run` 에서 제외돼 있으므로 따로 돌린다 ([ADR-0074](../../docs/adr/0074-xterm-cell-grid-screen-test-tier.md)):
+```bash
+cd D:/PycharmProjects/laymux/ui && npm run test:screen
+```
+
 **백엔드:**
 ```bash
 cd D:/PycharmProjects/laymux && cargo test
