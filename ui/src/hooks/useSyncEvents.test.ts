@@ -818,6 +818,34 @@ describe("useSyncEvents", () => {
     vi.useRealTimers();
   });
 
+  it("clears pending outputActive timers on unmount so none fire afterwards", () => {
+    vi.useFakeTimers();
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    const { unmount } = renderHook(() => useSyncEvents());
+
+    const callback = mockOnTerminalOutputActivity.mock.calls[0][0];
+    callback({ terminalId: "t1" });
+    expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.outputActive).toBe(
+      true,
+    );
+
+    unmount();
+
+    // The cleanup drains the timer map, so the pending reset never lands on a
+    // store this hook no longer owns.
+    vi.advanceTimersByTime(3000);
+    expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.outputActive).toBe(
+      true,
+    );
+    vi.useRealTimers();
+  });
+
   // ── Claude state transition: full event sequence tests ──
   // These simulate the exact event sequence that Rust PTY callback emits
   // during Claude lifecycle transitions, verifying frontend state at each step.

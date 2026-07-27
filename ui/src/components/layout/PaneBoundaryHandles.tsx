@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   findPaneBoundaries,
@@ -38,8 +38,15 @@ export function PaneBoundaryHandles({
   const storeRemovePane = useWorkspaceStore((s) => s.removePane);
 
   const panes = propPanes ?? activeWorkspace?.panes ?? [];
-  const getLatestPanes =
-    propGetLatestPanes ?? (() => useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? []);
+  // The store fallback must be memoized: an inline arrow would be a new
+  // identity every render, so both drag callbacks below would be rebuilt on
+  // every render even while a drag is in flight. The closure reads the store
+  // at call time, so memoizing it cannot serve stale panes.
+  const getLatestPanes = useMemo(
+    () =>
+      propGetLatestPanes ?? (() => useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? []),
+    [propGetLatestPanes],
+  );
   const resizePane = propOnResizePane ?? storeResizePane;
   const removePane = propOnRemovePane ?? storeRemovePane;
 

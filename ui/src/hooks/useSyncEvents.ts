@@ -141,6 +141,11 @@ export function useSyncEvents() {
   useEffect(() => {
     let cancelled = false;
     const unlisteners: (() => void)[] = [];
+    // Capture the Map itself so cleanup drains the same instance this effect
+    // populated. `useRef(new Map())` is never reassigned, so this is the live
+    // map — the capture exists to keep cleanup independent of `.current` at
+    // teardown time rather than to snapshot a different object.
+    const pendingOutputActiveTimers = outputActiveTimers.current;
 
     function trackListener(promise: Promise<() => void>) {
       promise.then((unlisten) => {
@@ -461,10 +466,10 @@ export function useSyncEvents() {
       unsubStore();
       if (initialSyncUnsub) initialSyncUnsub();
       if (cwdPersistTimerRef.current) clearTimeout(cwdPersistTimerRef.current);
-      for (const timer of outputActiveTimers.current.values()) {
+      for (const timer of pendingOutputActiveTimers.values()) {
         clearTimeout(timer);
       }
-      outputActiveTimers.current.clear();
+      pendingOutputActiveTimers.clear();
       for (const unlisten of unlisteners) {
         unlisten();
       }
