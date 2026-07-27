@@ -35,6 +35,10 @@ import {
   onTerminalOutputV2,
   onOpenFile,
 } from "./tauri-api";
+import {
+  recordTerminalOutputRecovery,
+  terminalOutputRecoveryCounters,
+} from "./terminal-output-recovery-metrics";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
@@ -213,6 +217,28 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("close_terminal_session", {
         id: "t1",
       });
+    });
+
+    // The recovery totals describe a ring and a generation that die with the
+    // session, so a closed terminal must not keep an entry alive forever
+    // (issue #607).
+    it("drops the terminal's output recovery counters", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      recordTerminalOutputRecovery("t-close-metrics", "gap");
+      expect(terminalOutputRecoveryCounters("t-close-metrics").gap).toBe(1);
+
+      await closeTerminalSession("t-close-metrics");
+
+      expect(terminalOutputRecoveryCounters("t-close-metrics").gap).toBe(0);
+    });
+
+    it("drops the counters even when the close command fails", async () => {
+      mockInvoke.mockRejectedValue(new Error("Session 't-close-fail' not found"));
+      recordTerminalOutputRecovery("t-close-fail", "gap");
+
+      await expect(closeTerminalSession("t-close-fail")).rejects.toThrow();
+
+      expect(terminalOutputRecoveryCounters("t-close-fail").gap).toBe(0);
     });
 
     it("serializes create, unmount close, and immediate remount create per terminal id", async () => {

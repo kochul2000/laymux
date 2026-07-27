@@ -11,6 +11,12 @@
  * purpose — the symptom is "this one pane keeps missing", which is a property of
  * the terminal, not of one React mount. They are diagnostic only: nothing reads
  * them to make a decision.
+ *
+ * Their lifetime ends with the backend session: `closeTerminalSession` calls
+ * {@link forgetTerminalOutputRecoveryCounters}, because the ring, the
+ * generation and every sequence the totals describe die with it. Without that
+ * hook a long-lived window accumulates one entry per terminal it ever opened
+ * (issue #607).
  */
 
 export type TerminalOutputRecoveryEvent =
@@ -30,9 +36,21 @@ export type TerminalOutputRecoveryEvent =
   | "geometryEscalation"
   /**
    * The repair applied, but a second hole opened behind it inside the same
-   * pending drain → full reattach. Unrelated to ring retention.
+   * pending drain. Unrelated to ring retention.
+   *
+   * Counted once per occurrence, not once per reattach: another exact range can
+   * repay the new hole too, so recovery retries up to
+   * `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` times and only then escalates to a full
+   * reattach (issue #607).
    */
   | "nestedGap"
+  /**
+   * The repair round-trip never settled within the watchdog window → full
+   * reattach. Its own bucket because a hung round-trip is a dead IPC channel,
+   * not a rejected request: it is the one failure that would otherwise freeze
+   * the pane's output forever (issue #607).
+   */
+  | "repairTimeout"
   /** The repair round-trip failed for any other reason → full reattach. */
   | "repairFailure"
   /** A live delta or a served repair range failed metadata/range validation. */
@@ -48,6 +66,7 @@ const EVENTS: readonly TerminalOutputRecoveryEvent[] = [
   "ringEscalation",
   "geometryEscalation",
   "nestedGap",
+  "repairTimeout",
   "repairFailure",
   "malformedDelta",
   "attachFailure",
@@ -78,6 +97,23 @@ export function terminalOutputRecoveryCounters(terminalId: string): TerminalOutp
   return entry ? { ...entry } : zeroed();
 }
 
+/**
+ * Drop the totals for a terminal whose backend session is gone.
+ *
+ * Called from the `close_terminal_session` path: once the session is closed its
+ * ring and generation are gone, so the totals no longer describe anything a
+ * later warning could be compared against. Keeping them would grow the map by
+ * one entry per terminal the window ever opened (issue #607).
+ */
+export function forgetTerminalOutputRecoveryCounters(terminalId: string): void {
+  counters.delete(terminalId);
+}
+
 export function resetTerminalOutputRecoveryCounters(): void {
   counters.clear();
+}
+
+/** Test-only: how many terminals currently hold counters. */
+export function terminalOutputRecoveryCounterCount(): number {
+  return counters.size;
 }

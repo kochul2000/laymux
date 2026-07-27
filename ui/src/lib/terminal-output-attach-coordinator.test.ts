@@ -90,6 +90,36 @@ describe("TerminalOutputAttachCoordinator", () => {
     expect(coordinator.ready).toBe(true);
   });
 
+  // `pending` is bounded only by how long the surface stays suspended, and a
+  // flood behind a slow repair parks six figures of deltas there. Re-buffering
+  // that tail with `push(...rest)` throws `RangeError: Maximum call stack size
+  // exceeded` — measured at 150k arguments on this runtime (issue #607).
+  it("re-buffers a six-figure pending tail without exhausting the call stack", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    const count = 150_000;
+    // Every buffered delta starts past the snapshot, so the drain gaps on the
+    // first one and has to put all the rest back.
+    for (let index = 0; index < count; index += 1) {
+      coordinator.ingest(delta(10 + index, "x"));
+    }
+
+    expect(coordinator.completeAttach(attachment(0, "abc"))).toMatchObject({
+      kind: "gap",
+      expectedSeq: 3,
+      actualSeq: 10,
+    });
+
+    // Nothing was dropped on the way back into `pending`: one exact repair range
+    // bridges the hole and the whole tail drains behind it, in order.
+    coordinator.beginRepair();
+    const result = coordinator.completeRepair(delta(3, "defghij"));
+
+    expect(result.kind).toBe("apply");
+    expect(result.chunks).toHaveLength(count + 1);
+    expect(coordinator.ready).toBe(true);
+    expect(coordinator.ingest(delta(10 + count, "y")).kind).toBe("apply");
+  });
+
   it("trims a repair range that overlaps bytes the surface already applied", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
     coordinator.completeAttach(attachment(0, "abc"));
