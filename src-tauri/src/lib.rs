@@ -8,6 +8,8 @@ pub mod clipboard;
 pub mod cloud;
 pub mod codex_activity;
 pub mod commands;
+#[cfg(test)]
+mod conpty_build;
 pub mod conpty_runtime;
 pub mod constants;
 pub mod crash_reporter;

@@ -1,13 +1,22 @@
 use std::path::PathBuf;
 
+#[path = "src/conpty_build.rs"]
+mod conpty_build;
+use conpty_build::{copy_runtime_file, tauri_config_without_runtime_resources, CopyOutcome};
+
 // 벤더 버전·파일 목록·아키텍처 표는 크레이트와 빌드 스크립트가 같은 정본을 본다.
 #[path = "src/conpty_runtime.rs"]
 mod conpty_runtime;
 use conpty_runtime::{conpty_runtime_arch_dir, CONPTY_RUNTIME_FILES, CONPTY_RUNTIME_VERSION};
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/conpty_build.rs");
+    println!("cargo:rerun-if-changed=src/conpty_runtime.rs");
+
     // tauri_build 가 resources 경로를 검증하므로 스테이징이 먼저 끝나야 한다.
-    stage_conpty_runtime();
+    if stage_conpty_runtime() {
+        suppress_tauri_build_runtime_copy();
+    }
     tauri_build::build();
 }
 
@@ -19,10 +28,10 @@ fn main() {
 /// resources 가 `gen/conpty/` 를 exe 옆으로 옮긴다. 두 경로 모두 여기서 채운다.
 ///
 /// 배치에 실패하면 빌드를 세운다. 조용히 넘어가면 in-box conhost 로 폴백한 채
-/// 출시되고, 그 증상은 실기에서 색이 이상한 형태로만 드러난다([ADR-0066]).
-fn stage_conpty_runtime() {
+/// 출시되고, 그 증상은 실기에서 색이 이상한 형태로만 드러난다([ADR-0067]).
+fn stage_conpty_runtime() -> bool {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
-        return;
+        return false;
     }
 
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -57,29 +66,41 @@ fn stage_conpty_runtime() {
         );
 
         for destination in [exe_dir.join(file), bundle_dir.join(file)] {
-            if let Err(error) = std::fs::copy(&source, &destination) {
-                // 실행 중인 인스턴스가 DLL 을 잡고 있으면 덮어쓰기가 막힌다. 같은
-                // 버전이 이미 놓여 있으면 동작에 문제가 없으므로 그 경우만 넘어간다.
-                assert!(
-                    same_size_file(&source, &destination),
+            let outcome = copy_runtime_file(&source, &destination).unwrap_or_else(|error| {
+                panic!(
                     "failed to copy {} -> {}: {error}",
                     source.display(),
                     destination.display()
-                );
+                )
+            });
+            if outcome == CopyOutcome::RetainedAfterSharingViolation {
                 println!(
-                    "cargo:warning=kept the existing {} (in use); {error}",
+                    "cargo:warning=kept the byte-identical existing {} after a sharing violation",
                     destination.display()
                 );
             }
         }
     }
+
+    true
 }
 
-fn same_size_file(source: &PathBuf, destination: &PathBuf) -> bool {
-    match (std::fs::metadata(source), std::fs::metadata(destination)) {
-        (Ok(source_meta), Ok(destination_meta)) => source_meta.len() == destination_meta.len(),
-        _ => false,
-    }
+/// `tauri-build` 는 bundle resources 를 dev 실행 파일 옆에도 다시 복사한다.
+/// ConPTY 는 위에서 이미 정확히 배치했으므로 build script 안에서만 그 두 resource 를
+/// 제외한다. 부모 Tauri CLI 의 설정은 바뀌지 않아 실제 installer bundling 은 유지된다.
+fn suppress_tauri_build_runtime_copy() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let environment_config = std::env::var("TAURI_CONFIG").ok();
+    let filtered = tauri_config_without_runtime_resources(
+        &manifest_dir,
+        &target_os,
+        environment_config.as_deref(),
+    )
+    .unwrap_or_else(|error| panic!("failed to filter ConPTY build resources: {error}"));
+
+    // The build script is single-threaded here and tauri_build reads the value immediately.
+    std::env::set_var("TAURI_CONFIG", filtered);
 }
 
 /// `OUT_DIR`(`target/<triple>?/<profile>/build/<pkg>-<hash>/out`)에서 실행 파일이

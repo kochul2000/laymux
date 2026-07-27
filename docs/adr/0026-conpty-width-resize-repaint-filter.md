@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-11
 - Source: 사용자 보고(스크롤백 반복 및 가로 정렬 손상) · issue #285 · ADR-0001 · ADR-0008 · [Microsoft Terminal #16911](https://github.com/microsoft/terminal/issues/16911) · [xterm.js #5997](https://github.com/xtermjs/xterm.js/pull/5997)
+- Amendment: 아래 repaint filter 조항(Decision 마지막 두 bullet 앞의 필터 관련 항목)은 [ADR-0067](0067-bundled-conpty-output-and-staging-contract.md)이 대체한다. 나머지 결정 — 공통 fit 스케줄러, 1 MiB 청크 write FIFO, Windows quiet window, remote 복귀 backend resize 동기화·재시도, `@xterm/xterm` 6.0.0 고정과 `isWrapped` 패치 — 은 그대로 유효하다.
 
 ## Context
 
@@ -15,6 +16,8 @@ xterm.js 6.0.0에는 별개로 폭 확장 reflow 뒤 제거된 soft-wrap 행의 
 ## Decision
 
 Windows normal buffer의 scrollback이 있는 상태에서 열 수가 변경될 때 ConPTY resize repaint filter를 짧게 활성화한다.
+
+> **필터 조항은 [ADR-0067](0067-bundled-conpty-output-and-staging-contract.md)이 대체한다.** 번들 ConPTY 런타임은 이 host repaint를 아예 내보내지 않으므로 필터를 무장하지 않으며, 스트리밍 필터 구현·배선·테스트는 제거했다. 필터에 관한 아래 항목(remote 복귀 resize의 "repaint filter로 보호", `baseY > 0` 스냅샷, 프레임 제거 알고리즘, alternate buffer 제외)은 legacy in-box 런타임을 다시 지원할 때의 참고 기록이다 — 알고리즘은 git 이력에서 되살린다. 그 밖의 결정은 현행이다.
 
 - pane resize, 폰트, DPR, scrollbar, remote control 복귀처럼 terminal geometry를 바꾸는 모든 `fit()`은 공통 스케줄러를 통과한다. pane resize는 기존 80ms trailing debounce를 유지하며, PTY 출력과 세션 복원을 포함한 모든 xterm write를 공통 추적 함수의 최대 1 MiB 청크 FIFO로 전달해 queue drain 뒤에만 fit한다. xterm backlog 제한이 write를 동기 거부하면 해당 청크를 FIFO 선두에 유지하고 parser 진행 뒤 같은 데이터를 재시도한다. 대기 중 들어온 atlas 재생성 및 backend resize 요구는 OR로 누적해 뒤의 일반 fit 요청이 덮어쓰지 못하게 하며, 대기 중 컨테이너가 숨겨지면 각 dirty ref로 이관한다.
 - Windows에서만 queue drain 뒤 마지막 PTY 출력 기준 최대 120ms의 quiet window를 기다린다. 최초 보류부터 500ms가 지나면 quiet 조건을 해제하고, parser queue가 비는 즉시 최신 resize를 실행한다. Linux는 queue가 비면 즉시 실행한다.

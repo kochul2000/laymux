@@ -605,7 +605,7 @@ mod tests {
     ///
     /// 청크 **개수**로 예산을 잡으면 콘솔 호스트가 시작 시퀀스를 잘게 쪼개 보낼 때
     /// 정작 기다리던 본문이 오기 전에 예산이 소진된다 — 번들 ConPTY 로 바꾸면서
-    /// 실제로 겪었다([ADR-0066](../../docs/adr/0066-bundled-conpty-runtime.md)).
+    /// 실제로 겪었다([ADR-0067](../../docs/adr/0067-bundled-conpty-output-and-staging-contract.md)).
     /// 예산은 시간으로만 잡는다. 비교는 대소문자를 구분하지 않는다.
     fn collect_pty_output_until(
         rx: &mpsc::Receiver<Vec<u8>>,

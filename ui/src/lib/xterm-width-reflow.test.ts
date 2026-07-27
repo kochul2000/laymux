@@ -1,6 +1,5 @@
 import { Terminal } from "@xterm/xterm";
 import { describe, expect, it } from "vitest";
-import { ConptyResizeRepaintFilter } from "./conpty-resize-repaint-filter";
 
 function writeTerminal(terminal: Terminal, data: string | Uint8Array): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve));
@@ -52,16 +51,9 @@ describe("xterm width reflow", () => {
 
     expect(logicalLines(terminal).filter((line) => line.startsWith("R5-"))).toEqual(records);
 
-    const repaintFilter = new ConptyResizeRepaintFilter(500);
-    repaintFilter.arm(1000);
+    // The bundled ConPTY runtime emits no host repaint after a width change
+    // (ADR-0067), so xterm sees the resize and nothing else.
     terminal.resize(8, 57);
-    const narrowRepaint =
-      "\x1b[?25l\x1b[8;57;8t\x1b[H" +
-      `${records[497].slice(120)}    \r\n${records[498]}    \r\n${records[499]}    \r\n` +
-      "PS D:\\PycharmProjects\\laymux>   \x1b[57;7H\x1b[?25h";
-    const filteredRepaint = repaintFilter.filter(new TextEncoder().encode(narrowRepaint), 1050);
-    expect(filteredRepaint).toHaveLength(0);
-    await writeTerminal(terminal, filteredRepaint);
     terminal.scrollLines(-7_900);
     terminal.resize(58, 57);
     terminal.resize(100, 57);
