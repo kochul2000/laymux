@@ -6,6 +6,7 @@ import {
   type SpatialDirection,
 } from "@/lib/spatial-navigation";
 import { filterVisibleWorkspaces, sortWorkspaces } from "@/lib/workspace-sort";
+import { resolveWorkspaceLandingPane, type WorkspaceLandingPane } from "@/lib/workspace-switch";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -61,6 +62,37 @@ export function getSortedWorkspaces() {
   const { hiddenWorkspaceIds } = useUiStore.getState();
   const visibleWorkspaces = filterVisibleWorkspaces(workspaces, hiddenWorkspaceIds);
   return { workspaces, visibleWorkspaces };
+}
+
+/**
+ * Activate `workspaceId` and land on a pane that actually belongs to it.
+ *
+ * `focusedPaneIndex` is a single global grid index, so carrying it across a
+ * switch untouched leaves the surface pointing at an unrelated pane of the new
+ * workspace — or at no pane at all when the index falls past its last one
+ * (issue #578). Both switch paths (desktop keyboard, Automation/Remote
+ * `workspaces.switchActive`) go through here so the landing rule lives in one
+ * place; `resolveWorkspaceLandingPane` owns the rule itself.
+ *
+ * Dock focus is always cleared — the grid owns focus after a switch. The
+ * desktop keyboard's `dock.arrowFocusPane=false` opt-out decides *not to call
+ * this* rather than passing a flag.
+ *
+ * Returns the landing pane (null for an empty workspace) so callers that must
+ * attach to its terminal can wait for that session to be ready.
+ */
+export function switchActiveWorkspace(workspaceId: string): WorkspaceLandingPane | null {
+  const wasDockFocused = useDockStore.getState().focusedDock !== null;
+  useWorkspaceStore.getState().setActiveWorkspace(workspaceId);
+  useDockStore.getState().setFocusedDock(null);
+
+  const panes = useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? [];
+  const landing = resolveWorkspaceLandingPane(panes, {
+    wasDockFocused,
+    focusedPaneIndex: useGridStore.getState().focusedPaneIndex,
+  });
+  useGridStore.getState().setFocusedPane(landing ? landing.paneIndex : null);
+  return landing;
 }
 
 /**

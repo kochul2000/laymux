@@ -38,6 +38,14 @@ type HandlerMap = Record<string, Record<string, Handler>>;
 type ActivePaneCtx = { err: HandlerResult } | { ws: Workspace; pane: WorkspacePane };
 const SCREENSHOT_OCCLUDER_SELECTOR = '[data-screenshot-occluder="true"]';
 const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
+/**
+ * How long `workspaces.switchActive` waits for the landing terminal's session
+ * (issue #578). Shorter than `TERMINAL_SESSION_READY_TIMEOUT_MS` on purpose: a
+ * switch must answer inside the Rust bridge's 5s request budget, and unlike
+ * `terminals.setFocus` it stays successful when the wait runs out — the
+ * workspace really did become active either way.
+ */
+const WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS = 3_500;
 
 function ok(data: unknown): HandlerResult {
   return { success: true, data };
@@ -327,10 +335,18 @@ const handlers: HandlerMap = {
       };
       return ok({ workspace: enriched });
     },
+    // Landing focus is resolved by the shared rule, never inherited: the grid's
+    // focusedPaneIndex describes the workspace we are leaving, so carrying it
+    // over pointed the surface at an unrelated pane — or at none at all — in the
+    // target workspace (issue #578).
     switchActive: (p) => {
-      useWorkspaceStore.getState().setActiveWorkspace(p.id as string);
-      useDockStore.getState().setFocusedDock(null);
-      return ok({ switched: p.id });
+      const landing = navigationActions.switchActiveWorkspace(p.id as string);
+      return ok({
+        switched: p.id,
+        landingPaneIndex: landing?.paneIndex ?? null,
+        landingPaneNumber: landing?.paneNumber ?? null,
+        landingTerminalId: landing?.terminalId ?? null,
+      });
     },
     add: (p) => {
       const { layouts } = useWorkspaceStore.getState();
@@ -1146,6 +1162,25 @@ export async function handleAsyncAutomationRequest(
     }
     useTerminalStore.getState().setTerminalFocus(terminalId);
     return result;
+  }
+  if (request.target === "workspaces" && request.method === "switchActive") {
+    const result = handleAutomationRequest(request);
+    if (!result.success) return result;
+    // Workspaces mount lazily and terminal startup is serialized (ADR-0043), so
+    // right after the switch the target workspace can own terminal panes with no
+    // session yet. A remote client reading state at that instant sees nothing
+    // live in the workspace and attaches its main output to a dock terminal
+    // instead of the pane it switched to (issue #578) — so wait for the landing
+    // terminal the same way the step-navigation landing does (ADR-0039).
+    const { landingTerminalId } = result.data as { landingTerminalId: string | null };
+    if (!landingTerminalId) return result;
+    // Never fail the switch on a slow start: it already happened, and the caller
+    // needs to know the workspace changed more than it needs the session.
+    const landingReady = await waitForTerminalSessionReady(
+      landingTerminalId,
+      WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
+    );
+    return ok({ ...(result.data as Record<string, unknown>), landingReady });
   }
   if (
     request.target === "navigation" &&

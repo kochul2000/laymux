@@ -12,7 +12,11 @@ import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
-import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
+import {
+  getSortedWorkspaces,
+  notificationStep,
+  switchActiveWorkspace,
+} from "@/lib/navigation-actions";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
 
@@ -28,37 +32,24 @@ const ARROW_TO_DIRECTION: Record<string, Direction> = {
  *
  * #311: When a dock is focused and the user changes workspace by arrow, the
  * dock would keep visual focus while no pane was focused. The fix is to always
- * re-focus a pane on switch — falling back to pane 0 when there is no valid
- * reference. The `dock.arrowFocusPane` setting (default true) lets
- * users opt out: when false, an active dock focus is preserved (memo-style).
+ * re-focus a pane on switch — the landing rule lives in
+ * `switchActiveWorkspace`, shared with the Automation/Remote switch. The
+ * `dock.arrowFocusPane` setting (default true) lets users opt out: when false,
+ * an active dock focus is preserved (memo-style) and no pane is focused.
  */
 function switchWorkspace(id: string) {
   const wasDockFocused = useDockStore.getState().focusedDock !== null;
   const focusPane = useSettingsStore.getState().dock.arrowFocusPane;
 
-  useWorkspaceStore.getState().setActiveWorkspace(id);
-
   // Opt-out (dockArrowFocusPane=false): when the dock was the focus source,
   // preserve dock focus across the switch (memo-style). When already in the
-  // grid, fall through to pane focusing.
-  if (!focusPane && wasDockFocused) return;
-
-  useDockStore.getState().setFocusedDock(null);
-  const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
-  // Always end with a focused pane. When the dock was focused the grid index is
-  // null → focus pane 0. When already in the grid, keep the current pane unless
-  // there is no valid reference (null) → fall back to pane 0.
-  if (wasDockFocused || focusedPaneIndex === null) {
-    setFocusedPane(0);
+  // grid, fall through to the shared landing rule.
+  if (!focusPane && wasDockFocused) {
+    useWorkspaceStore.getState().setActiveWorkspace(id);
     return;
   }
-  // grid→grid: the global focusedPaneIndex is retained across switches, so a
-  // larger index can fall outside a smaller target workspace. Clamp to the last
-  // pane so we always stay on a valid, focused pane (#311 review).
-  const paneCount = useWorkspaceStore.getState().getActiveWorkspace()?.panes.length ?? 0;
-  if (paneCount > 0 && focusedPaneIndex > paneCount - 1) {
-    setFocusedPane(paneCount - 1);
-  }
+
+  switchActiveWorkspace(id);
 }
 
 /** Switch to the nth visible workspace (0-based display order). */
