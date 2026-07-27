@@ -23,6 +23,11 @@ export default tseslint.config(
       ],
       // Terminal escape sequences use control characters legitimately
       "no-control-regex": "off",
+      // The plugin's recommended set leaves this at `warn`, which lets
+      // dependency regressions accumulate unnoticed. The other two hook rules
+      // are already errors, so hold this one to the same bar. Deliberate
+      // exceptions carry an `eslint-disable-next-line` with a reason comment.
+      "react-hooks/exhaustive-deps": "error",
     },
   },
   {

@@ -145,4 +145,34 @@ describe("PaneBoundaryHandles", () => {
     expect(panes[1].x + panes[1].w).toBeCloseTo(1);
     expect(panes[2].x + panes[2].w).toBeCloseTo(1);
   });
+
+  it("keeps reading fresh panes from the store when a re-render lands mid-drag", () => {
+    // Guards the memoized store fallback: the closure must read the store at
+    // call time, so a re-render between mousedown and mousemove must not make
+    // the in-flight drag operate on the panes captured at mount.
+    useWorkspaceStore.getState().splitPane(0, "vertical");
+
+    const { rerender } = render(
+      <PaneBoundaryHandles containerWidth={1000} containerHeight={600} />,
+    );
+
+    const handle = screen.getByTestId(/^boundary-handle/);
+    fireEvent.mouseDown(handle, { clientX: 500, clientY: 100 });
+
+    // A neighbouring pane resizes (e.g. another client's edit) and the parent
+    // re-renders while the drag is still active.
+    useWorkspaceStore.getState().resizePane(0, { w: 0.4 });
+    useWorkspaceStore.getState().resizePane(1, { x: 0.4, w: 0.6 });
+    rerender(<PaneBoundaryHandles containerWidth={1000} containerHeight={600} />);
+
+    fireEvent.mouseMove(document, { clientX: 600, clientY: 100 });
+    fireEvent.mouseUp(document);
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    // Delta applies on top of the post-rerender 0.4 split, not the 0.5 one
+    // that existed when the drag started.
+    expect(panes[0].w).toBeCloseTo(0.5);
+    expect(panes[1].x).toBeCloseTo(0.5);
+    expect(panes[1].x + panes[1].w).toBeCloseTo(1);
+  });
 });
