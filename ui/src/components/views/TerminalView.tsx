@@ -146,7 +146,11 @@ import {
   notifyTextureAtlasCleared,
   noteTerminalRendered,
 } from "@/lib/webgl-atlas-rebuild";
-import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
+import {
+  normalBufferOnly,
+  serializeTerminalOutput,
+  terminalRestoreBoundary,
+} from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import {
   NativeWindowsOutputStabilizer,
@@ -4058,16 +4062,11 @@ export function TerminalView({
           if (cached) {
             await trackedTerminalWriteAsync(cached);
             if (!isCurrentAttach()) return;
-            // The marker ends the restored block; the new session's first
-            // output starts on the next row. No screen-height padding here:
-            // issue #87 added `"\r\n".repeat(rows)` to push the restore into
-            // scrollback ahead of a clear-screen it attributed to shell init,
-            // but a PTY trace shows the clearing party was in-box conhost,
-            // which emitted `ESC[?25l ESC[2J ESC[m ESC[H` at every session
-            // start. The bundled ConPTY runtime (ADR-0067) emits no such
-            // frame, so the padding survived as a screenful of blank rows
-            // above the prompt. Linux never had a clearing party at all.
-            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+            // The persisted screen and the new PTY are different coordinate
+            // spaces. Move the former into scrollback, then home xterm so the
+            // backend's row-1 CUP/HVP writes (including typed-input echo) land
+            // on the same live row as the initial prompt.
+            await trackedTerminalWriteAsync(terminalRestoreBoundary(terminal.rows));
             if (!isCurrentAttach()) return;
           }
           if (attachment.snapshot.length > 0) {
@@ -4264,11 +4263,11 @@ export function TerminalView({
         // Register serializer for shutdown save
         if (paneId) {
           registerTerminalSerializer(paneId, () =>
-            serializeAddon.serialize(TERMINAL_OUTPUT_SERIALIZE_OPTIONS),
+            serializeTerminalOutput(terminal, serializeAddon),
           );
         }
         registerTerminalSerializer(instanceId, () =>
-          serializeAddon.serialize(TERMINAL_OUTPUT_SERIALIZE_OPTIONS),
+          serializeTerminalOutput(terminal, serializeAddon),
         );
 
         // Register buffer inspector for automated reflow verification (issue #285).

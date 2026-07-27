@@ -368,11 +368,13 @@ terminal-output-v2 listener 등록
     → create 결과의 immutable initialExecutionHost로 renderer gate 확정
     → attach_terminal_output
     → xterm reset
-    → cache → restored 구분선 → live snapshot
+    → cache → restored 구분선 → 한 화면 CRLF → CUP 1;1 → live snapshot
     → backend bracketed-paste state를 xterm parser에 최종 합성
     → snapshotSeq와 겹치는 buffered delta suffix 정리
     → contiguous live delta
 ```
+
+cache는 과거 출력이며 새 PTY의 현재 화면 좌표를 소유하지 않는다([ADR-0075](../adr/0075-session-restore-live-screen-origin.md)). 복원 구분선 뒤에 현재 `rows`만큼 CRLF를 써서 cache viewport를 scrollback으로 완전히 밀고 `CUP 1;1`로 xterm cursor를 새 PTY의 화면 원점에 맞춘 뒤 live snapshot을 쓴다. 따라서 ConPTY나 셸이 1행을 절대 좌표로 다시 그려도 복원 프롬프트와 입력 echo가 갈라지지 않는다. 이 합성 blank screen은 runtime 경계이므로 cache serializer는 normal buffer의 live cursor 또는 그 아래 마지막 의미 있는 행까지만 명시적 range로 저장한다. alternate buffer와 live terminal mode는 계속 제외하며, 이미 저장된 cache 내부의 반복 구분선·빈 줄은 사용자 출력과 구분할 metadata가 없어 파괴적으로 정리하지 않는다.
 
 `seqEnd <= snapshotSeq`인 delta는 중복으로 버리고 snapshot 끝을 가로지르는 delta는 suffix만 쓴다. cache/snapshot/delta parser write가 끝날 때까지 geometry reflow도 `outputAttachParserBusy`로 보류한다. 지원하는 attach metadata와 snapshot parser 적용이 끝나기 전에는 composer commit과 Direct clipboard paste를 fail-closed한다.
 

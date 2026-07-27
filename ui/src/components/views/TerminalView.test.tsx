@@ -66,6 +66,8 @@ const mockBufferActive: {
   cursorY: number;
   baseY: number;
   viewportY: number;
+  length: number;
+  getLine(index: number): undefined;
   // Real xterm reports which buffer is live. Composer passthrough keys off it.
   type: "normal" | "alternate";
 } = {
@@ -73,6 +75,8 @@ const mockBufferActive: {
   cursorY: 0,
   baseY: 0,
   viewportY: 0,
+  length: 1,
+  getLine: () => undefined,
   type: "normal",
 };
 const mockOnScroll = vi.fn((handler: () => void) => {
@@ -8052,7 +8056,7 @@ describe("TerminalView", () => {
       });
     });
 
-    it("ends the restored block with a marker and no screen-height padding", async () => {
+    it("moves the restored block behind a homed live PTY screen", async () => {
       mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
 
       render(
@@ -8068,18 +8072,19 @@ describe("TerminalView", () => {
         expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-scroll");
       });
 
-      // Writes: cached content, then the marker terminated by one newline.
+      // Writes: cached content, then marker + one viewport of scrollback
+      // advancement + CUP home. The live PTY owns the fresh screen from row 1.
       await vi.waitFor(() => {
         const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
         expect(calls).toContain("cached-terminal-output");
-        expect(calls).toContain("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+        expect(calls).toContain(
+          `\r\n\x1b[90m--- session restored ---\x1b[0m\r\n${"\r\n".repeat(24)}\x1b[H`,
+        );
       });
 
-      // Regression guard for the screenful of blank rows above the prompt.
-      // Issue #87 padded the restore with `"\r\n".repeat(rows)` to outrun a
-      // clear-screen it credited to shell init; the clearing party was really
-      // in-box conhost, and the bundled ConPTY runtime (ADR-0067) emits no
-      // such frame. Nothing on this path may write a bare newline run again.
+      // The boundary is one atomic tracked write and must finish at home. A
+      // standalone newline write would leave the frontend cursor at the bottom
+      // while ConPTY continues addressing its own first row.
       const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
       expect(calls.some((data) => typeof data === "string" && /^(?:\r\n){4,}$/.test(data))).toBe(
         false,
@@ -8131,6 +8136,7 @@ describe("TerminalView", () => {
       expect(mockSerialize).toHaveBeenCalledWith({
         excludeAltBuffer: true,
         excludeModes: true,
+        range: { start: 0, end: 0 },
       });
     });
 
