@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "resources": {
+      "gen/conpty/conpty.dll": "conpty.dll",
+      "gen/conpty/OpenConsole.exe": "OpenConsole.exe"
+    }
+  }
+}

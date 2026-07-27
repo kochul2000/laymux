@@ -66,6 +66,15 @@
 - PTY 생성 시 `TerminalEnvPlan`이 laymux 소유 환경변수의 `Set`/`Unset`을 한 번 계산한다. native
   `CommandBuilder`와 WSL rcfile은 같은 계획을 적용하며, `terminal.advertiseTrueColor`는 세션
   생성 시 `TerminalConfig`에 snapshot되어 새 PTY에만 반영된다([ADR-0052](../adr/0052-truecolor-capability-advertising-setting.md)).
+- Windows 자식은 in-box conhost 가 아니라 실행 파일 옆에 배치한 Microsoft ConPTY
+  재배포본(`conpty.dll` + `OpenConsole.exe`)으로 뜬다. `portable-pty` 가
+  `LoadLibrary("conpty.dll")` 로 사이드로드본을 kernel32 보다 먼저 찾으므로 PTY 코드에는
+  분기가 없다 — 벤더 트리는 `src-tauri/vendor/conpty/<version>/`, 배치는 `build.rs`
+  (dev·`cargo run` 용 `target/<profile>/`)와 `tauri.windows.conf.json` resources(설치본)가
+  맡는다. in-box conhost 는 자식이 보낸 `OSC 10/11` 색상 질의를 소비하고 응답하지 않아
+  WSL 안의 앱이 터미널 색을 알 방법이 없었다. 사이드로드본에서는 질의가 xterm 까지
+  도달하며, 같은 이유로 `CSI 6n`·`CSI c` 응답 주체도 conhost 가 아닌 xterm.js 다
+  ([ADR-0066](../adr/0066-bundled-conpty-runtime.md), issue #580).
 
 ### 8.2 `lx` CLI
 
