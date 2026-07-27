@@ -69,7 +69,7 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/grid",
-                "description": "Get grid state: editMode (bool), focusedPaneIndex (number|null)."
+                "description": "Get grid state: editMode (bool), focusedPaneIndex (number|null), focusedDock (string|null), focusedDockPaneId (string|null), focusedTerminalId (string|null — the terminal that owns keyboard focus on either axis)."
             },
             {
                 "method": "POST", "path": "/api/v1/grid/edit-mode",

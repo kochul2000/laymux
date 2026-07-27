@@ -49,3 +49,8 @@ tmp/
 
 # serena MCP (removed)
 /.serena/
+
+# Python (scripts/devinput)
+__pycache__/
+*.py[cod]
+.pytest_cache/

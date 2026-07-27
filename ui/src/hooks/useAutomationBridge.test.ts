@@ -2587,3 +2587,113 @@ describe("navigation step actions (issue #474)", () => {
     expect(result.error).toMatch(/Invalid direction/);
   });
 });
+
+// grid.getState is the only HTTP-reachable answer to "which terminal owns the
+// keyboard right now" — devinput refuses to inject without it (scripts/devinput).
+// Focus lives on two stores, so the resolution has to be tested on both axes.
+describe("grid.getState focus resolution", () => {
+  function gridState() {
+    const result = handleAutomationRequest({
+      requestId: "grid-focus",
+      category: "query",
+      target: "grid",
+      method: "getState",
+      params: {},
+    });
+    expect(result.success).toBe(true);
+    return result.data as {
+      focusedPaneIndex: number | null;
+      focusedDock: string | null;
+      focusedDockPaneId: string | null;
+      focusedTerminalId: string | null;
+    };
+  }
+
+  function seedBottomDockTerminal(paneId = "dp-test") {
+    useDockStore.setState((state) => ({
+      docks: state.docks.map((d) =>
+        d.position === "bottom"
+          ? {
+              ...d,
+              visible: true,
+              activeView: "TerminalView" as const,
+              panes: [
+                { id: paneId, view: { type: "TerminalView" as const }, x: 0, y: 0, w: 1, h: 1 },
+              ],
+            }
+          : d,
+      ),
+    }));
+    return paneId;
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+  });
+
+  function seedGridTerminals() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-focus",
+          name: "Focus",
+          panes: [
+            { id: "g1", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "g2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-focus",
+      workspaceDisplayOrder: [],
+    });
+  }
+
+  it("resolves the focused grid pane to its terminal id", () => {
+    seedGridTerminals();
+    useGridStore.getState().setFocusedPane(1);
+
+    const data = gridState();
+    expect(data.focusedDock).toBeNull();
+    expect(data.focusedTerminalId).toBe("terminal-g2");
+  });
+
+  it("resolves a focused dock pane to its terminal id, not the stale grid pane", () => {
+    const dockPaneId = seedBottomDockTerminal();
+    useDockStore.getState().setFocusedDock("bottom", dockPaneId);
+    useGridStore.getState().setFocusedPane(null);
+
+    const data = gridState();
+    expect(data.focusedDock).toBe("bottom");
+    expect(data.focusedDockPaneId).toBe(dockPaneId);
+    expect(data.focusedTerminalId).toBe(`terminal-${dockPaneId}`);
+  });
+
+  it("prefers the dock pane even if focusedPaneIndex was left behind", () => {
+    // Defence in depth: every dock-entry path nulls focusedPaneIndex today, but a
+    // caller reading focusedPaneIndex alone would type into the wrong pane if one
+    // ever forgot. The dock axis wins here regardless.
+    seedGridTerminals();
+    const dockPaneId = seedBottomDockTerminal("dp-stale");
+    useGridStore.getState().setFocusedPane(0);
+    useDockStore.setState({ focusedDock: "bottom", focusedDockPaneId: dockPaneId });
+
+    expect(gridState().focusedTerminalId).toBe(`terminal-${dockPaneId}`);
+  });
+
+  it("reports no focused terminal when the focused dock pane is not a terminal", () => {
+    useDockStore.getState().setFocusedDock("right"); // MemoView by default
+    useGridStore.getState().setFocusedPane(null);
+
+    const data = gridState();
+    expect(data.focusedDock).toBe("right");
+    expect(data.focusedTerminalId).toBeNull();
+  });
+
+  it("reports no focused terminal when nothing holds focus", () => {
+    useGridStore.getState().setFocusedPane(null);
+    expect(gridState().focusedTerminalId).toBeNull();
+  });
+});

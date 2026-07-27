@@ -82,6 +82,7 @@ ADR 이 필요한 대표 기준:
 | [0062](0062-composition-commit-keypress-race.md) | 조합 commit 중복은 pending commit 텍스트와의 포함 판정으로만 억제 | Proposed |
 | [0063](0063-remote-foreground-auto-reclaim.md) | Remote 재접속은 문서가 보일 때만 자동 claim (ADR-0027 마지막 항목을 이 범위로 좁힘) | Proposed |
 | [0064](0064-shared-webgl-atlas-clear-fanout.md) | 공유 WebGL atlas 를 지운 쪽이 모든 터미널의 렌더 모델을 무효화 | Proposed |
+| [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
 
 ## 새 ADR 추가
 
