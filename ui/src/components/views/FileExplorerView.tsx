@@ -73,10 +73,18 @@ export function FileExplorerView({
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < history.length - 1;
 
+  // Latest-value mirrors read by async callbacks (tauri event listeners,
+  // resolved promises, DOM handlers) that must not capture a stale closure.
+  // Mirroring happens in an effect, never during render — refs are not render
+  // input and writing them mid-render can desync React's output. This effect is
+  // declared before every consumer effect, so within one commit the mirrors are
+  // refreshed first.
   const currentCwdRef = useRef(currentCwd);
-  currentCwdRef.current = currentCwd;
   const historyIndexRef = useRef(historyIndex);
-  historyIndexRef.current = historyIndex;
+  useEffect(() => {
+    currentCwdRef.current = currentCwd;
+    historyIndexRef.current = historyIndex;
+  }, [currentCwd, historyIndex]);
 
   // --- Get initial CWD from syncGroup terminal store (one-time) ---
   const initialGroupCwd = useTerminalStore((s) => {

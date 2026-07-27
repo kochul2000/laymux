@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
 export const EXIT_FADE_DEFAULT_MS = 200;
 
@@ -40,37 +40,43 @@ export function ExitFade({
   children,
   ...rest
 }: ExitFadeProps) {
-  const [mounted, setMounted] = useState(show);
-  const [opaque, setOpaque] = useState(show);
   // Snapshot the content shown while visible so the exit fade renders the last
   // good children even after the driving condition has gone false (e.g. an
-  // unread count that drops to 0 would otherwise flash "0" mid-fade). This is
-  // the codebase's sanctioned "ref.current snapshot of latest props during
-  // render" pattern (see eslint.config.mjs / TerminalView).
-  const lastChildren = useRef<ReactNode>(children);
-  if (show) lastChildren.current = children;
+  // unread count that drops to 0 would otherwise flash "0" mid-fade).
+  //
+  // The snapshot lives in state, not a ref: refs must not be written or read
+  // while rendering, and the frozen children *are* render output. Adjusting
+  // state during render is React's sanctioned way to derive from changing
+  // props; the guard makes it converge after one extra pass.
+  const [visibleChildren, setVisibleChildren] = useState<ReactNode>(children);
+  if (show && visibleChildren !== children) setVisibleChildren(children);
+
+  // `exiting` keeps the node mounted for `durationMs` after `show` goes false so
+  // the opacity transition can play out. Flipping it at the show→hide edge
+  // during render (instead of from an effect) avoids a cascading extra commit.
+  const [wasShown, setWasShown] = useState(show);
+  const [exiting, setExiting] = useState(false);
+  if (wasShown !== show) {
+    setWasShown(show);
+    setExiting(!show);
+  }
 
   useEffect(() => {
-    if (show) {
-      setMounted(true);
-      setOpaque(true);
-      return;
-    }
-    // Begin fade-out, then unmount once it has finished.
-    setOpaque(false);
-    const timer = setTimeout(() => setMounted(false), durationMs);
+    if (!exiting) return;
+    const timer = setTimeout(() => setExiting(false), durationMs);
     return () => clearTimeout(timer);
-  }, [show, durationMs]);
+  }, [exiting, durationMs]);
 
-  if (!mounted) return null;
+  if (!show && !exiting) return null;
 
+  // Appearing is instant, so opacity tracks `show` directly.
   return (
     <span
       className={className}
-      style={{ ...style, opacity: opaque ? 1 : 0, transition: `opacity ${durationMs}ms ease` }}
+      style={{ ...style, opacity: show ? 1 : 0, transition: `opacity ${durationMs}ms ease` }}
       {...rest}
     >
-      {show ? children : lastChildren.current}
+      {show ? children : visibleChildren}
     </span>
   );
 }

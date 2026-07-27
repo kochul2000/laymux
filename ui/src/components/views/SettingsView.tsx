@@ -1867,9 +1867,13 @@ function RemoteSection() {
   );
   // Mirror the latest dirty state into a ref so async cloud callbacks (which
   // capture the value at click time) branch on the current draft state after a
-  // long-running OAuth await instead of a stale closure snapshot.
+  // long-running OAuth await instead of a stale closure snapshot. The mirror is
+  // written from an effect, never during render: refs are not render input, and
+  // every reader here runs after an await, long past the commit.
   const remoteDraftChangedRef = useRef(remoteDraftChanged);
-  remoteDraftChangedRef.current = remoteDraftChanged;
+  useEffect(() => {
+    remoteDraftChangedRef.current = remoteDraftChanged;
+  }, [remoteDraftChanged]);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus | null>(null);
   const [cloudStatusError, setCloudStatusError] = useState<string | null>(null);
   const [cloudConnectPending, setCloudConnectPending] = useState(false);
@@ -3829,7 +3833,7 @@ function useDraft<T>(
     const json = JSON.stringify(storeValue);
     if (json !== prevStoreJson.current) {
       prevStoreJson.current = json;
-      setDraft(storeValue); // eslint-disable-line react-hooks/set-state-in-effect
+      setDraft(storeValue);
       draftValues.current.set(id, storeValue);
       clearDirtyFor(id);
     }
@@ -3879,17 +3883,20 @@ export function SettingsView() {
   const profiles = useSettingsStore((s) => s.profiles);
   const addProfile = useSettingsStore((s) => s.addProfile);
   const removeProfile = useSettingsStore((s) => s.removeProfile);
-  const [activeNav, setActiveNav] = useState<string>("startup");
+  const [navChoice, setNavChoice] = useState<string>("startup");
   const settingsNavTarget = useUiStore((s) => s.settingsNavTarget);
   const setSettingsNavTarget = useUiStore((s) => s.setSettingsNavTarget);
 
-  // External navigation via automation API
-  useEffect(() => {
-    if (settingsNavTarget) {
-      setActiveNav(settingsNavTarget);
-      setSettingsNavTarget(null);
-    }
-  }, [settingsNavTarget, setSettingsNavTarget]);
+  // External navigation via automation API (`ui.navigateSettings`). The request
+  // lives in the ui store and is *derived* here rather than copied into local
+  // state by an effect — mirroring would need a setState-in-effect cascade and
+  // would split the "which section is open" truth across two owners. The
+  // external target wins until the user picks a section, which releases it.
+  const activeNav = settingsNavTarget ?? navChoice;
+  const setActiveNav = (id: string) => {
+    setNavChoice(id);
+    if (useUiStore.getState().settingsNavTarget !== null) setSettingsNavTarget(null);
+  };
 
   const profileDefaults = useSettingsStore((s) => s.profileDefaults);
 
@@ -3929,13 +3936,19 @@ export function SettingsView() {
     dirtySetRef.current.delete(id);
     setDirty(dirtySetRef.current.size > 0);
   }, []);
-  const draftCtx = useRef<SettingsDraftCtx>({
-    registerFlush,
-    registerReset,
-    markDirty,
-    clearDirtyFor,
-    draftValues: draftValuesRef,
-  }).current;
+  // Every member is stable (useCallback with no deps, or a ref object), so this
+  // memo never re-creates — the context value keeps a single identity without
+  // parking it in a ref and reading `.current` during render.
+  const draftCtx = useMemo<SettingsDraftCtx>(
+    () => ({
+      registerFlush,
+      registerReset,
+      markDirty,
+      clearDirtyFor,
+      draftValues: draftValuesRef,
+    }),
+    [registerFlush, registerReset, markDirty, clearDirtyFor],
+  );
 
   const handleSave = () => {
     const shouldReconcileRemote = dirtySetRef.current.has("remote");

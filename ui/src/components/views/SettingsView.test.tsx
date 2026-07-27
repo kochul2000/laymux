@@ -14,6 +14,7 @@ vi.mock("@/lib/persist-session", () => ({
 import { SettingsView } from "./SettingsView";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
+import { useUiStore } from "@/stores/ui-store";
 import { persistSession } from "@/lib/persist-session";
 
 /** Helper: click a profile in the sidebar by name */
@@ -95,11 +96,42 @@ describe("SettingsView", () => {
     });
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useRemoteAccessStore.setState(useRemoteAccessStore.getInitialState());
+    useUiStore.getState().setSettingsNavTarget(null);
   });
 
   it("renders settings panel", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("settings-view")).toBeInTheDocument();
+  });
+
+  describe("external navigation (ui.navigateSettings)", () => {
+    it("shows the section requested through the ui store", () => {
+      act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
+      render(<SettingsView />);
+      expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
+    });
+
+    it("lets a user nav click take over and release the external target", async () => {
+      const user = userEvent.setup();
+      act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
+      render(<SettingsView />);
+      expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("nav-font"));
+      expect(screen.queryByTestId("fe-padding-top")).not.toBeInTheDocument();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("re-navigates when the same section is requested again after a user click", async () => {
+      const user = userEvent.setup();
+      act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-font"));
+      expect(screen.queryByTestId("fe-padding-top")).not.toBeInTheDocument();
+
+      act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
+      expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
+    });
   });
 
   it("requires an explicit terminal profile for each extension viewer", async () => {

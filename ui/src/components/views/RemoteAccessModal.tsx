@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -54,28 +54,31 @@ export function RemoteAccessModal() {
   const [port, setPort] = useState<number | null>(null);
   const [accessStatus, setAccessStatus] = useState<RemoteAccessStatus | null>(null);
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
-  const lastHostRef = useRef(readLastRemoteHost());
-  const [selectedHost, setSelectedHost] = useState("");
+  // Read once at mount. It is a render input (it decides which host resolves by
+  // default), so it lives in lazily-initialised state rather than a ref —
+  // refs must not be read during render.
+  const [lastHost] = useState(readLastRemoteHost);
+  // Raw user pick; "" means "no explicit choice yet, follow the resolved host".
+  const [pickedHost, setPickedHost] = useState("");
   const [reclaiming, setReclaiming] = useState(false);
   const [actionPending, setActionPending] = useState<"runtime" | "mobile" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const hostOptions = useRemoteHostOptions(remote.customHosts);
-  const resolvedHost = chooseRemoteHost(hostOptions, remote.preferredHost, lastHostRef.current);
-
-  useEffect(() => {
-    setSelectedHost((current) => {
-      if (current && hostOptions.some((option) => option.host === current)) return current;
-      return resolvedHost;
-    });
-  }, [hostOptions, resolvedHost]);
+  const resolvedHost = chooseRemoteHost(hostOptions, remote.preferredHost, lastHost);
+  // Derive instead of mirroring the pick into state from an effect: the pick
+  // only wins while it is still an offered option, so a candidate list that
+  // changes under us can never leave a dangling selection.
+  const effectiveSelectedHost =
+    pickedHost && hostOptions.some((option) => option.host === pickedHost)
+      ? pickedHost
+      : resolvedHost;
 
   const token = (accessStatus?.effectiveAuthToken ?? remote.authToken).trim();
   const tokenConfigured = token.length > 0;
   const effectiveEnabled = accessStatus?.effectiveEnabled ?? remote.enabled;
   const runtimeEnabled = accessStatus?.runtimeEnabled ?? false;
-  const effectiveSelectedHost = selectedHost || resolvedHost;
   const urlHost = effectiveSelectedHost || "<laymux-host>";
   const urlWithToken = tokenConfigured
     ? buildRemoteUrlWithToken(urlHost, port ?? "...", token)
@@ -226,7 +229,7 @@ export function RemoteAccessModal() {
               value={effectiveSelectedHost}
               onChange={(event) => {
                 const host = event.target.value;
-                setSelectedHost(host);
+                setPickedHost(host);
                 writeLastRemoteHost(host);
               }}
               className="w-full rounded px-2 py-1 text-[12px]"

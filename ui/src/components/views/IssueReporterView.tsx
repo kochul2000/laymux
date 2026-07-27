@@ -29,7 +29,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
   const [resultMsg, setResultMsg] = useState("");
   const [showPreview, setShowPreview] = useState(true);
   const [issueNumber, setIssueNumber] = useState<number | null>(null);
-  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [repoChoice, setRepoChoice] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
@@ -53,15 +53,17 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
     return result;
   }, [ir.repositories]);
 
-  // Default the selection to the first configured repository. Re-sync if the
-  // current selection is no longer present in the list (e.g. settings changed).
-  useEffect(() => {
-    if (repositories.length === 0) {
-      setSelectedRepo(null);
-    } else if (selectedRepo === null || !repositories.includes(selectedRepo)) {
-      setSelectedRepo(repositories[0]);
-    }
-  }, [repositories, selectedRepo]);
+  // The effective repository is derived, not mirrored into state by an effect:
+  // it defaults to the first configured entry and re-homes there whenever the
+  // user's pick disappears from settings. Keeping `repoChoice` as the raw user
+  // intent means a settings edit can never leave a dangling selection, and no
+  // cascading render is needed to reconcile one.
+  const selectedRepo =
+    repositories.length === 0
+      ? null
+      : repoChoice !== null && repositories.includes(repoChoice)
+        ? repoChoice
+        : repositories[0];
 
   // Auto-focus title input when view receives focus
   useEffect(() => {
@@ -221,8 +223,8 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
         {repositories.length > 0 && (
           <select
             data-testid="issue-repo-select"
-            value={selectedRepo ?? repositories[0]}
-            onChange={(e) => setSelectedRepo(e.target.value)}
+            value={selectedRepo ?? ""}
+            onChange={(e) => setRepoChoice(e.target.value)}
             disabled={state === "submitting"}
             className="mb-1 w-full rounded px-1 py-1 ui-focus-ring"
             style={{

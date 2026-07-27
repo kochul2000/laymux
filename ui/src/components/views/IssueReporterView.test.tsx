@@ -577,6 +577,59 @@ describe("IssueReporterView", () => {
       });
     });
 
+    it("falls back to the first repository when the selection disappears from settings", async () => {
+      const user = userEvent.setup();
+      mockSubmitInvoke.mockResolvedValue("https://github.com/owner/third/issues/1");
+      setRepos(["owner/first", "owner/second"]);
+
+      render(<IssueReporterView />);
+      await user.selectOptions(screen.getByTestId("issue-repo-select"), "owner/second");
+      expect((screen.getByTestId("issue-repo-select") as HTMLSelectElement).value).toBe(
+        "owner/second",
+      );
+
+      // Settings change drops the selected entry — the selector must re-home on
+      // the first remaining repository instead of keeping a dangling value.
+      act(() => setRepos(["owner/third", "owner/fourth"]));
+      expect((screen.getByTestId("issue-repo-select") as HTMLSelectElement).value).toBe(
+        "owner/third",
+      );
+
+      await user.type(screen.getByTestId("issue-title"), "Test issue");
+      await user.click(screen.getByTestId("issue-submit"));
+      await waitFor(() => {
+        expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
+          title: "Test issue",
+          body: "",
+          screenshotPath: null,
+          issueNumber: null,
+          repo: "owner/third",
+        });
+      });
+    });
+
+    it("submits null when the repository list becomes empty", async () => {
+      const user = userEvent.setup();
+      mockSubmitInvoke.mockResolvedValue("https://github.com/repo/issues/1");
+      setRepos(["owner/first"]);
+
+      render(<IssueReporterView />);
+      act(() => setRepos([]));
+      expect(screen.queryByTestId("issue-repo-select")).not.toBeInTheDocument();
+
+      await user.type(screen.getByTestId("issue-title"), "Test issue");
+      await user.click(screen.getByTestId("issue-submit"));
+      await waitFor(() => {
+        expect(mockSubmitInvoke).toHaveBeenCalledWith("submit_github_issue", {
+          title: "Test issue",
+          body: "",
+          screenshotPath: null,
+          issueNumber: null,
+          repo: null,
+        });
+      });
+    });
+
     it("trims, drops blanks, and de-duplicates configured repositories", () => {
       setRepos(["  owner/first  ", "", "   ", "owner/first", "owner/second"]);
       render(<IssueReporterView />);
