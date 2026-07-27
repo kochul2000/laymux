@@ -136,6 +136,29 @@ describe("RemoteAccessModal", () => {
     expect(screen.getByText("http://100.64.0.2:19281/remote/#token=secret")).toBeInTheDocument();
   });
 
+  it("falls back to the resolved host when the picked host leaves the candidate list", async () => {
+    setRemote({ enabled: true, authToken: "secret", customHosts: ["box.internal"] });
+    const user = userEvent.setup();
+
+    const { rerender } = render(<RemoteAccessModal />);
+
+    const select = (await screen.findByTestId("remote-host-select")) as HTMLSelectElement;
+    await user.selectOptions(select, "box.internal");
+    expect(screen.getByText("http://box.internal:19281/remote/#token=secret")).toBeInTheDocument();
+
+    // The custom host is removed from settings — the picked value is now stale
+    // and the selector must re-home on the resolved default.
+    setRemote({ enabled: true, authToken: "secret", customHosts: [] });
+    rerender(<RemoteAccessModal />);
+
+    await waitFor(() => {
+      expect((screen.getByTestId("remote-host-select") as HTMLSelectElement).value).toBe(
+        "100.64.0.2",
+      );
+    });
+    expect(screen.getByText("http://100.64.0.2:19281/remote/#token=secret")).toBeInTheDocument();
+  });
+
   it("brackets IPv6 hosts in the copy URL", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });

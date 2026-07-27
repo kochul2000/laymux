@@ -1414,7 +1414,10 @@ export function WorkspaceSelectorView() {
           );
         })}
         {/* Drop zone: empty area below the last workspace item → append to end */}
-        {dragContext.enabled && (
+        {/* Gate on `isManualSort` directly, not `dragContext.enabled`: the drag
+            handlers close over refs, so reading a property off that object
+            during render counts as a render-phase ref access. */}
+        {isManualSort && (
           <div
             className="min-h-[40px] flex-1"
             onDragOver={(e) => {

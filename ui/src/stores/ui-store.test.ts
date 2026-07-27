@@ -31,6 +31,51 @@ describe("ui-store", () => {
     expect(useUiStore.getState().settingsModalOpen).toBe(false);
   });
 
+  describe("settingsNavTarget lifetime", () => {
+    it("releases the external nav target when the settings modal is closed", () => {
+      useUiStore.getState().openSettingsModal();
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().closeSettingsModal();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("releases the external nav target when the settings modal is toggled shut", () => {
+      useUiStore.getState().toggleSettingsModal();
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().toggleSettingsModal();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("releases the external nav target when the remote access modal displaces settings", () => {
+      useUiStore.getState().openSettingsModal();
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().openRemoteAccessModal();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("releases the external nav target when toggling remote access displaces settings", () => {
+      useUiStore.getState().openSettingsModal();
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().toggleRemoteAccessModal();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("releases the external nav target when the notification panel displaces settings", () => {
+      useUiStore.getState().openSettingsModal();
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().toggleNotificationPanel();
+      expect(useUiStore.getState().settingsNavTarget).toBeNull();
+    });
+
+    it("keeps a target aimed at a docked settings pane when no modal was open", () => {
+      useUiStore.getState().setSettingsNavTarget("remote");
+      useUiStore.getState().closeSettingsModal();
+      useUiStore.getState().toggleNotificationPanel();
+      useUiStore.getState().openRemoteAccessModal();
+      expect(useUiStore.getState().settingsNavTarget).toBe("remote");
+    });
+  });
+
   it("starts with notification panel closed", () => {
     expect(useUiStore.getState().notificationPanelOpen).toBe(false);
   });

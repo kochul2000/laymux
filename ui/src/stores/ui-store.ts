@@ -28,6 +28,21 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
+/**
+ * Patch for any transition that closes the settings modal.
+ *
+ * `settingsNavTarget` (written by `ui.navigateSettings`) lives exactly as long
+ * as the settings surface it was aimed at: closing releases it, so the next
+ * open lands on the user's own last pick instead of replaying a stale
+ * automation request. The target is left alone when the modal was not open —
+ * it may be steering a docked `SettingsView` pane instead.
+ */
+function closeSettingsPatch(state: UiState): Partial<UiState> {
+  return state.settingsModalOpen
+    ? { settingsModalOpen: false, settingsNavTarget: null }
+    : { settingsModalOpen: false };
+}
+
 interface UiState {
   settingsModalOpen: boolean;
   notificationPanelOpen: boolean;
@@ -101,30 +116,36 @@ export const useUiStore = create<UiState>()((set, get) => ({
   evictedPaneIds: new Set(),
 
   openSettingsModal: () => set({ settingsModalOpen: true, notificationPanelOpen: false }),
-  closeSettingsModal: () => set({ settingsModalOpen: false }),
+  closeSettingsModal: () => set(closeSettingsPatch),
   toggleSettingsModal: () =>
-    set((state) => ({
-      settingsModalOpen: !state.settingsModalOpen,
-      notificationPanelOpen: !state.settingsModalOpen ? false : state.notificationPanelOpen,
-    })),
+    set((state) =>
+      state.settingsModalOpen
+        ? closeSettingsPatch(state)
+        : { settingsModalOpen: true, notificationPanelOpen: false },
+    ),
   toggleNotificationPanel: () =>
-    set((state) => ({
-      notificationPanelOpen: !state.notificationPanelOpen,
-      settingsModalOpen: !state.notificationPanelOpen ? false : state.settingsModalOpen,
-    })),
+    set((state) =>
+      state.notificationPanelOpen
+        ? { notificationPanelOpen: false }
+        : { notificationPanelOpen: true, ...closeSettingsPatch(state) },
+    ),
   closeNotificationPanel: () => set({ notificationPanelOpen: false }),
   openRemoteAccessModal: () =>
-    set({
-      remoteAccessModalOpen: true,
-      settingsModalOpen: false,
-      notificationPanelOpen: false,
-    }),
-  toggleRemoteAccessModal: () =>
     set((state) => ({
-      remoteAccessModalOpen: !state.remoteAccessModalOpen,
-      settingsModalOpen: !state.remoteAccessModalOpen ? false : state.settingsModalOpen,
-      notificationPanelOpen: !state.remoteAccessModalOpen ? false : state.notificationPanelOpen,
+      remoteAccessModalOpen: true,
+      notificationPanelOpen: false,
+      ...closeSettingsPatch(state),
     })),
+  toggleRemoteAccessModal: () =>
+    set((state) =>
+      state.remoteAccessModalOpen
+        ? { remoteAccessModalOpen: false }
+        : {
+            remoteAccessModalOpen: true,
+            notificationPanelOpen: false,
+            ...closeSettingsPatch(state),
+          },
+    ),
   closeRemoteAccessModal: () => set({ remoteAccessModalOpen: false }),
   setSettingsNavTarget: (target) => set({ settingsNavTarget: target }),
   setAppFocused: (focused) => set({ isAppFocused: focused }),

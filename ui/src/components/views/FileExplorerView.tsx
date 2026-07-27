@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -73,10 +73,24 @@ export function FileExplorerView({
   const canGoBack = historyIndex > 0;
   const canGoForward = historyIndex < history.length - 1;
 
+  // Latest-value mirrors read by async callbacks (tauri event listeners,
+  // resolved promises, DOM handlers) that must not capture a stale closure.
+  // Mirroring happens in an effect, never during render — refs are not render
+  // input and writing them mid-render can desync React's output.
+  //
+  // `useLayoutEffect`, not `useEffect`: layout effects run synchronously inside
+  // the same commit, before passive effects, before the browser paints, and so
+  // before any DOM event or async continuation can observe the new UI. A
+  // passive effect would leave a window in which anything running during the
+  // commit phase (this component's or a child's layout effect) still reads the
+  // previous value. The cost is nil — two assignments — and it matches the
+  // guarantee the render-phase writes used to give.
   const currentCwdRef = useRef(currentCwd);
-  currentCwdRef.current = currentCwd;
   const historyIndexRef = useRef(historyIndex);
-  historyIndexRef.current = historyIndex;
+  useLayoutEffect(() => {
+    currentCwdRef.current = currentCwd;
+    historyIndexRef.current = historyIndex;
+  }, [currentCwd, historyIndex]);
 
   // --- Get initial CWD from syncGroup terminal store (one-time) ---
   const initialGroupCwd = useTerminalStore((s) => {

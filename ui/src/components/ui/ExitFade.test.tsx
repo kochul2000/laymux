@@ -78,6 +78,54 @@ describe("ExitFade", () => {
     expect(screen.getByTestId("content")).toHaveTextContent("5");
   });
 
+  it("keeps children live while shown (the snapshot only freezes on exit)", () => {
+    const { rerender } = render(
+      <ExitFade show data-testid="fade">
+        <span data-testid="content">5</span>
+      </ExitFade>,
+    );
+    rerender(
+      <ExitFade show data-testid="fade">
+        <span data-testid="content">6</span>
+      </ExitFade>,
+    );
+    expect(screen.getByTestId("content")).toHaveTextContent("6");
+
+    // Hiding now must freeze the *latest* visible children, not the first ones.
+    rerender(
+      <ExitFade show={false} data-testid="fade">
+        {null}
+      </ExitFade>,
+    );
+    expect(screen.getByTestId("content")).toHaveTextContent("6");
+  });
+
+  it("shows fresh children again after a completed exit fade", () => {
+    const { rerender } = render(
+      <ExitFade show durationMs={200} data-testid="fade">
+        <span data-testid="content">5</span>
+      </ExitFade>,
+    );
+    rerender(
+      <ExitFade show={false} durationMs={200} data-testid="fade">
+        {null}
+      </ExitFade>,
+    );
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(screen.queryByTestId("fade")).not.toBeInTheDocument();
+
+    rerender(
+      <ExitFade show durationMs={200} data-testid="fade">
+        <span data-testid="content">9</span>
+      </ExitFade>,
+    );
+    const el = screen.getByTestId("fade");
+    expect(el.style.opacity).toBe("1");
+    expect(screen.getByTestId("content")).toHaveTextContent("9");
+  });
+
   it("cancels a pending unmount if shown again mid-fade", () => {
     const { rerender } = render(
       <ExitFade show durationMs={200} data-testid="fade">
