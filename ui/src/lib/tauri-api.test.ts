@@ -241,6 +241,22 @@ describe("tauri-api", () => {
       expect(terminalOutputRecoveryCounters("t-close-fail").gap).toBe(0);
     });
 
+    // `closeTerminalSession` is `TerminalView`'s unmount cleanup, so the totals
+    // last one backend session rather than one terminal id. The docstring on
+    // `terminal-output-recovery-metrics.ts` says exactly that; this pins it so
+    // the two cannot drift apart again.
+    it("restarts the counters when the same terminal id is remounted", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+      recordTerminalOutputRecovery("t-remount", "gap");
+      recordTerminalOutputRecovery("t-remount", "repair");
+
+      await closeTerminalSession("t-remount");
+
+      expect(terminalOutputRecoveryCounters("t-remount")).toMatchObject({ gap: 0, repair: 0 });
+      recordTerminalOutputRecovery("t-remount", "gap");
+      expect(terminalOutputRecoveryCounters("t-remount")).toMatchObject({ gap: 1, repair: 0 });
+    });
+
     it("serializes create, unmount close, and immediate remount create per terminal id", async () => {
       const calls: string[] = [];
       let resolveFirstCreate!: (value: TerminalSessionResult) => void;

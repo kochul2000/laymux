@@ -3976,17 +3976,26 @@ export function TerminalView({
             // sequence at all: nothing was applied and `beginRepair()` would
             // throw, so that shape can only escalate.
             const repayable = outputCoordinator.ready && round < TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS;
-            console.warn(
-              repayable
-                ? "[TerminalView] terminal output gap reopened behind the repair; repairing again"
-                : "[TerminalView] terminal output gap could not be repaired; reattaching",
-              { ...currentGap, nextGap, round },
-              counters,
-            );
             if (!repayable) {
+              // `nestedGap` alone cannot say whether the screen survived — it is
+              // counted per round, and most rounds are repaid by the next one.
+              // The give-up gets its own bucket for the reason ADR-0072 gave
+              // `ringEscalation` one: `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` is a
+              // cap this code invented, and this counter is the only evidence
+              // that could ever justify moving it (issue #607).
+              console.warn(
+                "[TerminalView] terminal output gap could not be repaired; reattaching",
+                { ...currentGap, nextGap, round },
+                recordTerminalOutputRecovery(instanceId, "nestedGapEscalation"),
+              );
               scheduleOutputReattach();
               return;
             }
+            console.warn(
+              "[TerminalView] terminal output gap reopened behind the repair; repairing again",
+              { ...currentGap, nextGap, round },
+              counters,
+            );
             currentGap = nextGap;
             continue;
           }
@@ -4014,6 +4023,11 @@ export function TerminalView({
       const epoch = ++outputAttachEpoch;
       resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
+      // A hole the attach itself uncovered. Handed to the repair from the
+      // `finally` below rather than from inside the write chain, because
+      // `outputAttachInFlight` is still true in there and `startOutputRepair`
+      // would bounce off it into `scheduleOutputRepairRetry`'s timer.
+      let attachWindowGap: { expectedSeq: number; actualSeq: number } | undefined;
       try {
         const [rawAttachment, cached] = await Promise.all([
           attachTerminalOutput(instanceId),
@@ -4075,10 +4089,13 @@ export function TerminalView({
             // hole is an ordinary mid-stream gap, and live deltas keep buffering
             // in the coordinator until the repair splices in front of them.
             setOutputReady(true);
-            // `outputAttachInFlight` is still true, so this takes the retry path
-            // and runs once the attach settles — at which point the coordinator
-            // is ready at the snapshot sequence.
-            void startOutputRepair(buffered);
+            // Kicked from the attach's `finally`, one statement after
+            // `outputAttachInFlight` drops: the round-trip then starts directly
+            // instead of hopping through the retry timer, so the start latency
+            // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
+            // arriving in that window cannot race the attach for who owns the
+            // hole.
+            attachWindowGap = buffered;
             return;
           }
           if (await writeAttachedSegments(buffered.segments, isCurrentAttach)) {
@@ -4101,6 +4118,10 @@ export function TerminalView({
           outputAttachParserBusy = false;
           flushDeferredTerminalFit();
           if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach();
+          // `startOutputRepair` claims `outputRepairInFlight` synchronously, so
+          // no listener delta can slip in front of this and start the same
+          // round-trip from the other side.
+          else if (attachWindowGap) void startOutputRepair(attachWindowGap);
         }
       }
     };

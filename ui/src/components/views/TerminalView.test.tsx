@@ -8776,6 +8776,9 @@ describe("TerminalView desktop input composer", () => {
     expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
       gap: 1,
       nestedGap: 1,
+      // The loop repaid the reopened hole, so the screen survived: the
+      // escalation bucket that would say otherwise must stay empty.
+      nestedGapEscalation: 0,
       repair: 1,
       ringEscalation: 0,
       geometryEscalation: 0,
@@ -8807,7 +8810,12 @@ describe("TerminalView desktop input composer", () => {
       // Each served round still reached the screen before the escalation.
       expect(decodedWrites().filter((written) => written === "X")).toHaveLength(4);
       expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
+        // `nestedGap` counts every round, so on its own it cannot tell a repaid
+        // hole from a lost screen. The cap that ended the loop gets its own
+        // bucket — it is the only evidence that could move
+        // `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` (issue #607).
         nestedGap: 4,
+        nestedGapEscalation: 1,
         repair: 0,
         ringEscalation: 0,
         geometryEscalation: 0,
@@ -8929,6 +8937,63 @@ describe("TerminalView desktop input composer", () => {
         "true",
       ),
     );
+  });
+
+  // The attach hands its hole straight to recovery instead of going through
+  // `scheduleOutputRepairRetry`. Routing it through the retry timer would make
+  // the start latency depend on `TERMINAL_WRITE_RETRY_MS` and would let a live
+  // delta arriving inside that window decide who starts the round-trip.
+  it("starts the attach-window repair without waiting on the retry timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-gap-attach-direct";
+      const attachment = {
+        state: {
+          version: 1,
+          generation: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: 0,
+          sourceStartSeq: 0,
+          sourceSeq: 0,
+          snapshotKind: "raw",
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+          geometry,
+        },
+        snapshot: [],
+      };
+      let resolveAttach!: (value: unknown) => void;
+      mockAttachTerminalOutput.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveAttach = resolve;
+        }),
+      );
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      const emitOutput = await vi.waitFor(() => {
+        const registered = mockOnTerminalOutput.mock.calls.find(
+          ([registeredTerminalId]) => registeredTerminalId === terminalId,
+        );
+        expect(registered).toBeDefined();
+        return registered?.[1] as (data: Uint8Array | Record<string, unknown>) => void;
+      });
+
+      const attachCallsDuringGap = mockAttachTerminalOutput.mock.calls.length;
+      mockResumeTerminalOutput.mockClear();
+      mockResumeTerminalOutput.mockResolvedValueOnce(outputDelta(0, "AAAAAAAA"));
+
+      act(() => emitOutput(outputDelta(8, "CC")));
+      await act(async () => {
+        resolveAttach(attachment);
+        // Stop one millisecond short of `TERMINAL_WRITE_RETRY_MS`: the repair
+        // must already be in flight from the attach itself.
+        await vi.advanceTimersByTimeAsync(15);
+      });
+
+      expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 0);
+      expect(mockAttachTerminalOutput.mock.calls.length).toBe(attachCallsDuringGap);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts a rejected repair request as a repair failure, not a ring escalation", async () => {

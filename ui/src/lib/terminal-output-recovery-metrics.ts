@@ -7,16 +7,24 @@
  * once a flood scrolls it away, so every warning carries the running totals for
  * that terminal instead.
  *
- * The counters are keyed by terminal id and survive `TerminalView` remounts on
- * purpose — the symptom is "this one pane keeps missing", which is a property of
- * the terminal, not of one React mount. They are diagnostic only: nothing reads
+ * The counters are keyed by terminal id and are diagnostic only: nothing reads
  * them to make a decision.
  *
- * Their lifetime ends with the backend session: `closeTerminalSession` calls
- * {@link forgetTerminalOutputRecoveryCounters}, because the ring, the
- * generation and every sequence the totals describe die with it. Without that
- * hook a long-lived window accumulates one entry per terminal it ever opened
- * (issue #607).
+ * Their lifetime is **one backend session**, not one terminal id:
+ * `closeTerminalSession` calls {@link forgetTerminalOutputRecoveryCounters},
+ * because the ring, the generation and every sequence the totals describe die
+ * with it. Without that hook a long-lived window accumulates one entry per
+ * terminal it ever opened (issue #607).
+ *
+ * That is shorter than the terminal id's own life, and deliberately so. The
+ * xterm-creation effect in `TerminalView` closes the session from its cleanup,
+ * so a remount under the same `instanceId` — a hidden-pane eviction, a profile
+ * change, a StrictMode double mount — starts the totals over. Read "this one
+ * pane keeps missing" within one mount, and read a reset as "the ring these
+ * numbers described is gone" rather than as data loss. Surviving remounts would
+ * mean dropping the totals from the explicit pane-destroy paths instead, and
+ * there is no single one to hang them on: `removePane`, `removeWorkspace`,
+ * `removeDockPane` and `setPaneView` each end a terminal id independently.
  */
 
 export type TerminalOutputRecoveryEvent =
@@ -41,9 +49,21 @@ export type TerminalOutputRecoveryEvent =
    * Counted once per occurrence, not once per reattach: another exact range can
    * repay the new hole too, so recovery retries up to
    * `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` times and only then escalates to a full
-   * reattach (issue #607).
+   * reattach (issue #607). A pure observation, therefore — it says a hole
+   * reopened, not whether the screen survived. See {@link
+   * TerminalOutputRecoveryEvent} `nestedGapEscalation` for the latter.
    */
   | "nestedGap"
+  /**
+   * The repair loop ran out of rounds and gave up → full reattach, screen lost.
+   *
+   * Its own bucket for the reason ADR-0072 gave `ringEscalation` one: it is the
+   * only evidence that separates "a nested gap was repaid" from "a nested gap
+   * cost the screen", and therefore the only evidence that could justify moving
+   * `TERMINAL_OUTPUT_REPAIR_MAX_ROUNDS` — a cap this code invented, so nothing
+   * else measures it (issue #607).
+   */
+  | "nestedGapEscalation"
   /**
    * The repair round-trip never settled within the watchdog window → full
    * reattach. Its own bucket because a hung round-trip is a dead IPC channel,
@@ -66,6 +86,7 @@ const EVENTS: readonly TerminalOutputRecoveryEvent[] = [
   "ringEscalation",
   "geometryEscalation",
   "nestedGap",
+  "nestedGapEscalation",
   "repairTimeout",
   "repairFailure",
   "malformedDelta",
@@ -104,6 +125,10 @@ export function terminalOutputRecoveryCounters(terminalId: string): TerminalOutp
  * ring and generation are gone, so the totals no longer describe anything a
  * later warning could be compared against. Keeping them would grow the map by
  * one entry per terminal the window ever opened (issue #607).
+ *
+ * That path is also `TerminalView`'s unmount cleanup, so this runs on remount
+ * too — see the module docstring for why the shorter lifetime is accepted.
+ * Idempotent: the pane-teardown paths remove several panes per gesture.
  */
 export function forgetTerminalOutputRecoveryCounters(terminalId: string): void {
   counters.delete(terminalId);
