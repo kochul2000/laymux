@@ -20,7 +20,9 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { readFileForViewer } from "@/lib/tauri-api";
 import {
+  registerTerminalRenderCheckpointProvider,
   registerTerminalScroller,
+  unregisterTerminalRenderCheckpointProvider,
   unregisterTerminalScroller,
 } from "@/lib/terminal-serialize-registry";
 vi.mock("@/lib/tauri-api", () => ({
@@ -965,6 +967,41 @@ describe("handleAsyncAutomationRequest", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
+    unregisterTerminalRenderCheckpointProvider("t-checkpoint");
+  });
+
+  it("returns the exact renderer checkpoint requested by the backend", async () => {
+    const provider = vi.fn().mockResolvedValue({
+      generation: 4,
+      seq: 123,
+      geometry: { revision: 2, cols: 90, rows: 30 },
+      data: "\x1b[2J\x1b[Hrestored",
+    });
+    registerTerminalRenderCheckpointProvider("t-checkpoint", provider);
+    const target = {
+      generation: 4,
+      seq: 120,
+      geometry: { revision: 2, cols: 90, rows: 30 },
+    };
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "render-checkpoint",
+      category: "query",
+      target: "terminals",
+      method: "renderCheckpoint",
+      params: { id: "t-checkpoint", target, maxBytes: 4096 },
+    });
+
+    expect(provider).toHaveBeenCalledWith(target, 4096);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        generation: 4,
+        seq: 123,
+        geometry: { revision: 2, cols: 90, rows: 30 },
+        data: "\x1b[2J\x1b[Hrestored",
+      },
+    });
   });
 
   it("reports and renders the current file viewer through the async bridge", async () => {

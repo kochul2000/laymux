@@ -147,16 +147,19 @@ pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
 /// Desktop attach returns the retained output ring (currently capped at 1 MiB).
 pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = 1024 * 1024;
 
-/// Default cap (KiB) for the recent-output snapshot replayed to a remote
-/// client on terminal attach. Small on purpose: a remote connect or workspace
-/// switch should open at the live tail instead of replaying long history.
+/// Default scrollback budget (KiB) for the reconstructable screen checkpoint
+/// sent to a Remote client on terminal attach.
 pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 4;
 
 /// Effective bounds for `remote.snapshotMaxKib`. The upper bound matches the
-/// retained output ring (1 MiB); the lower bound keeps at least one screen of
-/// context so a TUI attach is not visibly empty.
+/// serialized checkpoint hard cap. The current viewport, alternate buffer and
+/// restore modes remain mandatory even when their minimum serialization is
+/// larger than the configured soft budget.
 pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
 pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
+/// Absolute serialized xterm checkpoint limit, independent of its soft
+/// scrollback budget.
+pub const REMOTE_RENDER_CHECKPOINT_ABSOLUTE_MAX_BYTES: usize = 1024 * 1024;
 
 /// Maximum source bytes returned by one Remote FileViewer render request.
 /// The frontend may expand images through base64 and preview documents, so the

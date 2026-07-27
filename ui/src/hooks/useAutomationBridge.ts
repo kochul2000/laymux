@@ -12,7 +12,12 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
-import { getTerminalInspector, getTerminalScroller } from "@/lib/terminal-serialize-registry";
+import {
+  getTerminalInspector,
+  getTerminalRenderCheckpointProvider,
+  getTerminalScroller,
+} from "@/lib/terminal-serialize-registry";
+import type { TerminalRenderCheckpointTarget } from "@/lib/terminal-render-checkpoint";
 import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
@@ -47,6 +52,11 @@ const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
  * fail when either side moves without the other.
  */
 export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
+// Together with TerminalRenderCheckpointModel's 3-second catch-up timeout,
+// provider discovery stays at 3.5 seconds inside the backend bridge's 5-second
+// request budget, leaving time for serialization and IPC delivery.
+const RENDER_CHECKPOINT_PROVIDER_WAIT_MS = 500;
+const RENDER_CHECKPOINT_PROVIDER_POLL_MS = 20;
 
 /**
  * How long `workspaces.switchActive` waits for the landing terminal's session
@@ -1144,6 +1154,47 @@ export function handleAutomationRequest(request: AutomationRequest): HandlerResu
 export async function handleAsyncAutomationRequest(
   request: AutomationRequest,
 ): Promise<HandlerResult> {
+  if (request.target === "terminals" && request.method === "renderCheckpoint") {
+    const terminalId = request.params.id;
+    const maxBytes = request.params.maxBytes;
+    const target = request.params.target as TerminalRenderCheckpointTarget | undefined;
+    if (
+      typeof terminalId !== "string" ||
+      terminalId.length === 0 ||
+      typeof maxBytes !== "number" ||
+      !Number.isSafeInteger(maxBytes) ||
+      maxBytes < 0 ||
+      !target ||
+      !Number.isSafeInteger(target.generation) ||
+      target.generation < 0 ||
+      !Number.isSafeInteger(target.seq) ||
+      target.seq < 0 ||
+      !target.geometry ||
+      !Number.isSafeInteger(target.geometry.revision) ||
+      target.geometry.revision < 0 ||
+      !Number.isSafeInteger(target.geometry.cols) ||
+      target.geometry.cols <= 0 ||
+      !Number.isSafeInteger(target.geometry.rows) ||
+      target.geometry.rows <= 0
+    ) {
+      return err("Invalid terminal render checkpoint request");
+    }
+
+    const deadline = Date.now() + RENDER_CHECKPOINT_PROVIDER_WAIT_MS;
+    let provider = getTerminalRenderCheckpointProvider(terminalId);
+    while (!provider && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, RENDER_CHECKPOINT_PROVIDER_POLL_MS));
+      provider = getTerminalRenderCheckpointProvider(terminalId);
+    }
+    if (!provider) return err(`Terminal '${terminalId}' render checkpoint is not ready`);
+    try {
+      return ok(await provider(target, maxBytes));
+    } catch (error) {
+      return err(
+        `Terminal render checkpoint error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (request.target === "fileViewer") {
     return handleRemoteFileViewerRequest(request.method, request.params);
   }

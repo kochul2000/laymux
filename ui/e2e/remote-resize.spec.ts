@@ -85,10 +85,15 @@ function outputFrames(text: string, seqStart: number, phase: "snapshot" | "delta
       ? {
           state: {
             version: 1,
+            generation: 1,
             snapshotStartSeq: seqStart,
             snapshotSeq: seqEnd,
+            sourceStartSeq: seqStart,
+            sourceSeq: seqEnd,
+            snapshotKind: "raw",
             protocolRevision: 0,
             modes: { bracketedPaste: false },
+            geometry: { revision: 0, cols: 80, rows: 24 },
           },
         }
       : {}),

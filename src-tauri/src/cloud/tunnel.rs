@@ -37,7 +37,7 @@ use crate::remote_server::{self, TunnelAuthorized};
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 use crate::terminal_output::{
-    self, TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
+    TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
     TerminalOutputSubscribedAttachment, TerminalOutputSubscriptionEvent,
     TERMINAL_OUTPUT_PROTOCOL_NAME, TERMINAL_OUTPUT_PROTOCOL_VERSION,
 };
@@ -70,6 +70,20 @@ const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEASE_CHECK_MS: u64 = 500;
 const STREAM_DATA_CHUNK_BYTES: usize = 64 * 1024;
+
+#[cfg(not(test))]
+type OutputCheckpointBridge = AppHandle;
+// Cloud stream tests intentionally keep their existing raw attach fixture.
+// Keeping AppHandle out of their shared function signatures also avoids
+// linking Common Controls UI imports into the manifest-less Windows test exe.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct OutputCheckpointBridge;
+
+struct FrameDispatchState {
+    app_state: Arc<AppState>,
+    output_checkpoint_bridge: OutputCheckpointBridge,
+}
 const MAX_BACKOFF_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -245,14 +259,22 @@ impl TunnelTerminalOutputMetadata {
         }
     }
 
-    fn delta(delta: &TerminalOutputDelta) -> Self {
-        Self {
+    fn delta(delta: &TerminalOutputDelta, wire_seq_offset: u64) -> Result<Self, AppError> {
+        let seq_start = delta
+            .seq_start
+            .checked_add(wire_seq_offset)
+            .ok_or_else(|| AppError::Other("terminal output wire sequence overflow".into()))?;
+        let seq_end = delta
+            .seq_end
+            .checked_add(wire_seq_offset)
+            .ok_or_else(|| AppError::Other("terminal output wire sequence overflow".into()))?;
+        Ok(Self {
             version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
             phase: TerminalOutputPhase::Delta,
-            seq_start: delta.seq_start,
-            seq_end: delta.seq_end,
+            seq_start,
+            seq_end,
             byte_length: delta.data.len(),
-        }
+        })
     }
 
     fn validate(self, data: &[u8]) -> Result<(), AppError> {
@@ -737,13 +759,20 @@ async fn handle_frame(
     let completion = completion_tx.clone();
     let dispatch_state = state.clone();
     let app_handle = app_handle.clone();
+    #[cfg(not(test))]
+    let output_checkpoint_bridge = app_handle.clone();
+    #[cfg(test)]
+    let output_checkpoint_bridge = OutputCheckpointBridge;
     handle_frame_with_dispatch(
         frame,
         active_streams,
         socket_pending_bytes,
         next_response_id,
         outbound_tx,
-        state.clone(),
+        FrameDispatchState {
+            app_state: state.clone(),
+            output_checkpoint_bridge,
+        },
         move |task_stream_id, response_id, request| {
             tokio::spawn(async move {
                 if let Err(error) = dispatch_http_stream(
@@ -778,12 +807,12 @@ async fn handle_frame_with_dispatch(
     socket_pending_bytes: &mut usize,
     next_response_id: &mut u64,
     outbound_tx: &OutboundSender,
-    state: Arc<AppState>,
+    dispatch_state: FrameDispatchState,
     spawn_dispatch: impl FnOnce(String, u64, IncomingHttpRequest) -> TokioJoinHandle<()>,
 ) {
     match frame.frame_type.as_str() {
         FRAME_READY | FRAME_HEARTBEAT_ACK => {
-            if let Err(error) = apply_ready_frame(&state, &frame) {
+            if let Err(error) = apply_ready_frame(&dispatch_state.app_state, &frame) {
                 tracing::warn!(error = %error, "cloud tunnel ready handling failed");
             }
         }
@@ -801,7 +830,8 @@ async fn handle_frame_with_dispatch(
                 active_streams,
                 socket_pending_bytes,
                 outbound_tx,
-                &state,
+                &dispatch_state.app_state,
+                dispatch_state.output_checkpoint_bridge,
             )
             .await;
         }
@@ -865,6 +895,7 @@ async fn handle_stream_open(
     socket_pending_bytes: &mut usize,
     outbound_tx: &OutboundSender,
     state: &Arc<AppState>,
+    output_checkpoint_bridge: OutputCheckpointBridge,
 ) {
     if active_streams.contains_key(&frame.stream_id) {
         let _ = send_stream_error(
@@ -952,6 +983,7 @@ async fn handle_stream_open(
             let join = tokio::spawn(stream_terminal_output_over_tunnel(
                 outbound_tx.clone(),
                 state.clone(),
+                output_checkpoint_bridge,
                 frame.stream_id.clone(),
                 terminal_id,
                 lease_id,
@@ -1303,6 +1335,7 @@ fn hop_by_hop_header(name: &str) -> bool {
 async fn stream_terminal_output_over_tunnel(
     outbound_tx: OutboundSender,
     app_state: Arc<AppState>,
+    output_checkpoint_bridge: OutputCheckpointBridge,
     stream_id: String,
     terminal_id: String,
     lease_id: String,
@@ -1339,29 +1372,25 @@ async fn stream_terminal_output_over_tunnel(
         }
     }
 
-    let subscribed = match terminal_output_subscription(&app_state, &terminal_id) {
+    let subscription =
+        terminal_output_subscription(&app_state, output_checkpoint_bridge, &terminal_id);
+    let subscribed = match prepare_terminal_output_after_checkpoint(
+        &app_state,
+        &lease_id,
+        timeout_seconds,
+        subscription,
+    )
+    .await
+    {
         Ok(subscribed) => subscribed,
-        Err(AppError::SessionNotFound(_)) => {
-            let _ = send_stream_error(
-                &outbound_tx,
-                &stream_id,
-                StreamErrorPayload::new("terminal_not_found", "terminal session not found", false),
-            )
-            .await;
-            return;
-        }
         Err(error) => {
-            let _ = send_stream_error(
-                &outbound_tx,
-                &stream_id,
-                StreamErrorPayload::new("lock_failed", error.to_string(), false),
-            )
-            .await;
+            let _ = send_stream_error(&outbound_tx, &stream_id, error).await;
             return;
         }
     };
     let attachment = subscribed.attachment;
     let generation = subscribed.generation;
+    let wire_seq_offset = subscribed.wire_seq_offset;
     let mut subscription = subscribed.subscription;
 
     // Handshake: the server holds the output stream pending a
@@ -1457,10 +1486,29 @@ async fn stream_terminal_output_over_tunnel(
                     }
                 };
 
+                let metadata = match TunnelTerminalOutputMetadata::delta(
+                    &delta,
+                    wire_seq_offset,
+                ) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        let _ = send_stream_error(
+                            &outbound_tx,
+                            &stream_id,
+                            StreamErrorPayload::new(
+                                "terminal_output_sequence",
+                                error.to_string(),
+                                false,
+                            ),
+                        ).await;
+                        sent_error = true;
+                        break;
+                    }
+                };
                 if send_terminal_output_data(
                     &outbound_tx,
                     &stream_id,
-                    TunnelTerminalOutputMetadata::delta(&delta),
+                    metadata,
                     &delta.data,
                 ).await.is_err() {
                     break;
@@ -1502,23 +1550,110 @@ async fn stream_terminal_output_over_tunnel(
     }
 }
 
-fn terminal_output_subscription(
-    app_state: &AppState,
+async fn terminal_output_subscription_with<F, Fut>(
+    app_state: &Arc<AppState>,
+    attach: F,
+) -> Result<TerminalOutputSubscribedAttachment, remote_server::RenderCheckpointAttachError>
+where
+    F: FnOnce(usize) -> Fut,
+    Fut: std::future::Future<
+        Output = Result<
+            TerminalOutputSubscribedAttachment,
+            remote_server::RenderCheckpointAttachError,
+        >,
+    >,
+{
+    let settings = remote_server::effective_remote_settings(app_state)
+        .map_err(remote_server::RenderCheckpointAttachError::fatal)?;
+    let snapshot_max_bytes = remote_server::effective_snapshot_max_bytes(&settings);
+    attach(snapshot_max_bytes).await
+}
+
+async fn terminal_output_subscription(
+    app_state: &Arc<AppState>,
+    _output_checkpoint_bridge: OutputCheckpointBridge,
     terminal_id: &str,
-) -> Result<TerminalOutputSubscribedAttachment, AppError> {
-    let settings = remote_server::effective_remote_settings(app_state).map_err(AppError::Other)?;
-    terminal_output::attach_and_subscribe_terminal_output(
-        &app_state.terminal_protocol_states,
-        terminal_id,
-        remote_server::effective_snapshot_max_bytes(&settings),
-    )
-    .map_err(|error| {
-        if error == format!("Session '{terminal_id}' not found") {
-            AppError::SessionNotFound(terminal_id.into())
-        } else {
-            AppError::Other(error)
+) -> Result<TerminalOutputSubscribedAttachment, remote_server::RenderCheckpointAttachError> {
+    #[cfg(not(test))]
+    {
+        let server = ServerState {
+            app_state: Arc::clone(app_state),
+            app_handle: _output_checkpoint_bridge,
+        };
+        terminal_output_subscription_with(app_state, move |snapshot_max_bytes| async move {
+            remote_server::attach_and_subscribe_render_checkpoint(
+                &server,
+                terminal_id,
+                snapshot_max_bytes,
+            )
+            .await
+        })
+        .await
+    }
+    #[cfg(test)]
+    {
+        terminal_output_subscription_with(app_state, |snapshot_max_bytes| async move {
+            crate::terminal_output::attach_and_subscribe_terminal_output(
+                &app_state.terminal_protocol_states,
+                terminal_id,
+                snapshot_max_bytes,
+            )
+            .map_err(|error| {
+                if error.contains("not found") {
+                    remote_server::RenderCheckpointAttachError::not_found(error)
+                } else {
+                    remote_server::RenderCheckpointAttachError::retryable(error)
+                }
+            })
+        })
+        .await
+    }
+}
+
+fn checkpoint_attach_stream_error(
+    error: remote_server::RenderCheckpointAttachError,
+) -> StreamErrorPayload {
+    match error.kind() {
+        remote_server::RenderCheckpointAttachErrorKind::NotFound => {
+            StreamErrorPayload::new("terminal_not_found", error.to_string(), false)
         }
-    })
+        remote_server::RenderCheckpointAttachErrorKind::Retryable => {
+            StreamErrorPayload::new("terminal_output_gap", error.to_string(), true)
+        }
+        remote_server::RenderCheckpointAttachErrorKind::Fatal => {
+            StreamErrorPayload::new("terminal_output_unavailable", error.to_string(), false)
+        }
+    }
+}
+
+async fn prepare_terminal_output_after_checkpoint<F>(
+    app_state: &Arc<AppState>,
+    lease_id: &str,
+    timeout_seconds: u64,
+    subscription: F,
+) -> Result<TerminalOutputSubscribedAttachment, StreamErrorPayload>
+where
+    F: std::future::Future<
+        Output = Result<
+            TerminalOutputSubscribedAttachment,
+            remote_server::RenderCheckpointAttachError,
+        >,
+    >,
+{
+    let subscribed = subscription.await.map_err(checkpoint_attach_stream_error)?;
+    match remote_server::active_lease_matches_with_timeout(
+        app_state,
+        lease_id,
+        Duration::from_secs(timeout_seconds),
+    ) {
+        Ok(true) => Ok(subscribed),
+        Ok(false) => Err(StreamErrorPayload::new(
+            "lease_not_active",
+            "remote controller lease changed during output attach",
+            false,
+        )),
+        Err(error) => Err(StreamErrorPayload::new("lease_check_failed", error, false)),
+    }
 }
 
 fn remote_output_timeout_seconds(app_state: &AppState) -> u64 {
@@ -1570,7 +1705,7 @@ async fn send_terminal_output_data(
 
     // Empty snapshots are significant: they establish sequence zero and clear a
     // stale browser surface. Unlike an idle delta, they still get one data frame.
-    if data.is_empty() {
+    if data.is_empty() || metadata.phase == TerminalOutputPhase::Snapshot {
         return send_terminal_output_chunk(outbound_tx, stream_id, metadata, data).await;
     }
 
@@ -1889,6 +2024,7 @@ mod tests {
         let join = tokio::spawn(stream_terminal_output_over_tunnel(
             tx,
             state,
+            OutputCheckpointBridge,
             "srv-output".into(),
             "term-1".into(),
             lease_id.into(),
@@ -1937,7 +2073,10 @@ mod tests {
             socket_pending_bytes,
             next_response_id,
             outbound_tx,
-            state,
+            FrameDispatchState {
+                app_state: state,
+                output_checkpoint_bridge: OutputCheckpointBridge,
+            },
             spawn_dispatch,
         )
         .await;
@@ -2008,6 +2147,140 @@ mod tests {
 
         let error = metadata.validate(b"abc").unwrap_err();
         assert!(error.to_string().contains("metadata mismatch"));
+    }
+
+    #[test]
+    fn checkpoint_attach_errors_keep_cloud_retry_semantics() {
+        let missing = checkpoint_attach_stream_error(
+            remote_server::RenderCheckpointAttachError::not_found("gone"),
+        );
+        assert_eq!(missing.code, "terminal_not_found");
+        assert!(!missing.retryable);
+
+        let racing = checkpoint_attach_stream_error(
+            remote_server::RenderCheckpointAttachError::retryable("geometry changed"),
+        );
+        assert_eq!(racing.code, "terminal_output_gap");
+        assert!(racing.retryable);
+
+        let malformed = checkpoint_attach_stream_error(
+            remote_server::RenderCheckpointAttachError::fatal("malformed checkpoint"),
+        );
+        assert_eq!(malformed.code, "terminal_output_unavailable");
+        assert!(!malformed.retryable);
+    }
+
+    #[tokio::test]
+    async fn cloud_subscription_uses_screen_checkpoint_and_offsets_live_sequence() {
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let target = crate::terminal_output::terminal_render_checkpoint_target(
+            &state.terminal_protocol_states,
+            "term-1",
+        )
+        .unwrap();
+        let checkpoint_data = "\x1b[2J\x1b[HCHECKPOINT";
+        let attach_state = Arc::clone(&state);
+
+        let mut subscribed = terminal_output_subscription_with(&state, move |snapshot_max_bytes| {
+            assert!(snapshot_max_bytes >= checkpoint_data.len());
+            async move {
+                crate::terminal_output::attach_and_subscribe_terminal_output_from_render_checkpoint(
+                    &attach_state.terminal_protocol_states,
+                    "term-1",
+                    crate::terminal_output::TerminalRenderCheckpoint {
+                        generation: target.generation,
+                        seq: target.seq,
+                        geometry: target.geometry,
+                        data: checkpoint_data.into(),
+                    },
+                )
+                .map_err(remote_server::RenderCheckpointAttachError::retryable)
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            subscribed.attachment.state.snapshot_kind,
+            crate::terminal_output::TerminalSnapshotKind::Screen
+        );
+        assert_eq!(subscribed.wire_seq_offset, checkpoint_data.len() as u64);
+        assert_eq!(
+            subscribed.attachment.state.snapshot_seq
+                - subscribed.attachment.state.snapshot_start_seq,
+            checkpoint_data.len() as u64
+        );
+
+        let session = crate::terminal_output::terminal_output_session_for(
+            &state.terminal_protocol_states,
+            "term-1",
+        )
+        .unwrap()
+        .unwrap();
+        session.record_output(b"-live").unwrap();
+        let delta = match subscribed.subscription.recv().await {
+            Some(TerminalOutputSubscriptionEvent::Delta(delta)) => delta,
+            other => panic!("expected live delta, got {other:?}"),
+        };
+        let metadata =
+            TunnelTerminalOutputMetadata::delta(&delta, subscribed.wire_seq_offset).unwrap();
+        assert_eq!(metadata.seq_start, subscribed.attachment.state.snapshot_seq);
+        assert_eq!(metadata.seq_end - metadata.seq_start, 5);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_wait_rechecks_lease_before_cloud_stream_accept() {
+        let state = state_with_terminal_output_and_lease("lease-1");
+        let subscribed = crate::terminal_output::attach_and_subscribe_terminal_output(
+            &state.terminal_protocol_states,
+            "term-1",
+            1024,
+        )
+        .unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let prepare_state = Arc::clone(&state);
+
+        let prepare = tokio::spawn(async move {
+            prepare_terminal_output_after_checkpoint(&prepare_state, "lease-1", 45, async move {
+                let _ = started_tx.send(());
+                let _ = resume_rx.await;
+                Ok(subscribed)
+            })
+            .await
+        });
+
+        started_rx.await.unwrap();
+        state.remote_control.lock_or_err().unwrap().lease = None;
+        resume_tx.send(()).unwrap();
+        let error = match prepare.await.unwrap() {
+            Ok(_) => panic!("stale checkpoint must not pass the lease boundary"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "lease_not_active");
+        assert!(!error.retryable);
+    }
+
+    #[tokio::test]
+    async fn terminal_screen_snapshot_stays_one_header_binary_pair_over_cloud() {
+        let data = vec![b'x'; STREAM_DATA_CHUNK_BYTES + 17];
+        let metadata = TunnelTerminalOutputMetadata {
+            version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+            phase: TerminalOutputPhase::Snapshot,
+            seq_start: 12,
+            seq_end: 12 + data.len() as u64,
+            byte_length: data.len(),
+        };
+        let (tx, mut rx) = mpsc::channel(2);
+
+        send_terminal_output_data(&tx, "screen", metadata, &data)
+            .await
+            .unwrap();
+
+        let frame = rx.recv().await.unwrap();
+        assert_eq!(frame.frame_type, FRAME_STREAM_DATA);
+        assert_eq!(decode_stream_data(&frame).unwrap(), data);
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

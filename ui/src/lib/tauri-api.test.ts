@@ -176,10 +176,15 @@ describe("tauri-api", () => {
       const attachment = {
         state: {
           version: 1,
+          generation: 1,
           snapshotStartSeq: 3,
           snapshotSeq: 5,
+          sourceStartSeq: 3,
+          sourceSeq: 5,
+          snapshotKind: "raw",
           protocolRevision: 2,
           modes: { bracketedPaste: true },
+          geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot: [65, 66],
       };

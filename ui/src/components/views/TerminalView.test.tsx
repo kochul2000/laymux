@@ -273,6 +273,8 @@ vi.mock("@xterm/addon-serialize", () => ({
 
 const mockRegisterTerminalSerializer = vi.fn();
 const mockUnregisterTerminalSerializer = vi.fn();
+const mockRegisterTerminalRenderCheckpointProvider = vi.fn();
+const mockUnregisterTerminalRenderCheckpointProvider = vi.fn();
 const mockRegisterTerminalInspector = vi.fn();
 const mockUnregisterTerminalInspector = vi.fn();
 const mockRegisterTerminalScroller = vi.fn();
@@ -280,10 +282,28 @@ const mockUnregisterTerminalScroller = vi.fn();
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
+  registerTerminalRenderCheckpointProvider: (...args: unknown[]) =>
+    mockRegisterTerminalRenderCheckpointProvider(...args),
+  unregisterTerminalRenderCheckpointProvider: (...args: unknown[]) =>
+    mockUnregisterTerminalRenderCheckpointProvider(...args),
   registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
   unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
   registerTerminalScroller: (...args: unknown[]) => mockRegisterTerminalScroller(...args),
   unregisterTerminalScroller: (...args: unknown[]) => mockUnregisterTerminalScroller(...args),
+}));
+
+vi.mock("@/lib/terminal-render-checkpoint", () => ({
+  TerminalRenderCheckpointModel: class MockTerminalRenderCheckpointModel {
+    attach = vi.fn().mockResolvedValue(undefined);
+    apply = vi.fn().mockResolvedValue(undefined);
+    capture = vi.fn().mockResolvedValue({
+      generation: 1,
+      seq: 0,
+      geometry: { revision: 0, cols: 80, rows: 24 },
+      data: "",
+    });
+    dispose = vi.fn();
+  },
 }));
 
 // Mock tauri API
@@ -309,10 +329,15 @@ const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
   state: {
     version: 1,
+    generation: 1,
     snapshotStartSeq: 0,
     snapshotSeq: 0,
+    sourceStartSeq: 0,
+    sourceSeq: 0,
+    snapshotKind: "raw",
     protocolRevision: 0,
     modes: { bracketedPaste: false },
+    geometry: { revision: 0, cols: 80, rows: 24 },
   },
   snapshot: [],
 });
@@ -357,7 +382,13 @@ vi.mock("@/lib/tauri-api", () => ({
       const raw = new Uint8Array(data as Uint8Array);
       const seqStart = mockOutputSequence;
       mockOutputSequence += raw.length;
-      callback({ seqStart, seqEnd: mockOutputSequence, data: Array.from(raw) });
+      callback({
+        generation: 1,
+        seqStart,
+        seqEnd: mockOutputSequence,
+        data: Array.from(raw),
+        geometry: { revision: 0, cols: 80, rows: 24 },
+      });
     };
     let attachWaitTurns = 0;
     const exposeRegisteredListenerAfterAttach = () => {
@@ -3040,10 +3071,15 @@ describe("TerminalView", () => {
       mockAttachTerminalOutput.mockResolvedValueOnce({
         state: {
           version: 1,
+          generation: 1,
           snapshotStartSeq: 0,
           snapshotSeq: snapshot.length,
+          sourceStartSeq: 0,
+          sourceSeq: snapshot.length,
+          snapshotKind: "raw",
           protocolRevision: 0,
           modes: { bracketedPaste: false },
+          geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot: Array.from(snapshot),
       });
@@ -3881,6 +3917,7 @@ describe("TerminalView", () => {
       render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" />);
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
       expect(capturedKeyHandler).not.toBeNull();
@@ -3969,6 +4006,7 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
 
@@ -4029,6 +4067,7 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
 

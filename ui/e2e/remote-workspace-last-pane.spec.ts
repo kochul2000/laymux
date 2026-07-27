@@ -58,6 +58,62 @@ const PANES: Record<string, Array<Record<string, unknown>>> = {
 
 const WS_NAME: Record<string, string> = { "ws-a": "Alpha", "ws-b": "Bravo" };
 
+type CheckpointTermWindow = typeof window & {
+  Terminal: { prototype: { reset: () => void } };
+  __checkpointResetGeometries?: Array<{ cols: number; rows: number }>;
+  __checkpointTerm?: {
+    cols: number;
+    rows: number;
+    buffer: {
+      active: {
+        baseY: number;
+        getLine: (
+          index: number,
+        ) => { translateToString: (trimRight: boolean) => string } | undefined;
+      };
+    };
+  };
+};
+
+interface OutputGeometry {
+  revision: number;
+  cols: number;
+  rows: number;
+}
+
+function outputSnapshot(
+  payloadText: string,
+  sourceSeq: number,
+  snapshotKind: "raw" | "screen",
+  geometry: OutputGeometry,
+) {
+  const payload = Buffer.from(payloadText, "utf8");
+  const sourceEndSeq = snapshotKind === "raw" ? sourceSeq + payload.byteLength : sourceSeq;
+  return {
+    header: JSON.stringify({
+      type: "terminal.output",
+      version: 1,
+      phase: "snapshot",
+      seqStart: sourceSeq,
+      seqEnd: sourceSeq + payload.byteLength,
+      byteLength: payload.byteLength,
+      state: {
+        version: 1,
+        generation: 1,
+        snapshotStartSeq: sourceSeq,
+        snapshotSeq: sourceSeq + payload.byteLength,
+        sourceStartSeq: sourceSeq,
+        sourceSeq: sourceEndSeq,
+        snapshotKind,
+        protocolRevision: 0,
+        modes: { bracketedPaste: false },
+        geometry,
+      },
+    }),
+    payload,
+  };
+}
+
 test.describe("remote workspace last-pane resume", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
 
@@ -68,6 +124,10 @@ test.describe("remote workspace last-pane resume", () => {
     let hostFocusedPaneNumber = 1;
 
     const openedOutputs: string[] = [];
+    const outputOpenResizeCounts: Array<{ terminalId: string; resizeCount: number }> = [];
+    const resizeCounts = new Map<string, number>();
+    const latestResize = new Map<string, OutputGeometry>();
+    let alphaPaneTwoAttachCount = 0;
 
     for (const asset of [
       [
@@ -140,15 +200,74 @@ test.describe("remote workspace last-pane resume", () => {
         await route.fulfill({ json: { focused: focusMatch[1] } });
         return;
       }
+      const resizeMatch = url.pathname.match(/^\/remote\/v1\/terminals\/([^/]+)\/resize$/);
+      if (resizeMatch) {
+        const terminalId = decodeURIComponent(resizeMatch[1]);
+        const body = request.postDataJSON() as { cols: number; rows: number };
+        const resizeCount = (resizeCounts.get(terminalId) ?? 0) + 1;
+        resizeCounts.set(terminalId, resizeCount);
+        latestResize.set(terminalId, { revision: resizeCount, cols: body.cols, rows: body.rows });
+        await route.fulfill({ json: { resized: terminalId } });
+        return;
+      }
       await route.fulfill({ json: {} });
     });
 
     await page.routeWebSocket(/\/remote\/v1\/terminals\/[^/]+\/output/, (ws) => {
       const match = ws.url().match(/terminals\/([^/]+)\/output/);
-      if (match) openedOutputs.push(decodeURIComponent(match[1]));
+      if (!match) return;
+      const terminalId = decodeURIComponent(match[1]);
+      openedOutputs.push(terminalId);
+      outputOpenResizeCounts.push({
+        terminalId,
+        resizeCount: resizeCounts.get(terminalId) ?? 0,
+      });
+      const attachGeometry = latestResize.get(terminalId) ?? { revision: 0, cols: 80, rows: 24 };
+      let snapshot;
+      if (terminalId === "term-a2") {
+        alphaPaneTwoAttachCount += 1;
+        snapshot =
+          alphaPaneTwoAttachCount === 1
+            ? outputSnapshot(
+                "\x1b[2J\x1b[HALPHA-BASE-01\r\nALPHA-BASE-02\r\nALPHA-BASE-03\r\nALPHA-BASE-04\r\nALPHA-BASE-05\r\nTICK-0000",
+                0,
+                "raw",
+                attachGeometry,
+              )
+            : outputSnapshot(
+                // This is the compact serialized screen produced after more
+                // than 500 KiB of sparse cursor updates. A raw 4/16 KiB tail
+                // would contain only the final TICK patch and reproduce the
+                // original almost-empty workspace-return failure.
+                "\x1b[2J\x1b[HALPHA-BASE-01\r\nALPHA-BASE-02\r\nALPHA-BASE-03\r\nALPHA-BASE-04\r\nALPHA-BASE-05\r\nTICK-9000",
+                500_000,
+                "screen",
+                // Deliberately race the browser viewport after the pre-attach
+                // resize. Screen ANSI must still be reset/replayed at the
+                // authoritative checkpoint grid, not at stale Remote cols.
+                { revision: attachGeometry.revision + 1, cols: 80, rows: 8 },
+              );
+      } else {
+        snapshot = outputSnapshot(`\x1b[2J\x1b[H${terminalId}`, 0, "raw", attachGeometry);
+      }
+      ws.send(snapshot.header);
+      ws.send(snapshot.payload);
     });
 
     await page.goto("http://remote.test/remote/#token=test-token");
+    await page.evaluate(() => {
+      const target = window as CheckpointTermWindow;
+      const originalReset = target.Terminal.prototype.reset;
+      target.Terminal.prototype.reset = function resetCapturingInstance() {
+        target.__checkpointTerm = this as never;
+        target.__checkpointResetGeometries ??= [];
+        target.__checkpointResetGeometries.push({
+          cols: (this as unknown as { cols: number }).cols,
+          rows: (this as unknown as { rows: number }).rows,
+        });
+        return originalReset.call(this);
+      };
+    });
     await page.locator("#connect").click();
 
     // Fresh connect honors the host's focused pane (pane 1) → term-a1.
@@ -177,6 +296,35 @@ test.describe("remote workspace last-pane resume", () => {
     await page.locator(".workspace-item", { hasText: "Alpha" }).click();
     await expect.poll(() => openedOutputs.at(-1)).toBe("term-a2");
     await expect(page.locator("#terminalMeta")).toHaveText("A2");
+    expect(outputOpenResizeCounts.every(({ resizeCount }) => resizeCount > 0)).toBe(true);
+    expect(
+      outputOpenResizeCounts
+        .filter(({ terminalId }) => terminalId === "term-a2")
+        .map(({ resizeCount }) => resizeCount),
+    ).toEqual([1, 2]);
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as CheckpointTermWindow).__checkpointResetGeometries?.at(-1)),
+      )
+      .toEqual({ cols: 80, rows: 8 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const term = (window as CheckpointTermWindow).__checkpointTerm;
+          if (!term) return [];
+          return Array.from({ length: Math.min(6, term.rows) }, (_, row) =>
+            term.buffer.active.getLine(term.buffer.active.baseY + row)?.translateToString(true),
+          );
+        }),
+      )
+      .toEqual([
+        "ALPHA-BASE-01",
+        "ALPHA-BASE-02",
+        "ALPHA-BASE-03",
+        "ALPHA-BASE-04",
+        "ALPHA-BASE-05",
+        "TICK-9000",
+      ]);
   });
 
   test("falls back to the first pane for a workspace never visited on Remote", async ({ page }) => {

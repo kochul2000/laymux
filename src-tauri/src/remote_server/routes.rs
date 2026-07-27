@@ -16,7 +16,7 @@ use crate::automation_server::ServerState;
 use crate::commands::{resize_terminal_inner, write_terminal_input_inner, write_to_terminal_inner};
 use crate::constants::{REMOTE_CLAIM_RESERVATION_TTL_MS, REMOTE_CLAIM_RETRY_AFTER_MS};
 use crate::lock_ext::MutexExt;
-use crate::terminal_output::{self, TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
+use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
 use super::assets::{
@@ -637,7 +637,7 @@ async fn remote_terminal_output_ws(
     ws.on_upgrade(move |socket| {
         stream_terminal_output(
             socket,
-            server.app_state,
+            server,
             id,
             lease_id,
             timeout_seconds,
@@ -648,28 +648,52 @@ async fn remote_terminal_output_ws(
 
 async fn stream_terminal_output(
     mut socket: WebSocket,
-    app_state: std::sync::Arc<crate::state::AppState>,
+    server: ServerState,
     id: String,
     lease_id: String,
     timeout_seconds: u64,
     snapshot_max_bytes: usize,
 ) {
-    let subscribed = match terminal_output::attach_and_subscribe_terminal_output(
-        &app_state.terminal_protocol_states,
-        &id,
-        snapshot_max_bytes,
+    let subscribed =
+        match super::attach_and_subscribe_render_checkpoint(&server, &id, snapshot_max_bytes).await
+        {
+            Ok(subscribed) => subscribed,
+            Err(err) => {
+                tracing::warn!(terminal_id = %id, error = %err, "remote output attach failed");
+                if err.kind() == super::RenderCheckpointAttachErrorKind::NotFound {
+                    let _ = socket
+                        .send(Message::Text("terminal session not found".into()))
+                        .await;
+                } else {
+                    let _ = socket.send(Message::Close(None)).await;
+                }
+                return;
+            }
+        };
+
+    // Checkpoint creation crosses the frontend bridge and may take several
+    // seconds. Never disclose the newly reconstructed screen to a controller
+    // whose lease was released, expired, or reclaimed during that wait.
+    match active_lease_matches_with_timeout(
+        &server.app_state,
+        &lease_id,
+        Duration::from_secs(timeout_seconds),
     ) {
-        Ok(subscribed) => subscribed,
-        Err(err) => {
-            tracing::warn!(terminal_id = %id, error = %err, "remote output attach failed");
-            let _ = socket
-                .send(Message::Text("terminal session not found".into()))
-                .await;
+        Ok(true) => {}
+        Ok(false) => {
+            tracing::warn!(terminal_id = %id, "remote output lease changed during attach");
+            let _ = socket.send(Message::Close(None)).await;
             return;
         }
-    };
+        Err(err) => {
+            tracing::warn!(terminal_id = %id, error = %err, "remote output lease recheck failed");
+            let _ = socket.send(Message::Close(None)).await;
+            return;
+        }
+    }
     let attachment = subscribed.attachment;
     let generation = subscribed.generation;
+    let wire_seq_offset = subscribed.wire_seq_offset;
     let mut subscription = subscribed.subscription;
     if send_output_pair(
         &mut socket,
@@ -698,16 +722,22 @@ async fn stream_terminal_output(
             event = subscription.recv() => {
                 match event {
                     Some(TerminalOutputSubscriptionEvent::Delta(delta)) => {
-                    if send_output_pair(
-                        &mut socket,
-                        TerminalOutputFrameHeaderV1::delta(&delta),
-                        delta.data,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        break;
-                    }
+                        let header = match TerminalOutputFrameHeaderV1::delta_with_offset(
+                            &delta,
+                            wire_seq_offset,
+                        ) {
+                            Ok(header) => header,
+                            Err(err) => {
+                                tracing::warn!(terminal_id = %id, error = %err, "remote output wire sequence failed");
+                                break;
+                            }
+                        };
+                        if send_output_pair(&mut socket, header, delta.data)
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
                     }
                     Some(TerminalOutputSubscriptionEvent::Gap {
                         generation,
@@ -739,7 +769,7 @@ async fn stream_terminal_output(
             }
             _ = lease_check.tick() => {
                 match active_lease_matches_with_timeout(
-                    &app_state,
+                    &server.app_state,
                     &lease_id,
                     Duration::from_secs(timeout_seconds),
                 ) {

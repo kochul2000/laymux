@@ -48,14 +48,57 @@ pub struct TerminalAttachModes {
     pub bracketed_paste: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalGeometry {
+    pub revision: u64,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+impl TerminalGeometry {
+    pub fn new(cols: u16, rows: u16) -> Result<Self, String> {
+        if cols == 0 || rows == 0 {
+            return Err("terminal size must be positive".into());
+        }
+        Ok(Self {
+            revision: 0,
+            cols,
+            rows,
+        })
+    }
+}
+
+impl Default for TerminalGeometry {
+    fn default() -> Self {
+        Self {
+            revision: 0,
+            cols: 80,
+            rows: 24,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalSnapshotKind {
+    Raw,
+    Screen,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalAttachState {
     pub version: u8,
+    pub generation: u64,
     pub snapshot_start_seq: u64,
     pub snapshot_seq: u64,
+    pub source_start_seq: u64,
+    pub source_seq: u64,
+    pub snapshot_kind: TerminalSnapshotKind,
     pub protocol_revision: u64,
     pub modes: TerminalAttachModes,
+    pub geometry: TerminalGeometry,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -68,9 +111,28 @@ pub struct TerminalOutputAttachment {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalOutputDelta {
+    pub generation: u64,
     pub seq_start: u64,
     pub seq_end: u64,
     pub data: Vec<u8>,
+    pub geometry: TerminalGeometry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRenderCheckpointTarget {
+    pub generation: u64,
+    pub seq: u64,
+    pub geometry: TerminalGeometry,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalRenderCheckpoint {
+    pub generation: u64,
+    pub seq: u64,
+    pub geometry: TerminalGeometry,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -108,15 +170,31 @@ impl TerminalOutputFrameHeaderV1 {
     }
 
     pub fn delta(delta: &TerminalOutputDelta) -> Self {
-        Self {
+        Self::delta_with_offset(delta, 0)
+            .expect("zero wire offset cannot overflow a terminal output sequence")
+    }
+
+    pub fn delta_with_offset(
+        delta: &TerminalOutputDelta,
+        wire_seq_offset: u64,
+    ) -> Result<Self, String> {
+        let seq_start = delta
+            .seq_start
+            .checked_add(wire_seq_offset)
+            .ok_or_else(|| "terminal output wire sequence overflow".to_string())?;
+        let seq_end = delta
+            .seq_end
+            .checked_add(wire_seq_offset)
+            .ok_or_else(|| "terminal output wire sequence overflow".to_string())?;
+        Ok(Self {
             frame_type: TERMINAL_OUTPUT_FRAME_TYPE.into(),
             version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
             phase: TerminalOutputPhase::Delta,
-            seq_start: delta.seq_start,
-            seq_end: delta.seq_end,
+            seq_start,
+            seq_end,
             byte_length: delta.data.len(),
             state: None,
-        }
+        })
     }
 }
 
@@ -178,15 +256,17 @@ struct TerminalOutputSubscriber {
 struct TerminalOutputSessionRuntime {
     creating: bool,
     retired: bool,
+    geometry: TerminalGeometry,
     next_subscriber_id: u64,
     subscribers: HashMap<u64, TerminalOutputSubscriber>,
 }
 
-impl Default for TerminalOutputSessionRuntime {
-    fn default() -> Self {
+impl TerminalOutputSessionRuntime {
+    fn new(geometry: TerminalGeometry) -> Self {
         Self {
             creating: true,
             retired: false,
+            geometry,
             next_subscriber_id: 0,
             subscribers: HashMap::new(),
         }
@@ -204,13 +284,18 @@ pub struct TerminalOutputSession {
 }
 
 impl TerminalOutputSession {
-    fn new(terminal_id: String, generation: u64, output: TerminalOutputBuffer) -> Self {
+    fn new(
+        terminal_id: String,
+        generation: u64,
+        output: TerminalOutputBuffer,
+        geometry: TerminalGeometry,
+    ) -> Self {
         Self {
             terminal_id,
             generation,
             protocol: new_protocol_gate(),
             output,
-            runtime: Mutex::new(TerminalOutputSessionRuntime::default()),
+            runtime: Mutex::new(TerminalOutputSessionRuntime::new(geometry)),
         }
     }
 
@@ -243,9 +328,11 @@ impl TerminalOutputSession {
         protocol.process_output(data);
         let written = self.output.push_sequenced(data);
         let delta = TerminalOutputDelta {
+            generation: self.generation,
             seq_start: written.seq_start,
             seq_end: written.seq_end,
             data: written.data,
+            geometry: runtime.geometry,
         };
 
         let retained_start_seq = self.output.start_seq();
@@ -300,7 +387,12 @@ impl TerminalOutputSession {
             ));
         }
         let snapshot = self.output.snapshot(max_snapshot_bytes);
-        Ok(attachment_from_snapshot(protocol.snapshot(), snapshot))
+        Ok(attachment_from_snapshot(
+            self.generation,
+            runtime.geometry,
+            protocol.snapshot(),
+            snapshot,
+        ))
     }
 
     fn attach_and_subscribe(
@@ -327,7 +419,12 @@ impl TerminalOutputSession {
             ));
         }
         let snapshot = self.output.snapshot(max_snapshot_bytes);
-        let attachment = attachment_from_snapshot(protocol.snapshot(), snapshot);
+        let attachment = attachment_from_snapshot(
+            self.generation,
+            runtime.geometry,
+            protocol.snapshot(),
+            snapshot,
+        );
 
         runtime.next_subscriber_id = runtime.next_subscriber_id.wrapping_add(1).max(1);
         let subscriber_id = runtime.next_subscriber_id;
@@ -345,6 +442,136 @@ impl TerminalOutputSession {
         Ok(TerminalOutputSubscribedAttachment {
             generation: self.generation,
             attachment,
+            wire_seq_offset: 0,
+            subscription: TerminalOutputSubscription {
+                generation: self.generation,
+                subscriber_id,
+                session: Arc::downgrade(self),
+                delta_rx,
+                terminal_rx,
+                terminal_watch_open: true,
+                terminated: false,
+            },
+        })
+    }
+
+    fn checkpoint_target(&self) -> Result<TerminalRenderCheckpointTarget, String> {
+        let _protocol = self.protocol.lock_or_err()?;
+        let runtime = self.runtime.lock_or_err()?;
+        if runtime.retired {
+            return Err(format!("Session '{}' not found", self.terminal_id));
+        }
+        if runtime.creating {
+            return Err(format!(
+                "Session '{}' is still being created",
+                self.terminal_id
+            ));
+        }
+        Ok(TerminalRenderCheckpointTarget {
+            generation: self.generation,
+            seq: self.output.write_seq(),
+            geometry: runtime.geometry,
+        })
+    }
+
+    fn update_geometry(&self, cols: u16, rows: u16) -> Result<TerminalGeometry, String> {
+        if cols == 0 || rows == 0 {
+            return Err("terminal size must be positive".into());
+        }
+        let _protocol = self.protocol.lock_or_err()?;
+        let mut runtime = self.runtime.lock_or_err()?;
+        if runtime.retired {
+            return Err(format!("Session '{}' not found", self.terminal_id));
+        }
+        if runtime.creating {
+            return Err(format!(
+                "Session '{}' is still being created",
+                self.terminal_id
+            ));
+        }
+        if runtime.geometry.cols != cols || runtime.geometry.rows != rows {
+            runtime.geometry.revision = runtime.geometry.revision.wrapping_add(1);
+            runtime.geometry.cols = cols;
+            runtime.geometry.rows = rows;
+        }
+        Ok(runtime.geometry)
+    }
+
+    fn attach_and_subscribe_from_render_checkpoint(
+        self: &Arc<Self>,
+        checkpoint: TerminalRenderCheckpoint,
+        queue_capacity: usize,
+    ) -> Result<TerminalOutputSubscribedAttachment, String> {
+        if queue_capacity == 0 {
+            return Err("terminal output subscriber capacity must be positive".into());
+        }
+
+        let protocol = self.protocol.lock_or_err()?;
+        let mut runtime = self.runtime.lock_or_err()?;
+        if runtime.retired {
+            return Err(format!("Session '{}' not found", self.terminal_id));
+        }
+        if runtime.creating {
+            return Err(format!(
+                "Session '{}' is still being created",
+                self.terminal_id
+            ));
+        }
+        if checkpoint.generation != self.generation {
+            return Err("terminal render checkpoint generation changed".into());
+        }
+        if checkpoint.geometry != runtime.geometry {
+            return Err("terminal render checkpoint geometry changed".into());
+        }
+        let suffix = self
+            .output
+            .delta_since(checkpoint.seq)
+            .ok_or_else(|| "terminal render checkpoint fell behind the output ring".to_string())?;
+        let serialized = checkpoint.data.into_bytes();
+        let wire_seq_offset = u64::try_from(serialized.len())
+            .map_err(|_| "terminal render checkpoint is too large".to_string())?;
+        let wire_snapshot_seq = suffix
+            .seq_end
+            .checked_add(wire_seq_offset)
+            .ok_or_else(|| "terminal output wire sequence overflow".to_string())?;
+        let mut snapshot = serialized;
+        snapshot.extend_from_slice(&suffix.data);
+        let protocol_snapshot = protocol.snapshot();
+        let attachment = TerminalOutputAttachment {
+            state: TerminalAttachState {
+                version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
+                generation: self.generation,
+                snapshot_start_seq: checkpoint.seq,
+                snapshot_seq: wire_snapshot_seq,
+                source_start_seq: checkpoint.seq,
+                source_seq: suffix.seq_end,
+                snapshot_kind: TerminalSnapshotKind::Screen,
+                protocol_revision: protocol_snapshot.revision,
+                modes: TerminalAttachModes {
+                    bracketed_paste: protocol_snapshot.bracketed_paste,
+                },
+                geometry: runtime.geometry,
+            },
+            snapshot,
+        };
+
+        runtime.next_subscriber_id = runtime.next_subscriber_id.wrapping_add(1).max(1);
+        let subscriber_id = runtime.next_subscriber_id;
+        let (delta_tx, delta_rx) = mpsc::channel(queue_capacity);
+        let (terminal_tx, terminal_rx) = watch::channel(None);
+        runtime.subscribers.insert(
+            subscriber_id,
+            TerminalOutputSubscriber {
+                next_seq: suffix.seq_end,
+                delta_tx,
+                terminal_tx,
+            },
+        );
+
+        Ok(TerminalOutputSubscribedAttachment {
+            generation: self.generation,
+            attachment,
+            wire_seq_offset,
             subscription: TerminalOutputSubscription {
                 generation: self.generation,
                 subscriber_id,
@@ -470,6 +697,7 @@ impl Drop for TerminalOutputSubscription {
 pub struct TerminalOutputSubscribedAttachment {
     pub generation: u64,
     pub attachment: TerminalOutputAttachment,
+    pub wire_seq_offset: u64,
     pub subscription: TerminalOutputSubscription,
 }
 
