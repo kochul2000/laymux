@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { Terminal } from "@xterm/xterm";
@@ -161,6 +170,7 @@ import {
   readRuntimeInputMode,
   settleComposerSubmission,
   subscribeRuntimeComposerDraft,
+  subscribeRuntimeInputMode,
   updateComposerDraftText,
   writeDesktopInputModePreference,
   writeRuntimeComposerDraft,
@@ -602,15 +612,36 @@ export function TerminalView({
   const remoteControlStatusKnownRef = useRef(false);
   const [localControlAvailable, setLocalControlAvailable] = useState(false);
   const localControlAvailableRef = useRef(false);
-  const [outputProtocolReady, setOutputProtocolReady] = useState(false);
   const outputProtocolReadyRef = useRef(false);
-  const [inputMode, setInputMode] = useState<InputMode>(() => readRuntimeInputMode(instanceId));
+  // Input mode and the composer draft live in a module-level runtime store so a
+  // remount keeps them (`terminal-input-composer-state.ts`). `useSyncExternalStore`
+  // is how React reads such a store: it owns the subscription, and changing
+  // `instanceId` re-subscribes and re-seeds in one step instead of seeding from
+  // an effect.
+  const inputMode = useSyncExternalStore(
+    useCallback(
+      (onStoreChange: () => void) => subscribeRuntimeInputMode(instanceId, onStoreChange),
+      [instanceId],
+    ),
+    useCallback(() => readRuntimeInputMode(instanceId), [instanceId]),
+  );
   const inputModeRef = useRef(inputMode);
   const lastComposerLayoutModeRef = useRef(inputMode);
-  const [composerDraft, setComposerDraft] = useState<ComposerDraftState>(() =>
-    readRuntimeComposerDraft(instanceId),
+  const composerDraftRef = useRef<ComposerDraftState>(readRuntimeComposerDraft(instanceId));
+  const composerDraft = useSyncExternalStore(
+    useCallback(
+      (onStoreChange: () => void) =>
+        subscribeRuntimeComposerDraft(instanceId, (draft) => {
+          // Mirror synchronously. Handlers that chain edits (history recall, the
+          // composition commit) read the ref before React can re-render, so the
+          // ref may never lag the store by a tick.
+          composerDraftRef.current = draft;
+          onStoreChange();
+        }),
+      [instanceId],
+    ),
+    useCallback(() => readRuntimeComposerDraft(instanceId), [instanceId]),
   );
-  const composerDraftRef = useRef(composerDraft);
   // OSC 133 input phase mirrored into state: true at a shell prompt (↑/↓ recall
   // Composer history), false while a program runs (↑/↓ pass through to it).
   const [atShellPrompt, setAtShellPrompt] = useState(true);
@@ -622,21 +653,36 @@ export function TerminalView({
     stash: "",
   });
   const currentInstanceIdRef = useRef(instanceId);
-  currentInstanceIdRef.current = instanceId;
+  // Ref mirrors of render values are committed, never written during render: a
+  // concurrent render can be discarded, and a ref written from a discarded
+  // render would hand event handlers a value the UI never showed. A layout
+  // effect lands at commit time, before any handler or effect can observe it.
+  useLayoutEffect(() => {
+    currentInstanceIdRef.current = instanceId;
+  }, [instanceId]);
 
   const storeComposerDraft = (next: ComposerDraftState, terminalId = instanceId) => {
     const stored = writeRuntimeComposerDraft(terminalId, next);
-    // The subscription normally updates the active mount synchronously. Keep
-    // this fallback for the tiny pre-effect window before it is installed.
-    if (currentInstanceIdRef.current === terminalId && composerDraftRef.current !== stored) {
-      composerDraftRef.current = next;
-      setComposerDraft(next);
-    }
+    // Handlers that chain edits — history recall, the composition commit — read
+    // `composerDraftRef` again before React can re-render, so this pane's ref has
+    // to be current the instant the write returns. The store subscription above
+    // does mirror synchronously once React has subscribed, which makes this write
+    // usually redundant; it stays because the guarantee belongs to the writer, not
+    // to whether a subscription happens to be attached (`useSyncExternalStore`
+    // subscribes from a passive effect, so the first commit has a window without
+    // one). Guarded on the id because callers may target another terminal.
+    if (currentInstanceIdRef.current === terminalId) composerDraftRef.current = stored;
   };
 
   const changeInputMode = (next: InputMode) => {
+    // Writing the runtime store notifies this component's own
+    // `useSyncExternalStore` subscription, which is what re-renders it. The
+    // notification only *schedules* that render, though, and the input-mode
+    // listener carries no value (unlike the draft one), so `inputModeRef` would
+    // stay stale until the next commit. The toggle handler decides the next mode
+    // from `inputModeRef.current`, so it is assigned here for readers that run
+    // before the commit lands.
     inputModeRef.current = writeRuntimeInputMode(instanceId, next);
-    setInputMode(next);
     writeDesktopInputModePreference(next);
   };
 
@@ -837,21 +883,15 @@ export function TerminalView({
     return true;
   };
 
+  // Non-render bookkeeping that has to follow `instanceId`. The rendered values
+  // are re-seeded by the external-store reads above, so nothing here sets state.
+  // `inputModeRef` is deliberately absent: the dependency-free layout effect
+  // below mirrors it on *every* commit, and layout effects flush before passive
+  // ones in the same commit, so it is already current by the time this runs.
   useEffect(() => {
-    const nextMode = readRuntimeInputMode(instanceId);
-    const nextDraft = readRuntimeComposerDraft(instanceId);
-    inputModeRef.current = nextMode;
     historyNavRef.current = { index: null, stash: "" };
-    composerDraftRef.current = nextDraft;
+    composerDraftRef.current = readRuntimeComposerDraft(instanceId);
     outputProtocolReadyRef.current = false;
-    setInputMode(nextMode);
-    setComposerDraft(nextDraft);
-    setOutputProtocolReady(false);
-    return subscribeRuntimeComposerDraft(instanceId, (draft) => {
-      if (currentInstanceIdRef.current !== instanceId) return;
-      composerDraftRef.current = draft;
-      setComposerDraft(draft);
-    });
   }, [instanceId]);
   // Marks that a reflow trigger fired while the container was hidden. The
   // ResizeObserver's hidden→visible branch consumes this in addition to
@@ -866,16 +906,37 @@ export function TerminalView({
   // same (instanceId, profile) pair can be revisited (e.g. PS → WSL → PS quick
   // toggle) and a string key would let the second PS terminal inherit the first
   // one's ready state before its first paint.
+  //
+  // The counter is React state adjusted during render — the supported way to
+  // derive a value from a changed prop (https://react.dev/reference/react/useState
+  // "storing information from previous renders"). A ref bumped in the render body
+  // would be a render-phase write that a discarded concurrent render could
+  // double-count; a ref bumped in an effect would leave the first paint after the
+  // switch showing the *old* generation, i.e. a stale "ready" terminal.
   const terminalDepsKey = `${instanceId}:${profile}`;
-  const lastTerminalDepsRef = useRef<string | null>(null);
-  const terminalGenerationRef = useRef(0);
-  if (lastTerminalDepsRef.current !== terminalDepsKey) {
-    lastTerminalDepsRef.current = terminalDepsKey;
-    terminalGenerationRef.current += 1;
+  const [terminalGenerationState, setTerminalGenerationState] = useState(() => ({
+    key: terminalDepsKey,
+    generation: 1,
+  }));
+  const terminalGeneration =
+    terminalGenerationState.key === terminalDepsKey
+      ? terminalGenerationState.generation
+      : terminalGenerationState.generation + 1;
+  if (terminalGenerationState.key !== terminalDepsKey) {
+    setTerminalGenerationState({ key: terminalDepsKey, generation: terminalGeneration });
   }
-  const terminalGeneration = terminalGenerationRef.current;
   const [readyGeneration, setReadyGeneration] = useState(-1);
   const readyGenerationRef = useRef(-1);
+  // Output-protocol readiness records *which xterm generation* published it
+  // rather than a bare boolean, so a terminal swap reads as "not ready" by
+  // derivation and needs no reset effect (an effect that seeds state is what
+  // cascades renders). It has to be the generation, not `instanceId`: a
+  // profile-only switch keeps the id, and an A → B → A round trip returns to
+  // the same id — both would let the new terminal inherit the previous one's
+  // ready state before its first paint, exactly the trap the counter above
+  // exists to avoid.
+  const [outputProtocolReadyGeneration, setOutputProtocolReadyGeneration] = useState(-1);
+  const outputProtocolReady = outputProtocolReadyGeneration === terminalGeneration;
   // Issue #349: floating "jump to bottom" button. Shown while the user has
   // scrolled up into the scrollback; hidden once pinned to the live bottom.
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -885,20 +946,27 @@ export function TerminalView({
   const stabilizeInteractiveCursorRef = useRef(true);
   const overlayCursorShapeRef = useRef<"bar" | "underscore" | "filledBox">("bar");
   const onKeyboardActivityRef = useRef(onKeyboardActivity);
-  onKeyboardActivityRef.current = onKeyboardActivity;
-  isFocusedRef.current = isFocused;
   const syncGroupRef = useRef(syncGroup);
-  syncGroupRef.current = syncGroup;
   const cwdSendRef = useRef(cwdSend);
-  cwdSendRef.current = cwdSend;
   const cwdReceiveRef = useRef(cwdReceive);
-  cwdReceiveRef.current = cwdReceive;
   // 리뷰 C: path-link provider 의 getCwd 가 hover(줄)마다 instances.find 로
   // store 배열을 전수 스캔하지 않도록, 이 pane 의 cwd 를 selector 로 한 번
   // 구독해 ref 로 유지한다(syncGroupRef 와 동일 패턴).
   const cwd = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.cwd);
   const cwdRef = useRef(cwd);
-  cwdRef.current = cwd;
+  // Latest-value mirrors for the long-lived xterm callbacks, committed rather
+  // than written during render (react-hooks/refs). A layout effect runs inside
+  // the same synchronous commit, so it lands before any effect, xterm callback
+  // or DOM event can read these — the ordering the render-body writes had.
+  useLayoutEffect(() => {
+    onKeyboardActivityRef.current = onKeyboardActivity;
+    isFocusedRef.current = isFocused;
+    syncGroupRef.current = syncGroup;
+    cwdSendRef.current = cwdSend;
+    cwdReceiveRef.current = cwdReceive;
+    cwdRef.current = cwd;
+    inputModeRef.current = inputMode;
+  });
   // Issue #439: pane 의 GitHub 베이스 URL(https://github.com/{owner}/{repo}).
   // cwd 변경 시 백엔드(resolve_git_remote)로 비동기 해석해 ref 에 저장한다.
   // pr-link-provider 는 provideLinks 안에서 이 ref 를 **동기로만** 읽는다
@@ -3690,7 +3758,9 @@ export function TerminalView({
     };
     const setOutputReady = (ready: boolean) => {
       outputProtocolReadyRef.current = ready;
-      if (!cancelled) setOutputProtocolReady(ready);
+      // Readiness is published as the owning xterm generation, so any later
+      // rebuild reads as "not ready" without a reset effect.
+      if (!cancelled) setOutputProtocolReadyGeneration(ready ? terminalGeneration : -1);
     };
     const scheduleOutputReattach = () => {
       if (cancelled || outputAttachRetryTimer !== undefined) return;
@@ -4299,7 +4369,12 @@ export function TerminalView({
   }, [baseFont, viewOverride]);
   const activity = useTerminalStore((s) => s.instances.find((i) => i.id === instanceId)?.activity);
   const prevActivityIsTuiRef = useRef<boolean>(false);
-  {
+  // Committed, not written during render. The shadow cursor is external state
+  // shared with the xterm callbacks, so resetting it belongs to the commit that
+  // actually put the new activity on screen. A layout effect still runs before
+  // the overlay-caret repaint effect below (layout effects precede passive ones
+  // in the same commit), which is the ordering the render-body write relied on.
+  useLayoutEffect(() => {
     const isTui = isOverlayCaretActivity(activity);
     if (prevActivityIsTuiRef.current && !isTui) {
       // Leaving a TUI overlay activity (e.g. Codex exited) → clear the
@@ -4311,8 +4386,8 @@ export function TerminalView({
       );
     }
     prevActivityIsTuiRef.current = isTui;
-  }
-  activityRef.current = activity;
+    activityRef.current = activity;
+  }, [activity]);
   const cursorShape = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
     return (
@@ -4326,7 +4401,6 @@ export function TerminalView({
     );
   });
   const overlayCursorShape = toSupportedCursorShape(cursorShape);
-  overlayCursorShapeRef.current = overlayCursorShape;
   const stabilizeInteractiveCursor = useSettingsStore((s) => {
     const prof = s.profiles?.find((p) => p.name === profile);
     return (
@@ -4335,7 +4409,13 @@ export function TerminalView({
       defaultProfileDefaults.stabilizeInteractiveCursor
     );
   });
-  stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
+  // Overlay-caret inputs the xterm callbacks read synchronously. Committed for
+  // the same reason as the mirrors above, and still ahead of the passive effect
+  // that repaints the caret on these very values.
+  useLayoutEffect(() => {
+    overlayCursorShapeRef.current = overlayCursorShape;
+    stabilizeInteractiveCursorRef.current = stabilizeInteractiveCursor;
+  }, [overlayCursorShape, stabilizeInteractiveCursor]);
   const effectiveCursorBlink = cursorBlink;
   // CSS cursor layers do not cover the WebGL addon's cursor because it is
   // painted into the main canvas. Include composer mode in the xterm option
@@ -4380,9 +4460,10 @@ export function TerminalView({
 
     // A listener must be installed before the initial snapshot can authorize
     // Local control. Until that barrier succeeds, keep the surface fail-closed.
+    // The rendered flag needs no reset here: this effect only runs on mount and
+    // `localControlAvailable` already starts `false`.
     remoteControlStatusKnownRef.current = false;
     localControlAvailableRef.current = false;
-    setLocalControlAvailable(false);
 
     const stopPolling = () => {
       if (pollTimer !== undefined) {

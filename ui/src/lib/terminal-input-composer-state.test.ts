@@ -29,11 +29,13 @@ import {
   readRuntimeInputMode,
   settleComposerSubmission,
   subscribeRuntimeComposerDraft,
+  subscribeRuntimeInputMode,
   updateComposerDraftText,
   writeComposerHeight,
   writeDesktopInputModePreference,
   writeRuntimeComposerDraft,
   writeRuntimeInputMode,
+  type InputMode,
 } from "./terminal-input-composer-state";
 
 /** Bucket key shorthands — the only sanctioned way to address a history bucket. */
@@ -383,6 +385,86 @@ describe("runtime-only terminal composer state", () => {
 
     unsubscribeA();
     unsubscribeB();
+  });
+
+  // `useSyncExternalStore` re-reads the snapshot on every render and throws
+  // "getSnapshot should be cached" if the identity keeps changing. An unseeded
+  // terminal must therefore hand back the same empty draft object every time.
+  it("returns a stable empty-draft identity for a terminal that has never been written", () => {
+    expect(readRuntimeComposerDraft("terminal-fresh")).toBe(
+      readRuntimeComposerDraft("terminal-fresh"),
+    );
+    expect(readRuntimeComposerDraft("terminal-fresh")).toBe(readRuntimeComposerDraft("other"));
+    expect(readRuntimeComposerDraft("terminal-fresh")).toEqual({
+      text: "",
+      revision: 0,
+      inFlight: null,
+    });
+  });
+
+  it("notifies input-mode subscribers only for the terminal whose mode changed", () => {
+    const receivedA: InputMode[] = [];
+    const receivedB: InputMode[] = [];
+    const unsubscribeA = subscribeRuntimeInputMode("terminal-a", () =>
+      receivedA.push(readRuntimeInputMode("terminal-a")),
+    );
+    const unsubscribeB = subscribeRuntimeInputMode("terminal-b", () =>
+      receivedB.push(readRuntimeInputMode("terminal-b")),
+    );
+
+    writeRuntimeInputMode("terminal-a", "composer");
+    expect(receivedA).toEqual(["composer"]);
+    expect(receivedB).toEqual([]);
+
+    unsubscribeA();
+    writeRuntimeInputMode("terminal-a", "direct");
+    expect(receivedA).toEqual(["composer"]);
+
+    unsubscribeB();
+  });
+
+  // The desktop preference only seeds a terminal that has no mode of its own.
+  // Once seeded, a later preference change must not silently retro-flip that
+  // terminal — the snapshot has to stay stable for `useSyncExternalStore`.
+  it("pins the desktop default per terminal on first read", () => {
+    writeDesktopInputModePreference("direct");
+    expect(readRuntimeInputMode("terminal-a")).toBe("direct");
+
+    writeDesktopInputModePreference("composer");
+    expect(readRuntimeInputMode("terminal-a")).toBe("direct");
+    // A terminal read for the first time still picks up the current default.
+    expect(readRuntimeInputMode("terminal-b")).toBe("composer");
+  });
+
+  it("re-seeds the pinned default after runtime state is cleared", () => {
+    writeDesktopInputModePreference("direct");
+    expect(readRuntimeInputMode("terminal-a")).toBe("direct");
+
+    writeDesktopInputModePreference("composer");
+    clearRuntimeComposerState("terminal-a");
+    expect(readRuntimeInputMode("terminal-a")).toBe("composer");
+
+    writeDesktopInputModePreference("direct");
+    clearRuntimeComposerState();
+    expect(readRuntimeInputMode("terminal-a")).toBe("direct");
+  });
+
+  it("notifies input-mode subscribers when runtime state is cleared", () => {
+    writeRuntimeInputMode("terminal-a", "composer");
+    let notifications = 0;
+    const unsubscribe = subscribeRuntimeInputMode("terminal-a", () => {
+      notifications += 1;
+    });
+
+    clearRuntimeComposerState("terminal-a");
+    expect(notifications).toBe(1);
+    expect(readRuntimeInputMode("terminal-a")).toBe("direct");
+
+    writeRuntimeInputMode("terminal-a", "composer");
+    clearRuntimeComposerState();
+    expect(notifications).toBe(3);
+
+    unsubscribe();
   });
 });
 

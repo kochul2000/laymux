@@ -8720,6 +8720,57 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  // Issue #567: the mode/draft/readiness re-seed used to run as a setState effect
+  // keyed on `instanceId`. It now falls out of reading the runtime store directly,
+  // so the swap must still isolate every one of those three per terminal.
+  it("re-seeds mode, draft and readiness when instanceId changes in place", async () => {
+    const { rerender } = render(
+      <TerminalView instanceId="t-swap-a" profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+
+    toggleInputMode("t-swap-a");
+    await vi.waitFor(() =>
+      expect(screen.getByTestId("terminal-input-composer-t-swap-a")).toHaveAttribute(
+        "data-can-send",
+        "true",
+      ),
+    );
+    fireEvent.change(screen.getByTestId("terminal-input-composer-t-swap-a-textarea"), {
+      target: { value: "draft for A" },
+    });
+    expect(screen.getByTestId("terminal-input-composer-t-swap-a-textarea")).toHaveValue(
+      "draft for A",
+    );
+
+    // Terminal B follows the desktop default (composer, just set by the toggle)
+    // but owns its own draft, and its output protocol has not attached yet.
+    rerender(<TerminalView instanceId="t-swap-b" profile="PowerShell" syncGroup="" />);
+    expect(screen.getByTestId("terminal-input-composer-t-swap-b")).toHaveAttribute(
+      "data-mode",
+      "composer",
+    );
+    expect(screen.getByTestId("terminal-input-composer-t-swap-b-textarea")).toHaveValue("");
+    expect(screen.getByTestId("terminal-input-composer-t-swap-b")).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
+
+    // Back to A: the runtime store still holds its draft.
+    rerender(<TerminalView instanceId="t-swap-a" profile="PowerShell" syncGroup="" />);
+    expect(screen.getByTestId("terminal-input-composer-t-swap-a-textarea")).toHaveValue(
+      "draft for A",
+    );
+    // …but the readiness that the *first* A terminal published must not carry
+    // over: this is a brand new xterm whose output protocol has not attached.
+    // Keying readiness by `instanceId` alone would report ready here (the draft
+    // is non-empty, so `data-can-send` is gated purely by readiness).
+    expect(screen.getByTestId("terminal-input-composer-t-swap-a")).toHaveAttribute(
+      "data-can-send",
+      "false",
+    );
+  });
+
   it("keeps the desktop draft but disables editing while Remote owns the PTY", async () => {
     localStorage.setItem("laymux.desktop.inputMode", "composer");
     mockGetRemoteControlStatus.mockResolvedValueOnce({

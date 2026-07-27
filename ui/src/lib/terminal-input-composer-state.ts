@@ -277,10 +277,38 @@ export interface SettleComposerSubmissionOptions {
 let nextSubmissionToken = 0;
 const runtimeDrafts = new Map<string, ComposerDraftState>();
 const runtimeModes = new Map<string, InputMode>();
+/**
+ * Desktop-preference value each terminal was seeded with. Pinned on first read
+ * so a later preference change cannot retro-flip a terminal the user never
+ * touched — and so the value stays a stable `useSyncExternalStore` snapshot.
+ */
+const runtimeSeededModes = new Map<string, InputMode>();
 const runtimeDraftListeners = new Map<string, Set<(draft: ComposerDraftState) => void>>();
+const runtimeModeListeners = new Map<string, Set<() => void>>();
 
 function notifyRuntimeComposerDraft(terminalId: string, draft: ComposerDraftState): void {
   for (const listener of runtimeDraftListeners.get(terminalId) ?? []) listener(draft);
+}
+
+function notifyRuntimeInputMode(terminalId: string): void {
+  for (const listener of runtimeModeListeners.get(terminalId) ?? []) listener();
+}
+
+function subscribeRuntimeMap<L>(
+  listeners: Map<string, Set<L>>,
+  terminalId: string,
+  listener: L,
+): () => void {
+  let bucket = listeners.get(terminalId);
+  if (!bucket) {
+    bucket = new Set();
+    listeners.set(terminalId, bucket);
+  }
+  bucket.add(listener);
+  return () => {
+    bucket?.delete(listener);
+    if (bucket?.size === 0) listeners.delete(terminalId);
+  };
 }
 
 export function createComposerSubmissionToken(): ComposerSubmissionToken {
@@ -292,9 +320,18 @@ export function createComposerDraftState(text = ""): ComposerDraftState {
   return { text, revision: 0, inFlight: null };
 }
 
+/**
+ * The one empty draft handed out for every terminal that has never been
+ * written. Every producer in this module returns a fresh object (`{...state}`),
+ * so nothing mutates a draft in place and a shared instance is safe — and
+ * required, because `useSyncExternalStore` rejects a snapshot whose identity
+ * changes on every read. Frozen so an accidental in-place write fails loudly.
+ */
+const EMPTY_COMPOSER_DRAFT: ComposerDraftState = Object.freeze(createComposerDraftState());
+
 /** Runtime-only terminal state. It intentionally disappears on WebView reload. */
 export function readRuntimeComposerDraft(terminalId: string): ComposerDraftState {
-  return runtimeDrafts.get(terminalId) ?? createComposerDraftState();
+  return runtimeDrafts.get(terminalId) ?? EMPTY_COMPOSER_DRAFT;
 }
 
 export function writeRuntimeComposerDraft(
@@ -316,24 +353,34 @@ export function subscribeRuntimeComposerDraft(
   terminalId: string,
   listener: (draft: ComposerDraftState) => void,
 ): () => void {
-  let listeners = runtimeDraftListeners.get(terminalId);
-  if (!listeners) {
-    listeners = new Set();
-    runtimeDraftListeners.set(terminalId, listeners);
-  }
-  listeners.add(listener);
-  return () => {
-    listeners?.delete(listener);
-    if (listeners?.size === 0) runtimeDraftListeners.delete(terminalId);
-  };
+  return subscribeRuntimeMap(runtimeDraftListeners, terminalId, listener);
+}
+
+/**
+ * Store-shaped counterpart of {@link subscribeRuntimeComposerDraft} for the
+ * per-terminal input mode. The listener takes no argument so it can be handed
+ * straight to `useSyncExternalStore`, which re-reads
+ * {@link readRuntimeInputMode} itself.
+ */
+export function subscribeRuntimeInputMode(terminalId: string, listener: () => void): () => void {
+  return subscribeRuntimeMap(runtimeModeListeners, terminalId, listener);
 }
 
 export function readRuntimeInputMode(terminalId: string): InputMode {
-  return runtimeModes.get(terminalId) ?? readDesktopInputModePreference();
+  const explicit = runtimeModes.get(terminalId);
+  if (explicit !== undefined) return explicit;
+  let seeded = runtimeSeededModes.get(terminalId);
+  if (seeded === undefined) {
+    seeded = readDesktopInputModePreference();
+    runtimeSeededModes.set(terminalId, seeded);
+  }
+  return seeded;
 }
 
 export function writeRuntimeInputMode(terminalId: string, mode: InputMode): InputMode {
+  const previous = runtimeModes.get(terminalId);
   runtimeModes.set(terminalId, mode);
+  if (previous !== mode) notifyRuntimeInputMode(terminalId);
   return mode;
 }
 
@@ -344,19 +391,26 @@ export function writeRuntimeInputMode(terminalId: string, mode: InputMode): Inpu
  */
 export function clearRuntimeComposerState(terminalId?: string): void {
   if (terminalId === undefined) {
-    const subscribedTerminalIds = [...runtimeDraftListeners.keys()];
+    const subscribedDraftIds = [...runtimeDraftListeners.keys()];
+    const subscribedModeIds = [...runtimeModeListeners.keys()];
     runtimeDrafts.clear();
     runtimeModes.clear();
+    runtimeSeededModes.clear();
     runtimeHistory.clear();
-    for (const subscribedTerminalId of subscribedTerminalIds) {
-      notifyRuntimeComposerDraft(subscribedTerminalId, createComposerDraftState());
+    for (const subscribedTerminalId of subscribedDraftIds) {
+      notifyRuntimeComposerDraft(subscribedTerminalId, EMPTY_COMPOSER_DRAFT);
+    }
+    for (const subscribedTerminalId of subscribedModeIds) {
+      notifyRuntimeInputMode(subscribedTerminalId);
     }
     return;
   }
   runtimeDrafts.delete(terminalId);
   runtimeModes.delete(terminalId);
+  runtimeSeededModes.delete(terminalId);
   runtimeHistory.delete(composerHistoryScopeKey("pane", { terminalId }));
-  notifyRuntimeComposerDraft(terminalId, createComposerDraftState());
+  notifyRuntimeComposerDraft(terminalId, EMPTY_COMPOSER_DRAFT);
+  notifyRuntimeInputMode(terminalId);
 }
 
 /** Editing stays available while a submission is in flight. */
