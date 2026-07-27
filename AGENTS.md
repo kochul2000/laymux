@@ -71,7 +71,7 @@ UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. �
 
 - **포트 규칙:** release=19280, dev=19281. 빌드 타입당 1 인스턴스. 개발 중 스크린샷/API 는 **반드시 dev(19281)**, release(19280)는 사용자 소유이므로 건드리지 않는다. 인증 불필요(IP allowlist).
 - **화면으로만 보이는 결함**(키보드·IME·커서·렌더링)은 dev 에 재현 환경을 세팅하고 그 계층에서 측정한다 — 절차는 [`docs/dev-repro-methodology.md`](docs/dev-repro-methodology.md). 코드 독해만으로 진단 확정 금지.
-- **dev 종료는 반드시 `bash scripts/kill-dev.sh`** — release/dev 가 같은 `laymux.exe` 이므로 `tasklist | grep laymux` 로 수동 kill 금지. `automation.json` PID 로 dev 만 안전 종료.
+- **dev 종료는 반드시 `bash scripts/kill-dev.sh`** — release/dev 가 같은 `laymux.exe` 이므로 `tasklist | grep laymux` 로 수동 kill 금지. `automation.json` 의 `port` 가 19281 일 때만 그 PID 를 믿고, 아니면 포트 19281 LISTENING 소유자로 폴백한다. 테스트는 discovery 파일의 실사용 경로를 절대 건드리지 않는다(임시 디렉터리 사용).
 
 ## 작업 규칙 (코드 짜기 전 확인)
 

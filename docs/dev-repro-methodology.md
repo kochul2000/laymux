@@ -89,9 +89,10 @@ LAYMUX_PTY_TRACE=1           # PTY 측 기록
 - **bash `node -e "..."` 안의 백틱**은 명령 치환이 된다. 스크립트 파일로 쓰거나 작은따옴표를 쓴다.
 - **테스트 목의 `viewportY` 와 `baseY` 불일치** → `isTerminalScrolledUp` 이 켜져 엉뚱한 분기를 탄다.
 - **MCP `escape` 의 제어문자 처리**가 일관되지 않다. 제출은 `\r`.
-- **`automation.json` 이 살아 있는 dev 인스턴스에서도 없을 수 있다.** `cargo test` 의
-  `write_and_remove_discovery_file` 이 실제 설정 경로에 port=19280 을 쓰고 지운다. dev pid 를 찾을 때는
-  포트 19281 LISTENING 소유자를 권위로 써라(`kill-dev.sh` 2순위 경로가 그것이다).
+- **`automation.json` 은 dev 인스턴스만 쓴다(#574 이후).** 예전에는 `cargo test` 의
+  `write_and_remove_discovery_file` 이 실제 설정 경로에 port=19280 을 쓰고 지워서, 살아 있는 dev 인스턴스에서도
+  파일이 사라졌다. 지금은 테스트가 `tempfile` 디렉터리를 쓰고, `kill-dev.sh` 1순위는 파일의 `port` 가 19281 일 때만
+  그 pid 를 신뢰한다. 그래도 dev pid 의 최종 권위는 포트 19281 LISTENING 소유자다(`kill-dev.sh` 2순위 경로).
 
 ## 관련
 
