@@ -215,10 +215,8 @@ describe("navigation-actions", () => {
       });
 
       expect(switchActiveWorkspace("ws3")).toEqual({
-        paneIndex: 1,
-        paneId: "y",
-        paneNumber: 2,
-        terminalId: "terminal-y",
+        switched: true,
+        landing: { paneIndex: 1, paneId: "y", paneNumber: 2, terminalId: "terminal-y" },
       });
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws3");
       expect(useGridStore.getState().focusedPaneIndex).toBe(1);
@@ -232,10 +230,8 @@ describe("navigation-actions", () => {
       useGridStore.getState().setFocusedPane(1); // pane b of ws1; ws2 has one pane
 
       expect(switchActiveWorkspace("ws2")).toEqual({
-        paneIndex: 0,
-        paneId: "c",
-        paneNumber: 1,
-        terminalId: "terminal-c",
+        switched: true,
+        landing: { paneIndex: 0, paneId: "c", paneNumber: 1, terminalId: "terminal-c" },
       });
       expect(useGridStore.getState().focusedPaneIndex).toBe(0);
     });
@@ -245,7 +241,10 @@ describe("navigation-actions", () => {
       useGridStore.getState().setFocusedPane(1);
       useDockStore.getState().setFocusedDock("left", "dock-pane");
 
-      expect(switchActiveWorkspace("ws1")).toMatchObject({ paneIndex: 0, paneId: "a" });
+      expect(switchActiveWorkspace("ws1")).toMatchObject({
+        switched: true,
+        landing: { paneIndex: 0, paneId: "a" },
+      });
       expect(useDockStore.getState().focusedDock).toBeNull();
       expect(useGridStore.getState().focusedPaneIndex).toBe(0);
     });
@@ -258,8 +257,26 @@ describe("navigation-actions", () => {
       });
       useGridStore.getState().setFocusedPane(0);
 
-      expect(switchActiveWorkspace("ws-empty")).toBeNull();
+      expect(switchActiveWorkspace("ws-empty")).toEqual({ switched: true, landing: null });
       expect(useGridStore.getState().focusedPaneIndex).toBeNull();
+    });
+
+    // Review of #578: `setActiveWorkspace` drops an unknown id silently, so
+    // continuing past it rewrote focus inside the workspace that stayed active
+    // — a switch nobody requested — and still reported success.
+    it("leaves every store untouched when the workspace id does not exist", () => {
+      seedTwoWorkspaces();
+      useGridStore.getState().setFocusedPane(1);
+      useDockStore.getState().setFocusedDock("left", "dock-pane");
+
+      expect(switchActiveWorkspace("ws-gone")).toEqual({
+        switched: false,
+        reason: "workspace_not_found",
+      });
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws1");
+      expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+      expect(useDockStore.getState().focusedDock).toBe("left");
+      expect(useDockStore.getState().focusedDockPaneId).toBe("dock-pane");
     });
 
     it("reports no landing terminal when the landing pane is not a terminal", () => {
@@ -274,10 +291,8 @@ describe("navigation-actions", () => {
       useGridStore.getState().setFocusedPane(0);
 
       expect(switchActiveWorkspace("ws2")).toEqual({
-        paneIndex: 0,
-        paneId: "m",
-        paneNumber: 1,
-        terminalId: null,
+        switched: true,
+        landing: { paneIndex: 0, paneId: "m", paneNumber: 1, terminalId: null },
       });
     });
   });

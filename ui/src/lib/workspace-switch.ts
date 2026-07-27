@@ -1,5 +1,6 @@
 import type { WorkspacePane } from "@/stores/types";
 
+import { toTerminalId } from "./pane-ids";
 import { computePaneNumbers } from "./pane-numbers";
 
 /**
@@ -71,6 +72,6 @@ export function resolveWorkspaceLandingPane(
     paneIndex,
     paneId: pane.id,
     paneNumber: computePaneNumbers(panes).get(pane.id) ?? null,
-    terminalId: pane.view.type === "TerminalView" ? `terminal-${pane.id}` : null,
+    terminalId: pane.view.type === "TerminalView" ? toTerminalId(pane.id) : null,
   };
 }
