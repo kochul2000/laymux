@@ -17,7 +17,7 @@ use std::net::IpAddr;
 
 use axum::extract::ConnectInfo;
 use axum::extract::Request;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -190,6 +190,23 @@ fn ip_allowlist_denied_body(client_ip: IpAddr) -> serde_json::Value {
     })
 }
 
+/// The local-network gate itself, shared by the middleware that wraps the
+/// automation routes and by the 404 fallback. Returns the 403 response when
+/// the observed peer is outside the allowlist.
+fn ip_allowlist_rejection(addr: SocketAddr) -> Option<Response> {
+    let client_ip = observed_client_ip(addr.ip());
+    if is_local_ip(&client_ip) {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::FORBIDDEN,
+            Json(ip_allowlist_denied_body(client_ip)),
+        )
+            .into_response(),
+    )
+}
+
 /// IP allowlist middleware — only permits requests from local/private networks.
 /// Replaces Bearer token auth: since this is localhost/WSL communication,
 /// IP restriction provides equivalent security without key management overhead.
@@ -198,16 +215,57 @@ async fn ip_allowlist_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let client_ip = observed_client_ip(addr.ip());
-    if is_local_ip(&client_ip) {
-        next.run(req).await
-    } else {
-        (
-            StatusCode::FORBIDDEN,
-            Json(ip_allowlist_denied_body(client_ip)),
-        )
-            .into_response()
+    match ip_allowlist_rejection(addr) {
+        Some(denied) => denied,
+        None => next.run(req).await,
     }
+}
+
+/// The single fallback of the combined server: a request that matched no route
+/// gets a 404 that names the path, not an auth error about it (issue #591).
+///
+/// The IP allowlist is re-applied here on purpose. It is a *network* boundary
+/// rather than route authorization, so an off-allowlist peer must not be able
+/// to map the API by reading 404-vs-401 off unknown paths. The remote auth
+/// guard is the opposite kind of gate — it belongs to `/remote/v1/*` and
+/// nothing else, which is why it is attached with `route_layer` there.
+async fn not_found(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    method: Method,
+    uri: Uri,
+) -> Response {
+    if let Some(denied) = ip_allowlist_rejection(addr) {
+        return denied;
+    }
+    let path = uri.path();
+    (
+        StatusCode::NOT_FOUND,
+        Json(serde_json::json!({
+            "error": format!("no such route: {method} {path}"),
+            "method": method.as_str(),
+            "path": path,
+            "docs": "/api/v1/docs",
+        })),
+    )
+        .into_response()
+}
+
+/// Merge the automation and remote surfaces into the served router.
+///
+/// Split out of `build_router` so the fallback contract can be tested without
+/// a Tauri `AppHandle`: `axum::Router::layer` wraps a router's fallback as well
+/// as its routes, and `merge` hands the other router's fallback to the combined
+/// router. A guard attached with `layer` therefore answers every unknown path
+/// of the whole server — that is issue #591.
+///
+/// Two things keep that from happening again: the remote guard now uses
+/// `route_layer` (matched routes only), and the combined router owns one
+/// explicit fallback that no merge can donate away.
+fn compose_surfaces<S>(automation: Router<S>, remote: Router<S>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    automation.merge(remote).fallback(not_found)
 }
 
 pub fn build_router(
@@ -312,14 +370,113 @@ pub fn build_router(
         .layer(middleware::from_fn(ip_allowlist_middleware))
         .layer(CorsLayer::permissive());
 
-    automation_routes
-        .merge(crate::remote_server::build_router(state.clone()))
-        .with_state(state)
+    compose_surfaces(
+        automation_routes,
+        crate::remote_server::build_router(state.clone()),
+    )
+    .with_state(state)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::Body;
+    use tower::ServiceExt;
+
+    /// Stand-in for `remote_server::build_router`: a guard that rejects every
+    /// request it sees, attached the way the real remote router used to attach
+    /// `remote_guard`. Building the real one needs a Tauri `AppHandle`, so the
+    /// composition contract is pinned with the same shape instead.
+    async fn deny_everything(_req: Request, _next: Next) -> Response {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "remote token is invalid" })),
+        )
+            .into_response()
+    }
+
+    /// The worst case for #591: the remote surface wraps its guard — and hence
+    /// its fallback — with `layer`, so the merge donates a guarded fallback.
+    fn composed_probe_router() -> Router {
+        let automation = Router::new()
+            .route("/api/v1/grid", get(|| async { "grid" }))
+            .layer(middleware::from_fn(ip_allowlist_middleware));
+        let remote = Router::new()
+            .route("/remote/v1/health", get(|| async { "health" }))
+            .layer(middleware::from_fn(deny_everything));
+        compose_surfaces(automation, remote)
+    }
+
+    async fn call(router: Router, path: &str, peer: &str) -> (StatusCode, serde_json::Value) {
+        let peer: SocketAddr = peer.parse().unwrap();
+        let mut request = Request::builder().uri(path).body(Body::empty()).unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        let response = router.oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap();
+        let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    #[tokio::test]
+    async fn unmatched_path_is_404_not_the_remote_auth_error() {
+        let (status, body) = call(
+            composed_probe_router(),
+            "/api/v1/nonexistent",
+            "127.0.0.1:5000",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        assert_eq!(body["path"], "/api/v1/nonexistent");
+        assert_eq!(body["method"], "GET");
+        let message = body["error"].as_str().unwrap();
+        assert!(
+            message.contains("/api/v1/nonexistent"),
+            "the 404 body must name the missing path, got {message}"
+        );
+        assert!(
+            !message.contains("token"),
+            "a routing mistake must not be reported as an auth failure, got {message}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unmatched_path_still_answers_off_allowlist_peers_with_403() {
+        // The 404 must not become a route scanner for peers the IP allowlist
+        // keeps out of the automation API.
+        let (status, body) = call(
+            composed_probe_router(),
+            "/api/v1/nonexistent",
+            "203.0.113.5:5000",
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(body["clientIp"], "203.0.113.5");
+    }
+
+    #[tokio::test]
+    async fn merged_surfaces_keep_their_own_gates() {
+        let (status, _) = call(composed_probe_router(), "/api/v1/grid", "127.0.0.1:5000").await;
+        assert_eq!(status, StatusCode::OK);
+
+        let (status, _) = call(composed_probe_router(), "/api/v1/grid", "203.0.113.5:5000").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // A matched remote route keeps hitting the remote guard: the fallback
+        // fix must not soften authentication on the routes that own it.
+        let (status, body) = call(
+            composed_probe_router(),
+            "/remote/v1/health",
+            "127.0.0.1:5000",
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(body["error"], "remote token is invalid");
+    }
 
     #[test]
     fn automation_port_returns_dev_in_debug() {

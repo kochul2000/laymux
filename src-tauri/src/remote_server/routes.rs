@@ -177,7 +177,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/file-viewer/path-link",
             post(remote_file_viewer_path_link),
         )
-        .layer(middleware::from_fn_with_state(state.clone(), remote_guard))
+        // `route_layer`, not `layer`: `Router::layer` wraps the router's
+        // fallback too, and `merge` donates that fallback to the combined
+        // automation router — every unknown path of the whole server then
+        // answered 401 "remote token is invalid" instead of 404 (issue #591).
+        // The same applies to the cloud tunnel, which serves this router alone.
+        // Authorization belongs to the routes it protects, so it must not
+        // decide what happens to a path nobody registered.
+        .route_layer(middleware::from_fn_with_state(state.clone(), remote_guard))
+        // CORS stays on `layer` deliberately: it is a response decoration, not
+        // a gate, and preflights must keep working. Whether it also covers the
+        // fallback is harmless either way — the combined router replaces this
+        // fallback with its own 404.
         .layer(CorsLayer::permissive());
 
     Router::new()
@@ -824,10 +835,15 @@ mod tests {
         terminal_size_is_positive, ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlState,
     };
     use crate::settings::models::RemoteSettings;
-    use axum::body::to_bytes;
+    use axum::body::{to_bytes, Body};
+    use axum::extract::Request;
     use axum::http::StatusCode;
-    use axum::response::Response;
+    use axum::middleware::Next;
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use axum::{middleware, Router};
     use std::time::{Duration, Instant};
+    use tower::ServiceExt;
 
     fn enabled_settings() -> RemoteSettings {
         RemoteSettings {
@@ -862,6 +878,38 @@ mod tests {
                 panic!("expected a rejected claim, got AwaitHandoff")
             }
         }
+    }
+
+    /// Pins the axum behaviour `build_router` relies on: a guard attached with
+    /// `route_layer` runs for matched routes only, so an unregistered path is
+    /// still a 404. `layer` would answer it with the guard's rejection, which
+    /// is how issue #591 surfaced. `remote_guard` itself needs a Tauri
+    /// `AppHandle`, so the guard is stood in for here.
+    #[tokio::test]
+    async fn route_layer_guards_matched_routes_without_owning_the_fallback() {
+        async fn deny(_req: Request, _next: Next) -> Response {
+            (StatusCode::UNAUTHORIZED, "remote token is invalid").into_response()
+        }
+
+        async fn status_of(router: Router, path: &str) -> StatusCode {
+            let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+            router.oneshot(request).await.unwrap().status()
+        }
+
+        let guarded = || {
+            Router::new()
+                .route("/remote/v1/health", get(|| async { "health" }))
+                .route_layer(middleware::from_fn(deny))
+        };
+
+        assert_eq!(
+            status_of(guarded(), "/remote/v1/health").await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status_of(guarded(), "/remote/v1/nonexistent").await,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[test]

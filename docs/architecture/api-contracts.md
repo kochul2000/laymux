@@ -387,6 +387,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - 인증 헤더 불필요 — 로컬/사설 네트워크 IP 제한만으로 보안 확보 (Chrome DevTools, Jupyter 등과 동일 모델)
 - 외부 공인 IP에서 접근 시 403 Forbidden 반환
 - IP allowlist 거절 응답은 laymux 가 관측한 클라이언트 주소를 포함한다: `{ "error": "... client IP: <ip>", "clientIp": "<ip>" }`
+- **등록되지 않은 경로는 404** 다. Automation 라우터와 remote 라우터를 merge 한 뒤 서버 전체가 명시적 fallback 하나를 소유하며, 응답은 `{ "error": "no such route: <METHOD> <path>", "method", "path", "docs": "/api/v1/docs" }` 다. 라우트 인증 게이트가 미등록 경로를 대신 답하면 경로 오타가 인증 실패로 오진된다([#591](https://github.com/kochul2000/laymux/issues/591)) — `axum::Router::layer` 는 fallback 까지 감싸고 `merge` 는 그 fallback 을 합쳐진 라우터에 넘기므로, 라우트 인증은 반드시 `route_layer` 로 붙인다.
+- 이 404 fallback 에도 IP allowlist 는 그대로 적용한다. IP allowlist 는 라우트 인증이 아니라 네트워크 경계이므로, 허용 밖 peer 가 404/401 차이로 라우트 존재 여부를 스캔하지 못하게 한다. 즉 허용 밖 peer 는 미등록 경로에서도 403 을 받는다.
 
 ### 12.7 내장 MCP 서버
 
@@ -690,6 +692,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 - Cloud tunnel이 내부 `oneshot` dispatch로 삽입하는 `TunnelAuthorized` marker는 wire에서 위조할 수 없는 크레이트 내부 marker다. 이 marker가 있으면 token/IP/Origin 검사는 우회하지만, `settings.remote.enabled || runtimeRemoteAccess.enabled` enabled gate와 controller lease 검사는 그대로 적용한다.
 - `settings.remote.allowedIps`는 IP/CIDR allowlist다. 기본값은 loopback only이며 Tailscale 직접 접속은 예를 들어 IPv4 `100.64.0.0/10`, IPv6 `fd7a:115c:a1e0::/48`를 명시해야 한다.
 - remote IP allowlist 거절 응답은 laymux 가 관측한 주소와 현재 allowlist를 포함한다: `{ "error": "... <ip>", "remoteIp": "<ip>", "allowedIps": [...] }`
+- `remote_guard` 는 등록된 `/remote/v1/*` 라우트에만 적용한다(`route_layer`). 미등록 경로는 guard 를 거치지 않고 §12.6 의 공용 404 fallback 이 답한다. cloud tunnel 이 remote 라우터를 단독으로 서빙할 때도 미등록 경로는 401 이 아니라 404 다.
 - `settings.remote.allowedOrigins`가 비어 있지 않으면 `Origin` 헤더가 존재할 때 정확히 일치해야 한다. 브라우저의 same-origin fetch가 `Origin`을 생략한 경우에 한해 `Sec-Fetch-Site: same-origin`과 `Host`가 허용 origin의 authority와 맞으면 허용한다. 이 예외는 브라우저 호환성용이며 보안 경계는 IP allowlist와 bearer token이다.
 
 ### 13.2 Controller Lease
