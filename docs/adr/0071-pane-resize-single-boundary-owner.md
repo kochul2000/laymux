@@ -1,6 +1,6 @@
 # 0071. Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-27
 - Source: issue #590, [ADR-0005](0005-display-state-raw-separation-compute.md), architecture/data-flow.md §5, architecture/api-contracts.md §12
 
