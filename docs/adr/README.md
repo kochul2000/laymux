@@ -92,6 +92,7 @@ ADR 이 필요한 대표 기준:
 | [0072](0072-terminal-output-gap-sequence-exact-repair.md) | output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다 | Accepted |
 | [0073](0073-native-cursor-renderer-level-suppression.md) | 네이티브 커서 숨김은 렌더러 게이트에서 한다 (배경색 위장·옵션 경합 폐기) | Accepted |
 | [0074](0074-xterm-cell-grid-screen-test-tier.md) | 화면 주장은 mock 이 아니라 실제 xterm 셀 격자로 검증한다 (별도 `*.screen.test.ts` 스위트) | Proposed |
+| [0075](0075-session-restore-live-screen-origin.md) | 세션 복원 출력은 새 PTY 화면 원점 뒤의 scrollback으로 둔다 | Accepted |
 
 ## 새 ADR 추가
 
