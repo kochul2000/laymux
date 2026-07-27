@@ -82,6 +82,7 @@ import {
 } from "@/lib/ime-anchor";
 import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { readCompositionStart, readPendingCompositionSend } from "@/lib/xterm-pending-composition";
+import { installNativeCursorSuppression } from "@/lib/native-cursor-suppression";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
 import {
   createTerminalFocusOwnership,
@@ -908,6 +909,10 @@ export function TerminalView({
   const reflowDirtyRef = useRef(false);
   const remoteReturnResizeDirtyRef = useRef(false);
   const overlayCaretUpdaterRef = useRef<(() => void) | null>(null);
+  // The single owner of "is laymux hiding the native cursor" (issue #598). The
+  // condition includes composition state that only the xterm callbacks see, so
+  // React never computes it — it pokes this and lets the owner decide.
+  const nativeCursorVisibilityRef = useRef<(() => void) | null>(null);
   const openedRef = useRef(false);
   // Each xterm rebuild gets a fresh generation, bumped at render time when
   // (instanceId, profile) changes. A monotonic counter is required because the
@@ -1320,6 +1325,17 @@ export function TerminalView({
 
     terminalRef.current = terminal;
 
+    // Renderer-level cursor gate (issue #598). Installed once per xterm instance
+    // and owned by `applyNativeCursorVisibility` below; see
+    // `native-cursor-suppression.ts` for why the option/theme route was wrong.
+    const nativeCursorSuppression = installNativeCursorSuppression(terminal);
+    if (!nativeCursorSuppression.supported) {
+      // Fails open: the native cursor stays visible per the user's settings. The
+      // contract test in `native-cursor-suppression.test.ts` is what makes an
+      // xterm bump break loudly; this trace is for the running app.
+      trace("native-cursor-suppression-unsupported");
+    }
+
     let prevHideNativeCursor: boolean | undefined;
     let prevNativeCursorInputMode: InputMode | undefined;
     const applyNativeCursorVisibility = () => {
@@ -1355,32 +1371,29 @@ export function TerminalView({
         liveProfile?.cursorBlink ??
         state.profileDefaults?.cursorBlink ??
         defaultProfileDefaults.cursorBlink;
-      const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
       terminal.options.cursorInactiveStyle = currentInputMode === "composer" ? "none" : "outline";
 
-      if (hideNativeCursor) {
-        terminal.options.theme = {
-          ...resolvedTheme,
-          cursor: hiddenCursorColor,
-          cursorAccent: hiddenCursorColor,
-        };
-        terminal.options.cursorBlink = false;
-        terminal.options.cursorStyle = "bar";
-        terminal.options.cursorWidth = 1;
-      } else {
-        const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
-        terminal.options.theme = resolvedTheme;
-        terminal.options.cursorBlink = resolvedCursorBlink;
-        terminal.options.cursorStyle = cursorOptions.cursorStyle;
-        if (cursorOptions.cursorWidth !== undefined) {
-          terminal.options.cursorWidth = cursorOptions.cursorWidth;
-        }
-        if (cursorOptions.cursorWidth === undefined) {
-          delete (terminal.options as { cursorWidth?: number }).cursorWidth;
-        }
+      // The cursor is switched off at the renderer gate, never disguised as the
+      // theme background and never by claiming a shape the app can overwrite
+      // (issue #598). Theme and shape therefore stay exactly what the user
+      // configured in both branches — the only thing that changes is whether the
+      // renderer draws a cursor at all.
+      nativeCursorSuppression.setSuppressed(hideNativeCursor);
+      const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
+      terminal.options.theme = resolvedTheme;
+      // Blinking a suppressed cursor is pure repaint churn.
+      terminal.options.cursorBlink = hideNativeCursor ? false : resolvedCursorBlink;
+      terminal.options.cursorStyle = cursorOptions.cursorStyle;
+      if (cursorOptions.cursorWidth !== undefined) {
+        terminal.options.cursorWidth = cursorOptions.cursorWidth;
       }
+      if (cursorOptions.cursorWidth === undefined) {
+        delete (terminal.options as { cursorWidth?: number }).cursorWidth;
+      }
+      // `isCursorHidden` is not an option, so no option-change repaint follows it.
       terminal.refresh(0, terminal.rows - 1);
     };
+    nativeCursorVisibilityRef.current = applyNativeCursorVisibility;
 
     const setSyncOutputCursorVisibility = (active: boolean) => {
       syncOutputActiveRef.current = active;
@@ -4391,6 +4404,8 @@ export function TerminalView({
       wrapperEl?.classList.remove("terminal-ime-composition-active");
       if (overlayCaretFrame !== undefined) cancelAnimationFrame(overlayCaretFrame);
       overlayCaretUpdaterRef.current = null;
+      nativeCursorVisibilityRef.current = null;
+      nativeCursorSuppression.dispose();
       stopSyncOutputMonitor();
       promptOsc133Disposable?.dispose();
       promptOsc633Disposable?.dispose();
@@ -4764,51 +4779,45 @@ export function TerminalView({
       const resolvedTheme = scheme
         ? { ...defaultTheme, ...colorSchemeToXtermTheme(scheme as unknown as WTColorScheme) }
         : defaultTheme;
-      // WebGL renderer strips alpha from cursor color (rgba >> 8 & 0xFFFFFF),
-      // so rgba(0,0,0,0) renders as opaque black. Hide the native cursor by
-      // matching it to the background color instead.
-      const hiddenCursorColor = resolvedTheme.background ?? defaultTheme.background;
+      // The theme is the user's, hidden or not. Repainting the cursor in the
+      // background colour only hid it while the cell under it still had the
+      // theme background, which a TUI painting SGR 48 breaks — it turned into a
+      // dark block instead (issue #598). Suppression now happens at the renderer
+      // gate, owned by `applyNativeCursorVisibility`.
       term.options.cursorInactiveStyle = inputMode === "composer" ? "none" : "outline";
-      term.options.theme = nativeCursorHidden
-        ? {
-            ...resolvedTheme,
-            cursor: hiddenCursorColor,
-            cursorAccent: hiddenCursorColor,
-          }
-        : resolvedTheme;
+      term.options.theme = resolvedTheme;
       term.options.fontSize = font.size;
       term.options.fontFamily = fontFamily;
-      if (nativeCursorHidden) {
-        // Keep xterm's internal cursor renderer on its least disruptive path.
-        // The visible caret is provided by the overlay, so block/invert rendering
-        // only creates repaint artifacts on the active text cell.
-        term.options.cursorBlink = false;
-        term.options.cursorStyle = "bar";
-        term.options.cursorWidth = 1;
-      } else {
-        const cursorOptions = toXtermCursorOptions(cursorShape);
-        term.options.cursorBlink = effectiveNativeCursorBlink;
-        term.options.cursorStyle = cursorOptions.cursorStyle;
-        if (cursorOptions.cursorWidth !== undefined) {
-          term.options.cursorWidth = cursorOptions.cursorWidth;
-        }
-        if (cursorOptions.cursorWidth === undefined) {
-          delete (term.options as { cursorWidth?: number }).cursorWidth;
-        }
+      const cursorOptions = toXtermCursorOptions(cursorShape);
+      term.options.cursorBlink = effectiveNativeCursorBlink;
+      term.options.cursorStyle = cursorOptions.cursorStyle;
+      if (cursorOptions.cursorWidth !== undefined) {
+        term.options.cursorWidth = cursorOptions.cursorWidth;
+      }
+      if (cursorOptions.cursorWidth === undefined) {
+        delete (term.options as { cursorWidth?: number }).cursorWidth;
       }
     } catch {
       /* xterm mock may not support options setter */
     }
-  }, [
-    currentSchemeName,
-    colorSchemes,
-    font,
-    cursorShape,
-    effectiveNativeCursorBlink,
-    inputMode,
-    nativeCursorHidden,
-    stabilizeInteractiveCursor,
-  ]);
+  }, [currentSchemeName, colorSchemes, font, cursorShape, effectiveNativeCursorBlink, inputMode]);
+
+  // Renderer-level native cursor suppression (issue #598). `nativeCursorHidden`
+  // is deliberately *not* recomputed here: the real condition also covers an
+  // in-flight IME composition, which lives in a ref the xterm callbacks own.
+  // Splitting that condition across two writers is what §8.15/§8.16/§8.17 of
+  // data-flow.md keep reporting as a vanished caret, so React only pokes the
+  // single owner and the owner dedupes.
+  // `terminalGeneration` is a dep because a new xterm arrives with a fresh gate
+  // (`suppressed: false`) and a fresh dedupe baseline, and none of the other deps
+  // change when the instance is replaced. Without it a profile/instance change
+  // during composer mode — or Codex with `stabilizeInteractiveCursor` — leaves
+  // the native cursor drawn under the overlay caret until the next inputMode /
+  // activity transition, i.e. exactly the doubled caret this suppression exists
+  // to remove.
+  useEffect(() => {
+    nativeCursorVisibilityRef.current?.();
+  }, [inputMode, activity, stabilizeInteractiveCursor, terminalGeneration]);
 
   // Cell-geometry reflow: only fontSize/fontFamily changes move xterm's
   // measured cell width/height, so the texture atlas only needs invalidation

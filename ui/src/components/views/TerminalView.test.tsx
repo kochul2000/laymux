@@ -83,6 +83,7 @@ type MockTerminalInstance = {
   options: Record<string, unknown>;
   element: HTMLDivElement;
   emitCoreData(data: string, wasUserInput?: boolean): void;
+  _core: { coreService: { isCursorHidden: boolean } };
 };
 const createdTerminals: MockTerminalInstance[] = [];
 const mockModes = { synchronizedOutputMode: false };
@@ -241,6 +242,10 @@ vi.mock("@xterm/xterm", () => ({
     private readonly userInputListeners = new Set<() => void>();
     _core = {
       coreService: {
+        // The field both renderers gate the cursor on. Real xterm owns it and
+        // DECTCEM writes it; issue #598 suppresses through it, so the mock must
+        // carry it or the suppression path silently reports unsupported.
+        isCursorHidden: false,
         onUserInput: (listener: () => void) => {
           this.userInputListeners.add(listener);
           return { dispose: () => this.userInputListeners.delete(listener) };
@@ -908,8 +913,11 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(container).toHaveClass("terminal-native-cursor-hidden");
     });
-    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
-    expect(createdTerminals[0].options.cursorWidth).toBe(1);
+    // The native cursor is off at the renderer gate, not by borrowing a shape or
+    // a colour the application can overwrite (issue #598).
+    await vi.waitFor(() => {
+      expect(createdTerminals[0]._core.coreService.isCursorHidden).toBe(true);
+    });
     expect(createdTerminals[0].options.cursorBlink).toBe(false);
 
     // Claude Code uses DEC 2026 synchronized output which keeps the native
@@ -924,6 +932,66 @@ describe("TerminalView", () => {
     await vi.waitFor(() => {
       expect(container).not.toHaveClass("terminal-native-cursor-hidden");
     });
+    await vi.waitFor(() => {
+      expect(createdTerminals[0]._core.coreService.isCursorHidden).toBe(false);
+    });
+  });
+
+  it("never disguises the native cursor as the theme background", async () => {
+    // Issue #598. The disguise only worked while the cell under the cursor still
+    // had the theme background; a TUI painting SGR 48 turned it into a dark
+    // block instead. The theme must stay the user's in every cursor mode.
+    render(<TerminalView instanceId="t-598-theme" profile="PowerShell" syncGroup="" />);
+
+    const themeOf = () => createdTerminals[0].options.theme as Record<string, string>;
+    const baseCursor = themeOf().cursor;
+    const background = themeOf().background;
+    expect(baseCursor).not.toBe(background);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-598-theme", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    await vi.waitFor(() => {
+      expect(createdTerminals[0]._core.coreService.isCursorHidden).toBe(true);
+    });
+    expect(themeOf().cursor).toBe(baseCursor);
+    expect(themeOf().cursorAccent).not.toBe(themeOf().cursor);
+    // Shape stays the user's too — the app owns it via DECSCUSR regardless.
+    expect(createdTerminals[0].options.cursorStyle).toBe("bar");
+  });
+
+  it("keeps the application's DECTCEM hide when suppression is released", async () => {
+    // ADR-0011 makes the app's DECTCEM the authoritative visible-cursor signal.
+    // Suppression records app writes instead of overwriting them, so releasing it
+    // must not turn an app-requested hide into a show.
+    render(<TerminalView instanceId="t-598-dectcem" profile="PowerShell" syncGroup="" />);
+
+    const coreService = () => createdTerminals[0]._core.coreService;
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-598-dectcem", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(coreService().isCursorHidden).toBe(true);
+    });
+
+    // The application hides its own cursor while we are suppressing.
+    act(() => {
+      coreService().isCursorHidden = true;
+    });
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-598-dectcem", {
+        activity: { type: "interactiveApp", name: "Claude" },
+      });
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(coreService().isCursorHidden).toBe(true);
   });
 
   it("uses the configured cursor color for the overlay caret", async () => {
@@ -8606,6 +8674,7 @@ describe("TerminalView desktop input composer", () => {
     await waitForTerminalInputReady();
 
     const terminal = createdTerminals.at(-1)!;
+    expect(terminal._core.coreService.isCursorHidden).toBe(false);
     toggleInputMode(terminalId);
 
     await vi.waitFor(() => {
@@ -8613,6 +8682,9 @@ describe("TerminalView desktop input composer", () => {
       expect(screen.getByTestId(`terminal-view-${terminalId}`)).toHaveClass(
         "terminal-native-cursor-hidden",
       );
+      // `cursorInactiveStyle` only covers the unfocused cursor; the active one is
+      // off at the renderer gate (issue #598).
+      expect(terminal._core.coreService.isCursorHidden).toBe(true);
     });
 
     toggleInputMode(terminalId);
@@ -8621,6 +8693,39 @@ describe("TerminalView desktop input composer", () => {
       expect(screen.getByTestId(`terminal-view-${terminalId}`)).not.toHaveClass(
         "terminal-native-cursor-hidden",
       );
+      expect(terminal._core.coreService.isCursorHidden).toBe(false);
+    });
+  });
+
+  it("re-suppresses the native cursor when the xterm instance is replaced", async () => {
+    // Issue #598. A replaced xterm arrives with a fresh gate (`suppressed: false`)
+    // and a fresh dedupe baseline, while `inputMode`/`activity`/`stabilize` are
+    // unchanged by the swap — so without the xterm generation in the poke effect's
+    // deps nobody re-applies, and Composer mode gets the native cursor back under
+    // the overlay caret (the doubled caret this suppression removes).
+    const terminalId = "t-composer-regen-cursor";
+    const { rerender } = render(
+      <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+
+    toggleInputMode(terminalId);
+    const first = createdTerminals.at(-1)!;
+    await vi.waitFor(() => {
+      expect(first._core.coreService.isCursorHidden).toBe(true);
+    });
+
+    // A profile change rebuilds the xterm instance. Composer mode persists.
+    const before = createdTerminals.length;
+    rerender(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(before);
+    });
+
+    const replaced = createdTerminals.at(-1)!;
+    expect(replaced).not.toBe(first);
+    await vi.waitFor(() => {
+      expect(replaced._core.coreService.isCursorHidden).toBe(true);
     });
   });
 
