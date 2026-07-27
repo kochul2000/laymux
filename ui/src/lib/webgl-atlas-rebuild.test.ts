@@ -278,6 +278,39 @@ describe("webgl-atlas-rebuild (issue #571)", () => {
     expect(rebuild).toHaveBeenCalledTimes(2);
   });
 
+  it("lets a paint reported from inside the rebuild win over the frame mark (issue #573)", async () => {
+    // xterm renders from rAF today, so this cannot happen — the test is what
+    // keeps the module's correctness off that assumption. If a rebuild ever
+    // paints synchronously, its model is refilled against the fresh atlas and
+    // the next clear in this frame has to reach it again.
+    const rebuild = vi.fn(() => noteTerminalRendered("t-sync"));
+    registerAtlasRebuilder("t-sync", rebuild);
+
+    notifyTextureAtlasCleared("t-reporter-a", true);
+    await flushMicrotasks();
+    notifyTextureAtlasCleared("t-reporter-b", true);
+    await flushMicrotasks();
+
+    expect(rebuild).toHaveBeenCalledTimes(2);
+  });
+
+  it("still rebuilds the skipped sole reporter on a later pass in the same frame", async () => {
+    const reporter = vi.fn();
+    registerAtlasRebuilder("t-reporter", reporter);
+
+    // The skip is a per-pass decision, not a frame mark. Marking it would save
+    // one rebuild per frame at the cost of extending "a second wipe on an empty
+    // atlas is harmless" from one pass to the whole frame — see the comment in
+    // `flush`. This pins the choice so it is not undone by accident.
+    notifyTextureAtlasCleared("t-reporter", true);
+    await flushMicrotasks();
+    expect(reporter).not.toHaveBeenCalled();
+
+    notifyTextureAtlasCleared("t-other", true);
+    await flushMicrotasks();
+    expect(reporter).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps iterating past an entry removed during the flush", async () => {
     const order: string[] = [];
     // `t-a` unregisters `t-b` while the pass is walking the map. Iterating a

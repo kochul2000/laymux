@@ -100,17 +100,29 @@ function flush(): void {
 
   flushing = true;
   try {
+    // `skip` is deliberately not marked as answered for the frame. It could be
+    // — its model is empty, so a later clear has nothing of its to invalidate —
+    // but that is the same "a second wipe lands on an already-empty atlas"
+    // reasoning the paragraph above refuses to rest on, and marking it would
+    // extend that reasoning from one pass to the whole frame. The cost of
+    // leaving it out is one extra rebuild per frame, and only when a second
+    // terminal clears in the same frame.
     for (const [instanceId, rebuild] of [...rebuilders]) {
       if (instanceId === skip) continue;
       if (answeredThisFrame.has(instanceId)) continue;
+      // Marked before the call, not after: a callback that paints synchronously
+      // reports through `noteTerminalRendered`, and that delete has to win. An
+      // add running afterwards would undo it and re-open the hole this hook
+      // closes. xterm paints from `requestAnimationFrame` today, but the
+      // ordering of these two lines should not be what makes that safe.
+      answeredThisFrame.add(instanceId);
       try {
         rebuild();
-        // Only a callback that returned counts as answered. One that threw did
-        // nothing, so the next pass in this frame must reach it again.
-        answeredThisFrame.add(instanceId);
       } catch {
         // A terminal disposed between the notify and the flush — the next mount
-        // rebuilds its own atlas anyway.
+        // rebuilds its own atlas anyway. It did nothing, so it does not count as
+        // answered and the next pass in this frame must reach it again.
+        answeredThisFrame.delete(instanceId);
       }
     }
   } finally {
