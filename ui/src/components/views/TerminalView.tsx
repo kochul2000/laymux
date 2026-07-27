@@ -94,6 +94,7 @@ import {
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
+  createShadowCursorState,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -128,12 +129,15 @@ import { loadTerminalOutputCache } from "@/lib/tauri-api";
 import {
   registerTerminalSerializer,
   unregisterTerminalSerializer,
+  registerTerminalRenderCheckpointProvider,
+  unregisterTerminalRenderCheckpointProvider,
   registerTerminalInspector,
   registerTerminalScroller,
   unregisterTerminalInspector,
   unregisterTerminalScroller,
   type TerminalBufferLine,
 } from "@/lib/terminal-serialize-registry";
+import { TerminalRenderCheckpointModel } from "@/lib/terminal-render-checkpoint";
 import {
   registerAtlasRebuilder,
   unregisterAtlasRebuilder,
@@ -1031,20 +1035,7 @@ export function TerminalView({
     anchorBufferX: 0,
     anchorBufferAbsY: 0,
   });
-  const shadowCursorRef = useRef<ShadowCursorState>({
-    commandStartLine: 0,
-    commandStartX: 0,
-    cursorX: 0,
-    cursorAbsY: 0,
-    isCursorHidden: false,
-    parkPending: false,
-    isDec2026FrameOpen: false,
-    hasPromptBoundary: false,
-    hasSyncFramePosition: false,
-    isInputPhase: false,
-    isRepaintInProgress: false,
-    isAltBufferActive: false,
-  });
+  const shadowCursorRef = useRef<ShadowCursorState>(createShadowCursorState());
   const shouldUseWebgl = shouldEnableTerminalWebgl();
 
   useEffect(() => {
@@ -2838,6 +2829,24 @@ export function TerminalView({
         stabilizedRefreshFrame = undefined;
       }
     };
+    // Discards every cursor belief this pane inferred from the byte stream that
+    // `terminal.reset()` is about to throw away (issue #596). A backend
+    // sequence gap — the subscriber queue filling under heavy output — is
+    // exactly how a DEC 2026 frame's `?2026l` disappears, and
+    // `isDec2026FrameOpen` has no other route back to false: it would then
+    // report `dec-2026-frame-open` on every sync, downgrade Codex's cursor
+    // parks to visibility-only, and leave the overlay caret pinned where the
+    // frame opened while the real cursor keeps advancing. Paired with the
+    // reset call so the two states cannot drift apart.
+    // See `createShadowCursorState`.
+    const resetStreamDerivedCursorState = () => {
+      Object.assign(shadowCursorRef.current, createShadowCursorState());
+      clearParkSettleTimer();
+      // `baseY` is about to drop to 0; an open composition must not charge that
+      // jump to its anchor as a scroll (issue #570).
+      compositionScrollBaselineRef.current?.();
+      scheduleOverlayCaretUpdate();
+    };
     // No repaint filter is armed around a backend resize: the bundled ConPTY
     // runtime never emits the legacy host repaint frame, so live PTY output
     // reaches xterm unfiltered (ADR-0067).
@@ -3281,6 +3290,10 @@ export function TerminalView({
     let outputAttachInFlight = false;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
+    const renderCheckpointModel = new TerminalRenderCheckpointModel();
+    registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
+      renderCheckpointModel.capture(target, maxBytes),
+    );
     let terminalOutputWriteChain = Promise.resolve();
     let inAltScreen = false;
     let recentOutputTail = "";
@@ -3730,16 +3743,26 @@ export function TerminalView({
         ]);
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
+        await renderCheckpointModel.attach(attachment);
+        if (!isCurrentAttach()) return;
 
         terminalOutputWriteChain = terminalOutputWriteChain.then(async () => {
           if (!isCurrentAttach()) return;
           terminal.reset();
+          resetStreamDerivedCursorState();
           if (cached) {
             await trackedTerminalWriteAsync(cached);
             if (!isCurrentAttach()) return;
-            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m");
-            if (!isCurrentAttach()) return;
-            await trackedTerminalWriteAsync("\r\n".repeat(terminal.rows));
+            // The marker ends the restored block; the new session's first
+            // output starts on the next row. No screen-height padding here:
+            // issue #87 added `"\r\n".repeat(rows)` to push the restore into
+            // scrollback ahead of a clear-screen it attributed to shell init,
+            // but a PTY trace shows the clearing party was in-box conhost,
+            // which emitted `ESC[?25l ESC[2J ESC[m ESC[H` at every session
+            // start. The bundled ConPTY runtime (ADR-0067) emits no such
+            // frame, so the padding survived as a screenful of blank rows
+            // above the prompt. Linux never had a clearing party at all.
+            await trackedTerminalWriteAsync("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
             if (!isCurrentAttach()) return;
           }
           if (attachment.snapshot.length > 0) {
@@ -3761,14 +3784,22 @@ export function TerminalView({
             scheduleOutputReattach();
             return;
           }
-          for (let index = 0; index < buffered.chunks.length; index += 1) {
-            const chunk = buffered.chunks[index];
-            if (index === buffered.chunks.length - 1) {
+          // Queue the whole buffered prefix synchronously. Listener callbacks
+          // can fire between awaits; enqueueing one-by-one would let a newer
+          // live delta jump ahead of the second buffered segment in the
+          // checkpoint model even though the visible xterm stayed ordered.
+          const checkpointWrites = buffered.segments.map((segment) =>
+            renderCheckpointModel.apply(segment),
+          );
+          for (let index = 0; index < buffered.segments.length; index += 1) {
+            const segment = buffered.segments[index];
+            await checkpointWrites[index];
+            if (index === buffered.segments.length - 1) {
               await new Promise<void>((resolve) =>
-                processLiveTerminalOutput(chunk, resolve, resolve),
+                processLiveTerminalOutput(segment.data, resolve, resolve),
               );
             } else {
-              processLiveTerminalOutput(chunk);
+              processLiveTerminalOutput(segment.data);
             }
             if (!isCurrentAttach()) return;
           }
@@ -3806,8 +3837,11 @@ export function TerminalView({
         scheduleOutputReattach();
         return;
       }
-      for (const data of result.chunks) {
-        processLiveTerminalOutput(data);
+      for (const segment of result.segments) {
+        void renderCheckpointModel.apply(segment).catch((error) => {
+          console.warn("[TerminalView] render checkpoint update failed:", error);
+        });
+        processLiveTerminalOutput(segment.data);
       }
     }).then((unlisten) => {
       if (cancelled) {
@@ -4213,12 +4247,14 @@ export function TerminalView({
         unregisterTerminalScroller(paneId);
       }
       unregisterTerminalSerializer(instanceId);
+      unregisterTerminalRenderCheckpointProvider(instanceId);
       unregisterTerminalInspector(instanceId);
       unregisterTerminalScroller(instanceId);
       unregisterAtlasRebuilder(instanceId);
       unlistenOutput?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
+      renderCheckpointModel.dispose();
       unregisterInstance(instanceId);
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT

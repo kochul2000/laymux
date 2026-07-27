@@ -15,6 +15,7 @@ import {
   applyDectcemShowToShadowCursor,
   applyParkSettleTimeoutToShadowCursor,
   computeUseShadowCursor,
+  createShadowCursorState,
   getShadowSyncEligibility,
   isDectcemShowPark,
   isOverlayCaretActivity,
@@ -22,24 +23,113 @@ import {
   type ShadowCursorState,
 } from "./shadow-cursor-state";
 
-const baseState: ShadowCursorState = {
-  commandStartLine: 0,
-  commandStartX: 0,
-  cursorX: 0,
-  cursorAbsY: 0,
-  isCursorHidden: false,
-  parkPending: false,
-  isDec2026FrameOpen: false,
-  hasPromptBoundary: false,
-  hasSyncFramePosition: false,
-  isInputPhase: false,
-  isRepaintInProgress: false,
-  isAltBufferActive: false,
-};
+const baseState: ShadowCursorState = createShadowCursorState();
 
 const codex: TerminalActivityInfo = { type: "interactiveApp", name: "Codex" };
 const claude: TerminalActivityInfo = { type: "interactiveApp", name: "Claude" };
 const shell: TerminalActivityInfo = { type: "shell" };
+
+describe("createShadowCursorState", () => {
+  it("returns an independent state on every call", () => {
+    const first = createShadowCursorState();
+    const second = createShadowCursorState();
+    expect(first).not.toBe(second);
+    expect(first).toStrictEqual(second);
+  });
+
+  /**
+   * The factory is applied with `Object.assign`, so a field it forgets to name is
+   * not cleared — it survives the stream swap. Spelling the whole field set out
+   * is what makes an omission fail here.
+   *
+   * `toStrictEqual` is load-bearing: `toEqual` treats a property whose value is
+   * `undefined` as equal to a missing property, which is exactly why the original
+   * `frameSavedCursorX`/`frameSavedCursorAbsY` omission survived both the earlier
+   * assertion and review.
+   */
+  it("names every field of ShadowCursorState, optional ones included", () => {
+    expect(createShadowCursorState()).toStrictEqual({
+      commandStartLine: 0,
+      commandStartX: 0,
+      cursorX: 0,
+      cursorAbsY: 0,
+      frameSavedCursorX: undefined,
+      frameSavedCursorAbsY: undefined,
+      isCursorHidden: false,
+      parkPending: false,
+      isDec2026FrameOpen: false,
+      hasPromptBoundary: false,
+      hasSyncFramePosition: false,
+      isInputPhase: false,
+      isRepaintInProgress: false,
+      isAltBufferActive: false,
+    } satisfies ShadowCursorState);
+  });
+
+  /**
+   * The consequence of forgetting the pre-frame snapshot fields, end to end.
+   *
+   * `Object.assign` here mirrors `TerminalView.tsx`'s application onto the live
+   * ref — the defect only exists in that direction, because a fresh factory
+   * object has no stale value to keep. The replayed ring snapshot is cut at a
+   * line boundary (`output_buffer.rs`), so the first `?2026l` it carries is an
+   * orphan reset with no `?2026h` before it in the new stream.
+   */
+  it("drops the pre-frame snapshot so an orphan `?2026l` cannot adopt it", () => {
+    const beforeGap = applyDec2026SetToShadowCursor(baseState, codex, 20, 700);
+    expect(beforeGap.frameSavedCursorX).toBe(20);
+    expect(beforeGap.frameSavedCursorAbsY).toBe(700);
+
+    const rebuilt: ShadowCursorState = Object.assign({ ...beforeGap }, createShadowCursorState());
+    // Row 700 does not exist after `terminal.reset()`; the live buffer cursor is
+    // the only usable position.
+    const afterOrphanReset = applyDec2026ResetToShadowCursor(rebuilt, codex, 3, 0);
+    expect(afterOrphanReset.cursorX).toBe(3);
+    expect(afterOrphanReset.cursorAbsY).toBe(0);
+    // Adopting row 700 would have pinned every later sync on the row gate.
+    expect(
+      getShadowSyncEligibility(afterOrphanReset, {
+        bufferAbsY: 0,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).not.toBe("row-mismatch");
+  });
+
+  /**
+   * The failure #596 reported: a sequence gap swallowed a frame's `\e[?2026l`,
+   * so `isDec2026FrameOpen` stayed `true` after the stream behind it was
+   * replaced. From then on the pane could neither sync the shadow cursor nor
+   * accept Codex's authoritative cursor park, and the overlay caret sat where
+   * the frame had opened while the real cursor kept advancing. No transition in
+   * this module undoes that — only rebuilding the state does.
+   */
+  it("undoes the latch a swallowed `?2026l` leaves behind", () => {
+    const latched = applyDec2026SetToShadowCursor(baseState, codex, 20, 7);
+    expect(latched.isDec2026FrameOpen).toBe(true);
+    expect(
+      getShadowSyncEligibility(latched, {
+        bufferAbsY: 7,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("dec-2026-frame-open");
+    expect(isDectcemShowPark(latched)).toBe(false);
+    // The park settle timeout deliberately keeps the parser frame open, so it
+    // is not an escape hatch either.
+    expect(applyParkSettleTimeoutToShadowCursor(latched).isDec2026FrameOpen).toBe(true);
+
+    const rebuilt = createShadowCursorState();
+    expect(
+      getShadowSyncEligibility(rebuilt, {
+        bufferAbsY: 7,
+        compositionPreviewActive: false,
+        syncOutputActive: false,
+      }),
+    ).toBe("eligible");
+    expect(isDectcemShowPark(rebuilt)).toBe(true);
+  });
+});
 
 describe("isOverlayCaretActivity", () => {
   it("matches only Codex (intentional — see shadow-cursor-state.ts docblock)", () => {
@@ -633,5 +723,10 @@ describe("applyActivityLeftTuiToShadowCursor", () => {
     // overwrite them synchronously, and computeUseShadowCursor now
     // returns false until then.
     expect(computeUseShadowCursor(out)).toBe(false);
+  });
+
+  it("cannot clear the parser frame — only a stream reset rebuilds that", () => {
+    const inFrame = applyDec2026SetToShadowCursor(baseState, codex, 20, 7);
+    expect(applyActivityLeftTuiToShadowCursor(inFrame).isDec2026FrameOpen).toBe(true);
   });
 });

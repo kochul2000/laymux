@@ -81,10 +81,15 @@ function snapshotFrames(lineCount: number): { header: string; payload: Buffer } 
     byteLength: payload.byteLength,
     state: {
       version: 1,
+      generation: 1,
       snapshotStartSeq: 0,
       snapshotSeq: payload.byteLength,
+      sourceStartSeq: 0,
+      sourceSeq: payload.byteLength,
+      snapshotKind: "raw",
       protocolRevision: 0,
       modes: { bracketedPaste: false },
+      geometry: { revision: 0, cols: 80, rows: 24 },
     },
   });
   return { header, payload };

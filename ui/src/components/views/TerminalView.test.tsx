@@ -273,6 +273,8 @@ vi.mock("@xterm/addon-serialize", () => ({
 
 const mockRegisterTerminalSerializer = vi.fn();
 const mockUnregisterTerminalSerializer = vi.fn();
+const mockRegisterTerminalRenderCheckpointProvider = vi.fn();
+const mockUnregisterTerminalRenderCheckpointProvider = vi.fn();
 const mockRegisterTerminalInspector = vi.fn();
 const mockUnregisterTerminalInspector = vi.fn();
 const mockRegisterTerminalScroller = vi.fn();
@@ -280,10 +282,28 @@ const mockUnregisterTerminalScroller = vi.fn();
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
+  registerTerminalRenderCheckpointProvider: (...args: unknown[]) =>
+    mockRegisterTerminalRenderCheckpointProvider(...args),
+  unregisterTerminalRenderCheckpointProvider: (...args: unknown[]) =>
+    mockUnregisterTerminalRenderCheckpointProvider(...args),
   registerTerminalInspector: (...args: unknown[]) => mockRegisterTerminalInspector(...args),
   unregisterTerminalInspector: (...args: unknown[]) => mockUnregisterTerminalInspector(...args),
   registerTerminalScroller: (...args: unknown[]) => mockRegisterTerminalScroller(...args),
   unregisterTerminalScroller: (...args: unknown[]) => mockUnregisterTerminalScroller(...args),
+}));
+
+vi.mock("@/lib/terminal-render-checkpoint", () => ({
+  TerminalRenderCheckpointModel: class MockTerminalRenderCheckpointModel {
+    attach = vi.fn().mockResolvedValue(undefined);
+    apply = vi.fn().mockResolvedValue(undefined);
+    capture = vi.fn().mockResolvedValue({
+      generation: 1,
+      seq: 0,
+      geometry: { revision: 0, cols: 80, rows: 24 },
+      data: "",
+    });
+    dispose = vi.fn();
+  },
 }));
 
 // Mock tauri API
@@ -309,10 +329,15 @@ const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
 const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
   state: {
     version: 1,
+    generation: 1,
     snapshotStartSeq: 0,
     snapshotSeq: 0,
+    sourceStartSeq: 0,
+    sourceSeq: 0,
+    snapshotKind: "raw",
     protocolRevision: 0,
     modes: { bracketedPaste: false },
+    geometry: { revision: 0, cols: 80, rows: 24 },
   },
   snapshot: [],
 });
@@ -357,7 +382,13 @@ vi.mock("@/lib/tauri-api", () => ({
       const raw = new Uint8Array(data as Uint8Array);
       const seqStart = mockOutputSequence;
       mockOutputSequence += raw.length;
-      callback({ seqStart, seqEnd: mockOutputSequence, data: Array.from(raw) });
+      callback({
+        generation: 1,
+        seqStart,
+        seqEnd: mockOutputSequence,
+        data: Array.from(raw),
+        geometry: { revision: 0, cols: 80, rows: 24 },
+      });
     };
     let attachWaitTurns = 0;
     const exposeRegisteredListenerAfterAttach = () => {
@@ -392,6 +423,18 @@ async function waitForTerminalInputReady(): Promise<void> {
     expect(mockGetRemoteControlStatus).toHaveBeenCalled();
     expect(mockAttachTerminalOutput).toHaveBeenCalled();
     expect(mockOnTerminalOutput).toHaveBeenCalled();
+  });
+}
+
+/**
+ * The output attach chain ends in `terminal.reset()`, which also rebuilds the
+ * pane's stream-derived cursor state (issue #596). Tests that drive the parser
+ * handlers directly — rather than through the buffered live stream that gates
+ * them in production — must let that land first.
+ */
+async function waitForStreamAttachReset(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockReset).toHaveBeenCalled();
   });
 }
 
@@ -1771,6 +1814,12 @@ describe("TerminalView", () => {
       render(
         <TerminalView instanceId="t-frame-before-activity" profile="PowerShell" syncGroup="" />,
       );
+      // The attach chain ends in `terminal.reset()`, which discards the pane's
+      // stream-derived cursor state along with the stream (issue #596). Live
+      // bytes are buffered behind it in production, so a frame can never open
+      // before it — but a test that drives parser handlers directly can, and
+      // would then watch its own frame get wiped.
+      await waitForStreamAttachReset();
 
       await act(async () => {
         await csiHandlers.get("?:h")?.([2026]);
@@ -1875,6 +1924,9 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(csiHandlers.get("?:l")).toBeTypeOf("function");
       });
+      // See `waitForStreamAttachReset` — the attach reset must land before this
+      // test arms a park settle timer of its own.
+      await waitForStreamAttachReset();
       act(() => {
         useTerminalStore.getState().updateInstanceInfo("t-park-stale", {
           activity: { type: "interactiveApp", name: "Codex" },
@@ -1917,6 +1969,66 @@ describe("TerminalView", () => {
       expect(traces("dectcem-park").length).toBeGreaterThan(0);
     } finally {
       vi.useRealTimers();
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
+  it("rebuilds the shadow cursor when a sequence gap replaces the stream", async () => {
+    // Issue #596: heavy output fills the backend subscriber queue, the backend
+    // reports a sequence gap, and TerminalView reattaches with
+    // `terminal.reset()` + a fresh snapshot. If the frame that was open when
+    // the gap hit never gets its `?2026l`, `isDec2026FrameOpen` stays true
+    // forever: shadow syncs report `dec-2026-frame-open`, Codex's cursor parks
+    // are demoted to visibility-only, and the overlay caret stays pinned where
+    // the frame opened while the real cursor keeps advancing.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const traces = (needle: string) =>
+      logSpy.mock.calls.filter((call) => typeof call[0] === "string" && call[0].includes(needle));
+    try {
+      render(<TerminalView instanceId="t-gap-reattach" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalled();
+        expect(csiHandlers.get("?:h")).toBeTypeOf("function");
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+        | ((data: Uint8Array | Record<string, unknown>) => void)
+        | undefined;
+      expect(onOutput).toBeTypeOf("function");
+      await waitForStreamAttachReset();
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-gap-reattach", {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      // A frame opens, and the gap swallows its `?2026l`.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+      });
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park")).toHaveLength(0);
+
+      const resetsBefore = mockReset.mock.calls.length;
+      act(() => {
+        // seqStart far past what the coordinator expects — the exact shape the
+        // backend's `Gap` produces once the subscriber queue overflows.
+        onOutput?.({ seqStart: 4096, seqEnd: 4099, data: [0x61, 0x62, 0x63] });
+      });
+      await vi.waitFor(() => {
+        expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBefore);
+      });
+
+      // The replacement stream owns the cursor beliefs now: the very next park
+      // has to be recognized.
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([25]);
+      });
+      expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
       logSpy.mockRestore();
       localStorage.removeItem("laymux:cursor-trace");
     }
@@ -3040,10 +3152,15 @@ describe("TerminalView", () => {
       mockAttachTerminalOutput.mockResolvedValueOnce({
         state: {
           version: 1,
+          generation: 1,
           snapshotStartSeq: 0,
           snapshotSeq: snapshot.length,
+          sourceStartSeq: 0,
+          sourceSeq: snapshot.length,
+          snapshotKind: "raw",
           protocolRevision: 0,
           modes: { bracketedPaste: false },
+          geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot: Array.from(snapshot),
       });
@@ -3881,6 +3998,7 @@ describe("TerminalView", () => {
       render(<TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" />);
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
       expect(capturedKeyHandler).not.toBeNull();
@@ -3969,6 +4087,7 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
 
@@ -4029,6 +4148,7 @@ describe("TerminalView", () => {
 
       await vi.waitFor(() => {
         expect(mockAttachCustomKeyEventHandler).toHaveBeenCalled();
+        expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
       await waitForLocalTerminalControl();
 
@@ -6369,11 +6489,14 @@ describe("TerminalView", () => {
       await new Promise((resolve) => setTimeout(resolve, 150));
       expect(mockFit).not.toHaveBeenCalled();
 
-      for (let index = 0; index < 4; index += 1) {
+      // Three restore writes drain in order: cached content, the marker, and
+      // the bracketed-paste mode reset. Each must clear before the deferred
+      // reflow runs.
+      for (let index = 0; index < 3; index += 1) {
         const finish = finishWrites.shift();
         expect(finish).toBeTypeOf("function");
         act(() => finish?.());
-        if (index < 3) {
+        if (index < 2) {
           await vi.waitFor(() => expect(finishWrites).toHaveLength(1));
           expect(mockFit).not.toHaveBeenCalled();
         }
@@ -7602,7 +7725,7 @@ describe("TerminalView", () => {
       });
     });
 
-    it("pushes restored content into scrollback with padding newlines", async () => {
+    it("ends the restored block with a marker and no screen-height padding", async () => {
       mockLoadTerminalOutputCache.mockResolvedValueOnce("cached-terminal-output");
 
       render(
@@ -7618,12 +7741,22 @@ describe("TerminalView", () => {
         expect(mockLoadTerminalOutputCache).toHaveBeenCalledWith("pane-scroll");
       });
 
-      // Should write: cached content, separator, then padding newlines (rows=24)
+      // Writes: cached content, then the marker terminated by one newline.
       await vi.waitFor(() => {
         const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
         expect(calls).toContain("cached-terminal-output");
-        expect(calls).toContain("\r\n".repeat(24));
+        expect(calls).toContain("\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
       });
+
+      // Regression guard for the screenful of blank rows above the prompt.
+      // Issue #87 padded the restore with `"\r\n".repeat(rows)` to outrun a
+      // clear-screen it credited to shell init; the clearing party was really
+      // in-box conhost, and the bundled ConPTY runtime (ADR-0067) emits no
+      // such frame. Nothing on this path may write a bare newline run again.
+      const calls = mockWrite.mock.calls.map((c: unknown[]) => c[0]);
+      expect(calls.some((data) => typeof data === "string" && /^(?:\r\n){4,}$/.test(data))).toBe(
+        false,
+      );
     });
 
     it("repairs a cache saved while the alternate buffer was active", async () => {

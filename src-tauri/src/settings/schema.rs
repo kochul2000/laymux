@@ -173,7 +173,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/remote/snapshotMaxKib",
-        description: "원격 접속·터미널 전환 시 재생하는 최근 출력 스냅샷 상한(KiB, 1~1024)입니다. 다음 attach부터 적용됩니다.",
+        description: "원격 접속·터미널 전환 시 만드는 화면 체크포인트의 스크롤백 소프트 예산(KiB, 1~1024)입니다. 현재 화면·터미널 상태는 예산보다 클 수 있으며 다음 attach부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },
