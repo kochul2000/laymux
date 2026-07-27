@@ -211,8 +211,13 @@ export class TerminalOutputAttachCoordinator {
       const result = this.consume(pending[index]);
       if (result.kind === "gap") {
         // `consume` re-buffered the gapped delta; keep the deltas behind it too
-        // so one repair can bridge the whole hole.
-        this.pending.push(...pending.slice(index + 1));
+        // so one repair can bridge the whole hole. Re-inserted one by one, not
+        // with `push(...rest)`: a flood that outruns a stalled repair can park
+        // six figures of deltas here, and a spread call that wide throws
+        // `RangeError: Maximum call stack size exceeded` (issue #607).
+        for (let rest = index + 1; rest < pending.length; rest += 1) {
+          this.pending.push(pending[rest]);
+        }
         return {
           ...result,
           chunks: [...chunks, ...result.chunks],
