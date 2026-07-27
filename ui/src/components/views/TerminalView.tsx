@@ -134,10 +134,6 @@ import {
 import { normalBufferOnly, TERMINAL_OUTPUT_SERIALIZE_OPTIONS } from "@/lib/terminal-output-cache";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import {
-  ConptyResizeRepaintFilter,
-  shouldArmConptyResizeRepaintFilter,
-} from "@/lib/conpty-resize-repaint-filter";
-import {
   NativeWindowsOutputStabilizer,
   type StabilizedOutputEmission,
 } from "@/lib/native-windows-output-stabilizer";
@@ -202,9 +198,6 @@ const RESIZE_OUTPUT_QUIET_MS = 120;
 
 /** Upper bound for waiting on a continuous ConPTY output stream before resize. */
 const RESIZE_OUTPUT_MAX_WAIT_MS = 500;
-
-/** ConPTY emits its resize repaint within this window after SIGWINCH. */
-const CONPTY_RESIZE_REPAINT_WINDOW_MS = 500;
 
 const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
 const REMOTE_RETURN_RESIZE_TIMEOUT_MS = 1000;
@@ -2739,42 +2732,15 @@ export function TerminalView({
       writeTerminalProtocolReply(instanceId, data).catch(() => {});
     });
 
-    const conptyResizeRepaintFilter = new ConptyResizeRepaintFilter(
-      CONPTY_RESIZE_REPAINT_WINDOW_MS,
-    );
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
-    // Supported Windows builds fail before compilation unless this runtime was staged.
-    const usesBundledConptyRuntime = isWindowsHost;
-    let conptyRepaintExpiryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputStabilizerDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let stabilizedRefreshFrame: number | undefined;
-    let writeTerminalDisplayData: ((data: Uint8Array) => void) | undefined;
     let deliverStabilizedEmissions:
       | ((emissions: StabilizedOutputEmission[], onParsed?: () => void) => void)
       | undefined;
     const pendingStabilizerParsedCallbacks = new DeferredParsedCallbackQueue();
-    let normalScrollbackBeforeFit: boolean | undefined;
     let suppressBackendResizeDuringFit = false;
-    const clearConptyRepaintExpiryTimer = () => {
-      if (conptyRepaintExpiryTimer !== undefined) {
-        clearTimeout(conptyRepaintExpiryTimer);
-        conptyRepaintExpiryTimer = undefined;
-      }
-    };
-    const scheduleConptyRepaintExpiry = () => {
-      clearConptyRepaintExpiryTimer();
-      if (!conptyResizeRepaintFilter.isArmed) return;
-      conptyRepaintExpiryTimer = setTimeout(
-        () => {
-          conptyRepaintExpiryTimer = undefined;
-          const pending = conptyResizeRepaintFilter.flush();
-          if (pending.length > 0) writeTerminalDisplayData?.(pending);
-          scheduleConptyRepaintExpiry();
-        },
-        Math.max(0, conptyResizeRepaintFilter.expiresAt - Date.now()),
-      );
-    };
     const clearOutputStabilizerDeadlineTimer = () => {
       if (outputStabilizerDeadlineTimer !== undefined) {
         clearTimeout(outputStabilizerDeadlineTimer);
@@ -2804,41 +2770,16 @@ export function TerminalView({
         stabilizedRefreshFrame = undefined;
       }
     };
-    const armConptyRepaintFilter = () => {
-      const token = conptyResizeRepaintFilter.arm();
-      scheduleConptyRepaintExpiry();
-      return token;
-    };
-    const cancelConptyRepaintArm = (token: number) => {
-      const pending = conptyResizeRepaintFilter.cancelArm(token);
-      if (pending.length > 0) writeTerminalDisplayData?.(pending);
-      scheduleConptyRepaintExpiry();
-    };
-    const resizeBackendTerminal = (cols: number, rows: number, protectConptyRepaint: boolean) => {
-      const repaintArm = protectConptyRepaint ? armConptyRepaintFilter() : undefined;
-      return resizeTerminal(instanceId, cols, rows).catch((error) => {
-        if (repaintArm !== undefined) cancelConptyRepaintArm(repaintArm);
-        throw error;
-      });
-    };
-    let previousResizeCols = terminal.cols;
+    // No repaint filter is armed around a backend resize: the bundled ConPTY
+    // runtime never emits the legacy host repaint frame, so live PTY output
+    // reaches xterm unfiltered (ADR-0067).
+    const resizeBackendTerminal = (cols: number, rows: number) =>
+      resizeTerminal(instanceId, cols, rows);
     // Handle terminal resize — notify backend PTY
     terminal.onResize(({ cols, rows }) => {
-      const widthChanged = cols !== previousResizeCols;
-      previousResizeCols = cols;
       if (!localTerminalControlAllowed()) return;
       if (suppressBackendResizeDuringFit) return;
-
-      const normalBuffer = terminal.buffer.normal;
-      const hadNormalScrollback = normalScrollbackBeforeFit ?? normalBuffer.baseY > 0;
-      const protectConptyRepaint = shouldArmConptyResizeRepaintFilter({
-        backendWidthMayChange: widthChanged,
-        isWindowsHost,
-        usesBundledConptyRuntime,
-        activeBufferIsNormal: terminal.buffer.active === normalBuffer,
-        hadNormalScrollback,
-      });
-      resizeBackendTerminal(cols, rows, protectConptyRepaint).catch(() => {});
+      resizeBackendTerminal(cols, rows).catch(() => {});
     });
 
     // Track terminal title changes (OSC 0/2) for interactive app detection.
@@ -2920,7 +2861,6 @@ export function TerminalView({
           revision: number;
           cols: number;
           rows: number;
-          protectConptyRepaint: boolean;
         }
       | undefined;
     let remoteResizeSyncTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2952,21 +2892,19 @@ export function TerminalView({
         guardedTerminalFitRef.current?.({ syncBackendResize: true });
       }, REMOTE_RETURN_RESIZE_RETRY_MS);
     };
-    const startRemoteResizeSync = (protectConptyRepaint: boolean) => {
+    const startRemoteResizeSync = () => {
       remoteReturnResizeDirtyRef.current = true;
       const cols = terminal.cols;
       const rows = terminal.rows;
       if (
         !remoteResizeSyncTarget ||
         remoteResizeSyncTarget.cols !== cols ||
-        remoteResizeSyncTarget.rows !== rows ||
-        remoteResizeSyncTarget.protectConptyRepaint !== protectConptyRepaint
+        remoteResizeSyncTarget.rows !== rows
       ) {
         remoteResizeSyncTarget = {
           revision: ++remoteResizeSyncTargetRevision,
           cols,
           rows,
-          protectConptyRepaint,
         };
       }
       if (
@@ -2982,7 +2920,7 @@ export function TerminalView({
       const target = remoteResizeSyncTarget;
       remoteResizeSyncInFlight = true;
       const attempt = ++remoteResizeSyncAttempt;
-      const resize = resizeBackendTerminal(target.cols, target.rows, target.protectConptyRepaint);
+      const resize = resizeBackendTerminal(target.cols, target.rows);
       clearRemoteResizeSyncTimeout();
       remoteResizeSyncTimeoutTimer = setTimeout(() => {
         if (cancelled || attempt !== remoteResizeSyncAttempt) return;
@@ -3059,30 +2997,15 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
     const performTerminalFit = (request: TerminalFitRequest) => {
-      const normalBuffer = terminal.buffer.normal;
-      const hadNormalScrollback = terminal.buffer.active === normalBuffer && normalBuffer.baseY > 0;
       const syncBackendResize = request.syncBackendResize || remoteReturnResizeDirtyRef.current;
-      normalScrollbackBeforeFit = hadNormalScrollback;
       suppressBackendResizeDuringFit = syncBackendResize;
       try {
         fitAddon.fit();
       } finally {
         suppressBackendResizeDuringFit = false;
-        normalScrollbackBeforeFit = undefined;
       }
 
-      if (syncBackendResize) {
-        const protectConptyRepaint = shouldArmConptyResizeRepaintFilter({
-          // The PC grid can be unchanged while the PTY is returning from a different
-          // remote width, so an explicit sync may still resize the legacy backend.
-          backendWidthMayChange: true,
-          isWindowsHost,
-          usesBundledConptyRuntime,
-          activeBufferIsNormal: terminal.buffer.active === normalBuffer,
-          hadNormalScrollback,
-        });
-        startRemoteResizeSync(protectConptyRepaint);
-      }
+      if (syncBackendResize) startRemoteResizeSync();
 
       if (request.rebuildAtlas || reflowDirtyRef.current) {
         rebuildTerminalRenderer();
@@ -3797,7 +3720,6 @@ export function TerminalView({
       }
     };
 
-    writeTerminalDisplayData = processLiveTerminalOutput;
     outputListenerReady = onTerminalOutputV2(instanceId, (payload) => {
       if (cancelled) return;
       let result;
@@ -3814,9 +3736,7 @@ export function TerminalView({
         scheduleOutputReattach();
         return;
       }
-      for (const rawData of result.chunks) {
-        const data = conptyResizeRepaintFilter.filter(rawData);
-        scheduleConptyRepaintExpiry();
+      for (const data of result.chunks) {
         processLiveTerminalOutput(data);
       }
     }).then((unlisten) => {
@@ -4137,10 +4057,7 @@ export function TerminalView({
       outputAttachEpoch += 1;
       outputProtocolReadyRef.current = false;
       if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);
-      clearConptyRepaintExpiryTimer();
-      conptyResizeRepaintFilter.disarm();
       resetOutputStabilizer();
-      writeTerminalDisplayData = undefined;
       deliverStabilizedEmissions = undefined;
       if (guardedTerminalFitRef.current === requestGuardedTerminalFit) {
         guardedTerminalFitRef.current = null;

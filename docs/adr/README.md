@@ -43,7 +43,7 @@ ADR 이 필요한 대표 기준:
 | [0023](0023-cloud-pairing-loopback-oauth.md) | Cloud Pairing Loopback OAuth | Accepted |
 | [0024](0024-cloud-native-wss-tunnel.md) | Cloud Native WSS Tunnel | Accepted |
 | [0025](0025-dev-terminal-viewport-automation.md) | Dev terminal viewport diagnostics | Accepted |
-| [0026](0026-conpty-width-resize-repaint-filter.md) | ConPTY width resize repaint filter | Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md) |
+| [0026](0026-conpty-width-resize-repaint-filter.md) | ConPTY width resize repaint filter (필터 조항만 [0067](0067-bundled-conpty-output-and-staging-contract.md)이 대체) | Accepted |
 | [0027](0027-remote-connection-graceful-recovery.md) | Remote 연결 유예와 무표시 자동 복구 | Accepted |
 | [0028](0028-remote-soft-key-toolbar.md) | Remote 소프트 키 툴바 (클라이언트 전용, 커스터마이저블) | Accepted |
 | [0029](0029-detached-terminal-input-composer.md) | Terminal 분리 입력 컴포저 — PC와 Remote 공통 surface 모델 | Superseded by [0034](0034-single-send-terminal-composer.md) |
@@ -84,7 +84,7 @@ ADR 이 필요한 대표 기준:
 | [0064](0064-shared-webgl-atlas-clear-fanout.md) | 공유 WebGL atlas 를 지운 쪽이 모든 터미널의 렌더 모델을 무효화 | Proposed |
 | [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
 | [0066](0066-bundled-conpty-runtime.md) | Windows 는 in-box conhost 대신 번들 ConPTY 런타임으로 자식을 실행 | Superseded by [0067](0067-bundled-conpty-output-and-staging-contract.md) |
-| [0067](0067-bundled-conpty-output-and-staging-contract.md) | 번들 ConPTY의 출력·배치 계약을 하나로 고정 | Proposed |
+| [0067](0067-bundled-conpty-output-and-staging-contract.md) | 번들 ConPTY의 출력·배치 계약을 하나로 고정 (resize repaint filter 제거) | Proposed |
 
 ## 새 ADR 추가
 

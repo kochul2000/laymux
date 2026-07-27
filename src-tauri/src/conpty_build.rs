@@ -24,22 +24,49 @@ pub(crate) fn files_have_same_contents(source: &Path, destination: &Path) -> io:
         return Ok(false);
     }
 
-    let mut source_reader = BufReader::new(File::open(source)?);
-    let mut destination_reader = BufReader::new(File::open(destination)?);
+    readers_have_same_contents(
+        BufReader::new(File::open(source)?),
+        BufReader::new(File::open(destination)?),
+        source_metadata.len(),
+    )
+}
+
+/// Compares `length` bytes from both readers.
+///
+/// `Read::read` may return fewer bytes than the buffer holds even when more data
+/// is available, so comparing one `read` call against another would report two
+/// identical files as different the moment the readers fall out of lockstep. The
+/// length is already known to match, so fill same-sized chunks with `read_exact`
+/// instead of trusting that contract.
+fn readers_have_same_contents(
+    mut source: impl Read,
+    mut destination: impl Read,
+    length: u64,
+) -> io::Result<bool> {
     let mut source_buffer = [0_u8; 64 * 1024];
     let mut destination_buffer = [0_u8; 64 * 1024];
+    let mut remaining = length;
 
-    loop {
-        let source_read = source_reader.read(&mut source_buffer)?;
-        let destination_read = destination_reader.read(&mut destination_buffer)?;
-        if source_read != destination_read
-            || source_buffer[..source_read] != destination_buffer[..destination_read]
+    while remaining > 0 {
+        let chunk = remaining.min(source_buffer.len() as u64) as usize;
+        if !read_chunk_exact(&mut source, &mut source_buffer[..chunk])?
+            || !read_chunk_exact(&mut destination, &mut destination_buffer[..chunk])?
+            || source_buffer[..chunk] != destination_buffer[..chunk]
         {
             return Ok(false);
         }
-        if source_read == 0 {
-            return Ok(true);
-        }
+        remaining -= chunk as u64;
+    }
+    Ok(true)
+}
+
+fn read_chunk_exact(reader: &mut impl Read, buffer: &mut [u8]) -> io::Result<bool> {
+    match reader.read_exact(buffer) {
+        Ok(()) => Ok(true),
+        // A file that shrank between the length check and this read is not a
+        // byte-for-byte match. Report the difference instead of failing the build.
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
@@ -172,6 +199,13 @@ fn set_bundle_resources(config: &mut Value, resources: Value) -> Result<(), Stri
     Ok(())
 }
 
+/// Matches the ConPTY entries of `tauri.windows.conf.json`'s resource map by
+/// **both** the `gen/conpty/` source path and the target file name. Moving the
+/// staging directory without updating [`is_runtime_resource_source`] therefore
+/// silently stops excluding them, and `tauri-build` copies them next to the dev
+/// executable a second time — which fails the build with
+/// `ERROR_SHARING_VIOLATION` whenever a dev instance has the DLL loaded. Loud,
+/// but the cause is one function away from the path that changed.
 fn is_runtime_resource(source: &str, target: &str) -> bool {
     let target = normalized_path(target);
     let expected_target = target == "conpty.dll" || target == "openconsole.exe";
@@ -203,6 +237,70 @@ mod tests {
         std::fs::write(&destination, b"staler").unwrap();
 
         assert!(!files_have_same_contents(&source, &destination).unwrap());
+    }
+
+    /// Yields at most `limit` bytes per `read` call even when more are buffered,
+    /// which `Read::read` is allowed to do and `File` can do on some platforms.
+    struct ShortReader {
+        data: Vec<u8>,
+        offset: usize,
+        limit: usize,
+    }
+
+    impl Read for ShortReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            let available = self.data.len() - self.offset;
+            let count = available.min(buffer.len()).min(self.limit);
+            buffer[..count].copy_from_slice(&self.data[self.offset..self.offset + count]);
+            self.offset += count;
+            Ok(count)
+        }
+    }
+
+    fn short_reader(data: &[u8], limit: usize) -> ShortReader {
+        ShortReader {
+            data: data.to_vec(),
+            offset: 0,
+            limit,
+        }
+    }
+
+    #[test]
+    fn identical_contents_match_even_when_reads_are_short_and_unaligned() {
+        let data: Vec<u8> = (0..200_000_u32).map(|index| index as u8).collect();
+
+        assert!(readers_have_same_contents(
+            short_reader(&data, 7),
+            short_reader(&data, 4_099),
+            data.len() as u64,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn differing_tail_beyond_the_first_chunk_is_detected() {
+        let source: Vec<u8> = (0..200_000_u32).map(|index| index as u8).collect();
+        let mut destination = source.clone();
+        *destination.last_mut().unwrap() ^= 0xff;
+
+        assert!(!readers_have_same_contents(
+            short_reader(&source, 8_192),
+            short_reader(&destination, 8_192),
+            source.len() as u64,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn a_reader_that_ends_early_is_not_a_match() {
+        let source = vec![7_u8; 4_096];
+
+        assert!(!readers_have_same_contents(
+            short_reader(&source, 512),
+            short_reader(&source[..2_048], 512),
+            source.len() as u64,
+        )
+        .unwrap());
     }
 
     #[test]
