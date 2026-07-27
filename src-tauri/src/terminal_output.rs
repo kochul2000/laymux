@@ -458,7 +458,7 @@ impl TerminalOutputSession {
     /// Serve the exact byte range a surface lost to a delivery gap.
     ///
     /// `terminal-output-v2` delivery is a notification, not a guarantee; the
-    /// ring is the single source of truth for sequenced bytes ([ADR-0071]). A
+    /// ring is the single source of truth for sequenced bytes ([ADR-0072]). A
     /// surface that observed `seqStart > expectedSeq` asks for `[seq, write_seq)`
     /// and splices it in without touching its screen.
     ///
@@ -467,7 +467,7 @@ impl TerminalOutputSession {
     /// fresh attach. Clamping to a shorter prefix is forbidden: it would hand
     /// back a hole disguised as a contiguous repair.
     ///
-    /// [ADR-0071]: ../../docs/adr/0071-terminal-output-gap-sequence-exact-repair.md
+    /// [ADR-0072]: ../../docs/adr/0072-terminal-output-gap-sequence-exact-repair.md
     pub fn resume_output(
         &self,
         generation: u64,

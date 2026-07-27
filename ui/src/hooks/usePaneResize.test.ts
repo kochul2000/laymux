@@ -4,8 +4,13 @@ import {
   findPaneBoundaries,
   calcResizeDelta,
   shouldMergeOnDragEnd,
+  boundaryResizeUpdates,
+  applyPaneResizeUpdates,
+  findPaneAxisBoundary,
+  planPaneResize,
   PANE_MIN_RATIO,
   type PaneBoundary,
+  type GridRect,
 } from "@/hooks/usePaneResize";
 import type { WorkspacePane } from "@/stores/types";
 
@@ -295,6 +300,149 @@ describe("usePaneResize", () => {
     it("is a positive number less than 0.5", () => {
       expect(PANE_MIN_RATIO).toBeGreaterThan(0);
       expect(PANE_MIN_RATIO).toBeLessThan(0.5);
+    });
+  });
+
+  // ── issue #590: neighbor-aware resize shared by drag and the automation API ──
+
+  /** pane0 (0,0,.5,.5) / pane1 (0,.5,.5,.5) / pane2 (.5,0,.5,1) — a T-junction. */
+  const tJunction: GridRect[] = [
+    { x: 0, y: 0, w: 0.5, h: 0.5 },
+    { x: 0, y: 0.5, w: 0.5, h: 0.5 },
+    { x: 0.5, y: 0, w: 0.5, h: 1 },
+  ];
+
+  function expectTiled(panes: GridRect[]) {
+    for (let i = 0; i < panes.length; i++) {
+      for (let j = i + 1; j < panes.length; j++) {
+        const a = panes[i];
+        const b = panes[j];
+        const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        expect(Math.max(0, xOverlap) * Math.max(0, yOverlap)).toBeLessThan(1e-9);
+      }
+    }
+    const area = panes.reduce((sum, p) => sum + p.w * p.h, 0);
+    expect(area).toBeCloseTo(1, 6);
+  }
+
+  describe("boundaryResizeUpdates", () => {
+    it("moves both sides of the boundary so they stay flush", () => {
+      const panes: GridRect[] = [
+        { x: 0, y: 0, w: 0.5, h: 1 },
+        { x: 0.5, y: 0, w: 0.5, h: 1 },
+      ];
+      const boundary = findPaneBoundaries(panes)[0];
+      const updates = boundaryResizeUpdates(boundary, 0.1, panes);
+      expect(applyPaneResizeUpdates(panes, updates)).toEqual([
+        { x: 0, y: 0, w: 0.6, h: 1 },
+        { x: 0.6, y: 0, w: 0.4, h: 1 },
+      ]);
+    });
+
+    it("returns no updates when the clamped delta is negligible", () => {
+      const panes: GridRect[] = [
+        { x: 0, y: 0, w: 0.5, h: 1 },
+        { x: 0.5, y: 0, w: 0.5, h: 1 },
+      ];
+      const boundary = findPaneBoundaries(panes)[0];
+      expect(boundaryResizeUpdates(boundary, 0.0001, panes)).toEqual([]);
+      // Neighbor is already at the minimum — a further grow is clamped away.
+      const pinned: GridRect[] = [
+        { x: 0, y: 0, w: 1 - PANE_MIN_RATIO, h: 1 },
+        { x: 1 - PANE_MIN_RATIO, y: 0, w: PANE_MIN_RATIO, h: 1 },
+      ];
+      expect(boundaryResizeUpdates(findPaneBoundaries(pinned)[0], 0.2, pinned)).toEqual([]);
+    });
+  });
+
+  describe("findPaneAxisBoundary", () => {
+    it("prefers the trailing edge and reports a positive sign", () => {
+      const resolved = findPaneAxisBoundary(tJunction, 0, "w");
+      expect(resolved).not.toBeNull();
+      expect(resolved!.sign).toBe(1);
+      expect(resolved!.boundary.position).toBeCloseTo(0.5);
+      // T-junction: the merged segment carries both stacked panes on the left.
+      expect([...resolved!.boundary.leftPaneIndices].sort()).toEqual([0, 1]);
+      expect(resolved!.boundary.rightPaneIndices).toEqual([2]);
+    });
+
+    it("falls back to the leading edge with an inverted sign at the grid edge", () => {
+      const resolved = findPaneAxisBoundary(tJunction, 2, "w");
+      expect(resolved).not.toBeNull();
+      expect(resolved!.sign).toBe(-1);
+      expect(resolved!.boundary.position).toBeCloseTo(0.5);
+    });
+
+    it("returns null when the pane spans the whole axis", () => {
+      expect(findPaneAxisBoundary(tJunction, 2, "h")).toBeNull();
+      expect(findPaneAxisBoundary([{ x: 0, y: 0, w: 1, h: 1 }], 0, "w")).toBeNull();
+    });
+  });
+
+  describe("planPaneResize", () => {
+    it("keeps a T-junction tiled across the issue #590 delta sequence", () => {
+      let panes = tJunction;
+      for (const dw of [0.08, -0.06, 0.05, -0.04, 0.03, 0.02]) {
+        const plan = planPaneResize(panes, 0, { w: dw });
+        expect(plan.ok).toBe(true);
+        if (!plan.ok) return;
+        panes = applyPaneResizeUpdates(panes, plan.updates);
+        expectTiled(panes);
+      }
+      expect(panes[0].w).toBeCloseTo(0.58, 6);
+      expect(panes[1].w).toBeCloseTo(0.58, 6);
+      expect(panes[2].x).toBeCloseTo(0.58, 6);
+      expect(panes[2].w).toBeCloseTo(0.42, 6);
+    });
+
+    it("grows an edge pane inward by inverting the leading boundary", () => {
+      const plan = planPaneResize(tJunction, 2, { w: 0.1 });
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+      const panes = applyPaneResizeUpdates(tJunction, plan.updates);
+      expectTiled(panes);
+      expect(panes[2]).toEqual({ x: 0.4, y: 0, w: 0.6, h: 1 });
+    });
+
+    it("resolves w and h against separate boundaries in one plan", () => {
+      const plan = planPaneResize(tJunction, 0, { w: 0.1, h: 0.2 });
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+      const panes = applyPaneResizeUpdates(tJunction, plan.updates);
+      expectTiled(panes);
+      expect(panes[0].w).toBeCloseTo(0.6, 6);
+      expect(panes[0].h).toBeCloseTo(0.7, 6);
+      expect(panes[1].y).toBeCloseTo(0.7, 6);
+      // The horizontal boundary was recomputed after the width change, so the
+      // stacked pane followed pane 0's new width instead of the old one.
+      expect(panes[1].w).toBeCloseTo(0.6, 6);
+      expect(panes[2].x).toBeCloseTo(0.6, 6);
+    });
+
+    it("clamps rather than shrinking a neighbor below the minimum", () => {
+      const plan = planPaneResize(tJunction, 0, { w: 0.9 });
+      expect(plan.ok).toBe(true);
+      if (!plan.ok) return;
+      const panes = applyPaneResizeUpdates(tJunction, plan.updates);
+      expectTiled(panes);
+      expect(panes[2].w).toBeCloseTo(PANE_MIN_RATIO, 6);
+    });
+
+    it("errors when the pane owns no boundary on the requested axis", () => {
+      const noRow = planPaneResize(tJunction, 2, { h: 0.1 });
+      expect(noRow.ok).toBe(false);
+      if (noRow.ok) return;
+      expect(noRow.error).toMatch(/no horizontal boundary/);
+
+      const solo = planPaneResize([{ x: 0, y: 0, w: 1, h: 1 }], 0, { w: 0.1 });
+      expect(solo.ok).toBe(false);
+    });
+
+    it("errors on an out-of-range index or an empty delta", () => {
+      expect(planPaneResize(tJunction, 7, { w: 0.1 }).ok).toBe(false);
+      expect(planPaneResize(tJunction, -1, { w: 0.1 }).ok).toBe(false);
+      expect(planPaneResize(tJunction, 0, {}).ok).toBe(false);
     });
   });
 });

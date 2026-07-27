@@ -1,4 +1,4 @@
-# 0071. output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다
+# 0072. output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다
 
 - Status: Accepted
 - Date: 2026-07-27

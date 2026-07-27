@@ -1,5 +1,5 @@
 /**
- * Per-terminal counters for the sequenced output recovery path (ADR-0071).
+ * Per-terminal counters for the sequenced output recovery path (ADR-0072).
  *
  * issue #600 could not be confirmed because nobody knew how often a
  * `terminal-output-v2` delta is actually lost, nor which of the several
@@ -21,7 +21,7 @@ export type TerminalOutputRecoveryEvent =
   /**
    * The ring could no longer bridge the gap → full reattach, screen lost.
    *
-   * ADR-0071 hangs a revisit condition (ring size / checkpoint reuse) on this
+   * ADR-0072 hangs a revisit condition (ring size / checkpoint reuse) on this
    * bucket alone, so nothing else may be filed here. It counts exactly one
    * thing: `resume_terminal_output` answered `null`.
    */

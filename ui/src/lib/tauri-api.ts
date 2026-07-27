@@ -130,7 +130,7 @@ export async function attachTerminalOutput(id: string): Promise<TerminalOutputAt
 
 /**
  * Pull the exact byte range this surface lost to a `terminal-output-v2` delivery
- * gap (ADR-0071). `null` means the backend ring can no longer bridge `seq` — the
+ * gap (ADR-0072). `null` means the backend ring can no longer bridge `seq` — the
  * caller must fall back to `attachTerminalOutput`.
  */
 export async function resumeTerminalOutput(

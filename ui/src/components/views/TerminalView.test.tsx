@@ -1979,7 +1979,7 @@ describe("TerminalView", () => {
 
   it("rebuilds the shadow cursor when a sequence gap replaces the stream", async () => {
     // Issue #596: a sequence gap the ring can no longer bridge escalates to
-    // `terminal.reset()` + a fresh snapshot (ADR-0071), which throws away the
+    // `terminal.reset()` + a fresh snapshot (ADR-0072), which throws away the
     // bytes the pane's cursor beliefs were inferred from. If the frame that was
     // open when the gap hit never gets its `?2026l`, `isDec2026FrameOpen` stays
     // true forever: shadow syncs report `dec-2026-frame-open`, Codex's cursor
@@ -2056,7 +2056,7 @@ describe("TerminalView", () => {
   });
 
   it("keeps the shadow cursor across a repaired sequence gap", async () => {
-    // ADR-0071 vs issue #596: a repaired gap is the opposite case. The visible
+    // ADR-0072 vs issue #596: a repaired gap is the opposite case. The visible
     // buffer is untouched and the byte stream stays continuous, so every
     // stream-derived belief is still valid and rebuilding them would be wrong —
     // `cursorAbsY`, `commandStartLine` and the frame snapshot all still name
@@ -8621,7 +8621,7 @@ describe("TerminalView desktop input composer", () => {
   // issue #600: a lost `terminal-output-v2` event used to cost screen cells for
   // good, because recovery reset xterm and replayed a ring window that a
   // differential-render TUI never repaints. The ring still holds those bytes, so
-  // the gap is repaired in place (ADR-0071).
+  // the gap is repaired in place (ADR-0072).
   const geometry = { revision: 0, cols: 80, rows: 24 };
   const outputDelta = (seqStart: number, text: string) => ({
     generation: 1,
@@ -8683,7 +8683,7 @@ describe("TerminalView desktop input composer", () => {
     await vi.waitFor(() => expect(decodedWrites()).toContain("DD"));
   });
 
-  // ADR-0071 hangs its "revisit the ring size / checkpoint reuse" condition on
+  // ADR-0072 hangs its "revisit the ring size / checkpoint reuse" condition on
   // `ringEscalation`, so each escalation must land in its own bucket. Every one
   // of these ends in the same visible outcome (a full reattach), which is why
   // asserting the attach count alone would not catch a misfiled counter.

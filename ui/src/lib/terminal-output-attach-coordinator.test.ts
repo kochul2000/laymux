@@ -118,7 +118,7 @@ describe("TerminalOutputAttachCoordinator", () => {
   });
 
   // Each refusal carries a machine-readable `reason` because the caller files a
-  // different recovery counter per reason, and ADR-0071 hangs revisit conditions
+  // different recovery counter per reason, and ADR-0072 hangs revisit conditions
   // on those counters. Matching messages instead would misfile every bucket the
   // moment a string is reworded.
   it.each([

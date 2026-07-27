@@ -3765,7 +3765,7 @@ export function TerminalView({
     };
     /**
      * Repair a `terminal-output-v2` delivery gap by pulling the exact missing
-     * range out of the backend ring (ADR-0071).
+     * range out of the backend ring (ADR-0072).
      *
      * The visible xterm is authoritative up to `expectedSeq`, so nothing is
      * reset, no attach epoch is burned, and the ADR-0069 checkpoint model keeps
@@ -3807,7 +3807,7 @@ export function TerminalView({
       // Each failure mode gets its own counter, and which counter is decided by
       // *where* the round-trip failed rather than by matching an error message.
       // `ringEscalation` in particular must stay reserved for the one thing
-      // ADR-0071 hangs a revisit condition on: the backend answering `null`.
+      // ADR-0072 hangs a revisit condition on: the backend answering `null`.
       const escalate = (event: TerminalOutputRecoveryEvent, message: string, detail: unknown) => {
         console.warn(`[TerminalView] ${message}`, detail, {
           gap,
@@ -3996,7 +3996,7 @@ export function TerminalView({
       }
       if (result.kind === "gap") {
         // The lost bytes are still in the backend ring, so repair the stream in
-        // place instead of resetting the screen (ADR-0071).
+        // place instead of resetting the screen (ADR-0072).
         console.warn(
           "[TerminalView] terminal output gap",
           result,

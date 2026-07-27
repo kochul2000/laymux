@@ -236,7 +236,7 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
-    // Monotonic discard counters for the sequenced output path (ADR-0071).
+    // Monotonic discard counters for the sequenced output path (ADR-0072).
     // `emit` losing a delta is recoverable (the ring keeps the bytes), but
     // `record_output` failing is not — those bytes never enter the ring and no
     // sequence gap ever reveals them. Both are counted so a real reproduction
@@ -274,7 +274,7 @@ pub fn create_terminal_session(
                 ) {
                     // Never `let _` this away. The bytes stay in the ring, so the
                     // surface repairs itself through `resume_terminal_output` on
-                    // the next delivered delta (ADR-0071) — but a discard that is
+                    // the next delivered delta (ADR-0072) — but a discard that is
                     // silent is a discard nobody can count, and counting is the
                     // only way to tell a shutdown race from a systematic delivery
                     // failure. `discarded_total` is monotonic so the real number
@@ -1149,10 +1149,10 @@ pub fn attach_terminal_output(
 }
 
 /// Splice the exact byte range a surface lost to a `terminal-output-v2`
-/// delivery gap ([ADR-0071]). `None` means the range is no longer bridgeable
+/// delivery gap ([ADR-0072]). `None` means the range is no longer bridgeable
 /// and the caller must fall back to `attach_terminal_output`.
 ///
-/// [ADR-0071]: ../../../docs/adr/0071-terminal-output-gap-sequence-exact-repair.md
+/// [ADR-0072]: ../../../docs/adr/0072-terminal-output-gap-sequence-exact-repair.md
 #[tauri::command]
 pub fn resume_terminal_output(
     id: String,

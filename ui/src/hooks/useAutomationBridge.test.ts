@@ -18,6 +18,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { PANE_MIN_RATIO } from "@/hooks/usePaneResize";
 import { readFileForViewer } from "@/lib/tauri-api";
 import {
   registerTerminalRenderCheckpointProvider,
@@ -2050,9 +2051,7 @@ describe("identify_caller and enriched responses", () => {
       params: { paneIndex: 0, direction: "vertical" },
     });
     const wsBefore = useWorkspaceStore.getState().getActiveWorkspace()!;
-    const paneBefore = wsBefore.panes[0];
-    const originalW = paneBefore.w;
-    const originalH = paneBefore.h;
+    const originalW = wsBefore.panes[0].w;
 
     // Resize with delta
     const result = handleAutomationRequest({
@@ -2060,14 +2059,201 @@ describe("identify_caller and enriched responses", () => {
       category: "action",
       target: "panes",
       method: "resize",
-      params: { paneIndex: 0, delta: { w: 0.1, h: -0.05 } },
+      params: { paneIndex: 0, delta: { w: 0.1 } },
     });
     expect(result.success).toBe(true);
 
     const wsAfter = useWorkspaceStore.getState().getActiveWorkspace()!;
-    const paneAfter = wsAfter.panes[0];
-    expect(paneAfter.w).toBeCloseTo(originalW + 0.1, 5);
-    expect(paneAfter.h).toBeCloseTo(originalH - 0.05, 5);
+    expect(wsAfter.panes[0].w).toBeCloseTo(originalW + 0.1, 5);
+    // …and the neighbor gives up exactly what pane 0 gained (issue #590).
+    expect(wsAfter.panes[1].x).toBeCloseTo(originalW + 0.1, 5);
+    expect(wsAfter.panes[1].w).toBeCloseTo(1 - (originalW + 0.1), 5);
+  });
+
+  // ── issue #590: API resize must obey the same no-overlap invariant as drag ──
+
+  /** pane0 (0,0,.5,.5) / pane1 (0,.5,.5,.5) / pane2 (.5,0,.5,1) — a T-junction. */
+  function seedTJunctionWorkspace() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-tj",
+          name: "TJunction",
+          panes: [
+            { id: "tj-0", x: 0, y: 0, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+            { id: "tj-1", x: 0, y: 0.5, w: 0.5, h: 0.5, view: { type: "TerminalView" } },
+            { id: "tj-2", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-tj",
+      workspaceDisplayOrder: [],
+    });
+  }
+
+  /** Every pair of panes must be disjoint (they may only touch at edges). */
+  function expectNoOverlap(panes: { x: number; y: number; w: number; h: number }[]) {
+    for (let i = 0; i < panes.length; i++) {
+      for (let j = i + 1; j < panes.length; j++) {
+        const a = panes[i];
+        const b = panes[j];
+        const xOverlap = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+        const yOverlap = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+        const area = Math.max(0, xOverlap) * Math.max(0, yOverlap);
+        expect(`panes ${i}/${j} overlap area ${area.toFixed(4)}`).toBe(
+          `panes ${i}/${j} overlap area 0.0000`,
+        );
+      }
+    }
+  }
+
+  it("resize_pane keeps a T-junction tiled through the issue #590 delta sequence", () => {
+    seedTJunctionWorkspace();
+
+    for (const [i, dw] of [0.08, -0.06, 0.05, -0.04, 0.03, 0.02].entries()) {
+      const result = handleAutomationRequest({
+        requestId: `rz-590-${i}`,
+        category: "action",
+        target: "panes",
+        method: "resize",
+        params: { paneIndex: 0, delta: { w: dw } },
+      });
+      expect(result.success).toBe(true);
+    }
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    // pane 0 grew by the cumulative delta …
+    expect(panes[0].w).toBeCloseTo(0.58, 5);
+    // … pane 1 sits under it and follows the same boundary (merged segment) …
+    expect(panes[1].w).toBeCloseTo(0.58, 5);
+    // … and pane 2 gave up exactly that space.
+    expect(panes[2].x).toBeCloseTo(0.58, 5);
+    expect(panes[2].w).toBeCloseTo(0.42, 5);
+    // Grid stays fully covered.
+    expect(panes[0].w + panes[2].w).toBeCloseTo(1, 5);
+  });
+
+  it("resize_pane uses the leading boundary for a pane flush against the grid edge", () => {
+    seedTJunctionWorkspace();
+
+    const result = handleAutomationRequest({
+      requestId: "rz-590-edge",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 2, delta: { w: 0.1 } },
+    });
+    expect(result.success).toBe(true);
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    expect(panes[2].x).toBeCloseTo(0.4, 5);
+    expect(panes[2].w).toBeCloseTo(0.6, 5);
+    expect(panes[0].w).toBeCloseTo(0.4, 5);
+    expect(panes[1].w).toBeCloseTo(0.4, 5);
+  });
+
+  it("resize_pane moves the horizontal boundary for dh", () => {
+    seedTJunctionWorkspace();
+
+    const result = handleAutomationRequest({
+      requestId: "rz-590-dh",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: { h: 0.2 } },
+    });
+    expect(result.success).toBe(true);
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    expect(panes[0].h).toBeCloseTo(0.7, 5);
+    expect(panes[1].y).toBeCloseTo(0.7, 5);
+    expect(panes[1].h).toBeCloseTo(0.3, 5);
+    // pane 2 spans the full height and owns no horizontal boundary — untouched.
+    expect(panes[2].y).toBeCloseTo(0, 5);
+    expect(panes[2].h).toBeCloseTo(1, 5);
+  });
+
+  it("resize_pane handles dw and dh independently in one call", () => {
+    seedTJunctionWorkspace();
+
+    const result = handleAutomationRequest({
+      requestId: "rz-590-both",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: { w: 0.1, h: 0.2 } },
+    });
+    expect(result.success).toBe(true);
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    expect(panes[0].w).toBeCloseTo(0.6, 5);
+    expect(panes[0].h).toBeCloseTo(0.7, 5);
+    expect(panes[2].x).toBeCloseTo(0.6, 5);
+    expect(panes[1].y).toBeCloseTo(0.7, 5);
+  });
+
+  it("resize_pane clamps instead of shrinking a neighbor below the minimum", () => {
+    seedTJunctionWorkspace();
+
+    const result = handleAutomationRequest({
+      requestId: "rz-590-clamp",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: { w: 0.9 } },
+    });
+    expect(result.success).toBe(true);
+
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    expect(panes[2].w).toBeCloseTo(PANE_MIN_RATIO, 5);
+    expect(panes[0].w).toBeCloseTo(1 - PANE_MIN_RATIO, 5);
+  });
+
+  it("resize_pane errors when the pane owns no boundary on the requested axis", () => {
+    // Single full-grid pane: neither axis has a neighbor.
+    const soloW = handleAutomationRequest({
+      requestId: "rz-590-solo-w",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: { w: 0.1 } },
+    });
+    expect(soloW.success).toBe(false);
+    expect(soloW.error).toMatch(/no .*boundary|neighbor/i);
+
+    seedTJunctionWorkspace();
+    // pane 2 spans the whole height — dh has nothing to push against.
+    const noRow = handleAutomationRequest({
+      requestId: "rz-590-no-row",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 2, delta: { h: 0.1 } },
+    });
+    expect(noRow.success).toBe(false);
+
+    // The failed axis must not have mutated anything.
+    const panes = useWorkspaceStore.getState().getActiveWorkspace()!.panes;
+    expectNoOverlap(panes);
+    expect(panes[2].y).toBeCloseTo(0, 5);
+    expect(panes[2].h).toBeCloseTo(1, 5);
+  });
+
+  it("resize_pane rejects a delta with neither w nor h", () => {
+    seedTJunctionWorkspace();
+    const result = handleAutomationRequest({
+      requestId: "rz-590-empty",
+      category: "action",
+      target: "panes",
+      method: "resize",
+      params: { paneIndex: 0, delta: {} },
+    });
+    expect(result.success).toBe(false);
   });
 
   it("split_pane forwards profile and cwd to new pane view config", () => {

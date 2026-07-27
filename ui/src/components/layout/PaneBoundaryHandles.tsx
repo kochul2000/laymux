@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from "react";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   findPaneBoundaries,
-  calcResizeDelta,
+  boundaryResizeUpdates,
   shouldMergeOnDragEnd,
   type PaneBoundary,
 } from "@/hooks/usePaneResize";
@@ -72,24 +72,13 @@ export function PaneBoundaryHandles({
         const currentPanes = getLatestPanes();
         if (!currentPanes || currentPanes.length === 0) return;
 
-        const delta = calcResizeDelta(bd, rawDelta, currentPanes);
-        if (Math.abs(delta) < 0.001) return;
+        // Clamping and the both-sides-of-the-boundary math live in
+        // usePaneResize so the automation API applies the same verdict (#590).
+        const updates = boundaryResizeUpdates(bd, rawDelta, currentPanes);
+        if (updates.length === 0) return;
 
-        for (const idx of bd.leftPaneIndices) {
-          const p = currentPanes[idx];
-          if (bd.direction === "vertical") {
-            resizePane(idx, { w: p.w + delta });
-          } else {
-            resizePane(idx, { h: p.h + delta });
-          }
-        }
-        for (const idx of bd.rightPaneIndices) {
-          const p = currentPanes[idx];
-          if (bd.direction === "vertical") {
-            resizePane(idx, { x: p.x + delta, w: p.w - delta });
-          } else {
-            resizePane(idx, { y: p.y + delta, h: p.h - delta });
-          }
+        for (const { index, rect } of updates) {
+          resizePane(index, rect);
         }
 
         dragging.current.startPos = currentPos;

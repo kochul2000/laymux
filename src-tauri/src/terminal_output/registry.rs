@@ -313,12 +313,12 @@ pub fn attach_and_subscribe_terminal_output_with_capacity(
         .attach_and_subscribe(max_snapshot_bytes, queue_capacity)
 }
 
-/// Serve a surface's sequence-exact gap repair ([ADR-0071]).
+/// Serve a surface's sequence-exact gap repair ([ADR-0072]).
 ///
 /// A missing terminal is an error (the surface must stop), while a range the
 /// ring can no longer bridge is `Ok(None)` (the surface must reattach).
 ///
-/// [ADR-0071]: ../../../docs/adr/0071-terminal-output-gap-sequence-exact-repair.md
+/// [ADR-0072]: ../../../docs/adr/0072-terminal-output-gap-sequence-exact-repair.md
 pub fn resume_terminal_output(
     protocol_states: &SharedTerminalProtocolStates,
     terminal_id: &str,

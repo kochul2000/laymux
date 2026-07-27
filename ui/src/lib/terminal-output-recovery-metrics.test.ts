@@ -29,7 +29,7 @@ describe("terminalOutputRecoveryCounters", () => {
     expect(terminalOutputRecoveryCounters("t2").ringEscalation).toBe(1);
   });
 
-  // ADR-0071 hangs a revisit condition on `ringEscalation` alone, so the buckets
+  // ADR-0072 hangs a revisit condition on `ringEscalation` alone, so the buckets
   // that share its "escalated to a full reattach" outcome must stay distinct.
   it.each(["nestedGap", "repairFailure", "geometryEscalation"] as const)(
     "keeps %s out of the ringEscalation bucket",

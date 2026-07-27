@@ -63,7 +63,7 @@ export type TerminalOutputRepairRejection =
 /**
  * A repair the coordinator refused, tagged with a machine-readable reason.
  *
- * The caller routes each reason to its own recovery counter, and ADR-0071 hangs
+ * The caller routes each reason to its own recovery counter, and ADR-0072 hangs
  * its revisit conditions on those counters. Classifying by `error.message`
  * instead would silently misfile every bucket the moment a message is reworded,
  * which is exactly the kind of instrumentation rot this PR exists to prevent.
@@ -85,7 +85,7 @@ export class TerminalOutputRepairError extends Error {
  * A `terminal-output-v2` event is a notification, not a delivery guarantee. When
  * one is lost the bytes still live in the backend ring, so a gap is repaired by
  * pulling the exact missing range rather than by throwing the screen away
- * (ADR-0071). The gapped delta therefore stays buffered: the repair splices in
+ * (ADR-0072). The gapped delta therefore stays buffered: the repair splices in
  * front of it and it is applied right after, in sequence.
  */
 export class TerminalOutputAttachCoordinator {

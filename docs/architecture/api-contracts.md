@@ -350,7 +350,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/ui/file-viewer` | 통합 파일 뷰어 오버레이 열기 (`path` 필수, `newWindow` 선택) — #277/#279/#404 |
 | POST | `/api/v1/workspaces/reorder` | 워크스페이스 순서 변경 |
 | POST | `/api/v1/grid/hover` | hover 시뮬레이션 |
-| POST | `/api/v1/panes/:index/resize` | Pane 크기 조정 (상대 delta) |
+| POST | `/api/v1/panes/:index/resize` | Pane 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [data-flow §5](./data-flow.md), [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | POST | `/api/v1/docks/:position/split` | 독 분할 |
 | GET | `/api/v1/terminals/:id/buffer` | 터미널 출력 버퍼 덤프 |
 | POST | `/api/v1/terminals/:id/focus` | 터미널 포커스 |
@@ -461,7 +461,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
 | `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시) |
 | `remove_pane` | bridge_request | 팬 제거 |
-| `resize_pane` | bridge_request | 팬 크기 조정 (상대 delta) |
+| `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |
 | `list_layouts` | bridge_request | 저장된 레이아웃 목록 |
 
