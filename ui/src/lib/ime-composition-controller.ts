@@ -1,4 +1,4 @@
-import { isCompositionSideInput } from "./ime-composition-events";
+import { isCompositionSideInput, isCompositionSideKey } from "./ime-composition-events";
 
 import { splitCellClusters, stringCellWidth } from "./terminal-unicode-width";
 
@@ -731,8 +731,34 @@ export function createImeCompositionController(
     }, 0);
   };
 
-  const handleActivityEvent = () => {
+  const releaseVisualCaretForFreshInput = () => {
+    if (phase !== "pending-finalize" || !state.active) return;
+    // `compositionend` deliberately leaves the controller in a deferred phase:
+    // a Korean IME can start the next syllable in the same task and that must stay
+    // in the current carry-over chain. A real non-IME key in that window proves
+    // the chain ended, though. Keeping the preview active until the timeout makes
+    // it keep owning the visible caret while xterm is already handling the fresh
+    // ASCII/Backspace key, so the text moves and the caret appears stuck at the
+    // finalized syllable. Retire only the visual state here; the deferred reset
+    // still owns textarea residue and the chain fields until its timer fires.
+    traceComposition(options, "ime-composition-preview-released-for-fresh-input", {});
+    update({
+      active: false,
+      text: "",
+      caretUtf16Index: 0,
+      caretCellOffset: 0,
+      textCellWidth: 0,
+    });
+  };
+
+  const handleActivityEvent = (event: KeyboardEvent) => {
     inputActivitySeq += 1;
+    // keyCode 229 / `Process` are the browser's "IME owns this key" marker.
+    // They may precede the same-tick compositionstart that turns the pending
+    // finalize into a carry-over, so they cannot hand the visual caret back.
+    if (!isCompositionSideKey(event)) {
+      releaseVisualCaretForFreshInput();
+    }
   };
 
   const handleBlur = () => {
@@ -789,8 +815,10 @@ export function createImeCompositionController(
   };
 
   const handleInputLikeEvent = (event: Event) => {
-    if (!isCompositionSideInput(event as Partial<InputEvent>)) {
+    const compositionSide = isCompositionSideInput(event as Partial<InputEvent>);
+    if (!compositionSide) {
       inputActivitySeq += 1;
+      releaseVisualCaretForFreshInput();
     }
     if (phase === "composing") {
       schedulePreviewSync();

@@ -156,6 +156,7 @@ import {
   NativeWindowsOutputStabilizer,
   type StabilizedOutputEmission,
 } from "@/lib/native-windows-output-stabilizer";
+import { WslInFrameCursorParkRecognizer } from "@/lib/wsl-in-frame-cursor-park-recognizer";
 import {
   routeXtermData,
   subscribeXtermUserInputOrigin,
@@ -1132,6 +1133,13 @@ export function TerminalView({
     };
 
     registerInstance({ id: instanceId, profile, syncGroup, workspaceId });
+    // Profile changes recreate the xterm instance under the same focused pane.
+    // Registration starts with neutral metadata, so restore the terminal-store
+    // projection immediately instead of waiting for a pane focus transition
+    // that will never happen when the focused pane index stays unchanged.
+    if (isFocusedRef.current) {
+      useTerminalStore.getState().setTerminalFocus(instanceId);
+    }
 
     // Diagnostic shadow-cursor tracer. Bound once per effect mount because
     // `instanceId` is constant inside this closure; the tracer is a no-op
@@ -2876,6 +2884,7 @@ export function TerminalView({
     });
 
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
+    const wslInFrameCursorParkRecognizer = new WslInFrameCursorParkRecognizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
     let outputStabilizerDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let stabilizedRefreshFrame: number | undefined;
@@ -2907,6 +2916,7 @@ export function TerminalView({
     const resetOutputStabilizer = () => {
       clearOutputStabilizerDeadlineTimer();
       nativeWindowsOutputStabilizer.reset();
+      wslInFrameCursorParkRecognizer.reset();
       pendingStabilizerParsedCallbacks.discard();
       if (stabilizedRefreshFrame !== undefined) {
         cancelAnimationFrame(stabilizedRefreshFrame);
@@ -3786,10 +3796,14 @@ export function TerminalView({
       onDiscard?: () => void,
     ) => {
       if (!stabilizeNativeWindowsOutput) {
-        processTerminalOutput(data, onParsed, {
-          source: "live",
-          attachEpoch: outputAttachEpoch,
-        });
+        if (initialExecutionHost === "wsl") {
+          deliverStabilizedEmissions?.(wslInFrameCursorParkRecognizer.push(data), onParsed);
+        } else {
+          processTerminalOutput(data, onParsed, {
+            source: "live",
+            attachEpoch: outputAttachEpoch,
+          });
+        }
         return;
       }
       if (onParsed) pendingStabilizerParsedCallbacks.push(onParsed, onDiscard);

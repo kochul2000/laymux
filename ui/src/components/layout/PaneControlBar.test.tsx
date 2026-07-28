@@ -604,6 +604,27 @@ describe("PaneControlBar", () => {
     expect(defaultActions.onChangeView).toHaveBeenCalledWith({ type: "MemoView" });
   });
 
+  it("releases the view selector focus before committing a terminal profile change", async () => {
+    const user = userEvent.setup();
+    const onChangeView = vi.fn();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onChangeView }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const select = screen.getByTestId("pane-control-view-select") as HTMLSelectElement;
+    select.focus();
+
+    await user.selectOptions(select, "TerminalView:WSL");
+
+    expect(select).not.toHaveFocus();
+    expect(onChangeView).toHaveBeenCalledWith({ type: "TerminalView", profile: "WSL" });
+  });
+
   it("renders children content in all modes", () => {
     render(
       <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
