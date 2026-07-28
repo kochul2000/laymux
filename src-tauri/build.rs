@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+#[path = "src/build_metadata.rs"]
+mod build_metadata;
 #[path = "src/conpty_build.rs"]
 mod conpty_build;
 use conpty_build::{copy_runtime_file, tauri_config_without_runtime_resources, CopyOutcome};
@@ -12,12 +14,42 @@ use conpty_runtime::{conpty_runtime_arch_dir, CONPTY_RUNTIME_FILES, CONPTY_RUNTI
 fn main() {
     println!("cargo:rerun-if-changed=src/conpty_build.rs");
     println!("cargo:rerun-if-changed=src/conpty_runtime.rs");
+    emit_build_metadata();
 
     // tauri_build 가 resources 경로를 검증하므로 스테이징이 먼저 끝나야 한다.
     if stage_conpty_runtime() {
         suppress_tauri_build_runtime_copy();
     }
     tauri_build::build();
+}
+
+/// Inject immutable source identity without invoking `git` (and therefore
+/// without flashing a console window on Windows builds).
+fn emit_build_metadata() {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let Some(worktree_root) = manifest_dir.parent() else {
+        println!("cargo:rustc-env=LAYMUX_BUILD_WORKTREE_ROOT=");
+        println!("cargo:rustc-env=LAYMUX_BUILD_GIT_COMMIT=");
+        println!("cargo:rustc-env=LAYMUX_BUILD_GIT_BRANCH=");
+        return;
+    };
+    let metadata = build_metadata::discover(worktree_root);
+
+    for path in metadata.rerun_paths {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+    println!(
+        "cargo:rustc-env=LAYMUX_BUILD_WORKTREE_ROOT={}",
+        metadata.worktree_root.display()
+    );
+    println!(
+        "cargo:rustc-env=LAYMUX_BUILD_GIT_COMMIT={}",
+        metadata.git_commit.as_deref().unwrap_or("")
+    );
+    println!(
+        "cargo:rustc-env=LAYMUX_BUILD_GIT_BRANCH={}",
+        metadata.git_branch.as_deref().unwrap_or("")
+    );
 }
 
 /// Windows ConPTY 재배포본을 실행 파일 옆과 번들러 스테이징 디렉터리에 복사한다.

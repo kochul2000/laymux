@@ -151,11 +151,31 @@ pub struct HiddenItemsOpenBody {
     pub open: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
     pub port: u16,
+    pub instance: HealthInstanceIdentity,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthBuildKind {
+    Dev,
+    Release,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HealthInstanceIdentity {
+    pub pid: u32,
+    pub build_kind: HealthBuildKind,
+    pub executable_path: Option<String>,
+    pub worktree_root: Option<String>,
+    pub git_commit: Option<String>,
+    pub git_branch: Option<String>,
 }
 
 /// All registered routes as (method, path) pairs.

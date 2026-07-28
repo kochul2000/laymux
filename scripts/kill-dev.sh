@@ -25,22 +25,58 @@ json_num() {
   sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$file" 2>/dev/null | head -1
 }
 
+# 종료 뒤에는 /proc/CIM 조회가 실패하므로 실행 경로를 먼저 캡처한다.
+# Windows 에서는 일회성 환경변수로 PID 를 전달해 PowerShell 코드에 문자열 보간하지 않는다.
+# Windows PowerShell 5.1은 `-Command <text> <pid>`의 pid를 `$args[0]`으로 넘기지 않고
+# command text 뒤에 붙여 파싱하므로 positional argv를 쓰지 않는다.
+process_executable_path() {
+  local pid=$1
+  if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  if [[ "$(uname -o 2>/dev/null)" == "Msys" || "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
+    local powershell_command=""
+    if command -v powershell.exe &>/dev/null; then
+      powershell_command=powershell.exe
+    elif command -v powershell &>/dev/null; then
+      powershell_command=powershell
+    else
+      return 1
+    fi
+    LAYMUX_KILL_DEV_TARGET_PID="$pid" \
+      "$powershell_command" -NoProfile -NonInteractive -Command \
+      '$processId = [int]$env:LAYMUX_KILL_DEV_TARGET_PID; (Get-CimInstance Win32_Process -Filter "ProcessId=$processId").ExecutablePath' \
+      2>/dev/null | tr -d '\r' | head -1
+    return
+  fi
+
+  if [ -e "/proc/$pid/exe" ]; then
+    readlink -f "/proc/$pid/exe" 2>/dev/null
+  fi
+}
+
 # 성공하면 0, 대상이 없으면 1 — 호출자가 다음 순위로 넘어갈지 판단한다.
 kill_pid() {
   local pid=$1
   local source=$2
+  local executable_path
+  executable_path=$(process_executable_path "$pid" || true)
+  if [ -z "$executable_path" ]; then
+    executable_path="<unavailable>"
+  fi
   if [[ "$(uname -o 2>/dev/null)" == "Msys" || "$(uname -s)" == MINGW* || "$(uname -s)" == CYGWIN* ]]; then
     if taskkill //PID "$pid" //F //T >/dev/null 2>&1; then
-      echo "Dev (PID $pid) killed ($source)"
+      echo "Dev (PID $pid) killed ($source) — executable: $executable_path"
       return 0
     fi
   else
     if kill -9 "$pid" 2>/dev/null; then
-      echo "Dev (PID $pid) killed ($source)"
+      echo "Dev (PID $pid) killed ($source) — executable: $executable_path"
       return 0
     fi
   fi
-  echo "PID $pid not running ($source)"
+  echo "PID $pid not running ($source) — executable: $executable_path"
   return 1
 }
 

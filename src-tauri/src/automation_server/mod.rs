@@ -1,6 +1,7 @@
 pub mod handlers_backend;
 pub mod handlers_bridge;
 pub mod helpers;
+mod instance_identity;
 pub mod mcp;
 pub mod mcp_resources;
 pub mod settings_bridge;

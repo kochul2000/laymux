@@ -1,6 +1,8 @@
 #![recursion_limit = "256"]
 pub mod activity;
 pub mod automation_server;
+#[cfg(test)]
+mod build_metadata;
 pub mod claude_activity;
 pub mod claude_bullet;
 pub mod cli;
