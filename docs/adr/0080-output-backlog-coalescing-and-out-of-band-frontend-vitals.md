@@ -1,51 +1,74 @@
-# 0080. 출력 백로그는 세그먼트가 아니라 바이트로 값을 치르고, 프론트 상태는 브리지 밖에서 읽는다
+# 0080. 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다
 
 - Status: Accepted
 - Date: 2026-07-28
-- Source: 사용자 보고(출력 폭주 중 레이아웃 변경 시 프론트 42~87초 무응답) · issue #606 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §12](../architecture/api-contracts.md) · [ADR-0026](0026-conpty-width-resize-repaint-filter.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md)
-- Relation: ADR-0026 의 공통 fit 스케줄러와 1 MiB 청크 write FIFO 를 유지하면서 그 앞단에 백로그 병합 단계를 추가하고, quiet window 의 기준 시각을 "write 시각"에서 "delta 도착 시각"으로 정정한다. ADR-0072 의 sequence 정확 복구 계약과 ADR-0069 의 checkpoint 경계(generation·geometry revision)는 병합 금지 경계로 그대로 보존한다. ADR-0002 의 Automation API 에 프론트를 경유하지 않는 진단 엔드포인트 하나를 추가한다.
+- Source: 사용자 보고(출력 폭주와 레이아웃 변경이 겹칠 때 프론트 42~87초 무응답) · issue #606 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §12](../architecture/api-contracts.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0026](0026-conpty-width-resize-repaint-filter.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0074](0074-xterm-cell-grid-screen-test-tier.md) · [ADR-0078](0078-wsl-in-frame-cursor-park-metadata.md) · [ADR-0079](0079-dec2026-cursor-gate-lifecycle-bypass.md)
+- Relation: ADR-0008·0078·0079의 커서 안정화 경계와 ADR-0072의 sequence 복구 순서를 유지한다. ADR-0026의 공통 fit 스케줄러에는 출력 도착 시각과 물리 write drain 불변식을 명시한다. ADR-0069 checkpoint는 별도 renderer로서 같은 바이트 순서를 유지한다. ADR-0002의 IP allowlist 아래에 backend-served 진단 endpoint를 추가한다.
 
 ## Context
 
-출력이 폭주하는 pane 이 있는 상태에서 레이아웃을 바꾸면 프론트엔드가 42~87초 동안 무응답이 된다. 백엔드는 멀쩡하다 — `/api/v1/health` 는 즉시 답하는데 프론트를 경유하는 모든 endpoint(`/grid`, `/terminals`, `/terminals/{id}/buffer`)가 `Frontend response timeout` 을 낸다. 폭주 단독(0초)도 레이아웃 변경 단독(0초)도 정상이며, 둘이 겹칠 때만 터진다. 폭주가 끝난 뒤에도 무응답이 이어진다. ADR-0072 의 복구 카운터 10종과 backend `discarded_total`/`dropped_total` 은 같은 스트레스에서 전부 0이었으므로 **정확성 결함이 아니라 비용 결함**이다.
+출력이 폭주하는 pane에서 레이아웃을 바꾸면 Automation API의 backend-only `/health`는 즉시 답하지만 WebView를 거치는 endpoint는 수십 초 동안 `Frontend response timeout`을 냈다. 폭주 단독과 레이아웃 변경 단독은 재현되지 않았고, ADR-0072 복구 카운터와 backend 폐기 카운터도 증가하지 않았다. 이는 먼저 화면 손실보다 WebView 메인 스레드의 비용 백로그를 의심해야 하는 신호다.
 
-issue #606 은 원인을 "워크스페이스 전환이 `TerminalView` 를 unmount/remount 시키고 재부착마다 1 MiB ring snapshot 을 replay 한다(flip 3회 = 6회)"로 추정했다. **코드는 그렇지 않다.** `WorkspaceArea` 는 한 번 활성화된 워크스페이스를 계속 마운트해 둔 채 `display:none` 으로만 감추고, `PaneGrid` 도 pane 박스에 같은 처리를 한다. `TerminalView` 의 xterm/PTY 수명은 `[instanceId, profile, …]` 에 달려 있고 `resizePane` 은 pane id 를 보존한다. 따라서 워크스페이스 전환도 pane resize 도 remount 를 유발하지 않으며, `TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES` replay 는 두 경로 어디에도 없다. 남는 것은 hide→show 복귀의 atlas 재생성과 공통 fit 스케줄러를 통과하는 fit 하나다.
+issue #606은 워크스페이스 전환이 `TerminalView`를 remount하고 1 MiB snapshot을 반복 replay한다고 추정했다. 실제 소유권은 다르다. `WorkspaceArea`와 `PaneGrid`는 활성화된 surface를 마운트한 채 `display:none`으로 숨기고, pane resize도 id를 유지한다. 전환과 resize에는 attach snapshot replay가 없고, hide→show atlas 복구와 공통 fit만 있다.
 
-그래서 실제 비용은 **레이아웃 작업 자체의 절대량**이 아니라, 이미 포화 상태인 파이프라인에 그 작업이 끼어들 때 생기는 백로그다. 프론트가 delta 하나를 적용할 때마다 크기와 무관한 고정 비용을 낸다 — `terminal.write` 와 그 parse 콜백, ADR-0069 checkpoint xterm 의 별도 write, stabilizer push, `TextDecoder` 라운드, 그리고 activity/Codex/Claude 감지기의 1 KiB·16 KiB 롤링 윈도 전체 스캔. 폭주는 같은 바이트를 수천 개의 작은 delta 로 전달하므로 이 상수가 메인 스레드를 채운다. 메인 스레드가 채워지면 `automation-request` 이벤트는 같은 WebView 전달 큐에서 그 뒤에 줄을 서고, 5초 예산은 큐에서 소진된다.
+sequenced delta 하나에는 크기와 무관한 고정 비용이 있다. visible xterm write/parse, rendererless checkpoint apply, native Windows stabilizer와 WSL recognizer, cursor·alternate-buffer·activity 감지기가 작은 delta마다 호출된다. 수천 개 delta가 쌓이면 이 고정 비용과 xterm parse가 WebView event loop를 점유하고 Automation 이벤트도 같은 큐 뒤에서 굶는다.
 
-무응답의 정체를 코드로 가릴 수 없었던 이유도 분명하다. `bridge_request` 는 emit 시각에 5초 타이머를 걸고, 프론트는 그 마감 시각을 **모른다**. 마감을 넘겨 도착한 응답은 `automation_response` 가 조용히 버린다 — 프론트는 이미 답을 만드는 데 메인 스레드를 다 쓴 뒤이고, 양쪽 어디에도 그 사실이 기록되지 않는다. 그래서 "핸들러가 느린 것"과 "요청이 큐에 밀린 것"을 구분할 관측 수단이 없었고, 폴링 재시도는 같은 큐 뒤에 죽은 일감을 더 쌓았다.
+그러나 세그먼트를 stabilizer와 감지기보다 위에서 합치는 것은 단순한 성능 최적화가 아니다. native stabilizer는 원래 chunk 경계와 50 ms deadline에 의존하고, alternate-buffer 등 감지기는 `enter`와 `leave`를 순서대로 보아야 한다. 상위 apply queue가 `D/A/B` 또는 `?1049h`/`?1049l`을 한 덩어리로 만들면 원래 상태 전이가 사라질 수 있다. 또한 이전 grid용 byte가 남은 상태에서 fit을 먼저 실행하면 정확성을 잃고, 반대로 queue 전체를 한 task에서 비우면 수십 초의 메인 스레드 블록을 다시 만든다.
 
-범위는 데스크톱 프론트엔드의 sequenced output 적용 경로, 공통 fit 스케줄러의 quiet window 기준, 그리고 Automation 브리지의 마감/관측이다. PTY ring, sequence 계약, 복구 정책, 커서 게이트는 바꾸지 않는다.
+관측 경로도 부족했다. Rust는 요청 emit 후 5초를 기다리지만 프론트는 deadline을 몰랐고, 늦게 도착한 응답은 pending receiver 유무와 무관하게 조용히 사라졌다. 프론트가 멈추면 그 프론트를 왕복하는 진단 endpoint도 함께 멈추므로, stall 중에 읽을 수 있는 out-of-band 상태가 필요하다.
+
+범위는 데스크톱의 sequenced output 적용·visible xterm write FIFO·공통 fit gate·Automation bridge 관측이다. backend PTY ring, sequence/gap 복구 계약, 커서 안정화 알고리즘 자체, Remote attach wire contract는 바꾸지 않는다.
 
 ## Decision
 
-**출력 백로그는 세그먼트 단위가 아니라 바이트 단위로 값을 치른다. 그리고 프론트엔드의 상태는 프론트엔드를 경유하지 않는 경로로 읽는다.**
+**coordinator 이후의 의미 처리에는 원래 세그먼트 경계를 보존하고, explicit-safe인 ordinary live byte만 visible xterm write FIFO에서 유한하게 묶는다. 프론트 상태는 항상 켜진 reporter가 Rust로 밀어 backend-only endpoint에서 읽는다.**
 
-- **backpressure 게이트 병합.** 이미 sequence 가 확정된 세그먼트는 `TerminalOutputApplyQueue` 를 지나 표면에 닿는다. 표면이 한가하면(`pendingTerminalWrites === 0` 이고 write FIFO 가 비었으면) 즉시 적용해 대화형 지연을 바꾸지 않고, 표면이 밀려 있으면 붙들었다가 **이미 진행 중인 write 가 끝나는 시점**에 병합해서 넣는다. 트리거는 타이머가 아니라 backpressure 다 — 지연 상한은 진행 중인 parse 이고, 배치 크기는 표면이 밀린 만큼만 자란다.
-- **병합 금지 경계.** generation 변경, geometry revision 변경, sequence 불연속, 1 MiB(`TERMINAL_WRITE_CHUNK_SIZE`) 에서 병합을 거부한다. geometry 경계는 ADR-0069 checkpoint 모델이 그 사이에서 resize 해야 하는 지점이고 ADR-0072 가 복구를 거부하는 지점과 같다. sequence 구멍은 gap 논리에 계속 보여야 한다. 병합된 세그먼트의 `seqStart`/`seqEnd` 는 자기가 실은 바이트를 정확히 서술하므로 coordinator 와 checkpoint 모델의 단정에 그대로 통한다.
-- **순서는 전순서 하나다.** 도착 순서 큐 하나만 두어, 복구 범위가 자신이 앞에 splice 하는 delta 보다 먼저 표면에 닿는다. 전체 재부착은 `reset()` + ring replay 로 화면을 새로 만들므로 큐를 비운다.
-- **fit 이 출력보다 먼저다.** write 가 끝난 시점에는 보류된 fit 을 먼저 흘려보내고 그다음에 병합 배치를 넣는다. 그렇지 않으면 지속 폭주가 fit 을 무한히 굶길 수 있고, fit 을 먼저 처리하면 그 사이에 배치가 더 커져 병합 효율도 올라간다.
-- **quiet window 는 도착 시각으로 잰다.** ADR-0026 의 Windows output quiet window 는 "최근에 PTY 출력이 도착하지 않았다"는 뜻이므로 delta 도착 시점에 기록한다. write 시점에 기록하면 큐에 붙들린 세그먼트가 침묵으로 읽혀, 아직 옛 격자를 향한 출력이 큐에 남은 상태에서 fit 이 풀린다.
-- **query 는 마감을 넘기면 버리고 action 은 실행한다.** `automation-request` 에 `emittedAtMs`·`deadlineMs` 를 실어 보낸다. 마감을 넘긴 **query** 는 계산하지 않고 즉시 거절한다 — 답이 닿을 상대가 없으므로 계산은 밀린 프론트의 시간만 빼앗고, 클라이언트 재시도가 그 일감을 더 쌓는다. 마감을 넘긴 **action** 은 그대로 실행한다 — 부수효과는 여전히 호출자가 요청한 것이며, 조용히 버리면 "느린 resize" 가 "일어나지 않은 resize" 가 된다.
-- **프론트 상태는 out-of-band 로 읽는다.** WebView 가 타이머로 자기 vitals(probe 지연·stall 수·브리지 카운터·terminal 별 파이프라인 카운터)를 Rust 상태로 밀어 넣고, `GET /api/v1/diagnostics/frontend` 가 브리지 왕복 없이 그것을 서빙한다. 1차 신호는 마지막 보고의 **나이**(`lastReportAgeMs`) 다 — 큰 값은 메인 스레드가 멈춘 것이고, 작은 값 옆에서 `bridge.requestTimeouts` 만 오르면 스레드는 살아 있고 이벤트가 큐에 밀린 것이다. 마감을 넘겨 도착한 응답은 조용히 버리지 않고 `responsesOrphaned` 로 세고 누적 총계와 함께 로그로 남긴다.
-- **파이프라인 카운터는 진단 전용이다.** ADR-0072 의 복구 카운터와 같은 규율을 따른다 — 어떤 제어 경로도 읽지 않고, 수명은 백엔드 세션 하나이며 `close_terminal_session` 이 지운다.
+### 스트림 의미와 checkpoint
+
+- `TerminalOutputAttachCoordinator`가 확정한 세그먼트는 도착 순서 그대로 즉시 native Windows stabilizer/WSL recognizer와 cursor·OSC·alternate-buffer·activity 감지 경로에 전달한다. 이 계층 앞에는 지연·병합 queue를 두지 않는다.
+- rendererless checkpoint는 visible 상태 감지와 무관한 별도 parser다. 같은 generation·geometry revision의 sequence-contiguous segment만 최대 256 KiB까지 합쳐 apply할 수 있다. generation, geometry, sequence hole은 필수 경계다.
+- 복구 범위와 그 뒤 buffered delta는 coordinator가 정한 전순서를 유지한다. attach/replay와 exact repair의 callback·readiness 의미를 물리 write 배치가 바꾸지 않는다.
+
+### visible xterm write FIFO
+
+- FIFO는 single-flight다. xterm parse callback이 돌아오기 전에는 다음 physical write를 제출하지 않는다.
+- 병합은 producer가 명시적으로 허용한 `Uint8Array`, `source:"live"`, 같은 attach epoch·geometry revision인 ordinary request만 가능하다. batch key가 없으면 병합하지 않는다.
+- replay, string write, stabilized emission, cursor park deadline, authoritative frame end, composition-active write, `onParsed`/`onDiscard` callback을 가진 request는 각각 barrier다. 이 목록은 안전 추론이 아니라 allowlist다.
+- IME composition 상태는 enqueue 때 기록할 뿐 아니라 dequeue 때 다시 확인한다. 기다리는 동안 composition이 시작되면 새 batch를 만들지 않는다. 이미 materialize되어 backpressure로 복원된 multi-part batch는 byte identity를 유지하기 위해 composition 종료까지 기다린다.
+- 한 physical write는 최대 128 logical part·256 KiB다. write callback 뒤 다음 batch는 `setTimeout(0)`의 새 macrotask에서 제출해 Automation·input·paint가 끼어들 기회를 둔다. 대화형 idle path의 첫 request는 즉시 제출한다.
+- xterm이 동기 backpressure를 반환하면 materialize된 같은 batch 객체와 같은 buffer를 FIFO head에 복원하고 16 ms 뒤 재시도한다. 성공적으로 받아들인 `terminal.write`만 physical write·byte metric에 센다.
+- 전체 reattach/unmount는 아직 제출하지 않은 old-epoch request를 discard하고 parsed waiter는 `onDiscard`로 정확히 한 번 종결한다. 이미 xterm이 받아들인 in-flight write는 취소할 수 없으므로 parse callback까지 기다린 뒤 replacement attach의 `reset()`을 실행하고, attach epoch로 stale parse context도 격리한다. 비동기 checkpoint await를 통과한 뒤 visible enqueue 직전에 epoch를 다시 검사하며, replay snapshot도 queue에서 폐기될 때 waiter를 종결한다. snapshot에 포함된 old byte가 reset 뒤 다시 쓰이거나 폐기된 waiter가 attach chain을 영구히 막는 것을 모두 금지한다.
+
+### fit 정확성 우선순위
+
+- Windows quiet window의 기준은 xterm write 시각이 아니라 sequenced delta가 적용 경로에 도착한 시각이다. backpressure 때문에 늦게 쓰인 byte를 가짜 침묵으로 해석하지 않는다.
+- grid를 바꾸는 fit은 attach parser, exact repair, native stabilizer transaction과 open lexical sequence, in-flight write, queued write가 모두 끝날 때까지 실행하지 않는다. standalone split ESC/CSI는 완결 byte가 오거나 lifecycle reset이 일어날 때까지 prefix를 stabilizer에 보류하며 유한 timeout으로 old-grid와 new-grid 사이에 쪼개지 않는다. xterm에 이미 fail-open된 partial sequence도 실제 final/terminator가 올 때까지 fit barrier로 남는다. 이전 grid용 byte가 visible FIFO에 남은 채 새 grid로 넘어가는 것보다 fit 지연을 선택한다.
+- 이 선택은 sustained flood에서 fit이 오래 굶을 수 있음을 인정한다. 출력 손실 없이 fit도 유한 시간 안에 보장하려면 backend가 old-geometry stream을 원자적으로 닫고 new-geometry stream을 여는 two-phase cutover가 필요하며, 이는 issue #623의 별도 결정 범위다. 이 PR에서 타이머로 정확성 gate를 우회하지 않는다.
+
+### Automation deadline과 out-of-band 진단
+
+- Rust는 `automation-request`에 `emittedAtMs`와 `deadlineMs`를 싣는다. deadline을 넘긴 query는 계산하지 않고 expired 응답을 시도하며, action은 호출자가 요청한 부수효과를 잃지 않도록 실행한다.
+- frontend response IPC가 resolve된 뒤에만 `responsesSent`를 센다. IPC 거절은 `responsesFailed`다. Rust는 pending sender를 찾은 것만으로 matched라 하지 않고 oneshot send가 성공한 뒤 `responsesMatched`를 센다. receiver가 없거나 send가 실패하면 `responsesOrphaned`와 누적 로그를 남긴다.
+- App-level bridge hook은 250 ms self-rescheduling probe와 1초 health report를 항상 소유한다. probe 지연, stall 수, bridge counter, terminal별 pipeline counter를 `report_frontend_health`로 Rust 상태에 push한다. report 실패는 다음 tick에서 재시도하고 probe 자체를 중단하지 않는다.
+- `GET /api/v1/diagnostics/frontend`는 WebView bridge를 거치지 않고 Rust의 마지막 report와 Rust bridge counter를 반환한다. mutex poison은 “아직 report 없음”으로 위장하지 않고 command error 또는 JSON HTTP 500으로 드러낸다.
+- 진단 payload는 byte stream·경로·설정을 담지 않고 수치와 terminal id만 담으며 ADR-0002의 기존 IP allowlist를 그대로 적용한다. 어떤 control path도 이 metric으로 동작을 바꾸지 않는다.
 
 ## Alternatives Considered
 
-- **워크스페이스 전환에서 재부착을 없앤다 / replay 예산 상한을 둔다**: issue #606 이 지목한 후보지만 **그 경로에 재부착이 없다.** 전환은 `display:none` 토글이고 xterm·PTY 는 계속 산다. `attachReplayBytes`·`attaches` 카운터를 남겨 이 판정을 실기에서도 확인할 수 있게 했다.
-- **delta 를 시간 창(microtask/rAF/타이머)으로 묶는다**: Tauri 는 이벤트마다 별도 스크립트를 실행하므로 microtask 창으로는 아무것도 묶이지 않고, 타이머 창은 한가할 때도 대화형 출력에 지연을 더한다. backpressure 는 비용이 실제로 발생한 순간에만 병합한다.
-- **PTY 출력을 백엔드에서 더 큰 청크로 합쳐 emit 한다**: 전달 비용은 줄지만 폭주 단독이 이미 0초이므로 관측된 결함의 원인이 아니고, ADR-0072 의 sequence·gap 계약과 backend ring 타이밍을 함께 건드린다. 프론트 상수를 먼저 줄이고, 파이프라인 카운터가 전달 병목을 지목하면 그때 별도 결정으로 다룬다.
-- **브리지 타임아웃을 늘린다**: 5초는 이미 `LONGEST_HANDLER_WAIT`(3.5초) 위에 잡힌 값이다. 42~87초를 덮으려면 예산이 무의미해지고, 스톨을 감추기만 한다.
-- **`automation-request` 를 전용 채널로 옮긴다**: 전달 큐의 head-of-line 은 줄겠지만 핸들러가 도는 스레드가 같으므로 스톨 자체는 남고, IPC 계약이 하나 늘어난다. 먼저 스레드를 비우는 쪽을 택했다.
-- **마감을 넘긴 요청을 종류 구분 없이 모두 버린다**: 구현은 더 단순하지만 늦게라도 반영되던 action 이 사라져 자동화의 의미가 바뀐다.
+- **coordinator 뒤에 상위 `TerminalOutputApplyQueue`를 두고 세그먼트 전체를 병합한다**: checkpoint와 xterm 호출 수를 크게 줄이지만 stabilizer chunk/deadline, ordered detector transition, repair callback 시점을 바꾼다. 리뷰 회귀 테스트에서 native `?25h` deadline과 alternate-buffer enter→leave 상태를 깨뜨려 기각했다.
+- **write가 밀린 동안 queue 전체를 한 번에 합친다**: physical write 수는 최소지만 batch materialization과 parse의 상한이 없어 event loop를 다시 장시간 독점한다. 128 part·256 KiB와 macrotask yield를 선택했다.
+- **보류 fit을 queued output보다 먼저 실행한다**: 지속 폭주에서 fit starvation을 피하지만 old-grid byte를 new grid에 파싱한다. terminal cell 정확성을 우선하고 atomic geometry cutover를 후속으로 분리했다.
+- **시간 창(microtask/rAF/고정 timer)으로 delta를 묶는다**: Tauri event마다 별도 task라 microtask는 event 사이를 묶지 못하고, 고정 timer는 idle 대화형 출력에도 지연을 더한다. 실제 xterm backpressure FIFO에서만 묶는다.
+- **backend가 더 큰 PTY chunk를 emit한다**: frontend 전달 비용은 줄지만 ring/sequence timing과 subscriber 계약을 함께 바꾼다. 이 PR의 관측치가 backend emit을 병목으로 지목하기 전에는 범위를 넓히지 않는다.
+- **Automation timeout만 늘린다**: 수십 초 stall을 감추고 죽은 query 재시도를 더 쌓을 뿐 원인을 줄이거나 stall 중 관측을 제공하지 않는다.
+- **진단도 기존 Automation bridge로 요청한다**: 가장 필요한 WebView stall 동안 함께 timeout되므로 목적을 달성하지 못한다.
 
 ## Consequences
 
-- 폭주 중 도착한 delta 수천 개가 한 번의 `terminal.write`·한 번의 checkpoint write·한 번의 감지기 스캔으로 정리되므로, 레이아웃 변경이 만든 블로킹이 회복 불가능한 백로그로 증폭되지 않는다. 한가한 표면의 지연은 변하지 않는다(첫 delta 는 즉시 통과).
-- 복구 단정은 **write 횟수**가 아니라 **바이트 스트림**의 계약이 된다. 복구 범위와 그 뒤 delta 가 한 write 로 합쳐지므로, 기존 테스트의 write 단위 단정을 스트림 단위로 옮겼다. 이후 배치 정책이 바뀌어도 같은 단정이 유지된다.
-- geometry revision 경계가 병합 경계이므로 resize 가 잦으면 병합 효율이 떨어진다. 이는 의도된 안전 쪽 절충이다 — checkpoint 모델이 그 경계에서 resize 해야 한다.
-- `/api/v1/diagnostics/frontend` 는 노출 표면을 하나 늘린다. 응답은 카운터와 지연 수치뿐이고 터미널 바이트·경로·설정을 담지 않으며, 기존 IP allowlist 아래 있다.
-- probe 는 250 ms 주기로 돌고 보고는 1초에 한 번(또는 500 ms 이상 지연된 tick 직후)이므로 IPC 부하가 상시로 조금 늘어난다. 대신 스톨을 **일어나는 중에** 읽을 수 있다.
-- 마감을 넘긴 query 는 이제 `Frontend request expired` 로 거절되지만, 그 HTTP 호출자는 이미 `504` 를 받은 뒤다 — 외부 계약은 바뀌지 않는다.
-- 테스트는 (1) 병합 산술과 금지 경계, (2) 실제 xterm 에서 병합 전후 셀 격자 동일성(escape 분할·wrap/scrollback·전각·alternate buffer 포함, [ADR-0074](0074-xterm-cell-grid-screen-test-tier.md) 계층), (3) 표면이 밀린 동안 도착한 delta 가 한 write 로 합쳐진다는 컴포넌트 계약, (4) 재부착 시 큐 폐기, (5) 마감 넘긴 query 거절 / action 실행, (6) 진단 스냅샷의 브리지 카운터와 보고 나이를 고정한다.
-- 재검토 조건: `segmentsIn / segmentsOut` 비가 1 에 가까운데도 스톨이 남으면 병합이 잘못된 층에 있다는 뜻이고, `lastReportAgeMs` 는 작은데 `requestTimeouts` 만 오르면 전달 큐 분리(위 기각안)로 넘어가야 한다.
+- 커서 stabilizer·DEC 2026 lifecycle gate·alternate-buffer/activity detector는 최적화 전과 같은 logical 경계와 순서를 받는다. 성능 최적화가 cursor state machine의 입력 계약을 바꾸지 않는다.
+- visible xterm의 ordinary flood는 bounded batch로 physical write 수와 parse callback 수를 줄이면서 batch마다 event loop에 양보한다. checkpoint도 안전한 contiguous prefix만 별도로 묶는다. stabilizer와 감지기의 per-segment 비용은 남으므로 전체 pipeline이 O(bytes)라고 주장하지 않는다.
+- 256 KiB·128 part는 메인 스레드 점유와 병합률의 운영 상수다. `writeQueueMaxDepth/Bytes`, `writeBatchMaxParts`, `writeSubmitMaxMs`, `xtermParseMaxMs`가 재검토 근거다.
+- fit은 stream/grid 정확성을 위해 queue drain을 기다린다. sustained flood에서 유한 fit latency까지 보장하지 않으며, 그 요구는 issue #623의 atomic cutover 설계와 함께 재검토한다.
+- `/api/v1/diagnostics/frontend`와 `report_frontend_health`가 외부·IPC 계약을 늘리고 상시 소량의 timer/IPC 비용을 만든다. 대신 stall이 진행 중일 때 `lastReportAgeMs`를 읽고 handler 지연과 event-queue starvation을 구분할 수 있다.
+- 테스트는 queue allowlist/barrier/상한/backpressure identity, 원래 stabilizer transaction deadline·standalone pending-sequence barrier와 detector 순서, IME composition 중 물리 경계, old-grid write-before-fit, reattach의 queued discard+in-flight drain·checkpoint epoch cutover·replay waiter 종결, exact repair byte stream, 실제 xterm checkpoint 셀 격자와 split-CSI/resize 순서 차이, bridge absolute deadline·send 실패·orphan 분류, reporter stall/recovery를 고정한다.
+- 실제 stress A/B 수치는 최종 구현으로 다시 측정해야 한다. 리뷰 전 상위 apply queue 구현의 수치를 이 결정의 성능 증거로 재사용하지 않는다.

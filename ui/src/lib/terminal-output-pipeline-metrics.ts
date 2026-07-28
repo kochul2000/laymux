@@ -21,20 +21,26 @@ export interface TerminalOutputPipelineCounters {
   deltaEvents: number;
   /** Bytes those events carried. */
   deltaBytes: number;
-  /** Segments handed to the apply path before coalescing. */
+  /** Coordinator segments handed to the live apply path. */
   segmentsIn: number;
-  /** Segments left after coalescing — i.e. actual xterm/checkpoint writes. */
-  segmentsOut: number;
-  /** Deepest apply backlog observed, in segments. */
-  applyQueueMaxDepth: number;
+  /** Logical visible-write requests emitted after stabilizer processing. */
+  writeRequests: number;
   /** `terminal.write` calls made on the visible xterm. */
   xtermWrites: number;
   /** Bytes those writes carried. */
   xtermWriteBytes: number;
-  /** Deepest `deferredTerminalWrites` FIFO depth observed. */
+  /** Deepest logical visible-write FIFO depth observed. */
   writeQueueMaxDepth: number;
+  /** Largest pending visible-write byte backlog. */
+  writeQueueMaxBytes: number;
+  /** Most logical requests combined into one physical xterm write. */
+  writeBatchMaxParts: number;
   /** Times xterm refused a write with backpressure and the chunk was retried. */
   writeBackpressure: number;
+  /** Longest synchronous batch preparation plus xterm submission, in ms. */
+  writeSubmitMaxMs: number;
+  /** Longest accepted xterm write took to invoke its parse callback, in ms. */
+  xtermParseMaxMs: number;
   /** `apply()` calls on the rendererless checkpoint model (ADR-0069). */
   checkpointApplies: number;
   /** `fitAddon.fit()` calls that actually ran. */
@@ -55,12 +61,15 @@ const COUNTERS: readonly TerminalOutputPipelineCounterName[] = [
   "deltaEvents",
   "deltaBytes",
   "segmentsIn",
-  "segmentsOut",
-  "applyQueueMaxDepth",
+  "writeRequests",
   "xtermWrites",
   "xtermWriteBytes",
   "writeQueueMaxDepth",
+  "writeQueueMaxBytes",
+  "writeBatchMaxParts",
   "writeBackpressure",
+  "writeSubmitMaxMs",
+  "xtermParseMaxMs",
   "checkpointApplies",
   "fits",
   "fitDeferredMaxMs",
@@ -71,8 +80,11 @@ const COUNTERS: readonly TerminalOutputPipelineCounterName[] = [
 
 /** Counters whose meaning is "high-water mark", not "running total". */
 const MAX_COUNTERS = new Set<TerminalOutputPipelineCounterName>([
-  "applyQueueMaxDepth",
   "writeQueueMaxDepth",
+  "writeQueueMaxBytes",
+  "writeBatchMaxParts",
+  "writeSubmitMaxMs",
+  "xtermParseMaxMs",
   "fitDeferredMaxMs",
 ]);
 

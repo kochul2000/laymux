@@ -14,6 +14,8 @@ describe("terminalOutputPipelineCounters", () => {
     const counters = terminalOutputPipelineCounters("nobody");
     expect(counters.deltaEvents).toBe(0);
     expect(counters.attachReplayBytes).toBe(0);
+    expect(counters.writeRequests).toBe(0);
+    expect(counters.xtermParseMaxMs).toBe(0);
     expect(Object.values(counters).every((value) => value === 0)).toBe(true);
   });
 
@@ -30,16 +32,22 @@ describe("terminalOutputPipelineCounters", () => {
   });
 
   it("keeps high-water marks instead of summing them", () => {
-    recordTerminalOutputPipeline("t1", "applyQueueMaxDepth", 12);
-    recordTerminalOutputPipeline("t1", "applyQueueMaxDepth", 5);
-    recordTerminalOutputPipeline("t1", "applyQueueMaxDepth", 40);
     recordTerminalOutputPipeline("t1", "writeQueueMaxDepth", 3);
+    recordTerminalOutputPipeline("t1", "writeQueueMaxBytes", 4096);
+    recordTerminalOutputPipeline("t1", "writeQueueMaxBytes", 2048);
+    recordTerminalOutputPipeline("t1", "writeBatchMaxParts", 12);
+    recordTerminalOutputPipeline("t1", "writeSubmitMaxMs", 4.5);
+    recordTerminalOutputPipeline("t1", "xtermParseMaxMs", 18);
+    recordTerminalOutputPipeline("t1", "xtermParseMaxMs", 7);
     recordTerminalOutputPipeline("t1", "fitDeferredMaxMs", 900);
     recordTerminalOutputPipeline("t1", "fitDeferredMaxMs", 120);
 
     const counters = terminalOutputPipelineCounters("t1");
-    expect(counters.applyQueueMaxDepth).toBe(40);
     expect(counters.writeQueueMaxDepth).toBe(3);
+    expect(counters.writeQueueMaxBytes).toBe(4096);
+    expect(counters.writeBatchMaxParts).toBe(12);
+    expect(counters.writeSubmitMaxMs).toBe(4.5);
+    expect(counters.xtermParseMaxMs).toBe(18);
     expect(counters.fitDeferredMaxMs).toBe(900);
   });
 

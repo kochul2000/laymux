@@ -1,26 +1,20 @@
 import type { TerminalOutputAppliedSegment } from "./terminal-output-attach-coordinator";
+import { TERMINAL_WRITE_BATCH_MAX_BYTES } from "./terminal-write-batch-queue";
 
 /**
  * Largest merged segment the coalescer will build.
  *
- * Mirrors `TERMINAL_WRITE_CHUNK_SIZE` in `TerminalView`: a merged segment is
- * handed straight to one `terminal.write`, and that FIFO already refuses to
- * hand xterm more than 1 MiB at a time (ADR-0026). Merging past the budget
- * would only be re-split one layer down.
+ * Shared with the visible xterm write FIFO so both renderer-facing parsers get
+ * bounded chunks. The checkpoint merge is independent from visible-write
+ * batching: stabilizers and state detectors still consume original boundaries.
  */
-export const TERMINAL_OUTPUT_COALESCE_MAX_BYTES = 1024 * 1024;
+export const TERMINAL_OUTPUT_COALESCE_MAX_BYTES = TERMINAL_WRITE_BATCH_MAX_BYTES;
 
 /**
- * Merge byte-contiguous output segments so a backlog costs O(bytes), not
- * O(deltas) (issue #606).
- *
- * Every applied segment pays a per-segment constant that has nothing to do with
- * its size: one `terminal.write` plus its parse callback, one headless
- * checkpoint-model write (ADR-0069), one stabilizer push, one `TextDecoder`
- * round, and a full sweep of the activity/Codex/Claude detectors over their
- * 1 KiB / 16 KiB rolling windows. During an output flood those constants — not
- * the byte count — dominate the frontend main thread, so a backlog of small
- * deltas is far more expensive than the same bytes in one delta.
+ * Merge byte-contiguous output segments for the rendererless checkpoint model
+ * (issue #606, ADR-0080). This helper must not sit above
+ * `processLiveTerminalOutput`: native stabilization depends on both arrival time
+ * and chunk boundaries, and the state detectors observe each emission in order.
  *
  * Merging is only ever legal where the stream is genuinely one run of bytes on
  * one grid, so a merge is refused at:

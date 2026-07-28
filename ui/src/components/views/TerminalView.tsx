@@ -207,9 +207,13 @@ import {
   recordTerminalOutputRecovery,
   type TerminalOutputRecoveryEvent,
 } from "@/lib/terminal-output-recovery-metrics";
-import { TerminalOutputApplyQueue } from "@/lib/terminal-output-apply-queue";
 import { coalesceTerminalOutputSegments } from "@/lib/terminal-output-coalesce";
 import { recordTerminalOutputPipeline } from "@/lib/terminal-output-pipeline-metrics";
+import {
+  TERMINAL_WRITE_BATCH_MAX_BYTES,
+  TerminalWriteBatchQueue,
+  type PreparedTerminalWriteBatch,
+} from "@/lib/terminal-write-batch-queue";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -234,8 +238,6 @@ const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
 const REMOTE_RETURN_RESIZE_TIMEOUT_MS = 1000;
 const REMOTE_RETURN_RESIZE_RETRY_MS = 100;
 
-/** Keep retry chunks comfortably below xterm's 50 MB discard watermark. */
-const TERMINAL_WRITE_CHUNK_SIZE = 1024 * 1024;
 const TERMINAL_WRITE_RETRY_MS = 16;
 
 /**
@@ -1491,6 +1493,10 @@ export function TerminalView({
         terminal.refresh(0, terminal.rows - 1);
       }
     };
+    // Installed once the output FIFO is constructed below. A restored multi-part
+    // batch is intentionally held while IME composition is active, then resumed
+    // from this lifecycle edge without reaching through React state.
+    let resumeDeferredTerminalWrites: (() => void) | undefined;
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
       // The cursor the app left after its last settled repaint. Raw buffer cursor,
@@ -1615,6 +1621,7 @@ export function TerminalView({
         overlayCaretUpdaterRef.current?.();
         if (!state.active) {
           scheduleShadowCursorSync();
+          resumeDeferredTerminalWrites?.();
         }
       },
     });
@@ -2965,10 +2972,16 @@ export function TerminalView({
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
     const wslInFrameCursorParkRecognizer = new WslInFrameCursorParkRecognizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
+    let flushDeferredTerminalFit: () => void = () => {};
     let outputStabilizerDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let stabilizedRefreshFrame: number | undefined;
     let deliverStabilizedEmissions:
-      | ((emissions: StabilizedOutputEmission[], onParsed?: () => void) => void)
+      | ((
+          emissions: StabilizedOutputEmission[],
+          onParsed?: () => void,
+          onDiscard?: () => void,
+          geometryRevision?: number,
+        ) => void)
       | undefined;
     const pendingStabilizerParsedCallbacks = new DeferredParsedCallbackQueue();
     let suppressBackendResizeDuringFit = false;
@@ -2986,8 +2999,12 @@ export function TerminalView({
         () => {
           outputStabilizerDeadlineTimer = undefined;
           const emissions = nativeWindowsOutputStabilizer.flushExpired(monotonicNow());
-          deliverStabilizedEmissions?.(emissions, pendingStabilizerParsedCallbacks.drain());
+          const callbacks = nativeWindowsOutputStabilizer.hasHeldBytes
+            ? undefined
+            : pendingStabilizerParsedCallbacks.drain();
+          deliverStabilizedEmissions?.(emissions, callbacks?.onParsed, callbacks?.onDiscard);
           scheduleOutputStabilizerDeadline();
+          flushDeferredTerminalFit();
         },
         Math.max(0, deadline - monotonicNow()),
       );
@@ -3093,44 +3110,11 @@ export function TerminalView({
       frameEndCursorAuthoritative?: boolean;
       stabilized?: boolean;
       attachEpoch?: number;
+      geometryRevision?: number;
+      compositionActive?: boolean;
+      needsSyncOutputMonitor?: boolean;
     };
-    type DeferredTerminalWrite = TerminalWriteMetadata & {
-      data: string | Uint8Array;
-      onParsed?: () => void;
-      warned: boolean;
-    };
-    const deferredTerminalWrites: DeferredTerminalWrite[] = [];
-    const parsingTerminalWrites: DeferredTerminalWrite[] = [];
-    /**
-     * Backpressure-gated apply queue: merges an output backlog instead of paying
-     * the per-segment constant thousands of times (issue #606, ADR-0080). Lives
-     * here, beside the write FIFO it is driven by — the moment xterm finishes a
-     * write is exactly the moment a merged batch should go in. See
-     * {@link TerminalOutputApplyQueue} for why the cost is per-segment, and
-     * `applyOutputSegments` below for the producer side.
-     *
-     * `apply` closes over the checkpoint model and the live-output path declared
-     * further down; every call reaches this queue asynchronously, well after the
-     * effect body has finished.
-     */
-    const outputApplyQueue = new TerminalOutputApplyQueue({
-      isSurfaceBusy: () => pendingTerminalWrites > 0 || deferredTerminalWrites.length > 0,
-      onDepth: (depth) => recordTerminalOutputPipeline(instanceId, "applyQueueMaxDepth", depth),
-      apply: (segments) => {
-        if (cancelled) return;
-        recordTerminalOutputPipeline(instanceId, "segmentsOut", segments.length);
-        // Enqueue every checkpoint write synchronously: listener callbacks can
-        // interleave with the awaits inside the model, and the visible xterm's own
-        // FIFO already fixes the order for the surface.
-        for (const segment of segments) {
-          recordTerminalOutputPipeline(instanceId, "checkpointApplies");
-          void renderCheckpointModel.apply(segment).catch((error) => {
-            console.warn("[TerminalView] render checkpoint update failed:", error);
-          });
-          processLiveTerminalOutput(segment.data);
-        }
-      },
-    });
+    const terminalWriteQueue = new TerminalWriteBatchQueue<TerminalWriteMetadata>();
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
@@ -3300,12 +3284,14 @@ export function TerminalView({
         scheduleOverlayCaretUpdate();
       }
     };
-    const flushDeferredTerminalFit = () => {
+    flushDeferredTerminalFit = () => {
       if (
         cancelled ||
         outputAttachParserBusy ||
+        outputRepairInFlight ||
+        nativeWindowsOutputStabilizer.hasOpenSequence ||
         pendingTerminalWrites > 0 ||
-        deferredTerminalWrites.length > 0 ||
+        terminalWriteQueue.depth > 0 ||
         !deferredTerminalFit
       ) {
         return;
@@ -3365,10 +3351,11 @@ export function TerminalView({
         terminalWriteRetryTimer = undefined;
       }
     };
-    const scheduleDeferredTerminalWriteRetry = () => {
+    const scheduleTerminalWritePump = (delayMs = 0) => {
       if (
         cancelled ||
-        deferredTerminalWrites.length === 0 ||
+        pendingTerminalWrites > 0 ||
+        terminalWriteQueue.depth === 0 ||
         terminalWriteRetryTimer !== undefined
       ) {
         return;
@@ -3376,39 +3363,40 @@ export function TerminalView({
       terminalWriteRetryTimer = setTimeout(() => {
         terminalWriteRetryTimer = undefined;
         flushDeferredTerminalWrites();
-      }, TERMINAL_WRITE_RETRY_MS);
+      }, delayMs);
     };
-    const tryTerminalWrite = (request: DeferredTerminalWrite) => {
-      recordTerminalOutputPipeline(instanceId, "xtermWrites");
-      recordTerminalOutputPipeline(instanceId, "xtermWriteBytes", request.data.length);
-      pendingTerminalWrites += 1;
-      parsingTerminalWrites.push(request);
-      if (parsingTerminalWrites.length === 1) {
-        currentParsingWriteSource = request.source;
-        currentParsingParkDeadline = request.parkDeadline;
-        currentParsingFrameEndCursorAuthoritative = request.frameEndCursorAuthoritative === true;
-        currentParsingAttachEpoch = request.attachEpoch;
-      }
+    const clearCurrentParsingWrite = () => {
+      currentParsingWriteSource = undefined;
+      currentParsingParkDeadline = undefined;
+      currentParsingFrameEndCursorAuthoritative = false;
+      currentParsingAttachEpoch = undefined;
+    };
+    const tryTerminalWrite = (batch: PreparedTerminalWriteBatch<TerminalWriteMetadata>) => {
+      const submittedAt = monotonicNow();
+      pendingTerminalWrites = 1;
+      currentParsingWriteSource = batch.metadata.source;
+      currentParsingParkDeadline = batch.metadata.parkDeadline;
+      currentParsingFrameEndCursorAuthoritative =
+        batch.metadata.frameEndCursorAuthoritative === true;
+      currentParsingAttachEpoch = batch.metadata.attachEpoch;
       try {
-        terminal.write(request.data, () => {
-          pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-          if (parsingTerminalWrites[0] === request) {
-            parsingTerminalWrites.shift();
-          } else {
-            const index = parsingTerminalWrites.indexOf(request);
-            if (index >= 0) parsingTerminalWrites.splice(index, 1);
-          }
-          currentParsingWriteSource = parsingTerminalWrites[0]?.source;
-          currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
-          currentParsingFrameEndCursorAuthoritative =
-            parsingTerminalWrites[0]?.frameEndCursorAuthoritative === true;
-          currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
+        terminal.write(batch.data, () => {
+          recordTerminalOutputPipeline(
+            instanceId,
+            "xtermParseMaxMs",
+            Math.max(0, monotonicNow() - submittedAt),
+          );
+          pendingTerminalWrites = 0;
+          clearCurrentParsingWrite();
           try {
-            request.onParsed?.();
+            if (batch.entries.some(({ metadata }) => metadata.needsSyncOutputMonitor === true)) {
+              startSyncOutputMonitor();
+            }
+            for (const entry of batch.entries) entry.onParsed?.();
             if (
-              request.stabilized &&
+              batch.metadata.stabilized &&
               !cancelled &&
-              request.attachEpoch === outputAttachEpoch &&
+              batch.metadata.attachEpoch === outputAttachEpoch &&
               terminal.rows > 0
             ) {
               if (isContainerHiddenRef.current) {
@@ -3422,7 +3410,7 @@ export function TerminalView({
                   stabilizedRefreshFrame = undefined;
                   if (
                     !cancelled &&
-                    request.attachEpoch === outputAttachEpoch &&
+                    batch.metadata.attachEpoch === outputAttachEpoch &&
                     terminal.rows > 0
                   ) {
                     if (isContainerHiddenRef.current) {
@@ -3435,86 +3423,130 @@ export function TerminalView({
               }
             }
           } finally {
-            scheduleDeferredTerminalWriteRetry();
-            // Fit before output: a deferred fit already lost this drain window
-            // once, and letting the next merged output batch in first would let a
-            // sustained flood starve it indefinitely. Draining the fit first also
-            // widens the batch the flush below gets to merge.
-            flushDeferredTerminalFit();
-            if (!cancelled) outputApplyQueue.flush();
+            if (terminalWriteQueue.depth > 0) {
+              // One physical write per task keeps automation/input responsive
+              // while a flood drains; the fixed batch budget bounds each task.
+              scheduleTerminalWritePump();
+            } else {
+              clearTerminalWriteRetryTimer();
+              flushDeferredTerminalFit();
+            }
           }
         });
+        // `terminal.write` throws synchronously when xterm rejects backpressure.
+        // Count only accepted physical writes, never failed attempts or retries.
+        recordTerminalOutputPipeline(instanceId, "xtermWrites");
+        recordTerminalOutputPipeline(instanceId, "xtermWriteBytes", batch.byteLength);
+        recordTerminalOutputPipeline(instanceId, "writeBatchMaxParts", batch.partCount);
+        recordTerminalOutputPipeline(
+          instanceId,
+          "writeSubmitMaxMs",
+          Math.max(0, monotonicNow() - submittedAt),
+        );
         return true;
       } catch (error) {
-        pendingTerminalWrites = Math.max(0, pendingTerminalWrites - 1);
-        const index = parsingTerminalWrites.indexOf(request);
-        if (index >= 0) parsingTerminalWrites.splice(index, 1);
-        currentParsingWriteSource = parsingTerminalWrites[0]?.source;
-        currentParsingParkDeadline = parsingTerminalWrites[0]?.parkDeadline;
-        currentParsingFrameEndCursorAuthoritative =
-          parsingTerminalWrites[0]?.frameEndCursorAuthoritative === true;
-        currentParsingAttachEpoch = parsingTerminalWrites[0]?.attachEpoch;
-        if (!request.warned) {
-          request.warned = true;
+        pendingTerminalWrites = 0;
+        clearCurrentParsingWrite();
+        if (!batch.warned) {
+          batch.warned = true;
           console.warn("[TerminalView] xterm write failed:", error);
         }
         const backpressure = isXtermWriteBackpressure(error);
-        if (backpressure) recordTerminalOutputPipeline(instanceId, "writeBackpressure");
+        if (backpressure) {
+          recordTerminalOutputPipeline(instanceId, "writeBackpressure");
+          terminalWriteQueue.restore(batch);
+        } else {
+          for (const entry of batch.entries) entry.onDiscard?.();
+        }
         return !backpressure;
       }
     };
     function flushDeferredTerminalWrites() {
-      if (cancelled) return;
-      while (deferredTerminalWrites.length > 0) {
-        if (!tryTerminalWrite(deferredTerminalWrites[0])) {
-          scheduleDeferredTerminalWriteRetry();
-          return;
+      if (cancelled || pendingTerminalWrites > 0) return;
+      const batch = terminalWriteQueue.dequeue(
+        terminalWriteQueue.lastEnqueuedId,
+        !compositionPreviewRef.current.active,
+      );
+      if (!batch) {
+        if (terminalWriteQueue.depth === 0) {
+          clearTerminalWriteRetryTimer();
+          flushDeferredTerminalFit();
         }
-        deferredTerminalWrites.shift();
+        return;
       }
-      clearTerminalWriteRetryTimer();
-      flushDeferredTerminalFit();
-      if (!cancelled) outputApplyQueue.flush();
+      if (!tryTerminalWrite(batch)) {
+        scheduleTerminalWritePump(TERMINAL_WRITE_RETRY_MS);
+        return;
+      }
+      // Test doubles may invoke xterm's callback synchronously. Production waits
+      // for that callback; in either case the next accepted write starts in a new
+      // macrotask rather than recursively draining the entire backlog.
+      if (pendingTerminalWrites === 0) {
+        if (terminalWriteQueue.depth > 0) {
+          scheduleTerminalWritePump();
+        } else {
+          // A synchronous accepted callback already reached this gate, making
+          // this a no-op. A non-backpressure synchronous failure has no callback,
+          // so this explicit path preserves the old fail-open fit release.
+          clearTerminalWriteRetryTimer();
+          flushDeferredTerminalFit();
+        }
+      }
     }
     const trackedTerminalWrite = (
       data: string | Uint8Array,
       onParsed?: () => void,
       metadata: TerminalWriteMetadata = { source: "replay" },
+      onDiscard?: () => void,
     ) => {
       const chunks: Array<string | Uint8Array> = [];
-      if (metadata.stabilized) {
+      if (metadata.stabilized || typeof data === "string") {
         // The stabilizer already bounds this request to 1 MiB. Keep the frame
         // end and exact cursor restore in one xterm write so its parser cannot
         // paint the transient footer cursor between chunk callbacks.
         chunks.push(data);
       } else {
-        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_CHUNK_SIZE) {
-          chunks.push(
-            data.slice(offset, offset + TERMINAL_WRITE_CHUNK_SIZE) as string | Uint8Array,
-          );
+        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_BATCH_MAX_BYTES) {
+          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_BATCH_MAX_BYTES) as Uint8Array);
         }
       }
       if (chunks.length === 0) chunks.push(data);
-      recordTerminalOutputPipeline(
-        instanceId,
-        "writeQueueMaxDepth",
-        deferredTerminalWrites.length + chunks.length,
-      );
-      const queueWasEmpty = deferredTerminalWrites.length === 0;
+      recordTerminalOutputPipeline(instanceId, "writeRequests");
+      const queueWasEmpty = terminalWriteQueue.depth === 0;
+      const requestMetadata: TerminalWriteMetadata = {
+        ...metadata,
+        compositionActive: compositionPreviewRef.current.active,
+      };
+      const batchKey =
+        metadata.source === "live"
+          ? `${metadata.attachEpoch ?? -1}:${metadata.geometryRevision ?? -1}`
+          : undefined;
       chunks.forEach((chunk, index) => {
-        deferredTerminalWrites.push({
+        terminalWriteQueue.enqueue({
           data: chunk,
+          metadata: requestMetadata,
+          batchKey,
+          allowCoalescing: batchKey !== undefined,
           onParsed: index === chunks.length - 1 ? onParsed : undefined,
-          warned: false,
-          ...metadata,
+          onDiscard: index === chunks.length - 1 ? onDiscard : undefined,
         });
       });
-      if (queueWasEmpty) flushDeferredTerminalWrites();
+      recordTerminalOutputPipeline(instanceId, "writeQueueMaxDepth", terminalWriteQueue.depth);
+      recordTerminalOutputPipeline(instanceId, "writeQueueMaxBytes", terminalWriteQueue.bytes);
+      if (pendingTerminalWrites === 0) {
+        if (queueWasEmpty) flushDeferredTerminalWrites();
+        else scheduleTerminalWritePump();
+      }
     };
     const trackedTerminalWriteAsync = (
       data: string | Uint8Array,
       metadata: TerminalWriteMetadata = { source: "replay" },
-    ) => new Promise<void>((resolve) => trackedTerminalWrite(data, resolve, metadata));
+    ) => new Promise<void>((resolve) => trackedTerminalWrite(data, resolve, metadata, resolve));
+    resumeDeferredTerminalWrites = () => {
+      if (pendingTerminalWrites === 0 && terminalWriteQueue.depth > 0) {
+        scheduleTerminalWritePump();
+      }
+    };
     let unlistenOutput: (() => void) | undefined;
     let outputListenerReady: Promise<void> = Promise.resolve();
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3570,18 +3602,15 @@ export function TerminalView({
       data: Uint8Array,
       onParsed?: () => void,
       metadata: TerminalWriteMetadata = { source: "live" },
+      onDiscard?: () => void,
     ) => {
       if (cancelled) return;
       if (data.length === 0) return;
-      lastTerminalOutputAt = Date.now();
-      clearDeferredResizeQuietTimer();
       trackedTerminalWrite(
         data,
-        () => {
-          startSyncOutputMonitor();
-          onParsed?.();
-        },
-        metadata,
+        onParsed,
+        { ...metadata, needsSyncOutputMonitor: true },
+        onDiscard,
       );
       const text = streamDecoder.decode(data, { stream: true });
       const previousOutputTail = recentOutputTail;
@@ -3903,7 +3932,7 @@ export function TerminalView({
         });
       }
     };
-    deliverStabilizedEmissions = (emissions, onParsed) => {
+    deliverStabilizedEmissions = (emissions, onParsed, onDiscard, geometryRevision) => {
       if (emissions.length === 0) {
         onParsed?.();
         return;
@@ -3918,7 +3947,9 @@ export function TerminalView({
             parkDeadline: emission.parkDeadline,
             frameEndCursorAuthoritative: emission.frameEndCursorAuthoritative,
             attachEpoch: outputAttachEpoch,
+            geometryRevision,
           },
+          index === emissions.length - 1 ? onDiscard : undefined,
         );
       });
     };
@@ -3926,25 +3957,41 @@ export function TerminalView({
       data: Uint8Array,
       onParsed?: () => void,
       onDiscard?: () => void,
+      geometryRevision?: number,
     ) => {
       if (!stabilizeNativeWindowsOutput) {
         if (initialExecutionHost === "wsl") {
-          deliverStabilizedEmissions?.(wslInFrameCursorParkRecognizer.push(data), onParsed);
+          deliverStabilizedEmissions?.(
+            wslInFrameCursorParkRecognizer.push(data),
+            onParsed,
+            onDiscard,
+            geometryRevision,
+          );
         } else {
-          processTerminalOutput(data, onParsed, {
-            source: "live",
-            attachEpoch: outputAttachEpoch,
-          });
+          processTerminalOutput(
+            data,
+            onParsed,
+            {
+              source: "live",
+              attachEpoch: outputAttachEpoch,
+              geometryRevision,
+            },
+            onDiscard,
+          );
         }
         return;
       }
       if (onParsed) pendingStabilizerParsedCallbacks.push(onParsed, onDiscard);
       const emissions = nativeWindowsOutputStabilizer.push(data, monotonicNow());
-      const parsed =
-        nativeWindowsOutputStabilizer.deadline === undefined
-          ? pendingStabilizerParsedCallbacks.drain()
-          : undefined;
-      deliverStabilizedEmissions?.(emissions, parsed);
+      const callbacks = nativeWindowsOutputStabilizer.hasHeldBytes
+        ? undefined
+        : pendingStabilizerParsedCallbacks.drain();
+      deliverStabilizedEmissions?.(
+        emissions,
+        callbacks?.onParsed,
+        callbacks?.onDiscard,
+        geometryRevision,
+      );
       scheduleOutputStabilizerDeadline();
     };
     const setOutputReady = (ready: boolean) => {
@@ -3956,32 +4003,54 @@ export function TerminalView({
     const scheduleOutputReattach = () => {
       if (cancelled || outputAttachRetryTimer !== undefined) return;
       // Invalidate every continuation belonging to the old snapshot before
-      // accepting more listener deltas. The old parser chain may still finish
-      // its current xterm write, but the next attach is serialized behind it
-      // and starts with reset(), so stale work can never publish readiness.
+      // accepting more listener deltas. Queued old-epoch bytes are already in
+      // the replacement snapshot, so discard them rather than replaying them
+      // again after reset. An accepted xterm write cannot be cancelled; wait for
+      // its parse callback before the replacement attach reaches reset().
       outputAttachEpoch += 1;
       outputAttachInFlight = false;
       outputAttachParserBusy = true;
       setOutputReady(false);
       resetOutputStabilizer();
       outputCoordinator.beginAttach();
-      outputAttachRetryTimer = setTimeout(() => {
+      terminalWriteQueue.clear(true);
+      clearTerminalWriteRetryTimer();
+      const tryStartReplacementAttach = () => {
+        if (cancelled) {
+          outputAttachRetryTimer = undefined;
+          return;
+        }
+        if (pendingTerminalWrites > 0) {
+          outputAttachRetryTimer = setTimeout(tryStartReplacementAttach, TERMINAL_WRITE_RETRY_MS);
+          return;
+        }
         outputAttachRetryTimer = undefined;
         void startOutputAttach();
-      }, TERMINAL_WRITE_RETRY_MS);
+      };
+      outputAttachRetryTimer = setTimeout(tryStartReplacementAttach, TERMINAL_WRITE_RETRY_MS);
     };
     const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
       if (segments.length === 0) return;
       // ADR-0026's quiet window means "no PTY output arrived recently", so it has
-      // to be stamped on arrival. Stamping it at write time instead would let a
-      // segment held in the queue below read as silence and release a fit into
-      // output that is still queued for the old grid.
+      // to be stamped before stabilizer or xterm backpressure can delay it.
       lastTerminalOutputAt = Date.now();
       clearDeferredResizeQuietTimer();
       recordTerminalOutputPipeline(instanceId, "segmentsIn", segments.length);
-      // One queue in arrival order, so a repair range still reaches the surface
-      // ahead of the deltas it splices in front of.
-      outputApplyQueue.push(segments);
+      // Only the rendererless checkpoint may merge coordinator segments. Cursor
+      // stabilization and every state detector consume the original boundaries
+      // immediately, exactly as they did before ADR-0080. Moving this merge above
+      // `processLiveTerminalOutput` changes the native stabilizer's 50 ms clock and
+      // can reorder OSC/alternate-buffer state transitions.
+      const checkpointSegments = coalesceTerminalOutputSegments(segments);
+      recordTerminalOutputPipeline(instanceId, "checkpointApplies", checkpointSegments.length);
+      for (const segment of checkpointSegments) {
+        void renderCheckpointModel.apply(segment).catch((error) => {
+          console.warn("[TerminalView] render checkpoint update failed:", error);
+        });
+      }
+      for (const segment of segments) {
+        processLiveTerminalOutput(segment.data, undefined, undefined, segment.geometry.revision);
+      }
     };
     /**
      * Write the buffered prefix an attach produced, awaiting the last segment so
@@ -3990,17 +4059,10 @@ export function TerminalView({
      * Returns `false` when a newer attach took over mid-write.
      */
     const writeAttachedSegments = async (
-      buffered: TerminalOutputAppliedSegment[],
+      segments: TerminalOutputAppliedSegment[],
       isCurrentAttach: () => boolean,
     ) => {
-      // A flood that outran a stalled attach can park six figures of deltas in the
-      // coordinator (issue #607). Applying them one at a time costs one xterm
-      // write, one checkpoint write and one detector sweep each, which is the
-      // difference between a bounded catch-up and a minute of dead frontend
-      // (issue #606).
-      recordTerminalOutputPipeline(instanceId, "segmentsIn", buffered.length);
-      const segments = coalesceTerminalOutputSegments(buffered);
-      recordTerminalOutputPipeline(instanceId, "segmentsOut", segments.length);
+      recordTerminalOutputPipeline(instanceId, "segmentsIn", segments.length);
       recordTerminalOutputPipeline(instanceId, "checkpointApplies", segments.length);
       // Queue the whole buffered prefix synchronously. Listener callbacks can
       // fire between awaits; enqueueing one-by-one would let a newer live delta
@@ -4010,12 +4072,16 @@ export function TerminalView({
       for (let index = 0; index < segments.length; index += 1) {
         const segment = segments[index];
         await checkpointWrites[index];
+        // The checkpoint promise can outlive this attach. Re-check before the
+        // visible enqueue; otherwise a stale segment can enter the FIFO after
+        // reattach already cleared it and later parse behind the new reset.
+        if (!isCurrentAttach()) return false;
         if (index === segments.length - 1) {
           await new Promise<void>((resolve) =>
-            processLiveTerminalOutput(segment.data, resolve, resolve),
+            processLiveTerminalOutput(segment.data, resolve, resolve, segment.geometry.revision),
           );
         } else {
-          processLiveTerminalOutput(segment.data);
+          processLiveTerminalOutput(segment.data, undefined, undefined, segment.geometry.revision);
         }
         if (!isCurrentAttach()) return false;
       }
@@ -4204,6 +4270,7 @@ export function TerminalView({
         escalate("repairFailure", "terminal output repair failed unexpectedly:", error);
       } finally {
         outputRepairInFlight = false;
+        flushDeferredTerminalFit();
       }
     };
     const startOutputAttach = async () => {
@@ -4211,9 +4278,6 @@ export function TerminalView({
       recordTerminalOutputPipeline(instanceId, "attaches");
       outputAttachInFlight = true;
       outputAttachParserBusy = true;
-      // The attach replays the whole ring after `terminal.reset()`, so anything
-      // still queued describes a screen that is about to be thrown away.
-      outputApplyQueue.clear();
       const epoch = ++outputAttachEpoch;
       resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
@@ -4260,7 +4324,7 @@ export function TerminalView({
                 attachment.snapshot.length,
               );
               await new Promise<void>((resolve) =>
-                processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }),
+                processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }, resolve),
               );
               if (!isCurrentAttach()) return;
             }
@@ -4684,12 +4748,10 @@ export function TerminalView({
       deferredTerminalFit = undefined;
       deferredResizeRequestedAt = 0;
       clearDeferredResizeQuietTimer();
-      deferredTerminalWrites.length = 0;
-      parsingTerminalWrites.length = 0;
-      currentParsingWriteSource = undefined;
-      currentParsingParkDeadline = undefined;
-      currentParsingFrameEndCursorAuthoritative = false;
-      currentParsingAttachEpoch = undefined;
+      terminalWriteQueue.clear(true);
+      pendingTerminalWrites = 0;
+      clearCurrentParsingWrite();
+      resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;

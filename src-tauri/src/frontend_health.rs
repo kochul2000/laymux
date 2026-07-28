@@ -20,6 +20,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::error::AppError;
+use crate::lock_ext::MutexExt;
+
 /// Wall-clock milliseconds since the Unix epoch.
 ///
 /// Wall clock, not `Instant`, because the frontend compares against `Date.now()`
@@ -76,24 +79,24 @@ impl FrontendHealthState {
         self.responses_orphaned.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    /// Replace the stored report. A failed lock is dropped silently: this is a
-    /// diagnostic sink and must never turn into a frontend-visible error.
-    pub fn store_report(&self, report: serde_json::Value) {
-        if let Ok(mut slot) = self.last_report.lock() {
-            *slot = Some((epoch_millis(), report));
-        }
+    /// Replace the stored report.
+    ///
+    /// A poisoned lock is surfaced to the command caller instead of making a
+    /// failed write look like a healthy-but-stalled frontend.
+    pub fn store_report(&self, report: serde_json::Value) -> Result<(), AppError> {
+        let mut slot = self.last_report.lock_or_err()?;
+        *slot = Some((epoch_millis(), report));
+        Ok(())
     }
 
-    pub fn snapshot(&self) -> serde_json::Value {
+    pub fn snapshot(&self) -> Result<serde_json::Value, AppError> {
         let now = epoch_millis();
-        let (received_at_ms, report) = match self.last_report.lock() {
-            Ok(slot) => match slot.as_ref() {
-                Some((at, value)) => (Some(*at), Some(value.clone())),
-                None => (None, None),
-            },
-            Err(_) => (None, None),
+        let slot = self.last_report.lock_or_err()?;
+        let (received_at_ms, report) = match slot.as_ref() {
+            Some((at, value)) => (Some(*at), Some(value.clone())),
+            None => (None, None),
         };
-        serde_json::json!({
+        Ok(serde_json::json!({
             "nowMs": now,
             // `null` means the frontend has never reported — a build without the
             // probe, or a WebView that has not finished booting. Distinguishing
@@ -108,7 +111,7 @@ impl FrontendHealthState {
                 "requestDisconnects": self.request_disconnects.load(Ordering::Relaxed),
             },
             "frontend": report,
-        })
+        }))
     }
 }
 
@@ -119,7 +122,7 @@ mod tests {
     #[test]
     fn snapshot_reports_no_frontend_before_the_first_report() {
         let state = FrontendHealthState::default();
-        let snapshot = state.snapshot();
+        let snapshot = state.snapshot().unwrap();
         assert!(snapshot["lastReportAgeMs"].is_null());
         assert!(snapshot["frontend"].is_null());
         assert_eq!(snapshot["bridge"]["requestsEmitted"], 0);
@@ -134,14 +137,42 @@ mod tests {
         state.note_response_matched();
         assert_eq!(state.note_response_orphaned(), 1);
         assert_eq!(state.note_response_orphaned(), 2);
-        state.store_report(serde_json::json!({ "probeLagMaxMs": 42 }));
+        state
+            .store_report(serde_json::json!({ "probeLagMaxMs": 42 }))
+            .unwrap();
 
-        let snapshot = state.snapshot();
+        let snapshot = state.snapshot().unwrap();
         assert_eq!(snapshot["bridge"]["requestsEmitted"], 2);
         assert_eq!(snapshot["bridge"]["requestTimeouts"], 1);
         assert_eq!(snapshot["bridge"]["responsesMatched"], 1);
         assert_eq!(snapshot["bridge"]["responsesOrphaned"], 2);
         assert_eq!(snapshot["frontend"]["probeLagMaxMs"], 42);
         assert!(snapshot["lastReportAgeMs"].as_u64().is_some());
+    }
+
+    #[test]
+    fn store_report_returns_lock_error_instead_of_hiding_poison() {
+        let state = FrontendHealthState::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.last_report.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        let error = state
+            .store_report(serde_json::json!({ "probeLagMaxMs": 42 }))
+            .unwrap_err();
+        assert!(matches!(error, crate::error::AppError::Lock(_)));
+    }
+
+    #[test]
+    fn snapshot_returns_lock_error_instead_of_reporting_never_seen() {
+        let state = FrontendHealthState::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = state.last_report.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        let error = state.snapshot().unwrap_err();
+        assert!(matches!(error, crate::error::AppError::Lock(_)));
     }
 }

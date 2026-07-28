@@ -31,6 +31,8 @@ export interface FrontendBridgeCounters {
   requestsReceived: number;
   /** Responses the frontend sent back. */
   responsesSent: number;
+  /** Response IPC calls that rejected before Rust accepted the response. */
+  responsesFailed: number;
   /** Query requests skipped because their Rust deadline had already passed. */
   queriesDroppedExpired: number;
   /** Action requests run late — their HTTP caller already got a 504. */
@@ -42,6 +44,7 @@ export interface FrontendBridgeCounters {
 const bridgeCounters: FrontendBridgeCounters = {
   requestsReceived: 0,
   responsesSent: 0,
+  responsesFailed: 0,
   queriesDroppedExpired: 0,
   actionsRunAfterDeadline: 0,
   maxDeliveryLagMs: 0,
@@ -66,6 +69,7 @@ export function frontendBridgeCounters(): FrontendBridgeCounters {
 export function resetFrontendHealthForTest(): void {
   bridgeCounters.requestsReceived = 0;
   bridgeCounters.responsesSent = 0;
+  bridgeCounters.responsesFailed = 0;
   bridgeCounters.queriesDroppedExpired = 0;
   bridgeCounters.actionsRunAfterDeadline = 0;
   bridgeCounters.maxDeliveryLagMs = 0;
@@ -96,8 +100,11 @@ export function startFrontendHealthReporter(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let probeLagMaxMs = 0;
   let stalls = 0;
-  let lastReportAtMs = 0;
-  let dueAtMs = Date.now() + PROBE_PERIOD_MS;
+  const startedAtMs = Date.now();
+  let lastReportAtMs = startedAtMs;
+  let dueAtMs = startedAtMs + PROBE_PERIOD_MS;
+  let retryReport = false;
+  let latestReportAttempt = 0;
 
   const tick = () => {
     if (stopped) return;
@@ -106,8 +113,14 @@ export function startFrontendHealthReporter(): () => void {
     if (probeLagMs > probeLagMaxMs) probeLagMaxMs = probeLagMs;
     if (probeLagMs >= STALL_REPORT_THRESHOLD_MS) stalls += 1;
 
-    if (probeLagMs >= STALL_REPORT_THRESHOLD_MS || now - lastReportAtMs >= REPORT_INTERVAL_MS) {
+    if (
+      retryReport ||
+      probeLagMs >= STALL_REPORT_THRESHOLD_MS ||
+      now - lastReportAtMs >= REPORT_INTERVAL_MS
+    ) {
+      retryReport = false;
       lastReportAtMs = now;
+      const attempt = ++latestReportAttempt;
       // Fire-and-forget: awaiting would make the probe's own period depend on
       // IPC latency, which is exactly the thing being measured.
       void reportFrontendHealth({
@@ -118,8 +131,9 @@ export function startFrontendHealthReporter(): () => void {
         bridge: frontendBridgeCounters(),
         pipeline: allTerminalOutputPipelineCounters(),
       }).catch(() => {
-        // A failed report is not worth breaking the probe over; the next tick
-        // carries the same high-water marks.
+        // Retry a current failed attempt on the next probe tick. Ignore a late
+        // rejection from an older attempt after a newer snapshot was sent.
+        if (!stopped && attempt === latestReportAttempt) retryReport = true;
       });
     }
 

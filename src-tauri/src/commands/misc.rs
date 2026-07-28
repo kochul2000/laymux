@@ -4,6 +4,7 @@ use tauri::{AppHandle, State};
 use crate::activity;
 use crate::automation_server::AutomationResponse;
 use crate::constants::*;
+use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 use crate::terminal::{TerminalActivity, TerminalNotification, TerminalStateInfo};
@@ -549,47 +550,79 @@ pub fn automation_response(
     let response: AutomationResponse =
         serde_json::from_str(&response_json).map_err(|e| format!("Parse error: {e}"))?;
 
-    let tx = {
-        let mut channels = state.automation_channels.lock_or_err()?;
-        channels.remove(&response.request_id)
+    dispatch_automation_response(response, state.inner().as_ref()).map_err(String::from)
+}
+
+fn dispatch_automation_response(
+    response: AutomationResponse,
+    state: &AppState,
+) -> Result<(), AppError> {
+    let request_id = response.request_id;
+    let value = if response.success {
+        response.data.unwrap_or(serde_json::Value::Null)
+    } else {
+        serde_json::json!({
+            "success": false,
+            "error": response.error.unwrap_or_default(),
+        })
     };
 
-    if let Some(tx) = tx {
-        state.frontend_health.note_response_matched();
-        let value = if response.success {
-            response.data.unwrap_or(serde_json::Value::Null)
-        } else {
-            serde_json::json!({
-                "success": false,
-                "error": response.error.unwrap_or_default(),
-            })
-        };
-        let _ = tx.send(value);
-    } else {
-        // Nobody is waiting: `bridge_request` already answered `504` and removed
-        // the channel. Dropping this silently is what made issue #606 undiagnosable
-        // — the frontend had paid the full main-thread cost of an answer and no
-        // side of the bridge recorded it. Counted so a starved bridge is
-        // distinguishable from individually slow handlers, and logged with the
-        // running total so one line survives a flood.
-        let orphaned_total = state.frontend_health.note_response_orphaned();
-        tracing::warn!(
-            request_id = %response.request_id,
-            orphaned_total,
-            "discarded an automation response whose request had already timed out"
-        );
+    let tx = {
+        let mut channels = state.automation_channels.lock_or_err()?;
+        channels.remove(&request_id)
+    };
+
+    match tx {
+        Some(tx) => match tx.send(value) {
+            Ok(()) => {
+                // Finding a map entry is not enough: the HTTP request may have
+                // dropped its receiver before its cleanup acquired the same
+                // lock. Count a match only after the oneshot accepted the
+                // response.
+                state.frontend_health.note_response_matched();
+            }
+            Err(_) => note_orphaned_automation_response(
+                state,
+                &request_id,
+                "the pending request receiver had already disconnected",
+            ),
+        },
+        None => note_orphaned_automation_response(
+            state,
+            &request_id,
+            "the pending request had already timed out or been removed",
+        ),
     }
 
     Ok(())
 }
 
+fn note_orphaned_automation_response(state: &AppState, request_id: &str, reason: &str) {
+    // The frontend paid the full main-thread cost of an answer but nobody
+    // received it. Count and log both timeout cleanup and the narrower race in
+    // which the sender remains in the map after its receiver has disconnected.
+    let orphaned_total = state.frontend_health.note_response_orphaned();
+    tracing::warn!(
+        request_id,
+        orphaned_total,
+        reason,
+        "discarded an undeliverable automation response"
+    );
+}
+
 /// Tauri command: store the frontend's responsiveness report (issue #606).
 ///
-/// Deliberately infallible past JSON parsing: this is a diagnostic sink on a
-/// timer, and a failure here must never surface as an error in the WebView.
+/// A failed state write is returned to the WebView so diagnostics cannot
+/// silently claim that the last successful report is current.
 #[tauri::command]
-pub fn report_frontend_health(report: serde_json::Value, state: State<Arc<AppState>>) {
-    state.frontend_health.store_report(report);
+pub fn report_frontend_health(
+    report: serde_json::Value,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .frontend_health
+        .store_report(report)
+        .map_err(String::from)
 }
 
 /// Tauri command: get terminal state for all terminals.
@@ -947,6 +980,62 @@ pub fn load_window_geometry() -> Result<Option<WindowGeometry>, String> {
 mod tests {
     use super::*;
     use crate::terminal::{TerminalConfig, TerminalSession};
+
+    fn automation_response_for(request_id: &str) -> AutomationResponse {
+        AutomationResponse {
+            request_id: request_id.into(),
+            success: true,
+            data: Some(serde_json::json!({ "answer": 42 })),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_automation_response_counts_matched_only_after_delivery() {
+        let state = AppState::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        state
+            .automation_channels
+            .lock()
+            .unwrap()
+            .insert("matched".into(), tx);
+
+        dispatch_automation_response(automation_response_for("matched"), &state).unwrap();
+
+        assert_eq!(rx.blocking_recv().unwrap()["answer"], 42);
+        let snapshot = state.frontend_health.snapshot().unwrap();
+        assert_eq!(snapshot["bridge"]["responsesMatched"], 1);
+        assert_eq!(snapshot["bridge"]["responsesOrphaned"], 0);
+    }
+
+    #[test]
+    fn dispatch_automation_response_counts_dropped_receiver_as_orphan() {
+        let state = AppState::new();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        drop(rx);
+        state
+            .automation_channels
+            .lock()
+            .unwrap()
+            .insert("dropped".into(), tx);
+
+        dispatch_automation_response(automation_response_for("dropped"), &state).unwrap();
+
+        let snapshot = state.frontend_health.snapshot().unwrap();
+        assert_eq!(snapshot["bridge"]["responsesMatched"], 0);
+        assert_eq!(snapshot["bridge"]["responsesOrphaned"], 1);
+    }
+
+    #[test]
+    fn dispatch_automation_response_counts_missing_channel_as_orphan() {
+        let state = AppState::new();
+
+        dispatch_automation_response(automation_response_for("missing"), &state).unwrap();
+
+        let snapshot = state.frontend_health.snapshot().unwrap();
+        assert_eq!(snapshot["bridge"]["responsesMatched"], 0);
+        assert_eq!(snapshot["bridge"]["responsesOrphaned"], 1);
+    }
 
     #[test]
     fn greet_returns_message() {

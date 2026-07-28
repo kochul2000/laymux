@@ -18,6 +18,13 @@ use super::ServerState;
 /// `504 Frontend response timeout`.
 const FRONTEND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 
+async fn wait_for_frontend_response_until<T>(
+    deadline: tokio::time::Instant,
+    receiver: tokio::sync::oneshot::Receiver<T>,
+) -> Result<Result<T, tokio::sync::oneshot::error::RecvError>, tokio::time::error::Elapsed> {
+    tokio::time::timeout_at(deadline, receiver).await
+}
+
 /// The longest wait a single async bridge handler performs inside one request
 /// is 3.5 seconds: `WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS`, or Remote render
 /// checkpoint provider discovery (0.5s) plus model catch-up (3s). Mirrored here
@@ -59,6 +66,11 @@ pub async fn bridge_request(
     // has already been given up on (issue #606) — without it, a WebView that fell
     // behind spends main-thread time producing answers this function has already
     // stopped waiting for.
+    // The wall-clock value travels to JavaScript, while the monotonic deadline
+    // controls Rust's waiter. Capture both before emit so time spent emitting or
+    // queued for delivery consumes the same one-shot budget instead of starting
+    // a second five-second window afterwards.
+    let response_deadline = tokio::time::Instant::now() + FRONTEND_RESPONSE_TIMEOUT;
     let emitted_at_ms = crate::frontend_health::epoch_millis();
     let request = AutomationRequest {
         request_id: request_id.clone(),
@@ -67,10 +79,8 @@ pub async fn bridge_request(
         method: method.into(),
         params,
         emitted_at_ms,
-        deadline_ms: emitted_at_ms + FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64,
+        deadline_ms: emitted_at_ms.saturating_add(FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64),
     };
-
-    state.app_state.frontend_health.note_request_emitted();
 
     state
         .app_handle
@@ -85,9 +95,11 @@ pub async fn bridge_request(
                 Json(err_json(&format!("Event emit error: {e}"))),
             )
         })?;
+    state.app_state.frontend_health.note_request_emitted();
 
-    // Wait for response with timeout
-    match tokio::time::timeout(FRONTEND_RESPONSE_TIMEOUT, rx).await {
+    // Wait only through the absolute deadline captured before emit. Starting a
+    // fresh relative timeout here would make `deadlineMs` lie to the frontend.
+    match wait_for_frontend_response_until(response_deadline, rx).await {
         Ok(Ok(data)) => Ok(data),
         Ok(Err(_)) => {
             // Channel dropped without response — clean up orphaned entry
@@ -277,6 +289,18 @@ pub fn unescape_terminal_input(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn frontend_response_deadline_spends_time_elapsed_before_waiting() {
+        // A deadline that elapsed before the receiver is polled must expire
+        // immediately. A relative timeout started inside the helper would hang
+        // for the full bridge budget instead.
+        let deadline = tokio::time::Instant::now() - Duration::from_millis(1);
+        let (_sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        assert!(wait_for_frontend_response_until(deadline, receiver)
+            .await
+            .is_err());
+    }
 
     /// The frontend's own waits happen *inside* this budget, and the handler
     /// still has to switch workspaces (lazy mount + React render) before its

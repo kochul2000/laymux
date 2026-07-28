@@ -314,7 +314,23 @@ pub async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoRespon
 /// the thread is alive and the `automation-request` events are queued behind
 /// something else.
 pub async fn diagnostics_frontend(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    Json(state.app_state.frontend_health.snapshot())
+    frontend_diagnostics_response(state.app_state.frontend_health.snapshot())
+}
+
+fn frontend_diagnostics_response(
+    snapshot: Result<serde_json::Value, crate::error::AppError>,
+) -> axum::response::Response {
+    match snapshot {
+        Ok(snapshot) => Json(snapshot).into_response(),
+        Err(error) => {
+            tracing::error!(error = %error, "failed to read frontend diagnostics state");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(err_json(&error.to_string())),
+            )
+                .into_response()
+        }
+    }
 }
 
 pub async fn terminal_write(
@@ -484,6 +500,21 @@ pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
 mod tests {
     use super::*;
     use crate::automation_server::types::REGISTERED_ROUTES;
+
+    #[tokio::test]
+    async fn frontend_diagnostics_maps_snapshot_failure_to_json_500() {
+        let response = frontend_diagnostics_response(Err(crate::error::AppError::Lock(
+            "frontend health".into(),
+        )));
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["success"], false);
+        assert!(json["error"].as_str().unwrap().contains("Lock poisoned"));
+    }
 
     #[test]
     fn health_response_format() {

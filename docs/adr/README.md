@@ -97,7 +97,7 @@ ADR 이 필요한 대표 기준:
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 | [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
 | [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
-| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 출력 백로그는 세그먼트가 아니라 바이트로 값을 치르고, 프론트 상태는 브리지 밖에서 읽는다 | Accepted |
+| [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 
 ## 새 ADR 추가

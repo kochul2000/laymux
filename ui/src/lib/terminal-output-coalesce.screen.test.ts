@@ -4,13 +4,14 @@ import type { TerminalOutputAppliedSegment } from "./terminal-output-attach-coor
 import { coalesceTerminalOutputSegments } from "./terminal-output-coalesce";
 
 /**
- * Coalescing is only safe if it is invisible (issue #606, ADR-0080).
+ * Checkpoint coalescing is only safe if it is cell-grid invisible
+ * (issue #606, ADR-0080).
  *
  * The unit tests next door prove the coalescer's arithmetic. They cannot prove
- * the thing that actually matters: that streaming the merged segments into a VT
- * parser produces the same cell grid as streaming the originals. Escape sequences
- * split across delta boundaries, cursor addressing and wide characters all live
- * below the byte arithmetic, so this claim belongs in the screen tier (ADR-0074).
+ * the thing that actually matters for the rendererless checkpoint: streaming the
+ * merged segments into a VT parser must produce the same cell grid as streaming
+ * the originals. Stabilizer and detector equivalence is deliberately not claimed;
+ * those layers receive the original emissions before visible-write batching.
  */
 
 const encoder = new TextEncoder();
