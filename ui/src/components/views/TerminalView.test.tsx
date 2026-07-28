@@ -1443,6 +1443,70 @@ describe("TerminalView", () => {
     });
   });
 
+  it("restores the native shell cursor before a fresh key after compositionend", async () => {
+    render(<TerminalView instanceId="t-ime-handoff" profile="WSL" syncGroup="" isFocused />);
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-ime-handoff", {
+        activity: { type: "shell" },
+      });
+    });
+
+    const container = screen.getByTestId("terminal-view-t-ime-handoff");
+    const terminal = createdTerminals[0] as unknown as {
+      element: HTMLDivElement;
+      buffer: { active: { cursorX: number; cursorY: number; baseY?: number } };
+      _core: { coreService: { isCursorHidden: boolean } };
+    };
+    const screenEl = document.createElement("div");
+    screenEl.className = "xterm-screen";
+    const rect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    screenEl.getBoundingClientRect = rect;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(screenEl);
+    terminal.element.appendChild(helper);
+    container.getBoundingClientRect = rect;
+
+    await vi.waitFor(() => {
+      expect(mockCreateTerminalSession).toHaveBeenCalled();
+    });
+
+    terminal.buffer.active.cursorX = 4;
+    terminal.buffer.active.cursorY = 2;
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "한";
+    helper.selectionStart = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "한" }));
+    helper.dispatchEvent(new Event("input"));
+
+    await vi.waitFor(() => {
+      expect(container).toHaveClass("terminal-ime-composition-active");
+      expect(terminal._core.coreService.isCursorHidden).toBe(true);
+    });
+
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "한" }));
+    helper.dispatchEvent(new KeyboardEvent("keydown", { key: "a" }));
+
+    // The deferred controller phase remains available for same-tick Korean
+    // carry-over, but a real English key has already handed rendering back to
+    // xterm. Otherwise the overlay stays on the finalized syllable while WSL
+    // echoes the new key at the advancing buffer cursor.
+    expect(container).not.toHaveClass("terminal-ime-composition-active");
+    expect(terminal._core.coreService.isCursorHidden).toBe(false);
+  });
+
   it("anchors the IME preview on the buffer cursor when the shadow cursor is not trusted", async () => {
     // Issue #551, measured on a real PowerShell pane: after `ls` the prompt emits
     // OSC 133 `D` but no `B`, so `isInputPhase` stays false, the shadow sync is
@@ -3552,7 +3616,7 @@ describe("TerminalView", () => {
     });
   });
 
-  describe("native Windows synchronized-output transaction", () => {
+  describe("synchronized-output cursor transactions", () => {
     const sessionResult = (initialExecutionHost: string) => ({
       id: "t-native-stabilizer",
       title: "Terminal",
@@ -3609,6 +3673,81 @@ describe("TerminalView", () => {
 
       expect(mockWrite).toHaveBeenCalledTimes(1);
       expect(new TextDecoder().decode(mockWrite.mock.calls[0][0] as Uint8Array)).toBe(expected);
+    });
+
+    it("does not send WSL Codex 0.145's in-frame park through the legacy settle timeout", async () => {
+      localStorage.setItem("laymux:cursor-trace", "1");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const terminalId = "t-wsl-in-frame-park";
+      try {
+        mockCreateTerminalSession.mockResolvedValueOnce({
+          ...sessionResult("wsl"),
+          id: terminalId,
+        });
+        render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+        await waitForTerminalInputReady();
+        act(() => {
+          useTerminalStore.getState().updateInstanceInfo(terminalId, {
+            activity: { type: "interactiveApp", name: "Codex" },
+          });
+        });
+
+        const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+          buffer: { active: typeof mockBufferActive };
+        };
+        const rawSet = mockRegisterCsiHandler.mock.calls.find(
+          (call) =>
+            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+            (call[0] as { prefix?: string; final: string }).final === "h",
+        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+        const rawReset = mockRegisterCsiHandler.mock.calls.find(
+          (call) =>
+            (call[0] as { prefix?: string; final: string }).prefix === "?" &&
+            (call[0] as { prefix?: string; final: string }).final === "l",
+        )?.[1] as ((params: readonly number[]) => boolean) | undefined;
+        expect(rawSet).toBeTypeOf("function");
+        expect(rawReset).toBeTypeOf("function");
+
+        mockWrite.mockClear();
+        mockWrite.mockImplementation(function (data, callback?: () => void) {
+          const parsed =
+            typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array);
+          if (parsed.includes("\x1b[?2026h")) rawSet?.([2026]);
+          if (parsed.includes("\x1b[?25h")) {
+            terminal.buffer.active.cursorX = 58;
+            terminal.buffer.active.cursorY = 23;
+            rawSet?.([25]);
+          }
+          if (parsed.includes("\x1b[6;5H")) {
+            terminal.buffer.active.cursorX = 4;
+            terminal.buffer.active.cursorY = 5;
+          }
+          if (parsed.includes("\x1b[?2026l")) rawReset?.([2026]);
+          callback?.();
+        });
+        const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+          | ((data: Uint8Array) => void)
+          | undefined;
+
+        vi.useFakeTimers();
+        act(() => {
+          onOutput?.(
+            new TextEncoder().encode("\x1b[?2026hbody\x1b[24;58H\x1b[?25h\x1b[6;5H\x1b[?2026l"),
+          );
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(60);
+        });
+
+        const settleTraces = logSpy.mock.calls.filter(
+          (call) => typeof call[0] === "string" && call[0].includes("park-settle-timeout"),
+        );
+        expect(settleTraces).toHaveLength(0);
+      } finally {
+        vi.useRealTimers();
+        logSpy.mockRestore();
+        localStorage.removeItem("laymux:cursor-trace");
+      }
     });
 
     it("lets an open IME composition adopt Codex 0.145's in-frame park", async () => {
@@ -3950,6 +4089,26 @@ describe("TerminalView", () => {
     // ResizeObserver fires → terminal.open() → should auto-focus
     await vi.waitFor(() => {
       expect(mockFocus).toHaveBeenCalled();
+    });
+  });
+
+  it("preserves terminal focus metadata when a focused pane changes profile", async () => {
+    const instanceId = "t-profile-focus";
+    const { rerender } = render(
+      <TerminalView instanceId={instanceId} profile="PowerShell" syncGroup="" isFocused />,
+    );
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().instances.find((item) => item.id === instanceId)).toEqual(
+        expect.objectContaining({ profile: "PowerShell", isFocused: true }),
+      );
+    });
+
+    rerender(<TerminalView instanceId={instanceId} profile="WSL" syncGroup="" isFocused />);
+
+    await vi.waitFor(() => {
+      expect(useTerminalStore.getState().instances.find((item) => item.id === instanceId)).toEqual(
+        expect.objectContaining({ profile: "WSL", isFocused: true }),
+      );
     });
   });
 

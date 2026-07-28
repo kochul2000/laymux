@@ -1,4 +1,4 @@
-import { isCompositionSideInput } from "./ime-composition-events";
+import { isCompositionSideInput, isCompositionSideKey } from "./ime-composition-events";
 
 /**
  * Linux IME candidate-selection key guard.
@@ -115,7 +115,6 @@ export type LinuxImeCandidateGuard = {
 /** Default outer bound. Deliberately short: it must not span a human keystroke. */
 export const DEFAULT_CANDIDATE_WINDOW_MS = 120;
 
-const KEYCODE_IME_PROCESSED = 229;
 const DIGIT_CODE = /^(Digit|Numpad)[0-9]$/;
 
 const PASS: LinuxImeCandidateDecision = { block: false, preventDefault: false, reason: "pass" };
@@ -130,7 +129,7 @@ export function isCandidateKey(event: LinuxImeCandidateKeyEvent): boolean {
 
 /** True when the platform reports that the IME already consumed this key. */
 export function isImeConsumedKey(event: LinuxImeCandidateKeyEvent): boolean {
-  return event.keyCode === KEYCODE_IME_PROCESSED || event.key === "Process";
+  return isCompositionSideKey(event);
 }
 
 function pressIdentity(event: LinuxImeCandidateKeyEvent): string {

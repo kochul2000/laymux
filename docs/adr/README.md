@@ -95,6 +95,7 @@ ADR 이 필요한 대표 기준:
 | [0075](0075-session-restore-live-screen-origin.md) | 세션 복원 출력은 새 PTY 화면 원점 뒤의 scrollback으로 둔다 | Accepted |
 | [0076](0076-codex-in-frame-cursor-park.md) | Codex 인프레임 커서 주차를 동기화 출력의 최종 상태로 인정 | Accepted |
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
+| [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
 
 ## 새 ADR 추가
 

@@ -246,6 +246,11 @@ function ViewSelect({
       value={value}
       onChange={(e) => {
         const val = e.target.value;
+        // A native select keeps DOM focus after committing an option. The pane
+        // remains logically focused, so a same-pane profile swap would not
+        // trigger the view's `isFocused` effect and keyboard input could stay
+        // parked on this selector instead of the newly created terminal.
+        e.currentTarget.blur();
         if (val.startsWith("TerminalView:")) {
           onChange({ type: "TerminalView", profile: val.slice("TerminalView:".length) });
         } else {

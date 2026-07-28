@@ -22,6 +22,15 @@ export type CompositionSideInputLike = {
   inputType?: string;
 };
 
+export type CompositionSideKeyLike = {
+  isComposing?: boolean;
+  key?: string;
+  keyCode?: number;
+};
+
+/** Browser marker for a key whose interpretation still belongs to the IME. */
+export const IME_PROCESSING_KEY_CODE = 229;
+
 /** `inputType` values a browser uses for composition commit/cancel edits. */
 const COMPOSITION_INPUT_TYPES = new Set([
   "insertCompositionText",
@@ -36,4 +45,16 @@ const COMPOSITION_INPUT_TYPES = new Set([
 export function isCompositionSideInput(event: CompositionSideInputLike): boolean {
   if (event.isComposing === true) return true;
   return event.inputType !== undefined && COMPOSITION_INPUT_TYPES.has(event.inputType);
+}
+
+/**
+ * True when a keyboard event still belongs to an IME composition, including
+ * browsers that expose only the legacy 229/`Process` marker.
+ */
+export function isCompositionSideKey(event: CompositionSideKeyLike): boolean {
+  return (
+    event.isComposing === true ||
+    event.keyCode === IME_PROCESSING_KEY_CODE ||
+    event.key === "Process"
+  );
 }

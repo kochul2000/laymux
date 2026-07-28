@@ -1401,6 +1401,57 @@ describe("createImeCompositionController", () => {
     });
   });
 
+  it.each(["a", "Backspace"])(
+    "hands the visual caret back before a fresh %s key races the deferred finalize",
+    async (key) => {
+      const controller = createImeCompositionController({
+        getCols: () => 150,
+        getAnchor: () => ({ cursorX: 7, cursorAbsY: 12 }),
+      });
+      const textarea = document.createElement("textarea");
+      controller.bind(textarea);
+
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      textarea.value = "한";
+      textarea.selectionStart = textarea.value.length;
+      textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "한" }));
+      await tick();
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "한" }));
+
+      // WebView2 can deliver the first English key before the two setTimeout(0)
+      // finalizers run. The controller still needs its pending phase for a Korean
+      // carry-over, but the ended preview must stop owning the visible caret before
+      // xterm sends and echoes this fresh key.
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key }));
+
+      expect(controller.getState()).toMatchObject({
+        active: false,
+        text: "",
+        caretUtf16Index: 0,
+        caretCellOffset: 0,
+        textCellWidth: 0,
+      });
+    },
+  );
+
+  it("keeps the visual caret with an IME-owned key before a carry-over start", async () => {
+    const controller = createImeCompositionController({
+      getCols: () => 150,
+      getAnchor: () => ({ cursorX: 7, cursorAbsY: 12 }),
+    });
+    const textarea = document.createElement("textarea");
+    controller.bind(textarea);
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    textarea.value = "한";
+    textarea.dispatchEvent(new CompositionEvent("compositionupdate", { data: "한" }));
+    await tick();
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { data: "한" }));
+    textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Process" }));
+
+    expect(controller.getState()).toMatchObject({ active: true, text: "한" });
+  });
+
   it("detects carry-over when compositionstart fires before the deferred reset", async () => {
     const controller = createImeCompositionController({
       getCols: () => 150,
