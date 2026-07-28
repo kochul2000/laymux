@@ -15,10 +15,18 @@ use sha2::{Digest, Sha256};
 use crate::lock_ext::MutexExt;
 use crate::settings::models::Settings;
 
+/// URL 경로 prefix. 라우트 등록(`routes.rs`)과 여기서 만드는 광고 URL 이 같아야 한다.
+pub(super) const FONT_ROUTE_PREFIX: &str = "/remote/font/";
+/// `routes.rs` 가 등록하는 경로. prefix 와 어긋나면 광고 URL 이 조용히 404 가 된다.
+pub(super) const FONT_ROUTE_PATH: &str = "/remote/font/{file_name}";
+
 /// 페이스 하나가 넘을 수 없는 원본 크기. 초과하면 이름-only 폴백으로 둔다.
 const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
-/// face 이름 → 자산 결과 캐시 상한. 넘으면 통째로 비운다(LRU 를 둘 만큼 크지 않다).
+/// face 이름 → 광고 캐시 상한.
 const MAX_CACHED_FACES: usize = 8;
+/// 토큰 → 바이트 캐시 상한. face 하나가 최대 4 파일이므로 face 캐시의 두 배로 둔다.
+/// 상주 바이트 천장은 이 값 × `MAX_FONT_BYTES`(+ brotli 본)이다.
+const MAX_CACHED_FONT_FILES: usize = 16;
 /// 콘텐츠 해시에서 URL 토큰으로 쓰는 hex 자리수.
 const CONTENT_TOKEN_HEX_LEN: usize = 16;
 /// CSS family 별칭에서 face 이름 해시로 쓰는 hex 자리수.
@@ -57,16 +65,17 @@ pub(super) struct ServedFont {
 
 impl ServedFont {
     /// 캐시된 brotli 본을 주고, 없으면 만들어 캐시한다. 압축 실패는 원본 서빙으로 폴백.
+    ///
+    /// 압축하는 동안 락을 계속 쥔다 — 캐시가 채워지기 전에 도착한 동시 요청이
+    /// 각자 MB 급 폰트를 압축하지 않도록 한 번만 돌리기 위해서다. 호출자는
+    /// blocking pool 위에 있으므로 여기서 기다려도 async 런타임을 막지 않는다.
     pub fn brotli_bytes(&self) -> Option<Bytes> {
-        if let Ok(cached) = self.compressed.lock_or_err() {
-            if let Some(bytes) = cached.as_ref() {
-                return Some(bytes.clone());
-            }
+        let mut slot = self.compressed.lock_or_err().ok()?;
+        if let Some(bytes) = slot.as_ref() {
+            return Some(bytes.clone());
         }
         let compressed = compress_brotli(&self.bytes)?;
-        if let Ok(mut slot) = self.compressed.lock_or_err() {
-            *slot = Some(compressed.clone());
-        }
+        *slot = Some(compressed.clone());
         Some(compressed)
     }
 }
@@ -119,20 +128,55 @@ pub(super) fn resolve_font_assets(face: &str, settings: &Settings) -> Option<Rem
         return None;
     }
 
-    if let Ok(cache) = face_assets_cache().lock_or_err() {
-        if let Some(cached) = cache.get(face) {
-            return cached.clone();
-        }
+    if let Some(cached) = cached_face_assets(face) {
+        return cached;
     }
 
     let resolved = load_face_assets(face);
     if let Ok(mut cache) = face_assets_cache().lock_or_err() {
-        if cache.len() >= MAX_CACHED_FACES {
-            cache.clear();
-        }
+        evict_until_below(&mut cache, MAX_CACHED_FACES);
         cache.insert(face.to_string(), resolved.clone());
     }
     resolved
+}
+
+/// 캐시된 광고는 그 토큰이 아직 서빙 가능할 때만 유효하다. 바이트 캐시는 광고
+/// 캐시와 따로 evict 되므로, 검증 없이 돌려주면 404 나는 URL 을 계속 광고하게 된다.
+fn cached_face_assets(face: &str) -> Option<Option<RemoteFontAssets>> {
+    let cached = {
+        let cache = face_assets_cache().lock_or_err().ok()?;
+        cache.get(face).cloned()?
+    };
+    let Some(assets) = cached else {
+        // 서빙 불가로 판정된 face 는 재확인할 바이트가 없다.
+        return Some(None);
+    };
+    if assets.faces.iter().all(|face| {
+        token_from_url(&face.url)
+            .map(|token| served_font(token).is_some())
+            .unwrap_or(false)
+    }) {
+        return Some(Some(assets));
+    }
+    if let Ok(mut cache) = face_assets_cache().lock_or_err() {
+        cache.remove(face);
+    }
+    None
+}
+
+fn token_from_url(url: &str) -> Option<&str> {
+    parse_font_token(url.strip_prefix(FONT_ROUTE_PREFIX)?)
+}
+
+/// 상한을 넘으면 통째로 비우지 않고 넘치는 만큼만 버린다. clear-all 은 face 가
+/// 상한보다 많을 때 매 요청이 전체를 다시 해석하는 thrash 로 이어진다.
+fn evict_until_below<V>(cache: &mut HashMap<String, V>, limit: usize) {
+    while cache.len() >= limit {
+        let Some(victim) = cache.keys().next().cloned() else {
+            return;
+        };
+        cache.remove(&victim);
+    }
 }
 
 /// 토큰으로 서빙 대상 폰트를 찾는다. 앱 재시작 후 첫 요청처럼 캐시가 비어 있으면 `None`
@@ -205,13 +249,18 @@ fn load_face_assets(face: &str) -> Option<RemoteFontAssets> {
         let bytes = Bytes::from(data.as_ref().clone());
         register_served_font(token.clone(), bytes, kind);
         faces.push(RemoteFontFace {
-            url: format!("/remote/font/{token}.{}", kind.extension),
+            url: format!("{FONT_ROUTE_PREFIX}{token}.{}", kind.extension),
             weight: css_weight,
             style: css_style,
         });
     }
 
     if faces.is_empty() {
+        // 토글을 켠 사용자는 폰트가 바뀌기를 기대하고 있다. 아무것도 못 내보내는
+        // 사유는 기본 로그 레벨에서 보여야 "왜 안 바뀌지"를 추적할 수 있다.
+        tracing::warn!(
+            "remote font: face '{face}' is not servable; falling back to the name-only stack"
+        );
         return None;
     }
     Some(RemoteFontAssets {
@@ -229,9 +278,7 @@ fn register_served_font(token: String, bytes: Bytes, kind: SfntKind) {
     if fonts.contains_key(&token) {
         return;
     }
-    if fonts.len() >= MAX_CACHED_FACES {
-        fonts.clear();
-    }
+    evict_until_below(&mut fonts, MAX_CACHED_FONT_FILES);
     fonts.insert(
         token,
         Arc::new(ServedFont {
@@ -312,6 +359,28 @@ fn compress_brotli(data: &[u8]) -> Option<Bytes> {
 mod tests {
     use super::*;
 
+    use serial_test::serial;
+
+    #[test]
+    fn advertised_urls_live_under_the_registered_route() {
+        assert!(FONT_ROUTE_PATH.starts_with(FONT_ROUTE_PREFIX));
+        assert_eq!(FONT_ROUTE_PATH, format!("{FONT_ROUTE_PREFIX}{{file_name}}"));
+        assert_eq!(
+            token_from_url("/remote/font/0123456789abcdef.ttf"),
+            Some("0123456789abcdef")
+        );
+        assert_eq!(token_from_url("/elsewhere/0123456789abcdef.ttf"), None);
+    }
+
+    #[test]
+    fn eviction_drops_only_the_overflow() {
+        let mut cache: HashMap<String, u8> = (0..10).map(|i| (i.to_string(), i)).collect();
+        evict_until_below(&mut cache, 8);
+        // Room for the caller's insert, and the rest survives — a clear-all here
+        // would re-resolve every face on the next request.
+        assert_eq!(cache.len(), 7);
+    }
+
     #[test]
     fn rejects_font_collections_and_unknown_tags() {
         assert!(sfnt_kind(b"ttcf\x00\x01\x00\x00").is_none());
@@ -373,6 +442,7 @@ mod tests {
     /// resolve -> validate -> register -> serve path instead of a stub.
     #[cfg(windows)]
     #[test]
+    #[serial(remote_font_cache)]
     fn windows_system_face_resolves_to_servable_faces() {
         let mut settings = Settings::default();
         settings.remote.serve_terminal_font = true;
@@ -411,6 +481,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(remote_font_cache)]
     fn served_font_lookup_returns_registered_bytes_and_caches_compression() {
         let bytes = Bytes::from_static(b"\x00\x01\x00\x00 laymux test face payload");
         let token = content_token(&bytes);

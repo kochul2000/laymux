@@ -178,6 +178,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/remote/serveTerminalFont",
+        description: "데스크톱 터미널 폰트 파일을 원격 브라우저로 전송할지 여부입니다. 폰트 바이너리를 네트워크로 내보내는 것은 재배포이므로 재배포가 허용된 폰트에만 켜세요(Consolas 등 OS 번들 독점 폰트는 허용되지 않습니다). 다음 attach부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/remote/authToken",
         description: "Direct Remote browser가 사용하는 bearer token입니다. 응답에는 원문을 노출하지 않으며 ***REDACTED***를 다시 보내면 기존 값을 유지합니다.",
         sensitive: true,

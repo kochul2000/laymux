@@ -21,13 +21,13 @@ pub(super) struct RemoteTerminalInfo {
     pub(super) appearance: RemoteTerminalAppearance,
 }
 
-pub(super) fn remote_terminal_infos(
+/// Appearance resolution can query the OS font system and read multi-megabyte
+/// font files on a cache miss (ADR-0077), so it runs on the blocking pool and
+/// outside the `terminals` lock. Only the session snapshot happens inline.
+pub(super) async fn remote_terminal_infos(
     app_state: &AppState,
     settings: &Settings,
 ) -> Result<Vec<RemoteTerminalInfo>, String> {
-    // Appearance resolution can hit the font system and read font files
-    // (ADR-0077), so snapshot the sessions first and release the lock before
-    // resolving.
     let snapshots: Vec<SessionSnapshot> = {
         let terminals = app_state.terminals.lock_or_err()?;
         terminals
@@ -46,7 +46,17 @@ pub(super) fn remote_terminal_infos(
             .collect()
     };
 
-    Ok(snapshots
+    let settings = settings.clone();
+    tokio::task::spawn_blocking(move || resolve_appearances(snapshots, &settings))
+        .await
+        .map_err(|err| format!("terminal appearance resolution failed: {err}"))
+}
+
+fn resolve_appearances(
+    snapshots: Vec<SessionSnapshot>,
+    settings: &Settings,
+) -> Vec<RemoteTerminalInfo> {
+    snapshots
         .into_iter()
         .map(|snapshot| RemoteTerminalInfo {
             appearance: resolve_remote_terminal_appearance(&snapshot.profile, settings),
@@ -60,7 +70,7 @@ pub(super) fn remote_terminal_infos(
             sync_group: snapshot.sync_group,
             command_running: snapshot.command_running,
         })
-        .collect())
+        .collect()
 }
 
 /// Session fields copied out under the `terminals` lock, before appearance

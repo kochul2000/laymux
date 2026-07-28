@@ -14,7 +14,9 @@ use super::font_assets::{parse_font_token, served_font, ServedFont};
 use super::internal_error;
 
 /// Font URLs carry a content hash (ADR-0077), so a hit is immutable forever.
-const FONT_CACHE_CONTROL: &str = "public, max-age=31536000, immutable";
+/// `private`, not `public`: the bytes can be a redistribution-restricted font and
+/// the cloud relay sits on this path — no shared cache may keep a copy.
+const FONT_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
 
 const XTERM_JS: &str = include_str!("assets/xterm.js");
 const XTERM_CSS: &str = include_str!("assets/xterm.css");
@@ -110,7 +112,7 @@ pub(crate) async fn remote_font(
         Err(err) => return internal_error(err),
     };
     if let Some(response) =
-        remote_asset_gate_for_settings(&settings, addr, request_is_tunnel_authorized(&req))
+        remote_font_gate_for_settings(&settings, addr, request_is_tunnel_authorized(&req))
     {
         return response;
     }
@@ -155,6 +157,23 @@ fn font_response(font: &ServedFont, compressed: Option<Bytes>) -> Response {
         headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("br"));
     }
     response
+}
+
+/// The font route carries the base asset gate plus the serve toggle. Turning the
+/// toggle off must stop serving immediately, including for URLs a browser was
+/// already handed and for bytes already sitting in the cache.
+fn remote_font_gate_for_settings(
+    settings: &crate::settings::models::RemoteSettings,
+    addr: SocketAddr,
+    tunnel_authorized: bool,
+) -> Option<Response> {
+    if let Some(response) = remote_asset_gate_for_settings(settings, addr, tunnel_authorized) {
+        return Some(response);
+    }
+    if !settings.serve_terminal_font {
+        return Some(StatusCode::NOT_FOUND.into_response());
+    }
+    None
 }
 
 fn accepts_brotli(headers: &HeaderMap) -> bool {
@@ -252,6 +271,34 @@ mod tests {
 
         let enabled_settings = remote_settings(true, "");
         assert!(remote_asset_gate_for_settings(&enabled_settings, addr, true).is_none());
+    }
+
+    #[test]
+    fn font_route_stops_serving_the_moment_the_toggle_goes_off() {
+        let addr = "203.0.113.10:1".parse::<SocketAddr>().unwrap();
+
+        // Toggle off: a URL a browser was already handed must stop resolving,
+        // even though the base asset gate would let the request through.
+        let mut settings = remote_settings(true, "");
+        assert!(!settings.serve_terminal_font);
+        assert!(remote_asset_gate_for_settings(&settings, addr, true).is_none());
+        let blocked = remote_font_gate_for_settings(&settings, addr, true).unwrap();
+        assert_eq!(blocked.status(), StatusCode::NOT_FOUND);
+
+        settings.serve_terminal_font = true;
+        assert!(remote_font_gate_for_settings(&settings, addr, true).is_none());
+
+        // The base gate still comes first: remote disabled outranks the toggle.
+        let mut disabled = remote_settings(false, "");
+        disabled.serve_terminal_font = true;
+        let refused = remote_font_gate_for_settings(&disabled, addr, true).unwrap();
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+        // Direct (non-tunnel) requests keep the full token/IP/Origin check.
+        let mut direct = remote_settings(true, "");
+        direct.serve_terminal_font = true;
+        let unauthorized = remote_font_gate_for_settings(&direct, addr, false).unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

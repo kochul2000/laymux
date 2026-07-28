@@ -2917,6 +2917,9 @@
         // to the fallback font, so a failure is retried on the next navigation
         // refresh or attach, bounded so a genuinely broken font stops asking.
         const REMOTE_FONT_MAX_ATTEMPTS = 3;
+        // A hung fetch would otherwise park the state on "loading" forever and
+        // block every later retry.
+        const REMOTE_FONT_LOAD_TIMEOUT_MS = 20000;
         const remoteFontFamilyState = new Map();
         const remoteFontAttempts = new Map();
 
@@ -2936,21 +2939,29 @@
                 REMOTE_FONT_STYLES.has(face.style)
             )
             .map((face) => ({ url: face.url, weight: Number(face.weight), style: face.style }));
-          return faces.length > 0 ? { family, faces } : null;
+          if (faces.length === 0) return null;
+          // Keyed by the advertised URLs, not by the family: the alias is a hash
+          // of the face *name*, so replacing the font file keeps the alias while
+          // the tokens change. Keying on content means new bytes get a fresh
+          // attempt budget instead of inheriting a "ready" or exhausted state.
+          const key = `${family}|${faces.map((face) => face.url).join(",")}`;
+          return { family, faces, key };
         }
 
         function remoteFontIsReady(assets) {
-          return Boolean(assets) && remoteFontFamilyState.get(assets.family) === "ready";
+          return Boolean(assets) && remoteFontFamilyState.get(assets.key) === "ready";
         }
 
         function ensureRemoteFont(appearance) {
           const assets = normalizeFontAssets(appearance && appearance.fontAssets);
-          if (!assets || remoteFontFamilyState.has(assets.family)) return;
-          const attempts = remoteFontAttempts.get(assets.family) || 0;
+          if (!assets || remoteFontFamilyState.has(assets.key)) return;
+          const attempts = remoteFontAttempts.get(assets.key) || 0;
           if (attempts >= REMOTE_FONT_MAX_ATTEMPTS) return;
-          remoteFontAttempts.set(assets.family, attempts + 1);
-          remoteFontFamilyState.set(assets.family, "loading");
-          loadRemoteFont(assets);
+          remoteFontAttempts.set(assets.key, attempts + 1);
+          remoteFontFamilyState.set(assets.key, "loading");
+          loadRemoteFont(assets).catch(() => {
+            remoteFontFamilyState.delete(assets.key);
+          });
         }
 
         // FontFace objects rather than an injected `@font-face` rule: a rule
@@ -2966,24 +2977,32 @@
                 display: "swap",
               })
           );
-          try {
-            const loaded = await Promise.all(fontFaces.map((fontFace) => fontFace.load()));
-            loaded.forEach((fontFace) => document.fonts.add(fontFace));
-          } catch (_) {
+          // allSettled, not all: one missing bold must not throw away a regular
+          // that loaded fine and send the whole family back to the fallback.
+          const settled = await Promise.race([
+            Promise.allSettled(fontFaces.map((fontFace) => fontFace.load())),
+            new Promise((resolve) => setTimeout(() => resolve(null), REMOTE_FONT_LOAD_TIMEOUT_MS)),
+          ]);
+          const loaded = settled
+            ? settled.filter((result) => result.status === "fulfilled").map((result) => result.value)
+            : [];
+          loaded.forEach((fontFace) => document.fonts.add(fontFace));
+          // `document.fonts.check` answers true for an *unknown* family — the
+          // fallback can render the text, so the query is satisfied. Readiness
+          // therefore has to come from a face actually being added.
+          if (loaded.length === 0 || !document.fonts.check(`16px "${assets.family}"`)) {
             // Drop the state so the next refresh can retry, up to the attempt cap.
-            remoteFontFamilyState.delete(assets.family);
+            remoteFontFamilyState.delete(assets.key);
             return;
           }
-          if (!document.fonts.check(`16px "${assets.family}"`)) {
-            remoteFontFamilyState.delete(assets.family);
-            return;
-          }
-          remoteFontFamilyState.set(assets.family, "ready");
+          remoteFontFamilyState.set(assets.key, "ready");
+          remoteFontAttempts.delete(assets.key);
           // Cell metrics just changed under the terminal: re-apply the (now
           // different) family string to force a re-measure, then re-fit so the
           // PTY gets the column count this font actually produces.
           const info = activeTerminalId ? terminalInfoById.get(activeTerminalId) : null;
-          applyTerminalAppearance(info && info.appearance);
+          if (!info || !info.appearance) return;
+          applyTerminalAppearance(info.appearance);
           scheduleTerminalFit();
         }
 

@@ -99,7 +99,7 @@ pub(super) async fn remote_navigation(State(server): State<ServerState>) -> Resp
         };
 
     let settings = crate::settings::load_settings();
-    let terminals = match remote_terminal_infos(&server.app_state, &settings) {
+    let terminals = match remote_terminal_infos(&server.app_state, &settings).await {
         Ok(terminals) => terminals,
         Err(err) => return internal_error(err),
     };

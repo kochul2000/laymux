@@ -9,11 +9,13 @@ const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", i
  * only trust the family alias once the faces really loaded. A real font file is
  * required — a stub body would never satisfy `document.fonts.check`.
  */
+// Single-face files only: `.ttc` collections are what the desktop refuses to
+// serve and what the browser cannot load, so one here would test a shape
+// production never emits.
 const FONT_CANDIDATES = [
   "C:\\Windows\\Fonts\\consola.ttf",
   "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
   "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-  "/System/Library/Fonts/Menlo.ttc",
 ];
 const fontPath = FONT_CANDIDATES.find((candidate) => existsSync(candidate));
 
@@ -259,15 +261,61 @@ test.describe("remote terminal font", () => {
     await connectRemote(page);
 
     await expect.poll(() => harness.fontRequests.length).toBeGreaterThanOrEqual(1);
-    expect(await terminalFontFamily(page)).toBe(SERVER_FONT_STACK);
 
-    // The next navigation refresh is what re-arms the attempt.
+    // Attach and navigation refresh both re-arm the attempt.
     await page.locator("#navToggle").click();
     await page.locator("#refresh").click();
     await expect
       .poll(() => terminalFontFamily(page), { timeout: 10000 })
       .toBe(`'${FONT_FAMILY}', ${SERVER_FONT_STACK}`);
+    // The 404 was retried rather than being treated as final.
     expect(harness.fontRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("gives up after the attempt cap instead of refetching forever", async ({ page }) => {
+    const harness: FontHarness = {
+      appearance: {
+        ...baseAppearance,
+        fontAssets: {
+          family: FONT_FAMILY,
+          faces: [{ url: FONT_URL, weight: 400, style: "normal" }],
+        },
+      },
+      failFirstFontRequests: Number.MAX_SAFE_INTEGER,
+      fontRequests: [],
+    };
+    await installRemoteMocks(page, harness);
+    await connectRemote(page);
+
+    await page.locator("#navToggle").click();
+    for (let refresh = 0; refresh < 4; refresh += 1) {
+      await page.locator("#refresh").click();
+      await page.waitForTimeout(150);
+    }
+
+    expect(await terminalFontFamily(page)).toBe(SERVER_FONT_STACK);
+    expect(harness.fontRequests.length).toBeLessThanOrEqual(3);
+  });
+
+  test("ignores faces whose weight or style is outside the contract", async ({ page }) => {
+    const harness: FontHarness = {
+      appearance: {
+        ...baseAppearance,
+        fontAssets: {
+          family: FONT_FAMILY,
+          faces: [
+            { url: FONT_URL, weight: 500, style: "normal" },
+            { url: FONT_URL, weight: 400, style: "oblique" },
+          ],
+        },
+      },
+      fontRequests: [],
+    };
+    await installRemoteMocks(page, harness);
+    await connectRemote(page);
+
+    expect(await terminalFontFamily(page)).toBe(SERVER_FONT_STACK);
+    expect(harness.fontRequests).toHaveLength(0);
   });
 
   test("keeps the name-only stack when no font is advertised", async ({ page }) => {
