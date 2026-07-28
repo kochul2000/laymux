@@ -34,6 +34,10 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 ///     never across `.await` and never while holding another `AppState` lock)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
+/// Inside one terminal-output session, nested locks have their own fixed order:
+/// per-terminal protocol gate -> session runtime -> output ring -> desktop flow.
+/// Paths that skip a lock, including retirement, preserve the remaining relative
+/// order.
 ///
 /// The per-terminal locks *inside* `exec_locks` are `tokio::sync::Mutex` because
 /// a writer holds one across `.await` (the body→CR delay); they are acquired

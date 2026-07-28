@@ -101,7 +101,7 @@ ADR 이 필요한 대표 기준:
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 | [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Accepted |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
-| [0084](0084-xterm-write-callback-no-throw-boundary.md) | xterm write 완료 콜백은 예외가 빠져나가지 않는 경계 (0080 확장) | Accepted |
+| [0084](0084-desktop-terminal-output-parsed-credit.md) | desktop output은 parsed ACK credit으로 PTY producer를 유한하게 제한한다 (0072 일부 대체·0080 확장) | Accepted |
 
 ## 새 ADR 추가
 

@@ -48,4 +48,47 @@ describe("DeferredParsedCallbackQueue", () => {
     expect(firstDiscarded).toHaveBeenCalledOnce();
     expect(secondDiscarded).toHaveBeenCalledOnce();
   });
+
+  it("preserves discard-only entries until the stabilized batch settles", () => {
+    const queue = new DeferredParsedCallbackQueue();
+    const firstDiscarded = vi.fn();
+    const lastParsed = vi.fn();
+    const lastDiscarded = vi.fn();
+    queue.push(undefined, firstDiscarded);
+    queue.push(lastParsed, lastDiscarded);
+
+    const drained = queue.drain();
+    drained?.onDiscard();
+    drained?.onParsed();
+
+    expect(firstDiscarded).toHaveBeenCalledOnce();
+    expect(lastDiscarded).toHaveBeenCalledOnce();
+    expect(lastParsed).not.toHaveBeenCalled();
+  });
+
+  it("snapshots immediate-prefix discard without consuming a successful held tail", () => {
+    const queue = new DeferredParsedCallbackQueue();
+    const parsed = vi.fn();
+    const discarded = vi.fn();
+    queue.push(parsed, discarded);
+
+    const discardPrefix = queue.snapshotDiscard();
+    expect(queue.drain()).toBeDefined();
+    expect(parsed).not.toHaveBeenCalled();
+
+    // Model the drained held-tail parse winning before a late prefix failure.
+    const second = new DeferredParsedCallbackQueue();
+    const secondParsed = vi.fn();
+    const secondDiscarded = vi.fn();
+    second.push(secondParsed, secondDiscarded);
+    const lateDiscard = second.snapshotDiscard();
+    second.drain()?.onParsed();
+    lateDiscard?.();
+    expect(secondParsed).toHaveBeenCalledOnce();
+    expect(secondDiscarded).not.toHaveBeenCalled();
+
+    discardPrefix?.();
+    expect(discarded).toHaveBeenCalledOnce();
+    expect(parsed).not.toHaveBeenCalled();
+  });
 });

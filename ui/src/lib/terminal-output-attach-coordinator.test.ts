@@ -133,6 +133,35 @@ describe("TerminalOutputAttachCoordinator", () => {
     expect(coordinator.ingest(delta(7, "h")).kind).toBe("apply");
   });
 
+  it("accepts an idle empty pull after backend geometry advances", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+
+    expect(coordinator.beginRepair()).toBe(3);
+    expect(coordinator.completeRepair(delta(3, "", 4))).toEqual({
+      kind: "duplicate",
+      chunks: [],
+      segments: [],
+    });
+    expect(coordinator.ready).toBe(true);
+
+    // Empty pull metadata did not pretend that any byte was parsed on rev 4.
+    expect(coordinator.ingest(delta(3, "d", 3)).kind).toBe("apply");
+  });
+
+  it("drains a delta that arrives while an idle pull is pending", () => {
+    const coordinator = new TerminalOutputAttachCoordinator();
+    coordinator.completeAttach(attachment(0, "abc"));
+
+    expect(coordinator.beginRepair()).toBe(3);
+    expect(coordinator.ingest(delta(3, "de", 4)).kind).toBe("buffered");
+    const result = coordinator.completeRepair(delta(3, "", 4));
+
+    expect(result.kind).toBe("apply");
+    expect(result.chunks.map((chunk) => new TextDecoder().decode(chunk))).toEqual(["de"]);
+    expect(coordinator.contiguousSeq).toBe(5);
+  });
+
   it("reports a gap when the repair itself does not reach the expected sequence", () => {
     const coordinator = new TerminalOutputAttachCoordinator();
     coordinator.completeAttach(attachment(0, "abc"));

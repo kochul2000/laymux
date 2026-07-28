@@ -13,6 +13,11 @@ use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWork
 use crate::terminal::{InitialExecutionHost, TerminalSession};
 use crate::terminal_env::TerminalEnvPlan;
 
+/// One master-read chunk. Desktop output credit may exceed its window by at
+/// most this amount because the reader applies backpressure after recording a
+/// complete callback chunk.
+pub(crate) const PTY_READ_BUFFER_BYTES: usize = 4096;
+
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
 /// in a path string. Also expands `~` as a shorthand for the user's home directory.
 fn expand_env_in_path(path: &str) -> String {
@@ -575,13 +580,11 @@ where
     // Spawn reader thread
     thread::spawn(move || {
         let mut reader = reader;
-        let mut buf = [0u8; 4096];
+        let mut buf = [0u8; PTY_READ_BUFFER_BYTES];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break, // EOF
-                Ok(n) => {
-                    on_output(buf[..n].to_vec());
-                }
+                Ok(n) => on_output(buf[..n].to_vec()),
                 Err(_) => break,
             }
         }

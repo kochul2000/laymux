@@ -116,6 +116,10 @@ export interface TerminalAttachState {
 export interface TerminalOutputAttachmentPayload {
   state: TerminalAttachState;
   snapshot: number[];
+  flowControl: {
+    token: string;
+    windowBytes: number;
+  };
 }
 
 export interface TerminalOutputDeltaPayload {
@@ -128,6 +132,15 @@ export interface TerminalOutputDeltaPayload {
 
 export async function attachTerminalOutput(id: string): Promise<TerminalOutputAttachmentPayload> {
   return invoke("attach_terminal_output", { id });
+}
+
+export async function acknowledgeTerminalOutput(
+  id: string,
+  generation: number,
+  token: string,
+  seq: number,
+): Promise<boolean> {
+  return invoke("acknowledge_terminal_output", { id, generation, token, seq });
 }
 
 /**

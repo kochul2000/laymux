@@ -11,6 +11,10 @@ use crate::lock_ext::MutexExt;
 use crate::output_buffer::{TerminalOutputBuffer, TerminalOutputSlice};
 use crate::terminal_protocol::{TerminalProtocolSnapshot, TerminalProtocolState};
 
+mod desktop_flow;
+use desktop_flow::DesktopOutputFlow;
+pub use desktop_flow::TerminalOutputFlowControl;
+
 pub const TERMINAL_OUTPUT_PROTOCOL_VERSION: u8 = 1;
 pub const TERMINAL_OUTPUT_PROTOCOL_NAME: &str = "laymux-terminal-output.v1";
 pub const TERMINAL_OUTPUT_FRAME_TYPE: &str = "terminal.output";
@@ -106,6 +110,14 @@ pub struct TerminalAttachState {
 pub struct TerminalOutputAttachment {
     pub state: TerminalAttachState,
     pub snapshot: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopTerminalOutputAttachment {
+    #[serde(flatten)]
+    pub attachment: TerminalOutputAttachment,
+    pub flow_control: TerminalOutputFlowControl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,6 +293,7 @@ pub struct TerminalOutputSession {
     protocol: TerminalProtocolGate,
     output: TerminalOutputBuffer,
     runtime: Mutex<TerminalOutputSessionRuntime>,
+    desktop_flow: DesktopOutputFlow,
 }
 
 impl TerminalOutputSession {
@@ -296,6 +309,7 @@ impl TerminalOutputSession {
             protocol: new_protocol_gate(),
             output,
             runtime: Mutex::new(TerminalOutputSessionRuntime::new(geometry)),
+            desktop_flow: DesktopOutputFlow::new(),
         }
     }
 
@@ -313,6 +327,42 @@ impl TerminalOutputSession {
 
     pub fn output_buffer(&self) -> TerminalOutputBuffer {
         self.output.clone()
+    }
+
+    /// Bound output that can race ahead of the first desktop attach.
+    pub fn begin_desktop_output_bootstrap(&self, window_bytes: usize) -> Result<(), String> {
+        self.desktop_flow.begin_bootstrap(window_bytes)
+    }
+
+    /// Wait after a fully processed PTY callback when the desktop parsed-credit
+    /// window is full. This method owns only the flow mutex while sleeping.
+    pub fn wait_for_desktop_output_capacity(&self, produced_seq: u64) -> Result<(), String> {
+        self.desktop_flow.wait_for_capacity(produced_seq)
+    }
+
+    /// Fail closed after `record_output` could not preserve the exact stream.
+    /// ACK or reattach cannot repair bytes that never received a sequence, so
+    /// the PTY callback remains parked until this generation is retired.
+    pub fn wait_for_terminal_output_retirement(&self) {
+        self.desktop_flow.wait_until_retired();
+    }
+
+    /// Cheap fail-stop guard for a PTY callback racing generation close.
+    pub fn is_terminal_output_retired(&self) -> bool {
+        self.desktop_flow.is_retired()
+    }
+
+    pub fn acknowledge_desktop_output(
+        &self,
+        generation: u64,
+        token: &str,
+        seq: u64,
+    ) -> Result<bool, String> {
+        if generation != self.generation {
+            return Ok(false);
+        }
+        self.desktop_flow
+            .acknowledge(token, seq, self.output.write_seq())
     }
 
     /// Parse and record one PTY callback chunk for this exact generation.
@@ -393,6 +443,42 @@ impl TerminalOutputSession {
             protocol.snapshot(),
             snapshot,
         ))
+    }
+
+    fn attach_desktop(
+        &self,
+        max_snapshot_bytes: usize,
+        window_bytes: usize,
+    ) -> Result<DesktopTerminalOutputAttachment, String> {
+        // Snapshot capture and token replacement share the protocol/runtime
+        // prefix gate. The replacement ACK starts at the exact first byte in
+        // the copied snapshot, and old tokens become stale before new output
+        // can acquire the runtime lock.
+        let protocol = self.protocol.lock_or_err()?;
+        let runtime = self.runtime.lock_or_err()?;
+        if runtime.retired {
+            return Err(format!("Session '{}' not found", self.terminal_id));
+        }
+        if runtime.creating {
+            return Err(format!(
+                "Session '{}' is still being created",
+                self.terminal_id
+            ));
+        }
+        let snapshot = self.output.snapshot(max_snapshot_bytes);
+        let attachment = attachment_from_snapshot(
+            self.generation,
+            runtime.geometry,
+            protocol.snapshot(),
+            snapshot,
+        );
+        let flow_control = self
+            .desktop_flow
+            .attach(attachment.state.snapshot_start_seq, window_bytes)?;
+        Ok(DesktopTerminalOutputAttachment {
+            attachment,
+            flow_control,
+        })
     }
 
     fn attach_and_subscribe(
@@ -646,9 +732,18 @@ impl TerminalOutputSession {
     }
 
     fn retire(&self, _allow_creating: bool) -> Result<(), String> {
-        let _protocol = self.protocol.lock_or_err()?;
-        let mut runtime = self.runtime.lock_or_err()?;
+        // Retirement discards both states, so poison is recoverable here even
+        // though it is fatal on every read/write path. Recovering lets the
+        // close command finish catalog cleanup and reach `PtyHandle::terminate`
+        // instead of returning early while an orphan reader resumes.
+        let _protocol = self
+            .protocol
+            .lock_or_recover_for_cleanup("retiring terminal output protocol");
+        let mut runtime = self
+            .runtime
+            .lock_or_recover_for_cleanup("retiring terminal output runtime");
         if runtime.retired {
+            self.desktop_flow.retire();
             return Ok(());
         }
         // A close that wins while create is still spawning the PTY records a
@@ -664,6 +759,11 @@ impl TerminalOutputSession {
             ));
         }
         runtime.subscribers.clear();
+        // Wake credit/fatal waiters only after the generation is observably
+        // retired. A callback that races close and runs again therefore sees
+        // `retired`/poison and returns before OSC or legacy emission; the close
+        // command can then terminate the selected PTY handle normally.
+        self.desktop_flow.retire();
         Ok(())
     }
 

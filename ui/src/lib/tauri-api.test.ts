@@ -16,6 +16,7 @@ import {
   type TerminalSessionResult,
   createTerminalSession,
   attachTerminalOutput,
+  acknowledgeTerminalOutput,
   writeTerminalInput,
   writeToTerminal,
   writeTerminalProtocolReply,
@@ -191,10 +192,22 @@ describe("tauri-api", () => {
           geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot: [65, 66],
+        flowControl: { token: "lease-9", windowBytes: 524288 },
       };
       mockInvoke.mockResolvedValue(attachment);
       await expect(attachTerminalOutput("t1")).resolves.toEqual(attachment);
       expect(mockInvoke).toHaveBeenCalledWith("attach_terminal_output", { id: "t1" });
+    });
+
+    it("acknowledges one generation-scoped parsed prefix", async () => {
+      mockInvoke.mockResolvedValue(true);
+      await expect(acknowledgeTerminalOutput("t1", 7, "lease-9", 1234)).resolves.toBe(true);
+      expect(mockInvoke).toHaveBeenCalledWith("acknowledge_terminal_output", {
+        id: "t1",
+        generation: 7,
+        token: "lease-9",
+        seq: 1234,
+      });
     });
   });
 

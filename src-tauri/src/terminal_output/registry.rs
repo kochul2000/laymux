@@ -288,6 +288,30 @@ pub fn attach_terminal_output(
     ))
 }
 
+/// Capture the desktop snapshot and atomically replace its parsed-credit lease.
+pub fn attach_desktop_terminal_output(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    max_snapshot_bytes: usize,
+    window_bytes: usize,
+) -> Result<DesktopTerminalOutputAttachment, String> {
+    terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
+        .attach_desktop(max_snapshot_bytes, window_bytes)
+}
+
+pub fn acknowledge_desktop_terminal_output(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    generation: u64,
+    token: &str,
+    seq: u64,
+) -> Result<bool, String> {
+    terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
+        .acknowledge_desktop_output(generation, token, seq)
+}
+
 /// Atomically capture attach state/snapshot and register a bounded subscriber.
 pub fn attach_and_subscribe_terminal_output(
     protocol_states: &SharedTerminalProtocolStates,

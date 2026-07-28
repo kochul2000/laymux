@@ -42,6 +42,7 @@ import {
   resizeTerminal,
   closeTerminalSession,
   attachTerminalOutput,
+  acknowledgeTerminalOutput,
   resumeTerminalOutput,
   onTerminalOutputV2,
   smartPaste,
@@ -217,6 +218,8 @@ import {
   TerminalWriteBatchQueue,
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
+import { TerminalOutputFlowAcknowledger } from "@/lib/terminal-output-flow-control";
+import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -284,6 +287,16 @@ const TERMINAL_WRITE_RETRY_MS = 16;
  * pane that never prints again (issue #607).
  */
 const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
+
+/**
+ * Low-frequency exact pull while a desktop parsed-credit lease is active.
+ *
+ * A v2 event can be lost at the precise chunk that fills the backend window;
+ * no later event then exists to expose a sequence gap. Pulling from the last
+ * contiguous prefix makes that edge recoverable without allowing another PTY
+ * read or weakening the fixed producer bound.
+ */
+const TERMINAL_OUTPUT_PULL_WATCHDOG_MS = 1000;
 
 /**
  * How many `resume` round-trips a single hole may take before escalating.
@@ -3052,7 +3065,10 @@ export function TerminalView({
           const callbacks = nativeWindowsOutputStabilizer.hasHeldBytes
             ? undefined
             : pendingStabilizerParsedCallbacks.drain();
-          deliverStabilizedEmissions?.(emissions, callbacks?.onParsed, callbacks?.onDiscard);
+          const onDiscard =
+            callbacks?.onDiscard ??
+            (emissions.length > 0 ? pendingStabilizerParsedCallbacks.snapshotDiscard() : undefined);
+          deliverStabilizedEmissions?.(emissions, callbacks?.onParsed, onDiscard);
           scheduleOutputStabilizerDeadline();
           flushDeferredTerminalFit();
         },
@@ -3433,169 +3449,180 @@ export function TerminalView({
       currentParsingFrameEndCursorAuthoritative =
         batch.metadata.frameEndCursorAuthoritative === true;
       currentParsingAttachEpoch = batch.metadata.attachEpoch;
-      try {
-        terminal.write(batch.data, () => {
-          pendingTerminalWrites = 0;
-          clearCurrentParsingWrite();
-
-          type CallbackFailure = {
-            stage: TerminalWriteCallbackFailureStage;
-            error: unknown;
-          };
-          const failures: CallbackFailure[] = [];
-          const runCompletionStep = (
-            stage: TerminalWriteCallbackFailureStage,
-            step: () => void,
-          ) => {
-            try {
-              step();
-            } catch (error) {
-              failures.push({ stage, error });
-            }
-          };
-          const reportCallbackFailures = (reported: readonly CallbackFailure[]) => {
-            if (reported.length === 0) return;
-            for (const failure of reported) {
-              // Diagnostics must never become another exception inside xterm's
-              // callback. xterm advances its buffer offset and subtracts the
-              // accepted bytes only after this callback returns.
-              try {
-                recordTerminalOutputPipeline(instanceId, "writeCallbackFailures");
-                recordTerminalOutputPipeline(
-                  instanceId,
-                  TERMINAL_WRITE_CALLBACK_SOURCE_COUNTER[batch.metadata.source],
-                );
-                recordTerminalOutputPipeline(
-                  instanceId,
-                  TERMINAL_WRITE_CALLBACK_STAGE_COUNTER[failure.stage],
-                );
-              } catch {
-                // Best-effort diagnostics cannot safely recurse into themselves.
-              }
-            }
-            const firstWarnings = reported.filter(({ stage }) => {
-              const key = `${batch.metadata.source}:${stage}`;
-              if (terminalWriteCallbackWarnings.has(key)) return false;
-              terminalWriteCallbackWarnings.add(key);
-              return true;
-            });
-            if (firstWarnings.length === 0) return;
-            try {
-              console.warn("[TerminalView] xterm write callback failed:", {
-                source: batch.metadata.source,
-                attachEpoch: batch.metadata.attachEpoch,
-                firstId: batch.firstId,
-                lastId: batch.lastId,
-                failures: firstWarnings.map(({ stage, error }) => {
-                  let message = "unknown callback failure";
-                  try {
-                    message = error instanceof Error ? error.message : String(error);
-                  } catch {
-                    // An exotic thrown value may itself reject stringification.
-                  }
-                  return { stage, message };
-                }),
-              });
-            } catch {
-              // A patched console must not poison xterm's accepted-write state.
-            }
-          };
-
-          try {
-            runCompletionStep("metrics", () => {
-              recordTerminalOutputPipeline(
-                instanceId,
-                "xtermParseMaxMs",
-                Math.max(0, monotonicNow() - submittedAt),
-              );
-            });
-            if (batch.entries.some(({ metadata }) => metadata.needsSyncOutputMonitor === true)) {
-              runCompletionStep("monitor", startSyncOutputMonitor);
-            }
-            for (const entry of batch.entries) {
-              if (entry.onParsed) runCompletionStep("consumer", entry.onParsed);
-            }
-            if (
-              batch.metadata.stabilized &&
-              !cancelled &&
-              batch.metadata.attachEpoch === outputAttachEpoch &&
-              terminal.rows > 0
-            ) {
-              runCompletionStep("refresh", () => {
-                if (isContainerHiddenRef.current) {
-                  reflowDirtyRef.current = true;
-                } else {
-                  terminal.refresh(0, terminal.rows - 1);
-                  if (stabilizedRefreshFrame !== undefined) {
-                    cancelAnimationFrame(stabilizedRefreshFrame);
-                  }
-                  stabilizedRefreshFrame = requestAnimationFrame(() => {
-                    stabilizedRefreshFrame = undefined;
-                    if (
-                      !cancelled &&
-                      batch.metadata.attachEpoch === outputAttachEpoch &&
-                      terminal.rows > 0
-                    ) {
-                      if (isContainerHiddenRef.current) {
-                        reflowDirtyRef.current = true;
-                      } else {
-                        try {
-                          terminal.refresh(0, terminal.rows - 1);
-                        } catch (error) {
-                          reportCallbackFailures([{ stage: "refresh", error }]);
-                        }
-                      }
-                    }
-                  });
-                }
-              });
-            }
-          } catch (error) {
-            // The classified steps above are independently guarded. Keep one
-            // final catch so future completion work cannot accidentally escape
-            // into xterm before receiving an explicit stage.
-            failures.push({ stage: "unknown", error });
-          } finally {
-            runCompletionStep("drain", () => {
-              if (terminalWriteQueue.depth > 0) {
-                // One physical write per task keeps automation/input responsive
-                // while a flood drains; the fixed batch budget bounds each task.
-                scheduleTerminalWritePump();
-              } else {
-                clearTerminalWriteRetryTimer();
-                flushDeferredTerminalFit();
-              }
-            });
-            reportCallbackFailures(failures);
-          }
-        });
-        // `terminal.write` throws synchronously when xterm rejects backpressure.
-        // Count only accepted physical writes, never failed attempts or retries.
-        recordTerminalOutputPipeline(instanceId, "xtermWrites");
-        recordTerminalOutputPipeline(instanceId, "xtermWriteBytes", batch.byteLength);
-        recordTerminalOutputPipeline(instanceId, "writeBatchMaxParts", batch.partCount);
-        recordTerminalOutputPipeline(
-          instanceId,
-          "writeSubmitMaxMs",
-          Math.max(0, monotonicNow() - submittedAt),
-        );
-        return true;
-      } catch (error) {
+      const onWriteParsed = () => {
         pendingTerminalWrites = 0;
         clearCurrentParsingWrite();
-        if (!batch.warned) {
+
+        type CallbackFailure = {
+          stage: TerminalWriteCallbackFailureStage;
+          error: unknown;
+        };
+        const failures: CallbackFailure[] = [];
+        const runCompletionStep = (stage: TerminalWriteCallbackFailureStage, step: () => void) => {
+          try {
+            step();
+          } catch (error) {
+            failures.push({ stage, error });
+          }
+        };
+        const reportCallbackFailures = (reported: readonly CallbackFailure[]) => {
+          if (reported.length === 0) return;
+          for (const failure of reported) {
+            // Diagnostics must never become another exception inside xterm's
+            // callback. xterm advances its buffer offset and subtracts the
+            // accepted bytes only after this callback returns.
+            try {
+              recordTerminalOutputPipeline(instanceId, "writeCallbackFailures");
+              recordTerminalOutputPipeline(
+                instanceId,
+                TERMINAL_WRITE_CALLBACK_SOURCE_COUNTER[batch.metadata.source],
+              );
+              recordTerminalOutputPipeline(
+                instanceId,
+                TERMINAL_WRITE_CALLBACK_STAGE_COUNTER[failure.stage],
+              );
+            } catch {
+              // Best-effort diagnostics cannot safely recurse into themselves.
+            }
+          }
+          const firstWarnings = reported.filter(({ stage }) => {
+            const key = `${batch.metadata.source}:${stage}`;
+            if (terminalWriteCallbackWarnings.has(key)) return false;
+            terminalWriteCallbackWarnings.add(key);
+            return true;
+          });
+          if (firstWarnings.length === 0) return;
+          try {
+            console.warn("[TerminalView] xterm write callback failed:", {
+              source: batch.metadata.source,
+              attachEpoch: batch.metadata.attachEpoch,
+              firstId: batch.firstId,
+              lastId: batch.lastId,
+              failures: firstWarnings.map(({ stage, error }) => {
+                let message = "unknown callback failure";
+                try {
+                  message = error instanceof Error ? error.message : String(error);
+                } catch {
+                  // An exotic thrown value may itself reject stringification.
+                }
+                return { stage, message };
+              }),
+            });
+          } catch {
+            // A patched console must not poison xterm's accepted-write state.
+          }
+        };
+
+        try {
+          runCompletionStep("metrics", () => {
+            recordTerminalOutputPipeline(
+              instanceId,
+              "xtermParseMaxMs",
+              Math.max(0, monotonicNow() - submittedAt),
+            );
+          });
+          if (batch.entries.some(({ metadata }) => metadata.needsSyncOutputMonitor === true)) {
+            runCompletionStep("monitor", startSyncOutputMonitor);
+          }
+          for (const entry of batch.entries) {
+            if (entry.onParsed) runCompletionStep("consumer", entry.onParsed);
+          }
+          if (
+            batch.metadata.stabilized &&
+            !cancelled &&
+            batch.metadata.attachEpoch === outputAttachEpoch &&
+            terminal.rows > 0
+          ) {
+            runCompletionStep("refresh", () => {
+              if (isContainerHiddenRef.current) {
+                reflowDirtyRef.current = true;
+              } else {
+                terminal.refresh(0, terminal.rows - 1);
+                if (stabilizedRefreshFrame !== undefined) {
+                  cancelAnimationFrame(stabilizedRefreshFrame);
+                }
+                stabilizedRefreshFrame = requestAnimationFrame(() => {
+                  stabilizedRefreshFrame = undefined;
+                  if (
+                    !cancelled &&
+                    batch.metadata.attachEpoch === outputAttachEpoch &&
+                    terminal.rows > 0
+                  ) {
+                    if (isContainerHiddenRef.current) {
+                      reflowDirtyRef.current = true;
+                    } else {
+                      try {
+                        terminal.refresh(0, terminal.rows - 1);
+                      } catch (error) {
+                        reportCallbackFailures([{ stage: "refresh", error }]);
+                      }
+                    }
+                  }
+                });
+              }
+            });
+          }
+        } catch (error) {
+          // The classified steps above are independently guarded. Keep one
+          // final catch so future completion work cannot accidentally escape
+          // into xterm before receiving an explicit stage.
+          failures.push({ stage: "unknown", error });
+        } finally {
+          runCompletionStep("drain", () => {
+            if (terminalWriteQueue.depth > 0) {
+              // One physical write per task keeps automation/input responsive
+              // while a flood drains; the fixed batch budget bounds each task.
+              scheduleTerminalWritePump();
+            } else {
+              clearTerminalWriteRetryTimer();
+              flushDeferredTerminalFit();
+            }
+          });
+          reportCallbackFailures(failures);
+        }
+      };
+      return attemptTerminalWrite({
+        // This is the complete admission boundary. Once it returns, diagnostics
+        // are forbidden from reclassifying the accepted bytes as discarded.
+        write: () => terminal.write(batch.data, onWriteParsed),
+        isBackpressure: isXtermWriteBackpressure,
+        onAccepted: () => {
+          // Count only accepted physical writes, never failed attempts or retries.
+          recordTerminalOutputPipeline(instanceId, "xtermWrites");
+          recordTerminalOutputPipeline(instanceId, "xtermWriteBytes", batch.byteLength);
+          recordTerminalOutputPipeline(instanceId, "writeBatchMaxParts", batch.partCount);
+          recordTerminalOutputPipeline(
+            instanceId,
+            "writeSubmitMaxMs",
+            Math.max(0, monotonicNow() - submittedAt),
+          );
+        },
+        restoreBackpressure: () => {
+          pendingTerminalWrites = 0;
+          clearCurrentParsingWrite();
+          // Restore the exact dequeued object before any warning/counter. Both
+          // its callbacks and its `warned` state belong to this retry.
+          terminalWriteQueue.restore(batch);
+        },
+        onBackpressure: () => recordTerminalOutputPipeline(instanceId, "writeBackpressure"),
+        onRejectedWarning: (error) => {
+          if (batch.warned) return;
           batch.warned = true;
           console.warn("[TerminalView] xterm write failed:", error);
-        }
-        const backpressure = isXtermWriteBackpressure(error);
-        if (backpressure) {
-          recordTerminalOutputPipeline(instanceId, "writeBackpressure");
-          terminalWriteQueue.restore(batch);
-        } else {
-          for (const entry of batch.entries) entry.onDiscard?.();
-        }
-        return !backpressure;
-      }
+        },
+        onDiscard: () => {
+          pendingTerminalWrites = 0;
+          clearCurrentParsingWrite();
+          for (const entry of batch.entries) {
+            try {
+              entry.onDiscard?.();
+            } catch {
+              // A consumer cannot change the already-rejected byte outcome or
+              // prevent later entries from receiving lifecycle cancellation.
+            }
+          }
+        },
+      });
     };
     function flushDeferredTerminalWrites() {
       if (cancelled || pendingTerminalWrites > 0) return;
@@ -3663,8 +3690,16 @@ export function TerminalView({
           metadata: requestMetadata,
           batchKey,
           allowCoalescing: batchKey !== undefined,
+          // Ordinary live entries in the same epoch/geometry may share one
+          // physical parse boundary. The prepared batch retains every logical
+          // parsed/discard callback, preserving ACK holes while restoring the
+          // ADR-0080 flood coalescing path.
+          coalesceCallbacks: batchKey !== undefined,
           onParsed: index === chunks.length - 1 ? onParsed : undefined,
-          onDiscard: index === chunks.length - 1 ? onDiscard : undefined,
+          // Any rejected physical chunk invalidates the logical sequence
+          // range. Promise settlement is one-shot, so sharing the callback is
+          // safe and prevents an early chunk failure from stranding credit.
+          onDiscard,
         });
       });
       recordTerminalOutputPipeline(instanceId, "writeQueueMaxDepth", terminalWriteQueue.depth);
@@ -3692,6 +3727,8 @@ export function TerminalView({
     let outputRepairInFlight = false;
     /** Generation of the attachment the coordinator is currently applying. */
     let outputGeneration: number | undefined;
+    /** Parsed-credit sender owned by exactly one backend attach lease. */
+    let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
     const renderCheckpointModel = new TerminalRenderCheckpointModel();
@@ -4085,7 +4122,11 @@ export function TerminalView({
             attachEpoch: outputAttachEpoch,
             geometryRevision,
           },
-          index === emissions.length - 1 ? onDiscard : undefined,
+          // One logical parsed-credit range may fan out into several physical
+          // stabilized emissions. Any one of them being discarded invalidates
+          // the whole range, so every emission shares the queue's one-shot
+          // discard callback; only the final emission may report parse success.
+          onDiscard,
         );
       });
     };
@@ -4117,15 +4158,25 @@ export function TerminalView({
         }
         return;
       }
-      if (onParsed) pendingStabilizerParsedCallbacks.push(onParsed, onDiscard);
+      // Earlier logical segments intentionally have no `onParsed`, but their
+      // discard callback still guards the same ACK range. Preserve those
+      // discard-only entries until every held byte is emitted.
+      if (onParsed || onDiscard) pendingStabilizerParsedCallbacks.push(onParsed, onDiscard);
       const emissions = nativeWindowsOutputStabilizer.push(data, monotonicNow());
       const callbacks = nativeWindowsOutputStabilizer.hasHeldBytes
         ? undefined
         : pendingStabilizerParsedCallbacks.drain();
+      // `push()` may emit a plain prefix while simultaneously holding a frame
+      // tail. Keep parse completion queued for that tail, but attach a
+      // non-destructive snapshot discard to the immediate prefix so its
+      // rejection cannot later be overwritten by the tail's successful parse.
+      const immediateDiscard =
+        callbacks?.onDiscard ??
+        (emissions.length > 0 ? pendingStabilizerParsedCallbacks.snapshotDiscard() : undefined);
       deliverStabilizedEmissions?.(
         emissions,
         callbacks?.onParsed,
-        callbacks?.onDiscard,
+        immediateDiscard,
         geometryRevision,
       );
       scheduleOutputStabilizerDeadline();
@@ -4136,13 +4187,24 @@ export function TerminalView({
       // rebuild reads as "not ready" without a reset effect.
       if (!cancelled) setOutputProtocolReadyGeneration(ready ? terminalGeneration : -1);
     };
-    const scheduleOutputReattach = () => {
-      if (cancelled || outputAttachRetryTimer !== undefined) return;
+    const scheduleOutputReattach = (expectedEpoch = outputAttachEpoch) => {
+      if (
+        cancelled ||
+        expectedEpoch !== outputAttachEpoch ||
+        outputAttachRetryTimer !== undefined
+      ) {
+        return;
+      }
       // Invalidate every continuation belonging to the old snapshot before
       // accepting more listener deltas. Queued old-epoch bytes are already in
       // the replacement snapshot, so discard them rather than replaying them
       // again after reset. An accepted xterm write cannot be cancelled; wait for
       // its parse callback before the replacement attach reaches reset().
+      // Discard callbacks below capture this epoch. Retire its sender and then
+      // advance the epoch before invoking them, so a stale failure cannot
+      // recursively replace the replacement attach.
+      outputFlowAcknowledger?.dispose();
+      outputFlowAcknowledger = undefined;
       outputAttachEpoch += 1;
       outputAttachInFlight = false;
       outputAttachParserBusy = true;
@@ -4167,6 +4229,13 @@ export function TerminalView({
     };
     const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
       if (segments.length === 0) return;
+      const epoch = outputAttachEpoch;
+      const flow = outputFlowAcknowledger;
+      if (!flow) {
+        console.warn("[TerminalView] terminal output flow lease is missing; reattaching");
+        scheduleOutputReattach(epoch);
+        return;
+      }
       // ADR-0026's quiet window means "no PTY output arrived recently", so it has
       // to be stamped before stabilizer or xterm backpressure can delay it.
       lastTerminalOutputAt = Date.now();
@@ -4179,13 +4248,37 @@ export function TerminalView({
       // can reorder OSC/alternate-buffer state transitions.
       const checkpointSegments = coalesceTerminalOutputSegments(segments);
       recordTerminalOutputPipeline(instanceId, "checkpointApplies", checkpointSegments.length);
-      for (const segment of checkpointSegments) {
-        void renderCheckpointModel.apply(segment).catch((error) => {
-          console.warn("[TerminalView] render checkpoint update failed:", error);
-        });
-      }
-      for (const segment of segments) {
-        processLiveTerminalOutput(segment.data, undefined, undefined, segment.geometry.revision);
+      const checkpointParsed = Promise.all(
+        checkpointSegments.map((segment) => renderCheckpointModel.apply(segment)),
+      ).then(() => undefined);
+      let resolveVisibleParsed!: () => void;
+      let rejectVisibleParsed!: (error: Error) => void;
+      const visibleParsed = new Promise<void>((resolve, reject) => {
+        resolveVisibleParsed = resolve;
+        rejectVisibleParsed = reject;
+      });
+      const first = segments[0];
+      const last = segments[segments.length - 1];
+      flow.completeAfterBothParsed(first.seqStart, last.seqEnd, visibleParsed, checkpointParsed);
+      // Install failure handling before enqueue: a test double may discard a
+      // physical batch synchronously, and checkpoint apply may reject while a
+      // stale epoch exits the loop.
+      void Promise.all([visibleParsed, checkpointParsed]).catch((error) => {
+        if (cancelled || epoch !== outputAttachEpoch) return;
+        console.warn("[TerminalView] terminal output parse failed; reattaching:", error);
+        scheduleOutputReattach(epoch);
+      });
+      // Keep the original segment boundaries on the live detector/stabilizer
+      // path immediately. Only producer credit waits for the checkpoint.
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index];
+        const isLast = index === segments.length - 1;
+        processLiveTerminalOutput(
+          segment.data,
+          isLast ? resolveVisibleParsed : undefined,
+          () => rejectVisibleParsed(new Error("visible xterm discarded terminal output")),
+          segment.geometry.revision,
+        );
       }
     };
     /**
@@ -4197,30 +4290,50 @@ export function TerminalView({
     const writeAttachedSegments = async (
       segments: TerminalOutputAppliedSegment[],
       isCurrentAttach: () => boolean,
+      epoch: number,
+      flow: TerminalOutputFlowAcknowledger,
     ) => {
+      if (segments.length === 0) return isCurrentAttach();
       recordTerminalOutputPipeline(instanceId, "segmentsIn", segments.length);
       recordTerminalOutputPipeline(instanceId, "checkpointApplies", segments.length);
       // Queue the whole buffered prefix synchronously. Listener callbacks can
       // fire between awaits; enqueueing one-by-one would let a newer live delta
       // jump ahead of the second buffered segment in the checkpoint model even
       // though the visible xterm stayed ordered.
-      const checkpointWrites = segments.map((segment) => renderCheckpointModel.apply(segment));
+      const checkpointParsed = Promise.all(
+        segments.map((segment) => renderCheckpointModel.apply(segment)),
+      ).then(() => undefined);
+      let resolveVisibleParsed!: () => void;
+      let rejectVisibleParsed!: (error: Error) => void;
+      const visibleParsed = new Promise<void>((resolve, reject) => {
+        resolveVisibleParsed = resolve;
+        rejectVisibleParsed = reject;
+      });
+      const first = segments[0];
+      const last = segments[segments.length - 1];
+      flow.completeAfterBothParsed(first.seqStart, last.seqEnd, visibleParsed, checkpointParsed);
+      const parsedSuccessfully = Promise.all([visibleParsed, checkpointParsed]).then(
+        () => true,
+        (error) => {
+          if (cancelled || epoch !== outputAttachEpoch) return false;
+          console.warn("[TerminalView] buffered terminal output parse failed; reattaching:", error);
+          scheduleOutputReattach(epoch);
+          return false;
+        },
+      );
       for (let index = 0; index < segments.length; index += 1) {
         const segment = segments[index];
-        await checkpointWrites[index];
-        // The checkpoint promise can outlive this attach. Re-check before the
-        // visible enqueue; otherwise a stale segment can enter the FIFO after
-        // reattach already cleared it and later parse behind the new reset.
         if (!isCurrentAttach()) return false;
-        if (index === segments.length - 1) {
-          await new Promise<void>((resolve) =>
-            processLiveTerminalOutput(segment.data, resolve, resolve, segment.geometry.revision),
-          );
-        } else {
-          processLiveTerminalOutput(segment.data, undefined, undefined, segment.geometry.revision);
-        }
+        const isLast = index === segments.length - 1;
+        processLiveTerminalOutput(
+          segment.data,
+          isLast ? resolveVisibleParsed : undefined,
+          () => rejectVisibleParsed(new Error("visible xterm discarded terminal output")),
+          segment.geometry.revision,
+        );
         if (!isCurrentAttach()) return false;
       }
+      if (!(await parsedSuccessfully)) return false;
       return isCurrentAttach();
     };
     const scheduleOutputRepairRetry = (
@@ -4262,7 +4375,10 @@ export function TerminalView({
      * have without the gap. Rebuilding here would instead promote the next
      * in-frame `?25h` to an authoritative cursor park.
      */
-    const startOutputRepair = async (gap: { expectedSeq: number; actualSeq: number }) => {
+    const startOutputRepair = async (
+      gap: { expectedSeq: number; actualSeq: number },
+      trigger: "event-gap" | "pull-watchdog" = "event-gap",
+    ) => {
       // An in-flight repair already owns this hole; its own pending drain picks
       // up whatever arrived behind it.
       if (cancelled || outputRepairInFlight) return;
@@ -4272,7 +4388,7 @@ export function TerminalView({
         // delta would then wait for output that may never come. Retry once the
         // attach settles, and let the epoch guard cancel the retry if the attach
         // turned into a full reattach that owns recovery itself.
-        scheduleOutputRepairRetry(gap, epoch);
+        if (trigger === "event-gap") scheduleOutputRepairRetry(gap, epoch);
         return;
       }
       const generation = outputGeneration;
@@ -4391,11 +4507,18 @@ export function TerminalView({
             currentGap = nextGap;
             continue;
           }
-          console.warn(
-            "[TerminalView] terminal output gap repaired",
-            { ...currentGap, repairedBytes: raw.data.length, round },
-            recordTerminalOutputRecovery(instanceId, "repair"),
-          );
+          // An idle watchdog returns an empty exact range. It deliberately
+          // exercises the same generation/geometry-safe splice path, but it is
+          // not a recovery and must not pollute gap metrics or logs.
+          if (trigger === "event-gap" || raw.data.length > 0) {
+            console.warn(
+              trigger === "pull-watchdog"
+                ? "[TerminalView] terminal output pull watchdog recovered undelivered bytes"
+                : "[TerminalView] terminal output gap repaired",
+              { ...currentGap, repairedBytes: raw.data.length, round },
+              recordTerminalOutputRecovery(instanceId, "repair"),
+            );
+          }
           applyOutputSegments(result.segments);
           return;
         }
@@ -4414,6 +4537,8 @@ export function TerminalView({
       recordTerminalOutputPipeline(instanceId, "attaches");
       outputAttachInFlight = true;
       outputAttachParserBusy = true;
+      outputFlowAcknowledger?.dispose();
+      outputFlowAcknowledger = undefined;
       const epoch = ++outputAttachEpoch;
       resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
@@ -4429,81 +4554,122 @@ export function TerminalView({
         ]);
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
+        const { token, windowBytes } = rawAttachment.flowControl;
+        if (
+          typeof token !== "string" ||
+          token.length === 0 ||
+          !Number.isSafeInteger(windowBytes) ||
+          windowBytes <= 0
+        ) {
+          throw new Error("malformed terminal output flow-control lease");
+        }
+        let ackWarningReported = false;
+        const flow = new TerminalOutputFlowAcknowledger(
+          attachment.state.snapshotStartSeq,
+          (seq) => acknowledgeTerminalOutput(instanceId, attachment.state.generation, token, seq),
+          {
+            onError: (error) => {
+              if (ackWarningReported || !isCurrentAttach()) return;
+              ackWarningReported = true;
+              console.warn("[TerminalView] terminal output ACK failed; retrying:", error);
+            },
+            onLeaseLost: () => {
+              if (!isCurrentAttach()) return;
+              console.warn("[TerminalView] terminal output ACK lease was replaced; reattaching");
+              scheduleOutputReattach(epoch);
+            },
+          },
+        );
+        outputFlowAcknowledger = flow;
         await renderCheckpointModel.attach(attachment);
         if (!isCurrentAttach()) return;
 
         // The whole rebuild is one composition-scroll window: `reset()` collapses
         // the scrollback and the replay below rebuilds it, so only the net shift
         // may reach an open composition anchor (issue #602).
-        terminalOutputWriteChain = terminalOutputWriteChain.then(() =>
-          withCompositionScrollRebuild(async () => {
-            if (!isCurrentAttach()) return;
-            terminal.reset();
-            resetStreamDerivedCursorState();
-            if (cached) {
-              await trackedTerminalWriteAsync(cached);
+        // A discarded stale replay rejects its epoch's chain by design. A new
+        // attach must preserve serialization without inheriting that terminal
+        // rejection forever.
+        terminalOutputWriteChain = terminalOutputWriteChain
+          .catch(() => {})
+          .then(() =>
+            withCompositionScrollRebuild(async () => {
               if (!isCurrentAttach()) return;
-              // The persisted screen and the new PTY are different coordinate
-              // spaces. Move the former into scrollback, then home xterm so the
-              // backend's row-1 CUP/HVP writes (including typed-input echo) land
-              // on the same live row as the initial prompt.
-              await trackedTerminalWriteAsync(terminalRestoreBoundary(terminal.rows));
-              if (!isCurrentAttach()) return;
-            }
-            if (attachment.snapshot.length > 0) {
-              // Ring snapshot bytes actually replayed into xterm. The number that
-              // settles whether a layout change costs a 1 MiB replay at all
-              // (issue #606 hypothesised six of them per workspace flip).
-              recordTerminalOutputPipeline(
-                instanceId,
-                "attachReplayBytes",
-                attachment.snapshot.length,
-              );
-              await new Promise<void>((resolve) =>
-                processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }, resolve),
-              );
-              if (!isCurrentAttach()) return;
-            }
+              terminal.reset();
+              resetStreamDerivedCursorState();
+              if (cached) {
+                await trackedTerminalWriteAsync(cached);
+                if (!isCurrentAttach()) return;
+                // The persisted screen and the new PTY are different coordinate
+                // spaces. Move the former into scrollback, then home xterm so the
+                // backend's row-1 CUP/HVP writes (including typed-input echo) land
+                // on the same live row as the initial prompt.
+                await trackedTerminalWriteAsync(terminalRestoreBoundary(terminal.rows));
+                if (!isCurrentAttach()) return;
+              }
+              if (attachment.snapshot.length > 0) {
+                // Ring snapshot bytes actually replayed into xterm. The number that
+                // settles whether a layout change costs a 1 MiB replay at all
+                // (issue #606 hypothesised six of them per workspace flip).
+                recordTerminalOutputPipeline(
+                  instanceId,
+                  "attachReplayBytes",
+                  attachment.snapshot.length,
+                );
+                await new Promise<void>((resolve, reject) =>
+                  processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }, () =>
+                    reject(new Error("visible xterm discarded terminal output snapshot")),
+                  ),
+                );
+                if (!isCurrentAttach()) return;
+              }
+              // `renderCheckpointModel.attach` already parsed this exact snapshot;
+              // release its range only after the visible replay also completed.
+              flow.complete(attachment.state.snapshotStartSeq, attachment.state.snapshotSeq);
 
-            // Cache/snapshot may contain historic DEC mode changes. Apply the
-            // backend's state last, to xterm only, before live sequenced deltas.
-            await trackedTerminalWriteAsync(
-              attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
-            );
-            if (!isCurrentAttach()) return;
-            outputGeneration = attachment.state.generation;
-            const buffered = outputCoordinator.completeAttach(attachment);
-            if (buffered.kind === "gap") {
-              console.warn(
-                "[TerminalView] terminal output gap during attach",
-                buffered,
-                recordTerminalOutputRecovery(instanceId, "gap"),
+              // Cache/snapshot may contain historic DEC mode changes. Apply the
+              // backend's state last, to xterm only, before live sequenced deltas.
+              await trackedTerminalWriteAsync(
+                attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
               );
-              // The snapshot is the whole 1 MiB ring, so a delta lost during the
-              // attach round-trip is still in the ring: repair the exact range
-              // instead of escalating to another screen-losing reattach that would
-              // only widen the window for the same loss (issue #607). The prefix
-              // that arrived before the hole is applied first — the coordinator has
-              // already moved `expectedSeq` past it.
-              if (!(await writeAttachedSegments(buffered.segments, isCurrentAttach))) return;
-              // Readiness belongs to the attach, not to the repair: from here the
-              // hole is an ordinary mid-stream gap, and live deltas keep buffering
-              // in the coordinator until the repair splices in front of them.
-              setOutputReady(true);
-              // Kicked from the attach's `finally`, one statement after
-              // `outputAttachInFlight` drops: the round-trip then starts directly
-              // instead of hopping through the retry timer, so the start latency
-              // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
-              // arriving in that window cannot race the attach for who owns the
-              // hole.
-              attachWindowGap = buffered;
-              return;
-            }
-            if (await writeAttachedSegments(buffered.segments, isCurrentAttach)) {
-              setOutputReady(true);
-            }
-          }),
-        );
+              if (!isCurrentAttach()) return;
+              outputGeneration = attachment.state.generation;
+              const buffered = outputCoordinator.completeAttach(attachment);
+              if (buffered.kind === "gap") {
+                console.warn(
+                  "[TerminalView] terminal output gap during attach",
+                  buffered,
+                  recordTerminalOutputRecovery(instanceId, "gap"),
+                );
+                // The snapshot is the whole 1 MiB ring, so a delta lost during the
+                // attach round-trip is still in the ring: repair the exact range
+                // instead of escalating to another screen-losing reattach that would
+                // only widen the window for the same loss (issue #607). The prefix
+                // that arrived before the hole is applied first — the coordinator has
+                // already moved `expectedSeq` past it.
+                if (
+                  !(await writeAttachedSegments(buffered.segments, isCurrentAttach, epoch, flow))
+                ) {
+                  return;
+                }
+                // Readiness belongs to the attach, not to the repair: from here the
+                // hole is an ordinary mid-stream gap, and live deltas keep buffering
+                // in the coordinator until the repair splices in front of them.
+                setOutputReady(true);
+                // Kicked from the attach's `finally`, one statement after
+                // `outputAttachInFlight` drops: the round-trip then starts directly
+                // instead of hopping through the retry timer, so the start latency
+                // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
+                // arriving in that window cannot race the attach for who owns the
+                // hole.
+                attachWindowGap = buffered;
+                return;
+              }
+              if (await writeAttachedSegments(buffered.segments, isCurrentAttach, epoch, flow)) {
+                setOutputReady(true);
+              }
+            }),
+          );
         await terminalOutputWriteChain;
       } catch (error) {
         if (!cancelled && epoch === outputAttachEpoch) {
@@ -4512,14 +4678,14 @@ export function TerminalView({
             error,
             recordTerminalOutputRecovery(instanceId, "attachFailure"),
           );
-          scheduleOutputReattach();
+          scheduleOutputReattach(epoch);
         }
       } finally {
         if (epoch === outputAttachEpoch) {
           outputAttachInFlight = false;
           outputAttachParserBusy = false;
           flushDeferredTerminalFit();
-          if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach();
+          if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach(epoch);
           // `startOutputRepair` claims `outputRepairInFlight` synchronously, so
           // no listener delta can slip in front of this and start the same
           // round-trip from the other side.
@@ -4530,33 +4696,62 @@ export function TerminalView({
 
     outputListenerReady = onTerminalOutputV2(instanceId, (payload) => {
       if (cancelled) return;
-      let result;
+      let result: TerminalOutputApplyResult;
       try {
         const delta: TerminalOutputDelta = normalizeTerminalOutputDelta(payload);
-        recordTerminalOutputPipeline(instanceId, "deltaEvents");
-        recordTerminalOutputPipeline(instanceId, "deltaBytes", delta.data.length);
         result = outputCoordinator.ingest(delta);
+        // Diagnostics never participate in delta validation/admission. A
+        // broken counter must not relabel valid bytes as malformed or reset a
+        // screen that the coordinator already advanced.
+        try {
+          recordTerminalOutputPipeline(instanceId, "deltaEvents");
+          recordTerminalOutputPipeline(instanceId, "deltaBytes", delta.data.length);
+        } catch {
+          // Best effort only.
+        }
       } catch (error) {
-        console.warn(
-          "[TerminalView] malformed terminal output delta:",
-          error,
-          recordTerminalOutputRecovery(instanceId, "malformedDelta"),
-        );
+        try {
+          console.warn(
+            "[TerminalView] malformed terminal output delta:",
+            error,
+            recordTerminalOutputRecovery(instanceId, "malformedDelta"),
+          );
+        } catch {
+          // Diagnostics are outside the delivery contract.
+        }
         scheduleOutputReattach();
         return;
       }
-      if (result.kind === "gap") {
-        // The lost bytes are still in the backend ring, so repair the stream in
-        // place instead of resetting the screen (ADR-0072).
-        console.warn(
-          "[TerminalView] terminal output gap",
-          result,
-          recordTerminalOutputRecovery(instanceId, "gap"),
-        );
-        void startOutputRepair(result);
-        return;
+      try {
+        if (result.kind === "gap") {
+          // The lost bytes are still in the backend ring, so repair the stream in
+          // place instead of resetting the screen (ADR-0072).
+          try {
+            console.warn(
+              "[TerminalView] terminal output gap",
+              result,
+              recordTerminalOutputRecovery(instanceId, "gap"),
+            );
+          } catch {
+            // A counter or console failure cannot replace exact repair with a
+            // screen-losing attach.
+          }
+          void startOutputRepair(result);
+          return;
+        }
+        // This entire listener boundary is no-throw. Detector, stabilizer,
+        // checkpoint, queue and diagnostic failures all invalidate this epoch
+        // instead of escaping Tauri's JS callback and leaving backend credit
+        // permanently outstanding.
+        applyOutputSegments(result.segments);
+      } catch (error) {
+        try {
+          console.warn("[TerminalView] terminal output pipeline failed; reattaching:", error);
+        } catch {
+          // A patched console cannot escape the Tauri callback boundary.
+        }
+        scheduleOutputReattach();
       }
-      applyOutputSegments(result.segments);
     }).then((unlisten) => {
       if (cancelled) {
         unlisten();
@@ -4564,6 +4759,25 @@ export function TerminalView({
         unlistenOutput = unlisten;
       }
     });
+
+    const outputPullWatchdogTimer = setInterval(() => {
+      if (
+        cancelled ||
+        outputAttachInFlight ||
+        outputRepairInFlight ||
+        !outputCoordinator.ready ||
+        outputGeneration === undefined ||
+        !outputFlowAcknowledger
+      ) {
+        return;
+      }
+      const expectedSeq = outputCoordinator.contiguousSeq;
+      if (expectedSeq === null) return;
+      // `startOutputRepair` claims the coordinator synchronously before its
+      // first await, so adjacent interval ticks and live gap detection share a
+      // single in-flight exact-resume request.
+      void startOutputRepair({ expectedSeq, actualSeq: expectedSeq }, "pull-watchdog");
+    }, TERMINAL_OUTPUT_PULL_WATCHDOG_MS);
 
     // Right-click: copy selection or paste (no context menu in terminal)
     const outerContainer = containerRef.current?.parentElement;
@@ -4872,10 +5086,13 @@ export function TerminalView({
 
     return () => {
       cancelled = true;
+      outputFlowAcknowledger?.dispose();
+      outputFlowAcknowledger = undefined;
       outputAttachEpoch += 1;
       outputProtocolReadyRef.current = false;
       if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);
       if (outputRepairRetryTimer !== undefined) clearTimeout(outputRepairRetryTimer);
+      if (outputPullWatchdogTimer !== undefined) clearInterval(outputPullWatchdogTimer);
       resetOutputStabilizer();
       deliverStabilizedEmissions = undefined;
       if (guardedTerminalFitRef.current === requestGuardedTerminalFit) {
