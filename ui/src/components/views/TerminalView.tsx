@@ -208,12 +208,43 @@ import {
   type TerminalOutputRecoveryEvent,
 } from "@/lib/terminal-output-recovery-metrics";
 import { coalesceTerminalOutputSegments } from "@/lib/terminal-output-coalesce";
-import { recordTerminalOutputPipeline } from "@/lib/terminal-output-pipeline-metrics";
+import {
+  recordTerminalOutputPipeline,
+  type TerminalOutputPipelineCounterName,
+} from "@/lib/terminal-output-pipeline-metrics";
 import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
   TerminalWriteBatchQueue,
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
+
+type TerminalWriteCallbackFailureStage =
+  | "metrics"
+  | "monitor"
+  | "consumer"
+  | "refresh"
+  | "drain"
+  | "unknown";
+
+const TERMINAL_WRITE_CALLBACK_STAGE_COUNTER: Record<
+  TerminalWriteCallbackFailureStage,
+  TerminalOutputPipelineCounterName
+> = {
+  metrics: "writeCallbackMetricFailures",
+  monitor: "writeCallbackMonitorFailures",
+  consumer: "writeCallbackConsumerFailures",
+  refresh: "writeCallbackRefreshFailures",
+  drain: "writeCallbackDrainFailures",
+  unknown: "writeCallbackUnknownFailures",
+};
+
+const TERMINAL_WRITE_CALLBACK_SOURCE_COUNTER: Record<
+  TerminalWriteSource,
+  TerminalOutputPipelineCounterName
+> = {
+  live: "writeCallbackLiveFailures",
+  replay: "writeCallbackReplayFailures",
+};
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -3134,6 +3165,10 @@ export function TerminalView({
       needsSyncOutputMonitor?: boolean;
     };
     const terminalWriteQueue = new TerminalWriteBatchQueue<TerminalWriteMetadata>();
+    // Completion failures keep counting, but a broken renderer callback must
+    // not turn a PTY flood into a console flood. Warn once per source+stage for
+    // this mounted terminal generation; session teardown drops the set.
+    const terminalWriteCallbackWarnings = new Set<string>();
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
@@ -3400,56 +3435,138 @@ export function TerminalView({
       currentParsingAttachEpoch = batch.metadata.attachEpoch;
       try {
         terminal.write(batch.data, () => {
-          recordTerminalOutputPipeline(
-            instanceId,
-            "xtermParseMaxMs",
-            Math.max(0, monotonicNow() - submittedAt),
-          );
           pendingTerminalWrites = 0;
           clearCurrentParsingWrite();
-          try {
-            if (batch.entries.some(({ metadata }) => metadata.needsSyncOutputMonitor === true)) {
-              startSyncOutputMonitor();
+
+          type CallbackFailure = {
+            stage: TerminalWriteCallbackFailureStage;
+            error: unknown;
+          };
+          const failures: CallbackFailure[] = [];
+          const runCompletionStep = (
+            stage: TerminalWriteCallbackFailureStage,
+            step: () => void,
+          ) => {
+            try {
+              step();
+            } catch (error) {
+              failures.push({ stage, error });
             }
-            for (const entry of batch.entries) entry.onParsed?.();
+          };
+          const reportCallbackFailures = (reported: readonly CallbackFailure[]) => {
+            if (reported.length === 0) return;
+            for (const failure of reported) {
+              // Diagnostics must never become another exception inside xterm's
+              // callback. xterm advances its buffer offset and subtracts the
+              // accepted bytes only after this callback returns.
+              try {
+                recordTerminalOutputPipeline(instanceId, "writeCallbackFailures");
+                recordTerminalOutputPipeline(
+                  instanceId,
+                  TERMINAL_WRITE_CALLBACK_SOURCE_COUNTER[batch.metadata.source],
+                );
+                recordTerminalOutputPipeline(
+                  instanceId,
+                  TERMINAL_WRITE_CALLBACK_STAGE_COUNTER[failure.stage],
+                );
+              } catch {
+                // Best-effort diagnostics cannot safely recurse into themselves.
+              }
+            }
+            const firstWarnings = reported.filter(({ stage }) => {
+              const key = `${batch.metadata.source}:${stage}`;
+              if (terminalWriteCallbackWarnings.has(key)) return false;
+              terminalWriteCallbackWarnings.add(key);
+              return true;
+            });
+            if (firstWarnings.length === 0) return;
+            try {
+              console.warn("[TerminalView] xterm write callback failed:", {
+                source: batch.metadata.source,
+                attachEpoch: batch.metadata.attachEpoch,
+                firstId: batch.firstId,
+                lastId: batch.lastId,
+                failures: firstWarnings.map(({ stage, error }) => {
+                  let message = "unknown callback failure";
+                  try {
+                    message = error instanceof Error ? error.message : String(error);
+                  } catch {
+                    // An exotic thrown value may itself reject stringification.
+                  }
+                  return { stage, message };
+                }),
+              });
+            } catch {
+              // A patched console must not poison xterm's accepted-write state.
+            }
+          };
+
+          try {
+            runCompletionStep("metrics", () => {
+              recordTerminalOutputPipeline(
+                instanceId,
+                "xtermParseMaxMs",
+                Math.max(0, monotonicNow() - submittedAt),
+              );
+            });
+            if (batch.entries.some(({ metadata }) => metadata.needsSyncOutputMonitor === true)) {
+              runCompletionStep("monitor", startSyncOutputMonitor);
+            }
+            for (const entry of batch.entries) {
+              if (entry.onParsed) runCompletionStep("consumer", entry.onParsed);
+            }
             if (
               batch.metadata.stabilized &&
               !cancelled &&
               batch.metadata.attachEpoch === outputAttachEpoch &&
               terminal.rows > 0
             ) {
-              if (isContainerHiddenRef.current) {
-                reflowDirtyRef.current = true;
-              } else {
-                terminal.refresh(0, terminal.rows - 1);
-                if (stabilizedRefreshFrame !== undefined) {
-                  cancelAnimationFrame(stabilizedRefreshFrame);
-                }
-                stabilizedRefreshFrame = requestAnimationFrame(() => {
-                  stabilizedRefreshFrame = undefined;
-                  if (
-                    !cancelled &&
-                    batch.metadata.attachEpoch === outputAttachEpoch &&
-                    terminal.rows > 0
-                  ) {
-                    if (isContainerHiddenRef.current) {
-                      reflowDirtyRef.current = true;
-                    } else {
-                      terminal.refresh(0, terminal.rows - 1);
-                    }
+              runCompletionStep("refresh", () => {
+                if (isContainerHiddenRef.current) {
+                  reflowDirtyRef.current = true;
+                } else {
+                  terminal.refresh(0, terminal.rows - 1);
+                  if (stabilizedRefreshFrame !== undefined) {
+                    cancelAnimationFrame(stabilizedRefreshFrame);
                   }
-                });
-              }
+                  stabilizedRefreshFrame = requestAnimationFrame(() => {
+                    stabilizedRefreshFrame = undefined;
+                    if (
+                      !cancelled &&
+                      batch.metadata.attachEpoch === outputAttachEpoch &&
+                      terminal.rows > 0
+                    ) {
+                      if (isContainerHiddenRef.current) {
+                        reflowDirtyRef.current = true;
+                      } else {
+                        try {
+                          terminal.refresh(0, terminal.rows - 1);
+                        } catch (error) {
+                          reportCallbackFailures([{ stage: "refresh", error }]);
+                        }
+                      }
+                    }
+                  });
+                }
+              });
             }
+          } catch (error) {
+            // The classified steps above are independently guarded. Keep one
+            // final catch so future completion work cannot accidentally escape
+            // into xterm before receiving an explicit stage.
+            failures.push({ stage: "unknown", error });
           } finally {
-            if (terminalWriteQueue.depth > 0) {
-              // One physical write per task keeps automation/input responsive
-              // while a flood drains; the fixed batch budget bounds each task.
-              scheduleTerminalWritePump();
-            } else {
-              clearTerminalWriteRetryTimer();
-              flushDeferredTerminalFit();
-            }
+            runCompletionStep("drain", () => {
+              if (terminalWriteQueue.depth > 0) {
+                // One physical write per task keeps automation/input responsive
+                // while a flood drains; the fixed batch budget bounds each task.
+                scheduleTerminalWritePump();
+              } else {
+                clearTerminalWriteRetryTimer();
+                flushDeferredTerminalFit();
+              }
+            });
+            reportCallbackFailures(failures);
           }
         });
         // `terminal.write` throws synchronously when xterm rejects backpressure.

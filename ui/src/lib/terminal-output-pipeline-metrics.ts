@@ -37,6 +37,24 @@ export interface TerminalOutputPipelineCounters {
   writeBatchMaxParts: number;
   /** Times xterm refused a write with backpressure and the chunk was retried. */
   writeBackpressure: number;
+  /** Post-parse callback operations that failed after xterm accepted the bytes. */
+  writeCallbackFailures: number;
+  /** Callback failures on live PTY bytes. */
+  writeCallbackLiveFailures: number;
+  /** Callback failures on cache/snapshot replay bytes. */
+  writeCallbackReplayFailures: number;
+  /** Failures while recording accepted-write parse timing. */
+  writeCallbackMetricFailures: number;
+  /** Failures while updating the synchronized-output monitor. */
+  writeCallbackMonitorFailures: number;
+  /** Failures in a logical write's parsed waiter. */
+  writeCallbackConsumerFailures: number;
+  /** Failures while settling a stabilized renderer frame. */
+  writeCallbackRefreshFailures: number;
+  /** Failures while handing the physical FIFO to its next task or fit. */
+  writeCallbackDrainFailures: number;
+  /** Failures outside the classified completion steps. */
+  writeCallbackUnknownFailures: number;
   /** Longest synchronous batch preparation plus xterm submission, in ms. */
   writeSubmitMaxMs: number;
   /** Longest accepted xterm write took to invoke its parse callback, in ms. */
@@ -68,6 +86,15 @@ const COUNTERS: readonly TerminalOutputPipelineCounterName[] = [
   "writeQueueMaxBytes",
   "writeBatchMaxParts",
   "writeBackpressure",
+  "writeCallbackFailures",
+  "writeCallbackLiveFailures",
+  "writeCallbackReplayFailures",
+  "writeCallbackMetricFailures",
+  "writeCallbackMonitorFailures",
+  "writeCallbackConsumerFailures",
+  "writeCallbackRefreshFailures",
+  "writeCallbackDrainFailures",
+  "writeCallbackUnknownFailures",
   "writeSubmitMaxMs",
   "xtermParseMaxMs",
   "checkpointApplies",

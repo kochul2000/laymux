@@ -324,13 +324,14 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     "pipeline": { "terminal-pane-xxxx": {
       "deltaEvents": 12000, "segmentsIn": 12000,
       "writeRequests": 11980, "xtermWrites": 340,
-      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18, "…": 0
+      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18,
+      "writeCallbackFailures": 0, "writeCallbackRefreshFailures": 0, "…": 0
     } }
   }
 }
 ```
 
-판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `frontend.pipeline`의 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
+판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-xterm-write-callback-no-throw-boundary.md)). `frontend.pipeline`의 나머지 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
 
 ### 12.2 포트 규칙
 

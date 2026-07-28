@@ -31,6 +31,21 @@ describe("terminalOutputPipelineCounters", () => {
     expect(terminalOutputPipelineCounters("t2").xtermWrites).toBe(1);
   });
 
+  it("keeps callback failures attributable by write source and completion stage", () => {
+    recordTerminalOutputPipeline("t1", "writeCallbackFailures", 2);
+    recordTerminalOutputPipeline("t1", "writeCallbackLiveFailures", 2);
+    recordTerminalOutputPipeline("t1", "writeCallbackRefreshFailures");
+    recordTerminalOutputPipeline("t1", "writeCallbackDrainFailures");
+
+    expect(terminalOutputPipelineCounters("t1")).toMatchObject({
+      writeCallbackFailures: 2,
+      writeCallbackLiveFailures: 2,
+      writeCallbackReplayFailures: 0,
+      writeCallbackRefreshFailures: 1,
+      writeCallbackDrainFailures: 1,
+    });
+  });
+
   it("keeps high-water marks instead of summing them", () => {
     recordTerminalOutputPipeline("t1", "writeQueueMaxDepth", 3);
     recordTerminalOutputPipeline("t1", "writeQueueMaxBytes", 4096);

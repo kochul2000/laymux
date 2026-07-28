@@ -10040,6 +10040,102 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  it("does not let a post-parse callback failure poison xterm flow-control accounting", async () => {
+    const terminalId = "t-output-callback-flow-control";
+    mockCreateTerminalSession.mockResolvedValueOnce({
+      id: terminalId,
+      title: "Terminal",
+      initialExecutionHost: "nativeWindows",
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    // xterm 6.0.0 invokes the embedder callback before advancing its buffer
+    // offset and subtracting the accepted bytes from `_pendingData`. Scale its
+    // 50 MB watermark down to one in-flight write so the same poisoned state is
+    // deterministic without allocating tens of megabytes in this component
+    // test. A callback throw means xterm never reaches the two accounting lines.
+    let xtermPendingBytes = 0;
+    const acceptedWrites: string[] = [];
+    const accountedWrites: string[] = [];
+    const callbackErrors: unknown[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const countersBefore = terminalOutputPipelineCounters(terminalId);
+    mockWrite.mockClear();
+    mockWrite.mockImplementation((data, callback?: () => void) => {
+      if (xtermPendingBytes > 0) {
+        throw new Error("write data discarded, use flow control to avoid losing data");
+      }
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      xtermPendingBytes += data.length;
+      acceptedWrites.push(text);
+      setTimeout(() => {
+        try {
+          callback?.();
+          // Deliberately after callback, matching xterm's WriteBuffer._innerWrite.
+          xtermPendingBytes -= data.length;
+          accountedWrites.push(text);
+        } catch (error) {
+          callbackErrors.push(error);
+        }
+      }, 0);
+    });
+    mockRefresh.mockImplementation(() => {
+      throw new Error("renderer settle failed");
+    });
+
+    const frame = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+    try {
+      act(() => {
+        emitOutput?.(new TextEncoder().encode(frame));
+        emitOutput?.(new TextEncoder().encode(frame));
+        emitOutput?.(new TextEncoder().encode("tail"));
+      });
+
+      await vi.waitFor(() => expect(accountedWrites).toHaveLength(3), { timeout: 1_000 });
+      expect(callbackErrors).toEqual([]);
+      expect(xtermPendingBytes).toBe(0);
+      expect(acceptedWrites).toHaveLength(3);
+      expect(acceptedWrites.filter((write) => write === "tail")).toHaveLength(1);
+      const countersAfter = terminalOutputPipelineCounters(terminalId);
+      expect(countersAfter.writeBackpressure - countersBefore.writeBackpressure).toBe(0);
+      expect(countersAfter.writeCallbackFailures - countersBefore.writeCallbackFailures).toBe(2);
+      expect(
+        countersAfter.writeCallbackLiveFailures - countersBefore.writeCallbackLiveFailures,
+      ).toBe(2);
+      expect(
+        countersAfter.writeCallbackRefreshFailures - countersBefore.writeCallbackRefreshFailures,
+      ).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "[TerminalView] xterm write callback failed:",
+        expect.objectContaining({
+          source: "live",
+          failures: [{ stage: "refresh", message: "renderer settle failed" }],
+        }),
+      );
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      mockRefresh.mockImplementation(() => {});
+      warn.mockRestore();
+    }
+  });
+
   it("keeps physical write boundaries while an IME composition is active", async () => {
     const terminalId = "t-output-backlog-ime-boundary";
     render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />);
