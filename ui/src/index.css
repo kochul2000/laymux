@@ -512,25 +512,18 @@
  * CSS classes (scrollbar-overlay / scrollbar-separate) applied for test hooks only.
  */
 
-/* `.xterm-cursor` is the DOM renderer's cursor element. Under the WebGL addon the
-   cursor is drawn into the canvas and a rule on it does nothing — but
-   `onContextLoss` disposes the addon and xterm falls back to the DOM renderer,
-   where it is a second line of defence. Not dead code. (The `.xterm-cursor-layer`
-   selector that used to sit here *was* dead: the canvas renderer it belonged to is
-   gone from xterm 6.)
-   A CSS cursor rule is therefore only ever allowed to *mirror* the renderer gate
-   in `native-cursor-suppression.ts` (issue #598), which covers both renderers and
-   cannot be overridden by the application — otherwise the caret behaves
-   differently depending on which renderer happens to be live.
-   Synchronized output had such a rule and no longer does (issue #610, ADR-0079).
-   There is no gate condition for it to mirror, and there cannot be: a DEC 2026
-   frame is a render-stopped interval, so nothing is drawn during it and nothing
-   needs hiding. The helper textarea below is a real DOM element in both renderers,
-   not a painted cell, so its caret is a separate question. */
+/* The helper textarea is a real DOM element in both renderers, so its OS caret
+   needs a frame class independently of xterm's painted cursor (ADR-0079). */
 .terminal-sync-output-active .xterm-helper-textarea {
   caret-color: transparent !important;
 }
 
+/* `.xterm-cursor` is the DOM renderer's cursor element. WebGL paints the cursor
+   into its canvas, but `onContextLoss` falls back to this DOM path. Keep this CSS
+   as a second line of defence for the same base condition owned by
+   `native-cursor-suppression.ts`; the raw gate itself covers both renderers.
+   Sync output deliberately has no CSS cursor rule: its separate raw-gate reason
+   catches direct renderer lifecycle paints without introducing DOM-only hiding. */
 .terminal-native-cursor-hidden .xterm-cursor {
   opacity: 0 !important;
 }

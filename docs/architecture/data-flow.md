@@ -306,7 +306,7 @@ TerminalView renderer 경로를 수정할 때는 다음 회귀 테스트를 유�
 Codex overlay caret의 DEC 2026 프레임 안/밖 판정은 xterm.js 렌더 모드가 아니라 parser 경계가 권위 소스다.
 
 - `CSI ? 2026 h/l` parser handler가 activity 분류와 무관하게 `ShadowCursorState.isDec2026FrameOpen`을 열고 닫는다. 웹뷰 리로드나 초기 감지 중 `?2026h`가 shell/미분류 상태에서 먼저 와도 같은 프레임의 `?25h`를 park로 오인하지 않는다.
-- `terminal.modes.synchronizedOutputMode`와 `syncOutputActiveRef`는 xterm 렌더 억제 구간 판정, 헬퍼 textarea caret 숨김, 중복 repaint 차단에 사용한다. **네이티브 커서 숨김에는 쓰지 않는다** — 프레임은 렌더 정지 구간이라 숨길 커서가 그려지지 않는다(§8.22, [ADR-0079](../adr/0079-dec2026-frame-is-render-stopped.md)). xterm.js는 1초 safety timeout 뒤 이 모드를 `false`로 바꿀 수 있으므로, DECTCEM `?25h` 주차 분류나 frame-open settle 판정에는 사용하지 않는다.
+- `terminal.modes.synchronizedOutputMode`와 `syncOutputActiveRef`는 xterm의 표준 렌더 억제 구간 판정, 헬퍼 textarea caret 숨김, 중복 repaint 차단에 사용한다. 별도 `syncOutputCursorGateActive`는 DOM focus·blur·selection의 직접 renderer 우회가 프레임 내부 cursor를 그리지 못하게 raw gate reason을 유지한다(§8.22, [ADR-0079](../adr/0079-dec2026-cursor-gate-lifecycle-bypass.md)). xterm.js는 1초 safety timeout 뒤 mode를 `false`로 바꿀 수 있으므로 DECTCEM `?25h` 주차 분류나 parser frame-open settle 판정에는 사용하지 않는다.
 - 프레임 set 시 기존 trusted shadow가 있으면 그대로 유지하고, 없으면 pre-frame buffer 좌표를 임시 `hasSyncFramePosition`으로 승격한다. safety timeout 뒤 overlay가 다시 그려져도 frame body의 footer 좌표를 live buffer에서 읽지 않게 하기 위함이다.
 - `isDectcemShowPark()`는 `isDec2026FrameOpen === false`이고 normal buffer일 때만 참이다. 따라서 장시간 프레임에서 모드 timeout이 발생해도 프레임 안 `?25h`는 visibility-only repaint tail로 남는다.
 - native Windows stabilizer 또는 WSL metadata-only recognizer가 strict in-frame park를 확인한 write에는 `frameEndCursorAuthoritative`가 붙는다. 이 경우 `?2026l` handler 시점의 buffer cursor는 바로 앞 final position을 이미 적용했으므로 pre-frame snapshot보다 우선하고, `parkPending`을 세우지 않으며 남은 settle timer를 해제한다. metadata가 없는 legacy frame은 pre-frame snapshot을 fallback으로 쓰고 out-of-frame park 또는 timeout을 기다린다.
@@ -701,30 +701,30 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - **계약**: 셀 배경이 무엇이든, 앱이 DECSCUSR 를 몇 번 보내든, 포커스가 있든 없든 숨김 구간에서 네이티브 커서는 그려지지 않는다.
 - **앱의 DECTCEM 은 여전히 권위다.** 같은 필드를 DECTCEM(`?25h/l`)이 쓰고, §8.5/[ADR-0011](../adr/0011-dectcem-cursor-park-fifth-layer.md) 은 프레임 밖 `?25h` 를 앱의 최우선 커서 신호로 쓴다. 그래서 `ui/src/lib/native-cursor-suppression.ts` 는 필드를 accessor 로 감싸 **앱의 쓰기를 기록**하고 우리가 숨기는 동안만 hidden 을 보고한다. 앱 값은 `appCursorHidden` 으로 보존되고 해제·`dispose()` 시 그대로 복원된다. 우리 쓰기는 파서를 거치지 않으므로 shadow cursor 의 DECTCEM CSI 추적에 보이지 않는다 — 보여서는 안 된다.
 - **테마·모양·`cursorWidth` 는 숨김 여부와 무관하게 사용자 설정이다.** 숨김 구간에서 달라지는 유일한 옵션은 `cursorBlink = false` 다(안 보이는 커서의 깜빡임은 repaint 낭비).
-- **조건의 소유자는 하나다.** `applyNativeCursorVisibility` 만 `hideNativeCursor`(composer 모드 · 조합 중 · `stabilizeInteractiveCursor` + overlay caret activity)를 계산한다. 조합 상태는 ref 에만 있어 React 가 볼 수 없으므로 React 는 `nativeCursorVisibilityRef` 를 **호출만** 하고 조건을 다시 계산하지 않는다. 두 곳에서 계산하는 형태가 §8.15/§8.16/§8.17 이 세 번 기록한 "캐럿이 사라졌다" 의 모양이다.
-- **`isCursorHidden` 은 옵션이 아니라 쓰기 뒤에 xterm 의 옵션 변경 repaint 가 따라오지 않는다.** 전이에서 `refresh(0, rows-1)` 를 한 번 호출하고, 전이가 아니면(dedupe) 호출하지 않는다 — §8.4 의 "활동 전이마다 repaint/atlas 를 유발하지 않는다" 를 유지한다.
+- **base 조건의 소유자는 하나다.** `applyNativeCursorVisibility`만 `baseHideNativeCursor`(composer 모드 · 조합 중 · `stabilizeInteractiveCursor` + overlay caret activity)를 계산한다. 조합 상태는 ref에만 있어 React가 볼 수 없으므로 React는 `nativeCursorVisibilityRef`를 **호출만** 하고 조건을 다시 계산하지 않는다. DEC 2026은 별도 `syncOutputCursorGateActive` reason을 소유하고, 최종 `applyNativeCursorGate`가 둘을 OR한다. 어느 reason의 전이도 다른 reason을 덮지 않는다.
+- **`isCursorHidden`은 옵션이 아니다.** base 전이만 사용자 cursor option을 동기화하고 `refresh(0, rows-1)`를 한 번 호출한다. sync set/reset은 option을 바꾸지 않으며 정상 reset에는 xterm의 기존 전체 flush만 사용한다. safety timeout에서만 monitor가 gate 해제 후 corrective refresh를 한 번 요청한다 — §8.4의 폭주 중 repaint 제한을 유지한다.
 - **실패하면 스스로 꺼진다.** private 필드 형태가 달라지면 `supported: false` 로 아무것도 하지 않고 네이티브 커서가 사용자 설정대로 보인다(overlay 와 겹친 이중 캐럿). #598 을 만든 배경색 위장으로 되돌아가지 않는다. `XTERM_NATIVE_CURSOR_FIELDS` 와 실제 `Terminal` 계약 테스트가 xterm 상향 시 읽을 수 있는 실패를 만든다 — §8.14 의 `xterm-pending-composition.ts` 와 같은 정책.
-- **DOM 렌더러용 CSS 는 게이트를 미러링할 때만 둔다.** `.terminal-native-cursor-hidden .xterm-cursor { opacity: 0 }` 는 `onContextLoss` 폴백 경로의 방어선이고(§8.4) 게이트와 같은 조건에 붙어 있으므로 유지한다. **게이트가 없는 조건에 CSS 만 두는 형태는 금지한다** — 기본 렌더러에서 무력하고 폴백에서만 동작하면 살아 있는 렌더러에 따라 캐럿 동작이 갈린다(issue #610).
-- **위 계약의 적용 범위는 `applyNativeCursorVisibility` 가 계산하는 숨김 구간이다. synchronized-output 구간에는 커서 숨김을 두지 않는다** — DEC 2026 프레임은 **렌더 정지 구간**이므로 숨길 커서가 그려지지 않고 숨길 수단도 없다(아래 §8.22, [ADR-0079](../adr/0079-dec2026-frame-is-render-stopped.md)). `setSyncOutputActive` 는 프레임 경계를 공표하는 것이 전부이고, 예전에 있던 `.terminal-sync-output-active .xterm-cursor { opacity: 0 }` 는 지웠다.
+- **DOM renderer용 CSS는 base gate를 미러링할 때만 둔다.** `.terminal-native-cursor-hidden .xterm-cursor { opacity: 0 }`는 `onContextLoss` fallback의 방어선이고(§8.4) composer/IME selector도 같은 base reason의 입력을 미러링한다. synchronized-output은 raw gate reason은 있지만 CSS cursor rule은 두지 않는다. CSS는 WebGL의 마지막 paint에 닿지 않아 DOM만 즉시 숨기는 비대칭을 만들기 때문이다(issue #610).
+- **synchronized-output은 lifecycle 우회용 raw reason이다.** 표준 write/refresh는 xterm `RenderService`가 보류하지만 DOM focus·blur·selection은 renderer를 직접 호출한다. `setSyncOutputActive`는 frame boundary 공표와 sync raw reason을 함께 소유하고, 정상 reset 전에 해제한다(아래 §8.22, [ADR-0079](../adr/0079-dec2026-cursor-gate-lifecycle-bypass.md)).
 - **미검증**: 실기 확인은 하지 않았다(테스트만). codex pane 에서 열 39 블록이 실제로 사라지는지, 그리고 DECRQM 25 조회 응답이 숨김 구간에 "hidden" 으로 바뀌는 것(게이트가 필드 하나이므로 불가피)에 반응하는 앱이 있는지는 사람이 확인해야 한다.
 
 판정과 대안 비교는 [ADR-0073](../adr/0073-native-cursor-renderer-level-suppression.md).
 
 ---
 
-### 8.22 DEC 2026 프레임은 렌더 정지 구간이다 (issue #610)
+### 8.22 DEC 2026 cursor gate와 renderer lifecycle 우회 (issue #610)
 
-`.terminal-sync-output-active .xterm-cursor { opacity: 0 }` 가 CSS-only 라 WebGL 에 닿지 않는다는 것이 issue #610 의 출발점이었지만, 실제 번들(`@xterm/xterm` 6.0.0, `@xterm/addon-webgl` 0.19.0)을 재보면 **애초에 숨길 커서가 그려지지 않는다.**
+`.terminal-sync-output-active .xterm-cursor { opacity: 0 }`는 DOM fallback에만 닿는다. 실제 xterm 6.0.0은 표준 행 갱신을 DEC 2026 frame 동안 보류하지만, 그 사실만으로 cursor가 안전하지는 않다.
 
-- **프레임 중 렌더는 0회다.** `RenderService.refreshRows` 와 `RenderService._renderRows` 둘 다 `decPrivateModes.synchronizedOutput` 이 켜져 있으면 행 범위만 `SynchronizedOutputHandler` 에 누적하고 반환한다. 앱의 write 도, 우리의 `terminal.refresh()` 도, `CursorBlinkStateManager` 의 커서 행 redraw 도 예외가 아니다. `?2026l`(또는 1초 safety timeout)이 전체 뷰포트를 한 번 flush 하며 끝낸다.
-- **그래서 화면에 남는 커서는 "계속 그려지는" 것이 아니라 프레임 직전 페인트가 얼어 있는 것**이고, 화면의 나머지와 함께 얼어 있는 것이 synchronized output 의 정의다.
-- **프레임 안에서는 렌더러 게이트도 적용할 수 없다.** laymux 의 `?2026h` CSI 핸들러는 `InputHandler` 의 것보다 먼저 돌아(파서는 나중에 등록된 핸들러부터 호출한다) 모드가 아직 `false` 인 시점에 게이트를 쓸 수 있지만, 렌더는 animation frame 디바운스라 그 콜백 시점에는 모드가 켜져 있고 `_renderRows` 가 다시 삼킨다. 프레임이 닫힐 때 게이트를 되돌리므로 게이트가 켜져 있던 구간에는 페인트가 하나도 없다 — 픽셀이 달라지지 않는다.
-- **판정: sync 구간에는 커서 숨김을 두지 않는다.** CSS 규칙을 지웠고, `hideNativeCursor` 에 sync 상태를 합류시키지 않는다. `.terminal-sync-output-active` 클래스는 남는다 — 헬퍼 textarea 의 `caret-color`(캔버스 셀이 아니라 실제 DOM 요소의 OS 캐럿)와 프레임 경계를 읽는 소비자들 때문이다. 클래스가 소유하는 것은 **프레임 경계**이지 커서 숨김이 아니고, 함수 이름도 `setSyncOutputActive` 다.
-- **`terminal.refresh()` 는 프레임 안에서 유실되지 않는다.** 버퍼링된 범위가 프레임 종료 flush 에 병합되므로, `applyNativeCursorVisibility` 같은 호출자가 프레임 경계를 알 필요가 없다.
-- **검증 계층**: `ui/src/test/screen/dec2026-render-suppression.screen.test.ts` (ADR-0074 스위트, 여기서만 `terminal.open()` 을 한다 — `RenderService` 는 open 전에 없다). 프레임 중 `onRender` 0회, 프레임 중 게이트를 켜도 `.xterm-cursor` 가 남음, 프레임 밖에서 같은 게이트로 즉시 사라짐. CSS 불변식("sync 조건에는 커서 규칙이 없다")은 `native-cursor-suppression.test.ts` 가 index.css 를 읽어 고정한다.
-- **미검증**: jsdom 에는 WebGL 컨텍스트가 없어 위 테스트가 도는 렌더러는 DOM 쪽이다. 억제가 두 렌더러 위쪽(`RenderService`)에 있고 커서 게이트가 양쪽에서 같은 필드라 주장은 그대로 성립하지만, 캔버스 픽셀 측정은 없다. 이 변경으로 기본 렌더러 동작은 바뀌지 않는다(지운 CSS 가 거기 닿지 않았다).
+- **표준 경로는 보류된다.** `RenderService.refreshRows`와 `_renderRows`는 mode가 켜져 있으면 범위만 `SynchronizedOutputHandler`에 누적한다. write, 공개 `terminal.refresh()`, WebGL cursor redraw는 정상 reset 또는 1초 safety timeout의 전체 flush까지 기다린다.
+- **DOM lifecycle은 이 gate를 우회한다.** `handleFocus`, `handleBlur`, `handleSelectionChanged`는 DOM renderer의 `renderRows()`를 직접 호출한다. 실번들에서 frame 내부 buffer를 `OLD`→`NEW`와 다른 CUP 위치로 바꾼 뒤 blur/focus하면 mode가 여전히 true이고 `onRender`가 0회인데도 DOM row와 cursor가 새 위치로 이동했다. 따라서 `onRender === 0`은 화면 전체 동결의 증거가 아니다.
+- **sync raw reason이 cursor만 보호한다.** `?2026h` parser handler가 `syncOutputCursorGateActive=true`를 먼저 적용하므로 직접 DOM paint는 새 내용을 그릴 수 있어도 `isCursorHidden`을 읽어 미확정 cursor는 만들지 못한다. 이 계약은 전체 frame content atomicity를 보장하지 않는다.
+- **정상 reset에는 추가 repaint가 없다.** `?2026l` custom handler가 xterm mode reset보다 먼저 sync reason을 해제하고, 바로 뒤 xterm 전체 flush가 최종 cursor를 그린다. base suppression이 남아 있으면 OR 결과는 계속 hidden이다.
+- **safety timeout만 recovery refresh를 요청한다.** xterm이 parser reset 없이 mode를 내리고 full render를 요청하면 rAF monitor가 그 전이를 감지해 sync reason을 해제하고 full refresh를 정확히 한 번 요청한다. xterm의 debounced render와 monitor의 실행 순서는 보장하지 않으며 같은 frame에서는 두 요청이 coalesce될 수 있다.
+- **CSS 역할을 분리한다.** sync class는 실제 DOM helper textarea의 OS caret와 frame boundary 소비자를 위해 유지한다. `.xterm-cursor` sync rule은 제거한다. DOM cursor의 CSS blink는 frame 중 계속될 수 있고 직접 lifecycle paint가 없으면 pre-frame cursor가 남을 수 있지만, 잘못된 새 위치를 노출하지 않는 것이 보장 범위다.
+- **검증 계층**: `ui/src/test/screen/dec2026-render-suppression.screen.test.ts`는 실제 DOM renderer에서 표준 refresh 보류, blur/focus 우회, gate 적용, 정상 reset, xterm safety timeout을 검증한다. `TerminalView.test.tsx`는 option churn 없음, timeout corrective refresh 1회, base/sync reason의 독립성을 검증한다. jsdom에는 WebGL context가 없으므로 canvas pixel parity는 주장하지 않는다([ADR-0074](../adr/0074-xterm-cell-grid-screen-test-tier.md)).
 
-판정과 대안 비교는 [ADR-0079](../adr/0079-dec2026-frame-is-render-stopped.md).
+판정과 대안 비교는 [ADR-0079](../adr/0079-dec2026-cursor-gate-lifecycle-bypass.md).
 
 ---
 

@@ -1,34 +1,25 @@
 /**
- * What a DEC 2026 (synchronized output) frame does to xterm's **renderer**,
- * pinned against the real bundle (issue #610, [ADR-0079]).
+ * DEC 2026 (synchronized output) cursor behavior against the real xterm bundle
+ * (issue #610, ADR-0079).
  *
- * Issue #610 was opened on the premise that `.terminal-sync-output-active
- * .xterm-cursor { opacity: 0 }` leaves a hole: CSS cannot reach the WebGL
- * addon's canvas, so "the native cursor keeps being drawn during the frame".
- * The premise is wrong, and these tests are why. `RenderService.refreshRows`
- * and `RenderService._renderRows` both return early while
- * `decPrivateModes.synchronizedOutput` is set, so **no** row is rendered for
- * the duration of a frame — not by a write, not by an explicit
- * `terminal.refresh()`, not by the cursor-blink redraw. Nothing new is drawn,
- * so there is nothing to suppress; what is on screen is the last pre-frame
- * paint, frozen, which is what synchronized output means.
+ * Standard row requests are held by `RenderService.refreshRows` and
+ * `RenderService._renderRows`. That is not a universal paint barrier: the DOM
+ * renderer's focus, blur, and selection handlers call `renderRows` directly.
+ * Such a lifecycle refresh can expose a mid-frame buffer position without an
+ * `onRender` event. Laymux therefore keeps the raw cursor gate active for the
+ * frame. This prevents a misplaced cursor on both renderer models; it does not
+ * claim to make all DOM content atomic.
  *
- * The same tests kill fix option (a) from the issue — "OR `syncOutputActive`
- * into `hideNativeCursor` and refresh". Writing the renderer gate at the
- * earliest possible moment (a `CSI ? h` handler, which runs *before*
- * `InputHandler` sets the mode, so a refresh from it is not rejected on
- * arrival) still paints nothing: the render is animation-frame debounced and by
- * the time the frame callback runs the mode is on and the render is swallowed.
- * So the gate would be written and reverted between two paints and no pixel
- * would ever differ.
+ * The gate is set by a `CSI ? h` handler before xterm enables the mode, without
+ * changing cursor options or requesting a render. Normal `?2026l` releases it
+ * before xterm's mandatory full flush. If xterm's one-second safety timeout
+ * closes the mode, TerminalView's rAF monitor releases the gate and requests
+ * one recovery refresh; it may coalesce with xterm's own pending full render.
  *
- * These are renderer-level claims, so unlike the rest of this directory they
- * need `terminal.open()` — `RenderService` does not exist before it. jsdom has
- * no WebGL context, so the renderer under test is the DOM one; the two are the
- * same on the point being made, because the suppression is in `RenderService`,
- * above both, and the cursor gate is the identical field in both
- * (`WebglRenderer` model build, `DomRendererRowFactory` row build — pinned in
- * `native-cursor-suppression.test.ts`).
+ * These renderer-level claims require `terminal.open()`. jsdom has no WebGL
+ * context, so direct lifecycle repaint assertions are deliberately DOM-specific.
+ * The raw gate itself is shared by the DOM row factory and WebGL model builder;
+ * that private-field contract is pinned in `native-cursor-suppression.test.ts`.
  */
 
 import { Terminal } from "@xterm/xterm";
@@ -55,7 +46,6 @@ function stubMatchMedia() {
 
 const mounted: Terminal[] = [];
 
-/** A rendered terminal: opened, focused, with the cursor element materialised. */
 async function mountRenderedTerminal() {
   stubMatchMedia();
   const host = document.createElement("div");
@@ -65,8 +55,6 @@ async function mountRenderedTerminal() {
   const terminal = new Terminal({ allowProposedApi: true, cols: 40, rows: 6 });
   terminal.open(host);
   mounted.push(terminal);
-  // `isCursorInitialized` is what both renderers check before the gate; DECTCEM
-  // show is one of the two things that sets it.
   await write(terminal, "\x1b[?25h");
   terminal.focus();
   await write(terminal, "ready");
@@ -78,7 +66,6 @@ function write(terminal: Terminal, data: string): Promise<void> {
   return new Promise((resolve) => terminal.write(data, resolve));
 }
 
-/** Let the render debouncer's animation frame run, then drain the task queue. */
 function settleRenders(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
 }
@@ -87,10 +74,21 @@ function countCursorElements(): number {
   return document.querySelectorAll(".xterm-cursor").length;
 }
 
-/** Records every `onRender` as `"start-end"`, newest last. */
+function renderedText(): string {
+  return document.querySelector(".xterm-rows")?.textContent ?? "";
+}
+
+function renderedCursorRow(): number {
+  const cursor = document.querySelector(".xterm-cursor");
+  if (!cursor) return -1;
+  return Array.from(document.querySelectorAll(".xterm-rows > div")).findIndex((row) =>
+    row.contains(cursor),
+  );
+}
+
 function recordRenders(terminal: Terminal): string[] {
   const renders: string[] = [];
-  terminal.onRender((e) => renders.push(`${e.start}-${e.end}`));
+  terminal.onRender((event) => renders.push(`${event.start}-${event.end}`));
   return renders;
 }
 
@@ -99,8 +97,8 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-describe("a DEC 2026 frame stops rendering outright (issue #610)", () => {
-  it("renders no row while the frame is open, then flushes once on close", async () => {
+describe("DEC 2026 standard render-service suppression (issue #610)", () => {
+  it("renders no standard row request while open, then flushes once on close", async () => {
     const terminal = await mountRenderedTerminal();
     const renders = recordRenders(terminal);
 
@@ -116,7 +114,7 @@ describe("a DEC 2026 frame stops rendering outright (issue #610)", () => {
     expect(renders).toEqual([`0-${terminal.rows - 1}`]);
   });
 
-  it("swallows an explicit refresh until the frame closes, keeping its range", async () => {
+  it("buffers an explicit refresh until the frame closes", async () => {
     const terminal = await mountRenderedTerminal();
     const renders = recordRenders(terminal);
 
@@ -126,64 +124,86 @@ describe("a DEC 2026 frame stops rendering outright (issue #610)", () => {
 
     expect(renders).toEqual([]);
 
-    // Not lost: the buffered range is merged into the frame-close flush, which
-    // is why laymux's own `refresh()` calls do not need to know about frames.
     await write(terminal, "\x1b[?2026l");
     await settleRenders();
     expect(renders).toEqual([`0-${terminal.rows - 1}`]);
   });
 });
 
-describe("the renderer cursor gate cannot be applied inside a frame (ADR-0079)", () => {
-  it("leaves the painted cursor on screen even when the gate is set before the mode flips", async () => {
+describe("DEC 2026 direct-render cursor gate (ADR-0079)", () => {
+  it("prevents blur/focus from moving the cursor to a mid-frame position", async () => {
     const terminal = await mountRenderedTerminal();
     const suppression = installNativeCursorSuppression(terminal);
     expect(suppression.supported).toBe(true);
-    expect(countCursorElements()).toBe(1);
+    await write(terminal, "\x1b[2J\x1b[HOLD\x1b[1;4H");
+    await settleRenders();
+    expect(renderedText()).toContain("OLD");
+    expect(renderedCursorRow()).toBe(0);
     const renders = recordRenders(terminal);
-    const modeSeenByHandler: boolean[] = [];
-    const decPrivateModes = (
-      terminal as Terminal & {
-        _core: { coreService: { decPrivateModes: { synchronizedOutput: boolean } } };
-      }
-    )._core.coreService.decPrivateModes;
 
-    // Registered after `InputHandler`'s, and CSI handlers run newest first, so
-    // this is the earliest any laymux code can act on `?2026h` — exactly where
-    // `setSyncOutputActive(true)` is called from today.
     terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
-      if (params.includes(2026)) {
-        modeSeenByHandler.push(decPrivateModes.synchronizedOutput);
-        suppression.setSuppressed(true);
-        terminal.refresh(0, terminal.rows - 1);
-      }
+      if (params.includes(2026)) suppression.setSuppressed(true);
+      return false;
+    });
+    terminal.parser.registerCsiHandler({ prefix: "?", final: "l" }, (params) => {
+      if (params.includes(2026)) suppression.setSuppressed(false);
       return false;
     });
 
     await write(terminal, "\x1b[?2026h");
+    await write(terminal, "\x1b[2J\x1b[HNEW\x1b[4;10H");
     await settleRenders();
 
-    // The handler really did run ahead of the mode being set...
-    expect(modeSeenByHandler).toEqual([false]);
-    expect(decPrivateModes.synchronizedOutput).toBe(true);
-    // ...and it still bought nothing: no paint, so the cursor drawn by the last
-    // pre-frame render is still there. Option (a) of issue #610 is not costly,
-    // it is inert.
     expect(renders).toEqual([]);
+    expect(renderedText()).toContain("OLD");
     expect(countCursorElements()).toBe(1);
+
+    // DOM focus lifecycle bypasses RenderService and paints the updated rows.
+    // The raw gate keeps the new, uncommitted cursor out of that direct paint.
+    terminal.blur();
+    terminal.focus();
+    expect(renders).toEqual([]);
+    expect(renderedText()).toContain("NEW");
+    expect(countCursorElements()).toBe(0);
+
+    // Our reset handler runs before xterm's own full-flush handler.
+    await write(terminal, "\x1b[?2026l");
+    await settleRenders();
+    expect(countCursorElements()).toBe(1);
+    expect(renderedCursorRow()).toBe(3);
   });
 
-  it("hides the cursor as soon as the same gate is applied outside a frame", async () => {
-    // The control case: the gate itself works (ADR-0073). Only the frame is
-    // unreachable, which is what makes joining sync-output to it pointless.
+  it("recovers the cursor when the safety timeout closes the mode", async () => {
     const terminal = await mountRenderedTerminal();
     const suppression = installNativeCursorSuppression(terminal);
-    expect(countCursorElements()).toBe(1);
+    const renders = recordRenders(terminal);
+    let recoveryRefreshes = 0;
+    let monitorFrame: number | undefined;
+    const monitorMode = () => {
+      if (terminal.modes.synchronizedOutputMode) {
+        monitorFrame = requestAnimationFrame(monitorMode);
+        return;
+      }
+      monitorFrame = undefined;
+      suppression.setSuppressed(false);
+      recoveryRefreshes += 1;
+      terminal.refresh(0, terminal.rows - 1);
+    };
+    terminal.parser.registerCsiHandler({ prefix: "?", final: "h" }, (params) => {
+      if (params.includes(2026)) {
+        suppression.setSuppressed(true);
+        monitorFrame ??= requestAnimationFrame(monitorMode);
+      }
+      return false;
+    });
 
-    suppression.setSuppressed(true);
-    terminal.refresh(0, terminal.rows - 1);
+    await write(terminal, "\x1b[?2026h\r\ntimeout body\x1b[4;10H");
+    await new Promise((resolve) => setTimeout(resolve, 1_050));
     await settleRenders();
 
-    expect(countCursorElements()).toBe(0);
+    expect(renders).toContain(`0-${terminal.rows - 1}`);
+    expect(recoveryRefreshes).toBe(1);
+    expect(countCursorElements()).toBe(1);
+    expect(renderedCursorRow()).toBe(3);
   });
 });

@@ -1,9 +1,10 @@
-# 0074. 화면 주장은 mock 이 아니라 실제 xterm 셀 격자로 검증한다
+# 0074. 실제 xterm 화면 의미는 별도 screen tier에서 검증한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-27
 - Source: issue #605 · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) Consequences 마지막 두 항목 · issue #600 · issue #602 · issue #596 · [dev-repro-methodology.md](../dev-repro-methodology.md) §4·§5
 - Relation: ADR-0072 가 "현 harness 로 검증할 수 없다"고 명시하고 #605 로 분리한 두 주장 중 (a) 를 검증 가능하게 만든다. ADR-0058 의 단일 셀 폭 provider 를 테스트 표면에도 적용한다. 드라이버는 ADR-0072 를 issue #607 이 확장한 복구 semantics 를 따른다(머지 순서 #611 → #613).
+- Amended by: [ADR-0079](0079-dec2026-cursor-gate-lifecycle-bypass.md)가 같은 tier에 실제 renderer 계약 테스트를 추가한다.
 
 ## Context
 
@@ -27,17 +28,21 @@ VT 파서에 닿지 않으며 `reset` 은 버퍼를 비우지도 `onScroll` 을 
 ("수정을 되돌리면 그 테스트가 정말 실패하는가")을 화면 주장에 대해서는 지금 수행할 수단이 없다.
 
 제약: 기존 데스크톱 스위트는 3,200여개이고 30초 안에 끝난다. 실제 xterm 인스턴스를 세워 바이트를
-흘리는 테스트는 그보다 무겁고, 목적도 다르다. 범위는 프론트엔드 테스트 계층 구성이며,
-Rust 테스트·e2e(Playwright)·실기 검증 절차는 비목표다.
+흘리는 테스트는 그보다 무겁고, 목적도 다르다. 셀 격자뿐 아니라 renderer의 실제 DOM 계약도 mock으로는
+표현할 수 없다. 범위는 프론트엔드 테스트 계층 구성이며, Rust 테스트·e2e(Playwright)·실기 검증 절차는
+비목표다.
 
 ## Decision
 
-**셀 격자에 대한 주장은 mock 이 아니라 `open()` 하지 않은 실제 `@xterm/xterm` 인스턴스에
-바이트를 흘려 검증하고, 그 테스트는 `*.screen.test.ts` 라는 별도 vitest 스위트에 둔다.**
+**바이트가 만드는 셀 격자 또는 xterm renderer의 화면 의미에 대한 주장은 mock이 아니라 실제
+`@xterm/xterm` 인스턴스로 검증하고, `*.screen.test.ts` 별도 vitest 스위트에 둔다.**
 
-- **표면**: `ui/src/test/screen/xterm-screen.ts` 가 유일한 진입점이다. `new Terminal()` 후
-  `terminal.open()` 을 호출하지 않는다 — 렌더러·캔버스·레이아웃 없이 VT 파서와 버퍼만 쓴다.
-  주장이 사는 계층이 거기이고, 렌더러를 붙이면 jsdom 이 흉내 내지 못하는 것들이 딸려 온다.
+- **셀 격자 표면**: `ui/src/test/screen/xterm-screen.ts`가 공용 진입점이다. `new Terminal()` 후
+  `terminal.open()`을 호출하지 않고 VT parser와 buffer만 쓴다. 셀·폭·cursor 주장에 renderer를
+  불필요하게 붙이지 않는다.
+- **renderer 계약 표면**: renderer 호출·DOM cursor처럼 `open()` 전에는 존재하지 않는 주장은 테스트
+  파일이 직접 `Terminal.open()`을 호출할 수 있다. 필요한 browser shim은 해당 파일이 로컬로 설치하고,
+  WebGL이 없는 jsdom에서 검증한 것을 WebGL pixel 결과처럼 확대 해석하지 않는다(ADR-0079).
 - **폭 계약은 프로덕션과 같다**: 하니스는 첫 write 보다 앞에서 `activateTerminalUnicodeProvider`
   를 호출한다(ADR-0058, `TerminalView` 와 같은 순서). 하지 않으면 셀 폭이 xterm 기본값이 되어
   출하되는 것과 다른 격자를 검증하게 된다.
@@ -49,7 +54,8 @@ Rust 테스트·e2e(Playwright)·실기 검증 절차는 비목표다.
   선택지로 들고 있는 이유이며, 그래야 "현재 코드가 무언가와 다르다"가 아니라 "옛 경로는 이렇게 잃는다"를 보인다.
 - **스위트 분리**: `vitest.screen.config.ts` + `npm run test:screen`. 기본 `vitest.config.ts` 는
   `*.screen.test.*` 를 exclude 하므로 `npx vitest run` 의 구성과 실행 시간은 그대로다. 화면 스위트는
-  React 플러그인·i18n·jest-dom·ResizeObserver shim 을 쓰지 않는다 — 컴포넌트를 렌더하지 않으므로 필요 없다.
+  React 플러그인·i18n·jest-dom 공용 setup을 쓰지 않는다. renderer 테스트의 shim도 전역 setup으로
+  숨기지 않고 필요한 계약 옆에 둔다.
 - **경계**: 화면 테스트는 컴포넌트를 렌더하지 않는다. 프로덕션 코드(coordinator, unicode provider,
   anchor 기하)를 직접 구동하고, `TerminalView` 가 그 순서로 배선했는지는 계속 `TerminalView.test.tsx`
   가 소유한다. 두 스위트는 같은 주장의 서로 다른 절반을 덮으며, 화면 스위트가 컴포넌트 배선을
@@ -71,9 +77,9 @@ Rust 테스트·e2e(Playwright)·실기 검증 절차는 비목표다.
 - **화면 테스트를 기본 스위트에 섞는다** — 지금은 14개라 4초지만, 이 계층은 시나리오당 수십 프레임을
   파싱하므로 늘어나는 방향이 명확하다. 무엇보다 두 스위트는 질문이 다르다. 섞으면 "터미널 화면
   테스트만 돌린다"는 선택지가 사라진다. 기각.
-- **e2e(Playwright)로 실브라우저에서 검증한다** — 실제 렌더러까지 덮지만 프레임 시퀀스 하나당 앱
-  기동이 필요하고, 셀 격자를 읽으려면 결국 같은 buffer API 를 쓴다. 비용 대비 추가로 얻는 것이
-  렌더러뿐이며, 렌더러 결함은 `/screenshot`·실기 절차의 몫이다. 기각.
+- **e2e(Playwright)로 실브라우저에서만 검증한다** — 실제 GPU와 pixel까지 덮지만 프레임 시퀀스마다
+  앱 기동이 필요하고 셀 격자는 결국 같은 buffer API를 쓴다. jsdom DOM renderer로 표현 가능한 계약은
+  screen tier가 맡고, GPU·폰트·DPI pixel 주장은 `/screenshot`·실기 절차로 남긴다. 전면 대체는 기각했다.
 - **사용자 캡처 PNG 픽셀 디코딩을 자동화한다**(#596 에서 실제로 쓴 방법) — 폰트·DPI·테마에 묶이고
   재현하려면 headful 앱이 필요하다. 진단 도구로는 유효했지만 회귀 테스트로는 부적합하다. 기각.
 
@@ -90,8 +96,8 @@ Rust 테스트·e2e(Playwright)·실기 검증 절차는 비목표다.
   시퀀스")로 섞여 무엇을 증명했는지 흐려진다. 하니스의 `evictTo(seq)` 는 이 목적 전용이다.
 - 새 계층이 하나 늘었으므로 **어느 스위트에 쓸지 판단**이 필요해진다. 기준: 셀 격자·커서·폭·`reset()`
   같은 xterm 실동작이 주장의 일부면 화면 스위트, 컴포넌트가 무엇을 호출하는지가 주장이면 기존 스위트다.
-- `npx vitest run` 은 그대로다(이 PR 이 기본 스위트에 추가하는 테스트는 0개). 화면 스위트는
-  14개 / 약 4초이며 `/full-test` 1단계에 한 줄이 늘어난다.
+- `npx vitest run` 은 그대로다. 화면 스위트의 테스트 수와 시간은 늘 수 있지만 기본 스위트와 목적이
+  섞이지 않으며 `/full-test`에서 별도로 실행한다.
 - 하니스의 `output-surface-driver.ts` 는 `TerminalView` 의 gap→복구 흐름을 재현한다.
   **이것은 중복이고 표류할 수 있다.** 표류의 대가는 "화면 스위트가 통과하는데 실제 배선은 다르다"이며,
   그 위험을 줄이려고 coordinator·에러 분류·카운터 이름은 프로덕션 것을 그대로 쓴다. 복구 흐름의
@@ -108,5 +114,6 @@ Rust 테스트·e2e(Playwright)·실기 검증 절차는 비목표다.
 - 남은 것: issue #602 의 **컴포넌트 계층** 재현(하니스는 `reset()` 이 동기 `onScroll` 로 baseY 를
   무너뜨린다는 선행 사실만 고정한다)과 issue #596 의 overlay caret **DOM** 배치(하니스는 버퍼 커서
   열과 앵커 픽셀 오프셋까지만 고정한다). 둘 다 각 이슈에서 다룬다.
-- 재검토 조건: 화면 스위트가 수십 초대로 커지거나(그때는 프레임 스크립트를 공유 fixture 로 접는다),
-  xterm 을 `open()` 해야만 표현되는 주장이 필요해지면(그때는 e2e 로 승격) 이 결정을 다시 본다.
+- 재검토 조건: 화면 스위트가 수십 초대로 커지거나(그때는 프레임 스크립트를 공유 fixture로 접는다),
+  jsdom이 필요한 renderer 계약을 정직하게 표현하지 못하거나 실제 GPU pixel이 판단의 일부가 되면 해당
+  테스트를 e2e·dev screenshot 계층으로 승격한다.

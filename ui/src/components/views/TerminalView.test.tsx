@@ -2114,10 +2114,9 @@ describe("TerminalView", () => {
     expect(preview.textContent).toBe("");
   });
 
-  // The class marks the DEC 2026 frame boundary, nothing more. It used to hide
-  // `.xterm-cursor` too; a frame is a render-stopped interval, so there is no
-  // cursor being drawn to hide (issue #610, ADR-0079 —
-  // `dec2026-render-suppression.screen.test.ts`).
+  // The class marks the DEC 2026 boundary and hides only the real helper
+  // textarea caret. The painted cursor uses the raw renderer gate, which also
+  // covers DOM focus/blur direct-render paths (issue #610, ADR-0079).
   it("marks the frame boundary on the host only while a synchronized output frame is open", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 
@@ -2872,6 +2871,104 @@ describe("TerminalView", () => {
       expect(container).not.toHaveClass("terminal-sync-output-active");
     });
     expect(mockRequestAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("gates the renderer cursor for a DEC 2026 frame without option churn", async () => {
+    render(<TerminalView instanceId="t-sync-cursor-gate" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    expect(terminal).toBeDefined();
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    const cursorBlinkBefore = terminal?.options.cursorBlink;
+    mockRefresh.mockClear();
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    expect(terminal?.options.cursorBlink).toBe(cursorBlinkBefore);
+    expect(mockRefresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+
+    // The parser hook runs before xterm's own reset handler. Releasing here lets
+    // that handler's already-required full flush paint the final cursor once.
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    expect(terminal?.options.cursorBlink).toBe(cursorBlinkBefore);
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("repaints once when the xterm safety timeout releases the cursor gate", async () => {
+    render(<TerminalView instanceId="t-sync-cursor-timeout" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(terminal).toBeDefined();
+    expect(onOutput).toBeTypeOf("function");
+
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+      onOutput?.(new TextEncoder().encode("frame"));
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    mockRefresh.mockClear();
+
+    // No `?2026l` arrives. The monitor observes xterm's timeout mode release,
+    // clears the raw gate, and requests exactly one recovery paint. Depending on
+    // rAF ordering this may coalesce with xterm's own pending full render.
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => {
+      expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    });
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(mockRefresh).toHaveBeenCalledWith(0, 23);
+  });
+
+  it("does not let a base cursor transition clear the active sync-frame gate", async () => {
+    render(<TerminalView instanceId="t-sync-base-gate" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    expect(terminal).toBeDefined();
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-sync-base-gate", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    });
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-sync-base-gate", {
+        activity: { type: "shell" },
+      });
+    });
+
+    // Base suppression is now false, but the independent frame reason remains.
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("terminal-view-t-sync-base-gate")).not.toHaveClass(
+        "terminal-native-cursor-hidden",
+      );
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
   });
 
   it("falls back to native xterm cursor when interactive cursor stability is disabled", async () => {

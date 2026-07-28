@@ -214,15 +214,11 @@ describe("installNativeCursorSuppression", () => {
 });
 
 describe("who is allowed to hide the native cursor in CSS", () => {
-  // `.terminal-native-cursor-hidden` is the DOM-renderer defence for the *gate*
-  // condition (ADR-0073): the class and the gate are written together, so the
-  // `onContextLoss` fallback path agrees with the WebGL path. No other condition
-  // gets a CSS cursor rule. In particular synchronized output does not (issue
-  // #610, ADR-0079): a DEC 2026 frame is a render-stopped interval, so there is
-  // no cursor being drawn to hide, and a CSS rule that only reaches the fallback
-  // renderer makes the caret behave differently depending on which renderer
-  // happens to be live. `dec2026-render-suppression.screen.test.ts` pins the
-  // render-stop itself against the real bundle.
+  // The base gate class and its composer/IME inputs are the complete allowlist.
+  // Composer/IME selectors are safe fallbacks because those states also feed the
+  // same raw gate. Sync output has a raw-gate reason but intentionally no CSS
+  // selector: otherwise a pre-frame DOM cursor would disappear while the WebGL
+  // cursor remained at its last settled paint (issue #610, ADR-0079).
   const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf-8").replace(
     /\/\*[\s\S]*?\*\//g,
     "",
@@ -233,14 +229,14 @@ describe("who is allowed to hide the native cursor in CSS", () => {
     .map((selector) => selector.trim())
     .filter(Boolean);
 
-  it("keeps the fallback-renderer rule for the gate condition", () => {
-    expect(cursorRuleSelectors).toContain(".terminal-native-cursor-hidden .xterm-cursor");
-  });
-
-  it("gives the synchronized-output condition no cursor rule", () => {
-    expect(cursorRuleSelectors?.filter((s) => s.includes("terminal-sync-output-active"))).toEqual(
-      [],
-    );
+  it("keeps the complete fallback allowlist and excludes synchronized output", () => {
+    expect(cursorRuleSelectors).toEqual([
+      ".terminal-native-cursor-hidden .xterm-cursor",
+      ".terminal-composer-active .xterm-cursor",
+      ".terminal-composer-active .terminal-overlay-caret",
+      ".terminal-composer-active .terminal-composition-preview",
+      ".terminal-ime-composition-active .xterm-cursor",
+    ]);
   });
 });
 

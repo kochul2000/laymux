@@ -1399,6 +1399,11 @@ export function TerminalView({
       trace("native-cursor-suppression-unsupported");
     }
 
+    let baseHideNativeCursor = false;
+    let syncOutputCursorGateActive = false;
+    const applyNativeCursorGate = () => {
+      nativeCursorSuppression.setSuppressed(baseHideNativeCursor || syncOutputCursorGateActive);
+    };
     let prevHideNativeCursor: boolean | undefined;
     let prevNativeCursorInputMode: InputMode | undefined;
     const applyNativeCursorVisibility = () => {
@@ -1415,6 +1420,7 @@ export function TerminalView({
       }
       prevHideNativeCursor = hideNativeCursor;
       prevNativeCursorInputMode = currentInputMode;
+      baseHideNativeCursor = hideNativeCursor;
 
       const state = useSettingsStore.getState();
       const liveProfile = state.profiles.find((p) => p.name === profile);
@@ -1441,7 +1447,7 @@ export function TerminalView({
       // (issue #598). Theme and shape therefore stay exactly what the user
       // configured in both branches — the only thing that changes is whether the
       // renderer draws a cursor at all.
-      nativeCursorSuppression.setSuppressed(hideNativeCursor);
+      applyNativeCursorGate();
       const cursorOptions = toXtermCursorOptions(resolvedCursorShape);
       terminal.options.theme = resolvedTheme;
       // Blinking a suppressed cursor is pure repaint churn.
@@ -1458,23 +1464,29 @@ export function TerminalView({
     };
     nativeCursorVisibilityRef.current = applyNativeCursorVisibility;
 
-    // The DEC 2026 frame boundary, published to everything that must not treat a
-    // mid-frame position as settled. It deliberately does **not** touch the native
-    // cursor: a frame is a render-stopped interval — `RenderService` rejects every
-    // row refresh while the mode is set — so no cursor is drawn during it, and the
-    // renderer gate of `applyNativeCursorVisibility` cannot be applied inside one
-    // either (issue #610, ADR-0079, data-flow.md §8.22; pinned against the real
-    // bundle in `dec2026-render-suppression.screen.test.ts`). The class survives
-    // for the helper textarea's own caret, which is a DOM element rather than a
-    // painted cell.
-    const setSyncOutputActive = (active: boolean) => {
+    // RenderService buffers normal row requests during DEC 2026, but xterm's DOM
+    // focus/blur/selection lifecycle calls renderer.renderRows directly. Keep a
+    // separate raw-gate reason for the whole parser frame so those bypasses cannot
+    // expose a mid-frame cursor. This reason never changes cursor options and
+    // never overwrites the base composer/composition/overlay reason above.
+    const setSyncOutputActive = (active: boolean, source: "parser" | "monitor" = "parser") => {
+      const wasActive = syncOutputActiveRef.current;
       syncOutputActiveRef.current = active;
+      syncOutputCursorGateActive = active;
+      applyNativeCursorGate();
       const host = wrapperRef.current;
       if (host) {
         host.classList.toggle("terminal-sync-output-active", active);
       }
       trace("sync-output-visibility", { active });
       overlayCaretUpdaterRef.current?.();
+      if (source === "monitor" && wasActive && !active) {
+        // xterm's one-second safety timeout lowers the mode and requests a full
+        // render without a parser reset. Its debounced render may run before or
+        // after this rAF monitor; release the gate and request one recovery paint.
+        // The render service coalesces both requests when they meet in one frame.
+        terminal.refresh(0, terminal.rows - 1);
+      }
     };
     const compositionController = createImeCompositionController({
       getCols: () => terminal.cols,
@@ -2073,7 +2085,7 @@ export function TerminalView({
         (terminal as Terminal & { modes?: { synchronizedOutputMode?: boolean } }).modes
           ?.synchronizedOutputMode,
       );
-      setSyncOutputActive(active);
+      setSyncOutputActive(active, "monitor");
       if (active && !cancelled) {
         syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       } else {
@@ -2086,12 +2098,12 @@ export function TerminalView({
           ?.synchronizedOutputMode,
       );
       if (!active) {
-        setSyncOutputActive(false);
+        setSyncOutputActive(false, "monitor");
         stopSyncOutputMonitor();
         return;
       }
       if (syncOutputMonitorFrame === undefined) {
-        setSyncOutputActive(true);
+        setSyncOutputActive(true, "monitor");
         syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       }
     };
