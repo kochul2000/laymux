@@ -4734,6 +4734,95 @@ describe("TerminalView", () => {
     });
   });
 
+  it("refreshes the helper focus cycle when app deactivation leaves it DOM-active", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    try {
+      const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-stale-active");
+      const focusEvents: string[] = [];
+      helper.addEventListener("blur", () => focusEvents.push("blur"));
+      helper.addEventListener("focus", () => focusEvents.push("focus"));
+
+      // WebView2 may detach the native IME context without changing
+      // document.activeElement. A plain helper.focus() on return is then a no-op.
+      await act(async () => {
+        fireEvent(window, new Event("blur"));
+      });
+      expect(document.activeElement).toBe(helper);
+
+      await reactivateApp();
+
+      expect(focusEvents).toEqual(["blur", "focus"]);
+      expect(document.activeElement).toBe(helper);
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+
+  it("does not blur a new IME composition that starts before the reclaim frame", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    try {
+      const instanceId = "t-focus-ownership-ime-before-frame";
+      const { helper, wrapper } = await mountPaneWithFocusedHelper(instanceId);
+      const focusEvents: string[] = [];
+      helper.addEventListener("blur", () => focusEvents.push("blur"));
+      helper.addEventListener("focus", () => focusEvents.push("focus"));
+
+      await act(async () => {
+        fireEvent(window, new Event("blur"));
+        fireEvent(window, new Event("focus"));
+        helper.value = "ㄱ";
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+        helper.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+
+      await flushRestoreFrame();
+
+      expect(focusEvents).toEqual([]);
+      expect(document.activeElement).toBe(helper);
+      expect(helper.value).toBe("ㄱ");
+      expect(wrapper).toHaveClass("terminal-ime-composition-active");
+
+      mockWriteToTerminal.mockClear();
+      const terminal = createdTerminals.at(-1)!;
+      await act(async () => {
+        helper.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        terminal.emitCoreData("가", true);
+      });
+      expect(mockWriteToTerminal).toHaveBeenCalledTimes(1);
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(instanceId, "가");
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+
+  it("does not cycle a DOM-active helper on Linux", async () => {
+    const userAgent = vi
+      .spyOn(window.navigator, "userAgent", "get")
+      .mockReturnValue("Mozilla/5.0 (X11; Linux x86_64)");
+    try {
+      const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-linux-active");
+      const focusEvents: string[] = [];
+      helper.addEventListener("blur", () => focusEvents.push("blur"));
+      helper.addEventListener("focus", () => focusEvents.push("focus"));
+
+      await act(async () => {
+        fireEvent(window, new Event("blur"));
+      });
+      await reactivateApp();
+
+      expect(focusEvents).toEqual([]);
+      expect(document.activeElement).toBe(helper);
+    } finally {
+      userAgent.mockRestore();
+    }
+  });
+
   it("keeps the first IME composition after reactivation on the restored helper", async () => {
     const { helper, wrapper } = await mountPaneWithFocusedHelper("t-focus-ownership-ime");
     await deactivateApp(helper);

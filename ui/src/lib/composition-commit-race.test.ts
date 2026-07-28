@@ -12,6 +12,7 @@ import {
   readCompositionStart,
   readPendingCompositionSend,
 } from "./xterm-pending-composition";
+import { createTerminalFocusOwnership } from "./terminal-focus-ownership";
 
 // ---------------------------------------------------------------------------
 // Pure decision
@@ -238,7 +239,20 @@ function racingKeypress(char: string): KeyboardEvent {
 
 const flushFinalizer = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-afterEach(() => {
+const writeTerminal = (terminal: Terminal, data: string) =>
+  new Promise<void>((resolve) => terminal.write(data, resolve));
+
+afterEach(async () => {
+  // Some blur-contract cases intentionally leave xterm's private composition
+  // flag set after their assertions. End that synthetic composition before
+  // dispose so CompositionHelper's queued position-update timer cannot run
+  // against a torn-down render service under a busy, parallel full-suite run.
+  for (const terminal of mounted) {
+    if (readPendingCompositionSend(terminal)?.composing) {
+      terminal.textarea?.dispatchEvent(new CompositionEvent("compositionend", { data: "" }));
+    }
+  }
+  await flushFinalizer();
   while (mounted.length) mounted.pop()?.dispose();
   document.body.replaceChildren();
 });
@@ -268,6 +282,63 @@ describe("xterm composition finalizer race (baseline)", () => {
     await flushFinalizer();
 
     expect(data).toEqual(["가", "가"]);
+  });
+});
+
+describe("xterm app-focus recovery with a new IME composition (issue #620)", () => {
+  it("cancels the queued refresh without extra focus reports and commits once", async () => {
+    const { terminal, helper } = mountTerminal();
+    await writeTerminal(terminal, "\x1b[?1004h");
+
+    const data: string[] = [];
+    terminal.onData((value) => data.push(value));
+    helper.focus();
+    expect(data).toEqual(["\x1b[I"]);
+    data.length = 0;
+
+    let reclaimFrame: (() => void) | undefined;
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => terminal.element,
+      refreshActiveHelper: true,
+      scheduleFrame: (callback) => {
+        reclaimFrame = callback;
+      },
+    });
+    helper.addEventListener("compositionstart", () => ownership.releaseForHelperInput(helper));
+
+    // WebView2 can leave the helper DOM-active across app deactivation. The
+    // focus controller schedules a blur/focus refresh, but a real IME can start
+    // using the recovered helper before that next animation frame arrives.
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+    expect(reclaimFrame).toBeTypeOf("function");
+
+    helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    helper.value = "ㄱ";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+    helper.dispatchEvent(new Event("input", { bubbles: true }));
+
+    reclaimFrame?.();
+
+    // A late refresh would make real xterm emit DEC focus-out/focus-in reports
+    // and clear the helper value in its blur handler, interrupting this new IME
+    // composition. Input ownership must cancel that frame instead.
+    expect(data).toEqual([]);
+    expect(document.activeElement).toBe(helper);
+    expect(helper.value).toBe("ㄱ");
+
+    helper.value = "가";
+    helper.selectionStart = 1;
+    helper.selectionEnd = 1;
+    helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+    helper.dispatchEvent(new CompositionEvent("compositionend", { data: "가" }));
+    await flushFinalizer();
+
+    expect(data).toEqual(["가"]);
+    expect(document.activeElement).toBe(helper);
+    ownership.dispose();
   });
 });
 

@@ -78,6 +78,7 @@ describe("createTerminalFocusOwnership", () => {
     const frames = createManualFrames();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
+      refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
     });
 
@@ -230,6 +231,110 @@ describe("createTerminalFocusOwnership", () => {
     helper.blur();
     frames.runAll();
     expect(document.activeElement).toBe(helper);
+  });
+
+  it("refreshes the helper focus cycle when DOM focus never left during app deactivation", () => {
+    // WebView2 can keep reporting the helper as `activeElement` while the
+    // native IME/TSF context has detached from it. Calling focus() again is a
+    // DOM no-op in that state, so the same pane click cannot recover input.
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      scheduleFrame: frames.schedule,
+      onTrace,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(document.activeElement).toBe(helper);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+    frames.runAll();
+
+    expect(focusEvents).toEqual(["blur", "focus"]);
+    expect(document.activeElement).toBe(helper);
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaimed",
+      expect.objectContaining({ refreshedActiveHelper: true }),
+    );
+  });
+
+  it("cancels a scheduled refresh when helper input starts before the reclaim frame", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      scheduleFrame: frames.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+
+    ownership.releaseForHelperInput(helper);
+    frames.runAll();
+
+    expect(focusEvents).toEqual([]);
+    expect(document.activeElement).toBe(helper);
+    expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("keeps a DOM-active helper untouched when active refresh is disabled", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: false,
+      scheduleFrame: frames.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    frames.runAll();
+
+    expect(focusEvents).toEqual([]);
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("does not steal focus when the refresh blur hands it to another element", () => {
+    const { container, helper } = buildPane();
+    const modalInput = document.createElement("input");
+    document.body.appendChild(modalInput);
+    const frames = createManualFrames();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      scheduleFrame: frames.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    helper.addEventListener("blur", () => modalInput.focus());
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    frames.runAll();
+
+    expect(document.activeElement).toBe(modalInput);
+    expect(ownership.getOwnedHelper()).toBe(null);
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaim-declined",
+      expect.objectContaining({ reason: "focus-won-during-refresh" }),
+    );
   });
 
   it("declines the reclaim when another element already owns focus on return", () => {

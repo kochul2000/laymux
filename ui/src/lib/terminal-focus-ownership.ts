@@ -15,9 +15,10 @@
  * - Ownership is recorded **only** when the pane's own helper textarea really
  *   held DOM focus at window blur. Store focus alone never records ownership.
  * - Restoration happens one frame after window focus and **only** when the
- *   active element is still `body`/`null`/`documentElement`. Any element that
- *   won focus in between (modal, search box, settings input, another pane's
- *   helper) keeps it — focus is never stolen back.
+ *   active element is still the remembered helper or
+ *   `body`/`null`/`documentElement`. A helper that stayed DOM-active is cycled
+ *   through blur/focus once so WebView2 can reattach its native IME context.
+ *   Any other element that wins focus keeps it — focus is never stolen back.
  * - The record is dropped as soon as it can no longer be trusted: helper
  *   detached or replaced, container gone, pointer press handed focus outside
  *   the surface, pane unfocused/unmounted, controller disposed.
@@ -30,6 +31,8 @@ export type FocusOwnershipTrace = (event: string, payload: Record<string, unknow
 export type TerminalFocusOwnershipOptions = {
   /** The pane surface that must contain the helper for it to be owned. */
   getContainer: () => HTMLElement | null;
+  /** Refresh a DOM-active helper through blur/focus (Windows WebView2 only). */
+  refreshActiveHelper?: boolean;
   /** Frame scheduler. Defaults to `requestAnimationFrame` (setTimeout fallback). */
   scheduleFrame?: (callback: () => void) => void;
   onTrace?: FocusOwnershipTrace;
@@ -48,6 +51,8 @@ export type TerminalFocusOwnership = {
   reclaimOnAppFocus: () => boolean;
   /** Pointer press anywhere: a press outside the surface hands focus away. */
   releaseForPointerTarget: (target: EventTarget | null) => void;
+  /** Real helper input supersedes a pending next-frame refresh. */
+  releaseForHelperInput: (target: EventTarget | null) => void;
   /** xterm adopted a (possibly new) helper textarea — invalidate stale records. */
   notifyHelperBound: (helper: HTMLTextAreaElement | null) => void;
   clear: (reason: string) => void;
@@ -199,9 +204,10 @@ export function createTerminalFocusOwnership(
       const activeElement = doc.activeElement;
       // `activeElement === helper` is deliberately *not* short-circuited here.
       // The webview may still report the helper as focused at window `focus`
-      // and blank it immediately after, so the decision belongs to the frame
-      // below, which re-reads the active element. Re-focusing an element that
-      // already has focus is a no-op, so covering both orderings costs nothing.
+      // and either blank it immediately after or keep DOM focus while its
+      // native IME context is detached. The decision belongs to the frame
+      // below, which re-reads the active element and refreshes that stale
+      // active state with an explicit blur/focus cycle.
       if (activeElement !== helper && !isUnownedActiveElement(activeElement, doc)) {
         // Something else (modal, search, another pane) owns focus now.
         clear("reclaim-focus-elsewhere");
@@ -236,11 +242,32 @@ export function createTerminalFocusOwnership(
           });
           return;
         }
+        const refreshActiveHelper = options.refreshActiveHelper === true && active === helper;
         clear("reclaim-attempted");
-        helper.focus();
+        if (refreshActiveHelper) {
+          helper.blur();
+          const refreshedContainer = options.getContainer();
+          const focusAfterBlur = helper.ownerDocument.activeElement;
+          if (
+            !refreshedContainer ||
+            !helper.isConnected ||
+            !refreshedContainer.contains(helper) ||
+            !isUnownedActiveElement(focusAfterBlur, helper.ownerDocument)
+          ) {
+            lastFocusedOutHelper = null;
+            trace("focus-ownership-reclaim-declined", {
+              reason: "focus-won-during-refresh",
+              activeElement: describeElement(focusAfterBlur),
+            });
+            return;
+          }
+        }
+        helper.focus({ preventScroll: true });
+        lastFocusedOutHelper = null;
         trace("focus-ownership-reclaimed", {
           helper: describeElement(helper),
           activeElement: describeElement(helper.ownerDocument.activeElement),
+          refreshedActiveHelper: refreshActiveHelper,
         });
       });
       return true;
@@ -256,6 +283,13 @@ export function createTerminalFocusOwnership(
       lastFocusedOutHelper = null;
       if (!ownedHelper) return;
       clear("pointer-handoff");
+    },
+
+    releaseForHelperInput(target) {
+      if (disposed || !ownedHelper || target !== ownedHelper) return;
+      // Input reaching the live helper proves it already owns a usable native
+      // context. A queued refresh must not blur a composition/key that beat rAF.
+      clear("helper-input-before-reclaim");
     },
 
     notifyHelperBound(helper) {
