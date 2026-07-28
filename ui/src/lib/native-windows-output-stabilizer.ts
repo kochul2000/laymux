@@ -63,6 +63,20 @@ export class NativeWindowsOutputStabilizer {
     return this.transaction?.deadline;
   }
 
+  /** Bytes that have not been handed to xterm yet. */
+  get hasHeldBytes(): boolean {
+    return (
+      this.transaction !== undefined ||
+      this.lexical.kind === "escape" ||
+      this.lexical.kind === "csi"
+    );
+  }
+
+  /** A stream construct that must finish before xterm buffer reflow is safe. */
+  get hasOpenSequence(): boolean {
+    return this.transaction !== undefined || this.lexical.kind !== "normal";
+  }
+
   reset(): void {
     this.lexical = { kind: "normal" };
     this.transaction = undefined;

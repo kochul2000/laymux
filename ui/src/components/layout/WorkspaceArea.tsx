@@ -4,6 +4,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import type { TerminalLocation } from "@/stores/settings-store";
+import { focusWorkspacePane } from "@/lib/workspace-transition";
 import { PaneGrid } from "./PaneGrid";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 
@@ -15,7 +16,6 @@ export function WorkspaceArea() {
   // pane removes it from this set and re-mounts a fresh terminal.
   const evictedPaneIds = useUiStore((s) => s.evictedPaneIds);
   const focusedPaneIndex = useGridStore((s) => s.focusedPaneIndex);
-  const setFocusedPane = useGridStore((s) => s.setFocusedPane);
   const automationHoverIndex = useGridStore((s) => s.automationHoverIndex);
   const focusedDock = useDockStore((s) => s.focusedDock);
   const setPaneView = useWorkspaceStore((s) => s.setPaneView);
@@ -61,8 +61,7 @@ export function WorkspaceArea() {
             onPaneFocus={(paneId) => {
               // 포커스 변경만 기록한다. 알림 해제는 focusedPaneIndex 변화를 감지하는
               // AppLayout 의 자동 해제 effect 가 입력 종류와 무관하게 처리한다 (ADR 0010).
-              setFocusedPane(idxOf(paneId));
-              useDockStore.getState().setFocusedDock(null);
+              focusWorkspacePane(ws.id, idxOf(paneId));
             }}
             onSetPaneView={
               isActive ? (paneId, config) => setPaneView(idxOf(paneId), config) : undefined

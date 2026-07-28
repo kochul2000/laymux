@@ -10,7 +10,7 @@ describe("DeferredParsedCallbackQueue", () => {
 
     const complete = queue.drain();
     expect(parsed).not.toHaveBeenCalled();
-    complete?.();
+    complete?.onParsed();
 
     expect(parsed).toHaveBeenCalledOnce();
     expect(discarded).not.toHaveBeenCalled();
@@ -27,5 +27,25 @@ describe("DeferredParsedCallbackQueue", () => {
     expect(parsed).not.toHaveBeenCalled();
     expect(discarded).toHaveBeenCalledOnce();
     expect(queue.drain()).toBeUndefined();
+  });
+
+  it("preserves every discard callback after drain without reporting parsed", () => {
+    const queue = new DeferredParsedCallbackQueue();
+    const firstParsed = vi.fn();
+    const secondParsed = vi.fn();
+    const firstDiscarded = vi.fn();
+    const secondDiscarded = vi.fn();
+    queue.push(firstParsed, firstDiscarded);
+    queue.push(secondParsed, secondDiscarded);
+
+    const drained = queue.drain();
+    drained?.onDiscard();
+    drained?.onDiscard();
+    drained?.onParsed();
+
+    expect(firstParsed).not.toHaveBeenCalled();
+    expect(secondParsed).not.toHaveBeenCalled();
+    expect(firstDiscarded).toHaveBeenCalledOnce();
+    expect(secondDiscarded).toHaveBeenCalledOnce();
   });
 });

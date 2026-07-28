@@ -17,6 +17,7 @@ import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { CODEX_INPUT_PENDING_MARKER, CLAUDE_INPUT_PENDING_MARKER } from "@/lib/activity-detection";
 import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 import { terminalOutputRecoveryCounters } from "@/lib/terminal-output-recovery-metrics";
+import { terminalOutputPipelineCounters } from "@/lib/terminal-output-pipeline-metrics";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
 import {
   registerAtlasRebuilder,
@@ -402,6 +403,7 @@ const mockRegisterTerminalInspector = vi.fn();
 const mockUnregisterTerminalInspector = vi.fn();
 const mockRegisterTerminalScroller = vi.fn();
 const mockUnregisterTerminalScroller = vi.fn();
+const mockTerminalRenderCheckpointApply = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   registerTerminalSerializer: (...args: unknown[]) => mockRegisterTerminalSerializer(...args),
   unregisterTerminalSerializer: (...args: unknown[]) => mockUnregisterTerminalSerializer(...args),
@@ -418,7 +420,7 @@ vi.mock("@/lib/terminal-serialize-registry", () => ({
 vi.mock("@/lib/terminal-render-checkpoint", () => ({
   TerminalRenderCheckpointModel: class MockTerminalRenderCheckpointModel {
     attach = vi.fn().mockResolvedValue(undefined);
-    apply = vi.fn().mockResolvedValue(undefined);
+    apply = (...args: unknown[]) => mockTerminalRenderCheckpointApply(...args);
     capture = vi.fn().mockResolvedValue({
       generation: 1,
       seq: 0,
@@ -2114,7 +2116,10 @@ describe("TerminalView", () => {
     expect(preview.textContent).toBe("");
   });
 
-  it("hides the xterm cursor only during synchronized output frames", async () => {
+  // The class marks the DEC 2026 boundary and hides only the real helper
+  // textarea caret. The painted cursor uses the raw renderer gate, which also
+  // covers DOM focus/blur direct-render paths (issue #610, ADR-0079).
+  it("marks the frame boundary on the host only while a synchronized output frame is open", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-sync-cursor");
@@ -2868,6 +2873,104 @@ describe("TerminalView", () => {
       expect(container).not.toHaveClass("terminal-sync-output-active");
     });
     expect(mockRequestAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("gates the renderer cursor for a DEC 2026 frame without option churn", async () => {
+    render(<TerminalView instanceId="t-sync-cursor-gate" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    expect(terminal).toBeDefined();
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    const cursorBlinkBefore = terminal?.options.cursorBlink;
+    mockRefresh.mockClear();
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    expect(terminal?.options.cursorBlink).toBe(cursorBlinkBefore);
+    expect(mockRefresh).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+
+    // The parser hook runs before xterm's own reset handler. Releasing here lets
+    // that handler's already-required full flush paint the final cursor once.
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    expect(terminal?.options.cursorBlink).toBe(cursorBlinkBefore);
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it("repaints once when the xterm safety timeout releases the cursor gate", async () => {
+    render(<TerminalView instanceId="t-sync-cursor-timeout" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
+      | ((data: Uint8Array) => void)
+      | undefined;
+    expect(terminal).toBeDefined();
+    expect(onOutput).toBeTypeOf("function");
+
+    mockModes.synchronizedOutputMode = true;
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+      onOutput?.(new TextEncoder().encode("frame"));
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    mockRefresh.mockClear();
+
+    // No `?2026l` arrives. The monitor observes xterm's timeout mode release,
+    // clears the raw gate, and requests exactly one recovery paint. Depending on
+    // rAF ordering this may coalesce with xterm's own pending full render.
+    mockModes.synchronizedOutputMode = false;
+    await vi.waitFor(() => {
+      expect(terminal?._core.coreService.isCursorHidden).toBe(false);
+    });
+    expect(mockRefresh).toHaveBeenCalledTimes(1);
+    expect(mockRefresh).toHaveBeenCalledWith(0, 23);
+  });
+
+  it("does not let a base cursor transition clear the active sync-frame gate", async () => {
+    render(<TerminalView instanceId="t-sync-base-gate" profile="PowerShell" syncGroup="" />);
+
+    await waitForTerminalInputReady();
+    const terminal = createdTerminals.find((candidate) => candidate.wasOpened);
+    expect(terminal).toBeDefined();
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-sync-base-gate", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+    });
+
+    await act(async () => {
+      await csiHandlers.get("?:h")?.([2026]);
+    });
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo("t-sync-base-gate", {
+        activity: { type: "shell" },
+      });
+    });
+
+    // Base suppression is now false, but the independent frame reason remains.
+    await vi.waitFor(() => {
+      expect(screen.getByTestId("terminal-view-t-sync-base-gate")).not.toHaveClass(
+        "terminal-native-cursor-hidden",
+      );
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(true);
+
+    await act(async () => {
+      await csiHandlers.get("?:l")?.([2026]);
+    });
+    expect(terminal?._core.coreService.isCursorHidden).toBe(false);
   });
 
   it("falls back to native xterm cursor when interactive cursor stability is disabled", async () => {
@@ -4191,6 +4294,115 @@ describe("TerminalView", () => {
       expect(written).toHaveLength(raw.length - "\x1b[?25h".length);
       expect(written.endsWith("\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h")).toBe(true);
       await vi.waitFor(() => expect(mockRefresh).toHaveBeenCalledTimes(2));
+    });
+
+    it("preserves the native stabilizer deadline while visible xterm is backpressured", async () => {
+      const terminalId = "t-native-stabilizer-backlog-deadline";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+
+      let finishBusyWrite: (() => void) | undefined;
+      mockWrite.mockClear();
+      mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+        finishBusyWrite = callback;
+      });
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const frameStart = "\x1b[?2026hbody\x1b[?25h";
+      const afterDeadline = "late\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+
+      vi.useFakeTimers();
+      try {
+        act(() => onOutput?.(new TextEncoder().encode("busy")));
+        act(() => onOutput?.(new TextEncoder().encode(frameStart)));
+        // The logical frame expires while xterm is still parsing the preceding
+        // write. Queueing above the stabilizer used to postpone the start marker,
+        // making this timeout disappear and deleting the in-frame `?25h` byte.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(51);
+        });
+        act(() => onOutput?.(new TextEncoder().encode(afterDeadline)));
+        act(() => finishBusyWrite?.());
+        await act(async () => {
+          await vi.runAllTimersAsync();
+        });
+
+        const stream = mockWrite.mock.calls
+          .map(([data]) =>
+            typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array),
+          )
+          .join("");
+        expect(stream).toBe(`busy${frameStart}${afterDeadline}`);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("holds a split native CSI through completion before a deferred fit", async () => {
+      const terminalId = "t-native-stabilizer-split-fit";
+      const paneId = "pane-native-stabilizer-split-fit";
+      const userAgent = vi
+        .spyOn(window.navigator, "userAgent", "get")
+        .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("nativeWindows"),
+        id: terminalId,
+      });
+      render(
+        <TerminalView instanceId={terminalId} paneId={paneId} profile="PowerShell" syncGroup="" />,
+      );
+      await waitForTerminalInputReady();
+      const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array) => void)
+        | undefined;
+      const order: string[] = [];
+      mockWrite.mockClear();
+      mockFit.mockClear();
+      mockWrite.mockImplementation((data, callback?: () => void) => {
+        order.push(
+          `write:${typeof data === "string" ? data : new TextDecoder().decode(data as Uint8Array)}`,
+        );
+        callback?.();
+      });
+      mockFit.mockImplementation(() => order.push("fit"));
+
+      vi.useFakeTimers();
+      try {
+        act(() => {
+          onOutput?.(new TextEncoder().encode("\x1b[1;"));
+          useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+        });
+        await act(async () => vi.advanceTimersByTimeAsync(0));
+        expect(order).toEqual([]);
+
+        // Correctness wins over a finite resize deadline: an incomplete CSI has
+        // not executed on either grid yet, so even the 500ms quiet-window cap
+        // cannot let fit cross it.
+        await act(async () => vi.advanceTimersByTimeAsync(50));
+        expect(order).toEqual([]);
+        await act(async () => vi.advanceTimersByTimeAsync(70));
+        expect(order).toEqual([]);
+        await act(async () => vi.advanceTimersByTimeAsync(380));
+        expect(order).toEqual([]);
+        expect(mockFit).not.toHaveBeenCalled();
+
+        act(() => onOutput?.(new TextEncoder().encode("70HX")));
+        expect(order).toEqual(["write:\x1b[1;70HX"]);
+        await act(async () => vi.advanceTimersByTimeAsync(120));
+        expect(order).toEqual(["write:\x1b[1;70HX", "fit"]);
+      } finally {
+        vi.useRealTimers();
+        userAgent.mockRestore();
+        mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+          callback?.();
+        });
+        mockFit.mockImplementation(() => {});
+      }
     });
 
     it("keeps an async IME commit human while a live parser write is pending", async () => {
@@ -7282,14 +7494,15 @@ describe("TerminalView", () => {
       expect(mockFit).not.toHaveBeenCalled();
 
       act(() => {
-        // A new ConPTY chunk can arrive after the queue briefly drained. Its
+        // A new ConPTY chunk can arrive while the first parse is pending. Its
         // cursor-addressing sequences still target the old width, so the fit
-        // must also wait for a short output-quiet window.
+        // must wait for both the batched write and a short output-quiet window.
         onOutput?.(new TextEncoder().encode("latest streaming output"));
         finishWrites[0]?.();
       });
       expect(mockFit).not.toHaveBeenCalled();
 
+      await vi.waitFor(() => expect(finishWrites).toHaveLength(2));
       act(() => {
         finishWrites[1]?.();
       });
@@ -7723,13 +7936,12 @@ describe("TerminalView", () => {
 
     try {
       render(<TerminalView instanceId="t-write-throw" profile="PowerShell" syncGroup="" />);
-      await vi.waitFor(() => {
-        expect(mockCreateTerminalSession).toHaveBeenCalled();
-        expect(mockOnTerminalOutput).toHaveBeenCalled();
-      });
+      await waitForTerminalInputReady();
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
         | ((data: Uint8Array) => void)
         | undefined;
+      const countersBefore = terminalOutputPipelineCounters("t-write-throw");
+      mockWrite.mockClear();
       mockWrite.mockImplementationOnce(() => {
         throw new Error("write data discarded");
       });
@@ -7748,6 +7960,12 @@ describe("TerminalView", () => {
           "overloaded output",
         );
       });
+      const countersAfter = terminalOutputPipelineCounters("t-write-throw");
+      expect(countersAfter.xtermWrites - countersBefore.xtermWrites).toBe(1);
+      expect(countersAfter.xtermWriteBytes - countersBefore.xtermWriteBytes).toBe(
+        "overloaded output".length,
+      );
+      expect(countersAfter.writeBackpressure - countersBefore.writeBackpressure).toBe(1);
 
       const obs = observers[0];
       const target = obs.target as Element;
@@ -9548,6 +9766,376 @@ describe("TerminalView desktop input composer", () => {
       typeof call[0] === "string" ? call[0] : new TextDecoder().decode(call[0] as Uint8Array),
     );
 
+  /**
+   * Everything xterm was asked to parse, concatenated in write order.
+   *
+   * Recovery assertions are about the **exact byte stream**, not about how many
+   * `write()` calls it took. The renderer FIFO may batch compatible live writes
+   * (issue #606, ADR-0080), so entry-level assertions would pin an implementation
+   * detail while allowing duplication or omission to slip through.
+   */
+  const writtenStream = () => decodedWrites().join("");
+
+  it("merges output deltas that arrive while xterm is still parsing (issue #606)", async () => {
+    const terminalId = "t-output-backlog-coalesce";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+
+    // Park the next write so the surface is provably behind while more deltas
+    // land — the flood condition, without needing a flood.
+    const finishWrites: Array<() => void> = [];
+    mockWrite.mockClear();
+    mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
+      if (callback) finishWrites.push(callback);
+    });
+
+    act(() => emitOutput(outputDelta(0, "one")));
+    // The first delta went straight through: an idle surface must not be delayed.
+    expect(decodedWrites()).toEqual(["one"]);
+
+    act(() => {
+      emitOutput(outputDelta(3, "two"));
+      emitOutput(outputDelta(6, "three"));
+      emitOutput(outputDelta(11, "four"));
+    });
+    // Held, not written: nothing may reach xterm while it still owes a callback.
+    expect(decodedWrites()).toEqual(["one"]);
+
+    act(() => finishWrites[0]?.());
+
+    // Three logical writes, one physical xterm write. Stabilizer and detector
+    // boundaries stay untouched; only the renderer-facing FIFO may batch.
+    await vi.waitFor(() => {
+      expect(decodedWrites()).toEqual(["one", "twothreefour"]);
+    });
+    expect(writtenStream()).toBe("onetwothreefour");
+    expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
+      gap: 0,
+      repair: 0,
+      malformedDelta: 0,
+    });
+  });
+
+  it("discards queued old-epoch writes and drains the in-flight parse before reattach", async () => {
+    const terminalId = "t-output-reattach-write-cutover";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    let finishInFlight: (() => void) | undefined;
+    mockWrite.mockClear();
+    mockReset.mockClear();
+    mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+      finishInFlight = callback;
+    });
+
+    const inFlight = "old-in-flight";
+    const queued = "old-queued";
+    act(() => {
+      emitOutput(outputDelta(0, inFlight));
+      emitOutput(outputDelta(inFlight.length, queued));
+    });
+    expect(decodedWrites()).toEqual([inFlight]);
+
+    // Malformed sequence metadata forces the screen-losing reattach path while
+    // one old write is parsing and another is queued behind it.
+    act(() => {
+      emitOutput({
+        ...outputDelta(inFlight.length + queued.length, "X"),
+        seqEnd: inFlight.length + queued.length + 2,
+      });
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+
+    expect(mockReset).not.toHaveBeenCalled();
+    expect(writtenStream()).toBe(inFlight);
+
+    act(() => finishInFlight?.());
+    await vi.waitFor(() => expect(mockReset).toHaveBeenCalled());
+    expect(writtenStream()).not.toContain(queued);
+  });
+
+  it("does not enqueue an invalidated attach segment after its checkpoint await", async () => {
+    const terminalId = "t-output-reattach-checkpoint-cutover";
+    const stale = "stale-after-checkpoint";
+    const attachment = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+
+    let resolveInitialAttach!: (value: typeof attachment) => void;
+    const initialAttach = new Promise<typeof attachment>((resolve) => {
+      resolveInitialAttach = resolve;
+    });
+    mockAttachTerminalOutput.mockReturnValueOnce(initialAttach).mockResolvedValueOnce(attachment);
+
+    let releaseCheckpoint!: () => void;
+    const checkpointHeld = new Promise<void>((resolve) => {
+      releaseCheckpoint = resolve;
+    });
+    mockTerminalRenderCheckpointApply.mockImplementationOnce(() => checkpointHeld);
+
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(1);
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function));
+    });
+    const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    act(() => emitOutput?.(outputDelta(0, stale)));
+    await act(async () => {
+      resolveInitialAttach(attachment);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(mockTerminalRenderCheckpointApply).toHaveBeenCalledTimes(1));
+
+    // The old attach is parked after its checkpoint accepted the segment but
+    // before the visible xterm enqueue. Invalidate that epoch at precisely this
+    // await boundary; the replacement attach is allowed to complete normally.
+    const resetsBeforeReattach = mockReset.mock.calls.length;
+    mockWrite.mockClear();
+    act(() => {
+      emitOutput?.({
+        ...outputDelta(stale.length, "X"),
+        seqEnd: stale.length + 2,
+      });
+    });
+    await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      releaseCheckpoint();
+      await checkpointHeld;
+    });
+    await vi.waitFor(() => {
+      expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBeforeReattach);
+    });
+    expect(writtenStream()).not.toContain(stale);
+  });
+
+  it("settles a discarded queued replay so the replacement attach can reset", async () => {
+    const terminalId = "t-output-reattach-queued-replay";
+    const replay = new TextEncoder().encode("queued-replay-snapshot");
+    const replayAttachment = {
+      state: {
+        version: 1,
+        generation: 1,
+        snapshotStartSeq: 0,
+        snapshotSeq: replay.length,
+        sourceStartSeq: 0,
+        sourceSeq: replay.length,
+        snapshotKind: "raw",
+        protocolRevision: 0,
+        modes: { bracketedPaste: false },
+        geometry,
+      },
+      snapshot: Array.from(replay),
+    };
+    const replacementAttachment = {
+      ...replayAttachment,
+      state: {
+        ...replayAttachment.state,
+        snapshotSeq: 0,
+        sourceSeq: 0,
+      },
+      snapshot: [],
+    };
+    mockAttachTerminalOutput
+      .mockResolvedValueOnce(replayAttachment)
+      .mockResolvedValueOnce(replacementAttachment);
+    mockWrite.mockImplementation(() => {
+      throw new Error("write data discarded");
+    });
+
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(decodedWrites()).toContain("queued-replay-snapshot");
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function));
+    });
+    const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+    const resetsBeforeReattach = mockReset.mock.calls.length;
+
+    // The replay batch was restored at the queue head after xterm rejected it.
+    // A malformed live payload clears that queue and starts a replacement attach.
+    // Its discard path must settle the old replay Promise, or the serialized
+    // replacement chain can never reach terminal.reset().
+    act(() => {
+      emitOutput?.({ seqStart: 0, seqEnd: 2, data: [0x58] });
+    });
+    mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+      callback?.();
+    });
+    await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBeforeReattach);
+    });
+  });
+
+  it("keeps physical write boundaries while an IME composition is active", async () => {
+    const terminalId = "t-output-backlog-ime-boundary";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />);
+    const terminal = createdTerminals.at(-1)!;
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(helper);
+    await waitForTerminalInputReady();
+    const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
+    const emitOutput = registered?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    let finishFirstWrite: (() => void) | undefined;
+    mockWrite.mockClear();
+    mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+      finishFirstWrite = callback;
+    });
+    act(() => emitOutput?.(outputDelta(0, "one")));
+    act(() => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+      helper.value = "ㄱ";
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+      helper.dispatchEvent(new Event("input", { bubbles: true }));
+      emitOutput?.(outputDelta(3, "two"));
+      emitOutput?.(outputDelta(6, "three"));
+    });
+
+    act(() => finishFirstWrite?.());
+    await vi.waitFor(() => expect(decodedWrites()).toEqual(["one", "two", "three"]));
+  });
+
+  it("drains old-grid writes before a deferred fit", async () => {
+    const terminalId = "t-output-backlog-fit-order";
+    const paneId = "pane-output-backlog-fit-order";
+    render(
+      <TerminalView instanceId={terminalId} paneId={paneId} profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+    const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
+    const emitOutput = registered?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+    const order: string[] = [];
+    let finishFirstWrite: (() => void) | undefined;
+    let firstWrite = true;
+    mockWrite.mockClear();
+    mockFit.mockClear();
+    mockRequestAnimationFrame.mockClear();
+    mockWrite.mockImplementation((data, callback?: () => void) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      order.push(`write:${text}`);
+      if (firstWrite) {
+        firstWrite = false;
+        finishFirstWrite = callback;
+      } else {
+        callback?.();
+      }
+    });
+    mockFit.mockImplementation(() => {
+      order.push("fit");
+    });
+
+    try {
+      act(() => {
+        emitOutput?.(outputDelta(0, "one"));
+        emitOutput?.(outputDelta(3, "two"));
+        useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+      });
+      await vi.waitFor(() => expect(mockRequestAnimationFrame).toHaveBeenCalled());
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => finishFirstWrite?.());
+      await vi.waitFor(() => expect(order).toEqual(["write:one", "write:two", "fit"]));
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      mockFit.mockImplementation(() => {});
+    }
+  });
+
+  it("releases a deferred fit after an unexpected synchronous xterm write failure", async () => {
+    const terminalId = "t-output-backlog-write-failure-fit";
+    const paneId = "pane-output-backlog-write-failure-fit";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <TerminalView instanceId={terminalId} paneId={paneId} profile="PowerShell" syncGroup="" />,
+    );
+    await waitForTerminalInputReady();
+    const registered = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId);
+    const emitOutput = registered?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    let finishFirstWrite: (() => void) | undefined;
+    let writeAttempt = 0;
+    mockWrite.mockClear();
+    mockFit.mockClear();
+    mockRequestAnimationFrame.mockClear();
+    mockWrite.mockImplementation((_, callback?: () => void) => {
+      writeAttempt += 1;
+      if (writeAttempt === 1) {
+        finishFirstWrite = callback;
+        return;
+      }
+      throw new Error("unexpected renderer failure");
+    });
+
+    try {
+      act(() => {
+        emitOutput?.(outputDelta(0, "one"));
+        emitOutput?.(outputDelta(3, "two"));
+        useOverridesStore.getState().setViewOverride(paneId, { fontSize: 20 });
+      });
+      await vi.waitFor(() => expect(mockRequestAnimationFrame).toHaveBeenCalled());
+      expect(mockFit).not.toHaveBeenCalled();
+
+      act(() => finishFirstWrite?.());
+      await vi.waitFor(() => expect(mockWrite).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(mockFit).toHaveBeenCalledTimes(1));
+      expect(warn).toHaveBeenCalledWith(
+        "[TerminalView] xterm write failed:",
+        expect.objectContaining({ message: "unexpected renderer failure" }),
+      );
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      mockFit.mockImplementation(() => {});
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps ordered detector transitions while batching the visible writes", async () => {
+    const terminalId = "t-output-backlog-detector-order";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const finishWrites: Array<() => void> = [];
+    mockWrite.mockClear();
+    mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
+      if (callback) finishWrites.push(callback);
+    });
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "running" },
+      });
+      emitOutput(outputDelta(0, "busy"));
+      emitOutput(outputDelta(4, "\x1b[?1049h"));
+      emitOutput(outputDelta(12, "\x1b[?1049l"));
+    });
+
+    // The raw detector must see enter then leave immediately, even though both
+    // byte writes are waiting behind the first xterm parse. Merging them before
+    // detection makes `enterAlt && leaveAlt` true and silently ignores both.
+    expect(
+      useTerminalStore.getState().instances.find(({ id }) => id === terminalId)?.activity,
+    ).toEqual({ type: "shell" });
+
+    act(() => finishWrites[0]?.());
+    await vi.waitFor(() => expect(writtenStream()).toBe("busy\x1b[?1049h\x1b[?1049l"));
+  });
+
   it("repairs an output delta gap from the ring without resetting the screen", async () => {
     const terminalId = "t-output-gap-repair";
     const emitOutput = await attachedOutputEmitter(terminalId);
@@ -9564,11 +10152,7 @@ describe("TerminalView desktop input composer", () => {
     act(() => emitOutput(outputDelta(8, "CC")));
 
     expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 5);
-    await vi.waitFor(() => {
-      const written = decodedWrites();
-      expect(written).toContain("BBB");
-      expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("BBB"));
-    });
+    await vi.waitFor(() => expect(writtenStream()).toBe("BBBCC"));
     expect(mockReset).not.toHaveBeenCalled();
     expect(mockAttachTerminalOutput.mock.calls.length).toBe(attachCallsBeforeGap);
     expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
@@ -9581,7 +10165,7 @@ describe("TerminalView desktop input composer", () => {
     mockResumeTerminalOutput.mockClear();
     act(() => emitOutput(outputDelta(10, "DD")));
     expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
-    await vi.waitFor(() => expect(decodedWrites()).toContain("DD"));
+    await vi.waitFor(() => expect(writtenStream()).toBe("BBBCCDD"));
   });
 
   // ADR-0072 hangs its "revisit the ring size / checkpoint reuse" condition on
@@ -9659,15 +10243,10 @@ describe("TerminalView desktop input composer", () => {
 
     act(() => emitOutput(outputDelta(12, "CC")));
 
-    await vi.waitFor(() => {
-      const written = decodedWrites();
-      // The bytes round 1 *did* bridge must reach xterm: the coordinator has
-      // already moved `expectedSeq` past them, so dropping them would silently
-      // punch the hole this path exists to close.
-      expect(written).toContain("BBB");
-      expect(written).toContain("DDDD");
-      expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("DDDD"));
-    });
+    // Both repair rounds must reach xterm exactly once and before the buffered
+    // delta. The coordinator has already moved `expectedSeq` past those bytes,
+    // so omission or duplication would silently corrupt the visible stream.
+    await vi.waitFor(() => expect(writtenStream()).toBe("BBBDDDDCC"));
     expect(mockResumeTerminalOutput.mock.calls).toEqual([
       [terminalId, 1, 5],
       [terminalId, 1, 8],
@@ -9816,7 +10395,7 @@ describe("TerminalView desktop input composer", () => {
     });
 
     await vi.waitFor(() => {
-      const written = decodedWrites();
+      const written = writtenStream();
       expect(written).toContain("AAAAAAAA");
       expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("AAAAAAAA"));
     });

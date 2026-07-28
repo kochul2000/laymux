@@ -363,6 +363,26 @@ describe("Dock", () => {
   });
 
   it("clicking a split pane sets focusedDockPaneId to that pane", () => {
+    useDockStore.setState((state) => ({
+      docks: state.docks.map((dock) =>
+        dock.position === "left"
+          ? {
+              ...dock,
+              panes: [
+                {
+                  id: "dp-1",
+                  view: { type: "WorkspaceSelectorView" },
+                  x: 0,
+                  y: 0,
+                  w: 1,
+                  h: 0.5,
+                },
+                { id: "dp-2", view: { type: "SettingsView" }, x: 0, y: 0.5, w: 1, h: 0.5 },
+              ],
+            }
+          : dock,
+      ),
+    }));
     useDockStore.getState().setFocusedDock("left", "dp-1");
     render(
       <Dock
@@ -382,6 +402,26 @@ describe("Dock", () => {
   });
 
   it("clicking a split pane clears workspace pane focus", () => {
+    useDockStore.setState((state) => ({
+      docks: state.docks.map((dock) =>
+        dock.position === "left"
+          ? {
+              ...dock,
+              panes: [
+                {
+                  id: "dp-1",
+                  view: { type: "WorkspaceSelectorView" },
+                  x: 0,
+                  y: 0,
+                  w: 1,
+                  h: 0.5,
+                },
+                { id: "dp-2", view: { type: "SettingsView" }, x: 0, y: 0.5, w: 1, h: 0.5 },
+              ],
+            }
+          : dock,
+      ),
+    }));
     useGridStore.getState().setFocusedPane(0);
     render(
       <Dock

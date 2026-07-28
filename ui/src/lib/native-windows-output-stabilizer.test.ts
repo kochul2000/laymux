@@ -104,6 +104,20 @@ describe("NativeWindowsOutputStabilizer", () => {
     expect(timedOut[0]).toMatchObject({ stabilized: false, parkDeadline: 199 });
   });
 
+  it("keeps a standalone split CSI pending until its final byte", () => {
+    const stabilizer = new NativeWindowsOutputStabilizer();
+
+    expect(text(stabilizer.push(bytes("\x1b[31"), 100))).toBe("");
+    expect(stabilizer.hasHeldBytes).toBe(true);
+    expect(stabilizer.hasOpenSequence).toBe(true);
+    expect(stabilizer.deadline).toBeUndefined();
+    expect(text(stabilizer.flushExpired(10_000))).toBe("");
+
+    expect(text(stabilizer.push(bytes("mbody"), 10_001))).toBe("\x1b[31mbody");
+    expect(stabilizer.hasHeldBytes).toBe(false);
+    expect(stabilizer.hasOpenSequence).toBe(false);
+  });
+
   it("streams an unterminated OSC after timeout until its real terminator", () => {
     const stabilizer = new NativeWindowsOutputStabilizer();
     const prefix = "\x1b[?2026hbody\x1b]0;unterminated \x1b[?2026l";

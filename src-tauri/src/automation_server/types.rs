@@ -11,6 +11,13 @@ pub struct AutomationRequest {
     pub target: String,
     pub method: String,
     pub params: serde_json::Value,
+    /// Wall-clock ms when the request was emitted. The frontend subtracts it from
+    /// `Date.now()` to measure how deep the event delivery queue actually is.
+    pub emitted_at_ms: u64,
+    /// Wall-clock ms after which `bridge_request` has stopped waiting. A query
+    /// past this point is dropped by the frontend instead of being computed for a
+    /// caller that already received `504 Frontend response timeout` (issue #606).
+    pub deadline_ms: u64,
 }
 
 /// Response from frontend via Tauri invoke.
@@ -156,6 +163,7 @@ pub struct HealthResponse {
 pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/v1/docs"),
     ("GET", "/api/v1/health"),
+    ("GET", "/api/v1/diagnostics/frontend"),
     ("GET", "/api/v1/workspaces"),
     ("POST", "/api/v1/workspaces"),
     ("GET", "/api/v1/workspaces/active"),
@@ -227,10 +235,16 @@ mod tests {
             target: "workspaces".into(),
             method: "list".into(),
             params: serde_json::json!({}),
+            emitted_at_ms: 1_000,
+            deadline_ms: 6_000,
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("requestId"));
         assert!(json.contains("workspaces"));
+        // The frontend drops an expired query off these two fields (issue #606),
+        // so they have to be on the wire in camelCase like everything else.
+        assert!(json.contains("emittedAtMs"));
+        assert!(json.contains("deadlineMs"));
     }
 
     #[test]
@@ -241,12 +255,16 @@ mod tests {
             target: "grid".into(),
             method: "setEditMode".into(),
             params: serde_json::json!({ "enabled": true }),
+            emitted_at_ms: 42,
+            deadline_ms: 5_042,
         };
         let json = serde_json::to_string(&req).unwrap();
         let deserialized: AutomationRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.request_id, "test-id");
         assert_eq!(deserialized.target, "grid");
         assert_eq!(deserialized.params["enabled"], true);
+        assert_eq!(deserialized.emitted_at_ms, 42);
+        assert_eq!(deserialized.deadline_ms, 5_042);
     }
 
     #[test]

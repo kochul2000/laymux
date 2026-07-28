@@ -151,6 +151,7 @@ pub fn build_router(
     let automation_routes = Router::new()
         .route("/api/v1/docs", get(api_docs))
         .route("/api/v1/health", get(health))
+        .route("/api/v1/diagnostics/frontend", get(diagnostics_frontend))
         .route("/api/v1/workspaces", get(workspaces_list))
         .route("/api/v1/workspaces", post(workspaces_create))
         .route("/api/v1/workspaces/active", get(workspaces_get_active))

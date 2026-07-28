@@ -296,6 +296,42 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     [oneshot channel → HTTP response]
 ```
 
+**브리지 마감은 요청에 실려 간다.** `bridge_request`는 event emit 직전에 monotonic absolute deadline과 wall-clock `deadlineMs`를 같은 5초(`FRONTEND_RESPONSE_TIMEOUT`) 예산으로 잡고, emit 뒤 새 timeout을 시작하지 않고 그 absolute deadline까지만 기다린다. 초과 시 `504 Frontend response timeout`을 낸다. 같은 시각을 프론트도 알아야 하므로 `automation-request` payload에 `emittedAtMs`·`deadlineMs`를 함께 싣는다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
+
+- 마감을 넘긴 **query** 는 계산하지 않고 `Frontend request expired` 로 즉시 거절한다 — 답이 닿을 상대가 없으므로 계산은 이미 밀린 메인 스레드의 시간만 빼앗고, 클라이언트 재시도가 같은 큐 뒤에 죽은 일감을 더 쌓는다.
+- 마감을 넘긴 **action** 은 그대로 실행한다 — 부수효과는 여전히 호출자가 요청한 것이며, 조용히 버리면 "느린 resize" 가 "일어나지 않은 resize" 가 된다.
+- 두 경우 모두 HTTP 호출자는 이미 `504` 를 받은 뒤이므로 **외부 계약은 바뀌지 않는다.**
+- 프론트는 response IPC가 resolve된 뒤에만 `responsesSent`를 세고 IPC 거절은 `responsesFailed`로 센다. Rust도 map에서 sender를 찾은 것만으로 성공이라 하지 않고 oneshot send가 성공한 뒤 `responsesMatched`를 센다. receiver가 이미 없거나 send가 실패한 응답은 `responsesOrphaned`로 세고 누적 총계와 함께 경고 로그를 남긴다.
+
+**프론트가 멈췄을 때 읽는 창구**: `GET /api/v1/diagnostics/frontend`. 이 라우트만은 브리지를 거치지 않고 Rust 상태에서 바로 서빙하므로, 다른 모든 프론트 경유 endpoint가 `Frontend response timeout`을 내는 동안에도 답한다. App-level bridge hook이 항상 켜진 250 ms self-rescheduling probe를 소유하고, 1초마다 또는 500 ms 이상 늦은 tick 직후 자기 vitals를 `report_frontend_health`로 밀어 넣는다. 첫 report 전에는 `frontend`와 report 시각/나이가 `null`이다. Rust health mutex 오류는 “아직 report 없음”으로 위장하지 않고 JSON HTTP 500으로 반환한다. 정상 응답은 이렇게 읽는다.
+
+```jsonc
+{
+  "nowMs": 1780000000000,
+  "lastReportAgeMs": 37421,   // null = 프론트가 아직 한 번도 보고하지 않음
+  "lastReportAtMs": 1779999962579,
+  "bridge": {                 // Rust 쪽 카운터
+    "requestsEmitted": 128, "responsesMatched": 91,
+    "responsesOrphaned": 12, "requestTimeouts": 37, "requestDisconnects": 0
+  },
+  "frontend": {               // 프론트가 마지막에 보고한 내용(null 가능)
+    "sentAtMs": 1779999962500,
+    "probeLagMs": 0, "probeLagMaxMs": 41230, "stalls": 3,
+    "bridge": { "requestsReceived": 128, "responsesSent": 91,
+                "responsesFailed": 1,
+                "queriesDroppedExpired": 25, "actionsRunAfterDeadline": 2,
+                "maxDeliveryLagMs": 40980 },
+    "pipeline": { "terminal-pane-xxxx": {
+      "deltaEvents": 12000, "segmentsIn": 12000,
+      "writeRequests": 11980, "xtermWrites": 340,
+      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18, "…": 0
+    } }
+  }
+}
+```
+
+판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `frontend.pipeline`의 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
+
 ### 12.2 포트 규칙
 
 **고정 포트**: release = `19280`, dev = `19281`. 각 빌드 타입은 하나의 인스턴스만 실행 가능하며, 포트 충돌 시 시작 실패한다.
@@ -316,12 +352,13 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 53개 = REST 52 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 55개 = REST 54 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 |
+| GET | `/api/v1/diagnostics/frontend` | 프론트엔드 vitals (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
 | GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
 | POST | `/api/v1/workspaces/active` | 워크스페이스 전환 |
@@ -742,7 +779,7 @@ Remote page는 같은 HTML 문서 생명주기에서 사용자가 마지막으�
 
 Remote page는 이 hint의 workspace별 변형도 유지한다(issue #508). 각 workspace에서 사용자가 마지막으로 attach한 workspace terminal의 `terminalId`를 workspace ID별로 기억하고, 접힌 workspace로 진입할 때(`/remote/v1/workspaces/active` 뒤 navigation 재조회) 그 workspace의 hint를 preferred terminal로 먼저 검토해 첫 pane 대신 마지막으로 머문 pane을 복원한다. host는 여전히 workspace별이 아닌 단일 focused pane만 노출하므로(§13.3 `focusedPaneNumber`) 이 workspace별 복원은 Remote surface에서만 이뤄진다. 복원 판정은 단일 hint와 동일하게 최신 navigation snapshot에서 해당 pane이 now-active workspace의 live terminal일 때만 적용하고, hint가 없거나(최초 진입) 무효하면 기존 focused pane → 첫 live pane fallback을 그대로 쓴다. dock terminal(`workspaceId` 없음)은 이 map에 기록하지 않으며, 단일 hint와 마찬가지로 surface-local이고 `localStorage`/`sessionStorage`에 저장하지 않는다.
 
-Workspace 전환의 착지 계약(issue #578). `focusedPaneIndex`는 활성 workspace를 기준으로 해석되는 단일 전역 grid 인덱스이므로 전환 시 그대로 물려받으면 대상 workspace의 엉뚱한 pane을 가리키거나(작은 workspace로 이동하면) 마지막 pane을 넘어간다. frontend bridge action `workspaces.switchActive`는 그래서 desktop 키보드 전환과 같은 규칙(`ui/src/lib/workspace-switch.ts`의 순수 함수 `resolveWorkspaceLandingPane`)으로 착지 pane을 다시 계산한다 — dock focus 중이거나 focus가 없으면 첫 pane, 범위를 넘으면 마지막 pane으로 clamp, 그 밖에는 현재 위치 유지, pane이 없는 workspace는 focus 없음. 응답에 `{switched, landingPaneIndex, landingPaneNumber, landingTerminalId}`를 담아 착지 지점을 호출자가 되읽을 수 있게 한다(`workspaces.getActive`의 `focusedPaneNumber`와 일치). 존재하지 않는 workspace id는 어떤 store도 건드리지 않고 `Workspace '<id>' not found` 에러로 답한다 — 성공 응답의 `landing*` 필드가 null인 것(pane 없는 workspace로 정상 전환)과 구분되며, `workspaces.remove`/`rename`과 같은 계약이다. 또한 workspace는 lazy mount이고 terminal 시작은 직렬화되므로([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)) 전환 직후에는 대상 workspace의 pane에 아직 세션이 없다. 그 순간 상태를 읽은 Remote client는 active workspace에 live terminal이 하나도 없다고 보고 메인 출력을 dock terminal로 폴백해버리므로, `workspaces.switchActive`는 [ADR-0039](../adr/0039-remote-spatial-notification-step-navigation.md)의 스텝 착지와 동일하게 착지 terminal의 세션 준비를 기다린 뒤 응답한다. 대기 상한은 **3.5초**(`WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS`)로 `terminals.setFocus`(20초)보다 짧다 — Rust bridge의 요청 예산 5초(`helpers.rs`의 `FRONTEND_RESPONSE_TIMEOUT`) 안에 lazy mount·React 렌더까지 들어가야 하기 때문이다. 두 숫자는 언어가 달라 서로를 상수로 미러링하고 양쪽 테스트가 여유를 단정하므로, 한쪽만 옮기면 테스트가 깨진다. 상한을 넘겨도 전환은 이미 일어났으므로 실패로 바꾸지 않고 `landingReady`로만 알린다. `landingReady`는 3-상태다: 기다릴 세션이 없었으면(착지 pane이 terminal이 아니거나 pane이 없는 workspace) `null`, 세션이 준비됐으면 `true`, 상한을 넘겼으면 `false`.
+Workspace 전환의 착지 계약(issue #578, [ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)). `focusedPaneIndex`는 활성 workspace를 기준으로 해석되는 단일 전역 grid 인덱스이므로 전환 시 그대로 물려받으면 대상 workspace의 엉뚱한 pane을 가리키거나(작은 workspace로 이동하면) 마지막 pane을 넘어간다. frontend bridge action `workspaces.switchActive`는 그래서 desktop selector·키보드 전환과 같은 상태 전환(`ui/src/lib/workspace-transition.ts`)을 호출하고, 그 안에서 순수 규칙(`ui/src/lib/workspace-switch.ts`의 `resolveWorkspaceLandingPane`)으로 착지 pane을 다시 계산한다 — dock focus 중이거나 focus가 없으면 첫 pane, 범위를 넘으면 마지막 pane으로 clamp, 그 밖에는 현재 위치 유지, pane이 없는 workspace는 focus 없음. 응답에 `{switched, landingPaneIndex, landingPaneNumber, landingTerminalId}`를 담아 착지 지점을 호출자가 되읽을 수 있게 한다(`workspaces.getActive`의 `focusedPaneNumber`와 일치). 존재하지 않는 workspace id는 어떤 store도 건드리지 않고 `Workspace '<id>' not found` 에러로 답한다 — 성공 응답의 `landing*` 필드가 null인 것(pane 없는 workspace로 정상 전환)과 구분되며, `workspaces.remove`/`rename`과 같은 계약이다. 또한 workspace는 lazy mount이고 terminal 시작은 직렬화되므로([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)) 전환 직후에는 대상 workspace의 pane에 아직 세션이 없다. 그 순간 상태를 읽은 Remote client는 active workspace에 live terminal이 하나도 없다고 보고 메인 출력을 dock terminal로 폴백해버리므로, `workspaces.switchActive`는 [ADR-0039](../adr/0039-remote-spatial-notification-step-navigation.md)의 스텝 착지와 동일하게 착지 terminal의 세션 준비를 기다린 뒤 응답한다. 대기 상한은 **3.5초**(`WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS`)로 `terminals.setFocus`(20초)보다 짧다 — Rust bridge의 요청 예산 5초(`helpers.rs`의 `FRONTEND_RESPONSE_TIMEOUT`) 안에 lazy mount·React 렌더까지 들어가야 하기 때문이다. 두 숫자는 언어가 달라 서로를 상수로 미러링하고 양쪽 테스트가 여유를 단정하므로, 한쪽만 옮기면 테스트가 깨진다. 상한을 넘겨도 전환은 이미 일어났으므로 실패로 바꾸지 않고 `landingReady`로만 알린다. `landingReady`는 3-상태다: 기다릴 세션이 없었으면(착지 pane이 terminal이 아니거나 pane이 없는 workspace) `null`, 세션이 준비됐으면 `true`, 상한을 넘겼으면 `false`.
 
 `/remote/v1/workspaces/active` body는 `{ "id": "...", "leaseId": "..." }`, `/remote/v1/terminals/{id}/focus` body는 `{ "leaseId": "..." }`다. 둘 다 `X-Laymux-Remote-Lease` 헤더도 허용하며, 성공 시 `workspace-state-changed` event를 발행해 MCP resource 구독자와 Automation resource cache가 stale 상태에 머물지 않게 한다. Remote workspace 전환은 해당 workspace의 unread notification을 읽음 처리하고, remote terminal focus는 해당 terminal의 unread notification을 읽음 처리한다. 이 처리는 focused remote UI의 명시적 navigation action에 대한 소비 동작이며, 숨김 항목 편집 자체는 desktop WorkspaceSelectorView와 기존 Automation/MCP `ui.toggle*Hidden` 호환 경로가 담당한다.
 
@@ -1080,6 +1117,7 @@ pub fn get_terminal_summaries_inner(
 - View 내부의 로컬 서브 컴포넌트(`BarBtn`, `Sep` 등)는 같은 파일 내에 정의한다. 단, 2개 이상의 파일에서 사용되면 공유 모듈로 승격한다.
 - Props에 `data-testid`를 전달할 수 있도록 `testId` prop을 지원한다.
 - 스타일 상수(높이, 반경 등)는 컴포넌트 파일 상단에 `const`로 선언하되, CSS 변수로 정의된 토큰이 있으면 그것을 사용한다.
+- **Pane 포커스 전환은 컴포넌트가 조립하지 않는다**([ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)). workspace/grid/dock의 raw state SoT는 각 Zustand store에 두되, 둘 이상의 store를 함께 바꾸는 workspace pane·dock pane 전환은 `lib/workspace-transition.ts`만 소유한다. UI 이벤트, 키보드, Automation/Remote adapter와 공유 navigation은 이 액션을 호출하고 `setActiveWorkspace`·`setFocusedDock`·`setFocusedPane` 조합을 직접 만들지 않는다.
 
 ### 15.5 키보드 단축키 설계 원칙
 
