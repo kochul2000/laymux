@@ -26,7 +26,9 @@ json_num() {
 }
 
 # 종료 뒤에는 /proc/CIM 조회가 실패하므로 실행 경로를 먼저 캡처한다.
-# Windows 에서는 PID 를 별도 인자로 전달해 PowerShell 코드에 문자열 보간하지 않는다.
+# Windows 에서는 일회성 환경변수로 PID 를 전달해 PowerShell 코드에 문자열 보간하지 않는다.
+# Windows PowerShell 5.1은 `-Command <text> <pid>`의 pid를 `$args[0]`으로 넘기지 않고
+# command text 뒤에 붙여 파싱하므로 positional argv를 쓰지 않는다.
 process_executable_path() {
   local pid=$1
   if ! [[ "$pid" =~ ^[0-9]+$ ]]; then
@@ -42,9 +44,10 @@ process_executable_path() {
     else
       return 1
     fi
-    "$powershell_command" -NoProfile -NonInteractive -Command \
-      '$processId = [int]$args[0]; (Get-CimInstance Win32_Process -Filter "ProcessId=$processId").ExecutablePath' \
-      "$pid" 2>/dev/null | tr -d '\r' | head -1
+    LAYMUX_KILL_DEV_TARGET_PID="$pid" \
+      "$powershell_command" -NoProfile -NonInteractive -Command \
+      '$processId = [int]$env:LAYMUX_KILL_DEV_TARGET_PID; (Get-CimInstance Win32_Process -Filter "ProcessId=$processId").ExecutablePath' \
+      2>/dev/null | tr -d '\r' | head -1
     return
   fi
 

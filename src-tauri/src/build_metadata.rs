@@ -17,8 +17,11 @@ pub struct BuildMetadata {
 
 pub fn discover(worktree_root: &Path) -> BuildMetadata {
     let marker = worktree_root.join(".git");
+    // A linked worktree's `.git` is a small pointer file whose content may be
+    // repointed. A normal checkout's `.git` is a directory; watching it would
+    // recursively include objects, FETCH_HEAD, index, and logs.
     let mut rerun_paths = marker
-        .exists()
+        .is_file()
         .then_some(marker.clone())
         .into_iter()
         .collect();
@@ -39,6 +42,14 @@ pub fn discover(worktree_root: &Path) -> BuildMetadata {
     let head_path = git_dir.join("HEAD");
     if head_path.is_file() {
         rerun_paths.push(head_path.clone());
+    }
+    // A commit on a packed branch creates a new loose ref without changing
+    // either HEAD or packed-refs. The per-worktree HEAD reflog changes for
+    // commits and checkouts, so it precisely invalidates that transition
+    // without making Cargo watch the entire refs directory.
+    let head_log_path = git_dir.join("logs/HEAD");
+    if head_log_path.is_file() {
+        rerun_paths.push(head_log_path);
     }
     let Some(head) = read_trimmed(&head_path) else {
         return BuildMetadata {
@@ -122,13 +133,6 @@ fn read_reference(
         }
     }
 
-    // A packed branch becomes a loose ref on its next commit. Watching the
-    // existing refs tree makes that file creation invalidate the build without
-    // registering a missing file (which would make Cargo rerun every time).
-    let refs_dir = common_dir.join("refs");
-    if refs_dir.is_dir() && !rerun_paths.contains(&refs_dir) {
-        rerun_paths.push(refs_dir);
-    }
     let packed_refs = common_dir.join("packed-refs");
     if packed_refs.is_file() && !rerun_paths.contains(&packed_refs) {
         rerun_paths.push(packed_refs.clone());
@@ -162,7 +166,9 @@ mod tests {
         let root = temp.path();
         let git_dir = root.join(".git");
         fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        fs::create_dir_all(git_dir.join("logs")).unwrap();
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(git_dir.join("logs/HEAD"), "normal worktree reflog\n").unwrap();
         fs::write(git_dir.join("refs/heads/main"), format!("{COMMIT}\n")).unwrap();
 
         let metadata = discover(root);
@@ -170,6 +176,12 @@ mod tests {
         assert_eq!(metadata.worktree_root, root);
         assert_eq!(metadata.git_commit.as_deref(), Some(COMMIT));
         assert_eq!(metadata.git_branch.as_deref(), Some("main"));
+        assert!(!metadata.rerun_paths.contains(&git_dir));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("HEAD")));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("logs/HEAD")));
+        assert!(metadata
+            .rerun_paths
+            .contains(&git_dir.join("refs/heads/main")));
         assert!(metadata.rerun_paths.iter().all(|path| path.exists()));
     }
 
@@ -180,7 +192,7 @@ mod tests {
         let common = temp.path().join("repo.git");
         let git_dir = common.join("worktrees/issue-625");
         fs::create_dir_all(common.join("refs/heads/fix")).unwrap();
-        fs::create_dir_all(&git_dir).unwrap();
+        fs::create_dir_all(git_dir.join("logs")).unwrap();
         fs::create_dir_all(&root).unwrap();
         fs::write(
             root.join(".git"),
@@ -189,13 +201,21 @@ mod tests {
         .unwrap();
         fs::write(git_dir.join("commondir"), "../..\n").unwrap();
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/fix/625\n").unwrap();
+        fs::write(git_dir.join("logs/HEAD"), "linked worktree reflog\n").unwrap();
         fs::write(common.join("refs/heads/fix/625"), format!("{COMMIT}\n")).unwrap();
 
         let metadata = discover(&root);
 
         assert_eq!(metadata.git_commit.as_deref(), Some(COMMIT));
         assert_eq!(metadata.git_branch.as_deref(), Some("fix/625"));
-        assert!(metadata.rerun_paths.iter().all(|path| path.exists()));
+        assert!(metadata.rerun_paths.contains(&root.join(".git")));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("HEAD")));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("logs/HEAD")));
+        assert!(metadata
+            .rerun_paths
+            .iter()
+            .any(|path| path.ends_with("refs/heads/fix/625")));
+        assert!(metadata.rerun_paths.iter().all(|path| path.is_file()));
     }
 
     #[test]
@@ -212,11 +232,17 @@ mod tests {
     }
 
     #[test]
-    fn reads_packed_ref_and_watches_for_its_loose_successor() {
+    fn packed_ref_watches_head_reflog_for_its_loose_successor() {
         let temp = tempfile::tempdir().unwrap();
         let git_dir = temp.path().join(".git");
         fs::create_dir_all(git_dir.join("refs")).unwrap();
+        fs::create_dir_all(git_dir.join("logs")).unwrap();
         fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git_dir.join("logs/HEAD"),
+            format!("{COMMIT} {COMMIT} Test <test@example.com> 0 +0000\tcommit\n"),
+        )
+        .unwrap();
         fs::write(
             git_dir.join("packed-refs"),
             format!("# pack-refs with: peeled fully-peeled\n{COMMIT} refs/heads/main\n"),
@@ -227,8 +253,12 @@ mod tests {
 
         assert_eq!(metadata.git_commit.as_deref(), Some(COMMIT));
         assert_eq!(metadata.git_branch.as_deref(), Some("main"));
+        assert!(!metadata.rerun_paths.contains(&git_dir));
+        assert!(!metadata.rerun_paths.contains(&git_dir.join("refs")));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("HEAD")));
+        assert!(metadata.rerun_paths.contains(&git_dir.join("logs/HEAD")));
         assert!(metadata.rerun_paths.contains(&git_dir.join("packed-refs")));
-        assert!(metadata.rerun_paths.contains(&git_dir.join("refs")));
+        assert!(metadata.rerun_paths.iter().all(|path| path.is_file()));
     }
 
     #[test]

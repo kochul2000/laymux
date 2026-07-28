@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SCRIPT="$REPO_ROOT/scripts/kill-dev.sh"
 FIXTURE=""
+SYSTEM_POWERSHELL=$(command -v powershell.exe 2>/dev/null || true)
 
 cleanup_fixture() {
   if [[ -n "$FIXTURE" && -d "$FIXTURE" ]]; then
@@ -50,12 +51,32 @@ printf '  TCP    0.0.0.0:19281    0.0.0.0:0    LISTENING    %s\n' "${KILL_DEV_TE
 EOF
   cat >"$FIXTURE/bin/powershell.exe" <<'EOF'
 #!/usr/bin/env bash
-pid=${!#}
+if [[ "$#" -ne 4 || "$1" != "-NoProfile" || "$2" != "-NonInteractive" || "$3" != "-Command" ]]; then
+  echo "mock PowerShell 5.1: arguments after the command text are parsed as command text" >&2
+  exit 64
+fi
+if [[ "$4" != *'$env:LAYMUX_KILL_DEV_TARGET_PID'* ]]; then
+  echo "mock PowerShell 5.1: command must read the one-shot PID environment variable" >&2
+  exit 65
+fi
+pid=${LAYMUX_KILL_DEV_TARGET_PID:?missing one-shot PID environment variable}
 printf 'D:\\trees\\pid-%s\\target\\debug\\laymux.exe\n' "$pid"
 EOF
   chmod +x "$FIXTURE/bin/uname" "$FIXTURE/bin/taskkill" "$FIXTURE/bin/netstat" "$FIXTURE/bin/powershell.exe"
   export KILL_DEV_TEST_TASKKILL_LOG="$FIXTURE/taskkill.log"
   export PATH="$FIXTURE/bin:$PATH"
+}
+
+test_real_powershell_51_reads_the_one_shot_pid_when_available() {
+  if [[ -z "$SYSTEM_POWERSHELL" ]]; then
+    return
+  fi
+
+  output=$(LAYMUX_KILL_DEV_TARGET_PID=4242 "$SYSTEM_POWERSHELL" \
+    -NoProfile -NonInteractive -Command \
+    '$processId = [int]$env:LAYMUX_KILL_DEV_TARGET_PID; Write-Output $processId' | tr -d '\r')
+
+  [[ "$output" == "4242" ]] || fail "real Windows PowerShell did not receive one-shot PID: $output"
 }
 
 test_discovery_pid_reports_its_executable() {
@@ -86,6 +107,7 @@ test_wrong_port_discovery_falls_back_and_reports_port_owner() {
   fi
 }
 
+test_real_powershell_51_reads_the_one_shot_pid_when_available
 test_discovery_pid_reports_its_executable
 test_wrong_port_discovery_falls_back_and_reports_port_owner
 echo "kill-dev tests passed"
