@@ -2114,7 +2114,11 @@ describe("TerminalView", () => {
     expect(preview.textContent).toBe("");
   });
 
-  it("hides the xterm cursor only during synchronized output frames", async () => {
+  // The class marks the DEC 2026 frame boundary, nothing more. It used to hide
+  // `.xterm-cursor` too; a frame is a render-stopped interval, so there is no
+  // cursor being drawn to hide (issue #610, ADR-0079 —
+  // `dec2026-render-suppression.screen.test.ts`).
+  it("marks the frame boundary on the host only while a synchronized output frame is open", async () => {
     render(<TerminalView instanceId="t-sync-cursor" profile="PowerShell" syncGroup="" />);
 
     const container = screen.getByTestId("terminal-view-t-sync-cursor");

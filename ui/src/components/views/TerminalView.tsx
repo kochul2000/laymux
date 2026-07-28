@@ -1458,7 +1458,16 @@ export function TerminalView({
     };
     nativeCursorVisibilityRef.current = applyNativeCursorVisibility;
 
-    const setSyncOutputCursorVisibility = (active: boolean) => {
+    // The DEC 2026 frame boundary, published to everything that must not treat a
+    // mid-frame position as settled. It deliberately does **not** touch the native
+    // cursor: a frame is a render-stopped interval — `RenderService` rejects every
+    // row refresh while the mode is set — so no cursor is drawn during it, and the
+    // renderer gate of `applyNativeCursorVisibility` cannot be applied inside one
+    // either (issue #610, ADR-0079, data-flow.md §8.22; pinned against the real
+    // bundle in `dec2026-render-suppression.screen.test.ts`). The class survives
+    // for the helper textarea's own caret, which is a DOM element rather than a
+    // painted cell.
+    const setSyncOutputActive = (active: boolean) => {
       syncOutputActiveRef.current = active;
       const host = wrapperRef.current;
       if (host) {
@@ -2064,7 +2073,7 @@ export function TerminalView({
         (terminal as Terminal & { modes?: { synchronizedOutputMode?: boolean } }).modes
           ?.synchronizedOutputMode,
       );
-      setSyncOutputCursorVisibility(active);
+      setSyncOutputActive(active);
       if (active && !cancelled) {
         syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       } else {
@@ -2077,12 +2086,12 @@ export function TerminalView({
           ?.synchronizedOutputMode,
       );
       if (!active) {
-        setSyncOutputCursorVisibility(false);
+        setSyncOutputActive(false);
         stopSyncOutputMonitor();
         return;
       }
       if (syncOutputMonitorFrame === undefined) {
-        setSyncOutputCursorVisibility(true);
+        setSyncOutputActive(true);
         syncOutputMonitorFrame = requestAnimationFrame(monitorSyncOutputMode);
       }
     };
@@ -2200,7 +2209,7 @@ export function TerminalView({
       { prefix: "?", final: "h" },
       (params) => {
         if (hasDecModeParam(params, 2026)) {
-          setSyncOutputCursorVisibility(true);
+          setSyncOutputActive(true);
           // Open the parser frame even before Codex activity is
           // classified. The helper snapshots coordinates only for the
           // overlay activity, but the stream boundary itself is global.
@@ -2273,7 +2282,7 @@ export function TerminalView({
           }
         }
         if (hasDecModeParam(params, 2026)) {
-          setSyncOutputCursorVisibility(false);
+          setSyncOutputActive(false);
           const overlayActivity = isOverlayCaretActivity(activityRef.current);
           const activeBuffer = terminal.buffer.active as { cursorX?: number };
           const bufferCursorAbsY = getBufferCursorAbsY(terminal);
@@ -4658,7 +4667,7 @@ export function TerminalView({
       writeParsedDisposable?.dispose();
       renderDisposable?.dispose();
       scrollDisposable?.dispose();
-      setSyncOutputCursorVisibility(false);
+      setSyncOutputActive(false);
       if (paneId) {
         unregisterTerminalSerializer(paneId);
         unregisterTerminalInspector(paneId);

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -207,6 +210,37 @@ describe("installNativeCursorSuppression", () => {
     // A disposed handle must not resurrect the gate on a live terminal.
     suppression.setSuppressed(true);
     expect(rendererSeesCursorHidden(terminal)).toBe(false);
+  });
+});
+
+describe("who is allowed to hide the native cursor in CSS", () => {
+  // `.terminal-native-cursor-hidden` is the DOM-renderer defence for the *gate*
+  // condition (ADR-0073): the class and the gate are written together, so the
+  // `onContextLoss` fallback path agrees with the WebGL path. No other condition
+  // gets a CSS cursor rule. In particular synchronized output does not (issue
+  // #610, ADR-0079): a DEC 2026 frame is a render-stopped interval, so there is
+  // no cursor being drawn to hide, and a CSS rule that only reaches the fallback
+  // renderer makes the caret behave differently depending on which renderer
+  // happens to be live. `dec2026-render-suppression.screen.test.ts` pins the
+  // render-stop itself against the real bundle.
+  const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf-8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const cursorRuleSelectors = css
+    .match(/[^{}]*\.xterm-cursor[^{}]*\{/g)
+    ?.flatMap((block) => block.replace(/\{$/, "").split(","))
+    .map((selector) => selector.trim())
+    .filter(Boolean);
+
+  it("keeps the fallback-renderer rule for the gate condition", () => {
+    expect(cursorRuleSelectors).toContain(".terminal-native-cursor-hidden .xterm-cursor");
+  });
+
+  it("gives the synchronized-output condition no cursor rule", () => {
+    expect(cursorRuleSelectors?.filter((s) => s.includes("terminal-sync-output-active"))).toEqual(
+      [],
+    );
   });
 });
 

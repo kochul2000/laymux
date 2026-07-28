@@ -513,18 +513,20 @@
  */
 
 /* `.xterm-cursor` is the DOM renderer's cursor element. Under the WebGL addon the
-   cursor is drawn into the canvas and these rules do nothing — but `onContextLoss`
-   disposes the addon and xterm falls back to the DOM renderer, where they are a
-   second line of defence. Not dead code. (The `.xterm-cursor-layer` selector next
-   to them *was* dead: the canvas renderer it belonged to is gone from xterm 6.)
-   Since issue #598 the primary suppression is the renderer gate in
-   `native-cursor-suppression.ts`, which covers both renderers and cannot be
-   overridden by the application. The sync-output rule below is a different
-   condition and has no gate equivalent. */
-.terminal-sync-output-active .xterm-cursor {
-  opacity: 0 !important;
-}
-
+   cursor is drawn into the canvas and a rule on it does nothing — but
+   `onContextLoss` disposes the addon and xterm falls back to the DOM renderer,
+   where it is a second line of defence. Not dead code. (The `.xterm-cursor-layer`
+   selector that used to sit here *was* dead: the canvas renderer it belonged to is
+   gone from xterm 6.)
+   A CSS cursor rule is therefore only ever allowed to *mirror* the renderer gate
+   in `native-cursor-suppression.ts` (issue #598), which covers both renderers and
+   cannot be overridden by the application — otherwise the caret behaves
+   differently depending on which renderer happens to be live.
+   Synchronized output had such a rule and no longer does (issue #610, ADR-0079).
+   There is no gate condition for it to mirror, and there cannot be: a DEC 2026
+   frame is a render-stopped interval, so nothing is drawn during it and nothing
+   needs hiding. The helper textarea below is a real DOM element in both renderers,
+   not a painted cell, so its caret is a separate question. */
 .terminal-sync-output-active .xterm-helper-textarea {
   caret-color: transparent !important;
 }
