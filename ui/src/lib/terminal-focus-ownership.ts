@@ -31,6 +31,8 @@ export type FocusOwnershipTrace = (event: string, payload: Record<string, unknow
 export type TerminalFocusOwnershipOptions = {
   /** The pane surface that must contain the helper for it to be owned. */
   getContainer: () => HTMLElement | null;
+  /** Refresh a DOM-active helper through blur/focus (Windows WebView2 only). */
+  refreshActiveHelper?: boolean;
   /** Frame scheduler. Defaults to `requestAnimationFrame` (setTimeout fallback). */
   scheduleFrame?: (callback: () => void) => void;
   onTrace?: FocusOwnershipTrace;
@@ -49,6 +51,8 @@ export type TerminalFocusOwnership = {
   reclaimOnAppFocus: () => boolean;
   /** Pointer press anywhere: a press outside the surface hands focus away. */
   releaseForPointerTarget: (target: EventTarget | null) => void;
+  /** Real helper input supersedes a pending next-frame refresh. */
+  releaseForHelperInput: (target: EventTarget | null) => void;
   /** xterm adopted a (possibly new) helper textarea — invalidate stale records. */
   notifyHelperBound: (helper: HTMLTextAreaElement | null) => void;
   clear: (reason: string) => void;
@@ -238,7 +242,7 @@ export function createTerminalFocusOwnership(
           });
           return;
         }
-        const refreshActiveHelper = active === helper;
+        const refreshActiveHelper = options.refreshActiveHelper === true && active === helper;
         clear("reclaim-attempted");
         if (refreshActiveHelper) {
           helper.blur();
@@ -279,6 +283,13 @@ export function createTerminalFocusOwnership(
       lastFocusedOutHelper = null;
       if (!ownedHelper) return;
       clear("pointer-handoff");
+    },
+
+    releaseForHelperInput(target) {
+      if (disposed || !ownedHelper || target !== ownedHelper) return;
+      // Input reaching the live helper proves it already owns a usable native
+      // context. A queued refresh must not blur a composition/key that beat rAF.
+      clear("helper-input-before-reclaim");
     },
 
     notifyHelperBound(helper) {

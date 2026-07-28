@@ -78,6 +78,7 @@ describe("createTerminalFocusOwnership", () => {
     const frames = createManualFrames();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
+      refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
     });
 
@@ -241,6 +242,7 @@ describe("createTerminalFocusOwnership", () => {
     const onTrace = vi.fn();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
+      refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
       onTrace,
     });
@@ -263,6 +265,51 @@ describe("createTerminalFocusOwnership", () => {
     );
   });
 
+  it("cancels a scheduled refresh when helper input starts before the reclaim frame", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      scheduleFrame: frames.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+
+    ownership.releaseForHelperInput(helper);
+    frames.runAll();
+
+    expect(focusEvents).toEqual([]);
+    expect(document.activeElement).toBe(helper);
+    expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("keeps a DOM-active helper untouched when active refresh is disabled", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: false,
+      scheduleFrame: frames.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    frames.runAll();
+
+    expect(focusEvents).toEqual([]);
+    expect(document.activeElement).toBe(helper);
+  });
+
   it("does not steal focus when the refresh blur hands it to another element", () => {
     const { container, helper } = buildPane();
     const modalInput = document.createElement("input");
@@ -271,6 +318,7 @@ describe("createTerminalFocusOwnership", () => {
     const onTrace = vi.fn();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
+      refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
       onTrace,
     });

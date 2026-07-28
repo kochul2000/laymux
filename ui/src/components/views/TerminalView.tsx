@@ -2522,6 +2522,10 @@ export function TerminalView({
     // 절대 빼앗지 않는다 (ADR-0057).
     const focusOwnership = createTerminalFocusOwnership({
       getContainer: () => wrapperRef.current,
+      // The stale DOM-active/native-IME split is a measured WebView2 failure.
+      // Linux keeps ADR-0053's no-synthetic-blur policy until equivalent
+      // headful evidence exists.
+      refreshActiveHelper: navigator.userAgent.includes("Windows"),
       onTrace: (event, payload) => trace(event, payload),
     });
     focusOwnershipRef.current = focusOwnership;
@@ -2543,6 +2547,15 @@ export function TerminalView({
     const handleFocusOutForFocusOwnership = (event: FocusEvent) => {
       focusOwnership.noteFocusOut(event.target, event.relatedTarget);
     };
+    const handleInputForFocusOwnership = (event: Event) => {
+      focusOwnership.releaseForHelperInput(event.target);
+    };
+    const focusOwnershipInputEvents = [
+      "keydown",
+      "beforeinput",
+      "input",
+      "compositionstart",
+    ] as const;
     const focusOwnershipSurface = wrapperRef.current;
     window.addEventListener("blur", handleAppBlurForFocusOwnership);
     window.addEventListener("focus", handleAppFocusForFocusOwnership);
@@ -2589,6 +2602,9 @@ export function TerminalView({
         restoreHelperAnchor("helper-replaced");
         helperTextarea.removeEventListener("beforeinput", handleBeforeInputForChord);
         helperTextarea.removeEventListener("blur", handleBlurForChord);
+        for (const eventName of focusOwnershipInputEvents) {
+          helperTextarea.removeEventListener(eventName, handleInputForFocusOwnership);
+        }
         detachCandidateGuardListeners(helperTextarea);
       }
       helperTextarea = nextHelperTextarea;
@@ -2602,6 +2618,9 @@ export function TerminalView({
       osInputSourceChord.reset("helper-replaced");
       helperTextarea.addEventListener("beforeinput", handleBeforeInputForChord);
       helperTextarea.addEventListener("blur", handleBlurForChord);
+      for (const eventName of focusOwnershipInputEvents) {
+        helperTextarea.addEventListener(eventName, handleInputForFocusOwnership);
+      }
       scheduleOverlayCaretUpdate();
     };
 
@@ -4789,6 +4808,9 @@ export function TerminalView({
       focusOwnershipSurface?.removeEventListener("focusout", handleFocusOutForFocusOwnership);
       helperTextarea?.removeEventListener("beforeinput", handleBeforeInputForChord);
       helperTextarea?.removeEventListener("blur", handleBlurForChord);
+      for (const eventName of focusOwnershipInputEvents) {
+        helperTextarea?.removeEventListener(eventName, handleInputForFocusOwnership);
+      }
       if (helperTextarea) detachCandidateGuardListeners(helperTextarea);
       restoreHelperAnchor("unmount");
       // unmount 시 진행 중이던 chord press 를 버린다 — 남겨두면 다음 마운트가
