@@ -465,7 +465,9 @@ const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
     geometry: { revision: 0, cols: 80, rows: 24 },
   },
   snapshot: [],
+  flowControl: { token: "lease-1", windowBytes: 524288 },
 });
+const mockAcknowledgeTerminalOutput = vi.fn().mockResolvedValue(true);
 const mockResumeTerminalOutput = vi.fn().mockResolvedValue(null);
 let mockOutputSequence = 0;
 const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
@@ -499,6 +501,7 @@ vi.mock("@/lib/tauri-api", () => ({
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
   attachTerminalOutput: (...args: unknown[]) => mockAttachTerminalOutput(...args),
+  acknowledgeTerminalOutput: (...args: unknown[]) => mockAcknowledgeTerminalOutput(...args),
   resumeTerminalOutput: (...args: unknown[]) => mockResumeTerminalOutput(...args),
   onTerminalOutputV2: (terminalId: string, callback: (payload: unknown) => void) => {
     const forward = (data: Uint8Array | Record<string, unknown>) => {
@@ -572,6 +575,19 @@ async function waitForLocalTerminalControl(): Promise<void> {
 beforeEach(() => {
   armStreamAttachResetGate();
   streamAttachResetBails.length = 0;
+  // Production exact-resume returns an empty delta while idle, never `null`.
+  // Keep the low-frequency parsed-credit watchdog a no-op unless a test
+  // explicitly models ring eviction or undelivered bytes.
+  mockResumeTerminalOutput.mockReset();
+  mockResumeTerminalOutput.mockImplementation((_id: string, generation: number, seq: number) =>
+    Promise.resolve({
+      generation,
+      seqStart: seq,
+      seqEnd: seq,
+      data: [],
+      geometry: { revision: 0, cols: 80, rows: 24 },
+    }),
+  );
 });
 
 // A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
@@ -2410,6 +2426,7 @@ describe("TerminalView", () => {
           geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot,
+        flowControl: { token: "lease-rebuild", windowBytes: 524288 },
       };
     };
 
@@ -3978,6 +3995,7 @@ describe("TerminalView", () => {
           geometry: { revision: 0, cols: 80, rows: 24 },
         },
         snapshot: Array.from(snapshot),
+        flowControl: { token: "lease-replay", windowBytes: 524288 },
       });
       const reply = "\x1b]11;rgb:0000/0000/0000\x1b\\";
       mockWrite.mockImplementationOnce((_, callback?: () => void) => {
@@ -9846,6 +9864,360 @@ describe("TerminalView desktop input composer", () => {
    */
   const writtenStream = () => decodedWrites().join("");
 
+  it("ACKs only after visible and checkpoint parse while detectors run immediately", async () => {
+    const terminalId = "t-output-parsed-credit-intersection";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    let resolveCheckpoint!: () => void;
+    const checkpointHeld = new Promise<void>((resolve) => {
+      resolveCheckpoint = resolve;
+    });
+    let finishVisible!: () => void;
+    mockTerminalRenderCheckpointApply.mockImplementationOnce(() => checkpointHeld);
+    mockWrite.mockClear();
+    mockAcknowledgeTerminalOutput.mockClear();
+    mockWrite.mockImplementationOnce((_, callback?: () => void) => {
+      finishVisible = callback ?? (() => {});
+    });
+    const enterAlt = "\x1b[?1049h";
+
+    try {
+      act(() => emitOutput(outputDelta(0, enterAlt)));
+
+      expect(
+        useTerminalStore.getState().instances.find(({ id }) => id === terminalId)?.activity,
+      ).toEqual({ type: "interactiveApp", name: "app" });
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+
+      act(() => finishVisible());
+      await Promise.resolve();
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveCheckpoint();
+        await checkpointHeld;
+      });
+      await vi.waitFor(() =>
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+          terminalId,
+          1,
+          "lease-1",
+          enterAlt.length,
+        ),
+      );
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => callback?.());
+    }
+  });
+
+  it("keeps parsed credit moving while the pane is hidden", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let observerCallback!: ResizeObserverCallback;
+    let observedTarget!: Element;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        observerCallback = callback;
+      }
+      observe(target: Element) {
+        observedTarget = target;
+        queueMicrotask(() =>
+          observerCallback(
+            [
+              {
+                target,
+                contentRect: { width: 800, height: 600 },
+              } as unknown as ResizeObserverEntry,
+            ],
+            this as unknown as ResizeObserver,
+          ),
+        );
+      }
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    const terminalId = "t-output-hidden-credit";
+    try {
+      const emitOutput = await attachedOutputEmitter(terminalId);
+      act(() =>
+        observerCallback(
+          [
+            {
+              target: observedTarget,
+              contentRect: { width: 0, height: 0 },
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        ),
+      );
+      mockAcknowledgeTerminalOutput.mockClear();
+
+      act(() => emitOutput(outputDelta(0, "hidden-output")));
+
+      await vi.waitFor(() =>
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+          terminalId,
+          1,
+          "lease-1",
+          "hidden-output".length,
+        ),
+      );
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
+  });
+
+  it("holds ACK when the native stabilizer suppresses every visible byte", async () => {
+    const terminalId = "t-output-stabilizer-credit";
+    mockCreateTerminalSession.mockResolvedValueOnce({
+      id: terminalId,
+      title: "Terminal",
+      initialExecutionHost: "nativeWindows",
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    mockWrite.mockClear();
+    mockAcknowledgeTerminalOutput.mockClear();
+    const held = "\x1b[?2026hbody";
+    const release = "\x1b[?2026l";
+
+    act(() => emitOutput(outputDelta(0, held)));
+    expect(mockWrite).not.toHaveBeenCalled();
+    expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+
+    act(() => emitOutput(outputDelta(held.length, release)));
+    await vi.waitFor(() =>
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenLastCalledWith(
+        terminalId,
+        1,
+        "lease-1",
+        held.length + release.length,
+      ),
+    );
+  });
+
+  it("reattaches once when checkpoint parsing rejects", async () => {
+    const terminalId = "t-output-checkpoint-reject";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAcknowledgeTerminalOutput.mockClear();
+    mockTerminalRenderCheckpointApply.mockRejectedValueOnce(new Error("checkpoint failed"));
+
+    try {
+      act(() => emitOutput(outputDelta(0, "checkpoint-failure")));
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1);
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reattaches once when an early physical chunk is discarded", async () => {
+    const terminalId = "t-output-early-physical-discard";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAcknowledgeTerminalOutput.mockClear();
+    mockWrite.mockImplementationOnce(() => {
+      throw new Error("unexpected renderer failure");
+    });
+    const data = "x".repeat(256 * 1024 + 1);
+
+    try {
+      act(() => emitOutput(outputDelta(0, data)));
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1);
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => callback?.());
+      warn.mockRestore();
+    }
+  });
+
+  it("does not ACK when an immediate native prefix is discarded before its held frame tail", async () => {
+    const terminalId = "t-output-native-prefix-discard";
+    mockCreateTerminalSession.mockResolvedValueOnce({
+      id: terminalId,
+      title: "Terminal",
+      initialExecutionHost: "nativeWindows",
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAcknowledgeTerminalOutput.mockClear();
+    mockWrite.mockImplementationOnce(() => {
+      throw new Error("discard immediate native prefix");
+    });
+
+    try {
+      const prefixAndHeldFrame = "prefix\x1b[?2026hbody";
+      act(() => emitOutput(outputDelta(0, prefixAndHeldFrame)));
+      // The original range is already invalid. A later frame end must not run
+      // its deferred parse callback and turn that rejection into parsed credit.
+      act(() => emitOutput(outputDelta(prefixAndHeldFrame.length, "\x1b[?2026l")));
+
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1);
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => callback?.());
+      warn.mockRestore();
+    }
+  });
+
+  it("pull watchdog accepts an idle empty range after backend geometry advances", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-pull-idle-resize";
+      await attachedOutputEmitter(terminalId);
+      toggleInputMode(terminalId);
+      const composer = screen.getByTestId(`terminal-input-composer-${terminalId}`);
+      expect(composer).toHaveAttribute("data-can-send", "true");
+      const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+      mockResumeTerminalOutput.mockClear();
+      mockResumeTerminalOutput.mockResolvedValue({
+        ...outputDelta(0, ""),
+        geometry: { revision: 1, cols: 100, rows: 30 },
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      expect(mockResumeTerminalOutput).toHaveBeenCalledTimes(1);
+      expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 0);
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls);
+      expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
+        geometryEscalation: 0,
+        repair: 0,
+      });
+      expect(composer).toHaveAttribute("data-can-send", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pull watchdog drains a live delta that arrives while its single request is pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-pull-live-race";
+      const emitOutput = await attachedOutputEmitter(terminalId);
+      let resolvePull!: (value: ReturnType<typeof outputDelta>) => void;
+      const pendingPull = new Promise<ReturnType<typeof outputDelta>>((resolve) => {
+        resolvePull = resolve;
+      });
+      mockResumeTerminalOutput.mockClear();
+      mockResumeTerminalOutput.mockReturnValue(pendingPull);
+      mockWrite.mockClear();
+      mockAcknowledgeTerminalOutput.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(mockResumeTerminalOutput).toHaveBeenCalledTimes(1);
+
+      act(() => emitOutput(outputDelta(0, "live")));
+      expect(writtenStream()).not.toContain("live");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      // Adjacent ticks cannot start another resume while this epoch owns one.
+      expect(mockResumeTerminalOutput).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolvePull(outputDelta(0, ""));
+        await pendingPull;
+        await Promise.resolve();
+      });
+      expect(writtenStream()).toContain("live");
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, "lease-1", 4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pull watchdog recovers a full-edge delta that emitted no event", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-pull-missing-edge";
+      await attachedOutputEmitter(terminalId);
+      mockResumeTerminalOutput.mockClear();
+      mockResumeTerminalOutput.mockResolvedValue(outputDelta(0, "lost"));
+      mockWrite.mockClear();
+      mockAcknowledgeTerminalOutput.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+
+      expect(writtenStream()).toContain("lost");
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, "lease-1", 4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reattaches the active epoch when the backend rejects its ACK token", async () => {
+    const terminalId = "t-output-ack-lease-lost";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockAcknowledgeTerminalOutput.mockResolvedValueOnce(false);
+
+    try {
+      act(() => emitOutput(outputDelta(0, "lease-lost")));
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps the Tauri event callback no-throw when live processing fails synchronously", async () => {
+    const terminalId = "t-output-listener-sync-failure";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const attachCalls = mockAttachTerminalOutput.mock.calls.length;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockTerminalRenderCheckpointApply.mockImplementationOnce(() => {
+      throw new Error("synchronous checkpoint failure");
+    });
+
+    try {
+      expect(() => emitOutput(outputDelta(0, "sync-failure"))).not.toThrow();
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCalls + 1),
+      );
+      expect(terminalOutputRecoveryCounters(terminalId).malformedDelta).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("merges output deltas that arrive while xterm is still parsing (issue #606)", async () => {
     const terminalId = "t-output-backlog-coalesce";
     const emitOutput = await attachedOutputEmitter(terminalId);
@@ -9996,6 +10368,7 @@ describe("TerminalView desktop input composer", () => {
         geometry,
       },
       snapshot: Array.from(replay),
+      flowControl: { token: "lease-replay", windowBytes: 524288 },
     };
     const replacementAttachment = {
       ...replayAttachment,
@@ -10005,6 +10378,7 @@ describe("TerminalView desktop input composer", () => {
         sourceSeq: 0,
       },
       snapshot: [],
+      flowControl: { token: "lease-gap", windowBytes: 524288 },
     };
     mockAttachTerminalOutput
       .mockResolvedValueOnce(replayAttachment)
@@ -10038,6 +10412,111 @@ describe("TerminalView desktop input composer", () => {
     await vi.waitFor(() => {
       expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBeforeReattach);
     });
+  });
+
+  it("does not let a post-parse callback failure poison xterm flow-control accounting", async () => {
+    const terminalId = "t-output-callback-flow-control";
+    mockCreateTerminalSession.mockResolvedValueOnce({
+      id: terminalId,
+      title: "Terminal",
+      initialExecutionHost: "nativeWindows",
+      config: {
+        profile: "PowerShell",
+        cols: 80,
+        rows: 24,
+        sync_group: "",
+        env: [],
+        advertise_true_color: true,
+      },
+    });
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+
+    const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+      | ((data: Uint8Array | Record<string, unknown>) => void)
+      | undefined;
+    expect(emitOutput).toBeDefined();
+
+    // xterm 6.0.0 drains one queued write at a time and schedules the next drain
+    // only after the embedder callback returns. If that callback escapes, a
+    // later small write is still accepted into the FIFO but no new drain is
+    // scheduled, so its callback never arrives and the pane stalls.
+    const acceptedWrites: string[] = [];
+    const accountedWrites: string[] = [];
+    const callbackErrors: unknown[] = [];
+    const xtermQueue: Array<{
+      text: string;
+      callback?: () => void;
+    }> = [];
+    let xtermDrainActive = false;
+    const scheduleXtermDrain = () => {
+      if (xtermDrainActive || xtermQueue.length === 0) return;
+      xtermDrainActive = true;
+      setTimeout(() => {
+        const accepted = xtermQueue.shift()!;
+        try {
+          accepted.callback?.();
+          accountedWrites.push(accepted.text);
+          xtermDrainActive = false;
+          scheduleXtermDrain();
+        } catch (error) {
+          callbackErrors.push(error);
+          // Deliberately leave the accepted FIFO in xterm's poisoned
+          // single-flight state: there is no follow-up drain task.
+        }
+      }, 0);
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const countersBefore = terminalOutputPipelineCounters(terminalId);
+    mockWrite.mockClear();
+    mockWrite.mockImplementation((data, callback?: () => void) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      acceptedWrites.push(text);
+      xtermQueue.push({ text, callback });
+      scheduleXtermDrain();
+    });
+    mockRefresh.mockImplementation(() => {
+      throw new Error("renderer settle failed");
+    });
+
+    const frame = "\x1b[?2026hbody\x1b[?25h\x1b[?2026l\x1b[?25l\x1b[3;4H\x1b[?25h";
+    try {
+      act(() => {
+        emitOutput?.(new TextEncoder().encode(frame));
+        emitOutput?.(new TextEncoder().encode(frame));
+        emitOutput?.(new TextEncoder().encode("tail"));
+      });
+
+      await vi.waitFor(() => expect(accountedWrites).toHaveLength(3), { timeout: 1_000 });
+      expect(callbackErrors).toEqual([]);
+      expect(xtermQueue).toEqual([]);
+      expect(xtermDrainActive).toBe(false);
+      expect(acceptedWrites).toHaveLength(3);
+      expect(acceptedWrites.filter((write) => write === "tail")).toHaveLength(1);
+      const countersAfter = terminalOutputPipelineCounters(terminalId);
+      expect(countersAfter.writeBackpressure - countersBefore.writeBackpressure).toBe(0);
+      expect(countersAfter.writeCallbackFailures - countersBefore.writeCallbackFailures).toBe(2);
+      expect(
+        countersAfter.writeCallbackLiveFailures - countersBefore.writeCallbackLiveFailures,
+      ).toBe(2);
+      expect(
+        countersAfter.writeCallbackRefreshFailures - countersBefore.writeCallbackRefreshFailures,
+      ).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "[TerminalView] xterm write callback failed:",
+        expect.objectContaining({
+          source: "live",
+          failures: [{ stage: "refresh", message: "renderer settle failed" }],
+        }),
+      );
+    } finally {
+      mockWrite.mockImplementation((_: string | Uint8Array, callback?: () => void) => {
+        callback?.();
+      });
+      mockRefresh.mockImplementation(() => {});
+      warn.mockRestore();
+    }
   });
 
   it("keeps physical write boundaries while an IME composition is active", async () => {
@@ -10149,8 +10628,10 @@ describe("TerminalView desktop input composer", () => {
         finishFirstWrite = callback;
         return;
       }
-      throw new Error("unexpected renderer failure");
+      if (writeAttempt === 2) throw new Error("unexpected renderer failure");
+      callback?.();
     });
+    const attachCallsBeforeFailure = mockAttachTerminalOutput.mock.calls.length;
 
     try {
       act(() => {
@@ -10162,7 +10643,11 @@ describe("TerminalView desktop input composer", () => {
       expect(mockFit).not.toHaveBeenCalled();
 
       act(() => finishFirstWrite?.());
-      await vi.waitFor(() => expect(mockWrite).toHaveBeenCalledTimes(2));
+      // Attempt 2 rejects the deferred tail exactly once. Parsed credit then
+      // performs its required reattach, whose normal mode-sync write is attempt
+      // 3; that is recovery work, not a duplicate retry of the rejected bytes.
+      await vi.waitFor(() => expect(mockWrite).toHaveBeenCalledTimes(3));
+      expect(mockAttachTerminalOutput.mock.calls.length).toBe(attachCallsBeforeFailure + 1);
       await vi.waitFor(() => expect(mockFit).toHaveBeenCalledTimes(1));
       expect(warn).toHaveBeenCalledWith(
         "[TerminalView] xterm write failed:",
@@ -10434,6 +10919,7 @@ describe("TerminalView desktop input composer", () => {
         geometry,
       },
       snapshot: [],
+      flowControl: { token: "lease-gap", windowBytes: 524288 },
     };
     let resolveAttach!: (value: unknown) => void;
     mockAttachTerminalOutput.mockReturnValueOnce(
@@ -10511,6 +10997,7 @@ describe("TerminalView desktop input composer", () => {
           geometry,
         },
         snapshot: [],
+        flowControl: { token: "lease-gap-direct", windowBytes: 524288 },
       };
       let resolveAttach!: (value: unknown) => void;
       mockAttachTerminalOutput.mockReturnValueOnce(

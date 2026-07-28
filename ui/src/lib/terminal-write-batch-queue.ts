@@ -33,6 +33,11 @@ export interface TerminalWriteBatchRequest<
   batchKey?: string;
   /** A second, explicit allowlist gate controlled by the producer. */
   allowCoalescing: boolean;
+  /**
+   * The producer guarantees callbacks may settle together after one physical
+   * parse/discard. Missing/false keeps callback-bearing requests as barriers.
+   */
+  coalesceCallbacks?: boolean;
   /** External completion semantics make this request an atomic barrier. */
   onParsed?: () => void;
   /** External cancellation semantics make this request an atomic barrier. */
@@ -89,8 +94,8 @@ function isIndividuallyCoalescible<TMetadata extends TerminalWriteBatchMetadata>
     metadata.parkDeadline === undefined &&
     metadata.frameEndCursorAuthoritative !== true &&
     metadata.compositionActive !== true &&
-    entry.onParsed === undefined &&
-    entry.onDiscard === undefined
+    ((entry.onParsed === undefined && entry.onDiscard === undefined) ||
+      entry.coalesceCallbacks === true)
   );
 }
 
@@ -112,9 +117,11 @@ function canJoin<TMetadata extends TerminalWriteBatchMetadata>(
  *
  * It batches only explicitly compatible ordinary live-byte requests. Replay,
  * strings, cursor-stabilized emissions, deadline-bearing emissions,
- * authoritative frame ends, composition output, and callback-bearing requests
- * remain one physical write each. Dequeue is bounded by both part count and
- * bytes; an oversized/atomic request at the head still progresses alone.
+ * authoritative frame ends, and composition output remain one physical write
+ * each. Callback-bearing requests merge only under the producer's explicit
+ * callback-coalescing contract; the prepared batch retains every callback.
+ * Dequeue is bounded by both part count and bytes; an oversized/atomic request
+ * at the head still progresses alone.
  */
 export class TerminalWriteBatchQueue<
   TMetadata extends TerminalWriteBatchMetadata = TerminalWriteBatchMetadata,

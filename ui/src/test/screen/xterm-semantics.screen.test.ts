@@ -138,3 +138,39 @@ describe("ESC[K erases from the cursor column only", () => {
     surface.dispose();
   });
 });
+
+describe("accepted write callback no-throw boundary (issue #624)", () => {
+  it("keeps the real xterm parser draining when a completion step fails", async () => {
+    const surface = createScreenTerminal({ cols: 20, rows: 3 });
+    const completionErrors: string[] = [];
+
+    const firstParsed = new Promise<void>((resolve) => {
+      surface.terminal.write("first", () => {
+        // Production isolates each embedder completion step at this boundary.
+        // The failed step is recorded, but its exception must not escape into
+        // xterm before xterm advances its own write-buffer accounting.
+        try {
+          throw new Error("completion failed");
+        } catch (error) {
+          completionErrors.push(error instanceof Error ? error.message : String(error));
+        }
+        resolve();
+      });
+    });
+    const tailParsed = new Promise<void>((resolve) => {
+      // Queue this immediately, before the first callback runs. It proves that
+      // the real parser continues draining its already-queued tail.
+      surface.terminal.write("tail", resolve);
+    });
+
+    await Promise.all([firstParsed, tailParsed]);
+
+    expect(surface.capture().viewport[0].text.trimEnd()).toBe("firsttail");
+    expect(completionErrors).toEqual(["completion failed"]);
+
+    // The inverse case (letting a callback exception escape) intentionally
+    // remains in TerminalView's faithful single-flight model: throwing from a
+    // real xterm callback is reported by Vitest as an uncaught async error.
+    surface.dispose();
+  });
+});

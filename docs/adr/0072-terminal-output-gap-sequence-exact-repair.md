@@ -4,6 +4,7 @@
 - Date: 2026-07-27
 - Source: issue #600(출력 폭주 시 셀 영구 유실) · issue #596(원 증상) · PR #597(같은 재부착에서 파생된 overlay caret 결함) · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0038](0038-remote-height-shrink-surface-crop.md)
 - Relation: ADR-0069 가 Remote attach 에 세운 "truncated raw tail 은 차분 렌더 TUI 화면의 권위 상태가 아니다" 결론을 데스크톱 live attach 에도 확장한다. data-flow §8.8 의 "다음 expected sequence 보다 큰 delta 는 임의 보간하지 않고 새 attach 를 시작한다" 계약을 정정한다.
+- Superseded in part by: [ADR-0084](0084-desktop-terminal-output-parsed-credit.md) — Decision의 “PTY 읽기 스레드는 프론트 소비 속도에 묶이지 않는다” 조항에 한함. 이벤트 비신뢰 알림과 sequence-exact 복구 결정은 유지한다.
 
 ## Context
 

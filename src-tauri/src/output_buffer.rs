@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
-const DEFAULT_MAX_SIZE: usize = 1024 * 1024; // 1MB
+use crate::constants::TERMINAL_OUTPUT_RING_MAX_BYTES;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TerminalOutputSlice {
@@ -216,7 +216,7 @@ fn bytes_since_from(inner: &TerminalOutputBufferInner, since_seq: u64) -> Vec<u8
 
 impl Default for TerminalOutputBuffer {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_SIZE)
+        Self::new(TERMINAL_OUTPUT_RING_MAX_BYTES)
     }
 }
 
@@ -303,7 +303,7 @@ mod tests {
     #[test]
     fn default_uses_1mb() {
         let buf = TerminalOutputBuffer::default();
-        assert_eq!(buf.max_size(), 1024 * 1024);
+        assert_eq!(buf.max_size(), TERMINAL_OUTPUT_RING_MAX_BYTES);
     }
 
     #[test]

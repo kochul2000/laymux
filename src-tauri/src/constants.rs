@@ -144,8 +144,12 @@ pub const REMOTE_CLAIM_RETRY_AFTER_MS: u64 = 25;
 /// new Local input for at most this bounded interval.
 pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
 
-/// Desktop attach returns the retained output ring (currently capped at 1 MiB).
-pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = 1024 * 1024;
+/// Bytes retained in each generation-scoped terminal output ring.
+pub const TERMINAL_OUTPUT_RING_MAX_BYTES: usize = 1024 * 1024;
+/// Maximum live source bytes accepted ahead of the desktop's contiguous parsed ACK.
+pub const TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES: usize = 512 * 1024;
+/// Desktop attach returns at most the retained output ring.
+pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = TERMINAL_OUTPUT_RING_MAX_BYTES;
 
 /// Default scrollback budget (KiB) for the reconstructable screen checkpoint
 /// sent to a Remote client on terminal attach.

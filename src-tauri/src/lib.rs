@@ -163,6 +163,7 @@ pub fn run() {
             commands::interrupt_terminal_on_exit,
             commands::write_terminal_input,
             commands::attach_terminal_output,
+            commands::acknowledge_terminal_output,
             commands::resume_terminal_output,
             commands::log_terminal_trace_batch,
             commands::close_terminal_session,

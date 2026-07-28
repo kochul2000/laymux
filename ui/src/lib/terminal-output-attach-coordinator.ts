@@ -99,6 +99,11 @@ export class TerminalOutputAttachCoordinator {
     return this.expectedSeq !== null;
   }
 
+  /** Last contiguous sequence already admitted to both surface pipelines. */
+  get contiguousSeq(): number | null {
+    return this.expectedSeq;
+  }
+
   beginAttach(): void {
     this.expectedSeq = null;
     this.generation = null;
@@ -167,7 +172,12 @@ export class TerminalOutputAttachCoordinator {
     // The ring stores bytes, not per-byte geometry, so one repair delta cannot
     // describe bytes written on two different grids. Refuse instead of parsing
     // pre-resize bytes at the post-resize size.
-    if (repair.geometry.revision !== this.geometryRevision) {
+    // An idle exact pull contains no bytes and therefore spans no grid. The
+    // backend reports its latest geometry, which may have advanced after a
+    // pane resize; rejecting that empty range would cause a reset every
+    // watchdog tick. A non-empty repair still must match the geometry under
+    // which its first missing byte was parsed.
+    if (repair.seqEnd > resumeSeq && repair.geometry.revision !== this.geometryRevision) {
       throw new TerminalOutputRepairError(
         "geometry-change",
         "terminal output repair spans a geometry change",
@@ -252,7 +262,7 @@ export class TerminalOutputAttachCoordinator {
     const offset = Math.max(0, expected - delta.seqStart);
     const suffix = delta.data.slice(offset);
     this.expectedSeq = delta.seqEnd;
-    this.geometryRevision = delta.geometry.revision;
+    if (suffix.length > 0) this.geometryRevision = delta.geometry.revision;
     const segment = {
       ...delta,
       seqStart: expected,

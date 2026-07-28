@@ -324,13 +324,14 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     "pipeline": { "terminal-pane-xxxx": {
       "deltaEvents": 12000, "segmentsIn": 12000,
       "writeRequests": 11980, "xtermWrites": 340,
-      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18, "…": 0
+      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18,
+      "writeCallbackFailures": 0, "writeCallbackRefreshFailures": 0, "…": 0
     } }
   }
 }
 ```
 
-판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `frontend.pipeline`의 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
+판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). `frontend.pipeline`의 나머지 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
 
 ### 12.2 포트 규칙
 
@@ -896,6 +897,8 @@ screen checkpoint의 직렬화 길이는 원본 PTY sequence에 없으므로 V1 
 
 Remote 입력 UI의 명시적 선호는 `laymux.remote.inputMode`에만 저장한다. 저장값이 없으면 coarse pointer는 composer, fine pointer는 direct가 기본이다. terminal별 현재 모드와 draft/revision/in-flight token은 페이지 runtime Map에만 있고 reload 시 사라진다. V1 snapshot state와 synthetic 최종 mode 적용이 끝나기 전에는 composer action과 Direct clipboard paste를 fail-closed한다. PC WebView도 동일한 상태 전이 계약을 사용하되 선호 키는 `laymux.desktop.inputMode`, 최초 기본값은 direct이며 Tauri `write_terminal_input`/`attach_terminal_output`/`terminal-output-v2-{id}` 계약을 사용한다.
 
+PC WebView의 `attach_terminal_output(id)` 응답은 raw attach state/snapshot과 `flowControl:{token:string,windowBytes:number}`를 함께 반환한다. token은 generation-local desktop lease의 불투명 문자열이며 JavaScript 안전 정수로 해석하지 않는다. generation당 활성 desktop lease는 하나이고 새 attach는 같은 generation의 이전 token을 즉시 무효화한다. visible xterm과 rendererless checkpoint xterm이 같은 contiguous prefix를 모두 parse하면 `acknowledge_terminal_output(id,generation,token,seq)`를 호출한다. 현재 generation/token이면 `true`, stale generation/token이면 `false`이며, 같은 seq 재전송은 idempotent 성공이다. 이미 ACK한 값보다 작은 seq 또는 backend `write_seq`보다 큰 seq는 계약 오류다. ACK IPC 일시 실패는 같은 token/seq로 재시도하되 reattach/unmount된 sender는 폐기하고, `false` 응답은 stale lease로 판정해 재시도 없이 현재 surface를 재부착한다. attach·ACK control IPC가 영구 pending인 경우의 watchdog/orphan completion은 issue #629 범위다. 이 credit 계약은 desktop Tauri surface에만 적용하고 Remote/Cloud output frame과 subscriber overflow 계약은 바꾸지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)).
+
 Remote composer도 데스크톱과 동일하게 두 가지 과거 입력 recall 경로를 노출한다(issues #504/#505, [data-flow §8.8](./data-flow.md)). (1) 빈·포커스 초안에서 **Tab** 은 최신순·중복 제거·blank skip·최대 N개(기본 8)로 만든 listbox 를 에디터 위에 띄우고, (2) 비어 있지 않은 초안 타이핑 중에는 prefix(대소문자 무시)·최신순·중복 제거·초안 완전 일치 제외·cap 자동완성 dropdown 을 같은 자리에 띄운다. 두 목록은 초안 길이(0 vs >0)로 상호 배타이며, keydown 에서 자동완성 블록을 Tab-open 블록보다 앞에 둬 비어 있지 않은 초안의 Tab 이 팝업을 열지 않고 추천을 채우게 한다. 자동완성은 초기 강조가 없어(activeIndex=−1) 일반 Enter 가 계속 Send 이고, ↑/↓ 로 강조가 생겨야 Enter 가 선택으로 바뀐다. **과거 입력 텍스트(history)와 초안은 페이지 runtime Map(history 는 `Map<scopeKey, string[]>`, 버킷당 최대 200개)에만 두고 `localStorage`/`sessionStorage`/디스크/네트워크 어디에도 영속하지 않는다** — ADR-0029 의 미전송·전송 문자열 비영속 경계를 Remote 로 그대로 확장한 것으로, 셸에 입력한 비밀번호 등 민감 문자열이 recall 표면이나 페이지 unload 뒤로 새지 않게 하는 보안 경계다. `commitComposer` 성공 콜백에서 전송된 텍스트만 이 Map 에 append 한다. Remote 는 host `settings.json` 을 읽지 않으므로(설정 endpoint 없음) 두 기능 on/off 는 surface-local `localStorage` 키 `laymux.remote.composerHistoryPopup`·`laymux.remote.composerAutocomplete`(기본 on, 없거나 `"0"` 이 아니면 on)에만 저장하는 설정값이고, 토글 UI 는 기존 소프트 키 `⚙` 팝오버(`keyPopover`)의 "Composer recall" 섹션에 둔다. 같은 섹션의 `History sharing` select 는 데스크톱 `terminal.composerHistoryScope` 와 같은 세 값(`global`(기본)/`workspace`/`pane`)을 `laymux.remote.composerHistoryScope` 에 저장하며([ADR-0055](../adr/0055-composer-history-scope-setting.md)), 알 수 없는 값은 `global` 로 해석한다. Remote 의 버킷 키 도출도 `composerHistoryBucketKey()` 한 곳뿐이고 workspace 를 모르는 dock 터미널은 `pane:` 키로 좁게 fallback 한다. 스코프를 바꾸면 열려 있던 recall 목록을 닫고 새 버킷에서 다시 읽는다(병합·이관 없음). 데스크톱 설정과 자동 동기화하지 않는다 — 별개 surface 계약이다. 이 recall 은 새 Remote API/endpoint 를 만들지 않고 기존 `/input` 전송 경로만 사용한다.
 
 터미널 종료는 control worker를 먼저 닫고 graceful window 동안 PTY master close를 bounded 재시도한다. resize 같은 control 작업이 master mutex를 잠시 보유해 첫 `try_lock`이 실패해도 이후 close로 EOF/HUP를 전달할 기회를 유지하며, window 안에 child가 종료되지 않을 때만 process-tree 강제 종료로 진행한다.
@@ -999,7 +1002,7 @@ pub enum AppError {
 
 ### 14.3 락 관리
 
-**`MutexExt` 트레이트**: 모든 `Mutex::lock()` 호출은 `lock_or_err()` 헬퍼를 사용한다.
+**`MutexExt` 트레이트**: 모든 `Mutex::lock()` 호출은 이름 있는 `MutexExt` 헬퍼를 사용한다. 정상 운영 경로는 `lock_or_err()`로 poison을 오류 처리한다.
 
 ```rust
 // ❌ 금지 — 보일러플레이트 반복
@@ -1009,6 +1012,8 @@ state.terminals.lock().map_err(|e| format!("Lock error: {e}"))?;
 use crate::lock_ext::MutexExt;
 state.terminals.lock_or_err()?;
 ```
+
+**poison cleanup 예외**: `lock_or_recover_for_cleanup(context)`은 이미 외부 사용이 끝난 상태를 폐기하고 waiter를 깨우는 cleanup과, 그 cleanup을 기다리는 terminal-output fatal waiter에서만 허용한다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). generation retirement는 이 helper로 protocol/runtime/desktop-flow 상태를 폐기하고 `retired`를 공표한 뒤 subscriber/lease를 제거하고 Condvar waiter를 깨운다. `wait_until_retired()`는 poison guard를 회수하더라도 lease·ACK·credit 같은 정상 상태를 읽거나 복구하지 않으며, mutex와 독립적인 `AtomicBool retired`만 권위 소스로 삼아 Condvar를 다시 기다린다. 일반 attach·ACK·record·capacity 경로는 poison을 성공으로 복구하지 않고 fail-closed한다. terminal-output 이외의 복구 정책 확장은 issue #631에서 결정한다.
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 
@@ -1023,6 +1028,8 @@ state.terminals.lock_or_err()?;
 13. remote_access → 14. remote_control → 15. cloud_tunnel →
 16. cloud → 17. exec_locks(table mutex only)
 ```
+
+terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
 

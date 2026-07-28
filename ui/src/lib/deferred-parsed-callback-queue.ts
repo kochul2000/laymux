@@ -1,6 +1,7 @@
 interface DeferredParsedCallback {
-  onParsed: () => void;
+  onParsed?: () => void;
   onDiscard?: () => void;
+  settled: boolean;
 }
 
 export interface DrainedParsedCallbacks {
@@ -16,8 +17,9 @@ export interface DrainedParsedCallbacks {
 export class DeferredParsedCallbackQueue {
   private callbacks: DeferredParsedCallback[] = [];
 
-  push(onParsed: () => void, onDiscard?: () => void): void {
-    this.callbacks.push({ onParsed, onDiscard });
+  push(onParsed?: () => void, onDiscard?: () => void): void {
+    if (!onParsed && !onDiscard) return;
+    this.callbacks.push({ onParsed, onDiscard, settled: false });
   }
 
   drain(): DrainedParsedCallbacks | undefined {
@@ -28,7 +30,9 @@ export class DeferredParsedCallbackQueue {
       if (settled) return;
       settled = true;
       for (const callback of callbacks) {
-        if (outcome === "parsed") callback.onParsed();
+        if (callback.settled) continue;
+        callback.settled = true;
+        if (outcome === "parsed") callback.onParsed?.();
         else callback.onDiscard?.();
       }
     };
@@ -40,6 +44,32 @@ export class DeferredParsedCallbackQueue {
 
   discard(): void {
     const callbacks = this.callbacks.splice(0);
-    for (const callback of callbacks) callback.onDiscard?.();
+    for (const callback of callbacks) {
+      if (callback.settled) continue;
+      callback.settled = true;
+      callback.onDiscard?.();
+    }
+  }
+
+  /**
+   * Capture only the currently pending logical ranges for an immediate prefix
+   * emission. Calling the returned closure removes/discards that snapshot;
+   * success leaves it queued until the stabilizer releases its held tail.
+   */
+  snapshotDiscard(): (() => void) | undefined {
+    const callbacks = this.callbacks.filter(({ settled }) => !settled);
+    if (callbacks.length === 0) return undefined;
+    let invoked = false;
+    return () => {
+      if (invoked) return;
+      invoked = true;
+      const captured = new Set(callbacks);
+      this.callbacks = this.callbacks.filter((callback) => !captured.has(callback));
+      for (const callback of callbacks) {
+        if (callback.settled) continue;
+        callback.settled = true;
+        callback.onDiscard?.();
+      }
+    };
   }
 }

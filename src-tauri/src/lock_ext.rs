@@ -14,11 +14,28 @@ use crate::error::AppError;
 /// ```
 pub trait MutexExt<T> {
     fn lock_or_err(&self) -> Result<MutexGuard<'_, T>, AppError>;
+
+    /// Recover a poisoned guard only for fail-stop cleanup/liveness state.
+    ///
+    /// Callers must not resume normal use of the protected value. This exists
+    /// for terminal-generation retirement and condvar gates whose sole job is
+    /// to wake blocked threads while the poisoned generation is discarded.
+    fn lock_or_recover_for_cleanup(&self, context: &'static str) -> MutexGuard<'_, T>;
 }
 
 impl<T> MutexExt<T> for Mutex<T> {
     fn lock_or_err(&self) -> Result<MutexGuard<'_, T>, AppError> {
         self.lock().map_err(|e| AppError::Lock(format!("{e}")))
+    }
+
+    fn lock_or_recover_for_cleanup(&self, context: &'static str) -> MutexGuard<'_, T> {
+        match self.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::warn!(context, "recovering poisoned mutex for fail-stop cleanup");
+                poisoned.into_inner()
+            }
+        }
     }
 }
 
@@ -45,5 +62,17 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().starts_with("Lock poisoned:"));
+    }
+
+    #[test]
+    fn cleanup_recovery_returns_poisoned_value_without_clearing_normal_failure() {
+        let mutex = Mutex::new(7);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = mutex.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        assert_eq!(*mutex.lock_or_recover_for_cleanup("test cleanup"), 7);
+        assert!(mutex.lock_or_err().is_err());
     }
 }

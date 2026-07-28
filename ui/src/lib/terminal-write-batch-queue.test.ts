@@ -174,6 +174,33 @@ describe("TerminalWriteBatchQueue", () => {
     expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([4]);
   });
 
+  it("coalesces explicitly compatible callbacks while retaining every entry", () => {
+    const queue = new TerminalWriteBatchQueue<TestMetadata>();
+    const parsed: number[] = [];
+    const discarded: number[] = [];
+    queue.enqueue(
+      request([1], {
+        coalesceCallbacks: true,
+        onParsed: () => parsed.push(1),
+        onDiscard: () => discarded.push(1),
+      }),
+    );
+    queue.enqueue(
+      request([2], {
+        coalesceCallbacks: true,
+        onParsed: () => parsed.push(2),
+        onDiscard: () => discarded.push(2),
+      }),
+    );
+
+    const batch = queue.dequeue();
+    expect(batch).toMatchObject({ partCount: 2, data: new Uint8Array([1, 2]) });
+    for (const entry of batch?.entries ?? []) entry.onParsed?.();
+
+    expect(parsed).toEqual([1, 2]);
+    expect(discarded).toEqual([]);
+  });
+
   it("never materializes more than the fixed part budget", () => {
     const queue = new TerminalWriteBatchQueue<TestMetadata>();
     for (let value = 0; value < TERMINAL_WRITE_BATCH_MAX_PARTS + 2; value += 1) {
