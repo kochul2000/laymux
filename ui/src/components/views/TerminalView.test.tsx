@@ -9534,7 +9534,7 @@ describe("TerminalView desktop input composer", () => {
    *
    * Recovery assertions are about the **byte stream**, not about how many
    * `write()` calls it took: a repair drain hands the served range and the deltas
-   * it splices in front of to one merged write (issue #606, ADR-0079). Asserting
+   * it splices in front of to one merged write (issue #606, ADR-0080). Asserting
    * on `decodedWrites()` entries would pin the batching, which is exactly the
    * thing that is allowed to change.
    */

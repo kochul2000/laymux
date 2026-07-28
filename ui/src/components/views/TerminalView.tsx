@@ -3082,7 +3082,7 @@ export function TerminalView({
     const parsingTerminalWrites: DeferredTerminalWrite[] = [];
     /**
      * Backpressure-gated apply queue: merges an output backlog instead of paying
-     * the per-segment constant thousands of times (issue #606, ADR-0079). Lives
+     * the per-segment constant thousands of times (issue #606, ADR-0080). Lives
      * here, beside the write FIFO it is driven by — the moment xterm finishes a
      * write is exactly the moment a merged batch should go in. See
      * {@link TerminalOutputApplyQueue} for why the cost is per-segment, and

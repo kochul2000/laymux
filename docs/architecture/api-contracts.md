@@ -296,7 +296,7 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     [oneshot channel → HTTP response]
 ```
 
-**브리지 마감은 요청에 실려 간다.** `bridge_request` 는 emit 시각에 5초(`FRONTEND_RESPONSE_TIMEOUT`) 타이머를 걸고 초과 시 `504 Frontend response timeout` 을 낸다. 그 시각을 프론트가 알아야 하므로 `automation-request` payload 에 `emittedAtMs`·`deadlineMs` 를 함께 싣는다([ADR-0079](../adr/0079-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
+**브리지 마감은 요청에 실려 간다.** `bridge_request` 는 emit 시각에 5초(`FRONTEND_RESPONSE_TIMEOUT`) 타이머를 걸고 초과 시 `504 Frontend response timeout` 을 낸다. 그 시각을 프론트가 알아야 하므로 `automation-request` payload 에 `emittedAtMs`·`deadlineMs` 를 함께 싣는다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
 
 - 마감을 넘긴 **query** 는 계산하지 않고 `Frontend request expired` 로 즉시 거절한다 — 답이 닿을 상대가 없으므로 계산은 이미 밀린 메인 스레드의 시간만 빼앗고, 클라이언트 재시도가 같은 큐 뒤에 죽은 일감을 더 쌓는다.
 - 마감을 넘긴 **action** 은 그대로 실행한다 — 부수효과는 여전히 호출자가 요청한 것이며, 조용히 버리면 "느린 resize" 가 "일어나지 않은 resize" 가 된다.

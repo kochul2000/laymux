@@ -4,7 +4,7 @@ import type { TerminalOutputAppliedSegment } from "./terminal-output-attach-coor
 import { coalesceTerminalOutputSegments } from "./terminal-output-coalesce";
 
 /**
- * Coalescing is only safe if it is invisible (issue #606, ADR-0079).
+ * Coalescing is only safe if it is invisible (issue #606, ADR-0080).
  *
  * The unit tests next door prove the coalescer's arithmetic. They cannot prove
  * the thing that actually matters: that streaming the merged segments into a VT
