@@ -126,9 +126,31 @@ function armStreamAttachResetGate(): void {
     resolveStreamAttachReset = resolve;
   });
 }
-const mockReset = vi.fn(() => {
+// Modelled on the real `reset()`, whose semantics are pinned against the shipped
+// bundle in `ui/src/test/screen/xterm-semantics.screen.test.ts`: it empties the
+// buffer, collapses the scrollback to `baseY === 0`, and emits `onScroll`
+// **synchronously** on the way out. A bare `vi.fn()` modelled none of that, which
+// left issue #602 — that synchronous scroll being charged to an open IME
+// composition anchor — inexpressible at this tier. ADR-0074 keeps byte→cell claims
+// in the screen suite and leaves this component-level reproduction here.
+//
+// Only an `open()`ed terminal gets the buffer/scroll effects. The rendererless
+// checkpoint mirror (`TerminalRenderCheckpointModel`, ADR-0069) resets its own
+// instance on every attach, and in production that instance owns a private buffer
+// with no viewport listeners. Here every mock instance shares `mockBufferActive`
+// and the one `capturedScrollHandler`, so without this gate the mirror's reset
+// would fire the visible pane's scroll handler. Gate arming stays ungated — it
+// only tracks that an attach reset has happened at all.
+const mockReset = vi.fn((terminal?: { wasOpened?: boolean }) => {
   streamAttachResetSeen = true;
   resolveStreamAttachReset?.();
+  if (!terminal?.wasOpened) return;
+  mockBufferActive.cursorX = 0;
+  mockBufferActive.cursorY = 0;
+  mockBufferActive.baseY = 0;
+  mockBufferActive.viewportY = 0;
+  mockBufferActive.length = 1;
+  capturedScrollHandler?.();
 });
 // Captured before any test installs fake timers, so the bail-out below still
 // measures wall clock while `vi.useFakeTimers()` is active.
@@ -285,7 +307,9 @@ vi.mock("@xterm/xterm", () => ({
     // Passes itself so a test can tell *which* terminals were cleared, not just
     // how many calls happened (issue #571).
     clearTextureAtlas = () => mockClearTextureAtlas(this);
-    reset = mockReset;
+    // Passes itself so the real `reset()` semantics only apply to the pane's own
+    // opened terminal, not to the rendererless checkpoint mirror (issue #602).
+    reset = () => mockReset(this);
     dispose = vi.fn();
     loadAddon = vi.fn();
     registerLinkProvider = vi.fn().mockReturnValue({ dispose: vi.fn() });
@@ -1071,6 +1095,10 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
+    // The attach reset empties the buffer (issue #602), so buffer state seeded
+    // before it lands would be wiped — the same ordering rule the parser-handler
+    // gate enforces for stream-derived state (issue #603).
+    await waitForStreamAttachReset();
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 2;
     terminal.buffer.active.cursorY = 4;
@@ -1141,6 +1169,8 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
+    // See above: buffer state has to be seeded after the attach reset.
+    await waitForStreamAttachReset();
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 2;
     terminal.buffer.active.cursorY = 4;
@@ -1228,6 +1258,8 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
+    // See above: buffer state has to be seeded after the attach reset.
+    await waitForStreamAttachReset();
     terminal.buffer.active.baseY = 100;
     terminal.buffer.active.viewportY = 100;
     terminal.buffer.active.cursorX = 2;
@@ -2330,6 +2362,291 @@ describe("TerminalView", () => {
         await csiHandlers.get("?:h")?.([25]);
       });
       expect(traces("dectcem-park").length).toBeGreaterThan(0);
+    } finally {
+      logSpy.mockRestore();
+      localStorage.removeItem("laymux:cursor-trace");
+    }
+  });
+
+  // ── issue #602: composition anchor across a stream rebuild ──────────────────
+  // A rebuild is `terminal.reset()` plus the snapshot replay serialized behind
+  // it. The reset emits `onScroll` synchronously with `baseY` already 0, and the
+  // replay grows `baseY` back over many awaited writes. The scenarios below fix
+  // that only the *net* scrollback shift may reach an open composition anchor:
+  // charging the two halves separately parks the preview off the top of the
+  // screen for the rest of the composition, because a Korean syllable commits
+  // long before the replay finishes repaying the jump.
+  describe("composition anchor across a stream rebuild (issue #602)", () => {
+    const SCROLLBACK = 1000;
+    /** The composing input line, as a viewport row. */
+    const INPUT_ROW = 20;
+    const INPUT_COL = 4;
+    /** 800x480 over 80x24 cells => 10x20 per cell. */
+    const anchorTransform = (screenRow: number) =>
+      `translate(${INPUT_COL * 10}px, ${screenRow * 20}px)`;
+    const REPLAY_MARKER = "rebuilt";
+    // Ends past the escalating delta below, so the reattached coordinator does not
+    // immediately report another gap and loop the pane through more rebuilds. The
+    // range has to match the snapshot length exactly or the attachment is rejected.
+    const REPLAY_END_SEQ = 8192;
+    const rebuildAttachment = () => {
+      const snapshot = Array.from(new TextEncoder().encode(REPLAY_MARKER));
+      return {
+        state: {
+          version: 1,
+          generation: 1,
+          snapshotStartSeq: REPLAY_END_SEQ - snapshot.length,
+          snapshotSeq: REPLAY_END_SEQ,
+          sourceStartSeq: REPLAY_END_SEQ - snapshot.length,
+          sourceSeq: REPLAY_END_SEQ,
+          snapshotKind: "raw",
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+          geometry: { revision: 0, cols: 80, rows: 24 },
+        },
+        snapshot,
+      };
+    };
+
+    /**
+     * Drive one mid-composition rebuild and report what the anchor was charged.
+     *
+     * `restoredScrollback` is how tall the replayed snapshot leaves the
+     * scrollback. The mocked `write` has no VT parser, so the replay's effect on
+     * `baseY` is applied by the fixture — hooked on the snapshot write itself, so
+     * it lands inside the rebuild window exactly where xterm's own scroll would.
+     * That hook is also the only place the *intermediate* anchor state is
+     * observable: React has not re-rendered yet, so the trace is read instead.
+     */
+    const runRebuild = async (
+      terminalId: string,
+      restoredScrollback: number,
+    ): Promise<{
+      deltasDuringRebuild: number[];
+      deltasAfterRebuild: number[];
+      transformBefore: string;
+      transformAfter: string;
+    }> => {
+      mockResumeTerminalOutput.mockResolvedValue(null);
+      localStorage.setItem("laymux:cursor-trace", "1");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const anchorScrollDeltas = () =>
+        logSpy.mock.calls
+          .filter(
+            (call) =>
+              typeof call[0] === "string" && call[0].includes("ime-composition-anchor-scrolled"),
+          )
+          .map((call) => (call[1] as { rowDelta: number }).rowDelta);
+      try {
+        render(
+          <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" isFocused />,
+        );
+        act(() => {
+          useTerminalStore.getState().updateInstanceInfo(terminalId, {
+            activity: { type: "shell" },
+          });
+        });
+        const container = screen.getByTestId(`terminal-view-${terminalId}`);
+        const preview = screen.getByTestId(`terminal-composition-preview-${terminalId}`);
+        const terminal = createdTerminals[0] as unknown as { element: HTMLDivElement };
+        const rect = () =>
+          ({
+            left: 0,
+            top: 0,
+            width: 800,
+            height: 480,
+            right: 800,
+            bottom: 480,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          }) as DOMRect;
+        const screenEl = document.createElement("div");
+        screenEl.className = "xterm-screen";
+        screenEl.getBoundingClientRect = rect;
+        const helper = document.createElement("textarea");
+        helper.className = "xterm-helper-textarea";
+        terminal.element.append(screenEl, helper);
+        container.getBoundingClientRect = rect;
+        // The mount attach owns the first rebuild; the scrollback below has to be
+        // seeded after its reset, not before.
+        await waitForTerminalInputReady();
+        const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+          | ((data: Uint8Array | Record<string, unknown>) => void)
+          | undefined;
+        expect(onOutput).toBeTypeOf("function");
+
+        // Deep scrollback: the reset's `baseY → 0` is the whole defect, so it has
+        // to be large enough that a mis-anchored preview is off-screen.
+        mockBufferActive.baseY = SCROLLBACK;
+        mockBufferActive.viewportY = SCROLLBACK;
+        mockBufferActive.cursorX = INPUT_COL;
+        mockBufferActive.cursorY = INPUT_ROW;
+        act(() => {
+          helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+          helper.value = "ㄱ";
+          helper.selectionStart = 1;
+          helper.selectionEnd = 1;
+          helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+          helper.dispatchEvent(new Event("input"));
+        });
+        await vi.waitFor(() => expect(preview.textContent).toBe("ㄱ"));
+        const transformBefore = preview.style.transform;
+
+        let deltasDuringRebuild: number[] | undefined;
+        const writeDefault = (data: string | Uint8Array, callback?: () => void) => {
+          void data;
+          callback?.();
+        };
+        mockAttachTerminalOutput.mockResolvedValueOnce(rebuildAttachment());
+        mockWrite.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+          const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+          if (deltasDuringRebuild === undefined && text.includes(REPLAY_MARKER)) {
+            deltasDuringRebuild = anchorScrollDeltas();
+            mockBufferActive.baseY = restoredScrollback;
+            mockBufferActive.viewportY = restoredScrollback;
+            mockBufferActive.cursorY = INPUT_ROW;
+            capturedScrollHandler?.();
+          }
+          callback?.();
+        });
+
+        const resetsBefore = mockReset.mock.calls.length;
+        act(() => {
+          // A fully-formed delta far past the expected sequence: a real gap, and
+          // `resume` answers `null` so the ring cannot bridge it — the escalation
+          // that ends in a rebuild (ADR-0072).
+          onOutput?.({
+            generation: 1,
+            seqStart: 4096,
+            seqEnd: 4099,
+            data: [0x61, 0x62, 0x63],
+            geometry: { revision: 0, cols: 80, rows: 24 },
+          });
+        });
+        await vi.waitFor(() => {
+          expect(mockReset.mock.calls.length).toBeGreaterThan(resetsBefore);
+        });
+        await vi.waitFor(() => expect(deltasDuringRebuild).toBeDefined());
+        // Let the anchor state the rebuild leaves behind reach the DOM.
+        await act(async () => {
+          await Promise.resolve();
+        });
+        mockWrite.mockImplementation(writeDefault);
+        // The composition is still open — that is the point. A rebuild that hands
+        // the anchor an intermediate row breaks the preview until it commits.
+        expect(preview.textContent).toBe("ㄱ");
+        return {
+          deltasDuringRebuild: deltasDuringRebuild ?? [],
+          deltasAfterRebuild: anchorScrollDeltas(),
+          transformBefore,
+          transformAfter: preview.style.transform,
+        };
+      } finally {
+        logSpy.mockRestore();
+        warnSpy.mockRestore();
+        localStorage.removeItem("laymux:cursor-trace");
+      }
+    };
+
+    it("hides the reset's scroll from the anchor when the replay restores the scrollback", async () => {
+      const result = await runRebuild("t-ime-rebuild-even", SCROLLBACK);
+
+      expect(result.transformBefore).toBe(anchorTransform(INPUT_ROW));
+      // Nothing at all: the rebuild ends where it started, so there is no net.
+      // Before the fix this read `[-1000]` — the reset's synchronous `onScroll`,
+      // already charged by the time the replay began.
+      expect(result.deltasDuringRebuild).toEqual([]);
+      expect(result.deltasAfterRebuild).toEqual([]);
+      expect(result.transformAfter).toBe(anchorTransform(INPUT_ROW));
+    });
+
+    it("charges only the net scrollback shift when the replay restores less", async () => {
+      const restored = 400;
+      const result = await runRebuild("t-ime-rebuild-shorter", restored);
+
+      expect(result.transformBefore).toBe(anchorTransform(INPUT_ROW));
+      expect(result.deltasDuringRebuild).toEqual([]);
+      // One charge, once, and it is the shift that keeps the anchor on the screen
+      // row the input line occupies — issue #570's rule applied to the rebuild as
+      // a whole instead of to each of its halves.
+      expect(result.deltasAfterRebuild).toEqual([restored - SCROLLBACK]);
+      expect(result.transformAfter).toBe(anchorTransform(INPUT_ROW));
+    });
+  });
+
+  it("carries an open composition anchor along with a live TUI scroll", async () => {
+    // Issue #570 regression guard at the wiring level: the rebuild suppression
+    // above must not swallow ordinary scrolls. A TUI that keeps its input box at
+    // the bottom grows `baseY` as it prints, and a stationary anchor would drift
+    // upward by exactly the rows emitted.
+    localStorage.setItem("laymux:cursor-trace", "1");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const anchorScrollDeltas = () =>
+      logSpy.mock.calls
+        .filter(
+          (call) =>
+            typeof call[0] === "string" && call[0].includes("ime-composition-anchor-scrolled"),
+        )
+        .map((call) => (call[1] as { rowDelta: number }).rowDelta);
+    try {
+      render(
+        <TerminalView instanceId="t-ime-tui-scroll" profile="PowerShell" syncGroup="" isFocused />,
+      );
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo("t-ime-tui-scroll", {
+          activity: { type: "shell" },
+        });
+      });
+      const container = screen.getByTestId("terminal-view-t-ime-tui-scroll");
+      const preview = screen.getByTestId("terminal-composition-preview-t-ime-tui-scroll");
+      const terminal = createdTerminals[0] as unknown as { element: HTMLDivElement };
+      const rect = () =>
+        ({
+          left: 0,
+          top: 0,
+          width: 800,
+          height: 480,
+          right: 800,
+          bottom: 480,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      screenEl.getBoundingClientRect = rect;
+      const helper = document.createElement("textarea");
+      helper.className = "xterm-helper-textarea";
+      terminal.element.append(screenEl, helper);
+      container.getBoundingClientRect = rect;
+      await waitForTerminalInputReady();
+
+      mockBufferActive.baseY = 100;
+      mockBufferActive.viewportY = 100;
+      mockBufferActive.cursorX = 4;
+      mockBufferActive.cursorY = 20;
+      act(() => {
+        helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+        helper.value = "ㄱ";
+        helper.selectionStart = 1;
+        helper.selectionEnd = 1;
+        helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
+        helper.dispatchEvent(new Event("input"));
+      });
+      await vi.waitFor(() => expect(preview.textContent).toBe("ㄱ"));
+      expect(preview.style.transform).toBe("translate(40px, 400px)");
+
+      // Nine rows of agent output: the input box stays on its screen row.
+      mockBufferActive.baseY = 109;
+      mockBufferActive.viewportY = 109;
+      await act(async () => {
+        capturedScrollHandler?.();
+      });
+
+      expect(anchorScrollDeltas()).toEqual([9]);
+      await vi.waitFor(() => expect(preview.style.transform).toBe("translate(40px, 400px)"));
     } finally {
       logSpy.mockRestore();
       localStorage.removeItem("laymux:cursor-trace");
@@ -8796,6 +9113,9 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     await vi.waitFor(() => {
       expect(capturedScrollHandler).not.toBeNull();
     });
+    // The attach reset empties the buffer and emits its own scroll (issue #602),
+    // so the viewport state below has to be seeded after it lands.
+    await waitForStreamAttachReset();
 
     expect(screen.queryByTestId("terminal-scroll-to-bottom-t-jump")).not.toBeInTheDocument();
 
@@ -8816,6 +9136,7 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
       await vi.waitFor(() => {
         expect(capturedScrollHandler).not.toBeNull();
       });
+      await waitForStreamAttachReset();
 
       // Scroll up: normally this would reveal the button.
       mockBufferActive.baseY = 100;
@@ -8835,6 +9156,7 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     await vi.waitFor(() => {
       expect(capturedScrollHandler).not.toBeNull();
     });
+    await waitForStreamAttachReset();
 
     mockBufferActive.baseY = 100;
     mockBufferActive.viewportY = 30;
@@ -8855,6 +9177,23 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     // Reattach/restore case: the viewport is parked above the scrollback
     // bottom before the first onScroll fires. The mount-time refresh must
     // sync the button so it appears without waiting for a scroll event.
+    //
+    // The attach is parked for the whole test on purpose. Its `terminal.reset()`
+    // empties the buffer and emits a scroll of its own (issue #602), which would
+    // answer the question being asked here; what this pins is the refresh inside
+    // `terminal.open()`, which runs before any stream attach.
+    const attachPayload = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    let releaseAttach = () => {};
+    const attachHeld = new Promise<void>((resolve) => {
+      releaseAttach = resolve;
+    });
+    mockAttachTerminalOutput.mockImplementationOnce(async () => {
+      await attachHeld;
+      return attachPayload;
+    });
+    // This `describe` does not clear mocks between tests, so count from here.
+    const resetsBefore = mockReset.mock.calls.length;
     mockBufferActive.baseY = 100;
     mockBufferActive.viewportY = 30;
     render(<TerminalView instanceId="t-jump-init" profile="PowerShell" syncGroup="" />);
@@ -8865,6 +9204,11 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     await vi.waitFor(() => {
       expect(screen.getByTestId("terminal-scroll-to-bottom-t-jump-init")).toBeInTheDocument();
     });
+    expect(mockReset.mock.calls.length).toBe(resetsBefore);
+    await act(async () => {
+      releaseAttach();
+      await attachHeld;
+    });
   });
 
   it("hides the button again when the viewport returns to the bottom", async () => {
@@ -8872,6 +9216,7 @@ describe("TerminalView jump-to-bottom button (issue #349)", () => {
     await vi.waitFor(() => {
       expect(capturedScrollHandler).not.toBeNull();
     });
+    await waitForStreamAttachReset();
 
     mockBufferActive.baseY = 100;
     mockBufferActive.viewportY = 30;
