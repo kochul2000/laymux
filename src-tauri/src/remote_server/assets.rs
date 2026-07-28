@@ -268,14 +268,19 @@ mod tests {
             plain.headers().get(header::CACHE_CONTROL).unwrap(),
             FONT_CACHE_CONTROL
         );
-        assert_eq!(plain.headers().get(header::VARY).unwrap(), "Accept-Encoding");
+        assert_eq!(
+            plain.headers().get(header::VARY).unwrap(),
+            "Accept-Encoding"
+        );
         assert!(plain.headers().get(header::CONTENT_ENCODING).is_none());
         let body = axum::body::to_bytes(plain.into_body(), usize::MAX)
             .await
             .unwrap();
         assert_eq!(body, raw);
 
-        let brotli = font.brotli_bytes().expect("brotli bytes should be produced");
+        let brotli = font
+            .brotli_bytes()
+            .expect("brotli bytes should be produced");
         let encoded = font_response(&font, Some(brotli.clone()));
         assert_eq!(
             encoded.headers().get(header::CONTENT_ENCODING).unwrap(),

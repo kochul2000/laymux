@@ -2911,8 +2911,14 @@
         const REMOTE_FONT_URL_PATTERN = /^\/remote\/font\/[0-9a-f]{16}\.(?:ttf|otf)$/;
         const REMOTE_FONT_WEIGHTS = new Set([400, 700]);
         const REMOTE_FONT_STYLES = new Set(["normal", "italic"]);
+        // A download can fail transiently — a phone drops out mid-fetch, or the
+        // desktop restarted between advertising the URL and being asked for the
+        // bytes (that lookup is a 404). One such miss must not pin the session
+        // to the fallback font, so a failure is retried on the next navigation
+        // refresh or attach, bounded so a genuinely broken font stops asking.
+        const REMOTE_FONT_MAX_ATTEMPTS = 3;
         const remoteFontFamilyState = new Map();
-        let remoteFontStyleElement = null;
+        const remoteFontAttempts = new Map();
 
         // Server-controlled strings end up inside a CSS rule, so accept only the
         // exact shapes this contract defines.
@@ -2940,39 +2946,39 @@
         function ensureRemoteFont(appearance) {
           const assets = normalizeFontAssets(appearance && appearance.fontAssets);
           if (!assets || remoteFontFamilyState.has(assets.family)) return;
+          const attempts = remoteFontAttempts.get(assets.family) || 0;
+          if (attempts >= REMOTE_FONT_MAX_ATTEMPTS) return;
+          remoteFontAttempts.set(assets.family, attempts + 1);
           remoteFontFamilyState.set(assets.family, "loading");
-          if (!remoteFontStyleElement) {
-            remoteFontStyleElement = document.createElement("style");
-            document.head.appendChild(remoteFontStyleElement);
-          }
-          remoteFontStyleElement.appendChild(
-            document.createTextNode(
-              assets.faces
-                .map(
-                  (face) =>
-                    `@font-face{font-family:"${assets.family}";src:url("${face.url}");` +
-                    `font-weight:${face.weight};font-style:${face.style};font-display:swap;}`
-                )
-                .join("\n")
-            )
-          );
           loadRemoteFont(assets);
         }
 
+        // FontFace objects rather than an injected `@font-face` rule: a rule
+        // whose src failed once stays in an error state, so a retry through it
+        // never re-requests. A fresh FontFace per attempt does, and the family
+        // never has to be interpolated into CSS text.
         async function loadRemoteFont(assets) {
+          const fontFaces = assets.faces.map(
+            (face) =>
+              new FontFace(assets.family, `url("${face.url}")`, {
+                weight: String(face.weight),
+                style: face.style,
+                display: "swap",
+              })
+          );
           try {
-            await Promise.all(
-              assets.faces.map((face) =>
-                document.fonts.load(`${face.style} ${face.weight} 16px "${assets.family}"`)
-              )
-            );
+            const loaded = await Promise.all(fontFaces.map((fontFace) => fontFace.load()));
+            loaded.forEach((fontFace) => document.fonts.add(fontFace));
           } catch (_) {
-            // A failed download just leaves the name-only fallback stack in place.
+            // Drop the state so the next refresh can retry, up to the attempt cap.
+            remoteFontFamilyState.delete(assets.family);
+            return;
           }
-          // `document.fonts.load` also resolves when nothing matched, so ask.
-          const ready = document.fonts.check(`16px "${assets.family}"`);
-          remoteFontFamilyState.set(assets.family, ready ? "ready" : "failed");
-          if (!ready) return;
+          if (!document.fonts.check(`16px "${assets.family}"`)) {
+            remoteFontFamilyState.delete(assets.family);
+            return;
+          }
+          remoteFontFamilyState.set(assets.family, "ready");
           // Cell metrics just changed under the terminal: re-apply the (now
           // different) family string to force a re-measure, then re-fit so the
           // PTY gets the column count this font actually produces.

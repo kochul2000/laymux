@@ -161,14 +161,19 @@ mod tests {
     #[test]
     fn remote_page_html_registers_the_desktop_terminal_font() {
         let html = remote_page_html();
-        // Only the exact advertised shapes may reach a CSS rule.
+        // Only the exact advertised shapes may be registered as a font.
         assert!(html.contains("const REMOTE_FONT_FAMILY_PATTERN = /^LxRemoteFont-[0-9a-f]{12}$/;"));
         assert!(html.contains(
             "const REMOTE_FONT_URL_PATTERN = /^\\/remote\\/font\\/[0-9a-f]{16}\\.(?:ttf|otf)$/;"
         ));
-        assert!(html.contains("@font-face{font-family:\""));
-        // `document.fonts.load` resolves even when nothing matched, so the
-        // ready flag has to come from an explicit check.
+        // A CSS `@font-face` rule whose src failed once stays in an error state,
+        // so a retry through it would never re-request. FontFace objects do.
+        assert!(html.contains("new FontFace(assets.family, `url(\"${face.url}\")`, {"));
+        assert!(!html.contains("@font-face{font-family:"));
+        assert!(html.contains("const REMOTE_FONT_MAX_ATTEMPTS = 3;"));
+        assert!(html.contains("remoteFontFamilyState.delete(assets.family);"));
+        // A load can resolve without the family becoming usable, so the ready
+        // flag comes from an explicit check.
         assert!(html.contains("document.fonts.check(`16px \"${assets.family}\"`)"));
         // The alias is prepended only once loaded, so the fontFamily string
         // really changes and xterm re-measures the cell (ADR-0077).

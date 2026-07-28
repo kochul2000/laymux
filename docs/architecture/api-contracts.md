@@ -818,9 +818,10 @@ appearance 에 선택적 `fontAssets: { family, faces: [{ url, weight, style }] 
 `url`은 위 폰트 route, `weight`는 400/700, `style`은 `normal`/`italic`이다. regular 와 같은 파일로
 해석되는 bold/italic 은 목록에 넣지 않고 브라우저 합성에 맡긴다. 토글이 꺼져 있거나 face 해석 실패·
 폰트 컬렉션(`ttcf`)·페이스당 8 MiB 초과이면 필드를 생략하고 remote 는 이름-only `fontFamily` 스택으로
-폴백한다. Remote 클라이언트는 `@font-face` 등록 후 실제 로드가 확인된 뒤에만 `family` 를 `fontFamily`
-스택 맨 앞에 붙인다 — xterm `OptionsService`는 값이 바뀔 때만 셀을 다시 재기 때문에, 로드 완료가
-곧 문자열 변경이어야 재계측과 재fit 이 일어난다.
+폴백한다. Remote 클라이언트는 `FontFace` 객체로 등록하고 실제 로드가 확인된 뒤에만 `family` 를
+`fontFamily` 스택 맨 앞에 붙인다 — xterm `OptionsService`는 값이 바뀔 때만 셀을 다시 재기 때문에,
+로드 완료가 곧 문자열 변경이어야 재계측과 재fit 이 일어난다. 로드 실패는 다음 navigation 갱신이나
+attach 에서 재시도하며 face 당 3 회로 제한한다.
 
 `write`/`input`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 이 검사는 route의 선행 status 확인이 아니라 Local Tauri command와 공유하는 backend human-control operation permit 등록 시점에 수행한다. permit은 등록 시점의 absolute deadline·owner epoch·operation id와 enqueue phase를 가지며, structured input은 protocol-state gate에서 mode를 캡처한 뒤 PTY control worker 큐 진입 직전에 소유권을 재검증한다. 동일 terminal의 작업은 permit 등록 순서대로 enqueue되므로 structured input 준비 중 뒤에 등록된 raw write/resize가 먼저 PTY에 도착하지 않는다. owner 전환은 아직 enqueue되지 않은 등록 요청을 취소·분리하고, 이미 queued/running인 요청은 per-terminal worker cancel과 completion acknowledgement까지 장벽에 남긴다. PTY handle table/protocol gate/owner gate는 queue wait나 물리 write 동안 잡지 않으며, worker는 physical operation 전후에 owner token을 재검증한다. 취소 adapter가 grace 안에 종료를 증명하지 못하면 해당 PTY를 종료·input-fault 격리하고 worker lifecycle completion을 확인할 때까지 Local owner를 공개하지 않는다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다.
 

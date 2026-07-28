@@ -91,6 +91,8 @@ interface FontHarness {
   appearance: Record<string, unknown>;
   /** Delay before the font body is returned, to exercise the late-arrival path. */
   fontDelayMs?: number;
+  /** Number of leading font requests answered with 404, as a restarted desktop would. */
+  failFirstFontRequests?: number;
   fontRequests: string[];
 }
 
@@ -110,6 +112,10 @@ async function installRemoteMocks(page: Page, harness: FontHarness) {
 
   await page.route("http://remote.test/remote/font/**", async (route) => {
     harness.fontRequests.push(new URL(route.request().url()).pathname);
+    if (harness.fontRequests.length <= (harness.failFirstFontRequests ?? 0)) {
+      await route.fulfill({ status: 404, body: "" });
+      return;
+    }
     if (harness.fontDelayMs) {
       await new Promise((resolve) => setTimeout(resolve, harness.fontDelayMs));
     }
@@ -235,6 +241,35 @@ test.describe("remote terminal font", () => {
     expect(fontFamily.endsWith(SERVER_FONT_STACK)).toBe(true);
   });
 
+  test("retries after a failed download instead of pinning the fallback font", async ({ page }) => {
+    const harness: FontHarness = {
+      appearance: {
+        ...baseAppearance,
+        fontAssets: {
+          family: FONT_FAMILY,
+          faces: [{ url: FONT_URL, weight: 400, style: "normal" }],
+        },
+      },
+      // A desktop restarted between advertising the URL and being asked for the
+      // bytes answers 404. One miss must not cost the whole session.
+      failFirstFontRequests: 1,
+      fontRequests: [],
+    };
+    await installRemoteMocks(page, harness);
+    await connectRemote(page);
+
+    await expect.poll(() => harness.fontRequests.length).toBeGreaterThanOrEqual(1);
+    expect(await terminalFontFamily(page)).toBe(SERVER_FONT_STACK);
+
+    // The next navigation refresh is what re-arms the attempt.
+    await page.locator("#navToggle").click();
+    await page.locator("#refresh").click();
+    await expect
+      .poll(() => terminalFontFamily(page), { timeout: 10000 })
+      .toBe(`'${FONT_FAMILY}', ${SERVER_FONT_STACK}`);
+    expect(harness.fontRequests.length).toBeGreaterThanOrEqual(2);
+  });
+
   test("keeps the name-only stack when no font is advertised", async ({ page }) => {
     const harness: FontHarness = { appearance: baseAppearance, fontRequests: [] };
     await installRemoteMocks(page, harness);
@@ -250,7 +285,7 @@ test.describe("remote terminal font", () => {
         ...baseAppearance,
         fontAssets: {
           // Not the `LxRemoteFont-<12 hex>` alias, and the url escapes the route.
-          family: "Evil\"; } body { display: none } @font-face { font-family: \"x",
+          family: 'Evil"; } body { display: none } @font-face { font-family: "x',
           faces: [{ url: "https://evil.example/font.ttf", weight: 400, style: "normal" }],
         },
       },
