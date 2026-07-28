@@ -1,4 +1,5 @@
 import { findNextVisibleWorkspaceId } from "@/lib/hidden-items";
+import { switchActiveWorkspace } from "@/lib/navigation-actions";
 import { sortWorkspaces } from "@/lib/workspace-sort";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -44,7 +45,12 @@ export function setWorkspaceHiddenWithFallback(
       return { hidden: false, blocked: true, fallbackWorkspaceId: null };
     }
     // Switch first so active content never disappears between store transitions.
-    workspaceState.setActiveWorkspace(fallbackWorkspaceId);
+    // The shared landing path also clears stale dock focus and resolves the
+    // global grid index against the fallback workspace (issue #578).
+    const switchResult = switchActiveWorkspace(fallbackWorkspaceId);
+    if (!switchResult.switched) {
+      return { hidden: false, blocked: true, fallbackWorkspaceId: null };
+    }
   }
 
   useUiStore.getState().setWorkspaceHidden(
@@ -68,8 +74,8 @@ export function ensureActiveWorkspaceVisible(): void {
     hiddenWorkspaceIds: uiState.hiddenWorkspaceIds,
   });
   if (fallbackWorkspaceId) {
-    workspaceState.setActiveWorkspace(fallbackWorkspaceId);
-    return;
+    const switchResult = switchActiveWorkspace(fallbackWorkspaceId);
+    if (switchResult.switched) return;
   }
 
   const activeWorkspace = workspaceState.workspaces.find((workspace) => workspace.id === activeId);

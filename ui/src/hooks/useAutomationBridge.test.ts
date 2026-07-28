@@ -850,6 +850,37 @@ describe("handleAutomationRequest", () => {
     expect(useUiStore.getState().hiddenWorkspaceIds.has(initial.id)).toBe(true);
   });
 
+  it("lands on the fallback grid when hiding the active workspace from dock focus", () => {
+    const initial = useWorkspaceStore.getState().workspaces[0];
+    useWorkspaceStore.getState().addWorkspace("Fallback", "default-layout");
+    const fallback = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.setState({
+      workspaces: useWorkspaceStore
+        .getState()
+        .workspaces.map((workspace) =>
+          workspace.id === fallback.id
+            ? { ...workspace, panes: workspace.panes.slice(0, 1) }
+            : workspace,
+        ),
+    });
+    useGridStore.getState().setFocusedPane(2);
+    useDockStore.getState().setFocusedDock("left", "dock-pane");
+
+    const result = handleAutomationRequest({
+      requestId: "toggle-active-hidden-from-dock",
+      category: "action",
+      target: "ui",
+      method: "toggleWorkspaceHidden",
+      params: { id: initial.id },
+    });
+
+    expect(result.success).toBe(true);
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(fallback.id);
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
   it("refuses an Automation toggle that would hide the last visible workspace", () => {
     const activeId = useWorkspaceStore.getState().activeWorkspaceId;
     const result = handleAutomationRequest({
