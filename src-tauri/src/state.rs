@@ -115,6 +115,12 @@ pub struct AppState {
     /// Serializes settings snapshot → validation → persistence across MCP sessions
     /// and legacy Automation setters so optimistic revisions cannot lose updates.
     pub settings_update_lock: tokio::sync::Mutex<()>,
+    /// Frontend responsiveness vitals plus bridge counters, served by
+    /// `GET /api/v1/diagnostics/frontend` without a bridge round-trip so a stalled
+    /// WebView is still diagnosable (issue #606). Diagnostic only — its own
+    /// `Mutex`/atomics participate in no ordering with the locks above because
+    /// nothing reads it while holding another AppState lock.
+    pub frontend_health: Arc<crate::frontend_health::FrontendHealthState>,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -147,6 +153,7 @@ impl AppState {
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
             exec_locks: Arc::new(Mutex::new(HashMap::new())),
             settings_update_lock: tokio::sync::Mutex::new(()),
+            frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
         }
     }
 }

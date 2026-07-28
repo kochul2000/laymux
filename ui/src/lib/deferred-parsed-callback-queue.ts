@@ -3,6 +3,11 @@ interface DeferredParsedCallback {
   onDiscard?: () => void;
 }
 
+export interface DrainedParsedCallbacks {
+  onParsed: () => void;
+  onDiscard: () => void;
+}
+
 /**
  * Keeps parser completion separate from lifecycle cancellation. A superseded
  * attach may release its internal waiter without reporting a stale write as
@@ -15,10 +20,22 @@ export class DeferredParsedCallbackQueue {
     this.callbacks.push({ onParsed, onDiscard });
   }
 
-  drain(): (() => void) | undefined {
+  drain(): DrainedParsedCallbacks | undefined {
     if (this.callbacks.length === 0) return undefined;
     const callbacks = this.callbacks.splice(0);
-    return () => callbacks.forEach((callback) => callback.onParsed());
+    let settled = false;
+    const settle = (outcome: "parsed" | "discarded") => {
+      if (settled) return;
+      settled = true;
+      for (const callback of callbacks) {
+        if (outcome === "parsed") callback.onParsed();
+        else callback.onDiscard?.();
+      }
+    };
+    return {
+      onParsed: () => settle("parsed"),
+      onDiscard: () => settle("discarded"),
+    };
   }
 
   discard(): void {

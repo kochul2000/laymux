@@ -32,6 +32,11 @@ import type {
 } from "@/stores/types";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 import {
+  recordBridgeCounter,
+  recordBridgeDeliveryLag,
+  startFrontendHealthReporter,
+} from "@/lib/frontend-health-reporter";
+import {
   focusDockPane,
   focusWorkspacePane,
   switchActiveWorkspace,
@@ -1314,25 +1319,97 @@ export async function handleAsyncAutomationRequest(
   return handleAutomationRequest(request);
 }
 
+/**
+ * Whether a request that has already outlived its Rust deadline should still run.
+ *
+ * `bridge_request` has stopped waiting, so a **query**'s answer can no longer
+ * reach anybody: computing it only spends main-thread time the frontend needs to
+ * catch up, and under an output flood the automation client's own retries pile
+ * more of that work behind the same queue (issue #606). An **action** is
+ * different — its side effect is still what the caller asked for, and silently
+ * dropping it would turn a slow resize into a resize that never happened. So
+ * queries are dropped past the deadline and actions are always run.
+ *
+ * Exported for the bridge tests; `category` is the backend's own "query"/"action"
+ * split from `AutomationRequest`.
+ */
+export function shouldRunExpiredAutomationRequest(request: AutomationRequest): boolean {
+  return request.category !== "query";
+}
+
+/** Record a response only after Rust has accepted its IPC command. */
+async function sendMeasuredAutomationResponse(
+  requestId: string,
+  success: boolean,
+  data?: unknown,
+  error?: string,
+): Promise<void> {
+  try {
+    await automationResponse(requestId, success, data, error);
+    recordBridgeCounter("responsesSent");
+  } catch {
+    recordBridgeCounter("responsesFailed");
+  }
+}
+
 /** Hook that bridges automation HTTP requests to Zustand stores. */
 export function useAutomationBridge() {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
+    // This push reporter must remain always-on: Rust serves its last snapshot
+    // out of band precisely when the automation bridge cannot answer (#606).
+    const stopHealthReporter = startFrontendHealthReporter();
 
     onAutomationRequest(async (request) => {
+      recordBridgeCounter("requestsReceived");
+      // Emit→handler delay. This is the bridge queue's real depth, and the number
+      // that separates "the handler is slow" from "the request waited" (#606).
+      if (Number.isFinite(request.emittedAtMs)) {
+        recordBridgeDeliveryLag(Math.max(0, Date.now() - request.emittedAtMs));
+      }
+      const expired = Number.isFinite(request.deadlineMs) && Date.now() > request.deadlineMs;
+      if (expired && !shouldRunExpiredAutomationRequest(request)) {
+        recordBridgeCounter("queriesDroppedExpired");
+        // Answer anyway: the channel is normally already gone, but if this request
+        // is merely close to its deadline rather than past it on the Rust clock,
+        // an explicit error is better than letting it burn the rest of the budget.
+        await sendMeasuredAutomationResponse(
+          request.requestId,
+          false,
+          undefined,
+          "Frontend request expired",
+        );
+        return;
+      }
+      if (expired) recordBridgeCounter("actionsRunAfterDeadline");
       if (cancelled) {
         // Still respond so the backend doesn't wait until timeout
-        automationResponse(request.requestId, false, undefined, "Bridge listener cancelled");
+        await sendMeasuredAutomationResponse(
+          request.requestId,
+          false,
+          undefined,
+          "Bridge listener cancelled",
+        );
         return;
       }
       const result = await handleAsyncAutomationRequest(request);
       if (cancelled) {
         // Respond with result anyway — backend is waiting on the oneshot channel
-        automationResponse(request.requestId, result.success, result.data, result.error);
+        await sendMeasuredAutomationResponse(
+          request.requestId,
+          result.success,
+          result.data,
+          result.error,
+        );
         return;
       }
-      automationResponse(request.requestId, result.success, result.data, result.error);
+      await sendMeasuredAutomationResponse(
+        request.requestId,
+        result.success,
+        result.data,
+        result.error,
+      );
     }).then((fn) => {
       if (cancelled) {
         // Effect was already cleaned up before promise resolved (StrictMode race)
@@ -1344,6 +1421,7 @@ export function useAutomationBridge() {
 
     return () => {
       cancelled = true;
+      stopHealthReporter();
       unlisten?.();
     };
   }, []);

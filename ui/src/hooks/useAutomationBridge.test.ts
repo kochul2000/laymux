@@ -19,7 +19,13 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { PANE_MIN_RATIO } from "@/hooks/usePaneResize";
-import { readFileForViewer } from "@/lib/tauri-api";
+import {
+  automationResponse,
+  readFileForViewer,
+  reportFrontendHealth,
+  type AutomationRequest,
+} from "@/lib/tauri-api";
+import { frontendBridgeCounters, resetFrontendHealthForTest } from "@/lib/frontend-health-reporter";
 import {
   registerTerminalRenderCheckpointProvider,
   registerTerminalScroller,
@@ -33,6 +39,7 @@ vi.mock("@/lib/tauri-api", () => ({
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   readFileForViewer: vi.fn(),
+  reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -1312,10 +1319,179 @@ describe("captureScreenshot", () => {
 });
 
 describe("useAutomationBridge hook", () => {
+  beforeEach(() => {
+    resetFrontendHealthForTest();
+    vi.clearAllMocks();
+    vi.mocked(automationResponse).mockResolvedValue(undefined);
+    vi.mocked(reportFrontendHealth).mockResolvedValue(undefined);
+  });
+
   it("registers event listener on mount", async () => {
     const { onAutomationRequest } = await import("@/lib/tauri-api");
     renderHook(() => useAutomationBridge());
     expect(onAutomationRequest).toHaveBeenCalled();
+  });
+
+  /**
+   * A request that outlived its Rust deadline (issue #606).
+   *
+   * `bridge_request` already answered `504 Frontend response timeout` and dropped
+   * the channel, so a query's answer can reach nobody. Computing it anyway spends
+   * main-thread time the frontend needs to catch up, and the automation client's
+   * retries pile more of that work behind the same queue.
+   */
+  async function fireBridgeRequest(request: AutomationRequest) {
+    const { onAutomationRequest } = await import("@/lib/tauri-api");
+    let captured: ((data: AutomationRequest) => Promise<void>) | null = null;
+    (onAutomationRequest as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      (cb: (data: AutomationRequest) => Promise<void>) => {
+        captured = cb;
+        return Promise.resolve(vi.fn());
+      },
+    );
+    const view = renderHook(() => useAutomationBridge());
+    await Promise.resolve();
+    await (captured as unknown as (data: unknown) => Promise<void>)(request);
+    view.unmount();
+  }
+
+  it("skips a query whose deadline already passed and reports it as expired", async () => {
+    const { automationResponse } = await import("@/lib/tauri-api");
+    const wsId = useWorkspaceStore.getState().workspaces[0]?.id;
+    expect(wsId).toBeTruthy();
+
+    await fireBridgeRequest({
+      requestId: "expired-query",
+      category: "query",
+      target: "workspaces",
+      method: "list",
+      params: {},
+      emittedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() - 5_000,
+    });
+
+    expect(automationResponse).toHaveBeenCalledWith(
+      "expired-query",
+      false,
+      undefined,
+      "Frontend request expired",
+    );
+    expect(frontendBridgeCounters()).toMatchObject({
+      responsesSent: 1,
+      responsesFailed: 0,
+      queriesDroppedExpired: 1,
+    });
+  });
+
+  it("still runs an expired action, because its side effect is what was asked for", async () => {
+    const state = useWorkspaceStore.getState();
+    const target = state.workspaces[1]?.id ?? state.workspaces[0]?.id;
+    expect(target).toBeTruthy();
+    useWorkspaceStore.setState({ activeWorkspaceId: "not-the-target" });
+
+    await fireBridgeRequest({
+      requestId: "expired-action",
+      category: "action",
+      target: "workspaces",
+      method: "switchActive",
+      params: { id: target },
+      emittedAtMs: Date.now() - 10_000,
+      deadlineMs: Date.now() - 5_000,
+    });
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(target);
+  });
+
+  it("runs a query that is still inside its deadline", async () => {
+    const { automationResponse } = await import("@/lib/tauri-api");
+
+    await fireBridgeRequest({
+      requestId: "live-query",
+      category: "query",
+      target: "workspaces",
+      method: "list",
+      params: {},
+      emittedAtMs: Date.now(),
+      deadlineMs: Date.now() + 5_000,
+    });
+
+    const call = (automationResponse as ReturnType<typeof vi.fn>).mock.calls.find(
+      (args) => args[0] === "live-query",
+    );
+    expect(call?.[1]).toBe(true);
+    expect(call?.[2]).toHaveProperty("workspaces");
+  });
+
+  it("counts a response only after automationResponse resolves", async () => {
+    let resolveResponse!: () => void;
+    vi.mocked(automationResponse).mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveResponse = resolve;
+      }),
+    );
+
+    const request = {
+      requestId: "delayed-response",
+      category: "query",
+      target: "workspaces",
+      method: "list",
+      params: {},
+      emittedAtMs: Date.now(),
+      deadlineMs: Date.now() + 5_000,
+    } satisfies AutomationRequest;
+    const pending = fireBridgeRequest(request);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(frontendBridgeCounters()).toMatchObject({
+      responsesSent: 0,
+      responsesFailed: 0,
+    });
+
+    resolveResponse();
+    await pending;
+    expect(frontendBridgeCounters()).toMatchObject({
+      responsesSent: 1,
+      responsesFailed: 0,
+    });
+  });
+
+  it("records a failed response separately and keeps the listener callback resolved", async () => {
+    vi.mocked(automationResponse).mockRejectedValueOnce(new Error("invoke failed"));
+
+    await expect(
+      fireBridgeRequest({
+        requestId: "failed-response",
+        category: "query",
+        target: "workspaces",
+        method: "list",
+        params: {},
+        emittedAtMs: Date.now(),
+        deadlineMs: Date.now() + 5_000,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(frontendBridgeCounters()).toMatchObject({
+      responsesSent: 0,
+      responsesFailed: 1,
+    });
+  });
+
+  it("starts the out-of-band health reporter unconditionally while mounted", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 6, 28));
+    const view = renderHook(() => useAutomationBridge());
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reportFrontendHealth).toHaveBeenCalledTimes(1);
+
+      view.unmount();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reportFrontendHealth).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("cleans up listener even when unmounted before promise resolves (StrictMode)", async () => {
@@ -1340,12 +1516,12 @@ describe("useAutomationBridge hook", () => {
     expect(unlistenMock).toHaveBeenCalled();
   });
 
-  it("does not process requests after unmount", async () => {
+  it("answers requests after unmount as cancelled through the measured response path", async () => {
     const { onAutomationRequest, automationResponse } = await import("@/lib/tauri-api");
 
-    let capturedCallback: ((data: unknown) => void) | null = null;
+    let capturedCallback: ((data: AutomationRequest) => Promise<void>) | null = null;
     (onAutomationRequest as ReturnType<typeof vi.fn>).mockImplementationOnce(
-      (cb: (data: unknown) => void) => {
+      (cb: (data: AutomationRequest) => Promise<void>) => {
         capturedCallback = cb;
         return Promise.resolve(vi.fn());
       },
@@ -1356,24 +1532,30 @@ describe("useAutomationBridge hook", () => {
 
     unmount();
 
-    // Fire a request after unmount — should be ignored
+    // The handler must not run after cleanup, but Rust may already have emitted
+    // the event. Resolve that oneshot explicitly as a cancellation.
     if (capturedCallback !== null) {
-      await (capturedCallback as (data: unknown) => void)({
+      await (capturedCallback as (data: AutomationRequest) => Promise<void>)({
         requestId: "late-req",
         category: "query",
         target: "workspaces",
         method: "list",
         params: {},
+        emittedAtMs: Date.now(),
+        deadlineMs: Date.now() + 5_000,
       });
     }
 
-    // automationResponse should NOT be called for the late request
-    expect(automationResponse).not.toHaveBeenCalledWith(
+    expect(automationResponse).toHaveBeenCalledWith(
       "late-req",
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
+      false,
+      undefined,
+      "Bridge listener cancelled",
     );
+    expect(frontendBridgeCounters()).toMatchObject({
+      responsesSent: 1,
+      responsesFailed: 0,
+    });
   });
 });
 

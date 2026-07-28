@@ -296,6 +296,42 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     [oneshot channel → HTTP response]
 ```
 
+**브리지 마감은 요청에 실려 간다.** `bridge_request`는 event emit 직전에 monotonic absolute deadline과 wall-clock `deadlineMs`를 같은 5초(`FRONTEND_RESPONSE_TIMEOUT`) 예산으로 잡고, emit 뒤 새 timeout을 시작하지 않고 그 absolute deadline까지만 기다린다. 초과 시 `504 Frontend response timeout`을 낸다. 같은 시각을 프론트도 알아야 하므로 `automation-request` payload에 `emittedAtMs`·`deadlineMs`를 함께 싣는다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
+
+- 마감을 넘긴 **query** 는 계산하지 않고 `Frontend request expired` 로 즉시 거절한다 — 답이 닿을 상대가 없으므로 계산은 이미 밀린 메인 스레드의 시간만 빼앗고, 클라이언트 재시도가 같은 큐 뒤에 죽은 일감을 더 쌓는다.
+- 마감을 넘긴 **action** 은 그대로 실행한다 — 부수효과는 여전히 호출자가 요청한 것이며, 조용히 버리면 "느린 resize" 가 "일어나지 않은 resize" 가 된다.
+- 두 경우 모두 HTTP 호출자는 이미 `504` 를 받은 뒤이므로 **외부 계약은 바뀌지 않는다.**
+- 프론트는 response IPC가 resolve된 뒤에만 `responsesSent`를 세고 IPC 거절은 `responsesFailed`로 센다. Rust도 map에서 sender를 찾은 것만으로 성공이라 하지 않고 oneshot send가 성공한 뒤 `responsesMatched`를 센다. receiver가 이미 없거나 send가 실패한 응답은 `responsesOrphaned`로 세고 누적 총계와 함께 경고 로그를 남긴다.
+
+**프론트가 멈췄을 때 읽는 창구**: `GET /api/v1/diagnostics/frontend`. 이 라우트만은 브리지를 거치지 않고 Rust 상태에서 바로 서빙하므로, 다른 모든 프론트 경유 endpoint가 `Frontend response timeout`을 내는 동안에도 답한다. App-level bridge hook이 항상 켜진 250 ms self-rescheduling probe를 소유하고, 1초마다 또는 500 ms 이상 늦은 tick 직후 자기 vitals를 `report_frontend_health`로 밀어 넣는다. 첫 report 전에는 `frontend`와 report 시각/나이가 `null`이다. Rust health mutex 오류는 “아직 report 없음”으로 위장하지 않고 JSON HTTP 500으로 반환한다. 정상 응답은 이렇게 읽는다.
+
+```jsonc
+{
+  "nowMs": 1780000000000,
+  "lastReportAgeMs": 37421,   // null = 프론트가 아직 한 번도 보고하지 않음
+  "lastReportAtMs": 1779999962579,
+  "bridge": {                 // Rust 쪽 카운터
+    "requestsEmitted": 128, "responsesMatched": 91,
+    "responsesOrphaned": 12, "requestTimeouts": 37, "requestDisconnects": 0
+  },
+  "frontend": {               // 프론트가 마지막에 보고한 내용(null 가능)
+    "sentAtMs": 1779999962500,
+    "probeLagMs": 0, "probeLagMaxMs": 41230, "stalls": 3,
+    "bridge": { "requestsReceived": 128, "responsesSent": 91,
+                "responsesFailed": 1,
+                "queriesDroppedExpired": 25, "actionsRunAfterDeadline": 2,
+                "maxDeliveryLagMs": 40980 },
+    "pipeline": { "terminal-pane-xxxx": {
+      "deltaEvents": 12000, "segmentsIn": 12000,
+      "writeRequests": 11980, "xtermWrites": 340,
+      "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18, "…": 0
+    } }
+  }
+}
+```
+
+판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `frontend.pipeline`의 terminal별 카운터 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 카운터와 지연 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
+
 ### 12.2 포트 규칙
 
 **고정 포트**: release = `19280`, dev = `19281`. 각 빌드 타입은 하나의 인스턴스만 실행 가능하며, 포트 충돌 시 시작 실패한다.
@@ -316,12 +352,13 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 53개 = REST 52 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 55개 = REST 54 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 |
+| GET | `/api/v1/diagnostics/frontend` | 프론트엔드 vitals (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
 | GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
 | POST | `/api/v1/workspaces/active` | 워크스페이스 전환 |
