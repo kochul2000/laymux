@@ -20,6 +20,7 @@ import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
 import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
 import { useTerminalStartupCoordinator } from "@/hooks/useTerminalStartupCoordinator";
+import { focusDockPane } from "@/lib/workspace-transition";
 
 function ModalOverlay({
   testIdPrefix,
@@ -169,7 +170,6 @@ export function AppLayout() {
   const removeDockPane = useDockStore((s) => s.removeDockPane);
   const setDockPaneView = useDockStore((s) => s.setDockPaneView);
   const resizeDockPane = useDockStore((s) => s.resizeDockPane);
-  const setFocusedDock = useDockStore((s) => s.setFocusedDock);
   const settingsModalOpen = useUiStore((s) => s.settingsModalOpen);
   const closeSettingsModal = useUiStore((s) => s.closeSettingsModal);
   const notificationPanelOpen = useUiStore((s) => s.notificationPanelOpen);
@@ -305,8 +305,7 @@ export function AppLayout() {
           onMouseDown={
             top?.visible
               ? () => {
-                  setFocusedDock("top");
-                  useGridStore.getState().setFocusedPane(null);
+                  focusDockPane("top");
                 }
               : undefined
           }
@@ -319,8 +318,7 @@ export function AppLayout() {
           onMouseDown={
             left?.visible
               ? () => {
-                  setFocusedDock("left");
-                  useGridStore.getState().setFocusedPane(null);
+                  focusDockPane("left");
                 }
               : undefined
           }
@@ -339,8 +337,7 @@ export function AppLayout() {
           onMouseDown={
             right?.visible
               ? () => {
-                  setFocusedDock("right");
-                  useGridStore.getState().setFocusedPane(null);
+                  focusDockPane("right");
                 }
               : undefined
           }
@@ -353,8 +350,7 @@ export function AppLayout() {
           onMouseDown={
             bottom?.visible
               ? () => {
-                  setFocusedDock("bottom");
-                  useGridStore.getState().setFocusedPane(null);
+                  focusDockPane("bottom");
                 }
               : undefined
           }

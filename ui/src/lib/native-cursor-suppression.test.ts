@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -207,6 +210,33 @@ describe("installNativeCursorSuppression", () => {
     // A disposed handle must not resurrect the gate on a live terminal.
     suppression.setSuppressed(true);
     expect(rendererSeesCursorHidden(terminal)).toBe(false);
+  });
+});
+
+describe("who is allowed to hide the native cursor in CSS", () => {
+  // The base gate class and its composer/IME inputs are the complete allowlist.
+  // Composer/IME selectors are safe fallbacks because those states also feed the
+  // same raw gate. Sync output has a raw-gate reason but intentionally no CSS
+  // selector: otherwise a pre-frame DOM cursor would disappear while the WebGL
+  // cursor remained at its last settled paint (issue #610, ADR-0079).
+  const css = readFileSync(path.resolve(__dirname, "../index.css"), "utf-8").replace(
+    /\/\*[\s\S]*?\*\//g,
+    "",
+  );
+  const cursorRuleSelectors = css
+    .match(/[^{}]*\.xterm-cursor[^{}]*\{/g)
+    ?.flatMap((block) => block.replace(/\{$/, "").split(","))
+    .map((selector) => selector.trim())
+    .filter(Boolean);
+
+  it("keeps the complete fallback allowlist and excludes synchronized output", () => {
+    expect(cursorRuleSelectors).toEqual([
+      ".terminal-native-cursor-hidden .xterm-cursor",
+      ".terminal-composer-active .xterm-cursor",
+      ".terminal-composer-active .terminal-overlay-caret",
+      ".terminal-composer-active .terminal-composition-preview",
+      ".terminal-ime-composition-active .xterm-cursor",
+    ]);
   });
 });
 

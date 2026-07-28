@@ -8,7 +8,8 @@ import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { Workspace, WorkspacePane } from "@/stores/types";
 
-import { notificationStep, spatialStep, switchActiveWorkspace } from "./navigation-actions";
+import { notificationStep, spatialStep } from "./navigation-actions";
+import { switchActiveWorkspace } from "./workspace-transition";
 
 function term(id: string, x: number, y: number, w = 0.5, h = 0.5): WorkspacePane {
   return { id, x, y, w, h, view: { type: "TerminalView" } };

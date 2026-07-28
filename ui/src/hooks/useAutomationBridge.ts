@@ -36,8 +36,9 @@ import {
   recordBridgeDeliveryLag,
   startFrontendHealthReporter,
 } from "@/lib/frontend-health-reporter";
-import * as navigationActions from "@/lib/navigation-actions";
+import { focusDockPane, focusWorkspacePane, switchActiveWorkspace } from "@/lib/workspace-transition";
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
+import * as navigationActions from "@/lib/navigation-actions";
 
 interface HandlerResult {
   success: boolean;
@@ -362,7 +363,7 @@ const handlers: HandlerMap = {
     // over pointed the surface at an unrelated pane — or at none at all — in the
     // target workspace (issue #578).
     switchActive: (p) => {
-      const result = navigationActions.switchActiveWorkspace(p.id as string);
+      const result = switchActiveWorkspace(p.id as string);
       // An unknown id must not answer `switched` — it changed nothing, and the
       // async path below would otherwise wait on a terminal of the workspace
       // that stayed active. Same contract as `remove`/`rename`.
@@ -504,7 +505,7 @@ const handlers: HandlerMap = {
       const index = p.index as number;
       const ctx = getActivePaneCtx(index);
       if ("err" in ctx) return ctx.err;
-      useGridStore.getState().setFocusedPane(index);
+      focusWorkspacePane(ctx.ws.id, index);
       return ok({ focusedPaneIndex: index });
     },
     simulateHover: (p) => {
@@ -793,22 +794,14 @@ const handlers: HandlerMap = {
       const terminalWorkspaceId = workspaceCtx?.workspace.id ?? terminal?.workspaceId;
       const switchedWorkspace =
         !dockCtx && terminalWorkspaceId !== undefined && terminalWorkspaceId !== activeWorkspaceId;
-      if (switchedWorkspace) {
-        useWorkspaceStore.getState().setActiveWorkspace(terminalWorkspaceId);
-      }
-
       // Update focusedPaneIndex to match the target terminal's pane
       const paneIndex =
         workspaceCtx?.paneIndex ??
         (terminalWorkspaceId ? resolveTerminalPaneIndex(terminalId, terminalWorkspaceId) : -1);
       if (dockCtx) {
-        useDockStore.getState().setFocusedDock(dockCtx.dock.position, dockCtx.pane.id);
-        useGridStore.getState().setFocusedPane(null);
-      } else {
-        useDockStore.getState().setFocusedDock(null);
-        if (paneIndex >= 0) {
-          useGridStore.getState().setFocusedPane(paneIndex);
-        }
+        focusDockPane(dockCtx.dock.position, dockCtx.pane.id);
+      } else if (terminalWorkspaceId && paneIndex >= 0) {
+        focusWorkspacePane(terminalWorkspaceId, paneIndex);
       }
 
       if (terminal) useTerminalStore.getState().setTerminalFocus(terminalId);

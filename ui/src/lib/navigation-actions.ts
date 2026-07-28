@@ -7,7 +7,7 @@ import {
   type SpatialDirection,
 } from "@/lib/spatial-navigation";
 import { filterVisibleWorkspaces, sortWorkspaces } from "@/lib/workspace-sort";
-import { resolveWorkspaceLandingPane, type WorkspaceLandingPane } from "@/lib/workspace-switch";
+import { focusWorkspacePane } from "@/lib/workspace-transition";
 import { useDockStore } from "@/stores/dock-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useNotificationStore } from "@/stores/notification-store";
@@ -47,16 +47,6 @@ export type NavigationStepResult =
         | "no_unread_notifications";
     };
 
-/**
- * Outcome of a workspace switch. `switched: false` means the id does not exist
- * and no store was touched — callers must not conflate it with a successful
- * switch that landed nowhere (`switched: true, landing: null`, i.e. an empty
- * workspace).
- */
-export type WorkspaceSwitchResult =
-  | { switched: true; landing: WorkspaceLandingPane | null }
-  | { switched: false; reason: "workspace_not_found" };
-
 /** Sorted (display-order) workspaces + the visible subset, derived from current store state. */
 export function getSortedWorkspaces() {
   const { workspaces: rawWorkspaces, workspaceDisplayOrder } = useWorkspaceStore.getState();
@@ -71,46 +61,6 @@ export function getSortedWorkspaces() {
   const { hiddenWorkspaceIds } = useUiStore.getState();
   const visibleWorkspaces = filterVisibleWorkspaces(workspaces, hiddenWorkspaceIds);
   return { workspaces, visibleWorkspaces };
-}
-
-/**
- * Activate `workspaceId` and land on a pane that actually belongs to it.
- *
- * `focusedPaneIndex` is a single global grid index, so carrying it across a
- * switch untouched leaves the surface pointing at an unrelated pane of the new
- * workspace — or at no pane at all when the index falls past its last one
- * (issue #578). Both switch paths (desktop keyboard, Automation/Remote
- * `workspaces.switchActive`) go through here so the landing rule lives in one
- * place; `resolveWorkspaceLandingPane` owns the rule itself.
- *
- * Dock focus is always cleared — the grid owns focus after a switch. The
- * desktop keyboard's `dock.arrowFocusPane=false` opt-out decides *not to call
- * this* rather than passing a flag.
- *
- * On success, returns the landing pane (null for an empty workspace) so callers
- * that must attach to its terminal can wait for that session to be ready. An
- * unknown workspace id leaves every store untouched and reports the miss.
- */
-export function switchActiveWorkspace(workspaceId: string): WorkspaceSwitchResult {
-  const wasDockFocused = useDockStore.getState().focusedDock !== null;
-  useWorkspaceStore.getState().setActiveWorkspace(workspaceId);
-  // `setActiveWorkspace` ignores an unknown id silently, so without this gate
-  // the rest of the function would rewrite focus inside the workspace the
-  // caller never asked about: dock focus cleared, landing resolved from the
-  // *current* panes, and a landing terminal reported from the wrong workspace.
-  // Nothing has been mutated yet at this point — leave it that way.
-  if (useWorkspaceStore.getState().activeWorkspaceId !== workspaceId) {
-    return { switched: false, reason: "workspace_not_found" };
-  }
-  useDockStore.getState().setFocusedDock(null);
-
-  const panes = useWorkspaceStore.getState().getActiveWorkspace()?.panes ?? [];
-  const landing = resolveWorkspaceLandingPane(panes, {
-    wasDockFocused,
-    focusedPaneIndex: useGridStore.getState().focusedPaneIndex,
-  });
-  useGridStore.getState().setFocusedPane(landing ? landing.paneIndex : null);
-  return { switched: true, landing };
 }
 
 /**
@@ -155,9 +105,7 @@ export function spatialStep(
   if (!target) return { moved: false, reason: "no_other_target" };
 
   const switchedWorkspace = target.workspaceId !== activeWorkspaceId;
-  workspaceState.setActiveWorkspace(target.workspaceId);
-  useDockStore.getState().setFocusedDock(null);
-  useGridStore.getState().setFocusedPane(target.paneIndex);
+  focusWorkspacePane(target.workspaceId, target.paneIndex);
 
   return {
     moved: true,
@@ -186,19 +134,17 @@ export function notificationStep(direction: NotificationDirection): NavigationSt
 
   const switchedWorkspace = useWorkspaceStore.getState().activeWorkspaceId !== target.workspaceId;
 
-  // Switch workspace if needed
-  useWorkspaceStore.getState().setActiveWorkspace(target.workspaceId);
-  useDockStore.getState().setFocusedDock(null);
-
   // Find the pane index from terminalId (terminal-{paneId} pattern)
   const paneId = toPaneId(target.terminalId);
-  const ws = useWorkspaceStore.getState().getActiveWorkspace();
+  const ws = useWorkspaceStore
+    .getState()
+    .workspaces.find((workspace) => workspace.id === target.workspaceId);
   let paneIndex = 0;
   let paneNumber: number | null = null;
   if (ws) {
     const idx = ws.panes.findIndex((p) => p.id === paneId);
     paneIndex = idx >= 0 ? idx : 0;
-    useGridStore.getState().setFocusedPane(paneIndex);
+    focusWorkspacePane(target.workspaceId, paneIndex);
     paneNumber = idx >= 0 ? paneNumberFor(ws.panes, paneId) : null;
   }
 
