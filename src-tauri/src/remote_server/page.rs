@@ -159,6 +159,42 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_registers_the_desktop_terminal_font() {
+        let html = remote_page_html();
+        // Only the exact advertised shapes may be registered as a font.
+        assert!(html.contains("const REMOTE_FONT_FAMILY_PATTERN = /^LxRemoteFont-[0-9a-f]{12}$/;"));
+        assert!(html.contains(
+            "const REMOTE_FONT_URL_PATTERN = /^\\/remote\\/font\\/[0-9a-f]{16}\\.(?:ttf|otf)$/;"
+        ));
+        // A CSS `@font-face` rule whose src failed once stays in an error state,
+        // so a retry through it would never re-request. FontFace objects do.
+        assert!(html.contains("new FontFace(assets.family, `url(\"${face.url}\")`, {"));
+        assert!(!html.contains("@font-face{font-family:"));
+        assert!(html.contains("const REMOTE_FONT_MAX_ATTEMPTS = 3;"));
+        assert!(html.contains("remoteFontFamilyState.delete(assets.key);"));
+        // State is keyed by the advertised URLs: the alias hashes the face name,
+        // so replacing the font file keeps the alias while the tokens change.
+        assert!(
+            html.contains("const key = `${family}|${faces.map((face) => face.url).join(\",\")}`;")
+        );
+        // One missing face must not throw away the ones that loaded.
+        assert!(html.contains("Promise.allSettled(fontFaces.map((fontFace) => fontFace.load()))"));
+        assert!(html.contains("const REMOTE_FONT_LOAD_TIMEOUT_MS = 20000;"));
+        // `document.fonts.check` answers true for an unknown family (the fallback
+        // can render the text), so readiness must also require an added face.
+        assert!(html.contains(
+            "if (loaded.length === 0 || !document.fonts.check(`16px \"${assets.family}\"`)) {"
+        ));
+        // No active terminal must not turn into applyTerminalAppearance(null).
+        assert!(html.contains("if (!info || !info.appearance) return;"));
+        // The alias is prepended only once loaded, so the fontFamily string
+        // really changes and xterm re-measures the cell (ADR-0077).
+        assert!(html.contains("fontFamily: remoteFontIsReady(fontAssets)"));
+        assert!(html.contains("applyTerminalAppearance(info.appearance);"));
+        assert!(html.contains("scheduleTerminalFit();"));
+    }
+
+    #[test]
     fn remote_page_html_contains_remote_bootstrap() {
         let html = remote_page_html();
         assert!(html.contains("Laymux Remote"));

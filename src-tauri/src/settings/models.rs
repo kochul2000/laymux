@@ -1123,6 +1123,12 @@ pub struct RemoteSettings {
     /// Reconnect to the cloud relay automatically on startup when credentials exist.
     #[serde(default = "default_cloud_auto_reconnect")]
     pub cloud_auto_reconnect: bool,
+    /// Send the desktop terminal font file to remote browsers so they render the
+    /// same glyphs and cell metrics (ADR-0077). Off by default: serving a font
+    /// binary over the network is redistribution, and OS-bundled fonts such as
+    /// Consolas are not redistributable.
+    #[serde(default)]
+    pub serve_terminal_font: bool,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1191,6 +1197,7 @@ impl Default for RemoteSettings {
             cloud_tunnel_url: None,
             cloud_server_base_url: None,
             cloud_auto_reconnect: default_cloud_auto_reconnect(),
+            serve_terminal_font: false,
         }
     }
 }

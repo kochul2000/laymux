@@ -21,25 +21,68 @@ pub(super) struct RemoteTerminalInfo {
     pub(super) appearance: RemoteTerminalAppearance,
 }
 
-pub(super) fn remote_terminal_infos(
+/// Appearance resolution can query the OS font system and read multi-megabyte
+/// font files on a cache miss (ADR-0077), so it runs on the blocking pool and
+/// outside the `terminals` lock. Only the session snapshot happens inline.
+pub(super) async fn remote_terminal_infos(
     app_state: &AppState,
     settings: &Settings,
 ) -> Result<Vec<RemoteTerminalInfo>, String> {
-    let terminals = app_state.terminals.lock_or_err()?;
+    let snapshots: Vec<SessionSnapshot> = {
+        let terminals = app_state.terminals.lock_or_err()?;
+        terminals
+            .values()
+            .map(|session| SessionSnapshot {
+                id: session.id.clone(),
+                title: session.title.clone(),
+                profile: session.config.profile.clone(),
+                cwd: session.cwd.clone(),
+                branch: session.branch.clone(),
+                cols: session.config.cols,
+                rows: session.config.rows,
+                sync_group: session.config.sync_group.clone(),
+                command_running: session.command_running,
+            })
+            .collect()
+    };
 
-    Ok(terminals
-        .values()
-        .map(|session| RemoteTerminalInfo {
-            id: session.id.clone(),
-            title: session.title.clone(),
-            profile: session.config.profile.clone(),
-            cwd: session.cwd.clone(),
-            branch: session.branch.clone(),
-            cols: session.config.cols,
-            rows: session.config.rows,
-            sync_group: session.config.sync_group.clone(),
-            command_running: session.command_running,
-            appearance: resolve_remote_terminal_appearance(&session.config.profile, settings),
+    let settings = settings.clone();
+    tokio::task::spawn_blocking(move || resolve_appearances(snapshots, &settings))
+        .await
+        .map_err(|err| format!("terminal appearance resolution failed: {err}"))
+}
+
+fn resolve_appearances(
+    snapshots: Vec<SessionSnapshot>,
+    settings: &Settings,
+) -> Vec<RemoteTerminalInfo> {
+    snapshots
+        .into_iter()
+        .map(|snapshot| RemoteTerminalInfo {
+            appearance: resolve_remote_terminal_appearance(&snapshot.profile, settings),
+            id: snapshot.id,
+            title: snapshot.title,
+            profile: snapshot.profile,
+            cwd: snapshot.cwd,
+            branch: snapshot.branch,
+            cols: snapshot.cols,
+            rows: snapshot.rows,
+            sync_group: snapshot.sync_group,
+            command_running: snapshot.command_running,
         })
-        .collect())
+        .collect()
+}
+
+/// Session fields copied out under the `terminals` lock, before appearance
+/// resolution runs outside it.
+struct SessionSnapshot {
+    id: String,
+    title: String,
+    profile: String,
+    cwd: Option<String>,
+    branch: Option<String>,
+    cols: u16,
+    rows: u16,
+    sync_group: String,
+    command_running: bool,
 }

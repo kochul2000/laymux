@@ -2,7 +2,10 @@ use serde::Serialize;
 
 use crate::settings::models::{ColorScheme, FontSettings, Profile, Settings};
 
+use super::font_assets::{resolve_font_assets, RemoteFontAssets};
+
 const DEFAULT_COLOR_SCHEME_NAME: &str = "CampbellClear";
+const DEFAULT_FONT_FACE: &str = "Cascadia Mono";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -12,6 +15,11 @@ pub(super) struct RemoteTerminalAppearance {
     pub cursor_style: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_width: Option<u16>,
+    /// Downloadable copy of the desktop font (ADR-0077). Absent when the
+    /// `remote.serveTerminalFont` toggle is off or the face is not servable —
+    /// the client then keeps the name-only `font_family` stack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_assets: Option<RemoteFontAssets>,
     pub theme: RemoteTerminalTheme,
 }
 
@@ -76,9 +84,10 @@ pub(super) fn resolve_remote_terminal_appearance(
         .or_else(|| non_empty(&settings.profile_defaults.cursor_shape))
         .unwrap_or("bar");
     let (cursor_style, cursor_width) = xterm_cursor_options(cursor_shape);
+    let face = non_empty(&font.face).unwrap_or(DEFAULT_FONT_FACE);
 
     RemoteTerminalAppearance {
-        font_family: terminal_font_family(font),
+        font_family: terminal_font_family(face),
         font_size: if font.size == 0 {
             FontSettings::default().size
         } else {
@@ -86,14 +95,14 @@ pub(super) fn resolve_remote_terminal_appearance(
         },
         cursor_style: cursor_style.into(),
         cursor_width,
+        font_assets: resolve_font_assets(face, settings),
         theme: resolve_terminal_theme(profile, settings),
     }
 }
 
-fn terminal_font_family(font: &FontSettings) -> String {
-    let face = non_empty(&font.face).unwrap_or("Cascadia Mono");
+fn terminal_font_family(face: &str) -> String {
     let escaped_face = face.replace('\'', "\\'");
-    format!("'{escaped_face}', 'Cascadia Mono', 'Consolas', monospace")
+    format!("'{escaped_face}', '{DEFAULT_FONT_FACE}', 'Consolas', monospace")
 }
 
 fn xterm_cursor_options(shape: &str) -> (&'static str, Option<u16>) {
@@ -342,6 +351,35 @@ mod tests {
         );
         assert_eq!(appearance.theme.magenta.as_deref(), Some("#555555"));
         assert_eq!(appearance.theme.bright_magenta.as_deref(), Some("#666666"));
+    }
+
+    #[test]
+    fn font_assets_stay_absent_without_the_toggle_or_a_resolvable_face() {
+        let mut settings = Settings::default();
+        settings.profiles = vec![Profile {
+            name: "PowerShell".into(),
+            ..Profile::default()
+        }];
+
+        // Toggle off is the default: never advertise a downloadable font.
+        assert_eq!(
+            resolve_remote_terminal_appearance("PowerShell", &settings).font_assets,
+            None
+        );
+
+        // Toggle on, but no such face is installed anywhere -> name-only fallback.
+        settings.remote.serve_terminal_font = true;
+        settings.profile_defaults.font = FontSettings {
+            face: "Laymux No Such Font Face".into(),
+            size: 14,
+            weight: "normal".into(),
+        };
+        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
+        assert_eq!(appearance.font_assets, None);
+        assert_eq!(
+            appearance.font_family,
+            "'Laymux No Such Font Face', 'Cascadia Mono', 'Consolas', monospace"
+        );
     }
 
     #[test]

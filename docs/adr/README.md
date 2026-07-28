@@ -94,6 +94,7 @@ ADR 이 필요한 대표 기준:
 | [0074](0074-xterm-cell-grid-screen-test-tier.md) | 화면 주장은 mock 이 아니라 실제 xterm 셀 격자로 검증한다 (별도 `*.screen.test.ts` 스위트) | Proposed |
 | [0075](0075-session-restore-live-screen-origin.md) | 세션 복원 출력은 새 PTY 화면 원점 뒤의 scrollback으로 둔다 | Accepted |
 | [0076](0076-codex-in-frame-cursor-park.md) | Codex 인프레임 커서 주차를 동기화 출력의 최종 상태로 인정 | Accepted |
+| [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 
 ## 새 ADR 추가
 

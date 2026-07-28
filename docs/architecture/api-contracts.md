@@ -87,7 +87,8 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "cloudInstanceId": null,            // relay가 발급한 instance id. 미연결이면 null
     "cloudTunnelUrl": null,             // pairing complete 응답의 WSS tunnel URL. PR3 터널에서 사용
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
-    "cloudAutoReconnect": true          // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
+    "cloudAutoReconnect": true,         // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
+    "serveTerminalFont": false          // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
   }
 }
 ```
@@ -673,6 +674,7 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/xterm.js` | GET | `/remote/` 전용 xterm.js 브라우저 빌드 |
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
 | `/remote/vendor/addon-web-links.js` | GET | `/remote/` 전용 xterm 평문 URL 링크 애드온 |
+| `/remote/font/{token}.{ttf\|otf}` | GET | 데스크톱 터미널 폰트 사본 (ADR-0077). `token` = 콘텐츠 sha256 앞 16 hex |
 | `/remote/viewer/` | GET | 자격 증명이 없는 Remote FileViewer 새 탭 bootstrap |
 | `/remote/viewer/viewer.js` | GET | Remote FileViewer 외부 script (`script-src 'self'`) |
 
@@ -683,6 +685,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 
 `/remote/vendor/*`도 `/remote/`와 같은 base access 조건(실효 enabled, 실효 token 존재, IP allowlist)을 통과해야 응답한다. Cloud tunnel 내부 요청은 token/IP/Origin 대신 `TunnelAuthorized` marker를 신뢰하지만, vendor route도 실효 enabled gate는 공유한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
+
+`/remote/font/{token}.{ttf|otf}`는 vendor asset과 같은 gate를 쓰는 폰트 route다([ADR-0077](../adr/0077-remote-terminal-font-serving.md)). `settings.remote.serveTerminalFont`가 켜져 있을 때만 appearance payload가 이 URL을 광고하며, route 자체는 등록되지 않은 token에 `404`를 돌려준다. `token`은 폰트 콘텐츠 sha256의 앞 16 hex이므로 URL이 곧 내용이며 `Cache-Control: public, max-age=31536000, immutable`과 `Vary: Accept-Encoding`을 보낸다. `Accept-Encoding`에 `br`이 있으면 한 번 만들어 캐시한 brotli 본을 `Content-Encoding: br`로 보내고, 아니면 원본 sfnt 바이트를 그대로 보낸다. woff2 컨테이너 변환은 하지 않는다.
 
 `/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 
@@ -807,6 +811,17 @@ terminal host의 geometry 변화는 fit 정책([ADR-0038](../adr/0038-remote-hei
 `fontSize`, `cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
 `purple`/`brightPurple`은 xterm.js의 `magenta`/`brightMagenta`로 매핑한다. 색상 스킴을 찾을 수
 없으면 로컬 `TerminalView`의 기본 테마와 동일한 CampbellClear 기반 fallback을 사용한다.
+
+`settings.remote.serveTerminalFont`가 켜져 있고 데스크톱이 해당 face 를 실제로 서빙할 수 있으면
+appearance 에 선택적 `fontAssets: { family, faces: [{ url, weight, style }] }`가 추가된다
+([ADR-0077](../adr/0077-remote-terminal-font-serving.md)). `family`는 `LxRemoteFont-<12 hex>` 별칭이고
+`url`은 위 폰트 route, `weight`는 400/700, `style`은 `normal`/`italic`이다. regular 와 같은 파일로
+해석되는 bold/italic 은 목록에 넣지 않고 브라우저 합성에 맡긴다. 토글이 꺼져 있거나 face 해석 실패·
+폰트 컬렉션(`ttcf`)·페이스당 8 MiB 초과이면 필드를 생략하고 remote 는 이름-only `fontFamily` 스택으로
+폴백한다. Remote 클라이언트는 `FontFace` 객체로 등록하고 실제 로드가 확인된 뒤에만 `family` 를
+`fontFamily` 스택 맨 앞에 붙인다 — xterm `OptionsService`는 값이 바뀔 때만 셀을 다시 재기 때문에,
+로드 완료가 곧 문자열 변경이어야 재계측과 재fit 이 일어난다. 로드 실패는 다음 navigation 갱신이나
+attach 에서 재시도하며 face 당 3 회로 제한한다.
 
 `write`/`input`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. 이 검사는 route의 선행 status 확인이 아니라 Local Tauri command와 공유하는 backend human-control operation permit 등록 시점에 수행한다. permit은 등록 시점의 absolute deadline·owner epoch·operation id와 enqueue phase를 가지며, structured input은 protocol-state gate에서 mode를 캡처한 뒤 PTY control worker 큐 진입 직전에 소유권을 재검증한다. 동일 terminal의 작업은 permit 등록 순서대로 enqueue되므로 structured input 준비 중 뒤에 등록된 raw write/resize가 먼저 PTY에 도착하지 않는다. owner 전환은 아직 enqueue되지 않은 등록 요청을 취소·분리하고, 이미 queued/running인 요청은 per-terminal worker cancel과 completion acknowledgement까지 장벽에 남긴다. PTY handle table/protocol gate/owner gate는 queue wait나 물리 write 동안 잡지 않으며, worker는 physical operation 전후에 owner token을 재검증한다. 취소 adapter가 grace 안에 종료를 증명하지 못하면 해당 PTY를 종료·input-fault 격리하고 worker lifecycle completion을 확인할 때까지 Local owner를 공개하지 않는다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다.
 

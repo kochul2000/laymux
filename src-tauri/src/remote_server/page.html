@@ -2901,14 +2901,123 @@
           if (connectionPanel) connectionPanel.classList.toggle("attention", attention);
         }
 
+        // Desktop terminal font copy (ADR-0077). The desktop advertises the font
+        // file it resolved locally; until those faces are really loaded here the
+        // client keeps the name-only stack. That way the fontFamily string
+        // actually changes on completion — xterm's OptionsService only fires
+        // onOptionChange for a changed value, so an unchanged string would leave
+        // the cell measured against the fallback font forever.
+        const REMOTE_FONT_FAMILY_PATTERN = /^LxRemoteFont-[0-9a-f]{12}$/;
+        const REMOTE_FONT_URL_PATTERN = /^\/remote\/font\/[0-9a-f]{16}\.(?:ttf|otf)$/;
+        const REMOTE_FONT_WEIGHTS = new Set([400, 700]);
+        const REMOTE_FONT_STYLES = new Set(["normal", "italic"]);
+        // A download can fail transiently — a phone drops out mid-fetch, or the
+        // desktop restarted between advertising the URL and being asked for the
+        // bytes (that lookup is a 404). One such miss must not pin the session
+        // to the fallback font, so a failure is retried on the next navigation
+        // refresh or attach, bounded so a genuinely broken font stops asking.
+        const REMOTE_FONT_MAX_ATTEMPTS = 3;
+        // A hung fetch would otherwise park the state on "loading" forever and
+        // block every later retry.
+        const REMOTE_FONT_LOAD_TIMEOUT_MS = 20000;
+        const remoteFontFamilyState = new Map();
+        const remoteFontAttempts = new Map();
+
+        // Server-controlled strings end up inside a CSS rule, so accept only the
+        // exact shapes this contract defines.
+        function normalizeFontAssets(assets) {
+          if (!assets || typeof assets !== "object") return null;
+          const family = typeof assets.family === "string" ? assets.family : "";
+          if (!REMOTE_FONT_FAMILY_PATTERN.test(family)) return null;
+          const faces = (Array.isArray(assets.faces) ? assets.faces : [])
+            .filter(
+              (face) =>
+                face &&
+                typeof face.url === "string" &&
+                REMOTE_FONT_URL_PATTERN.test(face.url) &&
+                REMOTE_FONT_WEIGHTS.has(Number(face.weight)) &&
+                REMOTE_FONT_STYLES.has(face.style)
+            )
+            .map((face) => ({ url: face.url, weight: Number(face.weight), style: face.style }));
+          if (faces.length === 0) return null;
+          // Keyed by the advertised URLs, not by the family: the alias is a hash
+          // of the face *name*, so replacing the font file keeps the alias while
+          // the tokens change. Keying on content means new bytes get a fresh
+          // attempt budget instead of inheriting a "ready" or exhausted state.
+          const key = `${family}|${faces.map((face) => face.url).join(",")}`;
+          return { family, faces, key };
+        }
+
+        function remoteFontIsReady(assets) {
+          return Boolean(assets) && remoteFontFamilyState.get(assets.key) === "ready";
+        }
+
+        function ensureRemoteFont(appearance) {
+          const assets = normalizeFontAssets(appearance && appearance.fontAssets);
+          if (!assets || remoteFontFamilyState.has(assets.key)) return;
+          const attempts = remoteFontAttempts.get(assets.key) || 0;
+          if (attempts >= REMOTE_FONT_MAX_ATTEMPTS) return;
+          remoteFontAttempts.set(assets.key, attempts + 1);
+          remoteFontFamilyState.set(assets.key, "loading");
+          loadRemoteFont(assets).catch(() => {
+            remoteFontFamilyState.delete(assets.key);
+          });
+        }
+
+        // FontFace objects rather than an injected `@font-face` rule: a rule
+        // whose src failed once stays in an error state, so a retry through it
+        // never re-requests. A fresh FontFace per attempt does, and the family
+        // never has to be interpolated into CSS text.
+        async function loadRemoteFont(assets) {
+          const fontFaces = assets.faces.map(
+            (face) =>
+              new FontFace(assets.family, `url("${face.url}")`, {
+                weight: String(face.weight),
+                style: face.style,
+                display: "swap",
+              })
+          );
+          // allSettled, not all: one missing bold must not throw away a regular
+          // that loaded fine and send the whole family back to the fallback.
+          const settled = await Promise.race([
+            Promise.allSettled(fontFaces.map((fontFace) => fontFace.load())),
+            new Promise((resolve) => setTimeout(() => resolve(null), REMOTE_FONT_LOAD_TIMEOUT_MS)),
+          ]);
+          const loaded = settled
+            ? settled.filter((result) => result.status === "fulfilled").map((result) => result.value)
+            : [];
+          loaded.forEach((fontFace) => document.fonts.add(fontFace));
+          // `document.fonts.check` answers true for an *unknown* family — the
+          // fallback can render the text, so the query is satisfied. Readiness
+          // therefore has to come from a face actually being added.
+          if (loaded.length === 0 || !document.fonts.check(`16px "${assets.family}"`)) {
+            // Drop the state so the next refresh can retry, up to the attempt cap.
+            remoteFontFamilyState.delete(assets.key);
+            return;
+          }
+          remoteFontFamilyState.set(assets.key, "ready");
+          remoteFontAttempts.delete(assets.key);
+          // Cell metrics just changed under the terminal: re-apply the (now
+          // different) family string to force a re-measure, then re-fit so the
+          // PTY gets the column count this font actually produces.
+          const info = activeTerminalId ? terminalInfoById.get(activeTerminalId) : null;
+          if (!info || !info.appearance) return;
+          applyTerminalAppearance(info.appearance);
+          scheduleTerminalFit();
+        }
+
         function normalizeAppearance(appearance = {}) {
           const fontSize = Number(appearance.fontSize);
           const cursorWidth = Number(appearance.cursorWidth);
           const cursorStyle = ["bar", "underline", "block"].includes(appearance.cursorStyle)
             ? appearance.cursorStyle
             : defaultAppearance.cursorStyle;
+          const fontAssets = normalizeFontAssets(appearance.fontAssets);
+          const serverFontFamily = appearance.fontFamily || defaultAppearance.fontFamily;
           return {
-            fontFamily: appearance.fontFamily || defaultAppearance.fontFamily,
+            fontFamily: remoteFontIsReady(fontAssets)
+              ? `'${fontAssets.family}', ${serverFontFamily}`
+              : serverFontFamily,
             fontSize: Number.isFinite(fontSize) && fontSize > 0 ? Math.floor(fontSize) : defaultAppearance.fontSize,
             cursorStyle,
             cursorWidth: Number.isFinite(cursorWidth) && cursorWidth > 0 ? Math.floor(cursorWidth) : undefined,
@@ -4843,6 +4952,9 @@
           navigationState = data;
           const terminals = data.terminals || [];
           terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
+          // Start font downloads before the user attaches, so the terminal is
+          // usually created with the desktop font already measurable.
+          terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
           const nextTerminal = preferredTerminal(data, terminals, preferredTerminalId);
           setActiveTerminal(nextTerminal ? nextTerminal.id : null);
           renderNavigation(data);
@@ -5065,6 +5177,7 @@
 
         async function openOutput(terminalId, options = {}) {
           const terminalInfo = terminalInfoById.get(terminalId);
+          ensureRemoteFont(terminalInfo && terminalInfo.appearance);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
           const reconnecting = options.reconnect === true;
           const outputLeaseId = leaseId;
