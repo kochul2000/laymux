@@ -12,11 +12,12 @@ import { matchesKeybinding } from "@/lib/keybinding-registry";
 import { formatPaneIdentifier, paneNumberFor } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { findPaneInDirection, type Direction } from "@/lib/pane-navigation";
+import { getSortedWorkspaces, notificationStep } from "@/lib/navigation-actions";
 import {
-  getSortedWorkspaces,
-  notificationStep,
+  focusDockPane,
+  focusWorkspacePane,
   switchActiveWorkspace,
-} from "@/lib/navigation-actions";
+} from "@/lib/workspace-transition";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
 
@@ -44,12 +45,7 @@ function switchWorkspace(id: string) {
   // Opt-out (dockArrowFocusPane=false): when the dock was the focus source,
   // preserve dock focus across the switch (memo-style). When already in the
   // grid, fall through to the shared landing rule.
-  if (!focusPane && wasDockFocused) {
-    useWorkspaceStore.getState().setActiveWorkspace(id);
-    return;
-  }
-
-  switchActiveWorkspace(id);
+  switchActiveWorkspace(id, { preserveDockFocus: !focusPane && wasDockFocused });
 }
 
 /** Switch to the nth visible workspace (0-based display order). */
@@ -147,7 +143,7 @@ function navigatePaneFocus(e: KeyboardEvent) {
       if (currentIdx >= 0) {
         const nextIdx = findPaneInDirection(dock.panes, currentIdx, direction);
         if (nextIdx !== null) {
-          dockStore.setFocusedDock(focusedDock, dock.panes[nextIdx].id);
+          focusDockPane(focusedDock, dock.panes[nextIdx].id);
           return;
         }
       }
@@ -156,9 +152,8 @@ function navigatePaneFocus(e: KeyboardEvent) {
     const exitDir = getDockExitDirection(focusedDock);
     if (direction === exitDir) {
       // Exit dock → go back to workspace
-      dockStore.setFocusedDock(null);
-      const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
-      if (focusedPaneIndex === null) setFocusedPane(0);
+      const activeWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+      switchActiveWorkspace(activeWorkspaceId);
       return;
     }
     // Other directions while in dock: try to navigate to another dock.
@@ -168,7 +163,7 @@ function navigatePaneFocus(e: KeyboardEvent) {
       const targetDock = getDockForDirection(direction);
       const targetState = dockStore.getDock(targetDock);
       if (targetState?.visible && targetState.panes.length > 0 && targetDock !== focusedDock) {
-        dockStore.setFocusedDock(targetDock);
+        focusDockPane(targetDock);
         return;
       }
     }
@@ -178,19 +173,17 @@ function navigatePaneFocus(e: KeyboardEvent) {
   // Currently in workspace: try pane navigation first
   const ws = useWorkspaceStore.getState().getActiveWorkspace();
   if (!ws) return;
-  const { focusedPaneIndex, setFocusedPane } = useGridStore.getState();
+  const { focusedPaneIndex } = useGridStore.getState();
   const current = focusedPaneIndex ?? 0;
   const next = findPaneInDirection(ws.panes, current, direction);
   if (next !== null) {
-    setFocusedPane(next);
-    dockStore.setFocusedDock(null);
+    focusWorkspacePane(ws.id, next);
   } else if (dockArrowNav) {
     // No pane in that direction → try to enter a dock
     const targetDock = getDockForDirection(direction);
     const targetState = dockStore.getDock(targetDock);
     if (targetState?.visible && targetState.panes.length > 0) {
-      dockStore.setFocusedDock(targetDock);
-      useGridStore.getState().setFocusedPane(null);
+      focusDockPane(targetDock);
     }
   }
 }

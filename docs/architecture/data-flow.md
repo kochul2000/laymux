@@ -739,6 +739,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - `uiStore.hiddenWorkspaceIds`와 `hiddenPaneIds`는 localStorage에 저장하는 독립 raw state다. UI는 이 set을 직접 세어 표시하지 않고 `lib/hidden-items.ts`의 `deriveHiddenItems`가 현재 workspace 구조와 함께 계산한 visible 목록, 유효 숨김 개수, stale ID, shelf grouping을 사용한다([ADR-0005](../adr/0005-display-state-raw-separation-compute.md), [ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md)).
 - **보관함(shelf)은 hidden workspace 전용이며, 그것을 여는 count chip 바로 아래(목록 위)에 인라인으로 열린다**([ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)). chip 카운트도 유효 hidden workspace 수만 세고, hidden pane 은 chip·보관함 어디에도 나타나지 않는다.
 - workspace 행의 quick-hide 버튼은 항상 DOM에 존재하고 hover 또는 `:focus-within`에서 시각화된다. 숨김은 즉시 반영하며 최근 action은 5초 Undo snackbar로 되돌릴 수 있다.
+- active workspace를 숨길 때의 visible fallback은 일반 workspace 전환과 같은 `workspace-transition.ts`의 `switchActiveWorkspace` 착지 경로를 사용한다. 따라서 이전 dock focus를 지우고 전역 `focusedPaneIndex`를 fallback workspace의 유효 pane으로 다시 계산한 뒤 숨김 raw state를 적용한다(issue #578, [ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)). Selector 클릭·생성·복제, 키보드, Automation/Remote, 외부 상태 주입을 수선하는 coordinator도 각자 store를 조립하지 않고 같은 전환 소유자를 사용한다.
 - **Pane 숨김은 workspace grid 의 각 pane 컨트롤바 eye 토글로만 제어한다**(숨김·복원 모두). selector 의 pane 요약 행에는 숨김 버튼이 없고, 숨겨진 pane 행은 목록에서 필터된다. dock pane 은 selector 에 나오지 않으므로 토글을 노출하지 않는다.
 - 보관함의 기본 복원(행 클릭)은 workspace 를 다시 표시하고 활성화하며, eye 버튼은 표시만 한다. "모두 표시"는 hidden workspace set 만 비우고 개별 숨김 pane flag 는 유지한다.
 - workspace 를 복원해도 그 아래 pane 의 raw hidden flag 는 유지된다(복원은 pane 토글 소관).

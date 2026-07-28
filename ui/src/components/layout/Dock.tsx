@@ -2,8 +2,8 @@ import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/sto
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
-import { useGridStore } from "@/stores/grid-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { focusDockPane } from "@/lib/workspace-transition";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { PaneControlBar } from "./PaneControlBar";
@@ -229,8 +229,7 @@ function DockGrid({
       testIdFn={(pane) => `dock-pane-${pane.id}`}
       isFocused={(paneId) => focusedDock === position && focusedDockPaneId === paneId}
       onPaneFocus={(paneId) => {
-        useDockStore.getState().setFocusedDock(position, paneId);
-        useGridStore.getState().setFocusedPane(null);
+        focusDockPane(position, paneId);
       }}
       onSetPaneView={onSetPaneView}
       onSplitPane={onSplitPane}
