@@ -331,6 +331,8 @@
       "autoMobileMinWidthDesc": "0이면 비활성화. 앱 창 폭이 이 값 이하이거나, 휴대폰(세로 화면 + 짧은 변이 이 값 이하)에서 RDP로 접속하면 Remote Access가 자동으로 열립니다.",
       "snapshotMaxKib": "화면 체크포인트 스크롤백",
       "snapshotMaxKibDesc": "원격 접속·터미널 전환 때 복원할 화면 체크포인트의 스크롤백 예산(KiB)입니다. 현재 화면과 터미널 상태는 이 값보다 클 수 있습니다.",
+      "serveTerminalFont": "터미널 폰트 전송",
+      "serveTerminalFontDesc": "PC 터미널 폰트 파일을 원격 브라우저로 보내 같은 글꼴·셀 폭으로 보이게 합니다. 폰트 바이너리를 네트워크로 내보내는 것은 재배포이므로, 재배포가 허용된 폰트에만 켜세요(Consolas 등 OS 번들 독점 폰트는 허용되지 않습니다). 첫 접속 때 폰트 용량만큼 받습니다.",
       "customHosts": "수동 호스트",
       "customHostsDesc": "Remote Access 복사 URL 선택기에 표시할 호스트 이름 또는 IP입니다.",
       "customHostPlaceholder": "devbox.tailnet.ts.net",

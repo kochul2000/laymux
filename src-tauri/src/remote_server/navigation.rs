@@ -828,6 +828,7 @@ mod tests {
                 font_size: 14,
                 cursor_style: "bar".into(),
                 cursor_width: Some(1),
+                font_assets: None,
                 theme: RemoteTerminalTheme::default(),
             },
         }

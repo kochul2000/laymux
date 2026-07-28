@@ -159,6 +159,25 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_registers_the_desktop_terminal_font() {
+        let html = remote_page_html();
+        // Only the exact advertised shapes may reach a CSS rule.
+        assert!(html.contains("const REMOTE_FONT_FAMILY_PATTERN = /^LxRemoteFont-[0-9a-f]{12}$/;"));
+        assert!(html.contains(
+            "const REMOTE_FONT_URL_PATTERN = /^\\/remote\\/font\\/[0-9a-f]{16}\\.(?:ttf|otf)$/;"
+        ));
+        assert!(html.contains("@font-face{font-family:\""));
+        // `document.fonts.load` resolves even when nothing matched, so the
+        // ready flag has to come from an explicit check.
+        assert!(html.contains("document.fonts.check(`16px \"${assets.family}\"`)"));
+        // The alias is prepended only once loaded, so the fontFamily string
+        // really changes and xterm re-measures the cell (ADR-0077).
+        assert!(html.contains("fontFamily: remoteFontIsReady(fontAssets)"));
+        assert!(html.contains("applyTerminalAppearance(info && info.appearance);"));
+        assert!(html.contains("scheduleTerminalFit();"));
+    }
+
+    #[test]
     fn remote_page_html_contains_remote_bootstrap() {
         let html = remote_page_html();
         assert!(html.contains("Laymux Remote"));

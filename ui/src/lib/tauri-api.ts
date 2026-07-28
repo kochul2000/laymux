@@ -482,6 +482,8 @@ export interface RemoteSettings {
   cloudTunnelUrl?: string | null;
   cloudServerBaseUrl?: string | null;
   cloudAutoReconnect: boolean;
+  /** Send the desktop terminal font file to remote browsers (ADR-0077). */
+  serveTerminalFont: boolean;
 }
 
 export interface Settings {

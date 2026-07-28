@@ -2134,6 +2134,14 @@ function RemoteSection() {
             </span>
           </div>
         </SettingRow>
+
+        <ToggleRow
+          label={t("remote.serveTerminalFont")}
+          desc={t("remote.serveTerminalFontDesc")}
+          testid="remote-settings-serve-terminal-font-toggle"
+          checked={remote.serveTerminalFont}
+          onChange={(value) => update({ serveTerminalFont: value })}
+        />
       </SubGroup>
 
       <SubGroup title={t("remote.groupHosts")}>

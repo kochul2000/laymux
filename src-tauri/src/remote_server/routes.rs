@@ -20,8 +20,8 @@ use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscrip
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
 use super::assets::{
-    remote_addon_fit_js, remote_unicode_provider_js, remote_web_links_addon_js, remote_xterm_css,
-    remote_xterm_js,
+    remote_addon_fit_js, remote_font, remote_unicode_provider_js, remote_web_links_addon_js,
+    remote_xterm_css, remote_xterm_js,
 };
 use super::auth::remote_guard;
 use super::github_repo_routes::remote_terminal_github_repo;
@@ -205,6 +205,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/vendor/addon-web-links.js",
             get(remote_web_links_addon_js),
         )
+        // Desktop terminal font copy (ADR-0077). Gated inside the handler like
+        // the other asset routes, not by `remote_guard`.
+        .route("/remote/font/{file_name}", get(remote_font))
         .route("/remote/viewer/", get(remote_viewer_page))
         .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)
