@@ -6,8 +6,12 @@ use axum::Json;
 use crate::lock_ext::MutexExt;
 
 use super::helpers::{bridge_request, err_json, ok_json};
+use super::instance_identity;
 use super::types::{HealthResponse, OutputQuery, WriteBody};
 use super::ServerState;
+
+#[cfg(test)]
+use super::types::{HealthBuildKind, HealthInstanceIdentity};
 
 // ---- API self-description ----
 
@@ -22,7 +26,8 @@ pub async fn api_docs() -> impl IntoResponse {
         "endpoints": [
             {
                 "method": "GET", "path": "/api/v1/health",
-                "description": "Health check. Returns status, version, port."
+                "description": "Health check plus immutable process/build identity. Dev responses include local executable/worktree paths and branch; release responses redact those fields to null.",
+                "response": "{ status, version, port, instance: { pid, buildKind: 'dev'|'release', executablePath: string|null, worktreeRoot: string|null, gitCommit: string|null, gitBranch: string|null } }"
             },
             {
                 "method": "GET", "path": "/api/v1/diagnostics/frontend",
@@ -302,6 +307,7 @@ pub async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoRespon
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
         port,
+        instance: instance_identity::current(),
     })
 }
 
@@ -522,9 +528,31 @@ mod tests {
             status: "ok".into(),
             version: env!("CARGO_PKG_VERSION").into(),
             port: 19280,
+            instance: HealthInstanceIdentity {
+                pid: 4242,
+                build_kind: HealthBuildKind::Dev,
+                executable_path: Some(r"D:\PycharmProjects\laymux\target\debug\laymux.exe".into()),
+                worktree_root: Some(r"D:\PycharmProjects\laymux".into()),
+                git_commit: Some("0123456789abcdef".into()),
+                git_branch: Some("main".into()),
+            },
         };
-        assert_eq!(resp.status, "ok");
-        assert_eq!(resp.port, 19280);
+        let json = serde_json::to_value(resp).unwrap();
+
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["port"], 19280);
+        assert_eq!(json["instance"]["pid"], 4242);
+        assert_eq!(json["instance"]["buildKind"], "dev");
+        assert_eq!(
+            json["instance"]["executablePath"],
+            r"D:\PycharmProjects\laymux\target\debug\laymux.exe"
+        );
+        assert_eq!(
+            json["instance"]["worktreeRoot"],
+            r"D:\PycharmProjects\laymux"
+        );
+        assert_eq!(json["instance"]["gitCommit"], "0123456789abcdef");
+        assert_eq!(json["instance"]["gitBranch"], "main");
     }
 
     /// Extract documented (method, path) pairs from the api_docs JSON.

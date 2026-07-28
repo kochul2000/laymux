@@ -25,8 +25,9 @@
   ```powershell
   Get-NetTCPConnection -LocalPort 19281 -State Listen | Select-Object -Expand OwningProcess
   ```
-  포그라운드 확인도 프로세스 **이름이 아니라 pid** 로 한다.
-- **dev 기동은 워크트리에서 `cargo tauri dev`, 종료는 `bash scripts/kill-dev.sh`.** 브랜치 코드를 실기에서 보려면 그 워크트리에서 띄운다. 새 워크트리는 `ui/` 에서 `npm ci` 가 필요하다(xterm 패치가 postinstall 로 붙는다).
+  포그라운드 확인도 프로세스 **이름이 아니라 pid** 로 한다. 다만 19281도 다른 워크트리 dev가 이어서 소유할 수 있으므로 포트만으로 대상 확인을 끝내지 않는다.
+- **health에서 워크트리 신원을 확인한다.** 측정 전에 `GET http://127.0.0.1:19281/api/v1/health`의 `instance.pid`·`executablePath`·`worktreeRoot`·`gitCommit`을 지금 띄운 워크트리의 기대값과 대조한다. `status: ok`와 `port: 19281`만 맞는 것은 충분하지 않다([ADR-0083](adr/0083-automation-health-instance-identity.md)).
+- **dev 기동은 워크트리에서 `cargo tauri dev`, 종료는 `bash scripts/kill-dev.sh`.** 브랜치 코드를 실기에서 보려면 그 워크트리에서 띄운다. 종료 출력의 PID와 실행 경로가 health에서 확인한 대상과 같은지 본다. 새 워크트리는 `ui/` 에서 `npm ci` 가 필요하다(xterm 패치가 postinstall 로 붙는다).
 - **재현 환경은 끝까지 세팅해 놓는다.** "vim 을 띄우고 insert 모드까지 들어간 pane" 처럼, 사용자가 할 일이 **키 몇 번**만 남도록 만든다. MCP `write_to_terminal` 로 앱 실행·모드 진입까지 미리 해둘 수 있다.
 
 ## 2. 사람이 해야만 하는 입력을 구분한다
@@ -110,7 +111,8 @@ cd ui && npm run test:screen     # *.screen.test.ts 만 — 기본 vitest run �
 - **`automation.json` 은 dev 인스턴스만 쓴다(#574 이후).** 예전에는 `cargo test` 의
   `write_and_remove_discovery_file` 이 실제 설정 경로에 port=19280 을 쓰고 지워서, 살아 있는 dev 인스턴스에서도
   파일이 사라졌다. 지금은 테스트가 `tempfile` 디렉터리를 쓰고, `kill-dev.sh` 1순위는 파일의 `port` 가 19281 일 때만
-  그 pid 를 신뢰한다. 그래도 dev pid 의 최종 권위는 포트 19281 LISTENING 소유자다(`kill-dev.sh` 2순위 경로).
+  그 pid 를 신뢰한다. dev pid 는 포트 19281 LISTENING 소유자에서 찾되, 측정 대상 워크트리는 health `instance`로
+  별도 확인한다(`kill-dev.sh` 2순위 경로, [ADR-0083](adr/0083-automation-health-instance-identity.md)).
 
 ## 관련
 

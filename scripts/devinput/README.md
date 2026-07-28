@@ -48,7 +48,9 @@ uv run --with pytest python -m pytest scripts/devinput/tests -q
    로 파일을 지우거나 `LAYMUX_DEVINPUT_DISABLE=1` 을 켜면 그 즉시 진행 중인 런도 멈춘다.
 2. **타깃 락.** 대상 pid 는 **포트 19281 LISTENING 소유자**로 정한다(`automation.json` 은 참고용 —
    아래 "함정" 참조). 그 pid 의 이미지가 `laymux.exe` 인지, 19280 소유자(release)와 겹치지 않는지
-   확인하고, **이벤트 하나 보내기 전마다** 포그라운드 창의 pid 가 그 pid 인지 다시 본다.
+   확인한다. 수동 측정에서는 health의 `instance.pid`·`buildKind`를 그 대상과,
+   `instance.worktreeRoot`·`gitCommit`을 기대 checkout과 대조한다. **이벤트 하나 보내기 전마다**
+   포그라운드 창의 pid 가 그 pid 인지 다시 본다.
    불일치면 즉시 중단, 재시도 없음. release pid 는 명시적 블랙리스트다.
 3. **데드맨 스위치.** `WH_KEYBOARD_LL`/`WH_MOUSE_LL` 훅으로 **합성이 아닌** 입력을 감지한다. 사람이
    키를 누르거나 마우스를 40px 움직이면 그 순간 중단된다. `GetLastInputInfo` 는 합성 입력도 세므로
@@ -98,6 +100,7 @@ SendInput 이 조용히 실패한다. doctor 가 그 진단을 출력한다.
 - **`automation.json` 을 신뢰하지 마라.** `cargo test` 의 `write_and_remove_discovery_file` 이 실제
   사용자 설정 경로(`%APPDATA%\laymux-dev\automation.json`)에 port=19280 을 쓰고 지운다. 그래서 살아 있는
   dev 인스턴스에 discovery 파일이 없는 상태가 흔하다. 이 도구는 포트 소유자를 권위로 쓴다.
+  어떤 워크트리의 프로세스인지는 `/api/v1/health`의 `instance`를 기대값과 대조한다.
 - **`SetForegroundWindow` 는 백그라운드 프로세스에서 실패한다.** `--focus-dev` 는 AttachThreadInput →
   최소화/복원까지 시도하고, 그래도 안 되면 실패를 보고한다(조용히 넘어가지 않는다).
 - **IME 는 비동기다.** 5단계가 들어오면 같은 시나리오를 여러 번 돌려 pass/fail 비율로 판정한다.

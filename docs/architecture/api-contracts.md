@@ -350,6 +350,31 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 
 Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가 대체한다(§12.6, [ADR-0002](../adr/0002-automation-api-fixed-port-ip-allowlist.md)).
 
+포트가 응답한다는 사실만으로는 같은 빌드 종류의 어느 워크트리인지 알 수 없다. `/api/v1/health`는
+[ADR-0083](../adr/0083-automation-health-instance-identity.md)에 따라 실제 응답 프로세스와 빌드 신원을 함께 반환한다.
+
+```jsonc
+{
+  "status": "ok",
+  "version": "0.8.1",
+  "port": 19281,
+  "instance": {
+    "pid": 12345,
+    "buildKind": "dev", // "dev" | "release"
+    "executablePath": "D:\\trees\\laymux\\target\\debug\\laymux.exe",
+    "worktreeRoot": "D:\\trees\\laymux",
+    "gitCommit": "0123456789abcdef0123456789abcdef01234567",
+    "gitBranch": "fix/625-dev-instance-identity"
+  }
+}
+```
+
+- `pid`는 이 응답을 만든 프로세스, `buildKind`는 포트와 같은 debug/release 판정이다.
+- `gitCommit`은 Git checkout에서 빌드하면 dev/release 공통으로 제공하며, Git 관리 정보가 없는 source archive 빌드는 `null`이다.
+- `executablePath`·`worktreeRoot`·`gitBranch`는 로컬 경로·사용자명·작업명을 포함할 수 있어 **dev에서만 값**이고 release에서는 명시적 `null`이다.
+- build identity는 빌드 시점 스냅샷이다. `gitCommit`은 uncommitted diff를 나타내지 않으므로 dev 측정 도구는 기대 `worktreeRoot`·commit과 필요하면 checkout dirty 상태를 별도로 대조한다.
+- 고정 포트는 발견 수단이지 인스턴스 신원이 아니다. 측정 전에 한 번의 health 응답에서 기대 PID/워크트리/commit을 검증한다.
+
 ### 12.3 엔드포인트
 
 > **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 55개 = REST 54 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
@@ -357,7 +382,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
-| GET | `/api/v1/health` | 헬스체크 |
+| GET | `/api/v1/health` | 헬스체크 + 응답 프로세스·빌드 신원(`instance`) |
 | GET | `/api/v1/diagnostics/frontend` | 프론트엔드 vitals (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
 | GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
@@ -424,6 +449,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - IP allowlist 미들웨어: loopback, RFC 1918 사설 대역(10.x, 172.16-31.x, 192.168.x), link-local(169.254.x, fe80::)만 허용
 - 인증 헤더 불필요 — 로컬/사설 네트워크 IP 제한만으로 보안 확보 (Chrome DevTools, Jupyter 등과 동일 모델)
 - 외부 공인 IP에서 접근 시 403 Forbidden 반환
+- `/api/v1/health`의 dev 응답은 대상 검증을 위해 로컬 실행 파일·워크트리 절대 경로와 브랜치명을 공개한다. release 응답은 이 세 필드를 `null`로 redaction하고 PID·version·commit만 공개한다([ADR-0083](../adr/0083-automation-health-instance-identity.md)).
 - IP allowlist 거절 응답은 laymux 가 관측한 클라이언트 주소를 포함한다: `{ "error": "... client IP: <ip>", "clientIp": "<ip>" }`
 - **등록되지 않은 경로는 404** 다. Automation 라우터와 remote 라우터를 merge 한 뒤 서버 전체가 명시적 fallback 하나를 소유하며, 응답은 `{ "error": "no such route: <METHOD> <path>", "method", "path", "docs": "/api/v1/docs" }` 다. 라우트 인증 게이트가 미등록 경로를 대신 답하면 경로 오타가 인증 실패로 오진된다([#591](https://github.com/kochul2000/laymux/issues/591)) — `axum::Router::layer` 는 fallback 까지 감싸고 `merge` 는 그 fallback 을 합쳐진 라우터에 넘기므로, 라우트 인증은 반드시 `route_layer` 로 붙인다.
 - 이 404 fallback 에도 IP allowlist 는 그대로 적용한다. IP allowlist 는 라우트 인증이 아니라 네트워크 경계이므로, 허용 밖 peer 가 404/401 차이로 라우트 존재 여부를 스캔하지 못하게 한다. 즉 허용 밖 peer 는 미등록 경로에서도 403 을 받는다.
