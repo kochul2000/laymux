@@ -1,5 +1,5 @@
 import { findNextVisibleWorkspaceId } from "@/lib/hidden-items";
-import { switchActiveWorkspace } from "@/lib/navigation-actions";
+import { switchActiveWorkspace } from "@/lib/workspace-transition";
 import { sortWorkspaces } from "@/lib/workspace-sort";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
