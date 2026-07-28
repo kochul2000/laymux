@@ -1,6 +1,6 @@
 # 0081. Pane 포커스 전환은 단일 도메인 액션이 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-28
 - Source: 사용자 요구, issue #578, PR #579 후속, [ADR-0005](0005-display-state-raw-separation-compute.md), [ADR-0020](0020-remote-dock-terminal-navigation.md), [ADR-0039](0039-remote-spatial-notification-step-navigation.md), architecture/api-contracts.md §13.3·§15.4
 
