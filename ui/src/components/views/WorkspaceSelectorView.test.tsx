@@ -176,6 +176,31 @@ describe("WorkspaceSelectorView", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ws2.id);
   });
 
+  it("routes workspace clicks through the shared pane transition", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.getState().addWorkspace("Second", "default-layout");
+    const second = useWorkspaceStore.getState().workspaces[1];
+    useWorkspaceStore.setState({
+      workspaces: useWorkspaceStore
+        .getState()
+        .workspaces.map((workspace) =>
+          workspace.id === second.id
+            ? { ...workspace, panes: workspace.panes.slice(0, 1) }
+            : workspace,
+        ),
+    });
+    useGridStore.getState().setFocusedPane(2);
+    useDockStore.getState().setFocusedDock("left", "dock-pane");
+    render(<WorkspaceSelectorView />);
+
+    await user.click(screen.getByTestId(`workspace-item-${second.id}`));
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(second.id);
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
+  });
+
   it("shows unread badge when notifications exist", async () => {
     useWorkspaceStore.setState({
       workspaces: [

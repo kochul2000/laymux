@@ -1,6 +1,8 @@
 import { renderHook, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useHiddenItemsCoordinator } from "./useHiddenItemsCoordinator";
+import { useDockStore } from "@/stores/dock-store";
+import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { Workspace } from "@/stores/types";
@@ -20,6 +22,8 @@ const workspaces: Workspace[] = [
 
 describe("useHiddenItemsCoordinator", () => {
   beforeEach(() => {
+    useDockStore.setState(useDockStore.getInitialState());
+    useGridStore.setState(useGridStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useWorkspaceStore.setState({
       workspaces,
@@ -42,9 +46,14 @@ describe("useHiddenItemsCoordinator", () => {
   });
 
   it("moves to a visible fallback when external state hides the active workspace", () => {
+    useGridStore.getState().setFocusedPane(4);
+    useDockStore.getState().setFocusedDock("left", "dock-pane");
     renderHook(() => useHiddenItemsCoordinator());
     act(() => useUiStore.getState().setWorkspaceHidden("ws-a", true));
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
   it("restores the active workspace when it is the last visible workspace", () => {

@@ -33,6 +33,7 @@ import { toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
+import { switchActiveWorkspace } from "@/lib/workspace-transition";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
 
@@ -985,7 +986,6 @@ export function WorkspaceSelectorView() {
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const removeWorkspace = useWorkspaceStore((s) => s.removeWorkspace);
   const duplicateWorkspace = useWorkspaceStore((s) => s.duplicateWorkspace);
   const addWorkspace = useWorkspaceStore((s) => s.addWorkspace);
@@ -1144,7 +1144,7 @@ export function WorkspaceSelectorView() {
 
   const handleSelectWorkspace = (wsId: string) => {
     // UI dismissal is NOT done here: entering the workspace funnels through
-    // setActiveWorkspace, and AppLayout's focus effect performs the read-marking
+    // the shared workspace transition, and AppLayout's focus effect performs the read-marking
     // per the active dismiss mode (ADR 0010, issue #365). Doing markWorkspaceAsRead
     // here would ignore paneFocus/manual modes and re-scatter dismissal into an
     // input handler — exactly what made dismissal key/device-dependent.
@@ -1157,7 +1157,7 @@ export function WorkspaceSelectorView() {
     if (wsTerminalIds.length > 0) {
       markNotificationsRead(wsTerminalIds).catch(() => {});
     }
-    setActiveWorkspace(wsId);
+    switchActiveWorkspace(wsId);
   };
 
   const handleCreateWithLayout = (layoutId: string) => {
@@ -1167,7 +1167,7 @@ export function WorkspaceSelectorView() {
     // Auto-switch to newly created workspace
     const newWs = useWorkspaceStore.getState().workspaces;
     const created = newWs[newWs.length - 1];
-    if (created) setActiveWorkspace(created.id);
+    if (created) switchActiveWorkspace(created.id);
   };
 
   const handleHideWorkspace = (workspaceId: string) => {
@@ -1401,7 +1401,7 @@ export function WorkspaceSelectorView() {
                       result.paneIdMap,
                       true,
                     );
-                  setActiveWorkspace(result.newWorkspaceId);
+                  switchActiveWorkspace(result.newWorkspaceId);
                 }
               }}
               onRename={() => {
