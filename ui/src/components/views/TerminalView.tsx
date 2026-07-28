@@ -2393,7 +2393,14 @@ export function TerminalView({
       lastCompositionBufferType = terminal.buffer.active.type;
     };
     compositionScrollBaselineRef.current = seedCompositionScrollBaseline;
-    const followBufferScrollForComposition = () => {
+    /**
+     * The single owner of "what a `baseY` move owes an open composition".
+     *
+     * Called from `onScroll` for live scrolls and once more when a buffer rebuild
+     * closes, which is why the shadow-cursor carry is a parameter rather than
+     * unconditional (see `withCompositionScrollRebuild`).
+     */
+    const chargeCompositionBaseYMove = (options: { carryShadowCursor: boolean }) => {
       const bufferType = terminal.buffer.active.type;
       const baseY = getTerminalBaseY(terminal);
       // xterm forwards buffer activation and `clear()` through the same scroll
@@ -2407,16 +2414,64 @@ export function TerminalView({
       const rowDelta = baseY - lastCompositionBaseY;
       lastCompositionBaseY = baseY;
       if (rowDelta === 0 || !compositionPreviewRef.current.active) return;
-      // The shadow cursor is frozen for the duration of a composition
-      // (`composition-preview-active`), so it holds the input line's row from
-      // before the scroll. Move it with the anchor: leaving it behind makes the
-      // next carry-over read a row that disagrees with the shifted origin,
-      // classify it as `originMoved`, and snap the preview back up.
-      shadowCursorRef.current.cursorAbsY += rowDelta;
+      if (options.carryShadowCursor) {
+        // The shadow cursor is frozen for the duration of a composition
+        // (`composition-preview-active`), so it holds the input line's row from
+        // before the scroll. Move it with the anchor: leaving it behind makes the
+        // next carry-over read a row that disagrees with the shifted origin,
+        // classify it as `originMoved`, and snap the preview back up.
+        shadowCursorRef.current.cursorAbsY += rowDelta;
+      }
       compositionController.notifyBufferScrolled(rowDelta);
     };
+    // A stream rebuild — `terminal.reset()` plus the snapshot replay serialized
+    // behind it — demolishes the buffer's coordinate space and builds a new one.
+    // `reset()` emits `onScroll` **synchronously**, with `baseY` already 0
+    // (pinned against the shipped bundle in `xterm-semantics.screen.test.ts`),
+    // and the replay then grows `baseY` back over many awaited writes.
+    //
+    // Charging those events to an open composition one at a time hands the anchor
+    // the entire scrollback height as a negative jump first and only repays it as
+    // the snapshot lands. A Korean syllable composed across that window therefore
+    // spends its whole life anchored off the top of the screen (issue #602) — the
+    // repayment arrives after it has already committed. Suppressing only the reset
+    // would be worse, not better: the replay's growth would then be charged with
+    // nothing to offset it.
+    //
+    // So the whole rebuild is one window. Its `onScroll` events are skipped with
+    // the baseline left frozen, and the single charge at the close is measured
+    // against that frozen baseline — which is exactly issue #570's rule applied to
+    // the rebuild as a unit, and stays right for a composition that opened *inside*
+    // the window (its own `compositionstart` re-seeded the baseline).
+    let compositionScrollRebuildDepth = 0;
+    /**
+     * Run a buffer rebuild with composition scroll accounting deferred to its net
+     * (issue #602). The `finally` is load-bearing: an abandoned window would leave
+     * the baseline frozen and silently stop issue #570's carry-along.
+     */
+    const withCompositionScrollRebuild = async (rebuild: () => Promise<void>) => {
+      compositionScrollRebuildDepth += 1;
+      try {
+        await rebuild();
+      } finally {
+        compositionScrollRebuildDepth = Math.max(0, compositionScrollRebuildDepth - 1);
+        if (compositionScrollRebuildDepth === 0) {
+          // Not `carryShadowCursor`: `resetStreamDerivedCursorState` cleared the
+          // shadow inside this window (issue #596), so there is no row left to
+          // carry, and adding a delta to the cleared `cursorAbsY` would invent one
+          // that later blocks shadow syncs with `row-mismatch`. With the beliefs
+          // cleared `computeUseShadowCursor` is false anyway, so the controller
+          // reads the live buffer cursor and never compares against the shadow.
+          chargeCompositionBaseYMove({ carryShadowCursor: false });
+        }
+      }
+    };
     const scrollDisposable = terminal.onScroll?.(() => {
-      followBufferScrollForComposition();
+      // A rebuild owns the composition accounting until it closes, baseline and
+      // all. Viewport presentation is unaffected — it reads the live buffer.
+      if (compositionScrollRebuildDepth === 0) {
+        chargeCompositionBaseYMove({ carryShadowCursor: true });
+      }
       refreshViewportPresentation();
     });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
@@ -2923,12 +2978,14 @@ export function TerminalView({
     // frame opened while the real cursor keeps advancing. Paired with the
     // reset call so the two states cannot drift apart.
     // See `createShadowCursorState`.
+    // The `baseY` drop this reset causes is not re-seeded here. `terminal.reset()`
+    // has already emitted its synchronous `onScroll` by the time this runs, so a
+    // re-seed from here is a no-op that only looks like protection (issue #602).
+    // `withCompositionScrollRebuild` owns that window instead, from before the
+    // reset until the replay has rebuilt the scrollback.
     const resetStreamDerivedCursorState = () => {
       Object.assign(shadowCursorRef.current, createShadowCursorState());
       clearParkSettleTimer();
-      // `baseY` is about to drop to 0; an open composition must not charge that
-      // jump to its anchor as a scroll (issue #570).
-      compositionScrollBaselineRef.current?.();
       scheduleOverlayCaretUpdate();
     };
     // No repaint filter is armed around a backend resize: the bundled ConPTY
@@ -4071,65 +4128,70 @@ export function TerminalView({
         await renderCheckpointModel.attach(attachment);
         if (!isCurrentAttach()) return;
 
-        terminalOutputWriteChain = terminalOutputWriteChain.then(async () => {
-          if (!isCurrentAttach()) return;
-          terminal.reset();
-          resetStreamDerivedCursorState();
-          if (cached) {
-            await trackedTerminalWriteAsync(cached);
+        // The whole rebuild is one composition-scroll window: `reset()` collapses
+        // the scrollback and the replay below rebuilds it, so only the net shift
+        // may reach an open composition anchor (issue #602).
+        terminalOutputWriteChain = terminalOutputWriteChain.then(() =>
+          withCompositionScrollRebuild(async () => {
             if (!isCurrentAttach()) return;
-            // The persisted screen and the new PTY are different coordinate
-            // spaces. Move the former into scrollback, then home xterm so the
-            // backend's row-1 CUP/HVP writes (including typed-input echo) land
-            // on the same live row as the initial prompt.
-            await trackedTerminalWriteAsync(terminalRestoreBoundary(terminal.rows));
-            if (!isCurrentAttach()) return;
-          }
-          if (attachment.snapshot.length > 0) {
-            await new Promise<void>((resolve) =>
-              processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }),
-            );
-            if (!isCurrentAttach()) return;
-          }
+            terminal.reset();
+            resetStreamDerivedCursorState();
+            if (cached) {
+              await trackedTerminalWriteAsync(cached);
+              if (!isCurrentAttach()) return;
+              // The persisted screen and the new PTY are different coordinate
+              // spaces. Move the former into scrollback, then home xterm so the
+              // backend's row-1 CUP/HVP writes (including typed-input echo) land
+              // on the same live row as the initial prompt.
+              await trackedTerminalWriteAsync(terminalRestoreBoundary(terminal.rows));
+              if (!isCurrentAttach()) return;
+            }
+            if (attachment.snapshot.length > 0) {
+              await new Promise<void>((resolve) =>
+                processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }),
+              );
+              if (!isCurrentAttach()) return;
+            }
 
-          // Cache/snapshot may contain historic DEC mode changes. Apply the
-          // backend's state last, to xterm only, before live sequenced deltas.
-          await trackedTerminalWriteAsync(
-            attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
-          );
-          if (!isCurrentAttach()) return;
-          outputGeneration = attachment.state.generation;
-          const buffered = outputCoordinator.completeAttach(attachment);
-          if (buffered.kind === "gap") {
-            console.warn(
-              "[TerminalView] terminal output gap during attach",
-              buffered,
-              recordTerminalOutputRecovery(instanceId, "gap"),
+            // Cache/snapshot may contain historic DEC mode changes. Apply the
+            // backend's state last, to xterm only, before live sequenced deltas.
+            await trackedTerminalWriteAsync(
+              attachment.state.modes.bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l",
             );
-            // The snapshot is the whole 1 MiB ring, so a delta lost during the
-            // attach round-trip is still in the ring: repair the exact range
-            // instead of escalating to another screen-losing reattach that would
-            // only widen the window for the same loss (issue #607). The prefix
-            // that arrived before the hole is applied first — the coordinator has
-            // already moved `expectedSeq` past it.
-            if (!(await writeAttachedSegments(buffered.segments, isCurrentAttach))) return;
-            // Readiness belongs to the attach, not to the repair: from here the
-            // hole is an ordinary mid-stream gap, and live deltas keep buffering
-            // in the coordinator until the repair splices in front of them.
-            setOutputReady(true);
-            // Kicked from the attach's `finally`, one statement after
-            // `outputAttachInFlight` drops: the round-trip then starts directly
-            // instead of hopping through the retry timer, so the start latency
-            // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
-            // arriving in that window cannot race the attach for who owns the
-            // hole.
-            attachWindowGap = buffered;
-            return;
-          }
-          if (await writeAttachedSegments(buffered.segments, isCurrentAttach)) {
-            setOutputReady(true);
-          }
-        });
+            if (!isCurrentAttach()) return;
+            outputGeneration = attachment.state.generation;
+            const buffered = outputCoordinator.completeAttach(attachment);
+            if (buffered.kind === "gap") {
+              console.warn(
+                "[TerminalView] terminal output gap during attach",
+                buffered,
+                recordTerminalOutputRecovery(instanceId, "gap"),
+              );
+              // The snapshot is the whole 1 MiB ring, so a delta lost during the
+              // attach round-trip is still in the ring: repair the exact range
+              // instead of escalating to another screen-losing reattach that would
+              // only widen the window for the same loss (issue #607). The prefix
+              // that arrived before the hole is applied first — the coordinator has
+              // already moved `expectedSeq` past it.
+              if (!(await writeAttachedSegments(buffered.segments, isCurrentAttach))) return;
+              // Readiness belongs to the attach, not to the repair: from here the
+              // hole is an ordinary mid-stream gap, and live deltas keep buffering
+              // in the coordinator until the repair splices in front of them.
+              setOutputReady(true);
+              // Kicked from the attach's `finally`, one statement after
+              // `outputAttachInFlight` drops: the round-trip then starts directly
+              // instead of hopping through the retry timer, so the start latency
+              // does not depend on `TERMINAL_WRITE_RETRY_MS` and a live delta
+              // arriving in that window cannot race the attach for who owns the
+              // hole.
+              attachWindowGap = buffered;
+              return;
+            }
+            if (await writeAttachedSegments(buffered.segments, isCurrentAttach)) {
+              setOutputReady(true);
+            }
+          }),
+        );
         await terminalOutputWriteChain;
       } catch (error) {
         if (!cancelled && epoch === outputAttachEpoch) {
