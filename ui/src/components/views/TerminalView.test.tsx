@@ -9529,6 +9529,58 @@ describe("TerminalView desktop input composer", () => {
       typeof call[0] === "string" ? call[0] : new TextDecoder().decode(call[0] as Uint8Array),
     );
 
+  /**
+   * Everything xterm was asked to parse, concatenated in write order.
+   *
+   * Recovery assertions are about the **byte stream**, not about how many
+   * `write()` calls it took: a repair drain hands the served range and the deltas
+   * it splices in front of to one merged write (issue #606, ADR-0079). Asserting
+   * on `decodedWrites()` entries would pin the batching, which is exactly the
+   * thing that is allowed to change.
+   */
+  const writtenStream = () => decodedWrites().join("");
+
+  it("merges output deltas that arrive while xterm is still parsing (issue #606)", async () => {
+    const terminalId = "t-output-backlog-coalesce";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+
+    // Park the next write so the surface is provably behind while more deltas
+    // land — the flood condition, without needing a flood.
+    const finishWrites: Array<() => void> = [];
+    mockWrite.mockClear();
+    mockWrite.mockImplementationOnce((_: string | Uint8Array, callback?: () => void) => {
+      if (callback) finishWrites.push(callback);
+    });
+
+    act(() => emitOutput(outputDelta(0, "one")));
+    // The first delta went straight through: an idle surface must not be delayed.
+    expect(decodedWrites()).toEqual(["one"]);
+
+    act(() => {
+      emitOutput(outputDelta(3, "two"));
+      emitOutput(outputDelta(6, "three"));
+      emitOutput(outputDelta(11, "four"));
+    });
+    // Held, not written: nothing may reach xterm while it still owes a callback.
+    expect(decodedWrites()).toEqual(["one"]);
+
+    act(() => finishWrites[0]?.());
+
+    // Three deltas, one write. The per-delta constant — a write callback, a
+    // checkpoint-model write, a stabilizer push, a `TextDecoder` round and a full
+    // detector sweep — is what saturates the main thread during a flood, and this
+    // ratio is what stops a layout change from turning that into a stall.
+    await vi.waitFor(() => {
+      expect(decodedWrites()).toEqual(["one", "twothreefour"]);
+    });
+    expect(writtenStream()).toBe("onetwothreefour");
+    expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({
+      gap: 0,
+      repair: 0,
+      malformedDelta: 0,
+    });
+  });
+
   it("repairs an output delta gap from the ring without resetting the screen", async () => {
     const terminalId = "t-output-gap-repair";
     const emitOutput = await attachedOutputEmitter(terminalId);
@@ -9546,7 +9598,7 @@ describe("TerminalView desktop input composer", () => {
 
     expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 5);
     await vi.waitFor(() => {
-      const written = decodedWrites();
+      const written = writtenStream();
       expect(written).toContain("BBB");
       expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("BBB"));
     });
@@ -9641,7 +9693,7 @@ describe("TerminalView desktop input composer", () => {
     act(() => emitOutput(outputDelta(12, "CC")));
 
     await vi.waitFor(() => {
-      const written = decodedWrites();
+      const written = writtenStream();
       // The bytes round 1 *did* bridge must reach xterm: the coordinator has
       // already moved `expectedSeq` past them, so dropping them would silently
       // punch the hole this path exists to close.
@@ -9797,7 +9849,7 @@ describe("TerminalView desktop input composer", () => {
     });
 
     await vi.waitFor(() => {
-      const written = decodedWrites();
+      const written = writtenStream();
       expect(written).toContain("AAAAAAAA");
       expect(written.indexOf("CC")).toBeGreaterThan(written.indexOf("AAAAAAAA"));
     });

@@ -54,14 +54,23 @@ pub async fn bridge_request(
         channels.insert(request_id.clone(), tx);
     }
 
-    // Emit event to frontend
+    // Emit event to frontend. The deadline travels with the request so the
+    // frontend can tell a request it can still answer from one whose HTTP caller
+    // has already been given up on (issue #606) — without it, a WebView that fell
+    // behind spends main-thread time producing answers this function has already
+    // stopped waiting for.
+    let emitted_at_ms = crate::frontend_health::epoch_millis();
     let request = AutomationRequest {
         request_id: request_id.clone(),
         category: category.into(),
         target: target.into(),
         method: method.into(),
         params,
+        emitted_at_ms,
+        deadline_ms: emitted_at_ms + FRONTEND_RESPONSE_TIMEOUT.as_millis() as u64,
     };
+
+    state.app_state.frontend_health.note_request_emitted();
 
     state
         .app_handle
@@ -82,6 +91,7 @@ pub async fn bridge_request(
         Ok(Ok(data)) => Ok(data),
         Ok(Err(_)) => {
             // Channel dropped without response — clean up orphaned entry
+            state.app_state.frontend_health.note_request_disconnect();
             if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
                 channels.remove(&request_id);
             }
@@ -92,6 +102,7 @@ pub async fn bridge_request(
         }
         Err(_) => {
             // Timeout
+            state.app_state.frontend_health.note_request_timeout();
             if let Ok(mut channels) = state.app_state.automation_channels.lock_or_err() {
                 channels.remove(&request_id);
             }

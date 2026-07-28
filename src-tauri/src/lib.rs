@@ -14,6 +14,7 @@ pub mod conpty_runtime;
 pub mod constants;
 pub mod crash_reporter;
 pub mod error;
+pub mod frontend_health;
 pub mod git_watcher;
 pub mod ipc_server;
 pub mod lock_ext;
@@ -182,6 +183,7 @@ pub fn run() {
             commands::resolve_git_remote,
             commands::send_os_notification,
             commands::automation_response,
+            commands::report_frontend_health,
             commands::get_terminal_states,
             commands::get_terminal_cwds,
             commands::get_terminal_summaries,

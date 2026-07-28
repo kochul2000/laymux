@@ -207,6 +207,9 @@ import {
   recordTerminalOutputRecovery,
   type TerminalOutputRecoveryEvent,
 } from "@/lib/terminal-output-recovery-metrics";
+import { TerminalOutputApplyQueue } from "@/lib/terminal-output-apply-queue";
+import { coalesceTerminalOutputSegments } from "@/lib/terminal-output-coalesce";
+import { recordTerminalOutputPipeline } from "@/lib/terminal-output-pipeline-metrics";
 
 /** Default silence timeout for output idle detection (ms). */
 const OUTPUT_IDLE_TIMEOUT_MS = 5000;
@@ -3077,6 +3080,36 @@ export function TerminalView({
     };
     const deferredTerminalWrites: DeferredTerminalWrite[] = [];
     const parsingTerminalWrites: DeferredTerminalWrite[] = [];
+    /**
+     * Backpressure-gated apply queue: merges an output backlog instead of paying
+     * the per-segment constant thousands of times (issue #606, ADR-0079). Lives
+     * here, beside the write FIFO it is driven by — the moment xterm finishes a
+     * write is exactly the moment a merged batch should go in. See
+     * {@link TerminalOutputApplyQueue} for why the cost is per-segment, and
+     * `applyOutputSegments` below for the producer side.
+     *
+     * `apply` closes over the checkpoint model and the live-output path declared
+     * further down; every call reaches this queue asynchronously, well after the
+     * effect body has finished.
+     */
+    const outputApplyQueue = new TerminalOutputApplyQueue({
+      isSurfaceBusy: () => pendingTerminalWrites > 0 || deferredTerminalWrites.length > 0,
+      onDepth: (depth) => recordTerminalOutputPipeline(instanceId, "applyQueueMaxDepth", depth),
+      apply: (segments) => {
+        if (cancelled) return;
+        recordTerminalOutputPipeline(instanceId, "segmentsOut", segments.length);
+        // Enqueue every checkpoint write synchronously: listener callbacks can
+        // interleave with the awaits inside the model, and the visible xterm's own
+        // FIFO already fixes the order for the surface.
+        for (const segment of segments) {
+          recordTerminalOutputPipeline(instanceId, "checkpointApplies");
+          void renderCheckpointModel.apply(segment).catch((error) => {
+            console.warn("[TerminalView] render checkpoint update failed:", error);
+          });
+          processLiveTerminalOutput(segment.data);
+        }
+      },
+    });
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
@@ -3188,6 +3221,7 @@ export function TerminalView({
     // coordinator (issue #571) — so it must not report back into it.
     const rebuildRendererLocal = () => {
       trace("atlas-rebuild");
+      recordTerminalOutputPipeline(instanceId, "atlasRebuilds");
       let cleared = true;
       try {
         (terminal as unknown as { clearTextureAtlas?: () => void }).clearTextureAtlas?.();
@@ -3226,6 +3260,7 @@ export function TerminalView({
       scheduleOverlayCaretUpdate();
     };
     const performTerminalFit = (request: TerminalFitRequest) => {
+      recordTerminalOutputPipeline(instanceId, "fits");
       const syncBackendResize = request.syncBackendResize || remoteReturnResizeDirtyRef.current;
       suppressBackendResizeDuringFit = syncBackendResize;
       try {
@@ -3275,6 +3310,10 @@ export function TerminalView({
       }
       clearDeferredResizeQuietTimer();
       const request = deferredTerminalFit;
+      // How long the layout change actually waited behind the write FIFO and the
+      // quiet window. ADR-0026 bounds only the quiet wait, so under a flood this
+      // is the number that says whether the fit was starved (issue #606).
+      recordTerminalOutputPipeline(instanceId, "fitDeferredMaxMs", deferredFor);
       deferredTerminalFit = undefined;
       deferredResizeRequestedAt = 0;
       performTerminalFit(request);
@@ -3319,6 +3358,8 @@ export function TerminalView({
       }, TERMINAL_WRITE_RETRY_MS);
     };
     const tryTerminalWrite = (request: DeferredTerminalWrite) => {
+      recordTerminalOutputPipeline(instanceId, "xtermWrites");
+      recordTerminalOutputPipeline(instanceId, "xtermWriteBytes", request.data.length);
       pendingTerminalWrites += 1;
       parsingTerminalWrites.push(request);
       if (parsingTerminalWrites.length === 1) {
@@ -3374,7 +3415,12 @@ export function TerminalView({
             }
           } finally {
             scheduleDeferredTerminalWriteRetry();
+            // Fit before output: a deferred fit already lost this drain window
+            // once, and letting the next merged output batch in first would let a
+            // sustained flood starve it indefinitely. Draining the fit first also
+            // widens the batch the flush below gets to merge.
             flushDeferredTerminalFit();
+            if (!cancelled) outputApplyQueue.flush();
           }
         });
         return true;
@@ -3391,7 +3437,9 @@ export function TerminalView({
           request.warned = true;
           console.warn("[TerminalView] xterm write failed:", error);
         }
-        return !isXtermWriteBackpressure(error);
+        const backpressure = isXtermWriteBackpressure(error);
+        if (backpressure) recordTerminalOutputPipeline(instanceId, "writeBackpressure");
+        return !backpressure;
       }
     };
     function flushDeferredTerminalWrites() {
@@ -3405,6 +3453,7 @@ export function TerminalView({
       }
       clearTerminalWriteRetryTimer();
       flushDeferredTerminalFit();
+      if (!cancelled) outputApplyQueue.flush();
     }
     const trackedTerminalWrite = (
       data: string | Uint8Array,
@@ -3425,6 +3474,11 @@ export function TerminalView({
         }
       }
       if (chunks.length === 0) chunks.push(data);
+      recordTerminalOutputPipeline(
+        instanceId,
+        "writeQueueMaxDepth",
+        deferredTerminalWrites.length + chunks.length,
+      );
       const queueWasEmpty = deferredTerminalWrites.length === 0;
       chunks.forEach((chunk, index) => {
         deferredTerminalWrites.push({
@@ -3896,15 +3950,17 @@ export function TerminalView({
       }, TERMINAL_WRITE_RETRY_MS);
     };
     const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
-      // Enqueue every checkpoint write synchronously: listener callbacks can
-      // interleave with the awaits inside the model, and the visible xterm's own
-      // FIFO already fixes the order for the surface.
-      for (const segment of segments) {
-        void renderCheckpointModel.apply(segment).catch((error) => {
-          console.warn("[TerminalView] render checkpoint update failed:", error);
-        });
-        processLiveTerminalOutput(segment.data);
-      }
+      if (segments.length === 0) return;
+      // ADR-0026's quiet window means "no PTY output arrived recently", so it has
+      // to be stamped on arrival. Stamping it at write time instead would let a
+      // segment held in the queue below read as silence and release a fit into
+      // output that is still queued for the old grid.
+      lastTerminalOutputAt = Date.now();
+      clearDeferredResizeQuietTimer();
+      recordTerminalOutputPipeline(instanceId, "segmentsIn", segments.length);
+      // One queue in arrival order, so a repair range still reaches the surface
+      // ahead of the deltas it splices in front of.
+      outputApplyQueue.push(segments);
     };
     /**
      * Write the buffered prefix an attach produced, awaiting the last segment so
@@ -3913,9 +3969,18 @@ export function TerminalView({
      * Returns `false` when a newer attach took over mid-write.
      */
     const writeAttachedSegments = async (
-      segments: TerminalOutputAppliedSegment[],
+      buffered: TerminalOutputAppliedSegment[],
       isCurrentAttach: () => boolean,
     ) => {
+      // A flood that outran a stalled attach can park six figures of deltas in the
+      // coordinator (issue #607). Applying them one at a time costs one xterm
+      // write, one checkpoint write and one detector sweep each, which is the
+      // difference between a bounded catch-up and a minute of dead frontend
+      // (issue #606).
+      recordTerminalOutputPipeline(instanceId, "segmentsIn", buffered.length);
+      const segments = coalesceTerminalOutputSegments(buffered);
+      recordTerminalOutputPipeline(instanceId, "segmentsOut", segments.length);
+      recordTerminalOutputPipeline(instanceId, "checkpointApplies", segments.length);
       // Queue the whole buffered prefix synchronously. Listener callbacks can
       // fire between awaits; enqueueing one-by-one would let a newer live delta
       // jump ahead of the second buffered segment in the checkpoint model even
@@ -4122,8 +4187,12 @@ export function TerminalView({
     };
     const startOutputAttach = async () => {
       if (cancelled || !terminalSessionReady || outputAttachInFlight) return;
+      recordTerminalOutputPipeline(instanceId, "attaches");
       outputAttachInFlight = true;
       outputAttachParserBusy = true;
+      // The attach replays the whole ring after `terminal.reset()`, so anything
+      // still queued describes a screen that is about to be thrown away.
+      outputApplyQueue.clear();
       const epoch = ++outputAttachEpoch;
       resetOutputStabilizer();
       const isCurrentAttach = () => !cancelled && epoch === outputAttachEpoch;
@@ -4161,6 +4230,14 @@ export function TerminalView({
               if (!isCurrentAttach()) return;
             }
             if (attachment.snapshot.length > 0) {
+              // Ring snapshot bytes actually replayed into xterm. The number that
+              // settles whether a layout change costs a 1 MiB replay at all
+              // (issue #606 hypothesised six of them per workspace flip).
+              recordTerminalOutputPipeline(
+                instanceId,
+                "attachReplayBytes",
+                attachment.snapshot.length,
+              );
               await new Promise<void>((resolve) =>
                 processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }),
               );
@@ -4235,6 +4312,8 @@ export function TerminalView({
       let result;
       try {
         const delta: TerminalOutputDelta = normalizeTerminalOutputDelta(payload);
+        recordTerminalOutputPipeline(instanceId, "deltaEvents");
+        recordTerminalOutputPipeline(instanceId, "deltaBytes", delta.data.length);
         result = outputCoordinator.ingest(delta);
       } catch (error) {
         console.warn(

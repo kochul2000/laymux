@@ -555,6 +555,7 @@ pub fn automation_response(
     };
 
     if let Some(tx) = tx {
+        state.frontend_health.note_response_matched();
         let value = if response.success {
             response.data.unwrap_or(serde_json::Value::Null)
         } else {
@@ -564,9 +565,31 @@ pub fn automation_response(
             })
         };
         let _ = tx.send(value);
+    } else {
+        // Nobody is waiting: `bridge_request` already answered `504` and removed
+        // the channel. Dropping this silently is what made issue #606 undiagnosable
+        // — the frontend had paid the full main-thread cost of an answer and no
+        // side of the bridge recorded it. Counted so a starved bridge is
+        // distinguishable from individually slow handlers, and logged with the
+        // running total so one line survives a flood.
+        let orphaned_total = state.frontend_health.note_response_orphaned();
+        tracing::warn!(
+            request_id = %response.request_id,
+            orphaned_total,
+            "discarded an automation response whose request had already timed out"
+        );
     }
 
     Ok(())
+}
+
+/// Tauri command: store the frontend's responsiveness report (issue #606).
+///
+/// Deliberately infallible past JSON parsing: this is a diagnostic sink on a
+/// timer, and a failure here must never surface as an error in the WebView.
+#[tauri::command]
+pub fn report_frontend_health(report: serde_json::Value, state: State<Arc<AppState>>) {
+    state.frontend_health.store_report(report);
 }
 
 /// Tauri command: get terminal state for all terminals.

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery-metrics";
+import { forgetTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
@@ -158,6 +159,7 @@ export async function closeTerminalSession(id: string): Promise<void> {
       // surviving entry would leak one map slot per terminal the window ever
       // opened (issue #607).
       forgetTerminalOutputRecoveryCounters(id);
+      forgetTerminalOutputPipelineCounters(id);
     }
   });
 }
@@ -866,6 +868,14 @@ export interface AutomationRequest {
   target: string;
   method: string;
   params: Record<string, unknown>;
+  /** Wall-clock ms when Rust emitted this request. `Date.now()` − this = queue depth. */
+  emittedAtMs: number;
+  /**
+   * Wall-clock ms after which `bridge_request` has stopped waiting. Past this
+   * point a query's answer is worthless, so producing it only takes main-thread
+   * time away from catching up (issue #606).
+   */
+  deadlineMs: number;
 }
 
 /** Listen for automation requests from the backend HTTP server. */
@@ -900,6 +910,17 @@ export async function automationResponse(
     error: error ?? null,
   });
   return invoke("automation_response", { responseJson });
+}
+
+/**
+ * Push the frontend's responsiveness vitals into Rust state (issue #606).
+ *
+ * Served back out by `GET /api/v1/diagnostics/frontend`, which is the only way to
+ * read the frontend's condition while its main thread is too busy to answer an
+ * `automation-request`.
+ */
+export async function reportFrontendHealth(report: Record<string, unknown>): Promise<void> {
+  return invoke("report_frontend_health", { report });
 }
 
 // -- Claude terminal detection (single source of truth in backend) --

@@ -25,6 +25,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Health check. Returns status, version, port."
             },
             {
+                "method": "GET", "path": "/api/v1/diagnostics/frontend",
+                "description": "Frontend responsiveness vitals, served from backend state with no frontend round-trip — so it still answers while every bridged endpoint returns 'Frontend response timeout'. Read lastReportAgeMs first: large = the WebView main thread is stalled; small next to rising bridge.requestTimeouts = the thread is alive and the requests are queued.",
+                "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} } } | null }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/docs",
                 "description": "This endpoint. Returns full API documentation as JSON."
             },
@@ -298,6 +303,18 @@ pub async fn health(AxumState(state): AxumState<ServerState>) -> impl IntoRespon
         version: env!("CARGO_PKG_VERSION").into(),
         port,
     })
+}
+
+/// Frontend responsiveness vitals, served without touching the frontend.
+///
+/// The whole point is that this answers while every bridged endpoint is
+/// returning `504 Frontend response timeout` (issue #606). Read
+/// `lastReportAgeMs` first: a large value means the WebView main thread itself is
+/// unavailable, while a small value next to rising `bridge.requestTimeouts` means
+/// the thread is alive and the `automation-request` events are queued behind
+/// something else.
+pub async fn diagnostics_frontend(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    Json(state.app_state.frontend_health.snapshot())
 }
 
 pub async fn terminal_write(

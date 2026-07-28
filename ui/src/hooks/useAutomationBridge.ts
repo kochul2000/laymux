@@ -31,6 +31,11 @@ import type {
   WorkspacePane,
 } from "@/stores/types";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
+import {
+  recordBridgeCounter,
+  recordBridgeDeliveryLag,
+  startFrontendHealthReporter,
+} from "@/lib/frontend-health-reporter";
 import * as navigationActions from "@/lib/navigation-actions";
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 
@@ -1317,19 +1322,55 @@ export async function handleAsyncAutomationRequest(
   return handleAutomationRequest(request);
 }
 
+/**
+ * Whether a request that has already outlived its Rust deadline should still run.
+ *
+ * `bridge_request` has stopped waiting, so a **query**'s answer can no longer
+ * reach anybody: computing it only spends main-thread time the frontend needs to
+ * catch up, and under an output flood the automation client's own retries pile
+ * more of that work behind the same queue (issue #606). An **action** is
+ * different — its side effect is still what the caller asked for, and silently
+ * dropping it would turn a slow resize into a resize that never happened. So
+ * queries are dropped past the deadline and actions are always run.
+ *
+ * Exported for the bridge tests; `category` is the backend's own "query"/"action"
+ * split from `AutomationRequest`.
+ */
+export function shouldRunExpiredAutomationRequest(request: AutomationRequest): boolean {
+  return request.category !== "query";
+}
+
 /** Hook that bridges automation HTTP requests to Zustand stores. */
 export function useAutomationBridge() {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
+    const stopHealthReporter = startFrontendHealthReporter();
 
     onAutomationRequest(async (request) => {
+      recordBridgeCounter("requestsReceived");
+      // Emit→handler delay. This is the bridge queue's real depth, and the number
+      // that separates "the handler is slow" from "the request waited" (#606).
+      if (Number.isFinite(request.emittedAtMs)) {
+        recordBridgeDeliveryLag(Math.max(0, Date.now() - request.emittedAtMs));
+      }
+      const expired = Number.isFinite(request.deadlineMs) && Date.now() > request.deadlineMs;
+      if (expired && !shouldRunExpiredAutomationRequest(request)) {
+        recordBridgeCounter("queriesDroppedExpired");
+        // Answer anyway: the channel is normally already gone, but if this request
+        // is merely close to its deadline rather than past it on the Rust clock,
+        // an explicit error is better than letting it burn the rest of the budget.
+        automationResponse(request.requestId, false, undefined, "Frontend request expired");
+        return;
+      }
+      if (expired) recordBridgeCounter("actionsRunAfterDeadline");
       if (cancelled) {
         // Still respond so the backend doesn't wait until timeout
         automationResponse(request.requestId, false, undefined, "Bridge listener cancelled");
         return;
       }
       const result = await handleAsyncAutomationRequest(request);
+      recordBridgeCounter("responsesSent");
       if (cancelled) {
         // Respond with result anyway — backend is waiting on the oneshot channel
         automationResponse(request.requestId, result.success, result.data, result.error);
@@ -1347,6 +1388,7 @@ export function useAutomationBridge() {
 
     return () => {
       cancelled = true;
+      stopHealthReporter();
       unlisten?.();
     };
   }, []);
