@@ -91,11 +91,12 @@ ADR 이 필요한 대표 기준:
 | [0071](0071-pane-resize-single-boundary-owner.md) | Pane 리사이즈 판정은 경계 이동 함수 한 곳이 소유한다 (드래그·Automation 공용) | Accepted |
 | [0072](0072-terminal-output-gap-sequence-exact-repair.md) | output delta 유실은 재부착이 아니라 sequence-exact 복구로 갚는다 | Accepted |
 | [0073](0073-native-cursor-renderer-level-suppression.md) | 네이티브 커서 숨김은 렌더러 게이트에서 한다 (배경색 위장·옵션 경합 폐기) | Accepted |
-| [0074](0074-xterm-cell-grid-screen-test-tier.md) | 화면 주장은 mock 이 아니라 실제 xterm 셀 격자로 검증한다 (별도 `*.screen.test.ts` 스위트) | Proposed |
+| [0074](0074-xterm-cell-grid-screen-test-tier.md) | 실제 xterm 화면 의미는 별도 `*.screen.test.ts` 스위트에서 검증한다 | Accepted |
 | [0075](0075-session-restore-live-screen-origin.md) | 세션 복원 출력은 새 PTY 화면 원점 뒤의 scrollback으로 둔다 | Accepted |
 | [0076](0076-codex-in-frame-cursor-park.md) | Codex 인프레임 커서 주차를 동기화 출력의 최종 상태로 인정 | Accepted |
 | [0077](0077-remote-terminal-font-serving.md) | Remote 터미널 폰트는 데스크톱 시스템 폰트를 sfnt 그대로 서빙한다 (woff2 변환 없음, 기본 off) | Accepted |
 | [0078](0078-wsl-in-frame-cursor-park-metadata.md) | WSL 인프레임 커서 주차는 바이트 보류 없이 reset 메타데이터로 전달 | Accepted |
+| [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
 
 ## 새 ADR 추가
