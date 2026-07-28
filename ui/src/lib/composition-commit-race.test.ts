@@ -238,7 +238,17 @@ function racingKeypress(char: string): KeyboardEvent {
 
 const flushFinalizer = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-afterEach(() => {
+afterEach(async () => {
+  // Some blur-contract cases intentionally leave xterm's private composition
+  // flag set after their assertions. End that synthetic composition before
+  // dispose so CompositionHelper's queued position-update timer cannot run
+  // against a torn-down render service under a busy, parallel full-suite run.
+  for (const terminal of mounted) {
+    if (readPendingCompositionSend(terminal)?.composing) {
+      terminal.textarea?.dispatchEvent(new CompositionEvent("compositionend", { data: "" }));
+    }
+  }
+  await flushFinalizer();
   while (mounted.length) mounted.pop()?.dispose();
   document.body.replaceChildren();
 });

@@ -4522,6 +4522,25 @@ describe("TerminalView", () => {
     });
   });
 
+  it("refreshes the helper focus cycle when app deactivation leaves it DOM-active", async () => {
+    const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-stale-active");
+    const focusEvents: string[] = [];
+    helper.addEventListener("blur", () => focusEvents.push("blur"));
+    helper.addEventListener("focus", () => focusEvents.push("focus"));
+
+    // WebView2 may detach the native IME context without changing
+    // document.activeElement. A plain helper.focus() on return is then a no-op.
+    await act(async () => {
+      fireEvent(window, new Event("blur"));
+    });
+    expect(document.activeElement).toBe(helper);
+
+    await reactivateApp();
+
+    expect(focusEvents).toEqual(["blur", "focus"]);
+    expect(document.activeElement).toBe(helper);
+  });
+
   it("keeps the first IME composition after reactivation on the restored helper", async () => {
     const { helper, wrapper } = await mountPaneWithFocusedHelper("t-focus-ownership-ime");
     await deactivateApp(helper);
