@@ -1,46 +1,49 @@
-# 0093. 조합 finalizer 중 keypress 조정은 xterm CompositionHelper가 소유한다
+# 0093. 조합 commit 관측은 xterm CompositionHelper의 세대별 큐가 소유한다
 
 - Status: Proposed
 - Date: 2026-07-29
-- Source: issue [#660](https://github.com/kochul2000/laymux/issues/660), [ADR-0062](0062-composition-commit-keypress-race.md), architecture/data-flow.md §8.14, 선행 검증 [stablyai/orca#9235](https://github.com/stablyai/orca/pull/9235)
+- Source: issue [#660](https://github.com/kochul2000/laymux/issues/660), [ADR-0062](0062-composition-commit-keypress-race.md), [architecture/data-flow.md §8.14](../architecture/data-flow.md), 선행 구현 [stablyai/orca#9235](https://github.com/stablyai/orca/pull/9235)
 - Supersedes: [ADR-0062](0062-composition-commit-keypress-race.md)
 
 ## Context
 
-xterm 6.0.0의 `CompositionHelper._finalizeComposition(true)`는 `compositionend`에서 commit 범위를 캡처하고 실제 textarea 읽기와 전송을 `setTimeout(0)`으로 미룬다. 그 사이 legacy `keypress`가 오면 `CoreBrowserTerminal._keyPress`는 같은 문자를 즉시 별도 전송한다. 브라우저·IME는 그 뒤 `input`에서 textarea 후보를 복원하거나, commit 일부와 keypress를 겹친 형태로 노출할 수 있다. 최종 후보와 keypress를 각각 보내면 중복되고 한쪽을 미리 버리면 유실된다.
+xterm 6.0.0의 `CompositionHelper._finalizeComposition(true)`는 `compositionend`에서 commit 범위를 캡처하되 실제 textarea 읽기와 전송은 `setTimeout(0)`으로 미룬다. Windows WebView2/한국어 IME에서는 그 사이 이벤트가 `compositionend → input(insertText) → keypress` 순서로 오거나 keypress 없이 `input`만 오는 경우가 있다. 기존 xterm은 `_keyPressHandled === false`인 `input`을 즉시 보내고 finalizer가 같은 candidate를 다시 보내므로 한 글자가 중복된다.
 
-ADR-0062는 이 문제를 TerminalView의 custom key handler에서 해결했다. 외부 handler가 xterm private 필드 다섯 개를 읽고 `compositionend` 시점의 시작 위치를 별도로 캡처한 뒤, keypress가 당시 pending slice와 같거나 그 suffix이면 즉시 억제했다. 이 방식에는 두 소유권 문제가 있다.
+선행 구현 `stablyai/orca#9235`는 이 finalizer 창의 legacy keypress를 CompositionHelper에 보류한 뒤 textarea candidate와 병합한다. 이는 단일 조합 세대의 keypress/candidate 경합을 해결하는 기반이지만 Windows 순서에는 두 공백이 있다.
 
-- textarea가 `compositionend`에서 잠시 비었다가 `input`으로 복원되는 이벤트열에서는 외부 handler가 빈 후보를 보고 keypress를 통과시킨다. 뒤늦게 xterm finalizer가 복원된 후보를 다시 보내 중복된다.
-- 외부 handler는 keypress 시점의 불완전한 후보만 보고 즉시 전달/폐기를 확정한다. finalizer가 실제로 읽는 최종 후보와 keypress 사이의 포함·부분 overlap을 알 수 없으므로, 빠른 입력에서 문자를 잃거나 순서를 바꿀 수 있다. main thread가 출력 처리로 바쁘면 0ms finalizer 창이 길어져 위험이 커진다.
+- `input(insertText)`가 keypress보다 먼저 오거나 단독으로 오면 보류 소유자에 도달하지 않아 finalizer와 중복된다.
+- `_isSendingComposition`과 pending 텍스트 하나를 여러 timer가 공유하면 첫 finalizer가 끝나기 전에 다음 `compositionend`가 올 때 상태를 덮어쓴다. 먼저 등록된 timer가 최신 상태를 소비하거나 후속 timer를 무효화해 두 글자 중 하나를 잃거나 순서를 바꿀 수 있다. 다중 pane 출력이 main thread를 점유하면 0ms 창이 길어져 이 경합 가능성이 커진다.
 
-선행 구현 `stablyai/orca#9235`는 같은 xterm 책임 경계에서 pending keypress를 보류하고 최종 후보와 조정했다. Ubuntu X11/IBus 실기에서 수정 전 30회 중 12회 실패, 수정 후 30/30 exact PTY byte 일치를 보고했고, 설치 번들 대상 6개 결정적 테스트를 제공한다. laymux는 이미 xterm reflow와 `disableStdin` 의미를 exact bundle patch로 고정하는 설치 관문을 갖고 있으므로 ADR-0062가 bundle patch를 기각할 때 전제한 “새 patch 인프라 도입” 비용도 더 이상 존재하지 않는다.
+ADR-0062는 TerminalView custom key handler가 xterm private 필드를 읽어 중복을 억제했다. 그러나 embedder는 finalizer가 나중에 읽을 textarea 값과 브라우저가 선택할 `input`/`keypress` 순서를 소유하지 않는다. 소유권이 xterm과 TerminalView로 갈라져 실제 candidate를 보지 못한 추정으로 문자를 버릴 수 있다.
 
-범위는 xterm 6.0.0의 조합 finalizer와 legacy keypress 사이의 입력 상태 소유권이다. 새 IPC·Automation·Remote·PTY 외부 계약을 만들지 않는다. IME preview 위치, 후보 키 정책, output fair scheduling, Direct `writeToTerminal` 실패 처리, release 19280 재현은 비목표다.
+범위는 xterm 6.0.0의 deferred composition finalizer, `input(insertText)`, legacy keypress 사이의 정확히 한 번·순서 보존 전송이다. IME preview 위치, 후보창 앵커, output fair scheduling, PTY/relay, Direct `writeToTerminal` 실패 전파, release 19280 재현은 비목표다.
 
 ## Decision
 
-**deferred composition finalizer가 열린 동안의 keypress는 xterm `CompositionHelper`가 보류하고, final textarea 후보와 한 번만 ordered merge해 전송한다.**
+**deferred composition commit은 xterm `CompositionHelper`가 조합 세대별 pending record로 소유하고, `input`·keypress·finalizer 세 경로의 관측을 각 세대에서 정확히 한 번 ordered merge해 전송한다.**
 
-- `CoreBrowserTerminal._keyPress`는 문자를 계산한 뒤 먼저 `CompositionHelper.keypress(text)`에 제안한다. helper의 `_isSendingComposition`이 false면 기존처럼 즉시 `triggerDataEvent`하고, true면 `_pendingKeypressData`에 순서대로 누적하고 즉시 전송하지 않는다. 일반 keypress 경로의 추가 비용은 함수 호출과 boolean 검사 하나다.
-- delayed finalize를 시작할 때 pending keypress를 비우고 그 finalizer 세대만 수집한다. timer가 최종 textarea candidate를 읽으면 candidate와 누적 keypress를 `CompositionHelper._sendCompositionInput` 한 곳에서 조정한다. 일반 keydown이 pending timer를 취소하고 immediate finalize하는 경로도 같은 함수로 들어가 keypress를 먼저 잃지 않는다.
-- 조정은 두 관측값을 모두 보존하는 가장 짧은 ordered merge다. candidate가 keypress를 포함하면 candidate, keypress가 candidate를 포함하면 keypress를 택한다. 어느 쪽도 포함하지 않으면 `candidate suffix ↔ keypress prefix`와 `keypress suffix ↔ candidate prefix`의 최장 overlap을 비교하고 더 큰 overlap의 순서를 택한다. overlap 길이가 같으면 실제 이벤트 순서인 keypress-first를 택한다.
-- 상태 소유자는 xterm 내부 하나뿐이다. TerminalView의 `compositionend` 시작 위치 snapshot, pending slice 판정, keypress `preventDefault`/억제는 제거한다. `xterm-pending-composition.ts`는 issue #555 blur fallback이 중복 주입을 피하기 위해 `_isSendingComposition` 한 필드만 읽는다.
-- 설치 관문 `ui/scripts/patch-xterm-reflow.mjs`가 `lib/xterm.mjs`와 `lib/xterm.js` 두 번들에 exact 문자열 교체를 적용한다. 각 원문 target이 없거나 일부만 달라지면 postinstall을 실패시킨다. 두 번들의 helper state·keypress owner·delayed/immediate send·CoreBrowserTerminal handoff가 모두 바뀌어야 설치가 성공한다.
-- 검증 SoT는 실제 설치된 `Terminal`에 composition/key/input 이벤트열을 태워 `onData`를 읽는 6개 테스트다: clear 후 candidate 복원, suffix overlap, unmatched keypress 순서, candidate-contained keypress, 여러 keypress partial overlap, 일반 keydown immediate finalize. mock decision 함수로 xterm 상태 전이를 대체하지 않는다.
+- delayed finalize를 시작할 때마다 캡처한 시작·끝 범위, 다음 조합 시작 전 textarea 경계, 이미 전송된 길이, 순서 있는 관측값, 완료 여부를 가진 generation record를 FIFO에 추가한다. 공유 pending 문자열 하나로 여러 timer를 대표하지 않는다.
+- 새 `compositionstart`는 현재 textarea 위치를 직전 pending generation의 상한으로 먼저 고정한 뒤 xterm의 조합 시작 위치를 덮어쓴다. 따라서 첫 timer가 늦어도 다음 세대의 범위를 읽지 않는다.
+- `CoreBrowserTerminal._inputEvent`와 `_keyPress`는 계산한 텍스트를 먼저 `CompositionHelper`에 제안한다. pending generation이 있으면 최신 미완료 세대에 이벤트 순서대로 보류하고, 없으면 기존 일반 input/keypress 경로로 즉시 전송한다.
+- 각 timer는 자신이 만든 record를 완료 표시하고 FIFO 선두부터 완료된 generation만 flush한다. 일반 keydown의 immediate finalize는 pending generation을 먼저 FIFO 순서로 끝낸 뒤 자기 키를 보낸다. 한 generation은 input, keypress, timer 중 어느 경로가 먼저 왔든 한 번만 flush된다. queue가 비기 전에는 `_isSendingComposition`을 내리지 않는다.
+- merge는 event observation을 순서대로 먼저 합치고, textarea candidate와 관측 집합의 양방향 포함 및 suffix-prefix 최장 overlap을 비교해 양쪽 정보를 보존하는 가장 짧은 문자열을 만든다. 같은 길이로 모호하면 실제 관측 순서를 보존한다.
+- TerminalView는 `compositionend` 위치를 별도로 캡처하거나 keypress를 `preventDefault`/억제하지 않는다. `xterm-pending-composition.ts`의 private 접근은 issue #555 blur fallback에서 deferred send 중복을 피하기 위한 `_isSendingComposition` 읽기만 유지한다.
+- 설치 관문 `ui/scripts/patch-xterm-reflow.mjs`는 pristine xterm을 먼저 선행 keypress patch 형태로 만든 뒤 generation correction을 적용한다. 이미 선행 patch가 설치된 worktree와 최종 patch가 설치된 worktree도 각각 upgrade와 idempotent 성공을 허용한다. ESM/CJS 모두 helper state, input·keypress owner handoff, delayed/immediate flush가 함께 바뀌지 않으면 실패한다.
+- 실제 설치된 xterm `Terminal`에 composition/key/input 이벤트를 보내 `onData`를 읽는 테스트가 정본이다. 기존 6개 조합 이벤트열에 Windows의 `compositionend → input → keypress`, input-only, timer 전 연속 두 세대, input/keyPress 뒤 즉시 keydown을 추가하고, pending이 없는 일반 input·keypress 두 경로도 고정한다. 순수 mock merge 함수로 이 상태 전이를 대체하지 않는다.
 
 ## Alternatives Considered
 
-- **ADR-0062의 TerminalView 외부 suffix guard 유지.** bundle을 건드리지 않지만 finalizer가 읽기 전의 임시 textarea만 볼 수 있다. clear→input 복원 이벤트열과 다중 keypress overlap을 정확히 판정할 수 없고, 상태 소유권이 helper와 embedder로 갈라진다. 기각.
-- **pending keypress를 모두 즉시 버린다.** 중복은 줄지만 candidate에 없는 새 문자도 유실한다. 사용자가 신고한 빠른 입력 유실을 구조적으로 만든다. 기각.
-- **pending keypress를 모두 즉시 보낸다.** candidate가 같은 텍스트를 포함하거나 경계에서 겹칠 때 중복한다. 기존 xterm 결함이다. 기각.
-- **시간 창 또는 다음 `compositionstart`로 duplicate 여부를 추정한다.** IME별 이벤트열 차이를 시간·후속 이벤트 휴리스틱으로 바꾸며, 최종 textarea 후보라는 권위 있는 값보다 약하다. 기각.
-- **xterm 전체 fork.** 읽기 쉬운 TypeScript 소스를 유지할 수 있지만 dependency 보안·버그 수정 동기화 비용이 크다. 이미 있는 exact patch 관문으로 필요한 두 메서드와 한 상태만 backport하는 편이 범위가 작다. 기각.
+- **선행 `stablyai/orca#9235`를 그대로 포팅한다.** 단일 세대의 keypress 경합에는 맞지만 input-before-keypress/input-only를 보류하지 않고, 여러 finalizer가 단일 pending 상태를 공유한다. Windows 이벤트 순서와 연속 조합 세대에서 중복·유실이 구조적으로 남으므로 기각했다.
+- **ADR-0062의 TerminalView suffix guard를 유지한다.** bundle을 건드리지 않지만 finalizer가 읽을 최종 textarea와 세대 경계를 알 수 없고 상태 소유권이 helper와 embedder로 갈라진다. input-only와 다중 세대에도 답하지 못하므로 기각했다.
+- **pending input/keypress를 모두 즉시 버린다.** 중복은 줄지만 candidate가 비거나 부분 문자열인 경우 실제 사용자의 문자를 잃는다. 기각했다.
+- **pending input/keypress를 모두 즉시 보낸다.** candidate에 같은 텍스트가 복원되는 일반 경계에서 중복된다. 기존 xterm 결함이므로 기각했다.
+- **시간 창이나 다음 `compositionstart`만으로 duplicate를 추정한다.** IME·브라우저·main-thread 부하에 따라 시간과 후속 이벤트가 달라지고 최종 textarea라는 권위 있는 값을 활용하지 못한다. 기각했다.
+- **xterm 전체 fork.** 읽기 쉬운 소스 테스트는 얻지만 dependency 보안·버그 수정 동기화 비용이 크다. 기존 exact bundle 설치 관문에서 필요한 상태만 backport하는 편이 현재 범위에 맞아 기각했다.
 
 ## Consequences
 
-- 출력 부하로 0ms finalizer 실행이 늦어져도 그 창의 keypress는 유실·중복 없이 final candidate와 한 번 조정된다. PTY·relay·renderer·focus 소유권은 바뀌지 않는다.
-- xterm 6.0.0의 minified ESM/CJS 형태에 의존하는 local patch가 늘어난다. 버전 상향 때 target이 달라지면 설치가 즉시 실패하며, 새 번들의 upstream 동작과 6개 이벤트열을 재검토해야 한다. xterm이 동등한 조정을 제공하는 버전을 채택하면 local patch와 이 결정의 구현을 제거한다.
-- intentional repeated text가 pending 창의 duplicate 관측과 완전히 같은 좁은 경우는 근본적으로 모호하다. 이번 결정은 최종 candidate와 keypress 두 관측의 shortest ordered merge를 택하며, 실기에서 서로 다른 논리 입력이 합쳐지는 증거가 나오면 CompositionHelper의 추가 provenance가 필요하다.
-- 자동 테스트는 실제 xterm 코드 경로와 `onData`까지 검증하지만 Windows WebView2/한국어 IME 및 다중 pane flood 실기는 별도 dev 19281 검증이 필요하다. release 19280은 검증 대상이 아니다.
-- Direct `writeToTerminal(...).catch(...)`가 실패를 호출자에게 노출하지 않는 경로는 이 상태 소유권 결정과 별개다. dev byte trace에서 실제 write failure가 확인되면 별도 이슈로 등록할 후속 후보로 남긴다.
+- `compositionend → input → keypress`, input-only, 연속 조합 세대, 즉시 keydown 교차에서 각 generation의 문자가 한 번씩 원래 순서로 PTY에 전달된다. pending이 없는 일반 input/keypress에는 추가 지연이 없다.
+- xterm 6.0.0 minified ESM/CJS 형태에 의존하는 local patch가 남는다. 대상이 달라지면 postinstall이 즉시 실패하며, xterm 상향 시에는 input ordering과 generation isolation까지 upstream이 동등하게 보장하는지 확인한 뒤 local patch를 제거한다. 선행 PR의 keypress 병합만 존재하는 버전은 동등하지 않다.
+- 서로 다른 의도적 반복 입력과 동일한 duplicate 관측은 provenance가 없으면 근본적으로 모호하다. 현재 결정은 한 generation 안의 textarea candidate와 브라우저 관측값의 shortest ordered merge를 택한다. 이를 깨는 실기 증거가 나오면 CompositionHelper에 더 강한 event provenance가 필요하다.
+- 자동 테스트는 실제 xterm 코드 경로와 `onData`까지 검증하지만 Windows WebView2/한국어 IME 및 다중 pane flood의 실기 재현률·key-to-PTY exact byte는 dev 19281에서 별도 확인해야 한다. release 19280은 이 검증 대상이 아니다.
+- Direct `writeToTerminal(...).catch(...)`가 실패를 호출자에게 전달하지 않는 문제는 이 결정과 별개다. dev byte trace에서 실제 write 실패나 swallow가 관측되면 이 PR에 끼워 넣지 않고 **별도 후속 이슈를 반드시 등록**해 재현·소유권·실패 계약을 추적한다. 이 PR은 그 경로를 해결했다고 주장하지 않는다.
