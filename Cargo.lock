@@ -2031,6 +2031,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "brotli",
+ "cargo_metadata",
  "clipboard-win",
  "font-kit",
  "futures-util",
@@ -3401,6 +3402,9 @@ checksum = "ef2bee61e6cffa4635c72d7d81a84294e28f0930db0ddcb0f66d10244674ebed"
 dependencies = [
  "block2",
  "dispatch2",
+ "glib-sys",
+ "gobject-sys",
+ "gtk-sys",
  "js-sys",
  "log",
  "objc2",

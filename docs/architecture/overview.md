@@ -20,12 +20,19 @@ Windows 및 Linux를 지원하며, 터미널 중심의 작업 환경을 제공�
 |---|---|
 | 프레임워크 | Tauri v2 (Rust + WebView2 / WebKitGTK) |
 | 플랫폼 | Windows, Linux |
+| 네이티브 대화상자 | `rfd 0.15.4`; Windows native backend / Linux GTK3 backend |
 | UI | React + TypeScript |
 | 스타일 | Tailwind CSS |
 | 상태 관리 | Zustand |
 | 터미널 | xterm.js + node-pty (Tauri sidecar) |
 | 설정 | settings.json (Windows Terminal 교집합 호환) |
 | IDE CLI | `lx` 바이너리 (Rust, Tauri 동봉) |
+
+Linux의 `rfd`는 default feature를 끄고 `gtk3` backend만 target dependency로
+활성화한다([ADR-0090](../adr/0090-linux-native-dialog-gtk3-backend.md)). 현재 사용처는
+crash reporter의 `MessageDialog`이며, headless test에서는 대화상자를 열지 않는다.
+GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prerequisite를 그대로
+재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
 
 ---
 
