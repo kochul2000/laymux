@@ -319,19 +319,21 @@ mod tests {
         scheme.purple = "#555555".into();
         scheme.bright_purple = "#666666".into();
 
-        let mut settings = Settings::default();
-        settings.color_schemes = vec![scheme];
-        settings.profiles = vec![Profile {
-            name: "Custom".into(),
-            color_scheme: "RemoteDark".into(),
-            cursor_shape: "filledBox".into(),
-            font: Some(FontSettings {
-                face: "JetBrains Mono".into(),
-                size: 18,
-                weight: "normal".into(),
-            }),
-            ..Profile::default()
-        }];
+        let settings = Settings {
+            color_schemes: vec![scheme],
+            profiles: vec![Profile {
+                name: "Custom".into(),
+                color_scheme: "RemoteDark".into(),
+                cursor_shape: "filledBox".into(),
+                font: Some(FontSettings {
+                    face: "JetBrains Mono".into(),
+                    size: 18,
+                    weight: "normal".into(),
+                }),
+                ..Profile::default()
+            }],
+            ..Settings::default()
+        };
 
         let appearance = resolve_remote_terminal_appearance("Custom", &settings);
 
@@ -355,11 +357,13 @@ mod tests {
 
     #[test]
     fn font_assets_stay_absent_without_the_toggle_or_a_resolvable_face() {
-        let mut settings = Settings::default();
-        settings.profiles = vec![Profile {
-            name: "PowerShell".into(),
-            ..Profile::default()
-        }];
+        let mut settings = Settings {
+            profiles: vec![Profile {
+                name: "PowerShell".into(),
+                ..Profile::default()
+            }],
+            ..Settings::default()
+        };
 
         // Toggle off is the default: never advertise a downloadable font.
         assert_eq!(
@@ -384,12 +388,14 @@ mod tests {
 
     #[test]
     fn maps_underscore_cursor_to_xterm_underline() {
-        let mut settings = Settings::default();
-        settings.profiles = vec![Profile {
-            name: "PowerShell".into(),
-            cursor_shape: "underscore".into(),
-            ..Profile::default()
-        }];
+        let settings = Settings {
+            profiles: vec![Profile {
+                name: "PowerShell".into(),
+                cursor_shape: "underscore".into(),
+                ..Profile::default()
+            }],
+            ..Settings::default()
+        };
 
         let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
 

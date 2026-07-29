@@ -1139,6 +1139,15 @@ pub fn get_terminal_summaries_inner(
 
 **테스트 격리**: `tempfile::tempdir()`로 파일시스템 테스트를 격리한다. 전역 상태에 의존하는 테스트는 `#[serial_test::serial]`을 사용한다.
 
+**Rust strict lint 게이트**: Rust 변경을 PR로 보내기 전 `src-tauri/`에서
+`cargo clippy --workspace --all-targets -- -D warnings`를 실행한다. `--all-targets`는
+라이브러리뿐 아니라 unit/integration test target의 lint 부채도 같은 게이트에 포함하며, 일반
+`cargo clippy` 성공은 이를 대체하지 않는다. 불가피한 `#[allow(clippy::...)]`는 crate나 모듈
+전체가 아니라 최소 항목에만 붙이고, 해당 위치에 구조 변경보다 예외가 적합한 구체적 이유를
+남긴다. 현재 GitHub Actions는 release build만 수행하므로 이 명령은 로컬 PR 검증 의무다.
+향후 일반 PR CI를 추가할 때 Rust lint job도 동일 명령을 사용하며 target 축소나 warning 허용으로
+완화하지 않는다.
+
 ---
 
 ## 15. UI 코드 설계 원칙

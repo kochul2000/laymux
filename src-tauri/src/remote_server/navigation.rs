@@ -7,6 +7,14 @@ use super::terminal_info::RemoteTerminalInfo;
 
 const TERMINAL_VIEW: &str = "TerminalView";
 
+#[derive(Clone, Copy)]
+struct NavigationSummaryContext<'maps, 'backend, 'frontend> {
+    notifications: &'maps [Value],
+    hidden_pane_ids: &'maps HashSet<String>,
+    backend_by_id: &'maps HashMap<&'backend str, &'backend RemoteTerminalInfo>,
+    frontend_by_id: &'maps HashMap<&'frontend str, &'frontend Value>,
+}
+
 pub(super) fn build_remote_navigation_payload(
     workspaces_data: &Value,
     active_workspace_data: &Value,
@@ -58,6 +66,12 @@ pub(super) fn build_remote_navigation_payload(
         &backend_by_id,
         &frontend_by_id,
     );
+    let summary_context = NavigationSummaryContext {
+        notifications,
+        hidden_pane_ids: &hidden_pane_ids,
+        backend_by_id: &backend_by_id,
+        frontend_by_id: &frontend_by_id,
+    };
 
     // `workspaces.list` returns raw panes, while `workspaces.getActive` adds the
     // derived paneNumber/paneIndex metadata needed by the remote selector.
@@ -87,11 +101,8 @@ pub(super) fn build_remote_navigation_payload(
                     workspace,
                     active_workspace_id,
                     terminal_instances,
-                    notifications,
                     &hidden_workspace_ids,
-                    &hidden_pane_ids,
-                    &backend_by_id,
-                    &frontend_by_id,
+                    summary_context,
                 )
             })
             .collect::<Vec<_>>()
@@ -102,14 +113,7 @@ pub(super) fn build_remote_navigation_payload(
         .get("workspace")
         .filter(|workspace| !workspace.is_null())
         .map(|workspace| {
-            summarize_active_workspace(
-                workspace,
-                active_workspace_id,
-                &backend_by_id,
-                &frontend_by_id,
-                notifications,
-                &hidden_pane_ids,
-            )
+            summarize_active_workspace(workspace, active_workspace_id, summary_context)
         })
         .unwrap_or(Value::Null);
 
@@ -120,14 +124,7 @@ pub(super) fn build_remote_navigation_payload(
             items
                 .iter()
                 .map(|dock| {
-                    summarize_dock(
-                        dock,
-                        &backend_by_id,
-                        &frontend_by_id,
-                        notifications,
-                        focused_dock,
-                        focused_dock_pane_id,
-                    )
+                    summarize_dock(dock, summary_context, focused_dock, focused_dock_pane_id)
                 })
                 .collect::<Vec<_>>()
         })
@@ -156,11 +153,8 @@ fn summarize_workspace(
     workspace: &Value,
     active_workspace_id: &str,
     terminal_instances: &[Value],
-    notifications: &[Value],
     hidden_workspace_ids: &HashSet<String>,
-    hidden_pane_ids: &HashSet<String>,
-    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
-    frontend_by_id: &HashMap<&str, &Value>,
+    context: NavigationSummaryContext<'_, '_, '_>,
 ) -> Value {
     let id = string_field(workspace, "id").unwrap_or_default();
     let is_active = id == active_workspace_id;
@@ -187,14 +181,7 @@ fn summarize_workspace(
         })
         .count();
     let pane_summaries = if is_active {
-        summarize_workspace_panes(
-            panes,
-            id,
-            backend_by_id,
-            frontend_by_id,
-            notifications,
-            hidden_pane_ids,
-        )
+        summarize_workspace_panes(panes, id, context)
     } else {
         Vec::new()
     };
@@ -209,7 +196,7 @@ fn summarize_workspace(
         "paneCount": panes.len(),
         "terminalPaneCount": terminal_pane_count,
         "liveTerminalCount": live_terminal_count,
-        "unreadCount": unread_count(notifications, Some(id), None),
+        "unreadCount": unread_count(context.notifications, Some(id), None),
         "panes": pane_summaries,
     })
 }
@@ -217,24 +204,12 @@ fn summarize_workspace(
 fn summarize_active_workspace(
     workspace: &Value,
     active_workspace_id: &str,
-    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
-    frontend_by_id: &HashMap<&str, &Value>,
-    notifications: &[Value],
-    hidden_pane_ids: &HashSet<String>,
+    context: NavigationSummaryContext<'_, '_, '_>,
 ) -> Value {
     let panes = workspace
         .get("panes")
         .and_then(Value::as_array)
-        .map(|items| {
-            summarize_workspace_panes(
-                items,
-                active_workspace_id,
-                backend_by_id,
-                frontend_by_id,
-                notifications,
-                hidden_pane_ids,
-            )
-        })
+        .map(|items| summarize_workspace_panes(items, active_workspace_id, context))
         .unwrap_or_default();
 
     json!({
@@ -250,10 +225,7 @@ fn summarize_active_workspace(
 fn summarize_workspace_panes(
     panes: &[Value],
     workspace_id: &str,
-    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
-    frontend_by_id: &HashMap<&str, &Value>,
-    notifications: &[Value],
-    hidden_pane_ids: &HashSet<String>,
+    context: NavigationSummaryContext<'_, '_, '_>,
 ) -> Vec<Value> {
     let mut summaries = panes
         .iter()
@@ -265,10 +237,8 @@ fn summarize_workspace_panes(
                 index,
                 Some(workspace_id),
                 "workspace",
-                backend_by_id,
-                frontend_by_id,
-                notifications,
-                hidden_pane_ids.contains(pane_id),
+                context,
+                context.hidden_pane_ids.contains(pane_id),
                 None,
             )
         })
@@ -286,9 +256,7 @@ fn summarize_workspace_panes(
 
 fn summarize_dock(
     dock: &Value,
-    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
-    frontend_by_id: &HashMap<&str, &Value>,
-    notifications: &[Value],
+    context: NavigationSummaryContext<'_, '_, '_>,
     focused_dock: Option<&str>,
     focused_dock_pane_id: Option<&str>,
 ) -> Value {
@@ -304,17 +272,7 @@ fn summarize_dock(
                     let pane_id = string_field(pane, "id").unwrap_or_default();
                     let is_focused = focused_dock == Some(dock_position)
                         && focused_dock_pane_id == Some(pane_id);
-                    summarize_pane(
-                        pane,
-                        index,
-                        None,
-                        "dock",
-                        backend_by_id,
-                        frontend_by_id,
-                        notifications,
-                        false,
-                        Some(is_focused),
-                    )
+                    summarize_pane(pane, index, None, "dock", context, false, Some(is_focused))
                 })
                 .collect::<Vec<_>>()
         })
@@ -336,9 +294,7 @@ fn summarize_pane(
     fallback_index: usize,
     workspace_id: Option<&str>,
     location: &str,
-    backend_by_id: &HashMap<&str, &RemoteTerminalInfo>,
-    frontend_by_id: &HashMap<&str, &Value>,
-    notifications: &[Value],
+    context: NavigationSummaryContext<'_, '_, '_>,
     hidden: bool,
     focused_override: Option<bool>,
 ) -> Value {
@@ -355,13 +311,13 @@ fn summarize_pane(
         });
     let backend = terminal_id
         .as_deref()
-        .and_then(|id| backend_by_id.get(id))
+        .and_then(|id| context.backend_by_id.get(id))
         .copied();
     let frontend = terminal_id
         .as_deref()
-        .and_then(|id| frontend_by_id.get(id))
+        .and_then(|id| context.frontend_by_id.get(id))
         .copied();
-    let title = pane_title(&view_type, backend, frontend, terminal_id.as_deref());
+    let title = pane_title(view_type, backend, frontend, terminal_id.as_deref());
     let pane_unread_count = terminal_id
         .as_deref()
         .map(|terminal_id| {
@@ -370,7 +326,7 @@ fn summarize_pane(
             } else {
                 workspace_id
             };
-            unread_count(notifications, count_workspace_id, Some(terminal_id))
+            unread_count(context.notifications, count_workspace_id, Some(terminal_id))
         })
         .unwrap_or(0);
 
@@ -393,7 +349,7 @@ fn summarize_pane(
         "isFocused": focused_override
             .map(|focused| json!(focused))
             .or_else(|| frontend.and_then(|terminal| optional_field(terminal, "isFocused")))
-            .unwrap_or_else(|| json!(false)),
+            .unwrap_or(Value::Bool(false)),
         "unreadCount": pane_unread_count,
         "hidden": hidden,
         "collapsed": hidden,

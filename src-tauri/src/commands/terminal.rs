@@ -1160,7 +1160,7 @@ pub fn write_terminal_input_inner(
     // Enter). Internal newlines are preserved for multi-line input. Matches the
     // MCP path (#314).
     let body_text = if submit {
-        text.trim_end_matches(|c| c == '\n' || c == '\r')
+        text.trim_end_matches(['\n', '\r'])
     } else {
         text
     };

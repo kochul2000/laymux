@@ -493,9 +493,7 @@ fn lookup_interactive_app_within_grace_window(
     terminal_id: &str,
 ) -> Option<String> {
     let mut guard = state.last_detected_interactive_app.lock_or_err().ok()?;
-    let Some((name, ts)) = guard.get(terminal_id) else {
-        return None;
-    };
+    let (name, ts) = guard.get(terminal_id)?;
     if ts.elapsed() <= INTERACTIVE_APP_GRACE_WINDOW {
         return Some(name.clone());
     }

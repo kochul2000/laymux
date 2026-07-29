@@ -998,6 +998,9 @@ pub(crate) fn emit_remote_control_status(app_handle: &AppHandle, status: &Remote
     }
 }
 
+// Axum handlers forward this Response directly; boxing would add an allocation
+// and caller-side unboxing without reducing the HTTP payload.
+#[allow(clippy::result_large_err)]
 pub(crate) fn require_active_lease(
     app_state: &AppState,
     lease_id: Option<&str>,
