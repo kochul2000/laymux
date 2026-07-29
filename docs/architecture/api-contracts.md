@@ -505,7 +505,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
 | `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반) |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
-| `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number) |
+| `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
 **워크스페이스 (6)**:
 

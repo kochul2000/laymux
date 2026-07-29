@@ -916,9 +916,15 @@ impl McpHandler {
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
     fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> {
-        let ptys = self
-            .state
-            .app_state
+        Self::write_pty_in(&self.state.app_state, terminal_id, data)
+    }
+
+    fn write_pty_in(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> Result<usize, CallToolResult> {
+        let ptys = app_state
             .pty_handles
             .lock_or_err()
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))?;
@@ -932,6 +938,47 @@ impl McpHandler {
                 terminal_id
             ))])),
         }
+    }
+
+    /// Revalidate every activity authority immediately before an
+    /// `execute_command` PTY write, then commit the write only for a proven
+    /// shell prompt. The initial existence check happens before the async exec
+    /// lock, so this second strict snapshot is also the TOCTOU barrier for
+    /// registry poison while the call was waiting.
+    fn execute_command_prewrite_and_write_from_state(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> Result<(u64, usize), CallToolResult> {
+        let before_seq = {
+            let buffers = app_state
+                .output_buffers
+                .lock_or_err()
+                .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+            let buffer = buffers.get(terminal_id).ok_or_else(|| {
+                CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found",
+                    terminal_id
+                ))])
+            })?;
+            let info = crate::activity::detect_terminal_state_for_control(
+                app_state,
+                terminal_id,
+                Some(buffer),
+            )
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+            if !matches!(info.activity, crate::terminal::TerminalActivity::Shell) {
+                return Err(CallToolResult::error(vec![Content::text(
+                    "Terminal is not at a shell prompt (command running or TUI app active)",
+                )]));
+            }
+            buffer
+                .write_seq()
+                .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?
+        };
+
+        let bytes = Self::write_pty_in(app_state, terminal_id, data)?;
+        Ok((before_seq, bytes))
     }
 
     /// Resolve a terminal target (stable ID or spatial pane number) to a terminal ID.
@@ -1979,55 +2026,36 @@ impl McpHandler {
         };
         let _guard = lock.lock().await;
 
-        // 1. Check terminal is at shell prompt and record sequence number atomically
-        let before_seq = {
-            let buffers = match self.lock_output_buffers() {
-                Ok(g) => g,
-                Err(e) => return Ok(e),
-            };
-            match buffers.get(&p.terminal_id) {
-                Some(buf) => {
-                    if let Err(error) = buf.write_seq() {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            error.to_string(),
-                        )]));
-                    }
-                    if !crate::activity::is_terminal_at_prompt_from_buffer(Some(buf)) {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            "Terminal is not at a shell prompt (command running or TUI app active)",
-                        )]));
-                    }
-                    match buf.write_seq() {
-                        Ok(seq) => seq,
-                        Err(error) => {
-                            return Ok(CallToolResult::error(vec![Content::text(
-                                error.to_string(),
-                            )]));
-                        }
-                    }
-                }
-                None => {
-                    // Vanished after the pre-lock existence check (raced close):
-                    // purge the possibly-recreated lock entry, but only if it is
-                    // still ours (#427).
+        // 1-2. Revalidate the strict activity authorities after acquiring the
+        // per-terminal exec lock, then write command + CR. This is the final
+        // pre-side-effect gate: the earlier existence check may have raced a
+        // poisoned activity/PTY registry while this call awaited the lock.
+        let cmd = format!("{}\r", p.command);
+        let (before_seq, bytes_written) = match Self::execute_command_prewrite_and_write_from_state(
+            &self.state.app_state,
+            &p.terminal_id,
+            cmd.as_bytes(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                // Preserve the close-race cleanup from the former inline
+                // ring lookup. Output-registry poison remains fail-closed.
+                if self
+                    .state
+                    .app_state
+                    .output_buffers
+                    .lock_or_err()
+                    .is_ok_and(|buffers| !buffers.contains_key(&p.terminal_id))
+                {
                     self.remove_terminal_lock(&p.terminal_id, &lock);
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found",
-                        p.terminal_id
-                    ))]));
                 }
+                return Ok(error);
             }
         };
-
-        // 2. Write command + CR
-        let cmd = format!("{}\r", p.command);
-        if let Err(e) = self.write_pty(&p.terminal_id, cmd.as_bytes()) {
-            return Ok(e);
-        }
         let committed_write = json!({
             "written": true,
-            "bytes": cmd.len(),
-            "bytesWritten": cmd.len(),
+            "bytes": bytes_written,
+            "bytesWritten": bytes_written,
             "terminalId": p.terminal_id,
         });
 
@@ -4127,6 +4155,163 @@ mod tests {
             remove_terminal_lock_if(&state.exec_locks, "t1", &Arc::new(TokioMutex::new(())),)
                 .is_err()
         );
+    }
+
+    #[derive(Clone)]
+    struct ExecuteCommandCountingWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for ExecuteCommandCountingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn execute_command_prompt_state() -> (crate::state::AppState, Arc<std::sync::Mutex<Vec<u8>>>) {
+        let state = crate::state::AppState::new();
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(ExecuteCommandCountingWriter(
+                Arc::clone(&written),
+            ))),
+        );
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]133;D;0\x07prompt$ ");
+        assert!(crate::activity::is_terminal_at_prompt_from_buffer(Some(
+            &ring
+        )));
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+        (state, written)
+    }
+
+    fn assert_execute_command_error_has_zero_bytes(
+        state: &crate::state::AppState,
+        written: &Arc<std::sync::Mutex<Vec<u8>>>,
+    ) {
+        let error =
+            McpHandler::execute_command_prewrite_and_write_from_state(state, "t1", b"echo safe\r")
+                .unwrap_err();
+
+        assert_eq!(error.is_error, Some(true));
+        assert!(
+            written.lock().unwrap().is_empty(),
+            "strict admission failure must happen before the PTY side effect"
+        );
+    }
+
+    fn assert_execute_command_poison_blocks_before_write(
+        poison: impl FnOnce(&crate::state::AppState),
+    ) {
+        let (state, written) = execute_command_prompt_state();
+        assert!(McpHandler::terminal_exists_in(&state, "t1").unwrap());
+        poison(&state);
+        assert_execute_command_error_has_zero_bytes(&state, &written);
+    }
+
+    #[test]
+    fn execute_command_strict_shell_prompt_preserves_write_and_sequence() {
+        let (state, written) = execute_command_prompt_state();
+
+        let (before_seq, bytes_written) =
+            McpHandler::execute_command_prewrite_and_write_from_state(&state, "t1", b"echo safe\r")
+                .unwrap();
+
+        assert!(before_seq > 0);
+        assert_eq!(bytes_written, b"echo safe\r".len());
+        assert_eq!(written.lock().unwrap().as_slice(), b"echo safe\r");
+    }
+
+    #[test]
+    fn execute_command_running_prompt_state_still_writes_zero_bytes() {
+        let (state, written) = execute_command_prompt_state();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .get_mut("t1")
+            .unwrap()
+            .push(b"\x1b]133;C\x07");
+
+        let error = McpHandler::execute_command_prewrite_and_write_from_state(
+            &state,
+            "t1",
+            b"echo unsafe\r",
+        )
+        .unwrap_err();
+
+        let content = serde_json::to_value(&error.content).unwrap().to_string();
+        assert!(content.contains("not at a shell prompt"));
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn execute_command_known_codex_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _known = state.known_codex_terminals.lock().unwrap();
+                panic!("poison known Codex cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_known_claude_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _known = state.known_claude_terminals.lock().unwrap();
+                panic!("poison known Claude cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_grace_cache_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _grace = state.last_detected_interactive_app.lock().unwrap();
+                panic!("poison activity grace cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_exit_cache_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _exit = state.recently_exited_interactive_app.lock().unwrap();
+                panic!("poison activity exit cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_pty_registry_poison_writes_zero_bytes() {
+        let (state, written) = execute_command_prompt_state();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ptys = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry before execute_command admission");
+        }));
+
+        assert_execute_command_error_has_zero_bytes(&state, &written);
+    }
+
+    #[test]
+    fn execute_command_pty_registry_poison_after_exists_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ptys = state.pty_handles.lock().unwrap();
+                panic!("poison PTY registry after execute_command existence check");
+            }));
+        });
     }
 
     #[test]
