@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::constants::*;
 use crate::lock_ext::MutexExt;
+#[cfg(target_os = "windows")]
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::terminal::{InitialExecutionHost, TerminalSession};
@@ -619,9 +620,13 @@ fn read_pty_output_loop(reader: &mut dyn Read, on_output: impl Fn(Vec<u8>) -> Pt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::{InitialExecutionHost, TerminalConfig};
+    use crate::terminal::InitialExecutionHost;
+    #[cfg(windows)]
+    use crate::terminal::TerminalConfig;
     use std::cell::Cell;
-    use std::sync::{mpsc, Condvar};
+    #[cfg(windows)]
+    use std::sync::mpsc;
+    use std::sync::Condvar;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -665,6 +670,7 @@ mod tests {
     /// 정작 기다리던 본문이 오기 전에 예산이 소진된다 — 번들 ConPTY 로 바꾸면서
     /// 실제로 겪었다([ADR-0067](../../docs/adr/0067-bundled-conpty-output-and-staging-contract.md)).
     /// 예산은 시간으로만 잡는다. 비교는 대소문자를 구분하지 않는다.
+    #[cfg(windows)]
     fn collect_pty_output_until(
         rx: &mpsc::Receiver<Vec<u8>>,
         needle: &str,
@@ -691,8 +697,10 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
     const PTY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(15);
 
+    #[cfg(windows)]
     fn make_test_session(profile: &str) -> TerminalSession {
         TerminalSession::new(
             "test-pty".into(),
@@ -710,6 +718,7 @@ mod tests {
         )
     }
 
+    #[cfg(windows)]
     fn make_test_session_with_cwd(profile: &str, cwd: &str) -> TerminalSession {
         TerminalSession::new(
             "test-pty-cwd".into(),
