@@ -18,6 +18,13 @@ import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { createPrLinkProvider } from "@/lib/pr-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import {
+  _reserveWebglInitDelay,
+  isLinuxHost,
+  isTerminalScrolledUp,
+  monotonicNow,
+  shouldEnableTerminalWebgl,
+} from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
 import {
   trimSelectionToPath,
@@ -486,43 +493,6 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
 /** Notify gate fallback timeout — only used for output idle detector gating. */
 const NOTIFY_GATE_FALLBACK_MS = 3000;
 
-// Stagger WebGL context creation to prevent WebView2 GPU process crash.
-// Multiple near-simultaneous WebGL inits can trigger ACCESS_VIOLATION in msedge.dll.
-// This is the next reserved start time, not an in-flight count: a later reveal
-// wave must be placed after every already-reserved slot.
-let webglNextInitAt = 0;
-const WEBGL_STAGGER_MS = 150;
-
-function monotonicNow(): number {
-  return typeof performance !== "undefined" ? performance.now() : Date.now();
-}
-
-/** Reserve the next globally-spaced WebGL initialization slot. */
-export function _reserveWebglInitDelay(now = monotonicNow()): number {
-  const scheduledAt = Math.max(now, webglNextInitAt);
-  webglNextInitAt = scheduledAt + WEBGL_STAGGER_MS;
-  return scheduledAt - now;
-}
-
-/** Reset the stagger timeline (for tests). */
-export function _resetWebglStagger(): void {
-  webglNextInitAt = 0;
-}
-
-/**
- * True on a Linux **desktop** host.
- *
- * Two exclusions matter. WSL runs a Windows WebView, so its user agent reports
- * Windows and must not enable Linux-only IME handling. Android WebView reports
- * `Linux; Android …` and is not a supported desktop target, so it is excluded
- * too rather than being silently treated as Linux.
- */
-export function isLinuxHost(): boolean {
-  const ua = navigator.userAgent;
-  if (!ua.includes("Linux")) return false;
-  return !ua.includes("Windows") && !ua.includes("Android");
-}
-
 /**
  * How long to hold overlay repaints after a DEC 2026 frame flush while
  * waiting for Codex's cursor park (`?25l` CUP `?25h` outside the frame).
@@ -545,10 +515,6 @@ const PARK_SETTLE_MAX_DEFERRALS = 20;
 
 function hasDecModeParam(params: readonly (number | number[])[], mode: number): boolean {
   return params.some((param) => (Array.isArray(param) ? param.includes(mode) : param === mode));
-}
-
-export function shouldEnableTerminalWebgl(): boolean {
-  return true;
 }
 
 /**
@@ -625,22 +591,6 @@ function getTerminalBaseY(terminal: Terminal): number {
 function getBufferCursorAbsY(terminal: Terminal): number {
   const activeBuffer = terminal.buffer.active as { cursorY?: number };
   return getTerminalBaseY(terminal) + (activeBuffer.cursorY ?? 0);
-}
-
-/**
- * Whether the viewport is scrolled away from the bottom of the scrollback
- * (issue #349). xterm exposes the bottom-most scroll offset as
- * `buffer.active.baseY` and the current top-of-viewport line as
- * `viewportY`; they are equal exactly when the user is pinned to the live
- * bottom. Treated as "at bottom" whenever they match (or the API is
- * unavailable) so the floating jump-to-bottom button only appears while the
- * user is actually looking at scrollback.
- */
-export function isTerminalScrolledUp(terminal: Terminal): boolean {
-  const activeBuffer = terminal.buffer.active as { baseY?: number; viewportY?: number };
-  const baseY = activeBuffer.baseY ?? 0;
-  const viewportY = activeBuffer.viewportY ?? baseY;
-  return viewportY < baseY;
 }
 
 function getOverlayCaretMetrics(

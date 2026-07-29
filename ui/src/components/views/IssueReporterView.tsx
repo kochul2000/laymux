@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useSettingsStore } from "@/stores/settings-store";
 import { matchesKeybinding, resolveKeybinding } from "@/lib/keybinding-registry";
-import { inputStyle } from "@/components/ui/FormControls";
+import { inputStyle } from "@/components/ui/form-control-styles";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
