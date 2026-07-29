@@ -126,7 +126,7 @@ static SNAPSHOT_CACHE: Mutex<Option<(Instant, Vec<ProcessEntry>)>> = Mutex::new(
 /// of the whole process list matters. On lock poisoning, falls back to an
 /// uncached fresh enumeration.
 fn with_snapshot<R>(force_fresh: bool, f: impl FnOnce(&[ProcessEntry]) -> R) -> R {
-    let Ok(mut guard) = SNAPSHOT_CACHE.lock() else {
+    let Ok(mut guard) = SNAPSHOT_CACHE.lock_or_err() else {
         return f(&snapshot_processes());
     };
     let stale = guard

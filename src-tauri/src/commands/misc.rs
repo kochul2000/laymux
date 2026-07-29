@@ -197,7 +197,7 @@ pub fn save_settings(
 
 #[tauri::command]
 pub fn load_memo(key: String) -> Result<String, String> {
-    Ok(crate::settings::load_memo(&key))
+    crate::settings::load_memo(&key)
 }
 
 #[tauri::command]
@@ -629,8 +629,8 @@ pub fn report_frontend_health(
 #[tauri::command]
 pub fn get_terminal_states(
     state: State<Arc<AppState>>,
-) -> std::collections::HashMap<String, TerminalStateInfo> {
-    activity::detect_all_terminal_states(&state)
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, String> {
+    activity::detect_all_terminal_states(&state).map_err(String::from)
 }
 
 /// Tauri command: get CWD for all terminals from backend (single source of truth).
@@ -1521,6 +1521,64 @@ mod tests {
             result[0].activity,
             crate::terminal::TerminalActivity::InteractiveApp { .. }
         ));
+    }
+
+    #[test]
+    fn detect_all_states_and_terminal_summaries_share_forward_lock_order() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+
+        let state = Arc::new(AppState::new());
+        state.terminals.lock().unwrap().insert(
+            "t1".into(),
+            TerminalSession::new("t1".into(), TerminalConfig::default()),
+        );
+        state.output_buffers.lock().unwrap().insert(
+            "t1".into(),
+            crate::output_buffer::TerminalOutputBuffer::default(),
+        );
+
+        let (detector_locked_tx, detector_locked_rx) = mpsc::channel();
+        let (release_detector_tx, release_detector_rx) = mpsc::channel();
+        let detector_state = Arc::clone(&state);
+        let detector_hook_state = Arc::clone(&state);
+        let detector = std::thread::spawn(move || {
+            crate::activity::detect_all_terminal_states_after_terminals_lock(
+                &detector_state,
+                || {
+                    assert!(
+                        detector_hook_state.output_buffers.try_lock().is_ok(),
+                        "detect-all must not acquire output_buffers before terminals"
+                    );
+                    detector_locked_tx.send(()).unwrap();
+                    release_detector_rx.recv().unwrap();
+                },
+            )
+        });
+        detector_locked_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("detector must hold terminals before output_buffers");
+
+        let (summary_started_tx, summary_started_rx) = mpsc::channel();
+        let (summary_done_tx, summary_done_rx) = mpsc::channel();
+        let summary_state = Arc::clone(&state);
+        let summary = std::thread::spawn(move || {
+            summary_started_tx.send(()).unwrap();
+            let result = get_terminal_summaries_inner(&["t1".into()], &summary_state);
+            summary_done_tx.send(()).unwrap();
+            result
+        });
+        summary_started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        release_detector_tx.send(()).unwrap();
+
+        assert!(detector.join().unwrap().is_ok());
+        summary_done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("opposite summary path must not deadlock with detect-all");
+        assert!(summary.join().unwrap().is_ok());
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
-use crate::lock_ext::MutexExt;
+use crate::lock_ext::{recover_poison_for_discard, MutexExt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -143,11 +143,14 @@ impl DesktopOutputFlow {
     pub(super) fn wait_until_retired(&self) {
         let mut state = self
             .state
-            .lock_or_recover_for_cleanup("waiting for terminal output retirement");
+            .lock_or_recover_for_discard("waiting for terminal output retirement");
         while !self.retired.load(Ordering::Acquire) {
             state = match self.changed.wait(state) {
                 Ok(state) => state,
-                Err(poisoned) => poisoned.into_inner(),
+                Err(poisoned) => recover_poison_for_discard(
+                    poisoned,
+                    "waiting for terminal output retirement condvar",
+                ),
             };
         }
     }
@@ -158,7 +161,7 @@ impl DesktopOutputFlow {
         self.retired.store(true, Ordering::Release);
         let mut state = self
             .state
-            .lock_or_recover_for_cleanup("retiring terminal desktop flow");
+            .lock_or_recover_for_discard("retiring terminal desktop flow");
         state.retired = true;
         state.active = None;
         self.changed.notify_all();

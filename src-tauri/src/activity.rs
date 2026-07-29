@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::claude_activity;
 use crate::constants::{ACTIVITY_SCAN_BYTES, INTERACTIVE_APP_GRACE_WINDOW};
+use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::osc;
 use crate::output_buffer::TerminalOutputBuffer;
@@ -96,7 +97,9 @@ pub fn is_claude_terminal_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         // No live signal to corroborate; if the cache still has us,
         // treat as stale — the grace window owns the early-startup
@@ -197,7 +200,9 @@ pub fn is_claude_idle_from_buffer(buffer: Option<&TerminalOutputBuffer>) -> bool
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         return false;
     }
@@ -213,7 +218,10 @@ pub fn is_terminal_at_prompt_from_buffer(buffer: Option<&TerminalOutputBuffer>) 
     let Some(buf) = buffer else {
         return true; // Unknown terminal → assume at prompt
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        // A poisoned authoritative ring must not be mistaken for an idle shell.
+        return false;
+    };
     if recent.is_empty() {
         return true; // No output yet → assume at prompt
     }
@@ -347,7 +355,9 @@ pub fn is_codex_terminal_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
             known.remove(terminal_id);
@@ -590,7 +600,8 @@ fn is_explicit_empty_title_reset(title: &str, buffer: Option<&TerminalOutputBuff
         return false;
     }
     buffer
-        .and_then(|buf| osc::extract_last_terminal_title(&buf.recent_bytes(ACTIVITY_SCAN_BYTES)))
+        .and_then(|buf| buf.recent_bytes(ACTIVITY_SCAN_BYTES).ok())
+        .and_then(|recent| osc::extract_last_terminal_title(&recent))
         .is_some_and(|latest| latest.is_empty())
 }
 
@@ -665,7 +676,9 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
     let Some(buf) = buffer else {
         return TerminalActivity::Shell;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return TerminalActivity::Shell;
+    };
     if recent.is_empty() {
         return TerminalActivity::Shell;
     }
@@ -693,7 +706,9 @@ pub fn detect_terminal_state(
     let Some(buf) = buffer else {
         return TerminalStateInfo { activity };
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return TerminalStateInfo { activity };
+    };
     if recent.is_empty() {
         return TerminalStateInfo { activity };
     }
@@ -714,20 +729,79 @@ pub fn detect_terminal_state(
     TerminalStateInfo { activity }
 }
 
-/// Detect terminal states for all terminals.
+/// Detect one terminal state for a control/admission decision.
+///
+/// The display-oriented detector keeps conservative fallback values for call
+/// sites that cannot return errors. Control paths must additionally prove that
+/// the authoritative ring stayed healthy so poison is never collapsed to
+/// `Shell` and used to authorize input or CWD propagation.
+pub fn detect_terminal_state_for_control(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> Result<TerminalStateInfo, AppError> {
+    if let Some(buffer) = buffer {
+        buffer.write_seq()?;
+    }
+    ensure_activity_control_state_healthy(state)?;
+    let info = detect_terminal_state(state, terminal_id, buffer);
+    if let Some(buffer) = buffer {
+        buffer.write_seq()?;
+    }
+    ensure_activity_control_state_healthy(state)?;
+    Ok(info)
+}
+
+/// Prove that every AppState mutex consulted by activity detection is healthy.
+///
+/// The display detector deliberately degrades when one of these hints cannot be
+/// read, but a control caller may use `Shell` to authorize PTY input or CWD
+/// propagation. Checking both before and after display detection prevents its
+/// internal `false`/`None` fallbacks from turning poison into admission. Locks
+/// are acquired and released one at a time in the AppState order; callers may
+/// already hold `output_buffers`, which precedes all of them.
+fn ensure_activity_control_state_healthy(state: &AppState) -> Result<(), AppError> {
+    drop(state.known_claude_terminals.lock_or_err()?);
+    drop(state.known_codex_terminals.lock_or_err()?);
+    drop(state.last_detected_interactive_app.lock_or_err()?);
+    drop(state.recently_exited_interactive_app.lock_or_err()?);
+    drop(state.pty_handles.lock_or_err()?);
+    Ok(())
+}
+
+/// Detect terminal states for all terminals without inverting the AppState
+/// lock order. Failure is explicit so callers cannot treat a poisoned registry
+/// or ring as an empty set of terminals.
 pub fn detect_all_terminal_states(
     state: &AppState,
-) -> std::collections::HashMap<String, TerminalStateInfo> {
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_all_terminal_states_inner(state, || {})
+}
+
+fn detect_all_terminal_states_inner(
+    state: &AppState,
+    after_terminals_lock: impl FnOnce(),
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
     let mut result = std::collections::HashMap::new();
-    if let Ok(buffers) = state.output_buffers.lock_or_err() {
-        if let Ok(terminals) = state.terminals.lock_or_err() {
-            for id in terminals.keys() {
-                let info = detect_terminal_state(state, id, buffers.get(id));
-                result.insert(id.clone(), info);
-            }
-        }
+    let terminals = state.terminals.lock_or_err()?;
+    after_terminals_lock();
+    let buffers = state.output_buffers.lock_or_err()?;
+    for id in terminals.keys() {
+        let buffer = buffers.get(id).ok_or_else(|| {
+            AppError::Other(format!("Terminal '{id}' has no authoritative output ring"))
+        })?;
+        let info = detect_terminal_state_for_control(state, id, Some(buffer))?;
+        result.insert(id.clone(), info);
     }
-    result
+    Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) fn detect_all_terminal_states_after_terminals_lock(
+    state: &AppState,
+    after_terminals_lock: impl FnOnce(),
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_all_terminal_states_inner(state, after_terminals_lock)
 }
 
 // ── DEC 2026 Burst Detection ──
@@ -774,7 +848,7 @@ impl BurstDetector {
     /// Record a DEC 2026h hit. Returns `true` if an event should be emitted
     /// (burst threshold reached + throttle interval elapsed).
     pub fn record_hit(&self) -> bool {
-        let Ok(mut inner) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock_or_err() else {
             return false;
         };
         let now = Instant::now();
@@ -964,7 +1038,7 @@ impl PtyCallbackState {
     /// behavior silently missed all hits too, so this is no worse and avoids
     /// leaking a poisoned-lock panic into the PTY thread.
     pub fn scan_dec_sync_marker(&self, data: &[u8]) -> bool {
-        match self.dec_sync_scanner.lock() {
+        match self.dec_sync_scanner.lock_or_err() {
             Ok(mut scanner) => scanner.scan(data),
             Err(_) => false,
         }
@@ -975,6 +1049,52 @@ impl PtyCallbackState {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn strict_detection_rejects_poisoned_grace_cache() {
+        let state = AppState::new();
+        let ring = TerminalOutputBuffer::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _grace = state.last_detected_interactive_app.lock().unwrap();
+            panic!("poison activity grace cache");
+        }));
+
+        assert!(detect_terminal_state_for_control(&state, "t1", Some(&ring)).is_err());
+    }
+
+    #[test]
+    fn strict_detection_rejects_poisoned_pty_registry() {
+        let state = AppState::new();
+        let ring = TerminalOutputBuffer::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ptys = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry used by activity detection");
+        }));
+
+        assert!(detect_terminal_state_for_control(&state, "t1", Some(&ring)).is_err());
+    }
+
+    #[test]
+    fn detect_all_states_returns_error_for_poisoned_ring() {
+        let state = AppState::new();
+        state.terminals.lock().unwrap().insert(
+            "target".into(),
+            crate::terminal::TerminalSession::new(
+                "target".into(),
+                crate::terminal::TerminalConfig::default(),
+            ),
+        );
+
+        let ring = TerminalOutputBuffer::default();
+        ring.poison_for_test();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("target".into(), ring);
+
+        assert!(detect_all_terminal_states(&state).is_err());
+    }
 
     #[test]
     fn detect_activity_empty_buffer() {

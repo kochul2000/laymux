@@ -174,11 +174,12 @@ struct WriteOutcome {
 fn get_or_create_terminal_lock(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
-) -> Arc<TokioMutex<()>> {
-    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
-    map.entry(terminal_id.to_string())
+) -> Result<Arc<TokioMutex<()>>, crate::error::AppError> {
+    let mut map = locks.lock_or_err()?;
+    Ok(map
+        .entry(terminal_id.to_string())
         .or_insert_with(|| Arc::new(TokioMutex::new(())))
-        .clone()
+        .clone())
 }
 
 /// Remove `terminal_id`'s entry, but only if it is still the exact `expected`
@@ -189,8 +190,8 @@ fn remove_terminal_lock_if(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
     expected: &Arc<TokioMutex<()>>,
-) {
-    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+) -> Result<(), crate::error::AppError> {
+    let mut map = locks.lock_or_err()?;
     let is_ours = map
         .get(terminal_id)
         .map(|cur| Arc::ptr_eq(cur, expected))
@@ -198,6 +199,7 @@ fn remove_terminal_lock_if(
     if is_ours {
         map.remove(terminal_id);
     }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -680,8 +682,12 @@ impl McpHandler {
     /// concurrent write/exec to the same terminal — #314). The table lives on
     /// the shared `Arc<AppState>` (see [`crate::state::SharedExecLocks`]) so this
     /// holds across MCP sessions, not just within one handler (#427).
-    async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
+    async fn terminal_exec_lock(
+        &self,
+        terminal_id: &str,
+    ) -> Result<Arc<TokioMutex<()>>, CallToolResult> {
         get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id)
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -821,7 +827,7 @@ impl McpHandler {
         // 존재하지 않는 터미널이면 락 엔트리를 만들기 전에 거른다 — 전역 exec_locks
         // 테이블이 무효/닫힌 id 호출만으로 커지지 않도록(#427). write_pty 도 동일한
         // not-found 를 내지만, 그 전에 이미 락이 삽입된 뒤다.
-        if !self.terminal_exists(terminal_id) {
+        if !self.terminal_exists(terminal_id)? {
             // The id may belong to a real pane whose TerminalView has not yet
             // passed the staggered reveal queue. The frontend temporarily
             // reveals it and responds only after backend PTY creation succeeds.
@@ -833,7 +839,7 @@ impl McpHandler {
                     json!({ "id": terminal_id }),
                 )
                 .await?;
-            if !self.terminal_exists(terminal_id) {
+            if !self.terminal_exists(terminal_id)? {
                 return Err(CallToolResult::error(vec![Content::text(format!(
                     "Terminal '{}' not found",
                     terminal_id
@@ -842,10 +848,10 @@ impl McpHandler {
         }
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
-        let lock = self.terminal_exec_lock(terminal_id).await;
+        let lock = self.terminal_exec_lock(terminal_id).await?;
         let _guard = lock.lock().await;
         // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
-        let (activity, before_seq) = self.sample_activity_and_seq(terminal_id, capture);
+        let (activity, before_seq) = self.sample_activity_and_seq(terminal_id, capture)?;
         let mut total = 0usize;
         for (i, chunk) in chunks.iter().enumerate() {
             // 청크(=본문 다음의 CR) 앞에만 지연을 둔다. lone CR/본문만일 때는
@@ -858,8 +864,12 @@ impl McpHandler {
                 Err(e) => {
                     // 쓰기 도중 터미널이 사라졌다면(close 와 경합) 방금 재생성됐을
                     // 수 있는 락 엔트리를 정리한다(#427). 단 우리가 든 락일 때만.
-                    if !self.terminal_exists(terminal_id) {
-                        self.remove_terminal_lock(terminal_id, &lock);
+                    match self.terminal_exists(terminal_id) {
+                        Ok(false) => self.remove_terminal_lock(terminal_id, &lock),
+                        Ok(true) => {}
+                        Err(exists_error) => {
+                            tracing::warn!(terminal_id, error = ?exists_error, "failed to verify terminal existence after write error");
+                        }
                     }
                     return Err(e);
                 }
@@ -874,14 +884,20 @@ impl McpHandler {
 
     /// True if the terminal has a live PTY handle. Used to reject writes to
     /// unknown/closed ids before an `exec_locks` entry is created (#427). A
-    /// poisoned lock is treated as "not present" (writes are fatal anyway).
-    fn terminal_exists(&self, terminal_id: &str) -> bool {
-        self.state
-            .app_state
+    /// poisoned lock is returned as a tool error rather than not-found.
+    fn terminal_exists(&self, terminal_id: &str) -> Result<bool, CallToolResult> {
+        Self::terminal_exists_in(&self.state.app_state, terminal_id)
+    }
+
+    fn terminal_exists_in(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+    ) -> Result<bool, CallToolResult> {
+        app_state
             .pty_handles
             .lock_or_err()
             .map(|ptys| ptys.contains_key(terminal_id))
-            .unwrap_or(false)
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
     }
 
     /// Drop the per-terminal lock `held` for `terminal_id` when a write finds the
@@ -891,14 +907,24 @@ impl McpHandler {
     /// same-id terminal recreated after us keeps its own lock (#427). Safe under
     /// the per-terminal guard: the guard keeps its `Arc`; the map drops a ref.
     fn remove_terminal_lock(&self, terminal_id: &str, held: &Arc<TokioMutex<()>>) {
-        remove_terminal_lock_if(&self.state.app_state.exec_locks, terminal_id, held);
+        if let Err(error) =
+            remove_terminal_lock_if(&self.state.app_state.exec_locks, terminal_id, held)
+        {
+            tracing::warn!(terminal_id, %error, "failed to clean terminal exec lock");
+        }
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
     fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> {
-        let ptys = self
-            .state
-            .app_state
+        Self::write_pty_in(&self.state.app_state, terminal_id, data)
+    }
+
+    fn write_pty_in(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> Result<usize, CallToolResult> {
+        let ptys = app_state
             .pty_handles
             .lock_or_err()
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))?;
@@ -912,6 +938,47 @@ impl McpHandler {
                 terminal_id
             ))])),
         }
+    }
+
+    /// Revalidate every activity authority immediately before an
+    /// `execute_command` PTY write, then commit the write only for a proven
+    /// shell prompt. The initial existence check happens before the async exec
+    /// lock, so this second strict snapshot is also the TOCTOU barrier for
+    /// registry poison while the call was waiting.
+    fn execute_command_prewrite_and_write_from_state(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        data: &[u8],
+    ) -> Result<(u64, usize), CallToolResult> {
+        let before_seq = {
+            let buffers = app_state
+                .output_buffers
+                .lock_or_err()
+                .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+            let buffer = buffers.get(terminal_id).ok_or_else(|| {
+                CallToolResult::error(vec![Content::text(format!(
+                    "Terminal '{}' not found",
+                    terminal_id
+                ))])
+            })?;
+            let info = crate::activity::detect_terminal_state_for_control(
+                app_state,
+                terminal_id,
+                Some(buffer),
+            )
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+            if !matches!(info.activity, crate::terminal::TerminalActivity::Shell) {
+                return Err(CallToolResult::error(vec![Content::text(
+                    "Terminal is not at a shell prompt (command running or TUI app active)",
+                )]));
+            }
+            buffer
+                .write_seq()
+                .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?
+        };
+
+        let bytes = Self::write_pty_in(app_state, terminal_id, data)?;
+        Ok((before_seq, bytes))
     }
 
     /// Resolve a terminal target (stable ID or spatial pane number) to a terminal ID.
@@ -1068,13 +1135,15 @@ impl McpHandler {
         transform: F,
     ) -> Result<CallToolResult, ErrorData>
     where
-        F: FnOnce(&mut Value),
+        F: FnOnce(&mut Value) -> Result<(), CallToolResult>,
     {
         let mut data = match self.bridge_raw(category, target, method, params).await {
             Ok(data) => data,
             Err(e) => return Ok(e),
         };
-        transform(&mut data);
+        if let Err(error) = transform(&mut data) {
+            return Ok(error);
+        }
         Ok(json_result(&data))
     }
 
@@ -1115,7 +1184,15 @@ impl McpHandler {
     ) -> Result<(String, usize), CallToolResult> {
         let buffers = self.lock_output_buffers()?;
         match buffers.get(terminal_id) {
-            Some(buf) => Ok((buf.recent_lines(lines), buf.len())),
+            Some(buf) => {
+                let output = buf.recent_lines(lines).map_err(|error| {
+                    CallToolResult::error(vec![Content::text(error.to_string())])
+                })?;
+                let len = buf.len().map_err(|error| {
+                    CallToolResult::error(vec![Content::text(error.to_string())])
+                })?;
+                Ok((output, len))
+            }
             None => Err(CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 terminal_id
@@ -1127,44 +1204,109 @@ impl McpHandler {
     /// its activity (shell / running / interactiveApp) as JSON, and — when
     /// `want_seq` — the current output-buffer write sequence to bracket a
     /// `capture_ms` window. Call this while holding the per-terminal exec lock so
-    /// the sample is atomic w.r.t. this terminal's write ordering. Best-effort: a
-    /// poisoned lock yields `(null, None)`.
+    /// the sample is atomic w.r.t. this terminal's write ordering. A poisoned
+    /// registry or ring returns a tool error before any PTY side effect.
     fn sample_activity_and_seq(
         &self,
         terminal_id: &str,
         want_seq: bool,
-    ) -> (serde_json::Value, Option<u64>) {
-        let app_state = &self.state.app_state;
-        let Ok(buffers) = app_state.output_buffers.lock_or_err() else {
-            return (json!(null), None);
-        };
-        let buf = buffers.get(terminal_id);
-        let info = crate::activity::detect_terminal_state(app_state, terminal_id, buf);
-        let activity = serde_json::to_value(&info.activity).unwrap_or(json!(null));
-        let seq = if want_seq {
-            buf.map(|b| b.write_seq())
-        } else {
-            None
-        };
-        (activity, seq)
+    ) -> Result<(serde_json::Value, Option<u64>), CallToolResult> {
+        Self::sample_activity_and_seq_from_state(&self.state.app_state, terminal_id, want_seq)
+    }
+
+    fn sample_activity_and_seq_from_state(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        want_seq: bool,
+    ) -> Result<(serde_json::Value, Option<u64>), CallToolResult> {
+        let buffers = app_state
+            .output_buffers
+            .lock_or_err()
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+        let buf = buffers.get(terminal_id).ok_or_else(|| {
+            CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{}' has no authoritative output ring",
+                terminal_id
+            ))])
+        })?;
+        let info =
+            crate::activity::detect_terminal_state_for_control(app_state, terminal_id, Some(buf))
+                .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+        let activity = serde_json::to_value(&info.activity).map_err(|error| {
+            CallToolResult::error(vec![Content::text(format!(
+                "Failed to serialize terminal activity: {error}"
+            ))])
+        })?;
+        let seq =
+            if want_seq {
+                Some(buf.write_seq().map_err(|error| {
+                    CallToolResult::error(vec![Content::text(error.to_string())])
+                })?)
+            } else {
+                None
+            };
+        Ok((activity, seq))
     }
 
     /// Copy the raw bytes produced since `before_seq` under the buffer lock, then
     /// release it before the (potentially large) ANSI strip + tail truncation so
     /// a noisy TUI's snapshot doesn't stall PTY callbacks pushing into the buffer.
-    /// Returns `(response, truncated)`; empty string when nothing new / unknown.
-    fn capture_response_since(&self, terminal_id: &str, before_seq: u64) -> (String, bool) {
+    /// Returns `(response, truncated)` and preserves registry/ring failures.
+    fn capture_response_since(
+        &self,
+        terminal_id: &str,
+        before_seq: u64,
+    ) -> Result<(String, bool), String> {
+        Self::capture_response_since_state(&self.state.app_state, terminal_id, before_seq)
+    }
+
+    fn capture_response_since_state(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        before_seq: u64,
+    ) -> Result<(String, bool), String> {
         let raw = {
-            let Ok(buffers) = self.state.app_state.output_buffers.lock_or_err() else {
-                return (String::new(), false);
-            };
+            let buffers = app_state.output_buffers.lock_or_err()?;
             match buffers.get(terminal_id) {
-                Some(buf) => buf.bytes_since(before_seq),
-                None => return (String::new(), false),
+                Some(buf) => buf.bytes_since(before_seq)?,
+                None => {
+                    return Err(format!(
+                        "Terminal '{}' has no authoritative output ring",
+                        terminal_id
+                    ))
+                }
             }
         }; // buffer lock released here
         let text = super::helpers::strip_ansi(&String::from_utf8_lossy(&raw));
-        Self::truncate_tail(text.trim(), Self::CAPTURE_RESPONSE_MAX_CHARS)
+        Ok(Self::truncate_tail(
+            text.trim(),
+            Self::CAPTURE_RESPONSE_MAX_CHARS,
+        ))
+    }
+
+    fn capture_failed_after_write(
+        result: &serde_json::Value,
+        terminal_id: &str,
+        error: impl ToString,
+    ) -> CallToolResult {
+        let error = error.to_string();
+        let mut payload = result.clone();
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("captureFailed".to_string(), json!(true));
+            object.insert("captureError".to_string(), json!(error));
+            object.insert(
+                "sideEffect".to_string(),
+                json!("terminal input was written before output capture failed"),
+            );
+            object
+                .entry("terminalId".to_string())
+                .or_insert_with(|| json!(terminal_id));
+        }
+        CallToolResult::error(vec![Content::text(
+            serde_json::to_string(&payload).unwrap_or_else(|_| {
+                "terminal input was written before output capture failed".to_string()
+            }),
+        )])
     }
 
     /// Keep at most `max` trailing chars of `s`. Returns `(text, truncated)`.
@@ -1180,29 +1322,58 @@ impl McpHandler {
 
     /// If `capture_ms` was requested, block up to `CAPTURE_MS_MAX`, then inject
     /// `captureMs` plus `response` / `responseTruncated` into a write tool's
-    /// result. `response` is always present when `capture_ms` is set (empty
-    /// string if the pre-write sequence was unavailable) so the return contract
-    /// is stable. No-op when `capture_ms` is unset.
+    /// result. Failure after the write returns a tool error whose JSON content
+    /// retains `written`, byte counts, target id, and the capture failure, so a
+    /// caller never retries an already-committed side effect as if nothing ran.
+    /// No-op when `capture_ms` is unset.
     async fn apply_capture(
         &self,
         result: &mut serde_json::Value,
         terminal_id: &str,
         capture_ms: Option<u64>,
         before_seq: Option<u64>,
-    ) {
-        let Some(ms) = capture_ms else { return };
+    ) -> Result<(), CallToolResult> {
+        let Some(ms) = capture_ms else {
+            return Ok(());
+        };
         let ms = ms.min(Self::CAPTURE_MS_MAX);
         tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-        let Some(obj) = result.as_object_mut() else {
-            return;
-        };
-        obj.insert("captureMs".to_string(), json!(ms));
-        let (response, truncated) = match before_seq {
-            Some(seq) => self.capture_response_since(terminal_id, seq),
-            None => (String::new(), false),
-        };
-        obj.insert("response".to_string(), json!(response));
-        obj.insert("responseTruncated".to_string(), json!(truncated));
+        match result.as_object_mut() {
+            Some(object) => {
+                object.insert("captureMs".to_string(), json!(ms));
+            }
+            None => {
+                return Err(Self::capture_failed_after_write(
+                    result,
+                    terminal_id,
+                    "write result was not an object",
+                ));
+            }
+        }
+        let seq = before_seq.ok_or_else(|| {
+            Self::capture_failed_after_write(
+                result,
+                terminal_id,
+                "pre-write output sequence was unavailable",
+            )
+        })?;
+        let (response, truncated) = self
+            .capture_response_since(terminal_id, seq)
+            .map_err(|error| Self::capture_failed_after_write(result, terminal_id, error))?;
+        match result.as_object_mut() {
+            Some(object) => {
+                object.insert("response".to_string(), json!(response));
+                object.insert("responseTruncated".to_string(), json!(truncated));
+            }
+            None => {
+                return Err(Self::capture_failed_after_write(
+                    result,
+                    terminal_id,
+                    "write result stopped being an object during capture",
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Resolve the workspace containing the given terminal from the bridge terminal list.
@@ -1254,7 +1425,8 @@ impl McpHandler {
                         panes,
                         "terminalId",
                         "terminalActivity",
-                    );
+                    )
+                    .map_err(|_| bridge_read_failed(uri, "terminal activity state"))?;
                 }
                 Ok(read_result_json(uri, &data))
             }
@@ -1281,16 +1453,20 @@ impl McpHandler {
                     .bridge_raw("query", "terminals", "list", json!({}))
                     .await
                     .map_err(|_| bridge_read_failed(uri, "terminals.list"))?;
-                let instance = data
-                    .get_mut("instances")
-                    .and_then(|v| v.as_array_mut())
-                    .and_then(|arr| {
-                        Self::enrich_with_activity(&self.state.app_state, arr, "id", "activity");
-                        arr.iter().find(|inst| {
+                let instance = if let Some(instances) =
+                    data.get_mut("instances").and_then(|v| v.as_array_mut())
+                {
+                    Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity")
+                        .map_err(|_| bridge_read_failed(uri, "terminal activity state"))?;
+                    instances
+                        .iter()
+                        .find(|inst| {
                             inst.get("id").and_then(|v| v.as_str()) == Some(terminal_id.as_str())
                         })
-                    })
-                    .cloned();
+                        .cloned()
+                } else {
+                    None
+                };
                 match instance {
                     Some(inst) => Ok(read_result_json(uri, &inst)),
                     None => Err(resource_not_found(uri)),
@@ -1304,7 +1480,9 @@ impl McpHandler {
                 let buf = buffers
                     .get(&terminal_id)
                     .ok_or_else(|| resource_not_found(uri))?;
-                let raw = buf.recent_lines(500);
+                let raw = buf
+                    .recent_lines(500)
+                    .map_err(|_| bridge_read_failed(uri, "terminal output ring"))?;
                 drop(buffers);
                 let text = super::helpers::strip_ansi(&raw);
                 Ok(read_result_text(uri, text))
@@ -1321,8 +1499,9 @@ impl McpHandler {
         items: &mut [Value],
         id_field: &str,
         activity_field: &str,
-    ) {
-        let states = crate::activity::detect_all_terminal_states(app_state);
+    ) -> Result<(), CallToolResult> {
+        let states = crate::activity::detect_all_terminal_states(app_state)
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
         for item in items.iter_mut() {
             if let Some(id) = item.get(id_field).and_then(|v| v.as_str()) {
                 if let Some(state_info) = states.get(id) {
@@ -1335,6 +1514,7 @@ impl McpHandler {
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -1518,7 +1698,7 @@ impl McpHandler {
     ) -> Result<CallToolResult, ErrorData> {
         self.bridge_transform("query", "terminals", "list", json!({}), |data| {
             if let Some(instances) = data.get_mut("instances").and_then(|v| v.as_array_mut()) {
-                Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity");
+                Self::enrich_with_activity(&self.state.app_state, instances, "id", "activity")?;
                 if let Some(ref ws_id) = p.workspace_id {
                     instances.retain(|inst| {
                         inst.get("workspaceId")
@@ -1528,6 +1708,7 @@ impl McpHandler {
                     });
                 }
             }
+            Ok(())
         })
         .await
     }
@@ -1609,8 +1790,12 @@ impl McpHandler {
                     "terminalId": terminal_id,
                     "activity": outcome.activity,
                 });
-                self.apply_capture(&mut result, &terminal_id, p.capture_ms, outcome.before_seq)
-                    .await;
+                if let Err(error) = self
+                    .apply_capture(&mut result, &terminal_id, p.capture_ms, outcome.before_seq)
+                    .await
+                {
+                    return Ok(error);
+                }
                 Ok(json_result(&result))
             }
             Err(e) => Ok(e),
@@ -1679,8 +1864,12 @@ impl McpHandler {
                     "direction": p.direction.to_string(),
                     "activity": outcome.activity,
                 });
-                self.apply_capture(&mut result, &target_id, p.capture_ms, outcome.before_seq)
-                    .await;
+                if let Err(error) = self
+                    .apply_capture(&mut result, &target_id, p.capture_ms, outcome.before_seq)
+                    .await
+                {
+                    return Ok(error);
+                }
                 Ok(json_result(&result))
             }
             Err(e) => Ok(e),
@@ -1785,7 +1974,14 @@ impl McpHandler {
     /// Get activity state for all terminals. Returns "shell" or "interactiveApp" (with app name).
     #[tool]
     async fn get_terminal_states(&self) -> Result<CallToolResult, ErrorData> {
-        let states = crate::activity::detect_all_terminal_states(&self.state.app_state);
+        let states = match crate::activity::detect_all_terminal_states(&self.state.app_state) {
+            Ok(states) => states,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![Content::text(
+                    error.to_string(),
+                )]));
+            }
+        };
         Ok(json_result(&json!({ "states": states })))
     }
 
@@ -1812,7 +2008,11 @@ impl McpHandler {
 
         // Reject unknown/closed terminals before creating a lock entry so the
         // process-global exec_locks table can't grow from invalid ids (#427).
-        if !self.terminal_exists(&p.terminal_id) {
+        let terminal_exists = match self.terminal_exists(&p.terminal_id) {
+            Ok(exists) => exists,
+            Err(error) => return Ok(error),
+        };
+        if !terminal_exists {
             return Ok(CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 p.terminal_id
@@ -1820,42 +2020,44 @@ impl McpHandler {
         }
 
         // Acquire per-terminal lock to serialize concurrent execute_command calls
-        let lock = self.terminal_exec_lock(&p.terminal_id).await;
+        let lock = match self.terminal_exec_lock(&p.terminal_id).await {
+            Ok(lock) => lock,
+            Err(error) => return Ok(error),
+        };
         let _guard = lock.lock().await;
 
-        // 1. Check terminal is at shell prompt and record sequence number atomically
-        let before_seq = {
-            let buffers = match self.lock_output_buffers() {
-                Ok(g) => g,
-                Err(e) => return Ok(e),
-            };
-            match buffers.get(&p.terminal_id) {
-                Some(buf) => {
-                    if !crate::activity::is_terminal_at_prompt_from_buffer(Some(buf)) {
-                        return Ok(CallToolResult::error(vec![Content::text(
-                            "Terminal is not at a shell prompt (command running or TUI app active)",
-                        )]));
-                    }
-                    buf.write_seq()
-                }
-                None => {
-                    // Vanished after the pre-lock existence check (raced close):
-                    // purge the possibly-recreated lock entry, but only if it is
-                    // still ours (#427).
+        // 1-2. Revalidate the strict activity authorities after acquiring the
+        // per-terminal exec lock, then write command + CR. This is the final
+        // pre-side-effect gate: the earlier existence check may have raced a
+        // poisoned activity/PTY registry while this call awaited the lock.
+        let cmd = format!("{}\r", p.command);
+        let (before_seq, bytes_written) = match Self::execute_command_prewrite_and_write_from_state(
+            &self.state.app_state,
+            &p.terminal_id,
+            cmd.as_bytes(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                // Preserve the close-race cleanup from the former inline
+                // ring lookup. Output-registry poison remains fail-closed.
+                if self
+                    .state
+                    .app_state
+                    .output_buffers
+                    .lock_or_err()
+                    .is_ok_and(|buffers| !buffers.contains_key(&p.terminal_id))
+                {
                     self.remove_terminal_lock(&p.terminal_id, &lock);
-                    return Ok(CallToolResult::error(vec![Content::text(format!(
-                        "Terminal '{}' not found",
-                        p.terminal_id
-                    ))]));
                 }
+                return Ok(error);
             }
         };
-
-        // 2. Write command + CR
-        let cmd = format!("{}\r", p.command);
-        if let Err(e) = self.write_pty(&p.terminal_id, cmd.as_bytes()) {
-            return Ok(e);
-        }
+        let committed_write = json!({
+            "written": true,
+            "bytes": bytes_written,
+            "bytesWritten": bytes_written,
+            "terminalId": p.terminal_id,
+        });
 
         // 3. Poll until prompt returns or timeout
         let start = std::time::Instant::now();
@@ -1865,18 +2067,39 @@ impl McpHandler {
 
         loop {
             if start.elapsed() > timeout {
-                return Ok(CallToolResult::error(vec![Content::text(format!(
-                    "Command timed out after {}ms",
-                    timeout_ms
-                ))]));
+                return Ok(Self::capture_failed_after_write(
+                    &committed_write,
+                    &p.terminal_id,
+                    format!("Command timed out after {timeout_ms}ms"),
+                ));
             }
 
             let at_prompt = {
-                let buffers = match self.lock_output_buffers() {
-                    Ok(g) => g,
-                    Err(e) => return Ok(e),
+                let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                    Ok(buffers) => buffers,
+                    Err(error) => {
+                        return Ok(Self::capture_failed_after_write(
+                            &committed_write,
+                            &p.terminal_id,
+                            error,
+                        ))
+                    }
                 };
-                crate::activity::is_terminal_at_prompt_from_buffer(buffers.get(&p.terminal_id))
+                let Some(buffer) = buffers.get(&p.terminal_id) else {
+                    return Ok(Self::capture_failed_after_write(
+                        &committed_write,
+                        &p.terminal_id,
+                        "authoritative output ring disappeared while command was running",
+                    ));
+                };
+                if let Err(error) = buffer.write_seq() {
+                    return Ok(Self::capture_failed_after_write(
+                        &committed_write,
+                        &p.terminal_id,
+                        error,
+                    ));
+                }
+                crate::activity::is_terminal_at_prompt_from_buffer(Some(buffer))
             };
 
             if at_prompt {
@@ -1890,13 +2113,34 @@ impl McpHandler {
 
         // 4. Read output using sequence number (immune to ring buffer wrap)
         let output = {
-            let buffers = match self.lock_output_buffers() {
-                Ok(g) => g,
-                Err(e) => return Ok(e),
+            let buffers = match self.state.app_state.output_buffers.lock_or_err() {
+                Ok(buffers) => buffers,
+                Err(error) => {
+                    return Ok(Self::capture_failed_after_write(
+                        &committed_write,
+                        &p.terminal_id,
+                        error,
+                    ))
+                }
             };
             match buffers.get(&p.terminal_id) {
-                Some(buf) => buf.bytes_since(before_seq),
-                None => Vec::new(),
+                Some(buf) => match buf.bytes_since(before_seq) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return Ok(Self::capture_failed_after_write(
+                            &committed_write,
+                            &p.terminal_id,
+                            error,
+                        ));
+                    }
+                },
+                None => {
+                    return Ok(Self::capture_failed_after_write(
+                        &committed_write,
+                        &p.terminal_id,
+                        "authoritative output ring disappeared before command capture",
+                    ))
+                }
             }
         };
 
@@ -1909,8 +2153,19 @@ impl McpHandler {
 
         // 5. Try to get exit code from terminal session
         let exit_code = {
-            let terminals = self.state.app_state.terminals.lock_or_err().ok();
-            terminals.and_then(|t| t.get(&p.terminal_id).and_then(|s| s.last_exit_code))
+            let terminals = match self.state.app_state.terminals.lock_or_err() {
+                Ok(terminals) => terminals,
+                Err(error) => {
+                    return Ok(Self::capture_failed_after_write(
+                        &committed_write,
+                        &p.terminal_id,
+                        error,
+                    ))
+                }
+            };
+            terminals
+                .get(&p.terminal_id)
+                .and_then(|session| session.last_exit_code)
         };
 
         Ok(json_result(&json!({
@@ -1930,7 +2185,7 @@ impl McpHandler {
     ) -> Result<CallToolResult, ErrorData> {
         self.bridge_transform("query", "workspaces", "list", json!({}), |data| {
             if !p.summary.unwrap_or(false) {
-                return;
+                return Ok(());
             }
             if let Some(workspaces) = data.get("workspaces").and_then(|v| v.as_array()) {
                 let active_id = data.get("activeWorkspaceId").and_then(|v| v.as_str());
@@ -1953,6 +2208,7 @@ impl McpHandler {
                     "activeWorkspaceId": active_workspace_id,
                 });
             }
+            Ok(())
         })
         .await
     }
@@ -1972,8 +2228,9 @@ impl McpHandler {
                     panes,
                     "terminalId",
                     "terminalActivity",
-                );
+                )?;
             }
+            Ok(())
         })
         .await
     }
@@ -2338,6 +2595,7 @@ impl McpHandler {
                     notifications.truncate(limit as usize);
                 }
             }
+            Ok(())
         })
         .await
     }
@@ -2463,6 +2721,7 @@ impl McpHandler {
                     }
                 });
             }
+            Ok(())
         })
         .await
     }
@@ -2529,7 +2788,11 @@ impl McpHandler {
                 .await
             {
                 Ok(_) => written.push(id.clone()),
-                Err(_) => failed.push(json!({ "id": id, "error": "not found or write failed" })),
+                Err(error) => {
+                    let detail = serde_json::to_string(&error.content)
+                        .unwrap_or_else(|_| "terminal write failed".to_string());
+                    failed.push(json!({ "id": id, "error": detail }));
+                }
             }
         }
 
@@ -2545,7 +2808,12 @@ impl McpHandler {
     /// pair this with `list_terminals` to map memos back to specific panes.
     #[tool]
     async fn list_memos(&self) -> Result<CallToolResult, ErrorData> {
-        let all = crate::settings::load_all_memos();
+        let all = match crate::settings::load_all_memos() {
+            Ok(all) => all,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![Content::text(error)]));
+            }
+        };
         let payload = super::handlers_backend::build_memos_list_payload(all);
         Ok(json_result(&payload))
     }
@@ -2557,7 +2825,12 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<MemoKeyParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let all = crate::settings::load_all_memos();
+        let all = match crate::settings::load_all_memos() {
+            Ok(all) => all,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![Content::text(error)]));
+            }
+        };
         Ok(read_memo_result_from_map(&all, &p.key))
     }
 
@@ -3809,13 +4082,13 @@ mod tests {
         // serialization — #427). Different terminals get different locks.
         let a = Arc::new(crate::state::AppState::new());
         let b = a.clone(); // second session's ServerState.app_state
-        let la = get_or_create_terminal_lock(&a.exec_locks, "t1");
-        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1");
+        let la = get_or_create_terminal_lock(&a.exec_locks, "t1").unwrap();
+        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1").unwrap();
         assert!(
             Arc::ptr_eq(&la, &lb),
             "same terminal across shared AppState must yield one lock"
         );
-        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2");
+        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2").unwrap();
         assert!(
             !Arc::ptr_eq(&la, &lc),
             "different terminals must get distinct locks"
@@ -3828,14 +4101,14 @@ mod tests {
         // removed from the table, the next get_or_create makes a fresh lock, so
         // the table does not retain entries for closed terminals forever.
         let state = Arc::new(crate::state::AppState::new());
-        let first = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let first = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         state.exec_locks.lock().unwrap().remove("t1");
         assert_eq!(
             state.exec_locks.lock().unwrap().len(),
             0,
             "removal must empty the table"
         );
-        let second = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let second = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(
             !Arc::ptr_eq(&first, &second),
             "a re-created lock after removal must be a distinct Arc"
@@ -3847,23 +4120,292 @@ mod tests {
         // id reuse + close race (#427): a stale write must not delete a lock
         // that a same-id terminal recreated after it.
         let state = Arc::new(crate::state::AppState::new());
-        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         // Simulate close + same-id recreation: table now holds a DIFFERENT Arc.
         state.exec_locks.lock().unwrap().remove("t1");
-        let current = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(!Arc::ptr_eq(&stale, &current));
 
         // Stale write tries to purge with its old Arc → must be a no-op.
-        remove_terminal_lock_if(&state.exec_locks, "t1", &stale);
-        let after = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        remove_terminal_lock_if(&state.exec_locks, "t1", &stale).unwrap();
+        let after = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(
             Arc::ptr_eq(&current, &after),
             "purge with a stale Arc must not evict the current lock"
         );
 
         // Purge with the matching Arc → removes it.
-        remove_terminal_lock_if(&state.exec_locks, "t1", &current);
+        remove_terminal_lock_if(&state.exec_locks, "t1", &current).unwrap();
         assert_eq!(state.exec_locks.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn poisoned_exec_lock_registry_fails_closed_instead_of_splitting_serialization() {
+        let state = Arc::new(crate::state::AppState::new());
+        let locks = Arc::clone(&state.exec_locks);
+        assert!(std::thread::spawn(move || {
+            let _registry = locks.lock().unwrap();
+            panic!("poison exec lock registry");
+        })
+        .join()
+        .is_err());
+
+        assert!(get_or_create_terminal_lock(&state.exec_locks, "t1").is_err());
+        assert!(
+            remove_terminal_lock_if(&state.exec_locks, "t1", &Arc::new(TokioMutex::new(())),)
+                .is_err()
+        );
+    }
+
+    #[derive(Clone)]
+    struct ExecuteCommandCountingWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for ExecuteCommandCountingWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn execute_command_prompt_state() -> (crate::state::AppState, Arc<std::sync::Mutex<Vec<u8>>>) {
+        let state = crate::state::AppState::new();
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        state.pty_handles.lock().unwrap().insert(
+            "t1".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(ExecuteCommandCountingWriter(
+                Arc::clone(&written),
+            ))),
+        );
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]133;D;0\x07prompt$ ");
+        assert!(crate::activity::is_terminal_at_prompt_from_buffer(Some(
+            &ring
+        )));
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+        (state, written)
+    }
+
+    fn assert_execute_command_error_has_zero_bytes(
+        state: &crate::state::AppState,
+        written: &Arc<std::sync::Mutex<Vec<u8>>>,
+    ) {
+        let error =
+            McpHandler::execute_command_prewrite_and_write_from_state(state, "t1", b"echo safe\r")
+                .unwrap_err();
+
+        assert_eq!(error.is_error, Some(true));
+        assert!(
+            written.lock().unwrap().is_empty(),
+            "strict admission failure must happen before the PTY side effect"
+        );
+    }
+
+    fn assert_execute_command_poison_blocks_before_write(
+        poison: impl FnOnce(&crate::state::AppState),
+    ) {
+        let (state, written) = execute_command_prompt_state();
+        assert!(McpHandler::terminal_exists_in(&state, "t1").unwrap());
+        poison(&state);
+        assert_execute_command_error_has_zero_bytes(&state, &written);
+    }
+
+    #[test]
+    fn execute_command_strict_shell_prompt_preserves_write_and_sequence() {
+        let (state, written) = execute_command_prompt_state();
+
+        let (before_seq, bytes_written) =
+            McpHandler::execute_command_prewrite_and_write_from_state(&state, "t1", b"echo safe\r")
+                .unwrap();
+
+        assert!(before_seq > 0);
+        assert_eq!(bytes_written, b"echo safe\r".len());
+        assert_eq!(written.lock().unwrap().as_slice(), b"echo safe\r");
+    }
+
+    #[test]
+    fn execute_command_running_prompt_state_still_writes_zero_bytes() {
+        let (state, written) = execute_command_prompt_state();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .get_mut("t1")
+            .unwrap()
+            .push(b"\x1b]133;C\x07");
+
+        let error = McpHandler::execute_command_prewrite_and_write_from_state(
+            &state,
+            "t1",
+            b"echo unsafe\r",
+        )
+        .unwrap_err();
+
+        let content = serde_json::to_value(&error.content).unwrap().to_string();
+        assert!(content.contains("not at a shell prompt"));
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn execute_command_known_codex_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _known = state.known_codex_terminals.lock().unwrap();
+                panic!("poison known Codex cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_known_claude_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _known = state.known_claude_terminals.lock().unwrap();
+                panic!("poison known Claude cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_grace_cache_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _grace = state.last_detected_interactive_app.lock().unwrap();
+                panic!("poison activity grace cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_exit_cache_poison_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _exit = state.recently_exited_interactive_app.lock().unwrap();
+                panic!("poison activity exit cache before execute_command");
+            }));
+        });
+    }
+
+    #[test]
+    fn execute_command_pty_registry_poison_writes_zero_bytes() {
+        let (state, written) = execute_command_prompt_state();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ptys = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry before execute_command admission");
+        }));
+
+        assert_execute_command_error_has_zero_bytes(&state, &written);
+    }
+
+    #[test]
+    fn execute_command_pty_registry_poison_after_exists_writes_zero_bytes() {
+        assert_execute_command_poison_blocks_before_write(|state| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ptys = state.pty_handles.lock().unwrap();
+                panic!("poison PTY registry after execute_command existence check");
+            }));
+        });
+    }
+
+    #[test]
+    fn poisoned_pty_registry_is_not_collapsed_to_terminal_not_found() {
+        let state = crate::state::AppState::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ptys = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry");
+        }));
+
+        let error = McpHandler::terminal_exists_in(&state, "t1").unwrap_err();
+        assert_eq!(error.is_error, Some(true));
+        let content = serde_json::to_value(&error.content).unwrap().to_string();
+        assert!(content.contains("Lock poisoned"));
+        assert!(!content.contains("not found"));
+    }
+
+    #[test]
+    fn poisoned_output_registry_aborts_pre_write_sampling() {
+        let state = crate::state::AppState::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _buffers = state.output_buffers.lock().unwrap();
+            panic!("poison output registry");
+        }));
+
+        let error = McpHandler::sample_activity_and_seq_from_state(&state, "t1", true).unwrap_err();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[test]
+    fn poisoned_ring_aborts_pre_write_sampling() {
+        let state = crate::state::AppState::new();
+        let ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.poison_for_test();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+
+        let error = McpHandler::sample_activity_and_seq_from_state(&state, "t1", true).unwrap_err();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[test]
+    fn poisoned_activity_cache_aborts_mcp_sampling_before_write() {
+        let state = crate::state::AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".into());
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _known = state.known_codex_terminals.lock().unwrap();
+            panic!("poison activity cache before MCP sampling");
+        }));
+
+        let error = McpHandler::sample_activity_and_seq_from_state(&state, "t1", true).unwrap_err();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[test]
+    fn post_write_capture_poison_reports_the_committed_side_effect() {
+        let state = crate::state::AppState::new();
+        let ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.poison_for_test();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+
+        let capture_error = McpHandler::capture_response_since_state(&state, "t1", 0).unwrap_err();
+        let result = json!({
+            "written": true,
+            "bytes": 4,
+            "bytesWritten": 4,
+            "terminalId": "t1",
+        });
+        let error = McpHandler::capture_failed_after_write(&result, "t1", capture_error);
+
+        assert_eq!(error.is_error, Some(true));
+        let content = serde_json::to_value(&error.content).unwrap().to_string();
+        assert!(content.contains("\\\"written\\\":true"));
+        assert!(content.contains("\\\"bytesWritten\\\":4"));
+        assert!(content.contains("\\\"captureFailed\\\":true"));
+        assert!(content.contains("written before output capture failed"));
     }
 
     #[test]
@@ -4307,7 +4849,7 @@ mod tests {
         );
 
         let mut items = vec![json!({ "id": terminal_id })];
-        McpHandler::enrich_with_activity(&state, &mut items, "id", "activity");
+        McpHandler::enrich_with_activity(&state, &mut items, "id", "activity").unwrap();
 
         assert_eq!(
             items[0]["activity"],

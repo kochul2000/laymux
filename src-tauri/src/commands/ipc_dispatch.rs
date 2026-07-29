@@ -168,11 +168,11 @@ pub fn do_sync_cwd(
     // force(1회성 전파)는 소스 측 게이트만 우회한다 — 소스가 "지금 전파한다"고 명시적으로
     // 누른 행위이기 때문이다. 그러나 각 대상의 cwd_receive 는 그 pane(dock 등)의 의사이므로
     // force 라도 존중해야 한다. CWD 전파는 force/non-force 가 동일한 대상 필터 경로를 거친다.
-    let receiving_targets = filter_targets_cwd_receive(state, &all_targets);
+    let receiving_targets = filter_targets_cwd_receive(state, &all_targets)?;
 
     let settings = crate::settings::load_settings();
     let (idle_targets, claude_ids) =
-        filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd);
+        filter_targets_not_busy(state, &receiving_targets, &settings.claude.sync_cwd)?;
 
     let target_terminals = filter_targets_needing_cd(state, &idle_targets, &normalized_path);
 
@@ -632,7 +632,7 @@ fn evaluate_source_gates(
         // 사용자가 의도한 cd 가 아니므로 피어에 밀거나 local session.cwd 를 갱신하지 않는다.
         {
             let buffers = state.output_buffers.lock_or_err()?;
-            if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id)) {
+            if !is_source_sync_allowed(state, terminal_id, buffers.get(terminal_id))? {
                 tracing::debug!(
                     terminal_id,
                     path,
@@ -705,9 +705,12 @@ pub(crate) fn is_source_sync_allowed(
     state: &AppState,
     terminal_id: &str,
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> bool {
-    let info = activity::detect_terminal_state(state, terminal_id, buffer);
-    matches!(info.activity, crate::terminal::TerminalActivity::Shell)
+) -> Result<bool, String> {
+    let info = activity::detect_terminal_state_for_control(state, terminal_id, buffer)?;
+    Ok(matches!(
+        info.activity,
+        crate::terminal::TerminalActivity::Shell
+    ))
 }
 
 /// Decide whether an incoming OSC CWD event from the source terminal should
@@ -722,7 +725,7 @@ pub(crate) fn should_accept_source_cwd_event(
     state: &AppState,
     terminal_id: &str,
     buffer: Option<&crate::output_buffer::TerminalOutputBuffer>,
-) -> bool {
+) -> Result<bool, String> {
     is_source_sync_allowed(state, terminal_id, buffer)
 }
 
@@ -740,16 +743,13 @@ pub(crate) fn is_propagated(state: &AppState, terminal_id: &str) -> Result<bool,
 }
 
 /// Filter out terminals that have cwd_receive disabled.
-fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Vec<String> {
-    if let Ok(terminals) = state.terminals.lock_or_err() {
-        targets
-            .iter()
-            .filter(|id| terminals.get(id.as_str()).is_none_or(|s| s.cwd_receive))
-            .cloned()
-            .collect()
-    } else {
-        targets.to_vec()
-    }
+fn filter_targets_cwd_receive(state: &AppState, targets: &[String]) -> Result<Vec<String>, String> {
+    let terminals = state.terminals.lock_or_err()?;
+    Ok(targets
+        .iter()
+        .filter(|id| terminals.get(id.as_str()).is_none_or(|s| s.cwd_receive))
+        .cloned()
+        .collect())
 }
 
 /// Filter target terminals based on their detected activity.
@@ -778,17 +778,15 @@ fn filter_targets_not_busy(
     state: &AppState,
     targets: &[String],
     claude_mode: &crate::settings::ClaudeSyncCwdMode,
-) -> (Vec<String>, std::collections::HashSet<String>) {
+) -> Result<(Vec<String>, std::collections::HashSet<String>), String> {
     let mut claude_ids = std::collections::HashSet::new();
 
-    let Ok(buffers) = state.output_buffers.lock_or_err() else {
-        return (targets.to_vec(), claude_ids);
-    };
+    let buffers = state.output_buffers.lock_or_err()?;
 
     let mut result = Vec::new();
     for id in targets {
         let buf = buffers.get(id.as_str());
-        let info = activity::detect_terminal_state(state, id, buf);
+        let info = activity::detect_terminal_state_for_control(state, id, buf)?;
 
         match &info.activity {
             crate::terminal::TerminalActivity::InteractiveApp { name } if name == "Claude" => {
@@ -821,7 +819,7 @@ fn filter_targets_not_busy(
             }
         }
     }
-    (result, claude_ids)
+    Ok((result, claude_ids))
 }
 
 /// Filter target terminals to only those whose CWD differs from the sync path.
@@ -1267,7 +1265,8 @@ mod tests {
 
         let targets = vec!["t1".into(), "t2".into(), "t3".into()];
         let (filtered, claude_ids) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(filtered.contains(&"t1".to_string()), "t1 at prompt");
         assert!(
             !filtered.contains(&"t2".to_string()),
@@ -1285,8 +1284,106 @@ mod tests {
         let state = AppState::new();
         let targets = vec!["unknown".into()];
         let (filtered, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert_eq!(filtered, vec!["unknown"]);
+    }
+
+    #[test]
+    fn poisoned_target_ring_blocks_sync_cwd_admission() {
+        let state = AppState::new();
+        let ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.poison_for_test();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("target".into(), ring);
+
+        let result = filter_targets_not_busy(
+            &state,
+            &["target".into()],
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+
+        assert!(result.is_err(), "poison must block cwd injection");
+    }
+
+    #[test]
+    fn poisoned_output_registry_blocks_sync_cwd_targets() {
+        let state = AppState::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _buffers = state.output_buffers.lock().unwrap();
+            panic!("poison output registry");
+        }));
+
+        let result = filter_targets_not_busy(
+            &state,
+            &["target".into()],
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+
+        assert!(result.is_err(), "poison must not admit every target");
+    }
+
+    #[test]
+    fn poisoned_terminal_registry_blocks_cwd_receive_admission() {
+        let state = AppState::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _terminals = state.terminals.lock().unwrap();
+            panic!("poison terminal registry");
+        }));
+
+        let result = filter_targets_cwd_receive(&state, &["target".into()]);
+
+        assert!(result.is_err(), "poison must not admit every cwd target");
+    }
+
+    #[test]
+    fn poisoned_source_ring_rejects_cwd_event_and_sync() {
+        let state = AppState::new();
+        let ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.poison_for_test();
+
+        assert!(should_accept_source_cwd_event(&state, "source", Some(&ring)).is_err());
+        assert!(is_source_sync_allowed(&state, "source", Some(&ring)).is_err());
+    }
+
+    #[test]
+    fn poisoned_codex_activity_cache_blocks_sync_cwd_source_and_target() {
+        let state = AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("codex".into());
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("codex".into(), ring);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _known = state.known_codex_terminals.lock().unwrap();
+            panic!("poison Codex activity cache");
+        }));
+
+        let source_result = {
+            let buffers = state.output_buffers.lock().unwrap();
+            is_source_sync_allowed(&state, "codex", buffers.get("codex"))
+        };
+        assert!(
+            source_result.is_err(),
+            "poison must not authorize the source"
+        );
+
+        let target_result = filter_targets_not_busy(
+            &state,
+            &["codex".into()],
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+        assert!(target_result.is_err(), "poison must not admit the target");
     }
 
     #[test]
@@ -1372,7 +1469,8 @@ mod tests {
             &state,
             &all_targets,
             &crate::settings::ClaudeSyncCwdMode::Skip,
-        );
+        )
+        .unwrap();
         assert_eq!(idle_targets, vec!["t2"]);
     }
 
@@ -1603,7 +1701,8 @@ mod tests {
 
         let targets = vec!["t1".into(), "t2".into()];
         let (filtered, claude_ids) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         // In skip mode (default), Claude terminal t2 should be excluded
         assert!(
             filtered.contains(&"t1".to_string()),
@@ -1640,7 +1739,8 @@ mod tests {
             &state,
             &targets,
             &crate::settings::ClaudeSyncCwdMode::Command,
-        );
+        )
+        .unwrap();
         assert!(
             filtered.contains(&"t1".to_string()),
             "normal terminal should pass"
@@ -1676,7 +1776,8 @@ mod tests {
             &state,
             &targets,
             &crate::settings::ClaudeSyncCwdMode::Command,
-        );
+        )
+        .unwrap();
         assert!(
             filtered.is_empty(),
             "working Claude should be excluded even in command mode"
@@ -2049,7 +2150,7 @@ mod tests {
         }
 
         let targets = vec!["t1".into(), "t2".into(), "t3".into()];
-        let filtered = filter_targets_cwd_receive(&state, &targets);
+        let filtered = filter_targets_cwd_receive(&state, &targets).unwrap();
         assert!(
             filtered.contains(&"t1".to_string()),
             "t1 with cwd_receive=true should pass"
@@ -2086,7 +2187,7 @@ mod tests {
         let all_targets: Vec<String> = vec!["t1".into(), "t2".into()];
 
         // 통일 경로: cwd_receive on 인 t1 만 통과, off 인 t2 는 force 여부와 무관하게 제외.
-        let receiving = filter_targets_cwd_receive(&state, &all_targets);
+        let receiving = filter_targets_cwd_receive(&state, &all_targets).unwrap();
         assert!(
             receiving.contains(&"t1".to_string()),
             "cwd_receive=on 대상은 전파를 받아야 한다"
@@ -2139,7 +2240,8 @@ mod tests {
             &state,
             &receiving_targets,
             &crate::settings::ClaudeSyncCwdMode::Skip,
-        );
+        )
+        .unwrap();
         // busy t3 는 idle_targets 에서 빠진다 → 상태 갱신/이벤트 대상에서 제외.
         assert_eq!(idle_targets, vec!["t2".to_string()]);
         assert!(
@@ -2229,7 +2331,8 @@ mod tests {
             &state,
             &receiving_targets,
             &crate::settings::ClaudeSyncCwdMode::Skip,
-        );
+        )
+        .unwrap();
         // 둘 다 idle 이므로 idle_targets 에 포함.
         assert_eq!(idle_targets, vec!["ps".to_string(), "at".to_string()]);
 
@@ -2444,7 +2547,8 @@ mod tests {
 
         let targets = vec!["t1".into(), "t2".into()];
         let (filtered, claude_ids) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(
             filtered.contains(&"t1".to_string()),
             "normal terminal should pass"
@@ -2483,7 +2587,8 @@ mod tests {
 
         let targets = vec!["t1".into(), "t2".into()];
         let (filtered, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(filtered.contains(&"t1".to_string()));
         assert!(
             !filtered.contains(&"t2".to_string()),
@@ -2519,7 +2624,8 @@ mod tests {
         }
         let targets = vec!["t-normal".into(), "t-claude".into()];
         let (filtered, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(filtered.contains(&"t-normal".to_string()));
         assert!(
             !filtered.contains(&"t-claude".to_string()),
@@ -2862,7 +2968,7 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07output\x1b]133;D;0\x07prompt$ ");
-        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -2874,7 +2980,7 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");
-        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -2887,7 +2993,7 @@ mod tests {
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07\x1b]7;file://localhost/C:/leaked\x07");
 
         assert!(
-            !should_accept_source_cwd_event(&state, "source", Some(&buf)),
+            !should_accept_source_cwd_event(&state, "source", Some(&buf)).unwrap(),
             "Running-state OSC 7 must not update local session.cwd before propagation is gated"
         );
     }
@@ -2896,7 +3002,7 @@ mod tests {
     fn is_source_sync_allowed_no_buffer() {
         // Unknown/no buffer → assume shell (permissive default).
         let state = AppState::new();
-        assert!(is_source_sync_allowed(&state, "t1", None));
+        assert!(is_source_sync_allowed(&state, "t1", None).unwrap());
     }
 
     #[test]
@@ -2906,7 +3012,7 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07PS C:\\> \x1b]0;OpenAI Codex\x07");
-        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -2914,7 +3020,7 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]0;\xe2\x9c\xb3 Claude Code\x07");
-        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -2922,7 +3028,7 @@ mod tests {
         let state = AppState::new();
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]2;vim - main.rs\x07");
-        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)));
+        assert!(!is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -2945,7 +3051,7 @@ mod tests {
         // combined with the braille spinner heuristic.
         buf.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
         assert!(
-            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            !is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap(),
             "Codex spinner title with persistent tracking must still block propagation"
         );
     }
@@ -2965,7 +3071,7 @@ mod tests {
         // Only a task title in buffer — no literal "Claude Code" anywhere.
         buf.push(b"\x1b]0;\xe2\x9c\xb6 Exploring code\x07\x1b]7;file://localhost/C:/tmp\x07");
         assert!(
-            !is_source_sync_allowed(&state, "t1", Some(&buf)),
+            !is_source_sync_allowed(&state, "t1", Some(&buf)).unwrap(),
             "Claude task title with persistent tracking must still block propagation"
         );
     }
@@ -2987,7 +3093,7 @@ mod tests {
         buf.push(b"\x1b]0;\xe2\x9c\xb6 Editing files\x07\x1b]7;file://localhost/C:/leaked\x07");
 
         assert!(
-            !should_accept_source_cwd_event(&state, "source", Some(&buf)),
+            !should_accept_source_cwd_event(&state, "source", Some(&buf)).unwrap(),
             "Claude-active OSC 7 must not update local session.cwd before propagation is gated"
         );
     }
@@ -2998,7 +3104,7 @@ mod tests {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;C\x07cd C:\\work\x1b]133;D;0\x07PS C:\\work> ");
 
-        assert!(should_accept_source_cwd_event(&state, "source", Some(&buf)));
+        assert!(should_accept_source_cwd_event(&state, "source", Some(&buf)).unwrap());
     }
 
     #[test]
@@ -3043,7 +3149,8 @@ mod tests {
         let src_buf_allowed = {
             let buffers = state.output_buffers.lock().unwrap();
             is_source_sync_allowed(&state, "source", buffers.get("source"))
-        };
+        }
+        .unwrap();
         assert!(
             !src_buf_allowed,
             "Codex-active source must not trigger sync-cwd propagation"
@@ -3108,7 +3215,8 @@ mod tests {
 
         let targets = vec!["t-claude".into()];
         let (filtered, _claude_ids) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(
             filtered.is_empty(),
             "Claude target must be skipped based on activity, not buffer-title scan"
@@ -3142,7 +3250,8 @@ mod tests {
 
         let targets = vec!["t-claude".into()];
         let (filtered_skip, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(
             filtered_skip.is_empty(),
             "Claude target must not receive cd propagation just because a stale ;D marker remains"
@@ -3165,7 +3274,8 @@ mod tests {
 
         let targets = vec!["t-vim".into()];
         let (filtered, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(
             filtered.is_empty(),
             "vim target must be skipped — cd injection would be typed into vim buffer"
@@ -3194,7 +3304,8 @@ mod tests {
 
         let targets = vec!["t-codex".into()];
         let (filtered, _) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(
             filtered.is_empty(),
             "Codex target must be skipped via activity detection"
@@ -3224,7 +3335,8 @@ mod tests {
 
         let targets = vec!["t-claude".into()];
         let (filtered_skip, claude_ids_skip) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert!(filtered_skip.is_empty());
         assert!(claude_ids_skip.is_empty());
 
@@ -3232,7 +3344,8 @@ mod tests {
             &state,
             &targets,
             &crate::settings::ClaudeSyncCwdMode::Command,
-        );
+        )
+        .unwrap();
         assert!(
             filtered_cmd.is_empty(),
             "Claude in Command mode must still be skipped when not idle"
@@ -3263,7 +3376,8 @@ mod tests {
             &state,
             &targets,
             &crate::settings::ClaudeSyncCwdMode::Command,
-        );
+        )
+        .unwrap();
         assert_eq!(filtered, vec!["t-claude".to_string()]);
         assert!(claude_ids.contains("t-claude"));
     }
@@ -3282,7 +3396,8 @@ mod tests {
 
         let targets = vec!["t-shell".into()];
         let (filtered, claude_ids) =
-            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip);
+            filter_targets_not_busy(&state, &targets, &crate::settings::ClaudeSyncCwdMode::Skip)
+                .unwrap();
         assert_eq!(filtered, vec!["t-shell".to_string()]);
         assert!(claude_ids.is_empty());
     }

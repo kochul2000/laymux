@@ -226,9 +226,9 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 3. `cwd_send` 플래그가 켜져 있는지
 4. 대상 필터링(`cwd_receive`, 대상 activity, Claude 모드, 동일 CWD 중복)
 
-2번 가드는 `detect_terminal_state`(= activity + 영구 추적 `known_claude_terminals`/`known_codex_terminals`)가 `TerminalActivity::Shell`이 아닌 모든 상태(`Running`, `InteractiveApp { .. }`)를 거짓으로 평가한다. `detect_terminal_activity`만으로는 Codex 스피너(브레일 문자) 타이틀이나 Claude Code 작업 타이틀처럼 `INTERACTIVE_APP_PATTERNS`에 직접 매칭되지 않는 상태를 놓치므로, 반드시 영구 추적을 경유하는 `detect_terminal_state`를 사용한다. 가드가 차단 판정하면 session.cwd 로컬 업데이트도 건너뛴다(스테일/실행 중 값을 후속 전파가 재사용하지 못하도록). `Shell`만 신뢰하는 이유는, OSC 7이 사용자 의도의 `cd`를 반영하는 시점은 셸이 프롬프트를 다시 그린 직후 — 즉 `OSC 133;D` 이후 — 뿐이기 때문이다.
+2번 가드는 `detect_terminal_state_for_control`(= activity + 영구 추적 `known_claude_terminals`/`known_codex_terminals` + grace/exit cache + PTY process-tree registry + authoritative ring 건강성)이 `TerminalActivity::Shell`인 경우에만 통과한다. `detect_terminal_activity`만으로는 Codex 스피너(브레일 문자) 타이틀이나 Claude Code 작업 타이틀처럼 `INTERACTIVE_APP_PATTERNS`에 직접 매칭되지 않는 상태를 놓치므로, 반드시 영구 추적을 경유한다. 표시용 detector는 degraded fallback을 유지하지만 strict detector는 ring과 activity cache·PTY registry를 detection 전후에 검사한다. 이들 mutex poison은 `Shell`로 축소하지 않고 자동 IPC에서는 로컬 CWD 갱신과 전파를 명시적으로 차단하며, 오류를 반환할 수 있는 경로는 그대로 전파한다. 가드가 차단 판정하면 session.cwd 로컬 업데이트도 건너뛴다(스테일/실행 중 값을 후속 전파가 재사용하지 못하도록). `Shell`만 신뢰하는 이유는, OSC 7이 사용자 의도의 `cd`를 반영하는 시점은 셸이 프롬프트를 다시 그린 직후 — 즉 `OSC 133;D` 이후 — 뿐이기 때문이다.
 
-**대상 필터링 (`filter_targets_not_busy`)**도 동일한 `detect_terminal_state`로 판정한다 (#239):
+**대상 필터링 (`filter_targets_not_busy`)**도 동일한 strict control detector로 판정한다 (#239). terminals/output registry 또는 개별 ring poison이면 전체 대상을 idle로 복원하지 않고 전파 자체를 오류로 중단한다:
 
 | 대상 activity | 처리 |
 |---|---|
@@ -505,7 +505,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `read_terminal_output` | AppState 직접 | 출력 버퍼 읽기 (raw/text 포맷) |
 | `focus_terminal` | bridge_request | 터미널 포커스 — `terminal_id`/`pane_ref`/`pane_number` 해석 후 `terminals.setFocus` (안정 식별자·공간 번호 기반) |
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
-| `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number) |
+| `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
 **워크스페이스 (6)**:
 
@@ -656,9 +656,12 @@ impl McpHandler {
   `{"type":"interactiveApp","name":"Codex"}`. codex/claude 인 줄 알고 보냈는데 shell 로
   빠진 경우를 호출 즉시 감지하기 위한 필드. 락 안에서 샘플링해 write 와 원자적.
 - `capture_ms`(opt-in): 주면 write 후 그만큼(상한 10000ms) 대기했다가 대상이 새로 낸
-  출력을 ANSI 제거 + tail 절단(상한 2000자)해 반환. `capture_ms` 를 준 호출은 **항상**
-  `captureMs` + `response`(문자열, 캡처 불가 시 `""`) + `responseTruncated`(bool)를 포함
-  — 계약 안정성. 대기는 exec 락 밖에서 하므로 같은 pane 의 다른 write 를 블록하지 않는다.
+  출력을 ANSI 제거 + tail 절단(상한 2000자)해 반환한다. 정상 성공은 `captureMs` +
+  `response` + `responseTruncated`를 포함한다. pre-write registry/ring sampling 실패는 PTY write
+  전에 tool error다. write 성공 뒤 capture가 실패하면 빈 성공으로 바꾸지 않고 `written=true`,
+  byte count, target id, `captureFailed=true`, `captureError`, `sideEffect`를 보존한 tool error를
+  반환하므로 호출자가 이미 적용된 입력을 맹목적으로 재시도하지 않는다. 대기는 exec 락 밖에서
+  하므로 같은 pane의 다른 write를 블록하지 않는다.
 - 교차 MCP 세션 write 직렬화는 `exec_locks` 가 세션별 handler 소유라 보장되지 않음(선존 한계).
 
 #### Tool 추가 시
@@ -1017,7 +1020,17 @@ use crate::lock_ext::MutexExt;
 state.terminals.lock_or_err()?;
 ```
 
-**poison cleanup 예외**: `lock_or_recover_for_cleanup(context)`은 이미 외부 사용이 끝난 상태를 폐기하고 waiter를 깨우는 cleanup과, 그 cleanup을 기다리는 terminal-output fatal waiter에서만 허용한다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). generation retirement는 이 helper로 protocol/runtime/desktop-flow 상태를 폐기하고 `retired`를 공표한 뒤 subscriber/lease를 제거하고 Condvar waiter를 깨운다. `wait_until_retired()`는 poison guard를 회수하더라도 lease·ACK·credit 같은 정상 상태를 읽거나 복구하지 않으며, mutex와 독립적인 `AtomicBool retired`만 권위 소스로 삼아 Condvar를 다시 기다린다. 일반 attach·ACK·record·capacity 경로는 poison을 성공으로 복구하지 않고 fail-closed한다. terminal-output 이외의 복구 정책 확장은 issue #631에서 결정한다.
+**poison 정책**([ADR-0087](../adr/0087-mutex-poison-fail-closed-discard-only.md)):
+
+| 분류 | helper / 형태 | 허용 동작 | 금지 동작 |
+|---|---|---|---|
+| 정상 운영 | `lock_or_err()` | 오류 전파, 또는 보수적 실패 결론 | 빈 값·not-found·기존 state를 성공으로 합성 |
+| recoverable diagnostic | 범용 helper 없음 | 제어 경로와 분리된 소유 타입의 typed snapshot이 poison/degraded를 함께 표시하는 경우만 별도 근거로 허용 | recovered guard나 clone을 권한·sequence·credit·activity 판정에 사용 |
+| discard-only cleanup | `lock_or_recover_for_discard(context)` / owner `Drop`의 `get_mut_or_recover_for_discard(context)` / Condvar의 `recover_poison_for_discard(error, context)` | explicit close·creation rollback·generation retirement에서 entry 제거, clear/overwrite, waiter wake, 추출한 OS resource terminate/drop | 새 작업 승인, 정상 registry/lease 재개, poison 해제 |
+
+discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. `wait_until_retired()`는 recovered guard를 Condvar에 다시 전달할 수 있지만 lease·ACK·credit을 읽지 않고 mutex와 독립적인 `AtomicBool retired`만 lifecycle SoT로 사용한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
+
+activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 
@@ -1034,6 +1047,8 @@ state.terminals.lock_or_err()?;
 ```
 
 terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
+
+poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 획득이나 상위 registry 재진입을 허용하지 않으며, 잠재적으로 blocking인 PTY `terminate()`는 모든 AppState guard를 놓은 뒤 실행한다.
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
 

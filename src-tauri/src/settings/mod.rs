@@ -10,7 +10,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use crate::lock_ext::MutexExt;
+
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
+    Ok(lock.lock_or_err()?)
+}
 
 /// Get the settings file path.
 pub fn settings_path() -> PathBuf {
@@ -181,22 +187,22 @@ pub fn memo_path() -> PathBuf {
 }
 
 /// Load memo content for a specific key.
-pub fn load_memo(key: &str) -> String {
-    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_memo_from(&memo_path(), key)
+pub fn load_memo(key: &str) -> Result<String, String> {
+    let _guard = lock_memo_gate(&MEMO_LOCK)?;
+    Ok(load_memo_from(&memo_path(), key))
 }
 
 /// Save memo content for a specific key.
 pub fn save_memo(key: &str, content: &str) -> Result<(), String> {
-    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = lock_memo_gate(&MEMO_LOCK)?;
     save_memo_to(&memo_path(), key, content)
 }
 
 /// Return the full map of memo `key → content` pairs.
 /// Returns an empty map when the memo file does not exist or fails to parse.
-pub fn load_all_memos() -> std::collections::HashMap<String, String> {
-    let _guard = MEMO_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    load_all_memos_from(&memo_path())
+pub fn load_all_memos() -> Result<std::collections::HashMap<String, String>, String> {
+    let _guard = lock_memo_gate(&MEMO_LOCK)?;
+    Ok(load_all_memos_from(&memo_path()))
 }
 
 pub fn load_all_memos_from(path: &PathBuf) -> std::collections::HashMap<String, String> {
@@ -244,6 +250,18 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memo_serialization_gate_fails_closed_after_poison() {
+        let gate = Mutex::new(());
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = gate.lock().unwrap();
+            panic!("poison memo serialization gate");
+        }))
+        .is_err());
+
+        assert!(lock_memo_gate(&gate).is_err());
+    }
 
     #[test]
     fn default_settings_has_profiles() {
