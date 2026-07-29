@@ -121,13 +121,16 @@ Microsoft Terminal 소스는 [MIT License](https://github.com/microsoft/terminal
   peer port의 flip buffer로 byte를 넣고 push한다. 이 경로는 `winsize_mutex`를 잡지 않는다.
 - 일반 tty write의 [`atomic_write_lock`](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/tty_io.c#L931-L945)은
   같은 tty의 writer를 직렬화할 뿐 resize와 공통 lock이 아니다. `winsize_mutex`와 `atomic_write_lock`도
-  별개로 초기화된다.
+  [`tty_struct` 초기화에서 서로 다른 mutex로 초기화된다](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/tty_io.c#L3113-L3122).
 - [`TIOCSWINSZ`](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/tty_io.c#L2345-L2369)는
   driver resize callback으로 위임한다. 성공은 winsize update의 결과이지 peer read queue의 byte boundary가
   아니다.
 
-`TIOCPKT` control byte도 flush/flow/termios 상태 알림이지 resize와 atomic한 `u64` byte epoch가 아니다.
-`poll()` non-readable이나 `TIOCINQ == 0` 역시 미래 writer를 배제하지 않는다.
+[`TIOCPKT` UAPI의 control bits](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/include/uapi/asm-generic/ioctls.h#L109-L117)와
+이를 설정하는 [PTY flush/flow/termios 경로](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/pty.c#L209-L265)에는
+resize와 atomic한 `u64` byte epoch가 없다. `poll()` non-readable이나
+[`TIOCINQ == 0`](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/include/uapi/asm-generic/ioctls.h#L43-L52)도
+관찰 시점의 readable byte 수일 뿐 미래 writer를 배제하지 않는다.
 
 ### 4.2 RFC L1: opt-in framed epoch UAPI
 
