@@ -1,12 +1,12 @@
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { TerminalView } from "./TerminalView";
 import {
-  TerminalView,
   _resetWebglStagger,
   _reserveWebglInitDelay,
   shouldEnableTerminalWebgl,
   isTerminalScrolledUp,
-} from "./TerminalView";
+} from "@/lib/terminal-view-runtime";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";

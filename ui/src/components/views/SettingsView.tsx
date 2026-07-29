@@ -57,7 +57,8 @@ import {
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
-import { FocusInput, FocusSelect, inputStyle, inputCls } from "@/components/ui/FormControls";
+import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
+import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import {
