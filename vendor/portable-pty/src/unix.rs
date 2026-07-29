@@ -30,8 +30,6 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     };
 
     let result = unsafe {
-        // BSDish systems may require mut pointers to some args
-        #[cfg_attr(clippy, allow(clippy::unnecessary_mut_passed))]
         libc::openpty(
             &mut master,
             &mut slave,
@@ -228,7 +226,7 @@ impl PtyFd {
                     // type::from(), but the size and potentially signedness
                     // are system dependent, which is why we're using `as _`.
                     // Suppress this lint for this section of code.
-                    #[cfg_attr(clippy, allow(clippy::cast_lossless))]
+                    #[allow(clippy::cast_lossless)]
                     if controlling_tty {
                         // Set the pty as the controlling terminal.
                         // Failure to do this means that delivery of
