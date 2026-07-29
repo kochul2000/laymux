@@ -1,6 +1,6 @@
 # 0085. PTY geometry cutover는 provenance barrier와 three-phase transaction이 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: 사용자 요구 · issue [#628](https://github.com/kochul2000/laymux/issues/628) · 구현 이관 issue [#632](https://github.com/kochul2000/laymux/issues/632) · PR #633 독립 리뷰 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4·§14.3](../architecture/api-contracts.md) · [ADR-0001](0001-osc-rust-single-pass.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0015](0015-remote-terminal-state-ownership.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
 - Extends: [ADR-0015](0015-remote-terminal-state-ownership.md)의 PTY 전역 geometry와 surface 로컬 geometry 분리를 resize transaction 참여자 선택까지 확장한다.
