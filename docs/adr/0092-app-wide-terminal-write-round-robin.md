@@ -18,6 +18,7 @@ issue #661의 동일한 bounded flood baseline에서 관측한 상호작용 지�
 **데스크톱의 모든 마운트된 `TerminalView`는 앱 전역 scheduler에서 physical xterm write lease를 하나씩 round-robin으로 얻고, 수락된 write의 parse callback 또는 명시적 lifecycle 취소 뒤에만 다음 pane으로 넘긴다.**
 
 - 앱 전역 scheduler가 physical write admission turn의 단일 진실원이다. 각 `TerminalView`의 `TerminalWriteBatchQueue`는 계속 자기 byte FIFO·batch materialization·callback을 소유하며 scheduler는 byte나 metadata를 읽거나 재배열하지 않는다.
+- scheduler owner는 `TerminalView`의 xterm 생성 effect마다 새로 만드는 opaque identity token이다. 프로파일 변경 뒤에도 재사용되는 `instanceId`를 owner key로 쓰지 않는다. old effect의 늦은 parse callback·pending 취소·unmount release는 그 token에만 작용하며 replacement effect가 같은 `instanceId`로 등록한 turn을 제거하거나 반환할 수 없다.
 - 전역 active lease는 최대 하나다. pane은 lease 한 번에 자기 FIFO의 physical batch 하나만 제출한다. 같은 pane이 backlog를 더 가져도 미래 turn은 하나만 등록하고 대기열 꼬리로 돌아간다. 이미 기다리는 다른 pane이 있으면 그 pane들이 먼저 한 turn씩 얻는다.
 - 앱 전체에 active·pending turn이 없는 idle 최초 request는 즉시 admission한다. 수락된 write가 끝나거나 거부·취소된 뒤 다음 turn은 반드시 새 macrotask에서 시작해 input·paint·Automation control이 pane 사이에 실행될 기회를 둔다.
 - xterm이 write를 수락하면 lease는 parse callback까지 유지한다. 동기 backpressure와 non-backpressure 거부는 local FIFO의 기존 restore/discard 처리를 끝낸 뒤 lease를 반환한다. backpressure 재시도는 기존 16 ms를 기다린 뒤 새 future turn으로 대기열에 진입한다.
@@ -39,5 +40,5 @@ issue #661의 동일한 bounded flood baseline에서 관측한 상호작용 지�
 - byte 순서·batch allowlist·128 part/256 KiB 상한·stabilizer/IME barrier·visible/checkpoint ACK 교집합은 그대로다. 공정성 scheduler는 성능 때문에 정확성 경계를 합치거나 건너뛰지 않는다.
 - 여러 pane의 총 renderer throughput은 기존 동시 outstanding 방식보다 낮아질 수 있고 ADR-0084 producer backpressure가 더 일찍 shell까지 전달될 수 있다. 이는 무제한 메인 스레드 경쟁 대신 bounded 응답성을 선택한 비용이다.
 - accepted callback이 영구히 오지 않고 pane도 unmount되지 않으면 모든 pane의 physical output이 멈춘다. 기존에는 해당 pane만 멈췄던 failure의 영향 범위가 넓어지는 비용이며, 실기에서 확인되면 callback watchdog 또는 격리 정책을 새 ADR로 재검토한다.
-- 순수 scheduler 테스트는 one-active, round-robin, pending dedupe, pending-only epoch 취소, unmount release와 stale callback idempotence를 고정한다. `TerminalView` 통합 테스트는 A pane이 backlog를 가진 동안 B pane이 A의 다음 batch보다 먼저 한 turn을 얻고 최종 byte stream이 보존됨을 고정한다.
+- 순수 scheduler 테스트는 one-active, round-robin, pending dedupe, pending-only epoch 취소, unmount release, stale callback idempotence와 동일 `instanceId` replacement 세대 격리를 고정한다. `TerminalView` 통합 테스트는 A pane이 backlog를 가진 동안 B pane이 A의 다음 batch보다 먼저 한 turn을 얻고 최종 byte stream이 보존됨을 고정한다.
 - dev 재검증은 동일한 bounded 1/2/4/8 pane flood에서 input/control latency, `xtermParseMaxMs`, queue/credit 상한, callback/discard/gap/repair/attach 카운터와 최종 고유 marker를 함께 비교한다. 성능 개선만으로 완료하지 않고 byte 무손실과 화면 tail을 같이 확인한다.

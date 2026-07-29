@@ -236,7 +236,10 @@ import {
   type TerminalOutputControlOperationKind,
 } from "@/lib/terminal-output-control-registry";
 import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
-import { terminalWriteFairScheduler } from "@/lib/terminal-write-fair-scheduler";
+import {
+  createTerminalWriteFairOwner,
+  terminalWriteFairScheduler,
+} from "@/lib/terminal-write-fair-scheduler";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -1120,6 +1123,10 @@ export function TerminalView({
 
   useEffect(() => {
     let cancelled = false;
+    // `instanceId` survives profile-driven effect replacement. The scheduler
+    // owner must not: a late callback from the old xterm generation may only
+    // cancel/release turns registered by that exact effect lifetime.
+    const terminalWriteFairOwner = createTerminalWriteFairOwner(instanceId);
     let terminalSessionReady = false;
     let initialExecutionHost: InitialExecutionHost = "unknown";
     let stabilizeNativeWindowsOutput = false;
@@ -3384,7 +3391,7 @@ export function TerminalView({
         clearTimeout(terminalWriteRetryTimer);
         terminalWriteRetryTimer = undefined;
       }
-      terminalWriteFairScheduler.cancelPending(instanceId);
+      terminalWriteFairScheduler.cancelPending(terminalWriteFairOwner);
     };
     const releaseCurrentTerminalWriteTurn = () => {
       const release = releaseTerminalWriteTurn;
@@ -3407,7 +3414,7 @@ export function TerminalView({
         }, delayMs);
         return;
       }
-      terminalWriteFairScheduler.request(instanceId, (release) => {
+      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release) => {
         if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
           release();
           return;
@@ -5230,7 +5237,7 @@ export function TerminalView({
       clearCurrentParsingWrite();
       resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
-      terminalWriteFairScheduler.cancel(instanceId);
+      terminalWriteFairScheduler.cancel(terminalWriteFairOwner);
       releaseTerminalWriteTurn = undefined;
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;

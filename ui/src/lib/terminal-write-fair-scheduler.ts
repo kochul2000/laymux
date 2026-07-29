@@ -1,9 +1,15 @@
 export type TerminalWriteFairTurn = (release: () => void) => void;
+export type TerminalWriteFairOwner = symbol;
+
+/** Create an identity token scoped to one TerminalView xterm effect lifetime. */
+export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWriteFairOwner {
+  return Symbol(debugLabel);
+}
 
 type ScheduleMacrotask = (task: () => void) => void;
 
 type ActiveTurn = {
-  ownerId: string;
+  owner: TerminalWriteFairOwner;
   released: boolean;
 };
 
@@ -17,8 +23,8 @@ type ActiveTurn = {
  * macrotask so input, paint, and control work can run between turns.
  */
 export class TerminalWriteFairScheduler {
-  private readonly pendingTurns = new Map<string, TerminalWriteFairTurn>();
-  private pendingOwners: string[] = [];
+  private readonly pendingTurns = new Map<TerminalWriteFairOwner, TerminalWriteFairTurn>();
+  private pendingOwners: TerminalWriteFairOwner[] = [];
   private activeTurn: ActiveTurn | undefined;
   private macrotaskScheduled = false;
   private macrotaskGeneration = 0;
@@ -30,10 +36,10 @@ export class TerminalWriteFairScheduler {
   ) {}
 
   /** Queue at most one future turn for a mounted terminal pane. */
-  request(ownerId: string, turn: TerminalWriteFairTurn): void {
-    if (this.pendingTurns.has(ownerId)) return;
-    this.pendingTurns.set(ownerId, turn);
-    this.pendingOwners.push(ownerId);
+  request(owner: TerminalWriteFairOwner, turn: TerminalWriteFairTurn): void {
+    if (this.pendingTurns.has(owner)) return;
+    this.pendingTurns.set(owner, turn);
+    this.pendingOwners.push(owner);
     // Preserve the existing zero-backlog path: terminal.write admission itself
     // is cheap and xterm schedules parsing internally. Fairness is needed once a
     // pane already owns a parse or another pane is waiting.
@@ -45,9 +51,9 @@ export class TerminalWriteFairScheduler {
   }
 
   /** Remove only a future turn while preserving an accepted active write. */
-  cancelPending(ownerId: string): void {
-    if (!this.pendingTurns.delete(ownerId)) return;
-    this.pendingOwners = this.pendingOwners.filter((pending) => pending !== ownerId);
+  cancelPending(owner: TerminalWriteFairOwner): void {
+    if (!this.pendingTurns.delete(owner)) return;
+    this.pendingOwners = this.pendingOwners.filter((pending) => pending !== owner);
     if (
       this.pendingTurns.size === 0 &&
       this.activeTurn === undefined &&
@@ -67,9 +73,9 @@ export class TerminalWriteFairScheduler {
    * callback still owns the local FIFO outcome, while the idempotent release it
    * captured can no longer disturb a newer global turn.
    */
-  cancel(ownerId: string): void {
-    this.cancelPending(ownerId);
-    if (this.activeTurn?.ownerId === ownerId) this.release(this.activeTurn);
+  cancel(owner: TerminalWriteFairOwner): void {
+    this.cancelPending(owner);
+    if (this.activeTurn?.owner === owner) this.release(this.activeTurn);
   }
 
   private scheduleNext(): void {
@@ -92,16 +98,16 @@ export class TerminalWriteFairScheduler {
   private runNext(): void {
     if (this.activeTurn !== undefined) return;
 
-    let ownerId: string | undefined;
+    let owner: TerminalWriteFairOwner | undefined;
     let turn: TerminalWriteFairTurn | undefined;
-    while ((ownerId = this.pendingOwners.shift()) !== undefined) {
-      turn = this.pendingTurns.get(ownerId);
+    while ((owner = this.pendingOwners.shift()) !== undefined) {
+      turn = this.pendingTurns.get(owner);
       if (turn !== undefined) break;
     }
-    if (ownerId === undefined || turn === undefined) return;
+    if (owner === undefined || turn === undefined) return;
 
-    this.pendingTurns.delete(ownerId);
-    const activeTurn: ActiveTurn = { ownerId, released: false };
+    this.pendingTurns.delete(owner);
+    const activeTurn: ActiveTurn = { owner, released: false };
     this.activeTurn = activeTurn;
     const release = () => this.release(activeTurn);
     try {

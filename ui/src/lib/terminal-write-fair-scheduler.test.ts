@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { TerminalWriteFairScheduler } from "./terminal-write-fair-scheduler";
+import {
+  createTerminalWriteFairOwner,
+  TerminalWriteFairScheduler,
+} from "./terminal-write-fair-scheduler";
+
+const owner = (label: string) => createTerminalWriteFairOwner(label);
 
 function createHarness() {
   const scheduled: Array<() => void> = [];
@@ -20,12 +25,14 @@ describe("TerminalWriteFairScheduler", () => {
     const order: string[] = [];
     let releaseA: (() => void) | undefined;
     let releaseB: (() => void) | undefined;
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
 
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneA, (release) => {
       order.push("a1");
       releaseA = release;
     });
-    scheduler.request("pane-b", (release) => {
+    scheduler.request(paneB, (release) => {
       order.push("b1");
       releaseB = release;
     });
@@ -33,7 +40,7 @@ describe("TerminalWriteFairScheduler", () => {
     expect(order).toEqual(["a1"]);
     expect(scheduled).toHaveLength(0);
 
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneA, (release) => {
       order.push("a2");
       release();
     });
@@ -51,13 +58,15 @@ describe("TerminalWriteFairScheduler", () => {
     const { scheduler, runNextTask } = createHarness();
     const run = vi.fn((release: () => void) => release());
     let releaseActive: (() => void) | undefined;
+    const active = owner("active");
+    const paneA = owner("pane-a");
 
-    scheduler.request("active", (release) => {
+    scheduler.request(active, (release) => {
       releaseActive = release;
     });
-    scheduler.request("pane-a", run);
-    scheduler.request("pane-a", run);
-    scheduler.request("pane-a", run);
+    scheduler.request(paneA, run);
+    scheduler.request(paneA, run);
+    scheduler.request(paneA, run);
     releaseActive?.();
     runNextTask();
 
@@ -68,16 +77,18 @@ describe("TerminalWriteFairScheduler", () => {
     const { scheduler, scheduled, runNextTask } = createHarness();
     const order: string[] = [];
     let staleRelease: (() => void) | undefined;
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
 
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneA, (release) => {
       order.push("a");
       staleRelease = release;
     });
-    scheduler.request("pane-b", (release) => {
+    scheduler.request(paneB, (release) => {
       order.push("b");
       release();
     });
-    scheduler.cancel("pane-a");
+    scheduler.cancel(paneA);
     expect(scheduled).toHaveLength(1);
     staleRelease?.();
     expect(scheduled).toHaveLength(1);
@@ -85,25 +96,65 @@ describe("TerminalWriteFairScheduler", () => {
     expect(order).toEqual(["a", "b"]);
   });
 
+  it("keeps a replacement generation queued when the old callback settles late", () => {
+    const { scheduler, scheduled, runNextTask } = createHarness();
+    const oldGeneration = owner("shared-instance");
+    const newGeneration = owner("shared-instance");
+    const otherPane = owner("other-pane");
+    const order: string[] = [];
+    let releaseOld: (() => void) | undefined;
+    let releaseOther: (() => void) | undefined;
+
+    scheduler.request(oldGeneration, (release) => {
+      order.push("old");
+      releaseOld = release;
+    });
+    scheduler.request(otherPane, (release) => {
+      order.push("other");
+      releaseOther = release;
+    });
+
+    // A profile change tears down the old effect and lets the other pane run.
+    scheduler.cancel(oldGeneration);
+    scheduler.request(newGeneration, (release) => {
+      order.push("new");
+      release();
+    });
+
+    // The accepted old xterm callback can still arrive after replacement. Its
+    // pending cleanup and stale release must target only the old effect owner.
+    scheduler.cancelPending(oldGeneration);
+    releaseOld?.();
+
+    expect(scheduled).toHaveLength(1);
+    runNextTask();
+    expect(order).toEqual(["old", "other"]);
+    releaseOther?.();
+    runNextTask();
+    expect(order).toEqual(["old", "other", "new"]);
+  });
+
   it("can drop a queued retry without releasing an accepted active write", () => {
     const { scheduler, scheduled, runNextTask } = createHarness();
     const order: string[] = [];
     let releaseA: (() => void) | undefined;
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
 
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneA, (release) => {
       order.push("a");
       releaseA = release;
     });
-    scheduler.request("pane-b", (release) => {
+    scheduler.request(paneB, (release) => {
       order.push("b");
       release();
     });
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneA, (release) => {
       order.push("stale-a-retry");
       release();
     });
 
-    scheduler.cancelPending("pane-a");
+    scheduler.cancelPending(paneA);
     expect(scheduled).toHaveLength(0);
     releaseA?.();
     runNextTask();
@@ -115,16 +166,19 @@ describe("TerminalWriteFairScheduler", () => {
     let releaseA: (() => void) | undefined;
     const paneB = vi.fn();
     const paneC = vi.fn((release: () => void) => release());
+    const paneAOwner = owner("pane-a");
+    const paneBOwner = owner("pane-b");
+    const paneCOwner = owner("pane-c");
 
-    scheduler.request("pane-a", (release) => {
+    scheduler.request(paneAOwner, (release) => {
       releaseA = release;
     });
-    scheduler.request("pane-b", paneB);
+    scheduler.request(paneBOwner, paneB);
     releaseA?.();
     expect(scheduled).toHaveLength(1);
 
-    scheduler.cancelPending("pane-b");
-    scheduler.request("pane-c", paneC);
+    scheduler.cancelPending(paneBOwner);
+    scheduler.request(paneCOwner, paneC);
     expect(paneC).toHaveBeenCalledTimes(1);
 
     runNextTask();
@@ -136,13 +190,15 @@ describe("TerminalWriteFairScheduler", () => {
     const { scheduler, scheduled } = createHarness();
     const expected = new Error("pump sabotage");
     const next = vi.fn((release: () => void) => release());
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
 
     expect(() =>
-      scheduler.request("pane-a", () => {
+      scheduler.request(paneA, () => {
         throw expected;
       }),
     ).toThrow(expected);
-    scheduler.request("pane-b", next);
+    scheduler.request(paneB, next);
     expect(scheduled).toHaveLength(0);
     expect(next).toHaveBeenCalledTimes(1);
   });
