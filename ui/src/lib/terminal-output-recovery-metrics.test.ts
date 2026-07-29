@@ -21,6 +21,8 @@ describe("terminalOutputRecoveryCounters", () => {
     repairFailure: 0,
     malformedDelta: 0,
     attachFailure: 0,
+    attachTimeout: 0,
+    ackTimeout: 0,
   };
 
   it("counts each recovery trigger separately per terminal", () => {
@@ -41,6 +43,8 @@ describe("terminalOutputRecoveryCounters", () => {
     "repairFailure",
     "repairTimeout",
     "geometryEscalation",
+    "attachTimeout",
+    "ackTimeout",
   ] as const)("keeps %s out of the ringEscalation bucket", (event) => {
     recordTerminalOutputRecovery("t1", event);
 

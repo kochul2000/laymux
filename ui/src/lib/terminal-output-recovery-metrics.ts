@@ -76,7 +76,11 @@ export type TerminalOutputRecoveryEvent =
   /** A live delta or a served repair range failed metadata/range validation. */
   | "malformedDelta"
   /** `attach_terminal_output` or its replay failed. */
-  | "attachFailure";
+  | "attachFailure"
+  /** An attach bridge Promise did not settle before its epoch watchdog. */
+  | "attachTimeout"
+  /** A token-scoped ACK bridge Promise did not settle before its watchdog. */
+  | "ackTimeout";
 
 export type TerminalOutputRecoveryCounters = Record<TerminalOutputRecoveryEvent, number>;
 
@@ -91,6 +95,8 @@ const EVENTS: readonly TerminalOutputRecoveryEvent[] = [
   "repairFailure",
   "malformedDelta",
   "attachFailure",
+  "attachTimeout",
+  "ackTimeout",
 ];
 
 const counters = new Map<string, TerminalOutputRecoveryCounters>();
