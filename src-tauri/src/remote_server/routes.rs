@@ -41,6 +41,7 @@ use super::navigation_step_routes::{
     remote_navigation_notification_step, remote_navigation_spatial_step,
 };
 use super::page::{remote_page, remote_page_redirect};
+use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
 use super::viewer_routes::{
@@ -211,6 +212,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         // Desktop terminal font copy (ADR-0077). Gated inside the handler like
         // the other asset routes, not by `remote_guard`.
         .route(FONT_ROUTE_PATH, get(remote_font))
+        // Home-screen install of the remote client (ADR-0091). Same gate as the
+        // vendor assets.
+        .route(MANIFEST_ROUTE_PATH, get(remote_manifest))
+        .route(ICON_ROUTE_PATH, get(remote_pwa_icon))
         .route("/remote/viewer/", get(remote_viewer_page))
         .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)

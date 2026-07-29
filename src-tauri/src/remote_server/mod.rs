@@ -9,6 +9,7 @@ mod navigation;
 mod navigation_routes;
 mod navigation_step_routes;
 mod page;
+mod pwa;
 mod render_checkpoint;
 mod routes;
 mod terminal_info;

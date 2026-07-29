@@ -68,7 +68,7 @@ pub(crate) async fn remote_page(
         .into_response()
 }
 
-fn remote_page_html() -> &'static str {
+pub(super) fn remote_page_html() -> &'static str {
     REMOTE_PAGE_HTML
 }
 
@@ -192,6 +192,34 @@ mod tests {
         assert!(html.contains("fontFamily: remoteFontIsReady(fontAssets)"));
         assert!(html.contains("applyTerminalAppearance(info.appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
+    }
+
+    /// Issue #654: on a phone the address bar eats a row of terminal, and the
+    /// portable way to drop it is an installable web app. Chrome needs the manifest
+    /// link; iOS/iPadOS gives `apple-touch-icon` precedence over manifest icons
+    /// and retains the legacy `apple-*` metadata path, so both sets stay present
+    /// (ADR-0091).
+    #[test]
+    fn remote_page_html_declares_an_installable_standalone_app() {
+        let html = remote_page_html();
+        // A manifest fetch omits cookies by default, and this route carries the
+        // same gate as the rest of `/remote/*` — without the attribute the
+        // manifest 401s and the install prompt never appears.
+        assert!(html.contains(
+            "<link rel=\"manifest\" href=\"/remote/manifest.webmanifest\" crossorigin=\"use-credentials\" />"
+        ));
+        assert!(html.contains("<meta name=\"mobile-web-app-capable\" content=\"yes\" />"));
+        assert!(html.contains("<meta name=\"apple-mobile-web-app-capable\" content=\"yes\" />"));
+        assert!(html.contains("<meta name=\"apple-mobile-web-app-title\" content=\"Laymux\" />"));
+        // `black-translucent` would run the terminal's first row under the clock.
+        assert!(html.contains(
+            "<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\" />"
+        ));
+        // Matches --bg-base so the launch splash does not flash a stock colour.
+        assert!(html.contains("<meta name=\"theme-color\" content=\"#1e1e2e\" />"));
+        assert!(html.contains(
+            "<link rel=\"apple-touch-icon\" href=\"/remote/pwa/apple-touch-icon-180.png\" />"
+        ));
     }
 
     #[test]
