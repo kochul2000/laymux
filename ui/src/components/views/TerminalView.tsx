@@ -3671,13 +3671,12 @@ export function TerminalView({
         // Ordinary byte writes enter the logical FIFO in fairness-sized slices.
         // A sole owner may coalesce four compatible slices back to 256 KiB;
         // when another owner waits, one scheduler turn stays bounded at 64 KiB.
-        // Replay remains a barrier and retains its previous 256 KiB slicing.
-        const chunkBytes =
-          metadata.source === "live"
-            ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES
-            : TERMINAL_WRITE_BATCH_MAX_BYTES;
-        for (let offset = 0; offset < data.length; offset += chunkBytes) {
-          chunks.push(data.slice(offset, offset + chunkBytes) as Uint8Array);
+        // Replay remains a per-entry barrier, so its 64 KiB slices are never
+        // coalesced with each other or with a different logical request.
+        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_FAIR_QUANTUM_BYTES) {
+          chunks.push(
+            data.slice(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES) as Uint8Array,
+          );
         }
       }
       if (chunks.length === 0) chunks.push(data);

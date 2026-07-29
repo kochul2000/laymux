@@ -10926,6 +10926,68 @@ describe("TerminalView desktop input composer", () => {
     expect(terminalOutputPipelineCounters(terminalId).writeBatchMaxParts).toBe(4);
   });
 
+  it("slices non-stabilized replay into independent 64 KiB physical writes (#661)", async () => {
+    const terminalId = "t-output-fair-replay-quantum";
+    const defaultAttachment = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    const replay = new Uint8Array(2 * 64 * 1024 + 17);
+    for (let index = 0; index < replay.length; index += 1) replay[index] = index % 251;
+    mockAttachTerminalOutput.mockResolvedValueOnce({
+      ...defaultAttachment,
+      state: {
+        ...defaultAttachment.state,
+        snapshotSeq: replay.length,
+        sourceSeq: replay.length,
+      },
+      snapshot: Array.from(replay),
+    });
+    const writes: Array<{ data: Uint8Array; sourceType: "bytes" | "string" }> = [];
+    const completions: Array<() => void> = [];
+    let completed = 0;
+    mockWrite.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      writes.push({
+        data: typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
+        sourceType: typeof data === "string" ? "string" : "bytes",
+      });
+      completions.push(() => {
+        completed += 1;
+        callback?.();
+      });
+    });
+
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({ sourceType: "bytes" });
+    expect(writes[0].data).toHaveLength(64 * 1024);
+    act(() => completions[0]?.());
+    await vi.waitFor(() => expect(writes).toHaveLength(2));
+    expect(writes[1].data).toHaveLength(64 * 1024);
+    act(() => completions[1]?.());
+    await vi.waitFor(() => expect(writes).toHaveLength(3));
+    expect(writes[2].data).toHaveLength(17);
+    act(() => completions[2]?.());
+    // The attach pipeline applies the authoritative bracketed-paste mode as a
+    // string only after every replay callback. It remains one atomic write.
+    await vi.waitFor(() => expect(writes).toHaveLength(4));
+    expect(writes[3]).toMatchObject({ sourceType: "string" });
+    act(() => completions[3]?.());
+    await waitForTerminalInputReady();
+
+    const replayWrites = writes.filter(({ sourceType }) => sourceType === "bytes");
+    const concatenated = new Uint8Array(
+      replayWrites.reduce((total, part) => total + part.data.length, 0),
+    );
+    let offset = 0;
+    for (const part of replayWrites) {
+      concatenated.set(part.data, offset);
+      offset += part.data.length;
+    }
+    expect(concatenated).toEqual(replay);
+    expect(replayWrites).toHaveLength(3);
+    expect(completed).toBe(4);
+    expect(terminalOutputPipelineCounters(terminalId).writeBatchMaxParts).toBe(1);
+  });
+
   it("rotates physical writes across flooded panes before returning to the same pane (#661)", async () => {
     const paneA = "t-output-fair-a";
     const paneB = "t-output-fair-b";
@@ -11017,38 +11079,65 @@ describe("TerminalView desktop input composer", () => {
       WritableTerminal,
       WritableTerminal,
     ];
-    const aWriteBytes: number[] = [];
-    const bWriteBytes: number[] = [];
+    const aWrites: Uint8Array[] = [];
+    const bWrites: Uint8Array[] = [];
+    let aCallbacksCompleted = 0;
+    let bCallbacksCompleted = 0;
+    let duplicateCallbacks = 0;
     let finishAFirst: (() => void) | undefined;
     let finishBFirst: (() => void) | undefined;
     terminalA.write = (data, callback) => {
-      aWriteBytes.push(
-        typeof data === "string" ? new TextEncoder().encode(data).length : data.length,
+      aWrites.push(
+        typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
       );
-      if (aWriteBytes.length === 1) finishAFirst = callback;
-      else callback?.();
+      let settled = false;
+      const complete = () => {
+        if (settled) {
+          duplicateCallbacks += 1;
+          return;
+        }
+        settled = true;
+        aCallbacksCompleted += 1;
+        callback?.();
+      };
+      if (aWrites.length === 1) finishAFirst = complete;
+      else complete();
     };
     terminalB.write = (data, callback) => {
-      bWriteBytes.push(
-        typeof data === "string" ? new TextEncoder().encode(data).length : data.length,
+      bWrites.push(
+        typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
       );
-      if (bWriteBytes.length === 1) finishBFirst = callback;
-      else callback?.();
+      let settled = false;
+      const complete = () => {
+        if (settled) {
+          duplicateCallbacks += 1;
+          return;
+        }
+        settled = true;
+        bCallbacksCompleted += 1;
+        callback?.();
+      };
+      if (bWrites.length === 1) finishBFirst = complete;
+      else complete();
     };
 
     const firstA = "hold-a";
     const firstB = "hold-b";
     const aFlood = "a".repeat(256 * 1024);
     const bFlood = "b".repeat(256 * 1024);
+    const expectedA = new TextEncoder().encode(firstA + aFlood);
+    const expectedB = new TextEncoder().encode(firstB + bFlood);
+    const attachCallsAfterInitial = mockAttachTerminalOutput.mock.calls.length;
+    mockAcknowledgeTerminalOutput.mockClear();
     act(() => emitter(paneA)(outputDelta(0, firstA)));
-    expect(aWriteBytes).toEqual([firstA.length]);
+    expect(aWrites.map(({ length }) => length)).toEqual([firstA.length]);
 
     act(() => {
       emitter(paneA)(outputDelta(firstA.length, aFlood));
       emitter(paneB)(outputDelta(0, firstB));
     });
     act(() => finishAFirst?.());
-    await vi.waitFor(() => expect(bWriteBytes).toEqual([firstB.length]));
+    await vi.waitFor(() => expect(bWrites.map(({ length }) => length)).toEqual([firstB.length]));
 
     act(() => emitter(paneB)(outputDelta(firstB.length, bFlood)));
     await vi.waitFor(() =>
@@ -11058,8 +11147,49 @@ describe("TerminalView desktop input composer", () => {
     );
     act(() => finishBFirst?.());
 
-    await vi.waitFor(() => expect(aWriteBytes.length).toBeGreaterThanOrEqual(2));
-    expect(aWriteBytes[1]).toBe(64 * 1024);
+    await vi.waitFor(() => {
+      expect(aWrites.reduce((total, part) => total + part.length, 0)).toBe(expectedA.length);
+      expect(bWrites.reduce((total, part) => total + part.length, 0)).toBe(expectedB.length);
+      expect(aCallbacksCompleted).toBe(aWrites.length);
+      expect(bCallbacksCompleted).toBe(bWrites.length);
+    });
+    expect(aWrites[1]).toHaveLength(64 * 1024);
+    const concatenate = (parts: readonly Uint8Array[]) => {
+      const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+      let offset = 0;
+      for (const part of parts) {
+        result.set(part, offset);
+        offset += part.length;
+      }
+      return result;
+    };
+    expect(concatenate(aWrites)).toEqual(expectedA);
+    expect(concatenate(bWrites)).toEqual(expectedB);
+    expect(duplicateCallbacks).toBe(0);
+    await vi.waitFor(() => {
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+        paneA,
+        1,
+        "lease-1",
+        expectedA.length,
+      );
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+        paneB,
+        1,
+        "lease-1",
+        expectedB.length,
+      );
+    });
+    const finalAckCount = (terminalId: string, seq: number) =>
+      mockAcknowledgeTerminalOutput.mock.calls.filter(
+        ([id, _generation, _token, acknowledgedSeq]) =>
+          id === terminalId && acknowledgedSeq === seq,
+      ).length;
+    expect(finalAckCount(paneA, expectedA.length)).toBe(1);
+    expect(finalAckCount(paneB, expectedB.length)).toBe(1);
+    // A rejected/discarded physical entry schedules a replacement attach. Both
+    // queues reached final parsed credit without that recovery path.
+    expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCallsAfterInitial);
     await act(async () => {
       view.unmount();
       await Promise.resolve();

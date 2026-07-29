@@ -260,6 +260,31 @@ describe("TerminalWriteBatchQueue", () => {
     expect(retry).toMatchObject({ partCount: 2, byteLength: 128 * 1024 });
   });
 
+  it("keeps replay quanta as separate callback barriers even for a sole owner", () => {
+    const queue = new TerminalWriteBatchQueue<TestMetadata>();
+    const parsed: number[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      queue.enqueue(
+        request([], {
+          data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES),
+          metadata: { source: "replay", attachEpoch: 7 },
+          batchKey: "replay:7",
+          allowCoalescing: true,
+          coalesceCallbacks: true,
+          onParsed: () => parsed.push(index),
+        }),
+      );
+    }
+
+    const first = queue.dequeue(queue.lastEnqueuedId, true, TERMINAL_WRITE_BATCH_MAX_BYTES);
+    const second = queue.dequeue(queue.lastEnqueuedId, true, TERMINAL_WRITE_BATCH_MAX_BYTES);
+    expect(first).toMatchObject({ partCount: 1, byteLength: 64 * 1024 });
+    expect(second).toMatchObject({ partCount: 1, byteLength: 64 * 1024 });
+    first?.entries[0].onParsed?.();
+    second?.entries[0].onParsed?.();
+    expect(parsed).toEqual([0, 1]);
+  });
+
   it("allows one oversized or atomic head request to make progress alone", () => {
     const queue = new TerminalWriteBatchQueue<TestMetadata>();
     const oversized = new Uint8Array(TERMINAL_WRITE_BATCH_MAX_BYTES + 1);
