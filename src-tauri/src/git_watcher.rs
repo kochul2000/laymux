@@ -25,8 +25,13 @@ pub fn parse_git_head(content: &str) -> Option<String> {
 /// Find the .git directory for a given working directory.
 /// Walks up from the given path to find the nearest .git directory.
 pub fn find_git_dir(working_dir: &Path) -> Option<PathBuf> {
-    let mut current = working_dir.to_path_buf();
-    loop {
+    find_git_dir_in_ancestors(working_dir.ancestors())
+}
+
+// Production supplies the complete ancestor chain. Tests can bound the same
+// search to a temporary root so an unrelated host ancestor cannot affect them.
+fn find_git_dir_in_ancestors<'a>(ancestors: impl IntoIterator<Item = &'a Path>) -> Option<PathBuf> {
+    for current in ancestors {
         let git_dir = current.join(".git");
         if git_dir.is_dir() {
             return Some(git_dir);
@@ -46,10 +51,8 @@ pub fn find_git_dir(working_dir: &Path) -> Option<PathBuf> {
                 }
             }
         }
-        if !current.pop() {
-            return None;
-        }
     }
+    None
 }
 
 /// Locate the git `config` file for a given git dir.
@@ -229,9 +232,15 @@ mod tests {
     }
 
     #[test]
-    fn find_git_dir_nonexistent() {
+    fn find_git_dir_nonexistent_within_isolated_temp_root() {
         let dir = TempDir::new().unwrap();
-        let found = find_git_dir(dir.path());
+        let nested = dir.path().join("nested").join("deeper");
+        fs::create_dir_all(&nested).unwrap();
+
+        let temp_ancestors = nested
+            .ancestors()
+            .take_while(|candidate| candidate.starts_with(dir.path()));
+        let found = find_git_dir_in_ancestors(temp_ancestors);
         assert_eq!(found, None);
     }
 
