@@ -1,6 +1,6 @@
 # 0086. terminal output control IPC는 epoch watchdog으로 stale lease를 교체한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: issue #629 · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4](../architecture/api-contracts.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
 - Extends: [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)의 desktop attach·ACK control-plane liveness 경계
