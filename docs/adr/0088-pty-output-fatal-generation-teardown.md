@@ -1,6 +1,6 @@
 # 0088. PTY output fatal은 reader를 멈추고 해당 generation을 비동기 teardown한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: issue #630 · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [ADR-0001](0001-osc-rust-single-pass.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md) · [ADR-0087](0087-mutex-poison-fail-closed-discard-only.md)
 - Extends: [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)의 output authoritative-state fatal을 explicit close 대기에서 generation-scoped 자동 teardown으로 확장한다.
