@@ -18,6 +18,15 @@ describe("resolveChunkGroup", () => {
     ).toBeUndefined();
   });
 
+  it("isolates the static v3 failure coordinator from the near-limit entry chunk", () => {
+    expect(resolveChunkGroup("/repo/ui/src/lib/terminal-output-v3-failure-coordinator.ts")).toBe(
+      "terminal-output-v3-failure",
+    );
+    expect(
+      resolveChunkGroup("/repo/ui/src/lib/terminal-output-v3-failure-coordinator.test.ts"),
+    ).toBeUndefined();
+  });
+
   it.each([
     ["/repo/ui/node_modules/@xterm/xterm/lib/xterm.js", "xterm"],
     ["/repo/ui/node_modules/html2canvas/dist/html2canvas.js", "html2canvas"],

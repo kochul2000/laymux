@@ -233,4 +233,56 @@ describe("TerminalOutputFlowAcknowledger", () => {
     acknowledger.complete(0, 4);
     await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith(4));
   });
+
+  it("settles a v3 waiter only after the backend confirms its parsed prefix", async () => {
+    const first = deferred<boolean>();
+    const send = vi.fn().mockReturnValue(first.promise);
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, send);
+    const settled = vi.fn();
+
+    void acknowledger.completeAndWait(0, 4).then(settled);
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledWith(4);
+    expect(settled).not.toHaveBeenCalled();
+
+    first.resolve(true);
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledWith(true));
+  });
+
+  it("coalesces v3 waiters and resolves each at its backend-confirmed frontier", async () => {
+    const first = deferred<boolean>();
+    const second = deferred<boolean>();
+    const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, send);
+    const firstSettled = vi.fn();
+    const secondSettled = vi.fn();
+
+    void acknowledger.completeAndWait(0, 4).then(firstSettled);
+    void acknowledger.completeAndWait(4, 8).then(secondSettled);
+    first.resolve(true);
+    await vi.waitFor(() => expect(firstSettled).toHaveBeenCalledWith(true));
+    expect(secondSettled).not.toHaveBeenCalled();
+    expect(send).toHaveBeenLastCalledWith(8);
+
+    second.resolve(true);
+    await vi.waitFor(() => expect(secondSettled).toHaveBeenCalledWith(true));
+  });
+
+  it("fails pending v3 confirmation waiters when their lease owner is retired", async () => {
+    const pending = deferred<boolean>();
+    const acknowledger = new TerminalOutputFlowAcknowledger(
+      0,
+      vi.fn().mockReturnValue(pending.promise),
+    );
+    const settled = vi.fn();
+
+    void acknowledger.completeAndWait(0, 4).then(settled);
+    acknowledger.dispose();
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalledWith(false);
+
+    pending.resolve(true);
+    await Promise.resolve();
+    expect(settled).toHaveBeenCalledTimes(1);
+  });
 });

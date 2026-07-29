@@ -125,6 +125,124 @@ fn fatal_teardown_request_is_generation_local_and_exactly_once() {
 }
 
 #[test]
+fn fatal_detach_returns_and_terminates_pty_when_delivery_emitter_join_times_out() {
+    let state = AppState::new();
+    let (session, handle) = install_test_terminal_generation(&state, "fatal-stuck-emitter");
+    session.set_delivery_shutdown_timeout_for_test(Duration::from_millis(20));
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let release_for_emit = Arc::clone(&release_rx);
+    session
+        .start_desktop_output_delivery(Arc::new(move |_, _| {
+            entered_tx.send(()).unwrap();
+            let _ = release_for_emit.lock().unwrap().recv();
+            Ok(())
+        }))
+        .unwrap();
+    session
+        .begin_desktop_output_bootstrap(crate::constants::TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES)
+        .unwrap();
+    terminal_output::attach_desktop_terminal_output(
+        &state.terminal_protocol_states,
+        "fatal-stuck-emitter",
+        crate::constants::TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
+        crate::constants::TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES,
+    )
+    .unwrap();
+    session.record_desktop_output(b"blocked").unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+    let detached = detach_terminal_output_generation(&state, "fatal-stuck-emitter", &session)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        session.delivery_failure(),
+        Some(terminal_output::TerminalOutputDeliveryCloseReason::WorkerShutdownTimedOut)
+    );
+    terminate_detached_for_test("fatal-stuck-emitter", session.generation(), detached);
+    assert!(handle.write(b"after-fatal").is_err());
+    release_tx.send(()).unwrap();
+}
+
+#[test]
+fn explicit_close_releases_terminal_catalog_before_delivery_join() {
+    let state = Arc::new(AppState::new());
+    let (closing_session, closing_handle) =
+        install_test_terminal_generation(&state, "close-stuck-emitter");
+    let (_other_session, other_handle) = install_test_terminal_generation(&state, "other-live");
+    closing_session.set_delivery_shutdown_timeout_for_test(Duration::from_secs(1));
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel::<()>();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let release_for_emit = Arc::clone(&release_rx);
+    closing_session
+        .start_desktop_output_delivery(Arc::new(move |_, _| {
+            entered_tx.send(()).unwrap();
+            let _ = release_for_emit.lock().unwrap().recv();
+            Ok(())
+        }))
+        .unwrap();
+    closing_session
+        .begin_desktop_output_bootstrap(crate::constants::TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES)
+        .unwrap();
+    terminal_output::attach_desktop_terminal_output(
+        &state.terminal_protocol_states,
+        "close-stuck-emitter",
+        crate::constants::TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
+        crate::constants::TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES,
+    )
+    .unwrap();
+    closing_session.record_desktop_output(b"blocked").unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+    // Mirror the explicit close transaction: same-id create stays excluded
+    // through logical retirement and handle transfer, but physical delivery
+    // settlement is transferred beyond the outer catalog guard.
+    let mut terminals = state.terminals.lock_or_err().unwrap();
+    let retirement = terminal_output::begin_terminal_output_retirement_for_close(
+        &state.terminal_protocol_states,
+        &state.output_buffers,
+        "close-stuck-emitter",
+    )
+    .unwrap()
+    .unwrap();
+    terminals.remove("close-stuck-emitter").unwrap();
+    let detached_handle = state
+        .pty_handles
+        .lock_or_err()
+        .unwrap()
+        .remove("close-stuck-emitter")
+        .unwrap();
+    drop(terminals);
+
+    let (finish_started_tx, finish_started_rx) = std::sync::mpsc::channel::<()>();
+    let (finish_done_tx, finish_done_rx) = std::sync::mpsc::channel::<()>();
+    let finish_worker = thread::spawn(move || {
+        finish_started_tx.send(()).unwrap();
+        retirement.finish();
+        finish_done_tx.send(()).unwrap();
+    });
+    finish_started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .unwrap();
+    assert!(finish_done_rx
+        .recv_timeout(Duration::from_millis(30))
+        .is_err());
+
+    let catalog = state.terminals.lock_or_err().unwrap();
+    assert!(catalog.contains_key("other-live"));
+    drop(catalog);
+    assert!(other_handle.write(b"still-live").is_ok());
+
+    release_tx.send(()).unwrap();
+    finish_done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    finish_worker.join().unwrap();
+    detached_handle.terminate().unwrap();
+    assert!(closing_handle.write(b"after-close").is_err());
+}
+
+#[test]
 fn pending_create_fatal_retires_the_reservation_and_makes_commit_fail() {
     let state = AppState::new();
     let registration = terminal_output::register_terminal_output_session(

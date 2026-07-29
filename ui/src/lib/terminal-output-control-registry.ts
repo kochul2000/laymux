@@ -1,6 +1,14 @@
-export type TerminalOutputControlOperationKind = "attach" | "ack";
+export type TerminalOutputControlOperationKind = "attach" | "ack" | "receipt" | "hold" | "close";
+
+type TerminalOutputControlBudgetKind = "attach" | "ack" | "delivery";
+
+function budgetKindFor(kind: TerminalOutputControlOperationKind): TerminalOutputControlBudgetKind {
+  return kind === "attach" || kind === "ack" ? kind : "delivery";
+}
 
 export interface TerminalOutputControlOperation {
+  /** Mark this still-pending bridge operation as a watchdog orphan exactly once. */
+  markTimedOut(): void;
   /** Release one uncancellable bridge operation exactly once. */
   settle(): void;
 }
@@ -8,22 +16,33 @@ export interface TerminalOutputControlOperation {
 export interface TerminalOutputControlMountScope {
   canStart(kind: TerminalOutputControlOperationKind): boolean;
   tryStart(kind: TerminalOutputControlOperationKind): TerminalOutputControlOperation | undefined;
+  /** Legacy terminal-local count. */
   outstanding(kind: TerminalOutputControlOperationKind): number;
+  localOutstanding(kind: TerminalOutputControlOperationKind): number;
+  globalOutstanding(kind: TerminalOutputControlOperationKind): number;
+  localTimedOut(kind: TerminalOutputControlOperationKind): number;
+  globalTimedOut(kind: TerminalOutputControlOperationKind): number;
   waitForCapacity(kind: TerminalOutputControlOperationKind, waiter: () => void): void;
   dispose(): void;
 }
 
 interface BudgetLease {
+  markTimedOut(): void;
   release(): void;
 }
 
 class OperationBudget {
   private outstandingCount = 0;
+  private timedOutCount = 0;
 
   constructor(private readonly maxOutstanding: number) {}
 
   get outstanding(): number {
     return this.outstandingCount;
+  }
+
+  get timedOut(): number {
+    return this.timedOutCount;
   }
 
   get canStart(): boolean {
@@ -34,11 +53,18 @@ class OperationBudget {
     if (!this.canStart) return undefined;
     this.outstandingCount += 1;
     let released = false;
+    let timedOut = false;
     return {
+      markTimedOut: () => {
+        if (released || timedOut) return;
+        timedOut = true;
+        this.timedOutCount += 1;
+      },
       release: () => {
         if (released) return;
         released = true;
         this.outstandingCount -= 1;
+        if (timedOut) this.timedOutCount -= 1;
       },
     };
   }
@@ -47,6 +73,7 @@ class OperationBudget {
 interface TerminalEntry {
   attach: OperationBudget;
   ack: OperationBudget;
+  delivery: OperationBudget;
 }
 
 interface CapacityWaiter {
@@ -61,24 +88,27 @@ interface CapacityWaiter {
  *
  * Every operation owns one terminal-local and one WebView-global lease. React
  * mounts own only FIFO recovery callbacks, so unmount cannot forget a pending
- * Promise. The global attach and ACK caps are separate: one wedged control kind
- * cannot consume the other kind's six process-retained slots.
+ * Promise. Attach, ACK, and the shared receipt/hold/close delivery domain have
+ * separate global caps, so one wedged domain cannot consume another domain's
+ * process-retained slots.
  */
 export class TerminalOutputControlOperationRegistry {
   private generation = 0;
   private readonly entries = new Map<string, TerminalEntry>();
   private readonly currentOwners = new Map<string, symbol>();
-  private globalBudgets: Record<TerminalOutputControlOperationKind, OperationBudget>;
-  private readonly capacityWaiters: Record<TerminalOutputControlOperationKind, CapacityWaiter[]> = {
+  private globalBudgets: Record<TerminalOutputControlBudgetKind, OperationBudget>;
+  private readonly capacityWaiters: Record<TerminalOutputControlBudgetKind, CapacityWaiter[]> = {
     attach: [],
     ack: [],
+    delivery: [],
   };
   private readonly capacityReservations: Record<
-    TerminalOutputControlOperationKind,
+    TerminalOutputControlBudgetKind,
     Map<symbol, BudgetLease>
   > = {
     attach: new Map(),
     ack: new Map(),
+    delivery: new Map(),
   };
 
   constructor(
@@ -96,6 +126,7 @@ export class TerminalOutputControlOperationRegistry {
     this.globalBudgets = {
       attach: new OperationBudget(maxOutstandingPerWindowKind),
       ack: new OperationBudget(maxOutstandingPerWindowKind),
+      delivery: new OperationBudget(maxOutstandingPerWindowKind),
     };
   }
 
@@ -116,11 +147,16 @@ export class TerminalOutputControlOperationRegistry {
         if (!isCurrent()) return undefined;
         return this.tryStart(owner, terminalId, kind);
       },
-      outstanding: (kind) => this.entries.get(terminalId)?.[kind].outstanding ?? 0,
+      outstanding: (kind) => this.entries.get(terminalId)?.[budgetKindFor(kind)].outstanding ?? 0,
+      localOutstanding: (kind) =>
+        this.entries.get(terminalId)?.[budgetKindFor(kind)].outstanding ?? 0,
+      globalOutstanding: (kind) => this.globalBudgets[budgetKindFor(kind)].outstanding,
+      localTimedOut: (kind) => this.entries.get(terminalId)?.[budgetKindFor(kind)].timedOut ?? 0,
+      globalTimedOut: (kind) => this.globalBudgets[budgetKindFor(kind)].timedOut,
       waitForCapacity: (kind, callback) => {
         if (!isCurrent()) return;
         this.removeOwnerWaiters(owner, kind);
-        this.capacityWaiters[kind].push({ owner, terminalId, isCurrent, callback });
+        this.capacityWaiters[budgetKindFor(kind)].push({ owner, terminalId, isCurrent, callback });
         this.wakeOneCapacityWaiter(kind);
       },
       dispose: () => {
@@ -140,7 +176,7 @@ export class TerminalOutputControlOperationRegistry {
 
   /** Test/diagnostic visibility for the hard WebView-wide resource bound. */
   globalOutstanding(kind: TerminalOutputControlOperationKind): number {
-    return this.globalBudgets[kind].outstanding;
+    return this.globalBudgets[budgetKindFor(kind)].outstanding;
   }
 
   /** Test-only isolation for module-global React component fixtures. */
@@ -150,11 +186,14 @@ export class TerminalOutputControlOperationRegistry {
     this.currentOwners.clear();
     this.capacityWaiters.attach.length = 0;
     this.capacityWaiters.ack.length = 0;
+    this.capacityWaiters.delivery.length = 0;
     this.capacityReservations.attach.clear();
     this.capacityReservations.ack.clear();
+    this.capacityReservations.delivery.clear();
     this.globalBudgets = {
       attach: new OperationBudget(this.maxOutstandingPerWindowKind),
       ack: new OperationBudget(this.maxOutstandingPerWindowKind),
+      delivery: new OperationBudget(this.maxOutstandingPerWindowKind),
     };
   }
 
@@ -163,9 +202,10 @@ export class TerminalOutputControlOperationRegistry {
     terminalId: string,
     kind: TerminalOutputControlOperationKind,
   ): boolean {
-    const local = this.entries.get(terminalId)?.[kind];
-    const hasReservation = this.capacityReservations[kind].has(owner);
-    return (hasReservation || this.globalBudgets[kind].canStart) && (local?.canStart ?? true);
+    const budgetKind = budgetKindFor(kind);
+    const local = this.entries.get(terminalId)?.[budgetKind];
+    const hasReservation = this.capacityReservations[budgetKind].has(owner);
+    return (hasReservation || this.globalBudgets[budgetKind].canStart) && (local?.canStart ?? true);
   }
 
   private tryStart(
@@ -173,6 +213,7 @@ export class TerminalOutputControlOperationRegistry {
     terminalId: string,
     kind: TerminalOutputControlOperationKind,
   ): TerminalOutputControlOperation | undefined {
+    const budgetKind = budgetKindFor(kind);
     let entry = this.entries.get(terminalId);
     const created = !entry;
     entry ??= this.createEntry();
@@ -180,12 +221,13 @@ export class TerminalOutputControlOperationRegistry {
     // Acquire locally first, then roll it back if the matching global lease is
     // unavailable. Nothing can observe the temporary entry in this synchronous
     // transaction, and no bridge IPC is called until the composite is returned.
-    const localLease = entry[kind].tryStart();
+    const localLease = entry[budgetKind].tryStart();
     if (!localLease) {
-      this.releaseReservation(owner, kind);
+      this.releaseReservation(owner, budgetKind);
       return undefined;
     }
-    const globalLease = this.takeReservation(owner, kind) ?? this.globalBudgets[kind].tryStart();
+    const globalLease =
+      this.takeReservation(owner, budgetKind) ?? this.globalBudgets[budgetKind].tryStart();
     if (!globalLease) {
       localLease.release();
       if (!created) this.prune(terminalId, entry);
@@ -196,6 +238,11 @@ export class TerminalOutputControlOperationRegistry {
     const generation = this.generation;
     let settled = false;
     return {
+      markTimedOut: () => {
+        if (settled) return;
+        localLease.markTimedOut();
+        globalLease.markTimedOut();
+      },
       settle: () => {
         if (settled) return;
         settled = true;
@@ -205,7 +252,7 @@ export class TerminalOutputControlOperationRegistry {
         globalLease.release();
         if (this.generation !== generation) return;
         this.prune(terminalId, entry!);
-        this.wakeOneCapacityWaiter(kind);
+        this.wakeOneCapacityWaiter(budgetKind);
       },
     };
   }
@@ -214,6 +261,7 @@ export class TerminalOutputControlOperationRegistry {
     return {
       attach: new OperationBudget(this.maxOutstandingPerTerminalKind),
       ack: new OperationBudget(this.maxOutstandingPerTerminalKind),
+      delivery: new OperationBudget(this.maxOutstandingPerTerminalKind),
     };
   }
 
@@ -221,6 +269,7 @@ export class TerminalOutputControlOperationRegistry {
     if (
       entry.attach.outstanding === 0 &&
       entry.ack.outstanding === 0 &&
+      entry.delivery.outstanding === 0 &&
       this.entries.get(terminalId) === entry
     ) {
       this.entries.delete(terminalId);
@@ -228,8 +277,10 @@ export class TerminalOutputControlOperationRegistry {
   }
 
   private removeOwnerWaiters(owner: symbol, kind?: TerminalOutputControlOperationKind): void {
-    const kinds: readonly TerminalOutputControlOperationKind[] = kind ? [kind] : ["attach", "ack"];
-    for (const candidate of kinds) {
+    const kinds: readonly TerminalOutputControlBudgetKind[] = kind
+      ? [budgetKindFor(kind)]
+      : ["attach", "ack", "delivery"];
+    for (const candidate of new Set(kinds)) {
       this.capacityWaiters[candidate] = this.capacityWaiters[candidate].filter(
         (waiter) => waiter.owner !== owner,
       );
@@ -238,14 +289,14 @@ export class TerminalOutputControlOperationRegistry {
 
   private takeReservation(
     owner: symbol,
-    kind: TerminalOutputControlOperationKind,
+    kind: TerminalOutputControlBudgetKind,
   ): BudgetLease | undefined {
     const reservation = this.capacityReservations[kind].get(owner);
     if (reservation) this.capacityReservations[kind].delete(owner);
     return reservation;
   }
 
-  private releaseReservation(owner: symbol, kind: TerminalOutputControlOperationKind): void {
+  private releaseReservation(owner: symbol, kind: TerminalOutputControlBudgetKind): void {
     const reservation = this.takeReservation(owner, kind);
     if (!reservation) return;
     reservation.release();
@@ -255,42 +306,47 @@ export class TerminalOutputControlOperationRegistry {
   private releaseOwnerReservations(owner: symbol): void {
     this.releaseReservation(owner, "attach");
     this.releaseReservation(owner, "ack");
+    this.releaseReservation(owner, "delivery");
   }
 
-  private wakeOneCapacityWaiter(kind: TerminalOutputControlOperationKind): void {
-    if (!this.globalBudgets[kind].canStart) return;
-    const waiters = this.capacityWaiters[kind];
+  private wakeOneCapacityWaiter(
+    kind: TerminalOutputControlOperationKind | TerminalOutputControlBudgetKind,
+  ): void {
+    const budgetKind =
+      kind === "receipt" || kind === "hold" || kind === "close" ? "delivery" : kind;
+    if (!this.globalBudgets[budgetKind].canStart) return;
+    const waiters = this.capacityWaiters[budgetKind];
     for (let index = 0; index < waiters.length; ) {
       const waiter = waiters[index];
       if (!waiter.isCurrent()) {
         waiters.splice(index, 1);
         continue;
       }
-      if (this.capacityReservations[kind].has(waiter.owner)) {
+      if (this.capacityReservations[budgetKind].has(waiter.owner)) {
         waiters.splice(index, 1);
         continue;
       }
-      const local = this.entries.get(waiter.terminalId)?.[kind];
+      const local = this.entries.get(waiter.terminalId)?.[budgetKind];
       if (local && !local.canStart) {
         // Keep this terminal's FIFO position, but let an eligible terminal use
         // the global slot so one local cap cannot starve the entire window.
         index += 1;
         continue;
       }
-      const reservation = this.globalBudgets[kind].tryStart();
+      const reservation = this.globalBudgets[budgetKind].tryStart();
       if (!reservation) return;
       waiters.splice(index, 1);
-      this.capacityReservations[kind].set(waiter.owner, reservation);
+      this.capacityReservations[budgetKind].set(waiter.owner, reservation);
       try {
         waiter.callback();
       } catch {
         // A UI recovery callback cannot corrupt global resource accounting.
-        this.releaseReservation(waiter.owner, kind);
+        this.releaseReservation(waiter.owner, budgetKind);
       }
       return;
     }
   }
 }
 
-/** One registry per WebView/window; at most 6 attach + 6 ACK IPCs remain pending. */
+/** One registry per WebView/window; each control budget has six pending IPC slots. */
 export const terminalOutputControlOperationRegistry = new TerminalOutputControlOperationRegistry();

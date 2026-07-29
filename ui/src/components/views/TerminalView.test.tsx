@@ -1,6 +1,7 @@
 import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { TerminalView } from "./TerminalView";
+import { setTerminalOutputV3RuntimeLoaderForTest } from "@/lib/terminal-output-v3-runtime-loader";
 import {
   _resetWebglStagger,
   _reserveWebglInitDelay,
@@ -21,6 +22,10 @@ import * as terminalOutputRecoveryMetrics from "@/lib/terminal-output-recovery-m
 import { terminalOutputPipelineCounters } from "@/lib/terminal-output-pipeline-metrics";
 import { terminalOutputControlOperationRegistry } from "@/lib/terminal-output-control-registry";
 import { terminalWriteFairScheduler } from "@/lib/terminal-write-fair-scheduler";
+import {
+  allTerminalOutputV3Diagnostics,
+  resetTerminalOutputV3DiagnosticsForTest,
+} from "@/lib/terminal-output-v3-diagnostics";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
 import {
   registerAtlasRebuilder,
@@ -455,6 +460,7 @@ const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
 const mockCloseTerminalSession = vi.fn().mockResolvedValue(undefined);
 const mockOnTerminalOutput = vi.fn().mockResolvedValue(vi.fn());
+const mockOnTerminalOutputV3 = vi.fn().mockResolvedValue(vi.fn());
 const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
   state: {
     version: 1,
@@ -472,7 +478,28 @@ const mockAttachTerminalOutput = vi.fn().mockResolvedValue({
   flowControl: { token: "lease-1", windowBytes: 524288 },
 });
 const mockAcknowledgeTerminalOutput = vi.fn().mockResolvedValue(true);
+const mockAcknowledgeTerminalOutputEnvelope = vi.fn().mockResolvedValue(true);
+const mockRepairTerminalOutputEnvelope = vi
+  .fn()
+  .mockResolvedValue({ status: "idle", envelope: null });
+const mockHoldTerminalOutputContinuation = vi.fn().mockResolvedValue(true);
+const mockCloseTerminalOutputContinuation = vi.fn().mockResolvedValue(true);
+const mockFailStopTerminalOutputSurface = vi.fn().mockResolvedValue(true);
 const mockResumeTerminalOutput = vi.fn().mockResolvedValue(null);
+let capturedTerminalOutputFailStopped:
+  | ((failure: {
+      terminalId: string;
+      generation: number;
+      leaseToken: string | null;
+      reason: string;
+    }) => void)
+  | null = null;
+const mockOnTerminalOutputFailStopped = vi.fn(
+  (callback: NonNullable<typeof capturedTerminalOutputFailStopped>) => {
+    capturedTerminalOutputFailStopped = callback;
+    return Promise.resolve(vi.fn());
+  },
+);
 let mockOutputSequence = 0;
 const mockGetRemoteControlStatus = vi.fn().mockResolvedValue({
   active: false,
@@ -506,6 +533,14 @@ vi.mock("@/lib/tauri-api", () => ({
   closeTerminalSession: (...args: unknown[]) => mockCloseTerminalSession(...args),
   attachTerminalOutput: (...args: unknown[]) => mockAttachTerminalOutput(...args),
   acknowledgeTerminalOutput: (...args: unknown[]) => mockAcknowledgeTerminalOutput(...args),
+  acknowledgeTerminalOutputEnvelope: (...args: unknown[]) =>
+    mockAcknowledgeTerminalOutputEnvelope(...args),
+  repairTerminalOutputEnvelope: (...args: unknown[]) => mockRepairTerminalOutputEnvelope(...args),
+  holdTerminalOutputContinuation: (...args: unknown[]) =>
+    mockHoldTerminalOutputContinuation(...args),
+  closeTerminalOutputContinuation: (...args: unknown[]) =>
+    mockCloseTerminalOutputContinuation(...args),
+  failStopTerminalOutputSurface: (...args: unknown[]) => mockFailStopTerminalOutputSurface(...args),
   resumeTerminalOutput: (...args: unknown[]) => mockResumeTerminalOutput(...args),
   onTerminalOutputV2: (terminalId: string, callback: (payload: unknown) => void) => {
     const forward = (data: Uint8Array | Record<string, unknown>) => {
@@ -538,6 +573,15 @@ vi.mock("@/lib/tauri-api", () => ({
     queueMicrotask(exposeRegisteredListenerAfterAttach);
     return Promise.resolve(vi.fn());
   },
+  onTerminalOutputV3: (terminalId: string, callback: (payload: unknown) => void) => {
+    void mockOnTerminalOutputV3(terminalId, callback);
+    return Promise.resolve(vi.fn());
+  },
+  onTerminalOutputFailStopped: (...args: unknown[]) => mockOnTerminalOutputFailStopped(...args),
+  normalizeTerminalOutputSurfaceFailStopReason: (reason: string) =>
+    reason === "control_orphan_cap" || reason.endsWith(":control_orphan_cap")
+      ? "control_orphan_cap"
+      : "surface_unavailable",
   getRemoteControlStatus: (...args: unknown[]) => mockGetRemoteControlStatus(...args),
   onRemoteControlChanged: (...args: unknown[]) => mockOnRemoteControlChanged(...args),
   smartPaste: (...args: unknown[]) => mockSmartPaste(...args),
@@ -577,7 +621,9 @@ async function waitForLocalTerminalControl(): Promise<void> {
 // test ran last and the ordering rule silently stops applying there. Every
 // `describe` in this file must get the gate, including ones added later.
 beforeEach(() => {
+  setTerminalOutputV3RuntimeLoaderForTest();
   terminalOutputControlOperationRegistry.resetForTests();
+  resetTerminalOutputV3DiagnosticsForTest();
   armStreamAttachResetGate();
   streamAttachResetBails.length = 0;
   // Production exact-resume returns an empty delta while idle, never `null`.
@@ -593,6 +639,10 @@ beforeEach(() => {
       geometry: { revision: 0, cols: 80, rows: 24 },
     }),
   );
+  mockRepairTerminalOutputEnvelope.mockReset();
+  mockRepairTerminalOutputEnvelope.mockResolvedValue({ status: "idle", envelope: null });
+  mockFailStopTerminalOutputSurface.mockReset();
+  mockFailStopTerminalOutputSurface.mockResolvedValue(true);
 });
 
 // A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
@@ -633,6 +683,7 @@ describe("TerminalView", () => {
     escHandlers.clear();
     mockModes.synchronizedOutputMode = false;
     capturedRemoteControlChanged = null;
+    capturedTerminalOutputFailStopped = null;
     mockOutputSequence = 0;
     capturedResizeHandler = null;
     capturedScrollHandler = null;
@@ -9882,6 +9933,735 @@ describe("TerminalView desktop input composer", () => {
    * detail while allowing duplication or omission to slip through.
    */
   const writtenStream = () => decodedWrites().join("");
+
+  const v3Attachment = (nextEnvelopeId = 1) => ({
+    state: {
+      version: 1,
+      generation: 7,
+      snapshotStartSeq: 0,
+      snapshotSeq: 0,
+      sourceStartSeq: 0,
+      sourceSeq: 0,
+      snapshotKind: "raw" as const,
+      protocolRevision: 3,
+      modes: { bracketedPaste: false },
+      geometry,
+    },
+    snapshot: [],
+    flowControl: {
+      token: "lease-v3",
+      windowBytes: 524288,
+      nextEnvelopeId,
+    },
+  });
+  const v3Envelope = (
+    envelopeId: number,
+    seqStart: number,
+    text: string,
+    grantId: string | null = null,
+  ) => {
+    const data = new TextEncoder().encode(text);
+    return {
+      version: 3,
+      generation: 7,
+      leaseToken: "lease-v3",
+      envelopeId,
+      grantId,
+      seqStart,
+      seqEnd: seqStart + data.byteLength,
+      data,
+      deltaEnds: [data.byteLength],
+      geometryRuns: [{ deltaIndex: 0, geometry }],
+    };
+  };
+
+  it("registers v3 before attach and applies one buffered envelope without v2 duplication", async () => {
+    const terminalId = "t-output-v3-listener-first";
+    let resolveAttach!: (value: ReturnType<typeof v3Attachment>) => void;
+    const pendingAttach = new Promise<ReturnType<typeof v3Attachment>>((resolve) => {
+      resolveAttach = resolve;
+    });
+    mockAttachTerminalOutput.mockReturnValueOnce(pendingAttach);
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutputV3).toHaveBeenCalledWith(terminalId, expect.any(Function));
+      expect(mockAttachTerminalOutput).toHaveBeenCalled();
+    });
+    expect(mockOnTerminalOutputV3.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAttachTerminalOutput.mock.invocationCallOrder[0],
+    );
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    const snapshot = new TextEncoder().encode("SNAP");
+    const backing = new TextEncoder().encode("buffered-v3");
+    act(() => emitV3(v3Envelope(17, snapshot.byteLength, "buffered-v3")));
+
+    const attachment = v3Attachment(17);
+    resolveAttach({
+      ...attachment,
+      state: {
+        ...attachment.state,
+        snapshotSeq: snapshot.byteLength,
+        sourceSeq: snapshot.byteLength,
+      },
+      snapshot: Array.from(snapshot),
+    });
+    await waitForTerminalInputReady();
+    await vi.waitFor(() => expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalled());
+    expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledWith(
+      terminalId,
+      7,
+      "lease-v3",
+      17,
+      null,
+      snapshot.byteLength + backing.byteLength,
+    );
+    expect(mockAcknowledgeTerminalOutput.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcknowledgeTerminalOutputEnvelope.mock.invocationCallOrder[0],
+    );
+    expect(writtenStream().indexOf("SNAP")).toBeLessThan(writtenStream().indexOf("buffered-v3"));
+    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+    await vi.waitFor(() =>
+      expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+        state: "active",
+        generation: 7,
+        leaseToken: "lease-v3",
+        nextEnvelopeId: 18,
+      }),
+    );
+
+    const writesBeforeV2 = writtenStream();
+    const emitV2 = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    act(() => emitV2(outputDelta(snapshot.byteLength, "buffered-v3")));
+    await Promise.resolve();
+    expect(writtenStream()).toBe(writesBeforeV2);
+  });
+
+  it("pulls one exact missing v3 envelope before admitting its observed successor", async () => {
+    const terminalId = "t-output-v3-exact-repair";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment());
+    const repaired = v3Envelope(2, 1, "B");
+    mockRepairTerminalOutputEnvelope.mockResolvedValueOnce({
+      status: "exact",
+      envelope: repaired,
+    });
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    mockWrite.mockClear();
+    mockResumeTerminalOutput.mockClear();
+
+    act(() => emitV3(v3Envelope(1, 0, "A")));
+    await vi.waitFor(() =>
+      expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledWith(
+        terminalId,
+        7,
+        "lease-v3",
+        1,
+        null,
+        1,
+      ),
+    );
+    act(() => emitV3(v3Envelope(3, 2, "C")));
+
+    await vi.waitFor(() => expect(writtenStream()).toContain("ABC"));
+    expect(mockRepairTerminalOutputEnvelope).toHaveBeenCalledWith(
+      terminalId,
+      7,
+      "lease-v3",
+      2,
+      null,
+      1,
+    );
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+      state: "active",
+      admittedSeq: 3,
+      nextEnvelopeId: 4,
+      repairCount: 1,
+      lastRepairReason: "event-gap:exact",
+    });
+    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+  });
+
+  it("holds an active DECSET frame across a control delay above 50ms", async () => {
+    const terminalId = "t-output-v3-hold-delay";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(3));
+    let resolveHold!: (accepted: boolean) => void;
+    const pendingHold = new Promise<boolean>((resolve) => {
+      resolveHold = resolve;
+    });
+    mockHoldTerminalOutputContinuation.mockReturnValueOnce(pendingHold);
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+
+    act(() => emitV3(v3Envelope(3, 0, "\x1b[?2026hframe")));
+    await vi.waitFor(() => expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce());
+    expect(mockWrite.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      mockHoldTerminalOutputContinuation.mock.invocationCallOrder[0],
+    );
+    await new Promise((resolve) => realSetTimeout(resolve, 75));
+    expect(mockCloseTerminalOutputContinuation).not.toHaveBeenCalled();
+    expect(mockAcknowledgeTerminalOutputEnvelope).not.toHaveBeenCalled();
+
+    resolveHold(true);
+    await vi.waitFor(() => expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledOnce());
+    const grantId = mockHoldTerminalOutputContinuation.mock.calls[0][4] as string;
+    const seq = new TextEncoder().encode("\x1b[?2026hframe").byteLength;
+    act(() => emitV3(v3Envelope(4, seq, "\x1b[?2026l", grantId)));
+    await vi.waitFor(() => expect(mockCloseTerminalOutputContinuation).toHaveBeenCalledOnce());
+    expect(mockCloseTerminalOutputContinuation.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcknowledgeTerminalOutputEnvelope.mock.invocationCallOrder[1],
+    );
+  });
+
+  it("arms one deadline timer only for an active frame and expires at 5 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-v3-frame-deadline";
+      mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment());
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        payload: unknown,
+      ) => void;
+      mockCloseTerminalOutputContinuation.mockClear();
+
+      act(() => emitV3(v3Envelope(1, 0, "\x1b[?2026h")));
+      for (
+        let turn = 0;
+        turn < 10 && mockHoldTerminalOutputContinuation.mock.calls.length === 0;
+        turn += 1
+      ) {
+        await act(async () => Promise.resolve());
+      }
+      expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce();
+      await act(async () => vi.advanceTimersByTimeAsync(4_999));
+      expect(mockCloseTerminalOutputContinuation).not.toHaveBeenCalled();
+
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      await vi.waitFor(() =>
+        expect(mockCloseTerminalOutputContinuation).toHaveBeenCalledWith(
+          terminalId,
+          7,
+          "lease-v3",
+          1,
+          expect.any(String),
+          8,
+          "abort:timeout",
+        ),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("advances v3 parsed credit only at the visible/checkpoint intersection", async () => {
+    const terminalId = "t-output-v3-parsed-intersection";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(5));
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    let finishVisible!: () => void;
+    let finishCheckpoint!: () => void;
+    const checkpoint = new Promise<void>((resolve) => {
+      finishCheckpoint = resolve;
+    });
+    mockTerminalRenderCheckpointApply.mockImplementationOnce(() => checkpoint);
+    mockWrite.mockImplementationOnce((_data, callback?: () => void) => {
+      finishVisible = callback ?? (() => {});
+    });
+    mockAcknowledgeTerminalOutput.mockClear();
+
+    act(() => emitV3(v3Envelope(5, 0, "intersection")));
+    await vi.waitFor(() => expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalled());
+    expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+    act(() => finishVisible());
+    await Promise.resolve();
+    expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+
+    await act(async () => {
+      finishCheckpoint();
+      await checkpoint;
+    });
+    await vi.waitFor(() =>
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+        terminalId,
+        7,
+        "lease-v3",
+        new TextEncoder().encode("intersection").byteLength,
+      ),
+    );
+  });
+
+  it("fail-stops a rejected v3 receipt without reset, repair, or replacement attach", async () => {
+    const terminalId = "t-output-v3-fail-stop";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(9));
+    mockAcknowledgeTerminalOutputEnvelope.mockResolvedValueOnce(false);
+    mockFailStopTerminalOutputSurface.mockRejectedValueOnce(new Error("diagnostics bridge down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    const attaches = mockAttachTerminalOutput.mock.calls.length;
+    const resets = mockReset.mock.calls.length;
+    mockResumeTerminalOutput.mockClear();
+
+    act(() => emitV3(v3Envelope(9, 0, "stops-here")));
+    await vi.waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("close/recreate required"),
+        expect.objectContaining({ reason: expect.stringContaining("control:receipt") }),
+      ),
+    );
+    expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
+      "Close and recreate this pane",
+    );
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+      state: "fail-stopped",
+      generation: 7,
+      leaseToken: "lease-v3",
+      reason: expect.stringContaining("control:receipt"),
+    });
+    expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledOnce();
+    expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledWith(
+      terminalId,
+      7,
+      "lease-v3",
+      "surface_unavailable",
+    );
+    const emitV2 = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    act(() => emitV2(outputDelta(0, "must-not-replay")));
+    await new Promise((resolve) => realSetTimeout(resolve, 75));
+
+    expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attaches);
+    expect(mockReset).toHaveBeenCalledTimes(resets);
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    view.unmount();
+    expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it("accepts only a current backend v3 fail-stop without echo or recovery", async () => {
+    const terminalId = "t-output-v3-backend-fail-stop";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(4));
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const attaches = mockAttachTerminalOutput.mock.calls.length;
+    const resets = mockReset.mock.calls.length;
+
+    act(() => {
+      capturedTerminalOutputFailStopped?.({
+        terminalId: "other-terminal",
+        generation: 7,
+        leaseToken: "lease-v3",
+        reason: "surface_unavailable",
+      });
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 6,
+        leaseToken: "old-lease",
+        reason: "surface_unavailable",
+      });
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 7,
+        leaseToken: "wrong-current-generation-lease",
+        reason: "receipt_timeout",
+      });
+    });
+    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+    expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attaches);
+    expect(mockReset).toHaveBeenCalledTimes(resets);
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+
+    act(() =>
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 7,
+        leaseToken: "lease-v3",
+        reason: "receipt_timeout",
+      }),
+    );
+
+    expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
+      "Close and recreate this pane",
+    );
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+      state: "fail-stopped",
+      reason: "backend:receipt_timeout",
+    });
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+    expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attaches);
+    expect(mockReset).toHaveBeenCalledTimes(resets);
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    view.unmount();
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+  });
+
+  it("buffers a backend fail-stop until the listener-first attach reveals its identity", async () => {
+    const terminalId = "t-output-v3-buffered-backend-fail-stop";
+    let resolveAttach!: (attachment: ReturnType<typeof v3Attachment>) => void;
+    mockAttachTerminalOutput.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAttach = resolve;
+      }),
+    );
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutputFailStopped).toHaveBeenCalled();
+      expect(mockAttachTerminalOutput).toHaveBeenCalled();
+    });
+
+    act(() =>
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 7,
+        leaseToken: "lease-v3",
+        reason: "surface_unavailable",
+      }),
+    );
+    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+
+    await act(async () => resolveAttach(v3Attachment(6)));
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toBeInTheDocument(),
+    );
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+    expect(mockReset).not.toHaveBeenCalled();
+  });
+
+  it("settles a pre-attach null-token backend failure without replacement attach", async () => {
+    const terminalId = "t-output-v3-pre-attach-fail-stop";
+    let resolveAttach!: (value: {
+      kind: "failStopped";
+      terminalId: string;
+      generation: number;
+      reason: string;
+    }) => void;
+    mockAttachTerminalOutput.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAttach = resolve;
+      }),
+    );
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutputFailStopped).toHaveBeenCalled();
+      expect(mockAttachTerminalOutput).toHaveBeenCalledOnce();
+    });
+    const resetCount = mockReset.mock.calls.length;
+
+    act(() =>
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 7,
+        leaseToken: null,
+        reason: "parsed_progress_expired",
+      }),
+    );
+    expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+
+    await act(async () =>
+      resolveAttach({
+        kind: "failStopped",
+        terminalId,
+        generation: 7,
+        reason: "parsed_progress_expired",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
+        "Close and recreate this pane",
+      ),
+    );
+    await new Promise((resolve) => realSetTimeout(resolve, 75));
+
+    expect(mockAttachTerminalOutput).toHaveBeenCalledOnce();
+    expect(mockReset).toHaveBeenCalledTimes(resetCount);
+    expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    expect(mockRepairTerminalOutputEnvelope).not.toHaveBeenCalled();
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+    view.unmount();
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+  });
+
+  it("uses the typed current attach failure instead of a stale null-token notice", async () => {
+    const terminalId = "t-output-v3-stale-pre-attach-failure";
+    let resolveAttach!: (value: {
+      kind: "failStopped";
+      terminalId: string;
+      generation: number;
+      reason: string;
+    }) => void;
+    mockAttachTerminalOutput.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAttach = resolve;
+      }),
+    );
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledOnce());
+
+    act(() =>
+      capturedTerminalOutputFailStopped?.({
+        terminalId,
+        generation: 6,
+        leaseToken: null,
+        reason: "stale_failure",
+      }),
+    );
+    await act(async () =>
+      resolveAttach({
+        kind: "failStopped",
+        terminalId,
+        generation: 7,
+        reason: "continuation_expired",
+      }),
+    );
+
+    expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toBeInTheDocument();
+    expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
+      "continuation_expired",
+    );
+    expect(mockAttachTerminalOutput).toHaveBeenCalledOnce();
+    expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale hold completion after the v3 surface unmounts", async () => {
+    const terminalId = "t-output-v3-unmount";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(12));
+    mockFailStopTerminalOutputSurface.mockResolvedValueOnce(false);
+    let resolveHold!: (accepted: boolean) => void;
+    const hold = new Promise<boolean>((resolve) => {
+      resolveHold = resolve;
+    });
+    mockHoldTerminalOutputContinuation.mockReturnValueOnce(hold);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    act(() => emitV3(v3Envelope(12, 0, "\x1b[?2026h")));
+    await vi.waitFor(() => expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce());
+
+    view.unmount();
+    expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledOnce();
+    expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledWith(
+      terminalId,
+      7,
+      "lease-v3",
+      "surface_unavailable",
+    );
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toBeUndefined();
+    resolveHold(true);
+    await hold;
+    await Promise.resolve();
+    expect(mockAcknowledgeTerminalOutputEnvelope).not.toHaveBeenCalled();
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toBeUndefined();
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("close/recreate required"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
+  it("does not publish an old runtime settlement after profile replacement", async () => {
+    const terminalId = "t-output-v3-profile-late-settle";
+    mockAttachTerminalOutput
+      .mockResolvedValueOnce(v3Attachment(14))
+      .mockResolvedValueOnce(v3Attachment(20));
+    let resolveHold!: (accepted: boolean) => void;
+    const hold = new Promise<boolean>((resolve) => {
+      resolveHold = resolve;
+    });
+    mockHoldTerminalOutputContinuation.mockReturnValueOnce(hold);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    const oldEmit = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+      payload: unknown,
+    ) => void;
+    act(() => oldEmit(v3Envelope(14, 0, "\x1b[?2026h")));
+    await vi.waitFor(() => expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce());
+
+    view.rerender(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+    await vi.waitFor(() =>
+      expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+        state: "active",
+        nextEnvelopeId: 20,
+      }),
+    );
+    resolveHold(true);
+    await hold;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+      state: "active",
+      reason: null,
+      nextEnvelopeId: 20,
+    });
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining("close/recreate required"),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
+  it("does not revive runtime, diagnostics, or timers when a v3 import settles after unmount", async () => {
+    const terminalId = "t-output-v3-import-unmount";
+    type RuntimeModule = typeof import("@/lib/terminal-output-v3-runtime");
+    let resolveRuntime!: (module: RuntimeModule) => void;
+    const pendingRuntime = new Promise<RuntimeModule>((resolve) => {
+      resolveRuntime = resolve;
+    });
+    const loadRuntime = vi.fn(() => pendingRuntime);
+    class FakeRuntime {
+      static constructions = 0;
+      constructor() {
+        FakeRuntime.constructions += 1;
+      }
+    }
+    setTerminalOutputV3RuntimeLoaderForTest(loadRuntime);
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(20));
+    const intervalSpy = vi.spyOn(globalThis, "setInterval");
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(loadRuntime).toHaveBeenCalledOnce());
+
+    view.unmount();
+    const intervalsAfterUnmount = intervalSpy.mock.calls.length;
+    await act(async () => {
+      resolveRuntime({
+        TerminalOutputV3Runtime: FakeRuntime as unknown as RuntimeModule["TerminalOutputV3Runtime"],
+      });
+      await pendingRuntime;
+      await Promise.resolve();
+    });
+
+    expect(FakeRuntime.constructions).toBe(0);
+    expect(intervalSpy).toHaveBeenCalledTimes(intervalsAfterUnmount);
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toBeUndefined();
+    intervalSpy.mockRestore();
+    setTerminalOutputV3RuntimeLoaderForTest();
+  });
+
+  it("uses the v3 exact watchdog without invoking the legacy v2 resume path", async () => {
+    vi.useFakeTimers();
+    type RuntimeModule = typeof import("@/lib/terminal-output-v3-runtime");
+    const pollExactRepair = vi.fn(() => Promise.resolve(undefined));
+    const flushExpired = vi.fn(() => Promise.resolve());
+    class FakeRuntime {
+      get continuationDeadline() {
+        return undefined;
+      }
+      receive() {
+        return Promise.resolve({ kind: "accepted" as const, envelopeId: 1 });
+      }
+      pollExactRepair = pollExactRepair;
+      flushExpired = flushExpired;
+      diagnostics() {
+        return {
+          admittedSeq: 0,
+          parsedSeq: 0,
+          nextEnvelopeId: 1,
+          activeGrantId: null,
+          repairCount: 0,
+          lastRepairReason: null,
+        };
+      }
+      dispose() {}
+    }
+    setTerminalOutputV3RuntimeLoaderForTest(() =>
+      Promise.resolve({
+        TerminalOutputV3Runtime: FakeRuntime as unknown as RuntimeModule["TerminalOutputV3Runtime"],
+      }),
+    );
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment());
+    try {
+      render(<TerminalView instanceId="t-output-v3-watchdog" profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockResumeTerminalOutput.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+
+      expect(pollExactRepair).toHaveBeenCalledTimes(1);
+      expect(flushExpired).not.toHaveBeenCalled();
+      expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      setTerminalOutputV3RuntimeLoaderForTest();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not revive the old v3 epoch when its import settles after profile replacement", async () => {
+    const terminalId = "t-output-v3-import-epoch";
+    type RuntimeModule = typeof import("@/lib/terminal-output-v3-runtime");
+    let resolveOld!: (module: RuntimeModule) => void;
+    let resolveCurrent!: (module: RuntimeModule) => void;
+    const oldRuntime = new Promise<RuntimeModule>((resolve) => {
+      resolveOld = resolve;
+    });
+    const currentRuntime = new Promise<RuntimeModule>((resolve) => {
+      resolveCurrent = resolve;
+    });
+    const loadRuntime = vi
+      .fn<() => Promise<RuntimeModule>>()
+      .mockReturnValueOnce(oldRuntime)
+      .mockReturnValueOnce(currentRuntime);
+    class FakeRuntime {
+      static constructions = 0;
+      constructor() {
+        FakeRuntime.constructions += 1;
+      }
+    }
+    const fakeModule = {
+      TerminalOutputV3Runtime: FakeRuntime as unknown as RuntimeModule["TerminalOutputV3Runtime"],
+    };
+    setTerminalOutputV3RuntimeLoaderForTest(loadRuntime);
+    mockAttachTerminalOutput
+      .mockResolvedValueOnce(v3Attachment(30))
+      .mockResolvedValueOnce(v3Attachment(40));
+    const intervalSpy = vi.spyOn(globalThis, "setInterval");
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(loadRuntime).toHaveBeenCalledTimes(1));
+    view.rerender(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" />);
+    await vi.waitFor(() => expect(loadRuntime).toHaveBeenCalledTimes(2));
+    const intervalsBeforeOldSettlement = intervalSpy.mock.calls.length;
+
+    await act(async () => {
+      resolveOld(fakeModule);
+      await oldRuntime;
+      await Promise.resolve();
+    });
+    expect(FakeRuntime.constructions).toBe(0);
+    expect(intervalSpy).toHaveBeenCalledTimes(intervalsBeforeOldSettlement);
+    expect(allTerminalOutputV3Diagnostics()[terminalId]).toBeUndefined();
+
+    view.unmount();
+    resolveCurrent(fakeModule);
+    await currentRuntime;
+    await Promise.resolve();
+    expect(FakeRuntime.constructions).toBe(0);
+    intervalSpy.mockRestore();
+    setTerminalOutputV3RuntimeLoaderForTest();
+  });
 
   it("ACKs only after visible and checkpoint parse while detectors run immediately", async () => {
     const terminalId = "t-output-parsed-credit-intersection";
