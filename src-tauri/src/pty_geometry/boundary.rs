@@ -52,7 +52,12 @@ impl GeometryBoundaryTracker {
                         self.synchronized_output = false;
                         Ground
                     }
+                    0x20..=0x2f => EscapeIntermediate,
                     0x00..=0x17 | 0x19 | 0x1c..=0x1f | 0x7f => Escape,
+                    _ => Ground,
+                },
+                EscapeIntermediate => match byte {
+                    0x20..=0x2f | 0x00..=0x17 | 0x19 | 0x1c..=0x1f | 0x7f => EscapeIntermediate,
                     _ => Ground,
                 },
                 Csi(mut tracker) => match byte {
@@ -120,7 +125,7 @@ impl GeometryBoundaryTracker {
             Dcs(DcsState::Passthrough) => Dcs(DcsState::Passthrough),
             // xterm's transition table has no NON_ASCII_PRINTABLE transition
             // for these states, so its ERROR fallback returns to Ground.
-            Escape | Csi(_) | Dcs(_) | IgnoredString => Ground,
+            Escape | EscapeIntermediate | Csi(_) | Dcs(_) | IgnoredString => Ground,
         };
     }
 }
@@ -130,6 +135,7 @@ enum LexicalState {
     #[default]
     Ground,
     Escape,
+    EscapeIntermediate,
     Csi(CsiTracker),
     Osc,
     Dcs(DcsState),

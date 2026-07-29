@@ -2,6 +2,8 @@
 fn split_control_strings_and_dec2026_frame_fail_prepare_without_physical_call() {
     let cases = [
         vec![b"\x1b".to_vec(), b"]title".to_vec()],
+        vec![b"\x1b".to_vec(), b"(".to_vec()],
+        vec![b"\x1b#".to_vec()],
         vec![b"\x1b[31".to_vec()],
         vec![b"\x1bPpayload".to_vec()],
         vec![b"\x1b_payload".to_vec()],
@@ -193,6 +195,8 @@ fn failed_abort_keeps_the_transaction_quarantined_until_teardown() {
 #[test]
 fn complete_split_sequences_and_closed_dec2026_frame_can_prepare() {
     let chunks = vec![
+        b"\x1b".to_vec(),
+        b"(B".to_vec(),
         b"\x1b]title\x1b".to_vec(),
         b"\\\x1b[?2026hframe\x1b[?2026".to_vec(),
         b"l\x1bPdata\x1b\\".to_vec(),
