@@ -200,11 +200,7 @@ export class TerminalWriteBatchQueue<
     );
     let partCount = 1;
     let byteLength = dataByteLength(first.data);
-    if (
-      allowCoalescing &&
-      isIndividuallyCoalescible(first) &&
-      byteLength <= coalescingByteLimit
-    ) {
+    if (allowCoalescing && isIndividuallyCoalescible(first) && byteLength <= coalescingByteLimit) {
       while (partCount < TERMINAL_WRITE_BATCH_MAX_PARTS) {
         const candidate = this.entries[this.headIndex + partCount];
         if (!candidate || candidate.id > cutoffMaxId || !canJoin(first, candidate)) break;
