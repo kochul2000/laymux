@@ -210,23 +210,20 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("한ab");
   });
 
-  it(
-    "reconciles buffered keypress text before an ordinary keydown finalizes immediately",
-    async () => {
-      const { emitted, textarea } = openTerminal();
-      startComposition(textarea, "한");
-      await flushEventLoop();
+  it("reconciles buffered keypress text before an ordinary keydown finalizes immediately", async () => {
+    const { emitted, textarea } = openTerminal();
+    startComposition(textarea, "한");
+    await flushEventLoop();
 
-      textarea.value = "";
-      endComposition(textarea, "한");
-      dispatchKeypress(textarea, "한");
-      textarea.value = "한";
-      textarea.selectionStart = 1;
-      textarea.selectionEnd = 1;
-      dispatchKeydown(textarea, "a", "KeyA", 65);
-      await flushEventLoop();
+    textarea.value = "";
+    endComposition(textarea, "한");
+    dispatchKeypress(textarea, "한");
+    textarea.value = "한";
+    textarea.selectionStart = 1;
+    textarea.selectionEnd = 1;
+    dispatchKeydown(textarea, "a", "KeyA", 65);
+    await flushEventLoop();
 
-      expect(emitted.join("")).toBe("한a");
-    },
-  );
+    expect(emitted.join("")).toBe("한a");
+  });
 });

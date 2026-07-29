@@ -12,9 +12,9 @@ const moduleUserOnlyDisableStdinGate = "if(this._optionsService.rawOptions.disab
 const commonJsUserOnlyDisableStdinGate =
   "if(this._optionsService.rawOptions.disableStdin&&t)return;";
 const moduleCompositionKeypressOwner =
-  'keypress(t){return this._isSendingComposition?(this._pendingKeypressData+=t,!0):!1}';
+  "keypress(t){return this._isSendingComposition?(this._pendingKeypressData+=t,!0):!1}";
 const commonJsCompositionKeypressOwner =
-  'keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}';
+  "keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}";
 const compositionReconcileOwner = "_sendCompositionInput(t){const e=this._pendingKeypressData;";
 const moduleCompositionKeypressHandoff =
   "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0)";

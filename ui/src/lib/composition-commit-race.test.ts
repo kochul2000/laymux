@@ -57,8 +57,9 @@ const writeTerminal = (terminal: Terminal, data: string) =>
 
 function readXtermComposing(terminal: Terminal): boolean {
   return (
-    terminal as Terminal & { _core?: { _compositionHelper?: { _isComposing?: unknown } } }
-  )._core?._compositionHelper?._isComposing === true;
+    (terminal as Terminal & { _core?: { _compositionHelper?: { _isComposing?: unknown } } })._core
+      ?._compositionHelper?._isComposing === true
+  );
 }
 
 afterEach(async () => {

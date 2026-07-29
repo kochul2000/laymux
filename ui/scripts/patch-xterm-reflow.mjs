@@ -35,49 +35,47 @@ const commonJsCompositionStatePatched =
   'this._compositionPosition={start:0,end:0},this._dataAlreadySent="",this._pendingKeypressData=""';
 
 const moduleCompositionKeypressOriginal =
-  'return t.keyCode===229?(this._handleAnyTextareaChanges(),!1):!0}_finalizeComposition(t){';
+  "return t.keyCode===229?(this._handleAnyTextareaChanges(),!1):!0}_finalizeComposition(t){";
 const moduleCompositionKeypressPatched =
-  'return t.keyCode===229?(this._handleAnyTextareaChanges(),!1):!0}keypress(t){return this._isSendingComposition?(this._pendingKeypressData+=t,!0):!1}_finalizeComposition(t){';
+  "return t.keyCode===229?(this._handleAnyTextareaChanges(),!1):!0}keypress(t){return this._isSendingComposition?(this._pendingKeypressData+=t,!0):!1}_finalizeComposition(t){";
 const commonJsCompositionKeypressOriginal =
-  'return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}_finalizeComposition(e){';
+  "return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}_finalizeComposition(e){";
 const commonJsCompositionKeypressPatched =
-  'return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}_finalizeComposition(e){';
+  "return 229!==e.keyCode||(this._handleAnyTextareaChanges(),!1)}keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}_finalizeComposition(e){";
 
 const moduleCompositionPendingResetOriginal =
-  'let e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._isSendingComposition=!0';
+  "let e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._isSendingComposition=!0";
 const moduleCompositionPendingResetPatched =
   'let e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._pendingKeypressData="",this._isSendingComposition=!0';
 const commonJsCompositionPendingResetOriginal =
-  'const e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._isSendingComposition=!0';
+  "const e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._isSendingComposition=!0";
 const commonJsCompositionPendingResetPatched =
   'const e={start:this._compositionPosition.start,end:this._compositionPosition.end};this._pendingKeypressData="",this._isSendingComposition=!0';
 
 const moduleCompositionDeferredSendOriginal =
-  'i.length>0&&this._coreService.triggerDataEvent(i,!0)';
-const moduleCompositionDeferredSendPatched = 'this._sendCompositionInput(i)';
+  "i.length>0&&this._coreService.triggerDataEvent(i,!0)";
+const moduleCompositionDeferredSendPatched = "this._sendCompositionInput(i)";
 const commonJsCompositionDeferredSendOriginal =
-  't.length>0&&this._coreService.triggerDataEvent(t,!0)';
-const commonJsCompositionDeferredSendPatched = 'this._sendCompositionInput(t)';
+  "t.length>0&&this._coreService.triggerDataEvent(t,!0)";
+const commonJsCompositionDeferredSendPatched = "this._sendCompositionInput(t)";
 
 const compositionReconcileMethod =
   '_sendCompositionInput(t){const e=this._pendingKeypressData;if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s?t+e.substring(i):e+t.substring(s)}this._pendingKeypressData="",t.length>0&&this._coreService.triggerDataEvent(t,!0)}';
 const moduleCompositionImmediateSendOriginal =
-  'this._coreService.triggerDataEvent(e,!0)}}_handleAnyTextareaChanges(){';
-const moduleCompositionImmediateSendPatched =
-  `this._sendCompositionInput(e)}}${compositionReconcileMethod}_handleAnyTextareaChanges(){`;
+  "this._coreService.triggerDataEvent(e,!0)}}_handleAnyTextareaChanges(){";
+const moduleCompositionImmediateSendPatched = `this._sendCompositionInput(e)}}${compositionReconcileMethod}_handleAnyTextareaChanges(){`;
 const commonJsCompositionImmediateSendOriginal =
-  'this._coreService.triggerDataEvent(e,!0)}}_handleAnyTextareaChanges(){';
-const commonJsCompositionImmediateSendPatched =
-  `this._sendCompositionInput(e)}}${compositionReconcileMethod}_handleAnyTextareaChanges(){`;
+  "this._coreService.triggerDataEvent(e,!0)}}_handleAnyTextareaChanges(){";
+const commonJsCompositionImmediateSendPatched = `this._sendCompositionInput(e)}}${compositionReconcileMethod}_handleAnyTextareaChanges(){`;
 
 const moduleTerminalKeypressSendOriginal =
-  'this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0';
+  "this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
 const moduleTerminalKeypressSendPatched =
-  'this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0';
+  "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
 const commonJsTerminalKeypressSendOriginal =
-  'this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0';
+  "this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0";
 const commonJsTerminalKeypressSendPatched =
-  'this._compositionHelper.keypress(t)||this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0';
+  "this._compositionHelper.keypress(t)||this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0";
 
 async function patchBundle(target, replacements) {
   const source = await readFile(target, "utf8");
