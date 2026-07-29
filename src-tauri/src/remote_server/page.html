@@ -6817,7 +6817,7 @@
         async function resizeTerminal(terminalId, activeLeaseId, cols, rows) {
           await remoteFetch(`/remote/v1/terminals/${encodeURIComponent(terminalId)}/resize`, {
             method: "POST",
-            body: JSON.stringify({ leaseId: activeLeaseId, cols, rows }),
+            body: JSON.stringify({ leaseId: activeLeaseId, cols, rows, exact: false }),
           });
         }
 

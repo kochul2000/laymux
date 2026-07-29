@@ -104,7 +104,7 @@ ADR 이 필요한 대표 기준:
 | [0084](0084-desktop-terminal-output-parsed-credit.md) | desktop output은 parsed ACK credit으로 PTY producer를 유한하게 제한한다 (0072 일부 대체·0080 확장) | Accepted |
 | [0085](0085-provenance-barrier-three-phase-geometry-cutover.md) | PTY geometry cutover는 provenance barrier와 three-phase transaction이 소유 | Accepted |
 | [0086](0086-terminal-output-control-epoch-watchdog.md) | terminal output attach·ACK IPC는 epoch watchdog으로 stale lease를 유한하게 교체한다 (0084 확장) | Accepted |
-| [0087](0087-mutex-poison-fail-closed-discard-only.md) | Mutex poison은 기본 fail-closed이며 폐기 전용 close만 guard를 회수한다 (0084 확장) | Proposed |
+| [0087](0087-mutex-poison-fail-closed-discard-only.md) | Mutex poison은 기본 fail-closed이며 폐기 전용 close만 guard를 회수한다 (0084 확장) | Accepted |
 
 ## 새 ADR 추가
 

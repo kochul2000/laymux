@@ -174,3 +174,79 @@ describe("accepted write callback no-throw boundary (issue #624)", () => {
     surface.dispose();
   });
 });
+
+describe("xterm UTF-8 decoding precedes VT control parsing (issue #632)", () => {
+  it("keeps a Korean OSC payload open until BEL despite its trailing 0x9c byte", async () => {
+    const surface = createScreenTerminal({ cols: 20, rows: 3 });
+    const payloads: string[] = [];
+    const handler = surface.terminal.parser.registerOscHandler(0, (payload) => {
+      payloads.push(payload);
+      return true;
+    });
+    const prefix = new TextEncoder().encode("\x1b]0;한");
+
+    await surface.write(prefix.slice(0, -1));
+    expect(Array.from(prefix.slice(-3))).toEqual([0xed, 0x95, 0x9c]);
+    expect(payloads).toEqual([]);
+    await surface.write(prefix.slice(-1));
+    expect(payloads).toEqual([]);
+
+    await surface.write(Uint8Array.of(0x07));
+    expect(payloads).toEqual(["한"]);
+
+    handler.dispose();
+    surface.dispose();
+  });
+
+  it("discards a standalone invalid UTF-8 C1 byte instead of treating it as ST", async () => {
+    const surface = createScreenTerminal({ cols: 20, rows: 3 });
+    const payloads: string[] = [];
+    const handler = surface.terminal.parser.registerOscHandler(0, (payload) => {
+      payloads.push(payload);
+      return true;
+    });
+
+    await surface.write(Uint8Array.from([0x1b, 0x5d, 0x30, 0x3b, 0x9c]));
+    expect(payloads).toEqual([]);
+    await surface.write(Uint8Array.of(0x07));
+    expect(payloads).toEqual([""]);
+
+    handler.dispose();
+    surface.dispose();
+  });
+
+  it("recognizes a valid UTF-8 encoding of the U+009C C1 scalar as ST", async () => {
+    const surface = createScreenTerminal({ cols: 20, rows: 3 });
+    const payloads: string[] = [];
+    const handler = surface.terminal.parser.registerOscHandler(0, (payload) => {
+      payloads.push(payload);
+      return true;
+    });
+
+    await surface.write(Uint8Array.from([0x1b, 0x5d, 0x30, 0x3b, 0x6f, 0x6b, 0xc2, 0x9c]));
+    expect(payloads).toEqual(["ok"]);
+
+    handler.dispose();
+    surface.dispose();
+  });
+
+  it("does not execute a CSI mode when a decoded non-ASCII scalar interrupts it", async () => {
+    const surface = createScreenTerminal({ cols: 20, rows: 3 });
+    const modes: number[][] = [];
+    const handler = surface.terminal.parser.registerCsiHandler(
+      { prefix: "?", final: "h" },
+      (params) => {
+        modes.push(params.toArray());
+        return true;
+      },
+    );
+
+    await surface.write(
+      Uint8Array.from([0x1b, 0x5b, 0x3f, 0x32, 0x30, 0x32, 0x36, 0x3b, 0xe1, 0x80, 0x9b, 0x68]),
+    );
+    expect(modes).toEqual([]);
+
+    handler.dispose();
+    surface.dispose();
+  });
+});

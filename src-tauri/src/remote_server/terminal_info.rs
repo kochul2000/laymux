@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 use crate::lock_ext::MutexExt;
+use crate::pty_geometry::{production_geometry_capabilities, TerminalGeometryCapabilities};
 use crate::settings::models::Settings;
 use crate::state::AppState;
 
@@ -18,6 +19,7 @@ pub(super) struct RemoteTerminalInfo {
     pub(super) rows: u16,
     pub(super) sync_group: String,
     pub(super) command_running: bool,
+    pub(super) geometry_capabilities: TerminalGeometryCapabilities,
     pub(super) appearance: RemoteTerminalAppearance,
 }
 
@@ -60,6 +62,7 @@ fn resolve_appearances(
         .into_iter()
         .map(|snapshot| RemoteTerminalInfo {
             appearance: resolve_remote_terminal_appearance(&snapshot.profile, settings),
+            geometry_capabilities: production_geometry_capabilities(),
             id: snapshot.id,
             title: snapshot.title,
             profile: snapshot.profile,

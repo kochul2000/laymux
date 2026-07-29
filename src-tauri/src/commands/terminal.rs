@@ -14,6 +14,7 @@ use crate::osc;
 use crate::osc_hooks::{self, CommandStatusField, OscAction};
 use crate::path_utils;
 use crate::pty;
+use crate::pty_geometry::{self, TerminalGeometryCapabilities};
 use crate::pty_trace;
 use crate::remote_server::{begin_human_control_operation, HumanControlOrigin, HumanControlPermit};
 use crate::state::AppState;
@@ -938,12 +939,29 @@ fn terminate_uninstalled_pty(handle: &pty::PtyHandle, error: impl std::fmt::Disp
 }
 
 #[tauri::command]
+pub fn get_terminal_geometry_capabilities() -> TerminalGeometryCapabilities {
+    pty_geometry::production_geometry_capabilities()
+}
+
+fn validate_exact_geometry_request(exact: bool) -> Result<(), String> {
+    if exact {
+        pty_geometry::reject_unavailable_exact_geometry()
+    } else {
+        Ok(())
+    }
+}
+
+#[tauri::command]
 pub fn resize_terminal(
     id: String,
     cols: u16,
     rows: u16,
+    exact: Option<bool>,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
+    // Reject before logical geometry publication, permit registration, FIFO
+    // enqueue, or `MasterPty::resize()`.
+    validate_exact_geometry_request(exact.unwrap_or(false))?;
     resize_terminal_inner(&state, &id, cols, rows, HumanControlOrigin::Local)
 }
 
@@ -1842,6 +1860,14 @@ mod tests {
             &*written.lock().unwrap(),
             b"local-rawlocal-input\rremote-rawremote-input\r"
         );
+    }
+
+    #[test]
+    fn exact_resize_entry_rejects_before_the_legacy_resize_path() {
+        assert!(validate_exact_geometry_request(false).is_ok());
+        let error = validate_exact_geometry_request(true).unwrap_err();
+        assert!(error.contains("#636"));
+        assert!(!get_terminal_geometry_capabilities().exact_geometry_cutover);
     }
 
     #[test]

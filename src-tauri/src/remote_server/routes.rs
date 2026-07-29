@@ -98,6 +98,8 @@ struct TerminalResizeRequest {
     cols: u16,
     rows: u16,
     lease_id: Option<String>,
+    #[serde(default)]
+    exact: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -620,6 +622,9 @@ async fn remote_terminal_resize(
     if !terminal_size_is_positive(body.cols, body.rows) {
         return json_error(StatusCode::BAD_REQUEST, "terminal size must be positive");
     }
+    if body.exact {
+        return exact_resize_unavailable_response(&server.app_state, &lease_id);
+    }
 
     terminal_control_response(resize_terminal_inner(
         &server.app_state,
@@ -628,6 +633,16 @@ async fn remote_terminal_resize(
         body.rows,
         HumanControlOrigin::Remote { lease_id },
     ))
+}
+
+fn exact_resize_unavailable_response(
+    app_state: &crate::state::AppState,
+    lease_id: &str,
+) -> Response {
+    if let Err(response) = require_active_lease(app_state, Some(lease_id)) {
+        return response;
+    }
+    terminal_control_response(crate::pty_geometry::reject_unavailable_exact_geometry())
 }
 
 async fn remote_terminal_output_ws(
@@ -836,6 +851,9 @@ fn terminal_control_response(result: Result<(), String>) -> Response {
         Err(err) if err.contains("size must be positive") => {
             json_error(StatusCode::BAD_REQUEST, &err)
         }
+        Err(err) if err.contains("exact terminal geometry cutover is unavailable") => {
+            json_error(StatusCode::NOT_IMPLEMENTED, &err)
+        }
         Err(err) if err.contains("exceed") || err.contains("too large") => {
             json_error(StatusCode::PAYLOAD_TOO_LARGE, &err)
         }
@@ -865,10 +883,13 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        attempt_claim, claim_input_busy_response, terminal_control_response,
-        terminal_size_is_positive, ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlState,
+        attempt_claim, claim_input_busy_response, exact_resize_unavailable_response,
+        terminal_control_response, terminal_size_is_positive, ClaimAttempt, ClaimRequest,
+        ClaimResponse, RemoteControlLease, RemoteControlState, TerminalResizeRequest,
     };
+    use crate::lock_ext::MutexExt;
     use crate::settings::models::RemoteSettings;
+    use crate::state::AppState;
     use axum::body::{to_bytes, Body};
     use axum::extract::Request;
     use axum::http::StatusCode;
@@ -952,6 +973,73 @@ mod tests {
         assert!(!terminal_size_is_positive(80, 0));
         assert!(!terminal_size_is_positive(0, 0));
         assert!(terminal_size_is_positive(80, 24));
+    }
+
+    #[test]
+    fn remote_resize_schema_defaults_to_guarded_and_exact_is_fail_closed() {
+        let guarded: TerminalResizeRequest = serde_json::from_value(serde_json::json!({
+            "cols": 80,
+            "rows": 24,
+            "leaseId": "lease-1"
+        }))
+        .unwrap();
+        assert!(!guarded.exact);
+
+        let exact: TerminalResizeRequest = serde_json::from_value(serde_json::json!({
+            "cols": 120,
+            "rows": 40,
+            "leaseId": "lease-1",
+            "exact": true
+        }))
+        .unwrap();
+        assert!(exact.exact);
+        let response =
+            terminal_control_response(crate::pty_geometry::reject_unavailable_exact_geometry());
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    fn state_with_route_test_lease(lease_id: &str, last_heartbeat: Instant) -> AppState {
+        let state = AppState::new();
+        state.remote_control.lock_or_err().unwrap().lease = Some(RemoteControlLease {
+            lease_id: lease_id.into(),
+            remote_addr: "127.0.0.1:1".into(),
+            client_name: None,
+            last_heartbeat,
+        });
+        state
+    }
+
+    #[test]
+    fn exact_resize_validates_active_lease_before_reporting_unavailable() {
+        let state = state_with_route_test_lease("lease-1", Instant::now());
+
+        let bogus = exact_resize_unavailable_response(&state, "bogus");
+        let valid = exact_resize_unavailable_response(&state, "lease-1");
+
+        assert_eq!(bogus.status(), StatusCode::CONFLICT);
+        assert_eq!(valid.status(), StatusCode::NOT_IMPLEMENTED);
+        assert!(!state
+            .remote_control
+            .lock_or_err()
+            .unwrap()
+            .has_active_operations());
+    }
+
+    #[test]
+    fn exact_resize_rejects_an_expired_lease_before_capability_rejection() {
+        let state = state_with_route_test_lease(
+            "stale",
+            Instant::now() - Duration::from_secs(24 * 60 * 60),
+        );
+
+        let stale = exact_resize_unavailable_response(&state, "stale");
+
+        assert_eq!(stale.status(), StatusCode::CONFLICT);
+        assert!(!state
+            .remote_control
+            .lock_or_err()
+            .unwrap()
+            .has_active_operations());
     }
 
     #[test]

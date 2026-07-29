@@ -23,6 +23,10 @@ pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 /// `useAutoRemoteAccessPrompt`).
 pub const EVENT_REMOTE_SESSION_CHANGED: &str = "remote-session-changed";
 pub const EVENT_TERMINAL_OUTPUT_V2_PREFIX: &str = "terminal-output-v2-";
+/// Production exact geometry entry remains fail-closed until #636 supplies an
+/// OS-proven producer-freeze/drain or kernel byte-epoch adapter (ADR-0085).
+pub const EXACT_GEOMETRY_CUTOVER_UNAVAILABLE: &str =
+    "exact terminal geometry cutover is unavailable on this PTY backend (follow-up issue #636)";
 
 /// Poll interval for the OS remote-session watcher. RDP connect/disconnect is a
 /// rare, human-scale event, so a slow poll keeps the cost negligible.
