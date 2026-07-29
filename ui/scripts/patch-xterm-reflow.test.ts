@@ -11,8 +11,21 @@ const staleDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin)r
 const moduleUserOnlyDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin&&i)return;";
 const commonJsUserOnlyDisableStdinGate =
   "if(this._optionsService.rawOptions.disableStdin&&t)return;";
+const moduleCompositionKeypressOwner =
+  'keypress(t){return this._isSendingComposition?(this._pendingKeypressData+=t,!0):!1}';
+const commonJsCompositionKeypressOwner =
+  'keypress(e){return!!this._isSendingComposition&&(this._pendingKeypressData+=e,!0)}';
+const compositionReconcileOwner = "_sendCompositionInput(t){const e=this._pendingKeypressData;";
+const moduleCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0)";
+const commonJsCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(t)||this.coreService.triggerDataEvent(t,!0)";
+const moduleUnreconciledKeypressSend =
+  "this._showCursor(),this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
+const commonJsUnreconciledKeypressSend =
+  "this._showCursor(),this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0";
 
-describe("xterm wider-reflow patch", () => {
+describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
     const source = await readFile(moduleTarget, "utf8");
 
@@ -30,5 +43,21 @@ describe("xterm wider-reflow patch", () => {
     expect(commonJsSource).toContain(commonJsUserOnlyDisableStdinGate);
     expect(moduleSource).not.toContain(staleDisableStdinGate);
     expect(commonJsSource).not.toContain(staleDisableStdinGate);
+  });
+
+  it("reconciles pending composition keypress text in both pinned xterm bundles", async () => {
+    const [moduleSource, commonJsSource] = await Promise.all([
+      readFile(moduleTarget, "utf8"),
+      readFile(commonJsTarget, "utf8"),
+    ]);
+
+    expect(moduleSource).toContain(moduleCompositionKeypressOwner);
+    expect(commonJsSource).toContain(commonJsCompositionKeypressOwner);
+    expect(moduleSource).toContain(compositionReconcileOwner);
+    expect(commonJsSource).toContain(compositionReconcileOwner);
+    expect(moduleSource).toContain(moduleCompositionKeypressHandoff);
+    expect(commonJsSource).toContain(commonJsCompositionKeypressHandoff);
+    expect(moduleSource).not.toContain(moduleUnreconciledKeypressSend);
+    expect(commonJsSource).not.toContain(commonJsUnreconciledKeypressSend);
   });
 });

@@ -542,16 +542,16 @@ composition preview 는 shadow cursor 로 그리지만, OS 후보창은 포커�
 - **원복 의무**: 조합 종료 · 두 커서 재일치 · overlay 가 숨는 모든 경로(비포커스·scrollback·geometry 미확정) · helper 교체 · unmount 에서 저장해 둔 원래 inline 값으로 되돌린다.
 - **진단**: `ime-anchor-hold-started`/`-reapplied`/`-restored` 를 기존 cursor-trace 채널(§8.5 와 동일 sink)에 남긴다. native 후보창의 실제 위치는 OS 창이라 스크린샷에 잡히지 않아 이 trace 로 사람이 확인한다.
 
-### 8.14 조합 commit 과 pending keypress 경합 (issue #527)
+### 8.14 조합 commit 과 pending keypress 경합 (issues #527, #660)
 
-xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를 즉시 보내지 않는다 — 조합 범위를 캡처하고 `_isSendingComposition = true` 로 표시한 뒤 `setTimeout(0)` 안에서 `textarea.value.substring(start)` 를 읽어 `triggerDataEvent` 한다. `_keyPress` 는 그 창을 모르고 자기 문자를 독립적으로 보내므로, 그 사이 도착한 keypress 가 같은 음절을 **한 번 더** 보낸다([ADR-0062](../adr/0062-composition-commit-keypress-race.md)).
+xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를 즉시 보내지 않는다 — 조합 범위를 캡처하고 `_isSendingComposition = true` 로 표시한 뒤 `setTimeout(0)` 안에서 textarea 최종값을 읽는다. 그 사이 legacy `keypress` 가 오면 같은 입력이 (1) keypress 경로와 (2) 나중에 복원된 textarea candidate 두 곳에 나타날 수 있다. 반대로 keypress 시점의 임시 candidate만 보고 한쪽을 즉시 버리면 빠른 입력을 잃는다([ADR-0093](../adr/0093-xterm-composition-keypress-reconciliation-owner.md), [ADR-0062](../adr/0062-composition-commit-keypress-race.md) 대체).
 
-- **재현됨**: 실제 `Terminal` 에 `compositionstart -> update -> end -> keypress -> flush` 를 태우면 `onData = ["가", "가"]`, keypress 를 빼면 `["가"]`. 경합은 플랫폼이 아니라 xterm 자신의 지연 전송 타이밍이라 Linux/IBus 실기 없이 재현된다.
-- **판정**: `ui/src/lib/composition-commit-race.ts` 가 소유한다. finalizer 가 읽을 슬라이스를 같은 식으로 재현하고(`value.slice(compositionStart + dataAlreadySent.length)`), keypress 문자가 그 텍스트와 동일/포함/끝 경계 중첩이면 중복으로 본다.
-- **보수성의 방향은 전달**: pending commit 이 비었거나 · 상태를 못 읽거나 · keypress 가 텍스트를 안 싣거나 · 문자가 commit 에 없으면 전달한다. 중복보다 유실이 나쁘고, pending 창 동안 사용자가 새로 누른 문자를 삼켜서는 안 된다.
-- **xterm 상태 읽기는 한 곳**: `ui/src/lib/xterm-pending-composition.ts` 가 private 필드 5개(`_compositionHelper`·`_isSendingComposition`·`_compositionPosition`·`_dataAlreadySent`·`_textarea`)를 방어적으로 읽고 목록을 상수로 노출한다. 형태가 달라지면 `null` → 판정은 전달로 떨어져 **guard 가 스스로 꺼진다**(입력을 삼키지 않는다). 동시에 실제 `Terminal` 계약 테스트가 필드 존재를 단정해 xterm 상향 시 읽을 수 있는 실패로 드러난다.
-- **번들 패치는 하지 않았다**: 상류 `_keyPress` 수정이 정론이지만 patch 인프라와 버전 상향 비용이 확정적으로 붙는다. 같은 판정 지점에서 xterm 자신의 pending 플래그를 읽어 없는 guard 를 적용하는 방식으로 대체했고, 상류에 guard 가 들어오면 제거 대상이다.
-- **미검증**: 실 IBus 이벤트열이 이 순서와 같은지, 그리고 **유실 방향**(pending 창 동안 textarea 값이 바뀌는 경로)은 재현하지 않았다 — 중복 방향만 재현했다.
+- **상태 소유자는 CompositionHelper 하나다**: exact bundle patch가 xterm 6.0.0 ESM/CJS의 `CompositionHelper.keypress(text)`를 추가한다. `_isSendingComposition`이 true일 때 CoreBrowserTerminal은 keypress를 즉시 PTY로 보내지 않고 `_pendingKeypressData`에 순서대로 보류한다. 일반 keypress는 기존 경로를 그대로 쓴다.
+- **최종 candidate와 한 번 조정한다**: delayed timer와 일반 keydown의 immediate finalize가 모두 `_sendCompositionInput`으로 들어간다. candidate/keyPress가 서로를 포함하면 더 긴 쪽을 택하고, 아니면 양방향 suffix-prefix 최장 overlap을 비교해 가장 짧은 ordered merge를 만든다. overlap이 같으면 실제 이벤트 순서인 keypress-first다.
+- **외부 guard는 없다**: TerminalView는 `compositionend` 시작 위치를 캡처하거나 keypress를 `preventDefault`/억제하지 않는다. `xterm-pending-composition.ts`의 private 접근은 issue #555 blur fallback이 deferred send 중복을 피하는 `_isSendingComposition` 하나로 축소됐다.
+- **설치가 계약 관문이다**: `ui/scripts/patch-xterm-reflow.mjs`는 두 번들의 helper state·keypress owner·delayed/immediate send·CoreBrowserTerminal handoff exact target을 모두 요구한다. xterm 상향으로 하나라도 달라지면 postinstall이 실패하고, 조용한 부분 적용은 없다.
+- **결정적 테스트는 실제 xterm 대상이다**: clear→compositionend→keypress→input candidate 복원, suffix overlap, unmatched keypress 순서, candidate-contained keypress, 여러 keypress partial overlap, 일반 keydown immediate finalize의 6개 이벤트열을 `Terminal.onData`까지 검증한다. 순수 mock 판정으로 이 상태 전이를 대체하지 않는다.
+- **미검증**: Windows WebView2/한국어 IME 실기와 다중 pane flood 조건의 재현률·key-to-PTY exact byte는 dev 19281에서 확인해야 한다. 자동 테스트는 브라우저 이벤트열 이후 xterm 경로를 고정한다.
 
 ### 8.15 조합 프리뷰 가시성은 activity 와 무관하다 (issue #551)
 
