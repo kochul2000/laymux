@@ -69,12 +69,8 @@ fn is_unix_path(path: &str) -> bool {
 
 /// Check if the command executable is `wsl` or `wsl.exe`.
 fn is_wsl_command(cmd_path: &str) -> bool {
-    let lower = cmd_path.to_lowercase();
-    let stem = std::path::Path::new(&lower)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
-    stem == "wsl"
+    let executable = cmd_path.rsplit(['/', '\\']).next().unwrap_or("");
+    executable.eq_ignore_ascii_case("wsl") || executable.eq_ignore_ascii_case("wsl.exe")
 }
 
 /// Write `data` in [`PTY_WRITE_CHUNK_SIZE`]-byte chunks, flushing after each.
@@ -1243,9 +1239,14 @@ mod tests {
         assert!(is_wsl_command("wsl.exe"));
         assert!(is_wsl_command("wsl"));
         assert!(is_wsl_command("C:\\Windows\\System32\\wsl.exe"));
+        assert!(is_wsl_command("C:\\Windows/System32\\wsl.exe"));
+        assert!(is_wsl_command("/mnt/c/Windows\\System32/wsl.EXE"));
         assert!(is_wsl_command("WSL.EXE"));
         assert!(!is_wsl_command("powershell.exe"));
         assert!(!is_wsl_command("cmd.exe"));
+        assert!(!is_wsl_command("not-wsl.exe"));
+        assert!(!is_wsl_command("wsl.cmd"));
+        assert!(!is_wsl_command("wsl.exe.backup"));
     }
 
     #[test]
