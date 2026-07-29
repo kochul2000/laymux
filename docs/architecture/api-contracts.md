@@ -744,6 +744,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 | `/remote/vendor/addon-fit.js` | GET | `/remote/` 전용 xterm fit 애드온 |
 | `/remote/vendor/addon-web-links.js` | GET | `/remote/` 전용 xterm 평문 URL 링크 애드온 |
 | `/remote/font/{token}.{ttf\|otf}` | GET | 데스크톱 터미널 폰트 사본 (ADR-0077). `token` = 콘텐츠 sha256 앞 16 hex |
+| `/remote/manifest.webmanifest` | GET | 홈 화면 설치용 web app manifest (ADR-0091) |
+| `/remote/pwa/{file}` | GET | manifest launcher 아이콘과 `apple-touch-icon` PNG |
 | `/remote/viewer/` | GET | 자격 증명이 없는 Remote FileViewer 새 탭 bootstrap |
 | `/remote/viewer/viewer.js` | GET | Remote FileViewer 외부 script (`script-src 'self'`) |
 
@@ -756,6 +758,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 `/remote/vendor/*`도 `/remote/`와 같은 base access 조건(실효 enabled, 실효 token 존재, IP allowlist)을 통과해야 응답한다. Cloud tunnel 내부 요청은 token/IP/Origin 대신 `TunnelAuthorized` marker를 신뢰하지만, vendor route도 실효 enabled gate는 공유한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
 
 `/remote/font/{token}.{ttf|otf}`는 vendor asset과 같은 gate를 쓰는 폰트 route다([ADR-0077](../adr/0077-remote-terminal-font-serving.md)). `settings.remote.serveTerminalFont`가 켜져 있을 때만 appearance payload가 이 URL을 광고하며, route 자체는 등록되지 않은 token에 `404`를 돌려준다. `token`은 폰트 콘텐츠 sha256의 앞 16 hex이므로 URL이 곧 내용이며 `Cache-Control: public, max-age=31536000, immutable`과 `Vary: Accept-Encoding`을 보낸다. `Accept-Encoding`에 `br`이 있으면 한 번 만들어 캐시한 brotli 본을 `Content-Encoding: br`로 보내고, 아니면 원본 sfnt 바이트를 그대로 보낸다. woff2 컨테이너 변환은 하지 않는다.
+
+`/remote/manifest.webmanifest`와 `/remote/pwa/*`는 vendor asset과 같은 base access gate를 쓰는 설치 자산이다([ADR-0091](../adr/0091-remote-client-standalone-web-app-manifest.md)). manifest는 `display: standalone`과 `scope`=`start_url`=`id`=`/remote/`를 선언하고 `application/manifest+json`, `Cache-Control: no-store`로 응답한다 — 컴파일 내장이라 revalidation 근거가 없고, 이미 설치된 앱 안에 stale한 `start_url`/아이콘 목록이 남으면 안 된다. 아이콘은 `image/png`, `Cache-Control: private, max-age=86400`이며 등록되지 않은 파일 이름은 404다. `page.html`의 manifest link는 `crossorigin="use-credentials"`를 반드시 갖는다 — manifest fetch는 기본적으로 credential을 생략하므로 gate 안쪽에서는 이 속성이 없으면 401이다. iOS는 manifest 대신 `apple-mobile-web-app-*` 메타와 `apple-touch-icon`을 읽으므로 두 계열을 함께 둔다. 아이콘 PNG는 `ui/public/logo.svg`에서 `cd ui && npm run build:pwa-icons`로 생성해 커밋한 자산이다. service worker는 등록하지 않는다(오프라인 캐싱 비목표, cloud remote origin CSP는 `worker-src 'none'`). 설치 자체는 HTTPS origin(cloud relay, 또는 HTTPS 앞단을 둔 direct)에서만 성립하며 평문 HTTP direct에서는 브라우저가 manifest를 무시한다.
 
 `/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 

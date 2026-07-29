@@ -213,18 +213,35 @@ fn remote_asset(
     body: &'static str,
     content_type: &'static str,
 ) -> Response {
-    // Asset routes are outside the `remote_guard` middleware, so gate here.
-    // Cloud tunnel requests only need the enable gate (WSS-authorized); direct
-    // requests go through the full token/IP/Origin base-access check.
-    let settings = match effective_remote_settings(&server.app_state) {
-        Ok(settings) => settings,
-        Err(err) => return internal_error(err),
-    };
-    if let Some(response) = remote_asset_gate_for_settings(&settings, addr, tunnel_authorized) {
+    if let Some(response) = remote_asset_gate_for_request(server, addr, tunnel_authorized) {
         return response;
     }
 
     ([(header::CONTENT_TYPE, content_type)], body).into_response()
+}
+
+/// The base access gate every asset route shares. Asset routes sit outside the
+/// `remote_guard` middleware, so each handler applies it itself.
+pub(super) fn remote_asset_gate(
+    server: &ServerState,
+    addr: SocketAddr,
+    req: &Request,
+) -> Option<Response> {
+    remote_asset_gate_for_request(server, addr, request_is_tunnel_authorized(req))
+}
+
+fn remote_asset_gate_for_request(
+    server: &ServerState,
+    addr: SocketAddr,
+    tunnel_authorized: bool,
+) -> Option<Response> {
+    // Cloud tunnel requests only need the enable gate (WSS-authorized); direct
+    // requests go through the full token/IP/Origin base-access check.
+    let settings = match effective_remote_settings(&server.app_state) {
+        Ok(settings) => settings,
+        Err(err) => return Some(internal_error(err)),
+    };
+    remote_asset_gate_for_settings(&settings, addr, tunnel_authorized)
 }
 
 fn remote_asset_gate_for_settings(
