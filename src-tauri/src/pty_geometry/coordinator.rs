@@ -236,10 +236,25 @@ impl<A: PtyGeometryProvenanceAdapter> PtyGeometryCoordinator<A> {
         self.phase = GeometryTransactionPhase::Applying;
         match self.adapter.apply_resize(proposed) {
             PhysicalResizeOutcome::Applied => {
-                self.phase = GeometryTransactionPhase::AppliedAwaitingAdoption;
-                Ok(self
-                    .active_for_token(token)?
-                    .status(GeometryTransactionOutcome::AppliedAwaitingAdoption))
+                match self.adapter.commit_authoritative_geometry(proposed) {
+                    Ok(()) => {
+                        self.phase = GeometryTransactionPhase::AppliedAwaitingAdoption;
+                        Ok(self
+                            .active_for_token(token)?
+                            .status(GeometryTransactionOutcome::AppliedAwaitingAdoption))
+                    }
+                    Err(_logical_commit_error) => {
+                        // The physical result is already Applied. A logical config
+                        // or output-revision failure cannot be represented as a
+                        // rollback; tear down best-effort and keep the transaction
+                        // quarantined as Indeterminate until explicit retirement.
+                        self.phase = GeometryTransactionPhase::Indeterminate;
+                        let _teardown_result = self.adapter.teardown();
+                        Ok(self
+                            .active_for_token(token)?
+                            .status(GeometryTransactionOutcome::Indeterminate))
+                    }
+                }
             }
             PhysicalResizeOutcome::NotApplied => match self.adapter.abort_prepared() {
                 Ok(()) => self.complete_current(GeometryTransactionOutcome::NotApplied),

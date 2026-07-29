@@ -11,6 +11,7 @@ struct FakeAdapter {
     release_count: usize,
     boundary_bias: u64,
     abort_fails: bool,
+    logical_commit_fails: bool,
 }
 
 impl FakeAdapter {
@@ -55,6 +56,15 @@ impl PtyGeometryProvenanceAdapter for FakeAdapter {
         self.outcomes
             .pop_front()
             .unwrap_or(PhysicalResizeOutcome::Applied)
+    }
+
+    fn commit_authoritative_geometry(&mut self, _geometry: TerminalGeometry) -> Result<(), String> {
+        self.calls.push("commit_authoritative_geometry");
+        if self.logical_commit_fails {
+            Err("logical geometry revision commit failed".into())
+        } else {
+            Ok(())
+        }
     }
 
     fn release(&mut self) -> Result<(), String> {
@@ -176,73 +186,7 @@ fn queued_inflight_and_freeze_race_bytes_are_delivered_as_old_before_prepared() 
     assert_eq!(coordinator.phase(), GeometryTransactionPhase::Prepared);
 }
 
-#[test]
-fn split_control_strings_and_dec2026_frame_fail_prepare_without_physical_call() {
-    let cases = [
-        vec![b"\x1b".to_vec(), b"]title".to_vec()],
-        vec![b"\x1b[31".to_vec()],
-        vec![b"\x1bPpayload".to_vec()],
-        vec![b"\x1b_payload".to_vec()],
-        vec![b"\x1b^payload".to_vec()],
-        vec![b"\x1bXpayload".to_vec()],
-        vec![b"\x1b[?2026hframe".to_vec()],
-    ];
-
-    for chunks in cases {
-        let mut adapter = FakeAdapter::proven();
-        adapter.drains.push_back(chunks);
-        let mut coordinator = PtyGeometryCoordinator::new(adapter);
-        let status = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
-        assert_eq!(status.outcome, GeometryTransactionOutcome::NotApplied);
-        assert_eq!(
-            coordinator.adapter().calls,
-            vec!["freeze_and_drain", "abort_prepared"]
-        );
-    }
-}
-
-#[test]
-fn failed_abort_keeps_the_transaction_quarantined_until_teardown() {
-    let mut adapter = FakeAdapter::proven();
-    adapter.drains.push_back(vec![b"\x1b]open".to_vec()]);
-    adapter.abort_fails = true;
-    let mut coordinator = PtyGeometryCoordinator::new(adapter);
-    let status = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
-    assert_eq!(status.outcome, GeometryTransactionOutcome::Indeterminate);
-    assert_eq!(coordinator.phase(), GeometryTransactionPhase::Indeterminate);
-    assert_eq!(coordinator.adapter().release_count, 0);
-
-    let retired = coordinator.retire().unwrap();
-    assert_eq!(retired.outcome, GeometryTransactionOutcome::Retired);
-    assert_eq!(coordinator.adapter().calls.last(), Some(&"teardown"));
-}
-
-#[test]
-fn complete_split_sequences_and_closed_dec2026_frame_can_prepare() {
-    let chunks = vec![
-        b"\x1b]title\x1b".to_vec(),
-        b"\\\x1b[?2026hframe\x1b[?2026".to_vec(),
-        b"l\x1bPdata\x1b\\".to_vec(),
-    ];
-    let mut adapter = FakeAdapter::proven();
-    adapter.drains.push_back(chunks);
-    let mut coordinator = PtyGeometryCoordinator::new(adapter);
-    let status = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
-    assert_eq!(status.outcome, GeometryTransactionOutcome::Prepared);
-}
-
-#[test]
-fn terminal_resets_close_an_open_dec2026_frame() {
-    for reset in [b"\x1bc".as_slice(), b"\x1b[!p".as_slice()] {
-        let mut adapter = FakeAdapter::proven();
-        adapter
-            .drains
-            .push_back(vec![b"\x1b[?2026hframe".to_vec(), reset.to_vec()]);
-        let mut coordinator = PtyGeometryCoordinator::new(adapter);
-        let status = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
-        assert_eq!(status.outcome, GeometryTransactionOutcome::Prepared);
-    }
-}
+include!("boundary_test_cases.rs");
 
 #[test]
 fn local_requires_visible_and_checkpoint_prefix_then_adoption_intersection() {
@@ -336,6 +280,15 @@ fn apply_and_adoption_response_loss_are_idempotent_and_release_once() {
             .count(),
         1
     );
+    assert_eq!(
+        coordinator
+            .adapter()
+            .calls
+            .iter()
+            .filter(|call| **call == "commit_authoritative_geometry")
+            .count(),
+        1
+    );
 
     let revision = first.geometry.unwrap().revision;
     coordinator
@@ -350,6 +303,65 @@ fn apply_and_adoption_response_loss_are_idempotent_and_release_once() {
     assert_eq!(released, replay);
     assert_eq!(coordinator.adapter().release_count, 1);
     assert_eq!(coordinator.status(token).unwrap(), released);
+}
+
+#[test]
+fn applied_physical_resize_requires_one_authoritative_logical_commit() {
+    let mut adapter = FakeAdapter::proven();
+    adapter.drains.push_back(vec![]);
+    let mut coordinator = PtyGeometryCoordinator::new(adapter);
+    let prepared = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
+    let token = prepared.token.unwrap();
+    for id in ["pc-visible", "checkpoint"] {
+        coordinator.ack_old_prefix(token, id, 0).unwrap();
+    }
+
+    let applied = coordinator.apply(token).unwrap();
+
+    assert_eq!(
+        applied.outcome,
+        GeometryTransactionOutcome::AppliedAwaitingAdoption
+    );
+    assert_eq!(
+        coordinator.adapter().calls,
+        vec![
+            "freeze_and_drain",
+            "apply_resize",
+            "commit_authoritative_geometry"
+        ]
+    );
+}
+
+#[test]
+fn logical_commit_failure_after_physical_apply_is_torn_down_and_quarantined() {
+    let mut adapter = FakeAdapter::proven();
+    adapter.drains.push_back(vec![]);
+    adapter.logical_commit_fails = true;
+    let mut coordinator = PtyGeometryCoordinator::new(adapter);
+    let prepared = coordinator.prepare(local_request(0), |_| Ok(())).unwrap();
+    let token = prepared.token.unwrap();
+    for id in ["pc-visible", "checkpoint"] {
+        coordinator.ack_old_prefix(token, id, 0).unwrap();
+    }
+
+    let first = coordinator.apply(token).unwrap();
+    let replay = coordinator.apply(token).unwrap();
+    let status = coordinator.status(token).unwrap();
+
+    assert_eq!(first.outcome, GeometryTransactionOutcome::Indeterminate);
+    assert_eq!(first.geometry, None);
+    assert_eq!(replay, first);
+    assert_eq!(status, first);
+    assert_eq!(coordinator.phase(), GeometryTransactionPhase::Indeterminate);
+    assert_eq!(
+        coordinator.adapter().calls,
+        vec![
+            "freeze_and_drain",
+            "apply_resize",
+            "commit_authoritative_geometry",
+            "teardown"
+        ]
+    );
 }
 
 #[test]
@@ -378,6 +390,10 @@ fn physical_outcomes_never_guess_old_or_new_geometry() {
         assert_eq!(coordinator.adapter().release_count, 0);
         if physical == PhysicalResizeOutcome::NotApplied {
             assert_eq!(coordinator.adapter().calls.last(), Some(&"abort_prepared"));
+            assert!(!coordinator
+                .adapter()
+                .calls
+                .contains(&"commit_authoritative_geometry"));
         }
     }
 }

@@ -65,6 +65,13 @@ pub trait PtyGeometryProvenanceAdapter {
 
     fn abort_prepared(&mut self) -> Result<(), String>;
     fn apply_resize(&mut self, geometry: TerminalGeometry) -> PhysicalResizeOutcome;
+
+    /// After the physical resize is proven Applied, atomically commit the
+    /// authoritative logical PTY configuration and terminal-output geometry
+    /// revision. Any error is post-physical and therefore Indeterminate; an
+    /// adapter must never claim that a partial logical commit was rolled back.
+    fn commit_authoritative_geometry(&mut self, geometry: TerminalGeometry) -> Result<(), String>;
+
     fn release(&mut self) -> Result<(), String>;
     fn teardown(&mut self) -> Result<(), String>;
 }
