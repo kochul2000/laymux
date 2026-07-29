@@ -102,7 +102,7 @@ ADR 이 필요한 대표 기준:
 | [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Accepted |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
 | [0084](0084-desktop-terminal-output-parsed-credit.md) | desktop output은 parsed ACK credit으로 PTY producer를 유한하게 제한한다 (0072 일부 대체·0080 확장) | Accepted |
-| [0085](0085-interruptible-pty-reader-two-phase-geometry-cutover.md) | PTY geometry cutover는 interruptible reader와 two-phase transaction이 소유 | Proposed |
+| [0085](0085-provenance-barrier-three-phase-geometry-cutover.md) | PTY geometry cutover는 provenance barrier와 three-phase transaction이 소유 | Proposed |
 
 ## 새 ADR 추가
 
