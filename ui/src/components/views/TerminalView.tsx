@@ -236,6 +236,7 @@ import {
   type TerminalOutputControlOperationKind,
 } from "@/lib/terminal-output-control-registry";
 import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
+import { terminalWriteFairScheduler } from "@/lib/terminal-write-fair-scheduler";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -3148,6 +3149,7 @@ export function TerminalView({
     // this mounted terminal generation; session teardown drops the set.
     const terminalWriteCallbackWarnings = new Set<string>();
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let releaseTerminalWriteTurn: (() => void) | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
     let deferredResizeRequestedAt = 0;
@@ -3382,6 +3384,12 @@ export function TerminalView({
         clearTimeout(terminalWriteRetryTimer);
         terminalWriteRetryTimer = undefined;
       }
+      terminalWriteFairScheduler.cancelPending(instanceId);
+    };
+    const releaseCurrentTerminalWriteTurn = () => {
+      const release = releaseTerminalWriteTurn;
+      releaseTerminalWriteTurn = undefined;
+      release?.();
     };
     const scheduleTerminalWritePump = (delayMs = 0) => {
       if (
@@ -3392,10 +3400,27 @@ export function TerminalView({
       ) {
         return;
       }
-      terminalWriteRetryTimer = setTimeout(() => {
-        terminalWriteRetryTimer = undefined;
-        flushDeferredTerminalWrites();
-      }, delayMs);
+      if (delayMs > 0) {
+        terminalWriteRetryTimer = setTimeout(() => {
+          terminalWriteRetryTimer = undefined;
+          scheduleTerminalWritePump();
+        }, delayMs);
+        return;
+      }
+      terminalWriteFairScheduler.request(instanceId, (release) => {
+        if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
+          release();
+          return;
+        }
+        releaseTerminalWriteTurn = release;
+        try {
+          flushDeferredTerminalWrites();
+        } finally {
+          // Async accepted writes retain the lease through their parse callback.
+          // Synchronous callbacks and all rejection paths have no in-flight write.
+          if (pendingTerminalWrites === 0) releaseCurrentTerminalWriteTurn();
+        }
+      });
     };
     const clearCurrentParsingWrite = () => {
       currentParsingWriteSource = undefined;
@@ -3541,6 +3566,7 @@ export function TerminalView({
             }
           });
           reportCallbackFailures(failures);
+          releaseCurrentTerminalWriteTurn();
         }
       };
       return attemptTerminalWrite({
@@ -3637,7 +3663,6 @@ export function TerminalView({
       }
       if (chunks.length === 0) chunks.push(data);
       recordTerminalOutputPipeline(instanceId, "writeRequests");
-      const queueWasEmpty = terminalWriteQueue.depth === 0;
       const requestMetadata: TerminalWriteMetadata = {
         ...metadata,
         compositionActive: compositionPreviewRef.current.active,
@@ -3667,8 +3692,9 @@ export function TerminalView({
       recordTerminalOutputPipeline(instanceId, "writeQueueMaxDepth", terminalWriteQueue.depth);
       recordTerminalOutputPipeline(instanceId, "writeQueueMaxBytes", terminalWriteQueue.bytes);
       if (pendingTerminalWrites === 0) {
-        if (queueWasEmpty) flushDeferredTerminalWrites();
-        else scheduleTerminalWritePump();
+        // Even the first physical write joins the app-wide round-robin. Direct
+        // admission here would let a newly busy pane bypass already waiting ones.
+        scheduleTerminalWritePump();
       }
     };
     const trackedTerminalWriteAsync = (
@@ -5204,6 +5230,8 @@ export function TerminalView({
       clearCurrentParsingWrite();
       resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
+      terminalWriteFairScheduler.cancel(instanceId);
+      releaseTerminalWriteTurn = undefined;
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;
       remoteResizeSyncTarget = undefined;

@@ -10911,6 +10911,60 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  it("rotates physical writes across flooded panes before returning to the same pane (#661)", async () => {
+    const paneA = "t-output-fair-a";
+    const paneB = "t-output-fair-b";
+    render(
+      <>
+        <TerminalView instanceId={paneA} profile="PowerShell" syncGroup="" />
+        <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
+      </>,
+    );
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneB, expect.any(Function));
+      expect(createdTerminals).toHaveLength(2);
+    });
+    await waitForStreamAttachReset();
+
+    const emitter = (terminalId: string) =>
+      mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        data: Uint8Array | Record<string, unknown>,
+      ) => void;
+    const writes: string[] = [];
+    let finishPaneAFirst: (() => void) | undefined;
+    type WritableTerminal = MockTerminalInstance & {
+      write: (data: string | Uint8Array, callback?: () => void) => void;
+    };
+    (createdTerminals[0] as WritableTerminal).write = (data, callback) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      writes.push(`a:${text}`);
+      if (text === "one") finishPaneAFirst = callback;
+      else callback?.();
+    };
+    (createdTerminals[1] as WritableTerminal).write = (data, callback) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      writes.push(`b:${text}`);
+      callback?.();
+    };
+
+    act(() => emitter(paneA)(outputDelta(0, "one")));
+    expect(writes).toEqual(["a:one"]);
+
+    act(() => {
+      emitter(paneA)(outputDelta(3, "two"));
+      emitter(paneB)(outputDelta(0, "other"));
+    });
+    await vi.waitFor(() => {
+      expect(terminalOutputPipelineCounters(paneA).writeQueueMaxDepth).toBeGreaterThanOrEqual(1);
+      expect(terminalOutputPipelineCounters(paneB).writeQueueMaxDepth).toBeGreaterThanOrEqual(1);
+    });
+    expect(writes).toEqual(["a:one"]);
+
+    act(() => finishPaneAFirst?.());
+    await vi.waitFor(() => expect(writes).toEqual(["a:one", "b:other", "a:two"]));
+  });
+
   it("discards queued old-epoch writes and drains the in-flight parse before reattach", async () => {
     const terminalId = "t-output-reattach-write-cutover";
     const emitOutput = await attachedOutputEmitter(terminalId);
