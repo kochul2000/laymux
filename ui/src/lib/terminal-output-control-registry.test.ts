@@ -2,6 +2,102 @@ import { describe, expect, it, vi } from "vitest";
 import { TerminalOutputControlOperationRegistry } from "./terminal-output-control-registry";
 
 describe("TerminalOutputControlOperationRegistry", () => {
+  for (const kind of ["attach", "ack"] as const) {
+    it(`caps ${kind} operations across different terminal ids without retaining blocked entries`, () => {
+      const registry = new TerminalOutputControlOperationRegistry(2, 2);
+      const firstMount = registry.mount("terminal-1");
+      const secondMount = registry.mount("terminal-2");
+      const first = firstMount.tryStart(kind);
+      const second = secondMount.tryStart(kind);
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      firstMount.dispose();
+      secondMount.dispose();
+
+      const staleBlockedMount = registry.mount("terminal-3");
+      expect(staleBlockedMount.tryStart(kind)).toBeUndefined();
+      expect(registry.entryCount()).toBe(2);
+      expect(registry.globalOutstanding(kind)).toBe(2);
+      const staleRecovery = vi.fn();
+      staleBlockedMount.waitForCapacity(kind, staleRecovery);
+      staleBlockedMount.dispose();
+
+      const currentMount = registry.mount("terminal-3");
+      const currentRecovery = vi.fn();
+      let recoveredOperation: ReturnType<typeof currentMount.tryStart>;
+      currentMount.waitForCapacity(kind, () => {
+        currentRecovery();
+        recoveredOperation = currentMount.tryStart(kind);
+      });
+
+      first?.settle();
+      first?.settle();
+      expect(staleRecovery).not.toHaveBeenCalled();
+      expect(currentRecovery).toHaveBeenCalledOnce();
+      expect(recoveredOperation).toBeDefined();
+      expect(registry.globalOutstanding(kind)).toBe(2);
+      expect(registry.entryCount()).toBe(2);
+
+      second?.settle();
+      expect(currentRecovery).toHaveBeenCalledOnce();
+    });
+  }
+
+  it("rolls back a terminal lease when the global cap rejects its matching lease", () => {
+    const registry = new TerminalOutputControlOperationRegistry(2, 1);
+    const firstMount = registry.mount("terminal-1");
+    const first = firstMount.tryStart("attach");
+    expect(first).toBeDefined();
+
+    const blockedMount = registry.mount("terminal-2");
+    expect(blockedMount.tryStart("attach")).toBeUndefined();
+    expect(blockedMount.outstanding("attach")).toBe(0);
+    expect(registry.globalOutstanding("attach")).toBe(1);
+    expect(registry.entryCount()).toBe(1);
+  });
+
+  it("wakes global capacity waiters in FIFO order, one per returned slot", () => {
+    const registry = new TerminalOutputControlOperationRegistry(1, 1);
+    const owner = registry.mount("owner");
+    const occupied = owner.tryStart("attach");
+    const order: string[] = [];
+    const firstWaiter = registry.mount("waiter-1");
+    const secondWaiter = registry.mount("waiter-2");
+    let firstRecovered: ReturnType<typeof firstWaiter.tryStart>;
+    firstWaiter.waitForCapacity("attach", () => {
+      order.push("first");
+      firstRecovered = firstWaiter.tryStart("attach");
+    });
+    secondWaiter.waitForCapacity("attach", () => order.push("second"));
+
+    occupied?.settle();
+    expect(order).toEqual(["first"]);
+    firstRecovered?.settle();
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("reserves a returned global slot for the selected waiter until start or unmount", () => {
+    const registry = new TerminalOutputControlOperationRegistry(1, 1);
+    const owner = registry.mount("owner");
+    const occupied = owner.tryStart("attach");
+    const selected = registry.mount("selected");
+    const selectedRecovery = vi.fn();
+    selected.waitForCapacity("attach", selectedRecovery);
+
+    occupied?.settle();
+    expect(selectedRecovery).toHaveBeenCalledOnce();
+    expect(registry.globalOutstanding("attach")).toBe(1);
+
+    const barger = registry.mount("barger");
+    expect(barger.tryStart("attach")).toBeUndefined();
+    const selectedOperation = selected.tryStart("attach");
+    expect(selectedOperation).toBeDefined();
+    expect(registry.globalOutstanding("attach")).toBe(1);
+
+    selectedOperation?.settle();
+    expect(registry.globalOutstanding("attach")).toBe(0);
+  });
+
   it("keeps pre-unmount operations charged across remounts of one terminal", () => {
     const registry = new TerminalOutputControlOperationRegistry(2);
     const firstMount = registry.mount("terminal-1");
