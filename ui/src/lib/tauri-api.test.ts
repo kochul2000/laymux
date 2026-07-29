@@ -20,6 +20,7 @@ import {
   writeTerminalInput,
   writeToTerminal,
   writeTerminalProtocolReply,
+  getTerminalGeometryCapabilities,
   resizeTerminal,
   closeTerminalSession,
   getSyncGroupTerminals,
@@ -212,6 +213,17 @@ describe("tauri-api", () => {
   });
 
   describe("resizeTerminal", () => {
+    it("queries the public production geometry capability", async () => {
+      const capabilities = {
+        exactGeometryCutover: false,
+        interruptibleRead: false,
+        followUpIssue: 636,
+      };
+      mockInvoke.mockResolvedValue(capabilities);
+      await expect(getTerminalGeometryCapabilities()).resolves.toEqual(capabilities);
+      expect(mockInvoke).toHaveBeenCalledWith("get_terminal_geometry_capabilities");
+    });
+
     it("invokes resize_terminal", async () => {
       mockInvoke.mockResolvedValue(undefined);
       await resizeTerminal("t1", 120, 40);
@@ -219,6 +231,18 @@ describe("tauri-api", () => {
         id: "t1",
         cols: 120,
         rows: 40,
+        exact: false,
+      });
+    });
+
+    it("forwards exact requests for backend fail-closed handling", async () => {
+      mockInvoke.mockRejectedValue(new Error("exact terminal geometry cutover is unavailable"));
+      await expect(resizeTerminal("t1", 120, 40, true)).rejects.toThrow("unavailable");
+      expect(mockInvoke).toHaveBeenCalledWith("resize_terminal", {
+        id: "t1",
+        cols: 120,
+        rows: 40,
+        exact: true,
       });
     });
   });

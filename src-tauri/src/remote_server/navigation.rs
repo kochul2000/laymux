@@ -823,6 +823,7 @@ mod tests {
             rows: 32,
             sync_group: "ws-1".into(),
             command_running: false,
+            geometry_capabilities: crate::pty_geometry::production_geometry_capabilities(),
             appearance: RemoteTerminalAppearance {
                 font_family: "Cascadia Mono".into(),
                 font_size: 14,
@@ -832,6 +833,17 @@ mod tests {
                 theme: RemoteTerminalTheme::default(),
             },
         }
+    }
+
+    #[test]
+    fn remote_terminal_payload_advertises_exact_geometry_as_unavailable() {
+        let payload = serde_json::to_value(terminal("t1", "Terminal")).unwrap();
+        assert_eq!(
+            payload["geometryCapabilities"]["exactGeometryCutover"],
+            false
+        );
+        assert_eq!(payload["geometryCapabilities"]["interruptibleRead"], false);
+        assert_eq!(payload["geometryCapabilities"]["followUpIssue"], 636);
     }
 
     #[test]

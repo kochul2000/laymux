@@ -98,6 +98,8 @@ struct TerminalResizeRequest {
     cols: u16,
     rows: u16,
     lease_id: Option<String>,
+    #[serde(default)]
+    exact: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -620,6 +622,9 @@ async fn remote_terminal_resize(
     if !terminal_size_is_positive(body.cols, body.rows) {
         return json_error(StatusCode::BAD_REQUEST, "terminal size must be positive");
     }
+    if body.exact {
+        return terminal_control_response(crate::pty_geometry::reject_unavailable_exact_geometry());
+    }
 
     terminal_control_response(resize_terminal_inner(
         &server.app_state,
@@ -836,6 +841,9 @@ fn terminal_control_response(result: Result<(), String>) -> Response {
         Err(err) if err.contains("size must be positive") => {
             json_error(StatusCode::BAD_REQUEST, &err)
         }
+        Err(err) if err.contains("exact terminal geometry cutover is unavailable") => {
+            json_error(StatusCode::NOT_IMPLEMENTED, &err)
+        }
         Err(err) if err.contains("exceed") || err.contains("too large") => {
             json_error(StatusCode::PAYLOAD_TOO_LARGE, &err)
         }
@@ -867,6 +875,7 @@ mod tests {
     use super::{
         attempt_claim, claim_input_busy_response, terminal_control_response,
         terminal_size_is_positive, ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlState,
+        TerminalResizeRequest,
     };
     use crate::settings::models::RemoteSettings;
     use axum::body::{to_bytes, Body};
@@ -952,6 +961,29 @@ mod tests {
         assert!(!terminal_size_is_positive(80, 0));
         assert!(!terminal_size_is_positive(0, 0));
         assert!(terminal_size_is_positive(80, 24));
+    }
+
+    #[test]
+    fn remote_resize_schema_defaults_to_guarded_and_exact_is_fail_closed() {
+        let guarded: TerminalResizeRequest = serde_json::from_value(serde_json::json!({
+            "cols": 80,
+            "rows": 24,
+            "leaseId": "lease-1"
+        }))
+        .unwrap();
+        assert!(!guarded.exact);
+
+        let exact: TerminalResizeRequest = serde_json::from_value(serde_json::json!({
+            "cols": 120,
+            "rows": 40,
+            "leaseId": "lease-1",
+            "exact": true
+        }))
+        .unwrap();
+        assert!(exact.exact);
+        let response =
+            terminal_control_response(crate::pty_geometry::reject_unavailable_exact_geometry());
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
     }
 
     #[test]

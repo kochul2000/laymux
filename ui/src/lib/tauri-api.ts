@@ -156,8 +156,23 @@ export async function resumeTerminalOutput(
   return invoke("resume_terminal_output", { id, generation, seq });
 }
 
-export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
-  return invoke("resize_terminal", { id, cols, rows });
+export interface TerminalGeometryCapabilities {
+  exactGeometryCutover: boolean;
+  interruptibleRead: boolean;
+  followUpIssue: number;
+}
+
+export async function getTerminalGeometryCapabilities(): Promise<TerminalGeometryCapabilities> {
+  return invoke("get_terminal_geometry_capabilities");
+}
+
+export async function resizeTerminal(
+  id: string,
+  cols: number,
+  rows: number,
+  exact = false,
+): Promise<void> {
+  return invoke("resize_terminal", { id, cols, rows, exact });
 }
 
 export async function closeTerminalSession(id: string): Promise<void> {

@@ -210,6 +210,9 @@ mod tests {
         assert!(html.contains("/remote/v1/workspaces/active"));
         assert!(html.contains("/remote/v1/terminals/${encodeURIComponent(terminalId)}/focus"));
         assert!(html.contains("/remote/v1/terminals"));
+        assert!(
+            html.contains("JSON.stringify({ leaseId: activeLeaseId, cols, rows, exact: false })")
+        );
         assert!(html.contains("new WebSocket"));
         assert!(html.contains("new TerminalCtor"));
         assert!(html.contains("new WebLinksAddonCtor"));
