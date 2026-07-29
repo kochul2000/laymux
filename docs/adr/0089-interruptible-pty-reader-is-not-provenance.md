@@ -1,6 +1,6 @@
 # 0089. Interruptible PTY reader는 liveness만 소유하고 exact provenance는 외부 primitive까지 fail-closed한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: 사용자 요구 · issue [#636](https://github.com/kochul2000/laymux/issues/636) · 선행 issue [#630](https://github.com/kochul2000/laymux/issues/630) · Accepted [ADR-0088](0088-pty-output-fatal-generation-teardown.md) · 외부 선행 issue [#643](https://github.com/kochul2000/laymux/issues/643) · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4·§14](../architecture/api-contracts.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0085](0085-provenance-barrier-three-phase-geometry-cutover.md)
 - Extends: [ADR-0085](0085-provenance-barrier-three-phase-geometry-cutover.md)의 platform capability gate를 현재 Windows ConPTY/Linux PTY가 제공하는 실제 primitive와 dependency 경계로 구체화한다.

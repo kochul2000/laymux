@@ -106,7 +106,7 @@ ADR 이 필요한 대표 기준:
 | [0086](0086-terminal-output-control-epoch-watchdog.md) | terminal output attach·ACK IPC는 epoch watchdog으로 stale lease를 유한하게 교체한다 (0084 확장) | Accepted |
 | [0087](0087-mutex-poison-fail-closed-discard-only.md) | Mutex poison은 기본 fail-closed이며 폐기 전용 close만 guard를 회수한다 (0084 확장) | Accepted |
 | [0088](0088-pty-output-fatal-generation-teardown.md) | PTY output fatal은 reader를 멈추고 해당 generation을 비동기 teardown한다 (0084 확장) | Accepted |
-| [0089](0089-interruptible-pty-reader-is-not-provenance.md) | Interruptible PTY reader는 liveness만 소유하고 exact provenance는 외부 primitive까지 fail-closed | Proposed |
+| [0089](0089-interruptible-pty-reader-is-not-provenance.md) | Interruptible PTY reader는 liveness만 소유하고 exact provenance는 외부 primitive까지 fail-closed | Accepted |
 
 ## 새 ADR 추가
 
