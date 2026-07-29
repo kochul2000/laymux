@@ -643,10 +643,9 @@ where
 mod tests {
     use super::*;
     use crate::terminal::InitialExecutionHost;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     use crate::terminal::TerminalConfig;
     use std::cell::Cell;
-    #[cfg(windows)]
     use std::sync::mpsc;
     use std::sync::Condvar;
     use std::time::{Duration, Instant};
@@ -910,7 +909,7 @@ mod tests {
     /// 정작 기다리던 본문이 오기 전에 예산이 소진된다 — 번들 ConPTY 로 바꾸면서
     /// 실제로 겪었다([ADR-0067](../../docs/adr/0067-bundled-conpty-output-and-staging-contract.md)).
     /// 예산은 시간으로만 잡는다. 비교는 대소문자를 구분하지 않는다.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn collect_pty_output_until(
         rx: &mpsc::Receiver<Vec<u8>>,
         needle: &str,
@@ -937,7 +936,7 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     const PTY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(15);
 
     #[cfg(windows)]
