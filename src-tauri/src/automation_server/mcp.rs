@@ -4172,6 +4172,30 @@ mod tests {
     }
 
     #[test]
+    fn poisoned_activity_cache_aborts_mcp_sampling_before_write() {
+        let state = crate::state::AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("t1".into());
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("t1".into(), ring);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _known = state.known_codex_terminals.lock().unwrap();
+            panic!("poison activity cache before MCP sampling");
+        }));
+
+        let error = McpHandler::sample_activity_and_seq_from_state(&state, "t1", true).unwrap_err();
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[test]
     fn post_write_capture_poison_reports_the_committed_side_effect() {
         let state = crate::state::AppState::new();
         let ring = crate::output_buffer::TerminalOutputBuffer::default();

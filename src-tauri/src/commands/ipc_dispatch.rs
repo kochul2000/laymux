@@ -1350,6 +1350,43 @@ mod tests {
     }
 
     #[test]
+    fn poisoned_codex_activity_cache_blocks_sync_cwd_source_and_target() {
+        let state = AppState::new();
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert("codex".into());
+        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
+        ring.push(b"\x1b]0;\xe2\xa0\x8b working\x07\x1b]7;file://localhost/C:/tmp\x07");
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("codex".into(), ring);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _known = state.known_codex_terminals.lock().unwrap();
+            panic!("poison Codex activity cache");
+        }));
+
+        let source_result = {
+            let buffers = state.output_buffers.lock().unwrap();
+            is_source_sync_allowed(&state, "codex", buffers.get("codex"))
+        };
+        assert!(
+            source_result.is_err(),
+            "poison must not authorize the source"
+        );
+
+        let target_result = filter_targets_not_busy(
+            &state,
+            &["codex".into()],
+            &crate::settings::ClaudeSyncCwdMode::Skip,
+        );
+        assert!(target_result.is_err(), "poison must not admit the target");
+    }
+
+    #[test]
     fn is_terminal_at_prompt_detects_running_command() {
         let mut buf = crate::output_buffer::TerminalOutputBuffer::default();
         buf.push(b"\x1b]133;D;0\x07prompt$ \x1b]133;C\x07");

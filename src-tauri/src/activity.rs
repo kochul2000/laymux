@@ -743,11 +743,30 @@ pub fn detect_terminal_state_for_control(
     if let Some(buffer) = buffer {
         buffer.write_seq()?;
     }
+    ensure_activity_control_state_healthy(state)?;
     let info = detect_terminal_state(state, terminal_id, buffer);
     if let Some(buffer) = buffer {
         buffer.write_seq()?;
     }
+    ensure_activity_control_state_healthy(state)?;
     Ok(info)
+}
+
+/// Prove that every AppState mutex consulted by activity detection is healthy.
+///
+/// The display detector deliberately degrades when one of these hints cannot be
+/// read, but a control caller may use `Shell` to authorize PTY input or CWD
+/// propagation. Checking both before and after display detection prevents its
+/// internal `false`/`None` fallbacks from turning poison into admission. Locks
+/// are acquired and released one at a time in the AppState order; callers may
+/// already hold `output_buffers`, which precedes all of them.
+fn ensure_activity_control_state_healthy(state: &AppState) -> Result<(), AppError> {
+    drop(state.known_claude_terminals.lock_or_err()?);
+    drop(state.known_codex_terminals.lock_or_err()?);
+    drop(state.last_detected_interactive_app.lock_or_err()?);
+    drop(state.recently_exited_interactive_app.lock_or_err()?);
+    drop(state.pty_handles.lock_or_err()?);
+    Ok(())
 }
 
 /// Detect terminal states for all terminals without inverting the AppState
@@ -1030,6 +1049,30 @@ impl PtyCallbackState {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn strict_detection_rejects_poisoned_grace_cache() {
+        let state = AppState::new();
+        let ring = TerminalOutputBuffer::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _grace = state.last_detected_interactive_app.lock().unwrap();
+            panic!("poison activity grace cache");
+        }));
+
+        assert!(detect_terminal_state_for_control(&state, "t1", Some(&ring)).is_err());
+    }
+
+    #[test]
+    fn strict_detection_rejects_poisoned_pty_registry() {
+        let state = AppState::new();
+        let ring = TerminalOutputBuffer::default();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ptys = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry used by activity detection");
+        }));
+
+        assert!(detect_terminal_state_for_control(&state, "t1", Some(&ring)).is_err());
+    }
 
     #[test]
     fn detect_all_states_returns_error_for_poisoned_ring() {

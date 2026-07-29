@@ -226,7 +226,7 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 3. `cwd_send` 플래그가 켜져 있는지
 4. 대상 필터링(`cwd_receive`, 대상 activity, Claude 모드, 동일 CWD 중복)
 
-2번 가드는 `detect_terminal_state_for_control`(= activity + 영구 추적 `known_claude_terminals`/`known_codex_terminals` + authoritative ring 건강성)이 `TerminalActivity::Shell`인 경우에만 통과한다. `detect_terminal_activity`만으로는 Codex 스피너(브레일 문자) 타이틀이나 Claude Code 작업 타이틀처럼 `INTERACTIVE_APP_PATTERNS`에 직접 매칭되지 않는 상태를 놓치므로, 반드시 영구 추적을 경유한다. output registry/ring poison은 `Shell`로 축소하지 않고 자동 IPC에서는 로컬 CWD 갱신과 전파를 명시적으로 차단하며, 오류를 반환할 수 있는 경로는 그대로 전파한다. 가드가 차단 판정하면 session.cwd 로컬 업데이트도 건너뛴다(스테일/실행 중 값을 후속 전파가 재사용하지 못하도록). `Shell`만 신뢰하는 이유는, OSC 7이 사용자 의도의 `cd`를 반영하는 시점은 셸이 프롬프트를 다시 그린 직후 — 즉 `OSC 133;D` 이후 — 뿐이기 때문이다.
+2번 가드는 `detect_terminal_state_for_control`(= activity + 영구 추적 `known_claude_terminals`/`known_codex_terminals` + grace/exit cache + PTY process-tree registry + authoritative ring 건강성)이 `TerminalActivity::Shell`인 경우에만 통과한다. `detect_terminal_activity`만으로는 Codex 스피너(브레일 문자) 타이틀이나 Claude Code 작업 타이틀처럼 `INTERACTIVE_APP_PATTERNS`에 직접 매칭되지 않는 상태를 놓치므로, 반드시 영구 추적을 경유한다. 표시용 detector는 degraded fallback을 유지하지만 strict detector는 ring과 activity cache·PTY registry를 detection 전후에 검사한다. 이들 mutex poison은 `Shell`로 축소하지 않고 자동 IPC에서는 로컬 CWD 갱신과 전파를 명시적으로 차단하며, 오류를 반환할 수 있는 경로는 그대로 전파한다. 가드가 차단 판정하면 session.cwd 로컬 업데이트도 건너뛴다(스테일/실행 중 값을 후속 전파가 재사용하지 못하도록). `Shell`만 신뢰하는 이유는, OSC 7이 사용자 의도의 `cd`를 반영하는 시점은 셸이 프롬프트를 다시 그린 직후 — 즉 `OSC 133;D` 이후 — 뿐이기 때문이다.
 
 **대상 필터링 (`filter_targets_not_busy`)**도 동일한 strict control detector로 판정한다 (#239). terminals/output registry 또는 개별 ring poison이면 전체 대상을 idle로 복원하지 않고 전파 자체를 오류로 중단한다:
 
@@ -1030,7 +1030,7 @@ state.terminals.lock_or_err()?;
 
 discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. `wait_until_retired()`는 recovered guard를 Condvar에 다시 전달할 수 있지만 lease·ACK·credit을 읽지 않고 mutex와 독립적인 `AtomicBool retired`만 lifecycle SoT로 사용한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
 
-activity bulk snapshot은 `terminals → output_buffers → per-ring` 순서로 읽고 오류를 `Result`로 반환한다. registry/ring poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
+activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 
