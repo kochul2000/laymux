@@ -223,7 +223,7 @@ import {
   boundedTerminalOutputControlBackoff,
   recoverTerminalOutputControl,
   settleTerminalOutputControl,
-  terminalOutputControlMayRetry,
+  TerminalOutputControlOrphanBudget,
 } from "@/lib/terminal-output-control-watchdog";
 import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
 
@@ -3736,6 +3736,8 @@ export function TerminalView({
     let outputRepairInFlight = false;
     let outputAttachTimeoutStreak = 0;
     let outputAckTimeoutStreak = 0;
+    const outputAttachOrphans = new TerminalOutputControlOrphanBudget();
+    const outputAckOrphans = new TerminalOutputControlOrphanBudget();
     /** Generation of the attachment the coordinator is currently applying. */
     let outputGeneration: number | undefined;
     /** Parsed-credit sender owned by exactly one backend attach lease. */
@@ -4223,11 +4225,11 @@ export function TerminalView({
       clearTerminalWriteRetryTimer();
       return true;
     };
-    const stopOutputControlRecovery = (expectedEpoch: number) => {
-      if (!invalidateOutputAttachEpoch(expectedEpoch, false)) return;
-      // The backend producer stays bounded/fail-stopped on its last lease. A
-      // remount starts a fresh epoch, but this mount creates no seventh orphan.
+    const stopOutputControlRecovery = (expectedEpoch: number): number | undefined => {
+      if (!invalidateOutputAttachEpoch(expectedEpoch, false)) return undefined;
+      // The backend producer stays bounded/fail-stopped on its last lease.
       flushDeferredTerminalFit();
+      return outputAttachEpoch;
     };
     const scheduleOutputReattach = (
       expectedEpoch = outputAttachEpoch,
@@ -4248,6 +4250,19 @@ export function TerminalView({
         void startOutputAttach();
       };
       outputAttachRetryTimer = setTimeout(tryStartReplacementAttach, initialDelayMs);
+    };
+    const waitForOutputControlCapacity = (
+      budget: TerminalOutputControlOrphanBudget,
+      expectedEpoch: number,
+      timeoutStreak: number,
+    ) => {
+      const stoppedEpoch = stopOutputControlRecovery(expectedEpoch);
+      if (stoppedEpoch === undefined) return;
+      const retryDelayMs = boundedTerminalOutputControlBackoff(Math.max(1, timeoutStreak));
+      budget.waitForCapacity(() => {
+        if (cancelled || outputAttachEpoch !== stoppedEpoch) return;
+        scheduleOutputReattach(stoppedEpoch, retryDelayMs);
+      });
     };
     const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
       if (segments.length === 0) return;
@@ -4570,26 +4585,54 @@ export function TerminalView({
       // would bounce off it into `scheduleOutputRepairRetry`'s timer.
       let attachWindowGap: { expectedSeq: number; actualSeq: number } | undefined;
       try {
+        if (!outputAttachOrphans.canStart) {
+          const retryDelayMs = boundedTerminalOutputControlBackoff(
+            Math.max(1, outputAttachTimeoutStreak),
+          );
+          recoverTerminalOutputControl(
+            () =>
+              waitForOutputControlCapacity(outputAttachOrphans, epoch, outputAttachTimeoutStreak),
+            () =>
+              console.warn(
+                "[TerminalView] terminal output attach orphan budget full; fail-stopping",
+                { epoch, retryDelayMs, outstanding: outputAttachOrphans.outstanding },
+              ),
+          );
+          return;
+        }
         const attachOutcome = await settleTerminalOutputControl(
           attachTerminalOutput(instanceId),
           TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+          {
+            onTimeout: () => outputAttachOrphans.recordTimeout(),
+            onOrphanSettled: () => outputAttachOrphans.recordOrphanSettled(),
+          },
         );
         if (!isCurrentAttach()) return;
         if (attachOutcome.kind === "timeout") {
           outputAttachTimeoutStreak += 1;
           const retryDelayMs = boundedTerminalOutputControlBackoff(outputAttachTimeoutStreak);
-          const willRetry = terminalOutputControlMayRetry(outputAttachTimeoutStreak);
+          const hasCapacity = outputAttachOrphans.canStart;
           recoverTerminalOutputControl(
             () =>
-              willRetry
+              hasCapacity
                 ? scheduleOutputReattach(epoch, retryDelayMs)
-                : stopOutputControlRecovery(epoch),
+                : waitForOutputControlCapacity(
+                    outputAttachOrphans,
+                    epoch,
+                    outputAttachTimeoutStreak,
+                  ),
             () =>
               console.warn(
-                willRetry
+                hasCapacity
                   ? "[TerminalView] terminal output attach timed out; replacing epoch"
-                  : "[TerminalView] terminal output attach timeout limit reached; fail-stopping",
-                { epoch, retryDelayMs, timeoutStreak: outputAttachTimeoutStreak },
+                  : "[TerminalView] terminal output attach orphan budget full; fail-stopping",
+                {
+                  epoch,
+                  retryDelayMs,
+                  timeoutStreak: outputAttachTimeoutStreak,
+                  outstanding: outputAttachOrphans.outstanding,
+                },
                 recordTerminalOutputRecovery(instanceId, "attachTimeout"),
               ),
           );
@@ -4630,27 +4673,49 @@ export function TerminalView({
                   ),
               );
             },
+            canStartOperation: () => outputAckOrphans.canStart,
+            onAdmissionBlocked: () => {
+              if (!isCurrentAttach()) return;
+              const retryDelayMs = boundedTerminalOutputControlBackoff(
+                Math.max(1, outputAckTimeoutStreak),
+              );
+              recoverTerminalOutputControl(
+                () => waitForOutputControlCapacity(outputAckOrphans, epoch, outputAckTimeoutStreak),
+                () =>
+                  console.warn(
+                    "[TerminalView] terminal output ACK orphan budget full; fail-stopping",
+                    { epoch, retryDelayMs, outstanding: outputAckOrphans.outstanding },
+                  ),
+              );
+            },
             timeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
             onTimeout: () => {
+              outputAckOrphans.recordTimeout();
               if (!isCurrentAttach()) return;
               outputAckTimeoutStreak += 1;
               const retryDelayMs = boundedTerminalOutputControlBackoff(outputAckTimeoutStreak);
-              const willRetry = terminalOutputControlMayRetry(outputAckTimeoutStreak);
+              const hasCapacity = outputAckOrphans.canStart;
               recoverTerminalOutputControl(
                 () =>
-                  willRetry
+                  hasCapacity
                     ? scheduleOutputReattach(epoch, retryDelayMs)
-                    : stopOutputControlRecovery(epoch),
+                    : waitForOutputControlCapacity(outputAckOrphans, epoch, outputAckTimeoutStreak),
                 () =>
                   console.warn(
-                    willRetry
+                    hasCapacity
                       ? "[TerminalView] terminal output ACK timed out; replacing epoch"
-                      : "[TerminalView] terminal output ACK timeout limit reached; fail-stopping",
-                    { epoch, retryDelayMs, timeoutStreak: outputAckTimeoutStreak },
+                      : "[TerminalView] terminal output ACK orphan budget full; fail-stopping",
+                    {
+                      epoch,
+                      retryDelayMs,
+                      timeoutStreak: outputAckTimeoutStreak,
+                      outstanding: outputAckOrphans.outstanding,
+                    },
                     recordTerminalOutputRecovery(instanceId, "ackTimeout"),
                   ),
               );
             },
+            onOrphanSettled: () => outputAckOrphans.recordOrphanSettled(),
             onConfirmed: () => {
               if (isCurrentAttach()) outputAckTimeoutStreak = 0;
             },
@@ -5167,6 +5232,8 @@ export function TerminalView({
       cancelled = true;
       outputFlowAcknowledger?.dispose();
       outputFlowAcknowledger = undefined;
+      outputAttachOrphans.dispose();
+      outputAckOrphans.dispose();
       outputAttachEpoch += 1;
       outputProtocolReadyRef.current = false;
       if (outputAttachRetryTimer !== undefined) clearTimeout(outputAttachRetryTimer);

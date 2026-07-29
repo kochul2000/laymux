@@ -20,11 +20,12 @@ ADR-0084는 desktop PTY producer를 generation-local parsed-credit lease로 제�
 - `TerminalView`의 mount-local `outputAttachEpoch`가 단 하나의 current epoch 진실원이다. attach 시작, 재부착, unmount는 이 값을 전진시키며, 모든 async continuation은 캡처한 epoch가 현재인지 확인한 뒤에만 lease·parser·readiness를 변경한다.
 - `attach_terminal_output` Promise는 fulfillment와 rejection handler를 먼저 연결한 뒤 5초 timer와 경쟁한다. timeout outcome은 원 Promise의 값이나 오류를 노출하지 않는다. 늦은 resolve/reject는 연결된 handler가 흡수하고 이미 교체된 epoch에는 아무 작업도 하지 않는다.
 - `TerminalOutputFlowAcknowledger` 하나는 attach token 하나와 단일 in-flight ACK만 소유한다. 각 ACK에 5초 timer를 두며 timeout이면 sender와 timer를 먼저 폐기한 뒤 current epoch에만 replacement를 요청한다. 늦은 `true`/`false`/reject는 confirmed prefix, retry timer, 새 token을 움직이지 않는다.
-- timeout replacement는 attach와 ACK 종류별 연속 streak를 가진다. 50 ms부터 지수 backoff하고 1,000 ms를 넘지 않는다. 성공한 attach fulfillment만 attach streak를, backend가 `true`로 수락한 ACK만 ACK streak를 0으로 만든다. 중간의 replacement attach 성공은 ACK streak를 지우지 않는다.
-- 취소할 수 없는 orphan을 유한하게 유지하기 위해 종류별로 초기 요청 하나와 replacement 다섯 개, 합계 6개의 unsettled operation까지만 허용한다. 여섯 번째 timeout 뒤에는 current epoch를 폐기하고 readiness를 닫되 새 control Promise를 만들지 않는다. backend producer는 마지막 lease의 bounded credit에서 fail-stop하며 pane remount가 새 mount/epoch를 시작한다.
+- timeout replacement는 attach와 ACK 종류별 연속 streak를 rate backoff 용도로만 가진다. 50 ms부터 지수 backoff하고 1,000 ms를 넘지 않는다. 성공한 attach fulfillment만 attach streak를, backend가 `true`로 수락한 ACK만 ACK streak를 0으로 만든다. 중간의 replacement attach 성공은 ACK streak를 지우지 않는다.
+- 자원 상한은 streak와 별개인 mount-local `outstanding timed-out but unsettled operation` 수가 소유한다. attach와 ACK 종류별 timeout 때 해당 수를 늘리고, timeout 뒤 underlying Promise가 늦게 resolve/reject할 때 lease·prefix·화면은 건드리지 않은 채 그 수만 줄인다. 중간의 attach/ACK 성공은 아직 pending인 과거 orphan 수를 줄이지 않는다.
+- 새 attach/ACK bridge operation은 해당 종류의 실제 outstanding orphan이 6 미만일 때만 만든다. 6이면 current epoch를 폐기하고 readiness를 닫아 backend producer를 마지막 lease의 bounded credit에서 fail-stop하며, capacity waiter는 현재 epoch 하나만 소유한다. orphan 하나가 늦게 정착해 슬롯을 돌려주면 waiter를 먼저 소비하고 current epoch가 여전히 같을 때만 bounded backoff 뒤 replacement 하나를 예약한다. 여러 orphan의 연속 정착은 같은 blocked epoch의 recovery를 중복 예약하지 않는다.
 - 정상 reject 의미는 유지한다. attach reject는 기존 즉시 재부착 경로를 사용한다. ACK Promise reject는 같은 token/sequence를 기존 50 ms 간격으로 재시도하며, backend `false`는 stale lease로 보고 재시도 없이 즉시 재부착한다. settled reject는 orphan을 남기지 않으므로 timeout streak나 6개 상한에 포함하지 않는다.
 - recovery state 변경은 warning/counter보다 먼저 확정한다. `console.warn` 또는 diagnostic counter가 throw해도 epoch 폐기·replacement/fail-stop 결정을 되돌리거나 막지 않는다. session-scoped recovery counter는 attach와 ACK timeout을 `attachTimeout`, `ackTimeout`으로 각각 센다.
-- unmount는 sender/timer를 폐기하고 epoch를 전진시킨다. 그 뒤 도착한 attach/ACK orphan completion은 no-op이다.
+- unmount는 sender/timer와 capacity waiter를 폐기하고 epoch를 전진시킨다. 그 뒤 도착한 attach/ACK orphan completion은 자원 계수만 내리고 UI recovery는 예약하지 않는다.
 
 ## Alternatives Considered
 
@@ -38,7 +39,7 @@ ADR-0084는 desktop PTY producer를 generation-local parsed-credit lease로 제�
 ## Consequences
 
 - 한 번 고아가 된 attach/ACK 뒤 control bridge가 다시 응답하면 새 epoch/token으로 출력이 진행된다. old completion은 새 prefix나 화면을 바꾸지 않는다.
-- control bridge가 계속 응답하지 않아도 backend output과 frontend pending delta는 ADR-0084 window/ring 경계 안에서 멈추고, mount당 취소 불가능한 attach·ACK operation도 종류별 최대 6개다.
-- 여섯 번째 연속 timeout 뒤에는 자동 회복보다 유한 자원을 우선해 pane output이 fail-stop한다. 사용자는 pane remount로 새 시도를 시작할 수 있다. 실측에서 이 상한 도달이 반복되면 cancellable bridge 또는 surface lifecycle 재시작을 별도 결정한다.
+- control bridge가 계속 응답하지 않아도 backend output과 frontend pending delta는 ADR-0084 window/ring 경계 안에서 멈추고, mount당 실제 미정착 attach·ACK orphan도 종류별 최대 6개다. timeout과 성공이 번갈아도 성공은 과거 orphan을 지우지 않으므로 상한을 우회하지 못한다.
+- outstanding 6개에서는 자동 회복보다 유한 자원을 우선해 pane output이 fail-stop한다. orphan이 늦게 정착하면 반환된 슬롯으로 current epoch 하나만 자동 재시도하고, 끝내 정착하지 않으면 사용자가 pane remount로 새 mount를 시작할 수 있다. 실측에서 이 상한 도달이 반복되면 cancellable bridge 또는 surface lifecycle 재시작을 별도 결정한다.
 - 두 timeout counter와 warning은 운영 진단용이며 delivery 결정을 소유하지 않는다. sabotage 회귀 테스트가 recovery-before-diagnostics 순서를 고정한다.
 - 화면 셀 의미나 terminal byte 변환은 바뀌지 않으므로 별도 xterm screen test는 필요하지 않다. fake-timer helper/component 테스트가 pending, replacement, stale completion, unmount, retry 상한을 검증한다.

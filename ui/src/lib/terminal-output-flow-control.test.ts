@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TerminalOutputFlowAcknowledger } from "./terminal-output-flow-control";
+import { TerminalOutputControlOrphanBudget } from "./terminal-output-control-watchdog";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -153,9 +154,14 @@ describe("TerminalOutputFlowAcknowledger", () => {
       const send = vi.fn().mockReturnValue(pending.promise);
       const onTimeout = vi.fn();
       const onConfirmed = vi.fn();
+      const budget = new TerminalOutputControlOrphanBudget(6);
       const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
         timeoutMs: 5_000,
-        onTimeout,
+        onTimeout: () => {
+          budget.recordTimeout();
+          onTimeout();
+        },
+        onOrphanSettled: () => budget.recordOrphanSettled(),
         onConfirmed,
       });
 
@@ -165,6 +171,7 @@ describe("TerminalOutputFlowAcknowledger", () => {
 
       await vi.advanceTimersByTimeAsync(1);
       expect(onTimeout).toHaveBeenCalledOnce();
+      expect(budget.outstanding).toBe(1);
       acknowledger.complete(4, 8);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(send).toHaveBeenCalledTimes(1);
@@ -174,9 +181,27 @@ describe("TerminalOutputFlowAcknowledger", () => {
       await Promise.resolve();
       expect(onConfirmed).not.toHaveBeenCalled();
       expect(onTimeout).toHaveBeenCalledOnce();
+      expect(budget.outstanding).toBe(0);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("blocks ACK bridge creation when real timed-out orphans fill the budget", async () => {
+    const budget = new TerminalOutputControlOrphanBudget(6);
+    for (let index = 0; index < 6; index += 1) budget.recordTimeout();
+    const send = vi.fn().mockResolvedValue(true);
+    const onAdmissionBlocked = vi.fn();
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+      canStartOperation: () => budget.canStart,
+      onAdmissionBlocked,
+    });
+
+    acknowledger.complete(0, 4);
+    await Promise.resolve();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(onAdmissionBlocked).toHaveBeenCalledOnce();
   });
 
   it("reports a settled ACK so a caller can reset only the ACK-timeout backoff", async () => {

@@ -10299,12 +10299,25 @@ describe("TerminalView desktop input composer", () => {
     }
   });
 
-  it("fail-stops after six unsettled attach operations instead of retaining orphans forever", async () => {
+  it("caps real attach orphans across successes and recovers once when one settles", async () => {
     vi.useFakeTimers();
     const terminalId = "t-output-attach-timeout-cap";
     const baselineAttachment = await mockAttachTerminalOutput();
     mockAttachTerminalOutput.mockClear();
-    mockAttachTerminalOutput.mockImplementation(() => new Promise(() => {}));
+    const resolveOrphans: Array<(value: typeof baselineAttachment) => void> = [];
+    let operation = 0;
+    mockAttachTerminalOutput.mockImplementation(() => {
+      operation += 1;
+      // Timeout and success alternate. The sixth timeout fills the resource
+      // budget; operation 12 is admitted only after a real orphan settles.
+      if (operation <= 11 && operation % 2 === 1) {
+        return new Promise<typeof baselineAttachment>((resolve) => resolveOrphans.push(resolve));
+      }
+      return Promise.resolve({
+        ...baselineAttachment,
+        flowControl: { ...baselineAttachment.flowControl, token: `lease-success-${operation}` },
+      });
+    });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     try {
@@ -10312,18 +10325,66 @@ describe("TerminalView desktop input composer", () => {
         <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
       );
       await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() =>
+        expect(mockOnTerminalOutput).toHaveBeenCalledWith(terminalId, expect.any(Function)),
+      );
+      const emitOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
+        | ((data: Uint8Array | Record<string, unknown>) => void)
+        | undefined;
+      expect(emitOutput).toBeDefined();
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(60_000);
-      });
-      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(6);
+      for (let orphan = 0; orphan < 6; orphan += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(6_000);
+        });
+        if (orphan === 5) break;
+
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes((orphan + 1) * 2);
+        await vi.waitFor(() => expect(mockReset.mock.calls.length).toBeGreaterThan(orphan));
+        act(() => {
+          emitOutput?.({ ...outputDelta(0, "X"), seqEnd: 2 });
+        });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(100);
+        });
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes((orphan + 1) * 2 + 1);
+      }
+
+      // Five successful replacements reset rate backoff, but the six orphan
+      // bridge Promises are all still pending. A twelfth operation is blocked.
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(11);
       expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({ attachTimeout: 6 });
+      const resetsAtCap = mockReset.mock.calls.length;
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(60_000);
+        resolveOrphans[0]?.({
+          ...baselineAttachment,
+          flowControl: { ...baselineAttachment.flowControl, token: "lease-orphan-late" },
+        });
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1_000);
       });
-      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(6);
+      await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(12));
+      await vi.waitFor(() => expect(mockReset.mock.calls.length).toBeGreaterThan(resetsAtCap));
+      const resetsAfterCapacityRecovery = mockReset.mock.calls.length;
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalledWith(
+        terminalId,
+        expect.any(Number),
+        "lease-orphan-late",
+        expect.any(Number),
+      );
+
+      // A second late orphan only releases another slot. The cap waiter was
+      // one-shot, so it cannot launch a duplicate recovery for the same epoch.
+      await act(async () => {
+        resolveOrphans[1]?.(baselineAttachment);
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(12);
+      expect(mockReset).toHaveBeenCalledTimes(resetsAfterCapacityRecovery);
       unmount();
+      for (const resolve of resolveOrphans.slice(2)) resolve(baselineAttachment);
     } finally {
       mockAttachTerminalOutput.mockReset();
       mockAttachTerminalOutput.mockResolvedValue(baselineAttachment);

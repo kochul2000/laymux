@@ -3,7 +3,7 @@ import {
   boundedTerminalOutputControlBackoff,
   recoverTerminalOutputControl,
   settleTerminalOutputControl,
-  terminalOutputControlMayRetry,
+  TerminalOutputControlOrphanBudget,
 } from "./terminal-output-control-watchdog";
 
 function deferred<T>() {
@@ -46,16 +46,22 @@ describe("settleTerminalOutputControl", () => {
   it("absorbs an orphan rejection that arrives after timeout", async () => {
     vi.useFakeTimers();
     try {
+      const budget = new TerminalOutputControlOrphanBudget(6);
       const pending = deferred<string>();
-      const outcome = settleTerminalOutputControl(pending.promise, 5_000);
+      const outcome = settleTerminalOutputControl(pending.promise, 5_000, {
+        onTimeout: () => budget.recordTimeout(),
+        onOrphanSettled: () => budget.recordOrphanSettled(),
+      });
 
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
+      expect(budget.outstanding).toBe(1);
       pending.reject(new Error("late bridge rejection"));
       await Promise.resolve();
       await Promise.resolve();
 
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
+      expect(budget.outstanding).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -65,13 +71,59 @@ describe("settleTerminalOutputControl", () => {
     expect([0, 1, 2, 3, 4, 5, 20].map(boundedTerminalOutputControlBackoff)).toEqual([
       0, 50, 100, 200, 400, 800, 1_000,
     ]);
-    expect([1, 5, 6, 7, 20].map(terminalOutputControlMayRetry)).toEqual([
-      true,
-      true,
-      false,
-      false,
-      false,
-    ]);
+  });
+
+  it("counts a timed-out operation until its orphan resolve settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const budget = new TerminalOutputControlOrphanBudget(6);
+      const pending = deferred<string>();
+      const outcome = settleTerminalOutputControl(pending.promise, 5_000, {
+        onTimeout: () => budget.recordTimeout(),
+        onOrphanSettled: () => budget.recordOrphanSettled(),
+      });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(outcome).resolves.toEqual({ kind: "timeout" });
+      expect(budget.outstanding).toBe(1);
+
+      pending.resolve("stale lease");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(budget.outstanding).toBe(0);
+      await expect(outcome).resolves.toEqual({ kind: "timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds real unsettled orphans across alternating timeout and success", () => {
+    const budget = new TerminalOutputControlOrphanBudget(6);
+    let operationsCreated = 0;
+    const start = (timesOut: boolean) => {
+      if (!budget.canStart) return false;
+      operationsCreated += 1;
+      if (timesOut) budget.recordTimeout();
+      return true;
+    };
+
+    for (let orphan = 0; orphan < 6; orphan += 1) {
+      expect(start(true)).toBe(true);
+      // A successful replacement resets rate backoff, but it cannot erase the
+      // previous bridge Promise that is still genuinely pending.
+      if (orphan < 5) expect(start(false)).toBe(true);
+    }
+    expect(budget.outstanding).toBe(6);
+    expect(operationsCreated).toBe(11);
+    expect(start(false)).toBe(false);
+
+    const recover = vi.fn();
+    budget.waitForCapacity(recover);
+    budget.recordOrphanSettled();
+    expect(recover).toHaveBeenCalledOnce();
+    budget.recordOrphanSettled();
+    expect(recover).toHaveBeenCalledOnce();
+    expect(budget.outstanding).toBe(4);
   });
 
   it("publishes epoch replacement before best-effort diagnostics and absorbs sabotage", () => {
