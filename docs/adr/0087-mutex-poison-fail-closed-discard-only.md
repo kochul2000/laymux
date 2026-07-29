@@ -1,6 +1,6 @@
 # 0087. Mutex poison은 기본 fail-closed이며 폐기 전용 close만 guard를 회수한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: issue #631 · PR #626 failure-path 리뷰 · [architecture/api-contracts.md §14.3](../architecture/api-contracts.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
 - Extends: [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)의 terminal-output generation retirement 예외를 리포 전역 poison 정책으로 일반화한다.
