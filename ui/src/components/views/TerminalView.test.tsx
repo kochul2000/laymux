@@ -11113,8 +11113,10 @@ describe("TerminalView desktop input composer", () => {
         <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
       </>,
     );
-    let finishAFirst: (() => void) | undefined;
-    let finishBFirst: (() => void) | undefined;
+    const pendingPhysicalWrites: Array<{
+      pane: "a" | "b";
+      complete: () => void;
+    }> = [];
     try {
       await vi.waitFor(() => {
         expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
@@ -11153,12 +11155,7 @@ describe("TerminalView desktop input composer", () => {
           aCallbacksCompleted += 1;
           callback?.();
         };
-        if (aWrites.length === 1) {
-          finishAFirst = () => {
-            finishAFirst = undefined;
-            complete();
-          };
-        } else complete();
+        pendingPhysicalWrites.push({ pane: "a", complete });
       };
       terminalB.write = (data, callback) => {
         bWrites.push(
@@ -11174,12 +11171,18 @@ describe("TerminalView desktop input composer", () => {
           bCallbacksCompleted += 1;
           callback?.();
         };
-        if (bWrites.length === 1) {
-          finishBFirst = () => {
-            finishBFirst = undefined;
-            complete();
-          };
-        } else complete();
+        pendingPhysicalWrites.push({ pane: "b", complete });
+      };
+
+      const completeNextPhysicalWrite = async (expectedPane?: "a" | "b") => {
+        await vi.waitFor(() => expect(pendingPhysicalWrites.length).toBeGreaterThan(0));
+        const pending = pendingPhysicalWrites.shift();
+        expect(pending).toBeDefined();
+        await act(async () => {
+          pending?.complete();
+          await Promise.resolve();
+        });
+        if (expectedPane !== undefined) expect(pending?.pane).toBe(expectedPane);
       };
 
       const firstA = "hold-a";
@@ -11197,7 +11200,7 @@ describe("TerminalView desktop input composer", () => {
         emitter(paneA)(outputDelta(firstA.length, aFlood));
         emitter(paneB)(outputDelta(0, firstB));
       });
-      act(() => finishAFirst?.());
+      await completeNextPhysicalWrite("a");
       await vi.waitFor(() => expect(bWrites.map(({ length }) => length)).toEqual([firstB.length]));
 
       act(() => emitter(paneB)(outputDelta(firstB.length, bFlood)));
@@ -11206,14 +11209,22 @@ describe("TerminalView desktop input composer", () => {
           256 * 1024,
         ),
       );
-      act(() => finishBFirst?.());
+      await completeNextPhysicalWrite("b");
 
-      await vi.waitFor(() => {
-        expect(aWrites.reduce((total, part) => total + part.length, 0)).toBe(expectedA.length);
-        expect(bWrites.reduce((total, part) => total + part.length, 0)).toBe(expectedB.length);
-        expect(aCallbacksCompleted).toBe(aWrites.length);
-        expect(bCallbacksCompleted).toBe(bWrites.length);
-      });
+      const byteLength = (parts: readonly Uint8Array[]) =>
+        parts.reduce((total, part) => total + part.length, 0);
+      while (
+        byteLength(aWrites) < expectedA.length ||
+        byteLength(bWrites) < expectedB.length ||
+        aCallbacksCompleted < aWrites.length ||
+        bCallbacksCompleted < bWrites.length
+      ) {
+        await completeNextPhysicalWrite();
+      }
+      expect(byteLength(aWrites)).toBe(expectedA.length);
+      expect(byteLength(bWrites)).toBe(expectedB.length);
+      expect(aCallbacksCompleted).toBe(aWrites.length);
+      expect(bCallbacksCompleted).toBe(bWrites.length);
       expect(aWrites[1]).toHaveLength(64 * 1024);
       const concatenate = (parts: readonly Uint8Array[]) => {
         const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
@@ -11224,8 +11235,28 @@ describe("TerminalView desktop input composer", () => {
         }
         return result;
       };
-      expect(concatenate(aWrites)).toEqual(expectedA);
-      expect(concatenate(bWrites)).toEqual(expectedB);
+      const expectExactBytes = (label: string, actual: Uint8Array, expected: Uint8Array) => {
+        expect(actual.byteLength, `${label}: actual/expected byte length`).toBe(
+          expected.byteLength,
+        );
+        let firstMismatch = -1;
+        for (let index = 0; index < expected.byteLength; index += 1) {
+          if (actual[index] !== expected[index]) {
+            firstMismatch = index;
+            break;
+          }
+        }
+        const mismatchDetail =
+          firstMismatch < 0
+            ? "none"
+            : `${firstMismatch} (actual=${actual[firstMismatch]}, expected=${expected[firstMismatch]})`;
+        expect(
+          firstMismatch,
+          `${label}: actual length=${actual.byteLength}, expected length=${expected.byteLength}, first mismatch=${mismatchDetail}`,
+        ).toBe(-1);
+      };
+      expectExactBytes("pane A", concatenate(aWrites), expectedA);
+      expectExactBytes("pane B", concatenate(bWrites), expectedB);
       expect(duplicateCallbacks).toBe(0);
       await vi.waitFor(() => {
         expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
@@ -11253,8 +11284,10 @@ describe("TerminalView desktop input composer", () => {
       expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCallsAfterInitial);
     } finally {
       await act(async () => {
-        finishAFirst?.();
-        finishBFirst?.();
+        while (pendingPhysicalWrites.length > 0) {
+          pendingPhysicalWrites.shift()?.complete();
+          await Promise.resolve();
+        }
         view.unmount();
         await Promise.resolve();
       });
