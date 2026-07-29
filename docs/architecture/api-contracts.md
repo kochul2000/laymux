@@ -507,6 +507,8 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
 | `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
+`write_to_terminal`·`write_to_neighbor`·`broadcast_write`·`execute_command`는 exec lock을 선택할 때 terminal output generation을 함께 캡처한다. async lock 대기 뒤 실제 write admission은 `terminals → terminal-output session registry → pty_handles` 순서의 한 임계구역에서 generation 일치와 handle 존재를 재검증하고 그 `PtyHandle`을 clone한다. operation의 body·제출 CR은 이 clone만 사용하며 terminal id로 handle table을 다시 조회하지 않는다. admission 뒤 close가 이기면 old handle 종료로 남은 write가 실패하고, 같은 id로 생성된 새 terminal에는 입력하지 않는다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)).
+
 **워크스페이스 (6)**:
 
 | Tool | 구현 방식 | 설명 |

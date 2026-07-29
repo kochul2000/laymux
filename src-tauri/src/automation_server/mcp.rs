@@ -160,10 +160,19 @@ fn default_true() -> bool {
 /// Result of [`McpHandler::write_input`]: bytes sent plus the pre-write state
 /// sampled atomically under the per-terminal exec lock (`activity` always;
 /// `before_seq` only when capture was requested).
+#[derive(Debug)]
 struct WriteOutcome {
     bytes: usize,
     activity: serde_json::Value,
     before_seq: Option<u64>,
+}
+
+/// Generation identity captured before acquiring the async per-terminal lock.
+/// The identity must be revalidated at physical-write admission because the
+/// terminal can close and reuse the same id while this caller awaits the lock.
+struct TerminalExecTicket {
+    generation: u64,
+    lock: Arc<TokioMutex<()>>,
 }
 
 /// Get or create the per-terminal serialization lock from a shared table.
@@ -195,6 +204,28 @@ fn get_or_create_terminal_lock(
         };
     }
     Ok(Arc::clone(&entry.lock))
+}
+
+fn terminal_exec_ticket_in_with_hook(
+    app_state: &crate::state::AppState,
+    terminal_id: &str,
+    after_generation_read: impl FnOnce(u64),
+) -> Result<TerminalExecTicket, CallToolResult> {
+    let output_session = crate::terminal_output::terminal_output_session_for(
+        &app_state.terminal_protocol_states,
+        terminal_id,
+    )
+    .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?
+    .ok_or_else(|| {
+        CallToolResult::error(vec![Content::text(format!(
+            "Terminal '{terminal_id}' not found"
+        ))])
+    })?;
+    let generation = output_session.generation();
+    after_generation_read(generation);
+    let lock = get_or_create_terminal_lock(&app_state.exec_locks, terminal_id, generation)
+        .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+    Ok(TerminalExecTicket { generation, lock })
 }
 
 /// Remove `terminal_id`'s entry, but only if it is still the exact `expected`
@@ -700,23 +731,8 @@ impl McpHandler {
     async fn terminal_exec_lock(
         &self,
         terminal_id: &str,
-    ) -> Result<Arc<TokioMutex<()>>, CallToolResult> {
-        let output_session = crate::terminal_output::terminal_output_session_for(
-            &self.state.app_state.terminal_protocol_states,
-            terminal_id,
-        )
-        .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?
-        .ok_or_else(|| {
-            CallToolResult::error(vec![Content::text(format!(
-                "Terminal '{terminal_id}' not found"
-            ))])
-        })?;
-        get_or_create_terminal_lock(
-            &self.state.app_state.exec_locks,
-            terminal_id,
-            output_session.generation(),
-        )
-        .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
+    ) -> Result<TerminalExecTicket, CallToolResult> {
+        terminal_exec_ticket_in_with_hook(&self.state.app_state, terminal_id, |_| {})
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -877,10 +893,47 @@ impl McpHandler {
         }
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
-        let lock = self.terminal_exec_lock(terminal_id).await?;
-        let _guard = lock.lock().await;
+        let ticket = self.terminal_exec_lock(terminal_id).await?;
+        let _guard = ticket.lock.lock().await;
+        let outcome = Self::write_input_after_lock_from_state(
+            &self.state.app_state,
+            terminal_id,
+            ticket.generation,
+            &chunks,
+            capture,
+        )
+        .await;
+        if outcome.is_err() {
+            match Self::generation_is_current_in(
+                &self.state.app_state,
+                terminal_id,
+                ticket.generation,
+            ) {
+                Ok(false) => self.remove_terminal_lock(terminal_id, &ticket.lock),
+                Ok(true) => {}
+                Err(error) => {
+                    tracing::warn!(terminal_id, error = ?error, "failed to verify terminal generation after write error");
+                }
+            }
+        }
+        outcome
+    }
+
+    async fn write_input_after_lock_from_state(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        expected_generation: u64,
+        chunks: &[Vec<u8>],
+        capture: bool,
+    ) -> Result<WriteOutcome, CallToolResult> {
         // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
-        let (activity, before_seq) = self.sample_activity_and_seq(terminal_id, capture)?;
+        let (activity, before_seq) =
+            Self::sample_activity_and_seq_from_state(app_state, terminal_id, capture)?;
+        let handle = Self::capture_pty_handle_for_generation_in(
+            app_state,
+            terminal_id,
+            expected_generation,
+        )?;
         let mut total = 0usize;
         for (i, chunk) in chunks.iter().enumerate() {
             // 청크(=본문 다음의 CR) 앞에만 지연을 둔다. lone CR/본문만일 때는
@@ -888,21 +941,7 @@ impl McpHandler {
             if i > 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(Self::ENTER_CR_DELAY_MS)).await;
             }
-            match self.write_pty(terminal_id, chunk) {
-                Ok(n) => total += n,
-                Err(e) => {
-                    // 쓰기 도중 터미널이 사라졌다면(close 와 경합) 방금 재생성됐을
-                    // 수 있는 락 엔트리를 정리한다(#427). 단 우리가 든 락일 때만.
-                    match self.terminal_exists(terminal_id) {
-                        Ok(false) => self.remove_terminal_lock(terminal_id, &lock),
-                        Ok(true) => {}
-                        Err(exists_error) => {
-                            tracing::warn!(terminal_id, error = ?exists_error, "failed to verify terminal existence after write error");
-                        }
-                    }
-                    return Err(e);
-                }
-            }
+            total += Self::write_captured_pty(&handle, chunk)?;
         }
         Ok(WriteOutcome {
             bytes: total,
@@ -943,30 +982,81 @@ impl McpHandler {
         }
     }
 
-    /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
-    fn write_pty(&self, terminal_id: &str, data: &[u8]) -> Result<usize, CallToolResult> {
-        Self::write_pty_in(&self.state.app_state, terminal_id, data)
-    }
-
-    fn write_pty_in(
+    /// Revalidate a captured output generation and clone its PTY handle while
+    /// close/create are excluded by the terminal catalog lock. The returned
+    /// handle, rather than a later id lookup, owns every physical write in the
+    /// operation so same-id recreation cannot redirect stale input.
+    fn capture_pty_handle_for_generation_in(
         app_state: &crate::state::AppState,
         terminal_id: &str,
-        data: &[u8],
-    ) -> Result<usize, CallToolResult> {
+        expected_generation: u64,
+    ) -> Result<crate::pty::PtyHandle, CallToolResult> {
+        // Global lock order: terminals (1) -> output session registry (2) ->
+        // pty_handles (12). All guards are released before platform I/O.
+        let terminals = app_state
+            .terminals
+            .lock_or_err()
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+        if !terminals.contains_key(terminal_id) {
+            return Err(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{terminal_id}' not found"
+            ))]));
+        }
+        let current = crate::terminal_output::terminal_output_session_for(
+            &app_state.terminal_protocol_states,
+            terminal_id,
+        )
+        .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?
+        .ok_or_else(|| {
+            CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{terminal_id}' not found"
+            ))])
+        })?;
+        if current.generation() != expected_generation {
+            return Err(CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{terminal_id}' generation changed before PTY write admission"
+            ))]));
+        }
         let ptys = app_state
             .pty_handles
             .lock_or_err()
             .map_err(|e| CallToolResult::error(vec![Content::text(e.to_string())]))?;
-        match ptys.get(terminal_id) {
-            Some(handle) => handle
-                .write(data)
-                .map(|_| data.len())
-                .map_err(|e| CallToolResult::error(vec![Content::text(e)])),
-            None => Err(CallToolResult::error(vec![Content::text(format!(
+        ptys.get(terminal_id).cloned().ok_or_else(|| {
+            CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 terminal_id
-            ))])),
+            ))])
+        })
+    }
+
+    fn write_captured_pty(
+        handle: &crate::pty::PtyHandle,
+        data: &[u8],
+    ) -> Result<usize, CallToolResult> {
+        handle
+            .write(data)
+            .map(|_| data.len())
+            .map_err(|error| CallToolResult::error(vec![Content::text(error)]))
+    }
+
+    fn generation_is_current_in(
+        app_state: &crate::state::AppState,
+        terminal_id: &str,
+        expected_generation: u64,
+    ) -> Result<bool, CallToolResult> {
+        let terminals = app_state
+            .terminals
+            .lock_or_err()
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?;
+        if !terminals.contains_key(terminal_id) {
+            return Ok(false);
         }
+        crate::terminal_output::terminal_output_session_for(
+            &app_state.terminal_protocol_states,
+            terminal_id,
+        )
+        .map(|current| current.is_some_and(|session| session.generation() == expected_generation))
+        .map_err(|error| CallToolResult::error(vec![Content::text(error)]))
     }
 
     /// Revalidate every activity authority immediately before an
@@ -977,6 +1067,7 @@ impl McpHandler {
     fn execute_command_prewrite_and_write_from_state(
         app_state: &crate::state::AppState,
         terminal_id: &str,
+        expected_generation: u64,
         data: &[u8],
     ) -> Result<(u64, usize), CallToolResult> {
         let before_seq = {
@@ -1006,7 +1097,12 @@ impl McpHandler {
                 .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))?
         };
 
-        let bytes = Self::write_pty_in(app_state, terminal_id, data)?;
+        let handle = Self::capture_pty_handle_for_generation_in(
+            app_state,
+            terminal_id,
+            expected_generation,
+        )?;
+        let bytes = Self::write_captured_pty(&handle, data)?;
         Ok((before_seq, bytes))
     }
 
@@ -1235,14 +1331,6 @@ impl McpHandler {
     /// `capture_ms` window. Call this while holding the per-terminal exec lock so
     /// the sample is atomic w.r.t. this terminal's write ordering. A poisoned
     /// registry or ring returns a tool error before any PTY side effect.
-    fn sample_activity_and_seq(
-        &self,
-        terminal_id: &str,
-        want_seq: bool,
-    ) -> Result<(serde_json::Value, Option<u64>), CallToolResult> {
-        Self::sample_activity_and_seq_from_state(&self.state.app_state, terminal_id, want_seq)
-    }
-
     fn sample_activity_and_seq_from_state(
         app_state: &crate::state::AppState,
         terminal_id: &str,
@@ -2049,11 +2137,11 @@ impl McpHandler {
         }
 
         // Acquire per-terminal lock to serialize concurrent execute_command calls
-        let lock = match self.terminal_exec_lock(&p.terminal_id).await {
-            Ok(lock) => lock,
+        let ticket = match self.terminal_exec_lock(&p.terminal_id).await {
+            Ok(ticket) => ticket,
             Err(error) => return Ok(error),
         };
-        let _guard = lock.lock().await;
+        let _guard = ticket.lock.lock().await;
 
         // 1-2. Revalidate the strict activity authorities after acquiring the
         // per-terminal exec lock, then write command + CR. This is the final
@@ -2063,20 +2151,21 @@ impl McpHandler {
         let (before_seq, bytes_written) = match Self::execute_command_prewrite_and_write_from_state(
             &self.state.app_state,
             &p.terminal_id,
+            ticket.generation,
             cmd.as_bytes(),
         ) {
             Ok(outcome) => outcome,
             Err(error) => {
-                // Preserve the close-race cleanup from the former inline
-                // ring lookup. Output-registry poison remains fail-closed.
-                if self
-                    .state
-                    .app_state
-                    .output_buffers
-                    .lock_or_err()
-                    .is_ok_and(|buffers| !buffers.contains_key(&p.terminal_id))
-                {
-                    self.remove_terminal_lock(&p.terminal_id, &lock);
+                match Self::generation_is_current_in(
+                    &self.state.app_state,
+                    &p.terminal_id,
+                    ticket.generation,
+                ) {
+                    Ok(false) => self.remove_terminal_lock(&p.terminal_id, &ticket.lock),
+                    Ok(true) => {}
+                    Err(generation_error) => {
+                        tracing::warn!(terminal_id = %p.terminal_id, error = ?generation_error, "failed to verify terminal generation after execute error");
+                    }
                 }
                 return Ok(error);
             }
@@ -4229,35 +4318,54 @@ mod tests {
         }
     }
 
-    fn execute_command_prompt_state() -> (crate::state::AppState, Arc<std::sync::Mutex<Vec<u8>>>) {
+    fn execute_command_prompt_state(
+    ) -> (crate::state::AppState, Arc<std::sync::Mutex<Vec<u8>>>, u64) {
         let state = crate::state::AppState::new();
         let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let registration = crate::terminal_output::register_terminal_output_session(
+            &state.terminal_protocol_states,
+            &state.output_buffers,
+            "t1",
+        )
+        .unwrap();
+        let generation = registration.session().generation();
+        state.terminals.lock().unwrap().insert(
+            "t1".into(),
+            crate::terminal::TerminalSession::new(
+                "t1".into(),
+                crate::terminal::TerminalConfig::default(),
+            ),
+        );
         state.pty_handles.lock().unwrap().insert(
             "t1".into(),
             crate::pty::PtyHandle::from_test_writer(Box::new(ExecuteCommandCountingWriter(
                 Arc::clone(&written),
             ))),
         );
-        let mut ring = crate::output_buffer::TerminalOutputBuffer::default();
-        ring.push(b"\x1b]133;D;0\x07prompt$ ");
-        assert!(crate::activity::is_terminal_at_prompt_from_buffer(Some(
-            &ring
-        )));
-        state
-            .output_buffers
-            .lock()
-            .unwrap()
-            .insert("t1".into(), ring);
-        (state, written)
+        {
+            let mut buffers = state.output_buffers.lock().unwrap();
+            let ring = buffers.get_mut("t1").unwrap();
+            ring.push(b"\x1b]133;D;0\x07prompt$ ");
+            assert!(crate::activity::is_terminal_at_prompt_from_buffer(Some(
+                ring
+            )));
+        }
+        registration.commit().unwrap();
+        (state, written, generation)
     }
 
     fn assert_execute_command_error_has_zero_bytes(
         state: &crate::state::AppState,
         written: &Arc<std::sync::Mutex<Vec<u8>>>,
+        generation: u64,
     ) {
-        let error =
-            McpHandler::execute_command_prewrite_and_write_from_state(state, "t1", b"echo safe\r")
-                .unwrap_err();
+        let error = McpHandler::execute_command_prewrite_and_write_from_state(
+            state,
+            "t1",
+            generation,
+            b"echo safe\r",
+        )
+        .unwrap_err();
 
         assert_eq!(error.is_error, Some(true));
         assert!(
@@ -4269,19 +4377,24 @@ mod tests {
     fn assert_execute_command_poison_blocks_before_write(
         poison: impl FnOnce(&crate::state::AppState),
     ) {
-        let (state, written) = execute_command_prompt_state();
+        let (state, written, generation) = execute_command_prompt_state();
         assert!(McpHandler::terminal_exists_in(&state, "t1").unwrap());
         poison(&state);
-        assert_execute_command_error_has_zero_bytes(&state, &written);
+        assert_execute_command_error_has_zero_bytes(&state, &written, generation);
     }
 
     #[test]
     fn execute_command_strict_shell_prompt_preserves_write_and_sequence() {
-        let (state, written) = execute_command_prompt_state();
+        let (state, written, generation) = execute_command_prompt_state();
 
         let (before_seq, bytes_written) =
-            McpHandler::execute_command_prewrite_and_write_from_state(&state, "t1", b"echo safe\r")
-                .unwrap();
+            McpHandler::execute_command_prewrite_and_write_from_state(
+                &state,
+                "t1",
+                generation,
+                b"echo safe\r",
+            )
+            .unwrap();
 
         assert!(before_seq > 0);
         assert_eq!(bytes_written, b"echo safe\r".len());
@@ -4290,7 +4403,7 @@ mod tests {
 
     #[test]
     fn execute_command_running_prompt_state_still_writes_zero_bytes() {
-        let (state, written) = execute_command_prompt_state();
+        let (state, written, generation) = execute_command_prompt_state();
         state
             .output_buffers
             .lock()
@@ -4302,6 +4415,7 @@ mod tests {
         let error = McpHandler::execute_command_prewrite_and_write_from_state(
             &state,
             "t1",
+            generation,
             b"echo unsafe\r",
         )
         .unwrap_err();
@@ -4353,13 +4467,13 @@ mod tests {
 
     #[test]
     fn execute_command_pty_registry_poison_writes_zero_bytes() {
-        let (state, written) = execute_command_prompt_state();
+        let (state, written, generation) = execute_command_prompt_state();
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ptys = state.pty_handles.lock().unwrap();
             panic!("poison PTY registry before execute_command admission");
         }));
 
-        assert_execute_command_error_has_zero_bytes(&state, &written);
+        assert_execute_command_error_has_zero_bytes(&state, &written, generation);
     }
 
     #[test]
@@ -4920,3 +5034,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "mcp/generation_tests.rs"]
+mod generation_tests;
