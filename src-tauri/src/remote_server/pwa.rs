@@ -71,8 +71,8 @@ const MANIFEST_JSON: &str = r##"{
 const ICON_192_PNG: &[u8] = include_bytes!("assets/pwa/icon-192.png");
 const ICON_512_PNG: &[u8] = include_bytes!("assets/pwa/icon-512.png");
 const ICON_MASKABLE_512_PNG: &[u8] = include_bytes!("assets/pwa/icon-maskable-512.png");
-/// iOS ignores the manifest icons for "Add to Home Screen" and uses the
-/// `apple-touch-icon` link in `page.html` instead.
+/// iOS/iPadOS gives the `apple-touch-icon` link in `page.html` precedence over
+/// manifest-declared icons, so the Apple-specific size remains bundled too.
 const APPLE_TOUCH_ICON_180_PNG: &[u8] = include_bytes!("assets/pwa/apple-touch-icon-180.png");
 
 const ICONS: &[(&str, &[u8])] = &[

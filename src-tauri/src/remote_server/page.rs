@@ -195,9 +195,10 @@ mod tests {
     }
 
     /// Issue #654: on a phone the address bar eats a row of terminal, and the
-    /// only way to drop it is an installable web app. Chrome needs the manifest
-    /// link; iOS ignores the manifest for "Add to Home Screen" and needs the
-    /// `apple-*` tags, so both sets have to be present (ADR-0091).
+    /// portable way to drop it is an installable web app. Chrome needs the manifest
+    /// link; iOS/iPadOS gives `apple-touch-icon` precedence over manifest icons
+    /// and retains the legacy `apple-*` metadata path, so both sets stay present
+    /// (ADR-0091).
     #[test]
     fn remote_page_html_declares_an_installable_standalone_app() {
         let html = remote_page_html();

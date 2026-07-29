@@ -1,12 +1,12 @@
 # 0091. Remote 클라이언트는 gate 안쪽 web app manifest로 standalone 설치를 지원한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: issue [#654](https://github.com/kochul2000/laymux/issues/654), [ADR-0013](0013-direct-remote-mode.md) §32/§43, architecture/api-contracts.md §13.0
 
 ## Context
 
-폰에서 `/remote/` 를 열면 브라우저 chrome(주소 표시줄 + 하단 툴바)이 세로 공간을 상당히 먹는다. 터미널이 쓸 수 있는 행 수가 줄고, 스크롤·스와이프가 브라우저 UI 제스처와 경쟁한다. issue #654 는 "PWA 처럼 주소 표시줄을 생략한 표시"를 요구한다. 브라우저가 주소 표시줄을 없애 주는 조건은 하나뿐이다 — origin 이 `display: standalone` 을 선언한 web app manifest 와 launcher 아이콘을 제공하고, 사용자가 홈 화면에 설치하는 것.
+폰에서 `/remote/` 를 열면 브라우저 chrome(주소 표시줄 + 하단 툴바)이 세로 공간을 상당히 먹는다. 터미널이 쓸 수 있는 행 수가 줄고, 스크롤·스와이프가 브라우저 UI 제스처와 경쟁한다. issue #654 는 "PWA 처럼 주소 표시줄을 생략한 표시"를 요구한다. 브라우저 전반에서 이를 제공하는 표준 경로는 origin 이 `display: standalone` 을 선언한 web app manifest 와 launcher 아이콘을 제공하고, 사용자가 홈 화면에 설치하는 것이다. iOS 의 오래된 `apple-*` 메타 경로도 호환용으로 함께 제공한다.
 
 작용하는 force:
 
@@ -27,7 +27,7 @@
 - 아이콘 SoT 는 `ui/public/logo.svg` 다. `ui/scripts/build-pwa-icons.mjs`(`npm run build:pwa-icons`)가 192/512/maskable 512/apple-touch 180 PNG 를 `src-tauri/src/remote_server/assets/pwa/` 로 rasterize 하고, 결과는 `include_bytes!` 대상이므로 커밋한다. maskable 변형은 launcher 의 원형 crop 을 견디도록 마크를 0.6 배로 축소해 자체 배경 위에 올린다.
 - `page.html` 의 manifest link 는 **`crossorigin="use-credentials"`** 를 반드시 갖는다. gate 안쪽 manifest 를 가져오는 유일한 방법이다.
 - **service worker 는 두지 않는다.** 인증된 터미널 origin 에 SW 를 등록하면 세션보다 오래 사는 요청 가로채기가 생기고(설치 해제 후에도 남는다), 응답 캐싱은 자격 증명이 실린 응답을 디스크에 남길 위험을 만든다. cloud CSP `worker-src 'none'` 도 그대로 유지한다.
-- iOS 는 "Add to Home Screen" 에서 manifest 대신 `apple-*` 메타를 읽으므로 `apple-mobile-web-app-capable`, `apple-mobile-web-app-title`, `apple-touch-icon` 을 함께 둔다. status bar style 은 `default` 로 고정한다 — `black-translucent` 는 터미널 첫 행을 시계 아래로 밀어 넣고 safe-area 보정을 요구하는데, `default` 는 그 문제 자체를 만들지 않는다. 따라서 이 결정은 `viewport` 를 바꾸지 않는다.
+- iOS/iPadOS도 manifest의 `display`와 아이콘을 지원하지만, `apple-touch-icon`이 manifest 아이콘보다 우선하고 오래된 설치 경로는 `apple-*` 메타를 사용한다. 따라서 `apple-mobile-web-app-capable`, `apple-mobile-web-app-title`, `apple-touch-icon` 을 호환 경로로 함께 둔다. status bar style 은 `default` 로 고정한다 — `black-translucent` 는 터미널 첫 행을 시계 아래로 밀어 넣고 safe-area 보정을 요구하는데, `default` 는 그 문제 자체를 만들지 않는다. 따라서 이 결정은 `viewport` 를 바꾸지 않는다.
 - 설치 성립 여부는 origin 의 보안 컨텍스트가 정한다. HTTP direct mode 에서 manifest 는 무해하게 무시되고, 라우트는 두 모드에 동일하게 제공한다.
 
 ## Alternatives Considered

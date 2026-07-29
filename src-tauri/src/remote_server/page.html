@@ -16,9 +16,11 @@
          splash are the same colour as the page. -->
     <meta name="theme-color" content="#1e1e2e" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <!-- iOS reads these, not the manifest, for "Add to Home Screen". Status bar
-         style stays `default`: `black-translucent` would let the terminal's
-         first row run underneath the clock. -->
+    <!-- iOS/iPadOS also supports the manifest, but apple-touch-icon takes
+         precedence over manifest icons and the apple-* metadata keeps the
+         legacy installation path compatible. Status bar style stays `default`:
+         `black-translucent` would let the terminal's first row run underneath
+         the clock. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Laymux" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
