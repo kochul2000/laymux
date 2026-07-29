@@ -1,6 +1,6 @@
 # 0092. 데스크톱 xterm physical write는 앱 전역 round-robin으로 진입한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: 사용자 보고(issue #661: 여러 pane 동시 대량 출력에서 UI·입력 심각한 지연) · 2026-07-29 dev baseline(1 pane 82.7 ms, 2 pane 193.1 ms, 4 pane 556.5 ms, 8 pane에서 echo·Automation timeout 및 WebView event send failure) · [architecture/data-flow.md §8.8](../architecture/data-flow.md) · [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
 - Extends: [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)의 pane-local macrotask 양보를 앱 전역 admission 순서와 경쟁 시 64 KiB fairness quantum으로 확장한다. batch allowlist와 [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)의 parsed ACK 교집합은 변경하지 않는다.
