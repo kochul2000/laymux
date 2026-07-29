@@ -86,9 +86,9 @@ const compositionGenerationMethods =
   '_finalizeComposition(t){this._compositionView.classList.remove("active");const e=this._isComposing;if(this._isComposing=!1,t){const t={start:this._compositionPosition.start,end:this._compositionPosition.end,valueEnd:null,alreadySentLength:this._dataAlreadySent.length,observed:"",done:!1};this._pendingCompositionGenerations.push(t),this._isSendingComposition=!0,setTimeout(()=>this._flushCompositionGeneration(t),0)}else{this._flushPendingCompositionGenerations();if(e){const t=this._textarea.value.substring(this._compositionPosition.start,this._compositionPosition.end);t.length>0&&this._coreService.triggerDataEvent(t,!0)}}}_boundPendingComposition(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t&&t.valueEnd===null&&(t.valueEnd=this._textarea.value.length)}_queueCompositionObservation(t){const e=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];return e&&!e.done?(e.observed=this._mergeCompositionData(t,e.observed),!0):!1}_flushPendingCompositionGenerations(){const t=this._pendingCompositionGenerations[this._pendingCompositionGenerations.length-1];t?this._flushCompositionGeneration(t):this._isSendingComposition=!1}_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;){const e=this._pendingCompositionGenerations.shift();e.done=!0;const i=e.start+e.alreadySentLength,s=e.valueEnd===null?this._textarea.value.length:e.valueEnd,r=this._textarea.value.substring(i,Math.max(i,s)),n=this._mergeCompositionData(r,e.observed);if(n.length>0&&this._coreService.triggerDataEvent(n,!0),e===t)break}this._isSendingComposition=this._pendingCompositionGenerations.length>0}_mergeCompositionData(t,e){if(!t.includes(e))if(e.includes(t))t=e;else{let i=Math.min(t.length,e.length);for(;i>0&&!t.endsWith(e.substring(0,i));)i--;let s=Math.min(t.length,e.length);for(;s>0&&!e.endsWith(t.substring(0,s));)s--;t=i>s?t+e.substring(i):e+t.substring(s)}return t}';
 
 const compositionStartOriginal =
-  'compositionstart(){this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length';
+  "compositionstart(){this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 const compositionStartPatched =
-  'compositionstart(){this._boundPendingComposition(),this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length';
+  "compositionstart(){this._boundPendingComposition(),this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 
 const moduleTerminalKeypressSendOriginal =
   "this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
@@ -104,9 +104,9 @@ const moduleTerminalInputSendOriginal =
 const moduleTerminalInputSendPatched =
   "let i=e.data;if(this._compositionHelper.input(i))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(i,!0),this.cancel(e),!0";
 const commonJsTerminalInputSendOriginal =
-  'if(this._keyPressHandled)return!1;this._unprocessedDeadKey=!1;const t=e.data;return this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0';
+  "if(this._keyPressHandled)return!1;this._unprocessedDeadKey=!1;const t=e.data;return this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0";
 const commonJsTerminalInputSendPatched =
-  'const t=e.data;if(this._compositionHelper.input(t))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0';
+  "const t=e.data;if(this._compositionHelper.input(t))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0";
 
 async function patchBundle(target, replacements) {
   const source = await readFile(target, "utf8");
