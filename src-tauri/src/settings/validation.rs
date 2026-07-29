@@ -770,8 +770,10 @@ mod tests {
 
     #[test]
     fn nonexistent_default_profile_warns() {
-        let mut settings = Settings::default();
-        settings.default_profile = "DoesNotExist".into();
+        let mut settings = Settings {
+            default_profile: "DoesNotExist".into(),
+            ..Settings::default()
+        };
         let warnings = validate_and_repair(&mut settings);
         assert!(warnings
             .iter()
@@ -962,8 +964,10 @@ mod tests {
 
     #[test]
     fn default_pane_uses_default_profile_when_valid() {
-        let mut settings = Settings::default();
-        settings.default_profile = "WSL".into();
+        let mut settings = Settings {
+            default_profile: "WSL".into(),
+            ..Settings::default()
+        };
         // Remove all panes to trigger default_workspace_pane
         settings.workspaces[0].panes.clear();
         let _warnings = validate_and_repair(&mut settings);
@@ -978,13 +982,15 @@ mod tests {
 
     #[test]
     fn default_pane_uses_first_profile_when_default_invalid() {
-        let mut settings = Settings::default();
-        settings.default_profile = "NonExistent".into();
-        settings.profiles = vec![Profile {
-            name: "GitBash".into(),
-            command_line: "bash.exe".into(),
-            ..Profile::default()
-        }];
+        let mut settings = Settings {
+            default_profile: "NonExistent".into(),
+            profiles: vec![Profile {
+                name: "GitBash".into(),
+                command_line: "bash.exe".into(),
+                ..Profile::default()
+            }],
+            ..Settings::default()
+        };
         settings.workspaces[0].panes.clear();
         let _warnings = validate_and_repair(&mut settings);
         let profile = settings.workspaces[0].panes[0]
@@ -998,13 +1004,15 @@ mod tests {
 
     #[test]
     fn default_pane_uses_first_profile_when_no_default_set() {
-        let mut settings = Settings::default();
-        settings.default_profile = "".into();
-        settings.profiles = vec![Profile {
-            name: "WSL".into(),
-            command_line: "wsl.exe".into(),
-            ..Profile::default()
-        }];
+        let mut settings = Settings {
+            default_profile: "".into(),
+            profiles: vec![Profile {
+                name: "WSL".into(),
+                command_line: "wsl.exe".into(),
+                ..Profile::default()
+            }],
+            ..Settings::default()
+        };
         settings.workspaces[0].panes.clear();
         let _warnings = validate_and_repair(&mut settings);
         let profile = settings.workspaces[0].panes[0]

@@ -84,6 +84,16 @@ struct FrameDispatchState {
     app_state: Arc<AppState>,
     output_checkpoint_bridge: OutputCheckpointBridge,
 }
+
+struct FrameHandlerContext<'a> {
+    active_streams: &'a mut HashMap<String, ActiveStream>,
+    socket_pending_bytes: &'a mut usize,
+    next_response_id: &'a mut u64,
+    outbound_tx: &'a OutboundSender,
+    completion_tx: &'a CompletionSender,
+    state: &'a Arc<AppState>,
+    app_handle: &'a AppHandle,
+}
 const MAX_BACKOFF_SECONDS: u64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -603,16 +613,15 @@ async fn connect_once(
                     Ok(WsMessage::Text(text)) => {
                         match parse_frame(text.as_ref()) {
                             Ok(frame) => {
-                                handle_frame(
-                                    frame,
-                                    &mut active_streams,
-                                    &mut socket_pending_bytes,
-                                    &mut next_response_id,
-                                    &outbound_tx,
-                                    &completion_tx,
-                                    &state,
-                                    &app_handle,
-                                ).await;
+                                handle_frame(frame, FrameHandlerContext {
+                                    active_streams: &mut active_streams,
+                                    socket_pending_bytes: &mut socket_pending_bytes,
+                                    next_response_id: &mut next_response_id,
+                                    outbound_tx: &outbound_tx,
+                                    completion_tx: &completion_tx,
+                                    state: &state,
+                                    app_handle: &app_handle,
+                                }).await;
                             }
                             Err(error) => {
                                 handle_malformed_frame(text.as_ref(), error, &outbound_tx).await;
@@ -745,16 +754,16 @@ fn stream_id_from_malformed_frame(text: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-async fn handle_frame(
-    frame: TunnelFrame,
-    active_streams: &mut HashMap<String, ActiveStream>,
-    socket_pending_bytes: &mut usize,
-    next_response_id: &mut u64,
-    outbound_tx: &OutboundSender,
-    completion_tx: &CompletionSender,
-    state: &Arc<AppState>,
-    app_handle: &AppHandle,
-) {
+async fn handle_frame(frame: TunnelFrame, context: FrameHandlerContext<'_>) {
+    let FrameHandlerContext {
+        active_streams,
+        socket_pending_bytes,
+        next_response_id,
+        outbound_tx,
+        completion_tx,
+        state,
+        app_handle,
+    } = context;
     let outbound = outbound_tx.clone();
     let completion = completion_tx.clone();
     let dispatch_state = state.clone();
@@ -1161,10 +1170,7 @@ fn begin_http_response_dispatch(
 
 fn allocate_response_id(next_response_id: &mut u64) -> u64 {
     let response_id = (*next_response_id).max(1);
-    *next_response_id = match response_id.checked_add(1) {
-        Some(next) => next,
-        None => 1,
-    };
+    *next_response_id = response_id.checked_add(1).unwrap_or(1);
     response_id
 }
 

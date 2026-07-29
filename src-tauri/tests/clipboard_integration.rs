@@ -196,7 +196,7 @@ mod windows_tests {
             } else {
                 hs as usize
             };
-            let row_stride = ((w as usize * (bits as usize / 8) + 3) / 4) * 4;
+            let row_stride = (w as usize * (bits as usize / 8)).div_ceil(4) * 4;
             let expected = pixel_offset + row_stride * h.unsigned_abs() as usize;
             eprintln!(
                 "[INFO] pixel_offset={} row_stride={} expected_total={} actual={}",

@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn error_trait_source() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let io_err = std::io::Error::other("test");
         let err = AppError::Io(io_err);
         assert!(std::error::Error::source(&err).is_some());
 

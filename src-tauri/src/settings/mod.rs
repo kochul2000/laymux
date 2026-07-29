@@ -348,8 +348,10 @@ mod tests {
     #[test]
     fn language_round_trip_and_backcompat() {
         // Explicit value survives a round trip.
-        let mut settings = Settings::default();
-        settings.language = "en".into();
+        let settings = Settings {
+            language: "en".into(),
+            ..Settings::default()
+        };
         let json = serde_json::to_string(&settings).unwrap();
         assert!(json.contains("\"language\":\"en\""));
         let parsed: Settings = serde_json::from_str(&json).unwrap();
@@ -477,24 +479,26 @@ mod tests {
 
     #[test]
     fn migrate_cmd_profile_to_powershell_in_workspace_panes() {
-        let mut settings = Settings::default();
-        settings.workspaces = vec![Workspace {
-            id: "ws-1".into(),
-            name: "Test".into(),
-            layout_id: None,
-            panes: vec![WorkspacePane {
-                id: "pane-test1".into(),
-                x: 0.0,
-                y: 0.0,
-                w: 1.0,
-                h: 1.0,
-                view: serde_json::from_value(serde_json::json!({
-                    "type": "TerminalView",
-                    "profile": "CMD"
-                }))
-                .unwrap(),
+        let mut settings = Settings {
+            workspaces: vec![Workspace {
+                id: "ws-1".into(),
+                name: "Test".into(),
+                layout_id: None,
+                panes: vec![WorkspacePane {
+                    id: "pane-test1".into(),
+                    x: 0.0,
+                    y: 0.0,
+                    w: 1.0,
+                    h: 1.0,
+                    view: serde_json::from_value(serde_json::json!({
+                        "type": "TerminalView",
+                        "profile": "CMD"
+                    }))
+                    .unwrap(),
+                }],
             }],
-        }];
+            ..Settings::default()
+        };
         migrate_settings(&mut settings);
         assert_eq!(
             settings.workspaces[0].panes[0].view.extra["profile"],
@@ -517,27 +521,29 @@ mod tests {
 
     #[test]
     fn migrate_deduplicates_workspace_names() {
-        let mut settings = Settings::default();
-        settings.workspaces = vec![
-            Workspace {
-                id: "ws-1".into(),
-                name: "Dev".into(),
-                layout_id: None,
-                panes: vec![],
-            },
-            Workspace {
-                id: "ws-2".into(),
-                name: "Dev".into(),
-                layout_id: None,
-                panes: vec![],
-            },
-            Workspace {
-                id: "ws-3".into(),
-                name: "Dev".into(),
-                layout_id: None,
-                panes: vec![],
-            },
-        ];
+        let mut settings = Settings {
+            workspaces: vec![
+                Workspace {
+                    id: "ws-1".into(),
+                    name: "Dev".into(),
+                    layout_id: None,
+                    panes: vec![],
+                },
+                Workspace {
+                    id: "ws-2".into(),
+                    name: "Dev".into(),
+                    layout_id: None,
+                    panes: vec![],
+                },
+                Workspace {
+                    id: "ws-3".into(),
+                    name: "Dev".into(),
+                    layout_id: None,
+                    panes: vec![],
+                },
+            ],
+            ..Settings::default()
+        };
         migrate_settings(&mut settings);
         let names: Vec<&str> = settings
             .workspaces
@@ -680,8 +686,10 @@ mod tests {
 
     #[test]
     fn workspace_display_order_round_trip() {
-        let mut settings = Settings::default();
-        settings.workspace_display_order = vec!["ws-2".into(), "ws-1".into()];
+        let settings = Settings {
+            workspace_display_order: vec!["ws-2".into(), "ws-1".into()],
+            ..Settings::default()
+        };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let parsed: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.workspace_display_order, vec!["ws-2", "ws-1"]);
