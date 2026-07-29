@@ -73,6 +73,43 @@ describe("TerminalWriteFairScheduler", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 
+  it("marks a turn contended only when another owner is already waiting", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const turns: Array<[string, boolean]> = [];
+    let releaseA: (() => void) | undefined;
+    let releaseB: (() => void) | undefined;
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
+
+    scheduler.request(paneA, (release, { contended }) => {
+      turns.push(["a1", contended]);
+      releaseA = release;
+    });
+    scheduler.request(paneB, (release, { contended }) => {
+      turns.push(["b1", contended]);
+      releaseB = release;
+    });
+    scheduler.request(paneA, (release, { contended }) => {
+      turns.push(["a2", contended]);
+      release();
+    });
+
+    expect(turns).toEqual([["a1", false]]);
+    releaseA?.();
+    runNextTask();
+    expect(turns).toEqual([
+      ["a1", false],
+      ["b1", true],
+    ]);
+    releaseB?.();
+    runNextTask();
+    expect(turns).toEqual([
+      ["a1", false],
+      ["b1", true],
+      ["a2", false],
+    ]);
+  });
+
   it("cancels a mounted pane without stranding the global lease", () => {
     const { scheduler, scheduled, runNextTask } = createHarness();
     const order: string[] = [];

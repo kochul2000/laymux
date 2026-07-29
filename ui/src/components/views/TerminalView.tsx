@@ -222,6 +222,7 @@ import {
 } from "@/lib/terminal-output-pipeline-metrics";
 import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
+  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
@@ -3414,14 +3415,16 @@ export function TerminalView({
         }, delayMs);
         return;
       }
-      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release) => {
+      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release, { contended }) => {
         if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
           release();
           return;
         }
         releaseTerminalWriteTurn = release;
         try {
-          flushDeferredTerminalWrites();
+          flushDeferredTerminalWrites(
+            contended ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES : TERMINAL_WRITE_BATCH_MAX_BYTES,
+          );
         } finally {
           // Async accepted writes retain the lease through their parse callback.
           // Synchronous callbacks and all rejection paths have no in-flight write.
@@ -3619,11 +3622,12 @@ export function TerminalView({
         },
       });
     };
-    function flushDeferredTerminalWrites() {
+    function flushDeferredTerminalWrites(maxCoalescedBytes: number) {
       if (cancelled || pendingTerminalWrites > 0) return;
       const batch = terminalWriteQueue.dequeue(
         terminalWriteQueue.lastEnqueuedId,
         !compositionPreviewRef.current.active,
+        maxCoalescedBytes,
       );
       if (!batch) {
         if (terminalWriteQueue.depth === 0) {
@@ -3664,8 +3668,16 @@ export function TerminalView({
         // paint the transient footer cursor between chunk callbacks.
         chunks.push(data);
       } else {
-        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_BATCH_MAX_BYTES) {
-          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_BATCH_MAX_BYTES) as Uint8Array);
+        // Ordinary byte writes enter the logical FIFO in fairness-sized slices.
+        // A sole owner may coalesce four compatible slices back to 256 KiB;
+        // when another owner waits, one scheduler turn stays bounded at 64 KiB.
+        // Replay remains a barrier and retains its previous 256 KiB slicing.
+        const chunkBytes =
+          metadata.source === "live"
+            ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES
+            : TERMINAL_WRITE_BATCH_MAX_BYTES;
+        for (let offset = 0; offset < data.length; offset += chunkBytes) {
+          chunks.push(data.slice(offset, offset + chunkBytes) as Uint8Array);
         }
       }
       if (chunks.length === 0) chunks.push(data);

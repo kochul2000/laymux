@@ -10911,6 +10911,21 @@ describe("TerminalView desktop input composer", () => {
     });
   });
 
+  it("coalesces four 64 KiB enqueue quanta for a sole owner (#661)", async () => {
+    const terminalId = "t-output-fair-sole-owner";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const flood = "x".repeat(256 * 1024);
+    mockWrite.mockClear();
+
+    act(() => emitOutput(outputDelta(0, flood)));
+
+    await vi.waitFor(() => expect(mockWrite).toHaveBeenCalledTimes(1));
+    const physical = mockWrite.mock.calls[0]?.[0] as Uint8Array;
+    expect(physical).toBeInstanceOf(Uint8Array);
+    expect(physical.byteLength).toBe(256 * 1024);
+    expect(terminalOutputPipelineCounters(terminalId).writeBatchMaxParts).toBe(4);
+  });
+
   it("rotates physical writes across flooded panes before returning to the same pane (#661)", async () => {
     const paneA = "t-output-fair-a";
     const paneB = "t-output-fair-b";
@@ -10968,6 +10983,83 @@ describe("TerminalView desktop input composer", () => {
 
     act(() => finishPaneAFirst?.());
     await vi.waitFor(() => expect(writes).toEqual(["a:one", "b:other", "a:two"]));
+    await act(async () => {
+      view.unmount();
+      await Promise.resolve();
+    });
+  });
+
+  it("limits a contended pane turn to one 64 KiB enqueue quantum (#661)", async () => {
+    const paneA = "t-output-fair-quantum-a";
+    const paneB = "t-output-fair-quantum-b";
+    const createdTerminalBaseline = createdTerminals.length;
+    const view = render(
+      <>
+        <TerminalView instanceId={paneA} profile="PowerShell" syncGroup="" />
+        <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
+      </>,
+    );
+    await vi.waitFor(() => {
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
+      expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneB, expect.any(Function));
+      expect(createdTerminals.slice(createdTerminalBaseline)).toHaveLength(2);
+    });
+    await waitForStreamAttachReset();
+
+    const emitter = (terminalId: string) =>
+      mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        data: Uint8Array | Record<string, unknown>,
+      ) => void;
+    type WritableTerminal = MockTerminalInstance & {
+      write: (data: string | Uint8Array, callback?: () => void) => void;
+    };
+    const [terminalA, terminalB] = createdTerminals.slice(createdTerminalBaseline) as [
+      WritableTerminal,
+      WritableTerminal,
+    ];
+    const aWriteBytes: number[] = [];
+    const bWriteBytes: number[] = [];
+    let finishAFirst: (() => void) | undefined;
+    let finishBFirst: (() => void) | undefined;
+    terminalA.write = (data, callback) => {
+      aWriteBytes.push(
+        typeof data === "string" ? new TextEncoder().encode(data).length : data.length,
+      );
+      if (aWriteBytes.length === 1) finishAFirst = callback;
+      else callback?.();
+    };
+    terminalB.write = (data, callback) => {
+      bWriteBytes.push(
+        typeof data === "string" ? new TextEncoder().encode(data).length : data.length,
+      );
+      if (bWriteBytes.length === 1) finishBFirst = callback;
+      else callback?.();
+    };
+
+    const firstA = "hold-a";
+    const firstB = "hold-b";
+    const aFlood = "a".repeat(256 * 1024);
+    const bFlood = "b".repeat(256 * 1024);
+    act(() => emitter(paneA)(outputDelta(0, firstA)));
+    expect(aWriteBytes).toEqual([firstA.length]);
+
+    act(() => {
+      emitter(paneA)(outputDelta(firstA.length, aFlood));
+      emitter(paneB)(outputDelta(0, firstB));
+    });
+    act(() => finishAFirst?.());
+    await vi.waitFor(() => expect(bWriteBytes).toEqual([firstB.length]));
+
+    act(() => emitter(paneB)(outputDelta(firstB.length, bFlood)));
+    await vi.waitFor(() =>
+      expect(terminalOutputPipelineCounters(paneB).writeQueueMaxBytes).toBeGreaterThanOrEqual(
+        256 * 1024,
+      ),
+    );
+    act(() => finishBFirst?.());
+
+    await vi.waitFor(() => expect(aWriteBytes.length).toBeGreaterThanOrEqual(2));
+    expect(aWriteBytes[1]).toBe(64 * 1024);
     await act(async () => {
       view.unmount();
       await Promise.resolve();

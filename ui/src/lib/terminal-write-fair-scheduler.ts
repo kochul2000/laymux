@@ -1,4 +1,12 @@
-export type TerminalWriteFairTurn = (release: () => void) => void;
+export interface TerminalWriteFairTurnContext {
+  /** Another effect owner is already queued behind this granted turn. */
+  contended: boolean;
+}
+
+export type TerminalWriteFairTurn = (
+  release: () => void,
+  context: TerminalWriteFairTurnContext,
+) => void;
 export type TerminalWriteFairOwner = symbol;
 
 /** Create an identity token scoped to one TerminalView xterm effect lifetime. */
@@ -103,7 +111,7 @@ export class TerminalWriteFairScheduler {
     this.activeTurn = activeTurn;
     const release = () => this.release(activeTurn);
     try {
-      turn(release);
+      turn(release, { contended: this.pendingTurns.size > 0 });
     } catch (error) {
       release();
       throw error;

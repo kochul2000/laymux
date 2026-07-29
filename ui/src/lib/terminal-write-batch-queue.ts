@@ -3,6 +3,8 @@ import type { TerminalWriteSource } from "./terminal-data-route";
 /** Hard upper bounds for one ordinary physical xterm write. */
 export const TERMINAL_WRITE_BATCH_MAX_PARTS = 128;
 export const TERMINAL_WRITE_BATCH_MAX_BYTES = 256 * 1024;
+/** Logical enqueue slice and maximum physical batch while another pane waits. */
+export const TERMINAL_WRITE_FAIR_QUANTUM_BYTES = 64 * 1024;
 
 /**
  * Metadata whose cursor/parser meaning must survive physical-write batching.
@@ -166,12 +168,17 @@ export class TerminalWriteBatchQueue<
    * any of its parts can include an enqueue newer than that ID. The dynamic
    * `allowCoalescing` gate is sampled here, not at enqueue, so a composition
    * that starts while requests wait turns every fresh dequeue into one part.
+   * `maxCoalescedBytes` can lower the physical batch for a contended scheduler
+   * turn without changing the queue's 256 KiB hard ceiling. It applies only to
+   * fresh materialization: a restored retry keeps the exact accepted buffer
+   * identity and callback set it had before contention changed.
    * A restored multi-part retry is held until the gate opens because splitting
    * it would violate the no-rematerialization retry contract.
    */
   dequeue(
     cutoffMaxId = this.lastEnqueuedId,
     allowCoalescing = true,
+    maxCoalescedBytes = TERMINAL_WRITE_BATCH_MAX_BYTES,
   ): PreparedTerminalWriteBatch<TMetadata> | undefined {
     if (this.restored) {
       if (this.restored.lastId > cutoffMaxId || (!allowCoalescing && this.restored.partCount > 1)) {
@@ -187,18 +194,22 @@ export class TerminalWriteBatchQueue<
     const first = this.entries[this.headIndex];
     if (!first || first.id > cutoffMaxId) return undefined;
 
+    const coalescingByteLimit = Math.min(
+      TERMINAL_WRITE_BATCH_MAX_BYTES,
+      Math.max(0, maxCoalescedBytes),
+    );
     let partCount = 1;
     let byteLength = dataByteLength(first.data);
     if (
       allowCoalescing &&
       isIndividuallyCoalescible(first) &&
-      byteLength <= TERMINAL_WRITE_BATCH_MAX_BYTES
+      byteLength <= coalescingByteLimit
     ) {
       while (partCount < TERMINAL_WRITE_BATCH_MAX_PARTS) {
         const candidate = this.entries[this.headIndex + partCount];
         if (!candidate || candidate.id > cutoffMaxId || !canJoin(first, candidate)) break;
         const candidateBytes = dataByteLength(candidate.data);
-        if (byteLength + candidateBytes > TERMINAL_WRITE_BATCH_MAX_BYTES) break;
+        if (byteLength + candidateBytes > coalescingByteLimit) break;
         byteLength += candidateBytes;
         partCount += 1;
       }

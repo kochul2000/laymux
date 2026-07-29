@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
   TERMINAL_WRITE_BATCH_MAX_PARTS,
+  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
   type TerminalWriteBatchMetadata,
   type TerminalWriteBatchRequest,
@@ -224,6 +225,46 @@ describe("TerminalWriteBatchQueue", () => {
     expect(queue.dequeue()).toMatchObject({ partCount: 2, byteLength: 200 * 1024 });
     expect(queue.dequeue()).toMatchObject({ partCount: 1, byteLength: 100 * 1024 });
     expect(TERMINAL_WRITE_BATCH_MAX_BYTES).toBe(256 * 1024);
+  });
+
+  it("uses a 64 KiB coalescing quantum only while another owner is waiting", () => {
+    const fill = (queue: TerminalWriteBatchQueue<TestMetadata>) => {
+      for (let index = 0; index < 4; index += 1) {
+        queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
+      }
+    };
+    const contended = new TerminalWriteBatchQueue<TestMetadata>();
+    const idle = new TerminalWriteBatchQueue<TestMetadata>();
+    fill(contended);
+    fill(idle);
+
+    expect(
+      contended.dequeue(contended.lastEnqueuedId, true, TERMINAL_WRITE_FAIR_QUANTUM_BYTES),
+    ).toMatchObject({ partCount: 1, byteLength: 64 * 1024 });
+    expect(
+      idle.dequeue(idle.lastEnqueuedId, true, TERMINAL_WRITE_BATCH_MAX_BYTES),
+    ).toMatchObject({ partCount: 4, byteLength: 256 * 1024 });
+    expect(TERMINAL_WRITE_FAIR_QUANTUM_BYTES).toBe(64 * 1024);
+  });
+
+  it("keeps a materialized retry intact when contention starts before retry", () => {
+    const queue = new TerminalWriteBatchQueue<TestMetadata>();
+    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
+    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
+    const prepared = queue.dequeue(
+      queue.lastEnqueuedId,
+      true,
+      TERMINAL_WRITE_BATCH_MAX_BYTES,
+    )!;
+    queue.restore(prepared);
+
+    const retry = queue.dequeue(
+      queue.lastEnqueuedId,
+      true,
+      TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
+    );
+    expect(retry).toBe(prepared);
+    expect(retry).toMatchObject({ partCount: 2, byteLength: 128 * 1024 });
   });
 
   it("allows one oversized or atomic head request to make progress alone", () => {
