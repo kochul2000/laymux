@@ -10914,7 +10914,8 @@ describe("TerminalView desktop input composer", () => {
   it("rotates physical writes across flooded panes before returning to the same pane (#661)", async () => {
     const paneA = "t-output-fair-a";
     const paneB = "t-output-fair-b";
-    render(
+    const createdTerminalBaseline = createdTerminals.length;
+    const view = render(
       <>
         <TerminalView instanceId={paneA} profile="PowerShell" syncGroup="" />
         <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
@@ -10923,7 +10924,7 @@ describe("TerminalView desktop input composer", () => {
     await vi.waitFor(() => {
       expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
       expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneB, expect.any(Function));
-      expect(createdTerminals).toHaveLength(2);
+      expect(createdTerminals.slice(createdTerminalBaseline)).toHaveLength(2);
     });
     await waitForStreamAttachReset();
 
@@ -10936,13 +10937,16 @@ describe("TerminalView desktop input composer", () => {
     type WritableTerminal = MockTerminalInstance & {
       write: (data: string | Uint8Array, callback?: () => void) => void;
     };
-    (createdTerminals[0] as WritableTerminal).write = (data, callback) => {
+    const [terminalA, terminalB] = createdTerminals.slice(
+      createdTerminalBaseline,
+    ) as [WritableTerminal, WritableTerminal];
+    terminalA.write = (data, callback) => {
       const text = typeof data === "string" ? data : new TextDecoder().decode(data);
       writes.push(`a:${text}`);
       if (text === "one") finishPaneAFirst = callback;
       else callback?.();
     };
-    (createdTerminals[1] as WritableTerminal).write = (data, callback) => {
+    terminalB.write = (data, callback) => {
       const text = typeof data === "string" ? data : new TextDecoder().decode(data);
       writes.push(`b:${text}`);
       callback?.();
@@ -10963,6 +10967,10 @@ describe("TerminalView desktop input composer", () => {
 
     act(() => finishPaneAFirst?.());
     await vi.waitFor(() => expect(writes).toEqual(["a:one", "b:other", "a:two"]));
+    await act(async () => {
+      view.unmount();
+      await Promise.resolve();
+    });
   });
 
   it("discards queued old-epoch writes and drains the in-flight parse before reattach", async () => {
