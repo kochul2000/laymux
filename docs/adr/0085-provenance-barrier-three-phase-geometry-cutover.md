@@ -2,7 +2,9 @@
 
 - Status: Proposed
 - Date: 2026-07-29
-- Source: 사용자 요구 · issue [#628](https://github.com/kochul2000/laymux/issues/628) · 구현 이관 issue [#632](https://github.com/kochul2000/laymux/issues/632) · PR #633 독립 리뷰 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §14.3](../architecture/api-contracts.md) · [ADR-0001](0001-osc-rust-single-pass.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
+- Source: 사용자 요구 · issue [#628](https://github.com/kochul2000/laymux/issues/628) · 구현 이관 issue [#632](https://github.com/kochul2000/laymux/issues/632) · PR #633 독립 리뷰 · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4·§14.3](../architecture/api-contracts.md) · [ADR-0001](0001-osc-rust-single-pass.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0015](0015-remote-terminal-state-ownership.md) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md) · [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) · [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)
+- Extends: [ADR-0015](0015-remote-terminal-state-ownership.md)의 PTY 전역 geometry와 surface 로컬 geometry 분리를 resize transaction 참여자 선택까지 확장한다.
+- Extends: [ADR-0069](0069-remote-render-checkpoint-attach.md)의 rendererless checkpoint를 현재 PTY geometry의 host-side 권위 parser로 유지하면서 Remote browser의 별도 surface ACK를 추가한다.
 - Extends: [ADR-0072](0072-terminal-output-gap-sequence-exact-repair.md)의 geometry 교차 승격 조건을 physical producer/read/resize 경계에서 예방한다.
 - Extends: [ADR-0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)의 old-grid write-before-fit 원칙을 frontend/backend three-phase cutover로 확장한다.
 - Preserves: [ADR-0001](0001-osc-rust-single-pass.md)의 Rust callback 단일 패스와 [ADR-0084](0084-desktop-terminal-output-parsed-credit.md)의 parsed-credit 상한을 유지한다.
@@ -95,11 +97,61 @@ barrier가 있을 때만 prepare→apply→frontend-adopt의 three-phase transac
   강제 teardown completion primitive가 확인될 때까지 persistent quarantine에 남는다. 그런 teardown
   acknowledgement가 없으면 Local/다음 owner 공개가 bounded하다고 주장하지 않는다.
 
+### resize owner별 authoritative parser와 ACK 집합
+
+- prepare가 시작될 때 sequencer는 `{generation, ownerKind, ownerEpoch, participantIds}`를 고정한다.
+  transaction 도중 surface가 unmount·disconnect되거나 lease가 만료돼도 참여자를 조용히 제거해 ACK
+  quorum을 줄이지 않는다. transaction-aware reattach가 같은 역할을 승계하거나 terminal teardown이
+  완료돼야 owner publication barrier를 끝낸다.
+- **Local owner**의 old-prefix ACK 집합은 source PTY stream을 실제 소비하는 PC visible xterm과
+  rendererless checkpoint다. 두 xterm이 모두 `boundarySeq`까지 old geometry에서 contiguous parse를
+  끝낸 교집합만 old-prefix ACK다. adoption ACK도 같은 두 참여자가 token·new revision에 맞춰 각자
+  xterm grid를 new geometry로 바꾼 뒤 frontend coordinator가 집계한다. 한 참여자의 parse/adoption이
+  확인되지 않으면 apply/release하지 않는다.
+- **Remote owner**의 old-prefix ACK 집합은 active lease의 Remote browser xterm과 rendererless
+  checkpoint다. checkpoint는 host source sequence를 직접 ACK하고, Remote browser는 V1 wire offset이
+  아니라 frame metadata의 `sourceSeq`를 기준으로 `{token, generation, ownerEpoch, boundarySeq}` parse
+  ACK를 보낸다. adoption ACK도 Remote browser xterm과 checkpoint가 각각 new PTY geometry/revision을
+  채택한 뒤의 교집합이다. Direct와 Cloud Remote는 같은 집합과 source-sequence 계약을 사용한다.
+- 현재 Remote의 fit→one-shot resize→output attach 순서에서는 browser가 old prefix를 보지 못하므로 exact
+  transaction에 사용할 수 없다. exact Remote attach는 viewport의 proposed geometry만 계산한 뒤 먼저
+  현재 PTY geometry의 checkpoint+suffix에 attach하고, browser가 그 source prefix를 파싱해 participant가
+  된 다음 prepare를 시작한다. 이후에만 apply된 new geometry를 browser와 checkpoint가 함께 채택한다.
+  transaction-aware reattach는 stored phase와 geometry를 attach state에 포함해 같은 규칙을 이어 간다.
+- Remote lease 중 PC visible xterm은 ADR-0015대로 PC surface geometry를 유지한다. output을 자신의
+  grid에서 계속 파싱할 수 있지만 Remote PTY geometry의 권위 parser가 아니므로 old-prefix ACK와
+  adoption ACK 어느 집합에도 참여하지 않고 Remote geometry로 resize하지 않는다. PC surface의 reflow,
+  selection, scroll, cursor cache도 transaction에 섞지 않는다.
+- Automation/MCP/HTTP 호출자는 parser surface가 아니므로 직접 parse/adoption ACK를 만들 수 없다.
+  exact resize는 호출자가 현재 Local 또는 Remote owner coordinator에 transaction을 위임할 때만 허용한다.
+  현재 Local `resize_terminal` Tauri IPC와 Remote `/remote/v1/terminals/{id}/resize` HTTP 응답, Remote V1
+  output WebSocket에는 token별 prepare/apply/status와 browser source-prefix/adoption ACK가 없다. 따라서
+  현재 runtime은 `exactGeometryCutover` capability를 광고하지 않으며 exact 요청을 physical resize 전에
+  명시적으로 거절해야 한다. exact mode가 terminal에 활성화된 뒤에는 이 one-shot 경로로 fallback해
+  resize를 수행하지 않는다.
+
+### surface response/ACK loss와 owner recovery
+
+- prepare 전에 surface coordinator가 사라지면 operation은 등록하지 않는다. Prepared response가
+  유실되거나 apply가 오지 않으면 physical call 전이므로 old geometry로 abort할 수 있지만, platform
+  unfreeze와 worker completion이 확인된 뒤에만 owner barrier를 끝낸다.
+- Remote apply response가 유실되면 browser는 같은 lease·token의 idempotent transaction status를 조회해
+  stored `Applied`와 new geometry/revision을 얻는다. Remote browser가 new grid를 채택하고 checkpoint와
+  함께 adoption ACK를 다시 보내기 전에는 output을 release하지 않는다. adoption ACK 응답만 유실된
+  경우 같은 token ACK 재전송은 release된 과거 결과를 반환한다.
+- Remote browser disconnect·lease expiry·Cloud relay loss가 생겨도 PC visible xterm을 Remote ACK 집합에
+  승격하지 않는다. transaction-aware Remote reattach가 stored outcome과 authoritative geometry를
+  복구하고 현재 PTY geometry의 checkpoint에서 browser 역할을 다시 수립해 ACK를 완성하거나 terminal
+  teardown이 완료될 때까지 fail-stop한다. owner 전환이
+  이미 시작됐다면 Prepared 이전에는 old geometry abort 뒤 새 owner를 공개하고,
+  `AppliedAwaitingAdoption` 이후에는 새 owner surface가 authoritative new PTY geometry를 채택하는 복구
+  transaction 또는 teardown을 완료해야 한다. 단순 timeout이나 lease 만료만으로 gate를 열지 않는다.
+
 ### prepare phase: old provenance를 닫는다
 
-- frontend는 `FitAddon.proposeDimensions()`로 새 `cols/rows`를 계산하되 visible/checkpoint xterm grid는
-  old geometry에 둔 채 prepare를 요청한다. 요청은 terminal generation, owner epoch, absolute deadline을
-  가진다.
+- owner surface coordinator는 `FitAddon.proposeDimensions()`로 새 `cols/rows`를 계산하되 해당 owner의
+  ACK 집합에 속한 xterm grid를 old geometry에 둔 채 prepare를 요청한다. 요청은 terminal generation,
+  owner epoch, participant snapshot, absolute deadline을 가진다.
 - sequencer는 모든 output producer를 platform capability로 freeze한 뒤 pipe에 이미 queued된 bytes를
   authoritative empty까지 읽고 각각 old geometry callback으로 완전히 처리한다. callback 완료에는
   ring 기록, v2/legacy event, activity, Rust OSC action과 desktop credit wait가 포함된다.
@@ -116,9 +168,10 @@ barrier가 있을 때만 prepare→apply→frontend-adopt의 three-phase transac
 
 ### apply phase: physical과 logical new geometry를 commit한다
 
-- frontend는 visible xterm과 rendererless checkpoint가 `boundarySeq`까지 old geometry에서 실제로
-  파싱했음을 ADR-0084 contiguous ACK로 확인한 뒤 같은 token으로 apply를 요청한다. 이 시점에도
-  frontend grid는 old geometry이고 producer/read gate는 닫혀 있다.
+- owner surface coordinator는 위에서 고정한 old-prefix ACK 집합 전체가 `boundarySeq`까지 old geometry에서
+  실제로 파싱했음을 확인한 뒤 같은 token으로 apply를 요청한다. Local은 ADR-0084 desktop parsed-credit
+  교집합을 사용하고, Remote는 새 browser source-sequence ACK와 checkpoint ACK를 교차 검증한다. 이
+  시점에도 참여 xterm grid는 old geometry이고 producer/read gate는 닫혀 있다.
 - apply는 token·generation·owner transaction을 검증하고 physical `MasterPty::resize()`를 호출한다.
   성공 또는 권위 query로 new size가 증명되면 output session geometry revision과 terminal config를
   new geometry로 commit하되 producer와 reader는 계속 막는다. 상태는 `AppliedAwaitingAdoption`이다.
@@ -130,9 +183,10 @@ barrier가 있을 때만 prepare→apply→frontend-adopt의 three-phase transac
 
 ### frontend adoption ACK와 release
 
-- frontend는 `Applied`를 받은 뒤에만 visible xterm과 rendererless checkpoint를 `newGeometry`로 바꾸고
-  token·revision을 포함한 adoption ACK를 보낸다. old prefix가 남았거나 apply가 NotApplied/Indeterminate면
-  new grid를 채택하지 않는다.
+- owner surface coordinator는 `Applied`를 받은 뒤에만 고정된 adoption ACK 집합의 xterm을
+  `newGeometry`로 바꾸고 각 참여자의 token·revision ACK를 집계해 보낸다. Local은 PC visible xterm과
+  checkpoint, Remote는 Remote browser xterm과 checkpoint이며 Remote lease 중 PC visible xterm은
+  바꾸지 않는다. old prefix가 남았거나 apply가 NotApplied/Indeterminate면 new grid를 채택하지 않는다.
 - backend는 adoption ACK가 current transaction의 token·generation·revision과 일치할 때만 producer를
   unfreeze하고 reader gate를 연다. physical resize 이후 pipe에 생긴 resize output과 첫 application
   output은 모두 new revision callback으로 처리된다.
@@ -181,6 +235,15 @@ barrier가 있을 때만 prepare→apply→frontend-adopt의 three-phase transac
   Prepared가 되고, 아니면 old geometry 재시도 또는 NotApplied가 됨을 검증한다.
 - prepare→apply→AppliedAwaitingAdoption→ACK release 순서, apply response loss, adoption ACK loss,
   idempotent recovery를 검증한다. Applied 뒤 ACK 없이 reader가 재개되는 경로는 없어야 한다.
+- Local은 PC visible xterm+checkpoint의 old-prefix/adoption 교집합, Remote는 Remote browser+checkpoint의
+  source-prefix/adoption 교집합을 검증한다. Remote lease 중 PC visible xterm은 PC geometry를 유지하고
+  어떤 transaction ACK에도 참여하지 않음을 단언한다.
+- exact Remote 최초 attach는 current PTY geometry의 checkpoint+suffix를 browser가 sourceSeq까지 파싱한
+  뒤에만 prepare를 허용하고, 기존 fit→one-shot resize→attach 순서로 exact path에 진입하지 못함을
+  검증한다.
+- 현재 Local/Remote/Automation one-shot protocol이 exact capability를 광고하지 않고 exact 요청을
+  physical call 전에 거절하는 양성 테스트를 둔다. Remote response/ACK·relay·lease loss에도 participant
+  quorum을 줄이거나 PC visible을 승격하지 않으며 reattach/teardown 전에는 release하지 않아야 한다.
 - owner/deadline이 physical call 전·중·후에 바뀌는 경우, 권위 size query 세 결과, Windows cache가
   reconciliation에 쓰이지 않는 경우를 독립 테스트한다.
 - request waiter 종료와 owner publication barrier를 별도로 단언한다. worker가 끝나지 않으면 barrier가
@@ -230,6 +293,9 @@ barrier가 있을 때만 prepare→apply→frontend-adopt의 three-phase transac
   Indeterminate가 된다. 정확한 분류를 원하면 #632가 별도 권위 OS query seam을 제공해야 한다.
 - current `portable-pty 0.8.1`에는 필수 provenance capability가 없으므로 이 ADR만으로 runtime 동작은
   바뀌지 않는다. 실제 adapter·IPC·race/screen test·laymux-dev 검증은 issue #632가 완료한다.
+- 현재 Local/Remote/Automation resize protocol에는 owner별 transaction ACK도 없으므로 exact capability는
+  false다. #632가 provenance adapter와 Local·Remote participant protocol을 함께 구현하기 전에는 exact
+  terminal에 one-shot resize를 허용할 수 없다.
 - ADR-0072의 geometry-crossing repair escalation은 구현 전까지 남는다. 구현 뒤에도 과거 generation과
   Indeterminate recovery에는 최후 승격이 필요하다.
 - 재검토 조건은 upstream portable-pty 또는 OS가 atomic read/resize byte epoch를 직접 제공하는 경우다.
