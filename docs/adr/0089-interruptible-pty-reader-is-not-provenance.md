@@ -2,9 +2,9 @@
 
 - Status: Proposed
 - Date: 2026-07-29
-- Source: 사용자 요구 · issue [#636](https://github.com/kochul2000/laymux/issues/636) · 외부 선행 issue [#643](https://github.com/kochul2000/laymux/issues/643) · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4·§14](../architecture/api-contracts.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0085](0085-provenance-barrier-three-phase-geometry-cutover.md)
+- Source: 사용자 요구 · issue [#636](https://github.com/kochul2000/laymux/issues/636) · 선행 issue [#630](https://github.com/kochul2000/laymux/issues/630) · Accepted [ADR-0088](0088-pty-output-fatal-generation-teardown.md) · 외부 선행 issue [#643](https://github.com/kochul2000/laymux/issues/643) · [architecture/data-flow.md §8.4·§8.8](../architecture/data-flow.md) · [architecture/api-contracts.md §13.4·§14](../architecture/api-contracts.md) · [ADR-0008](0008-shell-cursor-shadow-cursor.md) · [ADR-0085](0085-provenance-barrier-three-phase-geometry-cutover.md)
 - Extends: [ADR-0085](0085-provenance-barrier-three-phase-geometry-cutover.md)의 platform capability gate를 현재 Windows ConPTY/Linux PTY가 제공하는 실제 primitive와 dependency 경계로 구체화한다.
-- Dependency: issue #636의 reader 구현은 issue [#630](https://github.com/kochul2000/laymux/issues/630)의 generation-scoped stop/teardown이 머지된 뒤 그 reader loop 위에 재베이스한다.
+- Dependency: [ADR-0088](0088-pty-output-fatal-generation-teardown.md)이 Accepted되고 issue [#630](https://github.com/kochul2000/laymux/issues/630)의 generation-scoped stop/teardown이 main에 머지됐다. issue #636의 reader 구현은 그 공통 reader loop와 generation teardown completion을 재사용한다.
 
 ## Context
 
@@ -182,8 +182,8 @@ provenance primitive와 실기기 sabotage test를 통과한 뒤 별도 결정�
   이 비용은 byte 유실이나 다음 generation 오취소를 막기 위해 의도적으로 부담한다.
 - Linux raw fd adapter와 Windows private handle adapter의 구현은 다르지만 외부 reader event 계약은 같다.
   platform 차이를 `pty.rs`의 callback/teardown에 누출하지 않는다.
-- current production capability는 계속 false이며 이 ADR 전용 PR은 runtime을 바꾸지 않는다. ADR 승인 후에도
-  #630이 먼저 머지돼야 #636 reader 구현을 시작한다.
+- current production capability는 계속 false이며 이 ADR 전용 PR은 runtime을 바꾸지 않는다. #630과
+  ADR-0088은 이미 main에 반영됐으므로, ADR-0089 승인 뒤 #636 reader 구현을 그 lifecycle 위에서 시작한다.
 - upstream이 동등한 interruptible reader API를 release하면 pinned fork를 제거하고 crates.io dependency로
   복귀한다. API가 generation과 data/EOF/failure 구분을 잃으면 단순히 교체하지 않는다.
 - Windows가 output epoch/freeze API를 공개하거나 OpenConsole fork의 배포를 지속 가능하게 만들고, Linux가
