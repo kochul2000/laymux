@@ -30,7 +30,7 @@
  *   the break is a failing test with a readable name rather than a behaviour
  *   regression nobody notices (issue #527 completion criterion: "xterm 버전
  *   변경 시 패치 실패를 조용히 무시하지 않는다").
-  *
+ *
  * Policy when a read fails (`null`): **do not act**. Both consumers follow it, even
  * though the visible outcomes look opposite — issue #527's guard suppresses input, so
  * turning it off lets the keypress through; issue #555's blur commit injects text, so

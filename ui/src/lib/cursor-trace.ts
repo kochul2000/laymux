@@ -73,9 +73,7 @@ function readStorage(storage: StorageLike | null | undefined): string | null {
 
 export function isCursorTraceEnabled(deps: CursorTraceDeps = {}): boolean {
   if (BUILD_TIME_ENABLED) return true;
-  const storage =
-    deps.storage ??
-    (typeof window === "undefined" ? null : window.localStorage);
+  const storage = deps.storage ?? (typeof window === "undefined" ? null : window.localStorage);
   return isTruthyFlag(readStorage(storage));
 }
 
