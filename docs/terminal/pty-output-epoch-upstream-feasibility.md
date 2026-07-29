@@ -127,10 +127,13 @@ Microsoft Terminal 소스는 [MIT License](https://github.com/microsoft/terminal
   아니다.
 
 [`TIOCPKT` UAPI의 control bits](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/include/uapi/asm-generic/ioctls.h#L109-L117)와
-이를 설정하는 [PTY flush/flow/termios 경로](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/pty.c#L209-L265)에는
-resize와 atomic한 `u64` byte epoch가 없다. `poll()` non-readable이나
-[`TIOCINQ == 0`](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/include/uapi/asm-generic/ioctls.h#L43-L52)도
-관찰 시점의 readable byte 수일 뿐 미래 writer를 배제하지 않는다.
+이를 설정하는 [PTY flush/termios 경로](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/pty.c#L209-L265)와
+[flow start/stop 경로](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/pty.c#L310-L340)에는
+resize와 atomic한 `u64` byte epoch가 없다. `poll()` non-readable이나 `TIOCINQ == 0`도 barrier가 아니다.
+`TIOCINQ`가 `FIONREAD`의 alias라는 [UAPI 정의](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/include/uapi/asm-generic/ioctls.h#L43-L52)와
+[현재 N_TTY 구현](https://github.com/torvalds/linux/blob/fc02acf6ac0ccde0c805c2daa9148683cdd01ba8/drivers/tty/n_tty.c#L2460-L2494)을
+함께 보면, ioctl은 canonical mode에서는 `inq_canon`, 그 밖에는 현재 `read_cnt`를 반환한다. 이 값이 0이어도
+조회 뒤 enqueue하는 미래 writer는 배제하지 않는다.
 
 ### 4.2 RFC L1: opt-in framed epoch UAPI
 

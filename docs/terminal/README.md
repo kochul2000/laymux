@@ -16,3 +16,4 @@
 - [`claude-osc-handle.md`](./claude-osc-handle.md) — Claude Code 가 사용하는 모든 OSC/DEC 시퀀스 통합 가이드 (바이트 포맷, 스펙 링크, xterm.js API 예제, Tauri/Windows 연동 패턴).
 - [`windows-terminal-ime-caret-redesign-plan.md`](./windows-terminal-ime-caret-redesign-plan.md) — Windows Terminal 식 IME caret 소유권 모델 리디자인 플랜. **부분 구현 상태** — 문서 상단 현황 참조.
 - [`cursor-jump-evidence/`](./cursor-jump-evidence/README.md) — Codex footer frame 커서 점프의 PTY 트레이스 증거 (PR #207 후속 분석, `LAYMUX_PTY_TRACE`/`LAYMUX_CURSOR_TRACE`).
+- [`pty-output-epoch-upstream-feasibility.md`](./pty-output-epoch-upstream-feasibility.md) — Windows/Linux PTY output epoch upstream 연구/RFC. 실제 OS 패치·실기기 positive test가 없어 exact 활성화 근거가 아니다.
