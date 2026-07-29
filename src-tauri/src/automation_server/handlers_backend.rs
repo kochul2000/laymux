@@ -452,11 +452,16 @@ pub async fn terminal_output(
 }
 
 pub async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
-    let states = crate::activity::detect_all_terminal_states(&state.app_state);
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({ "states": states })),
-    )
+    match crate::activity::detect_all_terminal_states(&state.app_state) {
+        Ok(states) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "states": states })),
+        ),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&error.to_string())),
+        ),
+    }
 }
 
 /// Build the JSON payload returned by `GET /api/v1/memos` given a memo map.

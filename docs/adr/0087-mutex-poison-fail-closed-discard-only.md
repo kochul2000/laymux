@@ -23,6 +23,7 @@ ADR-0084는 terminal-output protocol/runtime/flow가 poison된 뒤 정상 output
 - terminal-output fatal waiter는 예외적으로 recovered guard를 Condvar에 다시 전달할 수 있다. 이때 보호된 lease·ACK·credit은 읽지 않고 mutex 밖의 `AtomicBool retired`만 lifecycle SoT로 사용한다. 이는 운영 복구가 아니라 discard 완료 대기다.
 - 진단 상태라는 이유만으로 poison guard를 반환하는 범용 helper를 만들지 않는다. 복구 가능한 진단은 해당 타입이 제어·권한·sequence 판단에 전혀 소비되지 않음을 소유 타입 경계로 증명하고, typed snapshot이 poison/degraded 사실을 함께 드러내는 경우에만 별도 ADR 또는 living doc 근거로 추가할 수 있다. 현재 frontend health도 poison을 500 오류로 드러내며 복구하지 않는다.
 - authoritative sequenced output ring의 모든 읽기와 쓰기는 `Result`를 반환한다. ring poison은 빈 history나 기존 sequence로 대체하지 않는다. MCP exec-lock table과 memo serialization gate도 poison을 회수하지 않아 입력 직렬화 분리와 설정 쓰기 순서 손상을 막는다.
+- activity·sync-CWD·MCP 입력처럼 상태를 근거로 side effect를 승인하는 경로는 strict snapshot의 오류를 `Shell`, 빈 target, not-found, `null`로 축소하지 않는다. bulk activity는 `terminals → output_buffers → ring` 순서를 지키며, CWD source/target admission은 poison 시 차단한다. MCP pre-write sampling 실패는 쓰기 전에 끝나고 post-write capture 실패는 이미 수행된 write와 byte count를 tool error에 보존한다.
 - terminal/session close는 lock order를 그대로 지키며 catalog/session registry/protocol/runtime/flow/output projection/PTY registry에서 필요한 discard만 수행한다. PTY registry에서 추출한 handle은 종료에만 사용한다. poison helper는 lock order의 우회 수단이 아니다.
 - poison 회수마다 정적인 `context`를 포함한 `tracing::warn!`을 남긴다. 정상 운영의 fail-closed 호출자가 오류를 의도적으로 무시하는 경우에도 제어 결론은 보수적이어야 하며, poison 상태를 성공 데이터로 합성하지 않는다.
 - test-only mock mutex와 테스트의 의도적 poison 생성용 직접 `lock()`은 프로덕션 helper 규칙의 대상이 아니다. 프로덕션의 모든 blocking `Mutex::lock()`은 이름 있는 helper를 사용한다.
@@ -39,6 +40,7 @@ ADR-0084는 terminal-output protocol/runtime/flow가 poison된 뒤 정상 output
 
 - poison 발생 시 일부 조회·Automation/MCP 요청은 빈 성공 대신 명시적 오류를 반환한다. 이는 손상된 상태로 계속 동작하는 것보다 가용성이 낮지만 sequence·직렬화·권한 불변식을 보존한다.
 - output ring API가 오류 가능성을 드러내므로 내부 호출자가 오류를 전파하거나 보수적 결론을 명시해야 한다. Tauri/HTTP/MCP의 정상 payload 스키마는 바뀌지 않으며 poison failure 응답만 달라진다.
+- activity bulk 조회와 sync-CWD target 계산은 poison에서 부분/빈 성공을 반환하지 않는다. MCP capture는 관찰 실패와 입력 미수행을 구분하므로, 실패 응답을 받은 호출자는 `written`/`sideEffect`를 확인한 뒤 재시도 여부를 결정해야 한다.
 - explicit close는 poisoned terminal-output state와 PTY registry에서도 waiter를 깨우고 handle을 종료할 수 있다. recovered mutex는 계속 poisoned라 새 운영 작업이 조용히 재개되지 않는다.
 - discard helper 호출자는 리뷰 시 좁은 allowlist가 된다. 새 호출자는 irreversible ownership 종료, 상태 비재노출, 기존 락 순서, tracing, poison 유지 테스트를 함께 제시해야 한다.
 - protocol/runtime/flow/session registry/output ring/exec-lock registry/memo gate/PTY close의 poison 회귀 테스트가 정책을 고정한다. 새 mutex domain이 poison recovery를 요구하면 범용 helper를 재사용하기 전에 typed invariant와 재노출 여부를 문서화해야 한다.

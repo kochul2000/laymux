@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::claude_activity;
 use crate::constants::{ACTIVITY_SCAN_BYTES, INTERACTIVE_APP_GRACE_WINDOW};
+use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::osc;
 use crate::output_buffer::TerminalOutputBuffer;
@@ -728,20 +729,60 @@ pub fn detect_terminal_state(
     TerminalStateInfo { activity }
 }
 
-/// Detect terminal states for all terminals.
+/// Detect one terminal state for a control/admission decision.
+///
+/// The display-oriented detector keeps conservative fallback values for call
+/// sites that cannot return errors. Control paths must additionally prove that
+/// the authoritative ring stayed healthy so poison is never collapsed to
+/// `Shell` and used to authorize input or CWD propagation.
+pub fn detect_terminal_state_for_control(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> Result<TerminalStateInfo, AppError> {
+    if let Some(buffer) = buffer {
+        buffer.write_seq()?;
+    }
+    let info = detect_terminal_state(state, terminal_id, buffer);
+    if let Some(buffer) = buffer {
+        buffer.write_seq()?;
+    }
+    Ok(info)
+}
+
+/// Detect terminal states for all terminals without inverting the AppState
+/// lock order. Failure is explicit so callers cannot treat a poisoned registry
+/// or ring as an empty set of terminals.
 pub fn detect_all_terminal_states(
     state: &AppState,
-) -> std::collections::HashMap<String, TerminalStateInfo> {
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_all_terminal_states_inner(state, || {})
+}
+
+fn detect_all_terminal_states_inner(
+    state: &AppState,
+    after_terminals_lock: impl FnOnce(),
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
     let mut result = std::collections::HashMap::new();
-    if let Ok(buffers) = state.output_buffers.lock_or_err() {
-        if let Ok(terminals) = state.terminals.lock_or_err() {
-            for id in terminals.keys() {
-                let info = detect_terminal_state(state, id, buffers.get(id));
-                result.insert(id.clone(), info);
-            }
-        }
+    let terminals = state.terminals.lock_or_err()?;
+    after_terminals_lock();
+    let buffers = state.output_buffers.lock_or_err()?;
+    for id in terminals.keys() {
+        let buffer = buffers.get(id).ok_or_else(|| {
+            AppError::Other(format!("Terminal '{id}' has no authoritative output ring"))
+        })?;
+        let info = detect_terminal_state_for_control(state, id, Some(buffer))?;
+        result.insert(id.clone(), info);
     }
-    result
+    Ok(result)
+}
+
+#[cfg(test)]
+pub(crate) fn detect_all_terminal_states_after_terminals_lock(
+    state: &AppState,
+    after_terminals_lock: impl FnOnce(),
+) -> Result<std::collections::HashMap<String, TerminalStateInfo>, AppError> {
+    detect_all_terminal_states_inner(state, after_terminals_lock)
 }
 
 // ── DEC 2026 Burst Detection ──
@@ -989,6 +1030,28 @@ impl PtyCallbackState {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn detect_all_states_returns_error_for_poisoned_ring() {
+        let state = AppState::new();
+        state.terminals.lock().unwrap().insert(
+            "target".into(),
+            crate::terminal::TerminalSession::new(
+                "target".into(),
+                crate::terminal::TerminalConfig::default(),
+            ),
+        );
+
+        let ring = TerminalOutputBuffer::default();
+        ring.poison_for_test();
+        state
+            .output_buffers
+            .lock()
+            .unwrap()
+            .insert("target".into(), ring);
+
+        assert!(detect_all_terminal_states(&state).is_err());
+    }
 
     #[test]
     fn detect_activity_empty_buffer() {

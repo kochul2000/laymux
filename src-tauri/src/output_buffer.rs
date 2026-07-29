@@ -191,6 +191,14 @@ impl TerminalOutputBuffer {
     fn max_size(&self) -> Result<usize, AppError> {
         Ok(self.lock_inner()?.max_size)
     }
+
+    #[cfg(test)]
+    pub(crate) fn poison_for_test(&self) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _inner = self.inner.lock().unwrap();
+            panic!("poison terminal output ring for test");
+        }));
+    }
 }
 
 fn recent_bytes_from(inner: &TerminalOutputBufferInner, n: usize) -> Vec<u8> {

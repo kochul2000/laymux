@@ -701,16 +701,21 @@ pub fn create_terminal_session(
             // CWD. Apply the same source-activity gate (Shell-only) before
             // local state is mutated or events are emitted.
             if event.code == 7 || (event.code == 9 && event.param.as_deref() == Some("9")) {
-                let accept_source_cwd =
-                    if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
-                        super::ipc_dispatch::should_accept_source_cwd_event(
-                            &state_for_pty,
-                            &terminal_id,
-                            buffers.get(&terminal_id),
-                        )
-                    } else {
-                        true
-                    };
+                let accept_source_cwd = match state_for_pty.output_buffers.lock_or_err() {
+                    Ok(buffers) => super::ipc_dispatch::should_accept_source_cwd_event(
+                        &state_for_pty,
+                        &terminal_id,
+                        buffers.get(&terminal_id),
+                    )
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by degraded activity state");
+                        false
+                    }),
+                    Err(error) => {
+                        tracing::warn!(terminal_id, %error, "terminal cwd update blocked by poisoned output registry");
+                        false
+                    }
+                };
                 if !accept_source_cwd {
                     tracing::debug!(
                         terminal_id,
