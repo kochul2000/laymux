@@ -108,6 +108,7 @@ lx get-terminal-id
 - [Tauri CLI](https://tauri.app/start/) — `cargo install tauri-cli`
 - **Windows**: WebView2 (pre-installed on Windows 10/11)
 - **Linux**: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`
+  (`libgtk-3-dev` also backs the native crash dialog; no XDG portal backend is required.)
 
 ### Development
 
