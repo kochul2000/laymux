@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -17,6 +17,10 @@ const mockedInvoke = vi.mocked(invoke);
 describe("system-fonts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe("MONOSPACED_FONTS", () => {
@@ -38,6 +42,30 @@ describe("system-fonts", () => {
       const candidates = ["FontA", "FontB"];
       const result = detectInstalledFonts(candidates);
       expect(result).toEqual(candidates);
+    });
+
+    it("uses an explicit canvas context to detect installed fonts", () => {
+      let font = "";
+      const measureText = vi.fn(() => ({
+        width: font.includes('"Installed Font"') ? 110 : 100,
+      }));
+      const context = {
+        get font() {
+          return font;
+        },
+        set font(value: string) {
+          font = value;
+        },
+        measureText,
+      } as unknown as CanvasRenderingContext2D;
+      const getContext = vi.fn(() => context);
+      vi.spyOn(document, "createElement").mockReturnValue({
+        getContext,
+      } as unknown as HTMLCanvasElement);
+
+      expect(detectInstalledFonts(["Installed Font", "Missing Font"])).toEqual(["Installed Font"]);
+      expect(getContext).toHaveBeenCalledWith("2d");
+      expect(measureText).toHaveBeenCalledTimes(3);
     });
   });
 
