@@ -415,7 +415,24 @@ pub async fn terminal_output(
 
     match buffers.get(&id) {
         Some(buf) => {
-            let output = buf.recent_lines(lines);
+            let output = match buf.recent_lines(lines) {
+                Ok(output) => output,
+                Err(error) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(err_json(&error.to_string())),
+                    )
+                }
+            };
+            let buffer_size = match buf.len() {
+                Ok(len) => len,
+                Err(error) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(err_json(&error.to_string())),
+                    )
+                }
+            };
             let line_count = output.lines().count();
             (
                 StatusCode::OK,
@@ -423,7 +440,7 @@ pub async fn terminal_output(
                     "success": true,
                     "output": output,
                     "lines": line_count,
-                    "bufferSize": buf.len(),
+                    "bufferSize": buffer_size,
                 })),
             )
         }
@@ -467,8 +484,10 @@ pub fn build_memos_list_payload(
 /// behavior of `settings::load_memo`). Keys are sorted alphabetically so
 /// callers get a stable ordering.
 pub async fn memos_list() -> impl IntoResponse {
-    let all = crate::settings::load_all_memos();
-    (StatusCode::OK, Json(build_memos_list_payload(all)))
+    match crate::settings::load_all_memos() {
+        Ok(all) => (StatusCode::OK, Json(build_memos_list_payload(all))),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&error))),
+    }
 }
 
 /// Build the JSON payload returned by `GET /api/v1/memos/{key}` given a memo
@@ -491,7 +510,12 @@ pub fn build_memo_get_response(
 /// keys whose stored value is the empty string — which cannot happen because
 /// `save_memo("", "")` removes the entry).
 pub async fn memo_get(Path(key): Path<String>) -> impl IntoResponse {
-    let all = crate::settings::load_all_memos();
+    let all = match crate::settings::load_all_memos() {
+        Ok(all) => all,
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&error))).into_response()
+        }
+    };
     match build_memo_get_response(&all, &key) {
         Some(json) => (StatusCode::OK, Json(json)).into_response(),
         None => (

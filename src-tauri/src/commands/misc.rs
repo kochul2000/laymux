@@ -197,7 +197,7 @@ pub fn save_settings(
 
 #[tauri::command]
 pub fn load_memo(key: String) -> Result<String, String> {
-    Ok(crate::settings::load_memo(&key))
+    crate::settings::load_memo(&key)
 }
 
 #[tauri::command]

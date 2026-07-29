@@ -106,13 +106,38 @@ fn close_cancels_an_uncommitted_create_reservation() {
 }
 
 #[test]
+fn poisoned_session_registry_is_recovered_only_for_close_discard() {
+    let states = SharedTerminalProtocolStates::default();
+    let buffers = empty_buffers();
+    let registration = register_terminal_output_session(&states, &buffers, "t1").unwrap();
+    let session = registration.commit().unwrap();
+
+    let sessions = Arc::clone(&states.sessions);
+    assert!(thread::spawn(move || {
+        let _registry = sessions.lock().unwrap();
+        panic!("poison terminal output registry");
+    })
+    .join()
+    .is_err());
+
+    assert!(terminal_output_session_for(&states, "t1").is_err());
+    assert!(retire_terminal_output_for_close(&states, &buffers, "t1").unwrap());
+    assert!(session.is_terminal_output_retired());
+    assert!(!states.lock().unwrap().contains_key("t1"));
+    assert!(!buffers.lock().unwrap().contains_key("t1"));
+}
+
+#[test]
 fn retired_callback_cannot_write_into_reused_terminal_id() {
     let states = SharedTerminalProtocolStates::default();
     let buffers = empty_buffers();
     let first = register_terminal_output_session(&states, &buffers, "t1").unwrap();
     let old_session = first.commit().unwrap();
     old_session.record_output(b"old").unwrap().unwrap();
-    assert_eq!(buffers.lock().unwrap()["t1"].recent_bytes(3), b"old");
+    assert_eq!(
+        buffers.lock().unwrap()["t1"].recent_bytes(3).unwrap(),
+        b"old"
+    );
     assert!(retire_terminal_output_session(&states, &buffers, "t1", &old_session).unwrap());
 
     let second = register_terminal_output_session(&states, &buffers, "t1").unwrap();
@@ -604,6 +629,23 @@ fn record_failure_stays_fail_closed_until_poison_tolerant_retirement() {
 }
 
 #[test]
+fn poisoned_runtime_rejects_operations_but_close_discards_the_generation() {
+    let session = flow_test_session();
+    let runtime_session = Arc::clone(&session);
+    assert!(thread::spawn(move || {
+        let _runtime = runtime_session.runtime.lock().unwrap();
+        panic!("poison terminal output runtime");
+    })
+    .join()
+    .is_err());
+
+    assert!(session.record_output(b"must-not-be-recorded").is_err());
+    assert!(session.attach(64).is_err());
+    session.retire(false).unwrap();
+    assert!(session.is_terminal_output_retired());
+}
+
+#[test]
 fn poisoned_credit_state_never_fails_open_and_only_retirement_wakes_fatal_wait() {
     let session = flow_test_session();
     session.begin_desktop_output_bootstrap(4).unwrap();
@@ -787,9 +829,10 @@ fn desktop_flow_window_keeps_every_unacked_live_byte_inside_the_ring() {
     let retained_live_bytes = crate::constants::TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES
         + crate::pty::PTY_READ_BUFFER_BYTES;
     let bytes = vec![b'x'; retained_live_bytes];
-    ring.push_sequenced(&bytes);
+    ring.push_sequenced(&bytes).unwrap();
     let recovered = ring
         .delta_since(0)
+        .unwrap()
         .expect("the whole bounded unacked prefix must remain repairable");
     assert_eq!(recovered.seq_start, 0);
     assert_eq!(recovered.seq_end, retained_live_bytes as u64);

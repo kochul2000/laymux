@@ -43,6 +43,8 @@ use std::sync::Arc;
 use tauri::image::Image;
 use tauri::Manager;
 
+use crate::lock_ext::MutexExt;
+
 pub fn run() {
     // 가장 먼저 패닉 훅을 설치한다. 이후 초기화 중 패닉이 나도
     // `last-crash.json` / `crash.log`로 캡처되어 다음 실행 때 다이얼로그로 표시된다.
@@ -84,13 +86,14 @@ pub fn run() {
                     }
                 }),
             ) {
-                Ok(socket_path) => {
-                    app_state
-                        .ipc_socket_path
-                        .lock()
-                        .unwrap()
-                        .replace(socket_path);
-                }
+                Ok(socket_path) => match app_state.ipc_socket_path.lock_or_err() {
+                    Ok(mut path) => {
+                        path.replace(socket_path);
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "failed to store IPC socket path");
+                    }
+                },
                 Err(e) => {
                     tracing::warn!(error = %e, "IPC server failed to start");
                 }

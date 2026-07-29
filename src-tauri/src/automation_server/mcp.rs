@@ -174,11 +174,12 @@ struct WriteOutcome {
 fn get_or_create_terminal_lock(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
-) -> Arc<TokioMutex<()>> {
-    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
-    map.entry(terminal_id.to_string())
+) -> Result<Arc<TokioMutex<()>>, crate::error::AppError> {
+    let mut map = locks.lock_or_err()?;
+    Ok(map
+        .entry(terminal_id.to_string())
         .or_insert_with(|| Arc::new(TokioMutex::new(())))
-        .clone()
+        .clone())
 }
 
 /// Remove `terminal_id`'s entry, but only if it is still the exact `expected`
@@ -189,8 +190,8 @@ fn remove_terminal_lock_if(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
     expected: &Arc<TokioMutex<()>>,
-) {
-    let mut map = locks.lock().unwrap_or_else(|e| e.into_inner());
+) -> Result<(), crate::error::AppError> {
+    let mut map = locks.lock_or_err()?;
     let is_ours = map
         .get(terminal_id)
         .map(|cur| Arc::ptr_eq(cur, expected))
@@ -198,6 +199,7 @@ fn remove_terminal_lock_if(
     if is_ours {
         map.remove(terminal_id);
     }
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -680,8 +682,12 @@ impl McpHandler {
     /// concurrent write/exec to the same terminal — #314). The table lives on
     /// the shared `Arc<AppState>` (see [`crate::state::SharedExecLocks`]) so this
     /// holds across MCP sessions, not just within one handler (#427).
-    async fn terminal_exec_lock(&self, terminal_id: &str) -> Arc<TokioMutex<()>> {
+    async fn terminal_exec_lock(
+        &self,
+        terminal_id: &str,
+    ) -> Result<Arc<TokioMutex<()>>, CallToolResult> {
         get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id)
+            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -842,7 +848,7 @@ impl McpHandler {
         }
         // body+CR 시퀀스를 원자적으로 보내기 위해 execute_command 와 동일한
         // per-terminal 락으로 직렬화한다.
-        let lock = self.terminal_exec_lock(terminal_id).await;
+        let lock = self.terminal_exec_lock(terminal_id).await?;
         let _guard = lock.lock().await;
         // 락을 잡은 뒤, 쓰기 직전 상태를 원자적으로 샘플링한다.
         let (activity, before_seq) = self.sample_activity_and_seq(terminal_id, capture);
@@ -891,7 +897,11 @@ impl McpHandler {
     /// same-id terminal recreated after us keeps its own lock (#427). Safe under
     /// the per-terminal guard: the guard keeps its `Arc`; the map drops a ref.
     fn remove_terminal_lock(&self, terminal_id: &str, held: &Arc<TokioMutex<()>>) {
-        remove_terminal_lock_if(&self.state.app_state.exec_locks, terminal_id, held);
+        if let Err(error) =
+            remove_terminal_lock_if(&self.state.app_state.exec_locks, terminal_id, held)
+        {
+            tracing::warn!(terminal_id, %error, "failed to clean terminal exec lock");
+        }
     }
 
     /// Write bytes to a terminal PTY. Returns (bytes_written) or error.
@@ -1115,7 +1125,15 @@ impl McpHandler {
     ) -> Result<(String, usize), CallToolResult> {
         let buffers = self.lock_output_buffers()?;
         match buffers.get(terminal_id) {
-            Some(buf) => Ok((buf.recent_lines(lines), buf.len())),
+            Some(buf) => {
+                let output = buf.recent_lines(lines).map_err(|error| {
+                    CallToolResult::error(vec![Content::text(error.to_string())])
+                })?;
+                let len = buf.len().map_err(|error| {
+                    CallToolResult::error(vec![Content::text(error.to_string())])
+                })?;
+                Ok((output, len))
+            }
             None => Err(CallToolResult::error(vec![Content::text(format!(
                 "Terminal '{}' not found",
                 terminal_id
@@ -1142,7 +1160,7 @@ impl McpHandler {
         let info = crate::activity::detect_terminal_state(app_state, terminal_id, buf);
         let activity = serde_json::to_value(&info.activity).unwrap_or(json!(null));
         let seq = if want_seq {
-            buf.map(|b| b.write_seq())
+            buf.and_then(|b| b.write_seq().ok())
         } else {
             None
         };
@@ -1159,7 +1177,13 @@ impl McpHandler {
                 return (String::new(), false);
             };
             match buffers.get(terminal_id) {
-                Some(buf) => buf.bytes_since(before_seq),
+                Some(buf) => match buf.bytes_since(before_seq) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        tracing::warn!(terminal_id, %error, "failed to sample terminal output");
+                        return (String::new(), false);
+                    }
+                },
                 None => return (String::new(), false),
             }
         }; // buffer lock released here
@@ -1304,7 +1328,9 @@ impl McpHandler {
                 let buf = buffers
                     .get(&terminal_id)
                     .ok_or_else(|| resource_not_found(uri))?;
-                let raw = buf.recent_lines(500);
+                let raw = buf
+                    .recent_lines(500)
+                    .map_err(|_| bridge_read_failed(uri, "terminal output ring"))?;
                 drop(buffers);
                 let text = super::helpers::strip_ansi(&raw);
                 Ok(read_result_text(uri, text))
@@ -1820,7 +1846,10 @@ impl McpHandler {
         }
 
         // Acquire per-terminal lock to serialize concurrent execute_command calls
-        let lock = self.terminal_exec_lock(&p.terminal_id).await;
+        let lock = match self.terminal_exec_lock(&p.terminal_id).await {
+            Ok(lock) => lock,
+            Err(error) => return Ok(error),
+        };
         let _guard = lock.lock().await;
 
         // 1. Check terminal is at shell prompt and record sequence number atomically
@@ -1836,7 +1865,14 @@ impl McpHandler {
                             "Terminal is not at a shell prompt (command running or TUI app active)",
                         )]));
                     }
-                    buf.write_seq()
+                    match buf.write_seq() {
+                        Ok(seq) => seq,
+                        Err(error) => {
+                            return Ok(CallToolResult::error(vec![Content::text(
+                                error.to_string(),
+                            )]));
+                        }
+                    }
                 }
                 None => {
                     // Vanished after the pre-lock existence check (raced close):
@@ -1895,7 +1931,14 @@ impl McpHandler {
                 Err(e) => return Ok(e),
             };
             match buffers.get(&p.terminal_id) {
-                Some(buf) => buf.bytes_since(before_seq),
+                Some(buf) => match buf.bytes_since(before_seq) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return Ok(CallToolResult::error(vec![Content::text(
+                            error.to_string(),
+                        )]));
+                    }
+                },
                 None => Vec::new(),
             }
         };
@@ -2545,7 +2588,12 @@ impl McpHandler {
     /// pair this with `list_terminals` to map memos back to specific panes.
     #[tool]
     async fn list_memos(&self) -> Result<CallToolResult, ErrorData> {
-        let all = crate::settings::load_all_memos();
+        let all = match crate::settings::load_all_memos() {
+            Ok(all) => all,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![Content::text(error)]));
+            }
+        };
         let payload = super::handlers_backend::build_memos_list_payload(all);
         Ok(json_result(&payload))
     }
@@ -2557,7 +2605,12 @@ impl McpHandler {
         &self,
         Parameters(p): Parameters<MemoKeyParam>,
     ) -> Result<CallToolResult, ErrorData> {
-        let all = crate::settings::load_all_memos();
+        let all = match crate::settings::load_all_memos() {
+            Ok(all) => all,
+            Err(error) => {
+                return Ok(CallToolResult::error(vec![Content::text(error)]));
+            }
+        };
         Ok(read_memo_result_from_map(&all, &p.key))
     }
 
@@ -3809,13 +3862,13 @@ mod tests {
         // serialization — #427). Different terminals get different locks.
         let a = Arc::new(crate::state::AppState::new());
         let b = a.clone(); // second session's ServerState.app_state
-        let la = get_or_create_terminal_lock(&a.exec_locks, "t1");
-        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1");
+        let la = get_or_create_terminal_lock(&a.exec_locks, "t1").unwrap();
+        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1").unwrap();
         assert!(
             Arc::ptr_eq(&la, &lb),
             "same terminal across shared AppState must yield one lock"
         );
-        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2");
+        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2").unwrap();
         assert!(
             !Arc::ptr_eq(&la, &lc),
             "different terminals must get distinct locks"
@@ -3828,14 +3881,14 @@ mod tests {
         // removed from the table, the next get_or_create makes a fresh lock, so
         // the table does not retain entries for closed terminals forever.
         let state = Arc::new(crate::state::AppState::new());
-        let first = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let first = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         state.exec_locks.lock().unwrap().remove("t1");
         assert_eq!(
             state.exec_locks.lock().unwrap().len(),
             0,
             "removal must empty the table"
         );
-        let second = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let second = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(
             !Arc::ptr_eq(&first, &second),
             "a re-created lock after removal must be a distinct Arc"
@@ -3847,23 +3900,41 @@ mod tests {
         // id reuse + close race (#427): a stale write must not delete a lock
         // that a same-id terminal recreated after it.
         let state = Arc::new(crate::state::AppState::new());
-        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         // Simulate close + same-id recreation: table now holds a DIFFERENT Arc.
         state.exec_locks.lock().unwrap().remove("t1");
-        let current = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(!Arc::ptr_eq(&stale, &current));
 
         // Stale write tries to purge with its old Arc → must be a no-op.
-        remove_terminal_lock_if(&state.exec_locks, "t1", &stale);
-        let after = get_or_create_terminal_lock(&state.exec_locks, "t1");
+        remove_terminal_lock_if(&state.exec_locks, "t1", &stale).unwrap();
+        let after = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
         assert!(
             Arc::ptr_eq(&current, &after),
             "purge with a stale Arc must not evict the current lock"
         );
 
         // Purge with the matching Arc → removes it.
-        remove_terminal_lock_if(&state.exec_locks, "t1", &current);
+        remove_terminal_lock_if(&state.exec_locks, "t1", &current).unwrap();
         assert_eq!(state.exec_locks.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn poisoned_exec_lock_registry_fails_closed_instead_of_splitting_serialization() {
+        let state = Arc::new(crate::state::AppState::new());
+        let locks = Arc::clone(&state.exec_locks);
+        assert!(std::thread::spawn(move || {
+            let _registry = locks.lock().unwrap();
+            panic!("poison exec lock registry");
+        })
+        .join()
+        .is_err());
+
+        assert!(get_or_create_terminal_lock(&state.exec_locks, "t1").is_err());
+        assert!(
+            remove_terminal_lock_if(&state.exec_locks, "t1", &Arc::new(TokioMutex::new(())),)
+                .is_err()
+        );
     }
 
     #[test]

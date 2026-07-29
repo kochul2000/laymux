@@ -1017,7 +1017,15 @@ use crate::lock_ext::MutexExt;
 state.terminals.lock_or_err()?;
 ```
 
-**poison cleanup 예외**: `lock_or_recover_for_cleanup(context)`은 이미 외부 사용이 끝난 상태를 폐기하고 waiter를 깨우는 cleanup과, 그 cleanup을 기다리는 terminal-output fatal waiter에서만 허용한다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). generation retirement는 이 helper로 protocol/runtime/desktop-flow 상태를 폐기하고 `retired`를 공표한 뒤 subscriber/lease를 제거하고 Condvar waiter를 깨운다. `wait_until_retired()`는 poison guard를 회수하더라도 lease·ACK·credit 같은 정상 상태를 읽거나 복구하지 않으며, mutex와 독립적인 `AtomicBool retired`만 권위 소스로 삼아 Condvar를 다시 기다린다. 일반 attach·ACK·record·capacity 경로는 poison을 성공으로 복구하지 않고 fail-closed한다. terminal-output 이외의 복구 정책 확장은 issue #631에서 결정한다.
+**poison 정책**([ADR-0087](../adr/0087-mutex-poison-fail-closed-discard-only.md)):
+
+| 분류 | helper / 형태 | 허용 동작 | 금지 동작 |
+|---|---|---|---|
+| 정상 운영 | `lock_or_err()` | 오류 전파, 또는 보수적 실패 결론 | 빈 값·not-found·기존 state를 성공으로 합성 |
+| recoverable diagnostic | 범용 helper 없음 | 제어 경로와 분리된 소유 타입의 typed snapshot이 poison/degraded를 함께 표시하는 경우만 별도 근거로 허용 | recovered guard나 clone을 권한·sequence·credit·activity 판정에 사용 |
+| discard-only cleanup | `lock_or_recover_for_discard(context)` / owner `Drop`의 `get_mut_or_recover_for_discard(context)` / Condvar의 `recover_poison_for_discard(error, context)` | explicit close·creation rollback·generation retirement에서 entry 제거, clear/overwrite, waiter wake, 추출한 OS resource terminate/drop | 새 작업 승인, 정상 registry/lease 재개, poison 해제 |
+
+discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. `wait_until_retired()`는 recovered guard를 Condvar에 다시 전달할 수 있지만 lease·ACK·credit을 읽지 않고 mutex와 독립적인 `AtomicBool retired`만 lifecycle SoT로 사용한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
 
 **락 획득 순서**: `state.rs`에 문서화된 번호 순서를 반드시 따른다. 역순 획득은 데드락을 유발한다.
 
@@ -1034,6 +1042,8 @@ state.terminals.lock_or_err()?;
 ```
 
 terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
+
+poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 획득이나 상위 registry 재진입을 허용하지 않으며, 잠재적으로 blocking인 PTY `terminate()`는 모든 AppState guard를 놓은 뒤 실행한다.
 
 **콜백 내 락**: PTY 콜백 등 비동기 콜백에서는 독립적으로 락을 획득한다. 호출자의 락을 전달하지 않는다.
 

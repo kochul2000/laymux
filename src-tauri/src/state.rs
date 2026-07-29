@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use crate::lock_ext::MutexExt;
 use crate::output_buffer::TerminalOutputBuffer;
 use crate::pty::PtyHandle;
 use crate::terminal::{SyncGroup, TerminalNotification, TerminalSession};
@@ -45,6 +46,14 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// outside this ordering.
 /// `settings_update_lock` is also async and is held only across frontend settings
 /// snapshot/validation/apply awaits, never together with a synchronous AppState lock.
+///
+/// ## Poison policy
+///
+/// Operational access fails closed through `MutexExt::lock_or_err`. Explicit
+/// close/rollback may recover a guard only through the discard-only helper and
+/// still follows the order above. Recovered state is removed/overwritten or an
+/// extracted OS resource is terminated; it is never returned to operation and
+/// the mutex poison is not cleared. See ADR-0087 and api-contracts §14.3.
 pub struct AppState {
     pub terminals: Arc<Mutex<HashMap<String, TerminalSession>>>,
     pub sync_groups: Mutex<HashMap<String, SyncGroup>>,
@@ -170,11 +179,12 @@ impl Default for AppState {
 
 impl Drop for AppState {
     fn drop(&mut self) {
-        if let Ok(handles) = self.pty_handles.get_mut() {
-            for (terminal_id, handle) in handles.drain() {
-                if let Err(err) = handle.terminate() {
-                    tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
-                }
+        let handles = self
+            .pty_handles
+            .get_mut_or_recover_for_discard("dropping PTY handle registry");
+        for (terminal_id, handle) in handles.drain() {
+            if let Err(err) = handle.terminate() {
+                tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
             }
         }
     }

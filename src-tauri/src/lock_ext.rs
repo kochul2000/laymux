@@ -1,4 +1,4 @@
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::error::AppError;
 
@@ -15,12 +15,27 @@ use crate::error::AppError;
 pub trait MutexExt<T> {
     fn lock_or_err(&self) -> Result<MutexGuard<'_, T>, AppError>;
 
-    /// Recover a poisoned guard only for fail-stop cleanup/liveness state.
+    /// Recover a poisoned guard only to discard protected state or wake
+    /// waiters while an owning resource is being irreversibly closed.
     ///
     /// Callers must not resume normal use of the protected value. This exists
-    /// for terminal-generation retirement and condvar gates whose sole job is
-    /// to wake blocked threads while the poisoned generation is discarded.
-    fn lock_or_recover_for_cleanup(&self, context: &'static str) -> MutexGuard<'_, T>;
+    /// Callers must leave the mutex poisoned and must not publish, authorize,
+    /// or resume normal operation from any recovered field.
+    fn lock_or_recover_for_discard(&self, context: &'static str) -> MutexGuard<'_, T>;
+
+    /// Mutable-owner variant for `Drop`, where no concurrent accessor exists
+    /// and the protected resources are about to be irreversibly disposed.
+    fn get_mut_or_recover_for_discard(&mut self, context: &'static str) -> &mut T;
+}
+
+/// Recover a poisoned guard returned by `Condvar::wait` under the same narrow
+/// discard/wake policy as [`MutexExt::lock_or_recover_for_discard`].
+pub fn recover_poison_for_discard<T>(poisoned: PoisonError<T>, context: &'static str) -> T {
+    tracing::warn!(
+        context,
+        "recovering poisoned mutex for discard-only cleanup"
+    );
+    poisoned.into_inner()
 }
 
 impl<T> MutexExt<T> for Mutex<T> {
@@ -28,13 +43,17 @@ impl<T> MutexExt<T> for Mutex<T> {
         self.lock().map_err(|e| AppError::Lock(format!("{e}")))
     }
 
-    fn lock_or_recover_for_cleanup(&self, context: &'static str) -> MutexGuard<'_, T> {
+    fn lock_or_recover_for_discard(&self, context: &'static str) -> MutexGuard<'_, T> {
         match self.lock() {
             Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::warn!(context, "recovering poisoned mutex for fail-stop cleanup");
-                poisoned.into_inner()
-            }
+            Err(poisoned) => recover_poison_for_discard(poisoned, context),
+        }
+    }
+
+    fn get_mut_or_recover_for_discard(&mut self, context: &'static str) -> &mut T {
+        match self.get_mut() {
+            Ok(value) => value,
+            Err(poisoned) => recover_poison_for_discard(poisoned, context),
         }
     }
 }
@@ -72,7 +91,21 @@ mod tests {
             panic!("intentional poison");
         }));
 
-        assert_eq!(*mutex.lock_or_recover_for_cleanup("test cleanup"), 7);
+        assert_eq!(*mutex.lock_or_recover_for_discard("test cleanup"), 7);
+        assert!(mutex.lock_or_err().is_err());
+    }
+
+    #[test]
+    fn owner_drop_recovery_keeps_mutex_poisoned() {
+        let mut mutex = Mutex::new(vec![1]);
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = mutex.lock().unwrap();
+            panic!("intentional poison");
+        }));
+
+        mutex
+            .get_mut_or_recover_for_discard("test owner drop")
+            .clear();
         assert!(mutex.lock_or_err().is_err());
     }
 }

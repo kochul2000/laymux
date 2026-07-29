@@ -460,8 +460,11 @@ pub fn create_terminal_session(
                     // Task completed (working→idle): extract from output buffer
                     if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
                         buffers.get(&terminal_id).and_then(|buf| {
-                            let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
-                            claude_bullet::extract_claude_status_message(&recent)
+                            buf.recent_bytes(ACTIVITY_SCAN_BYTES)
+                                .ok()
+                                .and_then(|recent| {
+                                    claude_bullet::extract_claude_status_message(&recent)
+                                })
                         })
                     } else {
                         None
@@ -1222,7 +1225,9 @@ pub fn close_terminal_session(
     // id-keyed cleanup. Create performs its duplicate check and generation
     // reservation under the same lock, so close cannot consume state from a
     // newer terminal that reused this id.
-    let mut terminals = state.terminals.lock_or_err()?;
+    let mut terminals = state
+        .terminals
+        .lock_or_recover_for_discard("closing terminal catalog entry");
     terminal_output::retire_terminal_output_for_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
@@ -1232,7 +1237,7 @@ pub fn close_terminal_session(
     let session = terminals
         .remove(&id)
         .ok_or_else(|| format!("Session '{id}' not found"))?;
-    let handle = state.pty_handles.lock_or_err()?.remove(&id);
+    let handle = take_pty_handle_for_close(&state, &id);
 
     // Remove from sync group
     if !session.config.sync_group.is_empty() {
@@ -1264,7 +1269,7 @@ pub fn close_terminal_session(
     // Clean up the per-terminal write/exec lock (#427). The table is now
     // process-global on AppState, so without this it would grow unbounded as
     // terminals open and close over a long session.
-    if let Ok(mut locks) = state.exec_locks.lock() {
+    if let Ok(mut locks) = state.exec_locks.lock_or_err() {
         locks.remove(&id);
     }
 
@@ -1300,6 +1305,18 @@ pub fn close_terminal_session(
     }
 
     Ok(())
+}
+
+/// Extract a PTY handle solely so explicit close can terminate it.
+///
+/// A poisoned registry is never returned to normal operation: the guard stays
+/// poisoned, future operational access still fails, and the extracted handle
+/// is used only for irreversible resource disposal.
+fn take_pty_handle_for_close(state: &AppState, id: &str) -> Option<pty::PtyHandle> {
+    state
+        .pty_handles
+        .lock_or_recover_for_discard("closing PTY handle registry entry")
+        .remove(id)
 }
 
 /// One shadow-cursor trace sample emitted by the UI. The UI batches
@@ -1671,6 +1688,27 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn poisoned_pty_registry_is_recovered_only_to_terminate_on_close() {
+        let state = AppState::new();
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(SharedTestWriter(Arc::new(Mutex::new(
+                Vec::new(),
+            ))))),
+        );
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _handles = state.pty_handles.lock().unwrap();
+            panic!("poison PTY registry");
+        }))
+        .is_err());
+
+        assert!(state.pty_handles.lock_or_err().is_err());
+        let handle = take_pty_handle_for_close(&state, "t1").expect("handle for disposal");
+        handle.terminate().unwrap();
+        assert!(state.pty_handles.lock_or_err().is_err());
     }
 
     struct BlockingTestWriter {

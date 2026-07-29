@@ -96,7 +96,9 @@ pub fn is_claude_terminal_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         // No live signal to corroborate; if the cache still has us,
         // treat as stale — the grace window owns the early-startup
@@ -197,7 +199,9 @@ pub fn is_claude_idle_from_buffer(buffer: Option<&TerminalOutputBuffer>) -> bool
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         return false;
     }
@@ -213,7 +217,10 @@ pub fn is_terminal_at_prompt_from_buffer(buffer: Option<&TerminalOutputBuffer>) 
     let Some(buf) = buffer else {
         return true; // Unknown terminal → assume at prompt
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        // A poisoned authoritative ring must not be mistaken for an idle shell.
+        return false;
+    };
     if recent.is_empty() {
         return true; // No output yet → assume at prompt
     }
@@ -347,7 +354,9 @@ pub fn is_codex_terminal_from_buffer(
     let Some(buf) = buffer else {
         return false;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
     if recent.is_empty() {
         if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
             known.remove(terminal_id);
@@ -590,7 +599,8 @@ fn is_explicit_empty_title_reset(title: &str, buffer: Option<&TerminalOutputBuff
         return false;
     }
     buffer
-        .and_then(|buf| osc::extract_last_terminal_title(&buf.recent_bytes(ACTIVITY_SCAN_BYTES)))
+        .and_then(|buf| buf.recent_bytes(ACTIVITY_SCAN_BYTES).ok())
+        .and_then(|recent| osc::extract_last_terminal_title(&recent))
         .is_some_and(|latest| latest.is_empty())
 }
 
@@ -665,7 +675,9 @@ pub fn detect_terminal_activity(buffer: Option<&TerminalOutputBuffer>) -> Termin
     let Some(buf) = buffer else {
         return TerminalActivity::Shell;
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return TerminalActivity::Shell;
+    };
     if recent.is_empty() {
         return TerminalActivity::Shell;
     }
@@ -693,7 +705,9 @@ pub fn detect_terminal_state(
     let Some(buf) = buffer else {
         return TerminalStateInfo { activity };
     };
-    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES);
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return TerminalStateInfo { activity };
+    };
     if recent.is_empty() {
         return TerminalStateInfo { activity };
     }
@@ -774,7 +788,7 @@ impl BurstDetector {
     /// Record a DEC 2026h hit. Returns `true` if an event should be emitted
     /// (burst threshold reached + throttle interval elapsed).
     pub fn record_hit(&self) -> bool {
-        let Ok(mut inner) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock_or_err() else {
             return false;
         };
         let now = Instant::now();
@@ -964,7 +978,7 @@ impl PtyCallbackState {
     /// behavior silently missed all hits too, so this is no worse and avoids
     /// leaking a poisoned-lock panic into the PTY thread.
     pub fn scan_dec_sync_marker(&self, data: &[u8]) -> bool {
-        match self.dec_sync_scanner.lock() {
+        match self.dec_sync_scanner.lock_or_err() {
             Ok(mut scanner) => scanner.scan(data),
             Err(_) => false,
         }

@@ -362,7 +362,7 @@ impl TerminalOutputSession {
             return Ok(false);
         }
         self.desktop_flow
-            .acknowledge(token, seq, self.output.write_seq())
+            .acknowledge(token, seq, self.output.write_seq()?)
     }
 
     /// Parse and record one PTY callback chunk for this exact generation.
@@ -376,7 +376,7 @@ impl TerminalOutputSession {
         }
 
         protocol.process_output(data);
-        let written = self.output.push_sequenced(data);
+        let written = self.output.push_sequenced(data)?;
         let delta = TerminalOutputDelta {
             generation: self.generation,
             seq_start: written.seq_start,
@@ -385,7 +385,7 @@ impl TerminalOutputSession {
             geometry: runtime.geometry,
         };
 
-        let retained_start_seq = self.output.start_seq();
+        let retained_start_seq = self.output.start_seq()?;
         let mut remove = Vec::new();
         for (&subscriber_id, subscriber) in &mut runtime.subscribers {
             if subscriber.next_seq != delta.seq_start {
@@ -436,7 +436,7 @@ impl TerminalOutputSession {
                 self.terminal_id
             ));
         }
-        let snapshot = self.output.snapshot(max_snapshot_bytes);
+        let snapshot = self.output.snapshot(max_snapshot_bytes)?;
         Ok(attachment_from_snapshot(
             self.generation,
             runtime.geometry,
@@ -465,7 +465,7 @@ impl TerminalOutputSession {
                 self.terminal_id
             ));
         }
-        let snapshot = self.output.snapshot(max_snapshot_bytes);
+        let snapshot = self.output.snapshot(max_snapshot_bytes)?;
         let attachment = attachment_from_snapshot(
             self.generation,
             runtime.geometry,
@@ -504,7 +504,7 @@ impl TerminalOutputSession {
                 self.terminal_id
             ));
         }
-        let snapshot = self.output.snapshot(max_snapshot_bytes);
+        let snapshot = self.output.snapshot(max_snapshot_bytes)?;
         let attachment = attachment_from_snapshot(
             self.generation,
             runtime.geometry,
@@ -575,7 +575,7 @@ impl TerminalOutputSession {
         if generation != self.generation {
             return Ok(None);
         }
-        let Some(slice) = self.output.delta_since(seq) else {
+        let Some(slice) = self.output.delta_since(seq)? else {
             return Ok(None);
         };
         Ok(Some(TerminalOutputDelta {
@@ -601,7 +601,7 @@ impl TerminalOutputSession {
         }
         Ok(TerminalRenderCheckpointTarget {
             generation: self.generation,
-            seq: self.output.write_seq(),
+            seq: self.output.write_seq()?,
             geometry: runtime.geometry,
         })
     }
@@ -657,7 +657,7 @@ impl TerminalOutputSession {
         }
         let suffix = self
             .output
-            .delta_since(checkpoint.seq)
+            .delta_since(checkpoint.seq)?
             .ok_or_else(|| "terminal render checkpoint fell behind the output ring".to_string())?;
         let serialized = checkpoint.data.into_bytes();
         let wire_seq_offset = u64::try_from(serialized.len())
@@ -738,10 +738,10 @@ impl TerminalOutputSession {
         // instead of returning early while an orphan reader resumes.
         let _protocol = self
             .protocol
-            .lock_or_recover_for_cleanup("retiring terminal output protocol");
+            .lock_or_recover_for_discard("retiring terminal output protocol");
         let mut runtime = self
             .runtime
-            .lock_or_recover_for_cleanup("retiring terminal output runtime");
+            .lock_or_recover_for_discard("retiring terminal output runtime");
         if runtime.retired {
             self.desktop_flow.retire();
             return Ok(());

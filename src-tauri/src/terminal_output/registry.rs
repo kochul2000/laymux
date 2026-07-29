@@ -145,7 +145,9 @@ fn retire_terminal_output_session_impl(
     expected: &Arc<TerminalOutputSession>,
     allow_creating: bool,
 ) -> Result<bool, String> {
-    let mut registry = protocol_states.sessions.lock_or_err()?;
+    let mut registry = protocol_states
+        .sessions
+        .lock_or_recover_for_discard("retiring terminal output session registry");
     let Some(current) = registry.active.get(terminal_id).cloned() else {
         return Ok(false);
     };
@@ -167,7 +169,9 @@ pub fn retire_terminal_output_for_close(
     output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
     terminal_id: &str,
 ) -> Result<bool, String> {
-    let mut registry = protocol_states.sessions.lock_or_err()?;
+    let mut registry = protocol_states
+        .sessions
+        .lock_or_recover_for_discard("closing terminal output session registry");
     let current = registry.active.get(terminal_id).cloned();
     if let Some(current) = current {
         current.retire(false)?;
@@ -191,7 +195,8 @@ fn remove_compatibility_projections(
     terminal_id: &str,
     expected: Option<&Arc<TerminalOutputSession>>,
 ) -> Result<(), String> {
-    let mut gates = protocol_states.lock_or_err()?;
+    let mut gates =
+        protocol_states.lock_or_recover_for_discard("removing terminal protocol projection");
     let remove_gate = expected.is_none_or(|session| {
         gates
             .get(terminal_id)
@@ -202,7 +207,8 @@ fn remove_compatibility_projections(
     }
     drop(gates);
 
-    let mut buffers = output_buffers.lock_or_err()?;
+    let mut buffers =
+        output_buffers.lock_or_recover_for_discard("removing terminal output ring projection");
     let remove_buffer = expected.is_none_or(|session| {
         buffers
             .get(terminal_id)
@@ -250,7 +256,7 @@ pub fn record_terminal_output(
     let buffer = buffers
         .get(terminal_id)
         .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
-    let written = buffer.push_sequenced(data);
+    let written = buffer.push_sequenced(data)?;
     Ok(TerminalOutputDelta {
         generation: 0,
         seq_start: written.seq_start,
@@ -279,7 +285,7 @@ pub fn attach_terminal_output(
     let buffer = buffers
         .get(terminal_id)
         .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
-    let snapshot = buffer.snapshot(max_snapshot_bytes);
+    let snapshot = buffer.snapshot(max_snapshot_bytes)?;
     Ok(attachment_from_snapshot(
         0,
         TerminalGeometry::default(),
