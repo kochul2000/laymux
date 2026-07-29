@@ -1,4 +1,4 @@
-use laymux_lib::pty::spawn_pty;
+use laymux_lib::pty::{spawn_pty, PtyOutputControl};
 use laymux_lib::settings::Settings;
 use laymux_lib::terminal::{TerminalConfig, TerminalSession};
 use std::sync::mpsc::{self, Receiver};
@@ -73,6 +73,7 @@ fn native_windows_child_receives_laymux_capability_contract() {
     let (tx, rx) = mpsc::channel();
     let handle = spawn_pty(&session, move |data| {
         let _ = tx.send(data);
+        PtyOutputControl::Continue
     })
     .expect("PowerShell PTY spawn");
 
@@ -99,6 +100,7 @@ fn native_windows_child_can_disable_truecolor_advertising() {
     let (tx, rx) = mpsc::channel();
     let handle = spawn_pty(&session, move |data| {
         let _ = tx.send(data);
+        PtyOutputControl::Continue
     })
     .expect("PowerShell PTY spawn");
 
@@ -128,6 +130,7 @@ fn native_unix_child_receives_laymux_capability_contract() {
     let (tx, rx) = mpsc::channel();
     let handle = spawn_pty(&session, move |data| {
         let _ = tx.send(data);
+        PtyOutputControl::Continue
     })
     .expect("Unix PTY spawn");
 
@@ -170,6 +173,7 @@ fn wsl_child_receives_mutations_without_stale_windows_terminal_identity() {
     let (tx, rx) = mpsc::channel();
     let handle = spawn_pty(&session, move |data| {
         let _ = tx.send(data);
+        PtyOutputControl::Continue
     })
     .expect("WSL PTY spawn");
 
@@ -203,6 +207,7 @@ fn wsl_child_can_disable_truecolor_advertising() {
     let (tx, rx) = mpsc::channel();
     let handle = spawn_pty(&session, move |data| {
         let _ = tx.send(data);
+        PtyOutputControl::Continue
     })
     .expect("WSL PTY spawn");
 

@@ -1,7 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::AtomicU64;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::lock_ext::MutexExt;
 use crate::output_buffer::TerminalOutputBuffer;
@@ -121,10 +124,14 @@ pub struct AppState {
     /// terminal close so the table does not grow unbounded.
     ///
     /// The outer table is a `std::sync::Mutex` (held only briefly to get/insert,
-    /// never across `.await`, so sync close paths can clean it too); each value
-    /// is a `tokio::sync::Mutex` because a writer holds it across the body→CR
-    /// `.await` delay.
+    /// never across `.await`, so sync close paths can clean it too); each entry
+    /// binds the lock Arc to one terminal generation, and each inner lock is a
+    /// `tokio::sync::Mutex` because a writer holds it across the body→CR delay.
     pub exec_locks: SharedExecLocks,
+    /// Non-callback cleanup/reaper coordinators for generation-scoped fatal PTY
+    /// cleanup. Both exist before AppState becomes usable; per-handle reaper
+    /// spawn failures retain and retry the owned job.
+    pub terminal_teardown_dispatcher: TerminalTeardownDispatcher,
     /// Serializes settings snapshot → validation → persistence across MCP sessions
     /// and legacy Automation setters so optimistic revisions cannot lose updates.
     pub settings_update_lock: tokio::sync::Mutex<()>,
@@ -138,7 +145,141 @@ pub struct AppState {
 
 /// Process-global per-terminal write/exec serialization table. See
 /// [`AppState::exec_locks`].
-pub type SharedExecLocks = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>;
+pub struct TerminalExecLockEntry {
+    pub(crate) generation: u64,
+    pub(crate) lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+pub type SharedExecLocks = Arc<Mutex<HashMap<String, TerminalExecLockEntry>>>;
+
+type TerminalTeardownJob = Box<dyn FnOnce() + Send + 'static>;
+
+#[derive(Clone)]
+pub struct TerminalTeardownDispatcher {
+    cleanup_sender: Sender<TerminalTeardownJob>,
+    reaper_sender: Sender<TerminalTeardownJob>,
+}
+
+impl TerminalTeardownDispatcher {
+    fn new() -> Self {
+        let (cleanup_sender, cleanup_receiver) = mpsc::channel::<TerminalTeardownJob>();
+        let (reaper_sender, reaper_receiver) = mpsc::channel::<TerminalTeardownJob>();
+        // Both coordinators exist before AppState is returned. `thread::spawn`
+        // aborts construction if the OS cannot create either thread, so no live
+        // terminal can claim a fatal request without both consumers.
+        thread::spawn(move || {
+            while let Ok(job) = cleanup_receiver.recv() {
+                run_terminal_teardown_job(job, "terminal fatal cleanup job panicked");
+            }
+        });
+        thread::spawn(move || run_terminal_reaper_dispatcher(reaper_receiver));
+        Self {
+            cleanup_sender,
+            reaper_sender,
+        }
+    }
+
+    pub(crate) fn dispatch_cleanup(&self, job: TerminalTeardownJob) -> Result<(), String> {
+        self.cleanup_sender
+            .send(job)
+            .map_err(|_| "terminal fatal cleanup worker is unavailable".to_string())
+    }
+
+    pub(crate) fn dispatch_reaper(&self, job: TerminalTeardownJob) -> Result<(), String> {
+        self.reaper_sender
+            .send(job)
+            .map_err(|_| "terminal fatal reaper coordinator is unavailable".to_string())
+    }
+}
+
+fn run_terminal_teardown_job(job: TerminalTeardownJob, panic_message: &'static str) {
+    if catch_unwind(AssertUnwindSafe(job)).is_err() {
+        tracing::error!(panic_message);
+    }
+}
+
+fn run_terminal_reaper_dispatcher(receiver: mpsc::Receiver<TerminalTeardownJob>) {
+    run_terminal_reaper_dispatcher_with(receiver, try_spawn_terminal_reaper);
+}
+
+fn run_terminal_reaper_dispatcher_with(
+    receiver: mpsc::Receiver<TerminalTeardownJob>,
+    mut spawn: impl FnMut(TerminalTeardownJob) -> Result<(), TerminalTeardownJob>,
+) {
+    let mut pending = VecDeque::new();
+    let mut disconnected = false;
+    loop {
+        if pending.is_empty() && !disconnected {
+            match receiver.recv() {
+                Ok(job) => pending.push_back(job),
+                Err(_) => disconnected = true,
+            }
+        } else if !disconnected {
+            loop {
+                match receiver.try_recv() {
+                    Ok(job) => pending.push_back(job),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let attempts = pending.len();
+        let mut retry_needed = false;
+        for _ in 0..attempts {
+            let Some(job) = pending.pop_front() else {
+                break;
+            };
+            if let Err(job) = spawn(job) {
+                pending.push_back(job);
+                retry_needed = true;
+            }
+        }
+        if disconnected && pending.is_empty() {
+            return;
+        }
+        if retry_needed {
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+}
+
+fn try_spawn_terminal_reaper(job: TerminalTeardownJob) -> Result<(), TerminalTeardownJob> {
+    let slot = Arc::new(Mutex::new(Some(job)));
+    let worker_slot = Arc::clone(&slot);
+    match thread::Builder::new()
+        .name("terminal-fatal-reaper".into())
+        .spawn(move || {
+            let job = match worker_slot.lock() {
+                Ok(mut slot) => slot.take(),
+                Err(poisoned) => poisoned.into_inner().take(),
+            };
+            if let Some(job) = job {
+                run_terminal_teardown_job(job, "terminal fatal reaper job panicked");
+            }
+        }) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            tracing::warn!(%error, "failed to spawn terminal fatal reaper; retrying");
+            let job = match slot.lock() {
+                Ok(mut slot) => slot.take(),
+                Err(poisoned) => poisoned.into_inner().take(),
+            };
+            match job {
+                Some(job) => Err(job),
+                None => {
+                    tracing::error!(
+                        "terminal fatal reaper job was unavailable after spawn failure"
+                    );
+                    Ok(())
+                }
+            }
+        }
+    }
+}
 
 impl AppState {
     pub fn new() -> Self {
@@ -165,6 +306,7 @@ impl AppState {
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
             exec_locks: Arc::new(Mutex::new(HashMap::new())),
+            terminal_teardown_dispatcher: TerminalTeardownDispatcher::new(),
             settings_update_lock: tokio::sync::Mutex::new(()),
             frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
         }
@@ -210,6 +352,66 @@ mod tests {
         let state = AppState::default();
         let terminals = state.terminals.lock().unwrap();
         assert!(terminals.is_empty());
+    }
+
+    #[test]
+    fn terminal_teardown_dispatcher_survives_a_panicking_job() {
+        let dispatcher = TerminalTeardownDispatcher::new();
+        dispatcher
+            .dispatch_cleanup(Box::new(|| panic!("injected teardown panic")))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        dispatcher
+            .dispatch_cleanup(Box::new(move || tx.send(()).unwrap()))
+            .unwrap();
+
+        rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn terminal_reaper_does_not_head_of_line_block_a_second_job() {
+        let dispatcher = TerminalTeardownDispatcher::new();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        dispatcher
+            .dispatch_reaper(Box::new(move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            }))
+            .unwrap();
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let (done_tx, done_rx) = mpsc::channel();
+        dispatcher
+            .dispatch_reaper(Box::new(move || done_tx.send(()).unwrap()))
+            .unwrap();
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn terminal_reaper_retries_a_job_after_spawn_failure() {
+        let (sender, receiver) = mpsc::channel();
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let worker_attempts = Arc::clone(&attempts);
+        let worker = thread::spawn(move || {
+            run_terminal_reaper_dispatcher_with(receiver, move |job| {
+                if worker_attempts.fetch_add(1, std::sync::atomic::Ordering::AcqRel) == 0 {
+                    return Err(job);
+                }
+                job();
+                Ok(())
+            });
+        });
+        let (done_tx, done_rx) = mpsc::channel();
+        sender
+            .send(Box::new(move || done_tx.send(()).unwrap()))
+            .unwrap();
+        drop(sender);
+
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::Acquire), 2);
     }
 
     #[test]

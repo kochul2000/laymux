@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use serde::{Deserialize, Serialize};
@@ -294,6 +295,9 @@ pub struct TerminalOutputSession {
     output: TerminalOutputBuffer,
     runtime: Mutex<TerminalOutputSessionRuntime>,
     desktop_flow: DesktopOutputFlow,
+    /// Generation-local, exactly-once handoff from the PTY reader callback to
+    /// the asynchronous catalog/OS-resource teardown worker.
+    fatal_teardown_requested: AtomicBool,
 }
 
 impl TerminalOutputSession {
@@ -310,6 +314,7 @@ impl TerminalOutputSession {
             output,
             runtime: Mutex::new(TerminalOutputSessionRuntime::new(geometry)),
             desktop_flow: DesktopOutputFlow::new(),
+            fatal_teardown_requested: AtomicBool::new(false),
         }
     }
 
@@ -340,16 +345,22 @@ impl TerminalOutputSession {
         self.desktop_flow.wait_for_capacity(produced_seq)
     }
 
-    /// Fail closed after `record_output` could not preserve the exact stream.
-    /// ACK or reattach cannot repair bytes that never received a sequence, so
-    /// the PTY callback remains parked until this generation is retired.
-    pub fn wait_for_terminal_output_retirement(&self) {
-        self.desktop_flow.wait_until_retired();
-    }
-
     /// Cheap fail-stop guard for a PTY callback racing generation close.
     pub fn is_terminal_output_retired(&self) -> bool {
         self.desktop_flow.is_retired()
+    }
+
+    /// Claim the one automatic teardown request owned by this generation.
+    /// The caller must return `PtyOutputControl::Stop` regardless of whether it
+    /// won the claim; a duplicate fatal cannot resume the reader.
+    pub(crate) fn request_fatal_teardown(&self) -> bool {
+        self.fatal_teardown_requested
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+    }
+
+    pub(crate) fn fatal_teardown_requested(&self) -> bool {
+        self.fatal_teardown_requested.load(Ordering::Acquire)
     }
 
     pub fn acknowledge_desktop_output(
@@ -759,7 +770,7 @@ impl TerminalOutputSession {
             ));
         }
         runtime.subscribers.clear();
-        // Wake credit/fatal waiters only after the generation is observably
+        // Wake ordinary credit waiters only after the generation is observably
         // retired. A callback that races close and runs again therefore sees
         // `retired`/poison and returns before OSC or legacy emission; the close
         // command can then terminate the selected PTY handle normally.

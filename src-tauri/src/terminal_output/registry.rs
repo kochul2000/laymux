@@ -129,13 +129,44 @@ pub fn retire_terminal_output_session(
     terminal_id: &str,
     expected: &Arc<TerminalOutputSession>,
 ) -> Result<bool, String> {
-    retire_terminal_output_session_impl(
+    Ok(retire_terminal_output_session_and_then(
         protocol_states,
         output_buffers,
         terminal_id,
         expected,
-        false,
-    )
+        || (),
+    )?
+    .is_some())
+}
+
+/// Retire exactly `expected` and run id-keyed discard cleanup before another
+/// generation can reserve the same terminal id.
+///
+/// The callback runs while the session-registry guard is still held, after the
+/// old generation and its compatibility projections have been removed. It may
+/// acquire only later AppState locks in the global order and must not block on
+/// platform resource shutdown.
+pub fn retire_terminal_output_session_and_then<T>(
+    protocol_states: &SharedTerminalProtocolStates,
+    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
+    terminal_id: &str,
+    expected: &Arc<TerminalOutputSession>,
+    on_retired: impl FnOnce() -> T,
+) -> Result<Option<T>, String> {
+    let mut registry = protocol_states
+        .sessions
+        .lock_or_recover_for_discard("retiring terminal output session registry");
+    let Some(current) = registry.active.get(terminal_id).cloned() else {
+        return Ok(None);
+    };
+    if !Arc::ptr_eq(&current, expected) {
+        return Ok(None);
+    }
+
+    current.retire(false)?;
+    remove_compatibility_projections(protocol_states, output_buffers, terminal_id, Some(&current))?;
+    registry.active.remove(terminal_id);
+    Ok(Some(on_retired()))
 }
 
 fn retire_terminal_output_session_impl(

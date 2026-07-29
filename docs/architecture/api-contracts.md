@@ -507,6 +507,8 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `get_terminal_states` | AppState 직접 | 전 터미널 활동 상태 감지 |
 | `execute_command` | AppState 직접 | 명령 실행 + 출력 수집 (per-terminal 세마포어, sequence number). exec lock 획득 뒤 실제 PTY write 직전에 공용 strict activity detector로 ring·known app·grace/exit cache·PTY registry 건강성과 `Shell` 상태를 다시 검증하며, 오류/TUI/실행 중 상태는 0-byte tool error로 차단 |
 
+`write_to_terminal`·`write_to_neighbor`·`broadcast_write`·`execute_command`는 exec lock을 선택할 때 terminal output generation을 함께 캡처한다. async lock 대기 뒤 실제 write admission은 `terminals → terminal-output session registry → pty_handles` 순서의 한 임계구역에서 generation 일치와 handle 존재를 재검증하고 그 `PtyHandle`을 clone한다. operation의 body·제출 CR은 이 clone만 사용하며 terminal id로 handle table을 다시 조회하지 않는다. admission 뒤 close가 이기면 old handle 종료로 남은 write가 실패하고, 같은 id로 생성된 새 terminal에는 입력하지 않는다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)).
+
 **워크스페이스 (6)**:
 
 | Tool | 구현 방식 | 설명 |
@@ -1028,7 +1030,7 @@ state.terminals.lock_or_err()?;
 | recoverable diagnostic | 범용 helper 없음 | 제어 경로와 분리된 소유 타입의 typed snapshot이 poison/degraded를 함께 표시하는 경우만 별도 근거로 허용 | recovered guard나 clone을 권한·sequence·credit·activity 판정에 사용 |
 | discard-only cleanup | `lock_or_recover_for_discard(context)` / owner `Drop`의 `get_mut_or_recover_for_discard(context)` / Condvar의 `recover_poison_for_discard(error, context)` | explicit close·creation rollback·generation retirement에서 entry 제거, clear/overwrite, waiter wake, 추출한 OS resource terminate/drop | 새 작업 승인, 정상 registry/lease 재개, poison 해제 |
 
-discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. `wait_until_retired()`는 recovered guard를 Condvar에 다시 전달할 수 있지만 lease·ACK·credit을 읽지 않고 mutex와 독립적인 `AtomicBool retired`만 lifecycle SoT로 사용한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
+discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit 또는 fatal generation terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. fatal PTY callback은 poisoned Condvar 안에서 close를 기다리지 않고 generation-local atomic request를 claim한 뒤 reader에 `Stop`을 반환하며, cleanup coordinator가 discard-only retirement를 수행하고 독립 reaper가 handle을 종료한다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)). `exec_locks` cleanup은 다른 AppState 락과 겹치지 않으며 entry generation이 retired generation과 같을 때만 제거한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
 
 activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 

@@ -3,7 +3,7 @@ use std::sync::{Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
-use crate::lock_ext::{recover_poison_for_discard, MutexExt};
+use crate::lock_ext::MutexExt;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -35,8 +35,8 @@ struct DesktopOutputFlowState {
 pub(super) struct DesktopOutputFlow {
     state: Mutex<DesktopOutputFlowState>,
     changed: Condvar,
-    /// Independent fail-stop bit. Normal credit state is never trusted after
-    /// poison; retirement alone publishes this bit and wakes fatal waiters.
+    /// Independent retirement bit. Normal credit state is never trusted after
+    /// poison; teardown publishes this bit before discard-only cleanup.
     retired: AtomicBool,
 }
 
@@ -134,30 +134,9 @@ impl DesktopOutputFlow {
         Ok(())
     }
 
-    /// Stop the PTY reader after the sequenced ring/protocol path failed.
-    ///
-    /// Unlike ordinary credit waiting this deliberately ignores leases and
-    /// ACKs. Once bytes failed to enter the authoritative sequence there is no
-    /// safe prefix a surface can acknowledge, so only generation retirement
-    /// may let the callback return.
-    pub(super) fn wait_until_retired(&self) {
-        let mut state = self
-            .state
-            .lock_or_recover_for_discard("waiting for terminal output retirement");
-        while !self.retired.load(Ordering::Acquire) {
-            state = match self.changed.wait(state) {
-                Ok(state) => state,
-                Err(poisoned) => recover_poison_for_discard(
-                    poisoned,
-                    "waiting for terminal output retirement condvar",
-                ),
-            };
-        }
-    }
-
     pub(super) fn retire(&self) {
-        // Publish the only fact fatal waiters may trust before recovering the
-        // poisoned guard solely to clear/discard it and notify the condvar.
+        // Publish retirement before recovering the poisoned guard solely to
+        // clear/discard it and notify any ordinary credit waiters.
         self.retired.store(true, Ordering::Release);
         let mut state = self
             .state

@@ -22,6 +22,8 @@ use crate::terminal::{TerminalConfig, TerminalSession};
 use crate::terminal_output::{self, DesktopTerminalOutputAttachment};
 use crate::terminal_protocol::encode_terminal_input;
 
+use super::terminal_teardown::request_terminal_output_fatal_teardown;
+
 /// Resolve whether Claude Code is currently detected for `terminal_id`,
 /// combining the per-terminal `claude_detected` atomic with the shared
 /// `known_claude_terminals` set.
@@ -257,7 +259,7 @@ pub fn create_terminal_session(
         // master reads without re-locking poisoned protocol state or emitting
         // repeated fatal diagnostics during that cleanup window.
         if pty_output_session.is_terminal_output_retired() {
-            return;
+            return pty::PtyOutputControl::Stop;
         }
         if pty_trace::is_pty_trace_enabled() {
             let signals = pty_trace::detect_terminal_signals(&data);
@@ -311,7 +313,7 @@ pub fn create_terminal_session(
                     generation = pty_output_session.generation(),
                     "dropped PTY output from retired terminal generation"
                 );
-                return;
+                return pty::PtyOutputControl::Stop;
             }
             Err(err) => {
                 // These bytes never reached the ring, so no sequence gap will
@@ -327,8 +329,13 @@ pub fn create_terminal_session(
                     error = %err,
                     "failed to record PTY output"
                 );
-                pty_output_session.wait_for_terminal_output_retirement();
-                return;
+                return request_terminal_output_fatal_teardown(
+                    &state_for_pty,
+                    &app_clone,
+                    &terminal_id,
+                    &pty_output_session,
+                    "record_output",
+                );
             }
         };
 
@@ -801,14 +808,35 @@ pub fn create_terminal_session(
                     terminal_id = %terminal_id,
                     generation = pty_output_session.generation(),
                     %error,
-                    "terminal desktop flow failed; stopping PTY output until retirement"
+                    "terminal desktop flow failed; stopping reader and tearing down generation"
                 );
-                pty_output_session.wait_for_terminal_output_retirement();
+                return request_terminal_output_fatal_teardown(
+                    &state_for_pty,
+                    &app_clone,
+                    &terminal_id,
+                    &pty_output_session,
+                    "desktop_flow",
+                );
             }
         }
+        pty::PtyOutputControl::Continue
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
     let pty_handle = spawned_pty.handle;
+
+    // Startup output can fail before the spawned handle is published. The
+    // callback has already stopped its reader and marked this exact generation;
+    // its registration guard owns rollback while this create path owns the
+    // still-uninstalled OS handle.
+    if output_session.fatal_teardown_requested() {
+        return Err(terminate_uninstalled_pty(
+            &pty_handle,
+            format!(
+                "terminal output generation {} failed during PTY creation",
+                output_session.generation()
+            ),
+        ));
+    }
 
     // Start notify gate fallback timer: arms the gate after NOTIFY_GATE_FALLBACK_MS
     // for shells without preexec (e.g., PowerShell which doesn't emit OSC 133;C/E).
@@ -862,6 +890,16 @@ pub fn create_terminal_session(
             return Err(terminate_uninstalled_pty(&pty_handle, error.to_string()));
         }
     };
+    if output_session.fatal_teardown_requested() {
+        drop(terminals);
+        return Err(terminate_uninstalled_pty(
+            &pty_handle,
+            format!(
+                "terminal output generation {} failed before PTY handle installation",
+                output_session.generation()
+            ),
+        ));
+    }
     let mut groups = match state.sync_groups.lock_or_err() {
         Ok(groups) => groups,
         Err(error) => {

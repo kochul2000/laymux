@@ -18,6 +18,17 @@ use crate::terminal_env::TerminalEnvPlan;
 /// complete callback chunk.
 pub(crate) const PTY_READ_BUFFER_BYTES: usize = 4096;
 
+/// Reader-loop decision returned by every PTY output callback.
+///
+/// `Stop` is a synchronous fail-stop boundary: after it is returned, the
+/// reader must not perform another master read or dispatch another chunk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use]
+pub enum PtyOutputControl {
+    Continue,
+    Stop,
+}
+
 /// Expand Windows-style environment variable references (e.g. `%USERPROFILE%`)
 /// in a path string. Also expands `~` as a shorthand for the user's home directory.
 fn expand_env_in_path(path: &str) -> String {
@@ -141,6 +152,11 @@ impl PtyHandle {
             child_exited: Arc::new(AtomicBool::new(true)),
             input_faulted: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn child_exited_for_test(&self) -> bool {
+        self.child_exited.load(Ordering::Acquire)
     }
 
     /// Close the PTY master and terminate the direct child process tree if
@@ -436,7 +452,7 @@ pub struct SpawnedPty {
 
 pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle, String>
 where
-    F: Fn(Vec<u8>) + Send + 'static,
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
     spawn_pty_with_metadata(session, on_output).map(|spawned| spawned.handle)
 }
@@ -446,7 +462,7 @@ pub fn spawn_pty_with_metadata<F>(
     on_output: F,
 ) -> Result<SpawnedPty, String>
 where
-    F: Fn(Vec<u8>) + Send + 'static,
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
     let pty_system = native_pty_system();
 
@@ -580,20 +596,28 @@ where
     // Spawn reader thread
     thread::spawn(move || {
         let mut reader = reader;
-        let mut buf = [0u8; PTY_READ_BUFFER_BYTES];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break, // EOF
-                Ok(n) => on_output(buf[..n].to_vec()),
-                Err(_) => break,
-            }
-        }
+        read_pty_output_loop(&mut reader, on_output);
     });
 
     Ok(SpawnedPty {
         handle,
         initial_execution_host,
     })
+}
+
+fn read_pty_output_loop(reader: &mut dyn Read, on_output: impl Fn(Vec<u8>) -> PtyOutputControl) {
+    let mut buf = [0u8; PTY_READ_BUFFER_BYTES];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                if on_output(buf[..n].to_vec()) == PtyOutputControl::Stop {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -603,6 +627,41 @@ mod tests {
     use std::cell::Cell;
     use std::sync::{mpsc, Condvar};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn output_reader_stops_before_reading_or_dispatching_another_chunk() {
+        struct ChunkReader {
+            chunks: std::collections::VecDeque<Vec<u8>>,
+            reads: Arc<std::sync::atomic::AtomicUsize>,
+        }
+
+        impl Read for ChunkReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.reads.fetch_add(1, Ordering::Relaxed);
+                let Some(chunk) = self.chunks.pop_front() else {
+                    return Ok(0);
+                };
+                buffer[..chunk.len()].copy_from_slice(&chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut reader = ChunkReader {
+            chunks: [b"fatal".to_vec(), b"must-not-run".to_vec()].into(),
+            reads: Arc::clone(&reads),
+        };
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let callback_count = Arc::clone(&callbacks);
+
+        read_pty_output_loop(&mut reader, move |_| {
+            callback_count.fetch_add(1, Ordering::Relaxed);
+            PtyOutputControl::Stop
+        });
+
+        assert_eq!(callbacks.load(Ordering::Relaxed), 1);
+        assert_eq!(reads.load(Ordering::Relaxed), 1);
+    }
 
     /// PTY 출력을 `needle` 이 보일 때까지(또는 `timeout` 까지) 모은다.
     ///
@@ -746,7 +805,7 @@ mod tests {
         // would have left the writer live and this test would have
         // returned Ok or a different I/O error).
         let session = make_test_session("PowerShell");
-        let handle = spawn_pty(&session, |_| {}).expect("spawn");
+        let handle = spawn_pty(&session, |_| PtyOutputControl::Continue).expect("spawn");
 
         handle.terminate().expect("terminate should succeed");
 
@@ -774,6 +833,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         })
         .expect("spawn");
 
@@ -811,6 +871,7 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         });
 
         assert!(handle.is_ok(), "PTY spawn should succeed for PowerShell");
@@ -831,7 +892,7 @@ mod tests {
     #[cfg(windows)]
     fn spawn_pty_resize() {
         let session = make_test_session("PowerShell");
-        let handle = spawn_pty(&session, |_| {}).unwrap();
+        let handle = spawn_pty(&session, |_| PtyOutputControl::Continue).unwrap();
 
         let result = handle.resize(120, 40);
         assert!(result.is_ok(), "Resize should succeed");
@@ -850,6 +911,7 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         });
 
         assert!(
@@ -879,6 +941,7 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         })
         .unwrap();
 
@@ -969,6 +1032,7 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         });
 
         assert!(
@@ -1206,6 +1270,7 @@ mod tests {
 
         let handle = spawn_pty(&session, move |data| {
             let _ = tx.send(data);
+            PtyOutputControl::Continue
         });
 
         assert!(handle.is_ok(), "PTY spawn should succeed with WSL --cd");
