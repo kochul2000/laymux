@@ -14,10 +14,11 @@ Ubuntu 22.04/WSL2의 `cargo check --locked -p laymux --lib`는 `rfd` build scrip
 선택 검사가 없어 이 결함이 드러나지 않았다.
 
 `rfd 0.15.4`의 Linux 선택지는 `gtk3`와 `xdg-portal`이다. `xdg-portal`은
-`tokio` 또는 `async-std` feature와 런타임 portal 구현을 요구하며, 이 버전에서는
-`MessageDialog`를 빌드하지 않는다. 이를 선택하면 현재 crash reporter를 별도 구현으로
-바꿔야 하므로 단순 build 수정의 범위를 넘고 기능을 잃는다. `gtk3`는
-`MessageDialog`를 지원하고 `libgtk-3-dev`가 필요하다. laymux의 Tauri/WebKitGTK Linux
+`tokio` 또는 `async-std` feature와 런타임 portal 구현을 요구한다. 또한 이 버전의
+`MessageDialog`는 portal API가 아니라 외부 `zenity` 프로세스로 구현되어, 현재
+crash reporter의 최후 알림 경로에 새 런타임 의존성과 프로세스 실행 실패면을 만든다.
+`gtk3`는 프로세스 외부 의존 없이 `MessageDialog`를 지원하고 `libgtk-3-dev`가 필요하다.
+laymux의 Tauri/WebKitGTK Linux
 빌드와 배포는 이미 같은 GTK3 개발·런타임 라이브러리를 필수로 하며 README의 Linux
 prerequisite에도 이를 명시한다.
 
@@ -38,8 +39,9 @@ feature 없는 기존 계약을 별도 target dependency로 유지한다.**
 - panic hook의 `MessageDialog`와 `catch_unwind`/stderr fallback은 유지한다. headless
   unit test는 대화상자를 열지 않고, Linux library compile이 이 API의 존재와 링크
   seam을 검증한다.
-- Cargo metadata 회귀 테스트는 두 target dependency, Linux의 단일 `gtk3` feature,
-  Windows의 빈 feature 집합, 비활성 default feature와 `--locked` 해석을 고정한다.
+- 회귀 테스트는 Cargo metadata로 두 target dependency와 비활성 default feature를
+  확인하고, target별 `--locked --filter-platform` resolved dependency graph에서 Linux의
+  GTK sys edge와 Windows의 Linux backend edge 부재를 고정한다.
   Linux 검증은 Ubuntu 22.04에서 별도 feature 인자 없이 locked library check를 수행한다.
 - Linux 패키징의 system dependency 문서는 Tauri prerequisite와 같은
   `libgtk-3-dev`/GTK3 runtime을 정본으로 삼는다. 지원 배포판이 Tauri의 GTK 계약을
@@ -47,12 +49,13 @@ feature 없는 기존 계약을 별도 target dependency로 유지한다.**
 
 ## Alternatives Considered
 
-- **`xdg-portal` + `tokio`를 선택한다.** Wayland sandbox와 desktop portal을 따르는
-  장점이 있지만 `rfd 0.15.4`의 `MessageDialog`가 이 backend에서 제공되지 않는다.
-  portal runtime 의존성과 crash 알림 대체 구현까지 추가하므로 기각했다.
+- **`xdg-portal` + `tokio`를 선택한다.** 파일 대화상자는 Wayland sandbox와 desktop
+  portal을 따를 수 있지만, `rfd 0.15.4`의 `MessageDialog`는 portal API를 사용하지 않고
+  외부 `zenity` 실행에 의존한다. portal runtime과 별도 프로세스 의존성을 crash 알림의
+  필수 경로에 추가하므로 기각했다.
 - **`rfd` 기본 feature를 다시 켠다.** 기본값은 `xdg-portal`과 `async-std`를 함께
-  활성화해 이미 사용하는 Tokio와 별개 executor를 추가하고 `MessageDialog`도 잃는다.
-  dependency 계약을 암묵화하므로 기각했다.
+  활성화해 이미 사용하는 Tokio와 별개 executor를 추가하고 `MessageDialog`는 여전히
+  외부 `zenity`에 의존한다. dependency 계약을 암묵화하므로 기각했다.
 - **Linux crash dialog를 제거하고 stderr만 사용한다.** build는 단순해지지만 GUI로
   실행된 앱의 치명 오류 알림을 Windows와 다르게 약화한다. 이 이슈의 완료 조건과
   기존 기능 보존에 맞지 않아 기각했다.
