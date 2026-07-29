@@ -1,6 +1,6 @@
 # 0093. 조합 commit 관측은 xterm CompositionHelper의 세대별 큐가 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-29
 - Source: issue [#660](https://github.com/kochul2000/laymux/issues/660), [ADR-0062](0062-composition-commit-keypress-race.md), [architecture/data-flow.md §8.14](../architecture/data-flow.md), 선행 구현 [stablyai/orca#9235](https://github.com/stablyai/orca/pull/9235)
 - Supersedes: [ADR-0062](0062-composition-commit-keypress-race.md)
@@ -45,5 +45,5 @@ ADR-0062는 TerminalView custom key handler가 xterm private 필드를 읽어 �
 - `compositionend → input → keypress`, input-only, 연속 조합 세대, 즉시 keydown 교차에서 각 generation의 문자가 한 번씩 원래 순서로 PTY에 전달된다. pending이 없는 일반 input/keypress에는 추가 지연이 없다.
 - xterm 6.0.0 minified ESM/CJS 형태에 의존하는 local patch가 남는다. 대상이 달라지면 postinstall이 즉시 실패하며, xterm 상향 시에는 input ordering과 generation isolation까지 upstream이 동등하게 보장하는지 확인한 뒤 local patch를 제거한다. 선행 PR의 keypress 병합만 존재하는 버전은 동등하지 않다.
 - 서로 다른 의도적 반복 입력과 동일한 duplicate 관측은 provenance가 없으면 근본적으로 모호하다. 현재 결정은 한 generation 안의 textarea candidate와 브라우저 관측값의 shortest ordered merge를 택한다. 이를 깨는 실기 증거가 나오면 CompositionHelper에 더 강한 event provenance가 필요하다.
-- 자동 테스트는 실제 xterm 코드 경로와 `onData`까지 검증하지만 Windows WebView2/한국어 IME 및 다중 pane flood의 실기 재현률·key-to-PTY exact byte는 dev 19281에서 별도 확인해야 한다. release 19280은 이 검증 대상이 아니다.
-- Direct `writeToTerminal(...).catch(...)`가 실패를 호출자에게 전달하지 않는 문제는 이 결정과 별개다. dev byte trace에서 실제 write 실패나 swallow가 관측되면 이 PR에 끼워 넣지 않고 **별도 후속 이슈를 반드시 등록**해 재현·소유권·실패 계약을 추적한다. 이 PR은 그 경로를 해결했다고 주장하지 않는다.
+- 자동 테스트는 실제 xterm 코드 경로와 `onData`까지 검증하지만 Windows WebView2/한국어 IME 및 다중 pane flood의 실기 재현률·key-to-PTY exact byte는 dev 19281에서 별도 확인해야 한다. 반복 가능한 Windows IME 실기 자동화는 [#666](https://github.com/kochul2000/laymux/issues/666)이 추적하며, release 19280은 이 검증 대상이 아니다.
+- Direct `writeToTerminal(...).catch(...)`가 실패를 호출자에게 전달하지 않는 문제는 이 결정과 별개이며 [#667](https://github.com/kochul2000/laymux/issues/667)이 재현·소유권·실패 계약을 추적한다. 이 PR은 그 경로를 해결했다고 주장하지 않는다.

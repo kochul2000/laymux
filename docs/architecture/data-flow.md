@@ -552,7 +552,7 @@ xterm 의 `CompositionHelper._finalizeComposition(true)` 는 확정 텍스트를
 - **외부 guard는 없다**: TerminalView는 `compositionend` 시작 위치를 캡처하거나 input/keypress를 `preventDefault`/억제하지 않는다. `xterm-pending-composition.ts`의 private 접근은 issue #555 blur fallback이 deferred send 중복을 피하는 `_isSendingComposition` 하나로 축소됐다.
 - **설치가 계약 관문이다**: `ui/scripts/patch-xterm-reflow.mjs`는 pristine bundle을 선행 keypress patch 형태로 만든 뒤 generation correction을 적용한다. 이미 선행 patch 또는 최종 patch인 설치도 각각 upgrade/idempotent 성공한다. 두 번들의 helper state·input/keypress owner·delayed/immediate flush가 모두 맞지 않으면 postinstall이 실패하고 조용한 부분 적용은 없다.
 - **결정적 테스트는 실제 xterm 대상이다**: 기존 6개 조합 이벤트열과 `compositionend → input → keypress`, input-only, timer 전 연속 두 generation, input/keyPress 뒤 일반 keydown 교차를 `Terminal.onData`까지 검증한다. pending이 없는 ordinary input·keypress 2개도 즉시 전송을 고정한다. 순수 mock 판정으로 이 상태 전이를 대체하지 않는다.
-- **미검증과 후속 경계**: Windows WebView2/한국어 IME 실기와 다중 pane flood 조건의 재현률·key-to-PTY exact byte는 dev 19281에서 확인해야 하며 release 19280은 건드리지 않는다. Direct `writeToTerminal` 실패 swallow는 이 범위가 아니다. dev byte trace에서 실제 실패가 확인되면 이 PR이 해결했다고 간주하지 않고 별도 후속 이슈를 반드시 등록한다.
+- **미검증과 후속 경계**: Windows WebView2/한국어 IME 실기와 다중 pane flood 조건의 재현률·key-to-PTY exact byte는 dev 19281에서 확인해야 하며 release 19280은 건드리지 않는다. 반복 가능한 Windows IME 실기 자동화는 [#666](https://github.com/kochul2000/laymux/issues/666)이 추적한다. Direct `writeToTerminal` 실패 swallow는 이 범위가 아니며 [#667](https://github.com/kochul2000/laymux/issues/667)이 별도 추적한다.
 
 ### 8.15 조합 프리뷰 가시성은 activity 와 무관하다 (issue #551)
 
