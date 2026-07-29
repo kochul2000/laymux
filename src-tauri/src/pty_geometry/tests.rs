@@ -117,11 +117,15 @@ fn remote_request(source_seq: u64) -> GeometryPrepareRequest {
 }
 
 #[test]
-fn production_capability_is_fail_closed_and_points_to_the_adapter_followup() {
+fn native_queue_and_delayed_writer_counterexamples_keep_production_exact_fail_closed() {
+    // The actual Windows PeekNamedPipe/Linux poll counterexamples live in the
+    // pinned portable-pty native integration test. Queued pre-resize bytes and
+    // a delayed writer after an empty observation both reach Data; neither
+    // permits this product capability to claim an exact provenance boundary.
     let capabilities = production_geometry_capabilities();
     assert!(!capabilities.exact_geometry_cutover);
-    assert!(!capabilities.interruptible_read);
-    assert_eq!(capabilities.follow_up_issue, 636);
+    assert!(capabilities.interruptible_read);
+    assert_eq!(capabilities.follow_up_issue, 643);
     assert!(reject_unavailable_exact_geometry().is_err());
 }
 

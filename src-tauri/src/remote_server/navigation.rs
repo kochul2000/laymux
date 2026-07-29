@@ -798,8 +798,8 @@ mod tests {
             payload["geometryCapabilities"]["exactGeometryCutover"],
             false
         );
-        assert_eq!(payload["geometryCapabilities"]["interruptibleRead"], false);
-        assert_eq!(payload["geometryCapabilities"]["followUpIssue"], 636);
+        assert_eq!(payload["geometryCapabilities"]["interruptibleRead"], true);
+        assert_eq!(payload["geometryCapabilities"]["followUpIssue"], 643);
     }
 
     #[test]
