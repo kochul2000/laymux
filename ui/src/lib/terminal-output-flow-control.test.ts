@@ -76,6 +76,31 @@ describe("TerminalOutputFlowAcknowledger", () => {
     vi.useRealTimers();
   });
 
+  it("keeps the ordinary rejection retry alive when its diagnostics throw", async () => {
+    vi.useFakeTimers();
+    try {
+      const send = vi
+        .fn<(_: number) => Promise<boolean>>()
+        .mockRejectedValueOnce(new Error("bridge busy"))
+        .mockResolvedValue(true);
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        retryMs: 25,
+        onError: () => {
+          throw new Error("patched console");
+        },
+      });
+
+      acknowledger.complete(0, 4);
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(25);
+
+      expect(send).toHaveBeenNthCalledWith(2, 4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("drops stale completion and retry work after an attach epoch is disposed", async () => {
     vi.useFakeTimers();
     const send = vi.fn().mockRejectedValue(new Error("bridge busy"));
@@ -119,5 +144,48 @@ describe("TerminalOutputFlowAcknowledger", () => {
 
     expect(send).toHaveBeenCalledOnce();
     expect(onLeaseLost).toHaveBeenCalledOnce();
+  });
+
+  it("retires a permanently pending ACK exactly once and ignores its late completion", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = deferred<boolean>();
+      const send = vi.fn().mockReturnValue(pending.promise);
+      const onTimeout = vi.fn();
+      const onConfirmed = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        onTimeout,
+        onConfirmed,
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onTimeout).toHaveBeenCalledOnce();
+      acknowledger.complete(4, 8);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(send).toHaveBeenCalledTimes(1);
+
+      pending.resolve(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onConfirmed).not.toHaveBeenCalled();
+      expect(onTimeout).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a settled ACK so a caller can reset only the ACK-timeout backoff", async () => {
+    const onConfirmed = vi.fn();
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, vi.fn().mockResolvedValue(true), {
+      onConfirmed,
+    });
+
+    acknowledger.complete(0, 4);
+    await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith(4));
   });
 });

@@ -1,10 +1,14 @@
 export interface TerminalOutputFlowAcknowledgerOptions {
   retryMs?: number;
+  timeoutMs?: number;
   onError?: (error: unknown) => void;
   onLeaseLost?: () => void;
+  onTimeout?: () => void;
+  onConfirmed?: (seq: number) => void;
 }
 
 const DEFAULT_ACK_RETRY_MS = 50;
+const DEFAULT_ACK_TIMEOUT_MS = 5_000;
 
 /**
  * Coalesces parsed terminal-output ranges into one monotonic backend ACK.
@@ -19,10 +23,14 @@ export class TerminalOutputFlowAcknowledger {
   private confirmedSeq: number;
   private readonly completed = new Map<number, number>();
   private readonly retryMs: number;
+  private readonly timeoutMs: number;
   private readonly onError?: (error: unknown) => void;
   private readonly onLeaseLost?: () => void;
+  private readonly onTimeout?: () => void;
+  private readonly onConfirmed?: (seq: number) => void;
   private inFlight = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
   private disposed = false;
 
   constructor(
@@ -33,8 +41,11 @@ export class TerminalOutputFlowAcknowledger {
     this.contiguousSeq = initialSeq;
     this.confirmedSeq = initialSeq;
     this.retryMs = options.retryMs ?? DEFAULT_ACK_RETRY_MS;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
     this.onError = options.onError;
     this.onLeaseLost = options.onLeaseLost;
+    this.onTimeout = options.onTimeout;
+    this.onConfirmed = options.onConfirmed;
   }
 
   complete(seqStart: number, seqEnd: number): void {
@@ -72,6 +83,7 @@ export class TerminalOutputFlowAcknowledger {
       clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
     }
+    this.clearWatchdog();
   }
 
   private advanceContiguousPrefix(): void {
@@ -111,8 +123,26 @@ export class TerminalOutputFlowAcknowledger {
       // IPC promise so the credit prefix is retried, never lost.
       sending = Promise.reject(error);
     }
+    this.watchdogTimer = setTimeout(
+      () => {
+        this.watchdogTimer = undefined;
+        if (this.disposed) return;
+        // The bridge Promise itself cannot be cancelled. Retire this token owner
+        // first, then ask the current UI epoch to replace it. Its already-wired
+        // handlers below absorb a late resolve/reject without touching prefix
+        // state or scheduling the ordinary rejection retry.
+        this.dispose();
+        try {
+          this.onTimeout?.();
+        } catch {
+          // Recovery diagnostics/callbacks cannot revive a stale sender.
+        }
+      },
+      Math.max(0, this.timeoutMs),
+    );
     void sending
       .then((accepted) => {
+        this.clearWatchdog();
         if (this.disposed) return;
         if (!accepted) {
           // A replacement attach owns the backend lease. Never retry a stale
@@ -128,8 +158,14 @@ export class TerminalOutputFlowAcknowledger {
           return;
         }
         this.confirmedSeq = Math.max(this.confirmedSeq, sentSeq);
+        try {
+          this.onConfirmed?.(this.confirmedSeq);
+        } catch {
+          // Diagnostics/backoff bookkeeping cannot stop parsed credit.
+        }
       })
       .catch((error) => {
+        this.clearWatchdog();
         if (this.disposed) return;
         try {
           this.onError?.(error);
@@ -145,5 +181,11 @@ export class TerminalOutputFlowAcknowledger {
         this.inFlight = false;
         this.pump();
       });
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer === undefined) return;
+    clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = undefined;
   }
 }

@@ -219,6 +219,12 @@ import {
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
 import { TerminalOutputFlowAcknowledger } from "@/lib/terminal-output-flow-control";
+import {
+  boundedTerminalOutputControlBackoff,
+  recoverTerminalOutputControl,
+  settleTerminalOutputControl,
+  terminalOutputControlMayRetry,
+} from "@/lib/terminal-output-control-watchdog";
 import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
 
 type TerminalWriteCallbackFailureStage =
@@ -287,6 +293,9 @@ const TERMINAL_WRITE_RETRY_MS = 16;
  * pane that never prints again (issue #607).
  */
 const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
+
+/** Local attach/ACK bridge calls should settle far below this on a live WebView. */
+const TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS = 5000;
 
 /**
  * Low-frequency exact pull while a desktop parsed-credit lease is active.
@@ -3725,6 +3734,8 @@ export function TerminalView({
     let outputAttachEpoch = 0;
     let outputAttachInFlight = false;
     let outputRepairInFlight = false;
+    let outputAttachTimeoutStreak = 0;
+    let outputAckTimeoutStreak = 0;
     /** Generation of the attachment the coordinator is currently applying. */
     let outputGeneration: number | undefined;
     /** Parsed-credit sender owned by exactly one backend attach lease. */
@@ -4187,14 +4198,11 @@ export function TerminalView({
       // rebuild reads as "not ready" without a reset effect.
       if (!cancelled) setOutputProtocolReadyGeneration(ready ? terminalGeneration : -1);
     };
-    const scheduleOutputReattach = (expectedEpoch = outputAttachEpoch) => {
-      if (
-        cancelled ||
-        expectedEpoch !== outputAttachEpoch ||
-        outputAttachRetryTimer !== undefined
-      ) {
-        return;
-      }
+    const invalidateOutputAttachEpoch = (
+      expectedEpoch: number,
+      replacementPending: boolean,
+    ): boolean => {
+      if (cancelled || expectedEpoch !== outputAttachEpoch) return false;
       // Invalidate every continuation belonging to the old snapshot before
       // accepting more listener deltas. Queued old-epoch bytes are already in
       // the replacement snapshot, so discard them rather than replaying them
@@ -4207,12 +4215,26 @@ export function TerminalView({
       outputFlowAcknowledger = undefined;
       outputAttachEpoch += 1;
       outputAttachInFlight = false;
-      outputAttachParserBusy = true;
+      outputAttachParserBusy = replacementPending;
       setOutputReady(false);
       resetOutputStabilizer();
       outputCoordinator.beginAttach();
       terminalWriteQueue.clear(true);
       clearTerminalWriteRetryTimer();
+      return true;
+    };
+    const stopOutputControlRecovery = (expectedEpoch: number) => {
+      if (!invalidateOutputAttachEpoch(expectedEpoch, false)) return;
+      // The backend producer stays bounded/fail-stopped on its last lease. A
+      // remount starts a fresh epoch, but this mount creates no seventh orphan.
+      flushDeferredTerminalFit();
+    };
+    const scheduleOutputReattach = (
+      expectedEpoch = outputAttachEpoch,
+      initialDelayMs = TERMINAL_WRITE_RETRY_MS,
+    ) => {
+      if (outputAttachRetryTimer !== undefined) return;
+      if (!invalidateOutputAttachEpoch(expectedEpoch, true)) return;
       const tryStartReplacementAttach = () => {
         if (cancelled) {
           outputAttachRetryTimer = undefined;
@@ -4225,7 +4247,7 @@ export function TerminalView({
         outputAttachRetryTimer = undefined;
         void startOutputAttach();
       };
-      outputAttachRetryTimer = setTimeout(tryStartReplacementAttach, TERMINAL_WRITE_RETRY_MS);
+      outputAttachRetryTimer = setTimeout(tryStartReplacementAttach, initialDelayMs);
     };
     const applyOutputSegments = (segments: TerminalOutputAppliedSegment[]) => {
       if (segments.length === 0) return;
@@ -4548,10 +4570,35 @@ export function TerminalView({
       // would bounce off it into `scheduleOutputRepairRetry`'s timer.
       let attachWindowGap: { expectedSeq: number; actualSeq: number } | undefined;
       try {
-        const [rawAttachment, cached] = await Promise.all([
+        const attachOutcome = await settleTerminalOutputControl(
           attachTerminalOutput(instanceId),
-          cacheRestorePromise,
-        ]);
+          TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+        );
+        if (!isCurrentAttach()) return;
+        if (attachOutcome.kind === "timeout") {
+          outputAttachTimeoutStreak += 1;
+          const retryDelayMs = boundedTerminalOutputControlBackoff(outputAttachTimeoutStreak);
+          const willRetry = terminalOutputControlMayRetry(outputAttachTimeoutStreak);
+          recoverTerminalOutputControl(
+            () =>
+              willRetry
+                ? scheduleOutputReattach(epoch, retryDelayMs)
+                : stopOutputControlRecovery(epoch),
+            () =>
+              console.warn(
+                willRetry
+                  ? "[TerminalView] terminal output attach timed out; replacing epoch"
+                  : "[TerminalView] terminal output attach timeout limit reached; fail-stopping",
+                { epoch, retryDelayMs, timeoutStreak: outputAttachTimeoutStreak },
+                recordTerminalOutputRecovery(instanceId, "attachTimeout"),
+              ),
+          );
+          return;
+        }
+        if (attachOutcome.kind === "rejected") throw attachOutcome.error;
+        outputAttachTimeoutStreak = 0;
+        const rawAttachment = attachOutcome.value;
+        const cached = await cacheRestorePromise;
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
         const { token, windowBytes } = rawAttachment.flowControl;
@@ -4575,8 +4622,37 @@ export function TerminalView({
             },
             onLeaseLost: () => {
               if (!isCurrentAttach()) return;
-              console.warn("[TerminalView] terminal output ACK lease was replaced; reattaching");
-              scheduleOutputReattach(epoch);
+              recoverTerminalOutputControl(
+                () => scheduleOutputReattach(epoch),
+                () =>
+                  console.warn(
+                    "[TerminalView] terminal output ACK lease was replaced; reattaching",
+                  ),
+              );
+            },
+            timeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+            onTimeout: () => {
+              if (!isCurrentAttach()) return;
+              outputAckTimeoutStreak += 1;
+              const retryDelayMs = boundedTerminalOutputControlBackoff(outputAckTimeoutStreak);
+              const willRetry = terminalOutputControlMayRetry(outputAckTimeoutStreak);
+              recoverTerminalOutputControl(
+                () =>
+                  willRetry
+                    ? scheduleOutputReattach(epoch, retryDelayMs)
+                    : stopOutputControlRecovery(epoch),
+                () =>
+                  console.warn(
+                    willRetry
+                      ? "[TerminalView] terminal output ACK timed out; replacing epoch"
+                      : "[TerminalView] terminal output ACK timeout limit reached; fail-stopping",
+                    { epoch, retryDelayMs, timeoutStreak: outputAckTimeoutStreak },
+                    recordTerminalOutputRecovery(instanceId, "ackTimeout"),
+                  ),
+              );
+            },
+            onConfirmed: () => {
+              if (isCurrentAttach()) outputAckTimeoutStreak = 0;
             },
           },
         );
@@ -4673,12 +4749,15 @@ export function TerminalView({
         await terminalOutputWriteChain;
       } catch (error) {
         if (!cancelled && epoch === outputAttachEpoch) {
-          console.warn(
-            "[TerminalView] terminal output attach failed:",
-            error,
-            recordTerminalOutputRecovery(instanceId, "attachFailure"),
+          recoverTerminalOutputControl(
+            () => scheduleOutputReattach(epoch),
+            () =>
+              console.warn(
+                "[TerminalView] terminal output attach failed:",
+                error,
+                recordTerminalOutputRecovery(instanceId, "attachFailure"),
+              ),
           );
-          scheduleOutputReattach(epoch);
         }
       } finally {
         if (epoch === outputAttachEpoch) {
