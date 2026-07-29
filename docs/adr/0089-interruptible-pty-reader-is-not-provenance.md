@@ -13,12 +13,16 @@ authoritative drain, 또는 physical resize와 atomic한 kernel byte epoch 중 �
 깨우는 기능은 control-plane liveness일 뿐 byte provenance가 아니라고 구분했다. issue #636은 이 조건을
 Windows ConPTY와 Linux PTY에서 실제로 제공할 수 있는 adapter와 interruptible reader seam을 조사한다.
 
-laymux가 고정한 [`portable-pty 0.8.1`](https://github.com/wezterm/wezterm/blob/4afedd626dadd15d9c2929bab0e2063b54f61393/pty/src/lib.rs#L88-L102)과 [2026-07-29 upstream](https://github.com/wezterm/wezterm/blob/76b606ec597a3c0263fa60321548637451c0a547/pty/src/lib.rs#L87-L114)을 감사한 결과 공통 `MasterPty` 계약은
-`resize`, `get_size`, `try_clone_reader() -> Box<dyn Read + Send>`만 제공한다. Unix 구현은 raw master fd를
-노출하지만 [Windows 구현](https://github.com/wezterm/wezterm/blob/4afedd626dadd15d9c2929bab0e2063b54f61393/pty/src/win/conpty.rs#L46-L97)은 synchronous anonymous pipe의 구체 handle과 HPCON을 private 상태에 보관한다.
-Windows `get_size()`는 `ResizePseudoConsole`이 성공한 뒤 process-local `size`를 바꿔 그대로 반환한다.
-따라서 laymux wrapper는 Linux에서 readiness source를 만들 수 있지만, Windows에서는 erased reader 밖에서
-정확한 read operation을 깨우거나 결과를 분류할 수조차 없다.
+laymux가 고정한 [`portable-pty 0.8.1`](https://github.com/wezterm/wezterm/blob/4afedd626dadd15d9c2929bab0e2063b54f61393/pty/src/lib.rs#L88-L122)과 [2026-07-29 upstream](https://github.com/wezterm/wezterm/blob/76b606ec597a3c0263fa60321548637451c0a547/pty/src/lib.rs#L87-L127)을 감사했다. 공통 `MasterPty` 계약에는
+`resize`, `get_size`, `try_clone_reader() -> Box<dyn Read + Send>`, `take_writer`가 있고 Unix에서만 process-group,
+raw master fd, termios 접근을 제공한다. 최신 upstream은 concrete master downcast도 제공한다. 그러나 어느 API에도
+reader readiness/control wake, 현재 read operation identity, control generation/epoch가 없다. `take_writer`는
+slave 입력 방향의 소유권일 뿐 output reader를 깨우지 않고, Unix raw fd는 Linux adapter 구현에는 충분하지만
+Windows 공통 계약이 아니다. downcast도 구체 구현에 이미 존재하는 기능을 꺼낼 뿐 private Windows pipe의 pending
+operation state나 generation handshake를 새로 만들지 않는다. [Windows 구현](https://github.com/wezterm/wezterm/blob/4afedd626dadd15d9c2929bab0e2063b54f61393/pty/src/win/conpty.rs#L46-L103)은 synchronous anonymous pipe의 구체 handle과 HPCON을 private 상태에 보관한다.
+Windows `get_size()`는 `ResizePseudoConsole`이 성공한 뒤 process-local `size`를 바꿔 그대로 반환한다. 따라서
+Linux는 raw fd로 readiness/wake adapter를 만들 수 있지만, Windows는 dependency 경계 안에 reader handle,
+operation identity와 generation state를 함께 추가하지 않고는 안전한 interrupt/ack 계약을 만들 수 없다.
 
 Windows의 공개 [CreatePseudoConsole](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)은
 input/output stream을 synchronous I/O로 제한하고,
@@ -47,9 +51,11 @@ process, 별도 process group, 이미 slave fd를 가진 외부 writer, signal�
 | Windows 10.0.26200.8875, MSVC Rust 1.94.1 | 120 | `LATE_OLD:80` | ConPTY resize 자체도 기존 `READY:80` 화면을 VT output으로 다시 방출했다. |
 | WSL2 Linux 6.6.87.2, GNU Rust 1.94.0 | 120 | `LATE_OLD:80` | 500 ms quiet와 kernel size query 뒤에도 지연 producer가 old 값으로 쓸 수 있었다. |
 
-이 실험은 child가 의도적으로 old geometry를 기억하는 sabotage다. 바로 그 때문에 `poll()` non-readable,
-`PeekNamedPipe()==0`, quiet timer, 성공한 resize, 크기 조회 중 어느 것도 다음 순간 old-geometry producer가 쓰지
-않는다는 증명이 아님을 보여 준다. exact adapter는 이 sabotage를 배제하거나 byte epoch로 구별해야 한다.
+이 실험이 직접 입증한 범위는 **500 ms quiet + 성공한 resize + `get_size()==120`** 뒤에도 old geometry를 기억한
+producer가 `LATE_OLD:80`을 쓸 수 있다는 것이다. `poll()` non-readable와 `PeekNamedPipe()==0`은 이번 실행에서
+측정하지 않았다. 두 신호도 관찰 순간의 read/pipe 상태일 뿐 future producer를 freeze-ack하지 않는다는 것은 API의
+논리적 한계이며, 구현 PR에서는 queued byte와 지연 writer를 포함한 별도 negative test로 고정한다. exact adapter는
+실측 sabotage와 그 future-writer 경합을 배제하거나 byte epoch로 구별해야 한다.
 
 현재 제품 범위에서 구현 가능한 것은 interruptible reader liveness다. Windows Console host나 Linux kernel을
 fork해 새 provenance primitive를 제품에 싣는 것은 별도 배포·보안·라이선스·OS 호환 결정을 요구한다. 따라서
@@ -72,8 +78,13 @@ provenance primitive와 실기기 sabotage test를 통과한 뒤 별도 결정�
   성공이나 `ERROR_NOT_FOUND`를 acknowledgement로 간주하지 않고 reader의 `Wake(generation)` 또는 terminal
   teardown completion을 기다린다.
 - data와 wake가 경합해 data가 먼저 완료되면 bytes를 버리지 않는다. `Data(bytes)`를 전달한 뒤 pending
-  generation을 `Wake(generation)`으로 acknowledgement한다. stale generation은 새 generation의 read를
-  취소하거나 stop을 완료시킬 수 없다.
+  generation을 아래 2단계 release로 acknowledgement한 뒤 `Wake(generation)`을 전달한다. EOF 또는 취소와
+  무관한 failure가 pending wake와 동시에 관찰되면 terminal event가 이기며 각각 `Eof` 또는 `Failure(error)`만
+  전달한다. 해당 wake waiter는 terminal 결과로 종결되고 별도 `Wake`를 받지 않는다. 같은 generation의
+  `ERROR_OPERATION_ABORTED`만 cancellation completion으로 분류하며 `Failure`로 중복 전달하지 않는다.
+- `Eof`와 `Failure`는 terminal event다. 둘 중 하나를 전달한 뒤 adapter는 추가 read를 시작하지 않고
+  `Data`나 `Wake`를 더 전달하지 않는다. stale generation은 새 generation의 read를 취소하거나 stop을
+  완료시킬 수 없다.
 - `Wake`는 read admission을 다시 평가하게 하는 control event다. byte sequence, geometry revision, source
   sequence를 만들거나 advance하지 않으며 ADR-0085의 freeze/drain 또는 epoch capability로 계산하지 않는다.
 - #630의 callback `Stop`, fatal generation teardown, EOF와 이 seam의 wake는 같은 것으로 합치지 않는다.
@@ -87,11 +98,20 @@ provenance primitive와 실기기 sabotage test를 통과한 뒤 별도 결정�
   wake fd를 독립적으로 분류하고, 둘 다 ready면 data를 잃지 않은 뒤 pending wake를 전달한다.
 - Windows는 ConPTY output pipe를 읽는 전용 thread와 그 thread handle, 현재 read operation state, pending wake
   generation, completion acknowledgement를 한 adapter가 소유한다. `CancelSynchronousIo`는 이 전용 thread에만
-  호출한다. reader가 read 진입 직전과 completion 직후 pending wake를 확인하고, controller는 acknowledgement가
-  올 때까지 `ERROR_NOT_FOUND`를 성공으로 보지 않고 같은 generation의 cancellation을 재시도한다. pending wake가
-  있으면 reader는 다음 read를 시작하지 않는다. 이 handshake로 호출 사이 race에서 영구 block되거나 다음 read가
-  잘못 취소되는 것을 막는다. completion의 정상 data,
-  `ERROR_OPERATION_ABORTED`, 0-byte EOF, 다른 오류를 각각 위 네 event로 변환한다.
+  호출한다. wake 상태는 `Pending(g) → ReaderParked/Acked(g) → CancellerQuiesced/Release(g) → next read`의
+  2단계 release를 따른다. reader는 read 진입 직전 또는 completion 직후 `Pending(g)`를 보면 다음 read에 진입하지
+  않고 `ReaderParked/Acked(g)`를 게시한다. controller는 cancellation 재시도를 중단하고 이미 시작한 모든
+  `CancelSynchronousIo` 호출이 반환해 canceller가 quiesced임을 확인한 뒤 `Release(g)`를 게시한다. reader는
+  `Release(g)` 전에는 다음 read를 시작하지 않으며, release 뒤에만 `Wake(g)`를 외부에 완료하고 read admission을
+  다시 평가한다. 이 순서가 늦은 cancel 호출이 다음 read를 잘못 취소하는 ABA를 막는다.
+- `CancelSynchronousIo`의 호출 성공이나 `ERROR_NOT_FOUND`는 `Acked(g)`가 아니다. ack deadline까지
+  `ReaderParked/Acked(g)`가 오지 않거나 cancellation이 다른 오류로 실패하면 controller는 wake를 성공 처리하지
+  않고 #630의 해당 generation stop/teardown을 요청한다. wake waiter는 reader가 우연히 돌아오는 데 의존하지 않고
+  generation teardown completion으로 반드시 종결된다. teardown이 시작된 generation에는 `Release(g)`로 새 read를
+  허용하지 않는다.
+- Windows read completion은 1-byte 이상 정상 data, 0-byte EOF, 같은 generation cancel의
+  `ERROR_OPERATION_ABORTED`, 다른 오류를 구분한다. data/wake 경합은 `Data → Acked/Release → Wake`, EOF/wake는
+  `Eof`만, failure/wake는 `Failure`만 전달한다. terminal event 뒤에는 추가 data/read가 없다.
 - 현재 `portable-pty` public trait와 erased Windows reader만으로는 이 ownership을 만들 수 없으므로, upstream에
   같은 최소 seam을 제안하되 수용 전에는 laymux가 감사한 git revision의 최소 fork를 pin한다. fork 범위는
   reader handle/operation state/wake/event API와 그 테스트뿐이다. process spawn, HPCON lifecycle, resize 동작,
@@ -115,11 +135,16 @@ provenance primitive와 실기기 sabotage test를 통과한 뒤 별도 결정�
 ### 검증 게이트
 
 - deterministic adapter test는 idle wake, wake-before-read, data/wake race, 연속 generation, EOF/wake race,
-  cancellation failure, stale wake, #630 fatal stop을 각각 재현하고 네 event가 섞이지 않음을 검증한다.
+  cancellation failure, ack deadline, stale wake, #630 fatal stop을 각각 재현한다. Windows test는
+  `Pending → ReaderParked/Acked → CancellerQuiesced/Release → next read` 순서, `Data → Wake`, terminal
+  `Eof|Failure`가 Wake보다 우선하고 별도 Wake를 내지 않는 규칙, terminal event 뒤 추가 data 금지,
+  cancel 오류/deadline waiter가 #630 generation
+  teardown completion으로 끝나는 것을 고정한다.
 - 실제 Windows ConPTY와 Linux PTY integration test는 idle 상태의 bounded wake와 data/EOF/failure 보존을
   검증한다. fake adapter만으로 `interruptibleRead=true`를 광고하지 않는다.
-- 위 provenance sabotage는 별도 negative capability test로 유지한다. queued old bytes, delayed/concurrent writer,
-  pipe-empty/quiet 직후 writer가 있는 환경에서 exact capability가 계속 false여야 한다.
+- 실측한 quiet+resize+get-size provenance sabotage는 별도 negative capability test로 유지한다. queued old bytes,
+  delayed/concurrent writer와 `poll`/`PeekNamedPipe` empty 직후 writer는 구현 PR에서 추가할 논리적 대조군이며,
+  모든 대조군에서 exact capability가 계속 false여야 한다.
 - issue #643만 Windows side-loaded OpenConsole producer barrier/epoch와 Linux kernel byte epoch의 feasibility,
   maintenance owner, ABI/version detection, signing/distribution, MIT notice와 Linux GPL-2.0 결과를 다룬다.
   양 플랫폼 capability=true 실기기 test가 없으면 이 ADR을 근거로 exact를 활성화할 수 없다.
