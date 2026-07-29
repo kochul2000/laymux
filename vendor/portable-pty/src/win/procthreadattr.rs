@@ -22,11 +22,9 @@ impl ProcThreadAttributeList {
                 &mut bytes_required,
             )
         };
-        let mut data = Vec::with_capacity(bytes_required);
-        // We have the right capacity, so force the vec to consider itself
-        // that length.  The contents of those bytes will be maintained
-        // by the win32 apis used in this impl.
-        unsafe { data.set_len(bytes_required) };
+        // Initialize the full buffer before handing it to Win32. The API writes
+        // the attribute list into the size it reported above.
+        let mut data = vec![0u8; bytes_required];
 
         let attr_ptr = data.as_mut_slice().as_mut_ptr() as *mut _;
         let res = unsafe {

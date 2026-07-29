@@ -132,56 +132,52 @@ fn get_base_env() -> BTreeMap<OsString, EnvEntry> {
         if let Ok(sys_env) = RegKey::predef(HKEY_LOCAL_MACHINE)
             .open_subkey("System\\CurrentControlSet\\Control\\Session Manager\\Environment")
         {
-            for res in sys_env.enum_values() {
-                if let Ok((name, value)) = res {
-                    if name.to_ascii_lowercase() == "username" {
-                        continue;
-                    }
-                    if let Ok(value) = reg_value_to_string(&value) {
-                        log::trace!("adding SYS env: {:?} {:?}", name, value);
-                        env.insert(
-                            EnvEntry::map_key(name.clone().into()),
-                            EnvEntry {
-                                is_from_base_env: true,
-                                preferred_key: name.into(),
-                                value,
-                            },
-                        );
-                    }
+            for (name, value) in sys_env.enum_values().flatten() {
+                if name.eq_ignore_ascii_case("username") {
+                    continue;
+                }
+                if let Ok(value) = reg_value_to_string(&value) {
+                    log::trace!("adding SYS env: {:?} {:?}", name, value);
+                    env.insert(
+                        EnvEntry::map_key(name.clone().into()),
+                        EnvEntry {
+                            is_from_base_env: true,
+                            preferred_key: name.into(),
+                            value,
+                        },
+                    );
                 }
             }
         }
 
         if let Ok(sys_env) = RegKey::predef(HKEY_CURRENT_USER).open_subkey("Environment") {
-            for res in sys_env.enum_values() {
-                if let Ok((name, value)) = res {
-                    if let Ok(value) = reg_value_to_string(&value) {
-                        // Merge the system and user paths together
-                        let value = if name.to_ascii_lowercase() == "path" {
-                            match env.get(&EnvEntry::map_key(name.clone().into())) {
-                                Some(entry) => {
-                                    let mut result = OsString::new();
-                                    result.push(&entry.value);
-                                    result.push(";");
-                                    result.push(&value);
-                                    result
-                                }
-                                None => value,
+            for (name, value) in sys_env.enum_values().flatten() {
+                if let Ok(value) = reg_value_to_string(&value) {
+                    // Merge the system and user paths together
+                    let value = if name.eq_ignore_ascii_case("path") {
+                        match env.get(&EnvEntry::map_key(name.clone().into())) {
+                            Some(entry) => {
+                                let mut result = OsString::new();
+                                result.push(&entry.value);
+                                result.push(";");
+                                result.push(&value);
+                                result
                             }
-                        } else {
-                            value
-                        };
+                            None => value,
+                        }
+                    } else {
+                        value
+                    };
 
-                        log::trace!("adding USER env: {:?} {:?}", name, value);
-                        env.insert(
-                            EnvEntry::map_key(name.clone().into()),
-                            EnvEntry {
-                                is_from_base_env: true,
-                                preferred_key: name.into(),
-                                value,
-                            },
-                        );
-                    }
+                    log::trace!("adding USER env: {:?} {:?}", name, value);
+                    env.insert(
+                        EnvEntry::map_key(name.clone().into()),
+                        EnvEntry {
+                            is_from_base_env: true,
+                            preferred_key: name.into(),
+                            value,
+                        },
+                    );
                 }
             }
         }
@@ -302,7 +298,7 @@ impl CommandBuilder {
             EnvEntry {
                 is_from_base_env: false,
                 preferred_key: key,
-                value: value,
+                value,
             },
         );
     }
@@ -534,7 +530,7 @@ impl CommandBuilder {
             let extensions = self.get_env("PATHEXT").unwrap_or(OsStr::new(".EXE"));
             for path in std::env::split_paths(&path) {
                 // Check for exactly the user's string in this path dir
-                let candidate = path.join(&exe);
+                let candidate = path.join(exe);
                 if candidate.exists() {
                     return candidate.into_os_string();
                 }
@@ -546,7 +542,7 @@ impl CommandBuilder {
                     // PATHEXT includes the leading `.`, but `with_extension`
                     // doesn't want that
                     let ext = ext.to_str().expect("PATHEXT entries must be utf8");
-                    let path = path.join(&exe).with_extension(&ext[1..]);
+                    let path = path.join(exe).with_extension(&ext[1..]);
                     if path.exists() {
                         return path.into_os_string();
                     }

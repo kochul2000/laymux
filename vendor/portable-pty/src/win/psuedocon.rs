@@ -22,6 +22,8 @@ use winapi::um::winbase::{
 use winapi::um::wincon::COORD;
 use winapi::um::winnt::HANDLE;
 
+// Keep the Win32 SDK spelling used by the dynamically loaded FFI contract.
+#[allow(clippy::upper_case_acronyms)]
 pub type HPCON = HANDLE;
 
 pub const PSEUDOCONSOLE_RESIZE_QUIRK: DWORD = 0x2;
