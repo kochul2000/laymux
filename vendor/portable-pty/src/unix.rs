@@ -22,7 +22,7 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     let mut master: RawFd = -1;
     let mut slave: RawFd = -1;
 
-    let mut size = winsize {
+    let size = winsize {
         ws_row: size.rows,
         ws_col: size.cols,
         ws_xpixel: size.pixel_width,
@@ -31,13 +31,13 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
 
     let result = unsafe {
         // BSDish systems may require mut pointers to some args
-        #[cfg_attr(feature = "cargo-clippy", allow(clippy::unnecessary_mut_passed))]
+        #[cfg_attr(clippy, allow(clippy::unnecessary_mut_passed))]
         libc::openpty(
             &mut master,
             &mut slave,
             ptr::null_mut(),
             ptr::null_mut(),
-            &mut size,
+            &size,
         )
     };
 
@@ -228,7 +228,7 @@ impl PtyFd {
                     // type::from(), but the size and potentially signedness
                     // are system dependent, which is why we're using `as _`.
                     // Suppress this lint for this section of code.
-                    #[cfg_attr(feature = "cargo-clippy", allow(clippy::cast_lossless))]
+                    #[cfg_attr(clippy, allow(clippy::cast_lossless))]
                     if controlling_tty {
                         // Set the pty as the controlling terminal.
                         // Failure to do this means that delivery of
@@ -325,10 +325,10 @@ impl MasterPty for UnixMasterPty {
     ) -> Result<Option<crate::InterruptiblePtyReaderPair>, Error> {
         #[cfg(target_os = "linux")]
         {
-            return Ok(Some(interruptible::new_pair(
+            Ok(Some(interruptible::new_pair(
                 self.fd.try_clone()?,
                 terminal_generation,
-            )?));
+            )?))
         }
         #[cfg(not(target_os = "linux"))]
         {
