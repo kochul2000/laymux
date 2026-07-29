@@ -82,6 +82,28 @@ export class TerminalWriteFairScheduler {
     if (this.activeTurn?.owner === owner) this.release(this.activeTurn);
   }
 
+  /** Test/diagnostic visibility without exposing mutable scheduler state. */
+  isIdleForTests(): boolean {
+    return (
+      this.pendingTurns.size === 0 &&
+      this.pendingOwners.length === 0 &&
+      this.activeTurn === undefined &&
+      !this.macrotaskScheduled
+    );
+  }
+
+  /** Test-only isolation for the app-global scheduler fixture. */
+  resetForTests(): void {
+    if (this.activeTurn !== undefined) this.activeTurn.released = true;
+    this.activeTurn = undefined;
+    this.pendingTurns.clear();
+    this.pendingOwners.length = 0;
+    this.macrotaskScheduled = false;
+    // Host timers have no shared cancellation API. Invalidate every callback
+    // that was scheduled before this reset so it cannot enter the next test.
+    this.macrotaskGeneration += 1;
+  }
+
   private scheduleNext(): void {
     if (this.activeTurn !== undefined || this.macrotaskScheduled || this.pendingTurns.size === 0) {
       return;

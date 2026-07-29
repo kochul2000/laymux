@@ -223,6 +223,26 @@ describe("TerminalWriteFairScheduler", () => {
     expect(paneC).toHaveBeenCalledTimes(1);
   });
 
+  it("resets an active lease and invalidates its pending host task for test isolation", () => {
+    const { scheduler, scheduled, runNextTask } = createHarness();
+    const stalePending = vi.fn((release: () => void) => release());
+    const paneA = owner("pane-a");
+    const paneB = owner("pane-b");
+
+    scheduler.request(paneA, () => {});
+    scheduler.request(paneB, stalePending);
+    expect(scheduler.isIdleForTests()).toBe(false);
+
+    scheduler.cancel(paneA);
+    expect(scheduled).toHaveLength(1);
+    scheduler.resetForTests();
+    expect(scheduler.isIdleForTests()).toBe(true);
+
+    runNextTask();
+    expect(stalePending).not.toHaveBeenCalled();
+    expect(scheduler.isIdleForTests()).toBe(true);
+  });
+
   it("releases the turn before propagating a synchronous pump failure", () => {
     const { scheduler, scheduled } = createHarness();
     const expected = new Error("pump sabotage");
