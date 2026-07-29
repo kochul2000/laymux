@@ -109,6 +109,7 @@ ADR 이 필요한 대표 기준:
 | [0089](0089-interruptible-pty-reader-is-not-provenance.md) | Interruptible PTY reader는 liveness만 소유하고 exact provenance는 외부 primitive까지 fail-closed | Accepted |
 | [0090](0090-linux-native-dialog-gtk3-backend.md) | Linux 네이티브 대화상자는 기존 Tauri GTK3 런타임을 재사용 | Accepted |
 | [0091](0091-remote-client-standalone-web-app-manifest.md) | Remote 클라이언트는 gate 안쪽 web app manifest로 standalone 설치를 지원한다 | Accepted |
+| [0092](0092-app-wide-terminal-write-round-robin.md) | 데스크톱 xterm physical write는 앱 전역 round-robin으로 진입 | Accepted |
 
 ## 새 ADR 추가
 

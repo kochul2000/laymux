@@ -1,4 +1,4 @@
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { TerminalView } from "./TerminalView";
 import {
@@ -20,6 +20,7 @@ import { terminalOutputRecoveryCounters } from "@/lib/terminal-output-recovery-m
 import * as terminalOutputRecoveryMetrics from "@/lib/terminal-output-recovery-metrics";
 import { terminalOutputPipelineCounters } from "@/lib/terminal-output-pipeline-metrics";
 import { terminalOutputControlOperationRegistry } from "@/lib/terminal-output-control-registry";
+import { terminalWriteFairScheduler } from "@/lib/terminal-write-fair-scheduler";
 import { LAYMUX_UNICODE_VERSION } from "@/lib/terminal-unicode-width";
 import {
   registerAtlasRebuilder,
@@ -98,9 +99,10 @@ let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
-const mockWrite = vi.fn((_: string | Uint8Array, callback?: () => void) => {
+function completeMockWrite(_: string | Uint8Array, callback?: () => void): void {
   callback?.();
-});
+}
+const mockWrite = vi.fn(completeMockWrite);
 const mockRefresh = vi.fn();
 const mockClearTextureAtlas = vi.fn();
 
@@ -595,8 +597,17 @@ beforeEach(() => {
 
 // A bailed gate is a fixture bug, not a passing test: the handler ran on ordering
 // luck. Reported here so the bailing test names itself.
-afterEach(() => {
+afterEach(async () => {
+  cleanup();
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const fairSchedulerWasIdle = terminalWriteFairScheduler.isIdleForTests();
+  // Reset after capturing the invariant so a fixture leak is attributed to the
+  // test that created it rather than cascading through every later test.
+  terminalWriteFairScheduler.resetForTests();
   expect(streamAttachResetBails).toEqual([]);
+  expect(fairSchedulerWasIdle).toBe(true);
 });
 
 describe("TerminalView", () => {
@@ -639,6 +650,11 @@ describe("TerminalView", () => {
     });
     _resetWebglStagger();
     vi.clearAllMocks();
+    // clearAllMocks preserves implementations and queued one-shot behavior.
+    // Restore the shared xterm write fixture explicitly so a callback-holding
+    // test cannot strand the next test's app-global fair-scheduler lease.
+    mockWrite.mockReset();
+    mockWrite.mockImplementation(completeMockWrite);
     mockProposeDimensions.mockReturnValue({ cols: 80, rows: 24 });
   });
 
@@ -10909,6 +10925,374 @@ describe("TerminalView desktop input composer", () => {
       repair: 0,
       malformedDelta: 0,
     });
+  });
+
+  it("coalesces four 64 KiB enqueue quanta for a sole owner (#661)", async () => {
+    const terminalId = "t-output-fair-sole-owner";
+    const emitOutput = await attachedOutputEmitter(terminalId);
+    const flood = "x".repeat(256 * 1024);
+    mockWrite.mockClear();
+
+    act(() => emitOutput(outputDelta(0, flood)));
+
+    await vi.waitFor(() => expect(mockWrite).toHaveBeenCalledTimes(1));
+    const physical = mockWrite.mock.calls[0]?.[0] as Uint8Array;
+    expect(physical).toBeInstanceOf(Uint8Array);
+    expect(physical.byteLength).toBe(256 * 1024);
+    expect(terminalOutputPipelineCounters(terminalId).writeBatchMaxParts).toBe(4);
+  });
+
+  it("slices non-stabilized replay into independent 64 KiB physical writes (#661)", async () => {
+    const terminalId = "t-output-fair-replay-quantum";
+    const defaultAttachment = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    const replay = new Uint8Array(2 * 64 * 1024 + 17);
+    for (let index = 0; index < replay.length; index += 1) replay[index] = index % 251;
+    mockAttachTerminalOutput.mockResolvedValueOnce({
+      ...defaultAttachment,
+      state: {
+        ...defaultAttachment.state,
+        snapshotSeq: replay.length,
+        sourceSeq: replay.length,
+      },
+      snapshot: Array.from(replay),
+    });
+    const writes: Array<{ data: Uint8Array; sourceType: "bytes" | "string" }> = [];
+    const completions: Array<() => void> = [];
+    const pendingCompletions = new Set<() => void>();
+    let completed = 0;
+    mockWrite.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+      writes.push({
+        data: typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
+        sourceType: typeof data === "string" ? "string" : "bytes",
+      });
+      let settled = false;
+      const complete = () => {
+        if (settled) return;
+        settled = true;
+        pendingCompletions.delete(complete);
+        completed += 1;
+        callback?.();
+      };
+      pendingCompletions.add(complete);
+      completions.push(complete);
+    });
+
+    let view: ReturnType<typeof render> | undefined;
+    try {
+      view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => expect(writes).toHaveLength(1));
+      expect(writes[0]).toMatchObject({ sourceType: "bytes" });
+      expect(writes[0].data).toHaveLength(64 * 1024);
+      act(() => completions[0]?.());
+      await vi.waitFor(() => expect(writes).toHaveLength(2));
+      expect(writes[1].data).toHaveLength(64 * 1024);
+      act(() => completions[1]?.());
+      await vi.waitFor(() => expect(writes).toHaveLength(3));
+      expect(writes[2].data).toHaveLength(17);
+      act(() => completions[2]?.());
+      // The attach pipeline applies the authoritative bracketed-paste mode as a
+      // string only after every replay callback. It remains one atomic write.
+      await vi.waitFor(() => expect(writes).toHaveLength(4));
+      expect(writes[3]).toMatchObject({ sourceType: "string" });
+      act(() => completions[3]?.());
+      await waitForTerminalInputReady();
+
+      const replayWrites = writes.filter(({ sourceType }) => sourceType === "bytes");
+      const concatenated = new Uint8Array(
+        replayWrites.reduce((total, part) => total + part.data.length, 0),
+      );
+      let offset = 0;
+      for (const part of replayWrites) {
+        concatenated.set(part.data, offset);
+        offset += part.data.length;
+      }
+      expect(concatenated).toEqual(replay);
+      expect(replayWrites).toHaveLength(3);
+      expect(completed).toBe(4);
+      expect(terminalOutputPipelineCounters(terminalId).writeBatchMaxParts).toBe(1);
+    } finally {
+      await act(async () => {
+        // A failed intermediate assertion must not leave an accepted xterm
+        // callback holding the app-global fair-scheduler lease.
+        while (pendingCompletions.size > 0) {
+          pendingCompletions.values().next().value?.();
+          await Promise.resolve();
+        }
+        view?.unmount();
+        await Promise.resolve();
+      });
+      mockWrite.mockReset();
+      mockWrite.mockImplementation(completeMockWrite);
+    }
+    expect(terminalWriteFairScheduler.isIdleForTests()).toBe(true);
+  });
+
+  it("rotates physical writes across flooded panes before returning to the same pane (#661)", async () => {
+    const paneA = "t-output-fair-a";
+    const paneB = "t-output-fair-b";
+    const createdTerminalBaseline = createdTerminals.length;
+    const view = render(
+      <>
+        <TerminalView instanceId={paneA} profile="PowerShell" syncGroup="" />
+        <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
+      </>,
+    );
+    const writes: string[] = [];
+    let finishPaneAFirst: (() => void) | undefined;
+    try {
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
+        expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneB, expect.any(Function));
+        expect(createdTerminals.slice(createdTerminalBaseline)).toHaveLength(2);
+      });
+      await waitForStreamAttachReset();
+
+      const emitter = (terminalId: string) =>
+        mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+          data: Uint8Array | Record<string, unknown>,
+        ) => void;
+      type WritableTerminal = MockTerminalInstance & {
+        write: (data: string | Uint8Array, callback?: () => void) => void;
+      };
+      const [terminalA, terminalB] = createdTerminals.slice(createdTerminalBaseline) as [
+        WritableTerminal,
+        WritableTerminal,
+      ];
+      terminalA.write = (data, callback) => {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        writes.push(`a:${text}`);
+        if (text === "one") {
+          let settled = false;
+          finishPaneAFirst = () => {
+            if (settled) return;
+            settled = true;
+            finishPaneAFirst = undefined;
+            callback?.();
+          };
+        } else callback?.();
+      };
+      terminalB.write = (data, callback) => {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        writes.push(`b:${text}`);
+        callback?.();
+      };
+
+      act(() => emitter(paneA)(outputDelta(0, "one")));
+      expect(writes).toEqual(["a:one"]);
+
+      act(() => {
+        emitter(paneA)(outputDelta(3, "two"));
+        emitter(paneB)(outputDelta(0, "other"));
+      });
+      await vi.waitFor(() => {
+        expect(terminalOutputPipelineCounters(paneA).writeQueueMaxDepth).toBeGreaterThanOrEqual(1);
+        expect(terminalOutputPipelineCounters(paneB).writeQueueMaxDepth).toBeGreaterThanOrEqual(1);
+      });
+      expect(writes).toEqual(["a:one"]);
+
+      act(() => finishPaneAFirst?.());
+      await vi.waitFor(() => expect(writes).toEqual(["a:one", "b:other", "a:two"]));
+    } finally {
+      await act(async () => {
+        finishPaneAFirst?.();
+        view.unmount();
+        await Promise.resolve();
+      });
+    }
+    expect(terminalWriteFairScheduler.isIdleForTests()).toBe(true);
+  });
+
+  it("limits a contended pane turn to one 64 KiB enqueue quantum (#661)", async () => {
+    const paneA = "t-output-fair-quantum-a";
+    const paneB = "t-output-fair-quantum-b";
+    const createdTerminalBaseline = createdTerminals.length;
+    const view = render(
+      <>
+        <TerminalView instanceId={paneA} profile="PowerShell" syncGroup="" />
+        <TerminalView instanceId={paneB} profile="PowerShell" syncGroup="" />
+      </>,
+    );
+    const pendingPhysicalWrites: Array<{
+      pane: "a" | "b";
+      complete: () => void;
+    }> = [];
+    try {
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneA, expect.any(Function));
+        expect(mockOnTerminalOutput).toHaveBeenCalledWith(paneB, expect.any(Function));
+        expect(createdTerminals.slice(createdTerminalBaseline)).toHaveLength(2);
+      });
+      await waitForStreamAttachReset();
+
+      const emitter = (terminalId: string) =>
+        mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+          data: Uint8Array | Record<string, unknown>,
+        ) => void;
+      type WritableTerminal = MockTerminalInstance & {
+        write: (data: string | Uint8Array, callback?: () => void) => void;
+      };
+      const [terminalA, terminalB] = createdTerminals.slice(createdTerminalBaseline) as [
+        WritableTerminal,
+        WritableTerminal,
+      ];
+      const aWrites: Uint8Array[] = [];
+      const bWrites: Uint8Array[] = [];
+      let aCallbacksCompleted = 0;
+      let bCallbacksCompleted = 0;
+      let duplicateCallbacks = 0;
+      terminalA.write = (data, callback) => {
+        aWrites.push(
+          typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
+        );
+        let settled = false;
+        const complete = () => {
+          if (settled) {
+            duplicateCallbacks += 1;
+            return;
+          }
+          settled = true;
+          aCallbacksCompleted += 1;
+          callback?.();
+        };
+        pendingPhysicalWrites.push({ pane: "a", complete });
+      };
+      terminalB.write = (data, callback) => {
+        bWrites.push(
+          typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data),
+        );
+        let settled = false;
+        const complete = () => {
+          if (settled) {
+            duplicateCallbacks += 1;
+            return;
+          }
+          settled = true;
+          bCallbacksCompleted += 1;
+          callback?.();
+        };
+        pendingPhysicalWrites.push({ pane: "b", complete });
+      };
+
+      const completeNextPhysicalWrite = async (expectedPane?: "a" | "b") => {
+        await vi.waitFor(() => expect(pendingPhysicalWrites.length).toBeGreaterThan(0));
+        const pending = pendingPhysicalWrites.shift();
+        expect(pending).toBeDefined();
+        await act(async () => {
+          pending?.complete();
+          await Promise.resolve();
+        });
+        if (expectedPane !== undefined) expect(pending?.pane).toBe(expectedPane);
+      };
+
+      const firstA = "hold-a";
+      const firstB = "hold-b";
+      const aFlood = "a".repeat(256 * 1024);
+      const bFlood = "b".repeat(256 * 1024);
+      const expectedA = new TextEncoder().encode(firstA + aFlood);
+      const expectedB = new TextEncoder().encode(firstB + bFlood);
+      const attachCallsAfterInitial = mockAttachTerminalOutput.mock.calls.length;
+      mockAcknowledgeTerminalOutput.mockClear();
+      act(() => emitter(paneA)(outputDelta(0, firstA)));
+      expect(aWrites.map(({ length }) => length)).toEqual([firstA.length]);
+
+      act(() => {
+        emitter(paneA)(outputDelta(firstA.length, aFlood));
+        emitter(paneB)(outputDelta(0, firstB));
+      });
+      await completeNextPhysicalWrite("a");
+      await vi.waitFor(() => expect(bWrites.map(({ length }) => length)).toEqual([firstB.length]));
+
+      act(() => emitter(paneB)(outputDelta(firstB.length, bFlood)));
+      await vi.waitFor(() =>
+        expect(terminalOutputPipelineCounters(paneB).writeQueueMaxBytes).toBeGreaterThanOrEqual(
+          256 * 1024,
+        ),
+      );
+      await completeNextPhysicalWrite("b");
+
+      const byteLength = (parts: readonly Uint8Array[]) =>
+        parts.reduce((total, part) => total + part.length, 0);
+      while (
+        byteLength(aWrites) < expectedA.length ||
+        byteLength(bWrites) < expectedB.length ||
+        aCallbacksCompleted < aWrites.length ||
+        bCallbacksCompleted < bWrites.length
+      ) {
+        await completeNextPhysicalWrite();
+      }
+      expect(byteLength(aWrites)).toBe(expectedA.length);
+      expect(byteLength(bWrites)).toBe(expectedB.length);
+      expect(aCallbacksCompleted).toBe(aWrites.length);
+      expect(bCallbacksCompleted).toBe(bWrites.length);
+      expect(aWrites[1]).toHaveLength(64 * 1024);
+      const concatenate = (parts: readonly Uint8Array[]) => {
+        const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+        let offset = 0;
+        for (const part of parts) {
+          result.set(part, offset);
+          offset += part.length;
+        }
+        return result;
+      };
+      const expectExactBytes = (label: string, actual: Uint8Array, expected: Uint8Array) => {
+        expect(actual.byteLength, `${label}: actual/expected byte length`).toBe(
+          expected.byteLength,
+        );
+        let firstMismatch = -1;
+        for (let index = 0; index < expected.byteLength; index += 1) {
+          if (actual[index] !== expected[index]) {
+            firstMismatch = index;
+            break;
+          }
+        }
+        const mismatchDetail =
+          firstMismatch < 0
+            ? "none"
+            : `${firstMismatch} (actual=${actual[firstMismatch]}, expected=${expected[firstMismatch]})`;
+        expect(
+          firstMismatch,
+          `${label}: actual length=${actual.byteLength}, expected length=${expected.byteLength}, first mismatch=${mismatchDetail}`,
+        ).toBe(-1);
+      };
+      expectExactBytes("pane A", concatenate(aWrites), expectedA);
+      expectExactBytes("pane B", concatenate(bWrites), expectedB);
+      expect(duplicateCallbacks).toBe(0);
+      await vi.waitFor(() => {
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+          paneA,
+          1,
+          "lease-1",
+          expectedA.length,
+        );
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+          paneB,
+          1,
+          "lease-1",
+          expectedB.length,
+        );
+      });
+      const finalAckCount = (terminalId: string, seq: number) =>
+        mockAcknowledgeTerminalOutput.mock.calls.filter(
+          ([id, _generation, _token, acknowledgedSeq]) =>
+            id === terminalId && acknowledgedSeq === seq,
+        ).length;
+      expect(finalAckCount(paneA, expectedA.length)).toBe(1);
+      expect(finalAckCount(paneB, expectedB.length)).toBe(1);
+      // A rejected/discarded physical entry schedules a replacement attach. Both
+      // queues reached final parsed credit without that recovery path.
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCallsAfterInitial);
+    } finally {
+      await act(async () => {
+        while (pendingPhysicalWrites.length > 0) {
+          pendingPhysicalWrites.shift()?.complete();
+          await Promise.resolve();
+        }
+        view.unmount();
+        await Promise.resolve();
+      });
+    }
+    expect(terminalWriteFairScheduler.isIdleForTests()).toBe(true);
   });
 
   it("discards queued old-epoch writes and drains the in-flight parse before reattach", async () => {

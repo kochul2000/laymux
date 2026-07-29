@@ -222,6 +222,7 @@ import {
 } from "@/lib/terminal-output-pipeline-metrics";
 import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
+  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
@@ -236,6 +237,10 @@ import {
   type TerminalOutputControlOperationKind,
 } from "@/lib/terminal-output-control-registry";
 import { attemptTerminalWrite } from "@/lib/terminal-write-admission";
+import {
+  createTerminalWriteFairOwner,
+  terminalWriteFairScheduler,
+} from "@/lib/terminal-write-fair-scheduler";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -1119,6 +1124,10 @@ export function TerminalView({
 
   useEffect(() => {
     let cancelled = false;
+    // `instanceId` survives profile-driven effect replacement. The scheduler
+    // owner must not: a late callback from the old xterm generation may only
+    // cancel/release turns registered by that exact effect lifetime.
+    const terminalWriteFairOwner = createTerminalWriteFairOwner(instanceId);
     let terminalSessionReady = false;
     let initialExecutionHost: InitialExecutionHost = "unknown";
     let stabilizeNativeWindowsOutput = false;
@@ -3148,6 +3157,7 @@ export function TerminalView({
     // this mounted terminal generation; session teardown drops the set.
     const terminalWriteCallbackWarnings = new Set<string>();
     let terminalWriteRetryTimer: ReturnType<typeof setTimeout> | undefined;
+    let releaseTerminalWriteTurn: (() => void) | undefined;
     let lastTerminalOutputAt = 0;
     let deferredTerminalFit: TerminalFitRequest | undefined;
     let deferredResizeRequestedAt = 0;
@@ -3382,6 +3392,12 @@ export function TerminalView({
         clearTimeout(terminalWriteRetryTimer);
         terminalWriteRetryTimer = undefined;
       }
+      terminalWriteFairScheduler.cancelPending(terminalWriteFairOwner);
+    };
+    const releaseCurrentTerminalWriteTurn = () => {
+      const release = releaseTerminalWriteTurn;
+      releaseTerminalWriteTurn = undefined;
+      release?.();
     };
     const scheduleTerminalWritePump = (delayMs = 0) => {
       if (
@@ -3392,10 +3408,29 @@ export function TerminalView({
       ) {
         return;
       }
-      terminalWriteRetryTimer = setTimeout(() => {
-        terminalWriteRetryTimer = undefined;
-        flushDeferredTerminalWrites();
-      }, delayMs);
+      if (delayMs > 0) {
+        terminalWriteRetryTimer = setTimeout(() => {
+          terminalWriteRetryTimer = undefined;
+          scheduleTerminalWritePump();
+        }, delayMs);
+        return;
+      }
+      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release, { contended }) => {
+        if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
+          release();
+          return;
+        }
+        releaseTerminalWriteTurn = release;
+        try {
+          flushDeferredTerminalWrites(
+            contended ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES : TERMINAL_WRITE_BATCH_MAX_BYTES,
+          );
+        } finally {
+          // Async accepted writes retain the lease through their parse callback.
+          // Synchronous callbacks and all rejection paths have no in-flight write.
+          if (pendingTerminalWrites === 0) releaseCurrentTerminalWriteTurn();
+        }
+      });
     };
     const clearCurrentParsingWrite = () => {
       currentParsingWriteSource = undefined;
@@ -3541,6 +3576,7 @@ export function TerminalView({
             }
           });
           reportCallbackFailures(failures);
+          releaseCurrentTerminalWriteTurn();
         }
       };
       return attemptTerminalWrite({
@@ -3586,11 +3622,12 @@ export function TerminalView({
         },
       });
     };
-    function flushDeferredTerminalWrites() {
+    function flushDeferredTerminalWrites(maxCoalescedBytes: number) {
       if (cancelled || pendingTerminalWrites > 0) return;
       const batch = terminalWriteQueue.dequeue(
         terminalWriteQueue.lastEnqueuedId,
         !compositionPreviewRef.current.active,
+        maxCoalescedBytes,
       );
       if (!batch) {
         if (terminalWriteQueue.depth === 0) {
@@ -3631,13 +3668,17 @@ export function TerminalView({
         // paint the transient footer cursor between chunk callbacks.
         chunks.push(data);
       } else {
-        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_BATCH_MAX_BYTES) {
-          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_BATCH_MAX_BYTES) as Uint8Array);
+        // Ordinary byte writes enter the logical FIFO in fairness-sized slices.
+        // A sole owner may coalesce four compatible slices back to 256 KiB;
+        // when another owner waits, one scheduler turn stays bounded at 64 KiB.
+        // Replay remains a per-entry barrier, so its 64 KiB slices are never
+        // coalesced with each other or with a different logical request.
+        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_FAIR_QUANTUM_BYTES) {
+          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES) as Uint8Array);
         }
       }
       if (chunks.length === 0) chunks.push(data);
       recordTerminalOutputPipeline(instanceId, "writeRequests");
-      const queueWasEmpty = terminalWriteQueue.depth === 0;
       const requestMetadata: TerminalWriteMetadata = {
         ...metadata,
         compositionActive: compositionPreviewRef.current.active,
@@ -3667,8 +3708,9 @@ export function TerminalView({
       recordTerminalOutputPipeline(instanceId, "writeQueueMaxDepth", terminalWriteQueue.depth);
       recordTerminalOutputPipeline(instanceId, "writeQueueMaxBytes", terminalWriteQueue.bytes);
       if (pendingTerminalWrites === 0) {
-        if (queueWasEmpty) flushDeferredTerminalWrites();
-        else scheduleTerminalWritePump();
+        // Even the first physical write joins the app-wide round-robin. Direct
+        // admission here would let a newly busy pane bypass already waiting ones.
+        scheduleTerminalWritePump();
       }
     };
     const trackedTerminalWriteAsync = (
@@ -5204,6 +5246,8 @@ export function TerminalView({
       clearCurrentParsingWrite();
       resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
+      terminalWriteFairScheduler.cancel(terminalWriteFairOwner);
+      releaseTerminalWriteTurn = undefined;
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;
       remoteResizeSyncTarget = undefined;
