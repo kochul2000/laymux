@@ -581,7 +581,7 @@ fn omitted_full_edge_event_is_pulled_from_the_ring_and_ack_releases_the_reader()
 }
 
 #[test]
-fn record_failure_stays_fail_closed_until_poison_tolerant_retirement() {
+fn record_failure_claims_one_fatal_teardown_before_poison_tolerant_retirement() {
     let session = flow_test_session();
     session.begin_desktop_output_bootstrap(4).unwrap();
     let attached = session.attach_desktop(64, 4).unwrap();
@@ -597,17 +597,9 @@ fn record_failure_stays_fail_closed_until_poison_tolerant_retirement() {
     .join()
     .is_err());
 
-    let worker_session = Arc::clone(&session);
-    let (failed_tx, failed_rx) = std_mpsc::channel();
-    let (done_tx, done_rx) = std_mpsc::channel();
-    let worker = thread::spawn(move || {
-        assert!(worker_session.record_output(b"lost").is_err());
-        failed_tx.send(()).unwrap();
-        worker_session.wait_for_terminal_output_retirement();
-        done_tx.send(()).unwrap();
-    });
-    failed_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert!(done_rx.recv_timeout(Duration::from_millis(30)).is_err());
+    assert!(session.record_output(b"lost").is_err());
+    assert!(session.request_fatal_teardown());
+    assert!(!session.request_fatal_teardown());
 
     // Neither parsed credit nor a replacement desktop token can manufacture a
     // sequence for the unrecorded bytes. The poisoned protocol also rejects an
@@ -616,16 +608,10 @@ fn record_failure_stays_fail_closed_until_poison_tolerant_retirement() {
         .acknowledge_desktop_output(session.generation(), &attached.flow_control.token, 0)
         .unwrap());
     assert!(session.attach_desktop(64, 4).is_err());
-    assert!(done_rx.recv_timeout(Duration::from_millis(30)).is_err());
-
-    // Retirement recovers poison only to discard the generation. It completes
-    // successfully, so the close command continues to PTY-handle termination;
-    // the callback returns without running legacy/OSC emission.
+    // Retirement recovers poison only to discard the generation. The production
+    // callback has already returned Stop; no poisoned Condvar wait remains.
     session.retire(false).unwrap();
-    done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    worker.join().unwrap();
     assert!(session.record_output(b"after-retire").is_err());
-    session.wait_for_terminal_output_retirement();
 }
 
 #[test]
@@ -641,12 +627,26 @@ fn poisoned_runtime_rejects_operations_but_close_discards_the_generation() {
 
     assert!(session.record_output(b"must-not-be-recorded").is_err());
     assert!(session.attach(64).is_err());
+    assert!(session.request_fatal_teardown());
+    assert!(!session.request_fatal_teardown());
     session.retire(false).unwrap();
     assert!(session.is_terminal_output_retired());
 }
 
 #[test]
-fn poisoned_credit_state_never_fails_open_and_only_retirement_wakes_fatal_wait() {
+fn poisoned_ring_rejects_the_chunk_and_claims_one_fatal_teardown() {
+    let session = flow_test_session();
+    session.output.poison_for_test();
+
+    assert!(session.record_output(b"must-not-get-a-sequence").is_err());
+    assert!(session.request_fatal_teardown());
+    assert!(!session.request_fatal_teardown());
+    session.retire(false).unwrap();
+    assert!(session.is_terminal_output_retired());
+}
+
+#[test]
+fn poisoned_credit_state_never_fails_open_and_claims_one_fatal_teardown() {
     let session = flow_test_session();
     session.begin_desktop_output_bootstrap(4).unwrap();
     let attached = session.attach_desktop(64, 4).unwrap();
@@ -665,20 +665,10 @@ fn poisoned_credit_state_never_fails_open_and_only_retirement_wakes_fatal_wait()
         .is_err());
     assert!(session.attach_desktop(64, 4).is_err());
 
-    let fatal_session = Arc::clone(&session);
-    let (entered_tx, entered_rx) = std_mpsc::channel();
-    let (done_tx, done_rx) = std_mpsc::channel();
-    let worker = thread::spawn(move || {
-        entered_tx.send(()).unwrap();
-        fatal_session.wait_for_terminal_output_retirement();
-        done_tx.send(()).unwrap();
-    });
-    entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert!(done_rx.recv_timeout(Duration::from_millis(30)).is_err());
+    assert!(session.request_fatal_teardown());
+    assert!(!session.request_fatal_teardown());
 
     session.retire(false).unwrap();
-    done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    worker.join().unwrap();
     assert!(session.is_terminal_output_retired());
 }
 

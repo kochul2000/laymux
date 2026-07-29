@@ -167,19 +167,34 @@ struct WriteOutcome {
 }
 
 /// Get or create the per-terminal serialization lock from a shared table.
-/// Same `terminal_id` → the same `Arc` (so all callers serialize); distinct
-/// ids → distinct locks. The outer table mutex is `std` and held only for this
-/// get/insert (never across `.await`). Free fn so it can be unit-tested without
-/// an `McpHandler` (which needs a Tauri `AppHandle`).
+/// Same `(terminal_id, generation)` → the same `Arc` (so all callers
+/// serialize); a reused id with a new generation replaces the old entry even
+/// if stale holders still own its Arc. The outer table mutex is `std` and held
+/// only for this get/insert (never across `.await`).
 fn get_or_create_terminal_lock(
     locks: &crate::state::SharedExecLocks,
     terminal_id: &str,
+    generation: u64,
 ) -> Result<Arc<TokioMutex<()>>, crate::error::AppError> {
     let mut map = locks.lock_or_err()?;
-    Ok(map
-        .entry(terminal_id.to_string())
-        .or_insert_with(|| Arc::new(TokioMutex::new(())))
-        .clone())
+    let entry =
+        map.entry(terminal_id.to_string())
+            .or_insert_with(|| crate::state::TerminalExecLockEntry {
+                generation,
+                lock: Arc::new(TokioMutex::new(())),
+            });
+    if entry.generation > generation {
+        return Err(crate::error::AppError::Other(format!(
+            "Terminal '{terminal_id}' generation changed before exec lock acquisition"
+        )));
+    }
+    if entry.generation < generation {
+        *entry = crate::state::TerminalExecLockEntry {
+            generation,
+            lock: Arc::new(TokioMutex::new(())),
+        };
+    }
+    Ok(Arc::clone(&entry.lock))
 }
 
 /// Remove `terminal_id`'s entry, but only if it is still the exact `expected`
@@ -194,7 +209,7 @@ fn remove_terminal_lock_if(
     let mut map = locks.lock_or_err()?;
     let is_ours = map
         .get(terminal_id)
-        .map(|cur| Arc::ptr_eq(cur, expected))
+        .map(|current| Arc::ptr_eq(&current.lock, expected))
         .unwrap_or(false);
     if is_ours {
         map.remove(terminal_id);
@@ -686,8 +701,22 @@ impl McpHandler {
         &self,
         terminal_id: &str,
     ) -> Result<Arc<TokioMutex<()>>, CallToolResult> {
-        get_or_create_terminal_lock(&self.state.app_state.exec_locks, terminal_id)
-            .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
+        let output_session = crate::terminal_output::terminal_output_session_for(
+            &self.state.app_state.terminal_protocol_states,
+            terminal_id,
+        )
+        .map_err(|error| CallToolResult::error(vec![Content::text(error)]))?
+        .ok_or_else(|| {
+            CallToolResult::error(vec![Content::text(format!(
+                "Terminal '{terminal_id}' not found"
+            ))])
+        })?;
+        get_or_create_terminal_lock(
+            &self.state.app_state.exec_locks,
+            terminal_id,
+            output_session.generation(),
+        )
+        .map_err(|error| CallToolResult::error(vec![Content::text(error.to_string())]))
     }
 
     /// 제출(`enter=true`) 시 텍스트와 종료 CR 사이의 지연(ms).
@@ -4082,13 +4111,13 @@ mod tests {
         // serialization — #427). Different terminals get different locks.
         let a = Arc::new(crate::state::AppState::new());
         let b = a.clone(); // second session's ServerState.app_state
-        let la = get_or_create_terminal_lock(&a.exec_locks, "t1").unwrap();
-        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1").unwrap();
+        let la = get_or_create_terminal_lock(&a.exec_locks, "t1", 1).unwrap();
+        let lb = get_or_create_terminal_lock(&b.exec_locks, "t1", 1).unwrap();
         assert!(
             Arc::ptr_eq(&la, &lb),
             "same terminal across shared AppState must yield one lock"
         );
-        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2").unwrap();
+        let lc = get_or_create_terminal_lock(&a.exec_locks, "t2", 1).unwrap();
         assert!(
             !Arc::ptr_eq(&la, &lc),
             "different terminals must get distinct locks"
@@ -4101,14 +4130,14 @@ mod tests {
         // removed from the table, the next get_or_create makes a fresh lock, so
         // the table does not retain entries for closed terminals forever.
         let state = Arc::new(crate::state::AppState::new());
-        let first = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
+        let first = get_or_create_terminal_lock(&state.exec_locks, "t1", 1).unwrap();
         state.exec_locks.lock().unwrap().remove("t1");
         assert_eq!(
             state.exec_locks.lock().unwrap().len(),
             0,
             "removal must empty the table"
         );
-        let second = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
+        let second = get_or_create_terminal_lock(&state.exec_locks, "t1", 2).unwrap();
         assert!(
             !Arc::ptr_eq(&first, &second),
             "a re-created lock after removal must be a distinct Arc"
@@ -4116,19 +4145,48 @@ mod tests {
     }
 
     #[test]
+    fn exec_lock_generation_change_replaces_a_stale_same_id_entry() {
+        let state = Arc::new(crate::state::AppState::new());
+        let old = get_or_create_terminal_lock(&state.exec_locks, "t1", 41).unwrap();
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1", 42).unwrap();
+
+        assert!(!Arc::ptr_eq(&old, &current));
+        assert_eq!(
+            state
+                .exec_locks
+                .lock()
+                .unwrap()
+                .get("t1")
+                .unwrap()
+                .generation,
+            42
+        );
+    }
+
+    #[test]
+    fn stale_generation_cannot_replace_a_newer_exec_lock_entry() {
+        let state = Arc::new(crate::state::AppState::new());
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1", 42).unwrap();
+
+        assert!(get_or_create_terminal_lock(&state.exec_locks, "t1", 41).is_err());
+        let after = get_or_create_terminal_lock(&state.exec_locks, "t1", 42).unwrap();
+        assert!(Arc::ptr_eq(&current, &after));
+    }
+
+    #[test]
     fn remove_terminal_lock_if_only_drops_the_matching_arc() {
         // id reuse + close race (#427): a stale write must not delete a lock
         // that a same-id terminal recreated after it.
         let state = Arc::new(crate::state::AppState::new());
-        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
+        let stale = get_or_create_terminal_lock(&state.exec_locks, "t1", 1).unwrap();
         // Simulate close + same-id recreation: table now holds a DIFFERENT Arc.
         state.exec_locks.lock().unwrap().remove("t1");
-        let current = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
+        let current = get_or_create_terminal_lock(&state.exec_locks, "t1", 2).unwrap();
         assert!(!Arc::ptr_eq(&stale, &current));
 
         // Stale write tries to purge with its old Arc → must be a no-op.
         remove_terminal_lock_if(&state.exec_locks, "t1", &stale).unwrap();
-        let after = get_or_create_terminal_lock(&state.exec_locks, "t1").unwrap();
+        let after = get_or_create_terminal_lock(&state.exec_locks, "t1", 2).unwrap();
         assert!(
             Arc::ptr_eq(&current, &after),
             "purge with a stale Arc must not evict the current lock"
@@ -4150,7 +4208,7 @@ mod tests {
         .join()
         .is_err());
 
-        assert!(get_or_create_terminal_lock(&state.exec_locks, "t1").is_err());
+        assert!(get_or_create_terminal_lock(&state.exec_locks, "t1", 1).is_err());
         assert!(
             remove_terminal_lock_if(&state.exec_locks, "t1", &Arc::new(TokioMutex::new(())),)
                 .is_err()

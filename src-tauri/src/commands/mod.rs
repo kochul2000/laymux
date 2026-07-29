@@ -4,6 +4,7 @@ mod ipc_dispatch;
 mod misc;
 mod remote_hosts;
 mod terminal;
+mod terminal_teardown;
 mod viewer_startup;
 
 pub use crate::cloud::commands::*;
