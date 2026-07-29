@@ -1,12 +1,13 @@
+import type { TerminalOutputControlOperation } from "./terminal-output-control-registry";
+
 export interface TerminalOutputFlowAcknowledgerOptions {
   retryMs?: number;
   timeoutMs?: number;
   onError?: (error: unknown) => void;
   onLeaseLost?: () => void;
   onTimeout?: () => void;
-  onOrphanSettled?: () => void;
   onConfirmed?: (seq: number) => void;
-  canStartOperation?: () => boolean;
+  tryStartOperation?: () => TerminalOutputControlOperation | undefined;
   onAdmissionBlocked?: () => void;
 }
 
@@ -30,14 +31,12 @@ export class TerminalOutputFlowAcknowledger {
   private readonly onError?: (error: unknown) => void;
   private readonly onLeaseLost?: () => void;
   private readonly onTimeout?: () => void;
-  private readonly onOrphanSettled?: () => void;
   private readonly onConfirmed?: (seq: number) => void;
-  private readonly canStartOperation?: () => boolean;
+  private readonly tryStartOperation?: () => TerminalOutputControlOperation | undefined;
   private readonly onAdmissionBlocked?: () => void;
   private inFlight = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
-  private timedOutAwaitingSettlement = false;
   private disposed = false;
 
   constructor(
@@ -52,9 +51,8 @@ export class TerminalOutputFlowAcknowledger {
     this.onError = options.onError;
     this.onLeaseLost = options.onLeaseLost;
     this.onTimeout = options.onTimeout;
-    this.onOrphanSettled = options.onOrphanSettled;
     this.onConfirmed = options.onConfirmed;
-    this.canStartOperation = options.canStartOperation;
+    this.tryStartOperation = options.tryStartOperation;
     this.onAdmissionBlocked = options.onAdmissionBlocked;
   }
 
@@ -124,15 +122,32 @@ export class TerminalOutputFlowAcknowledger {
       return;
     }
     const sentSeq = this.contiguousSeq;
-    if (this.canStartOperation && !this.canStartOperation()) {
-      this.dispose();
+    let operation: TerminalOutputControlOperation | undefined;
+    if (this.tryStartOperation) {
       try {
-        this.onAdmissionBlocked?.();
+        operation = this.tryStartOperation();
       } catch {
-        // Capacity recovery belongs to the current epoch owner.
+        operation = undefined;
       }
-      return;
+      if (!operation) {
+        this.dispose();
+        try {
+          this.onAdmissionBlocked?.();
+        } catch {
+          // Capacity recovery belongs to the current epoch owner.
+        }
+        return;
+      }
     }
+    const settleOperation = () => {
+      const active = operation;
+      operation = undefined;
+      try {
+        active?.settle();
+      } catch {
+        // Resource bookkeeping cannot change ACK completion semantics.
+      }
+    };
     this.inFlight = true;
     let sending: Promise<boolean>;
     try {
@@ -150,7 +165,6 @@ export class TerminalOutputFlowAcknowledger {
         // first, then ask the current UI epoch to replace it. Its already-wired
         // handlers below absorb a late resolve/reject without touching prefix
         // state or scheduling the ordinary rejection retry.
-        this.timedOutAwaitingSettlement = true;
         this.dispose();
         try {
           this.onTimeout?.();
@@ -163,7 +177,7 @@ export class TerminalOutputFlowAcknowledger {
     void sending
       .then((accepted) => {
         this.clearWatchdog();
-        this.reportOrphanSettled();
+        settleOperation();
         if (this.disposed) return;
         if (!accepted) {
           // A replacement attach owns the backend lease. Never retry a stale
@@ -187,7 +201,7 @@ export class TerminalOutputFlowAcknowledger {
       })
       .catch((error) => {
         this.clearWatchdog();
-        this.reportOrphanSettled();
+        settleOperation();
         if (this.disposed) return;
         try {
           this.onError?.(error);
@@ -209,15 +223,5 @@ export class TerminalOutputFlowAcknowledger {
     if (this.watchdogTimer === undefined) return;
     clearTimeout(this.watchdogTimer);
     this.watchdogTimer = undefined;
-  }
-
-  private reportOrphanSettled(): void {
-    if (!this.timedOutAwaitingSettlement) return;
-    this.timedOutAwaitingSettlement = false;
-    try {
-      this.onOrphanSettled?.();
-    } catch {
-      // Stale completion can release capacity but cannot revive this sender.
-    }
   }
 }

@@ -10393,6 +10393,197 @@ describe("TerminalView desktop input composer", () => {
     }
   });
 
+  it("shares the attach operation cap across pre-timeout remounts", async () => {
+    vi.useFakeTimers();
+    const terminalId = "t-output-attach-remount-cap";
+    const baselineAttachment = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    const pendingAttaches = Array.from({ length: 6 }, () => {
+      let resolve!: (value: typeof baselineAttachment) => void;
+      const promise = new Promise<typeof baselineAttachment>((resolvePromise) => {
+        resolve = resolvePromise;
+      });
+      return { promise, resolve };
+    });
+    let attachOperation = 0;
+    mockAttachTerminalOutput.mockImplementation(() => {
+      const operation = attachOperation;
+      attachOperation += 1;
+      if (operation < pendingAttaches.length) return pendingAttaches[operation].promise;
+      return Promise.resolve({
+        ...baselineAttachment,
+        flowControl: { ...baselineAttachment.flowControl, token: `lease-current-${operation}` },
+      });
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let currentUnmount: (() => void) | undefined;
+
+    try {
+      for (let mount = 0; mount < 6; mount += 1) {
+        const view = render(
+          <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+        );
+        await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(mount + 1));
+        // The operation has not reached its 5 s watchdog. Unmount must still
+        // leave its uncancellable bridge Promise charged to this terminal id.
+        view.unmount();
+      }
+
+      const current = render(
+        <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+      );
+      currentUnmount = current.unmount;
+      await vi.waitFor(() => {
+        expect(mockOnTerminalOutput.mock.calls.filter(([id]) => id === terminalId)).toHaveLength(7);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(6);
+      const resetsAtCap = mockReset.mock.calls.length;
+
+      pendingAttaches[0].resolve({
+        ...baselineAttachment,
+        flowControl: { ...baselineAttachment.flowControl, token: "lease-stale-remount" },
+      });
+      await act(async () => {
+        await pendingAttaches[0].promise;
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      await vi.waitFor(() => expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(7));
+      await vi.waitFor(() => expect(mockReset.mock.calls.length).toBeGreaterThan(resetsAtCap));
+      const resetsAfterCurrentRecovery = mockReset.mock.calls.length;
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalledWith(
+        terminalId,
+        expect.any(Number),
+        "lease-stale-remount",
+        expect.any(Number),
+      );
+
+      pendingAttaches[1].resolve(baselineAttachment);
+      await act(async () => {
+        await pendingAttaches[1].promise;
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(7);
+      expect(mockReset).toHaveBeenCalledTimes(resetsAfterCurrentRecovery);
+    } finally {
+      currentUnmount?.();
+      for (const pending of pendingAttaches.slice(2)) pending.resolve(baselineAttachment);
+      await Promise.all(pendingAttaches.map(({ promise }) => promise));
+      mockAttachTerminalOutput.mockReset();
+      mockAttachTerminalOutput.mockResolvedValue(baselineAttachment);
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares the ACK operation cap across pre-timeout remounts", async () => {
+    vi.useFakeTimers();
+    const terminalId = "t-output-ack-remount-cap";
+    const baselineAttachment = await mockAttachTerminalOutput();
+    mockAttachTerminalOutput.mockClear();
+    let attachmentNumber = 0;
+    mockAttachTerminalOutput.mockImplementation(() => {
+      attachmentNumber += 1;
+      return Promise.resolve({
+        ...baselineAttachment,
+        flowControl: {
+          ...baselineAttachment.flowControl,
+          token: `lease-ack-remount-${attachmentNumber}`,
+        },
+      });
+    });
+    const pendingAcks = Array.from({ length: 6 }, () => {
+      let resolve!: (value: boolean) => void;
+      const promise = new Promise<boolean>((resolvePromise) => {
+        resolve = resolvePromise;
+      });
+      return { promise, resolve };
+    });
+    let ackOperation = 0;
+    mockAcknowledgeTerminalOutput.mockImplementation(() => {
+      const operation = ackOperation;
+      ackOperation += 1;
+      if (operation < pendingAcks.length) return pendingAcks[operation].promise;
+      return Promise.resolve(true);
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let currentUnmount: (() => void) | undefined;
+
+    try {
+      for (let mount = 0; mount < 6; mount += 1) {
+        const view = render(
+          <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+        );
+        await waitForTerminalInputReady();
+        const emitOutput = mockOnTerminalOutput.mock.calls.filter(([id]) => id === terminalId)[
+          mount
+        ]?.[1] as ((data: Record<string, unknown>) => void) | undefined;
+        expect(emitOutput).toBeDefined();
+        act(() => emitOutput?.(outputDelta(0, "A")));
+        await vi.waitFor(() =>
+          expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(mount + 1),
+        );
+        view.unmount();
+      }
+
+      const current = render(
+        <TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />,
+      );
+      currentUnmount = current.unmount;
+      await waitForTerminalInputReady();
+      const currentEmitter = mockOnTerminalOutput.mock.calls.filter(
+        ([id]) => id === terminalId,
+      )[6]?.[1] as ((data: Record<string, unknown>) => void) | undefined;
+      expect(currentEmitter).toBeDefined();
+      act(() => currentEmitter?.(outputDelta(0, "B")));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(6);
+      const attachesAtCap = mockAttachTerminalOutput.mock.calls.length;
+      const resetsAtCap = mockReset.mock.calls.length;
+
+      pendingAcks[0].resolve(true);
+      await act(async () => {
+        await pendingAcks[0].promise;
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      await vi.waitFor(() =>
+        expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachesAtCap + 1),
+      );
+      await vi.waitFor(() => expect(mockReset.mock.calls.length).toBeGreaterThan(resetsAtCap));
+      const resetsAfterCurrentRecovery = mockReset.mock.calls.length;
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(6);
+
+      pendingAcks[1].resolve(true);
+      await act(async () => {
+        await pendingAcks[1].promise;
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachesAtCap + 1);
+      expect(mockReset).toHaveBeenCalledTimes(resetsAfterCurrentRecovery);
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(6);
+    } finally {
+      currentUnmount?.();
+      for (const pending of pendingAcks.slice(2)) pending.resolve(true);
+      await Promise.all(pendingAcks.map(({ promise }) => promise));
+      mockAttachTerminalOutput.mockReset();
+      mockAttachTerminalOutput.mockResolvedValue(baselineAttachment);
+      mockAcknowledgeTerminalOutput.mockReset();
+      mockAcknowledgeTerminalOutput.mockResolvedValue(true);
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("replaces a token after a pending ACK timeout and ignores the late old ACK", async () => {
     vi.useFakeTimers();
     const terminalId = "t-output-ack-timeout";

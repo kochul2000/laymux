@@ -5,66 +5,12 @@ export type TerminalOutputControlOutcome<T> =
 
 export interface TerminalOutputControlWatchdogOptions {
   onTimeout?: () => void;
-  onOrphanSettled?: () => void;
+  /** Called once when the underlying bridge Promise resolves or rejects. */
+  onSettled?: () => void;
 }
 
 const DEFAULT_CONTROL_BACKOFF_BASE_MS = 50;
 const DEFAULT_CONTROL_BACKOFF_MAX_MS = 1_000;
-
-/** Mount-local resource budget for timed-out bridge Promises still pending. */
-export class TerminalOutputControlOrphanBudget {
-  private outstandingCount = 0;
-  private capacityWaiter: (() => void) | undefined;
-
-  constructor(private readonly maxOutstanding = 6) {
-    if (!Number.isInteger(maxOutstanding) || maxOutstanding <= 0) {
-      throw new Error("terminal output orphan budget must be a positive integer");
-    }
-  }
-
-  get outstanding(): number {
-    return this.outstandingCount;
-  }
-
-  get canStart(): boolean {
-    return this.outstandingCount < this.maxOutstanding;
-  }
-
-  recordTimeout(): void {
-    if (!this.canStart) {
-      throw new Error("terminal output orphan budget exceeded");
-    }
-    this.outstandingCount += 1;
-  }
-
-  recordOrphanSettled(): void {
-    if (this.outstandingCount === 0) return;
-    this.outstandingCount -= 1;
-    if (!this.canStart || !this.capacityWaiter) return;
-    const waiter = this.capacityWaiter;
-    this.capacityWaiter = undefined;
-    try {
-      waiter();
-    } catch {
-      // A stale/unmounted recovery callback cannot corrupt resource accounting.
-    }
-  }
-
-  waitForCapacity(waiter: () => void): void {
-    this.capacityWaiter = waiter;
-    if (!this.canStart) return;
-    this.capacityWaiter = undefined;
-    try {
-      waiter();
-    } catch {
-      // Recovery callbacks are epoch guarded by the owner.
-    }
-  }
-
-  dispose(): void {
-    this.capacityWaiter = undefined;
-  }
-}
 
 /**
  * Bound one local IPC bridge call without cancelling the underlying Promise.
@@ -83,13 +29,11 @@ export async function settleTerminalOutputControl<T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let state: "pending" | "settled" | "timed-out" = "pending";
   const recordSettlement = () => {
-    const wasOrphan = state === "timed-out";
     state = "settled";
-    if (!wasOrphan) return;
     try {
-      options.onOrphanSettled?.();
+      options.onSettled?.();
     } catch {
-      // Resource bookkeeping is isolated from stale bridge completion.
+      // Resource bookkeeping is isolated from bridge completion semantics.
     }
   };
   const settled = Promise.resolve(operation).then<

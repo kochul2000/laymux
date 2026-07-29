@@ -3,8 +3,8 @@ import {
   boundedTerminalOutputControlBackoff,
   recoverTerminalOutputControl,
   settleTerminalOutputControl,
-  TerminalOutputControlOrphanBudget,
 } from "./terminal-output-control-watchdog";
+import { TerminalOutputControlOperationRegistry } from "./terminal-output-control-registry";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -46,22 +46,22 @@ describe("settleTerminalOutputControl", () => {
   it("absorbs an orphan rejection that arrives after timeout", async () => {
     vi.useFakeTimers();
     try {
-      const budget = new TerminalOutputControlOrphanBudget(6);
+      const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
+      const operation = scope.tryStart("attach");
       const pending = deferred<string>();
       const outcome = settleTerminalOutputControl(pending.promise, 5_000, {
-        onTimeout: () => budget.recordTimeout(),
-        onOrphanSettled: () => budget.recordOrphanSettled(),
+        onSettled: () => operation?.settle(),
       });
 
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
-      expect(budget.outstanding).toBe(1);
+      expect(scope.outstanding("attach")).toBe(1);
       pending.reject(new Error("late bridge rejection"));
       await Promise.resolve();
       await Promise.resolve();
 
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
-      expect(budget.outstanding).toBe(0);
+      expect(scope.outstanding("attach")).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -76,54 +76,39 @@ describe("settleTerminalOutputControl", () => {
   it("counts a timed-out operation until its orphan resolve settles", async () => {
     vi.useFakeTimers();
     try {
-      const budget = new TerminalOutputControlOrphanBudget(6);
+      const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
+      const operation = scope.tryStart("attach");
       const pending = deferred<string>();
       const outcome = settleTerminalOutputControl(pending.promise, 5_000, {
-        onTimeout: () => budget.recordTimeout(),
-        onOrphanSettled: () => budget.recordOrphanSettled(),
+        onSettled: () => operation?.settle(),
       });
 
+      expect(scope.outstanding("attach")).toBe(1);
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
-      expect(budget.outstanding).toBe(1);
+      expect(scope.outstanding("attach")).toBe(1);
 
       pending.resolve("stale lease");
       await Promise.resolve();
       await Promise.resolve();
-      expect(budget.outstanding).toBe(0);
+      expect(scope.outstanding("attach")).toBe(0);
       await expect(outcome).resolves.toEqual({ kind: "timeout" });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("bounds real unsettled orphans across alternating timeout and success", () => {
-    const budget = new TerminalOutputControlOrphanBudget(6);
-    let operationsCreated = 0;
-    const start = (timesOut: boolean) => {
-      if (!budget.canStart) return false;
-      operationsCreated += 1;
-      if (timesOut) budget.recordTimeout();
-      return true;
-    };
+  it("releases a normally settled operation through the same exactly-once callback", async () => {
+    const scope = new TerminalOutputControlOperationRegistry(1).mount("terminal-1");
+    const operation = scope.tryStart("attach");
 
-    for (let orphan = 0; orphan < 6; orphan += 1) {
-      expect(start(true)).toBe(true);
-      // A successful replacement resets rate backoff, but it cannot erase the
-      // previous bridge Promise that is still genuinely pending.
-      if (orphan < 5) expect(start(false)).toBe(true);
-    }
-    expect(budget.outstanding).toBe(6);
-    expect(operationsCreated).toBe(11);
-    expect(start(false)).toBe(false);
+    await expect(
+      settleTerminalOutputControl(Promise.resolve("lease"), 5_000, {
+        onSettled: () => operation?.settle(),
+      }),
+    ).resolves.toEqual({ kind: "resolved", value: "lease" });
 
-    const recover = vi.fn();
-    budget.waitForCapacity(recover);
-    budget.recordOrphanSettled();
-    expect(recover).toHaveBeenCalledOnce();
-    budget.recordOrphanSettled();
-    expect(recover).toHaveBeenCalledOnce();
-    expect(budget.outstanding).toBe(4);
+    expect(scope.outstanding("attach")).toBe(0);
   });
 
   it("publishes epoch replacement before best-effort diagnostics and absorbs sabotage", () => {

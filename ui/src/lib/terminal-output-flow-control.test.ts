@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TerminalOutputFlowAcknowledger } from "./terminal-output-flow-control";
-import { TerminalOutputControlOrphanBudget } from "./terminal-output-control-watchdog";
+import { TerminalOutputControlOperationRegistry } from "./terminal-output-control-registry";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -154,24 +154,22 @@ describe("TerminalOutputFlowAcknowledger", () => {
       const send = vi.fn().mockReturnValue(pending.promise);
       const onTimeout = vi.fn();
       const onConfirmed = vi.fn();
-      const budget = new TerminalOutputControlOrphanBudget(6);
+      const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
       const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
         timeoutMs: 5_000,
-        onTimeout: () => {
-          budget.recordTimeout();
-          onTimeout();
-        },
-        onOrphanSettled: () => budget.recordOrphanSettled(),
+        onTimeout,
+        tryStartOperation: () => scope.tryStart("ack"),
         onConfirmed,
       });
 
       acknowledger.complete(0, 4);
+      expect(scope.outstanding("ack")).toBe(1);
       await vi.advanceTimersByTimeAsync(4_999);
       expect(onTimeout).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1);
       expect(onTimeout).toHaveBeenCalledOnce();
-      expect(budget.outstanding).toBe(1);
+      expect(scope.outstanding("ack")).toBe(1);
       acknowledger.complete(4, 8);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(send).toHaveBeenCalledTimes(1);
@@ -181,19 +179,19 @@ describe("TerminalOutputFlowAcknowledger", () => {
       await Promise.resolve();
       expect(onConfirmed).not.toHaveBeenCalled();
       expect(onTimeout).toHaveBeenCalledOnce();
-      expect(budget.outstanding).toBe(0);
+      expect(scope.outstanding("ack")).toBe(0);
     } finally {
       vi.useRealTimers();
     }
   });
 
   it("blocks ACK bridge creation when real timed-out orphans fill the budget", async () => {
-    const budget = new TerminalOutputControlOrphanBudget(6);
-    for (let index = 0; index < 6; index += 1) budget.recordTimeout();
+    const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
+    for (let index = 0; index < 6; index += 1) expect(scope.tryStart("ack")).toBeDefined();
     const send = vi.fn().mockResolvedValue(true);
     const onAdmissionBlocked = vi.fn();
     const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
-      canStartOperation: () => budget.canStart,
+      tryStartOperation: () => scope.tryStart("ack"),
       onAdmissionBlocked,
     });
 
@@ -202,6 +200,28 @@ describe("TerminalOutputFlowAcknowledger", () => {
 
     expect(send).not.toHaveBeenCalled();
     expect(onAdmissionBlocked).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a pre-timeout ACK charged after sender unmount until its Promise settles", async () => {
+    const registry = new TerminalOutputControlOperationRegistry(1);
+    const firstMount = registry.mount("terminal-1");
+    const pending = deferred<boolean>();
+    const send = vi.fn().mockReturnValue(pending.promise);
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+      tryStartOperation: () => firstMount.tryStart("ack"),
+    });
+
+    acknowledger.complete(0, 4);
+    expect(firstMount.outstanding("ack")).toBe(1);
+    acknowledger.dispose();
+    firstMount.dispose();
+
+    const remount = registry.mount("terminal-1");
+    expect(remount.tryStart("ack")).toBeUndefined();
+    pending.resolve(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(remount.outstanding("ack")).toBe(0);
   });
 
   it("reports a settled ACK so a caller can reset only the ACK-timeout backoff", async () => {
