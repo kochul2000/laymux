@@ -22,7 +22,7 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     let mut master: RawFd = -1;
     let mut slave: RawFd = -1;
 
-    let size = winsize {
+    let mut size = winsize {
         ws_row: size.rows,
         ws_col: size.cols,
         ws_xpixel: size.pixel_width,
@@ -30,12 +30,13 @@ fn openpty(size: PtySize) -> anyhow::Result<(UnixMasterPty, UnixSlavePty)> {
     };
 
     let result = unsafe {
+        #[allow(clippy::unnecessary_mut_passed)]
         libc::openpty(
             &mut master,
             &mut slave,
             ptr::null_mut(),
             ptr::null_mut(),
-            &size,
+            &mut size,
         )
     };
 
