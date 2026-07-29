@@ -11,8 +11,27 @@ const staleDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin)r
 const moduleUserOnlyDisableStdinGate = "if(this._optionsService.rawOptions.disableStdin&&i)return;";
 const commonJsUserOnlyDisableStdinGate =
   "if(this._optionsService.rawOptions.disableStdin&&t)return;";
+const compositionGenerationState = "this._pendingCompositionGenerations=[]";
+const moduleCompositionKeypressOwner =
+  "keypress(t){return this._queueCompositionObservation(t)}input(t){return this._queueCompositionObservation(t)}";
+const commonJsCompositionKeypressOwner =
+  "keypress(e){return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)}";
+const compositionGenerationFinalizer =
+  "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
+const compositionBoundaryOwner = "compositionstart(){this._boundPendingComposition()";
+const moduleCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0)";
+const commonJsCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(t)||this.coreService.triggerDataEvent(t,!0)";
+const moduleCompositionInputHandoff = "if(this._compositionHelper.input(i))";
+const commonJsCompositionInputHandoff = "if(this._compositionHelper.input(t))";
+const staleSingleGenerationState = "_pendingKeypressData";
+const moduleUnreconciledKeypressSend =
+  "this._showCursor(),this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
+const commonJsUnreconciledKeypressSend =
+  "this._showCursor(),this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0";
 
-describe("xterm wider-reflow patch", () => {
+describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
     const source = await readFile(moduleTarget, "utf8");
 
@@ -30,5 +49,29 @@ describe("xterm wider-reflow patch", () => {
     expect(commonJsSource).toContain(commonJsUserOnlyDisableStdinGate);
     expect(moduleSource).not.toContain(staleDisableStdinGate);
     expect(commonJsSource).not.toContain(staleDisableStdinGate);
+  });
+
+  it("queues input and keypress observations per composition generation in both bundles", async () => {
+    const [moduleSource, commonJsSource] = await Promise.all([
+      readFile(moduleTarget, "utf8"),
+      readFile(commonJsTarget, "utf8"),
+    ]);
+
+    expect(moduleSource).toContain(compositionGenerationState);
+    expect(commonJsSource).toContain(compositionGenerationState);
+    expect(moduleSource).toContain(moduleCompositionKeypressOwner);
+    expect(commonJsSource).toContain(commonJsCompositionKeypressOwner);
+    expect(moduleSource).toContain(compositionGenerationFinalizer);
+    expect(commonJsSource).toContain(compositionGenerationFinalizer);
+    expect(moduleSource).toContain(compositionBoundaryOwner);
+    expect(commonJsSource).toContain(compositionBoundaryOwner);
+    expect(moduleSource).toContain(moduleCompositionKeypressHandoff);
+    expect(commonJsSource).toContain(commonJsCompositionKeypressHandoff);
+    expect(moduleSource).toContain(moduleCompositionInputHandoff);
+    expect(commonJsSource).toContain(commonJsCompositionInputHandoff);
+    expect(moduleSource).not.toContain(staleSingleGenerationState);
+    expect(commonJsSource).not.toContain(staleSingleGenerationState);
+    expect(moduleSource).not.toContain(moduleUnreconciledKeypressSend);
+    expect(commonJsSource).not.toContain(commonJsUnreconciledKeypressSend);
   });
 });

@@ -1,6 +1,6 @@
 # 0062. 조합 commit 중복은 pending commit 텍스트와의 포함 판정으로만 억제한다
 
-- Status: Proposed
+- Status: Superseded by [0093](0093-xterm-composition-keypress-reconciliation-owner.md)
 - Date: 2026-07-25
 - Source: issue #527, architecture/data-flow.md §8.14, [ADR-0053](0053-native-windows-synchronized-output-cursor-transaction.md)(IME 키 정책 경계), [ADR-0054](0054-xterm-human-and-protocol-data-origin.md)(입력 데이터 출처), [ADR-0060](0060-linux-ime-candidate-key-suppression.md)(후보 키 억제)
 

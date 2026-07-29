@@ -79,7 +79,7 @@ ADR 이 필요한 대표 기준:
 | [0059](0059-os-input-source-chord-pty-exclusion.md) | OS 입력 소스 전환 chord 는 사용자 바인딩에서만 PTY 입력에서 제외 | Proposed |
 | [0060](0060-linux-ime-candidate-key-suppression.md) | Linux IME 후보 선택 키는 IME 소비 표식 + orphan companion 으로만 억제 (0053 유보 확정) | Proposed |
 | [0061](0061-native-ime-candidate-anchor.md) | native IME 후보창은 두 커서가 갈릴 때만 helper 위치를 shadow cursor 앵커로 옮김 (0053 정정) | Proposed |
-| [0062](0062-composition-commit-keypress-race.md) | 조합 commit 중복은 pending commit 텍스트와의 포함 판정으로만 억제 | Proposed |
+| [0062](0062-composition-commit-keypress-race.md) | 조합 commit 중복은 pending commit 텍스트와의 포함 판정으로만 억제 | Superseded by [0093](0093-xterm-composition-keypress-reconciliation-owner.md) |
 | [0063](0063-remote-foreground-auto-reclaim.md) | Remote 재접속은 문서가 보일 때만 자동 claim (ADR-0027 마지막 항목을 이 범위로 좁힘) | Proposed |
 | [0064](0064-shared-webgl-atlas-clear-fanout.md) | 공유 WebGL atlas 를 지운 쪽이 모든 터미널의 렌더 모델을 무효화 | Proposed |
 | [0065](0065-dev-input-helper-out-of-process.md) | dev 전용 OS 입력 헬퍼는 앱 밖 프로세스 + lease·타깃 락 | Proposed |
@@ -110,6 +110,7 @@ ADR 이 필요한 대표 기준:
 | [0090](0090-linux-native-dialog-gtk3-backend.md) | Linux 네이티브 대화상자는 기존 Tauri GTK3 런타임을 재사용 | Accepted |
 | [0091](0091-remote-client-standalone-web-app-manifest.md) | Remote 클라이언트는 gate 안쪽 web app manifest로 standalone 설치를 지원한다 | Accepted |
 | [0092](0092-app-wide-terminal-write-round-robin.md) | 데스크톱 xterm physical write는 앱 전역 round-robin으로 진입 | Accepted |
+| [0093](0093-xterm-composition-keypress-reconciliation-owner.md) | 조합 commit 관측은 xterm CompositionHelper의 세대별 큐가 소유 | Accepted |
 
 ## 새 ADR 추가
 

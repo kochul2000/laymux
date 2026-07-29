@@ -1,5 +1,5 @@
 /**
- * The one place that reads xterm's pending-composition-send state.
+ * The one place outside xterm that reads its pending-composition-send flag.
  *
  * Issue #527. `CompositionHelper._finalizeComposition(true)` defers the actual
  * send to a `setTimeout(0)` and marks the window with `_isSendingComposition`.
@@ -7,37 +7,25 @@
  * public API, and there is no public equivalent — `Terminal` exposes nothing
  * about an in-flight composition send.
  *
- * Two details of the finalizer decide what may and may not be read here:
+ * The duplicate-keypress decision used to live in TerminalView and required
+ * five additional private fields plus a compositionend-time start snapshot.
+ * Issue #660 moves that responsibility into the patched CompositionHelper, the
+ * owner of the pending finalizer. This adapter remains only for issue #555's
+ * blur recovery: when xterm already has a deferred send in flight, laymux must
+ * not inject the same preview text from its blur fallback.
  *
- * - It closes over `range.start` at `compositionend`, then adds
- *   `_dataAlreadySent.length` **inside the timer**. So `compositionStart` must be
- *   *captured* by the caller at `compositionend` (`readCompositionStart`) while
- *   `dataAlreadySentLength` is read **live** — matching each value's real timing.
- *   Reading `_compositionPosition.start` late is simply wrong:
- *   `compositionstart` overwrites it with `textarea.value.length`.
- * - If `_isComposing` is true again when the timer fires, it sends a **bounded**
- *   slice instead. That upper bound is unknowable at keypress time, so
- *   `composing` is surfaced and the caller must decline to judge.
+ * Every field this adapter depends on is named in
+ * `XTERM_PENDING_COMPOSITION_FIELDS` and read defensively in one place:
  *
- * Every field this repository depends on is named in
- * `XTERM_PENDING_COMPOSITION_FIELDS` and read defensively in one place. Two
- * consequences that matter:
- *
- * - A version bump that renames or removes a field makes this return `null`, and
- *   the caller's decision then defaults to **delivering** the keypress. The guard
- *   turns itself off instead of silently swallowing input.
+ * - A version bump that renames or removes a field makes this return `null`.
  * - The field list is asserted by a contract test against a real `Terminal`, so
  *   the break is a failing test with a readable name rather than a behaviour
  *   regression nobody notices (issue #527 completion criterion: "xterm 버전
  *   변경 시 패치 실패를 조용히 무시하지 않는다").
  *
- * Policy when a read fails (`null`): **do not act**. Both consumers follow it, even
- * though the visible outcomes look opposite — issue #527's guard suppresses input, so
- * turning it off lets the keypress through; issue #555's blur commit injects text, so
- * turning it off lets the syllable drop. Each reverts to the behaviour from before its
- * own intervention rather than guessing with an unreadable xterm. #527's loss was bad
- * because our guard caused it; #555's loss is xterm's and our injection is the cure.
- * A duplicated syllable can run the wrong shell command, so acting blind is worse.
+ * Policy when a read fails (`null`): issue #555's blur fallback treats it as
+ * "not pending" and does not guess at xterm internals. The installed-bundle
+ * contract test makes that dependency break visible before shipping.
  */
 
 import type { Terminal } from "@xterm/xterm";
@@ -46,36 +34,16 @@ import type { Terminal } from "@xterm/xterm";
 export const XTERM_PENDING_COMPOSITION_FIELDS = [
   "_compositionHelper",
   "_isSendingComposition",
-  "_isComposing",
-  "_compositionPosition",
-  "_dataAlreadySent",
-  "_textarea",
 ] as const;
 
 export type PendingCompositionSend = {
   /** xterm's own `_isSendingComposition` — a deferred send is in flight. */
   pending: boolean;
-  /**
-   * xterm's own `_isComposing`. When a **new** composition has already started,
-   * the finalizer takes its other branch and sends a bounded slice whose upper
-   * bound cannot be known at keypress time. The caller must not judge then.
-   */
-  composing: boolean;
-  /** Live values, to be combined with a `compositionStart` captured earlier. */
-  live: { textareaValue: string; dataAlreadySentLength: number } | null;
 };
 
 type CompositionHelperLike = {
   _isSendingComposition?: unknown;
-  _isComposing?: unknown;
-  _compositionPosition?: { start?: unknown; end?: unknown };
-  _dataAlreadySent?: unknown;
-  _textarea?: { value?: unknown };
 };
-
-function asNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
 
 function readHelper(terminal: Terminal): CompositionHelperLike | null {
   const core = (terminal as Terminal & { _core?: Record<string, unknown> })._core;
@@ -92,30 +60,5 @@ export function readPendingCompositionSend(terminal: Terminal): PendingCompositi
   if (!helper) return null;
 
   const pendingFlag = helper._isSendingComposition;
-  const composingFlag = helper._isComposing;
-  if (typeof pendingFlag !== "boolean" || typeof composingFlag !== "boolean") return null;
-
-  const alreadySent = typeof helper._dataAlreadySent === "string" ? helper._dataAlreadySent : null;
-  const value = typeof helper._textarea?.value === "string" ? helper._textarea.value : null;
-  if (alreadySent === null || value === null) {
-    // The flags are readable but the slice inputs are not — report the flags and
-    // let the caller default to delivering.
-    return { pending: pendingFlag, composing: composingFlag, live: null };
-  }
-
-  return {
-    pending: pendingFlag,
-    composing: composingFlag,
-    live: { textareaValue: value, dataAlreadySentLength: alreadySent.length },
-  };
-}
-
-/**
- * `_compositionPosition.start` at this moment, for the caller to snapshot on
- * `compositionend` — the same moment the finalizer closes over it.
- */
-export function readCompositionStart(terminal: Terminal): number | null {
-  const helper = readHelper(terminal);
-  if (!helper) return null;
-  return asNumber(helper._compositionPosition?.start);
+  return typeof pendingFlag === "boolean" ? { pending: pendingFlag } : null;
 }
