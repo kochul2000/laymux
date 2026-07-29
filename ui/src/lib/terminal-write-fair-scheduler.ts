@@ -54,11 +54,7 @@ export class TerminalWriteFairScheduler {
   cancelPending(owner: TerminalWriteFairOwner): void {
     if (!this.pendingTurns.delete(owner)) return;
     this.pendingOwners = this.pendingOwners.filter((pending) => pending !== owner);
-    if (
-      this.pendingTurns.size === 0 &&
-      this.activeTurn === undefined &&
-      this.macrotaskScheduled
-    ) {
+    if (this.pendingTurns.size === 0 && this.activeTurn === undefined && this.macrotaskScheduled) {
       // The host timer API does not expose a common cancellation handle. Make
       // its callback stale instead, so a later idle request need not wait for it.
       this.macrotaskScheduled = false;
@@ -79,11 +75,7 @@ export class TerminalWriteFairScheduler {
   }
 
   private scheduleNext(): void {
-    if (
-      this.activeTurn !== undefined ||
-      this.macrotaskScheduled ||
-      this.pendingTurns.size === 0
-    ) {
+    if (this.activeTurn !== undefined || this.macrotaskScheduled || this.pendingTurns.size === 0) {
       return;
     }
     this.macrotaskScheduled = true;

@@ -10937,9 +10937,10 @@ describe("TerminalView desktop input composer", () => {
     type WritableTerminal = MockTerminalInstance & {
       write: (data: string | Uint8Array, callback?: () => void) => void;
     };
-    const [terminalA, terminalB] = createdTerminals.slice(
-      createdTerminalBaseline,
-    ) as [WritableTerminal, WritableTerminal];
+    const [terminalA, terminalB] = createdTerminals.slice(createdTerminalBaseline) as [
+      WritableTerminal,
+      WritableTerminal,
+    ];
     terminalA.write = (data, callback) => {
       const text = typeof data === "string" ? data : new TextDecoder().decode(data);
       writes.push(`a:${text}`);
