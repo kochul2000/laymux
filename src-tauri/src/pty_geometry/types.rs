@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::constants::EXACT_GEOMETRY_CUTOVER_UNAVAILABLE;
 
-/// Production capability is intentionally false until #636 supplies an
-/// OS-proven adapter. This shape is shared by Local Tauri and Remote HTTP.
+/// Exact provenance remains fail-closed until #643. The interruptible reader
+/// is an independently audited liveness capability from #636/ADR-0089.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalGeometryCapabilities {
@@ -17,8 +17,8 @@ pub struct TerminalGeometryCapabilities {
 pub const fn production_geometry_capabilities() -> TerminalGeometryCapabilities {
     TerminalGeometryCapabilities {
         exact_geometry_cutover: false,
-        interruptible_read: false,
-        follow_up_issue: 636,
+        interruptible_read: true,
+        follow_up_issue: 643,
     }
 }
 

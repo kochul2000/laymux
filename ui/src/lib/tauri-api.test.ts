@@ -216,8 +216,8 @@ describe("tauri-api", () => {
     it("queries the public production geometry capability", async () => {
       const capabilities = {
         exactGeometryCutover: false,
-        interruptibleRead: false,
-        followUpIssue: 636,
+        interruptibleRead: true,
+        followUpIssue: 643,
       };
       mockInvoke.mockResolvedValue(capabilities);
       await expect(getTerminalGeometryCapabilities()).resolves.toEqual(capabilities);

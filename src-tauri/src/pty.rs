@@ -1,5 +1,5 @@
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
@@ -11,11 +11,12 @@ use crate::lock_ext::MutexExt;
 #[cfg(target_os = "windows")]
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
+use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
 use crate::terminal::{InitialExecutionHost, TerminalSession};
 use crate::terminal_env::TerminalEnvPlan;
 
-/// One master-read chunk. Desktop output credit may exceed its window by at
-/// most this amount because the reader applies backpressure after recording a
+/// One maximum native reader Data event. Desktop output credit may exceed its
+/// window by at most this amount because backpressure is applied after a
 /// complete callback chunk.
 pub(crate) const PTY_READ_BUFFER_BYTES: usize = 4096;
 
@@ -128,6 +129,9 @@ pub struct PtyHandle {
     /// child has already exited on its own.
     child_exited: Arc<AtomicBool>,
     input_faulted: Arc<AtomicBool>,
+    /// Generation-bound reader wake and teardown completion. This is separate
+    /// from the master so a blocking cloned output pipe can be interrupted.
+    reader_lifecycle: Arc<PtyReaderLifecycle>,
 }
 
 impl PtyHandle {
@@ -148,6 +152,7 @@ impl PtyHandle {
             child_pid: None,
             child_exited: Arc::new(AtomicBool::new(true)),
             input_faulted: Arc::new(AtomicBool::new(false)),
+            reader_lifecycle: PtyReaderLifecycle::completed_for_test(),
         }
     }
 
@@ -168,14 +173,33 @@ impl PtyHandle {
     ///    handle (keeping the PID reserved) until `child_exited` flips, and
     ///    we re-check that flag immediately before killing.
     pub fn terminate(&self) -> Result<(), String> {
+        // Stop the exact reader generation before closing writer/master state.
+        // A wake failure is not success: cleanup continues and the lifecycle
+        // completion below is the authoritative fallback acknowledgement.
+        let wake_result = self
+            .reader_lifecycle
+            .request_stop(Duration::from_millis(PTY_READER_WAKE_TIMEOUT_MS));
         self.control.close();
         self.wait_for_child(Self::GRACEFUL_SHUTDOWN_TOTAL);
-        if self.child_exited.load(Ordering::Acquire) {
-            return Ok(());
+        let kill_result = if self.child_exited.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            let result = self.kill_child_tree();
+            self.wait_for_child(Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS));
+            result
+        };
+        let reader_result = self
+            .reader_lifecycle
+            .wait_for_exit(Duration::from_millis(PTY_READER_EXIT_TIMEOUT_MS));
+        match (kill_result, reader_result) {
+            (Err(kill), Err(reader)) => Err(format!("{kill}; {reader}")),
+            (Err(kill), Ok(())) => Err(kill),
+            (Ok(()), Err(reader)) => Err(match wake_result {
+                Err(wake) => format!("{wake}; {reader}"),
+                Ok(()) => reader,
+            }),
+            (Ok(()), Ok(())) => Ok(()),
         }
-        self.kill_child_tree()?;
-        self.wait_for_child(Duration::from_millis(PTY_CONTROL_TERMINATE_GRACE_MS));
-        Ok(())
     }
 
     /// Write data (user input) to the PTY.
@@ -451,11 +475,22 @@ pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle
 where
     F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
 {
-    spawn_pty_with_metadata(session, on_output).map(|spawned| spawned.handle)
+    spawn_pty_for_generation(session, 1, on_output).map(|spawned| spawned.handle)
 }
 
 pub fn spawn_pty_with_metadata<F>(
     session: &TerminalSession,
+    on_output: F,
+) -> Result<SpawnedPty, String>
+where
+    F: Fn(Vec<u8>) -> PtyOutputControl + Send + 'static,
+{
+    spawn_pty_for_generation(session, 1, on_output)
+}
+
+pub fn spawn_pty_for_generation<F>(
+    session: &TerminalSession,
+    terminal_generation: u64,
     on_output: F,
 ) -> Result<SpawnedPty, String>
 where
@@ -574,10 +609,12 @@ where
         .take_writer()
         .map_err(|e| format!("Failed to take writer: {e}"))?;
 
-    let reader = pair
+    let reader_pair = pair
         .master
-        .try_clone_reader()
-        .map_err(|e| format!("Failed to clone reader: {e}"))?;
+        .try_clone_interruptible_reader(terminal_generation)
+        .map_err(|e| format!("Failed to clone interruptible reader: {e}"))?
+        .ok_or_else(|| "Native PTY does not provide an interruptible reader".to_string())?;
+    let reader_lifecycle = PtyReaderLifecycle::new(terminal_generation, reader_pair.control)?;
 
     let master = Arc::new(Mutex::new(Some(pair.master)));
     let control = PtyControlWorker::spawn(writer, Arc::clone(&master))?;
@@ -588,12 +625,12 @@ where
         child_pid,
         child_exited,
         input_faulted: Arc::new(AtomicBool::new(false)),
+        reader_lifecycle: Arc::clone(&reader_lifecycle),
     };
 
     // Spawn reader thread
     thread::spawn(move || {
-        let mut reader = reader;
-        read_pty_output_loop(&mut reader, on_output);
+        run_interruptible_reader_loop(reader_pair.reader, reader_lifecycle, on_output);
     });
 
     Ok(SpawnedPty {
@@ -602,29 +639,13 @@ where
     })
 }
 
-fn read_pty_output_loop(reader: &mut dyn Read, on_output: impl Fn(Vec<u8>) -> PtyOutputControl) {
-    let mut buf = [0u8; PTY_READ_BUFFER_BYTES];
-    loop {
-        match reader.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if on_output(buf[..n].to_vec()) == PtyOutputControl::Stop {
-                    break;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::terminal::InitialExecutionHost;
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     use crate::terminal::TerminalConfig;
     use std::cell::Cell;
-    #[cfg(windows)]
     use std::sync::mpsc;
     use std::sync::Condvar;
     use std::time::{Duration, Instant};
@@ -636,26 +657,42 @@ mod tests {
             reads: Arc<std::sync::atomic::AtomicUsize>,
         }
 
-        impl Read for ChunkReader {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        impl portable_pty::InterruptiblePtyReader for ChunkReader {
+            fn read_event(&mut self) -> portable_pty::PtyReadEvent {
                 self.reads.fetch_add(1, Ordering::Relaxed);
                 let Some(chunk) = self.chunks.pop_front() else {
-                    return Ok(0);
+                    return portable_pty::PtyReadEvent::Eof;
                 };
-                buffer[..chunk.len()].copy_from_slice(&chunk);
-                Ok(chunk.len())
+                portable_pty::PtyReadEvent::Data(chunk)
+            }
+        }
+
+        struct TestControl;
+        impl portable_pty::InterruptiblePtyReaderControl for TestControl {
+            fn terminal_generation(&self) -> u64 {
+                99
+            }
+
+            fn wake(
+                &self,
+                _terminal_generation: u64,
+                _wake_generation: u64,
+                _timeout: Duration,
+            ) -> std::io::Result<portable_pty::PtyWakeOutcome> {
+                Ok(portable_pty::PtyWakeOutcome::Terminal)
             }
         }
 
         let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let mut reader = ChunkReader {
+        let reader = ChunkReader {
             chunks: [b"fatal".to_vec(), b"must-not-run".to_vec()].into(),
             reads: Arc::clone(&reads),
         };
         let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let callback_count = Arc::clone(&callbacks);
 
-        read_pty_output_loop(&mut reader, move |_| {
+        let lifecycle = PtyReaderLifecycle::new(99, Box::new(TestControl)).unwrap();
+        run_interruptible_reader_loop(Box::new(reader), lifecycle, move |_| {
             callback_count.fetch_add(1, Ordering::Relaxed);
             PtyOutputControl::Stop
         });
@@ -664,13 +701,215 @@ mod tests {
         assert_eq!(reads.load(Ordering::Relaxed), 1);
     }
 
+    #[test]
+    fn output_reader_does_not_prefetch_while_callback_is_blocked() {
+        struct CountingReader {
+            chunks: std::collections::VecDeque<Vec<u8>>,
+            reads: Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl portable_pty::InterruptiblePtyReader for CountingReader {
+            fn read_event(&mut self) -> portable_pty::PtyReadEvent {
+                self.reads.fetch_add(1, Ordering::AcqRel);
+                self.chunks
+                    .pop_front()
+                    .map(portable_pty::PtyReadEvent::Data)
+                    .unwrap_or(portable_pty::PtyReadEvent::Eof)
+            }
+        }
+        struct TestControl;
+        impl portable_pty::InterruptiblePtyReaderControl for TestControl {
+            fn terminal_generation(&self) -> u64 {
+                100
+            }
+            fn wake(
+                &self,
+                _terminal_generation: u64,
+                _wake_generation: u64,
+                _timeout: Duration,
+            ) -> std::io::Result<portable_pty::PtyWakeOutcome> {
+                Ok(portable_pty::PtyWakeOutcome::Terminal)
+            }
+        }
+
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reader = CountingReader {
+            chunks: [
+                b"first".to_vec(),
+                b"second".to_vec(),
+                b"must-not-read".to_vec(),
+            ]
+            .into(),
+            reads: Arc::clone(&reads),
+        };
+        let lifecycle = PtyReaderLifecycle::new(100, Box::new(TestControl)).unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let callback_count = Arc::clone(&callbacks);
+        let worker = thread::spawn(move || {
+            run_interruptible_reader_loop(Box::new(reader), lifecycle, move |_| {
+                let call = callback_count.fetch_add(1, Ordering::AcqRel);
+                if call == 0 {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    PtyOutputControl::Continue
+                } else {
+                    PtyOutputControl::Stop
+                }
+            });
+        });
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        thread::sleep(Duration::from_millis(20));
+        assert_eq!(reads.load(Ordering::Acquire), 1);
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(callbacks.load(Ordering::Acquire), 2);
+        assert_eq!(reads.load(Ordering::Acquire), 2);
+    }
+
+    #[test]
+    fn external_stop_during_a_blocked_callback_joins_the_reader_generation() {
+        struct CountingReader {
+            chunks: std::collections::VecDeque<Vec<u8>>,
+            reads: Arc<std::sync::atomic::AtomicUsize>,
+        }
+        impl portable_pty::InterruptiblePtyReader for CountingReader {
+            fn read_event(&mut self) -> portable_pty::PtyReadEvent {
+                self.reads.fetch_add(1, Ordering::AcqRel);
+                self.chunks
+                    .pop_front()
+                    .map(portable_pty::PtyReadEvent::Data)
+                    .unwrap_or(portable_pty::PtyReadEvent::Eof)
+            }
+        }
+        struct TimedOutControl;
+        impl portable_pty::InterruptiblePtyReaderControl for TimedOutControl {
+            fn terminal_generation(&self) -> u64 {
+                102
+            }
+            fn wake(
+                &self,
+                _terminal_generation: u64,
+                _wake_generation: u64,
+                _timeout: Duration,
+            ) -> std::io::Result<portable_pty::PtyWakeOutcome> {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "injected cancellation deadline",
+                ))
+            }
+        }
+
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reader = CountingReader {
+            chunks: [b"first".to_vec(), b"must-not-read".to_vec()].into(),
+            reads: Arc::clone(&reads),
+        };
+        let lifecycle = PtyReaderLifecycle::new(102, Box::new(TimedOutControl)).unwrap();
+        let worker_lifecycle = Arc::clone(&lifecycle);
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            run_interruptible_reader_loop(Box::new(reader), worker_lifecycle, move |_| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                PtyOutputControl::Continue
+            });
+            done_tx.send(()).unwrap();
+        });
+
+        entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(reads.load(Ordering::Acquire), 1);
+        assert!(lifecycle.request_stop(Duration::from_millis(1)).is_err());
+        assert_eq!(reads.load(Ordering::Acquire), 1);
+        release_tx.send(()).unwrap();
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        lifecycle.wait_for_exit(Duration::from_millis(1)).unwrap();
+        assert_eq!(reads.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn malformed_empty_data_stops_without_waiting_forever_for_a_decision() {
+        struct EmptyReader(bool);
+        impl portable_pty::InterruptiblePtyReader for EmptyReader {
+            fn read_event(&mut self) -> portable_pty::PtyReadEvent {
+                if std::mem::replace(&mut self.0, false) {
+                    portable_pty::PtyReadEvent::Data(Vec::new())
+                } else {
+                    portable_pty::PtyReadEvent::Eof
+                }
+            }
+        }
+        struct TestControl;
+        impl portable_pty::InterruptiblePtyReaderControl for TestControl {
+            fn terminal_generation(&self) -> u64 {
+                101
+            }
+            fn wake(
+                &self,
+                _terminal_generation: u64,
+                _wake_generation: u64,
+                _timeout: Duration,
+            ) -> std::io::Result<portable_pty::PtyWakeOutcome> {
+                Ok(portable_pty::PtyWakeOutcome::Terminal)
+            }
+        }
+        let lifecycle = PtyReaderLifecycle::new(101, Box::new(TestControl)).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            run_interruptible_reader_loop(Box::new(EmptyReader(true)), lifecycle, |_| {
+                panic!("empty Data must not reach the output callback")
+            });
+            done_tx.send(()).unwrap();
+        });
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
+    #[test]
+    fn oversized_data_stops_without_waiting_forever_for_a_decision() {
+        struct OversizedReader(bool);
+        impl portable_pty::InterruptiblePtyReader for OversizedReader {
+            fn read_event(&mut self) -> portable_pty::PtyReadEvent {
+                if std::mem::replace(&mut self.0, false) {
+                    portable_pty::PtyReadEvent::Data(vec![0; PTY_READ_BUFFER_BYTES + 1])
+                } else {
+                    portable_pty::PtyReadEvent::Eof
+                }
+            }
+        }
+        struct TestControl;
+        impl portable_pty::InterruptiblePtyReaderControl for TestControl {
+            fn terminal_generation(&self) -> u64 {
+                103
+            }
+            fn wake(
+                &self,
+                _terminal_generation: u64,
+                _wake_generation: u64,
+                _timeout: Duration,
+            ) -> std::io::Result<portable_pty::PtyWakeOutcome> {
+                Ok(portable_pty::PtyWakeOutcome::Terminal)
+            }
+        }
+        let lifecycle = PtyReaderLifecycle::new(103, Box::new(TestControl)).unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            run_interruptible_reader_loop(Box::new(OversizedReader(true)), lifecycle, |_| {
+                panic!("oversized Data must not reach the output callback")
+            });
+            done_tx.send(()).unwrap();
+        });
+        done_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    }
+
     /// PTY 출력을 `needle` 이 보일 때까지(또는 `timeout` 까지) 모은다.
     ///
     /// 청크 **개수**로 예산을 잡으면 콘솔 호스트가 시작 시퀀스를 잘게 쪼개 보낼 때
     /// 정작 기다리던 본문이 오기 전에 예산이 소진된다 — 번들 ConPTY 로 바꾸면서
     /// 실제로 겪었다([ADR-0067](../../docs/adr/0067-bundled-conpty-output-and-staging-contract.md)).
     /// 예산은 시간으로만 잡는다. 비교는 대소문자를 구분하지 않는다.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn collect_pty_output_until(
         rx: &mpsc::Receiver<Vec<u8>>,
         needle: &str,
@@ -697,7 +936,7 @@ mod tests {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     const PTY_OUTPUT_TIMEOUT: Duration = Duration::from_secs(15);
 
     #[cfg(windows)]
@@ -734,6 +973,62 @@ mod tests {
                 advertise_true_color: true,
             },
         )
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    fn make_native_idle_session() -> TerminalSession {
+        #[cfg(windows)]
+        let command_line = "powershell.exe -NoLogo";
+        #[cfg(target_os = "linux")]
+        let command_line = "/bin/sh";
+        TerminalSession::new(
+            "interruptible-reader-test".into(),
+            TerminalConfig {
+                profile: "native-test".into(),
+                command_line: command_line.into(),
+                startup_command: String::new(),
+                starting_directory: String::new(),
+                cols: 80,
+                rows: 24,
+                sync_group: "reader-test".into(),
+                env: vec![],
+                advertise_true_color: true,
+            },
+        )
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn native_interruptible_reader_preserves_data_and_stops_while_idle() {
+        let session = make_native_idle_session();
+        let (tx, rx) = mpsc::channel();
+        let handle = spawn_pty_for_generation(&session, 73, move |data| {
+            let _ = tx.send(data);
+            PtyOutputControl::Continue
+        })
+        .expect("spawn native PTY")
+        .handle;
+
+        handle
+            .write(b"echo INTERRUPTIBLE_READER_DATA_OK\r\n")
+            .expect("write marker");
+        let output =
+            collect_pty_output_until(&rx, "INTERRUPTIBLE_READER_DATA_OK", PTY_OUTPUT_TIMEOUT);
+        assert!(output.contains("INTERRUPTIBLE_READER_DATA_OK"));
+
+        // Make the next native read idle, then require a bounded generation
+        // wake rather than relying on child output or cloned-reader close.
+        thread::sleep(Duration::from_millis(100));
+        let started = Instant::now();
+        handle.terminate().expect("idle generation teardown");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "idle PTY reader did not stop within the bounded teardown window"
+        );
+        handle
+            .reader_lifecycle
+            .wait_for_exit(Duration::from_millis(1))
+            .expect("reader generation completion");
     }
 
     #[test]

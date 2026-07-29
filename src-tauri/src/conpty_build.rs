@@ -360,7 +360,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("tauri.conf.json"),
-            r#"{"bundle":{"resources":{"assets/help.txt":"help.txt"}}}"#,
+            r#"{"bundle":{"resources":{"assets/help.txt":"help.txt","../THIRD_PARTY_NOTICES.md":"THIRD_PARTY_NOTICES.md","../vendor/portable-pty/LICENSE.md":"licenses/portable-pty-LICENSE.md"}}}"#,
         )
         .unwrap();
         std::fs::write(
@@ -379,6 +379,14 @@ mod tests {
         assert_eq!(value["productName"], "Override");
         assert_eq!(value["bundle"]["resources"]["assets/help.txt"], "help.txt");
         assert_eq!(
+            value["bundle"]["resources"]["../THIRD_PARTY_NOTICES.md"],
+            "THIRD_PARTY_NOTICES.md"
+        );
+        assert_eq!(
+            value["bundle"]["resources"]["../vendor/portable-pty/LICENSE.md"],
+            "licenses/portable-pty-LICENSE.md"
+        );
+        assert_eq!(
             value["bundle"]["resources"]["assets/extra.txt"],
             "extra.txt"
         );
@@ -396,5 +404,13 @@ mod tests {
         assert!(resolved["bundle"]["resources"]
             .get("gen/conpty/OpenConsole.exe")
             .is_none());
+        assert_eq!(
+            resolved["bundle"]["resources"]["../THIRD_PARTY_NOTICES.md"],
+            "THIRD_PARTY_NOTICES.md"
+        );
+        assert_eq!(
+            resolved["bundle"]["resources"]["../vendor/portable-pty/LICENSE.md"],
+            "licenses/portable-pty-LICENSE.md"
+        );
     }
 }

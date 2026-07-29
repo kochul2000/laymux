@@ -32,6 +32,10 @@
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../vendor/portable-pty/LICENSE.md": "licenses/portable-pty-LICENSE.md"
+    }
   }
 }

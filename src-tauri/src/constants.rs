@@ -130,6 +130,11 @@ pub const ENTER_SUBMIT_CR_DELAY_MS: u64 = 300;
 pub const PTY_CONTROL_CANCEL_GRACE_MS: u64 = 250;
 /// Final bounded wait for the platform worker to acknowledge PTY termination.
 pub const PTY_CONTROL_TERMINATE_GRACE_MS: u64 = 250;
+/// Bound for an interruptible PTY reader to acknowledge a generation wake.
+pub const PTY_READER_WAKE_TIMEOUT_MS: u64 = 500;
+/// Bound for the generation-scoped reader lifecycle to reach terminal state
+/// after the PTY master/child teardown has been requested.
+pub const PTY_READER_EXIT_TIMEOUT_MS: u64 = 1_000;
 /// Shared upper bound for one owner transition, including worker polling,
 /// cancellation grace, terminal teardown, and scheduler slack.
 pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;

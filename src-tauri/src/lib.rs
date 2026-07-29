@@ -30,6 +30,7 @@ pub mod process_tree;
 pub mod pty;
 mod pty_control;
 pub mod pty_geometry;
+mod pty_reader;
 pub mod pty_trace;
 pub mod remote_server;
 pub mod remote_session;

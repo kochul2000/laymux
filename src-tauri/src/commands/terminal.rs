@@ -253,7 +253,8 @@ pub fn create_terminal_session(
     // `fetch_add` needs nothing more than `&AtomicU64`.
     let output_emit_discards = AtomicU64::new(0);
     let output_record_failures = AtomicU64::new(0);
-    let spawned_pty = pty::spawn_pty_with_metadata(&session, move |data| {
+    let terminal_generation = output_session.generation();
+    let spawned_pty = pty::spawn_pty_for_generation(&session, terminal_generation, move |data| {
         // Retirement may wake a callback parked in the fatal record-error gate
         // just before close terminates the PTY handle. Drop any final queued
         // master reads without re-locking poisoned protocol state or emitting
