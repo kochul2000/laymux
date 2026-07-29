@@ -3674,9 +3674,7 @@ export function TerminalView({
         // Replay remains a per-entry barrier, so its 64 KiB slices are never
         // coalesced with each other or with a different logical request.
         for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_FAIR_QUANTUM_BYTES) {
-          chunks.push(
-            data.slice(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES) as Uint8Array,
-          );
+          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES) as Uint8Array);
         }
       }
       if (chunks.length === 0) chunks.push(data);
