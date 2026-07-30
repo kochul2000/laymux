@@ -70,8 +70,8 @@ export class TerminalOutputV3ContinuationControl {
   private suppressedGrantId: string | undefined;
   /**
    * A bounded receipt pipeline may already contain several successors from
-   * overlapping closed grants. Keep those identities until the first
-   * contiguous null-grant envelope proves the backend has observed the close.
+   * overlapping closed grants. A null-grant envelope may have been frozen
+   * before a later hold, so only bounded history eviction retires these ids.
    */
   private settledCloseGrants: TerminalOutputFrameContinuationGrant[] = [];
   /**
@@ -92,6 +92,12 @@ export class TerminalOutputV3ContinuationControl {
 
   get activeGrantId(): string | null {
     return this.grant?.grantId ?? null;
+  }
+
+  hasDeferredEnvelope(envelopeId: number, seqStart: number): boolean {
+    return [...this.openingPending, ...this.pending].some(
+      (item) => item.envelope.envelopeId === envelopeId && item.envelope.seqStart === seqStart,
+    );
   }
 
   admitDuringOpen(
@@ -161,10 +167,6 @@ export class TerminalOutputV3ContinuationControl {
       return false;
     }
     return true;
-  }
-
-  clearSettledCloseGrants(): void {
-    this.settledCloseGrants = [];
   }
 
   controlsForTransitions(

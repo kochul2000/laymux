@@ -103,6 +103,19 @@ function harness(
   return { runtime, current, visible, checkpoints, failStops };
 }
 
+interface DrainInternals {
+  ingress: TerminalOutputEnvelopeIngress;
+  repairState: TerminalOutputV3RepairState;
+  controller: {
+    hasDeferredEnvelope(envelopeId: number, seqStart: number): boolean;
+    receiveValidated(
+      envelope: TerminalOutputEnvelope,
+      now: number,
+    ): Promise<TerminalOutputV3SurfaceResult>;
+  };
+  drainPendingObserved(strict: boolean): Promise<void>;
+}
+
 describe("TerminalOutputV3Runtime exact repair", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,18 +186,6 @@ describe("TerminalOutputV3Runtime exact repair", () => {
   });
 
   it("keeps one drain owner while the head observed successor is still gated", async () => {
-    interface DrainInternals {
-      ingress: TerminalOutputEnvelopeIngress;
-      repairState: TerminalOutputV3RepairState;
-      controller: {
-        receiveValidated(
-          envelope: TerminalOutputEnvelope,
-          now: number,
-        ): Promise<TerminalOutputV3SurfaceResult>;
-      };
-      drainPendingObserved(strict: boolean): Promise<void>;
-    }
-
     const h = harness(() => Promise.resolve({ status: "idle", envelope: null }));
     const internals = h.runtime as unknown as DrainInternals;
     const firstEnvelope = normalizeTerminalOutputEnvelope(payload(1, 0, "A"));
@@ -216,6 +217,40 @@ describe("TerminalOutputV3Runtime exact repair", () => {
 
     await Promise.all([firstDrain, secondDrain, firstAdmission.promise, secondAdmission.promise]);
     expect(receiveValidated).toHaveBeenCalledTimes(2);
+    expect(h.failStops).toEqual([]);
+    expect(internals.ingress.snapshot()).toMatchObject({
+      admittedSeq: 2,
+      expectedEnvelopeId: 3,
+    });
+  });
+
+  it("waits when the expected envelope is already owned by a continuation gate", async () => {
+    const h = harness(() => Promise.resolve({ status: "idle", envelope: null }));
+    const internals = h.runtime as unknown as DrainInternals;
+    const expected = normalizeTerminalOutputEnvelope(payload(1, 0, "A"));
+    const observed = normalizeTerminalOutputEnvelope(payload(2, 1, "B"));
+    const observedAdmission = internals.repairState.queueObserved(observed, 2);
+    if (observedAdmission.kind === "conflict") {
+      throw new Error("test setup failed to queue the observed successor");
+    }
+    const deferredExpected = vi
+      .spyOn(internals.controller, "hasDeferredEnvelope")
+      .mockReturnValue(true);
+
+    await internals.drainPendingObserved(true);
+    expect(deferredExpected).toHaveBeenCalledWith(1, 0);
+    expect(h.failStops).toEqual([]);
+
+    internals.ingress.acceptValidated(expected);
+    internals.ingress.completeReceipt({ terminalId: "term-1", ...expected.receiptIdentity });
+    deferredExpected.mockReturnValue(false);
+    vi.spyOn(internals.controller, "receiveValidated").mockImplementation((envelope) => {
+      internals.ingress.acceptValidated(envelope);
+      internals.ingress.completeReceipt({ terminalId: "term-1", ...envelope.receiptIdentity });
+      return Promise.resolve({ kind: "accepted", envelopeId: envelope.envelopeId });
+    });
+
+    await Promise.all([internals.drainPendingObserved(true), observedAdmission.promise]);
     expect(h.failStops).toEqual([]);
     expect(internals.ingress.snapshot()).toMatchObject({
       admittedSeq: 2,

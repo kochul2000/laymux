@@ -113,6 +113,10 @@ export class TerminalOutputV3SurfaceController {
     return this.unsettledDeliveryCount > 0;
   }
 
+  hasDeferredEnvelope(envelopeId: number, seqStart: number): boolean {
+    return this.continuationControl.hasDeferredEnvelope(envelopeId, seqStart);
+  }
+
   matchKnownEnvelope(envelope: TerminalOutputEnvelope): TerminalOutputV3KnownEnvelopeMatch {
     return this.ledger.match(envelope);
   }
@@ -164,10 +168,6 @@ export class TerminalOutputV3SurfaceController {
     if (envelope.grantId !== this.continuationControl.activeGrantId) {
       return Promise.resolve(this.failStop("grant_mismatch"));
     }
-
-    // The first null-grant successor proves the backend observed close. Do not
-    // let a later stale event inherit the bounded old-grant grace.
-    this.continuationControl.clearSettledCloseGrants();
 
     return this.startEnvelope(envelope, now);
   }

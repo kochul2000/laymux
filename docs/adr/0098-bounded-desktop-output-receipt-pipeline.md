@@ -19,8 +19,8 @@ desktop generation은 최대 **4개**의 immutable v3 envelope를 receipt 대기
 - receipt는 대상 identity의 slot 하나만 제거하며, 순서 밖 receipt도 허용한다. 최근 수락 receipt는 bounded history에 남겨 같은 identity/payload retry를 idempotent하게 처리한다.
 - repair는 동일한 full transport identity의 slot을 조회한다. hold/close는 pipeline에 먼저 동결된 transport grant와 새 control grant가 다를 수 있으므로 `(generation, lease token, envelope id)` boundary와 active control grant 소유권을 분리해 검증한다. receipt 뒤 close도 recent receipt의 전체 `[seqStart, seqEnd]`를 사용한다. deadline worker는 모든 slot 중 가장 이른 receipt deadline에서 generation을 fail-stop한다.
 - `heldEnvelopeId`는 opener envelope마다 backend hold를 최대 하나만 허용하는 불변식으로 유지한다. hold/close는 수락된 뒤 receipt를 열며, 이 control 순서는 receipt pipeline과 독립적으로 보존한다.
-- frontend는 앞 envelope가 continuation control에 보류된 동안 뒤따라 관측한 contiguous successor를 backend pipeline 상한과 같은 4개까지 source 순서로 보존한다. 이 bounded chain은 단일 drain owner만 순차 소비해 병렬 완료 callback이 뒤 successor를 먼저 판정하지 못하게 하며, 실제 identity 충돌이나 유실 gap과 구분하고 앞 control이 settle될 때 각 successor를 최신 control gate에 재진입시킨다.
-- frontend는 최대 4-slot에서 겹쳐 발행된 이전 closed grant들을 bounded history로 기억한다. 보류 envelope는 재개할 때마다 최신 opening/closing gate에 재진입시켜, 앞 envelope가 새 control 전이를 만들면 뒤 envelope가 그 전이를 우회하지 못하게 한다.
+- frontend는 앞 envelope가 continuation control에 보류된 동안 뒤따라 관측한 contiguous successor를 backend pipeline 상한과 같은 4개까지 source 순서로 보존한다. 이 bounded chain은 단일 drain owner만 순차 소비해 병렬 완료 callback이 뒤 successor를 먼저 판정하지 못하게 한다. ingress가 기다리는 정확한 envelope를 continuation gate가 이미 소유하면 뒤 successor를 gap으로 판정하지 않고 그 owner의 settle을 기다리며, 그 뒤 각 successor를 최신 control gate에 재진입시킨다.
+- frontend는 최대 4-slot에서 겹쳐 발행된 이전 closed grant들을 bounded history로 기억한다. pre-hold에 동결된 null-grant envelope 뒤에 hold 반영분이 올 수 있으므로 null 하나만으로 이 history를 지우지 않고 bounded eviction으로만 퇴출한다. 보류 envelope는 재개할 때마다 최신 opening/closing gate에 재진입시켜, 앞 envelope가 새 control 전이를 만들면 뒤 envelope가 그 전이를 우회하지 못하게 한다.
 - parsed ACK credit, active continuation grant, envelope byte/delta/wire 상한, fail-stop과 명시적 close/recreate 복구는 ADR-0095 그대로다.
 - Automation diagnostics의 기존 `receiptSlot`은 호환성을 위해 가장 오래된 미수령 slot을 계속 나타낸다. 다중 slot 전체의 공개는 별도 외부 계약 변경으로 다룬다.
 

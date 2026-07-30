@@ -390,6 +390,12 @@ export class TerminalOutputV3Runtime {
         pending.envelope.seqStart === ingress.admittedSeq;
       const match = this.controller.matchKnownEnvelope(pending.envelope);
       if (!isSuccessor && match !== "same") {
+        if (
+          match === "unknown" &&
+          this.controller.hasDeferredEnvelope(ingress.expectedEnvelopeId, ingress.admittedSeq)
+        ) {
+          return;
+        }
         if (strict) this.failRepair(match === "conflict" ? "observed_conflict" : "non_successor");
         return;
       }

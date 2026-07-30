@@ -667,7 +667,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controller.activeGrantId).toBeNull();
   });
 
-  it("accepts bounded old-grant successors until the first null-grant successor", async () => {
+  it("keeps bounded closed-grant history across a pre-hold null successor", async () => {
     const h = harness();
     await h.controller.receive(payload({ data: OPEN }), 1);
     await h.controller.receive(
@@ -689,7 +689,8 @@ describe("TerminalOutputV3SurfaceController", () => {
         payload({ envelopeId: 6, seqStart: 19, grantId: "grant-1", data: [68] }),
         6,
       ),
-    ).resolves.toEqual({ kind: "fail-stop", reason: "grant_mismatch" });
+    ).resolves.toEqual({ kind: "accepted", envelopeId: 6 });
+    expect(h.failStops).toEqual([]);
   });
 
   it("gates an earlier closed grant while a newer frame is closing", async () => {
