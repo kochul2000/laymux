@@ -119,6 +119,68 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
         snapshot["frontend"]["terminalOutputV3"]["t1"]["parsedSeq"] = 29
         self.assertIsNone(benchmark.settled_frontiers(snapshot, ["t1"]))
 
+    def test_minimum_parser_backlog_requires_every_hot_pane(self):
+        snapshot = {
+            "terminalOutput": [
+                {"terminalId": "t1", "parsedAck": 10, "writeSeq": 10 + 65_536},
+                {"terminalId": "t2", "parsedAck": 20, "writeSeq": 20 + 65_535},
+            ]
+        }
+
+        self.assertFalse(benchmark.has_minimum_parser_backlog(snapshot, ["t1", "t2"]))
+        snapshot["terminalOutput"][1]["writeSeq"] += 1
+        self.assertTrue(benchmark.has_minimum_parser_backlog(snapshot, ["t1", "t2"]))
+
+    def test_pipeline_counter_delta_rejects_attach_or_replay_during_run(self):
+        initial = {"t1": {"attaches": 1, "attachReplayBytes": 512}}
+        unchanged = {"t1": {"attaches": 1, "attachReplayBytes": 512}}
+        replayed = {"t1": {"attaches": 2, "attachReplayBytes": 1_024}}
+
+        self.assertTrue(
+            benchmark.pipeline_counters_unchanged(
+                initial, unchanged, ["t1"], ["attaches", "attachReplayBytes"]
+            )
+        )
+        self.assertFalse(
+            benchmark.pipeline_counters_unchanged(
+                initial, replayed, ["t1"], ["attaches", "attachReplayBytes"]
+            )
+        )
+        self.assertFalse(
+            benchmark.pipeline_counters_unchanged(
+                initial, {}, ["t1"], ["attaches", "attachReplayBytes"]
+            )
+        )
+
+    def test_ready_terminal_ids_rejects_stale_profile_generation(self):
+        instances = [
+            {
+                "id": "old",
+                "workspaceId": "ws",
+                "paneIndex": 0,
+                "profile": "WSL",
+                "sessionReady": True,
+            }
+        ]
+
+        self.assertIsNone(benchmark.ready_terminal_ids(instances, "ws", 1))
+        instances[0]["profile"] = "PowerShell"
+        self.assertEqual(benchmark.ready_terminal_ids(instances, "ws", 1), ["old"])
+
+    @patch.object(benchmark, "api")
+    def test_buffer_logical_text_rejoins_wrapped_xterm_rows(self, mocked_api):
+        mocked_api.return_value = {
+            "lines": [
+                {"text": "FINAL-run-terminal-", "isWrapped": False},
+                {"text": "pane-0001-150000", "isWrapped": True},
+                {"text": "next", "isWrapped": False},
+            ]
+        }
+
+        text = benchmark.buffer_logical_text("terminal-pane-0001")
+
+        self.assertEqual(text, "FINAL-run-terminal-pane-0001-150000\nnext")
+
     def test_latency_summary_preserves_failures(self):
         summary = benchmark.latency_summary(
             [
@@ -132,33 +194,39 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["maxMs"], 4.0)
 
     @patch.object(benchmark, "api")
-    def test_cleanup_deletes_only_exact_benchmark_names(self, mocked_api):
+    def test_cleanup_restores_original_workspace_and_deletes_only_created_ids(self, mocked_api):
         mocked_api.side_effect = [
             {
                 "activeWorkspaceId": "target-control",
                 "workspaces": [
-                    {"id": "keep", "name": "normal"},
+                    {"id": "original", "name": "normal"},
                     {"id": "target-hot", "name": "bench-661-run-hot"},
                     {"id": "target-control", "name": "bench-661-run-control"},
-                    {"id": "similar", "name": "bench-661-run-hot-old"},
+                    {"id": "same-name", "name": "bench-661-run-hot"},
                 ],
             },
             {},
             {},
             {},
+            {},
         ]
 
-        benchmark.cleanup_named_workspaces(
-            {"bench-661-run-hot", "bench-661-run-control"}
+        benchmark.cleanup_created_workspaces(
+            benchmark.BenchmarkResources(
+                original_active_workspace_id="original",
+                original_focused_terminal_id="original-terminal",
+                created_workspace_ids=["target-hot", "target-control"],
+            )
         )
 
         self.assertEqual(
             mocked_api.call_args_list,
             [
                 unittest.mock.call("GET", "/workspaces"),
-                unittest.mock.call("POST", "/workspaces/active", {"id": "keep"}),
+                unittest.mock.call("POST", "/workspaces/active", {"id": "original"}),
                 unittest.mock.call("DELETE", "/workspaces/target-control"),
                 unittest.mock.call("DELETE", "/workspaces/target-hot"),
+                unittest.mock.call("POST", "/terminals/original-terminal/focus"),
             ],
         )
 
