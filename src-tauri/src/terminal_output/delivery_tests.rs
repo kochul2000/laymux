@@ -2,7 +2,7 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[path = "delivery_emitter_tests.rs"]
 mod emitter;
@@ -175,6 +175,71 @@ fn one_unreceipted_slot_and_identity_retries_are_exact() {
 
     delivery
         .acknowledge_receipt(&identity(&second), second.seq_end)
+        .unwrap();
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+    delivery.join().unwrap();
+}
+
+#[test]
+fn repair_distinguishes_receipted_parser_backlog_from_a_lost_in_flight_event() {
+    let delivery = DesktopOutputDelivery::new("repair-parser-backlog".into(), 1);
+    install(&delivery, 0);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_: &str, envelope: &TerminalOutputDeltaEnvelopeV3| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+
+    delivery.enqueue(delta(0, 1)).unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    delivery.enqueue(delta(1, 1)).unwrap();
+    {
+        let mut state = delivery.inner.state.lock().unwrap();
+        state.pending.front_mut().unwrap().1 = Instant::now() + Duration::from_secs(60);
+    }
+    delivery
+        .acknowledge_receipt(&identity(&first), first.seq_end)
+        .unwrap();
+
+    let next_identity = TerminalOutputEnvelopeIdentity {
+        generation: 1,
+        lease_token: "lease-1".into(),
+        envelope_id: first.envelope_id + 1,
+        grant_id: None,
+    };
+    let backlog = delivery
+        .repair_envelope(&next_identity, first.seq_end)
+        .unwrap();
+    assert_eq!(
+        backlog.status,
+        TerminalOutputEnvelopeRepairStatus::Idle,
+        "a receipted envelope with parser credit still behind can leave the next bytes pending"
+    );
+    assert!(backlog.envelope.is_none());
+    let diagnostics = delivery.diagnostics().unwrap();
+    assert_eq!(diagnostics.parsed_seq, 0);
+    assert_eq!(diagnostics.observed_seq, 2);
+    assert!(diagnostics.in_flight.is_none());
+
+    {
+        let mut state = delivery.inner.state.lock().unwrap();
+        state.pending.front_mut().unwrap().1 = Instant::now() - Duration::from_secs(1);
+        delivery.inner.changed.notify_all();
+    }
+    let emitted = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let lost_event = delivery
+        .repair_envelope(&identity(&emitted), emitted.seq_start)
+        .unwrap();
+    assert_eq!(lost_event.status, TerminalOutputEnvelopeRepairStatus::Exact);
+    assert_eq!(lost_event.envelope, Some(emitted.clone()));
+
+    delivery
+        .acknowledge_receipt(&identity(&emitted), emitted.seq_end)
         .unwrap();
     delivery.close(TerminalOutputDeliveryCloseReason::Retired);
     delivery.join().unwrap();

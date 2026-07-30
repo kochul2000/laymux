@@ -31,7 +31,7 @@ fn utf8_continuations_cannot_forge_c1_control_string_boundaries() {
     // of the UTF-8 scalar E1 80 xx. xterm decodes the scalar before VT parsing,
     // so none of them is an 8-bit control introducer or ST terminator.
     let c1_continuations = [0x90, 0x98, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f];
-    for introducer in [b']', b'P'] {
+    for introducer in *b"]P" {
         for continuation in c1_continuations {
             let mut open = vec![0x1b, introducer];
             // DCS needs a final byte before it enters passthrough. A decoded
@@ -58,7 +58,7 @@ fn utf8_continuations_cannot_forge_c1_control_string_boundaries() {
     // SOS/PM/APC have no NON_ASCII_PRINTABLE transition in xterm's parser;
     // the decoded scalar aborts these ignored strings to Ground. The same C1-
     // looking continuation therefore cannot forge an ST transition either.
-    for introducer in [b'X', b'^', b'_'] {
+    for introducer in *b"X^_" {
         let mut adapter = FakeAdapter::proven();
         adapter
             .drains

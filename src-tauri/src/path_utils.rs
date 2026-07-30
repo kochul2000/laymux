@@ -305,7 +305,7 @@ pub fn find_wsl_distro(state: &AppState, source_id: &str) -> Option<String> {
         }
     }
     // Try other WSL terminals
-    for (_, session) in terminals.iter() {
+    for session in terminals.values() {
         if session.config.profile.eq_ignore_ascii_case("wsl") {
             if let Some(ref distro) = session.wsl_distro {
                 return Some(distro.clone());

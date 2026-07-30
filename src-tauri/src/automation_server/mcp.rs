@@ -2960,7 +2960,7 @@ impl McpHandler {
         let mut runtime_info: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         if let Ok(terms) = self.state.app_state.terminals.lock_or_err() {
-            for (_, session) in terms.iter() {
+            for session in terms.values() {
                 let profile = &session.config.profile;
                 if !runtime_info.contains_key(profile) {
                     let shell_type = session

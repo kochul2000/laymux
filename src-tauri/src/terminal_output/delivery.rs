@@ -351,8 +351,16 @@ impl DesktopOutputDelivery {
             ));
         }
         let Some(in_flight) = state.in_flight.as_mut() else {
+            // `observed_seq` includes every delta already admitted to the
+            // pending queue. While the worker is between a completed receipt
+            // and its next envelope build, the frontend legitimately asks at
+            // the first pending delta rather than at that queue's tail.
+            let next_delivery_seq = state
+                .pending
+                .front()
+                .map_or(state.observed_seq, |(delta, _)| delta.seq_start);
             let expected_next = state.next_envelope_id.checked_add(1) == Some(identity.envelope_id)
-                && state.observed_seq == expected_seq_start;
+                && next_delivery_seq == expected_seq_start;
             return Ok(repair_response(
                 if expected_next {
                     TerminalOutputEnvelopeRepairStatus::Idle

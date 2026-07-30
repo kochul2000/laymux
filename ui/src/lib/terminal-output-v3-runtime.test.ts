@@ -43,7 +43,11 @@ function payload(envelopeId: number, seqStart: number, text: string) {
 
 function harness(
   repairEnvelope: TerminalOutputV3RuntimeOptions["repairEnvelope"],
-  options?: { current?: { value: boolean }; controlTimeoutMs?: number },
+  options?: {
+    current?: { value: boolean };
+    controlTimeoutMs?: number;
+    pendingVisibleParsers?: Array<() => void>;
+  },
 ) {
   const current = options?.current ?? { value: true };
   const visible: string[] = [];
@@ -73,7 +77,11 @@ function harness(
     },
     enqueueVisible(delta, onParsed) {
       visible.push(new TextDecoder().decode(delta.data));
-      onParsed?.();
+      if (onParsed && options?.pendingVisibleParsers) {
+        options.pendingVisibleParsers.push(onParsed);
+      } else {
+        onParsed?.();
+      }
     },
     sendParsedRange: () => Promise.resolve(true),
     repairEnvelope,
@@ -178,6 +186,39 @@ describe("TerminalOutputV3Runtime exact repair", () => {
       repairCount: 0,
       lastRepairReason: null,
     });
+  });
+
+  it("keeps a receipted surface healthy when the watchdog observes parser backlog as idle", async () => {
+    const pendingVisibleParsers: Array<() => void> = [];
+    const repair = vi.fn(() => Promise.resolve({ status: "idle" as const, envelope: null }));
+    const h = harness(repair, { pendingVisibleParsers });
+
+    await expect(h.runtime.receive(payload(1, 0, "A"), 0)).resolves.toEqual({
+      kind: "accepted",
+      envelopeId: 1,
+    });
+    expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledOnce();
+    expect(h.runtime.diagnostics()).toMatchObject({ admittedSeq: 1, parsedSeq: 0 });
+
+    await expect(h.runtime.pollExactRepair(1_000)).resolves.toBeUndefined();
+    expect(repair).toHaveBeenCalledWith({
+      terminalId: "term-1",
+      generation: 4,
+      token: "lease-4",
+      envelopeId: 2,
+      grantId: null,
+      seqStart: 1,
+    });
+    expect(h.failStops).toEqual([]);
+    expect(h.runtime.diagnostics()).toMatchObject({
+      admittedSeq: 1,
+      parsedSeq: 0,
+      repairCount: 0,
+      lastRepairReason: null,
+    });
+
+    pendingVisibleParsers[0]?.();
+    await vi.waitFor(() => expect(h.runtime.diagnostics().parsedSeq).toBe(1));
   });
 
   it("does not poll while a receipt response is unsettled, then permits the next watchdog", async () => {
