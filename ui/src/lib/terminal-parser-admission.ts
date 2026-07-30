@@ -159,6 +159,7 @@ export class TerminalParserAdmission {
       pending.turn(release, { ...context, maxBytes });
     } catch (error) {
       release();
+      if (this.heldCheckpointLease) this.releaseHeldCheckpointLease();
       throw error;
     }
   }
@@ -229,6 +230,7 @@ export class TerminalParserAdmission {
       turn(release, { contended, maxBytes: remainingBytes });
     } catch (error) {
       release();
+      if (this.heldCheckpointLease) this.releaseHeldCheckpointLease();
       throw error;
     }
     return true;

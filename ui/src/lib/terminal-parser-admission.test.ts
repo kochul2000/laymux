@@ -130,6 +130,47 @@ describe("TerminalParserAdmission", () => {
     expect(checkpoint).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retain a reusable checkpoint lease after a synchronous throw", () => {
+    const scheduled: Array<() => void> = [];
+    const localScheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const admission = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("checkpoint"),
+      () => "background",
+      (task) => {
+        localScheduled.push(task);
+        return () => {
+          const index = localScheduled.indexOf(task);
+          if (index >= 0) localScheduled.splice(index, 1);
+        };
+      },
+    );
+
+    expect(() =>
+      admission.request(
+        "checkpoint",
+        () => {
+          throw new Error("sync parser failure");
+        },
+        1,
+      ),
+    ).toThrow("sync parser failure");
+
+    let releaseOther: (() => void) | undefined;
+    scheduler.request(createTerminalWriteFairOwner("other"), (release) => {
+      releaseOther = release;
+    });
+    const retry = vi.fn((release: () => void) => release());
+    admission.request("checkpoint", retry, 1);
+
+    expect(retry).not.toHaveBeenCalled();
+    expect(localScheduled).toHaveLength(0);
+    releaseOther?.();
+    scheduled.shift()?.();
+    expect(retry).toHaveBeenCalledTimes(1);
+  });
+
   it("reuses a checkpoint lease for small Promise-chain segments", () => {
     const { admission, scheduler, scheduled, localScheduled } = createHarness();
     let releaseFirst: (() => void) | undefined;
