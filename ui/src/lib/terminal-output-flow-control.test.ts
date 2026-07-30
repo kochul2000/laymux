@@ -101,7 +101,17 @@ describe("TerminalOutputFlowAcknowledger", () => {
     try {
       const registry = new TerminalOutputControlOperationRegistry(1, 1);
       const occupiedScope = registry.mount("occupied");
-      const occupied = occupiedScope.tryStart("ack");
+      const occupiedAck = deferred<boolean>();
+      const occupiedTimeout = vi.fn();
+      const occupied = new TerminalOutputFlowAcknowledger(
+        0,
+        vi.fn().mockReturnValue(occupiedAck.promise),
+        {
+          tryStartOperation: () => occupiedScope.tryStart("ack"),
+          timeoutMs: 5,
+          onTimeout: occupiedTimeout,
+        },
+      );
       const waitingScope = registry.mount("waiting");
       const send = vi.fn().mockResolvedValue(true);
       const onTimeout = vi.fn();
@@ -120,15 +130,23 @@ describe("TerminalOutputFlowAcknowledger", () => {
         onTimeout,
       });
 
+      occupied.complete(0, 4);
       acknowledger.complete(0, 4);
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(4);
       expect(onTimeout).not.toHaveBeenCalled();
       expect(onOrphanCap).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
 
-      occupied?.markTimedOut();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(occupiedTimeout).toHaveBeenCalledOnce();
       expect(onOrphanCap).toHaveBeenCalledOnce();
       expect(send).not.toHaveBeenCalled();
+      expect(occupiedScope.globalTimedOut("ack")).toBe(1);
+
+      occupiedAck.resolve(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(occupiedScope.globalTimedOut("ack")).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -263,6 +281,8 @@ describe("TerminalOutputFlowAcknowledger", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(onTimeout).toHaveBeenCalledOnce();
       expect(scope.outstanding("ack")).toBe(1);
+      expect(scope.localTimedOut("ack")).toBe(1);
+      expect(scope.globalTimedOut("ack")).toBe(1);
       acknowledger.complete(4, 8);
       await vi.advanceTimersByTimeAsync(10_000);
       expect(send).toHaveBeenCalledTimes(1);
@@ -273,6 +293,8 @@ describe("TerminalOutputFlowAcknowledger", () => {
       expect(onConfirmed).not.toHaveBeenCalled();
       expect(onTimeout).toHaveBeenCalledOnce();
       expect(scope.outstanding("ack")).toBe(0);
+      expect(scope.localTimedOut("ack")).toBe(0);
+      expect(scope.globalTimedOut("ack")).toBe(0);
     } finally {
       vi.useRealTimers();
     }

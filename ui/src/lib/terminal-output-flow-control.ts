@@ -213,6 +213,7 @@ export class TerminalOutputFlowAcknowledger {
       () => {
         this.watchdogTimer = undefined;
         if (this.disposed) return;
+        operation?.markTimedOut();
         // The bridge Promise itself cannot be cancelled. Retire this token owner
         // first, then ask the current UI epoch to replace it. Its already-wired
         // handlers below absorb a late resolve/reject without touching prefix
