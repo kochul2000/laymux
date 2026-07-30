@@ -370,6 +370,24 @@ def latency_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def control_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
+    return bool(samples) and all(
+        "error" not in sample and (sample.get("write") or {}).get("ok") is True
+        for sample in samples
+    )
+
+
+def run_guarded_worker(
+    name: str, target, failures: list[dict[str, str]]
+) -> None:
+    try:
+        target()
+    except Exception as error:
+        failures.append(
+            {"worker": name, "type": type(error).__name__, "error": str(error)}
+        )
+
+
 def timed_request(method: str, path: str, payload: Any | None = None) -> dict[str, Any]:
     started = time.monotonic()
     try:
@@ -577,6 +595,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
     screenshot_samples: list[dict[str, Any]] = []
     control_samples: list[dict[str, Any]] = []
     frontier_catchup_samples: list[dict[str, Any]] = []
+    worker_failures: list[dict[str, str]] = []
     resources.failure_context.update({
         "hotTerminals": hot_terminals,
         "controlTerminal": control_terminal,
@@ -588,6 +607,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             "screenshot": screenshot_samples,
             "control": control_samples,
             "checkpointTargetCatchup": frontier_catchup_samples,
+            "workerFailures": worker_failures,
         },
     })
 
@@ -740,12 +760,21 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             frontier_catchup_samples.append({"ok": False, "error": str(error)})
 
     flood_started = time.monotonic()
+    worker_targets = [
+        ("diagnostics", diagnostics_loop),
+        ("bridge", bridge_loop),
+        ("control", control_probe),
+        ("screenshot", screenshot_probe),
+        ("checkpoint-catchup", frontier_catchup_probe),
+    ]
     workers = [
-        threading.Thread(target=diagnostics_loop, daemon=True),
-        threading.Thread(target=bridge_loop, daemon=True),
-        threading.Thread(target=control_probe, daemon=True),
-        threading.Thread(target=screenshot_probe, daemon=True),
-        threading.Thread(target=frontier_catchup_probe, daemon=True),
+        threading.Thread(
+            name=f"bench-661-{name}",
+            target=run_guarded_worker,
+            args=(name, target, worker_failures),
+            daemon=True,
+        )
+        for name, target in worker_targets
     ]
     completed_at: dict[str, float] = {}
     started_workers: list[threading.Thread] = []
@@ -813,13 +842,14 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         for path in ["/workspaces/active", "/grid"]
     }
     max_service_gap = max(longest_service_gap_ms.values(), default=0.0)
-    control_ok = bool(control_samples) and all("error" not in item for item in control_samples)
+    control_ok = control_samples_succeeded(control_samples)
     catchup_ok = bool(frontier_catchup_samples) and all(
         sample.get("ok") and float(sample.get("maxMs") or 0) < 3_000
         for sample in frontier_catchup_samples
     )
     acceptance = {
         "workersStopped": not resources.failure_context["workersAliveAfterJoin"],
+        "workersHadNoUnexpectedErrors": not worker_failures,
         "frontiersSettled": True,
         "allFinalMarkersRendered": all(buffer_final.values()),
         "backgroundServiceGapUnder3s": max_service_gap < 3_000,
@@ -908,6 +938,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         "diagnostics": latency_summary(diagnostics_samples),
         "screenshot": latency_summary(screenshot_samples),
         "control": control_samples,
+        "workerFailures": worker_failures,
         "checkpointTargetCatchup": frontier_catchup_samples,
         "maxFrontendReportAgeMs": round(max(report_ages), 3) if report_ages else None,
         "stallDelta": (final_frontend.get("stalls") or 0) - (initial_frontend.get("stalls") or 0),
@@ -983,29 +1014,30 @@ def main() -> int:
         summary = run(args, resources)
     except BaseException as error:
         primary_error = error
-        if isinstance(error, BenchmarkError):
+        try:
             try:
-                try:
-                    failure_snapshot = api("GET", "/diagnostics/frontend")
-                except BenchmarkError as snapshot_error:
-                    failure_snapshot = {"error": str(snapshot_error)}
-                output = Path(args.output).resolve()
-                output.parent.mkdir(parents=True, exist_ok=True)
-                output.write_text(
-                    json.dumps(
-                        {
-                            "error": str(error),
-                            "runId": args.run_id,
-                            "finalDiagnostics": failure_snapshot,
-                            "partialRun": resources.failure_context,
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    ),
-                    encoding="utf-8",
+                failure_snapshot = api("GET", "/diagnostics/frontend")
+            except BaseException as snapshot_error:
+                failure_snapshot = {"error": str(snapshot_error)}
+            output = Path(args.output).resolve()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(
+                json.dumps(
+                    {
+                        "error": str(error),
+                        "errorType": type(error).__name__,
+                        "runId": args.run_id,
+                        "finalDiagnostics": failure_snapshot,
+                        "partialRun": resources.failure_context,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
                 )
-            except BaseException as error_writing_report:
-                report_error = error_writing_report
+                + "\n",
+                encoding="utf-8",
+            )
+        except BaseException as error_writing_report:
+            report_error = error_writing_report
     finally:
         if args.cleanup:
             try:

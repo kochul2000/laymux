@@ -193,6 +193,31 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["timeoutsOrErrors"], 1)
         self.assertEqual(summary["maxMs"], 4.0)
 
+    def test_control_acceptance_requires_the_write_request_to_succeed(self):
+        self.assertTrue(
+            benchmark.control_samples_succeeded(
+                [{"write": {"ok": True}, "backendEchoMs": 1.0, "xtermEchoMs": 2.0}]
+            )
+        )
+        self.assertFalse(
+            benchmark.control_samples_succeeded(
+                [{"write": {"ok": False}, "backendEchoMs": 1.0, "xtermEchoMs": 2.0}]
+            )
+        )
+
+    def test_guarded_worker_records_unexpected_exception(self):
+        failures = []
+
+        def fail():
+            raise ValueError("broken sample")
+
+        benchmark.run_guarded_worker("diagnostics", fail, failures)
+
+        self.assertEqual(
+            failures,
+            [{"worker": "diagnostics", "type": "ValueError", "error": "broken sample"}],
+        )
+
     @patch.object(benchmark, "api")
     def test_cleanup_restores_original_workspace_and_deletes_only_created_ids(self, mocked_api):
         mocked_api.side_effect = [
