@@ -200,12 +200,71 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
     def test_control_acceptance_requires_the_write_request_to_succeed(self):
         self.assertTrue(
             benchmark.control_samples_succeeded(
-                [{"write": {"ok": True}, "backendEchoMs": 1.0, "xtermEchoMs": 2.0}]
+                [
+                    {
+                        "write": {"ok": True, "latencyMs": 0.0},
+                        "backendEchoMs": 1.0,
+                        "xtermEchoMs": 2.0,
+                    }
+                ]
             )
         )
         self.assertFalse(
             benchmark.control_samples_succeeded(
                 [{"write": {"ok": False}, "backendEchoMs": 1.0, "xtermEchoMs": 2.0}]
+            )
+        )
+
+    def test_control_acceptance_rejects_a_five_second_echo(self):
+        self.assertFalse(
+            benchmark.control_samples_succeeded(
+                [
+                    {
+                        "write": {"ok": True, "latencyMs": 1.0},
+                        "backendEchoMs": 2.0,
+                        "xtermEchoMs": benchmark.MAX_INTERACTIVE_LATENCY_MS,
+                    }
+                ]
+            )
+        )
+
+    def test_request_acceptance_rejects_a_slow_success(self):
+        self.assertFalse(
+            benchmark.request_samples_succeeded(
+                [
+                    {
+                        "ok": True,
+                        "latencyMs": benchmark.MAX_INTERACTIVE_LATENCY_MS,
+                    }
+                ]
+            )
+        )
+        self.assertTrue(
+            benchmark.request_samples_succeeded([{"ok": True, "latencyMs": 0.0}])
+        )
+
+    def test_screenshot_acceptance_requires_a_real_image_payload(self):
+        self.assertFalse(
+            benchmark.screenshot_samples_succeeded(
+                [
+                    {
+                        "ok": True,
+                        "latencyMs": 1.0,
+                        "result": {"success": True, "syntheticNoScreenshot": True},
+                    }
+                ]
+            )
+        )
+        self.assertTrue(
+            benchmark.screenshot_samples_succeeded(
+                [
+                    {
+                        "ok": True,
+                        "latencyMs": 1.0,
+                        "result": {"success": True},
+                        "dataUrlBytes": 32,
+                    }
+                ]
             )
         )
 

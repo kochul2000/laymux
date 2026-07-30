@@ -31,6 +31,7 @@ DEV_RUNTIME_ARTIFACTS = {
     "src-tauri/settings.json",
 }
 CATCHUP_MIN_BACKLOG_BYTES = 64 * 1024
+MAX_INTERACTIVE_LATENCY_MS = 5_000
 
 
 class BenchmarkError(RuntimeError):
@@ -373,10 +374,51 @@ def latency_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def latency_under_limit(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and 0 <= float(value) < MAX_INTERACTIVE_LATENCY_MS
+    )
+
+
 def control_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
     return bool(samples) and all(
-        "error" not in sample and (sample.get("write") or {}).get("ok") is True
+        "error" not in sample
+        and (sample.get("write") or {}).get("ok") is True
+        and latency_under_limit((sample.get("write") or {}).get("latencyMs"))
+        and latency_under_limit(sample.get("backendEchoMs"))
+        and latency_under_limit(sample.get("xtermEchoMs"))
         for sample in samples
+    )
+
+
+def request_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
+    return bool(samples) and all(
+        sample.get("ok") is True and latency_under_limit(sample.get("latencyMs"))
+        for sample in samples
+    )
+
+
+def screenshot_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
+    return request_samples_succeeded(samples) and all(
+        isinstance(sample.get("result"), dict)
+        and sample["result"].get("success") is True
+        and isinstance(sample.get("dataUrlBytes"), int)
+        and sample["dataUrlBytes"] > 0
+        for sample in samples
+    )
+
+
+def control_latency_summary(samples: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    return latency_summary(
+        [
+            {
+                "ok": "error" not in sample and latency_under_limit(sample.get(key)),
+                "latencyMs": sample.get(key),
+            }
+            for sample in samples
+        ]
     )
 
 
@@ -642,44 +684,49 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             stop.wait(0.2)
 
     def control_probe() -> None:
-        stop.wait(0.5)
-        if stop.is_set():
-            return
-        write_sample = None
-        try:
-            marker = f"CONTROL-{run_id}"
-            started = time.monotonic()
-            write_sample = timed_request(
-                "POST",
-                f"/terminals/{quote(control_terminal, safe='')}/write",
-                {"data": f"echo {marker}\r"},
-            )
-            backend_at = wait_until(
-                "control PTY echo",
-                lambda: time.monotonic() if marker in terminal_output(control_terminal) else None,
-                timeout=15.0,
-                interval=0.02,
-                cancel=stop,
-            )
-            buffer_at = wait_until(
-                "control xterm echo",
-                lambda: time.monotonic() if buffer_contains(control_terminal, marker) else None,
-                timeout=15.0,
-                interval=0.02,
-                cancel=stop,
-            )
-            control_samples.append(
-                {
-                    "write": write_sample,
-                    "backendEchoMs": round((backend_at - started) * 1000, 3),
-                    "xtermEchoMs": round((buffer_at - started) * 1000, 3),
-                }
-            )
-        except BenchmarkError as error:
-            sample = {"error": str(error)}
-            if write_sample is not None:
-                sample["write"] = write_sample
-            control_samples.append(sample)
+        for probe_index in range(5):
+            stop.wait(0.5 if probe_index == 0 else 0.75)
+            if stop.is_set():
+                return
+            write_sample = None
+            try:
+                marker = f"CONTROL-{run_id}-{probe_index}"
+                started = time.monotonic()
+                write_sample = timed_request(
+                    "POST",
+                    f"/terminals/{quote(control_terminal, safe='')}/write",
+                    {"data": f"echo {marker}\r"},
+                )
+                backend_at = wait_until(
+                    "control PTY echo",
+                    lambda: time.monotonic()
+                    if marker in terminal_output(control_terminal)
+                    else None,
+                    timeout=15.0,
+                    interval=0.02,
+                    cancel=stop,
+                )
+                buffer_at = wait_until(
+                    "control xterm echo",
+                    lambda: time.monotonic()
+                    if buffer_contains(control_terminal, marker)
+                    else None,
+                    timeout=15.0,
+                    interval=0.02,
+                    cancel=stop,
+                )
+                control_samples.append(
+                    {
+                        "write": write_sample,
+                        "backendEchoMs": round((backend_at - started) * 1000, 3),
+                        "xtermEchoMs": round((buffer_at - started) * 1000, 3),
+                    }
+                )
+            except BenchmarkError as error:
+                sample = {"error": str(error)}
+                if write_sample is not None:
+                    sample["write"] = write_sample
+                control_samples.append(sample)
 
     def screenshot_probe() -> None:
         stop.wait(1.0)
@@ -869,23 +916,27 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         sample.get("ok") and float(sample.get("maxMs") or 0) < 3_000
         for sample in frontier_catchup_samples
     )
+    bridge_timeout_delta = (final_diag.get("bridge") or {}).get(
+        "requestTimeouts", 0
+    ) - (armed_diag.get("bridge") or {}).get("requestTimeouts", 0)
+    max_frontend_report_age_ms = max(report_ages) if report_ages else None
     acceptance = {
         "workersStopped": not resources.failure_context["workersAliveAfterJoin"],
         "workersHadNoUnexpectedErrors": not worker_failures,
         "frontiersSettled": True,
         "allFinalMarkersRendered": all(buffer_final.values()),
         "backgroundServiceGapUnder3s": max_service_gap < 3_000,
-        "bridgeHadNoErrors": bool(bridge_samples)
-        and all(sample.get("ok") for sample in bridge_samples)
+        "bridgeHadNoErrors": request_samples_succeeded(bridge_samples)
         and all(
             any(sample.get("path") == path for sample in bridge_samples)
             for path in bridge_by_path
-        ),
-        "diagnosticsHadNoErrors": bool(diagnostics_samples)
-        and all(sample.get("ok") for sample in diagnostics_samples),
-        "screenshotSucceeded": bool(screenshot_samples)
-        and all(sample.get("ok") for sample in screenshot_samples),
+        )
+        and bridge_timeout_delta == 0,
+        "diagnosticsHadNoErrors": request_samples_succeeded(diagnostics_samples),
+        "screenshotSucceeded": screenshot_samples_succeeded(screenshot_samples),
         "automationControlEchoSucceeded": control_ok,
+        "frontendReportAgeUnder5s": max_frontend_report_age_ms is not None
+        and max_frontend_report_age_ms < MAX_INTERACTIVE_LATENCY_MS,
         "checkpointTargetCatchupUnder3s": catchup_ok,
         "noRepairWasNeeded": all(
             (frontend_v3.get(terminal_id) or {}).get("repairCount") == 0
@@ -960,12 +1011,15 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         "diagnostics": latency_summary(diagnostics_samples),
         "screenshot": latency_summary(screenshot_samples),
         "control": control_samples,
+        "controlBackendEcho": control_latency_summary(control_samples, "backendEchoMs"),
+        "controlXtermEcho": control_latency_summary(control_samples, "xtermEchoMs"),
         "workerFailures": worker_failures,
         "checkpointTargetCatchup": frontier_catchup_samples,
-        "maxFrontendReportAgeMs": round(max(report_ages), 3) if report_ages else None,
+        "maxFrontendReportAgeMs": round(max_frontend_report_age_ms, 3)
+        if max_frontend_report_age_ms is not None
+        else None,
         "stallDelta": (final_frontend.get("stalls") or 0) - (initial_frontend.get("stalls") or 0),
-        "bridgeTimeoutDelta": (final_diag.get("bridge") or {}).get("requestTimeouts", 0)
-        - (armed_diag.get("bridge") or {}).get("requestTimeouts", 0),
+        "bridgeTimeoutDelta": bridge_timeout_delta,
         "longestBacklogServiceGapMs": {
             key: round(value, 3) for key, value in longest_service_gap_ms.items()
         },
