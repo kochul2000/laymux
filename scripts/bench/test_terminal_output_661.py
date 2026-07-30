@@ -1,3 +1,4 @@
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -217,6 +218,21 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
             failures,
             [{"worker": "diagnostics", "type": "ValueError", "error": "broken sample"}],
         )
+
+    def test_wait_for_worker_completion_reports_only_workers_still_alive(self):
+        released = threading.Event()
+        completed = threading.Thread(name="completed", target=lambda: None)
+        blocked = threading.Thread(name="blocked", target=released.wait, daemon=True)
+        completed.start()
+        blocked.start()
+        try:
+            self.assertEqual(
+                benchmark.wait_for_worker_completion([completed, blocked], timeout=0.01),
+                ["blocked"],
+            )
+        finally:
+            released.set()
+            blocked.join(timeout=1.0)
 
     @patch.object(benchmark, "api")
     def test_cleanup_restores_original_workspace_and_deletes_only_created_ids(self, mocked_api):

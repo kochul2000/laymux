@@ -388,6 +388,15 @@ def run_guarded_worker(
         )
 
 
+def wait_for_worker_completion(
+    workers: list[threading.Thread], timeout: float
+) -> list[str]:
+    deadline = time.monotonic() + timeout
+    for worker in workers:
+        worker.join(timeout=max(0.0, deadline - time.monotonic()))
+    return [worker.name for worker in workers if worker.is_alive()]
+
+
 def timed_request(method: str, path: str, payload: Any | None = None) -> dict[str, Any]:
     started = time.monotonic()
     try:
@@ -633,6 +642,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         stop.wait(0.5)
         if stop.is_set():
             return
+        write_sample = None
         try:
             marker = f"CONTROL-{run_id}"
             started = time.monotonic()
@@ -663,7 +673,10 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
                 }
             )
         except BenchmarkError as error:
-            control_samples.append({"error": str(error)})
+            sample = {"error": str(error)}
+            if write_sample is not None:
+                sample["write"] = write_sample
+            control_samples.append(sample)
 
     def screenshot_probe() -> None:
         stop.wait(1.0)
@@ -776,6 +789,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         )
         for name, target in worker_targets
     ]
+    finite_workers = workers[2:]
     completed_at: dict[str, float] = {}
     started_workers: list[threading.Thread] = []
     try:
@@ -812,6 +826,11 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             )
             for terminal_id in hot_terminals
         }
+        unfinished_probes = wait_for_worker_completion(finite_workers, timeout=20.0)
+        if unfinished_probes:
+            raise BenchmarkError(
+                f"finite benchmark probes did not finish: {unfinished_probes}"
+            )
     finally:
         stop.set()
         for worker in started_workers:
