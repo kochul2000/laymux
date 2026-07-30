@@ -1,5 +1,6 @@
 const SETTINGS_VIEW_SUFFIX = "/src/components/views/SettingsView.tsx";
 const TERMINAL_OUTPUT_V3_FAILURE_SUFFIX = "/src/lib/terminal-output-v3-failure-coordinator.ts";
+const TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX = "/src/lib/terminal-input-delivery-metrics.ts";
 const NODE_MODULES_SEGMENT = "/node_modules/";
 
 /**
@@ -12,6 +13,9 @@ export function resolveChunkGroup(id: string): string | undefined {
   if (normalizedId.endsWith(SETTINGS_VIEW_SUFFIX)) return "settings-view";
   if (normalizedId.endsWith(TERMINAL_OUTPUT_V3_FAILURE_SUFFIX)) {
     return "terminal-output-v3-failure";
+  }
+  if (normalizedId.endsWith(TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX)) {
+    return "terminal-input-delivery-metrics";
   }
   if (!normalizedId.includes(NODE_MODULES_SEGMENT)) return undefined;
 

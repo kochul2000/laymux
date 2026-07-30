@@ -20,6 +20,12 @@ import { clearRuntimeComposerState } from "@/lib/terminal-input-composer-state";
 import { terminalOutputRecoveryCounters } from "@/lib/terminal-output-recovery-metrics";
 import * as terminalOutputRecoveryMetrics from "@/lib/terminal-output-recovery-metrics";
 import { terminalOutputPipelineCounters } from "@/lib/terminal-output-pipeline-metrics";
+import {
+  allTerminalInputDeliveryCounters,
+  forgetTerminalInputDeliveryCounters,
+  resetTerminalInputDeliveryCounters,
+  terminalInputDeliveryCounters,
+} from "@/lib/terminal-input-delivery-metrics";
 import { terminalOutputControlOperationRegistry } from "@/lib/terminal-output-control-registry";
 import { terminalWriteFairScheduler } from "@/lib/terminal-write-fair-scheduler";
 import {
@@ -624,6 +630,7 @@ beforeEach(() => {
   setTerminalOutputV3RuntimeLoaderForTest();
   terminalOutputControlOperationRegistry.resetForTests();
   resetTerminalOutputV3DiagnosticsForTest();
+  resetTerminalInputDeliveryCounters();
   armStreamAttachResetGate();
   streamAttachResetBails.length = 0;
   // Production exact-resume returns an empty delta while idle, never `null`.
@@ -4021,6 +4028,128 @@ describe("TerminalView", () => {
     expect(mockOnData).toHaveBeenCalled();
   });
 
+  it("records a successful human onData write with UTF-8 byte totals", async () => {
+    const terminalId = "t-human-write-success";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("가", true));
+    await vi.waitFor(() => {
+      expect(terminalInputDeliveryCounters(terminalId).succeeded).toBe(1);
+    });
+
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 1,
+      failed: 0,
+      attemptedBytes: 3,
+      succeededBytes: 3,
+      failedBytes: 0,
+    });
+  });
+
+  it("coalesces rejected human onData alerts while counting every exactly-once attempt", async () => {
+    const terminalId = "t-human-write-rejected";
+    mockWriteToTerminal.mockRejectedValue(new Error("IPC response lost"));
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("x", true));
+    act(() => createdTerminals.at(-1)!.emitCoreData("y", true));
+    await vi.waitFor(() => {
+      expect(terminalInputDeliveryCounters(terminalId).failed).toBe(2);
+    });
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(mockWriteToTerminal).toHaveBeenCalledTimes(2);
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "x");
+    expect(useNotificationStore.getState().notifications[0]).toMatchObject({
+      terminalId,
+      requiresAction: true,
+      level: "error",
+    });
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 2,
+      succeeded: 0,
+      failed: 2,
+      attemptedBytes: 2,
+      succeededBytes: 0,
+      failedBytes: 2,
+    });
+  });
+
+  it("surfaces a rejected IME blur commit once without resending it", async () => {
+    const terminalId = "t-ime-blur-write-rejected";
+    mockWriteToTerminal.mockRejectedValue(new Error("IPC response lost"));
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    const host = screen.getByTestId(`terminal-xterm-host-${terminalId}`);
+    const terminal = createdTerminals.at(-1) as unknown as { element: HTMLDivElement };
+    const helper = document.createElement("textarea");
+    helper.className = "xterm-helper-textarea";
+    terminal.element.appendChild(helper);
+    host.appendChild(terminal.element);
+    await waitForLocalTerminalControl();
+
+    act(() => {
+      helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
+    });
+    await vi.waitFor(() => {
+      expect(screen.getByTestId(`terminal-view-${terminalId}`)).toHaveClass(
+        "terminal-ime-composition-active",
+      );
+    });
+    act(() => {
+      helper.value = "가";
+      helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "가" }));
+      helper.dispatchEvent(new Event("blur"));
+    });
+    await vi.waitFor(() => {
+      expect(terminalInputDeliveryCounters(terminalId).failed).toBe(1);
+    });
+
+    expect(mockWriteToTerminal).toHaveBeenCalledTimes(1);
+    expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "가");
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 0,
+      failed: 1,
+      attemptedBytes: 3,
+      succeededBytes: 0,
+      failedBytes: 3,
+    });
+  });
+
+  it("does not republish human input diagnostics when a closed pane's write settles late", async () => {
+    let settleWrite: (() => void) | undefined;
+    mockWriteToTerminal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          settleWrite = resolve;
+        }),
+    );
+    mockCloseTerminalSession.mockImplementationOnce(async (terminalId: string) => {
+      // The component mock replaces tauri-api's real close wrapper, whose
+      // finally block drops session-scoped input diagnostics.
+      forgetTerminalInputDeliveryCounters(terminalId);
+    });
+    const { unmount } = render(
+      <TerminalView instanceId="t-human-write-late-close" profile="PowerShell" syncGroup="" />,
+    );
+    await waitForLocalTerminalControl();
+    act(() => createdTerminals.at(-1)!.emitCoreData("x", true));
+    expect(terminalInputDeliveryCounters("t-human-write-late-close").attempts).toBe(1);
+
+    unmount();
+    await vi.waitFor(() => expect(mockCloseTerminalSession).toHaveBeenCalled());
+    await act(async () => {
+      settleWrite?.();
+      await Promise.resolve();
+    });
+
+    expect(allTerminalInputDeliveryCounters()).toEqual({});
+  });
+
   describe("terminal protocol reply ownership", () => {
     const emitLive = (terminalId: string, value: string) => {
       const onOutput = mockOnTerminalOutput.mock.calls.find(([id]) => id === terminalId)?.[1] as
@@ -4046,6 +4175,14 @@ describe("TerminalView", () => {
 
       expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
       expect(mockWriteToTerminal).not.toHaveBeenCalled();
+      expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+        attempts: 0,
+        succeeded: 0,
+        failed: 0,
+        attemptedBytes: 0,
+        succeededBytes: 0,
+        failedBytes: 0,
+      });
     });
 
     it("suppresses replies produced by snapshot replay", async () => {

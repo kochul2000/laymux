@@ -335,6 +335,10 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
       "writeQueueMaxBytes": 248320, "xtermParseMaxMs": 18,
       "writeCallbackFailures": 0, "writeCallbackRefreshFailures": 0, "…": 0
     } },
+    "inputDelivery": { "terminal-pane-xxxx": {
+      "attempts": 12, "succeeded": 11, "failed": 1,
+      "attemptedBytes": 24, "succeededBytes": 23, "failedBytes": 1
+    } },
     "terminalOutputV3": { "terminal-pane-xxxx": {
       "state": "active", "reason": null, "generation": 7,
       "leaseToken": "opaque", "attachEpoch": 2,
@@ -345,7 +349,7 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 }
 ```
 
-판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. `terminalOutput[]`은 WebView를 거치지 않고 현재 Rust `TerminalOutputSession`에서 합성한 backend SoT라 프론트가 멈춰도 `healthy | backpressured | failStopped`, reason, generation/token, parsed/write/ring/delivery bounds, active grant와 receipt slot을 읽을 수 있다. `frontend.terminalOutputV3`는 마지막 health report가 전달한 mount-local surface identity/frontier이므로 report age와 함께 읽고 backend 상태를 대체하지 않는다. 두 쪽 모두 terminal payload bytes를 담지 않는다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). `frontend.pipeline`과 v3 terminal state의 나머지 terminal별 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 identity·상태·카운터·지연·sequence 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
+판정 순서는 `lastReportAgeMs` 먼저다 — **큰 값이면 WebView 메인 스레드 자체가 멈춘 것**이고, **작은 값 옆에서 `bridge.requestTimeouts`만 오르면** 스레드는 살아 있고 `automation-request` 이벤트가 큐에 밀린 것이다. `terminalOutput[]`은 WebView를 거치지 않고 현재 Rust `TerminalOutputSession`에서 합성한 backend SoT라 프론트가 멈춰도 `healthy | backpressured | failStopped`, reason, generation/token, parsed/write/ring/delivery bounds, active grant와 receipt slot을 읽을 수 있다. `frontend.terminalOutputV3`는 마지막 health report가 전달한 mount-local surface identity/frontier이므로 report age와 함께 읽고 backend 상태를 대체하지 않는다. 두 쪽 모두 terminal payload bytes를 담지 않는다. 프론트의 `responsesSent`는 Rust가 IPC command를 받아들였다는 뜻이고 실제 HTTP waiter와의 결합은 Rust의 `responsesMatched`/`responsesOrphaned`가 구분한다. `writeBackpressure`는 xterm이 아직 받아들이지 않은 batch를 같은 byte로 재시도한 횟수이고, `writeCallbackFailures`와 source/stage별 하위 카운터는 xterm이 이미 받아들인 byte 뒤 embedder 완료 작업의 실패다. 후자는 sequence gap이 아니며 callback에서 절대 재시도하지 않는다([ADR-0084](../adr/0084-desktop-terminal-output-parsed-credit.md)). `frontend.inputDelivery`는 human raw input의 한 번 제출과 IPC completion만 기록한다. 실패는 backend 미수락의 증명이 아니므로 counter나 health report가 retry/recovery 결정을 만들지 않으며 payload는 절대 포함하지 않는다([ADR-0096](../adr/0096-terminal-human-input-write-failure-observability.md)). `frontend.pipeline`과 v3 terminal state의 나머지 terminal별 의미는 [data-flow.md §8.8](data-flow.md)이 소유한다. 응답은 identity·상태·카운터·지연·sequence 수치뿐이며 터미널 바이트·경로·설정을 담지 않고, 기존 IP allowlist 아래 있다.
 
 ### 12.2 포트 규칙
 
