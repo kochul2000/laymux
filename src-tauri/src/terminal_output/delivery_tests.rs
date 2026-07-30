@@ -389,8 +389,9 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
     delivery
         .acknowledge_receipt(&closing_identity, closing.seq_end)
         .unwrap();
+    let close_seq = closing.seq_start + 1;
     let completion = delivery
-        .close_continuation(&closing_identity, closing.seq_end, "close")
+        .close_continuation(&closing_identity, close_seq, "close")
         .unwrap();
     assert_eq!(
         completion.completion,
@@ -400,7 +401,7 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
     assert_eq!(completion.frame_start_seq, Some(opener.seq_start + 1));
     assert_eq!(
         delivery
-            .close_continuation(&closing_identity, closing.seq_end, "close")
+            .close_continuation(&closing_identity, close_seq, "close")
             .unwrap()
             .completion,
         TerminalOutputControlCompletion::Duplicate
@@ -575,6 +576,65 @@ fn continuation_close_rejects_unknown_reason_without_releasing_the_grant() {
         delivery.diagnostics().unwrap().grant_id.as_deref(),
         Some("grant-close-reason")
     );
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+    delivery.join().unwrap();
+}
+
+#[test]
+fn continuation_can_reopen_inside_an_envelope_frozen_with_the_closed_grant() {
+    let delivery = DesktopOutputDelivery::new("overlapping-grants".into(), 1);
+    install(&delivery, 0);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_, envelope| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+
+    delivery.enqueue(delta(0, 8)).unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let first_opener = identity(&first);
+    delivery
+        .open_continuation(&first_opener, "grant-1", first.seq_start)
+        .unwrap();
+
+    delivery.enqueue(delta(8, 8)).unwrap();
+    let frozen_with_first_grant = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(frozen_with_first_grant.grant_id.as_deref(), Some("grant-1"));
+    let first_close = TerminalOutputEnvelopeIdentity {
+        grant_id: Some("grant-1".into()),
+        ..first_opener
+    };
+    delivery
+        .close_continuation(&first_close, first.seq_end, "close")
+        .unwrap();
+
+    let second_opener = TerminalOutputEnvelopeIdentity {
+        grant_id: None,
+        ..identity(&frozen_with_first_grant)
+    };
+    assert_eq!(
+        delivery
+            .open_continuation(&second_opener, "grant-2", frozen_with_first_grant.seq_start)
+            .unwrap(),
+        TerminalOutputControlCompletion::Accepted
+    );
+    let second_close = TerminalOutputEnvelopeIdentity {
+        grant_id: Some("grant-2".into()),
+        ..second_opener
+    };
+    assert_eq!(
+        delivery
+            .close_continuation(&second_close, frozen_with_first_grant.seq_end, "close")
+            .unwrap()
+            .completion,
+        TerminalOutputControlCompletion::Accepted
+    );
+
     delivery.close(TerminalOutputDeliveryCloseReason::Retired);
     delivery.join().unwrap();
 }

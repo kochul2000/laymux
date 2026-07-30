@@ -93,7 +93,7 @@ export class TerminalOutputV3SurfaceController {
       deliveryControl: this.deliveryControl,
       isFailStopped: () => this.failure !== undefined,
       failStop: (reason) => this.failStop(reason),
-      startEnvelope: (envelope, now) => this.startEnvelope(envelope, now),
+      resumeEnvelope: (envelope, now) => this.resumeDeferredEnvelope(envelope, now),
     });
   }
 
@@ -165,9 +165,9 @@ export class TerminalOutputV3SurfaceController {
       return Promise.resolve(this.failStop("grant_mismatch"));
     }
 
-    // A null-grant successor consumed the one-envelope old-grant grace after
-    // a settled close. Do not let a later stale event inherit that grace.
-    this.continuationControl.clearSettledCloseGrant();
+    // The first null-grant successor proves the backend observed close. Do not
+    // let a later stale event inherit the bounded old-grant grace.
+    this.continuationControl.clearSettledCloseGrants();
 
     return this.startEnvelope(envelope, now);
   }
@@ -184,6 +184,22 @@ export class TerminalOutputV3SurfaceController {
     void promise.then(settleDelivery, settleDelivery);
     this.ledger.remember(envelope, promise);
     return promise;
+  }
+
+  /**
+   * Resume an envelope that was already admitted by an older continuation
+   * gate. Re-check newer gates before using that admission capability.
+   */
+  private resumeDeferredEnvelope(
+    envelope: TerminalOutputEnvelope,
+    now: number,
+  ): Promise<TerminalOutputV3SurfaceResult> {
+    if (this.failure) return Promise.resolve(this.failure);
+    const closingAdmission = this.continuationControl.admitDuringClose(envelope, now);
+    if (closingAdmission) return closingAdmission;
+    const openingAdmission = this.continuationControl.admitDuringOpen(envelope, now);
+    if (openingAdmission) return openingAdmission;
+    return this.startEnvelope(envelope, now);
   }
 
   async flushExpired(now: number): Promise<void> {
@@ -288,14 +304,12 @@ export class TerminalOutputV3SurfaceController {
     this.completePendingEnvelope(completion);
     if (this.failure) return this.failure;
 
-    // Start continuation controls before the receipt, but do not put their IPC
-    // round trip on the transport-credit path. Rust records the exact accepted
-    // receipt so a hold/close that lands just after it still validates against
-    // the immutable envelope boundary.
-    const transitionCompletion =
-      transitionControls.length > 0
-        ? this.continuationControl.sendControls(transitionControls)
-        : undefined;
+    if (transitionControls.length > 0) {
+      await this.continuationControl.sendControls(transitionControls);
+      if (this.failure) return this.failure;
+      completion.transitionsSettled = true;
+      this.completePendingEnvelope(completion);
+    }
 
     const receiptRequest: TerminalOutputDeliveryControlRequest = {
       identity: {
@@ -323,13 +337,6 @@ export class TerminalOutputV3SurfaceController {
     if (this.failure) return this.failure;
     if (receiptResult.kind !== "accepted") {
       return this.failStop(controlFailureReason(receiptRequest, receiptResult));
-    }
-
-    if (transitionCompletion) {
-      await transitionCompletion;
-      if (this.failure) return this.failure;
-      completion.transitionsSettled = true;
-      this.completePendingEnvelope(completion);
     }
 
     this.continuationControl.completeReceipt(envelope.envelopeId);

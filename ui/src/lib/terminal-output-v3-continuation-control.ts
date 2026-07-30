@@ -17,11 +17,19 @@ import { sameTerminalOutputEnvelope } from "./terminal-output-v3-envelope-ledger
 import type { TerminalOutputV3SurfaceResult } from "./terminal-output-v3-surface-controller";
 
 type Failure = Extract<TerminalOutputV3SurfaceResult, { kind: "fail-stop" }>;
+/** Twice the backend pipeline cap; enough for one overlapping close chain. */
+const CLOSED_GRANT_HISTORY_LIMIT = 8;
 
 interface ClosingGrant {
   grant: TerminalOutputFrameContinuationGrant;
   envelopeId: number;
   closeAccepted: boolean;
+  waitForReceiptEnvelopeId: number | null;
+}
+
+interface OpeningGrant {
+  grant: TerminalOutputFrameContinuationGrant;
+  holdAccepted: boolean;
   waitForReceiptEnvelopeId: number | null;
 }
 
@@ -37,32 +45,32 @@ interface Options {
   deliveryControl: Pick<TerminalOutputDeliveryControlSender, "send">;
   isFailStopped(): boolean;
   failStop(reason: string): Failure;
-  startEnvelope(
+  resumeEnvelope(
     envelope: TerminalOutputEnvelope,
     now: number,
   ): Promise<TerminalOutputV3SurfaceResult>;
 }
 
-/** Owns active/closing continuation identity and its single gated successor. */
+/** Owns active/closing continuation identity and bounded gated successors. */
 export class TerminalOutputV3ContinuationControl {
   private grant: TerminalOutputFrameContinuationGrant | undefined;
   /** A hold has been sent but its backend completion has not settled yet. */
-  private opening: TerminalOutputFrameContinuationGrant | undefined;
+  private opening: OpeningGrant | undefined;
   private closing: ClosingGrant | undefined;
-  /** Null-grant envelopes emitted before the opener hold reached Rust. */
+  /** Envelopes emitted while the opener receipt is still pending. */
   private openingPending: ClosingPendingEnvelope[] = [];
   /** The bounded successor set emitted before the close completion reached Rust. */
   private pending: ClosingPendingEnvelope[] = [];
-  /** Preserves hold/close causality while allowing receipts to run in parallel. */
+  /** Preserves hold/close causality across asynchronously resumed envelopes. */
   private controlTail: Promise<void> | undefined;
   /** A frame opened inside the envelope that closes the prior continuation. */
   private suppressedGrantId: string | undefined;
   /**
-   * The single successor can be emitted with the old grant after the close
-   * and receipt responses have both settled. Keep that identity only until
-   * the next contiguous envelope is admitted.
+   * A bounded receipt pipeline may already contain several successors from
+   * overlapping closed grants. Keep those identities until the first
+   * contiguous null-grant envelope proves the backend has observed the close.
    */
-  private settledCloseGrant: TerminalOutputFrameContinuationGrant | undefined;
+  private settledCloseGrants: TerminalOutputFrameContinuationGrant[] = [];
   /**
    * The envelope that already opened a backend continuation.
    *
@@ -89,7 +97,15 @@ export class TerminalOutputV3ContinuationControl {
   ): Promise<TerminalOutputV3SurfaceResult> | undefined {
     const opening = this.opening;
     if (!opening) return undefined;
-    if (envelope.grantId !== null) {
+    // The backend may accept hold before this opener's receipt releases its
+    // slot. With a multi-slot receipt pipeline, successors emitted in that
+    // interval already carry the active grant; ones emitted before hold still
+    // carry null. Both are contiguous and must wait for the opener receipt.
+    if (
+      envelope.grantId !== null &&
+      envelope.grantId !== opening.grant.grantId &&
+      !this.isSettledGrant(envelope.grantId)
+    ) {
       return Promise.resolve(this.options.failStop("grant_mismatch"));
     }
     return this.queuePendingEnvelope(this.openingPending, envelope, now);
@@ -112,7 +128,8 @@ export class TerminalOutputV3ContinuationControl {
     // `closeAccepted`, rather than treating that ordered successor as a
     // foreign grant.
     const nullGrantSuccessor = envelope.grantId === null;
-    if (!oldGrantSuccessor && !nullGrantSuccessor) {
+    const earlierClosedGrantSuccessor = this.isSettledGrant(envelope.grantId);
+    if (!oldGrantSuccessor && !nullGrantSuccessor && !earlierClosedGrantSuccessor) {
       return Promise.resolve(this.options.failStop("grant_mismatch"));
     }
     if (envelope.envelopeId !== ingress.expectedEnvelopeId) {
@@ -126,7 +143,9 @@ export class TerminalOutputV3ContinuationControl {
   }
 
   admitAfterClose(envelope: TerminalOutputEnvelope): boolean {
-    const settledCloseGrant = this.settledCloseGrant;
+    const settledCloseGrant = this.settledCloseGrants.find(
+      (grant) => grant.grantId === envelope.grantId,
+    );
     const ingress = this.options.ingress;
     if (
       !settledCloseGrant ||
@@ -138,12 +157,11 @@ export class TerminalOutputV3ContinuationControl {
     ) {
       return false;
     }
-    this.settledCloseGrant = undefined;
     return true;
   }
 
-  clearSettledCloseGrant(): void {
-    this.settledCloseGrant = undefined;
+  clearSettledCloseGrants(): void {
+    this.settledCloseGrants = [];
   }
 
   controlsForTransitions(
@@ -201,7 +219,11 @@ export class TerminalOutputV3ContinuationControl {
           return undefined;
         }
         this.grant = transition.grant;
-        this.opening = transition.grant;
+        this.opening = {
+          grant: transition.grant,
+          holdAccepted: false,
+          waitForReceiptEnvelopeId,
+        };
         this.heldEnvelopeId = transition.grant.envelopeId;
         controls.push({
           identity: { kind: "hold", ...transition.grant },
@@ -277,6 +299,11 @@ export class TerminalOutputV3ContinuationControl {
   }
 
   completeReceipt(envelopeId: number): void {
+    const opening = this.opening;
+    if (opening && opening.waitForReceiptEnvelopeId === envelopeId) {
+      opening.waitForReceiptEnvelopeId = null;
+      this.finishOpen();
+    }
     const closing = this.closing;
     if (!closing || closing.waitForReceiptEnvelopeId !== envelopeId) return;
     closing.waitForReceiptEnvelopeId = null;
@@ -291,7 +318,7 @@ export class TerminalOutputV3ContinuationControl {
     this.closing = undefined;
     this.grant = undefined;
     this.heldEnvelopeId = undefined;
-    this.settledCloseGrant = undefined;
+    this.settledCloseGrants = [];
     this.suppressedGrantId = undefined;
     for (const item of pending) item.resolve(failure);
   }
@@ -328,10 +355,17 @@ export class TerminalOutputV3ContinuationControl {
 
   private acceptOpen(request: TerminalOutputDeliveryControlRequest): void {
     const opening = this.opening;
-    if (!opening || opening.grantId !== request.identity.grantId) {
+    if (!opening || opening.grant.grantId !== request.identity.grantId) {
       this.options.failStop("grant_mismatch");
       return;
     }
+    opening.holdAccepted = true;
+    this.finishOpen();
+  }
+
+  private finishOpen(): void {
+    const opening = this.opening;
+    if (!opening || !opening.holdAccepted || opening.waitForReceiptEnvelopeId !== null) return;
     this.opening = undefined;
     this.startPending(this.openingPending.splice(0));
   }
@@ -355,19 +389,54 @@ export class TerminalOutputV3ContinuationControl {
     if (!closing || !closing.closeAccepted || closing.waitForReceiptEnvelopeId !== null) return;
     this.closing = undefined;
     this.grant = undefined;
+    this.rememberSettledGrant(closing.grant);
     const pending = this.pending.splice(0);
     if (pending.length === 0) {
-      this.settledCloseGrant = closing.grant;
       return;
     }
     this.startPending(pending);
   }
 
   private startPending(pending: readonly ClosingPendingEnvelope[]): void {
+    void this.drainPending(pending);
+  }
+
+  private async drainPending(pending: readonly ClosingPendingEnvelope[]): Promise<void> {
+    let failure: Failure | undefined;
     for (const item of pending) {
-      const processing = this.options.startEnvelope(item.envelope, item.now);
-      void processing.then(item.resolve, () =>
-        item.resolve(this.options.failStop("admission_failure")),
+      if (failure) {
+        item.resolve(failure);
+        continue;
+      }
+      try {
+        // Re-enter through the surface gate. The prior control may have
+        // created a new opening/closing transition, so directly starting the
+        // next item would bypass that newer owner.
+        const result = await this.options.resumeEnvelope(item.envelope, item.now);
+        item.resolve(result);
+        if (result.kind === "fail-stop") failure = result;
+      } catch {
+        failure = this.options.failStop("admission_failure");
+        item.resolve(failure);
+      }
+    }
+  }
+
+  private isSettledGrant(grantId: string | null): boolean {
+    return (
+      grantId !== null && this.settledCloseGrants.some((grant) => grant.grantId === grantId)
+    );
+  }
+
+  private rememberSettledGrant(grant: TerminalOutputFrameContinuationGrant): void {
+    this.settledCloseGrants = this.settledCloseGrants.filter(
+      (candidate) => candidate.grantId !== grant.grantId,
+    );
+    this.settledCloseGrants.push(grant);
+    if (this.settledCloseGrants.length > CLOSED_GRANT_HISTORY_LIMIT) {
+      this.settledCloseGrants.splice(
+        0,
+        this.settledCloseGrants.length - CLOSED_GRANT_HISTORY_LIMIT,
       );
     }
   }

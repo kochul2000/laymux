@@ -44,24 +44,16 @@ impl DesktopOutputDelivery {
         let boundary = state
             .in_flight
             .iter()
-            .find(|in_flight| in_flight.identity() == *opener)
+            .find(|in_flight| same_envelope(&in_flight.identity(), opener))
             .map(|in_flight| (in_flight.envelope.seq_start, in_flight.envelope.seq_end))
             .or_else(|| {
                 state
                     .recent_receipts
                     .iter()
-                    .find(|receipt| receipt.identity == *opener)
+                    .find(|receipt| same_envelope(&receipt.identity, opener))
                     .map(|receipt| (receipt.seq_start, receipt.seq_end))
             });
         let Some((seq_start, seq_end)) = boundary else {
-            if let Some(in_flight) = state.in_flight.iter().find(|in_flight| {
-                let candidate = in_flight.identity();
-                candidate.generation == opener.generation
-                    && candidate.lease_token == opener.lease_token
-                    && candidate.envelope_id == opener.envelope_id
-            }) {
-                ensure_same_envelope_or_stale(&in_flight.identity(), opener)?;
-            }
             return Ok(TerminalOutputControlCompletion::Stale);
         };
         if frame_start_seq < seq_start || frame_start_seq >= seq_end {
@@ -113,34 +105,22 @@ impl DesktopOutputDelivery {
             }
         }
         let in_flight_boundary = state.in_flight.iter().find_map(|in_flight| {
-            continuation_close_matches(&in_flight.identity(), identity)
+            same_envelope(&in_flight.identity(), identity)
                 .then_some((in_flight.envelope.seq_start, in_flight.envelope.seq_end))
         });
         let receipt_boundary = state
             .recent_receipts
             .iter()
-            .find(|receipt| continuation_close_matches(&receipt.identity, identity))
-            .map(|receipt| receipt.seq_end);
+            .find(|receipt| same_envelope(&receipt.identity, identity))
+            .map(|receipt| (receipt.seq_start, receipt.seq_end));
         match (in_flight_boundary, receipt_boundary) {
             (Some((seq_start, seq_end)), _) if close_seq >= seq_start && close_seq <= seq_end => {}
-            (None, Some(seq_end)) if close_seq == seq_end => {}
+            (None, Some((seq_start, seq_end)))
+                if close_seq >= seq_start && close_seq <= seq_end => {}
             (Some(_), _) | (None, Some(_)) => {
                 return Err("continuation close is outside its envelope sequence range".into());
             }
             (None, None) => {
-                if let Some(in_flight) = state
-                    .in_flight
-                    .iter()
-                    .find(|in_flight| in_flight.envelope.envelope_id == identity.envelope_id)
-                {
-                    ensure_same_envelope_or_stale(&in_flight.identity(), identity)?;
-                } else if let Some(receipt) = state
-                    .recent_receipts
-                    .iter()
-                    .find(|receipt| receipt.identity.envelope_id == identity.envelope_id)
-                {
-                    ensure_same_envelope_or_stale(&receipt.identity, identity)?;
-                }
                 return Ok(continuation(
                     TerminalOutputControlCompletion::Stale,
                     None,
@@ -188,15 +168,13 @@ fn is_valid_close_reason(reason: &str) -> bool {
     )
 }
 
-fn continuation_close_matches(
-    in_flight: &TerminalOutputEnvelopeIdentity,
-    close: &TerminalOutputEnvelopeIdentity,
+fn same_envelope(
+    left: &TerminalOutputEnvelopeIdentity,
+    right: &TerminalOutputEnvelopeIdentity,
 ) -> bool {
-    in_flight.generation == close.generation
-        && in_flight.lease_token == close.lease_token
-        && in_flight.envelope_id == close.envelope_id
-        && (in_flight.grant_id == close.grant_id
-            || (in_flight.grant_id.is_none() && close.grant_id.is_some()))
+    left.generation == right.generation
+        && left.lease_token == right.lease_token
+        && left.envelope_id == right.envelope_id
 }
 
 fn current_lease(
@@ -207,20 +185,6 @@ fn current_lease(
     identity.generation == generation
         && state.lease.as_ref().map(|lease| lease.token.as_str())
             == Some(identity.lease_token.as_str())
-}
-
-fn ensure_same_envelope_or_stale(
-    expected: &TerminalOutputEnvelopeIdentity,
-    actual: &TerminalOutputEnvelopeIdentity,
-) -> Result<(), String> {
-    if expected.generation == actual.generation
-        && expected.lease_token == actual.lease_token
-        && expected.envelope_id == actual.envelope_id
-        && expected.grant_id != actual.grant_id
-    {
-        return Err("terminal output envelope identity changed its continuation grant".into());
-    }
-    Ok(())
 }
 
 fn continuation(

@@ -315,7 +315,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     const receive = h.controller.receive(payload({ data: OPEN }), 1);
     await Promise.resolve();
     expect(transferred).toBeDefined();
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
     expect(parsedAck).not.toHaveBeenCalled();
 
     hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
@@ -329,23 +329,62 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
   });
 
-  it("queues the bounded null-grant successors emitted before opener hold settles", async () => {
+  it("re-gates bounded successors when the first queued envelope closes the frame", async () => {
     const hold = deferred<TerminalOutputDeliveryControlResult>();
     const h = harness({ hold });
 
     const opener = h.controller.receive(payload({ data: OPEN }), 1);
     await Promise.resolve();
-    const successor = h.controller.receive(
-      payload({ envelopeId: 2, seqStart: OPEN.length, data: [65] }),
+    const closingSuccessor = h.controller.receive(
+      payload({ envelopeId: 2, seqStart: OPEN.length, data: CLOSE }),
       2,
+    );
+    const trailingSuccessor = h.controller.receive(
+      payload({ envelopeId: 3, seqStart: OPEN.length + CLOSE.length, data: [65] }),
+      3,
     );
     await Promise.resolve();
 
     expect(h.failStops).toEqual([]);
     expect(h.transferRequests).toHaveLength(1);
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
 
     hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
+    await expect(opener).resolves.toEqual({ kind: "accepted", envelopeId: 1 });
+    await expect(closingSuccessor).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+    await expect(trailingSuccessor).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
+    expect(h.transferRequests).toHaveLength(3);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([
+      "hold",
+      "receipt",
+      "close",
+      "receipt",
+      "receipt",
+    ]);
+    expect(h.failStops).toEqual([]);
+  });
+
+  it("queues a current-grant successor emitted after hold but before opener receipt", async () => {
+    const hold = deferred<TerminalOutputDeliveryControlResult>();
+    const receipt = deferred<TerminalOutputDeliveryControlResult>();
+    const h = harness({ hold, receipt });
+
+    const opener = h.controller.receive(payload({ data: OPEN }), 1);
+    await Promise.resolve();
+    hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
+
+    const successor = h.controller.receive(
+      payload({ envelopeId: 2, seqStart: OPEN.length, grantId: "grant-1", data: [65] }),
+      2,
+    );
+    await Promise.resolve();
+    expect(h.transferRequests).toHaveLength(1);
+    expect(h.failStops).toEqual([]);
+
+    receipt.resolve({ kind: "accepted", identity: h.controlCalls[1].identity });
     await expect(opener).resolves.toEqual({ kind: "accepted", envelopeId: 1 });
     await expect(successor).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
     expect(h.transferRequests).toHaveLength(2);
@@ -440,12 +479,12 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controller.activeGrantId).toBeNull();
     expect(h.controlCalls.slice(3)).toMatchObject([
       {
-        identity: { kind: "receipt", envelopeId: 3, grantId: "grant-1" },
-        payload: { seqEnd: 17 },
-      },
-      {
         identity: { kind: "close", envelopeId: 3, grantId: "grant-1" },
         payload: { closeSeq: 17, reason: "close" },
+      },
+      {
+        identity: { kind: "receipt", envelopeId: 3, grantId: "grant-1" },
+        payload: { seqEnd: 17 },
       },
     ]);
   });
@@ -491,7 +530,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     });
   });
 
-  it("releases the local transport slot before an opener hold failure settles", async () => {
+  it("keeps the local transport slot until an opener hold failure settles", async () => {
     const h = harness({
       controlResult: {
         kind: "rejected",
@@ -511,8 +550,8 @@ describe("TerminalOutputV3SurfaceController", () => {
       kind: "fail-stop",
       reason: "control:hold:rejected",
     });
-    expect(h.controlCalls.map((request) => request.identity.kind)).toEqual(["hold", "receipt"]);
-    expect(h.ingress.unreceipted).toBeUndefined();
+    expect(h.controlCalls.map((request) => request.identity.kind)).toEqual(["hold"]);
+    expect(h.ingress.unreceipted).toBeDefined();
   });
 
   it("rejects a continuation envelope whose grant is not the current grant", async () => {
@@ -563,8 +602,8 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controller.activeGrantId).toBeNull();
     expect(h.transferRequests).toHaveLength(3);
     expect(h.controlCalls.filter((request) => request.identity.envelopeId === 2)).toMatchObject([
-      { identity: { kind: "receipt", grantId: "grant-1" } },
       { identity: { kind: "close", grantId: "grant-1" } },
+      { identity: { kind: "receipt", grantId: "grant-1" } },
     ]);
     expect(h.controlCalls).toContainEqual(
       expect.objectContaining({
@@ -616,8 +655,8 @@ describe("TerminalOutputV3SurfaceController", () => {
     ).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
 
     expect(h.controlCalls.filter((request) => request.identity.envelopeId === 2)).toMatchObject([
-      { identity: { kind: "receipt", grantId: "grant-1" } },
       { identity: { kind: "close", grantId: "grant-1" } },
+      { identity: { kind: "receipt", grantId: "grant-1" } },
     ]);
     expect(h.controlCalls.filter((request) => request.identity.kind === "hold")).toHaveLength(1);
 
@@ -628,7 +667,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controller.activeGrantId).toBeNull();
   });
 
-  it("does not carry settled-close grant admission past the next successor", async () => {
+  it("accepts bounded old-grant successors until the first null-grant successor", async () => {
     const h = harness();
     await h.controller.receive(payload({ data: OPEN }), 1);
     await h.controller.receive(
@@ -636,16 +675,76 @@ describe("TerminalOutputV3SurfaceController", () => {
       2,
     );
     await h.controller.receive(
-      payload({ envelopeId: 3, seqStart: 16, grantId: null, data: [65] }),
+      payload({ envelopeId: 3, seqStart: 16, grantId: "grant-1", data: [65] }),
       3,
     );
+    await h.controller.receive(
+      payload({ envelopeId: 4, seqStart: 17, grantId: "grant-1", data: [66] }),
+      4,
+    );
+    await h.controller.receive(payload({ envelopeId: 5, seqStart: 18, grantId: null, data: [67] }), 5);
 
     await expect(
       h.controller.receive(
-        payload({ envelopeId: 4, seqStart: 17, grantId: "grant-1", data: [66] }),
-        4,
+        payload({ envelopeId: 6, seqStart: 19, grantId: "grant-1", data: [68] }),
+        6,
       ),
     ).resolves.toEqual({ kind: "fail-stop", reason: "grant_mismatch" });
+  });
+
+  it("gates an earlier closed grant while a newer frame is closing", async () => {
+    const secondClose = deferred<TerminalOutputDeliveryControlResult>();
+    const h = harness({
+      sendControl: (request) =>
+        request.identity.kind === "close" && request.identity.envelopeId === 2
+          ? secondClose.promise
+          : undefined,
+    });
+
+    await h.controller.receive(payload({ data: [...OPEN, ...CLOSE] }), 1);
+    expect(h.controller.activeGrantId).toBeNull();
+
+    const second = h.controller.receive(
+      payload({
+        envelopeId: 2,
+        seqStart: OPEN.length + CLOSE.length,
+        grantId: "grant-1",
+        data: [...OPEN, ...CLOSE],
+      }),
+      2,
+    );
+    const trailingOldGrant = h.controller.receive(
+      payload({
+        envelopeId: 3,
+        seqStart: 2 * (OPEN.length + CLOSE.length),
+        grantId: "grant-1",
+        data: [65],
+      }),
+      3,
+    );
+    for (let turn = 0; turn < 10; turn += 1) {
+      if (
+        h.controlCalls.some(
+          (request) => request.identity.kind === "close" && request.identity.envelopeId === 2,
+        )
+      ) {
+        break;
+      }
+      await Promise.resolve();
+    }
+
+    expect(h.transferRequests).toHaveLength(2);
+    expect(h.failStops).toEqual([]);
+    const closeRequest = h.controlCalls.find(
+      (request) => request.identity.kind === "close" && request.identity.envelopeId === 2,
+    );
+    expect(closeRequest).toBeDefined();
+    secondClose.resolve({ kind: "accepted", identity: closeRequest!.identity });
+
+    await expect(second).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+    await expect(trailingOldGrant).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
+    expect(h.transferRequests).toHaveLength(3);
+    expect(h.failStops).toEqual([]);
   });
 
   it("gates a null-grant successor that wins the closing receipt-response race", async () => {

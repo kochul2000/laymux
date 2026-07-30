@@ -86,7 +86,7 @@ function setup() {
       failStops.push(reason);
       return { kind: "fail-stop", reason } as never;
     },
-    startEnvelope: vi.fn(),
+    resumeEnvelope: vi.fn(),
   });
 
   return { control, sent, failStops };
