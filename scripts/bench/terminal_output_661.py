@@ -444,6 +444,15 @@ def wait_for_worker_completion(
     return [worker.name for worker in workers if worker.is_alive()]
 
 
+def wait_for_preceding_probe(
+    preceding: threading.Event, stop: threading.Event, poll_seconds: float = 0.1
+) -> bool:
+    while not stop.is_set():
+        if preceding.wait(poll_seconds):
+            return True
+    return False
+
+
 def timed_request(method: str, path: str, payload: Any | None = None) -> dict[str, Any]:
     started = time.monotonic()
     try:
@@ -646,6 +655,7 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
     }
 
     stop = threading.Event()
+    frontier_probe_finished = threading.Event()
     diagnostics_samples: list[dict[str, Any]] = []
     bridge_samples: list[dict[str, Any]] = []
     screenshot_samples: list[dict[str, Any]] = []
@@ -731,7 +741,12 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
                 control_samples.append(sample)
 
     def screenshot_probe() -> None:
-        stop.wait(1.0)
+        # html2canvas is intentionally a real, synchronous main-thread workload.
+        # Keep it inside the flood, but do not overlap it with the independent
+        # 3-second renderer-checkpoint deadline: that would measure the sum of
+        # two probes instead of either production contract.
+        if not wait_for_preceding_probe(frontier_probe_finished, stop):
+            return
         if not stop.is_set():
             sample = timed_request("POST", "/screenshot", {})
             result = sample.get("result")
@@ -741,10 +756,10 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             screenshot_samples.append(sample)
 
     def frontier_catchup_probe() -> None:
-        stop.wait(0.5)
-        if stop.is_set():
-            return
         try:
+            stop.wait(0.5)
+            if stop.is_set():
+                return
             backlog_deadline = time.monotonic() + 5.0
             target_snapshot = None
             target_capture_started = None
@@ -823,6 +838,8 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             )
         except BenchmarkError as error:
             frontier_catchup_samples.append({"ok": False, "error": str(error)})
+        finally:
+            frontier_probe_finished.set()
 
     flood_started = time.monotonic()
     worker_targets = [
@@ -973,6 +990,10 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         "linesPerHotPane": args.lines,
         "flushEvery": args.flush_every,
         "catchupMinBacklogBytes": args.catchup_min_backlog_bytes,
+        "probeSchedule": {
+            "checkpointCatchupStartsAfterMs": 500,
+            "screenshotStartsAfter": "checkpoint-catchup",
+        },
         "environment": {
             "platform": platform.platform(),
             "processor": platform.processor(),

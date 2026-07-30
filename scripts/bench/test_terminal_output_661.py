@@ -308,6 +308,32 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
             released.set()
             blocked.join(timeout=1.0)
 
+    def test_wait_for_preceding_probe_requires_completion_before_running(self):
+        preceding = threading.Event()
+        stop = threading.Event()
+        started = threading.Event()
+        result = []
+
+        worker = threading.Thread(
+            target=lambda: (
+                result.append(benchmark.wait_for_preceding_probe(preceding, stop, 0.01)),
+                started.set(),
+            )
+        )
+        worker.start()
+        self.assertFalse(started.wait(0.03))
+        preceding.set()
+        worker.join(timeout=1.0)
+
+        self.assertEqual(result, [True])
+
+    def test_wait_for_preceding_probe_stops_without_running(self):
+        preceding = threading.Event()
+        stop = threading.Event()
+        stop.set()
+
+        self.assertFalse(benchmark.wait_for_preceding_probe(preceding, stop, 0.01))
+
     @patch.object(benchmark, "api")
     def test_cleanup_restores_original_workspace_and_deletes_only_created_ids(self, mocked_api):
         mocked_api.side_effect = [
