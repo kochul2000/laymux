@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createTerminalWriteFairOwner,
+  TERMINAL_WRITE_MAX_SKIPPED_TURNS,
   TerminalWriteFairScheduler,
+  type TerminalWritePriority,
 } from "./terminal-write-fair-scheduler";
 
 const owner = (label: string) => createTerminalWriteFairOwner(label);
@@ -20,6 +22,138 @@ function createHarness() {
 }
 
 describe("TerminalWriteFairScheduler", () => {
+  it("serves saturated focused, foreground, and background parsers with 4:2:1 weight", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const order: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    const blocker = owner("blocker");
+    const focused = owner("focused");
+    const foreground = owner("foreground");
+    const background = owner("background");
+
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+
+    const saturate = (
+      currentOwner: ReturnType<typeof owner>,
+      label: string,
+      priority: TerminalWritePriority,
+    ) => {
+      const turn = (release: () => void) => {
+        order.push(label);
+        if (order.length < 7) scheduler.request(currentOwner, turn, () => priority);
+        release();
+      };
+      scheduler.request(currentOwner, turn, () => priority);
+    };
+    // Deliberately enqueue low priority first. Selection is by current class,
+    // not by the order in which a flood happened to request its first turn.
+    saturate(background, "background", "background");
+    saturate(foreground, "foreground", "foreground");
+    saturate(focused, "focused", "focused");
+
+    releaseBlocker?.();
+    for (let index = 0; index < 7; index += 1) runNextTask();
+
+    expect(order).toEqual([
+      "focused",
+      "foreground",
+      "focused",
+      "background",
+      "focused",
+      "foreground",
+      "focused",
+    ]);
+  });
+
+  it("samples the latest priority when a queued pane reaches dequeue", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const order: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    let promotedPriority: TerminalWritePriority = "background";
+    const blocker = owner("blocker");
+    const foreground = owner("foreground");
+    const promoted = owner("promoted");
+
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+    scheduler.request(
+      foreground,
+      (release) => {
+        order.push("foreground");
+        release();
+      },
+      () => "foreground",
+    );
+    scheduler.request(
+      promoted,
+      (release) => {
+        order.push("promoted");
+        release();
+      },
+      () => promotedPriority,
+    );
+
+    promotedPriority = "focused";
+    releaseBlocker?.();
+    runNextTask();
+
+    expect(order).toEqual(["promoted"]);
+  });
+
+  it("age-promotes saturated background parsers within a finite turn bound", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const servicedBackground = new Set<string>();
+    let releaseBlocker: (() => void) | undefined;
+    const blocker = owner("blocker");
+
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+
+    const saturate = (
+      currentOwner: ReturnType<typeof owner>,
+      priority: TerminalWritePriority,
+      onTurn: () => void,
+    ) => {
+      const turn = (release: () => void) => {
+        onTurn();
+        scheduler.request(currentOwner, turn, () => priority);
+        release();
+      };
+      scheduler.request(currentOwner, turn, () => priority);
+    };
+    for (const label of ["background-a", "background-b", "background-c"]) {
+      const currentOwner = owner(label);
+      saturate(currentOwner, "background", () => servicedBackground.add(label));
+    }
+    // K+1 distinct focused owners make ordinary smooth weighting choose the
+    // ninth focused owner next. Aging must instead select the earlier-enqueued
+    // background FIFO after exactly K skips.
+    for (let index = 0; index <= TERMINAL_WRITE_MAX_SKIPPED_TURNS; index += 1) {
+      saturate(owner(`focused-${index}`), "focused", () => {});
+    }
+
+    releaseBlocker?.();
+    // Three overdue owners are serviced on selections K+1 through K+3.
+    const initialBackgroundOwnerCount = 3;
+    for (
+      let index = 0;
+      index < TERMINAL_WRITE_MAX_SKIPPED_TURNS + initialBackgroundOwnerCount;
+      index += 1
+    ) {
+      runNextTask();
+    }
+
+    expect([...servicedBackground].sort()).toEqual([
+      "background-a",
+      "background-b",
+      "background-c",
+    ]);
+  });
+
   it("admits one physical write at a time and rotates waiting panes", () => {
     const { scheduler, scheduled, runNextTask } = createHarness();
     const order: string[] = [];

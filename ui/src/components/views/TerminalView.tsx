@@ -257,6 +257,7 @@ import {
   createTerminalWriteFairOwner,
   terminalWriteFairScheduler,
 } from "@/lib/terminal-write-fair-scheduler";
+import { TerminalParserAdmission, terminalParserPriority } from "@/lib/terminal-parser-admission";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -1165,6 +1166,11 @@ export function TerminalView({
     // owner must not: a late callback from the old xterm generation may only
     // cancel/release turns registered by that exact effect lifetime.
     const terminalWriteFairOwner = createTerminalWriteFairOwner(instanceId);
+    const terminalParserAdmission = new TerminalParserAdmission(
+      terminalWriteFairScheduler,
+      terminalWriteFairOwner,
+      () => terminalParserPriority(isContainerHiddenRef.current, isFocusedRef.current),
+    );
     let terminalSessionReady = false;
     let initialExecutionHost: InitialExecutionHost = "unknown";
     let stabilizeNativeWindowsOutput = false;
@@ -3418,7 +3424,7 @@ export function TerminalView({
         clearTimeout(terminalWriteRetryTimer);
         terminalWriteRetryTimer = undefined;
       }
-      terminalWriteFairScheduler.cancelPending(terminalWriteFairOwner);
+      terminalParserAdmission.cancelPending("visible");
     };
     const releaseCurrentTerminalWriteTurn = () => {
       const release = releaseTerminalWriteTurn;
@@ -3441,7 +3447,7 @@ export function TerminalView({
         }, delayMs);
         return;
       }
-      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release, { contended }) => {
+      terminalParserAdmission.request("visible", (release, { contended }) => {
         if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
           release();
           return;
@@ -3779,7 +3785,9 @@ export function TerminalView({
     let publishOutputV3Diagnostics: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
-    const renderCheckpointModel = new TerminalRenderCheckpointModel();
+    const renderCheckpointModel = new TerminalRenderCheckpointModel({
+      admission: terminalParserAdmission,
+    });
     registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
       renderCheckpointModel.capture(target, maxBytes),
     );
@@ -5583,7 +5591,7 @@ export function TerminalView({
       clearCurrentParsingWrite();
       resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
-      terminalWriteFairScheduler.cancel(terminalWriteFairOwner);
+      terminalParserAdmission.cancel("visible");
       releaseTerminalWriteTurn = undefined;
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;
@@ -5672,6 +5680,7 @@ export function TerminalView({
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
       renderCheckpointModel.dispose();
+      terminalParserAdmission.dispose();
       unregisterInstance(instanceId);
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT
