@@ -156,9 +156,16 @@ export class TerminalOutputV3SurfaceController {
 
     const closingAdmission = this.continuationControl.admitDuringClose(envelope, now);
     if (closingAdmission) return closingAdmission;
+    if (this.continuationControl.admitAfterClose(envelope)) {
+      return this.startEnvelope(envelope, now);
+    }
     if (envelope.grantId !== this.continuationControl.activeGrantId) {
       return Promise.resolve(this.failStop("grant_mismatch"));
     }
+
+    // A null-grant successor consumed the one-envelope old-grant grace after
+    // a settled close. Do not let a later stale event inherit that grace.
+    this.continuationControl.clearSettledCloseGrant();
 
     return this.startEnvelope(envelope, now);
   }
