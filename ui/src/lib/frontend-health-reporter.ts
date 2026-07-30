@@ -1,6 +1,9 @@
 import { reportFrontendHealth } from "./tauri-api";
 import { allTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
-import { allTerminalOutputV3Diagnostics } from "./terminal-output-v3-diagnostics";
+import {
+  allTerminalOutputV3ControlTrace,
+  allTerminalOutputV3Diagnostics,
+} from "./terminal-output-v3-diagnostics";
 import { allTerminalInputDeliveryCounters } from "./terminal-input-delivery-metrics";
 
 /**
@@ -90,6 +93,8 @@ export interface FrontendHealthReport {
   pipeline: Record<string, unknown>;
   inputDelivery: Record<string, unknown>;
   terminalOutputV3: ReturnType<typeof allTerminalOutputV3Diagnostics>;
+  /** Recent hold/close controls per terminal; identity and sequence only. */
+  terminalOutputV3ControlTrace: ReturnType<typeof allTerminalOutputV3ControlTrace>;
 }
 
 /**
@@ -136,6 +141,7 @@ export function startFrontendHealthReporter(): () => void {
         pipeline: allTerminalOutputPipelineCounters(),
         inputDelivery: allTerminalInputDeliveryCounters(),
         terminalOutputV3: allTerminalOutputV3Diagnostics(),
+        terminalOutputV3ControlTrace: allTerminalOutputV3ControlTrace(),
       }).catch(() => {
         // Retry a current failed attempt on the next probe tick. Ignore a late
         // rejection from an older attempt after a newer snapshot was sent.

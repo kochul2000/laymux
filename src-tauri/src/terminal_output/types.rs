@@ -108,6 +108,10 @@ pub struct TerminalOutputDesktopDiagnostics {
     pub generation: u64,
     pub desktop_output_state: String,
     pub reason: Option<String>,
+    /// The message that named the tripped invariant. `reason` collapses several
+    /// distinct faults onto one code (notably every `ContractViolation` onto
+    /// `identity_conflict`), so the cause is only recoverable from here.
+    pub reason_detail: Option<String>,
     pub lease_token: Option<String>,
     pub parsed_ack: Option<u64>,
     pub write_seq: u64,

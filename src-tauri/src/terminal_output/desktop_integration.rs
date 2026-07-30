@@ -105,7 +105,14 @@ impl TerminalOutputSession {
     }
 
     pub(super) fn fail_delivery_contract<T>(&self, error: String) -> Result<T, String> {
-        self.fail_delivery(TerminalOutputDeliveryCloseReason::IdentityConflict, error)
+        // Close with the detail-carrying variant. `delivery_reason_code` maps it
+        // onto the same `identity_conflict` code, so the reported reason is
+        // unchanged, but `reason_detail` now names which invariant tripped
+        // instead of collapsing all twelve call sites onto one opaque code.
+        self.fail_delivery(
+            TerminalOutputDeliveryCloseReason::ContractViolation(error.clone()),
+            error,
+        )
     }
 
     pub fn delivery_failure(&self) -> Option<TerminalOutputDeliveryCloseReason> {
@@ -126,6 +133,18 @@ impl TerminalOutputSession {
             .map(delivery_reason_code)
             .or_else(|| delivery.close_reason.as_ref().map(delivery_reason_code))
             .or_else(|| flow.reason.map(flow_reason_code));
+        // Resolve the detail from the same source that won `reason` above, so the
+        // two can never describe different faults.
+        let reason_detail = delivery_failure
+            .as_ref()
+            .and_then(delivery_reason_detail)
+            .or_else(|| {
+                delivery
+                    .close_reason
+                    .as_ref()
+                    .and_then(delivery_reason_detail)
+            })
+            .or_else(|| flow.reason.and(flow.reason_detail.clone()));
         let state = if delivery_failure.is_some() || delivery.closed {
             "failStopped"
         } else {
@@ -150,6 +169,7 @@ impl TerminalOutputSession {
             generation: self.generation,
             desktop_output_state: state.into(),
             reason,
+            reason_detail,
             lease_token: delivery.lease_token.or(flow.lease_token),
             parsed_ack: flow.parsed_ack.or(Some(delivery.parsed_seq)),
             write_seq,
@@ -490,4 +510,17 @@ pub(super) fn delivery_reason_code(reason: &TerminalOutputDeliveryCloseReason) -
         TerminalOutputDeliveryCloseReason::Retired => "surface_unavailable",
     }
     .into()
+}
+
+/// The message a close reason carried, for the variants that carry one.
+///
+/// `delivery_reason_code` maps `ContractViolation` onto `identity_conflict` and
+/// `EmitFailed` onto `emit_failure`, discarding the only text that says which
+/// invariant actually tripped. Diagnostics report it alongside the code.
+pub(super) fn delivery_reason_detail(reason: &TerminalOutputDeliveryCloseReason) -> Option<String> {
+    match reason {
+        TerminalOutputDeliveryCloseReason::ContractViolation(detail)
+        | TerminalOutputDeliveryCloseReason::EmitFailed(detail) => Some(detail.clone()),
+        _ => None,
+    }
 }

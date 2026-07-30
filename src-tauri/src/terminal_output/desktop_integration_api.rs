@@ -91,6 +91,7 @@ pub fn terminal_output_diagnostics(
                         generation: session.generation,
                         desktop_output_state: "failStopped".into(),
                         reason: Some("surface_unavailable".into()),
+                        reason_detail: Some(error.clone()),
                         lease_token: None,
                         parsed_ack: None,
                         write_seq: 0,

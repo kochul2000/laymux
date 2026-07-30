@@ -417,6 +417,7 @@ impl DesktopOutputFlow {
         Ok(DesktopOutputDiagnostics {
             state: state.output_state,
             reason: state.failure_reason,
+            reason_detail: state.failure_detail.clone(),
             lease_token: active.and_then(|lease| lease.token.clone()),
             parsed_ack: active.map(|lease| lease.parsed_ack),
             effective_limit: active.map(effective_limit),
@@ -468,7 +469,11 @@ impl DesktopOutputFlow {
         state: &mut DesktopOutputFlowState,
         message: &str,
     ) -> Result<T, String> {
-        fail_stop(state, DesktopOutputFailureReason::IdentityConflict);
+        fail_stop_detailed(
+            state,
+            DesktopOutputFailureReason::IdentityConflict,
+            Some(message),
+        );
         self.changed.notify_all();
         Err(message.into())
     }
