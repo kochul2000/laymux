@@ -332,7 +332,7 @@ describe("TerminalWriteFairScheduler", () => {
     expect(order).toEqual(["a", "b"]);
   });
 
-  it("invalidates an empty scheduled turn so a later idle pane runs immediately", () => {
+  it("keeps the post-release yield when a same-task replacement arrives", () => {
     const { scheduler, scheduled, runNextTask } = createHarness();
     let releaseA: (() => void) | undefined;
     const paneB = vi.fn();
@@ -350,11 +350,150 @@ describe("TerminalWriteFairScheduler", () => {
 
     scheduler.cancelPending(paneBOwner);
     scheduler.request(paneCOwner, paneC);
-    expect(paneC).toHaveBeenCalledTimes(1);
+    expect(paneC).not.toHaveBeenCalled();
 
     runNextTask();
     expect(paneB).not.toHaveBeenCalled();
     expect(paneC).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers work requested by a parser-completion microtask", async () => {
+    const { scheduler, scheduled, runNextTask } = createHarness();
+    const firstOwner = owner("first");
+    const chainedOwner = owner("chained");
+    const chained = vi.fn((release: () => void) => release());
+    let releaseFirst: (() => void) | undefined;
+
+    scheduler.request(firstOwner, (release) => {
+      releaseFirst = release;
+    });
+    releaseFirst?.();
+    await Promise.resolve();
+    scheduler.request(chainedOwner, chained);
+
+    expect(scheduled).toHaveLength(1);
+    expect(chained).not.toHaveBeenCalled();
+    runNextTask();
+    expect(chained).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets a drained owner's weighted debt before its next burst", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const order: string[] = [];
+    const blocker = owner("blocker");
+    const drained = owner("drained");
+    const foreground = owner("foreground");
+    const background = owner("background");
+    const peer = owner("peer");
+    let releaseBlocker: (() => void) | undefined;
+    let releaseDrained: (() => void) | undefined;
+    let releaseForeground: (() => void) | undefined;
+
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+    scheduler.request(
+      drained,
+      (release) => {
+        order.push("drained-first");
+        releaseDrained = release;
+      },
+      () => "focused",
+    );
+    scheduler.request(
+      foreground,
+      (release) => {
+        order.push("foreground");
+        releaseForeground = release;
+      },
+      () => "foreground",
+    );
+    scheduler.request(
+      background,
+      () => {},
+      () => "background",
+    );
+
+    releaseBlocker?.();
+    runNextTask();
+    expect(order).toEqual(["drained-first"]);
+    releaseDrained?.();
+    runNextTask();
+    expect(order).toEqual(["drained-first", "foreground"]);
+
+    scheduler.cancelPending(background);
+    scheduler.request(
+      drained,
+      (release) => {
+        order.push("drained-second");
+        release();
+      },
+      () => "background",
+    );
+    scheduler.request(
+      peer,
+      (release) => {
+        order.push("peer");
+        release();
+      },
+      () => "background",
+    );
+    releaseForeground?.();
+    runNextTask();
+
+    expect(order).toEqual(["drained-first", "foreground", "drained-second"]);
+  });
+
+  it("preserves weight across checkpoint-like microtask requeues", async () => {
+    const { scheduler, runNextTask } = createHarness();
+    const order: string[] = [];
+    const blocker = owner("blocker");
+    const foreground = owner("foreground");
+    const background = owner("background");
+    let releaseBlocker: (() => void) | undefined;
+    let releaseActive: (() => void) | undefined;
+
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+    const turns = new Map([
+      [
+        foreground,
+        (release: () => void) => {
+          order.push("foreground");
+          releaseActive = release;
+        },
+      ],
+      [
+        background,
+        (release: () => void) => {
+          order.push("background");
+          releaseActive = release;
+        },
+      ],
+    ]);
+    scheduler.request(foreground, turns.get(foreground)!, () => "foreground");
+    scheduler.request(background, turns.get(background)!, () => "background");
+    releaseBlocker?.();
+
+    for (let index = 0; index < 6; index += 1) {
+      runNextTask();
+      const selected = order.at(-1) === "foreground" ? foreground : background;
+      releaseActive?.();
+      await Promise.resolve();
+      scheduler.request(selected, turns.get(selected)!, () =>
+        selected === foreground ? "foreground" : "background",
+      );
+    }
+
+    expect(order).toEqual([
+      "foreground",
+      "background",
+      "foreground",
+      "foreground",
+      "background",
+      "foreground",
+    ]);
   });
 
   it("resets an active lease and invalidates its pending host task for test isolation", () => {
@@ -390,7 +529,9 @@ describe("TerminalWriteFairScheduler", () => {
       }),
     ).toThrow(expected);
     scheduler.request(paneB, next);
-    expect(scheduled).toHaveLength(0);
+    expect(scheduled).toHaveLength(1);
+    expect(next).not.toHaveBeenCalled();
+    scheduled.shift()?.();
     expect(next).toHaveBeenCalledTimes(1);
   });
 });

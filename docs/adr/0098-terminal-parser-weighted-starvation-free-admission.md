@@ -3,7 +3,8 @@
 - Status: Proposed
 - Date: 2026-07-30
 - Source: issue #661; [data-flow.md §8.8](../architecture/data-flow.md); [ADR-0092](0092-app-wide-terminal-write-round-robin.md); [ADR-0095](0095-terminal-output-bounded-envelope-and-frame-continuation.md); [ADR-0097](0097-transport-lossless-presentation-lossy-ownership.md)
-- Relation: ADR-0092의 동일 우선순위 round-robin과 visible-only admission 범위를 확장한다. ADR-0095의 single receipt slot·두 parser 교집합 ACK와 ADR-0097의 lossless transport/backpressure 계약은 유지한다.
+- Amends: ADR-0092의 동일 우선순위 round-robin과 visible-only admission 범위를 가중·두-lane admission으로 확장한다.
+- Preserves: ADR-0095의 single receipt slot·두 parser 교집합 ACK와 ADR-0097의 lossless transport/backpressure 계약은 유지한다.
 
 ## Context
 
@@ -19,15 +20,15 @@
 
 **Desktop visible xterm과 rendererless checkpoint xterm은 pane당 하나의 owner로 앱 전역 단일 parser lease를 공유하고, owner는 최신 surface 상태에서 도출한 4:2:1 가중치와 bounded age promotion으로 선택한다.**
 
-1. 앱 전역 `TerminalWriteFairScheduler`는 동시에 하나의 pane owner만 활성화한다. owner는 `TerminalView` xterm effect 생명주기마다 새 opaque `Symbol`이고, stale generation의 cancel/release는 replacement owner에 영향을 주지 않는다.
+1. 앱 전역 `TerminalWriteFairScheduler`는 정상 mounted 생명주기에서 동시에 하나의 pane owner admission만 활성화한다. owner는 `TerminalView` xterm effect 생명주기마다 새 opaque `Symbol`이고, stale generation의 cancel/release는 replacement owner에 영향을 주지 않는다.
 2. 한 pane의 visible과 checkpoint는 별도 전역 owner가 아니라 하나의 `TerminalParserAdmission` 아래 두 lane이다. lane별 future callback은 최대 하나이고 둘 다 계속 pending이면 번갈아 선택한다. 따라서 checkpoint가 전역 gate를 우회하지 않으면서도 한 pane의 가중 지분을 두 배로 만들지 않는다.
 3. 선택 가중치는 focused visible `4`, visible unfocused `2`, hidden `1`이다. hidden은 `display:none`과 0 px track을 이미 관측하는 container visibility ref가 진실원이며 focus보다 먼저 판정한다. priority resolver는 request 때 값을 동결하지 않고 dequeue 때 committed visibility/focus ref를 읽는다. 사용자 설정이나 OS lock/minimize 상태는 입력이 아니다.
-4. owner 선택은 smooth weighted round-robin balance를 사용한다. 동일 balance는 pending FIFO 순서로 결정한다. 다른 owner에게 `K=8` turn을 양보한 owner는 age-promoted되고 FIFO의 다른 overdue owner보다만 뒤에 선다. 선택 시점에 pending owner가 `P`개라면 continuously pending pane owner의 최대 대기는 `K + P - 1`개의 다른 completed turn이고, 두 lane이 모두 saturated인 특정 lane은 sibling 교대 때문에 최대 한 turn을 더 기다린다. 새 arrival는 overdue owner를 앞지르지 않는다.
+4. owner 선택은 smooth weighted round-robin balance를 사용한다. 동일 balance는 pending FIFO 순서로 결정한다. 다른 owner에게 `K=8` turn을 양보한 owner는 age-promoted되고 FIFO의 다른 overdue owner보다만 뒤에 선다. 선택 시점에 pending owner가 `P`개라면 continuously pending pane owner의 최대 대기 `B`는 `K + P - 1`개의 다른 completed turn이다. 두 lane이 모두 saturated이면 특정 lane은 첫 owner 대기 `B`, sibling 한 turn, 다시 owner 대기 `B`를 거칠 수 있으므로 lane의 보수적 최대 대기는 `2B + 1` turn이다. 새 arrival는 overdue owner를 앞지르지 않는다.
 5. priority 변경은 다음 dequeue부터 balance와 weight에 반영한다. 이미 active인 write는 선점·취소하지 않으며 materialized batch, envelope identity, sequence, callback을 바꾸지 않는다. resolver 실패는 background로 fail-safe 분류하되 admission 자체를 멈추지 않는다.
-6. active callback이 끝나기 전 다음 local lane/turn을 예약하고, scheduler가 lease를 반환한 뒤 새 macrotask에서 다음 owner를 실행한다. parser callback timeout이나 UI 상태 변화로 lease를 조기 반환하지 않는다. 동기 throw·backpressure·lifecycle cancel의 기존 idempotent release 계약은 유지한다.
-7. 다른 pane owner가 pending인 turn은 visible과 checkpoint 모두 최대 64 KiB를 parser에 제출한다. 앱에 이 pane만 있으면 기존 256 KiB live/checkpoint fast path를 유지한다. replay callback barrier, stabilized string/frame 원자성, 1 MiB DECSET 상한, retry batch identity는 변경하지 않는다.
+6. active callback이 끝나기 전 다음 local lane/turn을 예약하고, scheduler가 lease를 반환한 뒤 새 macrotask에서 다음 owner를 실행한다. callback 직후 Promise microtask에서 다음 checkpoint operation이 생겨도 release가 만든 빈 macrotask barrier를 건너뛰지 않는다. parser callback timeout이나 UI 상태 변화로 lease를 조기 반환하지 않는다. 동기 throw·backpressure의 기존 idempotent release 계약은 유지한다. 단, unmount/profile replacement는 이미 dispose한 old xterm의 accepted write를 취소할 API가 없으므로 active lease를 해제할 수 있다. 이 경우 old generation마다 최대 한 stale physical callback만 남을 수 있고, 그 callback/release는 새 owner의 상태나 lease를 바꾸지 않는다.
+7. 다른 pane owner가 pending인 turn은 non-stabilized fresh visible write와 checkpoint slice를 최대 64 KiB로 제한한다. 앱에 이 pane만 있으면 기존 256 KiB live/checkpoint fast path를 유지한다. replay callback barrier는 64 KiB 이하이고, stabilized string/frame의 최대 1 MiB 원자 write와 이미 materialize된 retry batch는 경쟁 중에도 자르지 않는 기존 예외다. retry identity는 변경하지 않는다.
 8. background weight 1은 pause나 presentation drop이 아니다. hidden pane의 두 parser와 parsed ACK도 계속 전진하며 부족한 처리량은 ADR-0097에 따라 PTY backpressure로 전달한다. congestion을 reset/replay/replacement attach/fail-stop 사유로 승격하거나 visible parse 전 ACK하지 않는다.
-9. parsed frontier는 ADR-0095대로 visible과 checkpoint가 모두 완료한 contiguous prefix의 교집합이다. scheduler는 receipt/hold/close/ACK identity, generation당 하나인 unreceipted envelope, 5초 progress/continuation deadline을 소유하거나 변경하지 않는다. wall-clock bound는 accepted xterm callback이 유한하게 끝난다는 기존 liveness 가정에 의존하며, 2/4/7/8-pane 실측에서 background service gap이 5초보다 짧아야 이 weight를 유지한다.
+9. parsed frontier는 ADR-0095대로 visible과 checkpoint가 모두 완료한 contiguous prefix의 교집합이다. scheduler는 receipt/hold/close/ACK identity, generation당 하나인 unreceipted envelope, 5초 progress/continuation deadline을 소유하거나 변경하지 않는다. wall-clock bound는 accepted xterm callback이 유한하게 끝난다는 기존 liveness 가정에 의존한다. rendererless checkpoint capture의 3초 deadline과 Automation bridge의 5초 deadline에 여유를 남기기 위해 2/4/7/8-pane 실측은 backlog가 있는 background owner의 sampled service gap뿐 아니라 flood 중 고정한 `writeSeq` target까지 parsed 교집합 전체가 catch-up하는 시간도 3초 미만임을 검증한다.
 
 ## Alternatives Considered
 
@@ -45,5 +46,5 @@
 - checkpoint도 전역 단일 lease와 64 KiB contended quantum을 사용하므로 동시에 진행 중인 desktop xterm physical write는 앱 전체에서 최대 하나다.
 - owner 수가 늘면 background throughput과 최종 drain 시간은 감소할 수 있다. 이는 의도한 responsiveness 우선순위이며 byte를 버리지 않고 PTY backpressure로 나타난다. single-pane 256 KiB fast path는 유지한다.
 - smooth balance, age counter, pane-local two-lane arbiter가 scheduler 상태에 추가된다. 결정적 테스트는 4:2:1 share, latest-state reclassification, `K+P-1` owner bound, lane alternation/dedupe/cancel, one-active lease, callback FIFO를 고정해야 한다.
-- 2/4/7/8 hot-pane 150,000-line dev 측정은 key/Automation/screenshot latency, frontend health, parser frontier service gap, throughput, final marker와 fail-stop/repair를 함께 기록한다. 5초 timeout 또는 background parsed-progress expiry가 발생하면 weight·quantum을 재검토하되 single-slot·lossless 계약을 우회하지 않는다.
+- 2/4/7/8 hot-pane 150,000-line dev 측정은 Automation control echo/screenshot latency, frontend health, parser frontier service gap, 고정 frontier target의 전체 catch-up, throughput, final marker와 fail-stop/repair를 함께 기록한다. 실제 OS key latency는 devinput lease를 사용한 별도 실측으로 기록한다. 3초 checkpoint catch-up 또는 5초 parsed-progress 계약을 넘으면 weight·quantum을 재검토하되 single-slot·lossless 계약을 우회하지 않는다.
 - #683의 multi-receipt pipeline은 채택하지 않는다. receipt RTT가 실제 병목으로 다시 측정되면 batching/ACK 집계를 먼저 검토하고, slot 확대는 별도 ADR로 다룬다.

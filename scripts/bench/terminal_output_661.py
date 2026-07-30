@@ -8,6 +8,8 @@ import json
 import math
 import os
 from pathlib import Path
+import platform
+import re
 import subprocess
 import tempfile
 import threading
@@ -20,6 +22,7 @@ from urllib.request import Request, urlopen
 
 PORT = 19281
 BASE = f"http://127.0.0.1:{PORT}/api/v1"
+RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
 class BenchmarkError(RuntimeError):
@@ -48,6 +51,13 @@ def git_head(worktree: Path) -> str:
     ).strip()
 
 
+def git_is_clean(worktree: Path) -> bool:
+    status = subprocess.check_output(
+        ["git", "status", "--porcelain"], cwd=worktree, text=True, encoding="utf-8"
+    )
+    return not status.strip()
+
+
 def normalized_path(value: str | Path) -> str:
     return os.path.normcase(str(Path(value).resolve()))
 
@@ -56,6 +66,8 @@ def assert_dev_identity(expected_worktree: Path) -> dict[str, Any]:
     health = api("GET", "/health")
     instance = health.get("instance") or {}
     expected_head = git_head(expected_worktree)
+    if not git_is_clean(expected_worktree):
+        raise BenchmarkError(f"expected worktree is dirty: {expected_worktree}")
     facts = {
         "status": health.get("status"),
         "port": health.get("port"),
@@ -101,6 +113,23 @@ def create_workspace(name: str) -> str:
     return workspace_id
 
 
+def cleanup_named_workspaces(names: set[str]) -> None:
+    snapshot = api("GET", "/workspaces")
+    targets = [item["id"] for item in snapshot["workspaces"] if item.get("name") in names]
+    if not targets:
+        return
+    if snapshot["activeWorkspaceId"] in targets:
+        fallback = next(
+            (item["id"] for item in snapshot["workspaces"] if item["id"] not in targets),
+            None,
+        )
+        if fallback is None:
+            raise BenchmarkError("cannot clean benchmark workspaces without a fallback workspace")
+        api("POST", "/workspaces/active", {"id": fallback})
+    for workspace_id in reversed(targets):
+        api("DELETE", f"/workspaces/{quote(workspace_id, safe='')}")
+
+
 def normalize_active_workspace(total_panes: int) -> list[str]:
     while len(active_workspace()["panes"]) > total_panes:
         api("DELETE", f"/panes/{len(active_workspace()['panes']) - 1}")
@@ -113,8 +142,13 @@ def normalize_active_workspace(total_panes: int) -> list[str]:
         )
     workspace = active_workspace()
     for index, pane in enumerate(workspace["panes"]):
-        if (pane.get("view") or {}).get("type") != "TerminalView":
-            api("PUT", f"/panes/{index}/view", {"type": "TerminalView"})
+        view = pane.get("view") or {}
+        if view.get("type") != "TerminalView" or view.get("profile") != "PowerShell":
+            api(
+                "PUT",
+                f"/panes/{index}/view",
+                {"type": "TerminalView", "profile": "PowerShell"},
+            )
     workspace_id = workspace["id"]
 
     def ready_terminals():
@@ -187,12 +221,34 @@ def terminal_diagnostics(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     }
 
 
+def settled_frontiers(
+    snapshot: dict[str, Any], terminal_ids: list[str]
+) -> dict[str, Any] | None:
+    backend = terminal_diagnostics(snapshot)
+    frontend = (snapshot.get("frontend") or {}).get("terminalOutputV3") or {}
+    for terminal_id in terminal_ids:
+        back = backend.get(terminal_id) or {}
+        front = frontend.get(terminal_id) or {}
+        if not (
+            back.get("desktopOutputState") == "healthy"
+            and back.get("reason") is None
+            and back.get("parsedAck") == back.get("writeSeq") == back.get("ringEndSeq")
+            and back.get("deliveryObservedSeq") == back.get("writeSeq")
+            and front.get("state") == "active"
+            and front.get("reason") is None
+            and front.get("admittedSeq") == front.get("parsedSeq") == back.get("writeSeq")
+        ):
+            return None
+    return snapshot
+
+
 def longest_backlog_service_gaps(
     samples: list[dict[str, Any]], terminal_ids: list[str]
 ) -> dict[str, float]:
     longest = {terminal_id: 0.0 for terminal_id in terminal_ids}
     last_progress_ms = {terminal_id: 0.0 for terminal_id in terminal_ids}
     last_parsed: dict[str, int | None] = {terminal_id: None for terminal_id in terminal_ids}
+    backlogged = {terminal_id: False for terminal_id in terminal_ids}
     for sample in samples:
         if not sample.get("ok"):
             continue
@@ -201,18 +257,24 @@ def longest_backlog_service_gaps(
             if terminal_id not in last_parsed:
                 continue
             parsed = entry.get("parsedAck")
-            if parsed != last_parsed[terminal_id]:
+            has_backlog = entry.get("writeSeq", 0) > (parsed or 0)
+            if parsed != last_parsed[terminal_id] or (has_backlog and not backlogged[terminal_id]):
                 last_parsed[terminal_id] = parsed
                 last_progress_ms[terminal_id] = at_ms
-            if entry.get("writeSeq", 0) > (parsed or 0):
+            if has_backlog:
                 longest[terminal_id] = max(longest[terminal_id], at_ms - last_progress_ms[terminal_id])
+            else:
+                last_progress_ms[terminal_id] = at_ms
+            backlogged[terminal_id] = has_backlog
     return longest
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    if os.name != "nt":
+        raise BenchmarkError("issue #661 flood benchmark is Windows-only")
     expected_worktree = Path(args.expected_worktree).resolve()
     identity = assert_dev_identity(expected_worktree)
-    run_id = args.run_id or f"r{int(time.time())}"
+    run_id = args.run_id
     root_name = f"bench-661-{run_id}"
     created_workspaces: list[str] = []
     temp_root = Path(tempfile.gettempdir()) / "laymux-661" / run_id
@@ -234,6 +296,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         control_terminal = normalize_active_workspace(1)[0]
 
     api("POST", f"/terminals/{quote(control_terminal, safe='')}/focus")
+    initial_diag = wait_until(
+        "initial v3 attach and idle frontiers",
+        lambda: settled_frontiers(
+            api("GET", "/diagnostics/frontend"), hot_terminals + [control_terminal]
+        ),
+        timeout=60.0,
+    )
     flood_script = Path(__file__).with_name("terminal-output-flood.ps1").resolve()
     armed_markers: dict[str, str] = {}
     final_markers: dict[str, str] = {}
@@ -256,12 +325,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             timeout=60.0,
         )
 
-    initial_diag = api("GET", "/diagnostics/frontend")
     stop = threading.Event()
     diagnostics_samples: list[dict[str, Any]] = []
     bridge_samples: list[dict[str, Any]] = []
     screenshot_samples: list[dict[str, Any]] = []
     control_samples: list[dict[str, Any]] = []
+    frontier_catchup_samples: list[dict[str, Any]] = []
 
     def diagnostics_loop() -> None:
         while not stop.is_set():
@@ -318,7 +387,80 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     def screenshot_probe() -> None:
         stop.wait(1.0)
         if not stop.is_set():
-            screenshot_samples.append(timed_request("POST", "/screenshot", {}))
+            sample = timed_request("POST", "/screenshot", {})
+            result = sample.get("result")
+            if isinstance(result, dict) and isinstance(result.get("dataUrl"), str):
+                data_url = result.pop("dataUrl")
+                sample["dataUrlBytes"] = len(data_url)
+            screenshot_samples.append(sample)
+
+    def frontier_catchup_probe() -> None:
+        stop.wait(0.5)
+        if stop.is_set():
+            return
+        try:
+            backlog_deadline = time.monotonic() + 5.0
+            target_snapshot = None
+            while not stop.is_set() and time.monotonic() < backlog_deadline:
+                candidate = api("GET", "/diagnostics/frontend")
+                candidate_backend = terminal_diagnostics(candidate)
+                if all(
+                    int((candidate_backend.get(terminal_id) or {}).get("writeSeq") or 0)
+                    > int((candidate_backend.get(terminal_id) or {}).get("parsedAck") or 0)
+                    for terminal_id in hot_terminals
+                ):
+                    target_snapshot = candidate
+                    break
+                time.sleep(0.02)
+            if target_snapshot is None:
+                raise BenchmarkError("no simultaneous parser backlog observed for catch-up probe")
+            started = time.monotonic()
+            target_backend = terminal_diagnostics(target_snapshot)
+            targets = {
+                terminal_id: int((target_backend.get(terminal_id) or {}).get("writeSeq") or 0)
+                for terminal_id in hot_terminals
+            }
+            starting_parsed = {
+                terminal_id: int((target_backend.get(terminal_id) or {}).get("parsedAck") or 0)
+                for terminal_id in hot_terminals
+            }
+            reached_at: dict[str, float] = {}
+            deadline = started + 5.0
+            while len(reached_at) < len(targets) and time.monotonic() < deadline:
+                snapshot = api("GET", "/diagnostics/frontend")
+                backend = terminal_diagnostics(snapshot)
+                now = time.monotonic()
+                for terminal_id, target in targets.items():
+                    if terminal_id in reached_at:
+                        continue
+                    if int((backend.get(terminal_id) or {}).get("parsedAck") or 0) >= target:
+                        reached_at[terminal_id] = now
+                if len(reached_at) < len(targets):
+                    time.sleep(0.02)
+            missing = sorted(set(targets) - set(reached_at))
+            frontier_catchup_samples.append(
+                {
+                    "ok": not missing,
+                    "targetSeq": targets,
+                    "startingParsedSeq": starting_parsed,
+                    "backlogBytes": {
+                        terminal_id: targets[terminal_id] - starting_parsed[terminal_id]
+                        for terminal_id in hot_terminals
+                    },
+                    "perTerminalMs": {
+                        terminal_id: round((reached - started) * 1000, 3)
+                        for terminal_id, reached in reached_at.items()
+                    },
+                    "maxMs": round(
+                        max((reached - started) * 1000 for reached in reached_at.values()), 3
+                    )
+                    if reached_at
+                    else None,
+                    "missing": missing,
+                }
+            )
+        except BenchmarkError as error:
+            frontier_catchup_samples.append({"ok": False, "error": str(error)})
 
     flood_started = time.monotonic()
     workers = [
@@ -326,6 +468,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         threading.Thread(target=bridge_loop, daemon=True),
         threading.Thread(target=control_probe, daemon=True),
         threading.Thread(target=screenshot_probe, daemon=True),
+        threading.Thread(target=frontier_catchup_probe, daemon=True),
     ]
     for worker in workers:
         worker.start()
@@ -342,26 +485,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         missing = sorted(set(hot_terminals) - set(completed_at))
         raise BenchmarkError(f"flood timed out; missing FINAL for {missing}")
 
-    def all_frontiers_settled():
-        snapshot = api("GET", "/diagnostics/frontend")
-        backend = terminal_diagnostics(snapshot)
-        frontend = (snapshot.get("frontend") or {}).get("terminalOutputV3") or {}
-        for terminal_id in hot_terminals:
-            back = backend.get(terminal_id) or {}
-            front = frontend.get(terminal_id) or {}
-            if not (
-                back.get("desktopOutputState") == "active"
-                and back.get("reason") is None
-                and back.get("parsedAck") == back.get("writeSeq") == back.get("ringEndSeq")
-                and back.get("deliveryObservedSeq") == back.get("writeSeq")
-                and front.get("state") == "active"
-                and front.get("reason") is None
-                and front.get("admittedSeq") == front.get("parsedSeq") == back.get("writeSeq")
-            ):
-                return None
-        return snapshot
-
-    final_diag = wait_until("all parser frontiers", all_frontiers_settled, timeout=30.0)
+    final_diag = wait_until(
+        "all parser frontiers",
+        lambda: settled_frontiers(api("GET", "/diagnostics/frontend"), hot_terminals),
+        timeout=30.0,
+    )
+    frontiers_settled_at = time.monotonic()
     buffer_final = {
         terminal_id: buffer_contains(terminal_id, final_markers[terminal_id])
         for terminal_id in hot_terminals
@@ -373,12 +502,38 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     longest_service_gap_ms = longest_backlog_service_gaps(diagnostics_samples, hot_terminals)
 
     successful_diag = [sample["result"] for sample in diagnostics_samples if sample.get("ok")]
-    report_ages = [float(item.get("lastReportAgeMs") or 0) for item in successful_diag]
+    report_ages = [
+        float(item["lastReportAgeMs"])
+        for item in successful_diag
+        if isinstance(item.get("lastReportAgeMs"), (int, float))
+    ]
     pipeline = (final_diag.get("frontend") or {}).get("pipeline") or {}
     frontend_v3 = (final_diag.get("frontend") or {}).get("terminalOutputV3") or {}
     final_backend = terminal_diagnostics(final_diag)
     initial_frontend = initial_diag.get("frontend") or {}
     final_frontend = final_diag.get("frontend") or {}
+    bridge_by_path = {
+        path: latency_summary([sample for sample in bridge_samples if sample.get("path") == path])
+        for path in ["/workspaces/active", "/grid"]
+    }
+    max_service_gap = max(longest_service_gap_ms.values(), default=0.0)
+    control_ok = bool(control_samples) and all("error" not in item for item in control_samples)
+    catchup_ok = bool(frontier_catchup_samples) and all(
+        sample.get("ok") and float(sample.get("maxMs") or 0) < 3_000
+        for sample in frontier_catchup_samples
+    )
+    acceptance = {
+        "frontiersSettled": True,
+        "allFinalMarkersRendered": all(buffer_final.values()),
+        "backgroundServiceGapUnder3s": max_service_gap < 3_000,
+        "bridgeHadNoErrors": all(sample.get("ok") for sample in bridge_samples),
+        "diagnosticsHadNoErrors": all(sample.get("ok") for sample in diagnostics_samples),
+        "screenshotSucceeded": bool(screenshot_samples)
+        and all(sample.get("ok") for sample in screenshot_samples),
+        "automationControlEchoSucceeded": control_ok,
+        "checkpointTargetCatchupUnder3s": catchup_ok,
+    }
+    acceptance["passed"] = all(acceptance.values())
     summary = {
         "runId": run_id,
         "identity": identity,
@@ -387,7 +542,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "controlTerminal": control_terminal,
         "linesPerHotPane": args.lines,
         "flushEvery": args.flush_every,
+        "environment": {
+            "platform": platform.platform(),
+            "processor": platform.processor(),
+            "python": platform.python_version(),
+            "shellProfile": "PowerShell",
+        },
         "elapsedToLastFinalMs": round((max(completed_at.values()) - flood_started) * 1000, 3),
+        "elapsedToSettledFrontiersMs": round(
+            (frontiers_settled_at - flood_started) * 1000, 3
+        ),
         "perPaneFinalMs": {
             terminal_id: round((completed - flood_started) * 1000, 3)
             for terminal_id, completed in completed_at.items()
@@ -396,9 +560,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             args.lines * len(hot_terminals) / (max(completed_at.values()) - flood_started), 3
         ),
         "bridge": latency_summary(bridge_samples),
+        "bridgeByPath": bridge_by_path,
         "diagnostics": latency_summary(diagnostics_samples),
         "screenshot": latency_summary(screenshot_samples),
         "control": control_samples,
+        "checkpointTargetCatchup": frontier_catchup_samples,
         "maxFrontendReportAgeMs": round(max(report_ages), 3) if report_ages else None,
         "stallDelta": (final_frontend.get("stalls") or 0) - (initial_frontend.get("stalls") or 0),
         "bridgeTimeoutDelta": (final_diag.get("bridge") or {}).get("requestTimeouts", 0)
@@ -410,6 +576,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "backendFinal": {terminal_id: final_backend.get(terminal_id) for terminal_id in hot_terminals},
         "frontendFinal": {terminal_id: frontend_v3.get(terminal_id) for terminal_id in hot_terminals},
         "pipelineFinal": {terminal_id: pipeline.get(terminal_id) for terminal_id in hot_terminals},
+        "acceptance": acceptance,
     }
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -454,12 +621,40 @@ def main() -> int:
     args = parser.parse_args()
     if args.lines < 1 or args.flush_every < 1:
         parser.error("--lines and --flush-every must be positive")
+    if args.run_id is None:
+        args.run_id = f"r{int(time.time() * 1000)}-{os.getpid()}"
+    if not RUN_ID_PATTERN.fullmatch(args.run_id):
+        parser.error("--run-id must match [A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
     try:
         summary = run(args)
     except BenchmarkError as error:
+        try:
+            failure_snapshot = api("GET", "/diagnostics/frontend")
+        except BenchmarkError as snapshot_error:
+            failure_snapshot = {"error": str(snapshot_error)}
+        output = Path(args.output).resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(
+                {"error": str(error), "runId": args.run_id, "finalDiagnostics": failure_snapshot},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        if args.cleanup:
+            try:
+                cleanup_named_workspaces(
+                    {
+                        f"bench-661-{args.run_id}-hot",
+                        f"bench-661-{args.run_id}-control",
+                    }
+                )
+            except BenchmarkError as cleanup_error:
+                parser.exit(2, f"benchmark failed: {error}; cleanup failed: {cleanup_error}\n")
         parser.exit(2, f"benchmark failed: {error}\n")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return 0
+    return 0 if summary.get("acceptance", {}).get("passed") else 3
 
 
 if __name__ == "__main__":

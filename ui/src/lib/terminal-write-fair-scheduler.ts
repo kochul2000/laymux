@@ -82,15 +82,12 @@ export class TerminalWriteFairScheduler {
 
   /** Remove only a future turn while preserving an accepted active write. */
   cancelPending(owner: TerminalWriteFairOwner): void {
-    if (!this.pendingTurns.delete(owner)) return;
+    if (!this.pendingTurns.delete(owner)) {
+      if (this.activeTurn?.owner !== owner) this.balances.delete(owner);
+      return;
+    }
     this.balances.delete(owner);
     this.pendingOwners = this.pendingOwners.filter((pending) => pending !== owner);
-    if (this.pendingTurns.size === 0 && this.activeTurn === undefined && this.macrotaskScheduled) {
-      // The host timer API does not expose a common cancellation handle. Make
-      // its callback stale instead, so a later idle request need not wait for it.
-      this.macrotaskScheduled = false;
-      this.macrotaskGeneration += 1;
-    }
   }
 
   /**
@@ -128,8 +125,12 @@ export class TerminalWriteFairScheduler {
     this.macrotaskGeneration += 1;
   }
 
-  private scheduleNext(): void {
-    if (this.activeTurn !== undefined || this.macrotaskScheduled || this.pendingTurns.size === 0) {
+  private scheduleNext(forceYield = false): void {
+    if (
+      this.activeTurn !== undefined ||
+      this.macrotaskScheduled ||
+      (!forceYield && this.pendingTurns.size === 0)
+    ) {
       return;
     }
     this.macrotaskScheduled = true;
@@ -137,8 +138,17 @@ export class TerminalWriteFairScheduler {
     this.scheduleMacrotask(() => {
       if (generation !== this.macrotaskGeneration) return;
       this.macrotaskScheduled = false;
+      this.pruneInactiveBalances();
       this.runNext();
     });
+  }
+
+  private pruneInactiveBalances(): void {
+    for (const owner of this.balances.keys()) {
+      if (this.activeTurn?.owner !== owner && !this.pendingTurns.has(owner)) {
+        this.balances.delete(owner);
+      }
+    }
   }
 
   private runNext(): void {
@@ -213,8 +223,11 @@ export class TerminalWriteFairScheduler {
     if (turn.released) return;
     turn.released = true;
     if (this.activeTurn === turn) this.activeTurn = undefined;
-    this.scheduleNext();
-    if (this.activeTurn === undefined && this.pendingTurns.size === 0) this.balances.clear();
+    // Keep one host-task barrier even when no owner was pending at the exact
+    // callback boundary. Promise-chain continuations can enqueue checkpoint
+    // work in the following microtask; admitting that work immediately would
+    // let a stream of small segments monopolize the current main-thread turn.
+    this.scheduleNext(true);
   }
 }
 

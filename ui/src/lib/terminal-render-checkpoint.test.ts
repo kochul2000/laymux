@@ -71,6 +71,8 @@ describe("TerminalRenderCheckpointModel", () => {
     });
     const attached = attachment("ready", 10, 3);
     await model.attach(attached);
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
 
     let releaseBlocker: (() => void) | undefined;
     scheduler.request(blockerOwner, (release) => {
@@ -99,7 +101,8 @@ describe("TerminalRenderCheckpointModel", () => {
   });
 
   it("rejects an active scheduled write on dispose even if xterm never calls back", async () => {
-    const scheduler = new TerminalWriteFairScheduler();
+    const scheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
     const admission = new TerminalParserAdmission(
       scheduler,
       createTerminalWriteFairOwner("checkpoint"),
@@ -119,6 +122,8 @@ describe("TerminalRenderCheckpointModel", () => {
     });
     const attached = attachment("ready", 10, 3);
     await model.attach(attached);
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
 
     const applying = model.apply(
       segment(attached.state.snapshotSeq, "-checkpoint", {
@@ -131,9 +136,19 @@ describe("TerminalRenderCheckpointModel", () => {
     model.dispose();
 
     await expect(applying).rejects.toThrow("terminal render checkpoint is disposed");
-    expect(scheduler.isIdleForTests()).toBe(true);
+    const replacement = vi.fn((release: () => void) => release());
+    scheduler.request(createTerminalWriteFairOwner("replacement"), replacement);
+    expect(replacement).not.toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
+    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(scheduled).toHaveLength(1);
+    // A disposed xterm may still settle its already accepted callback. That
+    // stale release is idempotent and cannot disturb the replacement turn.
     settleActiveWrite?.();
     await Promise.resolve();
+    scheduled.shift()?.();
+    expect(scheduler.isIdleForTests()).toBe(true);
   });
 
   it.each([
