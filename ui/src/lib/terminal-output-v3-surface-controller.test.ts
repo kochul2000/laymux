@@ -546,6 +546,81 @@ describe("TerminalOutputV3SurfaceController", () => {
     ]);
   });
 
+  it("accepts the one old-grant successor delivered after the close and receipt settle", async () => {
+    const h = harness();
+    await h.controller.receive(payload({ data: OPEN }), 1);
+
+    await expect(
+      h.controller.receive(
+        payload({ envelopeId: 2, seqStart: 8, grantId: "grant-1", data: CLOSE }),
+        2,
+      ),
+    ).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+    expect(h.controller.activeGrantId).toBeNull();
+
+    await expect(
+      h.controller.receive(
+        payload({ envelopeId: 3, seqStart: 16, grantId: "grant-1", data: [65] }),
+        3,
+      ),
+    ).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
+
+    expect(h.failStops).toEqual([]);
+    expect(h.transferRequests).toHaveLength(3);
+    expect(h.controlCalls.slice(-1)).toMatchObject([
+      { identity: { kind: "receipt", envelopeId: 3, grantId: "grant-1" } },
+    ]);
+  });
+
+  it("keeps base credit for a frame that opens in its predecessor's closing envelope", async () => {
+    const h = harness();
+    await h.controller.receive(payload({ data: OPEN }), 1);
+
+    await expect(
+      h.controller.receive(
+        payload({
+          envelopeId: 2,
+          seqStart: 8,
+          grantId: "grant-1",
+          data: [...CLOSE, ...OPEN],
+        }),
+        2,
+      ),
+    ).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+
+    expect(h.controlCalls.filter((request) => request.identity.envelopeId === 2)).toMatchObject([
+      { identity: { kind: "close", grantId: "grant-1" } },
+      { identity: { kind: "receipt", grantId: "grant-1" } },
+    ]);
+    expect(h.controlCalls.filter((request) => request.identity.kind === "hold")).toHaveLength(1);
+
+    await expect(
+      h.controller.receive(payload({ envelopeId: 3, seqStart: 24, grantId: null, data: CLOSE }), 3),
+    ).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
+    expect(h.failStops).toEqual([]);
+    expect(h.controller.activeGrantId).toBeNull();
+  });
+
+  it("does not carry settled-close grant admission past the next successor", async () => {
+    const h = harness();
+    await h.controller.receive(payload({ data: OPEN }), 1);
+    await h.controller.receive(
+      payload({ envelopeId: 2, seqStart: 8, grantId: "grant-1", data: CLOSE }),
+      2,
+    );
+    await h.controller.receive(
+      payload({ envelopeId: 3, seqStart: 16, grantId: null, data: [65] }),
+      3,
+    );
+
+    await expect(
+      h.controller.receive(
+        payload({ envelopeId: 4, seqStart: 17, grantId: "grant-1", data: [66] }),
+        4,
+      ),
+    ).resolves.toEqual({ kind: "fail-stop", reason: "grant_mismatch" });
+  });
+
   it("gates a null-grant successor that wins the closing receipt-response race", async () => {
     const receipt = deferred<TerminalOutputDeliveryControlResult>();
     const h = harness({

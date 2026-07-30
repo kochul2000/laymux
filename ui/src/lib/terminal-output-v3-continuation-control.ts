@@ -44,6 +44,14 @@ export class TerminalOutputV3ContinuationControl {
   private grant: TerminalOutputFrameContinuationGrant | undefined;
   private closing: ClosingGrant | undefined;
   private pending: ClosingPendingEnvelope | undefined;
+  /** A frame opened inside the envelope that closes the prior continuation. */
+  private suppressedGrantId: string | undefined;
+  /**
+   * The single successor can be emitted with the old grant after the close
+   * and receipt responses have both settled. Keep that identity only until
+   * the next contiguous envelope is admitted.
+   */
+  private settledCloseGrant: TerminalOutputFrameContinuationGrant | undefined;
 
   constructor(private readonly options: Options) {}
 
@@ -92,6 +100,27 @@ export class TerminalOutputV3ContinuationControl {
     return promise;
   }
 
+  admitAfterClose(envelope: TerminalOutputEnvelope): boolean {
+    const settledCloseGrant = this.settledCloseGrant;
+    const ingress = this.options.ingress;
+    if (
+      !settledCloseGrant ||
+      envelope.grantId !== settledCloseGrant.grantId ||
+      envelope.generation !== ingress.generation ||
+      envelope.leaseToken !== ingress.leaseToken ||
+      envelope.envelopeId !== ingress.expectedEnvelopeId ||
+      envelope.seqStart !== ingress.admittedSeq
+    ) {
+      return false;
+    }
+    this.settledCloseGrant = undefined;
+    return true;
+  }
+
+  clearSettledCloseGrant(): void {
+    this.settledCloseGrant = undefined;
+  }
+
   controlsForTransitions(
     transitions: readonly TerminalOutputFrameContinuationTransition[],
     waitForReceiptEnvelopeId: number | null,
@@ -100,6 +129,18 @@ export class TerminalOutputV3ContinuationControl {
     for (const transition of transitions) {
       if (transition.type === "opened") {
         if (!transition.grant) continue;
+        if (this.suppressedGrantId) {
+          this.options.failStop("grant_mismatch");
+          return undefined;
+        }
+        if (this.grant && this.closing?.grant.grantId === this.grant.grantId) {
+          // A single v3 envelope has one backend grant identity. A new frame
+          // that starts after this envelope closes the old grant cannot open
+          // its own backend continuation until the next null-grant envelope,
+          // so keep its bytes on base credit and ignore its later close.
+          this.suppressedGrantId = transition.grant.grantId;
+          continue;
+        }
         if (
           this.grant ||
           transition.grant.terminalId !== this.options.ingress.terminalId ||
@@ -117,6 +158,10 @@ export class TerminalOutputV3ContinuationControl {
         continue;
       }
 
+      if (this.suppressedGrantId && this.suppressedGrantId === transition.grant?.grantId) {
+        this.suppressedGrantId = undefined;
+        continue;
+      }
       if (!transition.grant) {
         if (this.grant) {
           this.options.failStop("grant_mismatch");
@@ -173,6 +218,8 @@ export class TerminalOutputV3ContinuationControl {
     this.pending = undefined;
     this.closing = undefined;
     this.grant = undefined;
+    this.settledCloseGrant = undefined;
+    this.suppressedGrantId = undefined;
     pending?.resolve(failure);
   }
 
@@ -197,7 +244,10 @@ export class TerminalOutputV3ContinuationControl {
     this.grant = undefined;
     const pending = this.pending;
     this.pending = undefined;
-    if (!pending) return;
+    if (!pending) {
+      this.settledCloseGrant = closing.grant;
+      return;
+    }
     const processing = this.options.startEnvelope(pending.envelope, pending.now);
     void processing.then(pending.resolve, () =>
       pending.resolve(this.options.failStop("admission_failure")),
