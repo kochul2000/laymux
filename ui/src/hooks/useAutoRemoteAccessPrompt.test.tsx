@@ -147,6 +147,27 @@ describe("useAutoRemoteAccessPrompt", () => {
     });
   });
 
+  it("opens the modal when an RDP session connects while the app window is narrow", async () => {
+    useSettingsStore.getState().setRemote({ autoMobileModeMinWidth: 720 });
+    setScreen(1920, 1080);
+    let fire: ((active: boolean) => void) | undefined;
+    vi.mocked(onRemoteSessionChanged).mockImplementation((cb) => {
+      fire = cb;
+      return Promise.resolve(vi.fn());
+    });
+
+    render(<Probe />);
+
+    await waitFor(() => expect(fire).toBeDefined());
+    setInnerWidth(600);
+
+    fire?.(true);
+
+    await waitFor(() => {
+      expect(useUiStore.getState().remoteAccessModalOpen).toBe(true);
+    });
+  });
+
   it("does not open the modal on a phone RDP session while local mobile mode is active", async () => {
     useSettingsStore.getState().setRemote({ autoMobileModeMinWidth: 720 });
     useLocalMobileModeStore.getState().enter("http://127.0.0.1:19281/remote/?localApp=1");

@@ -82,10 +82,17 @@ export function useAutoRemoteAccessPrompt(enabled = true) {
       // the modal on top of it.
       if (useLocalMobileModeStore.getState().active) return;
       // Only a phone-shaped remote screen should auto-open the panel; a desktop
-      // RDP session stays untouched. Read the threshold fresh so live setting
-      // edits apply without re-registering the OS listener.
+      // RDP session stays untouched unless its laymux viewport is already
+      // narrow. Read the threshold fresh so live setting edits apply without
+      // re-registering the OS listener.
       const currentThreshold = useSettingsStore.getState().remote.autoMobileModeMinWidth;
-      if (!isPhoneLikeRemoteScreen(currentThreshold)) return;
+      if (!Number.isFinite(currentThreshold) || currentThreshold <= 0) return;
+      if (
+        window.innerWidth > currentThreshold &&
+        !isPhoneLikeRemoteScreen(currentThreshold)
+      ) {
+        return;
+      }
       useUiStore.getState().openRemoteAccessModal();
     };
 
