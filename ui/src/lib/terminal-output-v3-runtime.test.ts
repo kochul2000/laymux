@@ -6,7 +6,11 @@ import {
   type TerminalOutputV3RepairResponse,
   type TerminalOutputV3RuntimeOptions,
 } from "./terminal-output-v3-runtime";
-import { acknowledgeTerminalOutputEnvelope, closeTerminalOutputContinuation } from "./tauri-api";
+import {
+  acknowledgeTerminalOutputEnvelope,
+  closeTerminalOutputContinuation,
+  holdTerminalOutputContinuation,
+} from "./tauri-api";
 
 vi.mock("./tauri-api", () => ({
   acknowledgeTerminalOutputEnvelope: vi.fn(() => Promise.resolve(true)),
@@ -16,6 +20,7 @@ vi.mock("./tauri-api", () => ({
 
 const mockAcknowledgeTerminalOutputEnvelope = vi.mocked(acknowledgeTerminalOutputEnvelope);
 const mockCloseTerminalOutputContinuation = vi.mocked(closeTerminalOutputContinuation);
+const mockHoldTerminalOutputContinuation = vi.mocked(holdTerminalOutputContinuation);
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -94,6 +99,42 @@ describe("TerminalOutputV3Runtime exact repair", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAcknowledgeTerminalOutputEnvelope.mockResolvedValue(true);
+    mockHoldTerminalOutputContinuation.mockResolvedValue(true);
+  });
+
+  it("queues the bounded ordered pipeline while an opener control gates its first successor", async () => {
+    const hold = deferred<boolean>();
+    mockHoldTerminalOutputContinuation.mockReturnValueOnce(hold.promise);
+    const repair = vi.fn(() => Promise.resolve({ status: "idle" as const, envelope: null }));
+    const h = harness(repair);
+    const opener = "\u001b[?2026h";
+
+    const first = h.runtime.receive(payload(1, 0, opener), 1);
+    await vi.waitFor(() => expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce());
+    const grantId = mockHoldTerminalOutputContinuation.mock.calls[0]?.[4];
+    const successor = (envelopeId: number, seqStart: number, text: string) => ({
+      ...payload(envelopeId, seqStart, text),
+      grantId,
+    });
+    const second = h.runtime.receive(successor(2, opener.length, "B"), 2);
+    const third = h.runtime.receive(successor(3, opener.length + 1, "C"), 3);
+    const fourth = h.runtime.receive(successor(4, opener.length + 2, "D"), 4);
+
+    hold.resolve(true);
+
+    await expect(Promise.all([first, second, third, fourth])).resolves.toEqual([
+      { kind: "accepted", envelopeId: 1 },
+      { kind: "accepted", envelopeId: 2 },
+      { kind: "accepted", envelopeId: 3 },
+      { kind: "accepted", envelopeId: 4 },
+    ]);
+    expect(repair).not.toHaveBeenCalled();
+    expect(h.visible).toEqual([opener, "B", "C", "D"]);
+    expect(h.failStops).toEqual([]);
+    expect(h.runtime.diagnostics()).toMatchObject({
+      admittedSeq: opener.length + 3,
+      nextEnvelopeId: 5,
+    });
   });
 
   it("repairs one omitted envelope and then admits only its exact observed successor", async () => {

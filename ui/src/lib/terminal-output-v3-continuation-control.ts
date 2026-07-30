@@ -3,7 +3,10 @@ import type {
   TerminalOutputDeliveryControlResult,
   TerminalOutputDeliveryControlSender,
 } from "./terminal-output-delivery-control";
-import type { TerminalOutputEnvelope } from "./terminal-output-envelope";
+import {
+  TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT,
+  type TerminalOutputEnvelope,
+} from "./terminal-output-envelope";
 import type { TerminalOutputEnvelopeIngress } from "./terminal-output-envelope-ingress";
 import type {
   TerminalOutputFrameContinuationGrant,
@@ -18,7 +21,7 @@ import type { TerminalOutputV3SurfaceResult } from "./terminal-output-v3-surface
 
 type Failure = Extract<TerminalOutputV3SurfaceResult, { kind: "fail-stop" }>;
 /** Twice the backend pipeline cap; enough for one overlapping close chain. */
-const CLOSED_GRANT_HISTORY_LIMIT = 8;
+const CLOSED_GRANT_HISTORY_LIMIT = TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT * 2;
 
 interface ClosingGrant {
   grant: TerminalOutputFrameContinuationGrant;

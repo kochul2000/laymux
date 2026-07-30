@@ -1,6 +1,7 @@
 export const TERMINAL_OUTPUT_ENVELOPE_VERSION = 3;
 export const TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES = 64 * 1024;
 export const TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS = 8 * 1024;
+export const TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT = 4;
 
 export interface TerminalOutputEnvelopeGeometry {
   revision: number;

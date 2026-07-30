@@ -370,22 +370,27 @@ export class TerminalOutputV3Runtime {
   }
 
   private async drainPendingObserved(strict: boolean): Promise<void> {
-    const pending = this.repairState.pending;
-    if (!pending || !this.isCurrent()) return;
-    const ingress = this.ingress.snapshot();
-    const isSuccessor =
-      pending.envelope.envelopeId === ingress.expectedEnvelopeId &&
-      pending.envelope.seqStart === ingress.admittedSeq;
-    const match = this.controller.matchKnownEnvelope(pending.envelope);
-    if (!isSuccessor && match !== "same") {
-      if (strict) this.failRepair(match === "conflict" ? "observed_conflict" : "non_successor");
-      return;
-    }
+    while (this.isCurrent()) {
+      const pending = this.repairState.pending;
+      if (!pending) return;
+      const ingress = this.ingress.snapshot();
+      const isSuccessor =
+        pending.envelope.envelopeId === ingress.expectedEnvelopeId &&
+        pending.envelope.seqStart === ingress.admittedSeq;
+      const match = this.controller.matchKnownEnvelope(pending.envelope);
+      if (!isSuccessor && match !== "same") {
+        if (strict) this.failRepair(match === "conflict" ? "observed_conflict" : "non_successor");
+        return;
+      }
 
-    if (!this.repairState.detachPending(pending)) return;
-    const result = await this.controller.receiveValidated(pending.envelope, pending.now);
-    pending.resolve(result);
-    if (result.kind === "fail-stop") this.settlePending(result);
+      if (!this.repairState.detachPending(pending)) continue;
+      const result = await this.controller.receiveValidated(pending.envelope, pending.now);
+      pending.resolve(result);
+      if (result.kind === "fail-stop") {
+        this.settlePending(result);
+        return;
+      }
+    }
   }
 
   private failRepair(

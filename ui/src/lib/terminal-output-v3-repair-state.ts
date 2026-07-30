@@ -1,4 +1,7 @@
-import type { TerminalOutputEnvelope } from "./terminal-output-envelope";
+import {
+  TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT,
+  type TerminalOutputEnvelope,
+} from "./terminal-output-envelope";
 import { sameTerminalOutputEnvelope } from "./terminal-output-v3-envelope-ledger";
 import type { TerminalOutputV3RepairRequest } from "./terminal-output-v3-repair-transport";
 import type { TerminalOutputV3SurfaceResult } from "./terminal-output-v3-surface-controller";
@@ -24,47 +27,54 @@ export type TerminalOutputV3ObservedGapAdmission =
 
 export type TerminalOutputV3RepairWinnerObservation = "none" | "winner" | "duplicate" | "conflict";
 
-/** Owns the single observed gap and immutable direct-event witness for an exact repair. */
+/** Owns the bounded observed successor chain and immutable direct-event witness for exact repair. */
 export class TerminalOutputV3RepairState {
-  private pendingObserved: TerminalOutputV3PendingObservedEnvelope | undefined;
+  private pendingObserved: TerminalOutputV3PendingObservedEnvelope[] = [];
   private activeRepair: TerminalOutputV3ActiveRepair | undefined;
 
   get pending(): TerminalOutputV3PendingObservedEnvelope | undefined {
-    return this.pendingObserved;
+    return this.pendingObserved[0];
   }
 
   queueObserved(
     envelope: TerminalOutputEnvelope,
     now: number,
   ): TerminalOutputV3ObservedGapAdmission {
-    const pending = this.pendingObserved;
-    if (pending) {
-      return sameTerminalOutputEnvelope(pending.envelope, envelope)
-        ? { kind: "duplicate", promise: pending.promise }
+    const duplicate = this.pendingObserved.find(
+      (pending) => pending.envelope.envelopeId === envelope.envelopeId,
+    );
+    if (duplicate) {
+      return sameTerminalOutputEnvelope(duplicate.envelope, envelope)
+        ? { kind: "duplicate", promise: duplicate.promise }
         : { kind: "conflict" };
+    }
+    const previous = this.pendingObserved.at(-1)?.envelope;
+    if (
+      this.pendingObserved.length >= TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT ||
+      (previous &&
+        (envelope.envelopeId !== previous.envelopeId + 1 || envelope.seqStart !== previous.seqEnd))
+    ) {
+      return { kind: "conflict" };
     }
 
     let resolve!: (result: TerminalOutputV3SurfaceResult) => void;
     const promise = new Promise<TerminalOutputV3SurfaceResult>((settle) => {
       resolve = settle;
     });
-    this.pendingObserved = { envelope, now, promise, resolve };
+    this.pendingObserved.push({ envelope, now, promise, resolve });
     return { kind: "queued", promise };
   }
 
   detachPending(
     expected: TerminalOutputV3PendingObservedEnvelope,
   ): TerminalOutputV3PendingObservedEnvelope | undefined {
-    if (this.pendingObserved !== expected) return undefined;
-    this.pendingObserved = undefined;
-    return expected;
+    if (this.pendingObserved[0] !== expected) return undefined;
+    return this.pendingObserved.shift();
   }
 
   settlePending(result: TerminalOutputV3SurfaceResult): void {
-    const pending = this.pendingObserved;
-    if (!pending) return;
-    this.pendingObserved = undefined;
-    pending.resolve(result);
+    const pending = this.pendingObserved.splice(0);
+    for (const item of pending) item.resolve(result);
   }
 
   begin(request: Readonly<TerminalOutputV3RepairRequest>): TerminalOutputV3ActiveRepair {
