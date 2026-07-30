@@ -5211,8 +5211,8 @@ export function TerminalView({
       if (cancelled) return;
       const now = monotonicNow();
       // A moderate host-task stall can queue this timer beside the output edge
-      // it is meant to recover. Defer at most one poll so the direct event can
-      // win; long stalls and the next tick always poll within the hard window.
+      // it is meant to recover. Give the direct event one full watchdog period
+      // after the stall; long stalls still poll within the hard window.
       if (!outputPullWatchdogCadence.shouldPoll(now)) return;
       if (outputTransportMode === "v3") {
         const runtime = outputV3Runtime;

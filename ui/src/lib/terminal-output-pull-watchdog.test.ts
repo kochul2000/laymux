@@ -5,19 +5,25 @@ import {
 } from "./terminal-output-pull-watchdog";
 
 describe("TerminalOutputPullWatchdogCadence", () => {
-  it("defers one moderately delayed tick, then forces the next poll", () => {
+  it("gives queued output a full period after a moderately delayed tick", () => {
     const cadence = new TerminalOutputPullWatchdogCadence(0);
 
     expect(cadence.shouldPoll(TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS)).toBe(true);
     expect(cadence.shouldPoll(2_600)).toBe(false);
-    expect(cadence.shouldPoll(4_200)).toBe(true);
-    expect(cadence.shouldPoll(5_200)).toBe(true);
+    expect(cadence.shouldPoll(3_000)).toBe(false);
+    expect(cadence.shouldPoll(3_599)).toBe(false);
+    expect(cadence.shouldPoll(3_600)).toBe(true);
+    expect(cadence.shouldPoll(4_600)).toBe(true);
   });
 
-  it("polls immediately when deferral would consume the receipt deadline margin", () => {
+  it("caps delayed-event grace at a three-period poll interval", () => {
     const cadence = new TerminalOutputPullWatchdogCadence(0);
 
-    expect(cadence.shouldPoll(2_100)).toBe(true);
-    expect(cadence.shouldPoll(4_100)).toBe(true);
+    expect(cadence.shouldPoll(2_100)).toBe(false);
+    expect(cadence.shouldPoll(2_999)).toBe(false);
+    expect(cadence.shouldPoll(3_000)).toBe(true);
+
+    const alreadyPastBound = new TerminalOutputPullWatchdogCadence(0);
+    expect(alreadyPastBound.shouldPoll(3_001)).toBe(true);
   });
 });
