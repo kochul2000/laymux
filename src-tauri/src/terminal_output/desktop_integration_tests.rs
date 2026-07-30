@@ -1,6 +1,7 @@
 use std::sync::{mpsc as std_mpsc, Arc};
 use std::time::Duration;
 
+use super::desktop_integration::{delivery_reason_code, delivery_reason_detail};
 use super::*;
 use crate::constants::{
     TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES, TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES,
@@ -447,9 +448,18 @@ fn receipt_flow_projection_failure_is_sticky_for_exact_retries() {
         .unwrap_err();
     assert_eq!(retry, first);
     assert!(first.contains("receipt flow projection failed"));
+    // The contract failure keeps the reported code stable while carrying the
+    // message that names it. Assert the observable pair, not the enum variant:
+    // `reason` alone cannot distinguish this from a real identity conflict.
+    let failure = session.delivery_failure().unwrap();
+    assert_eq!(delivery_reason_code(&failure), "identity_conflict");
     assert_eq!(
-        session.delivery_failure(),
-        Some(TerminalOutputDeliveryCloseReason::IdentityConflict)
+        delivery_reason_detail(&failure).as_deref(),
+        Some(first.as_str())
     );
+    // `desktop_output_diagnostics()` is not reachable here: this test poisons the
+    // flow lock on purpose, and reading it is what fails. The endpoint-level
+    // projection of the same pair is covered in
+    // `automation_server::terminal_output_diagnostics`.
     session.retire(false).unwrap();
 }

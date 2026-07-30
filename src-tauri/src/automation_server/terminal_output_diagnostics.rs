@@ -84,6 +84,7 @@ mod tests {
             generation: 7,
             desktop_output_state: "backpressured".into(),
             reason: None,
+            reason_detail: None,
             lease_token: Some("lease".into()),
             parsed_ack: Some(10),
             write_seq: 12,
@@ -106,6 +107,9 @@ mod tests {
         assert_eq!(json["terminalOutput"][0]["terminalId"], "t1");
         assert_eq!(json["terminalOutput"][0]["writeSeq"], 12);
         assert!(json["terminalOutput"][0].get("data").is_none());
+        // `reason` collapses distinct faults onto one code, so the detail has to
+        // survive serialization or a fail-stop cause is unrecoverable in the field.
+        assert!(json["terminalOutput"][0].get("reasonDetail").is_some());
     }
 
     #[tokio::test]
@@ -115,6 +119,7 @@ mod tests {
             generation: 3,
             desktop_output_state: "failStopped".into(),
             reason: Some("surface_unavailable".into()),
+            reason_detail: Some("terminal output session lock poisoned".into()),
             lease_token: None,
             parsed_ack: None,
             write_seq: 0,
@@ -130,6 +135,7 @@ mod tests {
             generation: 4,
             desktop_output_state: "healthy".into(),
             reason: None,
+            reason_detail: None,
             lease_token: Some("lease".into()),
             parsed_ack: Some(9),
             write_seq: 9,
@@ -157,6 +163,10 @@ mod tests {
         assert_eq!(json["frontend"]["probeLagMs"], 4);
         assert_eq!(json["terminalOutput"][0]["terminalId"], "broken");
         assert_eq!(json["terminalOutput"][0]["reason"], "surface_unavailable");
+        assert_eq!(
+            json["terminalOutput"][0]["reasonDetail"],
+            "terminal output session lock poisoned"
+        );
         assert_eq!(json["terminalOutput"][1]["terminalId"], "healthy");
         assert!(json["terminalOutput"][0].get("data").is_none());
         assert!(json["terminalOutput"][0].get("path").is_none());

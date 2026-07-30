@@ -9,6 +9,10 @@ import type {
   TerminalOutputFrameContinuationGrant,
   TerminalOutputFrameContinuationTransition,
 } from "./terminal-output-frame-continuation";
+import {
+  noteTerminalOutputV3EnvelopePass,
+  recordTerminalOutputV3ControlTrace,
+} from "./terminal-output-v3-diagnostics";
 import { sameTerminalOutputEnvelope } from "./terminal-output-v3-envelope-ledger";
 import type { TerminalOutputV3SurfaceResult } from "./terminal-output-v3-surface-controller";
 
@@ -52,6 +56,19 @@ export class TerminalOutputV3ContinuationControl {
    * the next contiguous envelope is admitted.
    */
   private settledCloseGrant: TerminalOutputFrameContinuationGrant | undefined;
+  /**
+   * The envelope that already opened a backend continuation.
+   *
+   * The backend keys a hold by its opener envelope identity, so a second hold
+   * carrying the same `envelopeId` with a different grant/frameStart is a
+   * fail-stop (`hold identity was reused with different payload`). One envelope
+   * can contain many frames, and `grant`/`closing` alone do not close that hole:
+   * `finishClose()` clears them asynchronously, so a later frame in the *same*
+   * envelope can find them already cleared and open a second continuation.
+   * Tracking the envelope itself keeps the one-grant-per-envelope invariant
+   * regardless of when the close response lands.
+   */
+  private heldEnvelopeId: number | undefined;
 
   constructor(private readonly options: Options) {}
 
@@ -126,12 +143,37 @@ export class TerminalOutputV3ContinuationControl {
     waitForReceiptEnvelopeId: number | null,
   ): TerminalOutputDeliveryControlRequest[] | undefined {
     const controls: TerminalOutputDeliveryControlRequest[] = [];
+    const envelopePass = noteTerminalOutputV3EnvelopePass(
+      this.options.ingress.terminalId,
+      waitForReceiptEnvelopeId ?? -1,
+    );
+    const trace = (
+      kind: "hold" | "close",
+      envelopeId: number,
+      grantId: string | null,
+      seq: number,
+    ) =>
+      recordTerminalOutputV3ControlTrace(this.options.ingress.terminalId, {
+        kind,
+        envelopeId,
+        grantId,
+        seq,
+        envelopePass,
+      });
     for (const transition of transitions) {
       if (transition.type === "opened") {
         if (!transition.grant) continue;
         if (this.suppressedGrantId) {
           this.options.failStop("grant_mismatch");
           return undefined;
+        }
+        if (this.heldEnvelopeId === transition.grant.envelopeId) {
+          // This envelope already opened a continuation. A later frame inside it
+          // would reuse the same backend opener identity, so keep its bytes on
+          // base credit and ignore its close, exactly like the closing-envelope
+          // case below.
+          this.suppressedGrantId = transition.grant.grantId;
+          continue;
         }
         if (this.grant && this.closing?.grant.grantId === this.grant.grantId) {
           // A single v3 envelope has one backend grant identity. A new frame
@@ -151,10 +193,17 @@ export class TerminalOutputV3ContinuationControl {
           return undefined;
         }
         this.grant = transition.grant;
+        this.heldEnvelopeId = transition.grant.envelopeId;
         controls.push({
           identity: { kind: "hold", ...transition.grant },
           payload: { frameStartSeq: transition.frameStartSeq },
         });
+        trace(
+          "hold",
+          transition.grant.envelopeId,
+          transition.grant.grantId,
+          transition.frameStartSeq,
+        );
         continue;
       }
 
@@ -186,6 +235,7 @@ export class TerminalOutputV3ContinuationControl {
           reason: transition.grantResult === "abort" ? `abort:${transition.reason}` : "close",
         },
       });
+      trace("close", transition.envelopeId, transition.grant.grantId, transition.frameEndSeq);
     }
     return controls;
   }
@@ -218,6 +268,7 @@ export class TerminalOutputV3ContinuationControl {
     this.pending = undefined;
     this.closing = undefined;
     this.grant = undefined;
+    this.heldEnvelopeId = undefined;
     this.settledCloseGrant = undefined;
     this.suppressedGrantId = undefined;
     pending?.resolve(failure);

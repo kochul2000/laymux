@@ -32,6 +32,9 @@ pub enum DesktopOutputFailureReason {
 pub struct DesktopOutputDiagnostics {
     pub state: DesktopOutputState,
     pub reason: Option<DesktopOutputFailureReason>,
+    /// Which invariant the fail-stop tripped on. `reason` alone collapses several
+    /// distinct faults onto one code, so keep the message that named the cause.
+    pub reason_detail: Option<String>,
     pub lease_token: Option<String>,
     pub parsed_ack: Option<u64>,
     pub effective_limit: Option<u64>,
@@ -98,6 +101,7 @@ pub(super) struct DesktopOutputFlowState {
     pub(super) active: Option<DesktopOutputLease>,
     pub(super) output_state: DesktopOutputState,
     pub(super) failure_reason: Option<DesktopOutputFailureReason>,
+    pub(super) failure_detail: Option<String>,
     pub(super) progress_deadline: Option<ProgressDeadline>,
     pub(super) retired: bool,
 }
@@ -109,6 +113,7 @@ impl Default for DesktopOutputFlowState {
             active: None,
             output_state: DesktopOutputState::Healthy,
             failure_reason: None,
+            failure_detail: None,
             progress_deadline: None,
             retired: false,
         }
@@ -142,9 +147,18 @@ pub(super) fn reset_healthy(state: &mut DesktopOutputFlowState) {
 }
 
 pub(super) fn fail_stop(state: &mut DesktopOutputFlowState, reason: DesktopOutputFailureReason) {
+    fail_stop_detailed(state, reason, None);
+}
+
+pub(super) fn fail_stop_detailed(
+    state: &mut DesktopOutputFlowState,
+    reason: DesktopOutputFailureReason,
+    detail: Option<&str>,
+) {
     if state.output_state != DesktopOutputState::FailStopped {
         state.output_state = DesktopOutputState::FailStopped;
         state.failure_reason = Some(reason);
+        state.failure_detail = detail.map(str::to_owned);
         state.progress_deadline = None;
     }
 }

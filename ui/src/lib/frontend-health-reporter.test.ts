@@ -39,6 +39,9 @@ vi.mock("./terminal-output-v3-diagnostics", () => ({
       lastRepairReason: "watchdog:exact",
     },
   })),
+  allTerminalOutputV3ControlTrace: vi.fn(() => ({
+    "terminal-1": [{ kind: "hold", envelopeId: 4, grantId: "grant-1", seq: 12, envelopePass: 1 }],
+  })),
 }));
 
 const START_MS = Date.UTC(2026, 6, 28, 0, 0, 0);
@@ -89,6 +92,11 @@ describe("startFrontendHealthReporter", () => {
           repairCount: 1,
           lastRepairReason: "watchdog:exact",
         },
+      },
+      terminalOutputV3ControlTrace: {
+        "terminal-1": [
+          { kind: "hold", envelopeId: 4, grantId: "grant-1", seq: 12, envelopePass: 1 },
+        ],
       },
     });
 

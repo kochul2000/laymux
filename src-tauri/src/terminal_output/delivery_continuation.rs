@@ -28,7 +28,16 @@ impl DesktopOutputDelivery {
                 return if *last == record {
                     Ok(TerminalOutputControlCompletion::Duplicate)
                 } else {
-                    Err("terminal output hold identity was reused with different payload".into())
+                    Err(format!(
+                        "terminal output hold identity was reused with different payload \
+                         (previous: grant={} frameStart={}; incoming: grant={} frameStart={}; \
+                         opener={:?})",
+                        last.grant_id,
+                        last.frame_start_seq,
+                        record.grant_id,
+                        record.frame_start_seq,
+                        opener
+                    ))
                 };
             }
         }
