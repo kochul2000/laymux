@@ -43,9 +43,9 @@ type PendingTurn = {
  *
  * A TerminalView keeps ownership of its byte FIFO and parse completion. This
  * scheduler owns only the scarce main-thread admission turn: one pane submits
- * one physical write, holds the turn through its parse callback, then returns
- * to the tail if it still has work. The next pane always starts in a fresh
- * macrotask so input, paint, and control work can run between turns.
+ * one bounded parser quantum, holds the turn through its parse callback(s),
+ * then returns to the tail if it still has work. The next pane always starts
+ * in a fresh macrotask so input, paint, and control work can run between turns.
  */
 export class TerminalWriteFairScheduler {
   private readonly pendingTurns = new Map<TerminalWriteFairOwner, PendingTurn>();
@@ -116,6 +116,14 @@ export class TerminalWriteFairScheduler {
       this.activeTurn === undefined &&
       !this.macrotaskScheduled
     );
+  }
+
+  /** Whether another pane owner is queued behind the current owner. */
+  hasPendingOtherOwner(owner: TerminalWriteFairOwner): boolean {
+    for (const pendingOwner of this.pendingTurns.keys()) {
+      if (pendingOwner !== owner) return true;
+    }
+    return false;
   }
 
   /** Test-only isolation for the app-global scheduler fixture. */

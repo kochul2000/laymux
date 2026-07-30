@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { TerminalParserAdmission, terminalParserPriority } from "./terminal-parser-admission";
+import {
+  TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE,
+  TerminalParserAdmission,
+  terminalParserPriority,
+} from "./terminal-parser-admission";
 import {
   createTerminalWriteFairOwner,
   TerminalWriteFairScheduler,
 } from "./terminal-write-fair-scheduler";
+import { TERMINAL_WRITE_FAIR_QUANTUM_BYTES } from "./terminal-write-batch-queue";
 
 function createHarness() {
   const scheduled: Array<() => void> = [];
@@ -13,7 +18,13 @@ function createHarness() {
     scheduler,
     createTerminalWriteFairOwner("pane"),
     () => "foreground",
-    (task) => localScheduled.push(task),
+    (task) => {
+      localScheduled.push(task);
+      return () => {
+        const index = localScheduled.indexOf(task);
+        if (index >= 0) localScheduled.splice(index, 1);
+      };
+    },
   );
   const runNextTask = () => {
     const task = scheduled.shift();
@@ -119,48 +130,165 @@ describe("TerminalParserAdmission", () => {
     expect(checkpoint).toHaveBeenCalledTimes(1);
   });
 
-  it("holds a checkpoint lease across its Promise-chain microtask boundary", () => {
-    const { admission, scheduler, scheduled, localScheduled, runNextTask } = createHarness();
+  it("reuses a checkpoint lease for small Promise-chain segments", () => {
+    const { admission, scheduler, scheduled, localScheduled } = createHarness();
     let releaseFirst: (() => void) | undefined;
     const second = vi.fn((release: () => void) => release());
 
-    admission.request("checkpoint", (release) => {
-      releaseFirst = release;
-    });
+    admission.request(
+      "checkpoint",
+      (release) => {
+        releaseFirst = release;
+      },
+      1_024,
+    );
     releaseFirst?.();
     expect(localScheduled).toHaveLength(1);
     expect(scheduler.isIdleForTests()).toBe(false);
 
     // This request represents the next writeChain operation becoming visible
     // in the Promise continuation after the physical callback.
-    admission.request("checkpoint", second);
-    expect(second).not.toHaveBeenCalled();
-    localScheduled.shift()?.();
-    expect(scheduled).toHaveLength(1);
-    runNextTask();
+    admission.request("checkpoint", second, 1_024);
     expect(second).toHaveBeenCalledTimes(1);
+    expect(scheduled).toHaveLength(0);
 
+    // The first release timer was cancelled before the continued physical
+    // write. Only the final held lease still needs a host timer.
     expect(localScheduled).toHaveLength(1);
     localScheduled.shift()?.();
     expect(scheduler.isIdleForTests()).toBe(true);
   });
 
+  it("cancels a stale release timer before the next xterm-like parser task", async () => {
+    type HostTask = { kind: "admission" | "parser"; run: () => void };
+    const hostTasks: HostTask[] = [];
+    const scheduler = new TerminalWriteFairScheduler((task) =>
+      hostTasks.push({ kind: "admission", run: task }),
+    );
+    const admission = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("checkpoint"),
+      () => "background",
+      (task) => {
+        const scheduled = { kind: "admission" as const, run: task };
+        hostTasks.push(scheduled);
+        return () => {
+          const index = hostTasks.indexOf(scheduled);
+          if (index >= 0) hostTasks.splice(index, 1);
+        };
+      },
+    );
+    const runParserWrite = (release: () => void) => {
+      hostTasks.push({
+        kind: "parser",
+        run: () => {
+          release();
+          void Promise.resolve().then(() => admission.request("checkpoint", runParserWrite, 1));
+        },
+      });
+    };
+
+    admission.request("checkpoint", runParserWrite, 1);
+    expect(hostTasks.map(({ kind }) => kind)).toEqual(["parser"]);
+    hostTasks.shift()?.run();
+    await Promise.resolve();
+
+    // The held-lease timer was queued before the Promise continuation, but the
+    // continuation cancels it before scheduling xterm's next parser task.
+    expect(hostTasks.map(({ kind }) => kind)).toEqual(["parser"]);
+    admission.dispose();
+  });
+
+  it("hands off after checkpoint continuations consume one contended quantum", () => {
+    const scheduled: Array<() => void> = [];
+    const localScheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const checkpoint = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("checkpoint"),
+      () => "background",
+      (task) => {
+        localScheduled.push(task);
+        return () => {
+          const index = localScheduled.indexOf(task);
+          if (index >= 0) localScheduled.splice(index, 1);
+        };
+      },
+    );
+    const otherOwner = createTerminalWriteFairOwner("other");
+    const order: string[] = [];
+    let releaseCheckpoint: (() => void) | undefined;
+    const segment = (release: () => void) => {
+      order.push("checkpoint");
+      releaseCheckpoint = release;
+    };
+
+    checkpoint.request("checkpoint", segment, TERMINAL_WRITE_FAIR_QUANTUM_BYTES / 2);
+    scheduler.request(otherOwner, (release) => {
+      order.push("other");
+      release();
+    });
+    releaseCheckpoint?.();
+    checkpoint.request("checkpoint", segment, TERMINAL_WRITE_FAIR_QUANTUM_BYTES / 2);
+    expect(order).toEqual(["checkpoint", "checkpoint"]);
+    releaseCheckpoint?.();
+    checkpoint.request("checkpoint", segment, 1);
+    expect(order).toEqual(["checkpoint", "checkpoint"]);
+
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint", "checkpoint", "other"]);
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint", "checkpoint", "other", "checkpoint"]);
+  });
+
+  it("hands off after the checkpoint callback-count cap even for one-byte segments", () => {
+    const scheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const checkpoint = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("checkpoint"),
+      () => "background",
+      () => () => {},
+    );
+    const order: string[] = [];
+    let releaseCheckpoint: (() => void) | undefined;
+    const segment = (release: () => void) => {
+      order.push("checkpoint");
+      releaseCheckpoint = release;
+    };
+
+    checkpoint.request("checkpoint", segment, 1);
+    scheduler.request(createTerminalWriteFairOwner("other"), (release) => {
+      order.push("other");
+      release();
+    });
+    for (let index = 1; index < TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE; index += 1) {
+      releaseCheckpoint?.();
+      checkpoint.request("checkpoint", segment, 1);
+    }
+    expect(order).toHaveLength(TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE);
+    releaseCheckpoint?.();
+    checkpoint.request("checkpoint", segment, 1);
+    expect(order).toHaveLength(TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE);
+
+    scheduled.shift()?.();
+    expect(order.at(-1)).toBe("other");
+  });
+
   it("preserves 2:1 weight across delayed checkpoint-chain requeues", () => {
     const scheduled: Array<() => void> = [];
-    const foregroundTasks: Array<() => void> = [];
-    const backgroundTasks: Array<() => void> = [];
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
     const foreground = new TerminalParserAdmission(
       scheduler,
       createTerminalWriteFairOwner("foreground"),
       () => "foreground",
-      (task) => foregroundTasks.push(task),
+      () => () => {},
     );
     const background = new TerminalParserAdmission(
       scheduler,
       createTerminalWriteFairOwner("background"),
       () => "background",
-      (task) => backgroundTasks.push(task),
+      () => () => {},
     );
     const blocker = createTerminalWriteFairOwner("blocker");
     const order: string[] = [];
@@ -189,9 +317,6 @@ describe("TerminalParserAdmission", () => {
         if (selectedForeground) foreground.request("checkpoint", foregroundTurn);
         else background.request("checkpoint", backgroundTurn);
       }
-      const localTasks = selectedForeground ? foregroundTasks : backgroundTasks;
-      expect(localTasks).toHaveLength(1);
-      localTasks.shift()?.();
     }
 
     expect(order).toEqual([

@@ -67,6 +67,88 @@ function setup() {
 }
 
 describe("TerminalOutputV3TerminalAdapter", () => {
+  it("coalesces contiguous same-geometry deltas only for the checkpoint parser", () => {
+    const value = normalizeTerminalOutputEnvelope({
+      version: 3,
+      generation: 7,
+      leaseToken: "lease-7",
+      envelopeId: 11,
+      grantId: null,
+      seqStart: 20,
+      seqEnd: 24,
+      data: new Uint8Array([65, 66, 67, 68]),
+      deltaEnds: [1, 2, 3, 4],
+      geometryRuns: [{ deltaIndex: 0, geometry: { revision: 3, cols: 80, rows: 24 } }],
+    });
+    const applyCheckpoint = vi.fn().mockResolvedValue(undefined);
+    const enqueueVisible = vi.fn();
+    const adapter = new TerminalOutputV3TerminalAdapter({
+      terminalId: "terminal-7",
+      generation: 7,
+      leaseToken: "lease-7",
+      initialParsedSeq: 20,
+      isCurrent: () => true,
+      applyCheckpoint,
+      enqueueVisible,
+      sendParsedRange: vi.fn().mockResolvedValue(true),
+      onFailStop: vi.fn(),
+    });
+
+    adapter.transfer({ envelope: value, complete: vi.fn() });
+
+    expect(enqueueVisible).toHaveBeenCalledTimes(4);
+    expect(applyCheckpoint).toHaveBeenCalledTimes(1);
+    expect(applyCheckpoint.mock.calls[0][0]).toMatchObject({
+      generation: 7,
+      leaseToken: "lease-7",
+      envelopeId: 11,
+      grantId: null,
+      seqStart: 20,
+      seqEnd: 24,
+      geometry: { revision: 3, cols: 80, rows: 24 },
+    });
+    expect(applyCheckpoint.mock.calls[0][0].data).toEqual(new Uint8Array([65, 66, 67, 68]));
+  });
+
+  it("preserves contradictory dimensions for checkpoint validation", () => {
+    const value = normalizeTerminalOutputEnvelope({
+      version: 3,
+      generation: 7,
+      leaseToken: "lease-7",
+      envelopeId: 11,
+      grantId: null,
+      seqStart: 20,
+      seqEnd: 22,
+      data: new Uint8Array([65, 66]),
+      deltaEnds: [1, 2],
+      geometryRuns: [
+        { deltaIndex: 0, geometry: { revision: 3, cols: 80, rows: 24 } },
+        { deltaIndex: 1, geometry: { revision: 3, cols: 100, rows: 30 } },
+      ],
+    });
+    const applyCheckpoint = vi.fn().mockResolvedValue(undefined);
+    const adapter = new TerminalOutputV3TerminalAdapter({
+      terminalId: "terminal-7",
+      generation: 7,
+      leaseToken: "lease-7",
+      initialParsedSeq: 20,
+      isCurrent: () => true,
+      applyCheckpoint,
+      enqueueVisible: vi.fn(),
+      sendParsedRange: vi.fn().mockResolvedValue(true),
+      onFailStop: vi.fn(),
+    });
+
+    adapter.transfer({ envelope: value, complete: vi.fn() });
+
+    expect(applyCheckpoint).toHaveBeenCalledTimes(2);
+    expect(applyCheckpoint.mock.calls[1][0].geometry).toEqual({
+      revision: 3,
+      cols: 100,
+      rows: 30,
+    });
+  });
+
   it("transfers original delta views and geometry before reporting acceptance", () => {
     const backing = new Uint8Array([65, 66, 67, 68]);
     const value = envelope(backing);

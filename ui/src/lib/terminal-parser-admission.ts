@@ -1,11 +1,18 @@
 import type {
   TerminalWriteFairOwner,
-  TerminalWriteFairTurn,
   TerminalWriteFairTurnContext,
   TerminalWritePriorityResolver,
 } from "./terminal-write-fair-scheduler";
 import { TerminalWriteFairScheduler } from "./terminal-write-fair-scheduler";
 import type { TerminalWritePriority } from "./terminal-write-fair-scheduler";
+import {
+  TERMINAL_WRITE_BATCH_MAX_BYTES,
+  TERMINAL_WRITE_BATCH_MAX_PARTS,
+  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
+} from "./terminal-write-batch-queue";
+
+/** Hard liveness bound for adjacent checkpoint callbacks sharing one lease. */
+export const TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE = TERMINAL_WRITE_BATCH_MAX_PARTS;
 
 export type TerminalParserLane = "visible" | "checkpoint";
 
@@ -21,16 +28,47 @@ type ActiveLane = {
   lane: TerminalParserLane;
   releaseGlobal: () => void;
   released: boolean;
+  leaseBytesConsumed: number;
+  leaseCallbacksConsumed: number;
+  turnBytes: number;
 };
+
+export type TerminalParserTurnContext = TerminalWriteFairTurnContext & {
+  /** Remaining byte budget in this pane's current global admission turn. */
+  maxBytes: number;
+};
+
+export type TerminalParserTurn = (release: () => void, context: TerminalParserTurnContext) => void;
+
+type PendingLane = {
+  turn: TerminalParserTurn;
+  requestedBytes?: number;
+};
+
+type HeldCheckpointLease = {
+  releaseGlobal: () => void;
+  leaseBytesConsumed: number;
+  leaseCallbacksConsumed: number;
+};
+
+type CancelScheduledMacrotask = () => void;
+type ScheduleCancelableMacrotask = (task: () => void) => CancelScheduledMacrotask;
+
+function scheduleCancelableMacrotask(task: () => void): CancelScheduledMacrotask {
+  const timer = setTimeout(task, 0);
+  return () => clearTimeout(timer);
+}
 
 /**
  * Multiplexes one pane's visible and rendererless xterm parsers behind the
  * pane's single app-wide scheduling owner.
  */
 export class TerminalParserAdmission {
-  private readonly pending = new Map<TerminalParserLane, TerminalWriteFairTurn>();
+  private readonly pending = new Map<TerminalParserLane, PendingLane>();
   private globalTurnPending = false;
   private active: ActiveLane | undefined;
+  private heldCheckpointLease: HeldCheckpointLease | undefined;
+  private cancelCheckpointRelease: CancelScheduledMacrotask | undefined;
   private lastGranted: TerminalParserLane | undefined;
   private disposed = false;
 
@@ -38,13 +76,15 @@ export class TerminalParserAdmission {
     private readonly scheduler: TerminalWriteFairScheduler,
     private readonly owner: TerminalWriteFairOwner,
     private readonly resolvePriority: TerminalWritePriorityResolver,
-    private readonly scheduleMacrotask: (task: () => void) => void = (task) => setTimeout(task, 0),
+    private readonly scheduleMacrotask: ScheduleCancelableMacrotask = scheduleCancelableMacrotask,
   ) {}
 
-  request(lane: TerminalParserLane, turn: TerminalWriteFairTurn): void {
+  request(lane: TerminalParserLane, turn: TerminalParserTurn, requestedBytes?: number): void {
     if (this.disposed || this.pending.has(lane)) return;
-    this.pending.set(lane, turn);
+    if (lane === "checkpoint" && this.tryContinueCheckpoint(turn, requestedBytes)) return;
+    this.pending.set(lane, { turn, requestedBytes });
     this.ensureGlobalTurn();
+    if (this.heldCheckpointLease) this.releaseHeldCheckpointLease();
   }
 
   cancelPending(lane: TerminalParserLane): void {
@@ -58,6 +98,7 @@ export class TerminalParserAdmission {
   cancel(lane: TerminalParserLane): void {
     this.cancelPending(lane);
     if (this.active?.lane === lane) this.release(this.active);
+    if (lane === "checkpoint" && this.heldCheckpointLease) this.releaseHeldCheckpointLease();
   }
 
   dispose(): void {
@@ -66,6 +107,8 @@ export class TerminalParserAdmission {
     this.pending.clear();
     if (this.active) this.active.released = true;
     this.active = undefined;
+    this.heldCheckpointLease = undefined;
+    this.cancelScheduledCheckpointRelease();
     this.globalTurnPending = false;
     this.scheduler.cancel(this.owner);
   }
@@ -91,21 +134,29 @@ export class TerminalParserAdmission {
       releaseGlobal();
       return;
     }
-    const turn = this.pending.get(lane);
-    if (!turn) {
+    const pending = this.pending.get(lane);
+    if (!pending) {
       releaseGlobal();
       return;
     }
     this.pending.delete(lane);
     this.lastGranted = lane;
-    const active: ActiveLane = { lane, releaseGlobal, released: false };
+    const maxBytes = this.turnLimit(context.contended);
+    const active: ActiveLane = {
+      lane,
+      releaseGlobal,
+      released: false,
+      leaseBytesConsumed: 0,
+      leaseCallbacksConsumed: 0,
+      turnBytes: this.turnBytes(pending.requestedBytes, maxBytes),
+    };
     this.active = active;
     const release = () => this.release(active);
     try {
       // A sibling lane belongs to the same pane share. Preserve the existing
       // 256 KiB sole-pane fast path; another pane owner is what makes a turn
       // globally contended and reduces both lanes to 64 KiB.
-      turn(release, context);
+      pending.turn(release, { ...context, maxBytes });
     } catch (error) {
       release();
       throw error;
@@ -126,6 +177,8 @@ export class TerminalParserAdmission {
   private release(active: ActiveLane): void {
     if (active.released) return;
     active.released = true;
+    active.leaseBytesConsumed += active.turnBytes;
+    active.leaseCallbacksConsumed += 1;
     if (this.active === active) this.active = undefined;
     // Requeue while the global lease is still active. The scheduler then keeps
     // its macrotask yield between consecutive parser turns from the same pane.
@@ -133,10 +186,83 @@ export class TerminalParserAdmission {
     if (active.lane === "checkpoint" && !this.globalTurnPending && !this.disposed) {
       // The next Promise-chain operation becomes visible only in a microtask
       // after this callback. Hold the global lease through one host-task edge
-      // so it can requeue before release without monopolizing the current task.
-      this.scheduleMacrotask(active.releaseGlobal);
+      // so it can either continue within the remaining byte quantum or requeue
+      // before release without losing its smooth-WRR balance.
+      const held: HeldCheckpointLease = {
+        releaseGlobal: active.releaseGlobal,
+        leaseBytesConsumed: active.leaseBytesConsumed,
+        leaseCallbacksConsumed: active.leaseCallbacksConsumed,
+      };
+      this.heldCheckpointLease = held;
+      this.scheduleCheckpointRelease();
       return;
     }
     active.releaseGlobal();
+  }
+
+  private tryContinueCheckpoint(turn: TerminalParserTurn, requestedBytes?: number): boolean {
+    const held = this.heldCheckpointLease;
+    if (!held || this.active || this.pending.size > 0) return false;
+    const contended = this.scheduler.hasPendingOtherOwner(this.owner);
+    const turnLimit = this.turnLimit(contended);
+    const remainingBytes = turnLimit - held.leaseBytesConsumed;
+    if (
+      remainingBytes <= 0 ||
+      held.leaseCallbacksConsumed >= TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE
+    ) {
+      return false;
+    }
+
+    this.heldCheckpointLease = undefined;
+    this.cancelScheduledCheckpointRelease();
+    const active: ActiveLane = {
+      lane: "checkpoint",
+      releaseGlobal: held.releaseGlobal,
+      released: false,
+      leaseBytesConsumed: held.leaseBytesConsumed,
+      leaseCallbacksConsumed: held.leaseCallbacksConsumed,
+      turnBytes: this.turnBytes(requestedBytes, remainingBytes),
+    };
+    this.active = active;
+    const release = () => this.release(active);
+    try {
+      turn(release, { contended, maxBytes: remainingBytes });
+    } catch (error) {
+      release();
+      throw error;
+    }
+    return true;
+  }
+
+  private releaseHeldCheckpointLease(): void {
+    const held = this.heldCheckpointLease;
+    if (!held) return;
+    this.heldCheckpointLease = undefined;
+    this.cancelScheduledCheckpointRelease();
+    held.releaseGlobal();
+  }
+
+  private scheduleCheckpointRelease(): void {
+    if (this.cancelCheckpointRelease) return;
+    this.cancelCheckpointRelease = this.scheduleMacrotask(() => {
+      this.cancelCheckpointRelease = undefined;
+      if (this.heldCheckpointLease) this.releaseHeldCheckpointLease();
+    });
+  }
+
+  private cancelScheduledCheckpointRelease(): void {
+    const cancel = this.cancelCheckpointRelease;
+    if (!cancel) return;
+    this.cancelCheckpointRelease = undefined;
+    cancel();
+  }
+
+  private turnLimit(contended: boolean): number {
+    return contended ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES : TERMINAL_WRITE_BATCH_MAX_BYTES;
+  }
+
+  private turnBytes(requestedBytes: number | undefined, maxBytes: number): number {
+    if (requestedBytes === undefined || !Number.isFinite(requestedBytes)) return maxBytes;
+    return Math.min(maxBytes, Math.max(0, Math.floor(requestedBytes)));
   }
 }

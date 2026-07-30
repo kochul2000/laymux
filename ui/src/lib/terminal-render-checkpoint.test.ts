@@ -7,6 +7,10 @@ import {
   TerminalWriteFairScheduler,
 } from "./terminal-write-fair-scheduler";
 import { TerminalParserAdmission } from "./terminal-parser-admission";
+import {
+  TERMINAL_WRITE_BATCH_MAX_BYTES,
+  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
+} from "./terminal-write-batch-queue";
 import type {
   TerminalOutputAttachment,
   TerminalOutputAppliedSegment,
@@ -69,7 +73,13 @@ describe("TerminalRenderCheckpointModel", () => {
       scheduler,
       checkpointOwner,
       () => "background",
-      (task) => scheduled.push(task),
+      (task) => {
+        scheduled.push(task);
+        return () => {
+          const index = scheduled.indexOf(task);
+          if (index >= 0) scheduled.splice(index, 1);
+        };
+      },
     );
     const model = new TerminalRenderCheckpointModel({
       admission,
@@ -112,7 +122,13 @@ describe("TerminalRenderCheckpointModel", () => {
       scheduler,
       createTerminalWriteFairOwner("checkpoint"),
       () => "background",
-      (task) => scheduled.push(task),
+      (task) => {
+        scheduled.push(task);
+        return () => {
+          const index = scheduled.indexOf(task);
+          if (index >= 0) scheduled.splice(index, 1);
+        };
+      },
     );
     let writeCount = 0;
     let settleActiveWrite: (() => void) | undefined;
@@ -144,12 +160,6 @@ describe("TerminalRenderCheckpointModel", () => {
     await expect(applying).rejects.toThrow("terminal render checkpoint is disposed");
     const replacement = vi.fn((release: () => void) => release());
     scheduler.request(createTerminalWriteFairOwner("replacement"), replacement);
-    expect(replacement).not.toHaveBeenCalled();
-    expect(scheduled).toHaveLength(1);
-    scheduled.shift()?.();
-    expect(replacement).not.toHaveBeenCalled();
-    expect(scheduled).toHaveLength(1);
-    scheduled.shift()?.();
     expect(replacement).toHaveBeenCalledTimes(1);
     expect(scheduled).toHaveLength(0);
     // A disposed xterm may still settle its already accepted callback. That
@@ -170,7 +180,13 @@ describe("TerminalRenderCheckpointModel", () => {
         request: (
           _lane: Parameters<TerminalParserAdmission["request"]>[0],
           turn: Parameters<TerminalParserAdmission["request"]>[1],
-        ) => turn(() => {}, { contended }),
+        ) =>
+          turn(() => {}, {
+            contended,
+            maxBytes: contended
+              ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES
+              : TERMINAL_WRITE_BATCH_MAX_BYTES,
+          }),
         cancel: () => {},
       };
       const model = new TerminalRenderCheckpointModel({

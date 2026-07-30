@@ -7,10 +7,6 @@ import type {
   TerminalOutputAttachment,
 } from "./terminal-output-attach-coordinator";
 import type { TerminalParserAdmission } from "./terminal-parser-admission";
-import {
-  TERMINAL_WRITE_BATCH_MAX_BYTES,
-  TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
-} from "./terminal-write-batch-queue";
 
 const CAPTURE_WAIT_MS = 3_000;
 const CAPTURE_POLL_MS = 10;
@@ -222,33 +218,34 @@ export class TerminalRenderCheckpointModel {
           fail(new Error("terminal render checkpoint is disposed"));
           return;
         }
-        admission.request("checkpoint", (release, { contended }) => {
-          if (this.disposed) {
-            release();
-            fail(new Error("terminal render checkpoint is disposed"));
-            return;
-          }
-          const maxBytes = contended
-            ? TERMINAL_WRITE_FAIR_QUANTUM_BYTES
-            : TERMINAL_WRITE_BATCH_MAX_BYTES;
-          const end = Math.min(data.length, offset + maxBytes);
-          void this.write(data.subarray(offset, end)).then(
-            () => {
-              offset = end;
-              if (offset < data.length) requestNext();
+        admission.request(
+          "checkpoint",
+          (release, { maxBytes }) => {
+            if (this.disposed) {
               release();
-              if (offset === data.length && !settled) {
-                settled = true;
-                this.rejectScheduledWrite = undefined;
-                resolve();
-              }
-            },
-            (error) => {
-              release();
-              fail(error);
-            },
-          );
-        });
+              fail(new Error("terminal render checkpoint is disposed"));
+              return;
+            }
+            const end = Math.min(data.length, offset + maxBytes);
+            void this.write(data.subarray(offset, end)).then(
+              () => {
+                offset = end;
+                if (offset < data.length) requestNext();
+                release();
+                if (offset === data.length && !settled) {
+                  settled = true;
+                  this.rejectScheduledWrite = undefined;
+                  resolve();
+                }
+              },
+              (error) => {
+                release();
+                fail(error);
+              },
+            );
+          },
+          data.length - offset,
+        );
       };
       requestNext();
     });

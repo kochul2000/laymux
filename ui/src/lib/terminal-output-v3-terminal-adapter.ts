@@ -1,4 +1,5 @@
 import type { TerminalOutputEnvelopeDelta } from "./terminal-output-envelope";
+import { coalesceTerminalOutputSegments } from "./terminal-output-coalesce";
 import type { TerminalOutputParsedIdentity } from "./terminal-output-envelope-ingress";
 import type {
   TerminalOutputV3EnvelopeCompletion,
@@ -20,6 +21,24 @@ export interface TerminalOutputV3TerminalAdapterOptions {
   ): void;
   sendParsedRange(seqStart: number, seqEnd: number): Promise<boolean>;
   onFailStop(reason: string): void;
+}
+
+function coalesceCheckpointDeltas(
+  deltas: readonly TerminalOutputEnvelopeDelta[],
+): TerminalOutputEnvelopeDelta[] {
+  const coalesced = coalesceTerminalOutputSegments(deltas);
+  let sourceIndex = 0;
+  return coalesced.map((segment) => {
+    while (deltas[sourceIndex].seqStart < segment.seqStart) sourceIndex += 1;
+    const first = deltas[sourceIndex];
+    if (segment === first) return first;
+    return {
+      ...first,
+      seqEnd: segment.seqEnd,
+      data: segment.data,
+      geometry: segment.geometry,
+    };
+  });
 }
 
 /** Bridges v3 semantic deltas into the existing two-parser terminal surface. */
@@ -62,8 +81,9 @@ export class TerminalOutputV3TerminalAdapter implements TerminalOutputV3SurfaceA
     }
 
     const deltas = request.envelope.deltas;
+    const checkpointDeltas = coalesceCheckpointDeltas(deltas);
     const checkpointParsed = Promise.all(
-      deltas.map((delta) => Promise.resolve(this.options.applyCheckpoint(delta))),
+      checkpointDeltas.map((delta) => Promise.resolve(this.options.applyCheckpoint(delta))),
     ).then(() => undefined);
     let resolveVisible!: () => void;
     let rejectVisible!: (reason: unknown) => void;
