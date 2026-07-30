@@ -239,6 +239,10 @@ import type { TerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime";
 import { loadTerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime-loader";
 import { TerminalOutputV3FailureCoordinator } from "@/lib/terminal-output-v3-failure-coordinator";
 import {
+  TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS,
+  TerminalOutputPullWatchdogCadence,
+} from "@/lib/terminal-output-pull-watchdog";
+import {
   forgetTerminalOutputV3Diagnostics,
   recordTerminalOutputV3Diagnostics,
   type TerminalOutputV3DiagnosticEntry,
@@ -328,16 +332,6 @@ const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
 
 /** Local attach/ACK bridge calls should settle far below this on a live WebView. */
 const TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS = 5000;
-
-/**
- * Low-frequency exact pull while a desktop parsed-credit lease is active.
- *
- * A v2 event can be lost at the precise chunk that fills the backend window;
- * no later event then exists to expose a sequence gap. Pulling from the last
- * contiguous prefix makes that edge recoverable without allowing another PTY
- * read or weakening the fixed producer bound.
- */
-const TERMINAL_OUTPUT_PULL_WATCHDOG_MS = 1000;
 
 /**
  * How many `resume` round-trips a single hole may take before escalating.
@@ -5212,12 +5206,18 @@ export function TerminalView({
       outputFailStoppedListenerReady,
     ]).then(() => undefined);
 
+    const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
     const outputPullWatchdogTimer = setInterval(() => {
       if (cancelled) return;
+      const now = monotonicNow();
+      // A moderate host-task stall can queue this timer beside the output edge
+      // it is meant to recover. Defer at most one poll so the direct event can
+      // win; long stalls and the next tick always poll within the hard window.
+      if (!outputPullWatchdogCadence.shouldPoll(now)) return;
       if (outputTransportMode === "v3") {
         const runtime = outputV3Runtime;
         if (!runtime || outputV3FailStoppedReason !== null) return;
-        void runtime.pollExactRepair(monotonicNow()).then((result) => {
+        void runtime.pollExactRepair(now).then((result) => {
           publishOutputV3Diagnostics?.();
           if (result?.kind === "fail-stop") failStopOutputV3(result.reason);
         });
@@ -5239,7 +5239,7 @@ export function TerminalView({
       // first await, so adjacent interval ticks and live gap detection share a
       // single in-flight exact-resume request.
       void startOutputRepair({ expectedSeq, actualSeq: expectedSeq }, "pull-watchdog");
-    }, TERMINAL_OUTPUT_PULL_WATCHDOG_MS);
+    }, TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS);
 
     // Right-click: copy selection or paste (no context menu in terminal)
     const outerContainer = containerRef.current?.parentElement;
