@@ -579,6 +579,37 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.transferRequests).toHaveLength(3);
   });
 
+  it("gates a null-grant successor emitted before the close response", async () => {
+    const close = deferred<TerminalOutputDeliveryControlResult>();
+    const h = harness({
+      sendControl: (request) => (request.identity.kind === "close" ? close.promise : undefined),
+    });
+    await h.controller.receive(payload({ data: OPEN }), 1);
+    const closing = h.controller.receive(
+      payload({ envelopeId: 2, seqStart: 8, grantId: "grant-1", data: CLOSE }),
+      2,
+    );
+    for (let turn = 0; turn < 10 && h.controlCalls.length < 4; turn += 1) {
+      await Promise.resolve();
+    }
+    const queued = h.controller.receive(
+      payload({ envelopeId: 3, seqStart: 16, grantId: null, data: [66] }),
+      3,
+    );
+
+    expect(h.transferRequests).toHaveLength(2);
+    expect(h.failStops).toEqual([]);
+
+    const closeIdentity = h.controlCalls.find(
+      (request) => request.identity.kind === "close",
+    )!.identity;
+    close.resolve({ kind: "accepted", identity: closeIdentity });
+
+    await expect(closing).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+    await expect(queued).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
+    expect(h.transferRequests).toHaveLength(3);
+  });
+
   it("fail-stops a queued closing successor when close is rejected", async () => {
     const close = deferred<TerminalOutputDeliveryControlResult>();
     const h = harness({
