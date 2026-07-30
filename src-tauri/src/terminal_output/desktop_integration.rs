@@ -154,16 +154,18 @@ impl TerminalOutputSession {
                 DesktopOutputState::FailStopped => "failStopped",
             }
         };
-        let receipt_slot = delivery
-            .in_flight
-            .map(|slot| TerminalOutputReceiptSlotDiagnostics {
-                generation: slot.envelope.generation,
-                lease_token: slot.envelope.lease_token,
-                envelope_id: slot.envelope.envelope_id,
-                grant_id: slot.envelope.grant_id,
-                seq_start: slot.envelope.seq_start,
-                seq_end: slot.envelope.seq_end,
-            });
+        let receipt_slot =
+            delivery
+                .in_flight
+                .first()
+                .map(|slot| TerminalOutputReceiptSlotDiagnostics {
+                    generation: slot.envelope.generation,
+                    lease_token: slot.envelope.lease_token.clone(),
+                    envelope_id: slot.envelope.envelope_id,
+                    grant_id: slot.envelope.grant_id.clone(),
+                    seq_start: slot.envelope.seq_start,
+                    seq_end: slot.envelope.seq_end,
+                });
         Ok(TerminalOutputDesktopDiagnostics {
             terminal_id: self.terminal_id.clone(),
             generation: self.generation,

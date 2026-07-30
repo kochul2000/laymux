@@ -315,7 +315,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     const receive = h.controller.receive(payload({ data: OPEN }), 1);
     await Promise.resolve();
     expect(transferred).toBeDefined();
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
     expect(parsedAck).not.toHaveBeenCalled();
 
     hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
@@ -327,6 +327,29 @@ describe("TerminalOutputV3SurfaceController", () => {
       seq: OPEN.length,
     });
     expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
+  });
+
+  it("queues the bounded null-grant successors emitted before opener hold settles", async () => {
+    const hold = deferred<TerminalOutputDeliveryControlResult>();
+    const h = harness({ hold });
+
+    const opener = h.controller.receive(payload({ data: OPEN }), 1);
+    await Promise.resolve();
+    const successor = h.controller.receive(
+      payload({ envelopeId: 2, seqStart: OPEN.length, data: [65] }),
+      2,
+    );
+    await Promise.resolve();
+
+    expect(h.failStops).toEqual([]);
+    expect(h.transferRequests).toHaveLength(1);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "receipt"]);
+
+    hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
+    await expect(opener).resolves.toEqual({ kind: "accepted", envelopeId: 1 });
+    await expect(successor).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
+    expect(h.transferRequests).toHaveLength(2);
+    expect(h.failStops).toEqual([]);
   });
 
   it("fail-stops a synchronous discard immediately while opener hold is pending", async () => {
@@ -345,15 +368,14 @@ describe("TerminalOutputV3SurfaceController", () => {
     await Promise.resolve();
     expect(h.failStops).toEqual(["discarded:checkpoint_failed"]);
     expect(h.deliveryDisposed).toBe(1);
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([]);
     expect(parsedAck).not.toHaveBeenCalled();
 
-    hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
     await expect(receive).resolves.toEqual({
       kind: "fail-stop",
       reason: "discarded:checkpoint_failed",
     });
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([]);
     expect(parsedAck).not.toHaveBeenCalled();
     expect(h.ingress.parsedSeq).toBe(0);
   });
@@ -418,12 +440,12 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.controller.activeGrantId).toBeNull();
     expect(h.controlCalls.slice(3)).toMatchObject([
       {
-        identity: { kind: "close", envelopeId: 3, grantId: "grant-1" },
-        payload: { closeSeq: 17, reason: "close" },
-      },
-      {
         identity: { kind: "receipt", envelopeId: 3, grantId: "grant-1" },
         payload: { seqEnd: 17 },
+      },
+      {
+        identity: { kind: "close", envelopeId: 3, grantId: "grant-1" },
+        payload: { closeSeq: 17, reason: "close" },
       },
     ]);
   });
@@ -469,7 +491,7 @@ describe("TerminalOutputV3SurfaceController", () => {
     });
   });
 
-  it("does not open the transport slot when opener hold fails", async () => {
+  it("releases the local transport slot before an opener hold failure settles", async () => {
     const h = harness({
       controlResult: {
         kind: "rejected",
@@ -489,8 +511,8 @@ describe("TerminalOutputV3SurfaceController", () => {
       kind: "fail-stop",
       reason: "control:hold:rejected",
     });
-    expect(h.controlCalls.map((request) => request.identity.kind)).toEqual(["hold"]);
-    expect(h.ingress.unreceipted).toBeDefined();
+    expect(h.controlCalls.map((request) => request.identity.kind)).toEqual(["hold", "receipt"]);
+    expect(h.ingress.unreceipted).toBeUndefined();
   });
 
   it("rejects a continuation envelope whose grant is not the current grant", async () => {
@@ -540,10 +562,15 @@ describe("TerminalOutputV3SurfaceController", () => {
 
     expect(h.controller.activeGrantId).toBeNull();
     expect(h.transferRequests).toHaveLength(3);
-    expect(h.controlCalls.slice(-2)).toMatchObject([
-      { identity: { kind: "receipt", envelopeId: 2, grantId: "grant-1" } },
-      { identity: { kind: "receipt", envelopeId: 3, grantId: "grant-1" } },
+    expect(h.controlCalls.filter((request) => request.identity.envelopeId === 2)).toMatchObject([
+      { identity: { kind: "receipt", grantId: "grant-1" } },
+      { identity: { kind: "close", grantId: "grant-1" } },
     ]);
+    expect(h.controlCalls).toContainEqual(
+      expect.objectContaining({
+        identity: expect.objectContaining({ kind: "receipt", envelopeId: 3 }),
+      }),
+    );
   });
 
   it("accepts the one old-grant successor delivered after the close and receipt settle", async () => {
@@ -589,8 +616,8 @@ describe("TerminalOutputV3SurfaceController", () => {
     ).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
 
     expect(h.controlCalls.filter((request) => request.identity.envelopeId === 2)).toMatchObject([
-      { identity: { kind: "close", grantId: "grant-1" } },
       { identity: { kind: "receipt", grantId: "grant-1" } },
+      { identity: { kind: "close", grantId: "grant-1" } },
     ]);
     expect(h.controlCalls.filter((request) => request.identity.kind === "hold")).toHaveLength(1);
 
@@ -637,7 +664,11 @@ describe("TerminalOutputV3SurfaceController", () => {
     for (let turn = 0; turn < 10 && h.controlCalls.length < 5; turn += 1) {
       await Promise.resolve();
     }
-    expect(h.controlCalls.at(-1)).toMatchObject({
+    expect(
+      h.controlCalls.find(
+        (request) => request.identity.kind === "receipt" && request.identity.envelopeId === 2,
+      ),
+    ).toMatchObject({
       identity: { kind: "receipt", envelopeId: 2 },
     });
 
@@ -648,7 +679,10 @@ describe("TerminalOutputV3SurfaceController", () => {
     expect(h.transferRequests).toHaveLength(2);
     expect(h.controlCalls.filter((request) => request.identity.envelopeId === 3)).toEqual([]);
 
-    receipt.resolve({ kind: "accepted", identity: h.controlCalls.at(-1)!.identity });
+    const closingReceipt = h.controlCalls.find(
+      (request) => request.identity.kind === "receipt" && request.identity.envelopeId === 2,
+    )!;
+    receipt.resolve({ kind: "accepted", identity: closingReceipt.identity });
     await expect(closing).resolves.toEqual({ kind: "accepted", envelopeId: 2 });
     await expect(queued).resolves.toEqual({ kind: "accepted", envelopeId: 3 });
     expect(h.transferRequests).toHaveLength(3);

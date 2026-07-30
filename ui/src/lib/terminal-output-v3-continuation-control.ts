@@ -46,8 +46,15 @@ interface Options {
 /** Owns active/closing continuation identity and its single gated successor. */
 export class TerminalOutputV3ContinuationControl {
   private grant: TerminalOutputFrameContinuationGrant | undefined;
+  /** A hold has been sent but its backend completion has not settled yet. */
+  private opening: TerminalOutputFrameContinuationGrant | undefined;
   private closing: ClosingGrant | undefined;
-  private pending: ClosingPendingEnvelope | undefined;
+  /** Null-grant envelopes emitted before the opener hold reached Rust. */
+  private openingPending: ClosingPendingEnvelope[] = [];
+  /** The bounded successor set emitted before the close completion reached Rust. */
+  private pending: ClosingPendingEnvelope[] = [];
+  /** Preserves hold/close causality while allowing receipts to run in parallel. */
+  private controlTail: Promise<void> | undefined;
   /** A frame opened inside the envelope that closes the prior continuation. */
   private suppressedGrantId: string | undefined;
   /**
@@ -74,6 +81,18 @@ export class TerminalOutputV3ContinuationControl {
 
   get activeGrantId(): string | null {
     return this.grant?.grantId ?? null;
+  }
+
+  admitDuringOpen(
+    envelope: TerminalOutputEnvelope,
+    now: number,
+  ): Promise<TerminalOutputV3SurfaceResult> | undefined {
+    const opening = this.opening;
+    if (!opening) return undefined;
+    if (envelope.grantId !== null) {
+      return Promise.resolve(this.options.failStop("grant_mismatch"));
+    }
+    return this.queuePendingEnvelope(this.openingPending, envelope, now);
   }
 
   admitDuringClose(
@@ -103,18 +122,7 @@ export class TerminalOutputV3ContinuationControl {
       return Promise.resolve(this.options.failStop("ingress:sequence"));
     }
 
-    if (this.pending) {
-      if (!sameTerminalOutputEnvelope(this.pending.envelope, envelope)) {
-        return Promise.resolve(this.options.failStop("envelope_identity_conflict"));
-      }
-      return this.pending.promise;
-    }
-    let resolve!: (result: TerminalOutputV3SurfaceResult) => void;
-    const promise = new Promise<TerminalOutputV3SurfaceResult>((settle) => {
-      resolve = settle;
-    });
-    this.pending = { envelope, now, promise, resolve };
-    return promise;
+    return this.queuePendingEnvelope(this.pending, envelope, now);
   }
 
   admitAfterClose(envelope: TerminalOutputEnvelope): boolean {
@@ -193,6 +201,7 @@ export class TerminalOutputV3ContinuationControl {
           return undefined;
         }
         this.grant = transition.grant;
+        this.opening = transition.grant;
         this.heldEnvelopeId = transition.grant.envelopeId;
         controls.push({
           identity: { kind: "hold", ...transition.grant },
@@ -240,19 +249,30 @@ export class TerminalOutputV3ContinuationControl {
     return controls;
   }
 
-  async sendControls(controls: readonly TerminalOutputDeliveryControlRequest[]): Promise<void> {
-    const pending = controls.map((request) => ({
-      request,
-      result: this.options.deliveryControl.send(request),
-    }));
-    for (const control of pending) {
-      const result = await control.result;
+  sendControls(controls: readonly TerminalOutputDeliveryControlRequest[]): Promise<void> {
+    const previous = this.controlTail;
+    const task = previous
+      ? previous.then(() => this.sendControlsNow(controls))
+      : this.sendControlsNow(controls);
+    this.controlTail = task.then(
+      () => undefined,
+      () => undefined,
+    );
+    return task;
+  }
+
+  private async sendControlsNow(
+    controls: readonly TerminalOutputDeliveryControlRequest[],
+  ): Promise<void> {
+    for (const request of controls) {
+      const result = await this.options.deliveryControl.send(request);
       if (this.options.isFailStopped()) return;
       if (result.kind !== "accepted") {
-        this.options.failStop(controlFailureReason(control.request, result));
+        this.options.failStop(controlFailureReason(request, result));
         return;
       }
-      if (control.request.identity.kind === "close") this.acceptClose(control.request);
+      if (request.identity.kind === "hold") this.acceptOpen(request);
+      if (request.identity.kind === "close") this.acceptClose(request);
     }
   }
 
@@ -264,14 +284,56 @@ export class TerminalOutputV3ContinuationControl {
   }
 
   failPending(failure: Failure): void {
-    const pending = this.pending;
-    this.pending = undefined;
+    const pending = [...this.openingPending, ...this.pending];
+    this.openingPending = [];
+    this.pending = [];
+    this.opening = undefined;
     this.closing = undefined;
     this.grant = undefined;
     this.heldEnvelopeId = undefined;
     this.settledCloseGrant = undefined;
     this.suppressedGrantId = undefined;
-    pending?.resolve(failure);
+    for (const item of pending) item.resolve(failure);
+  }
+
+  private queuePendingEnvelope(
+    pending: ClosingPendingEnvelope[],
+    envelope: TerminalOutputEnvelope,
+    now: number,
+  ): Promise<TerminalOutputV3SurfaceResult> {
+    const existing = pending.find((item) => item.envelope.envelopeId === envelope.envelopeId);
+    if (existing) {
+      return sameTerminalOutputEnvelope(existing.envelope, envelope)
+        ? existing.promise
+        : Promise.resolve(this.options.failStop("envelope_identity_conflict"));
+    }
+    const previous = pending.at(-1)?.envelope;
+    const expectedEnvelopeId = previous
+      ? previous.envelopeId + 1
+      : this.options.ingress.expectedEnvelopeId;
+    const expectedSeq = previous ? previous.seqEnd : this.options.ingress.admittedSeq;
+    if (envelope.envelopeId !== expectedEnvelopeId) {
+      return Promise.resolve(this.options.failStop("ingress:envelope-order"));
+    }
+    if (envelope.seqStart !== expectedSeq) {
+      return Promise.resolve(this.options.failStop("ingress:sequence"));
+    }
+    let resolve!: (result: TerminalOutputV3SurfaceResult) => void;
+    const promise = new Promise<TerminalOutputV3SurfaceResult>((settle) => {
+      resolve = settle;
+    });
+    pending.push({ envelope, now, promise, resolve });
+    return promise;
+  }
+
+  private acceptOpen(request: TerminalOutputDeliveryControlRequest): void {
+    const opening = this.opening;
+    if (!opening || opening.grantId !== request.identity.grantId) {
+      this.options.failStop("grant_mismatch");
+      return;
+    }
+    this.opening = undefined;
+    this.startPending(this.openingPending.splice(0));
   }
 
   private acceptClose(request: TerminalOutputDeliveryControlRequest): void {
@@ -293,16 +355,21 @@ export class TerminalOutputV3ContinuationControl {
     if (!closing || !closing.closeAccepted || closing.waitForReceiptEnvelopeId !== null) return;
     this.closing = undefined;
     this.grant = undefined;
-    const pending = this.pending;
-    this.pending = undefined;
-    if (!pending) {
+    const pending = this.pending.splice(0);
+    if (pending.length === 0) {
       this.settledCloseGrant = closing.grant;
       return;
     }
-    const processing = this.options.startEnvelope(pending.envelope, pending.now);
-    void processing.then(pending.resolve, () =>
-      pending.resolve(this.options.failStop("admission_failure")),
-    );
+    this.startPending(pending);
+  }
+
+  private startPending(pending: readonly ClosingPendingEnvelope[]): void {
+    for (const item of pending) {
+      const processing = this.options.startEnvelope(item.envelope, item.now);
+      void processing.then(item.resolve, () =>
+        item.resolve(this.options.failStop("admission_failure")),
+      );
+    }
   }
 }
 

@@ -118,6 +118,7 @@ impl InFlightEnvelope {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReceiptRecord {
     pub(super) identity: TerminalOutputEnvelopeIdentity,
+    pub(super) seq_start: u64,
     pub(super) seq_end: u64,
     /// A receipt owns bytes before its flow projection is committed. If that
     /// second projection fails, every exact retry must return the same terminal
@@ -157,7 +158,7 @@ pub(super) struct DeliveryDiagnostics {
     pub(super) parsed_seq: u64,
     pub(super) observed_seq: u64,
     pub(super) pending_bytes: usize,
-    pub(super) in_flight: Option<InFlightEnvelope>,
+    pub(super) in_flight: Vec<InFlightEnvelope>,
 }
 
 impl From<&TerminalOutputDeltaEnvelopeV3> for TerminalOutputEnvelopeIdentity {

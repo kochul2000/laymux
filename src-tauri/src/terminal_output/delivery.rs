@@ -27,9 +27,9 @@ pub(super) struct DeliveryState {
     pub(super) parsed_seq: u64,
     pub(super) pending: VecDeque<(TerminalOutputDelta, Instant)>,
     pub(super) pending_bytes: usize,
-    pub(super) in_flight: Option<InFlightEnvelope>,
+    pub(super) in_flight: VecDeque<InFlightEnvelope>,
     pub(super) emitter_call_expires_at: Option<Instant>,
-    pub(super) last_receipt: Option<ReceiptRecord>,
+    pub(super) recent_receipts: VecDeque<ReceiptRecord>,
     pub(super) last_hold: Option<HoldRecord>,
     pub(super) last_close: Option<CloseRecord>,
 }
@@ -148,9 +148,9 @@ impl DesktopOutputDelivery {
         state.parsed_seq = parsed_seq;
         state.pending.clear();
         state.pending_bytes = 0;
-        state.in_flight = None;
+        state.in_flight.clear();
         state.emitter_call_expires_at = None;
-        state.last_receipt = None;
+        state.recent_receipts.clear();
         state.last_hold = None;
         state.last_close = None;
         let next = state
@@ -258,37 +258,52 @@ impl DesktopOutputDelivery {
         if !current_lease(&state, self.inner.generation, identity) {
             return Ok(TerminalOutputControlCompletion::Stale);
         }
-        if let Some(last) = state.last_receipt.as_ref() {
-            if last.identity == *identity {
-                return if last.seq_end != seq_end {
-                    Err(
-                        "terminal output receipt identity was reused with a different sequence"
-                            .into(),
-                    )
-                } else if let Some(error) = last.terminal_error.as_ref() {
-                    Err(error.clone())
-                } else {
-                    Ok(TerminalOutputControlCompletion::Duplicate)
-                };
-            }
+        if let Some(last) = state
+            .recent_receipts
+            .iter()
+            .find(|last| last.identity == *identity)
+        {
+            return if last.seq_end != seq_end {
+                Err("terminal output receipt identity was reused with a different sequence".into())
+            } else if let Some(error) = last.terminal_error.as_ref() {
+                Err(error.clone())
+            } else {
+                Ok(TerminalOutputControlCompletion::Duplicate)
+            };
         }
-        let Some(in_flight) = state.in_flight.as_ref() else {
+        let Some(slot_index) = state
+            .in_flight
+            .iter()
+            .position(|in_flight| in_flight.identity() == *identity)
+        else {
+            if let Some(in_flight) = state.in_flight.iter().find(|in_flight| {
+                let candidate = in_flight.identity();
+                candidate.generation == identity.generation
+                    && candidate.lease_token == identity.lease_token
+                    && candidate.envelope_id == identity.envelope_id
+            }) {
+                ensure_same_envelope_or_stale(&in_flight.identity(), identity)?;
+            }
             return Ok(TerminalOutputControlCompletion::Stale);
         };
-        let expected_identity = in_flight.identity();
+        let expected_identity = state.in_flight[slot_index].identity();
         ensure_same_envelope_or_stale(&expected_identity, identity)?;
-        if expected_identity != *identity {
-            return Ok(TerminalOutputControlCompletion::Stale);
-        }
-        if in_flight.envelope.seq_end != seq_end {
+        let seq_start = state.in_flight[slot_index].envelope.seq_start;
+        if state.in_flight[slot_index].envelope.seq_end != seq_end {
             return Err("terminal output receipt sequence does not match its envelope".into());
         }
-        state.in_flight = None;
-        state.last_receipt = Some(ReceiptRecord {
+        state.in_flight.remove(slot_index);
+        state.recent_receipts.push_back(ReceiptRecord {
             identity: identity.clone(),
+            seq_start,
             seq_end,
             terminal_error: None,
         });
+        while state.recent_receipts.len()
+            > crate::constants::TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT * 2
+        {
+            state.recent_receipts.pop_front();
+        }
         if let Some(lease) = state.lease.as_mut() {
             if lease.grant_id.is_some() {
                 lease.grant_expires_at = Some(Instant::now() + self.inner.continuation_timeout);
@@ -308,12 +323,13 @@ impl DesktopOutputDelivery {
         error: &str,
     ) -> Result<(), String> {
         let mut state = self.inner.state.lock_or_err()?;
-        let Some(last) = state.last_receipt.as_mut() else {
+        let Some(last) = state
+            .recent_receipts
+            .iter_mut()
+            .find(|last| last.identity == *identity && last.seq_end == seq_end)
+        else {
             return Err("accepted terminal output receipt lost its result record".into());
         };
-        if last.identity != *identity || last.seq_end != seq_end {
-            return Err("accepted terminal output receipt result identity changed".into());
-        }
         match last.terminal_error.as_ref() {
             Some(existing) if existing != error => {
                 Err("terminal output receipt terminal result changed".into())
@@ -341,16 +357,16 @@ impl DesktopOutputDelivery {
             ));
         }
         if state
-            .last_receipt
-            .as_ref()
-            .is_some_and(|last| last.identity == *identity)
+            .recent_receipts
+            .iter()
+            .any(|last| last.identity == *identity)
         {
             return Ok(repair_response(
                 TerminalOutputEnvelopeRepairStatus::AlreadyReceipted,
                 None,
             ));
         }
-        let Some(in_flight) = state.in_flight.as_mut() else {
+        if state.in_flight.is_empty() {
             // `observed_seq` includes every delta already admitted to the
             // pending queue. While the worker is between a completed receipt
             // and its next envelope build, the frontend legitimately asks at
@@ -367,6 +383,16 @@ impl DesktopOutputDelivery {
                 } else {
                     TerminalOutputEnvelopeRepairStatus::Stale
                 },
+                None,
+            ));
+        }
+        let Some(in_flight) = state
+            .in_flight
+            .iter_mut()
+            .find(|in_flight| in_flight.identity() == *identity)
+        else {
+            return Ok(repair_response(
+                TerminalOutputEnvelopeRepairStatus::Mismatch,
                 None,
             ));
         };
@@ -444,7 +470,7 @@ impl DesktopOutputDelivery {
             return Err("terminal output parsed sequence is outside the ring prefix".into());
         }
         if seq > state.observed_seq {
-            if state.in_flight.is_some() || !state.pending.is_empty() {
+            if !state.in_flight.is_empty() || !state.pending.is_empty() {
                 return Err("legacy parsed ACK cannot skip admitted v3 delivery bytes".into());
             }
             state.observed_seq = current_seq;
@@ -471,7 +497,7 @@ impl DesktopOutputDelivery {
             parsed_seq: state.parsed_seq,
             observed_seq: state.observed_seq,
             pending_bytes: state.pending_bytes,
-            in_flight: state.in_flight.clone(),
+            in_flight: state.in_flight.iter().cloned().collect(),
         })
     }
 

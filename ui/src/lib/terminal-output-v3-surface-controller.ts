@@ -156,6 +156,8 @@ export class TerminalOutputV3SurfaceController {
 
     const closingAdmission = this.continuationControl.admitDuringClose(envelope, now);
     if (closingAdmission) return closingAdmission;
+    const openingAdmission = this.continuationControl.admitDuringOpen(envelope, now);
+    if (openingAdmission) return openingAdmission;
     if (this.continuationControl.admitAfterClose(envelope)) {
       return this.startEnvelope(envelope, now);
     }
@@ -284,13 +286,16 @@ export class TerminalOutputV3SurfaceController {
 
     completion.transferred = true;
     this.completePendingEnvelope(completion);
+    if (this.failure) return this.failure;
 
-    if (transitionControls.length > 0) {
-      await this.continuationControl.sendControls(transitionControls);
-      if (this.failure) return this.failure;
-      completion.transitionsSettled = true;
-      this.completePendingEnvelope(completion);
-    }
+    // Start continuation controls before the receipt, but do not put their IPC
+    // round trip on the transport-credit path. Rust records the exact accepted
+    // receipt so a hold/close that lands just after it still validates against
+    // the immutable envelope boundary.
+    const transitionCompletion =
+      transitionControls.length > 0
+        ? this.continuationControl.sendControls(transitionControls)
+        : undefined;
 
     const receiptRequest: TerminalOutputDeliveryControlRequest = {
       identity: {
@@ -318,6 +323,13 @@ export class TerminalOutputV3SurfaceController {
     if (this.failure) return this.failure;
     if (receiptResult.kind !== "accepted") {
       return this.failStop(controlFailureReason(receiptRequest, receiptResult));
+    }
+
+    if (transitionCompletion) {
+      await transitionCompletion;
+      if (this.failure) return this.failure;
+      completion.transitionsSettled = true;
+      this.completePendingEnvelope(completion);
     }
 
     this.continuationControl.completeReceipt(envelope.envelopeId);

@@ -11,7 +11,8 @@ use crate::constants::{
     EVENT_TERMINAL_OUTPUT_V3_PREFIX, TERMINAL_OUTPUT_ENVELOPE_EMIT_MAX_ATTEMPTS,
     TERMINAL_OUTPUT_ENVELOPE_EMIT_RETRY_MS, TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES,
     TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS, TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS,
-    TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES, TERMINAL_OUTPUT_ENVELOPE_QUIET_MS,
+    TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT, TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES,
+    TERMINAL_OUTPUT_ENVELOPE_QUIET_MS,
 };
 use crate::lock_ext::MutexExt;
 
@@ -128,8 +129,8 @@ fn emit_with_retry(
             !state.closed
                 && state
                     .in_flight
-                    .as_ref()
-                    .is_some_and(|in_flight| in_flight.identity() == identity)
+                    .iter()
+                    .any(|in_flight| in_flight.identity() == identity)
         });
         if !current {
             return Ok(());
@@ -170,8 +171,8 @@ fn emit_with_retry(
                 if state.closed
                     || !state
                         .in_flight
-                        .as_ref()
-                        .is_some_and(|in_flight| in_flight.identity() == identity)
+                        .iter()
+                        .any(|in_flight| in_flight.identity() == identity)
                 {
                     return Ok(());
                 }
@@ -186,8 +187,8 @@ fn emit_with_retry(
                     })?;
                 if state
                     .in_flight
-                    .as_ref()
-                    .is_some_and(|in_flight| Instant::now() >= in_flight.expires_at)
+                    .iter()
+                    .any(|in_flight| Instant::now() >= in_flight.expires_at)
                 {
                     return Err(TerminalOutputDeliveryCloseReason::ReceiptExpired);
                 }
@@ -207,8 +208,8 @@ fn arm_emitter_call(
     if state.closed
         || !state
             .in_flight
-            .as_ref()
-            .is_some_and(|in_flight| in_flight.identity() == *identity)
+            .iter()
+            .any(|in_flight| in_flight.identity() == *identity)
     {
         return Ok(());
     }
@@ -248,8 +249,8 @@ fn next_envelope(
         }
         if state
             .in_flight
-            .as_ref()
-            .is_some_and(|in_flight| now >= in_flight.expires_at)
+            .iter()
+            .any(|in_flight| now >= in_flight.expires_at)
         {
             return Err(TerminalOutputDeliveryCloseReason::ReceiptExpired);
         }
@@ -258,7 +259,8 @@ fn next_envelope(
             state = wait(inner, state, wake_deadline)?;
             continue;
         };
-        if state.lease.is_none() || state.in_flight.is_some() {
+        if state.lease.is_none() || state.in_flight.len() >= TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT
+        {
             state = wait(inner, state, wake_deadline)?;
             continue;
         }
@@ -286,7 +288,7 @@ fn next_envelope(
 
 fn earliest_deadline(state: &DeliveryState) -> Option<Instant> {
     [
-        state.in_flight.as_ref().map(|item| item.expires_at),
+        state.in_flight.iter().map(|item| item.expires_at).min(),
         state
             .lease
             .as_ref()
@@ -370,7 +372,7 @@ fn build_next(
         ));
     }
     state.next_envelope_id = envelope_id;
-    state.in_flight = Some(InFlightEnvelope {
+    state.in_flight.push_back(InFlightEnvelope {
         envelope: envelope.clone(),
         expires_at: Instant::now() + receipt_timeout,
         repair_attempts: 0,
@@ -392,7 +394,7 @@ pub(super) fn publish_close(inner: &DeliveryInner, reason: TerminalOutputDeliver
         state.close_reason = Some(reason.clone());
         state.pending.clear();
         state.pending_bytes = 0;
-        state.in_flight = None;
+        state.in_flight.clear();
         state.emitter_call_expires_at = None;
         inner.changed.notify_all();
         state.close_hook.clone()

@@ -161,6 +161,11 @@ pub const TERMINAL_OUTPUT_DESKTOP_BASE_CREDIT_BYTES: usize = 512 * 1024;
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES: usize = 64 * 1024;
 /// Maximum number of physical PTY deltas represented by one v3 envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS: usize = 8 * 1024;
+/// Maximum immutable desktop envelopes awaiting a receipt per generation.
+///
+/// This hides one WebView IPC round trip while retaining a small, fixed repair
+/// and timeout surface. It is intentionally independent from parsed credit.
+pub const TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT: usize = 4;
 /// Strict compact-JSON ceiling for one serialized v3 envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES: usize = 1024 * 1024;
 /// Quiet batching interval before a non-full envelope is emitted.

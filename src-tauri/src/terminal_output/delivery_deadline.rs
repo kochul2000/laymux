@@ -85,7 +85,7 @@ fn expired_reason(
     state: &DeliveryState,
     now: Instant,
 ) -> Option<TerminalOutputDeliveryCloseReason> {
-    let receipt = state.in_flight.as_ref().map(|item| item.expires_at);
+    let receipt = state.in_flight.iter().map(|item| item.expires_at).min();
     let continuation = state
         .lease
         .as_ref()
@@ -111,7 +111,7 @@ fn expired_reason(
 
 fn earliest_deadline(state: &DeliveryState) -> Option<Instant> {
     [
-        state.in_flight.as_ref().map(|item| item.expires_at),
+        state.in_flight.iter().map(|item| item.expires_at).min(),
         state
             .lease
             .as_ref()

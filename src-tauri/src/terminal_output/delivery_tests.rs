@@ -1,4 +1,5 @@
 use super::*;
+use crate::constants::TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex};
 use std::thread;
@@ -124,7 +125,7 @@ fn one_envelope_obeys_all_structural_and_wire_caps() {
 }
 
 #[test]
-fn one_unreceipted_slot_and_identity_retries_are_exact() {
+fn bounded_receipt_pipeline_allows_out_of_order_ack_and_exact_retries() {
     let delivery = DesktopOutputDelivery::new("t1".into(), 1);
     install(&delivery, 0);
     let (tx, rx) = std_mpsc::channel();
@@ -137,12 +138,25 @@ fn one_unreceipted_slot_and_identity_retries_are_exact() {
             Arc::new(|_| {}),
         )
         .unwrap();
-    delivery.enqueue(delta(0, 1)).unwrap();
-    let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert_eq!(first.grant_id, None);
-
-    delivery.enqueue(delta(1, 1)).unwrap();
+    let bytes = TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES;
+    for index in 0..=TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT {
+        delivery
+            .enqueue(delta((index * bytes) as u64, bytes))
+            .unwrap();
+    }
+    let mut envelopes = Vec::with_capacity(TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT);
+    for _ in 0..TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT {
+        envelopes.push(rx.recv_timeout(Duration::from_secs(1)).unwrap());
+    }
+    assert_eq!(
+        envelopes
+            .iter()
+            .map(|envelope| envelope.envelope_id)
+            .collect::<Vec<_>>(),
+        (1..=TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT as u64).collect::<Vec<_>>()
+    );
     assert!(rx.recv_timeout(Duration::from_millis(30)).is_err());
+    let first = &envelopes[0];
     let mut stale = identity(&first);
     stale.lease_token = "stale-token".into();
     assert_eq!(
@@ -155,9 +169,20 @@ fn one_unreceipted_slot_and_identity_retries_are_exact() {
         delivery.acknowledge_receipt(&stale, first.seq_end).unwrap(),
         TerminalOutputReceiptCompletion::Stale
     );
-    assert!(rx.recv_timeout(Duration::from_millis(30)).is_err());
+    let third = &envelopes[2];
+    assert_eq!(
+        delivery
+            .acknowledge_receipt(&identity(third), third.seq_end)
+            .unwrap(),
+        TerminalOutputReceiptCompletion::Accepted
+    );
+    let fifth = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(
+        fifth.envelope_id,
+        TERMINAL_OUTPUT_ENVELOPE_MAX_IN_FLIGHT as u64 + 1
+    );
 
-    let first_identity = identity(&first);
+    let first_identity = identity(first);
     assert_eq!(
         delivery
             .acknowledge_receipt(&first_identity, first.seq_end)
@@ -170,11 +195,17 @@ fn one_unreceipted_slot_and_identity_retries_are_exact() {
             .unwrap(),
         TerminalOutputReceiptCompletion::Duplicate
     );
-    let second = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert_eq!(second.envelope_id, first.envelope_id + 1);
-
+    for envelope in envelopes
+        .iter()
+        .skip(1)
+        .filter(|envelope| envelope.envelope_id != third.envelope_id)
+    {
+        delivery
+            .acknowledge_receipt(&identity(envelope), envelope.seq_end)
+            .unwrap();
+    }
     delivery
-        .acknowledge_receipt(&identity(&second), second.seq_end)
+        .acknowledge_receipt(&identity(&fifth), fifth.seq_end)
         .unwrap();
     delivery.close(TerminalOutputDeliveryCloseReason::Retired);
     delivery.join().unwrap();
@@ -224,7 +255,7 @@ fn repair_distinguishes_receipted_parser_backlog_from_a_lost_in_flight_event() {
     let diagnostics = delivery.diagnostics().unwrap();
     assert_eq!(diagnostics.parsed_seq, 0);
     assert_eq!(diagnostics.observed_seq, 2);
-    assert!(diagnostics.in_flight.is_none());
+    assert!(diagnostics.in_flight.is_empty());
 
     {
         let mut state = delivery.inner.state.lock().unwrap();
@@ -329,6 +360,9 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
     assert!(delivery
         .open_continuation(&opener_identity, "grant-1", opener.seq_end)
         .is_err());
+    delivery
+        .acknowledge_receipt(&opener_identity, opener.seq_end)
+        .unwrap();
     assert_eq!(
         delivery
             .open_continuation(&opener_identity, "grant-1", opener.seq_start + 1)
@@ -344,9 +378,6 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
     assert!(delivery
         .open_continuation(&opener_identity, "grant-conflict", opener.seq_start + 1)
         .is_err());
-    delivery
-        .acknowledge_receipt(&opener_identity, opener.seq_end)
-        .unwrap();
 
     delivery.enqueue(delta(4, 4)).unwrap();
     let closing = rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -355,6 +386,9 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
     assert!(delivery
         .close_continuation(&closing_identity, closing.seq_end + 1, "close")
         .is_err());
+    delivery
+        .acknowledge_receipt(&closing_identity, closing.seq_end)
+        .unwrap();
     let completion = delivery
         .close_continuation(&closing_identity, closing.seq_end, "close")
         .unwrap();
@@ -371,10 +405,6 @@ fn hold_and_close_require_the_current_full_identity_and_envelope_ranges() {
             .completion,
         TerminalOutputControlCompletion::Duplicate
     );
-    delivery
-        .acknowledge_receipt(&closing_identity, closing.seq_end)
-        .unwrap();
-
     delivery.enqueue(delta(8, 1)).unwrap();
     let after = rx.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(after.grant_id, None);
@@ -401,6 +431,11 @@ fn receipt_payload_conflict_does_not_release_the_in_flight_slot() {
         .unwrap();
     delivery.enqueue(delta(0, 2)).unwrap();
     let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let mut conflicting_identity = identity(&envelope);
+    conflicting_identity.grant_id = Some("foreign-grant".into());
+    assert!(delivery
+        .acknowledge_receipt(&conflicting_identity, envelope.seq_end)
+        .is_err());
     assert!(delivery
         .acknowledge_receipt(&identity(&envelope), envelope.seq_end - 1)
         .is_err());
@@ -497,7 +532,7 @@ fn repair_grant_mismatch_is_a_typed_status_not_a_command_error() {
         TerminalOutputEnvelopeRepairStatus::Mismatch
     );
     assert!(response.envelope.is_none());
-    assert!(delivery.diagnostics().unwrap().in_flight.is_some());
+    assert!(!delivery.diagnostics().unwrap().in_flight.is_empty());
 
     delivery
         .acknowledge_receipt(&identity(&envelope), envelope.seq_end)

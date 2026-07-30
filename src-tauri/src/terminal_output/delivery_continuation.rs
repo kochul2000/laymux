@@ -41,17 +41,30 @@ impl DesktopOutputDelivery {
                 };
             }
         }
-        let Some(in_flight) = state.in_flight.as_ref() else {
+        let boundary = state
+            .in_flight
+            .iter()
+            .find(|in_flight| in_flight.identity() == *opener)
+            .map(|in_flight| (in_flight.envelope.seq_start, in_flight.envelope.seq_end))
+            .or_else(|| {
+                state
+                    .recent_receipts
+                    .iter()
+                    .find(|receipt| receipt.identity == *opener)
+                    .map(|receipt| (receipt.seq_start, receipt.seq_end))
+            });
+        let Some((seq_start, seq_end)) = boundary else {
+            if let Some(in_flight) = state.in_flight.iter().find(|in_flight| {
+                let candidate = in_flight.identity();
+                candidate.generation == opener.generation
+                    && candidate.lease_token == opener.lease_token
+                    && candidate.envelope_id == opener.envelope_id
+            }) {
+                ensure_same_envelope_or_stale(&in_flight.identity(), opener)?;
+            }
             return Ok(TerminalOutputControlCompletion::Stale);
         };
-        let in_flight_identity = in_flight.identity();
-        ensure_same_envelope_or_stale(&in_flight_identity, opener)?;
-        if in_flight_identity != *opener {
-            return Ok(TerminalOutputControlCompletion::Stale);
-        }
-        if frame_start_seq < in_flight.envelope.seq_start
-            || frame_start_seq >= in_flight.envelope.seq_end
-        {
+        if frame_start_seq < seq_start || frame_start_seq >= seq_end {
             return Err("continuation opener is outside its envelope sequence range".into());
         }
         let lease = state
@@ -99,24 +112,34 @@ impl DesktopOutputDelivery {
                 };
             }
         }
-        let in_flight_boundary = state.in_flight.as_ref().and_then(|in_flight| {
+        let in_flight_boundary = state.in_flight.iter().find_map(|in_flight| {
             continuation_close_matches(&in_flight.identity(), identity)
                 .then_some((in_flight.envelope.seq_start, in_flight.envelope.seq_end))
         });
-        let timeout_receipt_boundary = (reason == "abort:timeout")
-            .then(|| state.last_receipt.as_ref())
-            .flatten()
-            .filter(|receipt| continuation_close_matches(&receipt.identity, identity))
+        let receipt_boundary = state
+            .recent_receipts
+            .iter()
+            .find(|receipt| continuation_close_matches(&receipt.identity, identity))
             .map(|receipt| receipt.seq_end);
-        match (in_flight_boundary, timeout_receipt_boundary) {
+        match (in_flight_boundary, receipt_boundary) {
             (Some((seq_start, seq_end)), _) if close_seq >= seq_start && close_seq <= seq_end => {}
             (None, Some(seq_end)) if close_seq == seq_end => {}
             (Some(_), _) | (None, Some(_)) => {
                 return Err("continuation close is outside its envelope sequence range".into());
             }
             (None, None) => {
-                if let Some(in_flight) = state.in_flight.as_ref() {
+                if let Some(in_flight) = state
+                    .in_flight
+                    .iter()
+                    .find(|in_flight| in_flight.envelope.envelope_id == identity.envelope_id)
+                {
                     ensure_same_envelope_or_stale(&in_flight.identity(), identity)?;
+                } else if let Some(receipt) = state
+                    .recent_receipts
+                    .iter()
+                    .find(|receipt| receipt.identity.envelope_id == identity.envelope_id)
+                {
+                    ensure_same_envelope_or_stale(&receipt.identity, identity)?;
                 }
                 return Ok(continuation(
                     TerminalOutputControlCompletion::Stale,
