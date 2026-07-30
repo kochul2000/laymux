@@ -255,13 +255,25 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
                 ]
             )
         )
+        self.assertFalse(
+            benchmark.screenshot_samples_succeeded(
+                [
+                    {
+                        "ok": True,
+                        "latencyMs": 1.0,
+                        "result": {"success": True, "size": 0},
+                        "dataUrlBytes": 32,
+                    }
+                ]
+            )
+        )
         self.assertTrue(
             benchmark.screenshot_samples_succeeded(
                 [
                     {
                         "ok": True,
                         "latencyMs": 1.0,
-                        "result": {"success": True},
+                        "result": {"success": True, "size": 8},
                         "dataUrlBytes": 32,
                     }
                 ]

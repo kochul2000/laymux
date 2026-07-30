@@ -404,6 +404,8 @@ def screenshot_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
     return request_samples_succeeded(samples) and all(
         isinstance(sample.get("result"), dict)
         and sample["result"].get("success") is True
+        and type(sample["result"].get("size")) is int
+        and sample["result"]["size"] > 0
         and isinstance(sample.get("dataUrlBytes"), int)
         and sample["dataUrlBytes"] > 0
         for sample in samples
