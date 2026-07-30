@@ -171,7 +171,7 @@ describe("TerminalRenderCheckpointModel", () => {
 
   it.each([
     { contended: false, expected: [256 * 1024, 44 * 1024] },
-    { contended: true, expected: [128 * 1024, 128 * 1024, 44 * 1024] },
+    { contended: true, expected: [64 * 1024, 64 * 1024, 64 * 1024, 64 * 1024, 44 * 1024] },
   ])(
     "bounds checkpoint parser slices when contended=$contended",
     async ({ contended, expected }) => {

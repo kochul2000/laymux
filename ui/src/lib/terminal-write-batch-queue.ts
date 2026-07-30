@@ -3,10 +3,8 @@ import type { TerminalWriteSource } from "./terminal-data-route";
 /** Hard upper bounds for one ordinary physical xterm write. */
 export const TERMINAL_WRITE_BATCH_MAX_PARTS = 128;
 export const TERMINAL_WRITE_BATCH_MAX_BYTES = 256 * 1024;
-/** Immutable logical/replay boundary retained before physical batching. */
-export const TERMINAL_WRITE_ENQUEUE_SLICE_BYTES = 64 * 1024;
-/** Maximum physical parser turn while another pane owner waits. */
-export const TERMINAL_WRITE_FAIR_QUANTUM_BYTES = 128 * 1024;
+/** Logical enqueue slice and maximum physical batch while another pane waits. */
+export const TERMINAL_WRITE_FAIR_QUANTUM_BYTES = 64 * 1024;
 
 /**
  * Split one decoded ingress backing into scheduler-sized views without
@@ -16,8 +14,8 @@ export const TERMINAL_WRITE_FAIR_QUANTUM_BYTES = 128 * 1024;
 export function terminalWriteFairSlices(data: Uint8Array): readonly Uint8Array[] {
   if (data.byteLength === 0) return [data];
   const slices: Uint8Array[] = [];
-  for (let offset = 0; offset < data.byteLength; offset += TERMINAL_WRITE_ENQUEUE_SLICE_BYTES) {
-    slices.push(data.subarray(offset, offset + TERMINAL_WRITE_ENQUEUE_SLICE_BYTES));
+  for (let offset = 0; offset < data.byteLength; offset += TERMINAL_WRITE_FAIR_QUANTUM_BYTES) {
+    slices.push(data.subarray(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES));
   }
   return slices;
 }

@@ -3694,9 +3694,9 @@ export function TerminalView({
         // paint the transient footer cursor between chunk callbacks.
         chunks.push(data);
       } else {
-        // Ordinary byte writes enter the logical FIFO in fixed 64 KiB slices.
+        // Ordinary byte writes enter the logical FIFO in fairness-sized slices.
         // A sole owner may coalesce four compatible slices back to 256 KiB;
-        // when another owner waits, one scheduler turn stays bounded at 128 KiB.
+        // when another owner waits, one scheduler turn stays bounded at 64 KiB.
         // Replay remains a per-entry barrier, so its 64 KiB slices are never
         // coalesced with each other or with a different logical request.
         chunks.push(...terminalWriteFairSlices(data));

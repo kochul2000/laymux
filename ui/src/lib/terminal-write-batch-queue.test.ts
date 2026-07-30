@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
   TERMINAL_WRITE_BATCH_MAX_PARTS,
-  TERMINAL_WRITE_ENQUEUE_SLICE_BYTES,
   TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
   terminalWriteFairSlices,
@@ -29,17 +28,17 @@ function request(
 }
 
 describe("TerminalWriteBatchQueue", () => {
-  it("splits one ingress backing into zero-copy 64 KiB views", () => {
-    const backing = new Uint8Array(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES + 3);
+  it("splits one ingress backing into zero-copy fair-quantum views", () => {
+    const backing = new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES + 3);
     const slices = terminalWriteFairSlices(backing);
 
     expect(slices).toHaveLength(2);
-    expect(slices[0].byteLength).toBe(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES);
+    expect(slices[0].byteLength).toBe(TERMINAL_WRITE_FAIR_QUANTUM_BYTES);
     expect(slices[1].byteLength).toBe(3);
     expect(slices[0].buffer).toBe(backing.buffer);
     expect(slices[1].buffer).toBe(backing.buffer);
     expect(slices[0].byteOffset).toBe(backing.byteOffset);
-    expect(slices[1].byteOffset).toBe(backing.byteOffset + TERMINAL_WRITE_ENQUEUE_SLICE_BYTES);
+    expect(slices[1].byteOffset).toBe(backing.byteOffset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES);
   });
 
   it("dequeues an idle request immediately in FIFO order and tracks queue metrics", () => {
@@ -242,10 +241,10 @@ describe("TerminalWriteBatchQueue", () => {
     expect(TERMINAL_WRITE_BATCH_MAX_BYTES).toBe(256 * 1024);
   });
 
-  it("coalesces two 64 KiB slices while another owner is waiting", () => {
+  it("uses a 64 KiB coalescing quantum only while another owner is waiting", () => {
     const fill = (queue: TerminalWriteBatchQueue<TestMetadata>) => {
       for (let index = 0; index < 4; index += 1) {
-        queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES) }));
+        queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
       }
     };
     const contended = new TerminalWriteBatchQueue<TestMetadata>();
@@ -255,19 +254,18 @@ describe("TerminalWriteBatchQueue", () => {
 
     expect(
       contended.dequeue(contended.lastEnqueuedId, true, TERMINAL_WRITE_FAIR_QUANTUM_BYTES),
-    ).toMatchObject({ partCount: 2, byteLength: 128 * 1024 });
+    ).toMatchObject({ partCount: 1, byteLength: 64 * 1024 });
     expect(idle.dequeue(idle.lastEnqueuedId, true, TERMINAL_WRITE_BATCH_MAX_BYTES)).toMatchObject({
       partCount: 4,
       byteLength: 256 * 1024,
     });
-    expect(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES).toBe(64 * 1024);
-    expect(TERMINAL_WRITE_FAIR_QUANTUM_BYTES).toBe(128 * 1024);
+    expect(TERMINAL_WRITE_FAIR_QUANTUM_BYTES).toBe(64 * 1024);
   });
 
   it("keeps a materialized retry intact when contention starts before retry", () => {
     const queue = new TerminalWriteBatchQueue<TestMetadata>();
-    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES) }));
-    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES) }));
+    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
+    queue.enqueue(request([], { data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES) }));
     const prepared = queue.dequeue(queue.lastEnqueuedId, true, TERMINAL_WRITE_BATCH_MAX_BYTES)!;
     queue.restore(prepared);
 
@@ -282,7 +280,7 @@ describe("TerminalWriteBatchQueue", () => {
     for (let index = 0; index < 2; index += 1) {
       queue.enqueue(
         request([], {
-          data: new Uint8Array(TERMINAL_WRITE_ENQUEUE_SLICE_BYTES),
+          data: new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES),
           metadata: { source: "replay", attachEpoch: 7 },
           batchKey: "replay:7",
           allowCoalescing: true,

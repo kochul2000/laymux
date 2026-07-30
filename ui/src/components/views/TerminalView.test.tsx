@@ -12159,7 +12159,7 @@ describe("TerminalView desktop input composer", () => {
     expect(terminalWriteFairScheduler.isIdleForTests()).toBe(true);
   });
 
-  it("limits a contended pane turn to two 64 KiB enqueue slices (#661)", async () => {
+  it("limits a contended pane turn to one 64 KiB enqueue quantum (#661)", async () => {
     const paneA = "t-output-fair-quantum-a";
     const paneB = "t-output-fair-quantum-b";
     const createdTerminalBaseline = createdTerminals.length;
@@ -12281,7 +12281,7 @@ describe("TerminalView desktop input composer", () => {
       expect(byteLength(bWrites)).toBe(expectedB.length);
       expect(aCallbacksCompleted).toBe(aWrites.length);
       expect(bCallbacksCompleted).toBe(bWrites.length);
-      expect(aWrites[1]).toHaveLength(128 * 1024);
+      expect(aWrites[1]).toHaveLength(64 * 1024);
       const concatenate = (parts: readonly Uint8Array[]) => {
         const result = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
         let offset = 0;
