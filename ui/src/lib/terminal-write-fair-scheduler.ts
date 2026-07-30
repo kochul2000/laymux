@@ -20,6 +20,9 @@ const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
 /** A waiting owner becomes urgent after this many other completed admissions. */
 export const TERMINAL_WRITE_MAX_SKIPPED_TURNS = 8;
 
+/** Let non-MessageChannel browser task sources compete at least once per pane round. */
+export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 8;
+
 /** Create an identity token scoped to one TerminalView xterm effect lifetime. */
 export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWriteFairOwner {
   return Symbol(debugLabel);
@@ -31,7 +34,13 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
   const tasks: Array<() => void> = [];
   let channel: MessageChannel | undefined;
   let channelUnavailable = false;
+  let messageHandoffsSinceControlYield = 0;
   return (task) => {
+    if (messageHandoffsSinceControlYield >= TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS - 1) {
+      messageHandoffsSinceControlYield = 0;
+      setTimeout(task, 0);
+      return;
+    }
     const MessageChannelConstructor =
       typeof window === "undefined" ? undefined : window.MessageChannel;
     if (!channelUnavailable && typeof MessageChannelConstructor === "function") {
@@ -42,6 +51,7 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
         }
         tasks.push(task);
         channel.port2.postMessage(undefined);
+        messageHandoffsSinceControlYield += 1;
         return;
       } catch {
         tasks.length = 0;
@@ -51,6 +61,7 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
         channelUnavailable = true;
       }
     }
+    messageHandoffsSinceControlYield = 0;
     setTimeout(task, 0);
   };
 }

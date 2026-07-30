@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createTerminalWriteFairOwner,
+  TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS,
   TERMINAL_WRITE_MAX_SKIPPED_TURNS,
   TerminalWriteFairScheduler,
   type TerminalWritePriority,
@@ -102,6 +103,57 @@ describe("TerminalWriteFairScheduler", () => {
       expect(vi.getTimerCount()).toBe(1);
       vi.runOnlyPendingTimers();
       expect(next).toHaveBeenCalledTimes(1);
+    } finally {
+      scheduler.resetForTests();
+      Object.defineProperty(window, "MessageChannel", {
+        configurable: true,
+        value: originalMessageChannel,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it("periodically yields the MessageChannel chain to other browser task sources", () => {
+    vi.useFakeTimers();
+    const posted: Array<() => void> = [];
+    const originalMessageChannel = window.MessageChannel;
+    class FakeMessageChannel {
+      port1 = {
+        onmessage: null as (() => void) | null,
+        close: vi.fn(),
+      };
+      port2 = {
+        postMessage: () => posted.push(() => this.port1.onmessage?.()),
+        close: vi.fn(),
+      };
+    }
+    Object.defineProperty(window, "MessageChannel", {
+      configurable: true,
+      value: FakeMessageChannel,
+    });
+    const scheduler = new TerminalWriteFairScheduler();
+    try {
+      const saturatedOwner = owner("saturated");
+      let turns = 0;
+      const turn = (release: () => void) => {
+        turns += 1;
+        if (turns <= TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS) {
+          scheduler.request(saturatedOwner, turn);
+        }
+        release();
+      };
+
+      scheduler.request(saturatedOwner, turn);
+      for (let index = 1; index < TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS; index += 1) {
+        expect(posted).toHaveLength(1);
+        posted.shift()?.();
+      }
+
+      expect(turns).toBe(TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS);
+      expect(posted).toHaveLength(0);
+      expect(vi.getTimerCount()).toBe(1);
+      vi.runOnlyPendingTimers();
+      expect(turns).toBe(TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS + 1);
     } finally {
       scheduler.resetForTests();
       Object.defineProperty(window, "MessageChannel", {
