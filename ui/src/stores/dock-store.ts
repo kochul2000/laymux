@@ -73,11 +73,25 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
   focusedDockPaneId: null,
   docks: [
     // First-install defaults: only the left (workspace selector) and right
-    // (memo + file explorer) docks are shown; top/bottom start hidden.
+    // docks are shown; top/bottom start hidden. Memo and File Explorer occupy
+    // separate right-dock panes so both are immediately visible.
     { ...makeDock("top", null, 200), visible: false },
     { ...makeDock("bottom", null, 200), visible: false },
     makeDock("left", "WorkspaceSelectorView", 240),
-    { ...makeDock("right", "MemoView", 240), views: ["MemoView", "FileExplorerView"] },
+    {
+      ...makeDock("right", "MemoView", 240),
+      panes: [
+        { id: generateId("dp"), view: { type: "MemoView" }, x: 0, y: 0, w: 1, h: 0.5 },
+        {
+          id: generateId("dp"),
+          view: { type: "FileExplorerView" },
+          x: 0,
+          y: 0.5,
+          w: 1,
+          h: 0.5,
+        },
+      ],
+    },
   ],
 
   getDock: (position) => {
