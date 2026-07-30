@@ -35,12 +35,7 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
   let channel: MessageChannel | undefined;
   let channelUnavailable = false;
   let messageHandoffsSinceControlYield = 0;
-  return (task) => {
-    if (messageHandoffsSinceControlYield >= TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS - 1) {
-      messageHandoffsSinceControlYield = 0;
-      setTimeout(task, 0);
-      return;
-    }
+  const postMessageTask = (task: () => void): boolean => {
     const MessageChannelConstructor =
       typeof window === "undefined" ? undefined : window.MessageChannel;
     if (!channelUnavailable && typeof MessageChannelConstructor === "function") {
@@ -51,8 +46,7 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
         }
         tasks.push(task);
         channel.port2.postMessage(undefined);
-        messageHandoffsSinceControlYield += 1;
-        return;
+        return true;
       } catch {
         tasks.length = 0;
         channel?.port1.close();
@@ -60,6 +54,22 @@ function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
         channel = undefined;
         channelUnavailable = true;
       }
+    }
+    return false;
+  };
+  return (task) => {
+    if (messageHandoffsSinceControlYield >= TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS - 1) {
+      messageHandoffsSinceControlYield = 0;
+      // The timer is only a gate. Run the parser turn from a subsequent
+      // MessageChannel task so xterm's own timer chain starts non-nested.
+      setTimeout(() => {
+        if (!postMessageTask(task)) task();
+      }, 0);
+      return;
+    }
+    if (postMessageTask(task)) {
+      messageHandoffsSinceControlYield += 1;
+      return;
     }
     messageHandoffsSinceControlYield = 0;
     setTimeout(task, 0);

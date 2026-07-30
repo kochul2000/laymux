@@ -153,6 +153,9 @@ describe("TerminalWriteFairScheduler", () => {
       expect(posted).toHaveLength(0);
       expect(vi.getTimerCount()).toBe(1);
       vi.runOnlyPendingTimers();
+      expect(turns).toBe(TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS);
+      expect(posted).toHaveLength(1);
+      posted.shift()?.();
       expect(turns).toBe(TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS + 1);
     } finally {
       scheduler.resetForTests();
