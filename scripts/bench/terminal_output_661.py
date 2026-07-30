@@ -858,6 +858,12 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             missing = sorted(set(hot_terminals) - set(completed_at))
             raise BenchmarkError(f"flood timed out; missing FINAL for {missing}")
 
+        unfinished_probes = wait_for_worker_completion(finite_workers, timeout=20.0)
+        if unfinished_probes:
+            raise BenchmarkError(
+                f"finite benchmark probes did not finish: {unfinished_probes}"
+            )
+
         final_diag = wait_until(
             "all parser frontiers",
             lambda: settled_frontiers(api("GET", "/diagnostics/frontend"), measured_terminals),
@@ -876,11 +882,6 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             )
             for terminal_id in hot_terminals
         }
-        unfinished_probes = wait_for_worker_completion(finite_workers, timeout=20.0)
-        if unfinished_probes:
-            raise BenchmarkError(
-                f"finite benchmark probes did not finish: {unfinished_probes}"
-            )
     finally:
         stop.set()
         for worker in started_workers:
