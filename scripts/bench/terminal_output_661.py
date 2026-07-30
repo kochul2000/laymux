@@ -44,7 +44,7 @@ def api(method: str, path: str, payload: Any | None = None, timeout: float = 7.0
     try:
         with urlopen(request, timeout=timeout) as response:
             raw = response.read()
-    except (HTTPError, URLError, TimeoutError) as error:
+    except (HTTPError, URLError, TimeoutError, OSError) as error:
         raise BenchmarkError(f"{method} {path}: {error}") from error
     return json.loads(raw) if raw else {}
 
