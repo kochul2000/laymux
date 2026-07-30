@@ -209,7 +209,11 @@ export class TerminalParserAdmission {
     const remainingBytes = turnLimit - held.leaseBytesConsumed;
     if (
       remainingBytes <= 0 ||
-      held.leaseCallbacksConsumed >= TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE
+      held.leaseCallbacksConsumed >= TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE ||
+      requestedBytes === undefined ||
+      !Number.isSafeInteger(requestedBytes) ||
+      requestedBytes < 0 ||
+      requestedBytes > remainingBytes
     ) {
       return false;
     }
@@ -222,7 +226,7 @@ export class TerminalParserAdmission {
       released: false,
       leaseBytesConsumed: held.leaseBytesConsumed,
       leaseCallbacksConsumed: held.leaseCallbacksConsumed,
-      turnBytes: this.turnBytes(requestedBytes, remainingBytes),
+      turnBytes: requestedBytes,
     };
     this.active = active;
     const release = () => this.release(active);

@@ -282,6 +282,55 @@ describe("TerminalParserAdmission", () => {
     expect(order).toEqual(["checkpoint", "checkpoint", "other", "checkpoint"]);
   });
 
+  it("hands off instead of splitting a checkpoint operation across leases", () => {
+    const scheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const checkpoint = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("checkpoint"),
+      () => "background",
+      () => () => {},
+    );
+    const order: string[] = [];
+    const maxBytes: number[] = [];
+    let releaseCheckpoint: (() => void) | undefined;
+    checkpoint.request(
+      "checkpoint",
+      (release) => {
+        order.push("checkpoint-first");
+        releaseCheckpoint = release;
+      },
+      (TERMINAL_WRITE_FAIR_QUANTUM_BYTES * 3) / 4,
+    );
+    const otherOwner = createTerminalWriteFairOwner("other");
+    scheduler.request(otherOwner, (release) => {
+      order.push("other");
+      scheduler.request(otherOwner, (tailRelease) => {
+        order.push("other-tail");
+        tailRelease();
+      });
+      release();
+    });
+    releaseCheckpoint?.();
+
+    checkpoint.request(
+      "checkpoint",
+      (release, context) => {
+        order.push("checkpoint-second");
+        maxBytes.push(context.maxBytes);
+        release();
+      },
+      TERMINAL_WRITE_FAIR_QUANTUM_BYTES / 2,
+    );
+    expect(order).toEqual(["checkpoint-first"]);
+
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint-first", "other"]);
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint-first", "other", "checkpoint-second"]);
+    expect(maxBytes).toEqual([TERMINAL_WRITE_FAIR_QUANTUM_BYTES]);
+  });
+
   it("hands off after the checkpoint callback-count cap even for one-byte segments", () => {
     const scheduled: Array<() => void> = [];
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));

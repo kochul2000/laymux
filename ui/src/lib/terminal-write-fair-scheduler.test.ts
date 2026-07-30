@@ -22,6 +22,96 @@ function createHarness() {
 }
 
 describe("TerminalWriteFairScheduler", () => {
+  it("uses a MessageChannel task for browser handoff without timer nesting", () => {
+    vi.useFakeTimers();
+    const posted: Array<() => void> = [];
+    let channelConstructions = 0;
+    const originalMessageChannel = window.MessageChannel;
+    class FakeMessageChannel {
+      constructor() {
+        channelConstructions += 1;
+      }
+      port1 = {
+        onmessage: null as (() => void) | null,
+        close: vi.fn(),
+      };
+      port2 = {
+        postMessage: () => posted.push(() => this.port1.onmessage?.()),
+        close: vi.fn(),
+      };
+    }
+    Object.defineProperty(window, "MessageChannel", {
+      configurable: true,
+      value: FakeMessageChannel,
+    });
+    const scheduler = new TerminalWriteFairScheduler();
+    try {
+      let releaseActive: (() => void) | undefined;
+      const next = vi.fn((release: () => void) => release());
+      const pendingOwner = owner("next");
+      scheduler.request(owner("active"), (release) => {
+        releaseActive = release;
+      });
+      scheduler.request(pendingOwner, next);
+      releaseActive?.();
+
+      expect(posted).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      scheduler.cancelPending(pendingOwner);
+
+      let releaseReplacement: (() => void) | undefined;
+      scheduler.request(owner("replacement"), (release) => {
+        releaseReplacement = release;
+      });
+      scheduler.request(owner("after-replacement"), next);
+      releaseReplacement?.();
+      expect(posted).toHaveLength(2);
+      expect(channelConstructions).toBe(1);
+
+      posted.shift()?.();
+      expect(next).not.toHaveBeenCalled();
+      posted.shift()?.();
+      expect(next).toHaveBeenCalledTimes(1);
+    } finally {
+      scheduler.resetForTests();
+      Object.defineProperty(window, "MessageChannel", {
+        configurable: true,
+        value: originalMessageChannel,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back to a timer when MessageChannel is unavailable", () => {
+    vi.useFakeTimers();
+    const originalMessageChannel = window.MessageChannel;
+    Object.defineProperty(window, "MessageChannel", {
+      configurable: true,
+      value: undefined,
+    });
+    const scheduler = new TerminalWriteFairScheduler();
+    try {
+      let releaseActive: (() => void) | undefined;
+      const next = vi.fn((release: () => void) => release());
+      scheduler.request(owner("active"), (release) => {
+        releaseActive = release;
+      });
+      scheduler.request(owner("next"), next);
+      releaseActive?.();
+
+      expect(vi.getTimerCount()).toBe(1);
+      vi.runOnlyPendingTimers();
+      expect(next).toHaveBeenCalledTimes(1);
+    } finally {
+      scheduler.resetForTests();
+      Object.defineProperty(window, "MessageChannel", {
+        configurable: true,
+        value: originalMessageChannel,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it("serves saturated focused, foreground, and background parsers with 4:2:1 weight", () => {
     const { scheduler, runNextTask } = createHarness();
     const order: string[] = [];

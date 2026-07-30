@@ -27,6 +27,34 @@ export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWrite
 
 type ScheduleMacrotask = (task: () => void) => void;
 
+function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
+  const tasks: Array<() => void> = [];
+  let channel: MessageChannel | undefined;
+  let channelUnavailable = false;
+  return (task) => {
+    const MessageChannelConstructor =
+      typeof window === "undefined" ? undefined : window.MessageChannel;
+    if (!channelUnavailable && typeof MessageChannelConstructor === "function") {
+      try {
+        if (!channel) {
+          channel = new MessageChannelConstructor();
+          channel.port1.onmessage = () => tasks.shift()?.();
+        }
+        tasks.push(task);
+        channel.port2.postMessage(undefined);
+        return;
+      } catch {
+        tasks.length = 0;
+        channel?.port1.close();
+        channel?.port2.close();
+        channel = undefined;
+        channelUnavailable = true;
+      }
+    }
+    setTimeout(task, 0);
+  };
+}
+
 type ActiveTurn = {
   owner: TerminalWriteFairOwner;
   released: boolean;
@@ -56,9 +84,7 @@ export class TerminalWriteFairScheduler {
   private macrotaskGeneration = 0;
 
   constructor(
-    private readonly scheduleMacrotask: ScheduleMacrotask = (task) => {
-      setTimeout(task, 0);
-    },
+    private readonly scheduleMacrotask: ScheduleMacrotask = createTerminalWriteMacrotaskScheduler(),
   ) {}
 
   /** Queue at most one future turn for a mounted terminal pane. */
