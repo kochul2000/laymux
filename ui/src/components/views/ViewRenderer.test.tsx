@@ -27,13 +27,27 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 // Mock TerminalView to capture props
-const terminalViewProps: { syncGroup?: string; profile?: string; instanceId?: string }[] = [];
+const terminalViewProps: {
+  syncGroup?: string;
+  profile?: string;
+  instanceId?: string;
+  restartCwd?: string;
+  isUserRestart?: boolean;
+}[] = [];
 vi.mock("./TerminalView", () => ({
-  TerminalView: (props: { instanceId: string; profile: string; syncGroup: string }) => {
+  TerminalView: (props: {
+    instanceId: string;
+    profile: string;
+    syncGroup: string;
+    restartCwd?: string;
+    isUserRestart?: boolean;
+  }) => {
     terminalViewProps.push({
       syncGroup: props.syncGroup,
       profile: props.profile,
       instanceId: props.instanceId,
+      restartCwd: props.restartCwd,
+      isUserRestart: props.isUserRestart,
     });
     return (
       <div
@@ -255,6 +269,44 @@ describe("ViewRenderer", () => {
     // The mock captures syncGroup; we mainly assert that the component
     // rendered without creating a new instance by checking testid is still present
     expect(screen.getByTestId("mock-terminal")).toBe(terminal);
+  });
+
+  it("restarts a TerminalView as a fresh shell at the supplied CWD", () => {
+    const { rerender } = render(
+      <ViewRenderer
+        viewType="TerminalView"
+        viewConfig={{ type: "TerminalView" }}
+        paneId="pane-42"
+      />,
+    );
+    expect(terminalViewProps.at(-1)?.isUserRestart).toBe(false);
+
+    rerender(
+      <ViewRenderer
+        viewType="TerminalView"
+        viewConfig={{ type: "TerminalView" }}
+        paneId="pane-42"
+        terminalRestartEpoch={1}
+        terminalRestartCwd="C:\work"
+        terminalRestartFresh
+      />,
+    );
+    expect(terminalViewProps.at(-1)).toMatchObject({
+      restartCwd: "C:\\work",
+      isUserRestart: true,
+    });
+
+    rerender(
+      <ViewRenderer
+        viewType="TerminalView"
+        viewConfig={{ type: "TerminalView" }}
+        paneId="pane-42"
+        terminalRestartEpoch={1}
+        terminalRestartCwd="C:\work"
+        terminalRestartFresh={false}
+      />,
+    );
+    expect(terminalViewProps.at(-1)?.isUserRestart).toBe(false);
   });
 
   it("paneId 가 빈 문자열이면 fallback id 로 폴백한다 (빈 instanceId 방지)", () => {

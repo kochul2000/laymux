@@ -23,6 +23,14 @@ export interface ViewRendererProps {
   onKeyboardActivity?: () => void;
   /** Where this view is rendered: "workspace" or "dock". Affects CWD sync defaults. */
   location?: TerminalLocation;
+  /** TerminalView를 새 PTY 세션으로 교체할 때 증가시키는 로컬 epoch. */
+  terminalRestartEpoch?: number;
+  /** 재시작 시 현재 세션의 CWD를 설정 복원 여부와 무관하게 전달한다. */
+  terminalRestartCwd?: string;
+  /** 재시작 요청이 아직 첫 세션 생성에 소비되지 않았는지 나타낸다. */
+  terminalRestartFresh?: boolean;
+  /** 재시작 요청을 첫 세션 생성 뒤 소비한다. */
+  onTerminalRestartConsumed?: () => void;
 }
 
 /** Wrapper that subscribes to sync-cwd settings only for TerminalView instances. */
@@ -33,6 +41,10 @@ function TerminalViewWithSyncCwd({
   isFocused,
   onKeyboardActivity,
   location,
+  terminalRestartEpoch,
+  terminalRestartCwd,
+  terminalRestartFresh,
+  onTerminalRestartConsumed,
 }: {
   viewConfig?: ViewInstanceConfig;
   workspaceId?: string;
@@ -40,6 +52,10 @@ function TerminalViewWithSyncCwd({
   isFocused?: boolean;
   onKeyboardActivity?: () => void;
   location: TerminalLocation;
+  terminalRestartEpoch?: number;
+  terminalRestartCwd?: string;
+  terminalRestartFresh?: boolean;
+  onTerminalRestartConsumed?: () => void;
 }) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
@@ -67,6 +83,7 @@ function TerminalViewWithSyncCwd({
 
   return (
     <TerminalView
+      key={terminalRestartEpoch ?? 0}
       instanceId={instanceId}
       paneId={paneId}
       profile={profileName}
@@ -78,6 +95,9 @@ function TerminalViewWithSyncCwd({
       onKeyboardActivity={onKeyboardActivity}
       lastCwd={lastCwd}
       lastClaudeSession={lastClaudeSession}
+      restartCwd={terminalRestartCwd}
+      isUserRestart={terminalRestartFresh ?? false}
+      onUserRestartConsumed={onTerminalRestartConsumed}
     />
   );
 }
@@ -174,6 +194,10 @@ export function ViewRenderer({
   isFocused,
   onKeyboardActivity,
   location = "workspace",
+  terminalRestartEpoch,
+  terminalRestartCwd,
+  terminalRestartFresh,
+  onTerminalRestartConsumed,
 }: ViewRendererProps) {
   const fallbackId = useId();
   switch (viewType) {
@@ -199,6 +223,10 @@ export function ViewRenderer({
             isFocused={isFocused}
             onKeyboardActivity={onKeyboardActivity}
             location={location}
+            terminalRestartEpoch={terminalRestartEpoch}
+            terminalRestartCwd={terminalRestartCwd}
+            terminalRestartFresh={terminalRestartFresh}
+            onTerminalRestartConsumed={onTerminalRestartConsumed}
           />
         </div>
       );

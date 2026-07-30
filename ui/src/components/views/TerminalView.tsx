@@ -659,6 +659,12 @@ interface TerminalViewProps {
   onKeyboardActivity?: () => void;
   /** Last CWD from previous session, used for restore on startup. */
   lastCwd?: string;
+  /** Explicit CWD for a user-requested restart. This overrides restoreCwd settings. */
+  restartCwd?: string;
+  /** User-requested restart starts a fresh shell instead of restoring session output or Claude. */
+  isUserRestart?: boolean;
+  /** Called after the first restart session creation settles, so future remounts are normal starts. */
+  onUserRestartConsumed?: () => void;
   /** Claude Code session ID from previous session, used for --resume on startup. */
   lastClaudeSession?: string;
   /** Override the startup command (takes precedence over Claude session restore). */
@@ -683,6 +689,9 @@ export function TerminalView({
   isFocused = false,
   onKeyboardActivity,
   lastCwd,
+  restartCwd,
+  isUserRestart = false,
+  onUserRestartConsumed,
   lastClaudeSession,
   startupCommandOverride,
   viewerStartup,
@@ -694,6 +703,10 @@ export function TerminalView({
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  // A restart remount may subsequently recreate its session (for example, after
+  // a profile change). Only the first session of this component instance is the
+  // user-requested fresh start; later recreations retain normal restore policy.
+  const firstSessionStartRef = useRef(true);
   const terminalReflowFrameRef = useRef<number | null>(null);
   const pendingRendererFitRequestRef = useRef<TerminalFitRequest | null>(null);
   const guardedTerminalFitRef = useRef<((request: TerminalFitRequest) => void) | null>(null);
@@ -5383,6 +5396,8 @@ export function TerminalView({
 
         // Resolve profile restore settings and create session (async)
         const profileConfig = settingsState.profiles.find((p) => p.name === profile);
+        const isFreshRestart = isUserRestart && firstSessionStartRef.current;
+        firstSessionStartRef.current = false;
         const shouldRestoreCwd =
           profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
         const shouldRestoreOutput =
@@ -5391,7 +5406,8 @@ export function TerminalView({
         // Determine startup command override for Claude session restore.
         // Validate session ID format to prevent command injection.
         const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-        const shouldRestoreClaudeSession = settingsState.claude?.restoreSession !== false;
+        const shouldRestoreClaudeSession =
+          !isFreshRestart && settingsState.claude?.restoreSession !== false;
         const safeSessionId =
           lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
             ? lastClaudeSession
@@ -5403,7 +5419,7 @@ export function TerminalView({
             : undefined;
 
         cacheRestorePromise =
-          shouldRestoreOutput && paneId
+          !isFreshRestart && shouldRestoreOutput && paneId
             ? loadTerminalOutputCache(paneId)
                 .then((cached) =>
                   cancelled || !cached || cached.length === 0 ? null : normalBufferOnly(cached),
@@ -5431,7 +5447,7 @@ export function TerminalView({
             syncGroup,
             cwdSendRef.current,
             cwdReceiveRef.current,
-            shouldRestoreCwd ? lastCwd : undefined,
+            isFreshRestart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
             viewerStartup ?? startupOverride,
           )
             .then((createdSession) => {
@@ -5458,6 +5474,9 @@ export function TerminalView({
                 `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
               );
               settleFailedStartup();
+            })
+            .finally(() => {
+              if (isFreshRestart) onUserRestartConsumed?.();
             });
         }
       } else if (sessionCreated && width > 0 && height > 0) {
