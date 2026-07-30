@@ -404,6 +404,11 @@ fn receipt_payload_conflict_does_not_release_the_in_flight_slot() {
     assert!(delivery
         .acknowledge_receipt(&identity(&envelope), envelope.seq_end - 1)
         .is_err());
+    let mut foreign_grant = identity(&envelope);
+    foreign_grant.grant_id = Some("foreign-grant".into());
+    assert!(delivery
+        .acknowledge_receipt(&foreign_grant, envelope.seq_end)
+        .is_err());
     assert_eq!(
         delivery
             .acknowledge_receipt(&identity(&envelope), envelope.seq_end)
