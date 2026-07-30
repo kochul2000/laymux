@@ -23,6 +23,10 @@ from urllib.request import Request, urlopen
 PORT = 19281
 BASE = f"http://127.0.0.1:{PORT}/api/v1"
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+DEV_RUNTIME_ARTIFACTS = {
+    "src-tauri/automation.json",
+    "src-tauri/settings.json",
+}
 
 
 class BenchmarkError(RuntimeError):
@@ -51,11 +55,16 @@ def git_head(worktree: Path) -> str:
     ).strip()
 
 
-def git_is_clean(worktree: Path) -> bool:
+def git_source_changes(worktree: Path) -> list[str]:
     status = subprocess.check_output(
         ["git", "status", "--porcelain"], cwd=worktree, text=True, encoding="utf-8"
     )
-    return not status.strip()
+    changes = []
+    for line in status.splitlines():
+        path = line[3:].replace("\\", "/")
+        if path not in DEV_RUNTIME_ARTIFACTS:
+            changes.append(line)
+    return changes
 
 
 def normalized_path(value: str | Path) -> str:
@@ -66,8 +75,9 @@ def assert_dev_identity(expected_worktree: Path) -> dict[str, Any]:
     health = api("GET", "/health")
     instance = health.get("instance") or {}
     expected_head = git_head(expected_worktree)
-    if not git_is_clean(expected_worktree):
-        raise BenchmarkError(f"expected worktree is dirty: {expected_worktree}")
+    source_changes = git_source_changes(expected_worktree)
+    if source_changes:
+        raise BenchmarkError(f"expected worktree has source changes: {source_changes}")
     facts = {
         "status": health.get("status"),
         "port": health.get("port"),

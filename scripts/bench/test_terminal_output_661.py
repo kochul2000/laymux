@@ -5,6 +5,20 @@ import terminal_output_661 as benchmark
 
 
 class TerminalOutput661BenchmarkTests(unittest.TestCase):
+    @patch.object(benchmark.subprocess, "check_output")
+    def test_git_source_changes_ignores_only_known_dev_runtime_files(self, check_output):
+        check_output.return_value = (
+            "?? src-tauri/automation.json\n"
+            "?? src-tauri/settings.json\n"
+            " M ui/src/main.tsx\n"
+            "?? unexpected.txt\n"
+        )
+
+        self.assertEqual(
+            benchmark.git_source_changes(benchmark.Path("repo")),
+            [" M ui/src/main.tsx", "?? unexpected.txt"],
+        )
+
     def test_percentile_uses_nearest_rank(self):
         values = [5.0, 1.0, 4.0, 2.0, 3.0]
         self.assertEqual(benchmark.percentile(values, 0.50), 3.0)
