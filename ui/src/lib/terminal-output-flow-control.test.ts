@@ -41,6 +41,99 @@ describe("TerminalOutputFlowAcknowledger", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it("admits normal ACK capacity competitors in FIFO order without replacing their senders", async () => {
+    const registry = new TerminalOutputControlOperationRegistry(1, 1);
+    const occupiedScope = registry.mount("occupied");
+    const occupied = occupiedScope.tryStart("ack");
+    const firstScope = registry.mount("first");
+    const secondScope = registry.mount("second");
+    const firstAck = deferred<boolean>();
+    const secondAck = deferred<boolean>();
+    const firstSend = vi.fn().mockReturnValue(firstAck.promise);
+    const secondSend = vi.fn().mockReturnValue(secondAck.promise);
+    const first = new TerminalOutputFlowAcknowledger(0, firstSend, {
+      tryStartOperation: () => firstScope.tryStart("ack"),
+      onAdmissionBlocked: (resume: () => void) => firstScope.waitForCapacity("ack", resume),
+    });
+    const second = new TerminalOutputFlowAcknowledger(0, secondSend, {
+      tryStartOperation: () => secondScope.tryStart("ack"),
+      onAdmissionBlocked: (resume: () => void) => secondScope.waitForCapacity("ack", resume),
+    });
+
+    first.complete(0, 4);
+    second.complete(0, 8);
+    first.complete(4, 6);
+    expect(firstSend).not.toHaveBeenCalled();
+    expect(secondSend).not.toHaveBeenCalled();
+
+    occupied?.settle();
+    await vi.waitFor(() => expect(firstSend).toHaveBeenCalledWith(6));
+    expect(secondSend).not.toHaveBeenCalled();
+
+    firstAck.resolve(true);
+    await vi.waitFor(() => expect(secondSend).toHaveBeenCalledWith(8));
+    secondAck.resolve(true);
+    await vi.waitFor(() => expect(registry.globalOutstanding("ack")).toBe(0));
+  });
+
+  it("returns an unused ACK reservation when its waiting sender is disposed", async () => {
+    const registry = new TerminalOutputControlOperationRegistry(1, 1);
+    const occupiedScope = registry.mount("occupied");
+    const occupied = occupiedScope.tryStart("ack");
+    const waitingScope = registry.mount("waiting");
+    const send = vi.fn().mockResolvedValue(true);
+    const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+      tryStartOperation: () => waitingScope.tryStart("ack"),
+      onAdmissionBlocked: (resume) => waitingScope.waitForCapacity("ack", resume),
+    });
+
+    acknowledger.complete(0, 4);
+    acknowledger.dispose();
+    occupied?.settle();
+    await Promise.resolve();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(registry.globalOutstanding("ack")).toBe(0);
+  });
+
+  it("does not arm the ACK watchdog while waiting and rechecks a real orphan hard cap", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = new TerminalOutputControlOperationRegistry(1, 1);
+      const occupiedScope = registry.mount("occupied");
+      const occupied = occupiedScope.tryStart("ack");
+      const waitingScope = registry.mount("waiting");
+      const send = vi.fn().mockResolvedValue(true);
+      const onTimeout = vi.fn();
+      const onOrphanCap = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        tryStartOperation: () => waitingScope.tryStart("ack"),
+        onAdmissionBlocked: (resume) => {
+          if (waitingScope.orphanCapacityExhausted("ack")) {
+            onOrphanCap();
+            acknowledger.dispose();
+            return;
+          }
+          return waitingScope.waitForCapacityOrTimeout("ack", resume);
+        },
+        timeoutMs: 5,
+        onTimeout,
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(10);
+      expect(onTimeout).not.toHaveBeenCalled();
+      expect(onOrphanCap).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+
+      occupied?.markTimedOut();
+      expect(onOrphanCap).toHaveBeenCalledOnce();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("acknowledges only the intersection parsed by visible and checkpoint xterms", async () => {
     const visible = deferred<void>();
     const checkpoint = deferred<void>();

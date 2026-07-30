@@ -141,6 +141,24 @@ describe("TerminalOutputControlOperationRegistry", () => {
     expect(firstMount.globalTimedOut("receipt")).toBe(0);
   });
 
+  it("distinguishes normal ACK saturation from a timed-out orphan hard cap", () => {
+    const registry = new TerminalOutputControlOperationRegistry(2, 2);
+    const scope = registry.mount("terminal-1");
+    const first = scope.tryStart("ack");
+    const second = scope.tryStart("ack");
+
+    expect(scope.canStart("ack")).toBe(false);
+    expect(scope.orphanCapacityExhausted("ack")).toBe(false);
+    first?.markTimedOut();
+    expect(scope.orphanCapacityExhausted("ack")).toBe(false);
+    second?.markTimedOut();
+    expect(scope.orphanCapacityExhausted("ack")).toBe(true);
+
+    first?.settle();
+    expect(scope.orphanCapacityExhausted("ack")).toBe(false);
+    second?.settle();
+  });
+
   it("removes stale UI waiters but wakes the current mount exactly once on late settle", () => {
     const registry = new TerminalOutputControlOperationRegistry(1);
     const staleMount = registry.mount("terminal-1");
