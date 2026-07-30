@@ -230,6 +230,22 @@ fn emitter_failure_is_repaired_from_the_frozen_envelope() {
         envelope_id: slot.envelope_id,
         grant_id: slot.grant_id,
     };
+    let pending = session.repair_desktop_envelope(&in_flight, 0).unwrap();
+    assert_eq!(
+        pending.status,
+        TerminalOutputEnvelopeRepairStatus::EventPending
+    );
+    assert!(pending.envelope.is_none());
+    session
+        .desktop_delivery
+        .inner
+        .state
+        .lock()
+        .unwrap()
+        .in_flight
+        .as_mut()
+        .unwrap()
+        .repair_not_before = std::time::Instant::now();
     let repaired = session.repair_desktop_envelope(&in_flight, 0).unwrap();
     assert_eq!(repaired.status, TerminalOutputEnvelopeRepairStatus::Exact);
     let envelope = repaired.envelope.unwrap();

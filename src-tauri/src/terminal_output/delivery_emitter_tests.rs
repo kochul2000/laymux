@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn receipted_envelope_cannot_rearm_a_synchronous_emitter_call() {
+    let delivery = DesktopOutputDelivery::new("receipt-before-arm".into(), 1);
+    install(&delivery, 0);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_, envelope| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+    delivery.enqueue(delta(0, 1)).unwrap();
+    let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let envelope_identity = identity(&envelope);
+    assert_eq!(
+        delivery
+            .acknowledge_receipt(&envelope_identity, envelope.seq_end)
+            .unwrap(),
+        TerminalOutputReceiptCompletion::Accepted
+    );
+
+    assert!(
+        !super::super::delivery_worker::arm_emitter_call(&delivery.inner, &envelope_identity,)
+            .unwrap()
+    );
+    assert!(delivery
+        .inner
+        .state
+        .lock()
+        .unwrap()
+        .emitter_call_expires_at
+        .is_none());
+
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+    delivery.join().unwrap();
+}
+
+#[test]
 fn hung_emitter_after_exact_repair_receipt_still_releases_the_pending_cap_waiter() {
     let delivery = Arc::new(DesktopOutputDelivery::with_test_timeouts(
         "hung-after-repair".into(),
