@@ -23,6 +23,8 @@ pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 /// `useAutoRemoteAccessPrompt`).
 pub const EVENT_REMOTE_SESSION_CHANGED: &str = "remote-session-changed";
 pub const EVENT_TERMINAL_OUTPUT_V2_PREFIX: &str = "terminal-output-v2-";
+/// Generation-scoped bounded desktop envelope stream (ADR-0095).
+pub const EVENT_TERMINAL_OUTPUT_V3_PREFIX: &str = "terminal-output-v3-";
 /// Production exact geometry entry remains fail-closed until #636 supplies an
 /// OS-proven producer-freeze/drain or kernel byte-epoch adapter (ADR-0085).
 pub const EXACT_GEOMETRY_CUTOVER_UNAVAILABLE: &str =
@@ -153,12 +155,44 @@ pub const REMOTE_CLAIM_RETRY_AFTER_MS: u64 = 25;
 /// new Local input for at most this bounded interval.
 pub const REMOTE_CLAIM_RESERVATION_TTL_MS: u64 = 2_000;
 
+/// Base live source bytes accepted ahead of the desktop's contiguous parsed ACK.
+pub const TERMINAL_OUTPUT_DESKTOP_BASE_CREDIT_BYTES: usize = 512 * 1024;
+/// Maximum materialized payload carried by one desktop v3 envelope.
+pub const TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES: usize = 64 * 1024;
+/// Maximum number of physical PTY deltas represented by one v3 envelope.
+pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS: usize = 8 * 1024;
+/// Strict compact-JSON ceiling for one serialized v3 envelope.
+pub const TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES: usize = 1024 * 1024;
+/// Quiet batching interval before a non-full envelope is emitted.
+pub const TERMINAL_OUTPUT_ENVELOPE_QUIET_MS: u64 = 4;
+/// Maximum batching delay before a non-full envelope is emitted.
+pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS: u64 = 16;
+/// Server-side bound for a lost envelope receipt.
+pub const TERMINAL_OUTPUT_ENVELOPE_RECEIPT_TIMEOUT_MS: u64 = 5_000;
+/// Total attempts for one immutable envelope before emit fail-stop.
+pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_MAX_ATTEMPTS: usize = 3;
+pub const TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS: u8 = 3;
+pub const EVENT_TERMINAL_OUTPUT_FAIL_STOPPED: &str = "terminal-output-fail-stopped";
+/// Interruptible delay between exact retries of the same envelope.
+pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_RETRY_MS: u64 = 5;
+/// Server-side bound for a continuation whose close control was lost.
+pub const TERMINAL_OUTPUT_CONTINUATION_CONTROL_TIMEOUT_MS: u64 = 5_000;
+/// Maximum bytes in one normal DECSET 2026 frame continuation, opener through terminator.
+pub const TERMINAL_OUTPUT_DEC2026_CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
+/// One platform PTY callback can already own this many bytes when a credit edge is observed.
+pub const TERMINAL_OUTPUT_MAX_READ_CHUNK_BYTES: usize = crate::pty::PTY_READ_BUFFER_BYTES;
+/// Lossless desktop retention bound from ADR-0095: B + F + two read-boundary overshoots.
+pub const TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES: usize =
+    TERMINAL_OUTPUT_DESKTOP_BASE_CREDIT_BYTES
+        + TERMINAL_OUTPUT_DEC2026_CONTINUATION_MAX_BYTES
+        + 2 * TERMINAL_OUTPUT_MAX_READ_CHUNK_BYTES;
 /// Bytes retained in each generation-scoped terminal output ring.
-pub const TERMINAL_OUTPUT_RING_MAX_BYTES: usize = 1024 * 1024;
-/// Maximum live source bytes accepted ahead of the desktop's contiguous parsed ACK.
-pub const TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES: usize = 512 * 1024;
-/// Desktop attach returns at most the retained output ring.
-pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = TERMINAL_OUTPUT_RING_MAX_BYTES;
+pub const TERMINAL_OUTPUT_RING_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES;
+/// Backwards-compatible name for the base desktop parsed-credit window.
+pub const TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES: usize =
+    TERMINAL_OUTPUT_DESKTOP_BASE_CREDIT_BYTES;
+/// A desktop attach can carry the complete retained, unparsed prefix without truncation.
+pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES;
 
 /// Default scrollback budget (KiB) for the reconstructable screen checkpoint
 /// sent to a Remote client on terminal attach.

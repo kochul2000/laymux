@@ -52,6 +52,8 @@ describe("TerminalOutputControlOperationRegistry", () => {
     const blockedMount = registry.mount("terminal-2");
     expect(blockedMount.tryStart("attach")).toBeUndefined();
     expect(blockedMount.outstanding("attach")).toBe(0);
+    expect(blockedMount.localOutstanding("attach")).toBe(0);
+    expect(blockedMount.globalOutstanding("attach")).toBe(1);
     expect(registry.globalOutstanding("attach")).toBe(1);
     expect(registry.entryCount()).toBe(1);
   });
@@ -112,6 +114,33 @@ describe("TerminalOutputControlOperationRegistry", () => {
     expect(secondMount.tryStart("attach")).toBeUndefined();
   });
 
+  it("counts only marked timeouts as orphans and releases both counters on settlement", () => {
+    const registry = new TerminalOutputControlOperationRegistry(2, 2);
+    const firstMount = registry.mount("terminal-1");
+    const secondMount = registry.mount("terminal-2");
+    const healthy = firstMount.tryStart("receipt");
+    const orphan = secondMount.tryStart("hold");
+
+    expect(firstMount.globalOutstanding("close")).toBe(2);
+    expect(firstMount.globalTimedOut("close")).toBe(0);
+    expect(firstMount.localTimedOut("receipt")).toBe(0);
+    expect(secondMount.localTimedOut("hold")).toBe(0);
+
+    orphan?.markTimedOut();
+    orphan?.markTimedOut();
+    expect(firstMount.globalTimedOut("receipt")).toBe(1);
+    expect(firstMount.localTimedOut("receipt")).toBe(0);
+    expect(secondMount.localTimedOut("close")).toBe(1);
+
+    healthy?.settle();
+    expect(firstMount.globalOutstanding("receipt")).toBe(1);
+    expect(firstMount.globalTimedOut("receipt")).toBe(1);
+    orphan?.settle();
+    orphan?.settle();
+    expect(firstMount.globalOutstanding("receipt")).toBe(0);
+    expect(firstMount.globalTimedOut("receipt")).toBe(0);
+  });
+
   it("removes stale UI waiters but wakes the current mount exactly once on late settle", () => {
     const registry = new TerminalOutputControlOperationRegistry(1);
     const staleMount = registry.mount("terminal-1");
@@ -147,5 +176,50 @@ describe("TerminalOutputControlOperationRegistry", () => {
     expect(registry.entryCount()).toBe(1);
     ack?.settle();
     expect(registry.entryCount()).toBe(0);
+  });
+
+  it("shares one bounded delivery-control budget across receipt, hold, and close", () => {
+    const registry = new TerminalOutputControlOperationRegistry(2, 2);
+    const firstMount = registry.mount("terminal-1");
+    const secondMount = registry.mount("terminal-2");
+
+    const receipt = firstMount.tryStart("receipt");
+    const hold = firstMount.tryStart("hold");
+    expect(receipt).toBeDefined();
+    expect(hold).toBeDefined();
+    expect(firstMount.tryStart("close")).toBeUndefined();
+    expect(secondMount.tryStart("close")).toBeUndefined();
+    expect(registry.globalOutstanding("receipt")).toBe(2);
+    expect(registry.globalOutstanding("hold")).toBe(2);
+    expect(registry.globalOutstanding("close")).toBe(2);
+
+    // Existing attach/ACK domains remain independently available. Phase B
+    // must not silently change the Phase C admission policy.
+    expect(secondMount.tryStart("attach")).toBeDefined();
+    expect(secondMount.tryStart("ack")).toBeDefined();
+
+    receipt?.settle();
+    expect(secondMount.tryStart("close")).toBeDefined();
+  });
+
+  it("wakes mixed delivery-control waiters in one FIFO order", () => {
+    const registry = new TerminalOutputControlOperationRegistry(1, 1);
+    const owner = registry.mount("owner");
+    const occupied = owner.tryStart("receipt");
+    const order: string[] = [];
+    const holdWaiter = registry.mount("hold-waiter");
+    const closeWaiter = registry.mount("close-waiter");
+    let held: ReturnType<typeof holdWaiter.tryStart>;
+
+    holdWaiter.waitForCapacity("hold", () => {
+      order.push("hold");
+      held = holdWaiter.tryStart("hold");
+    });
+    closeWaiter.waitForCapacity("close", () => order.push("close"));
+
+    occupied?.settle();
+    expect(order).toEqual(["hold"]);
+    held?.settle();
+    expect(order).toEqual(["hold", "close"]);
   });
 });

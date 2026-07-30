@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery-metrics";
 import { forgetTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
+import type { TerminalOutputEnvelopePayload } from "./terminal-output-envelope";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
@@ -119,8 +120,20 @@ export interface TerminalOutputAttachmentPayload {
   flowControl: {
     token: string;
     windowBytes: number;
+    nextEnvelopeId?: number;
   };
 }
+
+export interface TerminalOutputAttachFailStoppedPayload {
+  kind: "failStopped";
+  terminalId: string;
+  generation: number;
+  reason: string;
+}
+
+export type TerminalOutputAttachResult =
+  | TerminalOutputAttachmentPayload
+  | TerminalOutputAttachFailStoppedPayload;
 
 export interface TerminalOutputDeltaPayload {
   generation: number;
@@ -130,7 +143,7 @@ export interface TerminalOutputDeltaPayload {
   geometry: { revision: number; cols: number; rows: number };
 }
 
-export async function attachTerminalOutput(id: string): Promise<TerminalOutputAttachmentPayload> {
+export async function attachTerminalOutput(id: string): Promise<TerminalOutputAttachResult> {
   return invoke("attach_terminal_output", { id });
 }
 
@@ -141,6 +154,114 @@ export async function acknowledgeTerminalOutput(
   seq: number,
 ): Promise<boolean> {
   return invoke("acknowledge_terminal_output", { id, generation, token, seq });
+}
+
+export async function acknowledgeTerminalOutputEnvelope(
+  id: string,
+  generation: number,
+  token: string,
+  envelopeId: number,
+  grantId: string | null,
+  seqEnd: number,
+): Promise<boolean> {
+  return invoke("acknowledge_terminal_output_envelope", {
+    id,
+    generation,
+    token,
+    envelopeId,
+    grantId,
+    seqEnd,
+  });
+}
+
+export type TerminalOutputEnvelopeRepairStatus =
+  | "idle"
+  | "exact"
+  | "stale"
+  | "alreadyReceipted"
+  | "mismatch"
+  | "exhausted";
+
+export interface TerminalOutputEnvelopeRepairResponse {
+  status: TerminalOutputEnvelopeRepairStatus;
+  envelope: TerminalOutputEnvelopePayload | null;
+}
+
+export async function repairTerminalOutputEnvelope(
+  id: string,
+  generation: number,
+  token: string,
+  envelopeId: number,
+  grantId: string | null,
+  seqStart: number,
+): Promise<TerminalOutputEnvelopeRepairResponse> {
+  return invoke("repair_terminal_output_envelope", {
+    id,
+    generation,
+    token,
+    envelopeId,
+    grantId,
+    seqStart,
+  });
+}
+
+export async function holdTerminalOutputContinuation(
+  id: string,
+  generation: number,
+  token: string,
+  envelopeId: number,
+  grantId: string,
+  frameStartSeq: number,
+): Promise<boolean> {
+  return invoke("hold_terminal_output_continuation", {
+    id,
+    generation,
+    token,
+    envelopeId,
+    grantId,
+    frameStartSeq,
+  });
+}
+
+export async function closeTerminalOutputContinuation(
+  id: string,
+  generation: number,
+  token: string,
+  envelopeId: number,
+  grantId: string,
+  closeSeq: number,
+  reason: string,
+): Promise<boolean> {
+  return invoke("close_terminal_output_continuation", {
+    id,
+    generation,
+    token,
+    envelopeId,
+    grantId,
+    closeSeq,
+    reason,
+  });
+}
+
+export type TerminalOutputSurfaceFailStopReason = "surface_unavailable" | "control_orphan_cap";
+
+export interface TerminalOutputSurfaceFailStoppedPayload {
+  terminalId: string;
+  generation: number;
+  /** Bootstrap/pre-attach failures have no desktop lease yet. */
+  leaseToken: string | null;
+  /** Backend delivery has a wider typed failure set than the two report inputs. */
+  reason: string;
+}
+
+/** Best-effort publication of a current desktop v3 surface failure. */
+export async function failStopTerminalOutputSurface(
+  id: string,
+  generation: number,
+  token: string,
+  reason: TerminalOutputSurfaceFailStopReason,
+): Promise<boolean> {
+  return invoke("fail_stop_terminal_output_surface", { id, generation, token, reason });
 }
 
 /**
@@ -769,6 +890,25 @@ export function onTerminalOutputV2(
   return listen<TerminalOutputDeltaPayload>(`terminal-output-v2-${terminalId}`, (event) => {
     callback(event.payload);
   });
+}
+
+/** Listen for bounded v3 terminal output envelopes without copying their payload. */
+export function onTerminalOutputV3(
+  terminalId: string,
+  callback: (envelope: TerminalOutputEnvelopePayload) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalOutputEnvelopePayload>(`terminal-output-v3-${terminalId}`, (event) => {
+    callback(event.payload);
+  });
+}
+
+/** Listen for the backend delivery owner fail-stopping a v3 surface. */
+export function onTerminalOutputFailStopped(
+  callback: (failure: TerminalOutputSurfaceFailStoppedPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<TerminalOutputSurfaceFailStoppedPayload>("terminal-output-fail-stopped", (event) =>
+    callback(event.payload),
+  );
 }
 
 /**

@@ -48,10 +48,13 @@ import {
   writeTerminalInput,
   resizeTerminal,
   closeTerminalSession,
+  failStopTerminalOutputSurface,
   attachTerminalOutput,
   acknowledgeTerminalOutput,
   resumeTerminalOutput,
   onTerminalOutputV2,
+  onTerminalOutputV3,
+  onTerminalOutputFailStopped,
   smartPaste,
   clipboardWriteText,
   setTerminalCwdSend,
@@ -65,6 +68,7 @@ import {
   markCodexTerminal,
   getRemoteControlStatus,
   onRemoteControlChanged,
+  type TerminalOutputSurfaceFailStoppedPayload,
 } from "@/lib/tauri-api";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
@@ -223,9 +227,18 @@ import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
   TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
+  terminalWriteFairSlices,
   type PreparedTerminalWriteBatch,
 } from "@/lib/terminal-write-batch-queue";
 import { TerminalOutputFlowAcknowledger } from "@/lib/terminal-output-flow-control";
+import type { TerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime";
+import { loadTerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime-loader";
+import { TerminalOutputV3FailureCoordinator } from "@/lib/terminal-output-v3-failure-coordinator";
+import {
+  forgetTerminalOutputV3Diagnostics,
+  recordTerminalOutputV3Diagnostics,
+  type TerminalOutputV3DiagnosticEntry,
+} from "@/lib/terminal-output-v3-diagnostics";
 import {
   boundedTerminalOutputControlBackoff,
   recoverTerminalOutputControl,
@@ -1020,6 +1033,12 @@ export function TerminalView({
   // exists to avoid.
   const [outputProtocolReadyGeneration, setOutputProtocolReadyGeneration] = useState(-1);
   const outputProtocolReady = outputProtocolReadyGeneration === terminalGeneration;
+  const [outputFailStop, setOutputFailStop] = useState<{
+    generation: number;
+    reason: string;
+  } | null>(null);
+  const outputFailStopReason =
+    outputFailStop?.generation === terminalGeneration ? outputFailStop.reason : null;
   // Issue #349: floating "jump to bottom" button. Shown while the user has
   // scrolled up into the scrollback; hidden once pinned to the live bottom.
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
@@ -3625,9 +3644,7 @@ export function TerminalView({
         // when another owner waits, one scheduler turn stays bounded at 64 KiB.
         // Replay remains a per-entry barrier, so its 64 KiB slices are never
         // coalesced with each other or with a different logical request.
-        for (let offset = 0; offset < data.length; offset += TERMINAL_WRITE_FAIR_QUANTUM_BYTES) {
-          chunks.push(data.slice(offset, offset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES) as Uint8Array);
-        }
+        chunks.push(...terminalWriteFairSlices(data));
       }
       if (chunks.length === 0) chunks.push(data);
       recordTerminalOutputPipeline(instanceId, "writeRequests");
@@ -3675,6 +3692,8 @@ export function TerminalView({
       }
     };
     let unlistenOutput: (() => void) | undefined;
+    let unlistenOutputV3: (() => void) | undefined;
+    let unlistenOutputFailStopped: (() => void) | undefined;
     let outputListenerReady: Promise<void> = Promise.resolve();
     let outputAttachRetryTimer: ReturnType<typeof setTimeout> | undefined;
     let outputRepairRetryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3688,6 +3707,21 @@ export function TerminalView({
     let outputGeneration: number | undefined;
     /** Parsed-credit sender owned by exactly one backend attach lease. */
     let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
+    type OutputTransportMode = "pending" | "v2" | "v3" | "fail-stop";
+    let outputTransportMode: OutputTransportMode = "pending";
+    const outputIsFailStopped = () => outputTransportMode === "fail-stop";
+    let bufferedOutputV3: unknown | undefined;
+    let hasBufferedOutputV3 = false;
+    let outputV3FailStoppedReason: string | null = null;
+    let outputV3Runtime: TerminalOutputV3Runtime | undefined;
+    const outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
+      instanceId,
+      failStopTerminalOutputSurface,
+    );
+    let outputV3ContinuationTimer: ReturnType<typeof setTimeout> | undefined;
+    let outputV3ParsersReady = false;
+    let outputV3DiagnosticEntry: TerminalOutputV3DiagnosticEntry | undefined;
+    let publishOutputV3Diagnostics: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
     const renderCheckpointModel = new TerminalRenderCheckpointModel();
@@ -4146,6 +4180,177 @@ export function TerminalView({
       // rebuild reads as "not ready" without a reset effect.
       if (!cancelled) setOutputProtocolReadyGeneration(ready ? terminalGeneration : -1);
     };
+    const isCurrentOutputV3Runtime = (runtime: TerminalOutputV3Runtime) =>
+      !cancelled &&
+      runtime === outputV3Runtime &&
+      outputTransportMode === "v3" &&
+      outputV3FailStoppedReason === null;
+    const armOutputV3ContinuationDeadline = (runtime: TerminalOutputV3Runtime) => {
+      if (!isCurrentOutputV3Runtime(runtime)) return;
+      if (outputV3ContinuationTimer !== undefined) {
+        clearTimeout(outputV3ContinuationTimer);
+        outputV3ContinuationTimer = undefined;
+      }
+      const deadline = runtime.continuationDeadline;
+      if (deadline === undefined) return;
+      const delayMs = Math.max(1, Math.ceil(deadline - monotonicNow()));
+      outputV3ContinuationTimer = setTimeout(() => {
+        outputV3ContinuationTimer = undefined;
+        if (!isCurrentOutputV3Runtime(runtime)) return;
+        void runtime.flushExpired(monotonicNow()).finally(() => {
+          if (!isCurrentOutputV3Runtime(runtime)) return;
+          publishOutputV3Diagnostics?.();
+          armOutputV3ContinuationDeadline(runtime);
+        });
+      }, delayMs);
+    };
+    const failStopOutputV3 = (reason: string, reportBackend = true) => {
+      if (outputTransportMode === "fail-stop") return;
+      outputTransportMode = "fail-stop";
+      outputV3FailStoppedReason = reason;
+      if (outputAttachRetryTimer !== undefined) {
+        clearTimeout(outputAttachRetryTimer);
+        outputAttachRetryTimer = undefined;
+      }
+      if (outputRepairRetryTimer !== undefined) {
+        clearTimeout(outputRepairRetryTimer);
+        outputRepairRetryTimer = undefined;
+      }
+      if (reportBackend) outputV3FailureCoordinator.reportLocal(reason);
+      outputV3ParsersReady = false;
+      setOutputReady(false);
+      if (!cancelled) setOutputFailStop({ generation: terminalGeneration, reason });
+      if (outputV3DiagnosticEntry) {
+        outputV3DiagnosticEntry = {
+          ...outputV3DiagnosticEntry,
+          state: "fail-stopped",
+          reason,
+        };
+        recordTerminalOutputV3Diagnostics(instanceId, outputV3DiagnosticEntry);
+      }
+      outputFlowAcknowledger?.dispose();
+      outputV3Runtime?.dispose();
+      if (outputV3ContinuationTimer !== undefined) {
+        clearTimeout(outputV3ContinuationTimer);
+        outputV3ContinuationTimer = undefined;
+      }
+      console.warn("[TerminalView] terminal output v3 fail-stopped; close/recreate required", {
+        terminalId: instanceId,
+        reason,
+      });
+    };
+    const receiveOutputV3FailStop = (failure: TerminalOutputSurfaceFailStoppedPayload) => {
+      if (cancelled) return;
+      const reason = outputV3FailureCoordinator.receiveBackend(failure);
+      if (reason) failStopOutputV3(reason, false);
+    };
+    const activateOutputV3 = async (
+      epoch: number,
+      generation: number,
+      leaseToken: string,
+      initialSeq: number,
+      initialEnvelopeId: number,
+      flow: TerminalOutputFlowAcknowledger,
+    ) => {
+      const isCurrent = () =>
+        !cancelled &&
+        epoch === outputAttachEpoch &&
+        outputTransportMode === "v3" &&
+        outputV3FailStoppedReason === null;
+      const { TerminalOutputV3Runtime } = await loadTerminalOutputV3Runtime();
+      if (!isCurrent()) return;
+      const runtime = new TerminalOutputV3Runtime({
+        terminalId: instanceId,
+        generation,
+        leaseToken,
+        attachEpoch: epoch,
+        initialSeq,
+        initialEnvelopeId,
+        controlTimeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+        scope: outputControlOperations,
+        isCurrent,
+        applyCheckpoint: (delta) => renderCheckpointModel.apply(delta),
+        enqueueVisible: (delta, onParsed, onDiscard) => {
+          lastTerminalOutputAt = Date.now();
+          clearDeferredResizeQuietTimer();
+          recordTerminalOutputPipeline(instanceId, "segmentsIn");
+          recordTerminalOutputPipeline(instanceId, "checkpointApplies");
+          processLiveTerminalOutput(
+            delta.data,
+            onParsed,
+            () => onDiscard("visible xterm discarded terminal output envelope"),
+            delta.geometry.revision,
+          );
+        },
+        sendParsedRange: async (seqStart, seqEnd) => {
+          const accepted = await flow.completeAndWait(seqStart, seqEnd);
+          if (isCurrent()) publishOutputV3Diagnostics?.();
+          return accepted;
+        },
+        onFailStop: failStopOutputV3,
+        getLifecycleFacts: () => ({
+          parsersReady: outputV3ParsersReady,
+          disposed: cancelled,
+          failStoppedReason: outputV3FailStoppedReason,
+          stabilizerHolding: nativeWindowsOutputStabilizer.hasHeldBytes,
+          capacityWaiting: pendingTerminalWrites > 0 || terminalWriteQueue.depth > 0,
+        }),
+      });
+      outputV3Runtime = runtime;
+      outputV3ParsersReady = true;
+      publishOutputV3Diagnostics = () => {
+        const snapshot = runtime.diagnostics();
+        outputV3DiagnosticEntry = {
+          state: outputV3FailStoppedReason === null ? "active" : "fail-stopped",
+          reason: outputV3FailStoppedReason,
+          generation,
+          leaseToken,
+          attachEpoch: epoch,
+          snapshotSeq: initialSeq,
+          admittedSeq: snapshot.admittedSeq,
+          parsedSeq: snapshot.parsedSeq,
+          nextEnvelopeId: snapshot.nextEnvelopeId,
+          activeGrantId: snapshot.activeGrantId,
+          repairCount: snapshot.repairCount,
+          lastRepairReason: snapshot.lastRepairReason,
+        };
+        recordTerminalOutputV3Diagnostics(instanceId, outputV3DiagnosticEntry);
+      };
+      publishOutputV3Diagnostics();
+
+      if (!hasBufferedOutputV3) return;
+      const buffered = bufferedOutputV3;
+      bufferedOutputV3 = undefined;
+      hasBufferedOutputV3 = false;
+      const receiving = runtime.receive(buffered, monotonicNow());
+      armOutputV3ContinuationDeadline(runtime);
+      const result = await receiving;
+      if (!isCurrent()) return;
+      armOutputV3ContinuationDeadline(runtime);
+      publishOutputV3Diagnostics();
+      if (result.kind === "fail-stop") failStopOutputV3(result.reason);
+    };
+    const receiveOutputV3 = (payload: unknown) => {
+      if (cancelled || outputTransportMode === "v2" || outputTransportMode === "fail-stop") return;
+      const runtime = outputV3Runtime;
+      if (!runtime) {
+        if (hasBufferedOutputV3) {
+          failStopOutputV3("attach_buffer_overflow");
+          return;
+        }
+        bufferedOutputV3 = payload;
+        hasBufferedOutputV3 = true;
+        return;
+      }
+      const receiving = runtime.receive(payload, monotonicNow());
+      armOutputV3ContinuationDeadline(runtime);
+      void receiving.then((result) => {
+        if (!isCurrentOutputV3Runtime(runtime)) return;
+        armOutputV3ContinuationDeadline(runtime);
+        publishOutputV3Diagnostics?.();
+        if (result.kind === "fail-stop") failStopOutputV3(result.reason);
+      });
+    };
     const invalidateOutputAttachEpoch = (
       expectedEpoch: number,
       replacementPending: boolean,
@@ -4181,10 +4386,15 @@ export function TerminalView({
       expectedEpoch = outputAttachEpoch,
       initialDelayMs = TERMINAL_WRITE_RETRY_MS,
     ) => {
+      if (outputTransportMode === "v3") {
+        failStopOutputV3("replacement_attach_forbidden");
+        return;
+      }
+      if (outputTransportMode === "fail-stop") return;
       if (outputAttachRetryTimer !== undefined) return;
       if (!invalidateOutputAttachEpoch(expectedEpoch, true)) return;
       const tryStartReplacementAttach = () => {
-        if (cancelled) {
+        if (cancelled || outputTransportMode === "fail-stop") {
           outputAttachRetryTimer = undefined;
           return;
         }
@@ -4516,7 +4726,9 @@ export function TerminalView({
       }
     };
     const startOutputAttach = async () => {
-      if (cancelled || !terminalSessionReady || outputAttachInFlight) return;
+      if (cancelled || outputIsFailStopped() || !terminalSessionReady || outputAttachInFlight) {
+        return;
+      }
       recordTerminalOutputPipeline(instanceId, "attaches");
       outputAttachInFlight = true;
       outputAttachParserBusy = true;
@@ -4586,10 +4798,15 @@ export function TerminalView({
         if (attachOutcome.kind === "rejected") throw attachOutcome.error;
         outputAttachTimeoutStreak = 0;
         const rawAttachment = attachOutcome.value;
+        if ("kind" in rawAttachment) {
+          const backendFailureReason = outputV3FailureCoordinator.bindFailedAttach(rawAttachment);
+          failStopOutputV3(backendFailureReason ?? "malformed_attach_fail_stop", false);
+          return;
+        }
         const cached = await cacheRestorePromise;
         if (!isCurrentAttach()) return;
         const attachment = normalizeTerminalOutputAttachment(rawAttachment);
-        const { token, windowBytes } = rawAttachment.flowControl;
+        const { token, windowBytes, nextEnvelopeId } = rawAttachment.flowControl;
         if (
           typeof token !== "string" ||
           token.length === 0 ||
@@ -4597,6 +4814,22 @@ export function TerminalView({
           windowBytes <= 0
         ) {
           throw new Error("malformed terminal output flow-control lease");
+        }
+        const supportsV3 = nextEnvelopeId !== undefined;
+        if (supportsV3 && (!Number.isSafeInteger(nextEnvelopeId) || nextEnvelopeId <= 0)) {
+          throw new Error("malformed terminal output v3 envelope identity");
+        }
+        if (outputTransportMode !== "fail-stop") {
+          outputTransportMode = supportsV3 ? "v3" : "v2";
+        }
+        if (supportsV3) {
+          const backendFailureReason = outputV3FailureCoordinator.bindIdentity(
+            attachment.state.generation,
+            token,
+          );
+          if (backendFailureReason) failStopOutputV3(backendFailureReason, false);
+          if (outputTransportMode === "fail-stop") return;
+          outputCoordinator.beginAttach();
         }
         let ackWarningReported = false;
         const flow = new TerminalOutputFlowAcknowledger(
@@ -4610,6 +4843,10 @@ export function TerminalView({
             },
             onLeaseLost: () => {
               if (!isCurrentAttach()) return;
+              if (outputTransportMode === "v3") {
+                failStopOutputV3("parsed_ack_stale");
+                return;
+              }
               recoverTerminalOutputControl(
                 () => scheduleOutputReattach(epoch),
                 () =>
@@ -4621,6 +4858,10 @@ export function TerminalView({
             tryStartOperation: () => outputControlOperations.tryStart("ack"),
             onAdmissionBlocked: () => {
               if (!isCurrentAttach()) return;
+              if (outputTransportMode === "v3") {
+                failStopOutputV3("parsed_ack_admission_blocked");
+                return;
+              }
               const retryDelayMs = boundedTerminalOutputControlBackoff(
                 Math.max(1, outputAckTimeoutStreak),
               );
@@ -4640,6 +4881,10 @@ export function TerminalView({
             timeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
             onTimeout: () => {
               if (!isCurrentAttach()) return;
+              if (outputTransportMode === "v3") {
+                failStopOutputV3("parsed_ack_timeout");
+                return;
+              }
               outputAckTimeoutStreak += 1;
               const retryDelayMs = boundedTerminalOutputControlBackoff(outputAckTimeoutStreak);
               const hasCapacity = outputControlOperations.canStart("ack");
@@ -4713,7 +4958,18 @@ export function TerminalView({
               }
               // `renderCheckpointModel.attach` already parsed this exact snapshot;
               // release its range only after the visible replay also completed.
-              flow.complete(attachment.state.snapshotStartSeq, attachment.state.snapshotSeq);
+              if (supportsV3) {
+                const snapshotConfirmed = await flow.completeAndWait(
+                  attachment.state.snapshotStartSeq,
+                  attachment.state.snapshotSeq,
+                );
+                if (!snapshotConfirmed || !isCurrentAttach()) {
+                  failStopOutputV3("snapshot_parsed_ack_rejected");
+                  return;
+                }
+              } else {
+                flow.complete(attachment.state.snapshotStartSeq, attachment.state.snapshotSeq);
+              }
 
               // Cache/snapshot may contain historic DEC mode changes. Apply the
               // backend's state last, to xterm only, before live sequenced deltas.
@@ -4722,6 +4978,18 @@ export function TerminalView({
               );
               if (!isCurrentAttach()) return;
               outputGeneration = attachment.state.generation;
+              if (supportsV3) {
+                await activateOutputV3(
+                  epoch,
+                  attachment.state.generation,
+                  token,
+                  attachment.state.snapshotSeq,
+                  nextEnvelopeId,
+                  flow,
+                );
+                if (isCurrentAttach() && outputTransportMode === "v3") setOutputReady(true);
+                return;
+              }
               const buffered = outputCoordinator.completeAttach(attachment);
               if (buffered.kind === "gap") {
                 console.warn(
@@ -4760,7 +5028,7 @@ export function TerminalView({
           );
         await terminalOutputWriteChain;
       } catch (error) {
-        if (!cancelled && epoch === outputAttachEpoch) {
+        if (!cancelled && outputTransportMode !== "fail-stop" && epoch === outputAttachEpoch) {
           recoverTerminalOutputControl(
             () => scheduleOutputReattach(epoch),
             () =>
@@ -4776,7 +5044,9 @@ export function TerminalView({
           outputAttachInFlight = false;
           outputAttachParserBusy = false;
           flushDeferredTerminalFit();
-          if (!cancelled && !outputCoordinator.ready) scheduleOutputReattach(epoch);
+          if (!cancelled && outputTransportMode === "v2" && !outputCoordinator.ready) {
+            scheduleOutputReattach(epoch);
+          }
           // `startOutputRepair` claims `outputRepairInFlight` synchronously, so
           // no listener delta can slip in front of this and start the same
           // round-trip from the other side.
@@ -4785,8 +5055,10 @@ export function TerminalView({
       }
     };
 
-    outputListenerReady = onTerminalOutputV2(instanceId, (payload) => {
-      if (cancelled) return;
+    const outputV2ListenerReady = onTerminalOutputV2(instanceId, (payload) => {
+      if (cancelled || outputTransportMode === "v3" || outputTransportMode === "fail-stop") {
+        return;
+      }
       let result: TerminalOutputApplyResult;
       try {
         const delta: TerminalOutputDelta = normalizeTerminalOutputDelta(payload);
@@ -4850,10 +5122,43 @@ export function TerminalView({
         unlistenOutput = unlisten;
       }
     });
+    const outputV3ListenerReady = onTerminalOutputV3(instanceId, receiveOutputV3).then(
+      (unlisten) => {
+        if (cancelled) {
+          unlisten();
+        } else {
+          unlistenOutputV3 = unlisten;
+        }
+      },
+    );
+    const outputFailStoppedListenerReady = onTerminalOutputFailStopped(
+      receiveOutputV3FailStop,
+    ).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenOutputFailStopped = unlisten;
+      }
+    });
+    outputListenerReady = Promise.all([
+      outputV2ListenerReady,
+      outputV3ListenerReady,
+      outputFailStoppedListenerReady,
+    ]).then(() => undefined);
 
     const outputPullWatchdogTimer = setInterval(() => {
+      if (cancelled) return;
+      if (outputTransportMode === "v3") {
+        const runtime = outputV3Runtime;
+        if (!runtime || outputV3FailStoppedReason !== null) return;
+        void runtime.pollExactRepair(monotonicNow()).then((result) => {
+          publishOutputV3Diagnostics?.();
+          if (result?.kind === "fail-stop") failStopOutputV3(result.reason);
+        });
+        return;
+      }
       if (
-        cancelled ||
+        outputTransportMode !== "v2" ||
         outputAttachInFlight ||
         outputRepairInFlight ||
         !outputCoordinator.ready ||
@@ -5176,7 +5481,23 @@ export function TerminalView({
     }
 
     return () => {
+      if (outputTransportMode === "v3") {
+        // There is no earlier lifecycle signal that distinguishes a terminal
+        // close from a disappearing WebView surface. Publish before `cancelled`
+        // retires the identity; a concurrent explicit close may safely make
+        // this best-effort command return stale/false.
+        outputV3FailureCoordinator.disposeSurface();
+      }
       cancelled = true;
+      outputV3Runtime?.dispose();
+      outputV3Runtime = undefined;
+      publishOutputV3Diagnostics = undefined;
+      outputV3DiagnosticEntry = undefined;
+      forgetTerminalOutputV3Diagnostics(instanceId);
+      if (outputV3ContinuationTimer !== undefined) {
+        clearTimeout(outputV3ContinuationTimer);
+        outputV3ContinuationTimer = undefined;
+      }
       outputFlowAcknowledger?.dispose();
       outputFlowAcknowledger = undefined;
       outputControlOperations.dispose();
@@ -5282,6 +5603,8 @@ export function TerminalView({
       unregisterTerminalScroller(instanceId);
       unregisterAtlasRebuilder(instanceId);
       unlistenOutput?.();
+      unlistenOutputV3?.();
+      unlistenOutputFailStopped?.();
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
       renderCheckpointModel.dispose();
@@ -5890,6 +6213,21 @@ export function TerminalView({
         >
           <div className="terminal-loading-spinner" />
         </div>
+        {outputFailStopReason && (
+          <div
+            role="status"
+            aria-live="assertive"
+            data-testid={`terminal-output-stopped-${instanceId}`}
+            className="pointer-events-none absolute inset-x-3 top-3 z-20 rounded px-3 py-2 text-xs"
+            style={{
+              color: "var(--text-primary)",
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border-color)",
+            }}
+          >
+            Terminal output stopped ({outputFailStopReason}). Close and recreate this pane.
+          </div>
+        )}
         {showScrollToBottom && showScrollToBottomButtonSetting && (
           <button
             type="button"

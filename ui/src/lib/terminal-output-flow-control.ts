@@ -37,6 +37,10 @@ export class TerminalOutputFlowAcknowledger {
   private inFlight = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly confirmationWaiters: Array<{
+    seq: number;
+    resolve: (accepted: boolean) => void;
+  }> = [];
   private disposed = false;
 
   constructor(
@@ -84,9 +88,27 @@ export class TerminalOutputFlowAcknowledger {
       .catch(() => {});
   }
 
+  /**
+   * Complete a parsed range and settle only after the backend confirmed that
+   * exact prefix (or a later coalesced prefix). v3 uses this promise so receipt
+   * and local parser completion cannot be mistaken for restored producer
+   * credit.
+   */
+  completeAndWait(seqStart: number, seqEnd: number): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    if (seqEnd <= this.confirmedSeq) return Promise.resolve(true);
+    const confirmed = new Promise<boolean>((resolve) => {
+      this.confirmationWaiters.push({ seq: seqEnd, resolve });
+    });
+    this.complete(seqStart, seqEnd);
+    return confirmed;
+  }
+
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     this.completed.clear();
+    this.settleConfirmationWaiters(false);
     if (this.retryTimer !== undefined) {
       clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
@@ -193,6 +215,7 @@ export class TerminalOutputFlowAcknowledger {
           return;
         }
         this.confirmedSeq = Math.max(this.confirmedSeq, sentSeq);
+        this.settleConfirmationWaiters(true);
         try {
           this.onConfirmed?.(this.confirmedSeq);
         } catch {
@@ -223,5 +246,14 @@ export class TerminalOutputFlowAcknowledger {
     if (this.watchdogTimer === undefined) return;
     clearTimeout(this.watchdogTimer);
     this.watchdogTimer = undefined;
+  }
+
+  private settleConfirmationWaiters(accepted: boolean): void {
+    for (let index = this.confirmationWaiters.length - 1; index >= 0; index -= 1) {
+      const waiter = this.confirmationWaiters[index];
+      if (accepted && waiter.seq > this.confirmedSeq) continue;
+      this.confirmationWaiters.splice(index, 1);
+      waiter.resolve(accepted);
+    }
   }
 }

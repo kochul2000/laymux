@@ -65,29 +65,21 @@ impl TerminalOutputBuffer {
     /// Append bytes and capture their exact range under one ring lock.
     pub(crate) fn push_sequenced(&self, data: &[u8]) -> Result<TerminalOutputSlice, AppError> {
         let mut inner = self.lock_inner()?;
-        let seq_start = inner.write_seq;
-        inner.last_output_at = Some(Instant::now());
-        inner.write_seq = inner.write_seq.saturating_add(data.len() as u64);
+        push_sequenced_inner(&mut inner, data, None)
+    }
 
-        if data.len() >= inner.max_size {
-            // Data larger than buffer: keep only the tail
-            inner.buffer.clear();
-            let start = data.len() - inner.max_size;
-            inner.buffer.extend(&data[start..]);
-        } else {
-            let new_len = inner.buffer.len() + data.len();
-            if new_len > inner.max_size {
-                let to_remove = new_len - inner.max_size;
-                inner.buffer.drain(..to_remove);
-            }
-            inner.buffer.extend(data);
-        }
-
-        Ok(TerminalOutputSlice {
-            seq_start,
-            seq_end: inner.write_seq,
-            data: data.to_vec(),
-        })
+    /// Append bytes without evicting `protected_start_seq` or anything after it.
+    ///
+    /// Desktop parsed credit passes its current ACK as the protected boundary.
+    /// All validation happens before sequence, timestamp, or bytes are mutated,
+    /// so a caller can wait for ACK progress and retry the identical PTY chunk.
+    pub(crate) fn push_sequenced_protected(
+        &self,
+        data: &[u8],
+        protected_start_seq: u64,
+    ) -> Result<TerminalOutputSlice, AppError> {
+        let mut inner = self.lock_inner()?;
+        push_sequenced_inner(&mut inner, data, Some(protected_start_seq))
     }
 
     pub fn recent_lines(&self, n: usize) -> Result<String, AppError> {
@@ -139,6 +131,44 @@ impl TerminalOutputBuffer {
             seq_end,
             data,
         })
+    }
+
+    /// Return the exact retained prefix `[since_seq, write_seq)` without tail
+    /// clamping or line-boundary trimming.
+    ///
+    /// `Ok(None)` means the requested start is outside the retained sequence
+    /// range. Exceeding `max_bytes` is an explicit invariant error rather than a
+    /// shorter snapshot that could begin inside an unparsed control sequence.
+    pub(crate) fn exact_snapshot_since(
+        &self,
+        since_seq: u64,
+        max_bytes: usize,
+    ) -> Result<Option<TerminalOutputSlice>, AppError> {
+        let inner = self.lock_inner()?;
+        let retained_start = start_seq_from(&inner);
+        if since_seq < retained_start || since_seq > inner.write_seq {
+            return Ok(None);
+        }
+        let byte_len_u64 = inner.write_seq - since_seq;
+        let byte_len = usize::try_from(byte_len_u64).map_err(|_| {
+            AppError::Other(format!(
+                "terminal output snapshot length {byte_len_u64} does not fit usize"
+            ))
+        })?;
+        if byte_len > max_bytes {
+            return Err(AppError::Other(format!(
+                "terminal output exact snapshot of {byte_len} bytes exceeds limit {max_bytes}"
+            )));
+        }
+        let skip = usize::try_from(since_seq - retained_start).map_err(|_| {
+            AppError::Other("terminal output snapshot offset does not fit usize".into())
+        })?;
+        let data = inner.buffer.iter().skip(skip).copied().collect();
+        Ok(Some(TerminalOutputSlice {
+            seq_start: since_seq,
+            seq_end: inner.write_seq,
+            data,
+        }))
     }
 
     /// Monotonically increasing sequence number (total bytes ever pushed).
@@ -210,6 +240,64 @@ fn recent_bytes_from(inner: &TerminalOutputBufferInner, n: usize) -> Vec<u8> {
     }
 }
 
+fn push_sequenced_inner(
+    inner: &mut TerminalOutputBufferInner,
+    data: &[u8],
+    protected_start_seq: Option<u64>,
+) -> Result<TerminalOutputSlice, AppError> {
+    let seq_start = inner.write_seq;
+    let data_len = u64::try_from(data.len())
+        .map_err(|_| AppError::Other("terminal output chunk length does not fit u64".into()))?;
+    let seq_end = seq_start
+        .checked_add(data_len)
+        .ok_or_else(|| AppError::Other("terminal output sequence overflow".into()))?;
+    let new_len = inner
+        .buffer
+        .len()
+        .checked_add(data.len())
+        .ok_or_else(|| AppError::Other("terminal output ring length overflow".into()))?;
+
+    if let Some(protected_start_seq) = protected_start_seq {
+        let retained_start = start_seq_from(inner);
+        if protected_start_seq < retained_start || protected_start_seq > seq_start {
+            return Err(AppError::Other(format!(
+                "terminal output protected sequence {protected_start_seq} is outside retained range {retained_start}..={seq_start}"
+            )));
+        }
+        let capacity = u64::try_from(inner.max_size).map_err(|_| {
+            AppError::Other("terminal output ring capacity does not fit u64".into())
+        })?;
+        let required_start = seq_end.saturating_sub(capacity);
+        if required_start > protected_start_seq {
+            return Err(AppError::Other(format!(
+                "terminal output append would evict unacknowledged bytes at sequence {protected_start_seq}"
+            )));
+        }
+    }
+
+    inner.last_output_at = Some(Instant::now());
+    inner.write_seq = seq_end;
+    if data.len() >= inner.max_size {
+        // Data at least as large as the buffer: keep only the tail. The
+        // protected path has already proved that this cannot discard its ACK.
+        inner.buffer.clear();
+        let start = data.len() - inner.max_size;
+        inner.buffer.extend(&data[start..]);
+    } else {
+        if new_len > inner.max_size {
+            let to_remove = new_len - inner.max_size;
+            inner.buffer.drain(..to_remove);
+        }
+        inner.buffer.extend(data);
+    }
+
+    Ok(TerminalOutputSlice {
+        seq_start,
+        seq_end,
+        data: data.to_vec(),
+    })
+}
+
 fn start_seq_from(inner: &TerminalOutputBufferInner) -> u64 {
     inner.write_seq.saturating_sub(inner.buffer.len() as u64)
 }
@@ -231,231 +319,5 @@ impl Default for TerminalOutputBuffer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn new_buffer_is_empty() {
-        let buf = TerminalOutputBuffer::new(1024);
-        assert!(buf.is_empty().unwrap());
-        assert_eq!(buf.len().unwrap(), 0);
-    }
-
-    #[test]
-    fn push_stores_data() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"hello");
-        assert_eq!(buf.len().unwrap(), 5);
-        assert_eq!(buf.recent_bytes(5).unwrap(), b"hello");
-    }
-
-    #[test]
-    fn push_evicts_oldest_when_full() {
-        let mut buf = TerminalOutputBuffer::new(10);
-        buf.push(b"abcdefgh"); // 8 bytes
-        buf.push(b"ijklm"); // 5 bytes, total 13 > 10
-        assert_eq!(buf.len().unwrap(), 10);
-        // oldest 3 bytes evicted: "abc" gone, "defghijklm" remains
-        assert_eq!(buf.recent_bytes(10).unwrap(), b"defghijklm");
-    }
-
-    #[test]
-    fn push_data_larger_than_capacity() {
-        let mut buf = TerminalOutputBuffer::new(5);
-        buf.push(b"abcdefghij"); // 10 bytes > capacity 5
-        assert_eq!(buf.len().unwrap(), 5);
-        assert_eq!(buf.recent_bytes(5).unwrap(), b"fghij");
-    }
-
-    #[test]
-    fn recent_lines_returns_last_n() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"line1\nline2\nline3\nline4\nline5");
-        assert_eq!(buf.recent_lines(3).unwrap(), "line3\nline4\nline5");
-    }
-
-    #[test]
-    fn recent_lines_fewer_than_n() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"line1\nline2");
-        assert_eq!(buf.recent_lines(10).unwrap(), "line1\nline2");
-    }
-
-    #[test]
-    fn recent_lines_zero_returns_empty() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"hello");
-        assert_eq!(buf.recent_lines(0).unwrap(), "");
-    }
-
-    #[test]
-    fn recent_lines_empty_buffer() {
-        let buf = TerminalOutputBuffer::new(1024);
-        assert_eq!(buf.recent_lines(5).unwrap(), "");
-    }
-
-    #[test]
-    fn recent_bytes_more_than_available() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"abc");
-        assert_eq!(buf.recent_bytes(100).unwrap(), b"abc");
-    }
-
-    #[test]
-    fn clear_empties_buffer() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"data");
-        buf.clear().unwrap();
-        assert!(buf.is_empty().unwrap());
-        assert_eq!(buf.len().unwrap(), 0);
-    }
-
-    #[test]
-    fn default_uses_1mb() {
-        let buf = TerminalOutputBuffer::default();
-        assert_eq!(buf.max_size().unwrap(), TERMINAL_OUTPUT_RING_MAX_BYTES);
-    }
-
-    #[test]
-    fn multiple_pushes_accumulate() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"aaa");
-        buf.push(b"bbb");
-        buf.push(b"ccc");
-        assert_eq!(buf.len().unwrap(), 9);
-        assert_eq!(buf.recent_bytes(9).unwrap(), b"aaabbbccc");
-    }
-
-    #[test]
-    fn write_seq_increases_monotonically() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        assert_eq!(buf.write_seq().unwrap(), 0);
-        buf.push(b"hello"); // 5 bytes
-        assert_eq!(buf.write_seq().unwrap(), 5);
-        buf.push(b"world"); // 5 bytes
-        assert_eq!(buf.write_seq().unwrap(), 10);
-    }
-
-    #[test]
-    fn write_seq_survives_ring_buffer_wrap() {
-        let mut buf = TerminalOutputBuffer::new(10);
-        buf.push(b"abcdefgh"); // 8 bytes, seq=8
-        assert_eq!(buf.write_seq().unwrap(), 8);
-        buf.push(b"ijklmnop"); // 8 bytes, total 16 > 10 cap, evicts oldest
-        assert_eq!(buf.write_seq().unwrap(), 16);
-        // len is capped but seq keeps growing
-        assert_eq!(buf.len().unwrap(), 10);
-    }
-
-    #[test]
-    fn bytes_since_returns_new_data() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"before");
-        let seq = buf.write_seq().unwrap(); // 6
-        buf.push(b"after");
-        let new = buf.bytes_since(seq).unwrap();
-        assert_eq!(new, b"after");
-    }
-
-    #[test]
-    fn bytes_since_after_wrap_returns_available() {
-        let mut buf = TerminalOutputBuffer::new(10);
-        buf.push(b"12345"); // seq=5, len=5
-        let seq = buf.write_seq().unwrap();
-        buf.push(b"67890abcde"); // seq=15, len=10, buffer="0abcde" wait...
-                                 // 15 bytes total pushed into 10 cap buffer
-                                 // new_bytes = 15 - 5 = 10, but buffer only holds 10
-        let new = buf.bytes_since(seq).unwrap();
-        // Should get min(10, 10) = 10 bytes (everything in buffer)
-        assert_eq!(new.len(), 10);
-    }
-
-    #[test]
-    fn bytes_since_zero_when_no_new_data() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"data");
-        let seq = buf.write_seq().unwrap();
-        let new = buf.bytes_since(seq).unwrap();
-        assert!(new.is_empty());
-    }
-
-    #[test]
-    fn snapshot_reports_the_exact_retained_sequence_range() {
-        let mut buf = TerminalOutputBuffer::new(5);
-        buf.push(b"abcdefgh");
-
-        let snapshot = buf.snapshot(3).unwrap();
-
-        assert_eq!(snapshot.seq_start, 5);
-        assert_eq!(snapshot.seq_end, 8);
-        assert_eq!(snapshot.data, b"fgh");
-        assert_eq!(buf.start_seq().unwrap(), 3);
-    }
-
-    #[test]
-    fn truncated_snapshot_drops_the_partial_first_line() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"line1\nline2\nline3");
-
-        let snapshot = buf.snapshot(10).unwrap(); // cuts inside "line2"
-
-        assert_eq!(snapshot.data, b"line3");
-        assert_eq!(snapshot.seq_end, 17);
-        assert_eq!(snapshot.seq_start, 17 - 5);
-    }
-
-    #[test]
-    fn untruncated_snapshot_keeps_a_leading_partial_line() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"line1\nline2");
-
-        let snapshot = buf.snapshot(1024).unwrap();
-
-        assert_eq!(snapshot.data, b"line1\nline2");
-        assert_eq!(snapshot.seq_start, 0);
-    }
-
-    #[test]
-    fn truncated_snapshot_without_a_newline_is_kept_as_is() {
-        let mut buf = TerminalOutputBuffer::new(1024);
-        buf.push(b"one very long line without breaks");
-
-        let snapshot = buf.snapshot(10).unwrap();
-
-        assert_eq!(snapshot.data, b"out breaks");
-        assert_eq!(snapshot.seq_start, snapshot.seq_end - 10);
-    }
-
-    #[test]
-    fn delta_since_rejects_a_sequence_gap_instead_of_clamping() {
-        let mut buf = TerminalOutputBuffer::new(5);
-        buf.push(b"abcdefgh");
-
-        assert!(buf.delta_since(2).unwrap().is_none());
-        assert_eq!(
-            buf.delta_since(3).unwrap().unwrap(),
-            TerminalOutputSlice {
-                seq_start: 3,
-                seq_end: 8,
-                data: b"defgh".to_vec(),
-            }
-        );
-        assert!(buf.delta_since(9).unwrap().is_none());
-    }
-
-    #[test]
-    fn poisoned_ring_fails_closed_for_authoritative_reads_and_writes() {
-        let buf = TerminalOutputBuffer::new(16);
-        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _inner = buf.inner.lock().unwrap();
-            panic!("poison output ring after a partial mutation");
-        }))
-        .is_err());
-
-        assert!(buf.push_sequenced(b"must-not-be-sequenced").is_err());
-        assert!(buf.snapshot(16).is_err());
-        assert!(buf.write_seq().is_err());
-        assert!(buf.delta_since(0).is_err());
-        assert!(buf.recent_bytes(16).is_err());
-    }
-}
+#[path = "output_buffer_tests.rs"]
+mod tests;

@@ -1,3 +1,4 @@
+use super::registry_retirement::retire_terminal_output_session_impl;
 use super::*;
 
 /// Rollback guard for the create path. Until committed, every error (including
@@ -121,146 +122,6 @@ pub fn terminal_output_session_for(
         .cloned())
 }
 
-/// Retire and remove only `expected`, never a newer generation that reused the
-/// same terminal id.
-pub fn retire_terminal_output_session(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-    expected: &Arc<TerminalOutputSession>,
-) -> Result<bool, String> {
-    Ok(retire_terminal_output_session_and_then(
-        protocol_states,
-        output_buffers,
-        terminal_id,
-        expected,
-        || (),
-    )?
-    .is_some())
-}
-
-/// Retire exactly `expected` and run id-keyed discard cleanup before another
-/// generation can reserve the same terminal id.
-///
-/// The callback runs while the session-registry guard is still held, after the
-/// old generation and its compatibility projections have been removed. It may
-/// acquire only later AppState locks in the global order and must not block on
-/// platform resource shutdown.
-pub fn retire_terminal_output_session_and_then<T>(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-    expected: &Arc<TerminalOutputSession>,
-    on_retired: impl FnOnce() -> T,
-) -> Result<Option<T>, String> {
-    let mut registry = protocol_states
-        .sessions
-        .lock_or_recover_for_discard("retiring terminal output session registry");
-    let Some(current) = registry.active.get(terminal_id).cloned() else {
-        return Ok(None);
-    };
-    if !Arc::ptr_eq(&current, expected) {
-        return Ok(None);
-    }
-
-    current.retire(false)?;
-    remove_compatibility_projections(protocol_states, output_buffers, terminal_id, Some(&current))?;
-    registry.active.remove(terminal_id);
-    Ok(Some(on_retired()))
-}
-
-fn retire_terminal_output_session_impl(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-    expected: &Arc<TerminalOutputSession>,
-    allow_creating: bool,
-) -> Result<bool, String> {
-    let mut registry = protocol_states
-        .sessions
-        .lock_or_recover_for_discard("retiring terminal output session registry");
-    let Some(current) = registry.active.get(terminal_id).cloned() else {
-        return Ok(false);
-    };
-    if !Arc::ptr_eq(&current, expected) {
-        return Ok(false);
-    }
-
-    current.retire(allow_creating)?;
-    remove_compatibility_projections(protocol_states, output_buffers, terminal_id, Some(&current))?;
-    registry.active.remove(terminal_id);
-    Ok(true)
-}
-
-/// Close-path transaction. The registry remains locked from current-generation
-/// selection through retirement and compatibility-index cleanup, so a create
-/// reservation cannot appear between a `None` lookup and legacy cleanup.
-pub fn retire_terminal_output_for_close(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-) -> Result<bool, String> {
-    let mut registry = protocol_states
-        .sessions
-        .lock_or_recover_for_discard("closing terminal output session registry");
-    let current = registry.active.get(terminal_id).cloned();
-    if let Some(current) = current {
-        current.retire(false)?;
-        remove_compatibility_projections(
-            protocol_states,
-            output_buffers,
-            terminal_id,
-            Some(&current),
-        )?;
-        registry.active.remove(terminal_id);
-        return Ok(true);
-    }
-
-    remove_compatibility_projections(protocol_states, output_buffers, terminal_id, None)?;
-    Ok(false)
-}
-
-fn remove_compatibility_projections(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-    expected: Option<&Arc<TerminalOutputSession>>,
-) -> Result<(), String> {
-    let mut gates =
-        protocol_states.lock_or_recover_for_discard("removing terminal protocol projection");
-    let remove_gate = expected.is_none_or(|session| {
-        gates
-            .get(terminal_id)
-            .is_some_and(|gate| Arc::ptr_eq(gate, &session.protocol))
-    });
-    if remove_gate {
-        gates.remove(terminal_id);
-    }
-    drop(gates);
-
-    let mut buffers =
-        output_buffers.lock_or_recover_for_discard("removing terminal output ring projection");
-    let remove_buffer = expected.is_none_or(|session| {
-        buffers
-            .get(terminal_id)
-            .is_some_and(|buffer| buffer.same_storage(&session.output))
-    });
-    if remove_buffer {
-        buffers.remove(terminal_id);
-    }
-    Ok(())
-}
-
-/// Cleanup fallback for sessions created by older/tests-only code that only
-/// populated the compatibility maps.
-pub fn remove_legacy_terminal_output(
-    protocol_states: &SharedTerminalProtocolStates,
-    output_buffers: &Arc<Mutex<HashMap<String, TerminalOutputBuffer>>>,
-    terminal_id: &str,
-) -> Result<(), String> {
-    remove_compatibility_projections(protocol_states, output_buffers, terminal_id, None)
-}
-
 pub fn protocol_gate_for(
     protocol_states: &SharedTerminalProtocolStates,
     terminal_id: &str,
@@ -332,9 +193,57 @@ pub fn attach_desktop_terminal_output(
     max_snapshot_bytes: usize,
     window_bytes: usize,
 ) -> Result<DesktopTerminalOutputAttachment, String> {
-    terminal_output_session_for(protocol_states, terminal_id)?
-        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?
-        .attach_desktop(max_snapshot_bytes, window_bytes)
+    match attach_desktop_terminal_output_outcome(
+        protocol_states,
+        terminal_id,
+        max_snapshot_bytes,
+        window_bytes,
+    )? {
+        DesktopTerminalOutputAttachOutcome::Attached(attachment) => Ok(attachment),
+        DesktopTerminalOutputAttachOutcome::FailStopped {
+            generation, reason, ..
+        } => Err(format!(
+            "terminal output generation {generation} is fail-stopped: {reason}"
+        )),
+    }
+}
+
+pub fn attach_desktop_terminal_output_outcome(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    max_snapshot_bytes: usize,
+    window_bytes: usize,
+) -> Result<DesktopTerminalOutputAttachOutcome, String> {
+    attach_desktop_terminal_output_outcome_with_hook(
+        protocol_states,
+        terminal_id,
+        max_snapshot_bytes,
+        window_bytes,
+        || {},
+    )
+}
+
+pub(super) fn attach_desktop_terminal_output_outcome_with_hook(
+    protocol_states: &SharedTerminalProtocolStates,
+    terminal_id: &str,
+    max_snapshot_bytes: usize,
+    window_bytes: usize,
+    after_outcome: impl FnOnce(),
+) -> Result<DesktopTerminalOutputAttachOutcome, String> {
+    let session = terminal_output_session_for(protocol_states, terminal_id)?
+        .ok_or_else(|| format!("Session '{terminal_id}' not found"))?;
+    let outcome = session.attach_desktop_outcome(max_snapshot_bytes, window_bytes)?;
+    after_outcome();
+    let registry = protocol_states.sessions.lock_or_err()?;
+    let current = registry.active.get(terminal_id);
+    if current.is_none_or(|current| {
+        !Arc::ptr_eq(current, &session) || current.generation() != session.generation()
+    }) {
+        return Err(format!(
+            "terminal output generation changed during desktop attach for '{terminal_id}'"
+        ));
+    }
+    Ok(outcome)
 }
 
 pub fn acknowledge_desktop_terminal_output(

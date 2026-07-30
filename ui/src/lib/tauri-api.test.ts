@@ -200,6 +200,19 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("attach_terminal_output", { id: "t1" });
     });
 
+    it("preserves a typed pre-attach backend fail-stop", async () => {
+      const failure = {
+        kind: "failStopped",
+        terminalId: "t1",
+        generation: 7,
+        reason: "parsed_progress_expired",
+      } as const;
+      mockInvoke.mockResolvedValue(failure);
+
+      await expect(attachTerminalOutput("t1")).resolves.toEqual(failure);
+      expect(mockInvoke).toHaveBeenCalledWith("attach_terminal_output", { id: "t1" });
+    });
+
     it("acknowledges one generation-scoped parsed prefix", async () => {
       mockInvoke.mockResolvedValue(true);
       await expect(acknowledgeTerminalOutput("t1", 7, "lease-9", 1234)).resolves.toBe(true);

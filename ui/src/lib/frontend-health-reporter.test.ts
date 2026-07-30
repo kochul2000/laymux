@@ -16,6 +16,25 @@ vi.mock("./terminal-output-pipeline-metrics", () => ({
   })),
 }));
 
+vi.mock("./terminal-output-v3-diagnostics", () => ({
+  allTerminalOutputV3Diagnostics: vi.fn(() => ({
+    "terminal-1": {
+      state: "active",
+      reason: null,
+      generation: 7,
+      leaseToken: "lease-7",
+      attachEpoch: 2,
+      snapshotSeq: 10,
+      admittedSeq: 14,
+      parsedSeq: 14,
+      nextEnvelopeId: 4,
+      activeGrantId: null,
+      repairCount: 1,
+      lastRepairReason: "watchdog:exact",
+    },
+  })),
+}));
+
 const START_MS = Date.UTC(2026, 6, 28, 0, 0, 0);
 
 describe("startFrontendHealthReporter", () => {
@@ -48,6 +67,22 @@ describe("startFrontendHealthReporter", () => {
       stalls: 0,
       bridge: frontendBridgeCounters(),
       pipeline: { "terminal-1": { deltaEvents: 2 } },
+      terminalOutputV3: {
+        "terminal-1": {
+          state: "active",
+          reason: null,
+          generation: 7,
+          leaseToken: "lease-7",
+          attachEpoch: 2,
+          snapshotSeq: 10,
+          admittedSeq: 14,
+          parsedSeq: 14,
+          nextEnvelopeId: 4,
+          activeGrantId: null,
+          repairCount: 1,
+          lastRepairReason: "watchdog:exact",
+        },
+      },
     });
 
     await vi.advanceTimersByTimeAsync(1_000);

@@ -6,6 +6,7 @@ pub mod mcp;
 pub mod mcp_resources;
 pub mod settings_bridge;
 mod surface_router;
+mod terminal_output_diagnostics;
 pub mod types;
 
 // Re-export key types used by other modules

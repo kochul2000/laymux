@@ -144,7 +144,7 @@ fn detach_terminal_output_generation_with_post_unlock(
     let mut terminals = state
         .terminals
         .lock_or_recover_for_discard("tearing down fatal terminal catalog entry");
-    let detached_handle = terminal_output::retire_terminal_output_session_and_then(
+    let detached = terminal_output::retire_terminal_output_session_and_then_deferred(
         &state.terminal_protocol_states,
         &state.output_buffers,
         terminal_id,
@@ -186,7 +186,7 @@ fn detach_terminal_output_generation_with_post_unlock(
             handle
         },
     )?;
-    let Some(handle) = detached_handle else {
+    let Some((handle, output_retirement)) = detached else {
         return Ok(None);
     };
 
@@ -200,6 +200,7 @@ fn detach_terminal_output_generation_with_post_unlock(
             locks.remove(terminal_id);
         }
     }
+    output_retirement.finish();
     Ok(Some(DetachedFatalGeneration { handle }))
 }
 

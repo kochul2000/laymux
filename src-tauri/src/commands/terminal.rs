@@ -19,10 +19,10 @@ use crate::pty_trace;
 use crate::remote_server::{begin_human_control_operation, HumanControlOrigin, HumanControlPermit};
 use crate::state::AppState;
 use crate::terminal::{TerminalConfig, TerminalSession};
-use crate::terminal_output::{self, DesktopTerminalOutputAttachment};
+use crate::terminal_output;
 use crate::terminal_protocol::encode_terminal_input;
 
-use super::terminal_teardown::request_terminal_output_fatal_teardown;
+use super::terminal_output_delivery::start_production_terminal_output_delivery;
 
 /// Resolve whether Claude Code is currently detected for `terminal_id`,
 /// combining the per-terminal `claude_detected` atomic with the shared
@@ -226,6 +226,27 @@ pub fn create_terminal_session(
         )?
     };
     let output_session = output_registration.session();
+    let delivery_app = app.clone();
+    let fail_stop_app = app.clone();
+    start_production_terminal_output_delivery(
+        &output_session,
+        Arc::new(move |event, envelope| {
+            delivery_app
+                .emit(event, envelope)
+                .map_err(|error| format!("failed to emit terminal output v3 envelope: {error}"))
+        }),
+        Arc::new(move |notice| {
+            if let Err(error) = fail_stop_app.emit(EVENT_TERMINAL_OUTPUT_FAIL_STOPPED, notice) {
+                tracing::error!(
+                    terminal_id = %notice.terminal_id,
+                    generation = notice.generation,
+                    reason = %notice.reason,
+                    %error,
+                    "failed to emit terminal output surface fail-stop notice"
+                );
+            }
+        }),
+    )?;
     // The listener is registered before create, but a startup command may emit
     // before the first attach RPC returns. Bootstrap credit makes that race
     // finite; the first desktop attach atomically replaces this lease.
@@ -243,15 +264,7 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
-    // Monotonic discard counters for the sequenced output path (ADR-0072).
-    // `emit` losing a delta is recoverable (the ring keeps the bytes), but
-    // `record_output` failing is not — those bytes never enter the ring and no
-    // sequence gap ever reveals them. Both are counted so a real reproduction
-    // can tell which one, if either, actually fires.
-    //
-    // Owned by the callback (no `Arc`): the closure is the only reader, and
-    // `fetch_add` needs nothing more than `&AtomicU64`.
-    let output_emit_discards = AtomicU64::new(0);
+    // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
     let spawned_pty = pty::spawn_pty_for_generation(&session, terminal_generation, move |data| {
@@ -278,36 +291,11 @@ pub fn create_terminal_session(
         // documented protocol → output order so attach observes one prefix.
         // Every other AppState lock below remains independent of that pair.
 
-        // Parse protocol modes and append bytes under one prefix gate. The v2
-        // event carries the exact byte range for listener-before-attach clients.
-        let recorded_seq_end = match pty_output_session.record_output(&data) {
-            Ok(Some(delta)) => {
-                let (seq_start, seq_end) = (delta.seq_start, delta.seq_end);
-                if let Err(error) = app_clone.emit(
-                    &format!("{EVENT_TERMINAL_OUTPUT_V2_PREFIX}{terminal_id}"),
-                    delta,
-                ) {
-                    // Never `let _` this away. The bytes stay in the ring, so the
-                    // surface repairs itself through `resume_terminal_output` on
-                    // the next delivered delta (ADR-0072) — but a discard that is
-                    // silent is a discard nobody can count, and counting is the
-                    // only way to tell a shutdown race from a systematic delivery
-                    // failure. `discarded_total` is monotonic so the real number
-                    // survives log rotation.
-                    let discarded_total = output_emit_discards.fetch_add(1, Ordering::Relaxed) + 1;
-                    tracing::warn!(
-                        terminal_id = %terminal_id,
-                        generation = pty_output_session.generation(),
-                        seq_start,
-                        seq_end,
-                        bytes = seq_end - seq_start,
-                        discarded_total,
-                        %error,
-                        "discarded a terminal output delta event"
-                    );
-                }
-                Some(seq_end)
-            }
+        // Parse protocol modes, append bytes under one prefix gate, and enqueue
+        // them for the bounded v3 delivery worker. Startup bytes remain in the
+        // bootstrap ring until attach; this callback emits no per-read event.
+        match pty_output_session.record_desktop_output(&data) {
+            Ok(Some(_)) => {}
             Ok(None) => {
                 tracing::debug!(
                     terminal_id = %terminal_id,
@@ -330,15 +318,18 @@ pub fn create_terminal_session(
                     error = %err,
                     "failed to record PTY output"
                 );
-                return request_terminal_output_fatal_teardown(
-                    &state_for_pty,
-                    &app_clone,
-                    &terminal_id,
-                    &pty_output_session,
-                    "record_output",
-                );
+                if err.requires_generation_teardown() {
+                    return super::terminal_teardown::request_terminal_output_fatal_teardown(
+                        &state_for_pty,
+                        &app_clone,
+                        &terminal_id,
+                        &pty_output_session,
+                        "record_desktop_output",
+                    );
+                }
+                return pty::PtyOutputControl::Stop;
             }
-        };
+        }
 
         // ── DEC 2026 burst detection: sustained TUI activity ──
         // See activity::BurstDetector for sliding window + throttle logic.
@@ -798,28 +789,6 @@ pub fn create_terminal_session(
         // 1. Working title → strip spinner prefix → claude_message (in OSC title handler below)
         // 2. Task completion (working→idle) → extract from output buffer via claude_bullet (below)
 
-        let _ = app_clone.emit(&format!("terminal-output-{terminal_id}"), data);
-
-        // All protocol/output/AppState locks and both event emissions are done.
-        // Sleeping here stops the next PTY master read and propagates bounded,
-        // lossless backpressure into ConPTY/the child process.
-        if let Some(seq_end) = recorded_seq_end {
-            if let Err(error) = pty_output_session.wait_for_desktop_output_capacity(seq_end) {
-                tracing::error!(
-                    terminal_id = %terminal_id,
-                    generation = pty_output_session.generation(),
-                    %error,
-                    "terminal desktop flow failed; stopping reader and tearing down generation"
-                );
-                return request_terminal_output_fatal_teardown(
-                    &state_for_pty,
-                    &app_clone,
-                    &terminal_id,
-                    &pty_output_session,
-                    "desktop_flow",
-                );
-            }
-        }
         pty::PtyOutputControl::Continue
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
@@ -1233,19 +1202,6 @@ pub fn write_terminal_input_inner(
 }
 
 #[tauri::command]
-pub fn attach_terminal_output(
-    id: String,
-    state: State<Arc<AppState>>,
-) -> Result<DesktopTerminalOutputAttachment, String> {
-    terminal_output::attach_desktop_terminal_output(
-        &state.terminal_protocol_states,
-        &id,
-        TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
-        TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES,
-    )
-}
-
-#[tauri::command]
 pub fn acknowledge_terminal_output(
     id: String,
     generation: u64,
@@ -1290,15 +1246,19 @@ pub fn close_terminal_session(
     let mut terminals = state
         .terminals
         .lock_or_recover_for_discard("closing terminal catalog entry");
-    terminal_output::retire_terminal_output_for_close(
+    let output_retirement = terminal_output::begin_terminal_output_retirement_for_close(
         &state.terminal_protocol_states,
         &state.output_buffers,
         &id,
     )?;
 
-    let session = terminals
-        .remove(&id)
-        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    let Some(session) = terminals.remove(&id) else {
+        drop(terminals);
+        if let Some(retirement) = output_retirement {
+            retirement.finish();
+        }
+        return Err(format!("Session '{id}' not found"));
+    };
     let handle = take_pty_handle_for_close(&state, &id);
 
     // Remove from sync group
@@ -1362,6 +1322,9 @@ pub fn close_terminal_session(
     // released. A replacement generation may now start without being mistaken
     // for the process being terminated here.
     drop(terminals);
+    if let Some(retirement) = output_retirement {
+        retirement.finish();
+    }
     if let Some(handle) = handle {
         handle.terminate()?;
     }

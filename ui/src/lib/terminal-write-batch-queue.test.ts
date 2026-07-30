@@ -4,6 +4,7 @@ import {
   TERMINAL_WRITE_BATCH_MAX_PARTS,
   TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
+  terminalWriteFairSlices,
   type TerminalWriteBatchMetadata,
   type TerminalWriteBatchRequest,
 } from "./terminal-write-batch-queue";
@@ -27,6 +28,19 @@ function request(
 }
 
 describe("TerminalWriteBatchQueue", () => {
+  it("splits one ingress backing into zero-copy fair-quantum views", () => {
+    const backing = new Uint8Array(TERMINAL_WRITE_FAIR_QUANTUM_BYTES + 3);
+    const slices = terminalWriteFairSlices(backing);
+
+    expect(slices).toHaveLength(2);
+    expect(slices[0].byteLength).toBe(TERMINAL_WRITE_FAIR_QUANTUM_BYTES);
+    expect(slices[1].byteLength).toBe(3);
+    expect(slices[0].buffer).toBe(backing.buffer);
+    expect(slices[1].buffer).toBe(backing.buffer);
+    expect(slices[0].byteOffset).toBe(backing.byteOffset);
+    expect(slices[1].byteOffset).toBe(backing.byteOffset + TERMINAL_WRITE_FAIR_QUANTUM_BYTES);
+  });
+
   it("dequeues an idle request immediately in FIFO order and tracks queue metrics", () => {
     const queue = new TerminalWriteBatchQueue<TestMetadata>();
     const firstId = queue.enqueue(request([1, 2]));
