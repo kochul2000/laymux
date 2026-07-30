@@ -38,6 +38,7 @@ export class TerminalParserAdmission {
     private readonly scheduler: TerminalWriteFairScheduler,
     private readonly owner: TerminalWriteFairOwner,
     private readonly resolvePriority: TerminalWritePriorityResolver,
+    private readonly scheduleMacrotask: (task: () => void) => void = (task) => setTimeout(task, 0),
   ) {}
 
   request(lane: TerminalParserLane, turn: TerminalWriteFairTurn): void {
@@ -129,6 +130,13 @@ export class TerminalParserAdmission {
     // Requeue while the global lease is still active. The scheduler then keeps
     // its macrotask yield between consecutive parser turns from the same pane.
     this.ensureGlobalTurn();
+    if (active.lane === "checkpoint" && !this.globalTurnPending && !this.disposed) {
+      // The next Promise-chain operation becomes visible only in a microtask
+      // after this callback. Hold the global lease through one host-task edge
+      // so it can requeue before release without monopolizing the current task.
+      this.scheduleMacrotask(active.releaseGlobal);
+      return;
+    }
     active.releaseGlobal();
   }
 }

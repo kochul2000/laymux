@@ -65,7 +65,12 @@ describe("TerminalRenderCheckpointModel", () => {
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
     const checkpointOwner = createTerminalWriteFairOwner("checkpoint");
     const blockerOwner = createTerminalWriteFairOwner("visible-blocker");
-    const admission = new TerminalParserAdmission(scheduler, checkpointOwner, () => "background");
+    const admission = new TerminalParserAdmission(
+      scheduler,
+      checkpointOwner,
+      () => "background",
+      (task) => scheduled.push(task),
+    );
     const model = new TerminalRenderCheckpointModel({
       admission,
     });
@@ -107,6 +112,7 @@ describe("TerminalRenderCheckpointModel", () => {
       scheduler,
       createTerminalWriteFairOwner("checkpoint"),
       () => "background",
+      (task) => scheduled.push(task),
     );
     let writeCount = 0;
     let settleActiveWrite: (() => void) | undefined;
@@ -141,13 +147,15 @@ describe("TerminalRenderCheckpointModel", () => {
     expect(replacement).not.toHaveBeenCalled();
     expect(scheduled).toHaveLength(1);
     scheduled.shift()?.();
-    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(replacement).not.toHaveBeenCalled();
     expect(scheduled).toHaveLength(1);
+    scheduled.shift()?.();
+    expect(replacement).toHaveBeenCalledTimes(1);
+    expect(scheduled).toHaveLength(0);
     // A disposed xterm may still settle its already accepted callback. That
     // stale release is idempotent and cannot disturb the replacement turn.
     settleActiveWrite?.();
     await Promise.resolve();
-    scheduled.shift()?.();
     expect(scheduler.isIdleForTests()).toBe(true);
   });
 

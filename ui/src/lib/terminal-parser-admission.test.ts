@@ -7,18 +7,20 @@ import {
 
 function createHarness() {
   const scheduled: Array<() => void> = [];
+  const localScheduled: Array<() => void> = [];
   const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
   const admission = new TerminalParserAdmission(
     scheduler,
     createTerminalWriteFairOwner("pane"),
     () => "foreground",
+    (task) => localScheduled.push(task),
   );
   const runNextTask = () => {
     const task = scheduled.shift();
     expect(task).toBeDefined();
     task?.();
   };
-  return { admission, scheduler, scheduled, runNextTask };
+  return { admission, scheduler, scheduled, localScheduled, runNextTask };
 }
 
 describe("TerminalParserAdmission", () => {
@@ -115,5 +117,93 @@ describe("TerminalParserAdmission", () => {
     runNextTask();
 
     expect(checkpoint).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a checkpoint lease across its Promise-chain microtask boundary", () => {
+    const { admission, scheduler, scheduled, localScheduled, runNextTask } = createHarness();
+    let releaseFirst: (() => void) | undefined;
+    const second = vi.fn((release: () => void) => release());
+
+    admission.request("checkpoint", (release) => {
+      releaseFirst = release;
+    });
+    releaseFirst?.();
+    expect(localScheduled).toHaveLength(1);
+    expect(scheduler.isIdleForTests()).toBe(false);
+
+    // This request represents the next writeChain operation becoming visible
+    // in the Promise continuation after the physical callback.
+    admission.request("checkpoint", second);
+    expect(second).not.toHaveBeenCalled();
+    localScheduled.shift()?.();
+    expect(scheduled).toHaveLength(1);
+    runNextTask();
+    expect(second).toHaveBeenCalledTimes(1);
+
+    expect(localScheduled).toHaveLength(1);
+    localScheduled.shift()?.();
+    expect(scheduler.isIdleForTests()).toBe(true);
+  });
+
+  it("preserves 2:1 weight across delayed checkpoint-chain requeues", () => {
+    const scheduled: Array<() => void> = [];
+    const foregroundTasks: Array<() => void> = [];
+    const backgroundTasks: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const foreground = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("foreground"),
+      () => "foreground",
+      (task) => foregroundTasks.push(task),
+    );
+    const background = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("background"),
+      () => "background",
+      (task) => backgroundTasks.push(task),
+    );
+    const blocker = createTerminalWriteFairOwner("blocker");
+    const order: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    let releaseActive: (() => void) | undefined;
+    scheduler.request(blocker, (release) => {
+      releaseBlocker = release;
+    });
+    const foregroundTurn = (release: () => void) => {
+      order.push("foreground");
+      releaseActive = release;
+    };
+    const backgroundTurn = (release: () => void) => {
+      order.push("background");
+      releaseActive = release;
+    };
+    foreground.request("checkpoint", foregroundTurn);
+    background.request("checkpoint", backgroundTurn);
+    releaseBlocker?.();
+
+    for (let index = 0; index < 6; index += 1) {
+      scheduled.shift()?.();
+      const selectedForeground = order.at(-1) === "foreground";
+      releaseActive?.();
+      if (index < 5) {
+        if (selectedForeground) foreground.request("checkpoint", foregroundTurn);
+        else background.request("checkpoint", backgroundTurn);
+      }
+      const localTasks = selectedForeground ? foregroundTasks : backgroundTasks;
+      expect(localTasks).toHaveLength(1);
+      localTasks.shift()?.();
+    }
+
+    expect(order).toEqual([
+      "foreground",
+      "background",
+      "foreground",
+      "foreground",
+      "background",
+      "foreground",
+    ]);
+    foreground.dispose();
+    background.dispose();
+    expect(scheduler.isIdleForTests()).toBe(true);
   });
 });
