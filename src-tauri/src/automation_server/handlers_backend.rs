@@ -33,7 +33,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "GET", "path": "/api/v1/diagnostics/frontend",
                 "description": "Frontend responsiveness vitals, served from backend state with no frontend round-trip — so it still answers while every bridged endpoint returns 'Frontend response timeout'. Read lastReportAgeMs first: large = the WebView main thread is stalled; small next to rising bridge.requestTimeouts = the thread is alive and the requests are queued.",
-                "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} } } | null, terminalOutput: [{ terminalId, generation, desktopOutputState, reason, ...bounded counters/identities }] }"
+                "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} }, inputDelivery: { [terminalId]: { attempts, succeeded, failed, attemptedBytes, succeededBytes, failedBytes } } } | null, terminalOutput: [{ terminalId, generation, desktopOutputState, reason, ...bounded counters/identities }] }"
             },
             {
                 "method": "GET", "path": "/api/v1/docs",

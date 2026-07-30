@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openInDefaultApp } from "@tauri-apps/plugin-shell";
 import { forgetTerminalOutputRecoveryCounters } from "./terminal-output-recovery-metrics";
 import { forgetTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
+import { forgetTerminalInputDeliveryCounters } from "./terminal-input-delivery-metrics";
 import type { TerminalOutputEnvelopePayload } from "./terminal-output-envelope";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
@@ -297,6 +298,10 @@ export async function resizeTerminal(
 }
 
 export async function closeTerminalSession(id: string): Promise<void> {
+  // A surface that requested close is already gone from the input owner's
+  // perspective. Fence its diagnostics before the serialized backend close
+  // starts so a prior IPC completion cannot settle into a retired/reused id.
+  forgetTerminalInputDeliveryCounters(id);
   return enqueueTerminalLifecycle(id, async () => {
     try {
       await invoke<void>("close_terminal_session", { id });
@@ -309,6 +314,7 @@ export async function closeTerminalSession(id: string): Promise<void> {
       // opened (issue #607).
       forgetTerminalOutputRecoveryCounters(id);
       forgetTerminalOutputPipelineCounters(id);
+      forgetTerminalInputDeliveryCounters(id);
     }
   });
 }

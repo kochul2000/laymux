@@ -1,6 +1,7 @@
 import { reportFrontendHealth } from "./tauri-api";
 import { allTerminalOutputPipelineCounters } from "./terminal-output-pipeline-metrics";
 import { allTerminalOutputV3Diagnostics } from "./terminal-output-v3-diagnostics";
+import { allTerminalInputDeliveryCounters } from "./terminal-input-delivery-metrics";
 
 /**
  * Out-of-band frontend responsiveness probe (issue #606).
@@ -87,6 +88,7 @@ export interface FrontendHealthReport {
   stalls: number;
   bridge: FrontendBridgeCounters;
   pipeline: Record<string, unknown>;
+  inputDelivery: Record<string, unknown>;
   terminalOutputV3: ReturnType<typeof allTerminalOutputV3Diagnostics>;
 }
 
@@ -132,6 +134,7 @@ export function startFrontendHealthReporter(): () => void {
         stalls,
         bridge: frontendBridgeCounters(),
         pipeline: allTerminalOutputPipelineCounters(),
+        inputDelivery: allTerminalInputDeliveryCounters(),
         terminalOutputV3: allTerminalOutputV3Diagnostics(),
       }).catch(() => {
         // Retry a current failed attempt on the next probe tick. Ignore a late

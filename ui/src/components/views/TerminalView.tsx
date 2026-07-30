@@ -224,6 +224,10 @@ import {
   type TerminalOutputPipelineCounterName,
 } from "@/lib/terminal-output-pipeline-metrics";
 import {
+  beginTerminalInputDelivery,
+  settleTerminalInputDelivery,
+} from "@/lib/terminal-input-delivery-metrics";
+import {
   TERMINAL_WRITE_BATCH_MAX_BYTES,
   TERMINAL_WRITE_FAIR_QUANTUM_BYTES,
   TerminalWriteBatchQueue,
@@ -509,6 +513,8 @@ function shouldBlockLargePaste(content: string, enabled: boolean): boolean {
 
 /** Notify gate fallback timeout — only used for output idle detector gating. */
 const NOTIFY_GATE_FALLBACK_MS = 3000;
+const HUMAN_INPUT_DELIVERY_FAILURE_MESSAGE =
+  "입력을 터미널에 전달하지 못했습니다. 중복 실행을 막기 위해 자동 재시도하지 않았습니다. 다시 입력하세요.";
 
 /**
  * How long to hold overlay repaints after a DEC 2026 frame flush while
@@ -1155,6 +1161,7 @@ export function TerminalView({
     let currentParsingAttachEpoch: number | undefined;
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
+    let humanInputFailureNotified = false;
     let firstRenderReady = false;
     let startupSettled = false;
     const settleStartupIfReady = () => {
@@ -1184,6 +1191,19 @@ export function TerminalView({
     // unless `cursor-trace.ts` gating is on. See `cursor-trace.ts` for how
     // to enable.
     const trace = createCursorTracer(instanceId);
+    const notifyHumanInputDeliveryFailure = () => {
+      // A repeated IPC outage must remain countable without placing one
+      // action-required alert per keystroke in the notification store.
+      if (cancelled || humanInputFailureNotified) return;
+      humanInputFailureNotified = true;
+      useNotificationStore.getState().addNotification({
+        terminalId: instanceId,
+        workspaceId: resolveWorkspaceId(instanceId),
+        message: HUMAN_INPUT_DELIVERY_FAILURE_MESSAGE,
+        level: "error",
+        requiresAction: true,
+      });
+    };
 
     // Resolve theme from settings color scheme (profile → profileDefaults → none)
     const settingsState = useSettingsStore.getState();
@@ -1578,9 +1598,19 @@ export function TerminalView({
           return;
         }
         trace("ime-composition-commit-on-blur", { text });
-        writeToTerminal(instanceId, text).catch((error: unknown) => {
-          trace("ime-composition-commit-on-blur-failed", { text, error: String(error) });
-        });
+        const byteLength = textEncoder.encode(text).length;
+        const attempt = beginTerminalInputDelivery(instanceId, byteLength);
+        void writeToTerminal(instanceId, text).then(
+          () => settleTerminalInputDelivery(attempt, "succeeded"),
+          (error: unknown) => {
+            if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
+            trace("ime-composition-commit-on-blur-failed", {
+              bytes: byteLength,
+              error: error instanceof Error ? error.name : "unknown",
+            });
+            notifyHumanInputDeliveryFailure();
+          },
+        );
       },
       getAnchor: () => {
         // Prefer the shadow cursor only when it is actually the trusted position.
@@ -2968,7 +2998,19 @@ export function TerminalView({
       if (route === "suppress") return;
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
-        writeToTerminal(instanceId, data).catch(() => {});
+        const byteLength = textEncoder.encode(data).length;
+        const attempt = beginTerminalInputDelivery(instanceId, byteLength);
+        void writeToTerminal(instanceId, data).then(
+          () => settleTerminalInputDelivery(attempt, "succeeded"),
+          (error: unknown) => {
+            if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
+            trace("terminal-human-input-write-failed", {
+              bytes: byteLength,
+              error: error instanceof Error ? error.name : "unknown",
+            });
+            notifyHumanInputDeliveryFailure();
+          },
+        );
         return;
       }
       writeTerminalProtocolReply(instanceId, data).catch(() => {});

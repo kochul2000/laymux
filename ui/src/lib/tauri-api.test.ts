@@ -41,12 +41,19 @@ import {
   recordTerminalOutputRecovery,
   terminalOutputRecoveryCounters,
 } from "./terminal-output-recovery-metrics";
+import {
+  allTerminalInputDeliveryCounters,
+  beginTerminalInputDelivery,
+  resetTerminalInputDeliveryCounters,
+  settleTerminalInputDelivery,
+} from "./terminal-input-delivery-metrics";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetTerminalInputDeliveryCounters();
 });
 
 describe("tauri-api", () => {
@@ -280,6 +287,29 @@ describe("tauri-api", () => {
       await closeTerminalSession("t-close-metrics");
 
       expect(terminalOutputRecoveryCounters("t-close-metrics").gap).toBe(0);
+    });
+
+    it("fences input diagnostics before a pending backend close resolves", async () => {
+      let resolveClose!: () => void;
+      mockInvoke.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveClose = resolve;
+          }),
+      );
+      const attempt = beginTerminalInputDelivery("t-close-input-fence", 1);
+
+      const close = closeTerminalSession("t-close-input-fence");
+      await vi.waitFor(() =>
+        expect(mockInvoke).toHaveBeenCalledWith("close_terminal_session", {
+          id: "t-close-input-fence",
+        }),
+      );
+
+      expect(allTerminalInputDeliveryCounters()).toEqual({});
+      expect(settleTerminalInputDelivery(attempt, "succeeded")).toBe(false);
+      resolveClose();
+      await close;
     });
 
     it("drops the counters even when the close command fails", async () => {

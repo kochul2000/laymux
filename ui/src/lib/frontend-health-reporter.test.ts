@@ -16,6 +16,12 @@ vi.mock("./terminal-output-pipeline-metrics", () => ({
   })),
 }));
 
+vi.mock("./terminal-input-delivery-metrics", () => ({
+  allTerminalInputDeliveryCounters: vi.fn(() => ({
+    "terminal-1": { attempts: 2, failed: 1 },
+  })),
+}));
+
 vi.mock("./terminal-output-v3-diagnostics", () => ({
   allTerminalOutputV3Diagnostics: vi.fn(() => ({
     "terminal-1": {
@@ -67,6 +73,7 @@ describe("startFrontendHealthReporter", () => {
       stalls: 0,
       bridge: frontendBridgeCounters(),
       pipeline: { "terminal-1": { deltaEvents: 2 } },
+      inputDelivery: { "terminal-1": { attempts: 2, failed: 1 } },
       terminalOutputV3: {
         "terminal-1": {
           state: "active",

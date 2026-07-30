@@ -27,6 +27,15 @@ describe("resolveChunkGroup", () => {
     ).toBeUndefined();
   });
 
+  it("isolates input delivery diagnostics from the near-limit entry chunk", () => {
+    expect(resolveChunkGroup("/repo/ui/src/lib/terminal-input-delivery-metrics.ts")).toBe(
+      "terminal-input-delivery-metrics",
+    );
+    expect(
+      resolveChunkGroup("/repo/ui/src/lib/terminal-input-delivery-metrics.test.ts"),
+    ).toBeUndefined();
+  });
+
   it.each([
     ["/repo/ui/node_modules/@xterm/xterm/lib/xterm.js", "xterm"],
     ["/repo/ui/node_modules/html2canvas/dist/html2canvas.js", "html2canvas"],
