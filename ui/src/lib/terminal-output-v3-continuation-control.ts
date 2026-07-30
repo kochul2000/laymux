@@ -62,8 +62,13 @@ export class TerminalOutputV3ContinuationControl {
       return Promise.resolve(this.options.failStop("ingress:session-mismatch"));
     }
     const oldGrantSuccessor = envelope.grantId === closing.grant.grantId;
-    const settledNullSuccessor = closing.closeAccepted && envelope.grantId === null;
-    if (!oldGrantSuccessor && !settledNullSuccessor) {
+    // Rust clears its lease grant before its close invoke resolves. Its next
+    // output event can therefore arrive with no grant while this close is
+    // still awaiting that response. Keep the envelope gated until
+    // `closeAccepted`, rather than treating that ordered successor as a
+    // foreign grant.
+    const nullGrantSuccessor = envelope.grantId === null;
+    if (!oldGrantSuccessor && !nullGrantSuccessor) {
       return Promise.resolve(this.options.failStop("grant_mismatch"));
     }
     if (envelope.envelopeId !== ingress.expectedEnvelopeId) {
