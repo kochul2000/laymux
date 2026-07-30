@@ -19,10 +19,19 @@ describe("DockStore", () => {
     expect(left?.activeView).toBe("WorkspaceSelectorView");
   });
 
-  it("right dock ships Memo + FileExplorer tabs by default", () => {
+  it("right dock shows MemoView and FileExplorerView in separate panes by default", () => {
     const right = useDockStore.getInitialState().docks.find((d) => d.position === "right")!;
     expect(right.activeView).toBe("MemoView");
-    expect(right.views).toEqual(["MemoView", "FileExplorerView"]);
+    expect(right.views).toEqual([]);
+    expect(right.panes).toHaveLength(2);
+    expect(right.panes.map((pane) => pane.view)).toEqual([
+      { type: "MemoView" },
+      { type: "FileExplorerView" },
+    ]);
+    expect(right.panes.map(({ x, y, w, h }) => ({ x, y, w, h }))).toEqual([
+      { x: 0, y: 0, w: 1, h: 0.5 },
+      { x: 0, y: 0.5, w: 1, h: 0.5 },
+    ]);
     expect(right.visible).toBe(true);
   });
 
