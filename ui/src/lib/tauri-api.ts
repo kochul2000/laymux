@@ -177,6 +177,7 @@ export async function acknowledgeTerminalOutputEnvelope(
 
 export type TerminalOutputEnvelopeRepairStatus =
   | "idle"
+  | "eventPending"
   | "exact"
   | "stale"
   | "alreadyReceipted"

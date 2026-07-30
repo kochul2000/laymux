@@ -197,6 +197,15 @@ fn emit_with_retry(
     Ok(())
 }
 
+fn disarm_emitter_call(inner: &DeliveryInner) -> Result<(), TerminalOutputDeliveryCloseReason> {
+    let mut state = inner.state.lock().map_err(|poisoned| {
+        TerminalOutputDeliveryCloseReason::ContractViolation(poisoned.to_string())
+    })?;
+    state.emitter_call_expires_at = None;
+    inner.changed.notify_all();
+    Ok(())
+}
+
 fn arm_emitter_call(
     inner: &DeliveryInner,
     identity: &TerminalOutputEnvelopeIdentity,
@@ -213,15 +222,6 @@ fn arm_emitter_call(
         return Ok(());
     }
     state.emitter_call_expires_at = Some(Instant::now() + inner.receipt_timeout);
-    inner.changed.notify_all();
-    Ok(())
-}
-
-fn disarm_emitter_call(inner: &DeliveryInner) -> Result<(), TerminalOutputDeliveryCloseReason> {
-    let mut state = inner.state.lock().map_err(|poisoned| {
-        TerminalOutputDeliveryCloseReason::ContractViolation(poisoned.to_string())
-    })?;
-    state.emitter_call_expires_at = None;
     inner.changed.notify_all();
     Ok(())
 }
@@ -370,9 +370,14 @@ fn build_next(
         ));
     }
     state.next_envelope_id = envelope_id;
+    let created_at = Instant::now();
+    let direct_event_grace =
+        Duration::from_millis(crate::constants::TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS)
+            .min(receipt_timeout / 2);
     state.in_flight = Some(InFlightEnvelope {
         envelope: envelope.clone(),
-        expires_at: Instant::now() + receipt_timeout,
+        repair_not_before: created_at + direct_event_grace,
+        expires_at: created_at + receipt_timeout,
         repair_attempts: 0,
     });
     state.pending_bytes = state.pending.iter().map(|item| item.0.data.len()).sum();

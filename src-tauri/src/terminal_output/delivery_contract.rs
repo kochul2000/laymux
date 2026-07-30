@@ -73,6 +73,7 @@ pub type TerminalOutputReceiptCompletion = TerminalOutputControlCompletion;
 #[serde(rename_all = "camelCase")]
 pub enum TerminalOutputEnvelopeRepairStatus {
     Exact,
+    EventPending,
     Idle,
     Stale,
     AlreadyReceipted,
@@ -105,6 +106,7 @@ pub(super) struct DeliveryLease {
 #[derive(Debug, Clone)]
 pub(super) struct InFlightEnvelope {
     pub(super) envelope: TerminalOutputDeltaEnvelopeV3,
+    pub(super) repair_not_before: Instant,
     pub(super) expires_at: Instant,
     pub(super) repair_attempts: u8,
 }

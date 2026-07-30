@@ -108,7 +108,7 @@ describe("terminal output v3 Tauri API", () => {
       seqStart: 100,
     });
     expectTypeOf<TerminalOutputEnvelopeRepairStatus>().toEqualTypeOf<
-      "idle" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted"
+      "idle" | "eventPending" | "exact" | "stale" | "alreadyReceipted" | "mismatch" | "exhausted"
     >();
   });
 

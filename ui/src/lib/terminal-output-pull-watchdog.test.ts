@@ -26,4 +26,14 @@ describe("TerminalOutputPullWatchdogCadence", () => {
     const alreadyPastBound = new TerminalOutputPullWatchdogCadence(0);
     expect(alreadyPastBound.shouldPoll(3_001)).toBe(true);
   });
+
+  it("forces the next callback after the server reports a pending direct event", () => {
+    const cadence = new TerminalOutputPullWatchdogCadence(0);
+
+    expect(cadence.shouldPoll(1_000)).toBe(true);
+    expect(cadence.shouldPoll(2_600)).toBe(false);
+    cadence.requireNextPoll();
+    expect(cadence.shouldPoll(2_700)).toBe(true);
+    expect(cadence.shouldPoll(3_700)).toBe(true);
+  });
 });

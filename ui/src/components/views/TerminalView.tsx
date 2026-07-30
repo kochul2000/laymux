@@ -3769,6 +3769,7 @@ export function TerminalView({
     let hasBufferedOutputV3 = false;
     let outputV3FailStoppedReason: string | null = null;
     let outputV3Runtime: TerminalOutputV3Runtime | undefined;
+    const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
     const outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
       instanceId,
       failStopTerminalOutputSurface,
@@ -4344,6 +4345,7 @@ export function TerminalView({
           if (isCurrent()) publishOutputV3Diagnostics?.();
           return accepted;
         },
+        onRepairEventPending: () => outputPullWatchdogCadence.requireNextPoll(),
         onFailStop: failStopOutputV3,
         getLifecycleFacts: () => ({
           parsersReady: outputV3ParsersReady,
@@ -5206,7 +5208,6 @@ export function TerminalView({
       outputFailStoppedListenerReady,
     ]).then(() => undefined);
 
-    const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
     const outputPullWatchdogTimer = setInterval(() => {
       if (cancelled) return;
       const now = monotonicNow();

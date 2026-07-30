@@ -10,15 +10,25 @@ const TERMINAL_OUTPUT_PULL_WATCHDOG_MAX_POLL_INTERVAL_MS = 3_000;
 export class TerminalOutputPullWatchdogCadence {
   private lastTickAt: number;
   private deferredPollNotBefore: number | null = null;
+  private nextPollRequired = false;
 
   constructor(startedAt: number) {
     this.lastTickAt = startedAt;
+  }
+
+  requireNextPoll(): void {
+    this.nextPollRequired = true;
+    this.deferredPollNotBefore = null;
   }
 
   shouldPoll(now: number): boolean {
     const previousTickAt = this.lastTickAt;
     const elapsed = Math.max(0, now - previousTickAt);
     this.lastTickAt = now;
+    if (this.nextPollRequired) {
+      this.nextPollRequired = false;
+      return true;
+    }
     if (this.deferredPollNotBefore !== null) {
       if (now < this.deferredPollNotBefore) return false;
       this.deferredPollNotBefore = null;
