@@ -282,6 +282,53 @@ describe("TerminalParserAdmission", () => {
     expect(order).toEqual(["checkpoint", "checkpoint", "other", "checkpoint"]);
   });
 
+  it("fills a checkpoint quantum before handing the pane turn to its visible sibling", () => {
+    const scheduled: Array<() => void> = [];
+    const localScheduled: Array<() => void> = [];
+    const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
+    const admission = new TerminalParserAdmission(
+      scheduler,
+      createTerminalWriteFairOwner("two-lane"),
+      () => "background",
+      (task) => {
+        localScheduled.push(task);
+        return () => {
+          const index = localScheduled.indexOf(task);
+          if (index >= 0) localScheduled.splice(index, 1);
+        };
+      },
+    );
+    const order: string[] = [];
+    let releaseCheckpoint: (() => void) | undefined;
+    const checkpointTurn = (release: () => void) => {
+      order.push("checkpoint");
+      releaseCheckpoint = release;
+    };
+
+    admission.request("checkpoint", checkpointTurn, TERMINAL_WRITE_FAIR_QUANTUM_BYTES / 2);
+    scheduler.request(createTerminalWriteFairOwner("other"), (release) => {
+      order.push("other");
+      release();
+    });
+    admission.request("visible", (release) => {
+      order.push("visible");
+      release();
+    });
+    releaseCheckpoint?.();
+    admission.request("checkpoint", checkpointTurn, TERMINAL_WRITE_FAIR_QUANTUM_BYTES / 2);
+    expect(order).toEqual(["checkpoint", "checkpoint"]);
+
+    releaseCheckpoint?.();
+    admission.request("checkpoint", checkpointTurn, 1);
+    expect(order).toEqual(["checkpoint", "checkpoint"]);
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint", "checkpoint", "other"]);
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint", "checkpoint", "other", "visible"]);
+    scheduled.shift()?.();
+    expect(order).toEqual(["checkpoint", "checkpoint", "other", "visible", "checkpoint"]);
+  });
+
   it("hands off instead of splitting a checkpoint operation across leases", () => {
     const scheduled: Array<() => void> = [];
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));

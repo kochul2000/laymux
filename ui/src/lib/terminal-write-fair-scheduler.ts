@@ -20,8 +20,8 @@ const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
 /** A waiting owner becomes urgent after this many other completed admissions. */
 export const TERMINAL_WRITE_MAX_SKIPPED_TURNS = 8;
 
-/** Let non-MessageChannel browser task sources compete within two eight-pane rounds. */
-export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 16;
+/** Let non-MessageChannel browser task sources compete at least once per pane round. */
+export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 8;
 
 /** Create an identity token scoped to one TerminalView xterm effect lifetime. */
 export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWriteFairOwner {

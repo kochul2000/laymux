@@ -83,6 +83,13 @@ export class TerminalParserAdmission {
     if (this.disposed || this.pending.has(lane)) return;
     if (lane === "checkpoint" && this.tryContinueCheckpoint(turn, requestedBytes)) return;
     this.pending.set(lane, { turn, requestedBytes });
+    // A visible sibling discovered during a checkpoint callback belongs to the
+    // pane's next turn. Keep it pending while the current checkpoint turn uses
+    // its remaining byte/callback budget; the held-lease edge below queues the
+    // sibling if no checkpoint continuation appears.
+    if (lane === "visible" && (this.active?.lane === "checkpoint" || this.heldCheckpointLease)) {
+      return;
+    }
     this.ensureGlobalTurn();
     if (this.heldCheckpointLease) this.releaseHeldCheckpointLease();
   }
@@ -181,14 +188,20 @@ export class TerminalParserAdmission {
     active.leaseBytesConsumed += active.turnBytes;
     active.leaseCallbacksConsumed += 1;
     if (this.active === active) this.active = undefined;
-    // Requeue while the global lease is still active. The scheduler then keeps
-    // its macrotask yield between consecutive parser turns from the same pane.
-    this.ensureGlobalTurn();
-    if (active.lane === "checkpoint" && !this.globalTurnPending && !this.disposed) {
+    const checkpointTurnLimit = this.turnLimit(this.scheduler.hasPendingOtherOwner(this.owner));
+    const canContinueCheckpoint =
+      active.leaseBytesConsumed < checkpointTurnLimit &&
+      active.leaseCallbacksConsumed < TERMINAL_CHECKPOINT_MAX_CALLBACKS_PER_LEASE;
+    if (
+      active.lane === "checkpoint" &&
+      !this.disposed &&
+      !this.pending.has("checkpoint") &&
+      (this.pending.size === 0 || canContinueCheckpoint)
+    ) {
       // The next Promise-chain operation becomes visible only in a microtask
       // after this callback. Hold the global lease through one host-task edge
-      // so it can either continue within the remaining byte quantum or requeue
-      // before release without losing its smooth-WRR balance.
+      // so it can continue within the remaining byte quantum even when the
+      // visible sibling is already pending for this pane's next turn.
       const held: HeldCheckpointLease = {
         releaseGlobal: active.releaseGlobal,
         leaseBytesConsumed: active.leaseBytesConsumed,
@@ -198,12 +211,15 @@ export class TerminalParserAdmission {
       this.scheduleCheckpointRelease();
       return;
     }
+    // Requeue while the global lease is still active. The scheduler then keeps
+    // its macrotask yield between consecutive parser turns from the same pane.
+    this.ensureGlobalTurn();
     active.releaseGlobal();
   }
 
   private tryContinueCheckpoint(turn: TerminalParserTurn, requestedBytes?: number): boolean {
     const held = this.heldCheckpointLease;
-    if (!held || this.active || this.pending.size > 0) return false;
+    if (!held || this.active || this.pending.has("checkpoint")) return false;
     const contended = this.scheduler.hasPendingOtherOwner(this.owner);
     const turnLimit = this.turnLimit(contended);
     const remainingBytes = turnLimit - held.leaseBytesConsumed;
@@ -245,6 +261,7 @@ export class TerminalParserAdmission {
     if (!held) return;
     this.heldCheckpointLease = undefined;
     this.cancelScheduledCheckpointRelease();
+    this.ensureGlobalTurn();
     held.releaseGlobal();
   }
 
