@@ -2,10 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalOutputControlOperationRegistry } from "./terminal-output-control-registry";
 import {
+  normalizeTerminalOutputEnvelope,
+  type TerminalOutputEnvelope,
+  type TerminalOutputEnvelopeReceiptIdentity,
+} from "./terminal-output-envelope";
+import { TerminalOutputEnvelopeIngress } from "./terminal-output-envelope-ingress";
+import {
   TerminalOutputV3Runtime,
   type TerminalOutputV3RepairResponse,
   type TerminalOutputV3RuntimeOptions,
 } from "./terminal-output-v3-runtime";
+import { TerminalOutputV3RepairState } from "./terminal-output-v3-repair-state";
+import type { TerminalOutputV3SurfaceResult } from "./terminal-output-v3-surface-controller";
 import {
   acknowledgeTerminalOutputEnvelope,
   closeTerminalOutputContinuation,
@@ -134,6 +142,84 @@ describe("TerminalOutputV3Runtime exact repair", () => {
     expect(h.runtime.diagnostics()).toMatchObject({
       admittedSeq: opener.length + 3,
       nextEnvelopeId: 5,
+    });
+  });
+
+  it("serializes rapid full-frame successors across runtime and continuation drains", async () => {
+    const firstHold = deferred<boolean>();
+    mockHoldTerminalOutputContinuation.mockReturnValueOnce(firstHold.promise);
+    const repair = vi.fn(() => Promise.resolve({ status: "idle" as const, envelope: null }));
+    const h = harness(repair);
+    const frame = "\u001b[?2026hX\u001b[?2026l";
+    const receives: Array<Promise<unknown>> = [];
+    let seq = 0;
+    for (let envelopeId = 1; envelopeId <= 4; envelopeId += 1) {
+      receives.push(h.runtime.receive(payload(envelopeId, seq, frame), envelopeId));
+      seq += frame.length;
+    }
+    await vi.waitFor(() => expect(mockHoldTerminalOutputContinuation).toHaveBeenCalledOnce());
+    firstHold.resolve(true);
+
+    await expect(Promise.all(receives)).resolves.toEqual(
+      [1, 2, 3, 4].map((envelopeId) => ({ kind: "accepted", envelopeId })),
+    );
+    expect(repair).not.toHaveBeenCalled();
+    expect(h.failStops).toEqual([]);
+    expect(h.runtime.diagnostics()).toMatchObject({
+      admittedSeq: seq,
+      parsedSeq: seq,
+      nextEnvelopeId: 5,
+    });
+  });
+
+  it("keeps one drain owner while the head observed successor is still gated", async () => {
+    interface DrainInternals {
+      ingress: TerminalOutputEnvelopeIngress;
+      repairState: TerminalOutputV3RepairState;
+      controller: {
+        receiveValidated(
+          envelope: TerminalOutputEnvelope,
+          now: number,
+        ): Promise<TerminalOutputV3SurfaceResult>;
+      };
+      drainPendingObserved(strict: boolean): Promise<void>;
+    }
+
+    const h = harness(() => Promise.resolve({ status: "idle", envelope: null }));
+    const internals = h.runtime as unknown as DrainInternals;
+    const firstEnvelope = normalizeTerminalOutputEnvelope(payload(1, 0, "A"));
+    const secondEnvelope = normalizeTerminalOutputEnvelope(payload(2, 1, "B"));
+    const firstAdmission = internals.repairState.queueObserved(firstEnvelope, 1);
+    const secondAdmission = internals.repairState.queueObserved(secondEnvelope, 2);
+    if (firstAdmission.kind === "conflict" || secondAdmission.kind === "conflict") {
+      throw new Error("test setup failed to queue the observed successor chain");
+    }
+    const headGate = deferred<void>();
+    const accept = (envelope: TerminalOutputEnvelope): TerminalOutputV3SurfaceResult => {
+      internals.ingress.acceptValidated(envelope);
+      const identity: TerminalOutputEnvelopeReceiptIdentity & { terminalId: string } = {
+        terminalId: "term-1",
+        ...envelope.receiptIdentity,
+      };
+      internals.ingress.completeReceipt(identity);
+      return { kind: "accepted", envelopeId: envelope.envelopeId };
+    };
+    const receiveValidated = vi
+      .spyOn(internals.controller, "receiveValidated")
+      .mockImplementationOnce((envelope) => headGate.promise.then(() => accept(envelope)))
+      .mockImplementation((envelope) => Promise.resolve(accept(envelope)));
+
+    const firstDrain = internals.drainPendingObserved(true);
+    await vi.waitFor(() => expect(receiveValidated).toHaveBeenCalledOnce());
+    const secondDrain = internals.drainPendingObserved(true);
+    headGate.resolve();
+
+    await Promise.all([firstDrain, secondDrain, firstAdmission.promise, secondAdmission.promise]);
+    expect(receiveValidated).toHaveBeenCalledTimes(2);
+    expect(h.failStops).toEqual([]);
+    expect(internals.ingress.snapshot()).toMatchObject({
+      admittedSeq: 2,
+      expectedEnvelopeId: 3,
     });
   });
 

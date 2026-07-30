@@ -84,6 +84,7 @@ export class TerminalOutputV3Runtime {
   private readonly repairTransport: TerminalOutputV3RepairTransport;
   private readonly repairState = new TerminalOutputV3RepairState();
   private repairPromise: Promise<void> | undefined;
+  private pendingObservedDrain: Promise<void> | undefined;
   private disposed = false;
   private repairCount = 0;
   private lastRepairReason: string | null = null;
@@ -369,7 +370,17 @@ export class TerminalOutputV3Runtime {
     await this.drainPendingObserved(true);
   }
 
-  private async drainPendingObserved(strict: boolean): Promise<void> {
+  private drainPendingObserved(strict: boolean): Promise<void> {
+    if (this.pendingObservedDrain) return this.pendingObservedDrain;
+    const drain = this.drainPendingObservedNow(strict);
+    const tracked = drain.finally(() => {
+      if (this.pendingObservedDrain === tracked) this.pendingObservedDrain = undefined;
+    });
+    this.pendingObservedDrain = tracked;
+    return tracked;
+  }
+
+  private async drainPendingObservedNow(strict: boolean): Promise<void> {
     while (this.isCurrent()) {
       const pending = this.repairState.pending;
       if (!pending) return;
