@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { ViewInstanceConfig } from "@/stores/types";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -13,6 +13,7 @@ import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { getTerminalRestartCwd } from "@/lib/terminal-restart";
 
 export interface GridPane {
   id: string;
@@ -133,6 +134,25 @@ export function PaneGrid({
   const dndEnabled = isActive && !!onSwapPanes;
   const dragSrcRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [terminalRestarts, setTerminalRestarts] = useState<
+    Record<string, { epoch: number; cwd?: string; fresh: boolean }>
+  >({});
+
+  const restartTerminalView = useCallback((pane: GridPane) => {
+    const cwd = getTerminalRestartCwd(pane.id, pane.view);
+    setTerminalRestarts((previous) => ({
+      ...previous,
+      [pane.id]: { epoch: (previous[pane.id]?.epoch ?? 0) + 1, cwd, fresh: true },
+    }));
+  }, []);
+
+  const consumeTerminalRestart = useCallback((paneId: string) => {
+    setTerminalRestarts((previous) => {
+      const restart = previous[paneId];
+      if (!restart?.fresh) return previous;
+      return { ...previous, [paneId]: { ...restart, fresh: false } };
+    });
+  }, []);
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {
     dragSrcRef.current = paneId;
@@ -247,6 +267,8 @@ export function PaneGrid({
                 onClear: onSetPaneView
                   ? () => onSetPaneView(pane.id, { type: "EmptyView" })
                   : undefined,
+                onRestart:
+                  pane.view.type === "TerminalView" ? () => restartTerminalView(pane) : undefined,
                 onDelete:
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
@@ -288,6 +310,10 @@ export function PaneGrid({
                   emptyViewContext={emptyViewContext}
                   location={location}
                   onKeyboardActivity={hover.clear}
+                  terminalRestartEpoch={terminalRestarts[pane.id]?.epoch}
+                  terminalRestartCwd={terminalRestarts[pane.id]?.cwd}
+                  terminalRestartFresh={terminalRestarts[pane.id]?.fresh}
+                  onTerminalRestartConsumed={() => consumeTerminalRestart(pane.id)}
                 />
               ) : (
                 <PaneLoadingPlaceholder data-testid={`pane-loading-placeholder-${i}`} />

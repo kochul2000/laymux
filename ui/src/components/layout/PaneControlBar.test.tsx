@@ -289,6 +289,37 @@ describe("PaneControlBar", () => {
     expect(defaultActions.onClear).toHaveBeenCalled();
   });
 
+  it("Restart View는 terminal에서만 빨간 위험 버튼으로 표시하고 동작한다", async () => {
+    const onRestart = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onRestart }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const button = screen.getByTestId("pane-control-restart");
+    expect(button).toHaveAttribute("title", "Restart view");
+    expect(button.style.color).toBe("var(--red)");
+    await user.click(button);
+    expect(onRestart).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PaneControlBar
+        currentView={{ type: "MemoView" }}
+        actions={{ ...defaultActions, onRestart }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-restart")).not.toBeInTheDocument();
+  });
+
   // -- Pinned mode --
 
   it("clicking pin toggles to pinned mode", async () => {

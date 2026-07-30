@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -10,6 +11,7 @@ import { PaneControlBar } from "./PaneControlBar";
 import { PaneGrid } from "./PaneGrid";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
+import { getTerminalRestartCwd } from "@/lib/terminal-restart";
 
 interface DockProps {
   position: DockPosition;
@@ -58,6 +60,11 @@ export function Dock({
   const singleHover = useHoverTimer(hoverIdleSeconds);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
+  const [terminalRestart, setTerminalRestart] = useState<{
+    epoch: number;
+    cwd?: string;
+    fresh: boolean;
+  } | null>(null);
 
   // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
@@ -150,6 +157,17 @@ export function Dock({
                     ? () => onSwitchView("EmptyView")
                     : undefined
                 : undefined,
+            onRestart:
+              singleView?.type === "TerminalView" && singlePaneId
+                ? () => {
+                    const cwd = getTerminalRestartCwd(singlePaneId, singleView);
+                    setTerminalRestart((previous) => ({
+                      epoch: (previous?.epoch ?? 0) + 1,
+                      cwd,
+                      fresh: true,
+                    }));
+                  }
+                : undefined,
             onToggleCwdSend:
               singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
                 ? () => {
@@ -186,6 +204,14 @@ export function Dock({
               }
               emptyViewContext="dock"
               location="dock"
+              terminalRestartEpoch={terminalRestart?.epoch}
+              terminalRestartCwd={terminalRestart?.cwd}
+              terminalRestartFresh={terminalRestart?.fresh}
+              onTerminalRestartConsumed={() => {
+                setTerminalRestart((previous) =>
+                  previous?.fresh ? { ...previous, fresh: false } : previous,
+                );
+              }}
             />
           ) : (
             <PaneLoadingPlaceholder data-testid={`dock-pane-loading-${singlePaneId}`} />

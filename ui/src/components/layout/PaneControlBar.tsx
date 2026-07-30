@@ -26,6 +26,7 @@ export type { ControlBarMode } from "@/stores/settings-store";
 export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
+  onRestart?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
   onChangeView?: (config: ViewInstanceConfig) => void;
@@ -510,6 +511,30 @@ function BarContent({
                   <circle cx="7" cy="7" r="1.7" stroke="currentColor" strokeWidth="1.2" />
                 </svg>
               )}
+            </BarBtn>
+          )}
+          {currentView.type === "TerminalView" && actions.onRestart && (
+            <BarBtn
+              testId="pane-control-restart"
+              onClick={actions.onRestart}
+              title="Restart view"
+              danger
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <path
+                  d="M10.5 6.5A4.5 4.5 0 1 1 9.2 3.3"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M9.2 1.8v2.1h2.1"
+                  stroke="currentColor"
+                  strokeWidth="1.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
             </BarBtn>
           )}
           {actions.onClear && (
