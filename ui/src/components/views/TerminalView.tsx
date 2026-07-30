@@ -4856,11 +4856,14 @@ export function TerminalView({
               );
             },
             tryStartOperation: () => outputControlOperations.tryStart("ack"),
-            onAdmissionBlocked: () => {
+            onAdmissionBlocked: (resume) => {
               if (!isCurrentAttach()) return;
               if (outputTransportMode === "v3") {
-                failStopOutputV3("parsed_ack_admission_blocked");
-                return;
+                if (outputControlOperations.orphanCapacityExhausted("ack")) {
+                  failStopOutputV3("control_orphan_cap");
+                  return;
+                }
+                return outputControlOperations.waitForCapacityOrTimeout("ack", resume);
               }
               const retryDelayMs = boundedTerminalOutputControlBackoff(
                 Math.max(1, outputAckTimeoutStreak),

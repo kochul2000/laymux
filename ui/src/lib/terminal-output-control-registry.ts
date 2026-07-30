@@ -22,8 +22,12 @@ export interface TerminalOutputControlMountScope {
   globalOutstanding(kind: TerminalOutputControlOperationKind): number;
   localTimedOut(kind: TerminalOutputControlOperationKind): number;
   globalTimedOut(kind: TerminalOutputControlOperationKind): number;
-  waitForCapacity(kind: TerminalOutputControlOperationKind, waiter: () => void): void;
-  waitForCapacityOrTimeout(kind: TerminalOutputControlOperationKind, waiter: () => void): void;
+  orphanCapacityExhausted(kind: TerminalOutputControlOperationKind): boolean;
+  waitForCapacity(kind: TerminalOutputControlOperationKind, waiter: () => void): () => void;
+  waitForCapacityOrTimeout(
+    kind: TerminalOutputControlOperationKind,
+    waiter: () => void,
+  ): () => void;
   dispose(): void;
 }
 
@@ -156,10 +160,19 @@ export class TerminalOutputControlOperationRegistry {
       globalOutstanding: (kind) => this.globalBudgets[budgetKindFor(kind)].outstanding,
       localTimedOut: (kind) => this.entries.get(terminalId)?.[budgetKindFor(kind)].timedOut ?? 0,
       globalTimedOut: (kind) => this.globalBudgets[budgetKindFor(kind)].timedOut,
+      orphanCapacityExhausted: (kind) => {
+        const budgetKind = budgetKindFor(kind);
+        const localTimedOut = this.entries.get(terminalId)?.[budgetKind].timedOut ?? 0;
+        return (
+          localTimedOut >= this.maxOutstandingPerTerminalKind ||
+          this.globalBudgets[budgetKind].timedOut >= this.maxOutstandingPerWindowKind
+        );
+      },
       waitForCapacity: (kind, callback) => {
-        if (!isCurrent()) return;
+        if (!isCurrent()) return () => {};
+        const budgetKind = budgetKindFor(kind);
         this.removeOwnerWaiters(owner, kind);
-        this.capacityWaiters[budgetKindFor(kind)].push({
+        this.capacityWaiters[budgetKind].push({
           owner,
           terminalId,
           isCurrent,
@@ -167,11 +180,19 @@ export class TerminalOutputControlOperationRegistry {
           callback,
         });
         this.wakeOneCapacityWaiter(kind);
+        let cancelled = false;
+        return () => {
+          if (cancelled) return;
+          cancelled = true;
+          this.removeOwnerWaiters(owner, kind);
+          this.releaseReservation(owner, budgetKind);
+        };
       },
       waitForCapacityOrTimeout: (kind, callback) => {
-        if (!isCurrent()) return;
+        if (!isCurrent()) return () => {};
+        const budgetKind = budgetKindFor(kind);
         this.removeOwnerWaiters(owner, kind);
-        this.capacityWaiters[budgetKindFor(kind)].push({
+        this.capacityWaiters[budgetKind].push({
           owner,
           terminalId,
           isCurrent,
@@ -179,6 +200,13 @@ export class TerminalOutputControlOperationRegistry {
           callback,
         });
         this.wakeOneCapacityWaiter(kind);
+        let cancelled = false;
+        return () => {
+          if (cancelled) return;
+          cancelled = true;
+          this.removeOwnerWaiters(owner, kind);
+          this.releaseReservation(owner, budgetKind);
+        };
       },
       dispose: () => {
         if (disposed) return;

@@ -10205,6 +10205,102 @@ describe("TerminalView desktop input composer", () => {
     );
   });
 
+  it("waits for normal v3 ACK capacity without reset, replay, or a replacement lease", async () => {
+    const holders = Array.from({ length: 6 }, (_, index) => {
+      const scope = terminalOutputControlOperationRegistry.mount(`ack-holder-${index}`);
+      const operation = scope.tryStart("ack");
+      expect(operation).toBeDefined();
+      return { scope, operation };
+    });
+    const terminalId = "t-output-v3-ack-capacity-wait";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(5));
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+
+    try {
+      await waitForTerminalInputReady();
+      const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        payload: unknown,
+      ) => void;
+      const attachCount = mockAttachTerminalOutput.mock.calls.length;
+      const resetCount = mockReset.mock.calls.length;
+      mockAcknowledgeTerminalOutput.mockClear();
+
+      act(() => emitV3(v3Envelope(5, 0, "capacity")));
+      await vi.waitFor(() => expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledOnce());
+      await act(async () => Promise.resolve());
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+      expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+
+      holders[0].operation?.settle();
+      await vi.waitFor(() =>
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(
+          terminalId,
+          7,
+          "lease-v3",
+          new TextEncoder().encode("capacity").byteLength,
+        ),
+      );
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCount);
+      expect(mockReset).toHaveBeenCalledTimes(resetCount);
+      expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      for (const holder of holders) {
+        holder.operation?.settle();
+        holder.scope.dispose();
+      }
+    }
+  });
+
+  it("fail-stops a v3 ACK waiter when real timed-out orphans reach the hard cap", async () => {
+    const holders = Array.from({ length: 6 }, (_, index) => {
+      const scope = terminalOutputControlOperationRegistry.mount(`ack-orphan-${index}`);
+      const operation = scope.tryStart("ack");
+      expect(operation).toBeDefined();
+      return { scope, operation };
+    });
+    const terminalId = "t-output-v3-ack-orphan-cap";
+    mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(7));
+    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+
+    try {
+      await waitForTerminalInputReady();
+      const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        payload: unknown,
+      ) => void;
+      const attachCount = mockAttachTerminalOutput.mock.calls.length;
+      const resetCount = mockReset.mock.calls.length;
+      mockAcknowledgeTerminalOutput.mockClear();
+
+      act(() => emitV3(v3Envelope(7, 0, "orphan-cap")));
+      await vi.waitFor(() => expect(mockAcknowledgeTerminalOutputEnvelope).toHaveBeenCalledOnce());
+      await act(async () => Promise.resolve());
+      expect(mockAcknowledgeTerminalOutput).not.toHaveBeenCalled();
+
+      act(() => {
+        for (const holder of holders) holder.operation?.markTimedOut();
+      });
+      await vi.waitFor(() =>
+        expect(mockFailStopTerminalOutputSurface).toHaveBeenCalledWith(
+          terminalId,
+          7,
+          "lease-v3",
+          "control_orphan_cap",
+        ),
+      );
+      expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toBeInTheDocument();
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCount);
+      expect(mockReset).toHaveBeenCalledTimes(resetCount);
+      expect(mockResumeTerminalOutput).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      for (const holder of holders) {
+        holder.operation?.settle();
+        holder.scope.dispose();
+      }
+    }
+  });
+
   it("fail-stops a rejected v3 receipt without reset, repair, or replacement attach", async () => {
     const terminalId = "t-output-v3-fail-stop";
     mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(9));

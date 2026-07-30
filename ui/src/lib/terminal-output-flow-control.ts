@@ -8,7 +8,7 @@ export interface TerminalOutputFlowAcknowledgerOptions {
   onTimeout?: () => void;
   onConfirmed?: (seq: number) => void;
   tryStartOperation?: () => TerminalOutputControlOperation | undefined;
-  onAdmissionBlocked?: () => void;
+  onAdmissionBlocked?: (resume: () => void) => (() => void) | void;
 }
 
 const DEFAULT_ACK_RETRY_MS = 50;
@@ -33,8 +33,10 @@ export class TerminalOutputFlowAcknowledger {
   private readonly onTimeout?: () => void;
   private readonly onConfirmed?: (seq: number) => void;
   private readonly tryStartOperation?: () => TerminalOutputControlOperation | undefined;
-  private readonly onAdmissionBlocked?: () => void;
+  private readonly onAdmissionBlocked?: (resume: () => void) => (() => void) | void;
   private inFlight = false;
+  private admissionPending = false;
+  private cancelAdmissionWait: (() => void) | undefined;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly confirmationWaiters: Array<{
@@ -109,6 +111,10 @@ export class TerminalOutputFlowAcknowledger {
     this.disposed = true;
     this.completed.clear();
     this.settleConfirmationWaiters(false);
+    this.admissionPending = false;
+    const cancelAdmissionWait = this.cancelAdmissionWait;
+    this.cancelAdmissionWait = undefined;
+    cancelAdmissionWait?.();
     if (this.retryTimer !== undefined) {
       clearTimeout(this.retryTimer);
       this.retryTimer = undefined;
@@ -138,6 +144,7 @@ export class TerminalOutputFlowAcknowledger {
     if (
       this.disposed ||
       this.inFlight ||
+      this.admissionPending ||
       this.retryTimer !== undefined ||
       this.contiguousSeq <= this.confirmedSeq
     ) {
@@ -152,11 +159,34 @@ export class TerminalOutputFlowAcknowledger {
         operation = undefined;
       }
       if (!operation) {
-        this.dispose();
+        const onAdmissionBlocked = this.onAdmissionBlocked;
+        if (!onAdmissionBlocked) {
+          this.dispose();
+          return;
+        }
+        this.admissionPending = true;
+        let resumed = false;
+        const resume = () => {
+          if (!this.admissionPending) return;
+          resumed = true;
+          this.admissionPending = false;
+          this.cancelAdmissionWait = undefined;
+          if (this.disposed) return;
+          this.pump();
+        };
+        let cancel: (() => void) | void;
         try {
-          this.onAdmissionBlocked?.();
+          cancel = onAdmissionBlocked(resume);
         } catch {
-          // Capacity recovery belongs to the current epoch owner.
+          this.admissionPending = false;
+          this.dispose();
+          return;
+        }
+        if (typeof cancel === "function") {
+          if (resumed || this.disposed) cancel();
+          else this.cancelAdmissionWait = cancel;
+        } else if (this.disposed) {
+          this.admissionPending = false;
         }
         return;
       }
@@ -183,6 +213,7 @@ export class TerminalOutputFlowAcknowledger {
       () => {
         this.watchdogTimer = undefined;
         if (this.disposed) return;
+        operation?.markTimedOut();
         // The bridge Promise itself cannot be cancelled. Retire this token owner
         // first, then ask the current UI epoch to replace it. Its already-wired
         // handlers below absorb a late resolve/reject without touching prefix
