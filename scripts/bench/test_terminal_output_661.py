@@ -181,6 +181,9 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
         text = benchmark.buffer_logical_text("terminal-pane-0001")
 
         self.assertEqual(text, "FINAL-run-terminal-pane-0001-150000\nnext")
+        mocked_api.assert_called_once_with(
+            "GET", "/terminals/terminal-pane-0001/buffer?limit=300"
+        )
 
     def test_latency_summary_preserves_failures(self):
         summary = benchmark.latency_summary(

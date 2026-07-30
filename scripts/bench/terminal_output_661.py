@@ -329,7 +329,10 @@ def terminal_output(terminal_id: str, lines: int = 8) -> str:
 
 
 def buffer_logical_text(terminal_id: str) -> str:
-    result = api("GET", f"/terminals/{quote(terminal_id, safe='')}/buffer?limit=40")
+    # The endpoint returns the last N rows. A fresh full-height control pane can
+    # have its marker near row zero, so 40 rows silently omits it on ordinary
+    # 60+ row windows even though xterm already parsed it.
+    result = api("GET", f"/terminals/{quote(terminal_id, safe='')}/buffer?limit=300")
     logical_lines: list[str] = []
     current = ""
     for line in result.get("lines", []):
