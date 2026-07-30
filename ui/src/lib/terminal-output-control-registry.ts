@@ -23,11 +23,12 @@ export interface TerminalOutputControlMountScope {
   localTimedOut(kind: TerminalOutputControlOperationKind): number;
   globalTimedOut(kind: TerminalOutputControlOperationKind): number;
   waitForCapacity(kind: TerminalOutputControlOperationKind, waiter: () => void): void;
+  waitForCapacityOrTimeout(kind: TerminalOutputControlOperationKind, waiter: () => void): void;
   dispose(): void;
 }
 
 interface BudgetLease {
-  markTimedOut(): void;
+  markTimedOut(): boolean;
   release(): void;
 }
 
@@ -56,9 +57,10 @@ class OperationBudget {
     let timedOut = false;
     return {
       markTimedOut: () => {
-        if (released || timedOut) return;
+        if (released || timedOut) return false;
         timedOut = true;
         this.timedOutCount += 1;
+        return true;
       },
       release: () => {
         if (released) return;
@@ -80,6 +82,7 @@ interface CapacityWaiter {
   owner: symbol;
   terminalId: string;
   isCurrent: () => boolean;
+  wakeOnTimeout: boolean;
   callback: () => void;
 }
 
@@ -156,7 +159,25 @@ export class TerminalOutputControlOperationRegistry {
       waitForCapacity: (kind, callback) => {
         if (!isCurrent()) return;
         this.removeOwnerWaiters(owner, kind);
-        this.capacityWaiters[budgetKindFor(kind)].push({ owner, terminalId, isCurrent, callback });
+        this.capacityWaiters[budgetKindFor(kind)].push({
+          owner,
+          terminalId,
+          isCurrent,
+          wakeOnTimeout: false,
+          callback,
+        });
+        this.wakeOneCapacityWaiter(kind);
+      },
+      waitForCapacityOrTimeout: (kind, callback) => {
+        if (!isCurrent()) return;
+        this.removeOwnerWaiters(owner, kind);
+        this.capacityWaiters[budgetKindFor(kind)].push({
+          owner,
+          terminalId,
+          isCurrent,
+          wakeOnTimeout: true,
+          callback,
+        });
         this.wakeOneCapacityWaiter(kind);
       },
       dispose: () => {
@@ -241,7 +262,9 @@ export class TerminalOutputControlOperationRegistry {
       markTimedOut: () => {
         if (settled) return;
         localLease.markTimedOut();
-        globalLease.markTimedOut();
+        if (globalLease.markTimedOut() && this.generation === generation) {
+          this.wakeTimeoutWaiters(budgetKind);
+        }
       },
       settle: () => {
         if (settled) return;
@@ -344,6 +367,25 @@ export class TerminalOutputControlOperationRegistry {
         this.releaseReservation(waiter.owner, budgetKind);
       }
       return;
+    }
+  }
+
+  private wakeTimeoutWaiters(kind: TerminalOutputControlBudgetKind): void {
+    const waiters = this.capacityWaiters[kind];
+    const callbacks: Array<() => void> = [];
+    this.capacityWaiters[kind] = waiters.filter((waiter) => {
+      if (!waiter.isCurrent()) return false;
+      if (!waiter.wakeOnTimeout) return true;
+      callbacks.push(waiter.callback);
+      return false;
+    });
+    for (const callback of callbacks) {
+      try {
+        callback();
+      } catch {
+        // Timeout progress does not own a capacity reservation. A failed UI
+        // callback is therefore isolated without any resource to roll back.
+      }
     }
   }
 }

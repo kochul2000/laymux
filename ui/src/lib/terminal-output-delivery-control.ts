@@ -233,7 +233,7 @@ export class TerminalOutputDeliveryControlSender {
     const key = identityKey(request.identity);
     return new Promise((resolve) => {
       this.capacityWait = { key, resolve };
-      this.scope.waitForCapacity(request.identity.kind, () => {
+      this.scope.waitForCapacityOrTimeout(request.identity.kind, () => {
         const waiting = this.capacityWait;
         if (!waiting || waiting.key !== key) return;
         this.capacityWait = undefined;
