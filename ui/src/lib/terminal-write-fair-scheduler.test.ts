@@ -397,6 +397,34 @@ describe("TerminalWriteFairScheduler", () => {
     expect(served.indexOf("hidden")).toBe(TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS);
   });
 
+  it("charges the floor to the class, so a hidden crowd cannot claim it per pane", () => {
+    // The floor is what rescues a starved class, so it must not scale with pane
+    // count — that is exactly how the per-pane promotion of issue #686 ate the
+    // weighted share. One hidden pane and forty hidden panes must cost the
+    // focused class the same single turn per floor period.
+    const floorPeriodTurns = TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS + 1;
+    const turns = floorPeriodTurns * 2;
+    const hiddenTurnsByPaneCount = [1, 8, 40].map((hiddenPaneCount) => {
+      const { scheduler, runNextTask } = createHarness();
+      scheduler.setClassShare({
+        focused: TERMINAL_WRITE_MAX_CLASS_SHARE,
+        foreground: TERMINAL_WRITE_MAX_CLASS_SHARE,
+        background: TERMINAL_WRITE_MIN_CLASS_SHARE,
+      });
+      const panes: Array<{ label: string; priority: TerminalWritePriority }> = [
+        { label: "focused", priority: "focused" },
+      ];
+      for (let index = 0; index < hiddenPaneCount; index += 1) {
+        panes.push({ label: `hidden-${index}`, priority: "background" });
+      }
+      const served = runSaturated(scheduler, runNextTask, panes, turns);
+      scheduler.resetForTests();
+      return served.length - countOf(served, "focused");
+    });
+
+    expect(hiddenTurnsByPaneCount).toEqual([2, 2, 2]);
+  });
+
   it("keeps a class's gap bound when another class drains and re-enters", () => {
     const { scheduler, runNextTask } = createHarness();
     const served: string[] = [];
