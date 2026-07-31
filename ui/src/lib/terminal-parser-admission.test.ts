@@ -6,6 +6,7 @@ import {
 } from "./terminal-parser-admission";
 import {
   createTerminalWriteFairOwner,
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE,
   TerminalWriteFairScheduler,
 } from "./terminal-write-fair-scheduler";
 import { TERMINAL_WRITE_FAIR_QUANTUM_BYTES } from "./terminal-write-batch-queue";
@@ -422,7 +423,7 @@ describe("TerminalParserAdmission", () => {
     expect(order.at(-1)).toBe("other");
   });
 
-  it("preserves 8:1 weight across delayed checkpoint-chain requeues", () => {
+  it("preserves the visible:hidden class share across delayed checkpoint-chain requeues", () => {
     const scheduled: Array<() => void> = [];
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
     const foreground = new TerminalParserAdmission(
@@ -456,7 +457,9 @@ describe("TerminalParserAdmission", () => {
     background.request("checkpoint", backgroundTurn);
     releaseBlocker?.();
 
-    const cycleTurns = 9;
+    // Only these two classes are pending, so one cycle is their two shares.
+    const cycleTurns =
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground + TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
     for (let index = 0; index < cycleTurns; index += 1) {
       scheduled.shift()?.();
       const selectedForeground = order.at(-1) === "foreground";
@@ -467,8 +470,12 @@ describe("TerminalParserAdmission", () => {
       }
     }
 
-    expect(order.filter((label) => label === "foreground")).toHaveLength(8);
-    expect(order.filter((label) => label === "background")).toHaveLength(1);
+    expect(order.filter((label) => label === "foreground")).toHaveLength(
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
+    );
+    expect(order.filter((label) => label === "background")).toHaveLength(
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
+    );
     foreground.dispose();
     background.dispose();
     expect(scheduler.isIdleForTests()).toBe(true);

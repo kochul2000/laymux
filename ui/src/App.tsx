@@ -11,6 +11,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeometry";
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLanguageSync } from "@/hooks/useLanguageSync";
+import { useTerminalParserAdmissionSettings } from "@/hooks/useTerminalParserAdmissionSettings";
 import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
 import { closeTerminalSession } from "@/lib/tauri-api";
 import { useTerminalStore } from "@/stores/terminal-store";
@@ -27,6 +28,7 @@ export function App() {
   useWindowGeometry();
   useAppFocus();
   useLanguageSync();
+  useTerminalParserAdmissionSettings();
   useAutoRemoteAccessPrompt(loaded);
   const localMobileModeActive = useLocalMobileModeStore((state) => state.active);
 

@@ -1,7 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::constants::{DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB};
+use crate::constants::{
+    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB,
+    PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT, PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT,
+    PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT,
+};
 
 /// Color scheme definition (Windows Terminal compatible).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -597,12 +601,69 @@ impl OutputActivityBurstSettings {
     }
 }
 
+fn default_focused_admission_share() -> u32 {
+    PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT
+}
+fn default_visible_admission_share() -> u32 {
+    PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT
+}
+fn default_hidden_admission_share() -> u32 {
+    PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT
+}
+
+/// Share of xterm parser admission turns per pane class (ADR-0101).
+///
+/// The share belongs to the class, not to a pane, so the active workspace keeps
+/// its share no matter how many hidden panes are flooding. The three values are
+/// relative; their sum is one admission cycle.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ParserAdmissionSettings {
+    /// Share for the focused pane of the active workspace.
+    #[serde(default = "default_focused_admission_share")]
+    pub focused_share: u32,
+    /// Share for the active workspace's other visible panes, together.
+    #[serde(default = "default_visible_admission_share")]
+    pub visible_share: u32,
+    /// Share for every hidden pane together (inactive workspaces, 0 px tracks).
+    #[serde(default = "default_hidden_admission_share")]
+    pub hidden_share: u32,
+}
+
+impl Default for ParserAdmissionSettings {
+    fn default() -> Self {
+        Self {
+            focused_share: default_focused_admission_share(),
+            visible_share: default_visible_admission_share(),
+            hidden_share: default_hidden_admission_share(),
+        }
+    }
+}
+
+impl ParserAdmissionSettings {
+    /// Clamp to the range the scheduler honours. The frontend clamps the same
+    /// way, so an out-of-range file behaves identically on both sides.
+    pub fn sanitized(&self) -> Self {
+        let clamp =
+            |value: u32| value.clamp(PARSER_ADMISSION_SHARE_MIN, PARSER_ADMISSION_SHARE_MAX);
+        Self {
+            focused_share: clamp(self.focused_share),
+            visible_share: clamp(self.visible_share),
+            hidden_share: clamp(self.hidden_share),
+        }
+    }
+}
+
 /// Terminal behavior & rendering settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     #[serde(default)]
     pub output_activity_burst: OutputActivityBurstSettings,
+    /// Class shares for xterm parser admission (ADR-0101). No settings UI: this
+    /// is a tuning knob edited in settings.json.
+    #[serde(default)]
+    pub parser_admission: ParserAdmissionSettings,
     /// Advertise xterm.js 24-bit color support to newly spawned PTY children.
     #[serde(default = "default_true")]
     pub advertise_true_color: bool,
@@ -646,6 +707,7 @@ impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             output_activity_burst: OutputActivityBurstSettings::default(),
+            parser_admission: ParserAdmissionSettings::default(),
             advertise_true_color: true,
             copy_on_select: true,
             scrollbar_style: default_scrollbar_style(),

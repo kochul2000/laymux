@@ -1,50 +1,50 @@
-# 0101. parser admission 의 starvation floor 는 우선순위 등급별이며 활성 워크스페이스가 지분을 지배한다
+# 0101. parser admission 은 pane 가중치가 아니라 클래스 몫으로 나누고 그 몫은 설정값이다
 
 - Status: Proposed
 - Date: 2026-07-31
-- Source: 사용자 요구(issue #686: 렌더 round robin 에서 활성 워크스페이스 우선순위를 높여 달라 — "현재는 그냥 공평하게 배분됨") · [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) · [ADR-0092](0092-app-wide-terminal-write-round-robin.md) · [architecture/data-flow.md §8.8](../architecture/data-flow.md)
-- Amends: [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) Decision 3 의 4:2:1 가중치와 Decision 4 의 등급 무관 `K=8` age promotion 을 16:8:1 가중치와 등급별 promotion bound 로 정정한다. Decision 11 의 성능 acceptance 구성, Decision 7 의 quantum, Decision 5·6·8·9·10 의 lossless·lease·watchdog 계약은 그대로 유지한다.
+- Source: 사용자 요구(issue #686: 렌더 round robin 에서 활성 워크스페이스 우선순위를 높여 달라 — "현재는 그냥 공평하게 배분됨") · 사용자 지적(pane 100개·workspace 10개 규모에서는 pane 단위 가중치로 활성 workspace 몫을 지킬 수 없다) · [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) · [ADR-0092](0092-app-wide-terminal-write-round-robin.md) · [architecture/data-flow.md §8.8](../architecture/data-flow.md)
+- Amends: [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) Decision 3·4 의 pane 단위 4:2:1 가중치와 `K=8` age promotion 을 **클래스 단위 몫 + 클래스 내 round-robin** 으로 대체한다. Decision 4 의 `K + P - 1` bound 는 클래스 몫에서 파생되는 bound 로 대체된다. Alternatives 의 "가중치를 사용자 설정으로 노출한다 → 기각" 판단도 정정한다(설정 노출, Settings UI 는 비목표). Decision 7 의 quantum, Decision 5·6·8·9·10 의 lossless·lease·watchdog 계약, Decision 11 의 acceptance 구성은 유지한다.
 
 ## Context
 
-ADR-0098 은 pane owner 선택을 smooth weighted round-robin 으로 정하고(focused 4, visible unfocused 2, hidden 1) 어떤 owner 도 굶지 않도록 "다른 owner 에게 `K=8` turn 을 양보하면 age-promote" 라는 floor 를 두었다. floor 의 bound `K + P - 1` 은 등급과 무관한 단일 상수였다.
+ADR-0098 은 pane owner 하나하나에 가중치를 주고(focused 4, visible 2, hidden 1) smooth weighted round-robin 으로 admission turn 을 나눴다. 이 구조에서 한 pane 의 몫은 `자기 가중치 / 살아 있는 pending pane 가중치 합`이므로 **pane 수에 희석된다.**
 
-이 두 규칙은 pane 수가 늘면 서로 충돌한다. 가중 서비스 간격은 owner 마다 `총가중치 / 자기가중치` turn 인데, hidden pane 이 여러 개면 hidden 의 가중 간격이 곧 `K` 를 넘어선다. 그러면 hidden owner 들이 매 `K` turn 마다 전원 overdue 가 되고, urgent 경로는 balance 를 보지 않고 pending FIFO 순서로 하나씩 뽑기 때문에 turn 대부분이 floor 로 소비된다. 가중치는 사실상 무력화되고 배분이 균등 round-robin 으로 되돌아간다.
+세 가지가 실측·분석으로 드러났다.
 
-결정적 scheduler 측정으로 확인한 수치다. 계속 backlog 를 가진 hidden pane 8개와 focused pane 1개를 두고 12 turn(= 옛 총가중치 4+8)을 돌리면 focused 는 가중치가 요구하는 4회가 아니라 2회만 서비스됐다. 균등 배분값 12/9 ≈ 1.33회 와 거의 같다. 사용자가 보고한 "활성 워크스페이스가 더 갱신되지 않는다" 는 이 무력화의 관측면이다.
+1. **floor 가 가중치를 먹는다.** 등급 무관 `K=8` age promotion 때문에 hidden flood pane 이 여러 개면 전원이 매 8 turn 마다 overdue 가 되고, promotion 경로는 balance 를 보지 않고 FIFO 로 뽑는다. 결정적 fixture(hidden 8 + focused 1)에서 focused 는 12 turn 중 가중치가 요구하는 4회가 아니라 2회만 서비스됐다 — 균등 배분값 1.33회 와 사실상 같다.
+2. **가중치만 넓혀도 부족하다.** 같은 fixture 에서 16:8:1 로 넓히고 `K=8` 을 유지하면 focused 는 24 turn 중 16회가 아니라 6회였다.
+3. **pane 단위 가중치는 규모에서 무너진다.** 사용자가 지적한 100 pane·10 workspace(workspace 당 10 pane) 구성에서 16:8:1 을 적용하면 활성 workspace 합계는 약 49%지만 focused pane 자기 몫은 16/178 ≈ 9%다. 게다가 `P ≈ 100` 이면 hidden bound 32 로도 hidden 90개가 131 turn 중 90 turn 을 floor 로 가져가 #686 의 무력화가 규모만 키워 재발한다.
 
-또한 laymux 는 비활성 workspace 의 pane 을 `display:none` 으로 유지한다(`WorkspaceArea`). 즉 ADR-0098 의 hidden 등급이 곧 "비활성 workspace" 이고, focused/unfocused 구분은 활성 workspace **내부**의 구분이다. 활성 workspace 우선순위를 올리는 축은 focus 축이 아니라 visible↔hidden 축이다. 기존 8:4:2:1 대비 visible:hidden 이 2:1 뿐이었던 것이 두 번째 원인이다.
+세 번째가 결정적이다. "활성 워크스페이스를 더 갱신한다" 는 요구는 pane 개수와 무관한 성질이어야 하는데, pane 단위 가중치로는 그 성질을 표현할 수 없다. 비활성 workspace 의 pane 은 `WorkspaceArea` 가 `display:none` 으로 유지하므로 hidden 등급이 곧 비활성 workspace 이고, 지켜야 할 몫은 pane 이 아니라 **클래스**(focused / 활성 workspace 의 나머지 visible / hidden)의 몫이다.
 
-제약은 ADR-0098 그대로다. hidden 도 drop·pause 없이 유한하게 전진해야 하고(parsed ACK 지연과 PTY backpressure 로 전달), active write 를 선점하거나 lease 를 조기 반환할 수 없으며, rendererless checkpoint 의 3초 catch-up 과 receipt 5초 deadline 에 여유가 남아야 한다. 범위는 desktop `TerminalWriteFairScheduler` 의 owner 선택 정책뿐이다. quantum, lane 교대, envelope/ACK 계약, Remote browser scheduling, 사용자 노출 설정은 비목표다.
+제약은 ADR-0098 그대로다. hidden 도 drop·pause 없이 유한하게 전진해야 하고(부족한 처리량은 parsed ACK 지연과 PTY backpressure 로 전달), active write 를 선점하거나 lease 를 조기 반환할 수 없으며, rendererless checkpoint 의 3초 catch-up 과 receipt 5초 deadline 에 여유가 남아야 한다. 범위는 desktop `TerminalWriteFairScheduler` 의 owner 선택 정책과 그 정책값의 설정 경로다. quantum, lane 교대, envelope/ACK 계약, Remote browser scheduling, Settings UI 는 비목표다.
 
 ## Decision
 
-**parser admission 의 가중치는 focused 16 · visible unfocused 8 · hidden 1 이고, age promotion bound 는 등급별 상수(visible 8 turn, hidden 32 turn)다. 즉 활성 워크스페이스가 지분을 지배하고, floor 는 지분이 아니라 굶주림 방지선으로만 작동한다.**
+**admission turn 은 먼저 우선순위 클래스에게 그 클래스의 몫만큼 배분하고, 그 다음 클래스 안에서 대기 순서 round-robin 으로 pane 을 고른다. 클래스 몫은 `settings.json` 의 `terminal.parserAdmission` 이며 기본값은 focused 5 · visible 3 · hidden 2 다.**
 
-1. 가중치는 `focused: 16`, `foreground: 8`, `background: 1` 이다. 등급 판정 입력은 ADR-0098 Decision 3 그대로다 — container 가 `display:none` 또는 0 px 이면 focus 보다 먼저 hidden 으로 판정하고, dequeue 시점의 최신 committed visibility/focus ref 를 읽으며, 사용자 설정이나 OS lock/minimize 는 입력이 아니다. focused:foreground 비 2:1 은 유지하고 visible:hidden 비만 2:1 에서 8:1 로 넓힌다. 비활성 workspace 는 hidden 으로 판정되므로 이 비가 곧 활성 워크스페이스 우선순위다.
-2. age promotion bound 는 등급별 상수다. `focused`·`foreground` 는 8 turn, `background` 는 32 turn 을 다른 owner 에게 양보하면 overdue 가 된다. bound 는 owner 의 **현재** 등급으로 판정하므로 workspace/focus 전환은 다음 dequeue 부터 새 bound 를 따른다. 등급 판정 실패는 ADR-0098 대로 background 로 fail-safe 하며 그 owner 는 hidden bound 를 받는다.
-3. overdue owner 의 선택 규칙은 바꾸지 않는다. pending FIFO 순서로 하나를 고르고 그 owner 의 balance 를 0 으로 되돌린다(빚도 credit 도 남기지 않는다). 새 arrival 은 overdue owner 를 앞지르지 않는다. skipped turn 카운터는 등급 bound 중 가장 큰 값에서 포화한다.
-4. 따라서 continuously pending owner 의 최대 대기 `B` 는 `K_등급 + P - 1` 개의 다른 completed turn 이다. hidden 은 `31 + P`, visible 은 `7 + P` 다. 두 lane 이 모두 saturated 인 lane 의 보수적 최대 대기 `2B + 1` 규칙도 그대로 각 등급의 `B` 로 계산한다.
-5. hidden bound 32 는 "현실적 pane 수에서는 floor 가 가중치보다 먼저 발동하지 않는다" 를 불변식으로 삼아 고른 값이다. focused pane 1개와 hidden pane N개가 모두 backlog 를 가지면 hidden 의 가중 서비스 간격은 `16 + N` turn 이므로 N ≤ 16 까지는 floor 가 발동하지 않고 가중치가 배분을 결정한다. N 이 더 크면 floor 가 다시 지분을 평탄화하지만 그 열화는 bound 안이며, 어떤 pane 수에서도 hidden 의 서비스 간격은 `31 + P` turn 을 넘지 않는다.
-6. floor 는 여전히 pause 나 presentation drop 이 아니다. hidden 의 두 parser 와 parsed ACK 는 계속 전진하고 부족한 처리량은 ADR-0097 대로 PTY backpressure 로 전달한다. congestion 을 reset/replay/replacement attach/fail-stop 사유로 승격하지 않는다.
-7. 가중치·bound 는 내부 상수이며 설정으로 노출하지 않는다. 두 값은 한 곳(`terminal-write-fair-scheduler.ts`)에서만 정의하고 결정적 테스트가 등급별 지분과 등급별 bound 를 각각 고정한다.
+1. **2단 배분.** 1단은 클래스 선택이다. pending pane 이 하나라도 있는 클래스만 cycle 에 참여하고, 그 클래스들의 몫으로 smooth weighted round-robin 을 돌린다. 2단은 선택된 클래스 안에서 가장 오래 기다린 pane(pending FIFO 선두)을 고르고, 서비스된 pane 은 다시 대기열 꼬리로 간다. 따라서 클래스 몫은 pane 수와 무관하고, pane 수는 그 클래스 **안에서만** 몫을 나눈다.
+2. **클래스 판정 입력은 ADR-0098 Decision 3 그대로다.** container 가 `display:none` 또는 0 px 이면 focus 표시보다 우선해 hidden 으로 판정하고, 값은 request 시점에 동결하지 않고 dequeue 시점의 최신 committed visibility/focus ref 에서 읽는다. resolver 실패는 hidden 으로 fail-safe 하며 admission 을 멈추지 않는다. 클래스가 바뀐 pane 은 다음 dequeue 부터 새 클래스의 대기열에서 자기 차례를 받는다.
+3. **몫은 설정값이다.** `terminal.parserAdmission.{focusedShare,visibleShare,hiddenShare}` 는 상대값이고 합이 한 cycle 이다. 유효 범위는 `1..=1000` 이며 `0` 은 그 클래스의 parser 를 멈추는 뜻이므로 허용하지 않는다. Rust `ParserAdmissionSettings::sanitized()` 와 프론트엔드 `sanitizeTerminalWriteClassShare()` 가 같은 범위로 clamp 하고 누락·비수치 항목은 기본값으로 되돌리므로, 잘못된 파일이 admission 을 멈추게 할 수 없다. `validate_settings` 는 범위 위반을 `/terminal/parserAdmission/<field>` 로 보고한다. 기본값·범위 상수는 Rust `constants.rs` 와 `terminal-write-fair-scheduler.ts` 에 각각 한 곳만 둔다.
+4. **Settings UI 는 만들지 않는다.** 이 값은 정책 튜닝 knob 이며 settings.json 직접 편집 경로만 지원한다. ADR-0098 은 "재현성이 낮아진다" 는 이유로 노출 자체를 기각했지만, 실측 결과 적정 비율이 pane 구성과 사용 습관에 따라 달라진다는 것이 확인됐으므로 기본값은 코드가 고정하고 조정 여지는 파일로 남긴다.
+5. **적용 시점.** 몫 변경은 다음 dequeue 부터 반영한다. 이미 active 인 write 를 선점하지 않고 materialized batch·envelope identity·sequence·callback 을 바꾸지 않으며 xterm 을 재생성하지 않는다. 이전 몫으로 계산된 클래스 balance 는 폐기해 새 비율로 다음 cycle 을 시작한다. 앱 전체가 drain 되면 balance 를 비워 다음 burst 가 균등한 cycle 에서 시작한다.
+6. **starvation floor 는 클래스 몫에서 파생된다.** pane 단위 절대 turn bound(age promotion)는 제거한다 — 그것이 위 Context 1·3 의 원인이다. 모든 클래스 몫이 양수이므로 각 클래스는 `cycle / 자기 몫` turn 마다 한 turn 을 받고, 클래스 안에서는 round-robin 이므로 pane 은 자기 클래스 구성원 수만큼의 자기 클래스 turn 안에 반드시 서비스된다. 즉 pending pane 의 최대 대기는 `ceil(cycle / 자기 클래스 몫) × 자기 클래스 pane 수` turn 이며, 기본값에서 hidden pane N개면 `5N` turn 이다. wall-clock 상한은 이 bound 가 아니라 ADR-0098 의 3초 checkpoint catch-up·5초 parsed-progress 계약으로 검증한다.
+7. **hidden 은 pause 가 아니다.** hidden 몫 20% 는 pane 수가 늘어도 사라지지 않고 N 등분된다. hidden 의 두 parser 와 parsed ACK 는 계속 전진하고 부족한 처리량은 ADR-0097 대로 PTY backpressure 로 전달한다. congestion 을 reset/replay/replacement attach/fail-stop 사유로 승격하거나 visible parse 전에 ACK 하지 않는다.
 
 ## Alternatives Considered
 
-- **가중치만 넓힌다(16:8:1, `K=8` 유지).** 같은 결정적 fixture 에서 focused 는 24 turn 중 16회가 아니라 6회만 서비스됐다. hidden 이 8개면 `K=8` floor 가 여전히 매 turn 을 지배하므로 가중치 조정만으로는 issue #686 이 해결되지 않는다. 이 관측이 등급별 bound 를 필수로 만들었다.
-- **bound 만 등급별로 한다(4:2:1 유지).** floor 무력화는 사라지지만 visible:hidden 이 2:1 이라 hidden flood pane 이 여러 개면 활성 워크스페이스 지분이 여전히 소수다(예: hidden 8개에서 focused 4/12). 사용자가 요구한 "더 갱신" 폭이 나오지 않는다.
-- **hidden bound 를 pane 수 `P` 에 비례해 계산한다.** floor 가 가중 간격을 항상 넘도록 자동 조정되지만, floor 가 pane 수에 따라 늘어나 wall-clock 대기 상한이 사라지고 재현 가능한 bound 를 문서화할 수 없다. 등급별 상수로 두고 bound 를 명시하는 쪽을 택했다.
-- **hidden 을 promotion 대상에서 제외하거나 strict foreground priority 로 간다.** ADR-0098 이 기각한 대안 그대로다. hidden 의 5초 parsed-progress expiry, ring pressure, reconnect checkpoint stale 을 정상 부하에서 만들 수 있다.
-- **overdue owner 에게 가중 빚을 청구해 promotion 남용을 줄인다.** floor 발동 빈도 자체는 등급이 아니라 bound 가 정하므로 무력화를 못 막는다. 게다가 balance 가 무한히 음수로 흘러 등급이 hidden→visible 로 바뀐 pane 이 한동안 굶을 수 있다. balance 0 복귀를 유지한다.
-- **가중치를 사용자 설정으로 노출한다.** ADR-0098 과 같은 이유로 기각했다. 재현성이 낮아지고 정확성 acceptance 보다 정책 공간이 먼저 커진다.
+- **pane 단위 가중치를 넓히고 floor 만 등급별로 둔다(16:8:1, hidden bound 32).** 8 pane 급에서는 실제로 동작했고(활성 pane 지분 10.7% → 25~28% 실측) 이 PR 의 첫 구현이었다. 그러나 몫이 pane 수에 희석되는 성질이 남아 100 pane 급에서 활성 workspace 몫을 지키지 못하고, hidden 이 많아지면 floor 가 다시 지배한다. 규모 무관 성질을 원한 요구를 충족하지 못해 클래스 몫으로 대체했다.
+- **pane 단위 가중치 + pane 수에 비례하는 hidden bound.** floor 가 가중 간격을 항상 넘도록 자동 조정되지만 wall-clock 대기 상한이 pane 수에 따라 무한히 늘어나고 문서화 가능한 bound 가 사라진다.
+- **strict foreground priority 또는 hidden parser pause.** ADR-0098 이 기각한 대안 그대로다. hidden 의 5초 parsed-progress expiry, ring pressure, reconnect checkpoint stale 을 정상 부하에서 만들 수 있다.
+- **클래스 몫을 pane 수로 다시 나눠 "pane 당 몫" 으로 환산한다.** pane 단위 가중치와 수학적으로 같아지므로 같은 희석 문제로 되돌아간다.
+- **몫을 자동 튜닝한다(부하·backlog 기반 적응).** 재현성이 떨어지고 acceptance 를 고정할 수 없다. 고정 기본값 + 설정 override 로 둔다.
+- **클래스를 더 쪼갠다(workspace 별, pane group 별).** 정책 공간이 커지고 상태가 늘어난다. 요구는 활성 workspace 대 나머지의 구분이므로 세 클래스로 충분하다.
 
 ## Consequences
 
-- 활성 workspace 의 pane 이 비활성 workspace 의 flood 보다 명확히 자주 parser turn 을 얻는다. hidden 8개 + focused 1개 fixture 에서 focused 는 24 turn 중 16회(옛 정책 12 turn 중 2회 = 균등 배분 수준)를 얻고 각 hidden 은 1회를 얻는다. workspace/focus 전환은 xterm 재생성 없이 다음 dequeue 부터 반영된다.
-- hidden pane 의 총 처리량은 경쟁 중에 더 낮아진다. 가시 pane 이 동시에 폭주할 때 hidden drain 과 최종 catch-up 이 옛 정책보다 늦어질 수 있으며, 이는 byte 를 버리지 않고 PTY backpressure 로 나타난다. hidden 만 backlog 를 가지는 구성(ADR-0098 Decision 11 의 background scenario)은 경쟁이 없으므로 catch-up 이 사실상 영향받지 않는다.
-- floor 가 늦어졌으므로 hidden 의 최악 서비스 간격은 turn 수로 `31 + P`, wall-clock 으로는 turn 당 최대 64 KiB parse 비용에 비례해 늘어난다. 8 pane 급 구성에서 이 값은 여전히 checkpoint 3초 catch-up 과 receipt 5초 deadline 아래지만, 실측에서 hidden sampled service gap 이 3초에 접근하면 hidden bound 를 먼저 낮추고 quantum·lossless 계약은 건드리지 않는다.
-- 결정적 테스트가 (a) 16:8:1 지분, (b) hidden crowd 에서도 focused 가 가중 지분을 유지(issue #686 회귀), (c) hidden 32 turn·visible 8 turn 이라는 등급별 promotion bound, (d) 두 bound 가 동시에 overdue 일 때 visible 이 먼저 promote 됨을 고정한다. 사보타주로 hidden bound 를 8 로 되돌리면 (b) 가 16회→6회로 실패한다.
-- ADR-0098 Decision 11 의 dev acceptance 구성(2/4/7/8 hot pane, 150,000 라인, active/background scenario, 3초 catch-up·5초 control/bridge 한계)은 그대로 유효하다. 이 결정은 hidden 지분을 낮추므로 재검토 조건은 "hidden 의 sampled service gap 또는 고정 `writeSeq` target catch-up 이 3초에 도달" 이다.
-- 지분 개선은 **양쪽 pane 이 동시에 폭주하는 축소 측정**으로 확인했다. 같은 flood 생성기(`terminal-output-flood.ps1`, barrier 정렬, `-FlushEvery 256`)로 hidden 8 pane 과 활성 workspace 1 pane 을 함께 15초 flood 하고 `/diagnostics/frontend` 의 pane 별 `parsedAck`·backlog 를 비교했다(모든 hidden backlog ≈ 510 KiB 로 경쟁 포화). 활성 pane 의 parsed 지분은 10.7%(활성:hidden 비 0.96 — 균등 배분)에서 25.2~28.4%(비 2.69~3.18)로, 평균 backlog 는 511.7 KiB 에서 119~128 KiB 로 바뀌었다. 비가 16:1 까지 가지 않는 것은 그 구성에서 활성 pane 의 producer 가 약 1.5~1.7 MiB/s 로 먼저 한계이기 때문이다.
-- ADR-0098 Decision 11 하네스(`scripts/bench/terminal_output_661.py`, `background` scenario, 150,000 라인)도 같은 머신에서 baseline(4:2:1·`K=8`)과 candidate 를 번갈아 실행했다. candidate 는 hidden pane 2/4/8 구성에서 `frontiersSettled`·`allFinalMarkersRendered`·`checkpointTargetCatchupUnder3s`·`noRepairWasNeeded`·`noWriteCallbackFailed`·`noFullReattachDuringFlood`·bridge/diagnostics 무오류·`frontendReportAgeUnder5s` 를 모두 통과했다. hidden drain 시간은 8 pane 21.2~22.2 s → 24.8 s, 4 pane 11.8 → 13.2 s, 2 pane 9.0 → 9.4~9.6 s 로 약 5~15% 늘었다. 이는 이 결정이 선택한 hidden 지분 감소의 실측값이다.
-- **남은 실패는 이 결정과 무관한 선행 조건이다.** `screenshotSucceeded` 는 baseline 과 candidate 모두 모든 pane 수에서 실패한다(dev debug 빌드의 html2canvas capture 3.31~3.94 s > 3 s, 2 pane 에서는 capture 시점 backlog 선행조건 미달). 8 pane 의 `backgroundServiceGapUnder3s` 도 그 capture 동안의 메인 스레드 정지를 그대로 세므로 baseline 3.50~3.64 s, candidate 3.72~3.89 s 로 양쪽이 함께 실패한다. 2 pane candidate 의 3.47 s 관측 1회는 반복 실행에서 1.88·2.00 s 로 재현되지 않았다. 즉 3초 screenshot 계약은 이 환경에서 이미 깨져 있고 별도 조사 대상이며, weight·bound 재검토 조건(hidden service gap 이 capture 정지와 무관하게 3초 도달)은 아직 충족되지 않았다.
+- 활성 workspace 몫이 pane 수와 무관해진다. hidden pane 이 2개든 40개든 focused 클래스는 자기 몫을 그대로 받고, hidden 몫은 hidden pane 들이 N 등분한다. hidden pane 이 많아질수록 개별 hidden 이 느려지는 것은 의도한 방향이다.
+- pane 단위 balance·skip 카운터가 사라지고 상태는 클래스 balance 3개와 pending FIFO 로 줄었다. 클래스 안의 fairness 는 가중치가 아니라 순수 round-robin 이므로, 같은 클래스 pane 들 사이에는 장기 지분 보정이 없다(같은 클래스는 동등 대우한다).
+- hidden 처리량은 경쟁 중 낮아진다. 실측: 활성 pane 과 hidden 8 pane 이 동시에 폭주할 때 활성 pane 의 parsed 지분은 pane 가중치(4:2:1·`K=8`) 정책의 10.7%(활성:hidden 비 0.96 = 균등 배분)에서 클래스 몫 정책으로 크게 올라가고, hidden 은 그만큼 늦어진다. byte 는 버리지 않고 PTY backpressure 로 나타난다.
+- 설정값이 생겼으므로 성능 회귀 보고에는 `terminal.parserAdmission` 값이 함께 필요하다. acceptance·벤치는 기본값에서 수행한다.
+- 결정적 테스트가 (a) 한 cycle 의 클래스 배분, (b) hidden pane 2/8/40 에서 활성 몫 불변(issue #686 회귀), (c) 클래스 안 round-robin 순서, (d) focused pane 을 늘려도 hidden 몫이 줄지 않음, (e) idle 클래스의 몫이 backlog 클래스로 넘어감, (f) 클래스 몫 starvation bound 안에서 모든 hidden pane 서비스, (g) 설정값 채택과 clamp, (h) 설정 변경 구독을 고정한다.
+- ADR-0098 Decision 11 하네스(`terminal_output_661.py`, `background`, 150,000 라인)는 그대로 acceptance 다. 재검토 조건은 "hidden 의 sampled service gap 또는 고정 `writeSeq` target catch-up 이 screenshot capture 정지와 무관하게 3초에 도달" 이다. 이 환경에서 `screenshotSucceeded` 는 정책과 무관하게 이미 실패하며(dev debug 빌드 html2canvas capture 3.3~3.9 s > 3 s) 별도 이슈(#700)로 분리했다.

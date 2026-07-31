@@ -1,14 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createTerminalWriteFairOwner,
+  sanitizeTerminalWriteClassShare,
   TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS,
-  TERMINAL_WRITE_PRIORITY_WEIGHT,
-  TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS,
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE,
+  TERMINAL_WRITE_MAX_CLASS_SHARE,
+  TERMINAL_WRITE_MIN_CLASS_SHARE,
   TerminalWriteFairScheduler,
   type TerminalWritePriority,
 } from "./terminal-write-fair-scheduler";
 
 const owner = (label: string) => createTerminalWriteFairOwner(label);
+
+const CLASS_SHARE_CYCLE_TURNS =
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused +
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground +
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
 
 function createHarness() {
   const scheduled: Array<() => void> = [];
@@ -168,92 +175,145 @@ describe("TerminalWriteFairScheduler", () => {
     }
   });
 
-  it("serves saturated focused, foreground, and background parsers with 16:8:1 weight", () => {
-    const { scheduler, runNextTask } = createHarness();
-    const order: string[] = [];
-    let releaseBlocker: (() => void) | undefined;
-    const blocker = owner("blocker");
-    const focused = owner("focused");
-    const foreground = owner("foreground");
-    const background = owner("background");
-    const cycleTurns = 25;
-
-    scheduler.request(blocker, (release) => {
-      releaseBlocker = release;
-    });
-
-    const saturate = (
-      currentOwner: ReturnType<typeof owner>,
-      label: string,
-      priority: TerminalWritePriority,
-    ) => {
-      const turn = (release: () => void) => {
-        order.push(label);
-        if (order.length < cycleTurns) scheduler.request(currentOwner, turn, () => priority);
-        release();
-      };
-      scheduler.request(currentOwner, turn, () => priority);
-    };
-    // Deliberately enqueue low priority first. Selection is by current class,
-    // not by the order in which a flood happened to request its first turn.
-    saturate(background, "background", "background");
-    saturate(foreground, "foreground", "foreground");
-    saturate(focused, "focused", "focused");
-
-    releaseBlocker?.();
-    for (let index = 0; index < cycleTurns; index += 1) runNextTask();
-
-    expect(order.slice(0, 7)).toEqual([
-      "focused",
-      "foreground",
-      "focused",
-      "focused",
-      "foreground",
-      "focused",
-      "focused",
-    ]);
-    expect(order.filter((label) => label === "focused")).toHaveLength(16);
-    expect(order.filter((label) => label === "foreground")).toHaveLength(8);
-    expect(order.filter((label) => label === "background")).toHaveLength(1);
-  });
-
-  it("keeps a focused parser's weighted share when many hidden parsers flood", () => {
-    // issue #686: the age-promotion floor used to be one class-independent
-    // bound, so a crowd of hidden flooders each went overdue every K turns and
-    // the weighted share degenerated into plain round-robin.
-    const { scheduler, runNextTask } = createHarness();
+  /** Drive `turns` admissions with the given panes all continuously backlogged. */
+  function runSaturated(
+    scheduler: TerminalWriteFairScheduler,
+    runNextTask: () => void,
+    panes: Array<{ label: string; priority: TerminalWritePriority }>,
+    turns: number,
+  ): string[] {
     const served: string[] = [];
     let releaseBlocker: (() => void) | undefined;
-    const hiddenPaneCount = 8;
-    const cycleTurns = TERMINAL_WRITE_PRIORITY_WEIGHT.focused + hiddenPaneCount;
-
     scheduler.request(owner("blocker"), (release) => {
       releaseBlocker = release;
     });
-
-    const saturate = (label: string, priority: TerminalWritePriority) => {
-      const currentOwner = owner(label);
+    for (const pane of panes) {
+      const paneOwner = owner(pane.label);
       const turn = (release: () => void) => {
-        served.push(label);
-        if (served.length < cycleTurns) scheduler.request(currentOwner, turn, () => priority);
+        served.push(pane.label);
+        if (served.length < turns) scheduler.request(paneOwner, turn, () => pane.priority);
         release();
       };
-      scheduler.request(currentOwner, turn, () => priority);
-    };
-    for (let index = 0; index < hiddenPaneCount; index += 1) {
-      saturate(`hidden-${index}`, "background");
+      scheduler.request(paneOwner, turn, () => pane.priority);
     }
-    saturate("focused", "focused");
-
     releaseBlocker?.();
-    for (let index = 0; index < cycleTurns; index += 1) runNextTask();
+    for (let index = 0; index < turns; index += 1) runNextTask();
+    return served;
+  }
 
-    expect(served.filter((label) => label === "focused")).toHaveLength(
-      TERMINAL_WRITE_PRIORITY_WEIGHT.focused,
+  const countOf = (served: string[], label: string) =>
+    served.filter((entry) => entry === label).length;
+
+  it("splits one cycle between classes by their configured share", () => {
+    const { scheduler, runNextTask } = createHarness();
+    // Deliberately enqueue the lowest class first. Selection is by current
+    // class, not by the order in which a flood requested its first turn.
+    const served = runSaturated(
+      scheduler,
+      runNextTask,
+      [
+        { label: "background", priority: "background" },
+        { label: "foreground", priority: "foreground" },
+        { label: "focused", priority: "focused" },
+      ],
+      CLASS_SHARE_CYCLE_TURNS,
     );
-    for (let index = 0; index < hiddenPaneCount; index += 1) {
-      expect(served.filter((label) => label === `hidden-${index}`)).toHaveLength(1);
+
+    expect(served[0]).toBe("focused");
+    expect(countOf(served, "focused")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused);
+    expect(countOf(served, "foreground")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground);
+    expect(countOf(served, "background")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background);
+  });
+
+  it("keeps the active workspace's share no matter how many hidden panes flood", () => {
+    // issue #686: with a per-pane weight the active workspace's share was
+    // divided by the hidden pane count, so a hidden crowd flattened admission
+    // into plain round-robin. A class share does not depend on that count.
+    const focusedSharePerCycle = TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused;
+    const hiddenSharePerCycle = TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
+
+    for (const hiddenPaneCount of [2, 8, 40]) {
+      const { scheduler, runNextTask } = createHarness();
+      // One full round of the hidden class, so every hidden pane is reachable.
+      const cycles = hiddenPaneCount;
+      const panes: Array<{ label: string; priority: TerminalWritePriority }> = [
+        { label: "focused", priority: "focused" },
+      ];
+      for (let index = 0; index < hiddenPaneCount; index += 1) {
+        panes.push({ label: `hidden-${index}`, priority: "background" });
+      }
+      const turns = CLASS_SHARE_CYCLE_TURNS * cycles;
+      // The idle foreground class lends its share, so the cycle here is
+      // focused + background only.
+      const activeCycleTurns = focusedSharePerCycle + hiddenSharePerCycle;
+      const served = runSaturated(scheduler, runNextTask, panes, turns);
+      const focusedTurns = countOf(served, "focused");
+      const hiddenTurns = served.length - focusedTurns;
+
+      expect(focusedTurns / served.length).toBeCloseTo(focusedSharePerCycle / activeCycleTurns, 1);
+      expect(hiddenTurns).toBeGreaterThan(0);
+      // Tier 2 is round-robin, so the hidden class's turns spread evenly and no
+      // hidden pane is skipped within one round of its own class.
+      const hiddenCounts = Array.from({ length: hiddenPaneCount }, (_, index) =>
+        countOf(served, `hidden-${index}`),
+      );
+      expect(Math.max(...hiddenCounts) - Math.min(...hiddenCounts)).toBeLessThanOrEqual(1);
+      expect(Math.min(...hiddenCounts)).toBeGreaterThan(0);
+      scheduler.resetForTests();
     }
+  });
+
+  it("serves every hidden pane within its class-share starvation bound", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const hiddenPaneCount = 8;
+    // A hidden pane waits at most one full round of its own class: the class
+    // needs `cycle / hiddenShare` turns per own turn, times the class members.
+    const boundTurns =
+      Math.ceil(CLASS_SHARE_CYCLE_TURNS / TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background) *
+      hiddenPaneCount;
+    const panes: Array<{ label: string; priority: TerminalWritePriority }> = [
+      { label: "focused", priority: "focused" },
+      { label: "visible", priority: "foreground" },
+    ];
+    for (let index = 0; index < hiddenPaneCount; index += 1) {
+      panes.push({ label: `hidden-${index}`, priority: "background" });
+    }
+
+    const served = runSaturated(scheduler, runNextTask, panes, boundTurns);
+
+    for (let index = 0; index < hiddenPaneCount; index += 1) {
+      expect(countOf(served, `hidden-${index}`)).toBeGreaterThan(0);
+    }
+  });
+
+  it("adopts configured class shares and clamps invalid ones", () => {
+    expect(sanitizeTerminalWriteClassShare(undefined)).toEqual(TERMINAL_WRITE_DEFAULT_CLASS_SHARE);
+    expect(
+      sanitizeTerminalWriteClassShare({ focused: 0, foreground: "x", background: 7.9 }),
+    ).toEqual({
+      focused: TERMINAL_WRITE_MIN_CLASS_SHARE,
+      foreground: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
+      background: 7,
+    });
+    expect(sanitizeTerminalWriteClassShare({ focused: 10_000 }).focused).toBe(
+      TERMINAL_WRITE_MAX_CLASS_SHARE,
+    );
+
+    const { scheduler, runNextTask } = createHarness();
+    scheduler.setClassShare({ focused: 1, foreground: 1, background: 3 });
+    const served = runSaturated(
+      scheduler,
+      runNextTask,
+      [
+        { label: "focused", priority: "focused" },
+        { label: "hidden", priority: "background" },
+      ],
+      4,
+    );
+
+    // Shares are honoured verbatim, including a deliberately hidden-first table.
+    expect(countOf(served, "hidden")).toBe(3);
+    expect(countOf(served, "focused")).toBe(1);
   });
 
   it("samples the latest priority when a queued pane reaches dequeue", () => {
@@ -292,86 +352,42 @@ describe("TerminalWriteFairScheduler", () => {
     expect(order).toEqual(["promoted"]);
   });
 
-  it("age-promotes saturated background parsers within a finite turn bound", () => {
+  it("does not let a focused crowd take the hidden class's share", () => {
     const { scheduler, runNextTask } = createHarness();
-    const servicedBackground = new Set<string>();
-    let releaseBlocker: (() => void) | undefined;
-    const blocker = owner("blocker");
-    const backgroundBound = TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS.background;
-
-    scheduler.request(blocker, (release) => {
-      releaseBlocker = release;
-    });
-
-    const saturate = (
-      currentOwner: ReturnType<typeof owner>,
-      priority: TerminalWritePriority,
-      onTurn: () => void,
-    ) => {
-      const turn = (release: () => void) => {
-        onTurn();
-        scheduler.request(currentOwner, turn, () => priority);
-        release();
-      };
-      scheduler.request(currentOwner, turn, () => priority);
-    };
-    for (const label of ["background-a", "background-b", "background-c"]) {
-      const currentOwner = owner(label);
-      saturate(currentOwner, "background", () => servicedBackground.add(label));
-    }
-    // Enough focused owners that ordinary smooth weighting keeps choosing one of
-    // them. Aging must instead select the earlier-enqueued background FIFO after
-    // exactly the background bound's worth of skips.
-    for (let index = 0; index <= backgroundBound; index += 1) {
-      saturate(owner(`focused-${index}`), "focused", () => {});
+    const focusedPaneCount = 9;
+    const cycleTurns =
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused + TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
+    const panes: Array<{ label: string; priority: TerminalWritePriority }> = [
+      { label: "hidden", priority: "background" },
+    ];
+    for (let index = 0; index < focusedPaneCount; index += 1) {
+      panes.push({ label: `focused-${index}`, priority: "focused" });
     }
 
-    releaseBlocker?.();
-    // Three overdue owners are serviced on selections K+1 through K+3.
-    const initialBackgroundOwnerCount = 3;
-    for (let index = 0; index < backgroundBound + initialBackgroundOwnerCount; index += 1) {
-      runNextTask();
-    }
+    const served = runSaturated(scheduler, runNextTask, panes, cycleTurns);
 
-    expect([...servicedBackground].sort()).toEqual([
-      "background-a",
-      "background-b",
-      "background-c",
-    ]);
+    // Adding focused panes divides the focused class's share among them; it
+    // never consumes the hidden class's share.
+    expect(countOf(served, "hidden")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background);
   });
 
-  it("age-promotes an overdue visible parser sooner than a hidden one", () => {
+  it("lends an idle class's share to the classes that are backlogged", () => {
     const { scheduler, runNextTask } = createHarness();
-    const served: string[] = [];
-    let releaseBlocker: (() => void) | undefined;
-    const foregroundBound = TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS.foreground;
+    const cycleTurns =
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused + TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
 
-    scheduler.request(owner("blocker"), (release) => {
-      releaseBlocker = release;
-    });
+    const served = runSaturated(
+      scheduler,
+      runNextTask,
+      [
+        { label: "focused", priority: "focused" },
+        { label: "hidden", priority: "background" },
+      ],
+      cycleTurns,
+    );
 
-    const saturate = (label: string, priority: TerminalWritePriority) => {
-      const currentOwner = owner(label);
-      const turn = (release: () => void) => {
-        served.push(label);
-        scheduler.request(currentOwner, turn, () => priority);
-        release();
-      };
-      scheduler.request(currentOwner, turn, () => priority);
-    };
-    // Hidden and visible flooders enqueue before the focused crowd, so FIFO
-    // order alone would serve the hidden pane first once both go overdue.
-    saturate("hidden", "background");
-    saturate("visible", "foreground");
-    for (let index = 0; index <= foregroundBound; index += 1) {
-      saturate(`focused-${index}`, "focused");
-    }
-
-    releaseBlocker?.();
-    for (let index = 0; index < foregroundBound + 1; index += 1) runNextTask();
-
-    expect(served).toContain("visible");
-    expect(served).not.toContain("hidden");
+    expect(countOf(served, "focused")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused);
+    expect(countOf(served, "hidden")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background);
   });
 
   it("admits one physical write at a time and rotates waiting panes", () => {
@@ -577,71 +593,25 @@ describe("TerminalWriteFairScheduler", () => {
     expect(paneC).toHaveBeenCalledTimes(1);
   });
 
-  it("forgets a drained owner's weighted debt before its next burst", () => {
+  it("rotates panes inside one class in waiting order", () => {
     const { scheduler, runNextTask } = createHarness();
-    const order: string[] = [];
-    const blocker = owner("blocker");
-    const drained = owner("drained");
-    const foreground = owner("foreground");
-    const background = owner("background");
-    const peer = owner("peer");
-    let releaseBlocker: (() => void) | undefined;
-    let releaseDrained: (() => void) | undefined;
-    let releaseForeground: (() => void) | undefined;
+    const hiddenPaneCount = 3;
+    const panes: Array<{ label: string; priority: TerminalWritePriority }> = [];
+    for (let index = 0; index < hiddenPaneCount; index += 1) {
+      panes.push({ label: `hidden-${index}`, priority: "background" });
+    }
 
-    scheduler.request(blocker, (release) => {
-      releaseBlocker = release;
-    });
-    scheduler.request(
-      drained,
-      (release) => {
-        order.push("drained-first");
-        releaseDrained = release;
-      },
-      () => "focused",
-    );
-    scheduler.request(
-      foreground,
-      (release) => {
-        order.push("foreground");
-        releaseForeground = release;
-      },
-      () => "foreground",
-    );
-    scheduler.request(
-      background,
-      () => {},
-      () => "background",
-    );
+    // A single pending class owns every turn, so tier 2 alone decides the order.
+    const served = runSaturated(scheduler, runNextTask, panes, hiddenPaneCount * 2);
 
-    releaseBlocker?.();
-    runNextTask();
-    expect(order).toEqual(["drained-first"]);
-    releaseDrained?.();
-    runNextTask();
-    expect(order).toEqual(["drained-first", "foreground"]);
-
-    scheduler.cancelPending(background);
-    scheduler.request(
-      drained,
-      (release) => {
-        order.push("drained-second");
-        release();
-      },
-      () => "background",
-    );
-    scheduler.request(
-      peer,
-      (release) => {
-        order.push("peer");
-        release();
-      },
-      () => "background",
-    );
-    releaseForeground?.();
-    runNextTask();
-
-    expect(order).toEqual(["drained-first", "foreground", "drained-second"]);
+    expect(served).toEqual([
+      "hidden-0",
+      "hidden-1",
+      "hidden-2",
+      "hidden-0",
+      "hidden-1",
+      "hidden-2",
+    ]);
   });
 
   it("resets an active lease and invalidates its pending host task for test isolation", () => {
