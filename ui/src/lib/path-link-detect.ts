@@ -12,6 +12,8 @@
  *     존재 검증을 실질 게이트로 삼는다.
  */
 
+import { reconstructLine, type CellInfo } from "./terminal-cell-map";
+
 /** 흔한 URL/프로토콜 스킴 — 이 스킴이 붙어 있으면 경로가 아니다(URL provider 담당). */
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
@@ -178,6 +180,33 @@ export interface SelectionPos {
   end: { x: number; y: number };
 }
 
+/**
+ * 셀 정보로 토큰의 실제 셀 범위를 찾는다(#691). 실패하면 null → 호출부가
+ * 문자열 기반 계산으로 떨어진다.
+ *
+ * 선택 시작 셀보다 앞에서 찾지 않는다. 같은 토큰이 한 줄에 여러 번 나오면
+ * (`a.txt ... a.txt`) 사용자가 고른 쪽에 밑줄이 가야 하기 때문이다.
+ */
+function mapWithCells(
+  pos: SelectionPos,
+  token: string,
+  lineCells: CellInfo[],
+): MappedPathRange | null {
+  const { text, columns, endColumns } = reconstructLine(lineCells);
+  const startCell = pos.start.x + 1; // 0-based 셀 → 1-based 컬럼
+  const searchFrom = columns.findIndex((col) => col >= startCell);
+  let index = searchFrom >= 0 ? text.indexOf(token, searchFrom) : -1;
+  if (index < 0) index = text.indexOf(token); // 선택 앞쪽에서라도 찾는다.
+  if (index < 0) return null;
+
+  const lastOffset = index + token.length - 1;
+  const startCol = columns[index];
+  const endCol = endColumns[lastOffset];
+  if (startCol === undefined || endCol === undefined) return null;
+
+  return { bufferLine: pos.start.y + 1, startCol, endCol };
+}
+
 /** provider 에 넘길 1-based 절대 버퍼 좌표 범위. */
 export interface MappedPathRange {
   /** 1-based 절대 버퍼 라인. */
@@ -208,7 +237,14 @@ export function mapSelectionToPathRange(
   pos: SelectionPos,
   rawFirstLine: string,
   token: string,
+  lineCells?: CellInfo[],
 ): MappedPathRange {
+  // #691: 셀 정보가 있으면 그쪽이 정확하다. 아래 문자열 기반 계산은 UTF-16
+  // 길이를 셀 수로 쓰기 때문에 한글/CJK 경로에서 밑줄이 절반만 그어진다.
+  if (lineCells && lineCells.length > 0) {
+    const mapped = mapWithCells(pos, token, lineCells);
+    if (mapped) return mapped;
+  }
   const sameLine = pos.start.y === pos.end.y;
   // 0-based 프레임에서 먼저 계산.
   let startCol0 = pos.start.x;

@@ -1,10 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  findPrTokens,
-  reconstructLine,
-  createPrLinkProvider,
-  type CellInfo,
-} from "./pr-link-provider";
+import { findPrTokens, createPrLinkProvider } from "./pr-link-provider";
+import type { CellInfo } from "./terminal-cell-map";
 
 describe("findPrTokens", () => {
   it("detects a bare #number token", () => {
@@ -68,51 +64,6 @@ describe("findPrTokens", () => {
 function asciiCells(text: string): CellInfo[] {
   return [...text].map((ch) => ({ chars: ch, width: 1 }));
 }
-
-describe("reconstructLine", () => {
-  it("maps ASCII 1:1 (offset == column)", () => {
-    const { text, columns } = reconstructLine(asciiCells("#12"));
-    expect(text).toBe("#12");
-    expect(columns).toEqual([1, 2, 3]);
-  });
-
-  it("skips the trailing half of a wide char and shifts columns", () => {
-    // 가 (width 2) occupies cells 0+1; `#` lands on cell column 3.
-    const cells: CellInfo[] = [
-      { chars: "가", width: 2 },
-      { chars: "", width: 0 },
-      { chars: "#", width: 1 },
-      { chars: "1", width: 1 },
-    ];
-    const { text, columns } = reconstructLine(cells);
-    expect(text).toBe("가#1");
-    // string offsets: 0=가, 1=#, 2=1 → cell columns 1, 3, 4
-    expect(columns).toEqual([1, 3, 4]);
-  });
-
-  it("handles a surrogate-pair emoji (2 UTF-16 units in one wide cell)", () => {
-    const cells: CellInfo[] = [
-      { chars: "😀", width: 2 },
-      { chars: "", width: 0 },
-      { chars: "#", width: 1 },
-    ];
-    const { text, columns } = reconstructLine(cells);
-    expect(text).toBe("😀#");
-    // 😀 is 2 UTF-16 units, both mapped to cell column 1; `#` on column 3.
-    expect(columns).toEqual([1, 1, 3]);
-  });
-
-  it("emits a space for empty/unset cells (matches translateToString padding)", () => {
-    const cells: CellInfo[] = [
-      { chars: "#", width: 1 },
-      { chars: "9", width: 1 },
-      { chars: "", width: 1 },
-    ];
-    const { text, columns } = reconstructLine(cells);
-    expect(text).toBe("#9 ");
-    expect(columns).toEqual([1, 2, 3]);
-  });
-});
 
 describe("createPrLinkProvider", () => {
   function makeTerminalFromCells(cells: CellInfo[]) {
