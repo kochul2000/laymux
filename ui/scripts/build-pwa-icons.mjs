@@ -7,14 +7,19 @@
  * its tests if a committed PNG no longer has the pixel size the manifest
  * advertises.
  *
+ * Rendering goes through headless Chromium, not a standalone SVG rasteriser: the
+ * mark layers a cyan arrow over a white one with `mix-blend-mode: plus-lighter`,
+ * so the arrow body reads white and only its edges fringe. A rasteriser that
+ * ignores the blend mode paints the cyan layer opaque and the body comes out
+ * cyan — the same trap the app/website icons hit, fixed the same way.
+ *
  * Run: cd ui && npm run build:pwa-icons
  */
-import { mkdirSync, writeFileSync } from "node:fs";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Resvg } from "@resvg/resvg-js";
+import { chromium } from "@playwright/test";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const SOURCE_SVG = resolve(scriptDir, "../public/logo.svg");
@@ -58,16 +63,22 @@ function maskableSvg(svg) {
   ].join("");
 }
 
-function renderPng(svg, size) {
-  const png = new Resvg(svg, {
-    fitTo: { mode: "width", value: size },
-    // The mark is drawn on its own opaque plate, so this only covers rounding
-    // seams at the edges.
-    background: MASKABLE_BACKGROUND,
-  })
-    .render()
-    .asPng();
-  return png;
+/**
+ * The SVG is embedded as a data URI inside an `<img>` rather than inlined into
+ * the document: an inline `<svg>` would inherit page styles and let the blend
+ * mode compose against the page background instead of the mark's own plate.
+ */
+function iconDocument(svg, size) {
+  const encoded = Buffer.from(svg, "utf8").toString("base64");
+  return [
+    "<!doctype html>",
+    '<meta charset="utf-8">',
+    "<style>",
+    "  html, body { margin: 0; padding: 0; background: transparent; }",
+    `  img { display: block; width: ${size}px; height: ${size}px; }`,
+    "</style>",
+    `<img src="data:image/svg+xml;base64,${encoded}" alt="">`,
+  ].join("");
 }
 
 const targets = [
@@ -78,9 +89,39 @@ const targets = [
   { file: "apple-touch-icon-180.png", size: 180, svg: source },
 ];
 
-mkdirSync(OUT_DIR, { recursive: true });
-for (const { file, size, svg } of targets) {
-  const out = resolve(OUT_DIR, file);
-  writeFileSync(out, renderPng(svg, size));
-  console.log(`wrote ${out} (${size}x${size})`);
+let browser;
+try {
+  browser = await chromium.launch();
+} catch (cause) {
+  throw new Error(
+    "Chromium is required to rasterise the icons — run `npx playwright install chromium`.",
+    { cause },
+  );
+}
+
+try {
+  mkdirSync(OUT_DIR, { recursive: true });
+  for (const { file, size, svg } of targets) {
+    const page = await browser.newPage({
+      viewport: { width: size, height: size },
+      deviceScaleFactor: 1,
+    });
+    try {
+      await page.setContent(iconDocument(svg, size), { waitUntil: "load" });
+      const png = await page.screenshot({
+        type: "png",
+        // The mark paints its own opaque plate; keeping the page transparent
+        // means a rounded corner stays transparent instead of picking up white.
+        omitBackground: true,
+        clip: { x: 0, y: 0, width: size, height: size },
+      });
+      const out = resolve(OUT_DIR, file);
+      writeFileSync(out, png);
+      console.log(`wrote ${out} (${size}x${size})`);
+    } finally {
+      await page.close();
+    }
+  }
+} finally {
+  await browser.close();
 }
