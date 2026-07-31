@@ -204,6 +204,44 @@ mod tests {
             .any(|icon| icon["purpose"] == "maskable" && icon["sizes"] == "512x512"));
     }
 
+    /// The mark layers a cyan arrow over a white one with
+    /// `mix-blend-mode: plus-lighter`, so the arrow body reads white. A rasteriser
+    /// that ignores the blend mode paints the cyan layer opaque and the body comes
+    /// out cyan — same pixel count, same declared size, so nothing else here
+    /// catches it. `build-pwa-icons.mjs` renders through Chromium for exactly this
+    /// reason; this test is what fails if that regresses.
+    #[test]
+    fn the_arrow_body_is_white_in_every_icon() {
+        for (name, bytes) in ICONS {
+            let decoder = png::Decoder::new(*bytes);
+            let mut reader = decoder.read_info().expect("icon is a readable PNG");
+            let mut buffer = vec![0; reader.output_buffer_size()];
+            let info = reader.next_frame(&mut buffer).expect("icon has one frame");
+            // An encoder is free to drop the alpha channel once nothing is
+            // translucent, so the sample reads whatever this file actually has.
+            let channels = match info.color_type {
+                png::ColorType::Rgba => 4,
+                png::ColorType::Rgb => 3,
+                other => panic!("{name} is {other:?}; this test only samples RGB(A)"),
+            };
+
+            // The centre of every variant lands on the arrow body: the maskable
+            // one only scales the mark about that same centre.
+            let x = (info.width / 2) as usize;
+            let y = (info.height / 2) as usize;
+            let index = y * info.line_size + x * channels;
+            let pixel = &buffer[index..index + channels];
+            assert_eq!(
+                &pixel[..3],
+                [255, 255, 255],
+                "{name} centre is {pixel:?}; the blend mode was dropped if it is cyan"
+            );
+            if channels == 4 {
+                assert_eq!(pixel[3], 255, "{name} centre is translucent");
+            }
+        }
+    }
+
     #[test]
     fn the_apple_touch_icon_is_served_even_though_the_manifest_omits_it() {
         let bytes = icon_bytes("apple-touch-icon-180.png").expect("apple touch icon is served");
