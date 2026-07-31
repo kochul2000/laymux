@@ -1,6 +1,6 @@
 //! Raw usage snapshot types.
 //!
-//! Per [ADR-0099], the probe stores only raw values read off the `/usage`
+//! Per [ADR-0102], the probe stores only raw values read off the `/usage`
 //! screen. Reset times are carried as the verbatim strings Claude Code
 //! printed — the probe never interprets them into a calendar instant, and it
 //! never derives pace. Both are the frontend's job.

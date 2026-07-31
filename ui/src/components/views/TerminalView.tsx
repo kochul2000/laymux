@@ -26,6 +26,9 @@ import {
   shouldEnableTerminalWebgl,
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
+import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
+import { createPathLinkClickHandlers } from "@/lib/path-link-click";
+import { createPathLinkHint } from "@/lib/path-link-hint";
 import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
@@ -33,6 +36,7 @@ import {
   decidePathLinkAction,
   mapSelectionToPathRange,
 } from "@/lib/path-link-detect";
+import { readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
@@ -61,6 +65,7 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  openInOs,
   resolveGitRemote,
   statPath,
   handleLxMessage,
@@ -1346,9 +1351,28 @@ export function TerminalView({
     // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
+    // #687: 밑줄 위 hover 힌트 라벨. 좌표를 wrapper 기준으로 계산하므로 반드시
+    // wrapper 에 붙인다(자식인 xterm host 는 자체 패딩 좌표계라 어긋난다).
+    // wrapper 가 아직 없으면 라벨만 생략하고 나머지 경로는 그대로 동작한다.
+    const pathLinkHint = createPathLinkHint(wrapperRef.current);
     const pathLink = createPathLinkController(terminal, {
       onOpenPath: (absPath) => {
         useFileViewerStore.getState().openFileViewer(absPath);
+      },
+      // #687: 호스트 OS 로 위임한다. 확인 대화상자는 이미 mouseup 에서 끝났다.
+      // 실패는 spawn 실패뿐이며(그 이후는 OS 소관), 조용히 삼키지 않고 알린다.
+      // 모달(alert)이 아니라 알림 스토어를 쓴다 — 모달은 터미널 입력을 막고
+      // dev 자동화 루프(스크린샷/Automation)를 세운다.
+      onOsAction: (absPath, mode) => {
+        openInOs(absPath, mode).catch((err) => {
+          console.warn(`[pathLink] ${instanceId} OS ${mode} 실패:`, err);
+          useNotificationStore.getState().addNotification({
+            terminalId: instanceId,
+            workspaceId: resolveWorkspaceId(instanceId),
+            message: i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }),
+            level: "error",
+          });
+        });
       },
       onChangeDir: (absPath) => {
         // 클릭한 디렉토리를 새 cwd 로 **제안**해 기존 중앙화 전파 경로(do_sync_cwd)에
@@ -1386,6 +1410,7 @@ export function TerminalView({
     // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
+      pathLinkHint.hide();
       pathLink.clear();
     };
 
@@ -1425,7 +1450,17 @@ export function TerminalView({
       // (getSelectionPosition 과 provideLinks/ILink.range 의 좌표계 불일치 보정 —
       //  mapSelectionToPathRange 주석 참고. 여러 줄 선택은 첫 줄만 사용.)
       const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
-      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(pos, rawFirstLine, token);
+      // #691: 밑줄 폭은 문자 수가 아니라 **셀 수**다. 한글/CJK 는 한 글자가 두
+      // 셀, 이모지는 UTF-16 두 칸이 한 셀 쌍이라 문자열 길이로 계산하면 밑줄이
+      // 절반만 그어지거나 어긋난다. 선택 시작 줄의 실제 셀을 넘겨 보정한다.
+      const selectionLine = t.buffer.active.getLine(pos.start.y);
+      const lineCells = selectionLine ? readLineCells(selectionLine) : undefined;
+      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(
+        pos,
+        rawFirstLine,
+        token,
+        lineCells,
+      );
 
       const seq = ++pathLinkSelectionSeq;
       statPath(absPath)
@@ -2575,6 +2610,10 @@ export function TerminalView({
         chargeCompositionBaseYMove({ carryShadowCursor: true });
       }
       refreshViewportPresentation();
+      // #687: 밑줄은 마커를 따라 움직이지만 힌트 라벨은 mousemove 에서만 자리를
+      // 잡는다. 스크롤 뒤 포인터가 멈춰 있으면 라벨만 옛 좌표에 남으므로 감춘다
+      // (다음 mousemove 가 필요하면 다시 그린다).
+      pathLinkHint.hide();
     });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
@@ -2823,10 +2862,32 @@ export function TerminalView({
     const handleMouseMove = (e: MouseEvent) => {
       if (outerEl) outerEl.style.cursor = "";
       // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
-      setPathLinkCursor(pathLink.hitTest(e.clientX, e.clientY));
+      // 사각형은 한 번만 읽어 hit-test 와 라벨 배치에 함께 쓴다(mousemove 마다
+      // 같은 요소를 두 번 재는 강제 리플로우를 피한다).
+      const rect = pathLink.getRect();
+      const inside =
+        !!rect &&
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      setPathLinkCursor(inside);
+      // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
+      // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
+      const sel = inside ? pathLink.getCurrent() : null;
+      const hintKey = sel
+        ? pathLinkHintKey(
+            sel.isDirectory,
+            useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
+          )
+        : null;
+      if (rect && hintKey) pathLinkHint.show(rect, i18n.t(hintKey, { ns: "common" }));
+      else pathLinkHint.hide();
     };
+    const handleMouseLeave = () => pathLinkHint.hide();
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
+    outerEl?.addEventListener("mouseleave", handleMouseLeave);
 
     // #363: 밑줄(검증된 경로) 클릭으로 열기/이동. 데코레이션은 pointer-events:none
     // 이라 mousedown/up 은 그대로 xterm 으로 흘러가 선택/드래그가 정상 동작한다.
@@ -2834,28 +2895,45 @@ export function TerminalView({
     // 경로를 연다(파일=viewer, 디렉토리=cwd 전파). 드래그면 무시해 일반 재선택이
     // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
     // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
-    let pathLinkPress: { sel: VerifiedPathSelection; x: number; y: number } | null = null;
-    const PATH_LINK_CLICK_SLOP = 4;
-    const handlePathLinkMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0) {
-        pathLinkPress = null;
-        return;
-      }
-      const sel = pathLink.getCurrent();
-      pathLinkPress =
-        sel && pathLink.hitTest(e.clientX, e.clientY) ? { sel, x: e.clientX, y: e.clientY } : null;
-    };
-    const handlePathLinkMouseUp = (e: MouseEvent) => {
-      const press = pathLinkPress;
-      pathLinkPress = null;
-      if (!press) return;
-      const moved =
-        Math.abs(e.clientX - press.x) > PATH_LINK_CLICK_SLOP ||
-        Math.abs(e.clientY - press.y) > PATH_LINK_CLICK_SLOP;
-      if (moved) return; // 드래그 → 열지 않음(재선택 의도).
-      pathLink.activate(press.sel);
-    };
-    // capture 단계로 xterm 핸들러보다 먼저 관찰(전파는 막지 않는다).
+    //
+    // #687(ADR-0100): Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 이 조합만은
+    // "관찰"이 아니라 **소유**한다 — 밑줄 안에서 성립하면 mousedown 을
+    // preventDefault + stopImmediatePropagation 으로 종결해, xterm 의 선택 확장,
+    // TUI 로의 마우스 리포팅 전달, #352 우회가 같은 클릭을 함께 처리하지 못하게
+    // 한다(#352 쪽은 isModifierLinkClick 이 Ctrl 조합을 배제해 이중 안전).
+    // 상태 기계는 path-link-click.ts 가 소유한다(단위 테스트 대상). 여기서는
+    // 스토어·i18n·터미널 포커스만 주입해 배선한다.
+    const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
+      getSelection: () => pathLink.getCurrent(),
+      hitTest: (x, y) => pathLink.hitTest(x, y),
+      getSettings: () => {
+        const terminalSettings = useSettingsStore.getState().terminal;
+        return {
+          osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
+          confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
+        };
+      },
+      confirm: ({ path }) =>
+        window.confirm(
+          i18n.t(
+            requiresHardConfirm(path)
+              ? "terminal.osOpenConfirmExecutable"
+              : "terminal.osOpenConfirm",
+            { ns: "common", path },
+          ),
+        ),
+      activate: (sel, action) => pathLink.activate(sel, action),
+      // mousedown 을 preventDefault 했고 네이티브 대화상자가 포커스를 가져가므로,
+      // 진행·취소 어느 쪽이든 터미널 포커스를 되돌려 준다.
+      onOsHandoffSettled: () => terminalRef.current?.focus(),
+    });
+    // capture 단계로 xterm 핸들러보다 먼저 관찰한다. 전파를 막는 것은 위의
+    // 호스트 OS 위임 조합뿐이고, 나머지 클릭은 그대로 흘려보낸다. #352 우회
+    // 리스너도 같은 wrapper 엘리먼트의 capture 에 등록되므로, 여기서 먼저
+    // 등록해 두는 것이 순서상 우선한다(실질 방어는 isModifierLinkClick 의 Ctrl
+    // 배제이며, 이 등록 순서는 그 이중 안전이다).
+    const handlePathLinkMouseDown = (e: MouseEvent) => pathLinkClick.onMouseDown(e);
+    const handlePathLinkMouseUp = (e: MouseEvent) => pathLinkClick.onMouseUp(e);
     outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
     window.addEventListener("mouseup", handlePathLinkMouseUp);
 
@@ -5293,6 +5371,8 @@ export function TerminalView({
     let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
+      // #687: reflow 뒤 라벨 좌표는 더 이상 밑줄과 맞지 않는다(스크롤과 동일 이유).
+      pathLinkHint.hide();
       const isNowHidden = width === 0 || height === 0;
       isContainerHiddenRef.current = isNowHidden;
       // A pending debounced fit must never run against a hidden container.
@@ -5630,6 +5710,8 @@ export function TerminalView({
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      outerEl?.removeEventListener("mouseleave", handleMouseLeave);
+      pathLinkHint.dispose();
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
       outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
       window.removeEventListener("mouseup", handlePathLinkMouseUp);

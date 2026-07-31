@@ -537,7 +537,8 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
             "pathLinkEnabled": false,
             "pathLinkMaxLength": 1024,
             "showScrollToBottomButton": false,
-            "composerAutocomplete": false
+            "composerAutocomplete": false,
+            "pathLinkOsOpenConfirm": false
         }
     }))
     .unwrap();
@@ -552,6 +553,10 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert!(!settings.terminal.show_scroll_to_bottom_button);
     // Issue #505: the autocomplete toggle round-trips like the other terminal leaves.
     assert!(!settings.terminal.composer_autocomplete);
+    // ADR-0099: the OS-open confirmation can be relaxed explicitly, but the
+    // feature toggle defaults on when omitted — neither may flip silently.
+    assert!(!settings.terminal.path_link_os_open_confirm);
+    assert!(settings.terminal.path_link_os_open_enabled);
     // Both composer recall toggles default on when omitted from the JSON above.
     assert!(settings.terminal.composer_history_popup);
     // ADR-0055: history sharing defaults to the whole app when omitted.
@@ -560,4 +565,66 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     let serialized = serde_json::to_value(settings).unwrap();
     assert_eq!(serialized["profileDefaults"]["maxOutputCacheKB"], 512);
     assert_eq!(serialized["terminal"]["pathLinkMaxLength"], 1024);
+    assert_eq!(serialized["terminal"]["pathLinkOsOpenConfirm"], false);
+    assert_eq!(serialized["terminal"]["pathLinkOsOpenEnabled"], true);
+}
+
+#[test]
+fn parser_admission_shares_default_to_five_three_two() {
+    let defaults = Settings::default().terminal.parser_admission;
+    assert_eq!(defaults.focused_share, 5);
+    assert_eq!(defaults.visible_share, 3);
+    assert_eq!(defaults.hidden_share, 2);
+
+    // A file predating the knob keeps the defaults instead of pausing a class.
+    let legacy: Settings = serde_json::from_str(r#"{ "terminal": {} }"#).unwrap();
+    assert_eq!(legacy.terminal.parser_admission, defaults);
+}
+
+#[test]
+fn parser_admission_shares_outside_range_are_rejected() {
+    for (path, patch) in [
+        (
+            "/terminal/parserAdmission/focusedShare",
+            json!({ "terminal": { "parserAdmission": { "focusedShare": 0 } } }),
+        ),
+        (
+            "/terminal/parserAdmission/visibleShare",
+            json!({ "terminal": { "parserAdmission": { "visibleShare": 1001 } } }),
+        ),
+        (
+            // Zero would pause every hidden pane's parser, which the lossless
+            // contract forbids (ADR-0101).
+            "/terminal/parserAdmission/hiddenShare",
+            json!({ "terminal": { "parserAdmission": { "hiddenShare": 0 } } }),
+        ),
+    ] {
+        let prepared = prepare_settings_update(&Settings::default(), &patch);
+        assert!(!prepared.valid, "{path} must be rejected");
+        assert!(prepared.errors.iter().any(|issue| issue.path == path));
+    }
+
+    let in_range = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "terminal": { "parserAdmission": { "focusedShare": 9, "visibleShare": 4, "hiddenShare": 1 } } }),
+    );
+    assert!(in_range.valid, "errors: {:?}", in_range.errors);
+    let candidate = in_range
+        .candidate
+        .expect("valid update must have candidate");
+    assert_eq!(candidate.terminal.parser_admission.focused_share, 9);
+    assert_eq!(candidate.terminal.parser_admission.hidden_share, 1);
+}
+
+#[test]
+fn parser_admission_sanitize_clamps_a_hand_edited_file() {
+    let edited: Settings = serde_json::from_str(
+        r#"{ "terminal": { "parserAdmission": { "focusedShare": 0, "visibleShare": 5000, "hiddenShare": 2 } } }"#,
+    )
+    .unwrap();
+    let sanitized = edited.terminal.parser_admission.sanitized();
+
+    assert_eq!(sanitized.focused_share, 1);
+    assert_eq!(sanitized.visible_share, 1000);
+    assert_eq!(sanitized.hidden_share, 2);
 }

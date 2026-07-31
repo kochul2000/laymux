@@ -3,7 +3,7 @@
  *
  * The pane can be any rectangle the grid allows, so the view picks its
  * arrangement from the box it was given rather than from a fixed setting
- * (ADR-0099). Users can still pin a choice; `auto` is only the default.
+ * (ADR-0102). Users can still pin a choice; `auto` is only the default.
  */
 
 /** Arrangements the view can render. */

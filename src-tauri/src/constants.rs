@@ -16,7 +16,7 @@ pub const EVENT_TERMINAL_TITLE_CHANGED: &str = "terminal-title-changed";
 pub const EVENT_CLAUDE_MESSAGE_CHANGED: &str = "claude-message-changed";
 pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
-/// A Claude usage probe published a new snapshot (ADR-0099).
+/// A Claude usage probe published a new snapshot (ADR-0102).
 pub const EVENT_USAGE_SNAPSHOT_CHANGED: &str = "usage-snapshot-changed";
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
@@ -94,6 +94,15 @@ pub const MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS: u64 = 30;
 pub const SETTINGS_LANGUAGES: &[&str] = &["system", "ko", "en"];
 pub const APP_THEME_IDS: &[&str] = &["catppuccin-mocha", "dracula", "wsl-dark", "github-light"];
 pub const TERMINAL_SCROLLBAR_STYLES: &[&str] = &["overlay", "separate"];
+/// xterm parser admission class shares (ADR-0101). Defaults are 5 (focused) /
+/// 3 (other visible) / 2 (hidden together); the sum is one admission cycle.
+pub const PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT: u32 = 5;
+pub const PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT: u32 = 3;
+pub const PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT: u32 = 2;
+/// A class at zero would pause its parsers, which the lossless contract forbids.
+pub const PARSER_ADMISSION_SHARE_MIN: u32 = 1;
+/// Bounds the admission cycle a settings file can ask the scheduler to honour.
+pub const PARSER_ADMISSION_SHARE_MAX: u32 = 1000;
 /// Composer past-input history sharing scope (ADR-0055).
 pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];

@@ -9,7 +9,7 @@
 //! cargo test --test usage_probe_live -- --ignored --nocapture
 //! ```
 //!
-//! Screen scraping a TUI is not a stable contract ([ADR-0099]), so this test is
+//! Screen scraping a TUI is not a stable contract ([ADR-0102]), so this test is
 //! the only thing that catches an upstream layout change before a user does.
 
 use std::time::{Duration, Instant};

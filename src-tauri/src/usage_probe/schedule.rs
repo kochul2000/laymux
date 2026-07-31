@@ -1,7 +1,7 @@
 //! Refresh interval policy.
 //!
 //! Anthropic rate-limits `/usage`, so the normal interval has a hard floor that
-//! settings cannot lower ([ADR-0099]). Failures get a shorter interval but a
+//! settings cannot lower ([ADR-0102]). Failures get a shorter interval but a
 //! bounded number of fast attempts, so a persistently broken probe settles back
 //! to the normal cadence instead of hammering.
 

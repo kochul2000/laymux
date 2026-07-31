@@ -5,7 +5,7 @@
  * The backend carries reset times verbatim (`7pm (Asia/Seoul)`,
  * `Mar 6, 12pm (Asia/Seoul)`) and never interprets them. Turning one into an
  * elapsed fraction needs local-calendar reasoning, so that lives here — one
- * implementation, on the side that already has a calendar (ADR-0099).
+ * implementation, on the side that already has a calendar (ADR-0102).
  */
 
 /** Length of a Claude session window. */

@@ -16,50 +16,13 @@
  */
 
 import type { Terminal, ILinkProvider, ILink } from "@xterm/xterm";
+import { reconstructLine, readLineCells } from "./terminal-cell-map";
 
 /** A matched `#number` token on a single line (columns are 1-based, inclusive). */
 export interface PrMatch {
   number: number;
   startCol: number;
   endCol: number;
-}
-
-/**
- * Minimal xterm cell shape needed for offset→column mapping (subset of
- * `IBufferCell`): `chars` = `getCell().getChars()`, `width` =
- * `getCell().getWidth()` (0 = trailing half of a wide char, 1 = normal,
- * 2 = leading half of a wide char).
- */
-export interface CellInfo {
-  chars: string;
-  width: number;
-}
-
-/**
- * Reconstruct a terminal line's string together with a UTF-16-offset →
- * 1-based-cell-column map from its cells.
- *
- * `findPrTokens` returns UTF-16 string offsets, but `ILink.range.x` is an
- * xterm *cell* column. A wide char (CJK/emoji) occupies 2 cells while
- * contributing only 1–2 UTF-16 code units, so string offset and cell column
- * diverge whenever a wide char precedes a token. Building the string and the
- * column map in the same pass guarantees they stay consistent (issue #441).
- *
- * `columns[o]` is the 1-based cell column of the character at string offset
- * `o`. Empty/unset cells emit a single space (matching `translateToString`),
- * and width-0 trailing cells are skipped (their char lives in the lead cell).
- */
-export function reconstructLine(cells: CellInfo[]): { text: string; columns: number[] } {
-  let text = "";
-  const columns: number[] = [];
-  for (let i = 0; i < cells.length; i++) {
-    const cell = cells[i];
-    if (cell.width === 0) continue; // trailing half of a wide char — not emitted
-    const emitted = cell.chars.length > 0 ? cell.chars : " ";
-    text += emitted;
-    for (let k = 0; k < emitted.length; k++) columns.push(i + 1); // 1-based column
-  }
-  return { text, columns };
 }
 
 // `#` must not be preceded by a word char (avoids `abc#12`, `v1.2#3`), must be
@@ -86,29 +49,6 @@ export function findPrTokens(text: string): PrMatch[] {
     matches.push({ number, startCol, endCol });
   }
   return matches;
-}
-
-/** xterm buffer line — the subset used here (getCell/length). */
-interface BufferLineLike {
-  length: number;
-  getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
-}
-
-/**
- * Snapshot a buffer line's cells into plain `CellInfo[]`. xterm may reuse the
- * cell object across `getCell` calls, so chars/width are read eagerly.
- */
-function readLineCells(line: BufferLineLike): CellInfo[] {
-  const cells: CellInfo[] = [];
-  for (let i = 0; i < line.length; i++) {
-    const cell = line.getCell(i);
-    if (!cell) {
-      cells.push({ chars: " ", width: 1 });
-      continue;
-    }
-    cells.push({ chars: cell.getChars(), width: cell.getWidth() });
-  }
-  return cells;
 }
 
 /**
@@ -142,7 +82,7 @@ export function createPrLinkProvider(
 
       // Reconstruct text + offset→cell-column map in one pass so wide chars
       // (CJK/emoji) don't shift the underline/hit area (#441).
-      const { text, columns } = reconstructLine(readLineCells(bufLine));
+      const { text, columns, endColumns } = reconstructLine(readLineCells(bufLine));
       const matches = findPrTokens(text);
       if (matches.length === 0) {
         callback(undefined);
@@ -151,9 +91,12 @@ export function createPrLinkProvider(
 
       const links: ILink[] = [];
       for (const match of matches) {
-        // token cols are 1-based string offsets; map to cell columns.
+        // token cols are 1-based string offsets; map to cell columns. `end` is
+        // inclusive, so it takes the *last* cell the character occupies —
+        // identical for `#\d+` (all width 1), but correct if the pattern ever
+        // grows to include a wide char.
         const startX = columns[match.startCol - 1];
-        const endX = columns[match.endCol - 1];
+        const endX = endColumns[match.endCol - 1];
         if (startX === undefined || endX === undefined) continue; // out-of-range guard
         links.push({
           range: {

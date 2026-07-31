@@ -54,7 +54,7 @@ let claimSeq = 0;
  *
  * The subscription is what keeps the probe (and its `claude` process) alive, so
  * it is released on unmount and re-established whenever the config dir changes
- * — that is the demand signal the backend counts (ADR-0099).
+ * — that is the demand signal the backend counts (ADR-0102).
  *
  * `subscriberKey` identifies the view instance; the actual claim id is derived
  * from it per effect run.

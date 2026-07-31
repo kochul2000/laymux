@@ -5,7 +5,7 @@
 //! deliberately avoids a regex dependency — the shapes are fixed enough that
 //! hand-rolled scanning stays shorter than the patterns would be.
 //!
-//! Per [ADR-0099] reset text is captured verbatim and never interpreted.
+//! Per [ADR-0102] reset text is captured verbatim and never interpreted.
 
 use super::snapshot::{ProbeStatus, UsageLimit};
 

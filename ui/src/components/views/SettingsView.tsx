@@ -1623,6 +1623,22 @@ function TerminalSection() {
             }
           />
         </SettingRow>
+
+        <ToggleRow
+          label={t("terminal.pathLinkOsOpen")}
+          desc={t("terminal.pathLinkOsOpenDesc")}
+          testid="path-link-os-open-toggle"
+          checked={terminal.pathLinkOsOpenEnabled}
+          onChange={(v) => update({ pathLinkOsOpenEnabled: v })}
+        />
+
+        <ToggleRow
+          label={t("terminal.pathLinkOsOpenConfirm")}
+          desc={t("terminal.pathLinkOsOpenConfirmDesc")}
+          testid="path-link-os-open-confirm-toggle"
+          checked={terminal.pathLinkOsOpenConfirm}
+          onChange={(v) => update({ pathLinkOsOpenConfirm: v })}
+        />
       </SubGroup>
 
       <SubGroup title={t("terminal.exitGroup")}>
@@ -3276,7 +3292,7 @@ function IssueReporterSection() {
  * Grouped per monitored agent rather than merged into the Claude/Codex
  * integration sections: these are the data-source settings of one view, not
  * agent integration behavior, and a second agent should sit next to the first
- * for comparison (ADR-0099).
+ * for comparison (ADR-0102).
  */
 function UsageSection() {
   const { t } = useTranslation("settings");

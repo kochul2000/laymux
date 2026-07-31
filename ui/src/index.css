@@ -581,6 +581,28 @@
   cursor: pointer !important;
 }
 
+/* #687: 밑줄 위 hover 힌트 라벨. 수정자 클릭(Ctrl / Ctrl+Shift)은 발견성이
+   없으므로 밑줄에 마우스를 올렸을 때 무엇을 할 수 있는지 알린다. 클릭·드래그를
+   가로채지 않도록 pointer-events 를 끈다. 위치는 TerminalView 가 계산한다. */
+.terminal-path-link-hint {
+  position: absolute;
+  z-index: 6;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 8px var(--backdrop-light);
+}
+
+.terminal-path-link-hint[hidden] {
+  display: none;
+}
+
 .terminal-overlay-caret {
   position: absolute;
   top: 0;

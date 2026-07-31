@@ -1,7 +1,7 @@
 //! Claude usage collection.
 //!
 //! Owns headless `claude` probes — one per `CLAUDE_CONFIG_DIR` — and caches the
-//! raw snapshot each produces. Per [ADR-0099] a probe exists only while some
+//! raw snapshot each produces. Per [ADR-0102] a probe exists only while some
 //! `UsageView` is subscribed to it, and the probe PTY never appears in the
 //! terminal registry.
 //!

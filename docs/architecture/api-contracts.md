@@ -54,6 +54,56 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 `export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
 버리지 않고 제거 대상 항목만 정리한다.
 
+### xterm parser admission 클래스 몫
+
+```jsonc
+{
+  "terminal": {
+    "parserAdmission": {
+      "focusedShare": 5, // 활성 workspace 의 focused pane
+      "visibleShare": 3, // 활성 workspace 의 나머지 visible pane 전체
+      "hiddenShare": 2 // hidden pane(비활성 workspace·0 px track) 전체
+    }
+  }
+}
+```
+
+`terminal.parserAdmission`은 앱 전역 xterm parser admission turn 을 **pane 단위가 아니라 클래스 단위**로 나누는 비율이다([ADR-0101](../adr/0101-active-workspace-weighted-parser-admission.md)). 세 값은 상대값이고 합이 한 admission cycle 이므로 기본값 `5/3/2`는 focused 50%, 활성 workspace 의 나머지 visible 30%, hidden 전체 20%를 뜻한다. 클래스 안에서는 pane 들이 round-robin 으로 돌아가므로 hidden pane 이 3개든 300개든 활성 workspace 몫은 변하지 않는다.
+
+**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
+
+값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만의 문제가 아니라 `Settings` 역직렬화 자체를 실패시키므로 `load_settings_validated`가 파일 전체를 `ParseError`로 판정하고 기본 설정으로 기동한 뒤 `SettingsRecoveryModal`로 알린다 — 모든 수치 설정에 공통인 기존 동작이며 이 필드만 관용적으로 파싱하지 않는다. 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
+
+극단 비율을 넣어도 한 클래스가 무한정 밀리지 않는다. pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) turn 안에 반드시 한 turn 을 받는다. 기본값에서는 몫이 만드는 간격(hidden 최대 5 turn)이 늘 먼저 도달하므로 이 floor 는 극단 설정과 클래스 drain/재진입에서만 작동한다.
+
+적용 시점은 저장 직후 다음 admission turn 이다. 프론트엔드는 `useTerminalParserAdmissionSettings`가 store 변경을 구독해 scheduler 에 넣으며, 진행 중인 physical write 를 선점하거나 xterm 을 재생성하지 않는다. 클래스 몫이 바뀌면 이전 몫으로 계산된 balance 는 폐기해 새 비율로 다음 cycle 을 시작한다.
+
+### 경로 링크의 호스트 OS 열기
+
+```jsonc
+{
+  "terminal": {
+    "pathLinkOsOpenEnabled": true, // 기본값. Ctrl/Ctrl+Shift 클릭으로 호스트 OS 에 위임
+    "pathLinkOsOpenConfirm": true // 기본값. 파일을 연결 프로그램으로 열 때마다 확인
+  }
+}
+```
+
+두 Boolean 모두 Settings → Terminal → 파일 경로 링크에서 편집하며, Rust serde 와 프론트엔드
+settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-path-link-host-os-open-modifier-contract.md)).
+`pathLinkOsOpenEnabled` 가 꺼져 있으면 수정자 클릭도 기존 동작(파일=뷰어, 디렉터리=CWD 전파)으로
+떨어진다. `pathLinkOsOpenConfirm` 은 **완화만** 할 수 있다 — 꺼도 직접 실행·설치·스크립트 호스트·
+레지스트리 병합 확장자(코드 상수 `HARD_CONFIRM_EXTENSIONS`)는 계속 확인을 받는다. 이 하드 클래스는
+설정 키로 노출하지 않으므로 설정 patch 로 소거할 수 없다. 확인은 실행으로 이어지는 파일 `open` 에만
+적용되고 `reveal` 과 디렉터리 열기에는 적용되지 않는다.
+
+실행 커맨드 `open_in_os(path, wslDistro, mode)` 는 데스크톱 프론트엔드 전용이며 Automation API·MCP
+툴·Remote 라우트 어디에도 노출하지 않는다. 원격이 파일 읽기 권한을 호스트 프로세스 실행으로 넓히지
+못하게 하는 [ADR-0045](../adr/0045-remote-path-link-reuses-desktop-parser.md) 경계를 그대로 따른다.
+`mode` 는 `"open"`/`"reveal"` 두 값만 허용하고 그 외는 오류다. 호스트 경로는 `stat_path` 와 같은
+`resolve_address_path_following_symlinks` 로 산출하며, 커맨드는 프로세스 spawn 실패만 오류로
+보고한다(Windows `explorer.exe` 는 성공해도 0 이 아닌 종료 코드를 반환하므로 종료 코드를 보지 않는다).
+
 ### 사용량 모니터 설정
 
 ```jsonc
@@ -72,7 +122,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 `usage.claude.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
 
-`refreshSeconds` 는 **적용 시점에 600~3600 으로 clamp** 된다. 600 초 하한은 Anthropic 의 rate limit 때문이며 설정으로 내릴 수 없다 — 스키마는 값을 거부하지 않고 조용히 올려 적용한다([ADR-0099](../adr/0099-claude-usage-probe-headless-pty.md)). metadata apply mode 는 `nextUse` 다(다음 워커 기동부터 적용).
+`refreshSeconds` 는 **적용 시점에 600~3600 으로 clamp** 된다. 600 초 하한은 Anthropic 의 rate limit 때문이며 설정으로 내릴 수 없다 — 스키마는 값을 거부하지 않고 조용히 올려 적용한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)). metadata apply mode 는 `nextUse` 다(다음 워커 기동부터 적용).
 
 편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
 
@@ -802,6 +852,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 `/remote/font/{token}.{ttf|otf}`는 vendor asset과 같은 gate를 쓰는 폰트 route다([ADR-0077](../adr/0077-remote-terminal-font-serving.md)). `settings.remote.serveTerminalFont`가 켜져 있을 때만 appearance payload가 이 URL을 광고하며, route 자체는 등록되지 않은 token에 `404`를 돌려준다. `token`은 폰트 콘텐츠 sha256의 앞 16 hex이므로 URL이 곧 내용이며 `Cache-Control: public, max-age=31536000, immutable`과 `Vary: Accept-Encoding`을 보낸다. `Accept-Encoding`에 `br`이 있으면 한 번 만들어 캐시한 brotli 본을 `Content-Encoding: br`로 보내고, 아니면 원본 sfnt 바이트를 그대로 보낸다. woff2 컨테이너 변환은 하지 않는다.
 
 `/remote/manifest.webmanifest`와 `/remote/pwa/*`는 vendor asset과 같은 base access gate를 쓰는 설치 자산이다([ADR-0091](../adr/0091-remote-client-standalone-web-app-manifest.md)). manifest는 `display: standalone`과 `scope`=`start_url`=`id`=`/remote/`를 선언하고 `application/manifest+json`, `Cache-Control: no-store`로 응답한다 — 컴파일 내장이라 revalidation 근거가 없고, 이미 설치된 앱 안에 stale한 `start_url`/아이콘 목록이 남으면 안 된다. 아이콘은 `image/png`, `Cache-Control: private, max-age=86400`이며 등록되지 않은 파일 이름은 404다. `page.html`의 manifest link는 `crossorigin="use-credentials"`를 반드시 갖는다 — manifest fetch는 기본적으로 credential을 생략하므로 gate 안쪽에서는 이 속성이 없으면 401이다. iOS/iPadOS도 manifest를 지원하지만 `apple-touch-icon`이 manifest 아이콘보다 우선하고 오래된 설치 경로는 `apple-mobile-web-app-*` 메타를 사용하므로 두 계열을 함께 둔다. 아이콘 PNG는 `ui/public/logo.svg`에서 `cd ui && npm run build:pwa-icons`로 생성해 커밋한 자산이다. service worker는 등록하지 않는다(오프라인 캐싱 비목표, cloud remote origin CSP는 `worker-src 'none'`). 설치 자체는 HTTPS origin(cloud relay, 또는 HTTPS 앞단을 둔 direct)에서만 성립하며 평문 HTTP direct에서는 브라우저가 manifest를 무시한다.
+
+설치 권유 UI는 내비게이션 드로어 최하단의 `#installSection` 하나다([ADR-0100](../adr/0099-remote-client-install-affordance-in-drawer.md)). 상시 배너나 헤더 버튼을 두지 않는다 — ADR-0091이 되찾으려던 터미널 행을 다시 먹기 때문이다. 이 섹션은 기본 `hidden`이고, `window.isSecureContext`가 참이며 standalone 실행(`display-mode: standalone` 또는 iOS `navigator.standalone`)이 아니고, Chromium이 `beforeinstallprompt`를 발생시켰거나 iOS/iPadOS로 식별될 때만 나타난다. 클릭은 보관한 `beforeinstallprompt` 이벤트의 `prompt()`를 호출하고 그 이벤트를 즉시 버린다(재사용 불가); 이벤트가 없는 iOS에서는 "공유 → 홈 화면에 추가" 안내를 토글한다. `appinstalled` 이후에는 다시 숨는다 — 단 이 이벤트는 Chromium 경로에만 오고, iOS 는 공유 시트 설치로 이를 발생시키지 않으므로 그 탭에서는 다음 방문의 standalone 판정으로만 사라진다. 프롬프트를 자동으로 띄우지 않는다.
 
 `/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 

@@ -1,4 +1,4 @@
-# 0099. Claude 사용량은 레지스트리 밖 headless probe PTY 가 소유한다
+# 0102. Claude 사용량은 레지스트리 밖 headless probe PTY 가 소유한다
 
 - Status: Proposed
 - Date: 2026-07-31

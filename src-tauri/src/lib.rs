@@ -151,7 +151,7 @@ pub fn run() {
             }
 
             // Push usage snapshots to the UI so `UsageView` learns about a fresh
-            // capture without polling (ADR-0099).
+            // capture without polling (ADR-0102).
             {
                 let usage_app = app.handle().clone();
                 if let Err(error) = app_state.usage_probe.set_sink(Arc::new(
@@ -209,6 +209,7 @@ pub fn run() {
             commands::load_memo,
             commands::save_memo,
             commands::open_settings_file,
+            commands::open_in_os,
             commands::submit_github_issue,
             commands::get_listening_ports,
             commands::get_git_branch,

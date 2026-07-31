@@ -51,7 +51,7 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// snapshot/validation/apply awaits, never together with a synchronous AppState lock.
 /// `usage_probe` owns its own registry mutex and participates in no ordering with
 /// the locks above: nothing acquires it while holding another `AppState` lock, and
-/// its worker threads touch no `AppState` state (ADR-0099).
+/// its worker threads touch no `AppState` state (ADR-0102).
 ///
 /// ## Poison policy
 ///
@@ -145,7 +145,7 @@ pub struct AppState {
     /// nothing reads it while holding another AppState lock.
     pub frontend_health: Arc<crate::frontend_health::FrontendHealthState>,
     /// Claude usage probes. Owns headless `claude` PTYs that are deliberately
-    /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0099).
+    /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0102).
     pub usage_probe: Arc<crate::usage_probe::UsageProbe>,
 }
 
@@ -328,7 +328,7 @@ impl Default for AppState {
 
 impl Drop for AppState {
     fn drop(&mut self) {
-        // Probe PTYs are intentionally absent from `pty_handles` (ADR-0099), so
+        // Probe PTYs are intentionally absent from `pty_handles` (ADR-0102), so
         // they need their own teardown or the `claude` children outlive the app.
         if let Err(err) = self.usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "usage probe cleanup during app shutdown failed");

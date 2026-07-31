@@ -35,7 +35,7 @@ export interface ViewOverrides {
   fontSize?: number;
   /**
    * UsageView: pane 종횡비에서 도출되는 배치를 고정한다. 없으면 `auto`
-   * (박스에서 매번 재계산). ADR-0099.
+   * (박스에서 매번 재계산). ADR-0102.
    */
   usageLayout?: "auto" | "stacked" | "columns" | "compact";
 }

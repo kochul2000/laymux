@@ -41,6 +41,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
     });
     ctrl.setVerifiedSelection({
       bufferLine: 3,
@@ -64,27 +65,65 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
   it("activate 는 파일이면 onOpenPath, 디렉토리면 onChangeDir 로 라우팅한다", () => {
     const onOpenPath = vi.fn();
     const onChangeDir = vi.fn();
+    const onOsAction = vi.fn();
     const t = makeTerminal();
-    const ctrl = createPathLinkController(t.terminal, { onOpenPath, onChangeDir });
+    const ctrl = createPathLinkController(t.terminal, { onOpenPath, onChangeDir, onOsAction });
 
-    ctrl.activate({
+    ctrl.activate(
+      {
+        bufferLine: 1,
+        startCol: 1,
+        endCol: 10,
+        absPath: "/proj/a.ts",
+        isDirectory: false,
+      },
+      "viewer",
+    );
+    expect(onOpenPath).toHaveBeenCalledWith("/proj/a.ts");
+    expect(onChangeDir).not.toHaveBeenCalled();
+
+    ctrl.activate(
+      {
+        bufferLine: 1,
+        startCol: 1,
+        endCol: 10,
+        absPath: "/proj/src",
+        isDirectory: true,
+      },
+      "changeDir",
+    );
+    expect(onChangeDir).toHaveBeenCalledWith("/proj/src");
+  });
+
+  // ADR-0100: Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 라우팅만 여기서
+  // 검증하고, 어떤 수정자가 어떤 액션인지는 path-link-os-open 의 순수 함수가 정한다.
+  it("activate 는 osOpen/osReveal 을 onOsAction 으로 라우팅한다", () => {
+    const onOpenPath = vi.fn();
+    const onChangeDir = vi.fn();
+    const onOsAction = vi.fn();
+    const t = makeTerminal();
+    const ctrl = createPathLinkController(t.terminal, { onOpenPath, onChangeDir, onOsAction });
+
+    const file = {
       bufferLine: 1,
       startCol: 1,
       endCol: 10,
       absPath: "/proj/a.ts",
       isDirectory: false,
-    });
-    expect(onOpenPath).toHaveBeenCalledWith("/proj/a.ts");
-    expect(onChangeDir).not.toHaveBeenCalled();
+    };
+    ctrl.activate(file, "osOpen");
+    expect(onOsAction).toHaveBeenCalledWith("/proj/a.ts", "open");
 
-    ctrl.activate({
-      bufferLine: 1,
-      startCol: 1,
-      endCol: 10,
-      absPath: "/proj/src",
-      isDirectory: true,
-    });
-    expect(onChangeDir).toHaveBeenCalledWith("/proj/src");
+    ctrl.activate(file, "osReveal");
+    expect(onOsAction).toHaveBeenCalledWith("/proj/a.ts", "reveal");
+
+    const dir = { ...file, absPath: "/proj/src", isDirectory: true };
+    ctrl.activate(dir, "osOpen");
+    expect(onOsAction).toHaveBeenCalledWith("/proj/src", "open");
+
+    // 앱 내부 동작은 트리거되지 않는다.
+    expect(onOpenPath).not.toHaveBeenCalled();
+    expect(onChangeDir).not.toHaveBeenCalled();
   });
 
   it("hitTest 는 검증이 없으면 false, 있으면 데코 사각형 안일 때만 true", () => {
@@ -94,6 +133,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
     });
     expect(ctrl.hitTest(20, 25)).toBe(false); // 검증 없음
     ctrl.setVerifiedSelection({
@@ -110,11 +150,35 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     expect(ctrl.hitTest(20, 25)).toBe(false);
   });
 
+  // #687: 힌트 라벨 배치의 유일한 좌표 소스다.
+  it("getRect 는 검증이 없으면 null, 있으면 데코 사각형을 돌려준다", () => {
+    const t = makeTerminal();
+    const rect = { left: 10, right: 50, top: 20, bottom: 36 } as DOMRect;
+    t.el.getBoundingClientRect = () => rect;
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    expect(ctrl.getRect()).toBeNull();
+    ctrl.setVerifiedSelection({
+      bufferLine: 1,
+      startCol: 1,
+      endCol: 4,
+      absPath: "/x",
+      isDirectory: false,
+    });
+    expect(ctrl.getRect()).toBe(rect);
+    ctrl.clear();
+    expect(ctrl.getRect()).toBeNull();
+  });
+
   it("데코레이션 요소는 클릭을 가로채지 않는다(pointer-events:none)", () => {
     const t = makeTerminal();
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
     });
     ctrl.setVerifiedSelection({
       bufferLine: 1,
@@ -131,6 +195,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
     });
     ctrl.setVerifiedSelection({
       bufferLine: 2,
@@ -150,6 +215,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
     });
     ctrl.setVerifiedSelection({
       bufferLine: 2,

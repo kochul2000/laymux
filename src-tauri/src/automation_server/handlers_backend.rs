@@ -447,7 +447,7 @@ pub async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl 
 /// Extracted so the HTTP handler, the MCP tool, and tests share one shape.
 /// Only raw snapshot values are exposed — pace is a display-derived value the
 /// frontend computes, and it is deliberately absent from this contract
-/// (ADR-0099).
+/// (ADR-0102).
 pub fn build_usage_payload(snapshots: Vec<crate::usage_probe::UsageSnapshot>) -> serde_json::Value {
     let count = snapshots.len();
     serde_json::json!({ "usage": snapshots, "count": count })

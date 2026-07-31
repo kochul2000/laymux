@@ -14,6 +14,7 @@
  */
 
 import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
+import type { PathLinkClickAction } from "./path-link-os-open";
 
 /** 검증된 선택 경로의 버퍼 범위 + 메타. */
 export interface VerifiedPathSelection {
@@ -29,11 +30,19 @@ export interface VerifiedPathSelection {
   isDirectory: boolean;
 }
 
+/** 호스트 OS 위임 모드(백엔드 `open_in_os` 의 `mode` 인자와 같은 값). */
+export type OsHandoffMode = "open" | "reveal";
+
 export interface PathLinkControllerDeps {
   /** 검증된 파일 경로 클릭 시 호출 — viewer 로 연다. */
   onOpenPath: (absPath: string) => void;
   /** 검증된 디렉토리 경로 클릭 시 호출 — 해당 경로로 cwd 전파. */
   onChangeDir: (absPath: string) => void;
+  /**
+   * 호스트 OS 로 위임할 때 호출(ADR-0100). 확인 대화상자는 호출부가 이미
+   * 처리한 뒤이며, 여기서는 라우팅만 한다.
+   */
+  onOsAction: (absPath: string, mode: OsHandoffMode) => void;
 }
 
 export interface PathLinkController {
@@ -45,8 +54,13 @@ export interface PathLinkController {
   getCurrent: () => VerifiedPathSelection | null;
   /** viewport 좌표가 현재 밑줄(데코레이션) 영역 안인지. 없으면 false. */
   hitTest: (clientX: number, clientY: number) => boolean;
-  /** 주어진 선택을 파일/디렉토리에 따라 onOpenPath/onChangeDir 로 라우팅. */
-  activate: (sel: VerifiedPathSelection) => void;
+  /** 현재 밑줄의 뷰포트 사각형(힌트 라벨 배치용). 없으면 null. */
+  getRect: () => DOMRect | null;
+  /**
+   * 주어진 선택을 결정된 액션에 따라 라우팅. 액션 판정(수정자 해석·설정
+   * 반영·확인 대화상자)은 호출부가 `path-link-os-open` 의 순수 함수로 한다.
+   */
+  activate: (sel: VerifiedPathSelection, action: PathLinkClickAction) => void;
 }
 
 /**
@@ -123,9 +137,26 @@ export function createPathLinkController(
       const r = el.getBoundingClientRect();
       return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
     },
-    activate: (sel: VerifiedPathSelection) => {
-      if (sel.isDirectory) deps.onChangeDir(sel.absPath);
-      else deps.onOpenPath(sel.absPath);
+    getRect: () => {
+      const el = decoration?.element;
+      if (!current || !el) return null;
+      return el.getBoundingClientRect();
+    },
+    activate: (sel: VerifiedPathSelection, action: PathLinkClickAction) => {
+      switch (action) {
+        case "osOpen":
+          deps.onOsAction(sel.absPath, "open");
+          return;
+        case "osReveal":
+          deps.onOsAction(sel.absPath, "reveal");
+          return;
+        case "changeDir":
+          deps.onChangeDir(sel.absPath);
+          return;
+        case "viewer":
+          deps.onOpenPath(sel.absPath);
+          return;
+      }
     },
   };
 }

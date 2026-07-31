@@ -2,7 +2,7 @@
 //! drives `/usage` on a schedule.
 //!
 //! The PTY is deliberately *not* registered in `AppState::terminals`
-//! ([ADR-0099]) — it is the probe's implementation detail, not a terminal the
+//! ([ADR-0102]) — it is the probe's implementation detail, not a terminal the
 //! user can see, attach to, or persist.
 
 use std::sync::atomic::{AtomicBool, Ordering};

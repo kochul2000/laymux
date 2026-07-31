@@ -18,6 +18,7 @@ import {
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
 import type { PastePathSeparator } from "../lib/smart-text";
+import { TERMINAL_WRITE_DEFAULT_CLASS_SHARE } from "../lib/terminal-write-fair-scheduler";
 import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
   type ComposerHistoryScope,
@@ -114,6 +115,13 @@ export interface PasteSettings {
 export interface TerminalSettings {
   /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
   outputActivityBurst?: { windowMs: number; threshold: number; throttleMs: number };
+  /**
+   * ADR-0101: how xterm parser admission turns are split between the focused
+   * pane, the active workspace's other visible panes, and every hidden pane.
+   * Shares are relative and belong to the class, not to a pane. No settings UI —
+   * this is a settings.json tuning knob.
+   */
+  parserAdmission?: { focusedShare: number; visibleShare: number; hiddenShare: number };
   /** Advertise 24-bit color support to programs started in newly created terminals. */
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
@@ -124,6 +132,16 @@ export interface TerminalSettings {
   pathLinkEnabled: boolean;
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
   pathLinkMaxLength: number;
+  /**
+   * Issue #687 / ADR-0100: Ctrl click opens a path link in the host OS and
+   * Ctrl+Shift shows it in the host file manager.
+   */
+  pathLinkOsOpenEnabled: boolean;
+  /**
+   * Confirm every host OS open. When off, only the always-confirmed executable
+   * class (see `HARD_CONFIRM_EXTENSIONS`) still asks.
+   */
+  pathLinkOsOpenConfirm: boolean;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
   /**
@@ -156,7 +174,7 @@ export interface UsageAgentSettings {
 }
 
 /**
- * Usage monitor (UsageView, ADR-0099).
+ * Usage monitor (UsageView, ADR-0102).
  *
  * Keyed by agent: each is monitored by its own probe with its own shell, config
  * dirs, and provider rate limit. Codex arrives as a sibling field.
@@ -573,11 +591,18 @@ export const DEFAULT_PASTE: PasteSettings = {
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
   outputActivityBurst: { windowMs: 2000, threshold: 6, throttleMs: 1000 },
+  parserAdmission: {
+    focusedShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused,
+    visibleShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
+    hiddenShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
+  },
   advertiseTrueColor: true,
   copyOnSelect: true,
   scrollbarStyle: "overlay",
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
+  pathLinkOsOpenEnabled: true,
+  pathLinkOsOpenConfirm: true,
   showScrollToBottomButton: true,
   composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,

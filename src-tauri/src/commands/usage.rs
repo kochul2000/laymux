@@ -2,7 +2,7 @@
 //!
 //! Thin entry points: they resolve settings into a [`WorkerSpec`] and delegate
 //! to [`UsageProbe`]. The probe owns all lifecycle and scheduling policy
-//! ([ADR-0099]).
+//! ([ADR-0102]).
 
 use std::sync::Arc;
 

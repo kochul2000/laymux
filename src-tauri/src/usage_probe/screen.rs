@@ -3,7 +3,7 @@
 //! The probe needs *rendered* screen state, not a byte stream: `/usage` is a
 //! TUI that repaints in place, so concatenated output interleaves stale and
 //! live frames. This wrapper is scoped to the probe on purpose — laymux's user
-//! terminals keep their single cell grid in xterm.js ([ADR-0099]).
+//! terminals keep their single cell grid in xterm.js ([ADR-0102]).
 
 use std::sync::{Arc, Mutex};
 
