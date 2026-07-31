@@ -1,6 +1,6 @@
 # 0103. UsageView 표시 행은 전역 사용량 설정이 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-31
 - Source: 사용자 요구; [ADR-0102](0102-claude-usage-probe-headless-pty.md); `docs/architecture/api-contracts.md` 사용량 모니터 설정
 
