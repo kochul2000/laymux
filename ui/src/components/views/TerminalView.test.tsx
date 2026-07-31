@@ -382,7 +382,11 @@ vi.mock("@xterm/addon-web-links", () => ({
 }));
 
 let capturedIndentedLinkHandler: ((uri: string) => void) | null = null;
-vi.mock("@/lib/indented-link-provider", () => ({
+vi.mock("@/lib/indented-link-provider", async () => ({
+  // provider 생성만 가로채고 나머지(readIndentedLine 등)는 실물을 쓴다.
+  ...(await vi.importActual<typeof import("@/lib/indented-link-provider")>(
+    "@/lib/indented-link-provider",
+  )),
   createIndentedLinkProvider: (_terminal: unknown, onClickLink: (uri: string) => void) => {
     capturedIndentedLinkHandler = onClickLink;
     return { provideLinks: vi.fn() };
