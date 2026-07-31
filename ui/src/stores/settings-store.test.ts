@@ -932,6 +932,7 @@ describe("settings-store", () => {
       expect(usage.claude.profile).toBe("");
       expect(usage.claude.refreshSeconds).toBe(600);
       expect(usage.claude.configDirs).toEqual([]);
+      expect(usage.claude.visibleRows).toEqual(["session", "weekAll", "weekModel"]);
     });
 
     it("fills missing agent fields from defaults", () => {
@@ -942,6 +943,7 @@ describe("settings-store", () => {
       expect(usage.claude.profile).toBe("WSL");
       expect(usage.claude.refreshSeconds).toBe(600);
       expect(usage.claude.configDirs).toEqual([]);
+      expect(usage.claude.visibleRows).toEqual(["session", "weekAll", "weekModel"]);
     });
 
     it("survives a settings.json with no usage key", () => {
@@ -955,6 +957,17 @@ describe("settings-store", () => {
         usage: { claude: { configDirs: "oops" } },
       } as never);
       expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
+    });
+
+    it("restores all visible rows when settings omit or empty the selection", () => {
+      useSettingsStore.getState().loadFromSettings({
+        usage: { claude: { visibleRows: [] } },
+      } as never);
+      expect(useSettingsStore.getState().usage.claude.visibleRows).toEqual([
+        "session",
+        "weekAll",
+        "weekModel",
+      ]);
     });
 
     it("patches one agent without touching the rest of usage", () => {

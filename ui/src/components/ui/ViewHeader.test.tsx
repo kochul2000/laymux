@@ -71,10 +71,11 @@ describe("ViewHeader with PaneControlContext", () => {
     expect(ctx.onSetMode).toHaveBeenCalledWith("hover");
   });
 
-  it("always renders view content regardless of mode", () => {
+  it("releases its toolbar height when minimized", () => {
     const ctx = makeCtx({ mode: "minimized", hovered: false });
-    renderWithCtx(ctx, <ViewHeader>My View Title</ViewHeader>);
-    expect(screen.getByText("My View Title")).toBeInTheDocument();
+    renderWithCtx(ctx, <ViewHeader testId="header">My View Title</ViewHeader>);
+    expect(screen.getByTestId("header")).not.toHaveClass("ui-toolbar");
+    expect(screen.queryByText("My View Title")).not.toBeInTheDocument();
   });
 
   it("vertically centers a title prop in the toolbar", () => {

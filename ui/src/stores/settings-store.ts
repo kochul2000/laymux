@@ -164,6 +164,17 @@ export interface ControlBarSettings {
 }
 
 /** One monitored agent's probe settings. */
+export const USAGE_VISIBLE_ROW_KEYS = ["session", "weekAll", "weekModel"] as const;
+export type UsageVisibleRow = (typeof USAGE_VISIBLE_ROW_KEYS)[number];
+
+export const DEFAULT_USAGE_VISIBLE_ROWS: UsageVisibleRow[] = [...USAGE_VISIBLE_ROW_KEYS];
+
+export function normalizeUsageVisibleRows(value: unknown): UsageVisibleRow[] {
+  if (!Array.isArray(value)) return [...DEFAULT_USAGE_VISIBLE_ROWS];
+  const rows = USAGE_VISIBLE_ROW_KEYS.filter((row) => value.includes(row));
+  return rows.length > 0 ? rows : [...DEFAULT_USAGE_VISIBLE_ROWS];
+}
+
 export interface UsageAgentSettings {
   /** Terminal profile whose shell can run the agent CLI. Empty = defaultProfile. */
   profile: string;
@@ -171,6 +182,8 @@ export interface UsageAgentSettings {
   refreshSeconds: number;
   /** Extra agent config directories offered as monitorable profiles. */
   configDirs: string[];
+  /** Usage limit rows shown in every Claude UsageView. At least one is required. */
+  visibleRows: UsageVisibleRow[];
 }
 
 /**
@@ -627,6 +640,7 @@ export const DEFAULT_USAGE_AGENT: UsageAgentSettings = {
   profile: "",
   refreshSeconds: 600,
   configDirs: [],
+  visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS],
 };
 
 export const DEFAULT_USAGE: UsageSettings = {
@@ -1026,7 +1040,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   paste: { ...DEFAULT_PASTE },
   terminal: { ...DEFAULT_TERMINAL },
   controlBar: { ...DEFAULT_CONTROL_BAR },
-  usage: { claude: { ...DEFAULT_USAGE_AGENT, configDirs: [] } },
+  usage: {
+    claude: {
+      ...DEFAULT_USAGE_AGENT,
+      configDirs: [],
+      visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS],
+    },
+  },
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   workspaceSelector: {
@@ -1116,7 +1136,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
 
   setUsageAgent: (agent, data) =>
     set((state) => ({
-      usage: { ...state.usage, [agent]: { ...state.usage[agent], ...data } },
+      usage: {
+        ...state.usage,
+        [agent]: {
+          ...state.usage[agent],
+          ...data,
+          ...(data.visibleRows === undefined
+            ? {}
+            : { visibleRows: normalizeUsageVisibleRows(data.visibleRows) }),
+        },
+      },
     })),
 
   setFileExplorer: (data) =>
@@ -1296,6 +1325,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
             configDirs: Array.isArray(data.usage.claude?.configDirs)
               ? data.usage.claude.configDirs
               : [],
+            visibleRows: normalizeUsageVisibleRows(data.usage.claude?.visibleRows),
           },
         }
       : undefined;

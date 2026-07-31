@@ -2387,6 +2387,9 @@ describe("SettingsView", () => {
       expect(screen.getByTestId("settings-usage-section")).toBeInTheDocument();
       expect(screen.getByTestId("usage-profile-select")).toBeInTheDocument();
       expect(screen.getByTestId("usage-refresh-input")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-visible-row-session")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-visible-row-weekAll")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-visible-row-weekModel")).toBeInTheDocument();
       expect(screen.getByTestId("usage-config-dir-add")).toBeInTheDocument();
     });
 
@@ -2421,6 +2424,21 @@ describe("SettingsView", () => {
 
       await user.click(screen.getByTestId("save-settings-btn"));
       expect(useSettingsStore.getState().usage.claude.refreshSeconds).toBe(900);
+    });
+
+    it("saves selected rows and prevents deselecting the last one", async () => {
+      const user = await openUsage();
+      await user.click(screen.getByTestId("usage-visible-row-weekAll"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().usage.claude.visibleRows).toEqual([
+        "session",
+        "weekModel",
+      ]);
+
+      await user.click(screen.getByTestId("usage-visible-row-weekModel"));
+      const session = screen.getByTestId("usage-visible-row-session") as HTMLInputElement;
+      expect(session.checked).toBe(true);
+      expect(session.disabled).toBe(true);
     });
 
     it("adds and removes config dirs", async () => {

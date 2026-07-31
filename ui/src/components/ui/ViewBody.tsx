@@ -11,7 +11,10 @@ interface ViewBodyProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const variantClasses: Record<ViewBodyVariant, string> = {
   scroll: "flex-1 overflow-auto",
-  full: "relative flex-1",
+  // A full-size child must be allowed to become smaller than its contents.
+  // Otherwise a responsive view's intrinsic height wins over its pane height
+  // and ResizeObserver never sees the lower density states.
+  full: "relative min-h-0 flex-1",
 };
 
 /** View 본문 영역. variant에 따라 스크롤 또는 전체 채움 모드를 제공한다. */

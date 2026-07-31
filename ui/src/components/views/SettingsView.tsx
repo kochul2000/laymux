@@ -27,6 +27,8 @@ import {
   type ColorScheme,
   USAGE_REFRESH_MAX_SECONDS,
   USAGE_REFRESH_MIN_SECONDS,
+  USAGE_VISIBLE_ROW_KEYS,
+  type UsageVisibleRow,
   type Keybinding,
   type LanguageSetting,
 } from "@/stores/settings-store";
@@ -3310,6 +3312,19 @@ function UsageSection() {
     update({ configDirs: usage.configDirs.filter((_, i) => i !== index) });
   const updateConfigDir = (index: number, value: string) =>
     update({ configDirs: usage.configDirs.map((d, i) => (i === index ? value : d)) });
+  const toggleVisibleRow = (row: UsageVisibleRow, checked: boolean) => {
+    if (!checked && usage.visibleRows.length === 1) return;
+    update({
+      visibleRows: checked
+        ? [...usage.visibleRows, row]
+        : usage.visibleRows.filter((visible) => visible !== row),
+    });
+  };
+  const visibleRowLabels: Record<UsageVisibleRow, string> = {
+    session: t("usage.rowSession"),
+    weekAll: t("usage.rowWeekAll"),
+    weekModel: t("usage.rowWeekModel"),
+  };
 
   return (
     <div data-testid="settings-usage-section">
@@ -3357,6 +3372,30 @@ function UsageSection() {
             value={usage.refreshSeconds}
             onChange={(e) => update({ refreshSeconds: Number(e.target.value) })}
           />
+        </SettingRow>
+
+        <SettingRow label={t("usage.visibleRows")} desc={t("usage.visibleRowsDesc")}>
+          <div className="flex flex-col items-start gap-1">
+            {USAGE_VISIBLE_ROW_KEYS.map((row) => {
+              const checked = usage.visibleRows.includes(row);
+              const disabled = checked && usage.visibleRows.length === 1;
+              return (
+                <label key={row} className="flex items-center gap-2 text-[13px]">
+                  <input
+                    data-testid={`usage-visible-row-${row}`}
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(event) => toggleVisibleRow(row, event.target.checked)}
+                    style={{ accentColor: "var(--accent)" }}
+                  />
+                  <span style={{ color: disabled ? "var(--text-muted)" : "var(--text-primary)" }}>
+                    {visibleRowLabels[row]}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
         </SettingRow>
 
         <div className="flex items-start gap-3 py-1.5">

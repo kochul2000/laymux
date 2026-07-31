@@ -577,6 +577,30 @@ describe("PaneControlBar", () => {
     expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
   });
 
+  it("keeps minimize available after expanding a narrow minimized pane", async () => {
+    stubPaneWidth(320);
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
+
+    // Expanding from the three-dot entry opens the same narrow menu. It must
+    // retain a Minimize action so this is a reversible toggle.
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    await waitFor(() =>
+      expect(screen.getByTestId("pane-control-floating-menu")).toBeInTheDocument(),
+    );
+    await user.click(screen.getByTestId("pane-control-minimize"));
+    expect(screen.getByTestId("pane-control-minimized")).toBeInTheDocument();
+  });
+
   // -- Delete pane --
 
   it("shows delete button when onDelete is provided", () => {

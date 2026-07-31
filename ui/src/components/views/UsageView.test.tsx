@@ -9,6 +9,7 @@ import {
   type UsageSnapshot,
 } from "@/lib/tauri-api";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { DEFAULT_USAGE_VISIBLE_ROWS, useSettingsStore } from "@/stores/settings-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   subscribeUsageProbe: vi.fn(),
@@ -73,6 +74,9 @@ describe("UsageView", () => {
         return Promise.resolve(unlisten);
       });
     useOverridesStore.setState({ viewOverrides: {} });
+    useSettingsStore
+      .getState()
+      .setUsageAgent("claude", { visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS] });
     mockBox(400, 600);
   });
 
@@ -136,6 +140,109 @@ describe("UsageView", () => {
     expect(screen.getByTestId("usage-plan")).toHaveTextContent("Claude Max");
   });
 
+  it("matches the heading and quota percentage size while emphasizing only the percentage", async () => {
+    await renderView({ paneId: "pane-1" });
+
+    const row = screen.getByTestId("usage-row-week-all");
+    const label = row.firstElementChild?.firstElementChild;
+    expect(label).toHaveStyle({ fontSize: "13px", fontWeight: "400" });
+    expect(screen.getByTestId("usage-percent-week-all")).toHaveStyle({
+      fontSize: "13px",
+      fontWeight: "600",
+      color: "var(--text-secondary)",
+    });
+  });
+
+  it("shrinks the heading and quota percentage together", async () => {
+    mockBox(200, 100);
+    await renderView({ paneId: "pane-1" });
+
+    const row = screen.getByTestId("usage-row-week-all");
+    const label = row.firstElementChild?.firstElementChild as HTMLElement;
+    const percent = screen.getByTestId("usage-percent-week-all");
+    expect(percent.style.fontSize).toBe(label.style.fontSize);
+  });
+
+  it("shows Claude's reset text on the left and elapsed pace on the right", async () => {
+    await renderView({ paneId: "pane-1" });
+
+    const detail = screen.getByTestId("usage-detail-week-all");
+    expect(detail.firstElementChild).toHaveTextContent("Resets Mar 6, 12pm (Asia/Seoul)");
+    expect(detail.firstElementChild).toHaveStyle({ color: "var(--text-secondary)" });
+    expect(detail.lastElementChild).toHaveTextContent("0% elapsed");
+    expect(detail).not.toHaveTextContent("resets in");
+    expect(detail.lastElementChild).toHaveStyle({ color: "var(--usage-pace)" });
+  });
+
+  it("uses the configured usage profile's terminal font", async () => {
+    useSettingsStore.getState().setUsageAgent("claude", { profile: "PowerShell" });
+    useSettingsStore
+      .getState()
+      .updateProfile(0, { font: { face: "JetBrains Mono", size: 14, weight: "normal" } });
+
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-view")).toHaveStyle({
+      fontFamily: "'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace",
+    });
+  });
+
+  it("uses a square, prominent quota meter with a thin elapsed-time meter", async () => {
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-meter-used-session")).toHaveStyle({
+      height: "16px",
+      borderRadius: "",
+    });
+    expect(screen.getByTestId("usage-meter-pace-session")).toHaveStyle({
+      height: "3px",
+      borderRadius: "",
+      background: "var(--usage-track)",
+    });
+  });
+
+  it("centers the body content with 8px padding", async () => {
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-content")).toHaveClass(
+      "p-2",
+      "flex-1",
+      "min-h-0",
+      "justify-center",
+    );
+    expect(screen.getByTestId("usage-content")).not.toHaveClass("mx-auto", "my-auto");
+    expect(screen.getByTestId("usage-content").style.maxWidth).toBe("");
+    expect(screen.getByTestId("usage-footer")).toHaveClass("px-2", "pb-2");
+  });
+
+  it("hides the Ready and Last capture footer before dropping limit detail", async () => {
+    mockBox(200, 200);
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-detail-session")).toBeInTheDocument();
+    expect(screen.queryByTestId("usage-footer")).not.toBeInTheDocument();
+  });
+
+  it("filters the rendered limits to the configured visible rows", async () => {
+    useSettingsStore.getState().setUsageAgent("claude", { visibleRows: ["weekAll"] });
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.queryByTestId("usage-row-session")).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-row-week-all")).toBeInTheDocument();
+    expect(screen.queryByTestId("usage-row-week-model")).not.toBeInTheDocument();
+  });
+
+  it("abbreviates labels and detail words only when the row becomes narrow", async () => {
+    mockBox(230, 600);
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-row-session")).toHaveTextContent("session");
+    expect(screen.getByTestId("usage-row-week-all")).toHaveTextContent("week (all)");
+    expect(screen.getByTestId("usage-row-week-model")).toHaveTextContent("week (Fable)");
+    expect(screen.getByTestId("usage-detail-session")).not.toHaveTextContent("Resets");
+    expect(screen.getByTestId("usage-detail-session")).not.toHaveTextContent("elapsed");
+  });
+
   it("shows -- rather than a number when a row has no data", async () => {
     vi.mocked(subscribeUsageProbe).mockResolvedValue(
       snapshot({ status: { type: "starting" }, session: { percent: null, reset: null } }),
@@ -174,12 +281,17 @@ describe("UsageView", () => {
   });
 
   it("goes compact in a thin horizontal strip", async () => {
-    mockBox(1200, 80);
+    mockBox(1200, 40);
     await renderView({ paneId: "pane-1" });
     expect(screen.getByTestId("usage-body")).toHaveAttribute("data-layout", "compact");
-    // Compact drops the footer detail; the numbers must still be there.
+    // Compact drops every text label and leaves only the paired meters.
     expect(screen.queryByTestId("usage-footer")).not.toBeInTheDocument();
-    expect(screen.getByTestId("usage-percent-session")).toHaveTextContent("30%");
+    expect(screen.queryByTestId("usage-percent-session")).not.toBeInTheDocument();
+    expect(screen.getByTestId("usage-meter-used-session")).toHaveStyle({ height: "3px" });
+    expect(screen.getByTestId("usage-meter-pace-session")).toHaveStyle({ height: "3px" });
+    const barsOnly = screen.getByTestId("usage-row-session").parentElement;
+    expect(barsOnly).toHaveClass("flex-row");
+    expect(barsOnly).toHaveClass("p-2");
   });
 
   it("honors a pinned layout override over the measured box", async () => {
