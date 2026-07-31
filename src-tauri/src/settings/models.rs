@@ -618,6 +618,14 @@ pub struct TerminalSettings {
     /// Maximum selected text length considered for a path link.
     #[serde(default = "default_path_link_max_length")]
     pub path_link_max_length: u32,
+    /// Allow Ctrl / Ctrl+Shift click on a path link to hand the target to the
+    /// host OS (open with the file association / show in the file manager).
+    #[serde(default = "default_true")]
+    pub path_link_os_open_enabled: bool,
+    /// Confirm every host OS open, not just the always-confirmed executable
+    /// class. Turning this off still confirms directly executable extensions.
+    #[serde(default = "default_true")]
+    pub path_link_os_open_confirm: bool,
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
@@ -643,6 +651,8 @@ impl Default for TerminalSettings {
             scrollbar_style: default_scrollbar_style(),
             path_link_enabled: true,
             path_link_max_length: default_path_link_max_length(),
+            path_link_os_open_enabled: true,
+            path_link_os_open_confirm: true,
             show_scroll_to_bottom_button: true,
             composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
