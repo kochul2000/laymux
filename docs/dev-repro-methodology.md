@@ -84,6 +84,21 @@ cd ui && npm run test:screen     # *.screen.test.ts 만 — 기본 vitest run �
 
 실기(§1–§3)를 대체하지 않는다. 이 계층은 **반복 가능한 회귀**를 담당하고, 폰트·렌더러·OS IME 는 여전히 dev 실기의 몫이다.
 
+## 4.6. 부하는 결정적 플러드 벤치로 잰다
+
+출력 폭주·공정성·catch-up 지연처럼 **여러 pane 이 동시에 쏟아질 때만 보이는** 결함은 손으로 `yes` 를 돌려서는 재현이 흔들린다. dev 인스턴스(19281)에 결정적 다중 pane 플러드를 걸고 지표를 뽑는 하네스가 `scripts/bench/` 에 있다.
+
+```bash
+python scripts/bench/terminal_output_661.py \
+  --expected-worktree <repo-path> --output bench-result.json \
+  --hot-panes 4 --scenario background --lines 150000 --flush-every 256 --cleanup
+```
+
+- `terminal_output_661.py` — Automation API 로 workspace/pane 을 세우고 플러드를 구동한 뒤 catch-up·인터랙티브 입력 지연·스크린샷 지연을 JSON 으로 뽑는다. `--hot-panes` 는 2/4/7/8, `--scenario` 는 `active|background`.
+- `terminal-output-flood.ps1` — 실제 부하 생성기. `ARMED-` 를 찍고 barrier 파일을 기다렸다가 결정적 라인(`L%06d-runId-termId-…`)을 쏟는다. **barrier 로 pane 시작을 정렬**하기 때문에 동시성이 재현된다.
+- `test_terminal_output_661.py` — 하네스 자체의 유닛 테스트. 하네스를 고치면 여기부터 돌린다.
+- 포트는 dev(19281) 고정이며 discovery 파일의 실사용 경로를 건드리지 않는다(§1 · [`AGENTS.md`](../AGENTS.md) 포트 규칙). 계약은 [ADR-0097](adr/0097-transport-lossless-presentation-lossy-ownership.md).
+
 ## 5. 사보타주 검증 — 테스트가 결함을 못박고 있지 않은지
 
 수정을 되돌려 **의도한 테스트가 실제로 실패하는지** 확인한다. 통과하면 그 테스트는 아무것도 지키지 않는다.
