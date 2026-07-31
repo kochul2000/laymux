@@ -279,6 +279,10 @@ mod tests {
         // hijacking a page nobody asked to install is what the drawer avoids.
         assert!(!html.contains("deferredInstallPrompt.prompt();"));
         assert!(html.contains("installHint.hidden = !installHint.hidden;"));
+        // The audience is developers, so the button names the thing being
+        // installed. The hint quotes iOS' own share-sheet wording, which is what
+        // the user has to look for on that platform.
+        assert!(html.contains(">Install PWA</button>"));
         assert!(html.contains("Add to Home Screen"));
     }
 
