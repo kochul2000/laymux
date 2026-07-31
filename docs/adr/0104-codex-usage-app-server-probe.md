@@ -17,7 +17,7 @@ Codex CLI 사용량을 Claude UsageView와 같은 pane으로 보여줘야 한다
 - Codex probe는 `headless_command`로 app-server를 실행하고 stdio JSONL만 사용한다. Windows의 npm 설치에서는 stdio를 보존하기 위해 command shim 대신 Node의 Codex 엔트리포인트를 직접 실행한다. WebSocket listener를 열지 않으며 사용자 터미널·PTY 레지스트리·Codex 대화 스레드를 만들지 않는다.
 - raw snapshot은 app-server가 반환한 `limitId`, `limitName`, `primary`/`secondary`의 `usedPercent`, `windowDurationMins`, `resetsAt`와 계정 plan만 저장한다. 표시용 reset 문구와 elapsed 퍼센트는 프론트엔드가 원시 시각·window duration에서 계산한다.
 - Codex view는 마운트된 동안에만 `settings.usage.codex.refreshSeconds`(600~3600초) cadence로 읽고, unmount 뒤에는 프로세스를 유지하지 않는다. `usage.codex`는 terminal font profile과 `Weekly limit`/`Spark Weekly limit` 표시 행(하나 이상)을 함께 소유한다. `configDirs`의 추가 계정은 각 경로에서 사용자가 `codex login`을 마친 `CODEX_HOME`이며, 선택한 경로만 app-server 자식의 환경으로 전달한다. 읽기 API는 캐시·listener·worker를 기동하지 않는다.
-- `UsagePresentation`은 bar, 색, 서체, responsive density, compact 배치, footer, control bar 동작을 단일 구현으로 소유한다. provider view는 제목·행·상태·refresh 함수만 주입한다. 사용량·경과·track 색은 provider별이 아니라 `usage.colors` 하나가 소유한다.
+- `UsagePresentation`은 bar, 색, 서체, responsive density, compact 배치, footer, control bar 동작을 단일 구현으로 소유한다. provider view는 제목·행·상태·refresh 함수만 주입한다. 사용량·경과·track 색은 provider별이 아니라 `usage.colors` 하나가 소유한다. 기본 팔레트는 청록 `#58d1eb`·주황 `#fd971f`·회색 `#585858`이며, 테마 토큰이 아닌 사용량 표시 설정이므로 테마 전환으로 바뀌지 않는다.
 
 ## Alternatives Considered
 
@@ -31,3 +31,4 @@ Codex CLI 사용량을 Claude UsageView와 같은 pane으로 보여줘야 한다
 - Codex CLI가 PATH에 없거나 ChatGPT 계정으로 인증되지 않았으면 view footer에 명확한 상태를 표시한다.
 - app-server protocol이 바뀌면 JSON-RPC parser의 고립된 adapter와 fixture 테스트를 갱신한다. Claude의 PTY probe에는 영향을 주지 않는다.
 - Codex의 반환 버킷 수는 계정·플랜에 따라 달라질 수 있으므로 공통 프레젠테이션은 고정된 세 행을 가정하지 않는다.
+- 사용량 색을 테마 토큰에서 분리한 결과, 테마를 바꿔도 사용량 색은 유지된다. 이는 계정/모델을 가로질러 사용량의 의미를 일관되게 보이게 하는 선택이며, 테마와 함께 바꾸려면 사용자가 `usage.colors`를 직접 조정해야 한다.

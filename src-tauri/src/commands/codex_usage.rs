@@ -5,7 +5,7 @@
 //! competes with an interactive Codex terminal.
 
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::process::Stdio;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -87,7 +87,7 @@ struct RawBucket {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawWindow {
-    used_percent: u8,
+    used_percent: f64,
     window_duration_mins: u64,
     resets_at: u64,
 }
@@ -147,24 +147,91 @@ fn read_rate_limits(config_dir: &str) -> Result<CodexUsageSnapshot, ReadError> {
         .stdout
         .take()
         .ok_or_else(|| ReadError::Failed("Codex app-server stdout unavailable".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ReadError::Failed("Codex app-server stderr unavailable".into()))?;
+    let stderr_reader = std::thread::spawn(move || read_stderr_tail(stderr));
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if let Ok(message) = serde_json::from_str::<RpcEnvelope>(&line) {
-                if message.id == Some(1) {
-                    let _ = sender.send(message);
-                    break;
+        let response =
+            find_rate_limit_response(BufReader::new(stdout).lines().map_while(Result::ok));
+        let _ = sender.send(response);
+    });
+    let response = receiver.recv_timeout(APP_SERVER_TIMEOUT);
+    drop(stdin);
+    let exit_status = match child.try_wait() {
+        Ok(Some(status)) => Some(status),
+        Ok(None) => {
+            let _ = child.kill();
+            child.wait().ok()
+        }
+        Err(_) => None,
+    };
+    let stderr = stderr_reader
+        .join()
+        .unwrap_or_else(|_| "Codex app-server stderr reader failed".into());
+
+    match response {
+        Ok(Some(response)) => parse_rate_limit_response(response),
+        Ok(None) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            Err(classify_no_response(exit_status, &stderr))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            Err(ReadError::Failed("Codex app-server timed out".into()))
+        }
+    }
+}
+
+const STDERR_TAIL_BYTES: usize = 4 * 1024;
+
+fn read_stderr_tail(mut stderr: impl Read) -> String {
+    let mut tail = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    loop {
+        match stderr.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => {
+                tail.extend_from_slice(&buffer[..read]);
+                if tail.len() > STDERR_TAIL_BYTES {
+                    tail.drain(..tail.len() - STDERR_TAIL_BYTES);
                 }
             }
         }
-    });
-    let response = receiver
-        .recv_timeout(APP_SERVER_TIMEOUT)
-        .map_err(|_| ReadError::Failed("Codex app-server timed out".into()));
-    drop(stdin);
-    let _ = child.kill();
-    let _ = child.wait();
-    parse_rate_limit_response(response?)
+    }
+    String::from_utf8_lossy(&tail).trim().to_owned()
+}
+
+fn find_rate_limit_response<I, S>(lines: I) -> Option<RpcEnvelope>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    lines.into_iter().find_map(|line| {
+        let message = serde_json::from_str::<RpcEnvelope>(line.as_ref()).ok()?;
+        (message.id == Some(1)).then_some(message)
+    })
+}
+
+fn classify_no_response(exit_status: Option<std::process::ExitStatus>, stderr: &str) -> ReadError {
+    let lower_stderr = stderr.to_lowercase();
+    if lower_stderr.contains("not recognized as an internal or external command")
+        || lower_stderr.contains("command not found")
+        || lower_stderr.contains("no such file or directory")
+    {
+        return ReadError::Missing;
+    }
+    let status = exit_status
+        .map(|status| status.to_string())
+        .unwrap_or_else(|| "unknown exit status".into());
+    let detail = if stderr.is_empty() {
+        String::new()
+    } else {
+        format!(": {stderr}")
+    };
+    ReadError::Failed(format!(
+        "Codex app-server exited without a rate-limit response ({status}){detail}"
+    ))
 }
 
 fn apply_codex_home(command: &mut std::process::Command, config_dir: &str) {
@@ -202,13 +269,9 @@ fn codex_app_server_command() -> std::process::Command {
 
 #[cfg(test)]
 fn parse_rate_limits(stdout: &str) -> Result<CodexUsageSnapshot, ReadError> {
-    let response = stdout
-        .lines()
-        .filter_map(|line| serde_json::from_str::<RpcEnvelope>(line).ok())
-        .find(|message| message.id == Some(1))
-        .ok_or_else(|| {
-            ReadError::Failed("Codex app-server returned no rate-limit response".into())
-        })?;
+    let response = find_rate_limit_response(stdout.lines()).ok_or_else(|| {
+        ReadError::Failed("Codex app-server returned no rate-limit response".into())
+    })?;
     parse_rate_limit_response(response)
 }
 
@@ -251,7 +314,7 @@ fn flatten_bucket(bucket: RawBucket) -> Vec<CodexUsageLimit> {
                 } else {
                     format!("{base} ({kind})")
                 },
-                used_percent: window.used_percent.min(100),
+                used_percent: window.used_percent.round().clamp(0.0, 100.0) as u8,
                 window_duration_mins: window.window_duration_mins,
                 resets_at_secs: window.resets_at,
             })
@@ -290,6 +353,25 @@ mod tests {
         assert_eq!(snapshot.limits[0].label, "Codex");
         assert_eq!(snapshot.limits[1].label, "Codex (secondary)");
         assert_eq!(snapshot.plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn rounds_and_clamps_fractional_rate_limit_percentages() {
+        let output = r#"{"id":1,"result":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":42.5,"windowDurationMins":300,"resetsAt":1730950800},"secondary":{"usedPercent":255.1,"windowDurationMins":10080,"resetsAt":1731550800}}}}"#;
+        let snapshot = parse_rate_limits(output).unwrap();
+        assert_eq!(snapshot.limits[0].used_percent, 43);
+        assert_eq!(snapshot.limits[1].used_percent, 100);
+    }
+
+    #[test]
+    fn maps_disconnected_command_shim_to_codex_missing() {
+        assert!(matches!(
+            classify_no_response(
+                None,
+                "'codex' is not recognized as an internal or external command"
+            ),
+            ReadError::Missing
+        ));
     }
     #[test]
     fn maps_auth_errors_to_a_display_state() {

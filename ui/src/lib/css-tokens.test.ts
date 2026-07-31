@@ -2,11 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import fs from "fs";
 import path from "path";
 
-/**
- * CSS Design Token existence tests — Phase 0 of UI refactoring (#126).
- * Ensures all required tokens are defined in index.css :root block.
- */
-
+/** CSS design-token existence tests for index.css :root. */
 let cssContent: string;
 
 beforeAll(() => {
@@ -25,8 +21,7 @@ describe("CSS design tokens — accent opacity variants", () => {
   ];
 
   it.each(accentTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
   });
 });
 
@@ -43,8 +38,7 @@ describe("CSS design tokens — hover overlay", () => {
   ];
 
   it.each(hoverTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
   });
 });
 
@@ -52,39 +46,23 @@ describe("CSS design tokens — dimensions", () => {
   const dimensionTokens = ["--bar-h", "--btn-h", "--btn-min-w"];
 
   it.each(dimensionTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
   });
 });
 
-describe("CSS design tokens — border-radius", () => {
+describe("CSS design tokens — border radius", () => {
   const radiusTokens = ["--radius-sm", "--radius-md", "--radius-lg"];
 
   it.each(radiusTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
   });
 });
 
-describe("CSS design tokens — Claude usage meters", () => {
-  const usageColors: [string, string][] = [
-    ["--usage-used", "#58d1eb"],
-    ["--usage-pace", "#fd971f"],
-    ["--usage-track", "#585858"],
-  ];
-
-  it.each(usageColors)("sets %s to %s", (token, color) => {
-    const escaped = token.replace(/[-/]/g, "\\$&");
-    expect(cssContent).toMatch(new RegExp(`${escaped}\\s*:\\s*${color};`, "i"));
-  });
-});
-
-describe("CSS design tokens — font-size", () => {
+describe("CSS design tokens — font size", () => {
   const fontTokens = ["--fs-2xs", "--fs-xs", "--fs-sm", "--fs-md", "--fs-lg"];
 
   it.each(fontTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
   });
 });
 
@@ -96,8 +74,13 @@ describe("CSS design tokens — utility", () => {
   ];
 
   it.each(utilityTokens)("defines %s in :root", (token) => {
-    const regex = new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`);
-    expect(cssContent).toMatch(regex);
+    expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));
+  });
+});
+
+describe("CSS usage colors", () => {
+  it("keeps meter colors out of theme CSS tokens", () => {
+    expect(cssContent).not.toMatch(/--usage-(used|pace|track)\s*:/);
   });
 });
 
@@ -171,8 +154,8 @@ describe("CSS utility classes — terminal IME composition", () => {
   });
 });
 
-describe("CSS design tokens — control bar overlay opacity (issue #320)", () => {
-  it("--bar-bg-overlay is semi-transparent (alpha <= 0.75) so content beneath stays visible", () => {
+describe("CSS design tokens — control bar overlay opacity", () => {
+  it("keeps --bar-bg-overlay semi-transparent", () => {
     const match = cssContent.match(
       /--bar-bg-overlay\s*:\s*rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/,
     );

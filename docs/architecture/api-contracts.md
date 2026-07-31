@@ -142,7 +142,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `visibleRows`는 같은 provider를 보는 모든 UsageView가 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 
-`usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 기존 `--usage-used`/`--usage-pace`/`--usage-track` 값과 같다.
+`usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 각각 청록 `#58d1eb`, 주황 `#fd971f`, 회색 `#585858`이다. 이 색은 사용자가 Views → 사용량에서 바꾸는 표시 선호이며 앱 테마 토큰에 속하지 않는다. 따라서 테마 전환만으로는 바뀌지 않고, 사용자가 명시적으로 바꿀 때만 두 provider에 함께 적용된다.
 
 ### Direct Remote Mode 설정
 
