@@ -245,6 +245,7 @@ import {
 import {
   forgetTerminalOutputV3Diagnostics,
   recordTerminalOutputV3Diagnostics,
+  registerTerminalOutputV3DiagnosticsProvider,
   type TerminalOutputV3DiagnosticEntry,
 } from "@/lib/terminal-output-v3-diagnostics";
 import {
@@ -3778,6 +3779,7 @@ export function TerminalView({
     let outputV3ParsersReady = false;
     let outputV3DiagnosticEntry: TerminalOutputV3DiagnosticEntry | undefined;
     let publishOutputV3Diagnostics: (() => void) | undefined;
+    let disposeOutputV3DiagnosticsProvider: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
     const renderCheckpointModel = new TerminalRenderCheckpointModel({
@@ -4357,9 +4359,10 @@ export function TerminalView({
       });
       outputV3Runtime = runtime;
       outputV3ParsersReady = true;
-      publishOutputV3Diagnostics = () => {
+      const readOutputV3Diagnostics = (): TerminalOutputV3DiagnosticEntry | undefined => {
+        if (!isCurrent()) return undefined;
         const snapshot = runtime.diagnostics();
-        outputV3DiagnosticEntry = {
+        return {
           state: outputV3FailStoppedReason === null ? "active" : "fail-stopped",
           reason: outputV3FailStoppedReason,
           generation,
@@ -4373,8 +4376,18 @@ export function TerminalView({
           repairCount: snapshot.repairCount,
           lastRepairReason: snapshot.lastRepairReason,
         };
+      };
+      publishOutputV3Diagnostics = () => {
+        const entry = readOutputV3Diagnostics();
+        if (!entry) return;
+        outputV3DiagnosticEntry = entry;
         recordTerminalOutputV3Diagnostics(instanceId, outputV3DiagnosticEntry);
       };
+      disposeOutputV3DiagnosticsProvider?.();
+      disposeOutputV3DiagnosticsProvider = registerTerminalOutputV3DiagnosticsProvider(
+        instanceId,
+        readOutputV3Diagnostics,
+      );
       publishOutputV3Diagnostics();
 
       if (!hasBufferedOutputV3) return;
@@ -5564,6 +5577,8 @@ export function TerminalView({
       cancelled = true;
       outputV3Runtime?.dispose();
       outputV3Runtime = undefined;
+      disposeOutputV3DiagnosticsProvider?.();
+      disposeOutputV3DiagnosticsProvider = undefined;
       publishOutputV3Diagnostics = undefined;
       outputV3DiagnosticEntry = undefined;
       forgetTerminalOutputV3Diagnostics(instanceId);

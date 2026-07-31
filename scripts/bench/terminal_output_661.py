@@ -32,6 +32,7 @@ DEV_RUNTIME_ARTIFACTS = {
 }
 CATCHUP_MIN_BACKLOG_BYTES = 64 * 1024
 MAX_INTERACTIVE_LATENCY_MS = 5_000
+MAX_SCREENSHOT_LATENCY_MS = 3_000
 
 
 class BenchmarkError(RuntimeError):
@@ -400,10 +401,51 @@ def request_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
     )
 
 
+def screenshot_started_during_active_flood(sample: dict[str, Any]) -> bool:
+    required = sample.get("requiredBacklogBytes")
+    hot_terminal_ids = sample.get("hotTerminalIds")
+    backend_backlogs = sample.get("backendBacklogBytesBeforeRequest")
+    capture_backlogs = sample.get("captureParserBacklogBytes")
+    final_markers = sample.get("finalMarkersPresentBeforeRequest")
+    expected_ids = set(hot_terminal_ids) if isinstance(hot_terminal_ids, list) else set()
+    return (
+        sample.get("duringFlood") is True
+        and sample.get("finalBarrierHeldThroughoutCapture") is True
+        and type(required) is int
+        and required >= CATCHUP_MIN_BACKLOG_BYTES
+        and bool(expected_ids)
+        and all(isinstance(terminal_id, str) for terminal_id in expected_ids)
+        and isinstance(backend_backlogs, dict)
+        and set(backend_backlogs) == expected_ids
+        and isinstance(capture_backlogs, dict)
+        and set(capture_backlogs) == expected_ids
+        and isinstance(final_markers, dict)
+        and set(final_markers) == expected_ids
+        and all(
+            type(backlog) is int and backlog >= required
+            for backlog in backend_backlogs.values()
+        )
+        and all(
+            type(backlog) is int and backlog >= required
+            for backlog in capture_backlogs.values()
+        )
+        and all(present is False for present in final_markers.values())
+    )
+
+
 def screenshot_samples_succeeded(samples: list[dict[str, Any]]) -> bool:
-    return request_samples_succeeded(samples) and all(
-        isinstance(sample.get("result"), dict)
+    return bool(samples) and all(
+        sample.get("ok") is True
+        and screenshot_started_during_active_flood(sample)
+        and isinstance(sample.get("latencyMs"), (int, float))
+        and math.isfinite(float(sample["latencyMs"]))
+        and 0 <= float(sample["latencyMs"]) < MAX_SCREENSHOT_LATENCY_MS
+        and isinstance(sample.get("result"), dict)
         and sample["result"].get("success") is True
+        and type(sample["result"].get("captureStartedAtMs")) in (int, float)
+        and sample["result"]["captureStartedAtMs"] > 0
+        and isinstance(sample["result"].get("path"), str)
+        and bool(sample["result"]["path"])
         and type(sample["result"].get("size")) is int
         and sample["result"]["size"] > 0
         and isinstance(sample.get("dataUrlBytes"), int)
@@ -588,8 +630,10 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
     temp_root = Path(tempfile.gettempdir()) / "laymux-661" / run_id
     temp_root.mkdir(parents=True, exist_ok=True)
     barrier = temp_root / "go"
-    if barrier.exists():
-        barrier.unlink()
+    final_barrier = temp_root / "allow-final"
+    for stale_barrier in (barrier, final_barrier):
+        if stale_barrier.exists():
+            stale_barrier.unlink()
 
     source_layout_id = select_source_layout()
     existing_names = {item.get("name") for item in workspace_snapshot.get("workspaces", [])}
@@ -627,7 +671,9 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
             "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "
             f"{shell_quote(str(flood_script))} -Lines {args.lines} "
             f"-RunId {shell_quote(run_id)} -TerminalId {shell_quote(terminal_id)} "
-            f"-BarrierPath {shell_quote(str(barrier))} -FlushEvery {args.flush_every}\r"
+            f"-BarrierPath {shell_quote(str(barrier))} "
+            f"-FinalBarrierPath {shell_quote(str(final_barrier))} "
+            f"-FlushEvery {args.flush_every}\r"
         )
         terminal_write(terminal_id, command)
     for terminal_id, marker in armed_markers.items():
@@ -745,15 +791,88 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         # Keep it inside the flood, but do not overlap it with the independent
         # 3-second renderer-checkpoint deadline: that would measure the sum of
         # two probes instead of either production contract.
-        if not wait_for_preceding_probe(frontier_probe_finished, stop):
-            return
-        if not stop.is_set():
+        try:
+            if not wait_for_preceding_probe(frontier_probe_finished, stop):
+                return
+            if stop.is_set():
+                return
+            precondition_started = time.monotonic()
+            snapshot = api("GET", "/diagnostics/frontend")
+            backend = terminal_diagnostics(snapshot)
+            backend_backlog_bytes = {
+                terminal_id: int((backend.get(terminal_id) or {}).get("writeSeq") or 0)
+                - int((backend.get(terminal_id) or {}).get("parsedAck") or 0)
+                for terminal_id in hot_terminals
+            }
+            final_markers_present = {
+                terminal_id: final_markers[terminal_id]
+                in terminal_output(terminal_id)
+                for terminal_id in hot_terminals
+            }
+            precondition_observed = time.monotonic()
+            request_started = time.monotonic()
             sample = timed_request("POST", "/screenshot", {})
             result = sample.get("result")
+            capture_diagnostics = (
+                result.get("terminalOutputV3AtCaptureStart")
+                if isinstance(result, dict)
+                else None
+            )
+            capture_parser_backlogs: dict[str, int] = {}
+            if isinstance(capture_diagnostics, dict):
+                for terminal_id in hot_terminals:
+                    entry = capture_diagnostics.get(terminal_id)
+                    if not isinstance(entry, dict):
+                        continue
+                    admitted = entry.get("admittedSeq")
+                    parsed = entry.get("parsedSeq")
+                    if type(admitted) is int and type(parsed) is int:
+                        capture_parser_backlogs[terminal_id] = admitted - parsed
+            final_barrier_held = not final_barrier.exists()
+            during_flood = (
+                all(
+                    backlog >= args.catchup_min_backlog_bytes
+                    for backlog in backend_backlog_bytes.values()
+                )
+                and all(
+                    backlog >= args.catchup_min_backlog_bytes
+                    for backlog in capture_parser_backlogs.values()
+                )
+                and len(capture_parser_backlogs) == len(hot_terminals)
+                and not any(final_markers_present.values())
+                and final_barrier_held
+            )
+            metadata = {
+                "atMs": round((request_started - flood_started) * 1000, 3),
+                "preconditionObservedAtMs": round(
+                    (precondition_observed - flood_started) * 1000, 3
+                ),
+                "preconditionResponseMs": round(
+                    (precondition_observed - precondition_started) * 1000, 3
+                ),
+                "requiredBacklogBytes": args.catchup_min_backlog_bytes,
+                "hotTerminalIds": hot_terminals,
+                "backendBacklogBytesBeforeRequest": backend_backlog_bytes,
+                "captureParserBacklogBytes": capture_parser_backlogs,
+                "finalMarkersPresentBeforeRequest": final_markers_present,
+                "finalBarrierHeldThroughoutCapture": final_barrier_held,
+                "duringFlood": during_flood,
+            }
+            sample.update(metadata)
+            if sample.get("ok") is True and not during_flood:
+                sample.update(
+                    ok=False,
+                    error="screenshot did not start with parser backlog during an active flood",
+                )
             if isinstance(result, dict) and isinstance(result.get("dataUrl"), str):
                 data_url = result.pop("dataUrl")
                 sample["dataUrlBytes"] = len(data_url)
             screenshot_samples.append(sample)
+        finally:
+            # Flood producers wait before FINAL, so completion cannot race the
+            # exact WebView capture-start snapshot. Always release them after
+            # the screenshot attempt, including failed preconditions.
+            final_barrier.write_text("go", encoding="utf-8")
 
     def frontier_catchup_probe() -> None:
         try:
@@ -993,6 +1112,12 @@ def run(args: argparse.Namespace, resources: BenchmarkResources) -> dict[str, An
         "probeSchedule": {
             "checkpointCatchupStartsAfterMs": 500,
             "screenshotStartsAfter": "checkpoint-catchup",
+            "screenshotRequiresActiveFlood": {
+                "minimumBackendAndCaptureParserBacklogBytesPerHotPane": (
+                    args.catchup_min_backlog_bytes
+                ),
+                "finalMarkerBarrierHeldThroughoutCapture": True,
+            },
         },
         "environment": {
             "platform": platform.platform(),

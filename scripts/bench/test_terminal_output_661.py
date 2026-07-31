@@ -250,7 +250,23 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
                     {
                         "ok": True,
                         "latencyMs": 1.0,
-                        "result": {"success": True, "syntheticNoScreenshot": True},
+                        "duringFlood": True,
+                        "finalBarrierHeldThroughoutCapture": True,
+                        "requiredBacklogBytes": benchmark.CATCHUP_MIN_BACKLOG_BYTES,
+                        "hotTerminalIds": ["t1"],
+                        "backendBacklogBytesBeforeRequest": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "captureParserBacklogBytes": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "finalMarkersPresentBeforeRequest": {"t1": False},
+                        "result": {
+                            "success": True,
+                            "captureStartedAtMs": 1,
+                            "path": "shot.png",
+                            "syntheticNoScreenshot": True,
+                        },
                     }
                 ]
             )
@@ -261,7 +277,23 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
                     {
                         "ok": True,
                         "latencyMs": 1.0,
-                        "result": {"success": True, "size": 0},
+                        "duringFlood": True,
+                        "finalBarrierHeldThroughoutCapture": True,
+                        "requiredBacklogBytes": benchmark.CATCHUP_MIN_BACKLOG_BYTES,
+                        "hotTerminalIds": ["t1"],
+                        "backendBacklogBytesBeforeRequest": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "captureParserBacklogBytes": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "finalMarkersPresentBeforeRequest": {"t1": False},
+                        "result": {
+                            "success": True,
+                            "captureStartedAtMs": 1,
+                            "path": "shot.png",
+                            "size": 0,
+                        },
                         "dataUrlBytes": 32,
                     }
                 ]
@@ -273,12 +305,80 @@ class TerminalOutput661BenchmarkTests(unittest.TestCase):
                     {
                         "ok": True,
                         "latencyMs": 1.0,
-                        "result": {"success": True, "size": 8},
+                        "duringFlood": True,
+                        "finalBarrierHeldThroughoutCapture": True,
+                        "requiredBacklogBytes": benchmark.CATCHUP_MIN_BACKLOG_BYTES,
+                        "hotTerminalIds": ["t1"],
+                        "backendBacklogBytesBeforeRequest": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "captureParserBacklogBytes": {
+                            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+                        },
+                        "finalMarkersPresentBeforeRequest": {"t1": False},
+                        "result": {
+                            "success": True,
+                            "captureStartedAtMs": 1,
+                            "path": "shot.png",
+                            "size": 8,
+                        },
                         "dataUrlBytes": 32,
                     }
                 ]
             )
         )
+
+    def test_screenshot_acceptance_recomputes_active_flood_from_recorded_facts(self):
+        sample = {
+            "ok": True,
+            "latencyMs": 1.0,
+            "duringFlood": True,
+            "finalBarrierHeldThroughoutCapture": True,
+            "requiredBacklogBytes": benchmark.CATCHUP_MIN_BACKLOG_BYTES,
+            "hotTerminalIds": ["t1"],
+            "backendBacklogBytesBeforeRequest": {
+                "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+            },
+            "captureParserBacklogBytes": {"t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES},
+            "finalMarkersPresentBeforeRequest": {"t1": True},
+            "result": {
+                "success": True,
+                "captureStartedAtMs": 1,
+                "path": "shot.png",
+                "size": 8,
+            },
+            "dataUrlBytes": 32,
+        }
+        self.assertFalse(benchmark.screenshot_samples_succeeded([sample]))
+
+        sample["finalMarkersPresentBeforeRequest"] = {"t1": False}
+        sample["captureParserBacklogBytes"] = {
+            "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES - 1
+        }
+        self.assertFalse(benchmark.screenshot_samples_succeeded([sample]))
+
+    def test_screenshot_acceptance_has_a_three_second_deadline(self):
+        sample = {
+            "ok": True,
+            "latencyMs": benchmark.MAX_SCREENSHOT_LATENCY_MS,
+            "duringFlood": True,
+            "finalBarrierHeldThroughoutCapture": True,
+            "requiredBacklogBytes": benchmark.CATCHUP_MIN_BACKLOG_BYTES,
+            "hotTerminalIds": ["t1"],
+            "backendBacklogBytesBeforeRequest": {
+                "t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES
+            },
+            "captureParserBacklogBytes": {"t1": benchmark.CATCHUP_MIN_BACKLOG_BYTES},
+            "finalMarkersPresentBeforeRequest": {"t1": False},
+            "result": {
+                "success": True,
+                "captureStartedAtMs": 1,
+                "path": "shot.png",
+                "size": 8,
+            },
+            "dataUrlBytes": 32,
+        }
+        self.assertFalse(benchmark.screenshot_samples_succeeded([sample]))
 
     def test_guarded_worker_records_unexpected_exception(self):
         failures = []

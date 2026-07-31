@@ -459,7 +459,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 - `POST /api/v1/screenshot` → 프론트엔드 `html2canvas`로 DOM 캡처
 - xterm WebGL canvas는 후처리로 합성하되, `data-screenshot-occluder="true"` 오버레이와 겹치는 canvas는 다시 그리지 않는다
 - `.screenshots/` 디렉터리에 `screenshot_{timestamp}.png`로 저장
-- 응답: `{ "path": ".../.screenshots/screenshot_xxx.png", "size": 12345 }`
+- 응답: `{ "path": ".../.screenshots/screenshot_xxx.png", "size": 12345, "captureStartedAtMs": 123, "terminalOutputV3AtCaptureStart": { ... } }`. `captureStartedAtMs`와 v3 frontier snapshot은 WebView main thread가 실제 capture handler에 진입한 직후, `html2canvas` 전에 함께 고정한다. 따라서 backend가 요청 전 읽은 오래된 health report가 아니라 캡처 시작 시점의 parser backlog를 판정할 수 있다. payload byte는 포함하지 않는다.
 - `.screenshots/*.png`는 `.gitignore`에 의해 버전 관리 제외
 
 ### 12.6 보안

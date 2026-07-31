@@ -171,7 +171,19 @@ def pick_shell_terminal(port: int, terminal_id: str | None = None) -> dict:
         # `isFocused` is per-workspace and true for several terminals at once, so
         # it cannot rank anything. Ask which terminal really has focus instead.
         focused = focused_terminal_id(port)
-        shells.sort(key=lambda t: (t["id"] != focused, t.get("paneIndex", 0)))
+        def terminal_order(terminal: dict) -> tuple[bool, bool, int, str]:
+            pane_index = terminal.get("paneIndex")
+            is_grid_pane = isinstance(pane_index, int) and not isinstance(
+                pane_index, bool
+            )
+            return (
+                terminal["id"] != focused,
+                not is_grid_pane,
+                pane_index if is_grid_pane else 0,
+                terminal["id"],
+            )
+
+        shells.sort(key=terminal_order)
         target = shells[0]
 
     activity = (target.get("activity") or {}).get("type")

@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory = $true)][string]$RunId,
     [Parameter(Mandatory = $true)][string]$TerminalId,
     [Parameter(Mandatory = $true)][string]$BarrierPath,
+    [Parameter(Mandatory = $true)][string]$FinalBarrierPath,
     [int]$FlushEvery = 1
 )
 
@@ -29,6 +30,10 @@ for ($index = 1; $index -le $Lines; $index += 1) {
 }
 if ($buffer.Length -gt 0) {
     [Console]::Out.Write($buffer.ToString())
+}
+[Console]::Out.Flush()
+while (-not [System.IO.File]::Exists($FinalBarrierPath)) {
+    Start-Sleep -Milliseconds 10
 }
 [Console]::Out.WriteLine(("FINAL-{0}-{1}-{2}" -f $RunId, $TerminalId, $Lines))
 [Console]::Out.Flush()

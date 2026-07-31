@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   allTerminalOutputV3Diagnostics,
+  allLiveTerminalOutputV3Diagnostics,
   forgetTerminalOutputV3Diagnostics,
   recordTerminalOutputV3Diagnostics,
+  registerTerminalOutputV3DiagnosticsProvider,
   resetTerminalOutputV3DiagnosticsForTest,
 } from "./terminal-output-v3-diagnostics";
 
@@ -57,5 +59,76 @@ describe("terminal output v3 diagnostics", () => {
 
     forgetTerminalOutputV3Diagnostics("terminal-1");
     expect(allTerminalOutputV3Diagnostics()).toEqual({});
+  });
+
+  it("reads the live runtime frontier instead of a stale published ACK snapshot", () => {
+    const stale = {
+      state: "active" as const,
+      reason: null,
+      generation: 1,
+      leaseToken: "lease-1",
+      attachEpoch: 1,
+      snapshotSeq: 0,
+      admittedSeq: 131_072,
+      parsedSeq: 0,
+      nextEnvelopeId: 3,
+      activeGrantId: null,
+      repairCount: 0,
+      lastRepairReason: null,
+    };
+    recordTerminalOutputV3Diagnostics("terminal-1", stale);
+    registerTerminalOutputV3DiagnosticsProvider("terminal-1", () => ({
+      ...stale,
+      parsedSeq: 65_536,
+    }));
+
+    expect(allTerminalOutputV3Diagnostics()["terminal-1"].parsedSeq).toBe(65_536);
+  });
+
+  it("owner-fences provider cleanup across replacement mounts", () => {
+    const entry = (generation: number) => ({
+      state: "active" as const,
+      reason: null,
+      generation,
+      leaseToken: `lease-${generation}`,
+      attachEpoch: generation,
+      snapshotSeq: 0,
+      admittedSeq: generation,
+      parsedSeq: generation,
+      nextEnvelopeId: 1,
+      activeGrantId: null,
+      repairCount: 0,
+      lastRepairReason: null,
+    });
+    const disposeOld = registerTerminalOutputV3DiagnosticsProvider("terminal-1", () => entry(1));
+    registerTerminalOutputV3DiagnosticsProvider("terminal-1", () => entry(2));
+
+    disposeOld();
+
+    expect(allTerminalOutputV3Diagnostics()["terminal-1"].generation).toBe(2);
+  });
+
+  it("never substitutes the published cache for a missing live snapshot", () => {
+    const cached = {
+      state: "active" as const,
+      reason: null,
+      generation: 1,
+      leaseToken: "lease-1",
+      attachEpoch: 1,
+      snapshotSeq: 0,
+      admittedSeq: 131_072,
+      parsedSeq: 0,
+      nextEnvelopeId: 3,
+      activeGrantId: null,
+      repairCount: 0,
+      lastRepairReason: null,
+    };
+    recordTerminalOutputV3Diagnostics("terminal-1", cached);
+    registerTerminalOutputV3DiagnosticsProvider("terminal-1", () => {
+      throw new Error("runtime unavailable");
+    });
+
+    expect(allTerminalOutputV3Diagnostics()["terminal-1"]).toEqual(cached);
+    expect(allLiveTerminalOutputV3Diagnostics()).toEqual({});
   });
 });

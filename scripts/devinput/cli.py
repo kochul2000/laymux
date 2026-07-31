@@ -96,30 +96,48 @@ def cmd_lease(args: argparse.Namespace) -> int:
     except guard.GuardError as exc:
         print(f"{BAD}{exc}")
         return 1
-    print(f"{OK}lease granted for {fmt_remaining(lease.remaining)}")
-    print(f"{INFO}stored at {guard.lease_path()}")
-    print(f"{INFO}any real keypress or {guard.MOUSE_MOVE_ABORT_PX}px of mouse travel aborts a run")
 
-    if args.focus_dev:
-        if win32.force_foreground(lock.dev_hwnd):
-            print(f"{OK}dev window brought to the foreground")
-        else:
-            # Same rule as the resolve failure above: a command that reports
-            # failure hands the keyboard back instead of leaving it delegated.
-            guard.clear_lease()
-            print(f"{BAD}could not focus dev — click its window once, then re-run lease")
-            print(f"{INFO}lease revoked (nothing is delegated right now)")
-            return 1
     try:
-        target = probe.pick_shell_terminal(lock.dev_port)
-        probe.notify(
-            lock.dev_port,
-            target,
-            f"DEV INPUT ACTIVE — automation holds the keyboard for {fmt_remaining(lease.remaining)}",
-            "warn",
+        print(f"{OK}lease granted for {fmt_remaining(lease.remaining)}")
+        print(f"{INFO}stored at {guard.lease_path()}")
+        print(
+            f"{INFO}any real keypress or {guard.MOUSE_MOVE_ABORT_PX}px of mouse travel "
+            "aborts a run"
         )
-    except (guard.GuardError, probe.ApiError) as exc:
-        print(f"{INFO}banner skipped: {exc}")
+
+        if args.focus_dev:
+            if win32.force_foreground(lock.dev_hwnd):
+                print(f"{OK}dev window brought to the foreground")
+            else:
+                # A command that reports failure hands the keyboard back instead
+                # of leaving it delegated.
+                guard.clear_lease()
+                print(f"{BAD}could not focus dev — click its window once, then re-run lease")
+                print(f"{INFO}lease revoked (nothing is delegated right now)")
+                return 1
+        try:
+            target = probe.pick_shell_terminal(lock.dev_port)
+            probe.notify(
+                lock.dev_port,
+                target,
+                "DEV INPUT ACTIVE — automation holds the keyboard for "
+                f"{fmt_remaining(lease.remaining)}",
+                "warn",
+            )
+        except (guard.GuardError, probe.ApiError) as exc:
+            print(f"{INFO}banner skipped: {exc}")
+    except Exception as exc:
+        # Post-grant setup is one cleanup scope. An unexpected failure must not
+        # make a failed command leave keyboard delegation live behind the user.
+        guard.clear_lease()
+        print(f"{BAD}post-grant setup failed: {exc}")
+        print(f"{INFO}lease revoked (nothing is delegated right now)")
+        return 1
+    except BaseException:
+        # KeyboardInterrupt/SystemExit bypass `Exception`; revoke before the
+        # outer command boundary reports or re-raises them.
+        guard.clear_lease()
+        raise
     return 0
 
 
@@ -130,7 +148,9 @@ def cmd_unlease(_args: argparse.Namespace) -> int:
         lock = guard.TargetLock.resolve()
         target = probe.pick_shell_terminal(lock.dev_port)
         probe.notify(lock.dev_port, target, "dev input released — keyboard is yours", "info")
-    except (guard.GuardError, probe.ApiError):
+    except Exception:
+        # Revocation already succeeded; the optional release banner must never
+        # turn it into a failed command or obscure the safe final state.
         pass
     return 0
 
@@ -342,6 +362,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows PowerShell commonly exposes a CP949 console. Keep diagnostics
+    # printable even when a message contains punctuation outside that codepage.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
     if sys.platform != "win32":
         print(f"{BAD}dev-input is Windows-only (SendInput/IMM32)")
         return 1
