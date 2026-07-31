@@ -2391,6 +2391,14 @@ describe("SettingsView", () => {
       expect(screen.getByTestId("usage-visible-row-weekAll")).toBeInTheDocument();
       expect(screen.getByTestId("usage-visible-row-weekModel")).toBeInTheDocument();
       expect(screen.getByTestId("usage-config-dir-add")).toBeInTheDocument();
+      expect(screen.getByTestId("codex-usage-profile-select")).toBeInTheDocument();
+      expect(screen.getByTestId("codex-usage-refresh-input")).toBeInTheDocument();
+      expect(screen.getByTestId("codex-usage-visible-row-weekly")).toBeInTheDocument();
+      expect(screen.getByTestId("codex-usage-visible-row-sparkWeekly")).toBeInTheDocument();
+      expect(screen.getByTestId("codex-usage-config-dir-add")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-color-used")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-color-pace")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-color-track")).toBeInTheDocument();
     });
 
     it("offers every terminal profile plus a default option", async () => {
@@ -2441,6 +2449,17 @@ describe("SettingsView", () => {
       expect(session.disabled).toBe(true);
     });
 
+    it("saves Codex limits independently and prevents deselecting its last row", async () => {
+      const user = await openUsage();
+      await user.click(screen.getByTestId("codex-usage-visible-row-sparkWeekly"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().usage.codex.visibleRows).toEqual(["weekly"]);
+
+      const weekly = screen.getByTestId("codex-usage-visible-row-weekly") as HTMLInputElement;
+      expect(weekly.checked).toBe(true);
+      expect(weekly.disabled).toBe(true);
+    });
+
     it("adds and removes config dirs", async () => {
       const user = await openUsage();
       await user.click(screen.getByTestId("usage-config-dir-add"));
@@ -2453,6 +2472,22 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("usage-config-dir-remove-0"));
       await user.click(screen.getByTestId("save-settings-btn"));
       expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
+    });
+
+    it("adds a separately signed-in Codex account and saves shared colors", async () => {
+      const user = await openUsage();
+      await user.click(screen.getByTestId("codex-usage-config-dir-add"));
+      await user.type(
+        screen.getByTestId("codex-usage-config-dir-input-0"),
+        "C:\\Users\\me\\.codex-work",
+      );
+      fireEvent.change(screen.getByTestId("usage-color-used"), { target: { value: "#112233" } });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().usage.codex.configDirs).toEqual([
+        "C:\\Users\\me\\.codex-work",
+      ]);
+      expect(useSettingsStore.getState().usage.colors.used).toBe("#112233");
     });
 
     it("discards unsaved usage edits", async () => {

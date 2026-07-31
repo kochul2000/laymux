@@ -28,7 +28,9 @@ import {
   USAGE_REFRESH_MAX_SECONDS,
   USAGE_REFRESH_MIN_SECONDS,
   USAGE_VISIBLE_ROW_KEYS,
+  CODEX_USAGE_VISIBLE_ROW_KEYS,
   type UsageVisibleRow,
+  type CodexUsageVisibleRow,
   type Keybinding,
   type LanguageSetting,
 } from "@/stores/settings-store";
@@ -3296,34 +3298,185 @@ function IssueReporterSection() {
  * agent integration behavior, and a second agent should sit next to the first
  * for comparison (ADR-0102).
  */
+function UsageProfileFields({
+  usage,
+  update,
+  profiles,
+  defaultProfile,
+  testIdPrefix,
+  profileLabel,
+  profileDescription,
+  refreshDescription,
+}: {
+  usage: { profile: string; refreshSeconds: number };
+  update: (partial: { profile?: string; refreshSeconds?: number }) => void;
+  profiles: Profile[];
+  defaultProfile: string;
+  testIdPrefix: string;
+  profileLabel: string;
+  profileDescription: string;
+  refreshDescription: string;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <>
+      <SettingRow label={profileLabel} desc={profileDescription}>
+        <select
+          data-testid={`${testIdPrefix}-profile-select`}
+          value={usage.profile}
+          onChange={(e) => update({ profile: e.target.value })}
+          className={inputCls}
+          style={inputStyle}
+        >
+          <option value="">
+            {t("usage.profileDefault")}
+            {defaultProfile ? ` (${defaultProfile})` : ""}
+          </option>
+          {profiles.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </SettingRow>
+
+      <SettingRow label={t("usage.refresh")} desc={refreshDescription}>
+        <FocusInput
+          data-testid={`${testIdPrefix}-refresh-input`}
+          type="number"
+          inputStyle={{ width: "7rem" }}
+          min={USAGE_REFRESH_MIN_SECONDS}
+          max={USAGE_REFRESH_MAX_SECONDS}
+          step={30}
+          value={usage.refreshSeconds}
+          onChange={(e) => update({ refreshSeconds: Number(e.target.value) })}
+        />
+      </SettingRow>
+    </>
+  );
+}
+
+function UsageRowSelection<Row extends string>({
+  rows,
+  visibleRows,
+  labels,
+  testIdPrefix,
+  update,
+}: {
+  rows: readonly Row[];
+  visibleRows: readonly Row[];
+  labels: Record<Row, string>;
+  testIdPrefix: string;
+  update: (visibleRows: Row[]) => void;
+}) {
+  const { t } = useTranslation("settings");
+  return (
+    <SettingRow label={t("usage.visibleRows")} desc={t("usage.visibleRowsDesc")}>
+      <div className="flex flex-col items-start gap-1">
+        {rows.map((row) => {
+          const checked = visibleRows.includes(row);
+          const disabled = checked && visibleRows.length === 1;
+          return (
+            <label key={row} className="flex items-center gap-2 text-[13px]">
+              <input
+                data-testid={`${testIdPrefix}-visible-row-${row}`}
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                onChange={(event) =>
+                  update(
+                    event.target.checked
+                      ? [...visibleRows, row]
+                      : visibleRows.filter((visible) => visible !== row),
+                  )
+                }
+                style={{ accentColor: "var(--accent)" }}
+              />
+              <span style={{ color: disabled ? "var(--text-muted)" : "var(--text-primary)" }}>
+                {labels[row]}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </SettingRow>
+  );
+}
+
+function UsageColorFields({
+  colors,
+  update,
+}: {
+  colors: { used: string; pace: string; track: string };
+  update: (partial: { used?: string; pace?: string; track?: string }) => void;
+}) {
+  const { t } = useTranslation("settings");
+  const entries = [
+    ["used", t("usage.colorUsed")],
+    ["pace", t("usage.colorPace")],
+    ["track", t("usage.colorTrack")],
+  ] as const;
+  return (
+    <SubGroup title={t("usage.groupAppearance")}>
+      {entries.map(([key, label]) => (
+        <SettingRow
+          key={key}
+          label={label}
+          desc={t(`usage.color${key[0].toUpperCase()}${key.slice(1)}Desc`)}
+        >
+          <input
+            data-testid={`usage-color-${key}`}
+            type="color"
+            value={colors[key]}
+            onChange={(event) => update({ [key]: event.target.value })}
+            className="h-7 w-12 cursor-pointer bg-transparent p-0"
+          />
+        </SettingRow>
+      ))}
+    </SubGroup>
+  );
+}
+
 function UsageSection() {
   const { t } = useTranslation("settings");
-  const storeUsage = useSettingsStore((s) => s.usage.claude);
+  const storeClaudeUsage = useSettingsStore((s) => s.usage.claude);
+  const storeCodexUsage = useSettingsStore((s) => s.usage.codex);
   const setUsageAgent = useSettingsStore((s) => s.setUsageAgent);
+  const setCodexUsage = useSettingsStore((s) => s.setCodexUsage);
+  const storeUsageColors = useSettingsStore((s) => s.usage.colors);
+  const setUsageColors = useSettingsStore((s) => s.setUsageColors);
   const profiles = useSettingsStore((s) => s.profiles);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
-  const [usage, setDraftUsage] = useDraft("usage", storeUsage, (v) => setUsageAgent("claude", v));
+  const [claudeUsage, setDraftClaudeUsage] = useDraft("usage-claude", storeClaudeUsage, (v) =>
+    setUsageAgent("claude", v),
+  );
+  const [codexUsage, setDraftCodexUsage] = useDraft("usage-codex", storeCodexUsage, setCodexUsage);
+  const [usageColors, setDraftUsageColors] = useDraft(
+    "usage-colors",
+    storeUsageColors,
+    setUsageColors,
+  );
 
-  const update = (partial: Partial<typeof usage>) =>
-    setDraftUsage((prev) => ({ ...prev, ...partial }));
+  const updateClaude = (partial: Partial<typeof claudeUsage>) =>
+    setDraftClaudeUsage((prev) => ({ ...prev, ...partial }));
+  const updateCodex = (partial: Partial<typeof codexUsage>) =>
+    setDraftCodexUsage((prev) => ({ ...prev, ...partial }));
+  const updateColors = (partial: Partial<typeof usageColors>) =>
+    setDraftUsageColors((prev) => ({ ...prev, ...partial }));
 
-  const addConfigDir = () => update({ configDirs: [...usage.configDirs, ""] });
+  const addConfigDir = () => updateClaude({ configDirs: [...claudeUsage.configDirs, ""] });
   const removeConfigDir = (index: number) =>
-    update({ configDirs: usage.configDirs.filter((_, i) => i !== index) });
+    updateClaude({ configDirs: claudeUsage.configDirs.filter((_, i) => i !== index) });
   const updateConfigDir = (index: number, value: string) =>
-    update({ configDirs: usage.configDirs.map((d, i) => (i === index ? value : d)) });
-  const toggleVisibleRow = (row: UsageVisibleRow, checked: boolean) => {
-    if (!checked && usage.visibleRows.length === 1) return;
-    update({
-      visibleRows: checked
-        ? [...usage.visibleRows, row]
-        : usage.visibleRows.filter((visible) => visible !== row),
-    });
-  };
+    updateClaude({ configDirs: claudeUsage.configDirs.map((d, i) => (i === index ? value : d)) });
   const visibleRowLabels: Record<UsageVisibleRow, string> = {
     session: t("usage.rowSession"),
     weekAll: t("usage.rowWeekAll"),
     weekModel: t("usage.rowWeekModel"),
+  };
+  const codexVisibleRowLabels: Record<CodexUsageVisibleRow, string> = {
+    weekly: t("usage.rowWeekly"),
+    sparkWeekly: t("usage.rowSparkWeekly"),
   };
 
   return (
@@ -3338,65 +3491,23 @@ function UsageSection() {
       </p>
 
       <SubGroup title={t("usage.groupClaude")}>
-        <SettingRow label={t("usage.profile")} desc={t("usage.profileDesc")}>
-          <select
-            data-testid="usage-profile-select"
-            value={usage.profile}
-            onChange={(e) => update({ profile: e.target.value })}
-            className={inputCls}
-            style={inputStyle}
-          >
-            <option value="">
-              {t("usage.profileDefault")}
-              {defaultProfile ? ` (${defaultProfile})` : ""}
-            </option>
-            {profiles.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </SettingRow>
-
-        <SettingRow label={t("usage.refresh")} desc={t("usage.refreshDesc")}>
-          <FocusInput
-            data-testid="usage-refresh-input"
-            type="number"
-            // `inputStyle`, not `style`: FocusInput overwrites `style` with its
-            // own. A width here also beats `inputCls`'s `w-full`, which a
-            // `w-24` class would lose to depending on stylesheet order.
-            inputStyle={{ width: "7rem" }}
-            min={USAGE_REFRESH_MIN_SECONDS}
-            max={USAGE_REFRESH_MAX_SECONDS}
-            step={30}
-            value={usage.refreshSeconds}
-            onChange={(e) => update({ refreshSeconds: Number(e.target.value) })}
-          />
-        </SettingRow>
-
-        <SettingRow label={t("usage.visibleRows")} desc={t("usage.visibleRowsDesc")}>
-          <div className="flex flex-col items-start gap-1">
-            {USAGE_VISIBLE_ROW_KEYS.map((row) => {
-              const checked = usage.visibleRows.includes(row);
-              const disabled = checked && usage.visibleRows.length === 1;
-              return (
-                <label key={row} className="flex items-center gap-2 text-[13px]">
-                  <input
-                    data-testid={`usage-visible-row-${row}`}
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled}
-                    onChange={(event) => toggleVisibleRow(row, event.target.checked)}
-                    style={{ accentColor: "var(--accent)" }}
-                  />
-                  <span style={{ color: disabled ? "var(--text-muted)" : "var(--text-primary)" }}>
-                    {visibleRowLabels[row]}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-        </SettingRow>
+        <UsageProfileFields
+          usage={claudeUsage}
+          update={updateClaude}
+          profiles={profiles}
+          defaultProfile={defaultProfile}
+          testIdPrefix="usage"
+          profileLabel={t("usage.profile")}
+          profileDescription={t("usage.profileDesc")}
+          refreshDescription={t("usage.refreshDesc")}
+        />
+        <UsageRowSelection
+          rows={USAGE_VISIBLE_ROW_KEYS}
+          visibleRows={claudeUsage.visibleRows}
+          labels={visibleRowLabels}
+          testIdPrefix="usage"
+          update={(visibleRows) => updateClaude({ visibleRows })}
+        />
 
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -3411,7 +3522,7 @@ function UsageSection() {
             </p>
           </div>
           <div className="min-w-0 flex-1">
-            {usage.configDirs.map((dir, i) => (
+            {claudeUsage.configDirs.map((dir, i) => (
               <div key={i} className="mb-2 flex items-center gap-2">
                 <FocusInput
                   data-testid={`usage-config-dir-input-${i}`}
@@ -3448,6 +3559,86 @@ function UsageSection() {
           </div>
         </div>
       </SubGroup>
+
+      <SubGroup title={t("usage.groupCodex")}>
+        <UsageProfileFields
+          usage={codexUsage}
+          update={updateCodex}
+          profiles={profiles}
+          defaultProfile={defaultProfile}
+          testIdPrefix="codex-usage"
+          profileLabel={t("usage.codexProfile")}
+          profileDescription={t("usage.codexProfileDesc")}
+          refreshDescription={t("usage.codexRefreshDesc")}
+        />
+        <UsageRowSelection
+          rows={CODEX_USAGE_VISIBLE_ROW_KEYS}
+          visibleRows={codexUsage.visibleRows}
+          labels={codexVisibleRowLabels}
+          testIdPrefix="codex-usage"
+          update={(visibleRows) => updateCodex({ visibleRows })}
+        />
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("usage.codexAccountDirs")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("usage.codexAccountDirsDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            {codexUsage.configDirs.map((dir, i) => (
+              <div key={i} className="mb-2 flex items-center gap-2">
+                <FocusInput
+                  data-testid={`codex-usage-config-dir-input-${i}`}
+                  placeholder={t("usage.codexAccountDirPlaceholder")}
+                  value={dir}
+                  onChange={(e) =>
+                    updateCodex({
+                      configDirs: codexUsage.configDirs.map((value, index) =>
+                        index === i ? e.target.value : value,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  data-testid={`codex-usage-config-dir-remove-${i}`}
+                  className="rounded px-1.5 py-0.5 text-xs"
+                  style={{
+                    background: "var(--bg-overlay)",
+                    color: "var(--red)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onClick={() =>
+                    updateCodex({
+                      configDirs: codexUsage.configDirs.filter((_, index) => index !== i),
+                    })
+                  }
+                >
+                  {t("common.remove")}
+                </button>
+              </div>
+            ))}
+            <button
+              data-testid="codex-usage-config-dir-add"
+              className="rounded px-2 py-1 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={() => updateCodex({ configDirs: [...codexUsage.configDirs, ""] })}
+            >
+              {t("usage.addCodexAccount")}
+            </button>
+          </div>
+        </div>
+      </SubGroup>
+      <UsageColorFields colors={usageColors} update={updateColors} />
     </div>
   );
 }

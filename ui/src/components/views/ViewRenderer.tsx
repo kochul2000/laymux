@@ -10,6 +10,7 @@ import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
 import { UsageView } from "./UsageView";
+import { CodexUsageView } from "./CodexUsageView";
 import { FileExplorerView } from "./FileExplorerView";
 
 export interface ViewRendererProps {
@@ -250,6 +251,14 @@ export function ViewRenderer({
       return (
         <div data-testid="view-usage" className="h-full">
           <UsageView configDir={configDir} paneId={paneId ?? fallbackId} />
+        </div>
+      );
+    }
+    case "CodexUsageView": {
+      const configDir = typeof viewConfig?.configDir === "string" ? viewConfig.configDir : "";
+      return (
+        <div data-testid="view-codex-usage" className="h-full">
+          <CodexUsageView paneId={paneId ?? fallbackId} configDir={configDir} />
         </div>
       );
     }

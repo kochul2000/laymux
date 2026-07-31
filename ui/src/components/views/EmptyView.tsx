@@ -158,6 +158,13 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
     config: { type: "MemoView" },
     testId: "empty-view-memo",
   });
+  options.push({
+    key: "codex-usage",
+    label: "Codex Usage",
+    category: "tool",
+    config: { type: "CodexUsageView" },
+    testId: "empty-view-codex-usage",
+  });
 
   options.push({
     key: "usage",

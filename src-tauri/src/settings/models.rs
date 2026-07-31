@@ -813,11 +813,57 @@ impl Default for PasteSettings {
 /// Keyed by agent because each agent is monitored by its own probe with its own
 /// shell, config dirs, and provider rate limit. Adding Codex later means adding
 /// a sibling field, not reshaping this one.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSettings {
     #[serde(default)]
     pub claude: UsageAgentSettings,
+    #[serde(default = "default_codex_usage_settings")]
+    pub codex: UsageAgentSettings,
+    #[serde(default)]
+    pub colors: UsageColorSettings,
+}
+
+impl Default for UsageSettings {
+    fn default() -> Self {
+        Self {
+            claude: UsageAgentSettings::default(),
+            codex: default_codex_usage_settings(),
+            colors: UsageColorSettings::default(),
+        }
+    }
+}
+
+/// Shared colors for all provider usage meters.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageColorSettings {
+    #[serde(default = "default_usage_used_color")]
+    pub used: String,
+    #[serde(default = "default_usage_pace_color")]
+    pub pace: String,
+    #[serde(default = "default_usage_track_color")]
+    pub track: String,
+}
+
+fn default_usage_used_color() -> String {
+    "#58d1eb".into()
+}
+fn default_usage_pace_color() -> String {
+    "#fd971f".into()
+}
+fn default_usage_track_color() -> String {
+    "#585858".into()
+}
+
+impl Default for UsageColorSettings {
+    fn default() -> Self {
+        Self {
+            used: default_usage_used_color(),
+            pace: default_usage_pace_color(),
+            track: default_usage_track_color(),
+        }
+    }
 }
 
 /// One monitored agent's probe settings.
@@ -847,6 +893,15 @@ fn default_usage_refresh_seconds() -> u64 {
 
 fn default_usage_visible_rows() -> Vec<String> {
     vec!["session".into(), "weekAll".into(), "weekModel".into()]
+}
+
+fn default_codex_usage_settings() -> UsageAgentSettings {
+    UsageAgentSettings {
+        profile: String::new(),
+        refresh_seconds: default_usage_refresh_seconds(),
+        config_dirs: Vec::new(),
+        visible_rows: vec!["weekly".into(), "sparkWeekly".into()],
+    }
 }
 
 impl Default for UsageAgentSettings {

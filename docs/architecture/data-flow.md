@@ -1097,6 +1097,12 @@ Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usa
 - **모델명에 의존하지 않는다**: 준비 판정은 배너의 `Claude Code` 문자열, 세 번째 행은 `Current week (<라벨>)` 의 괄호 라벨을 그대로 읽는 모델 무관 행(`weekModel` + `weekModelLabel`)이다. 퍼센트는 `used` 가 있는 줄에서만 읽어 `+50% ... promo` 같은 무관한 숫자를 배제한다. 실제 관측된 라벨: `Sonnet only`, `Fable`.
 - **실기 확인**: `cargo test --test usage_probe_live -- --ignored --nocapture` 가 실제 `claude` 를 띄워 1회 조회한다. `LAYMUX_PROBE_SCREEN_OUT=<path>` 를 주면 캡처를 파일로 남겨 재조회 없이 분석할 수 있다.
 
+### 10.5.1 CodexUsageView
+
+Codex는 `/status` TUI를 파싱하지 않는다. `CodexUsageView`가 마운트된 동안 Rust command가 짧게 실행한 로컬 `codex app-server --stdio`에 `initialize`/`initialized` 뒤 `account/rateLimits/read`를 요청한다. 응답의 `rateLimitsByLimitId` primary window를 원시 usage row로 만들고, 프론트가 reset 시각과 window duration에서 elapsed bar를 계산한다. 비-Spark 행은 `Weekly limit`(좁으면 `Weekly`), Spark 행은 `Spark Weekly limit`(좁으면 `Spark`)으로 표시한다. `settings.usage.codex`가 font profile·600~3600초 갱신 간격·두 행의 표시 선택(하나 이상)·추가 `CODEX_HOME` 계정을 소유한다. 추가 계정은 해당 경로에서 사용자가 `codex login`을 끝낸 뒤 pane control bar에서 선택하며, Rust는 그 경로를 app-server 자식의 `CODEX_HOME` 환경으로만 전달한다. app-server listener·Codex thread·사용자 terminal에는 접근하지 않는다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)).
+
+Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다.
+
 ---
 
 ## 11. 전체 데이터 흐름 요약

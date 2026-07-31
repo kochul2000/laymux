@@ -114,12 +114,25 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
       "refreshSeconds": 600, // 조회 간격. 600 미만은 적용되지 않는다
       "configDirs": [], // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
       "visibleRows": ["session", "weekAll", "weekModel"] // 모든 UsageView에 표시할 한도 행. 하나 이상 필수
+    },
+    "codex": {
+      "profile": "", // Codex UsageView의 terminal font profile. 빈 값이면 defaultProfile
+      "refreshSeconds": 600, // 로컬 app-server 조회 간격. 600~3600으로 적용
+      "configDirs": [], // 별도 로그인한 CODEX_HOME 목록. 기본 CODEX_HOME은 항상 포함
+      "visibleRows": ["weekly", "sparkWeekly"] // Weekly limit / Spark Weekly limit. 하나 이상 필수
+    },
+    "colors": {
+      "used": "#58d1eb",
+      "pace": "#fd971f",
+      "track": "#585858"
     }
   }
 }
 ```
 
-**에이전트별로 키가 나뉜다.** 각 에이전트는 자기 probe·셸·config dir·provider rate limit 을 갖기 때문이다. Codex 사용량을 붙일 때는 `usage.codex` 를 형제 필드로 추가하며 기존 키 모양은 바뀌지 않는다.
+**에이전트별 수집 경로는 분리한다.** Claude는 profile/config dir를 가진 PTY probe를 쓰며, Codex는 CLI가 제공하는 app-server 계정 API를 쓴다. 두 provider는 원시 snapshot만 만들고 화면 규칙은 공통 `UsagePresentation`이 소유한다.
+
+Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdio JSON-RPC `account/rateLimits/read`다. 이 호출은 설정·네트워크 listener·사용자 대화 state를 만들지 않는다. 응답에서 직접 얻는 window와 reset epoch만 `get_codex_usage_snapshot` Tauri command로 WebView에 전달한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). `usage.codex.profile`은 화면의 terminal font를, `refreshSeconds`는 local app-server 재조회 간격을 정한다. `configDirs`의 각 경로는 app-server 자식 프로세스의 `CODEX_HOME`으로 전달되며, 사용자는 해당 경로에서 `codex login`을 먼저 실행한다.
 
 `usage.claude.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
 
@@ -127,7 +140,9 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
 
 편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
 
-`visibleRows`는 같은 Claude 계정을 보는 모든 UsageView가 공유하는 표시 선택이다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 세 행 모두 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
+`visibleRows`는 같은 provider를 보는 모든 UsageView가 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
+
+`usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 각각 청록 `#58d1eb`, 주황 `#fd971f`, 회색 `#585858`이다. 이 색은 사용자가 Views → 사용량에서 바꾸는 표시 선호이며 앱 테마 토큰에 속하지 않는다. 따라서 테마 전환만으로는 바뀌지 않고, 사용자가 명시적으로 바꿀 때만 두 provider에 함께 적용된다.
 
 ### Direct Remote Mode 설정
 

@@ -244,6 +244,7 @@ pub fn run() {
             commands::unsubscribe_usage_probe,
             commands::get_usage_snapshot,
             commands::refresh_usage_probe,
+            commands::get_codex_usage_snapshot,
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,

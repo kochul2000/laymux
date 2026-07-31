@@ -175,6 +175,19 @@ export function normalizeUsageVisibleRows(value: unknown): UsageVisibleRow[] {
   return rows.length > 0 ? rows : [...DEFAULT_USAGE_VISIBLE_ROWS];
 }
 
+export const CODEX_USAGE_VISIBLE_ROW_KEYS = ["weekly", "sparkWeekly"] as const;
+export type CodexUsageVisibleRow = (typeof CODEX_USAGE_VISIBLE_ROW_KEYS)[number];
+
+export const DEFAULT_CODEX_USAGE_VISIBLE_ROWS: CodexUsageVisibleRow[] = [
+  ...CODEX_USAGE_VISIBLE_ROW_KEYS,
+];
+
+export function normalizeCodexUsageVisibleRows(value: unknown): CodexUsageVisibleRow[] {
+  if (!Array.isArray(value)) return [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS];
+  const rows = CODEX_USAGE_VISIBLE_ROW_KEYS.filter((row) => value.includes(row));
+  return rows.length > 0 ? rows : [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS];
+}
+
 export interface UsageAgentSettings {
   /** Terminal profile whose shell can run the agent CLI. Empty = defaultProfile. */
   profile: string;
@@ -186,6 +199,11 @@ export interface UsageAgentSettings {
   visibleRows: UsageVisibleRow[];
 }
 
+export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visibleRows"> {
+  /** Codex rate-limit windows shown in every Codex UsageView. At least one is required. */
+  visibleRows: CodexUsageVisibleRow[];
+}
+
 /**
  * Usage monitor (UsageView, ADR-0102).
  *
@@ -194,6 +212,15 @@ export interface UsageAgentSettings {
  */
 export interface UsageSettings {
   claude: UsageAgentSettings;
+  codex: CodexUsageAgentSettings;
+  colors: UsageColorSettings;
+}
+
+/** Shared colors for every provider's UsagePresentation. */
+export interface UsageColorSettings {
+  used: string;
+  pace: string;
+  track: string;
 }
 
 /** Dock behavior (distinct from the structural docks array). */
@@ -459,7 +486,9 @@ interface SettingsState {
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   /** Patch one monitored agent's usage settings. */
-  setUsageAgent: (agent: keyof UsageSettings, data: Partial<UsageAgentSettings>) => void;
+  setUsageAgent: (agent: "claude", data: Partial<UsageAgentSettings>) => void;
+  setCodexUsage: (data: Partial<CodexUsageAgentSettings>) => void;
+  setUsageColors: (data: Partial<UsageColorSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
   setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
@@ -643,8 +672,27 @@ export const DEFAULT_USAGE_AGENT: UsageAgentSettings = {
   visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS],
 };
 
+export const DEFAULT_CODEX_USAGE_AGENT: CodexUsageAgentSettings = {
+  profile: "",
+  refreshSeconds: 600,
+  configDirs: [],
+  visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
+};
+
+export const DEFAULT_USAGE_COLORS: UsageColorSettings = {
+  used: "#58d1eb",
+  pace: "#fd971f",
+  track: "#585858",
+};
+
+function normalizeUsageColor(value: unknown, fallback: string): string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
 export const DEFAULT_USAGE: UsageSettings = {
   claude: { ...DEFAULT_USAGE_AGENT },
+  codex: { ...DEFAULT_CODEX_USAGE_AGENT },
+  colors: { ...DEFAULT_USAGE_COLORS },
 };
 
 export const DEFAULT_DOCK: DockSettings = {
@@ -1046,6 +1094,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       configDirs: [],
       visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS],
     },
+    codex: {
+      ...DEFAULT_CODEX_USAGE_AGENT,
+      configDirs: [],
+      visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
+    },
+    colors: { ...DEFAULT_USAGE_COLORS },
   },
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
@@ -1146,6 +1200,25 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
             : { visibleRows: normalizeUsageVisibleRows(data.visibleRows) }),
         },
       },
+    })),
+
+  setCodexUsage: (data) =>
+    set((state) => ({
+      usage: {
+        ...state.usage,
+        codex: {
+          ...state.usage.codex,
+          ...data,
+          ...(data.visibleRows === undefined
+            ? {}
+            : { visibleRows: normalizeCodexUsageVisibleRows(data.visibleRows) }),
+        },
+      },
+    })),
+
+  setUsageColors: (data) =>
+    set((state) => ({
+      usage: { ...state.usage, colors: { ...state.usage.colors, ...data } },
     })),
 
   setFileExplorer: (data) =>
@@ -1326,6 +1399,19 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
               ? data.usage.claude.configDirs
               : [],
             visibleRows: normalizeUsageVisibleRows(data.usage.claude?.visibleRows),
+          },
+          codex: {
+            ...DEFAULT_CODEX_USAGE_AGENT,
+            ...(data.usage.codex ?? {}),
+            configDirs: Array.isArray(data.usage.codex?.configDirs)
+              ? data.usage.codex.configDirs
+              : [],
+            visibleRows: normalizeCodexUsageVisibleRows(data.usage.codex?.visibleRows),
+          },
+          colors: {
+            used: normalizeUsageColor(data.usage.colors?.used, DEFAULT_USAGE_COLORS.used),
+            pace: normalizeUsageColor(data.usage.colors?.pace, DEFAULT_USAGE_COLORS.pace),
+            track: normalizeUsageColor(data.usage.colors?.track, DEFAULT_USAGE_COLORS.track),
           },
         }
       : undefined;

@@ -243,13 +243,18 @@ function ViewSelect({
   const usageConfigDirs = useSettingsStore((s) => s.usage.claude.configDirs);
   const usageConfigDir =
     currentView.type === "UsageView" ? (currentView.configDir as string) || "" : "";
+  const codexUsageConfigDirs = useSettingsStore((s) => s.usage.codex.configDirs);
+  const codexUsageConfigDir =
+    currentView.type === "CodexUsageView" ? (currentView.configDir as string) || "" : "";
 
   const value =
     currentView.type === "TerminalView"
       ? `TerminalView:${effectiveProfile}`
       : currentView.type === "UsageView"
         ? `UsageView:${usageConfigDir}`
-        : currentView.type;
+        : currentView.type === "CodexUsageView"
+          ? `CodexUsageView:${codexUsageConfigDir}`
+          : currentView.type;
 
   return (
     <select
@@ -266,6 +271,8 @@ function ViewSelect({
           onChange({ type: "TerminalView", profile: val.slice("TerminalView:".length) });
         } else if (val.startsWith("UsageView:")) {
           onChange({ type: "UsageView", configDir: val.slice("UsageView:".length) });
+        } else if (val.startsWith("CodexUsageView:")) {
+          onChange({ type: "CodexUsageView", configDir: val.slice("CodexUsageView:".length) });
         } else {
           onChange({ type: val as ViewType });
         }
@@ -293,9 +300,15 @@ function ViewSelect({
       ))}
       <option value="MemoView">Memo</option>
       <option value="UsageView:">Claude Usage</option>
+      <option value="CodexUsageView:">Codex Usage</option>
       {usageConfigDirs.map((dir) => (
         <option key={dir} value={`UsageView:${dir}`}>
           Usage: {dir}
+        </option>
+      ))}
+      {codexUsageConfigDirs.map((dir) => (
+        <option key={dir} value={`CodexUsageView:${dir}`}>
+          Codex: {dir}
         </option>
       ))}
       <option value="IssueReporterView">Issue Reporter</option>
@@ -809,6 +822,7 @@ const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   EmptyView: "Empty",
   MemoView: "Memo",
   UsageView: "Claude Usage",
+  CodexUsageView: "Codex Usage",
   IssueReporterView: "Issue Reporter",
   FileExplorerView: "File Explorer",
 };

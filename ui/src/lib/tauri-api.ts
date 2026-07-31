@@ -509,6 +509,27 @@ export interface UsageSnapshot {
   rawScreen: string | null;
 }
 
+export type CodexUsageStatus =
+  | { type: "ready" }
+  | { type: "codexMissing" }
+  | { type: "unauthorized" }
+  | { type: "failed"; message: string };
+
+export interface CodexUsageLimit {
+  key: string;
+  label: string;
+  usedPercent: number;
+  windowDurationMins: number;
+  resetsAtSecs: number;
+}
+
+export interface CodexUsageSnapshot {
+  status: CodexUsageStatus;
+  limits: CodexUsageLimit[];
+  plan: string | null;
+  capturedAtMs: number | null;
+}
+
 /**
  * Keep a probe alive for `configDir` on behalf of one view instance. Resolves
  * with whatever snapshot is already cached, which may predate this call.
@@ -533,6 +554,11 @@ export async function getUsageSnapshot(configDir: string): Promise<UsageSnapshot
 /** Ask a running probe to query now. `false` = no probe was running. */
 export async function refreshUsageProbe(configDir: string): Promise<boolean> {
   return invoke("refresh_usage_probe", { configDir });
+}
+
+/** Read one local Codex CLI account's structured rate limits. */
+export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageSnapshot> {
+  return invoke("get_codex_usage_snapshot", { configDir });
 }
 
 /** Listen for fresh usage captures so the view need not poll. */
