@@ -66,6 +66,19 @@ describe("CSS design tokens — border-radius", () => {
   });
 });
 
+describe("CSS design tokens — Claude usage meters", () => {
+  const usageColors: [string, string][] = [
+    ["--usage-used", "#58d1eb"],
+    ["--usage-pace", "#fd971f"],
+    ["--usage-track", "#585858"],
+  ];
+
+  it.each(usageColors)("sets %s to %s", (token, color) => {
+    const escaped = token.replace(/[-/]/g, "\\$&");
+    expect(cssContent).toMatch(new RegExp(`${escaped}\\s*:\\s*${color};`, "i"));
+  });
+});
+
 describe("CSS design tokens — font-size", () => {
   const fontTokens = ["--fs-2xs", "--fs-xs", "--fs-sm", "--fs-md", "--fs-lg"];
 

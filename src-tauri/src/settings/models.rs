@@ -835,10 +835,18 @@ pub struct UsageAgentSettings {
     /// default config dir is always available and is not listed here.
     #[serde(default)]
     pub config_dirs: Vec<String>,
+    /// Limit rows displayed by the agent's UsageView. The frontend keeps at
+    /// least one selected and falls back to all rows for malformed input.
+    #[serde(default = "default_usage_visible_rows")]
+    pub visible_rows: Vec<String>,
 }
 
 fn default_usage_refresh_seconds() -> u64 {
     crate::usage_probe::MIN_REFRESH_SECS
+}
+
+fn default_usage_visible_rows() -> Vec<String> {
+    vec!["session".into(), "weekAll".into(), "weekModel".into()]
 }
 
 impl Default for UsageAgentSettings {
@@ -847,6 +855,7 @@ impl Default for UsageAgentSettings {
             profile: String::new(),
             refresh_seconds: default_usage_refresh_seconds(),
             config_dirs: Vec::new(),
+            visible_rows: default_usage_visible_rows(),
         }
     }
 }

@@ -723,7 +723,6 @@ function NarrowControlMenu({
         paneHidden={paneHidden}
         onToggleHidden={onToggleHidden}
         vertical
-        showMinimize={false}
       />
     </div>,
     document.body,

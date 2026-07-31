@@ -112,7 +112,8 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
     "claude": {
       "profile": "", // claude 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
       "refreshSeconds": 600, // 조회 간격. 600 미만은 적용되지 않는다
-      "configDirs": [] // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
+      "configDirs": [], // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
+      "visibleRows": ["session", "weekAll", "weekModel"] // 모든 UsageView에 표시할 한도 행. 하나 이상 필수
     }
   }
 }
@@ -125,6 +126,8 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
 `refreshSeconds` 는 **적용 시점에 600~3600 으로 clamp** 된다. 600 초 하한은 Anthropic 의 rate limit 때문이며 설정으로 내릴 수 없다 — 스키마는 값을 거부하지 않고 조용히 올려 적용한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)). metadata apply mode 는 `nextUse` 다(다음 워커 기동부터 적용).
 
 편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
+
+`visibleRows`는 같은 Claude 계정을 보는 모든 UsageView가 공유하는 표시 선택이다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 세 행 모두 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 
 ### Direct Remote Mode 설정
 

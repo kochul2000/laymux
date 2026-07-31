@@ -16,8 +16,8 @@ interface ViewHeaderProps {
  *
  * PaneControlContext가 있으면:
  * - pinned / hover+hovered: View 콘텐츠 + pane 제어를 한 줄에 표시
- * - hover+!hovered / minimized+!hovered: View 콘텐츠만 표시
- * - minimized+hovered: View 콘텐츠 + ⋯ 버튼
+ * - hover+!hovered: View 콘텐츠만 표시
+ * - minimized: 툴바 높이를 점유하지 않고 hover 시 ⋯ 버튼만 표시
  *
  * Context 없이도 독립적으로 동작한다 (Dock 등).
  */
@@ -40,6 +40,43 @@ export function ViewHeader({
 
   const showPaneControls = ctx && (ctx.mode === "pinned" || (ctx.mode === "hover" && ctx.hovered));
   const showMinimizedBtn = ctx && ctx.mode === "minimized" && ctx.hovered;
+
+  // Views with their own header used to keep a 28px bar even when their pane
+  // was minimized. Keep the header registered (so PaneControlBar does not add
+  // a second button), but remove it from layout and expose the same hover-only
+  // entry point that terminal panes use.
+  if (ctx?.mode === "minimized") {
+    return (
+      <div data-testid={testId} className="absolute right-0 top-0 z-20">
+        {showMinimizedBtn && (
+          <button
+            data-testid="pane-control-menu-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              ctx.onSetMode("hover");
+              ctx.openControls?.();
+            }}
+            className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded"
+            style={{
+              width: "var(--btn-min-w)",
+              height: "var(--btn-min-w)",
+              color: "var(--text-secondary)",
+              border: "none",
+              borderRadius: "var(--radius-sm)",
+              transition: "background var(--transition-fast)",
+            }}
+            title="Expand control bar"
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <circle cx="3" cy="6" r="1" />
+              <circle cx="6" cy="6" r="1" />
+              <circle cx="9" cy="6" r="1" />
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -76,32 +113,6 @@ export function ViewHeader({
         <div data-testid="pane-control-bar-content" onClick={(e) => e.stopPropagation()}>
           {ctx.paneControls}
         </div>
-      )}
-      {showMinimizedBtn && (
-        <button
-          data-testid="pane-control-menu-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            ctx.onSetMode("hover");
-            ctx.openControls?.();
-          }}
-          className="hover-bg-strong flex shrink-0 cursor-pointer items-center justify-center rounded"
-          style={{
-            width: "var(--btn-min-w)",
-            height: "var(--btn-min-w)",
-            color: "var(--text-secondary)",
-            border: "none",
-            borderRadius: "var(--radius-sm)",
-            transition: "background var(--transition-fast)",
-          }}
-          title="Expand control bar"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <circle cx="3" cy="6" r="1" />
-            <circle cx="6" cy="6" r="1" />
-            <circle cx="9" cy="6" r="1" />
-          </svg>
-        </button>
       )}
     </div>
   );

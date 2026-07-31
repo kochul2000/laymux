@@ -100,7 +100,7 @@ describe("PaneControlBar + ViewHeader integration", () => {
     // ViewHeader 안에 ⋯ 버튼이 표시됨
     expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument();
     // PaneControlBar 자체 MinimizedButton은 없음 (ViewHeader가 대신 처리)
-    expect(screen.getByText("Title")).toBeInTheDocument();
+    expect(screen.queryByText("Title")).not.toBeInTheDocument();
   });
 
   it("without ViewHeader, PaneControlBar works as before", () => {

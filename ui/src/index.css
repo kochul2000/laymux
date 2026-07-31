@@ -20,11 +20,10 @@
   --green: #a6e3a1;
   --red: #f38ba8;
   --yellow: #f9e2af;
-  /* Claude usage meters: quota consumed vs. billing-window elapsed. Two
-     distinct hues so the pair reads at a glance (ADR-0099). */
-  --usage-used: #89dceb;
-  --usage-pace: #f9e2af;
-  --usage-track: #45475a;
+  /* Claude usage meters: quota consumed vs. billing-window elapsed. */
+  --usage-used: #58d1eb;
+  --usage-pace: #fd971f;
+  --usage-track: #585858;
   --border: #313244;
 
   /* hover / interaction overlays */

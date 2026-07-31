@@ -5,24 +5,18 @@ import { ViewBody } from "@/components/ui/ViewBody";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { useNowTick, useUsageSnapshot } from "@/hooks/useUsageSnapshot";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { useSettingsStore, type UsageVisibleRow } from "@/stores/settings-store";
 import {
   resolveUsageLayout,
+  resolveUsageDensity,
   showsDetail,
   type UsageLayout,
   type UsageLayoutPreference,
 } from "@/lib/usage-layout";
-import {
-  SESSION_WINDOW_MS,
-  WEEK_WINDOW_MS,
-  formatTimeUntil,
-  paceVerdict,
-  sessionElapsedPercent,
-  weekElapsedPercent,
-  type PaceVerdict,
-} from "@/lib/usage-pace";
+import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
 import type { UsageLimit, UsageProbeStatus, UsageSnapshot } from "@/lib/tauri-api";
 
-/** Pace and countdowns are time-derived, so re-render on a slow tick. */
+/** Pace is time-derived, so re-render on a slow tick. */
 const TICK_MS = 30_000;
 
 interface UsageViewProps {
@@ -34,13 +28,12 @@ interface UsageViewProps {
 
 /** One limit row, resolved for display. */
 interface Row {
-  key: string;
+  key: "session" | "week-all" | "week-model";
+  visibleKey: UsageVisibleRow;
   label: string;
   limit: UsageLimit;
   /** Elapsed percentage of this row's billing window, when derivable. */
   elapsed: number | null;
-  /** Time until this row resets. */
-  remaining: string | null;
 }
 
 function statusMessage(status: UsageProbeStatus): string | null {
@@ -64,31 +57,25 @@ function statusMessage(status: UsageProbeStatus): string | null {
   }
 }
 
-const VERDICT_COLOR: Record<PaceVerdict, string> = {
-  ahead: "var(--red)",
-  onTrack: "var(--text-secondary)",
-  behind: "var(--green)",
-  unknown: "var(--text-muted)",
-};
-
 function buildRows(snapshot: UsageSnapshot, now: Date): Row[] {
   return [
     {
       key: "session",
+      visibleKey: "session",
       label: "Current session",
       limit: snapshot.session,
       elapsed: sessionElapsedPercent(snapshot.session.reset, now),
-      remaining: formatTimeUntil(snapshot.session.reset, SESSION_WINDOW_MS, now),
     },
     {
       key: "week-all",
+      visibleKey: "weekAll",
       label: "Current week (all models)",
       limit: snapshot.weekAll,
       elapsed: weekElapsedPercent(snapshot.weekAll.reset, now),
-      remaining: formatTimeUntil(snapshot.weekAll.reset, WEEK_WINDOW_MS, now),
     },
     {
       key: "week-model",
+      visibleKey: "weekModel",
       // The label comes from the panel, which names this row after the account's
       // model. Falling back to a generic title is better than naming a model the
       // account may not be on.
@@ -97,20 +84,40 @@ function buildRows(snapshot: UsageSnapshot, now: Date): Row[] {
         : "Current week (per model)",
       limit: snapshot.weekModel,
       elapsed: weekElapsedPercent(snapshot.weekModel.reset, now),
-      remaining: formatTimeUntil(snapshot.weekModel.reset, WEEK_WINDOW_MS, now),
     },
   ];
 }
 
+const PACE_METER_HEIGHT = "3px";
+/** Below this width a limit row cannot carry its full labels comfortably. */
+const ABBREVIATED_ROW_MAX_WIDTH = 240;
+
+function displayRowLabel(row: Row, abbreviated: boolean): string {
+  if (!abbreviated) return row.label;
+  if (row.key === "session") return "session";
+  if (row.key === "week-all") return "week (all)";
+  return row.label.replace(/^Current /, "");
+}
+
 /** Fixed-height meter. Renders an empty track when the value is unknown. */
-function Meter({ percent, color }: { percent: number | null; color: string }) {
+function Meter({
+  percent,
+  color,
+  testId,
+  height,
+}: {
+  percent: number | null;
+  color: string;
+  testId: string;
+  height: string;
+}) {
   const width = percent == null ? 0 : Math.max(0, Math.min(100, percent));
   return (
     <div
+      data-testid={testId}
       className="w-full overflow-hidden"
       style={{
-        height: "6px",
-        borderRadius: "var(--radius-sm)",
+        height,
         background: "var(--usage-track)",
       }}
     >
@@ -119,49 +126,82 @@ function Meter({ percent, color }: { percent: number | null; color: string }) {
   );
 }
 
-function RowBlock({ row, detailed }: { row: Row; detailed: boolean }) {
+function RowBlock({
+  row,
+  detailed,
+  abbreviated,
+  density,
+}: {
+  row: Row;
+  detailed: boolean;
+  abbreviated: boolean;
+  density: ReturnType<typeof resolveUsageDensity>;
+}) {
   const used = row.limit.percent;
-  const verdict = paceVerdict(used, row.elapsed);
 
   return (
-    <div data-testid={`usage-row-${row.key}`} className="flex min-w-0 flex-col gap-1">
+    <div
+      data-testid={`usage-row-${row.key}`}
+      className="flex min-w-0 flex-col"
+      style={{ gap: density.blockGap }}
+    >
       <div className="flex min-w-0 items-baseline justify-between gap-2">
         <span
           className="truncate"
-          style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
+          style={{
+            color: "var(--text-secondary)",
+            fontSize: density.labelFontSize,
+            fontWeight: 400,
+          }}
         >
-          {row.label}
+          {displayRowLabel(row, abbreviated)}
         </span>
         <span
           data-testid={`usage-percent-${row.key}`}
-          style={{ color: "var(--text-primary)", fontSize: "var(--fs-md)", fontWeight: 600 }}
+          style={{ color: "var(--usage-used)", fontSize: "var(--fs-md)", fontWeight: 600 }}
         >
           {used == null ? "--" : `${used}%`}
         </span>
       </div>
 
-      <Meter percent={used} color="var(--usage-used)" />
+      <Meter
+        percent={used}
+        color="var(--usage-used)"
+        testId={`usage-meter-used-${row.key}`}
+        height={density.usedMeterHeight}
+      />
 
       {detailed && row.elapsed != null && (
-        <>
-          <Meter percent={row.elapsed} color="var(--usage-pace)" />
-          <div className="flex min-w-0 items-baseline justify-between gap-2">
-            <span style={{ color: VERDICT_COLOR[verdict], fontSize: "var(--fs-xs)" }}>
-              {row.elapsed}% elapsed
-            </span>
-            {row.remaining && (
-              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)" }}>
-                resets in {row.remaining}
-              </span>
-            )}
-          </div>
-        </>
+        <Meter
+          percent={row.elapsed}
+          color="var(--usage-pace)"
+          testId={`usage-meter-pace-${row.key}`}
+          height={PACE_METER_HEIGHT}
+        />
       )}
 
-      {detailed && row.elapsed == null && row.limit.reset && (
-        <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)" }}>
-          Resets {row.limit.reset}
-        </span>
+      {detailed && density.showDetailText && (row.limit.reset || row.elapsed != null) && (
+        <div
+          data-testid={`usage-detail-${row.key}`}
+          className="flex min-w-0 items-baseline justify-between gap-2"
+        >
+          <span
+            className="truncate"
+            style={{ color: "var(--text-secondary)", fontSize: "var(--fs-xs)" }}
+          >
+            {row.limit.reset
+              ? `${abbreviated ? "" : "Resets "}${row.limit.reset}`
+              : "Reset unavailable"}
+          </span>
+          {row.elapsed != null && (
+            <span
+              className="shrink-0"
+              style={{ color: "var(--usage-pace)", fontSize: "var(--fs-xs)" }}
+            >
+              {row.elapsed}%{abbreviated ? "" : " elapsed"}
+            </span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -169,30 +209,27 @@ function RowBlock({ row, detailed }: { row: Row; detailed: boolean }) {
 
 function CompactRow({ rows }: { rows: Row[] }) {
   return (
-    <div className="flex h-full min-w-0 items-center gap-3 overflow-x-auto px-2">
+    <div className="flex h-full min-w-0 flex-row items-center gap-1 p-2">
       {rows.map((row) => {
         const used = row.limit.percent;
-        const verdict = paceVerdict(used, row.elapsed);
         return (
           <div
             key={row.key}
             data-testid={`usage-row-${row.key}`}
-            className="flex min-w-0 shrink-0 items-center gap-1.5"
+            className="flex min-w-0 flex-1 flex-col gap-1"
           >
-            <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)" }}>
-              {compactLabel(row)}
-            </span>
-            <span
-              data-testid={`usage-percent-${row.key}`}
-              style={{ color: VERDICT_COLOR[verdict], fontSize: "var(--fs-md)", fontWeight: 600 }}
-            >
-              {used == null ? "--" : `${used}%`}
-            </span>
-            {row.elapsed != null && (
-              <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}>
-                /{row.elapsed}%
-              </span>
-            )}
+            <Meter
+              percent={used}
+              color="var(--usage-used)"
+              testId={`usage-meter-used-${row.key}`}
+              height={PACE_METER_HEIGHT}
+            />
+            <Meter
+              percent={row.elapsed}
+              color="var(--usage-pace)"
+              testId={`usage-meter-pace-${row.key}`}
+              height={PACE_METER_HEIGHT}
+            />
           </div>
         );
       })}
@@ -200,16 +237,7 @@ function CompactRow({ rows }: { rows: Row[] }) {
   );
 }
 
-function compactLabel(row: Row): string {
-  if (row.key === "session") return "session";
-  if (row.key === "week-all") return "week";
-  return "model";
-}
-
 const LAYOUT_CYCLE: UsageLayoutPreference[] = ["auto", "stacked", "columns", "compact"];
-
-/** Widest a single column grows to before the block stops expanding. */
-const MAX_COLUMN_WIDTH = 340;
 
 export function UsageView({ configDir = "", paneId }: UsageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -225,14 +253,26 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
     paneId ? s.viewOverrides[paneId]?.usageLayout : undefined,
   );
   const setViewOverride = useOverridesStore((s) => s.setViewOverride);
+  const visibleRows = useSettingsStore((s) => s.usage.claude.visibleRows);
+  const terminalFontFamily = useSettingsStore((s) => {
+    const profileName = s.usage.claude.profile || s.defaultProfile;
+    const font = s.resolveFont(profileName);
+    return `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
+  });
 
+  const rows = useMemo(
+    () => buildRows(snapshot, now).filter((row) => visibleRows.includes(row.visibleKey)),
+    [snapshot, now, visibleRows],
+  );
   const layout: UsageLayout = resolveUsageLayout(
     { width: size.w, height: size.h },
     preference ?? "auto",
+    rows.length,
   );
   const detailed = showsDetail(layout);
-
-  const rows = useMemo(() => buildRows(snapshot, now), [snapshot, now]);
+  const density = resolveUsageDensity(size.h, rows.length);
+  const rowWidth = layout === "columns" ? size.w / Math.max(1, rows.length) : size.w;
+  const abbreviated = rowWidth < ABBREVIATED_ROW_MAX_WIDTH;
   const message = error ?? statusMessage(snapshot.status);
 
   const cycleLayout = () => {
@@ -251,7 +291,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
         });
 
   return (
-    <ViewShell testId="usage-view">
+    <ViewShell testId="usage-view" style={{ fontFamily: terminalFontFamily }}>
       <ViewHeader testId="usage-header" title="Claude Usage">
         <div className="ml-2 flex min-w-0 flex-1 items-center gap-2">
           {snapshot.plan && (
@@ -277,7 +317,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
         <button
           data-testid="usage-layout-toggle"
           onClick={cycleLayout}
-          className="hover-bg-strong shrink-0 cursor-pointer rounded px-1.5"
+          className="hover-bg-strong shrink-0 cursor-pointer px-1.5"
           style={{
             height: "var(--btn-h)",
             border: "none",
@@ -292,7 +332,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
         <button
           data-testid="usage-refresh"
           onClick={refresh}
-          className="hover-bg-strong shrink-0 cursor-pointer rounded px-1.5"
+          className="hover-bg-strong shrink-0 cursor-pointer px-1.5"
           style={{
             height: "var(--btn-h)",
             border: "none",
@@ -311,41 +351,44 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
           ref={containerRef}
           data-testid="usage-body"
           data-layout={layout}
-          className="flex h-full w-full flex-col overflow-auto"
+          className="flex h-full min-h-0 w-full flex-col overflow-auto"
           style={{ background: "var(--bg-base)" }}
         >
           {layout === "compact" ? (
             <CompactRow rows={rows} />
           ) : (
-            // `my-auto` centers the block when the pane is taller than the
-            // content and collapses to no-op when it is not, so a tall tile does
-            // not leave the meters clinging to its top edge.
+            // Center the group in surplus space. Its fixed 8px edge padding
+            // remains intact while density contracts the internal gaps.
             <div
               className={
                 layout === "columns"
-                  ? "mx-auto my-auto grid w-full gap-4 p-3"
-                  : "mx-auto my-auto flex w-full flex-col gap-4 p-3"
+                  ? "grid min-h-0 w-full flex-1 content-center p-2"
+                  : "flex min-h-0 w-full flex-1 flex-col justify-center p-2"
               }
               style={{
-                // Meters stop being readable long before they stop fitting: on a
-                // very wide pane a full-bleed row pushes its label and its number
-                // to opposite edges. Cap the block and center it instead.
-                maxWidth: layout === "columns" ? `${MAX_COLUMN_WIDTH * rows.length}px` : "720px",
+                gap: density.rowGap,
                 ...(layout === "columns"
                   ? { gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }
                   : {}),
               }}
+              data-testid="usage-content"
             >
               {rows.map((row) => (
-                <RowBlock key={row.key} row={row} detailed={detailed} />
+                <RowBlock
+                  key={row.key}
+                  row={row}
+                  detailed={detailed}
+                  abbreviated={abbreviated}
+                  density={density}
+                />
               ))}
             </div>
           )}
 
-          {detailed && (
+          {detailed && density.showFooter && (
             <div
               data-testid="usage-footer"
-              className="flex shrink-0 items-center justify-between gap-2 px-3 pb-2"
+              className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
               style={{ color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}
             >
               <span data-testid="usage-status" className="truncate">
