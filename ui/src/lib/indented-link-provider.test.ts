@@ -110,6 +110,10 @@ describe("findIndentedUrls", () => {
     const result = findIndentedUrls(lines, 1);
     expect(result).toHaveLength(1);
     expect(result[0].text).toBe("https://example.com/path?very-long-param=value&another=data");
+    // 이 헬퍼는 탭을 1셀로 본다. 실제 xterm 버퍼에는 탭 문자가 남지 않고
+    // 다음 탭 스톱까지 빈 셀로 채워지므로, 진짜 컬럼은 화면 테스트가 잰다.
+    expect(result[0].range.start).toEqual({ x: 2, y: 1 });
+    expect(result[0].range.end).toEqual({ x: 22, y: 2 });
   });
 
   it("handles http:// scheme across indented lines", () => {

@@ -103,6 +103,35 @@ describe("들여쓰기 하드랩 URL 범위 (실제 xterm 셀)", () => {
     expect(first.range.end).toEqual({ x: 11, y: 3 });
   });
 
+  it("탭 들여쓰기는 실제로 빈 셀로 펼쳐진다", async () => {
+    // `getIndent` 는 탭을 1문자로 세는데, xterm 버퍼에는 탭 문자가 남지 않고
+    // 다음 탭 스톱까지 빈 셀이 채워진다. 즉 이 provider 가 보는 것은 이미
+    // 공백 들여쓰기라 문자 수와 셀 수가 어긋날 여지가 없다 — 실기로 못박는다.
+    const s = screen();
+    await s.write("\thttps://example.com/path?very-long-par\r\n\tam=value&another=data");
+    const line0 = s.terminal.buffer.active.getLine(0)!;
+    expect(line0.translateToString().slice(0, 8)).toBe("        "); // 탭 → 8셀
+    expect(line0.getCell(0)!.getChars()).not.toBe("\t");
+
+    const match = await linkRange([
+      "\thttps://example.com/path?very-long-par",
+      "\tam=value&another=data",
+    ]);
+    expect(match.text).toBe("https://example.com/path?very-long-param=value&another=data");
+    // 탭 스톱 8 → URL 은 셀 9 에서 시작하고, 끝은 둘째 줄 8+21=29 셀
+    expect(match.range.start).toEqual({ x: 9, y: 1 });
+    expect(match.range.end).toEqual({ x: 29, y: 2 });
+  });
+
+  it("결합 문자는 앞 글자와 한 셀에 들어간다", async () => {
+    // e + U+0301 은 UTF-16 2칸이지만 화면에서는 1셀이다. 셀 하나의 `chars` 가
+    // 2칸이므로 컬럼 맵도 오프셋 2개를 같은 셀로 접어야 끝점이 밀리지 않는다.
+    // 소스의 문자열 리터럴은 조합형(U+00E9)이 아니라 분해형(e + U+0301)이다.
+    const match = await linkRange(["  https://example.com/pathpath", "  /café"]);
+    // /(3) c(4) a(5) f(6) é(7)
+    expect(match.range.end).toEqual({ x: 7, y: 2 });
+  });
+
   it("끝쪽 패딩 공백이 있어도 끝점이 마지막 줄에 찍힌다", async () => {
     // 실제 버퍼 줄은 폭(60)만큼 공백으로 채워진다. 패딩을 길이로 세면 결합
     // 오프셋이 첫 줄 안에서 소진되어 끝점이 엉뚱한 행·컬럼으로 간다.

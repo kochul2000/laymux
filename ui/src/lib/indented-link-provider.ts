@@ -147,7 +147,9 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     // cell past where it starts, so the underline has to cover both halves.
     const startPos = joined.starts[urlOffset];
     const endPos = joined.ends[urlOffset + urlText.length - 1];
-    if (!startPos || !endPos) continue; // 맵 범위 밖 — 이론상 발생하지 않는다
+    // 컬럼 맵이 줄 텍스트보다 짧으면 좌표 객체는 있지만 `x` 가 undefined 다.
+    // 객체 존재만 보면 그런 좌표가 그대로 `ILink` 로 나간다 — `x` 를 확인한다.
+    if (startPos?.x === undefined || endPos?.x === undefined) continue;
 
     results.push({ text: urlText, range: { start: startPos, end: endPos } });
 

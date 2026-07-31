@@ -13,7 +13,12 @@ import type { CellInfo } from "@/lib/terminal-cell-map";
 import { reconstructLine } from "@/lib/terminal-cell-map";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 
-/** 대표적인 폭 2 구간만 덮는 근사 — 정본은 xterm 의 Unicode provider 다. */
+/**
+ * 대표적인 폭 2 구간만 덮는 근사 — 정본은 xterm 의 Unicode provider 다.
+ * 결합 문자(U+0300 등)와 탭은 모델링하지 않는다: 실제 버퍼에서 결합 문자는 앞
+ * 글자와 같은 셀의 `chars` 에 붙고 탭은 다음 탭 스톱까지 빈 셀로 펼쳐진다.
+ * 둘 다 화면 스위트에서 진짜 버퍼로 확인한다.
+ */
 function widthOf(codePoint: number): number {
   if (codePoint >= 0x1100 && codePoint <= 0x115f) return 2; // Hangul Jamo
   if (codePoint >= 0x2e80 && codePoint <= 0xa4cf) return 2; // CJK Radicals ~ Yi
