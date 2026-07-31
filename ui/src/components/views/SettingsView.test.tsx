@@ -1108,6 +1108,34 @@ describe("SettingsView", () => {
     expect(exit.settleMs).toBe(1200);
   });
 
+  // -- Terminal section: path link host OS open (#687, ADR-0099) --
+
+  it("defaults both path-link OS open toggles to on", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("path-link-os-open-toggle")).toBeChecked();
+    expect(screen.getByTestId("path-link-os-open-confirm-toggle")).toBeChecked();
+  });
+
+  it("persists the path-link OS open toggles on Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.click(screen.getByTestId("path-link-os-open-confirm-toggle"));
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().terminal.pathLinkOsOpenConfirm).toBe(false);
+    // The feature toggle is independent and stays on.
+    expect(useSettingsStore.getState().terminal.pathLinkOsOpenEnabled).toBe(true);
+
+    await user.click(screen.getByTestId("path-link-os-open-toggle"));
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.pathLinkOsOpenEnabled).toBe(false);
+  });
+
   // -- Terminal section: scrollbar style --
 
   it("shows scrollbar style select in terminal section", async () => {
