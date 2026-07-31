@@ -21,7 +21,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalCwdChanged: vi.fn().mockResolvedValue(() => {}),
   onTerminalTitleChanged: vi.fn().mockResolvedValue(() => {}),
   onTerminalOutputActivity: vi.fn().mockResolvedValue(() => {}),
-  getTerminalStates: vi.fn().mockResolvedValue([]),
+  getTerminalStates: vi.fn().mockResolvedValue({}),
   getHomeDirectory: vi.fn().mockResolvedValue("/home/mock"),
   createTerminalSession: vi.fn().mockResolvedValue("t-mock"),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),

@@ -46,7 +46,10 @@ async function withProductionEnv<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run();
   } finally {
-    process.env.NODE_ENV = previous;
+    // Assigning `undefined` would leave the literal string "undefined" behind,
+    // so an originally-unset value has to be deleted instead.
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
   }
 }
 
