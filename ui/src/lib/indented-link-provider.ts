@@ -15,13 +15,28 @@
  * This provider looks at adjacent non-wrapped lines with the same
  * indentation, strips the common indent, joins them, and checks if the
  * result is a valid URL.
+ *
+ * 좌표계 주의(issue #696): `ILink.range` 는 **셀 컬럼**인데 정규식 매칭 위치는
+ * UTF-16 오프셋이다. 한글/CJK/이모지가 끼면 두 계가 갈라지므로, 각 줄을
+ * `reconstructLine` 으로 재구성해 오프셋↔컬럼 맵을 함께 들고 다닌다
+ * (`#123` 이슈 링크(#441), 경로 밑줄(#691)과 같은 매핑).
  */
 
 import type { Terminal, ILinkProvider, ILink, IBufferCellPosition } from "@xterm/xterm";
+import {
+  reconstructLine,
+  readLineCells,
+  type BufferLineLike,
+  type ReconstructedLine,
+} from "./terminal-cell-map";
 
-/** Minimal line info — also used in tests. */
-export interface IndentedLineInfo {
-  text: string;
+/**
+ * 한 버퍼 줄의 정보 — 텍스트와 그 줄의 오프셋→셀 컬럼 맵을 함께 담는다.
+ * 맵이 줄마다 필요한 이유는 이 provider 가 여러 줄을 결합해 URL 을 만들기
+ * 때문이다: 결합 문자열의 오프셋을 (행, 셀) 로 되돌리려면 그 문자가 원래
+ * 속했던 줄의 맵을 써야 한다.
+ */
+export interface IndentedLineInfo extends ReconstructedLine {
   isWrapped: boolean;
   lineNumber: number; // 1-based
 }
@@ -29,6 +44,37 @@ export interface IndentedLineInfo {
 interface UrlMatch {
   text: string;
   range: { start: IBufferCellPosition; end: IBufferCellPosition };
+}
+
+/**
+ * URL regex: stops at whitespace and common delimiters )>]"'`.
+ * Parentheses () are valid URL chars per RFC 3986, but ( is not excluded
+ * here because real URLs (e.g. Wikipedia) use them legitimately.
+ */
+const URL_RE = /https?:\/\/[^\s)>\]"'`]+/;
+
+/** 결합 문자열과, 그 오프셋마다의 버퍼 좌표. */
+interface JoinedGroup {
+  text: string;
+  /** `starts[o]` = 오프셋 `o` 문자가 **시작**하는 버퍼 좌표(셀 컬럼 1-based). */
+  starts: IBufferCellPosition[];
+  /** `ends[o]` = 오프셋 `o` 문자가 **끝나는**(포함) 버퍼 좌표. */
+  ends: IBufferCellPosition[];
+}
+
+/**
+ * `IBufferLine` 을 이 provider 가 쓰는 줄 정보로 읽는다.
+ * 텍스트와 컬럼 맵을 한 번에 만들어 두 좌표계가 갈라지지 않게 한다.
+ */
+export function readIndentedLine(
+  bufLine: BufferLineLike & { isWrapped: boolean },
+  lineNumber: number,
+): IndentedLineInfo {
+  return {
+    ...reconstructLine(readLineCells(bufLine)),
+    isWrapped: bufLine.isWrapped,
+    lineNumber,
+  };
 }
 
 /**
@@ -55,8 +101,7 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     const content = line.text.slice(indent);
 
     // Must contain a URL start
-    const urlStart = content.search(/https?:\/\//);
-    if (urlStart < 0) continue;
+    if (!/https?:\/\//.test(content)) continue;
 
     // Collect continuation lines: same indent, not wrapped, non-empty content
     let endIdx = startIdx;
@@ -67,7 +112,9 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
       // theoretically possible but extremely rare in practice.
       if (nextLine.isWrapped) break;
       const nextIndent = getIndent(nextLine.text);
-      const nextContent = nextLine.text.slice(nextIndent);
+      // 끝쪽 패딩을 뗀 내용으로 판정한다 — 결합에 쓰는 것과 같은 문자열이라야
+      // "빈 줄에서 멈춘다"가 실제 버퍼(폭만큼 공백으로 채워진 줄)에서도 성립한다.
+      const nextContent = trimEnd(nextLine.text.slice(nextIndent));
       // Must have same indent and non-empty content
       if (nextIndent !== indent || nextContent.length === 0) break;
       // Must NOT start with a new URL (that would be an independent link)
@@ -78,19 +125,14 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     // Only interesting if multiple lines were joined
     if (endIdx === startIdx) continue;
 
-    // Join the content (indent-stripped, trailing whitespace trimmed).
-    // Terminal buffer lines are padded to terminal width with spaces;
-    // without trimming, those spaces would break URL detection.
-    const joined = lines
-      .slice(startIdx, endIdx + 1)
-      .map((l) => l.text.slice(indent).replace(/\s+$/, ""))
-      .join("");
+    // Join the content (indent-stripped, trailing whitespace trimmed) together
+    // with per-offset buffer coordinates. Terminal buffer lines are padded to
+    // terminal width with spaces; without trimming, those spaces would break
+    // URL detection.
+    const joined = joinGroup(lines, startIdx, endIdx, indent);
 
     // Extract URL from the joined text
-    // URL regex: stops at whitespace and common delimiters )>]"'`.
-    // Parentheses () are valid URL chars per RFC 3986, but ( is not excluded
-    // here because real URLs (e.g. Wikipedia) use them legitimately.
-    const urlMatch = joined.match(/https?:\/\/[^\s)>\]"'`]+/);
+    const urlMatch = joined.text.match(URL_RE);
     if (!urlMatch) continue;
 
     const urlText = urlMatch[0];
@@ -100,9 +142,14 @@ export function findIndentedUrls(lines: IndentedLineInfo[], queriedLine: number)
     const groupLineNumbers = lines.slice(startIdx, endIdx + 1).map((l) => l.lineNumber);
     if (!groupLineNumbers.includes(queriedLine)) continue;
 
-    // Map start/end back to buffer positions
-    const startPos = offsetToPos(urlOffset, lines, startIdx, endIdx, indent);
-    const endPos = offsetToPos(urlOffset + urlText.length - 1, lines, startIdx, endIdx, indent);
+    // Map start/end back to buffer positions. `end` is inclusive and takes the
+    // *last* cell of the final character — a wide char (CJK, emoji) ends one
+    // cell past where it starts, so the underline has to cover both halves.
+    const startPos = joined.starts[urlOffset];
+    const endPos = joined.ends[urlOffset + urlText.length - 1];
+    // 컬럼 맵이 줄 텍스트보다 짧으면 좌표 객체는 있지만 `x` 가 undefined 다.
+    // 객체 존재만 보면 그런 좌표가 그대로 `ILink` 로 나간다 — `x` 를 확인한다.
+    if (startPos?.x === undefined || endPos?.x === undefined) continue;
 
     results.push({ text: urlText, range: { start: startPos, end: endPos } });
 
@@ -118,25 +165,35 @@ function getIndent(text: string): number {
   return match ? match[1].length : 0;
 }
 
-function offsetToPos(
-  offset: number,
+function trimEnd(text: string): string {
+  return text.replace(/\s+$/, "");
+}
+
+/**
+ * 그룹의 각 줄에서 들여쓰기와 끝쪽 패딩을 뗀 내용을 이어 붙이고, 결합 문자열의
+ * 오프셋마다 원래 줄의 셀 좌표를 기록한다. 문자열과 좌표를 같은 루프에서
+ * 만들기 때문에 둘이 어긋날 수 없다.
+ */
+function joinGroup(
   lines: IndentedLineInfo[],
   startIdx: number,
   endIdx: number,
   indent: number,
-): IBufferCellPosition {
-  let remaining = offset;
+): JoinedGroup {
+  let text = "";
+  const starts: IBufferCellPosition[] = [];
+  const ends: IBufferCellPosition[] = [];
   for (let i = startIdx; i <= endIdx; i++) {
-    const contentLen = lines[i].text.length - indent;
-    if (remaining < contentLen || i === endIdx) {
-      return {
-        x: indent + Math.min(remaining, contentLen - 1) + 1, // 1-based, clamped
-        y: lines[i].lineNumber,
-      };
+    const line = lines[i];
+    const content = trimEnd(line.text.slice(indent));
+    for (let offset = 0; offset < content.length; offset++) {
+      const lineOffset = indent + offset;
+      starts.push({ x: line.columns[lineOffset], y: line.lineNumber });
+      ends.push({ x: line.endColumns[lineOffset], y: line.lineNumber });
     }
-    remaining -= contentLen;
+    text += content;
   }
-  return { x: 1, y: lines[startIdx].lineNumber };
+  return { text, starts, ends };
 }
 
 /**
@@ -169,11 +226,7 @@ export function createIndentedLinkProvider(
       for (let y = startLine; y <= endLine; y++) {
         const bufLine = buffer.getLine(y - 1); // 0-based
         if (!bufLine) continue;
-        lines.push({
-          text: bufLine.translateToString(),
-          isWrapped: bufLine.isWrapped,
-          lineNumber: y,
-        });
+        lines.push(readIndentedLine(bufLine, y));
       }
 
       const matches = findIndentedUrls(lines, bufferLineNumber);

@@ -1,18 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  findIndentedUrls,
-  createIndentedLinkProvider,
-  type IndentedLineInfo,
-} from "./indented-link-provider";
+import { findIndentedUrls, createIndentedLinkProvider } from "./indented-link-provider";
 import { RAW_XTERM_SELECTION, CLEAN_URL } from "./__fixtures__/right-pane-fixture";
-
-function makeLines(texts: string[], wrappedIndices: number[] = []): IndentedLineInfo[] {
-  return texts.map((text, i) => ({
-    text,
-    isWrapped: wrappedIndices.includes(i),
-    lineNumber: i + 1,
-  }));
-}
+import { makeIndentedLines as makeLines, textCells } from "@/test/cell-lines";
 
 describe("findIndentedUrls", () => {
   it("detects Claude Code OAuth URL split across indented lines", () => {
@@ -121,6 +110,10 @@ describe("findIndentedUrls", () => {
     const result = findIndentedUrls(lines, 1);
     expect(result).toHaveLength(1);
     expect(result[0].text).toBe("https://example.com/path?very-long-param=value&another=data");
+    // 이 헬퍼는 탭을 1셀로 본다. 실제 xterm 버퍼에는 탭 문자가 남지 않고
+    // 다음 탭 스톱까지 빈 셀로 채워지므로, 진짜 컬럼은 화면 테스트가 잰다.
+    expect(result[0].range.start).toEqual({ x: 2, y: 1 });
+    expect(result[0].range.end).toEqual({ x: 22, y: 2 });
   });
 
   it("handles http:// scheme across indented lines", () => {
@@ -183,24 +176,131 @@ describe("findIndentedUrls — right-pane fixture (terminal-padded lines)", () =
   });
 });
 
+// ============================================================
+// 셀 좌표 (issue #696)
+// ============================================================
+describe("findIndentedUrls — 셀 좌표", () => {
+  /** 결합 URL 하나를 찾아 그 range 를 돌려준다. */
+  function rangeOf(texts: string[], queriedLine = 1) {
+    const result = findIndentedUrls(makeLines(texts), queriedLine);
+    expect(result).toHaveLength(1);
+    return result[0].range;
+  }
+
+  it("ASCII 는 문자열 오프셋과 셀 컬럼이 일치한다", () => {
+    const range = rangeOf(["  https://example.com/path?q=1&foo=ba", "  r&baz=qux&end=true"]);
+    expect(range.start).toEqual({ x: 3, y: 1 });
+    // 마지막 문자 'e' 는 둘째 줄 20번째 셀
+    expect(range.end).toEqual({ x: 20, y: 2 });
+  });
+
+  it("앞선 한글이 시작 컬럼을 밀어낸다", () => {
+    // "메모 " 는 문자 3개지만 셀 5칸 — 오프셋으로 계산하면 밑줄이 2칸 왼쪽으로 샌다.
+    const range = rangeOf(["  메모 https://example.com/path?q=1&foo=ba", "  r&baz=qux&end=true"]);
+    expect(range.start).toEqual({ x: 8, y: 1 });
+    expect(range.end).toEqual({ x: 20, y: 2 });
+  });
+
+  it("URL 안의 와이드 문자만큼 끝 컬럼이 밀린다", () => {
+    const range = rangeOf(["  https://example.com/문서와", "  보고서?q=1"]);
+    expect(range.start).toEqual({ x: 3, y: 1 });
+    // 둘째 줄: 보(3-4) 고(5-6) 서(7-8) ?(9) q(10) =(11) 1(12)
+    expect(range.end).toEqual({ x: 12, y: 2 });
+  });
+
+  it("와이드 문자로 끝나면 끝 컬럼이 뒷칸까지 덮는다", () => {
+    const range = rangeOf(["  https://example.com/pathpath", "  /문서"]);
+    // 둘째 줄: /(3) 문(4-5) 서(6-7) → 끝 셀은 7 이어야 밑줄이 절반만 그이지 않는다
+    expect(range.end).toEqual({ x: 7, y: 2 });
+  });
+
+  it("이모지(서로게이트 페어)로 끝나도 두 셀을 덮는다", () => {
+    const range = rangeOf(["  https://example.com/pathpath", "  /x😀"]);
+    // 둘째 줄: /(3) x(4) 😀(5-6)
+    expect(range.end).toEqual({ x: 6, y: 2 });
+  });
+
+  it("앞선 이모지 뒤의 URL 도 셀 컬럼이 맞는다", () => {
+    const range = rangeOf(["  😀 https://example.com/path?q=1&foo=ba", "  r&baz=qux&end=true"]);
+    // 😀(3-4) 공백(5) → URL 은 셀 6 에서 시작
+    expect(range.start).toEqual({ x: 6, y: 1 });
+    expect(range.end).toEqual({ x: 20, y: 2 });
+  });
+
+  it("한글·이모지가 섞인 접두사에서도 어긋나지 않는다", () => {
+    const range = rangeOf([
+      "  🔗 열기 https://example.com/path?q=1&foo=ba",
+      "  r&baz=qux&end=true",
+    ]);
+    // 🔗(3-4) 공백(5) 열(6-7) 기(8-9) 공백(10) → URL 은 셀 11
+    expect(range.start).toEqual({ x: 11, y: 1 });
+    expect(range.end).toEqual({ x: 20, y: 2 });
+  });
+
+  it("끝쪽 패딩 공백이 있는 실제 버퍼 줄에서도 행·컬럼이 맞는다", () => {
+    // 버퍼 줄은 터미널 폭만큼 공백으로 채워져 있다. 패딩을 길이 계산에 넣으면
+    // 결합 문자열의 오프셋이 첫 줄 안에 다 들어가 버려 끝점이 엉뚱한 행에 찍힌다.
+    const range = rangeOf([
+      "  https://example.com/path?q=1&foo=ba".padEnd(55, " "),
+      "  r&baz=qux&end=true".padEnd(55, " "),
+    ]);
+    expect(range.start).toEqual({ x: 3, y: 1 });
+    expect(range.end).toEqual({ x: 20, y: 2 });
+  });
+});
+
 describe("createIndentedLinkProvider", () => {
-  it("returns undefined when isEnabled returns false", () => {
-    const mockTerminal = {
+  /** 셀 배열을 돌려주는 최소 xterm 버퍼 목. */
+  function mockTerminal(texts: string[]) {
+    const rows = texts.map((t) => textCells(t));
+    return {
       buffer: {
         active: {
-          length: 2,
-          getLine: (y: number) => ({
-            translateToString: () => ["  https://example.com/long-pa", "  ram=value"][y] ?? "",
-            isWrapped: false,
-          }),
+          length: rows.length,
+          getLine: (y: number) => {
+            const cells = rows[y];
+            if (!cells) return undefined;
+            return {
+              length: cells.length,
+              getCell: (x: number) => {
+                const cell = cells[x];
+                return cell
+                  ? { getChars: () => cell.chars, getWidth: () => cell.width }
+                  : undefined;
+              },
+              isWrapped: false,
+            };
+          },
         },
       },
-    };
+    } as never;
+  }
 
-    const provider = createIndentedLinkProvider(mockTerminal as never, vi.fn(), () => false);
+  it("returns undefined when isEnabled returns false", () => {
+    const terminal = mockTerminal(["  https://example.com/long-pa", "  ram=value"]);
+    const provider = createIndentedLinkProvider(terminal, vi.fn(), () => false);
 
     const callback = vi.fn();
     provider.provideLinks(1, callback);
     expect(callback).toHaveBeenCalledWith(undefined);
+  });
+
+  it("한글이 앞선 줄에서도 링크 range 가 실제 셀을 가리킨다", () => {
+    const terminal = mockTerminal([
+      "  메모 https://example.com/path?q=1&foo=ba",
+      "  r&baz=qux&end=true",
+    ]);
+    const onClick = vi.fn();
+    const provider = createIndentedLinkProvider(terminal, onClick);
+
+    const callback = vi.fn();
+    provider.provideLinks(1, callback);
+    const links = callback.mock.calls[0][0];
+    expect(links).toHaveLength(1);
+    expect(links[0].text).toBe("https://example.com/path?q=1&foo=bar&baz=qux&end=true");
+    expect(links[0].range).toEqual({ start: { x: 8, y: 1 }, end: { x: 20, y: 2 } });
+
+    links[0].activate();
+    expect(onClick).toHaveBeenCalledWith(links[0].text);
   });
 });

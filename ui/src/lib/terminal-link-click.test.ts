@@ -5,15 +5,7 @@ import {
   resolveLinkAtCell,
   isModifierLinkClick,
 } from "./terminal-link-click";
-import type { IndentedLineInfo } from "./indented-link-provider";
-
-function makeLines(texts: string[], wrappedIndices: number[] = []): IndentedLineInfo[] {
-  return texts.map((text, i) => ({
-    text,
-    isWrapped: wrappedIndices.includes(i),
-    lineNumber: i + 1,
-  }));
-}
+import { makeIndentedLines as makeLines } from "@/test/cell-lines";
 
 describe("WEB_LINK_REGEX", () => {
   it("WebLinksAddon 과 동일한 경계로 URL 을 매칭한다", () => {

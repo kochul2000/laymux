@@ -14,7 +14,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { createIndentedLinkProvider } from "@/lib/indented-link-provider";
+import { createIndentedLinkProvider, readIndentedLine } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { createPrLinkProvider } from "@/lib/pr-link-provider";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
@@ -3004,11 +3004,7 @@ export function TerminalView({
       for (let y = startLine; y <= endLine; y++) {
         const bufLine = buffer.getLine(y - 1);
         if (!bufLine) continue;
-        lines.push({
-          text: bufLine.translateToString(),
-          isWrapped: bufLine.isWrapped,
-          lineNumber: y,
-        });
+        lines.push(readIndentedLine(bufLine, y));
       }
 
       const oscLinkUri = getOscLinkUriAtCell(terminal, clickedLineNumber - 1, col - 1);
