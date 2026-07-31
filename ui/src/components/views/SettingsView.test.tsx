@@ -1108,7 +1108,7 @@ describe("SettingsView", () => {
     expect(exit.settleMs).toBe(1200);
   });
 
-  // -- Terminal section: path link host OS open (#687, ADR-0099) --
+  // -- Terminal section: path link host OS open (#687, ADR-0100) --
 
   it("defaults both path-link OS open toggles to on", async () => {
     const user = userEvent.setup();

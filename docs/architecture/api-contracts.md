@@ -66,7 +66,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 ```
 
 두 Boolean 모두 Settings → Terminal → 파일 경로 링크에서 편집하며, Rust serde 와 프론트엔드
-settings store 가 누락값을 `true`로 보완한다([ADR-0099](../adr/0099-path-link-host-os-open-modifier-contract.md)).
+settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-path-link-host-os-open-modifier-contract.md)).
 `pathLinkOsOpenEnabled` 가 꺼져 있으면 수정자 클릭도 기존 동작(파일=뷰어, 디렉터리=CWD 전파)으로
 떨어진다. `pathLinkOsOpenConfirm` 은 **완화만** 할 수 있다 — 꺼도 직접 실행·설치·스크립트 호스트·
 레지스트리 병합 확장자(코드 상수 `HARD_CONFIRM_EXTENSIONS`)는 계속 확인을 받는다. 이 하드 클래스는
@@ -804,6 +804,8 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 `/remote/font/{token}.{ttf|otf}`는 vendor asset과 같은 gate를 쓰는 폰트 route다([ADR-0077](../adr/0077-remote-terminal-font-serving.md)). `settings.remote.serveTerminalFont`가 켜져 있을 때만 appearance payload가 이 URL을 광고하며, route 자체는 등록되지 않은 token에 `404`를 돌려준다. `token`은 폰트 콘텐츠 sha256의 앞 16 hex이므로 URL이 곧 내용이며 `Cache-Control: public, max-age=31536000, immutable`과 `Vary: Accept-Encoding`을 보낸다. `Accept-Encoding`에 `br`이 있으면 한 번 만들어 캐시한 brotli 본을 `Content-Encoding: br`로 보내고, 아니면 원본 sfnt 바이트를 그대로 보낸다. woff2 컨테이너 변환은 하지 않는다.
 
 `/remote/manifest.webmanifest`와 `/remote/pwa/*`는 vendor asset과 같은 base access gate를 쓰는 설치 자산이다([ADR-0091](../adr/0091-remote-client-standalone-web-app-manifest.md)). manifest는 `display: standalone`과 `scope`=`start_url`=`id`=`/remote/`를 선언하고 `application/manifest+json`, `Cache-Control: no-store`로 응답한다 — 컴파일 내장이라 revalidation 근거가 없고, 이미 설치된 앱 안에 stale한 `start_url`/아이콘 목록이 남으면 안 된다. 아이콘은 `image/png`, `Cache-Control: private, max-age=86400`이며 등록되지 않은 파일 이름은 404다. `page.html`의 manifest link는 `crossorigin="use-credentials"`를 반드시 갖는다 — manifest fetch는 기본적으로 credential을 생략하므로 gate 안쪽에서는 이 속성이 없으면 401이다. iOS/iPadOS도 manifest를 지원하지만 `apple-touch-icon`이 manifest 아이콘보다 우선하고 오래된 설치 경로는 `apple-mobile-web-app-*` 메타를 사용하므로 두 계열을 함께 둔다. 아이콘 PNG는 `ui/public/logo.svg`에서 `cd ui && npm run build:pwa-icons`로 생성해 커밋한 자산이다. service worker는 등록하지 않는다(오프라인 캐싱 비목표, cloud remote origin CSP는 `worker-src 'none'`). 설치 자체는 HTTPS origin(cloud relay, 또는 HTTPS 앞단을 둔 direct)에서만 성립하며 평문 HTTP direct에서는 브라우저가 manifest를 무시한다.
+
+설치 권유 UI는 내비게이션 드로어 최하단의 `#installSection` 하나다([ADR-0100](../adr/0099-remote-client-install-affordance-in-drawer.md)). 상시 배너나 헤더 버튼을 두지 않는다 — ADR-0091이 되찾으려던 터미널 행을 다시 먹기 때문이다. 이 섹션은 기본 `hidden`이고, `window.isSecureContext`가 참이며 standalone 실행(`display-mode: standalone` 또는 iOS `navigator.standalone`)이 아니고, Chromium이 `beforeinstallprompt`를 발생시켰거나 iOS/iPadOS로 식별될 때만 나타난다. 클릭은 보관한 `beforeinstallprompt` 이벤트의 `prompt()`를 호출하고 그 이벤트를 즉시 버린다(재사용 불가); 이벤트가 없는 iOS에서는 "공유 → 홈 화면에 추가" 안내를 토글한다. `appinstalled` 이후에는 다시 숨는다 — 단 이 이벤트는 Chromium 경로에만 오고, iOS 는 공유 시트 설치로 이를 발생시키지 않으므로 그 탭에서는 다음 방문의 standalone 판정으로만 사라진다. 프롬프트를 자동으로 띄우지 않는다.
 
 `/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 

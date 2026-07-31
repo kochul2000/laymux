@@ -1,6 +1,6 @@
 /**
  * path-link 선택을 **호스트 데스크톱 맥락**에서 여는 동작의 순수 로직
- * (issue #687, [ADR-0099](../../../docs/adr/0099-path-link-host-os-open-modifier-contract.md)).
+ * (issue #687, [ADR-0100](../../../docs/adr/0100-path-link-host-os-open-modifier-contract.md)).
  *
  * 책임은 두 가지뿐이다.
  *   1. 수정자 키 + 대상 종류(파일/디렉토리)를 클릭 액션으로 매핑한다.
@@ -34,7 +34,7 @@ export interface PathLinkClickModifiers {
 
 /**
  * 호스트 OS 로 위임하는 액션인지. `TerminalView` 는 이 값이 참일 때만 클릭
- * 이벤트를 가로챈다(ADR-0099 Decision 2 의 소유권 불변식).
+ * 이벤트를 가로챈다(ADR-0100 Decision 2 의 소유권 불변식).
  */
 export function isOsHandoffAction(action: PathLinkClickAction): boolean {
   return action === "osOpen" || action === "osReveal";
@@ -63,7 +63,7 @@ export function decidePathLinkClickAction(
 }
 
 /**
- * 사용자 설정과 무관하게 **항상** 확인을 받는 확장자(ADR-0099 Decision 3 의
+ * 사용자 설정과 무관하게 **항상** 확인을 받는 확장자(ADR-0100 Decision 3 의
  * 하드 클래스). 호스트에서 곧바로 실행·설치·시스템 변경으로 이어지는 것들이다.
  *
  * 기준은 "확장자가 실행 파일처럼 보이는가"가 아니라 **"연결 프로그램에 넘기면

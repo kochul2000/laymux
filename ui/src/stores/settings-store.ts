@@ -125,7 +125,7 @@ export interface TerminalSettings {
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
   pathLinkMaxLength: number;
   /**
-   * Issue #687 / ADR-0099: Ctrl click opens a path link in the host OS and
+   * Issue #687 / ADR-0100: Ctrl click opens a path link in the host OS and
    * Ctrl+Shift shows it in the host file manager.
    */
   pathLinkOsOpenEnabled: boolean;

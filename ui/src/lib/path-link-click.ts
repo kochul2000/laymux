@@ -1,5 +1,5 @@
 /**
- * 검증된 path-link 밑줄에 대한 mousedown/mouseup 처리 (issue #687, ADR-0099).
+ * 검증된 path-link 밑줄에 대한 mousedown/mouseup 처리 (issue #687, ADR-0100).
  *
  * `TerminalView` 의 effect 안에 인라인으로 두면 소유권 계약(수정자 클릭에서만
  * 이벤트를 종결한다)과 확인 게이트(취소하면 아무 일도 일어나지 않는다)를

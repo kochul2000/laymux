@@ -39,7 +39,7 @@ export interface PathLinkControllerDeps {
   /** 검증된 디렉토리 경로 클릭 시 호출 — 해당 경로로 cwd 전파. */
   onChangeDir: (absPath: string) => void;
   /**
-   * 호스트 OS 로 위임할 때 호출(ADR-0099). 확인 대화상자는 호출부가 이미
+   * 호스트 OS 로 위임할 때 호출(ADR-0100). 확인 대화상자는 호출부가 이미
    * 처리한 뒤이며, 여기서는 라우팅만 한다.
    */
   onOsAction: (absPath: string, mode: OsHandoffMode) => void;

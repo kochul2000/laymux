@@ -138,7 +138,7 @@ export function resolveLinkAtCell(input: LinkAtCellInput): string | null {
  * mousedown/click 이벤트가 "수정자키+클릭"으로 링크 우회를 트리거해야
  * 하는지 판정한다. Shift 또는 Alt 를 누른 좌클릭(주 버튼)만 대상.
  *
- * **Ctrl 이 눌린 조합은 제외한다**(ADR-0099). Ctrl / Ctrl+Shift 좌클릭은
+ * **Ctrl 이 눌린 조합은 제외한다**(ADR-0100). Ctrl / Ctrl+Shift 좌클릭은
  * path-link 의 호스트 OS 열기가 소유한다. 이 우회는 wrapper 엘리먼트의 같은
  * capture `mousedown` 에 등록돼 있어, 제외하지 않으면 한 클릭이 "URL 을
  * 브라우저로 연다"와 "파일을 호스트에서 연다"를 동시에 트리거한다.

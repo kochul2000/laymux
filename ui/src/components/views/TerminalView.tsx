@@ -2885,7 +2885,7 @@ export function TerminalView({
     // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
     // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
     //
-    // #687(ADR-0099): Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 이 조합만은
+    // #687(ADR-0100): Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 이 조합만은
     // "관찰"이 아니라 **소유**한다 — 밑줄 안에서 성립하면 mousedown 을
     // preventDefault + stopImmediatePropagation 으로 종결해, xterm 의 선택 확장,
     // TUI 로의 마우스 리포팅 전달, #352 우회가 같은 클릭을 함께 처리하지 못하게

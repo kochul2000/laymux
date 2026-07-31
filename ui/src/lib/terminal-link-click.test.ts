@@ -175,7 +175,7 @@ describe("isModifierLinkClick", () => {
       false,
     );
   });
-  // ADR-0099: Ctrl 조합은 path-link 의 호스트 OS 열기가 소유한다. #352 TUI
+  // ADR-0100: Ctrl 조합은 path-link 의 호스트 OS 열기가 소유한다. #352 TUI
   // 우회가 같은 클릭을 함께 처리하면 링크 열기와 OS 열기가 동시에 일어난다.
   it("Ctrl+Shift+좌클릭은 false — path-link 가 소유한다", () => {
     expect(isModifierLinkClick({ button: 0, shiftKey: true, altKey: false, ctrlKey: true })).toBe(

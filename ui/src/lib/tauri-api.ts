@@ -834,7 +834,7 @@ export async function statPath(path: string, wslDistro?: string): Promise<PathIn
 }
 
 /**
- * Hand a verified path-link target to the host desktop (issue #687, ADR-0099).
+ * Hand a verified path-link target to the host desktop (issue #687, ADR-0100).
  * `open` uses the host file association (file) or file manager (directory);
  * `reveal` shows the target inside its parent directory.
  *

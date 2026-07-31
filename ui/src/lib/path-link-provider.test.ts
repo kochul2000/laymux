@@ -95,7 +95,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     expect(onChangeDir).toHaveBeenCalledWith("/proj/src");
   });
 
-  // ADR-0099: Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 라우팅만 여기서
+  // ADR-0100: Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 라우팅만 여기서
   // 검증하고, 어떤 수정자가 어떤 액션인지는 path-link-os-open 의 순수 함수가 정한다.
   it("activate 는 osOpen/osReveal 을 onOsAction 으로 라우팅한다", () => {
     const onOpenPath = vi.fn();

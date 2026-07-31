@@ -1,4 +1,4 @@
-//! Hand a verified path-link target to the host desktop (issue #687, ADR-0099).
+//! Hand a verified path-link target to the host desktop (issue #687, ADR-0100).
 //!
 //! The terminal path-link feature validates a selected path with `stat_path`
 //! and underlines it. `Ctrl`/`Ctrl+Shift` clicking that underline asks the host
@@ -11,7 +11,7 @@
 //! so `/home/... → \\wsl.localhost\<distro>\...` and `/mnt/c/... → C:\...` stay
 //! in one place (ADR-0031: the host path is Rust's responsibility).
 //!
-//! Confirmation policy lives in the frontend (ADR-0099 Decision 4); this module
+//! Confirmation policy lives in the frontend (ADR-0100 Decision 4); this module
 //! performs the requested action without knowing whether a dialog was shown.
 //! The command is intentionally **not** exposed to Automation, MCP or Remote —
 //! remote file access must not widen into host process execution (ADR-0045).
@@ -115,7 +115,7 @@ pub struct OsOpenPlan {
 ///
 /// `Reveal` uses `/select,` on Windows; when the target has no parent (drive
 /// root, UNC share root) there is nothing to select inside, so it degrades to
-/// `Open` (ADR-0099 Decision 2). Linux has no portable "select this entry"
+/// `Open` (ADR-0100 Decision 2). Linux has no portable "select this entry"
 /// verb, so `Reveal` opens the parent directory instead (Decision 6).
 pub fn plan_for_resolved(mode: OsOpenMode, resolved: &str) -> OsOpenPlan {
     let target = normalize_target(resolved);
@@ -156,7 +156,7 @@ pub fn plan_for_resolved(mode: OsOpenMode, resolved: &str) -> OsOpenPlan {
 ///
 /// The resolution is deliberately the same call `stat_path` makes, with the
 /// same `(path, wsl_distro)` pair, so the underline that lit up and the target
-/// handed to the OS can never disagree (ADR-0099 Decision 1 / 7).
+/// handed to the OS can never disagree (ADR-0100 Decision 1 / 7).
 pub fn plan_os_open(path: &str, wsl_distro: Option<&str>, mode: OsOpenMode) -> OsOpenPlan {
     let resolved = path_utils::resolve_address_path_following_symlinks(path, wsl_distro);
     plan_for_resolved(mode, &resolved)
@@ -338,7 +338,7 @@ mod tests {
 
         #[test]
         fn plan_reuses_the_stat_path_resolution() {
-            // ADR-0099 Decision 1: the argument is the host path `stat_path`
+            // ADR-0100 Decision 1: the argument is the host path `stat_path`
             // resolved from the same (path, distro) pair — not a second rule.
             assert_eq!(
                 plan_os_open("/mnt/c/Users/u/a.txt", None, OsOpenMode::Open).arg,
