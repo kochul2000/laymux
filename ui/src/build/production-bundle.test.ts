@@ -32,32 +32,55 @@ interface BuildLog {
   message: string;
 }
 
+/**
+ * Build the way `npm run build` does.
+ *
+ * Vitest sets `NODE_ENV=test`, and Vite derives `isProduction` from it — so
+ * without this the harness resolved development React (and dev-only plugin
+ * output), producing a ~540 KB entry chunk that never ships. Every assertion
+ * below is about the shipped artifact, so the env has to match the real build.
+ */
+async function withProductionEnv<T>(run: () => Promise<T>): Promise<T> {
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  try {
+    return await run();
+  } finally {
+    // Assigning `undefined` would leave the literal string "undefined" behind,
+    // so an originally-unset value has to be deleted instead.
+    if (previous === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previous;
+  }
+}
+
 async function runProductionBuild(outDir: string, chunkSizeWarningLimit?: number) {
   const logs: BuildLog[] = [];
   let resolvedConfig: ResolvedConfig | undefined;
-  const result = await build({
-    logLevel: "silent",
-    plugins: [
-      {
-        name: "test:capture-production-config",
-        configResolved(config) {
-          resolvedConfig = config;
+  const result = await withProductionEnv(() =>
+    build({
+      logLevel: "silent",
+      plugins: [
+        {
+          name: "test:capture-production-config",
+          configResolved(config) {
+            resolvedConfig = config;
+          },
+        },
+      ],
+      build: {
+        outDir,
+        emptyOutDir: true,
+        write: true,
+        ...(chunkSizeWarningLimit === undefined ? {} : { chunkSizeWarningLimit }),
+        rolldownOptions: {
+          onLog(level, log, handler) {
+            logs.push({ level, code: log.code, message: log.message });
+            handler(level, log);
+          },
         },
       },
-    ],
-    build: {
-      outDir,
-      emptyOutDir: true,
-      write: true,
-      ...(chunkSizeWarningLimit === undefined ? {} : { chunkSizeWarningLimit }),
-      rolldownOptions: {
-        onLog(level, log, handler) {
-          logs.push({ level, code: log.code, message: log.message });
-          handler(level, log);
-        },
-      },
-    },
-  });
+    }),
+  );
   if (!resolvedConfig) throw new Error("Vite did not resolve the production config");
 
   const buildResults = (Array.isArray(result) ? result : [result]) as unknown as Array<{
