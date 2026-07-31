@@ -1,6 +1,6 @@
 # 0099. Remote 클라이언트의 설치 권유는 내비게이션 드로어의 버튼 하나로만 한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-31
 - Source: 사용자 요구("터미널 페이지에서 메뉴 오픈 했을 때 버튼으로 추가하자, pwa 상태면 숨기는 버튼으로"), [ADR-0091](0091-remote-client-standalone-web-app-manifest.md)
 
