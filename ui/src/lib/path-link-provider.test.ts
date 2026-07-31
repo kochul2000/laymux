@@ -150,6 +150,29 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     expect(ctrl.hitTest(20, 25)).toBe(false);
   });
 
+  // #687: 힌트 라벨 배치의 유일한 좌표 소스다.
+  it("getRect 는 검증이 없으면 null, 있으면 데코 사각형을 돌려준다", () => {
+    const t = makeTerminal();
+    const rect = { left: 10, right: 50, top: 20, bottom: 36 } as DOMRect;
+    t.el.getBoundingClientRect = () => rect;
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    expect(ctrl.getRect()).toBeNull();
+    ctrl.setVerifiedSelection({
+      bufferLine: 1,
+      startCol: 1,
+      endCol: 4,
+      absPath: "/x",
+      isDirectory: false,
+    });
+    expect(ctrl.getRect()).toBe(rect);
+    ctrl.clear();
+    expect(ctrl.getRect()).toBeNull();
+  });
+
   it("데코레이션 요소는 클릭을 가로채지 않는다(pointer-events:none)", () => {
     const t = makeTerminal();
     const ctrl = createPathLinkController(t.terminal, {

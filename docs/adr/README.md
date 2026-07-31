@@ -116,7 +116,7 @@ ADR 이 필요한 대표 기준:
 | [0096](0096-terminal-human-input-write-failure-observability.md) | 터미널 인간 입력 IPC 실패는 정확히 한 번 기록하고 재전송하지 않는다 | Proposed |
 | [0097](0097-transport-lossless-presentation-lossy-ownership.md) | terminal output은 transport lossless·presentation lossy 계층 계약으로 분리한다 | Proposed |
 | [0098](0098-terminal-parser-weighted-starvation-free-admission.md) | 데스크톱 terminal parser는 가시성 가중치로 starvation 없이 진입한다 (0092 확장) | Proposed |
-| [0099](0099-path-link-host-os-open-modifier-contract.md) | path-link 의 OS 열기는 호스트 맥락에서 Ctrl 계열 수정자와 확인 게이트로 수행한다 (#352 수정자 소유권 정정, 0045 경계 유지) | Proposed |
+| [0099](0099-path-link-host-os-open-modifier-contract.md) | path-link 의 OS 열기는 호스트 맥락에서 Ctrl 계열 수정자와 확인 게이트로 수행한다 (#352 수정자 소유권 정정, 0045 경계 유지) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

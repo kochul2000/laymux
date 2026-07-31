@@ -29,8 +29,14 @@ export interface PathLinkHint {
  * `host`(터미널 wrapper, `position: relative`) 안에 힌트 라벨을 만든다.
  * 좌표는 뷰포트 기준으로 받아 host 기준으로 변환하므로, 호출부는 데코레이션
  * `getBoundingClientRect()` 를 그대로 넘기면 된다.
+ *
+ * `host` 가 아직 없으면(마운트 전) 아무것도 하지 않는 no-op 을 돌려준다 —
+ * 힌트는 보조 표시이므로 호출부가 존재 여부를 분기하지 않아도 되게 한다.
  */
-export function createPathLinkHint(host: HTMLElement): PathLinkHint {
+export function createPathLinkHint(host: HTMLElement | null): PathLinkHint {
+  if (!host) {
+    return { show: () => {}, hide: () => {}, dispose: () => {} };
+  }
   const el = document.createElement("div");
   el.className = "terminal-path-link-hint";
   el.dataset.testid = "path-link-hint";

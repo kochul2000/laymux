@@ -108,7 +108,12 @@ export function createPathLinkClickHandlers<T extends PathLinkClickTarget>(
       const moved =
         Math.abs(e.clientX - current.x) > PATH_LINK_CLICK_SLOP ||
         Math.abs(e.clientY - current.y) > PATH_LINK_CLICK_SLOP;
-      if (moved) return; // 드래그 → 열지 않음(재선택 의도).
+      if (moved) {
+        // 드래그 → 열지 않음(재선택 의도). 다만 mousedown 을 preventDefault 한
+        // 조합이면 포커스가 이동하지 않았으므로 여기서도 되돌려 준다.
+        if (isOsHandoffAction(current.action)) deps.onOsHandoffSettled?.();
+        return;
+      }
 
       if (isOsHandoffAction(current.action)) {
         const settings = deps.getSettings();

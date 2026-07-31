@@ -143,6 +143,16 @@ describe("createPathLinkClickHandlers — activation", () => {
     h.onMouseUp(makeEvent({ ctrlKey: true, clientX: 100 + PATH_LINK_CLICK_SLOP + 1 }));
     expect(h.activate).not.toHaveBeenCalled();
     expect(h.confirm).not.toHaveBeenCalled();
+    // mousedown was prevented for this combination, so focus still has to
+    // come back even though nothing was opened.
+    expect(h.onOsHandoffSettled).toHaveBeenCalled();
+  });
+
+  it("does not restore focus for a plain drag — that mousedown was never prevented", () => {
+    const h = setup();
+    h.onMouseDown(makeEvent());
+    h.onMouseUp(makeEvent({ clientX: 100 + PATH_LINK_CLICK_SLOP + 1 }));
+    expect(h.onOsHandoffSettled).not.toHaveBeenCalled();
   });
 
   it("does not activate a mouseup without a matching mousedown", () => {

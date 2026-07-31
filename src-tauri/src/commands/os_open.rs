@@ -93,8 +93,14 @@ pub enum OsOpenArg {
     /// escaping wraps the whole `/select,<path>` argument once the path
     /// contains a space, which explorer then fails to recognize as a switch —
     /// verified on Windows 11: it silently opens the default folder instead of
-    /// the target. Windows paths cannot contain `"`, so embedding the path in
-    /// quotes adds no injection surface.
+    /// the target.
+    ///
+    /// Only used when the path itself contains no `"`. A native Windows path
+    /// cannot, but a **WSL** one can — Linux filenames allow every byte except
+    /// `/` and NUL, and `\\wsl.localhost\...` carries that name through
+    /// verbatim. Embedding such a path would end the quoted run early and hand
+    /// the remainder to explorer's own parser, so those targets take the
+    /// escaped fallback instead (see `plan_for_resolved`).
     Raw(String),
 }
 
@@ -119,6 +125,11 @@ pub fn plan_for_resolved(mode: OsOpenMode, resolved: &str) -> OsOpenPlan {
         let arg = match mode {
             OsOpenMode::Open => OsOpenArg::Escaped(target),
             OsOpenMode::Reveal => match parent_dir(&target) {
+                // A `"` in the name would close the quoted run early and let
+                // explorer's own parser read the rest as further arguments, so
+                // those targets lose the selection and just open the containing
+                // folder — the safe degradation, not a silently wrong window.
+                Some(parent) if target.contains('"') => OsOpenArg::Escaped(parent),
                 Some(_) => OsOpenArg::Raw(format!("/select,\"{target}\"")),
                 None => OsOpenArg::Escaped(target),
             },
@@ -174,9 +185,11 @@ pub fn open_in_os(path: String, wsl_distro: Option<String>, mode: String) -> Res
                 use std::os::windows::process::CommandExt;
                 command.raw_arg(raw);
             }
+            // `Raw` only exists to work around explorer.exe's command line
+            // parser, so nothing else can produce it.
             #[cfg(not(target_os = "windows"))]
             {
-                command.arg(raw);
+                unreachable!("raw command lines are Windows-only: {raw}");
             }
         }
     }
@@ -297,6 +310,21 @@ mod tests {
             assert_eq!(
                 plan_for_resolved(OsOpenMode::Reveal, "\\\\wsl.localhost\\Ubuntu").arg,
                 OsOpenArg::Escaped("\\\\wsl.localhost\\Ubuntu".into())
+            );
+        }
+
+        #[test]
+        fn reveal_degrades_to_the_parent_folder_for_a_quoted_wsl_name() {
+            // Linux filenames may contain `"`; the raw command line cannot
+            // carry one, so the selection is dropped rather than risking
+            // explorer parsing the remainder as further arguments.
+            let plan = plan_for_resolved(
+                OsOpenMode::Reveal,
+                "\\\\wsl.localhost\\Ubuntu\\home\\u\\a\",calc.exe,\".txt",
+            );
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Escaped("\\\\wsl.localhost\\Ubuntu\\home\\u".into())
             );
         }
 

@@ -586,11 +586,11 @@
   border-radius: 4px;
   background: var(--bg-surface);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   line-height: 1.4;
   white-space: nowrap;
   pointer-events: none;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
+  box-shadow: 0 2px 8px var(--backdrop-light);
 }
 
 .terminal-path-link-hint[hidden] {

@@ -1350,8 +1350,10 @@ export function TerminalView({
     // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
-    // #687: 밑줄 위 hover 힌트 라벨. wrapper 안에 붙이고 effect cleanup 에서 제거.
-    const pathLinkHint = createPathLinkHint(wrapperRef.current ?? containerRef.current!);
+    // #687: 밑줄 위 hover 힌트 라벨. 좌표를 wrapper 기준으로 계산하므로 반드시
+    // wrapper 에 붙인다(자식인 xterm host 는 자체 패딩 좌표계라 어긋난다).
+    // wrapper 가 아직 없으면 라벨만 생략하고 나머지 경로는 그대로 동작한다.
+    const pathLinkHint = createPathLinkHint(wrapperRef.current);
     const pathLink = createPathLinkController(terminal, {
       onOpenPath: (absPath) => {
         useFileViewerStore.getState().openFileViewer(absPath);
@@ -2597,6 +2599,10 @@ export function TerminalView({
         chargeCompositionBaseYMove({ carryShadowCursor: true });
       }
       refreshViewportPresentation();
+      // #687: 밑줄은 마커를 따라 움직이지만 힌트 라벨은 mousemove 에서만 자리를
+      // 잡는다. 스크롤 뒤 포인터가 멈춰 있으면 라벨만 옛 좌표에 남으므로 감춘다
+      // (다음 mousemove 가 필요하면 다시 그린다).
+      pathLinkHint.hide();
     });
     // Issue #530: 앱 비활성화(Alt-Tab 등)에서 webview 가 helper textarea 의 실제
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
@@ -2845,12 +2851,19 @@ export function TerminalView({
     const handleMouseMove = (e: MouseEvent) => {
       if (outerEl) outerEl.style.cursor = "";
       // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
-      const inside = pathLink.hitTest(e.clientX, e.clientY);
+      // 사각형은 한 번만 읽어 hit-test 와 라벨 배치에 함께 쓴다(mousemove 마다
+      // 같은 요소를 두 번 재는 강제 리플로우를 피한다).
+      const rect = pathLink.getRect();
+      const inside =
+        !!rect &&
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
       setPathLinkCursor(inside);
       // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
       // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
       const sel = inside ? pathLink.getCurrent() : null;
-      const rect = sel ? pathLink.getRect() : null;
       const hintKey = sel
         ? pathLinkHintKey(
             sel.isDirectory,
@@ -5347,6 +5360,8 @@ export function TerminalView({
     let resizeFitTimer: ReturnType<typeof setTimeout> | undefined;
     const resizeObserver = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect;
+      // #687: reflow 뒤 라벨 좌표는 더 이상 밑줄과 맞지 않는다(스크롤과 동일 이유).
+      pathLinkHint.hide();
       const isNowHidden = width === 0 || height === 0;
       isContainerHiddenRef.current = isNowHidden;
       // A pending debounced fit must never run against a hidden container.
