@@ -8,6 +8,7 @@ mod terminal;
 mod terminal_output_delivery;
 mod terminal_output_surface;
 mod terminal_teardown;
+mod usage;
 mod viewer_startup;
 
 pub use crate::cloud::commands::*;
@@ -19,4 +20,5 @@ pub use os_open::*;
 pub use remote_hosts::*;
 pub use terminal::*;
 pub use terminal_output_surface::*;
+pub use usage::*;
 pub use viewer_startup::*;

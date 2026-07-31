@@ -163,6 +163,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "response": "{ lines: string[] } — current on-screen buffer lines"
             },
             {
+                "method": "GET", "path": "/api/v1/usage",
+                "description": "Cached Claude usage snapshots, one per monitored CLAUDE_CONFIG_DIR. Read-only and side-effect free: it never starts a probe, so an empty list means no UsageView is subscribed. Numbers are meaningful only when status.type is 'ready'; reset strings are verbatim from Claude Code and are not parsed here.",
+                "response": "{ usage: [{ configDir, status: { type, message? }, session: { percent, reset }, weekAll: {...}, weekModel: {...}, weekModelLabel, plan, model, capturedAtMs, nextQueryAtMs, rawScreen }], count: number }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/memos",
                 "description": "List every memo stored in cache/memo.json. Each entry is { key, content }. Keys are sorted alphabetically for stable ordering. Returns an empty list when the file does not exist.",
                 "response": "{ memos: [{ key: string, content: string }, ...], count: number }"
@@ -430,6 +435,32 @@ pub async fn terminals_states(AxumState(state): AxumState<ServerState>) -> impl 
             StatusCode::OK,
             Json(serde_json::json!({ "states": states })),
         ),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&error.to_string())),
+        ),
+    }
+}
+
+/// Build the payload for `GET /api/v1/usage`.
+///
+/// Extracted so the HTTP handler, the MCP tool, and tests share one shape.
+/// Only raw snapshot values are exposed — pace is a display-derived value the
+/// frontend computes, and it is deliberately absent from this contract
+/// (ADR-0102).
+pub fn build_usage_payload(snapshots: Vec<crate::usage_probe::UsageSnapshot>) -> serde_json::Value {
+    let count = snapshots.len();
+    serde_json::json!({ "usage": snapshots, "count": count })
+}
+
+/// `GET /api/v1/usage` — cached Claude usage snapshots, one per monitored
+/// `CLAUDE_CONFIG_DIR`.
+///
+/// Read-only and side-effect free: it never starts a probe, so an empty list
+/// means no `UsageView` is currently subscribed rather than "no usage".
+pub async fn usage_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    match state.app_state.usage_probe.snapshots() {
+        Ok(snapshots) => (StatusCode::OK, Json(build_usage_payload(snapshots))),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(err_json(&error.to_string())),

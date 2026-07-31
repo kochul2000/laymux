@@ -160,6 +160,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "usage",
+    label: "Claude Usage",
+    category: "tool",
+    config: { type: "UsageView" },
+    testId: "empty-view-usage",
+  });
+
+  options.push({
     key: "file-explorer",
     label: "File Explorer",
     category: "tool",

@@ -808,6 +808,49 @@ impl Default for PasteSettings {
     }
 }
 
+/// Usage monitor settings (`UsageView`, ADR-0102).
+///
+/// Keyed by agent because each agent is monitored by its own probe with its own
+/// shell, config dirs, and provider rate limit. Adding Codex later means adding
+/// a sibling field, not reshaping this one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSettings {
+    #[serde(default)]
+    pub claude: UsageAgentSettings,
+}
+
+/// One monitored agent's probe settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAgentSettings {
+    /// Terminal profile whose shell can run the agent CLI. Empty = `defaultProfile`.
+    #[serde(default)]
+    pub profile: String,
+    /// Seconds between usage queries. Clamped to the provider's rate-limit floor
+    /// on use — a lower value is not honored.
+    #[serde(default = "default_usage_refresh_seconds")]
+    pub refresh_seconds: u64,
+    /// Additional agent config directories offered in the view's picker. The
+    /// default config dir is always available and is not listed here.
+    #[serde(default)]
+    pub config_dirs: Vec<String>,
+}
+
+fn default_usage_refresh_seconds() -> u64 {
+    crate::usage_probe::MIN_REFRESH_SECS
+}
+
+impl Default for UsageAgentSettings {
+    fn default() -> Self {
+        Self {
+            profile: String::new(),
+            refresh_seconds: default_usage_refresh_seconds(),
+            config_dirs: Vec::new(),
+        }
+    }
+}
+
 /// Pane control bar settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1357,6 +1400,9 @@ pub struct Settings {
     pub paste: PasteSettings,
     #[serde(default)]
     pub control_bar: ControlBarSettings,
+    /// Claude usage monitor settings.
+    #[serde(default)]
+    pub usage: UsageSettings,
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
@@ -1459,6 +1505,7 @@ impl Default for Settings {
             terminal: TerminalSettings::default(),
             paste: PasteSettings::default(),
             control_bar: ControlBarSettings::default(),
+            usage: UsageSettings::default(),
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),

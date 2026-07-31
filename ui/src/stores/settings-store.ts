@@ -163,6 +163,26 @@ export interface ControlBarSettings {
   defaultMode: ControlBarMode;
 }
 
+/** One monitored agent's probe settings. */
+export interface UsageAgentSettings {
+  /** Terminal profile whose shell can run the agent CLI. Empty = defaultProfile. */
+  profile: string;
+  /** Seconds between usage queries. The backend clamps this to the provider floor. */
+  refreshSeconds: number;
+  /** Extra agent config directories offered as monitorable profiles. */
+  configDirs: string[];
+}
+
+/**
+ * Usage monitor (UsageView, ADR-0102).
+ *
+ * Keyed by agent: each is monitored by its own probe with its own shell, config
+ * dirs, and provider rate limit. Codex arrives as a sibling field.
+ */
+export interface UsageSettings {
+  claude: UsageAgentSettings;
+}
+
 /** Dock behavior (distinct from the structural docks array). */
 export interface DockSettings {
   /** Keep dock state in background when hidden. */
@@ -397,6 +417,7 @@ interface SettingsState {
   paste: PasteSettings;
   terminal: TerminalSettings;
   controlBar: ControlBarSettings;
+  usage: UsageSettings;
   dock: DockSettings;
   notifications: NotificationSettings;
   workspaceSelector: WorkspaceSelectorSettings;
@@ -424,6 +445,8 @@ interface SettingsState {
   setExit: (data: Partial<ExitSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
+  /** Patch one monitored agent's usage settings. */
+  setUsageAgent: (agent: keyof UsageSettings, data: Partial<UsageAgentSettings>) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
   setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
@@ -463,6 +486,7 @@ interface SettingsState {
         | "paste"
         | "terminal"
         | "controlBar"
+        | "usage"
         | "dock"
         | "notifications"
         | "workspaceSelector"
@@ -588,6 +612,25 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
   hoverIdleSeconds: 2,
   defaultMode: "minimized",
+};
+
+/**
+ * Bounds the backend clamps a usage refresh interval into. Mirrored here only so
+ * the settings UI can hint them — the backend remains the authority, because the
+ * floor exists to respect a provider rate limit, not a preference.
+ */
+export const USAGE_REFRESH_MIN_SECONDS = 600;
+export const USAGE_REFRESH_MAX_SECONDS = 3600;
+
+/** Mirrors the Rust default; 600 is Anthropic's rate-limit floor, not a preference. */
+export const DEFAULT_USAGE_AGENT: UsageAgentSettings = {
+  profile: "",
+  refreshSeconds: 600,
+  configDirs: [],
+};
+
+export const DEFAULT_USAGE: UsageSettings = {
+  claude: { ...DEFAULT_USAGE_AGENT },
 };
 
 export const DEFAULT_DOCK: DockSettings = {
@@ -983,6 +1026,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   paste: { ...DEFAULT_PASTE },
   terminal: { ...DEFAULT_TERMINAL },
   controlBar: { ...DEFAULT_CONTROL_BAR },
+  usage: { claude: { ...DEFAULT_USAGE_AGENT, configDirs: [] } },
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   workspaceSelector: {
@@ -1068,6 +1112,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setIssueReporter: (data) =>
     set((state) => ({
       issueReporter: { ...state.issueReporter, ...data },
+    })),
+
+  setUsageAgent: (agent, data) =>
+    set((state) => ({
+      usage: { ...state.usage, [agent]: { ...state.usage[agent], ...data } },
     })),
 
   setFileExplorer: (data) =>
@@ -1238,6 +1287,18 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const paste = data.paste ? { ...DEFAULT_PASTE, ...data.paste } : undefined;
     const terminal = data.terminal ? { ...DEFAULT_TERMINAL, ...data.terminal } : undefined;
     const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;
+    const usage = data.usage
+      ? {
+          claude: {
+            ...DEFAULT_USAGE_AGENT,
+            ...(data.usage.claude ?? {}),
+            // A malformed configDirs must not break the view selector.
+            configDirs: Array.isArray(data.usage.claude?.configDirs)
+              ? data.usage.claude.configDirs
+              : [],
+          },
+        }
+      : undefined;
     const dock = data.dock ? { ...DEFAULT_DOCK, ...data.dock } : undefined;
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
@@ -1323,6 +1384,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       paste: _rawPaste,
       terminal: _rawTerminal,
       controlBar: _rawControlBar,
+      usage: _rawUsage,
       dock: _rawDock,
       notifications: _rawNotifications,
       workspaceSelector: _rawWorkspaceSelector,
@@ -1348,6 +1410,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(paste ? { paste } : {}),
       ...(terminal ? { terminal } : {}),
       ...(controlBar ? { controlBar } : {}),
+      ...(usage ? { usage } : {}),
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),

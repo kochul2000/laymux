@@ -466,6 +466,84 @@ export async function saveMemo(key: string, content: string): Promise<void> {
   return invoke("save_memo", { key, content });
 }
 
+// ── Claude usage probe (ADR-0102) ────────────────────────────────
+
+/** One usage limit row. `reset` is verbatim Claude Code text, not parsed here. */
+export interface UsageLimit {
+  percent: number | null;
+  reset: string | null;
+}
+
+/**
+ * Why a probe is or is not reporting numbers. Only `ready` means the
+ * percentages are meaningful.
+ */
+export type UsageProbeStatus =
+  | { type: "idle" }
+  | { type: "starting" }
+  | { type: "ready" }
+  | { type: "claudeMissing" }
+  | { type: "startupTimeout" }
+  | { type: "parseFailed" }
+  | { type: "upstreamError"; message: string }
+  | { type: "failed"; message: string };
+
+export interface UsageSnapshot {
+  /** `CLAUDE_CONFIG_DIR` this snapshot describes; empty = default config dir. */
+  configDir: string;
+  status: UsageProbeStatus;
+  session: UsageLimit;
+  weekAll: UsageLimit;
+  /**
+   * Per-model weekly row. Claude Code names it after the account's model
+   * (`Current week (Fable)`, `Current week (Sonnet only)`), so the label travels
+   * with it instead of being assumed.
+   */
+  weekModel: UsageLimit;
+  weekModelLabel: string | null;
+  plan: string | null;
+  model: string | null;
+  capturedAtMs: number | null;
+  nextQueryAtMs: number | null;
+  /** Last captured screen, for diagnosing an upstream TUI change. */
+  rawScreen: string | null;
+}
+
+/**
+ * Keep a probe alive for `configDir` on behalf of one view instance. Resolves
+ * with whatever snapshot is already cached, which may predate this call.
+ */
+export async function subscribeUsageProbe(
+  subscriberId: string,
+  configDir: string,
+): Promise<UsageSnapshot> {
+  return invoke("subscribe_usage_probe", { subscriberId, configDir });
+}
+
+/** Release a view instance's claim; the probe stops when none remain. */
+export async function unsubscribeUsageProbe(subscriberId: string): Promise<void> {
+  return invoke("unsubscribe_usage_probe", { subscriberId });
+}
+
+/** Read the cached snapshot without starting a probe. */
+export async function getUsageSnapshot(configDir: string): Promise<UsageSnapshot> {
+  return invoke("get_usage_snapshot", { configDir });
+}
+
+/** Ask a running probe to query now. `false` = no probe was running. */
+export async function refreshUsageProbe(configDir: string): Promise<boolean> {
+  return invoke("refresh_usage_probe", { configDir });
+}
+
+/** Listen for fresh usage captures so the view need not poll. */
+export function onUsageSnapshotChanged(
+  callback: (snapshot: UsageSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<UsageSnapshot>("usage-snapshot-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 export async function saveTerminalOutputCache(paneId: string, data: string): Promise<void> {
   return invoke("save_terminal_output_cache", { paneId, data });
 }

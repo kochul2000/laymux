@@ -25,6 +25,8 @@ import {
   type CloseOnExit,
   type AntialiasingMode,
   type ColorScheme,
+  USAGE_REFRESH_MAX_SECONDS,
+  USAGE_REFRESH_MIN_SECONDS,
   type Keybinding,
   type LanguageSetting,
 } from "@/stores/settings-store";
@@ -3284,6 +3286,133 @@ function IssueReporterSection() {
 
 // -- Section: Memo --
 
+/**
+ * Usage monitor settings.
+ *
+ * Grouped per monitored agent rather than merged into the Claude/Codex
+ * integration sections: these are the data-source settings of one view, not
+ * agent integration behavior, and a second agent should sit next to the first
+ * for comparison (ADR-0102).
+ */
+function UsageSection() {
+  const { t } = useTranslation("settings");
+  const storeUsage = useSettingsStore((s) => s.usage.claude);
+  const setUsageAgent = useSettingsStore((s) => s.setUsageAgent);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const [usage, setDraftUsage] = useDraft("usage", storeUsage, (v) => setUsageAgent("claude", v));
+
+  const update = (partial: Partial<typeof usage>) =>
+    setDraftUsage((prev) => ({ ...prev, ...partial }));
+
+  const addConfigDir = () => update({ configDirs: [...usage.configDirs, ""] });
+  const removeConfigDir = (index: number) =>
+    update({ configDirs: usage.configDirs.filter((_, i) => i !== index) });
+  const updateConfigDir = (index: number, value: string) =>
+    update({ configDirs: usage.configDirs.map((d, i) => (i === index ? value : d)) });
+
+  return (
+    <div data-testid="settings-usage-section">
+      <SectionTitle>{t("usage.title")}</SectionTitle>
+
+      <p
+        className="px-4 pb-2 text-[11px] leading-relaxed"
+        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+      >
+        {t("usage.intro")}
+      </p>
+
+      <SubGroup title={t("usage.groupClaude")}>
+        <SettingRow label={t("usage.profile")} desc={t("usage.profileDesc")}>
+          <select
+            data-testid="usage-profile-select"
+            value={usage.profile}
+            onChange={(e) => update({ profile: e.target.value })}
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="">
+              {t("usage.profileDefault")}
+              {defaultProfile ? ` (${defaultProfile})` : ""}
+            </option>
+            {profiles.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+
+        <SettingRow label={t("usage.refresh")} desc={t("usage.refreshDesc")}>
+          <FocusInput
+            data-testid="usage-refresh-input"
+            type="number"
+            // `inputStyle`, not `style`: FocusInput overwrites `style` with its
+            // own. A width here also beats `inputCls`'s `w-full`, which a
+            // `w-24` class would lose to depending on stylesheet order.
+            inputStyle={{ width: "7rem" }}
+            min={USAGE_REFRESH_MIN_SECONDS}
+            max={USAGE_REFRESH_MAX_SECONDS}
+            step={30}
+            value={usage.refreshSeconds}
+            onChange={(e) => update({ refreshSeconds: Number(e.target.value) })}
+          />
+        </SettingRow>
+
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("usage.configDirs")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("usage.configDirsDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            {usage.configDirs.map((dir, i) => (
+              <div key={i} className="mb-2 flex items-center gap-2">
+                <FocusInput
+                  data-testid={`usage-config-dir-input-${i}`}
+                  placeholder={t("usage.configDirPlaceholder")}
+                  value={dir}
+                  onChange={(e) => updateConfigDir(i, e.target.value)}
+                />
+                <button
+                  data-testid={`usage-config-dir-remove-${i}`}
+                  className="rounded px-1.5 py-0.5 text-xs"
+                  style={{
+                    background: "var(--bg-overlay)",
+                    color: "var(--red)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onClick={() => removeConfigDir(i)}
+                >
+                  {t("common.remove")}
+                </button>
+              </div>
+            ))}
+            <button
+              data-testid="usage-config-dir-add"
+              className="rounded px-2 py-1 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={addConfigDir}
+            >
+              {t("usage.addConfigDir")}
+            </button>
+          </div>
+        </div>
+      </SubGroup>
+    </div>
+  );
+}
+
 function MemoSection() {
   const { t } = useTranslation("settings");
   const storeMemo = useSettingsStore((s) => s.memo);
@@ -4184,6 +4313,16 @@ export function SettingsView() {
           {/* Views */}
           <NavGroupHeader label={t("nav.groupViews")} />
           <button
+            data-testid="nav-usage"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("usage")}
+            onClick={() => setActiveNav("usage")}
+            onMouseEnter={() => setNavHover("usage")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.usage")}
+          </button>
+          <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("memo")}
@@ -4320,6 +4459,7 @@ export function SettingsView() {
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
+            {activeNav === "usage" && <UsageSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
           </div>
 

@@ -40,10 +40,11 @@ pub mod terminal;
 mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
+pub mod usage_probe;
 
 use std::sync::Arc;
 use tauri::image::Image;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::lock_ext::MutexExt;
 
@@ -149,6 +150,23 @@ pub fn run() {
                 });
             }
 
+            // Push usage snapshots to the UI so `UsageView` learns about a fresh
+            // capture without polling (ADR-0102).
+            {
+                let usage_app = app.handle().clone();
+                if let Err(error) = app_state.usage_probe.set_sink(Arc::new(
+                    move |snapshot: &usage_probe::UsageSnapshot| {
+                        if let Err(error) =
+                            usage_app.emit(constants::EVENT_USAGE_SNAPSHOT_CHANGED, snapshot)
+                        {
+                            tracing::warn!(%error, "failed to emit usage snapshot");
+                        }
+                    },
+                )) {
+                    tracing::warn!(%error, "failed to install usage snapshot sink");
+                }
+            }
+
             // Set window icon (for taskbar in dev mode)
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
@@ -222,6 +240,10 @@ pub fn run() {
             commands::load_settings_validated,
             commands::reset_settings,
             commands::get_settings_path,
+            commands::subscribe_usage_probe,
+            commands::unsubscribe_usage_probe,
+            commands::get_usage_snapshot,
+            commands::refresh_usage_probe,
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,

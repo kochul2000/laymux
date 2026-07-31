@@ -165,7 +165,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 2. 설정 UI에도 기본값이 있는가? → 있으면 해석 체인에 기본값 경로를 둔다 (`settings → override`).
 3. View 타입 전환 시 초기화돼야 하는가? → 그렇다면 `ViewOverrides` 쪽.
 
-`ViewOverrides`에 추가하는 필드는 특정 view 타입에만 의미 있을 수 있다. 현재 필드는 `fontSize` 하나이며 TerminalView·MemoView 가 각자의 기본값 체인 위에서 공유한다. 향후 view 전용 필드가 추가돼도 동일 슬롯에 공존한다 — view 타입이 바뀌면 전부 리셋되므로 충돌 없음.
+`ViewOverrides`에 추가하는 필드는 특정 view 타입에만 의미 있을 수 있다. `fontSize` 는 TerminalView·MemoView 가 각자의 기본값 체인 위에서 공유하고, `usageLayout` 은 UsageView 전용이다. 서로 다른 view 전용 필드가 동일 슬롯에 공존해도 무해하다 — view 타입이 바뀌면 전부 리셋되므로 충돌 없음.
 
 ### 4.3 settings.json 예시
 
@@ -208,6 +208,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | `SettingsView` | Dock only (또는 모달) | 설정 화면 |
 | `TerminalView` | 자유 | WSL / PowerShell 실행. xterm 직접 입력과 분리된 native textarea composer를 terminal별로 토글 |
 | `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장 |
+| `UsageView` | 자유 | Claude Code 사용량 모니터. Rust `usage_probe` 가 숨은 PTY 로 `claude` 를 띄워 `/usage` 화면을 파싱한 스냅샷(세션 · 주간 all models · 주간 모델별)을 표시하고, pane 종횡비에 따라 stacked / columns / compact 배치를 자동 선택한다(`viewOverrides.usageLayout` 으로 고정 가능). 모니터링 대상 `CLAUDE_CONFIG_DIR` 은 pane view config 의 `configDir` 이며 컨트롤 바의 view 선택에서 `settings.usage.claude.configDirs` 항목으로 전환한다. 전역 설정은 Settings → Views → 사용량. pace(창 경과율)는 프론트 `lib/usage-pace.ts` 단일 구현 ([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)) |
 | `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. Rust `list_directory`로 디렉터리 나열, 편집 가능한 주소창(경로 직접 입력/붙여넣기 → `stat_path`로 검증 후 디렉터리 이동 또는 파일이면 부모 이동+통합 뷰어 open, #278), 파일 뷰어(텍스트/이미지/HTML·Markdown preview/source/터미널) 지원. `.html`·`.md`는 기본 preview와 source 토글을 제공하되, `extensionViewers`에 해당 확장자·command·profile 매핑이 있으면 그 명시적 터미널 프로필의 외부 뷰어를 우선한다(#404/#446, [ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). Remote Focused UI는 host path 입력과 현재 데스크톱 viewer path를 명시적으로 가져오는 `From host` action을 제공하고, `Open viewer` 클릭 시점의 exact path를 active lease와 claim 전용 FileViewer capability로 읽어 별도 브라우저 탭의 안전한 웹 renderer로 표시한다([ADR-0041](../adr/0041-remote-served-file-viewer.md), [ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md)). |
 | `IssueReporterView` | 자유 | GitHub 이슈 리포터. 제출은 `issueReporter.submit` 키바인딩(기본 `Ctrl+Enter`) |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |

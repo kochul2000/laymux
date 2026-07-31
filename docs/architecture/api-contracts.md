@@ -104,6 +104,28 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
 `resolve_address_path_following_symlinks` 로 산출하며, 커맨드는 프로세스 spawn 실패만 오류로
 보고한다(Windows `explorer.exe` 는 성공해도 0 이 아닌 종료 코드를 반환하므로 종료 코드를 보지 않는다).
 
+### 사용량 모니터 설정
+
+```jsonc
+{
+  "usage": {
+    "claude": {
+      "profile": "", // claude 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
+      "refreshSeconds": 600, // 조회 간격. 600 미만은 적용되지 않는다
+      "configDirs": [] // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
+    }
+  }
+}
+```
+
+**에이전트별로 키가 나뉜다.** 각 에이전트는 자기 probe·셸·config dir·provider rate limit 을 갖기 때문이다. Codex 사용량을 붙일 때는 `usage.codex` 를 형제 필드로 추가하며 기존 키 모양은 바뀌지 않는다.
+
+`usage.claude.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
+
+`refreshSeconds` 는 **적용 시점에 600~3600 으로 clamp** 된다. 600 초 하한은 Anthropic 의 rate limit 때문이며 설정으로 내릴 수 없다 — 스키마는 값을 거부하지 않고 조용히 올려 적용한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)). metadata apply mode 는 `nextUse` 다(다음 워커 기동부터 적용).
+
+편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
@@ -474,6 +496,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | GET | `/api/v1/terminals` | 터미널 목록 |
 | POST | `/api/v1/terminals/:id/write` | 터미널 입력 |
 | GET | `/api/v1/terminals/:id/output?lines=N` | 터미널 출력 읽기 |
+| GET | `/api/v1/usage` | Claude 사용량 스냅샷 목록 (config dir 당 1개 → `{ usage: [...], count }`). 각 항목은 `session` · `weekAll` · `weekModel`(+`weekModelLabel`, 예 `Fable`) 3행. 읽기 전용·부작용 없음 — probe 를 기동시키지 않으므로 빈 목록은 "구독 없음"을 뜻한다. `status.type === "ready"` 일 때만 숫자가 유효하고, `reset` 은 Claude Code 원문 그대로다 |
 | GET | `/api/v1/memos` | 모든 메모 목록 조회 (`cache/memo.json` → `{ memos: [{ key, content }, ...], count }`) |
 | GET | `/api/v1/memos/:key` | 특정 키의 메모 내용 조회 (없으면 404) |
 | GET | `/api/v1/notifications` | 알림 목록 |
@@ -621,6 +644,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
+| `get_claude_usage` | 백엔드 상태 | Claude 사용량 스냅샷 (config dir 당 1개). 최대 10분 낡을 수 있고(`capturedAtMs`) 조회가 probe 를 기동시키지 않는다 |
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
