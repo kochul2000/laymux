@@ -546,6 +546,20 @@
         opacity: 0.72;
         text-transform: uppercase;
       }
+      .install-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 0 8px 8px;
+      }
+      .install-button {
+        width: 100%;
+      }
+      .install-hint {
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1.35;
+      }
       .nav-list {
         display: flex;
         min-height: 0;
@@ -1605,6 +1619,17 @@
                 <div id="dockList" class="nav-list"></div>
               </div>
             </section>
+            <!-- Installing drops the address bar (ADR-0091), but every browser
+                 buries that path in its own menu. The offer lives here, not over
+                 the terminal, and only appears while it can be acted on
+                 (ADR-0099). -->
+            <section id="installSection" class="nav-section" aria-label="Install this app" hidden>
+              <h2 class="nav-section-title">Install</h2>
+              <div class="install-panel">
+                <button id="installApp" class="install-button" type="button">Add to home screen</button>
+                <div id="installHint" class="install-hint" hidden>Open the browser share menu, then choose “Add to Home Screen”.</div>
+              </div>
+            </section>
           </aside>
           <div class="terminal-shell">
             <div id="terminal" aria-label="Terminal output">
@@ -1702,6 +1727,9 @@
         const notificationListEl = $("notificationList");
         const markAllNotificationsReadButton = $("markAllNotificationsRead");
         const clearNotificationsButton = $("clearNotifications");
+        const installSection = $("installSection");
+        const installButton = $("installApp");
+        const installHint = $("installHint");
         const fileViewerSection = $("fileViewerSection");
         const fileViewerStatusElement = $("fileViewerStatus");
         const fileViewerPathInput = $("fileViewerPath");
@@ -7040,6 +7068,64 @@
         });
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
+
+        // --- Install affordance (ADR-0099) ---
+        // The manifest (ADR-0091) makes installation possible; the browser hides
+        // the path inside its own menu, so the drawer offers it. Whether it is
+        // possible right now is the browser's judgement, not ours: Chromium says
+        // so by firing `beforeinstallprompt`, and that event is also the only
+        // handle to the prompt itself.
+        let deferredInstallPrompt = null;
+        const standaloneDisplay = window.matchMedia("(display-mode: standalone)");
+        // iOS/iPadOS never fires the event and offers no programmatic install, so
+        // the share sheet is the only route and an instruction is all we can give.
+        const iosInstallOnly =
+          !("onbeforeinstallprompt" in window) && /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+        function runningStandalone() {
+          // `navigator.standalone` is iOS' pre-`display-mode` flag for a home
+          // screen launch and is still what its older webviews report.
+          return standaloneDisplay.matches || navigator.standalone === true;
+        }
+
+        function syncInstallSection() {
+          // Direct Remote Mode is plain HTTP, so it is not a secure context and no
+          // browser will install it. A button that cannot work is worse than none.
+          const installable =
+            window.isSecureContext &&
+            !runningStandalone() &&
+            (deferredInstallPrompt !== null || iosInstallOnly);
+          installSection.hidden = !installable;
+          if (!installable) installHint.hidden = true;
+        }
+
+        window.addEventListener("beforeinstallprompt", (event) => {
+          // Letting it through spends Chromium's own mini-infobar and leaves the
+          // drawer with nothing to trigger.
+          event.preventDefault();
+          deferredInstallPrompt = event;
+          syncInstallSection();
+        });
+        window.addEventListener("appinstalled", () => {
+          deferredInstallPrompt = null;
+          syncInstallSection();
+        });
+        standaloneDisplay.addEventListener("change", syncInstallSection);
+
+        installButton.addEventListener("click", () => {
+          if (!deferredInstallPrompt) {
+            installHint.hidden = !installHint.hidden;
+            return;
+          }
+          const prompt = deferredInstallPrompt;
+          // A prompt event cannot be replayed, so it is spent either way — drop it
+          // before prompting so a second tap cannot reuse a dead handle.
+          deferredInstallPrompt = null;
+          prompt.prompt().catch(() => {});
+          syncInstallSection();
+        });
+
+        syncInstallSection();
         // Ctrl+C sends like a soft key; keep it from blurring the input surface
         // and dismissing the keyboard (#482).
         keepInputSurfaceFocus(ctrlCButton);

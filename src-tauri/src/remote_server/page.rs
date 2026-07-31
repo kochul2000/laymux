@@ -222,6 +222,66 @@ mod tests {
         ));
     }
 
+    /// ADR-0099: the manifest makes installation possible, but every browser hides
+    /// the path inside its own menu. The offer lives in the drawer — a banner would
+    /// spend the terminal rows ADR-0091 set out to win back.
+    #[test]
+    fn remote_page_html_offers_installation_from_the_drawer() {
+        let html = remote_page_html();
+        // Inside the navigation drawer, after the last section — not the header
+        // (already crowded) and not over the terminal.
+        assert!(html.contains("<section id=\"installSection\""));
+        assert!(html.contains("<button id=\"installApp\""));
+        let drawer = html
+            .split("<aside id=\"navigationPanel\"")
+            .nth(1)
+            .expect("the navigation drawer is present");
+        let drawer = drawer.split("</aside>").next().unwrap();
+        assert!(
+            drawer.contains("id=\"installSection\""),
+            "the install offer must sit inside the drawer"
+        );
+        // Hidden until something makes it actionable.
+        assert!(html.contains("<section id=\"installSection\" class=\"nav-section\" aria-label=\"Install this app\" hidden>"));
+    }
+
+    /// A button that cannot install anything is worse than no button, so every
+    /// condition that rules installation out keeps the section hidden (ADR-0099).
+    #[test]
+    fn remote_page_html_hides_the_install_offer_when_it_cannot_be_acted_on() {
+        let html = remote_page_html();
+        // Already on the home screen: nothing left to offer. iOS' legacy flag is
+        // checked too — its standalone launch predates `display-mode`.
+        assert!(html.contains("window.matchMedia(\"(display-mode: standalone)\")"));
+        assert!(html.contains("navigator.standalone === true"));
+        // HTTP direct mode is not a secure context, so no browser installs it.
+        assert!(html.contains("window.isSecureContext"));
+        assert!(html.contains("installSection.hidden = !installable;"));
+        // Installing removes the reason to keep offering.
+        assert!(html.contains("window.addEventListener(\"appinstalled\""));
+    }
+
+    /// Chromium proves installability by firing `beforeinstallprompt`, and that
+    /// event is the only handle to the prompt. iOS has no such event and no
+    /// programmatic path at all, so it gets the share-sheet instruction instead of
+    /// a call into an API that does not exist (ADR-0099).
+    #[test]
+    fn remote_page_html_installs_through_the_deferred_prompt_or_explains_ios() {
+        let html = remote_page_html();
+        assert!(html.contains("window.addEventListener(\"beforeinstallprompt\""));
+        // Letting the event through would spend Chromium's own mini-infobar and
+        // leave nothing to trigger from the drawer.
+        assert!(html.contains("deferredInstallPrompt = event;"));
+        // A prompt event cannot be replayed, so it is dropped on use either way.
+        assert!(html.contains("deferredInstallPrompt = null;"));
+        assert!(html.contains("prompt.prompt()"));
+        // No automatic prompt: Chromium refuses one without a user gesture, and
+        // hijacking a page nobody asked to install is what the drawer avoids.
+        assert!(!html.contains("deferredInstallPrompt.prompt();"));
+        assert!(html.contains("installHint.hidden = !installHint.hidden;"));
+        assert!(html.contains("Add to Home Screen"));
+    }
+
     #[test]
     fn remote_page_html_contains_remote_bootstrap() {
         let html = remote_page_html();
