@@ -1,4 +1,5 @@
 mod claude_session;
+mod codex_usage;
 mod file_ops;
 mod ipc_dispatch;
 mod misc;
@@ -13,6 +14,7 @@ mod viewer_startup;
 
 pub use crate::cloud::commands::*;
 pub use claude_session::*;
+pub use codex_usage::*;
 pub use file_ops::*;
 pub use ipc_dispatch::*;
 pub use misc::*;

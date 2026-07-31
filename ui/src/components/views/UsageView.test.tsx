@@ -9,7 +9,11 @@ import {
   type UsageSnapshot,
 } from "@/lib/tauri-api";
 import { useOverridesStore } from "@/stores/overrides-store";
-import { DEFAULT_USAGE_VISIBLE_ROWS, useSettingsStore } from "@/stores/settings-store";
+import {
+  DEFAULT_USAGE_COLORS,
+  DEFAULT_USAGE_VISIBLE_ROWS,
+  useSettingsStore,
+} from "@/stores/settings-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   subscribeUsageProbe: vi.fn(),
@@ -77,6 +81,7 @@ describe("UsageView", () => {
     useSettingsStore
       .getState()
       .setUsageAgent("claude", { visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS] });
+    useSettingsStore.getState().setUsageColors({ ...DEFAULT_USAGE_COLORS });
     mockBox(400, 600);
   });
 
@@ -171,7 +176,7 @@ describe("UsageView", () => {
     expect(detail.firstElementChild).toHaveStyle({ color: "var(--text-secondary)" });
     expect(detail.lastElementChild).toHaveTextContent("0% elapsed");
     expect(detail).not.toHaveTextContent("resets in");
-    expect(detail.lastElementChild).toHaveStyle({ color: "var(--usage-pace)" });
+    expect(detail.lastElementChild).toHaveStyle({ color: "rgb(253, 151, 31)" });
   });
 
   it("uses the configured usage profile's terminal font", async () => {
@@ -197,7 +202,24 @@ describe("UsageView", () => {
     expect(screen.getByTestId("usage-meter-pace-session")).toHaveStyle({
       height: "3px",
       borderRadius: "",
-      background: "var(--usage-track)",
+      background: "rgb(88, 88, 88)",
+    });
+  });
+
+  it("uses the shared configured colors for Claude and Codex-compatible meters", async () => {
+    useSettingsStore
+      .getState()
+      .setUsageColors({ used: "#112233", pace: "#445566", track: "#778899" });
+    await renderView({ paneId: "pane-1" });
+
+    expect(screen.getByTestId("usage-meter-used-session")).toHaveStyle({
+      background: "rgb(119, 136, 153)",
+    });
+    expect(screen.getByTestId("usage-meter-used-session").firstElementChild).toHaveStyle({
+      background: "rgb(17, 34, 51)",
+    });
+    expect(screen.getByTestId("usage-meter-pace-session").firstElementChild).toHaveStyle({
+      background: "rgb(68, 85, 102)",
     });
   });
 

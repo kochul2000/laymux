@@ -5,6 +5,7 @@ export type ViewType =
   | "IssueReporterView"
   | "MemoView"
   | "UsageView"
+  | "CodexUsageView"
   | "FileExplorerView"
   | "EmptyView";
 

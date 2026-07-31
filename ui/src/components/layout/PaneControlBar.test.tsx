@@ -647,6 +647,31 @@ describe("PaneControlBar", () => {
     expect(options).toContain("MemoView");
   });
 
+  it("offers additional Codex account homes and selects their UsageView", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.getState().setCodexUsage({ configDirs: ["C:\\Users\\me\\.codex-work"] });
+    const onChangeView = vi.fn();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onChangeView }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const select = screen.getByTestId("pane-control-view-select") as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toContain(
+      "CodexUsageView:C:\\Users\\me\\.codex-work",
+    );
+
+    await user.selectOptions(select, "CodexUsageView:C:\\Users\\me\\.codex-work");
+    expect(onChangeView).toHaveBeenCalledWith({
+      type: "CodexUsageView",
+      configDir: "C:\\Users\\me\\.codex-work",
+    });
+  });
+
   it("selecting Memo calls onChangeView with MemoView type", async () => {
     const user = userEvent.setup();
     render(
