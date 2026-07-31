@@ -122,9 +122,9 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
       "visibleRows": ["weekly", "sparkWeekly"] // Weekly limit / Spark Weekly limit. 하나 이상 필수
     },
     "colors": {
-      "used": "#58d1eb",
-      "pace": "#fd971f",
-      "track": "#585858"
+      "used": "#89dceb",
+      "pace": "#f9e2af",
+      "track": "#45475a"
     }
   }
 }

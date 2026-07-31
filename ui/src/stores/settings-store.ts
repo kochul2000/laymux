@@ -680,9 +680,9 @@ export const DEFAULT_CODEX_USAGE_AGENT: CodexUsageAgentSettings = {
 };
 
 export const DEFAULT_USAGE_COLORS: UsageColorSettings = {
-  used: "#58d1eb",
-  pace: "#fd971f",
-  track: "#585858",
+  used: "#89dceb",
+  pace: "#f9e2af",
+  track: "#45475a",
 };
 
 function normalizeUsageColor(value: unknown, fallback: string): string {

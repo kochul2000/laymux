@@ -65,7 +65,7 @@ describe("CodexUsageView", () => {
     expect(meter).toHaveStyle({
       height: "16px",
     });
-    expect(meter.firstElementChild).toHaveStyle({ background: "rgb(88, 209, 235)" });
+    expect(meter.firstElementChild).toHaveStyle({ background: "rgb(137, 220, 235)" });
   });
 
   it("shows the shared surface's status area for an unauthenticated CLI", () => {

@@ -176,7 +176,7 @@ describe("UsageView", () => {
     expect(detail.firstElementChild).toHaveStyle({ color: "var(--text-secondary)" });
     expect(detail.lastElementChild).toHaveTextContent("0% elapsed");
     expect(detail).not.toHaveTextContent("resets in");
-    expect(detail.lastElementChild).toHaveStyle({ color: "rgb(253, 151, 31)" });
+    expect(detail.lastElementChild).toHaveStyle({ color: "rgb(249, 226, 175)" });
   });
 
   it("uses the configured usage profile's terminal font", async () => {
@@ -202,7 +202,7 @@ describe("UsageView", () => {
     expect(screen.getByTestId("usage-meter-pace-session")).toHaveStyle({
       height: "3px",
       borderRadius: "",
-      background: "rgb(88, 88, 88)",
+      background: "rgb(69, 71, 90)",
     });
   });
 
