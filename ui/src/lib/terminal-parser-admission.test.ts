@@ -6,6 +6,7 @@ import {
 } from "./terminal-parser-admission";
 import {
   createTerminalWriteFairOwner,
+  TERMINAL_WRITE_DEFAULT_CLASS_SHARE,
   TerminalWriteFairScheduler,
 } from "./terminal-write-fair-scheduler";
 import { TERMINAL_WRITE_FAIR_QUANTUM_BYTES } from "./terminal-write-batch-queue";
@@ -350,14 +351,24 @@ describe("TerminalParserAdmission", () => {
       (TERMINAL_WRITE_FAIR_QUANTUM_BYTES * 3) / 4,
     );
     const otherOwner = createTerminalWriteFairOwner("other");
-    scheduler.request(otherOwner, (release) => {
-      order.push("other");
-      scheduler.request(otherOwner, (tailRelease) => {
-        order.push("other-tail");
-        tailRelease();
-      });
-      release();
-    });
+    // Same class as the checkpoint owner: this test pins lease handoff and the
+    // quantum of the deferred operation, not the weight table.
+    scheduler.request(
+      otherOwner,
+      (release) => {
+        order.push("other");
+        scheduler.request(
+          otherOwner,
+          (tailRelease) => {
+            order.push("other-tail");
+            tailRelease();
+          },
+          () => "background",
+        );
+        release();
+      },
+      () => "background",
+    );
     releaseCheckpoint?.();
 
     checkpoint.request(
@@ -412,7 +423,7 @@ describe("TerminalParserAdmission", () => {
     expect(order.at(-1)).toBe("other");
   });
 
-  it("preserves 2:1 weight across delayed checkpoint-chain requeues", () => {
+  it("preserves the visible:hidden class share across delayed checkpoint-chain requeues", () => {
     const scheduled: Array<() => void> = [];
     const scheduler = new TerminalWriteFairScheduler((task) => scheduled.push(task));
     const foreground = new TerminalParserAdmission(
@@ -446,24 +457,25 @@ describe("TerminalParserAdmission", () => {
     background.request("checkpoint", backgroundTurn);
     releaseBlocker?.();
 
-    for (let index = 0; index < 6; index += 1) {
+    // Only these two classes are pending, so one cycle is their two shares.
+    const cycleTurns =
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground + TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background;
+    for (let index = 0; index < cycleTurns; index += 1) {
       scheduled.shift()?.();
       const selectedForeground = order.at(-1) === "foreground";
       releaseActive?.();
-      if (index < 5) {
+      if (index < cycleTurns - 1) {
         if (selectedForeground) foreground.request("checkpoint", foregroundTurn);
         else background.request("checkpoint", backgroundTurn);
       }
     }
 
-    expect(order).toEqual([
-      "foreground",
-      "background",
-      "foreground",
-      "foreground",
-      "background",
-      "foreground",
-    ]);
+    expect(order.filter((label) => label === "foreground")).toHaveLength(
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
+    );
+    expect(order.filter((label) => label === "background")).toHaveLength(
+      TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
+    );
     foreground.dispose();
     background.dispose();
     expect(scheduler.isIdleForTests()).toBe(true);

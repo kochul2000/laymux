@@ -11,14 +11,63 @@ export type TerminalWriteFairOwner = symbol;
 export type TerminalWritePriority = "focused" | "foreground" | "background";
 export type TerminalWritePriorityResolver = () => TerminalWritePriority;
 
-const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
-  focused: 4,
-  foreground: 2,
-  background: 1,
+export type TerminalWriteClassShare = Record<TerminalWritePriority, number>;
+
+/**
+ * Share of parser admission turns each priority class receives (ADR-0101).
+ *
+ * The share belongs to the class, not to a pane. A per-pane weight divides the
+ * active workspace's share by however many hidden panes exist, so a large hidden
+ * crowd erases it (issue #686); a class share does not. The sum is the cycle
+ * length in turns when all three classes have pending panes, so `5/3/2` means
+ * 50% focused, 30% for the rest of the active workspace, 20% for every hidden
+ * pane together. Panes inside one class then take turns round-robin.
+ */
+export const TERMINAL_WRITE_DEFAULT_CLASS_SHARE: TerminalWriteClassShare = {
+  focused: 5,
+  foreground: 3,
+  background: 2,
 };
 
-/** A waiting owner becomes urgent after this many other completed admissions. */
-export const TERMINAL_WRITE_MAX_SKIPPED_TURNS = 8;
+/** Hidden panes must keep making progress, so no class may be starved to zero. */
+export const TERMINAL_WRITE_MIN_CLASS_SHARE = 1;
+
+/** Bounds the cycle length a settings file can ask the scheduler to honour. */
+export const TERMINAL_WRITE_MAX_CLASS_SHARE = 1000;
+
+/**
+ * A pending class is served after this many consecutive turns went elsewhere,
+ * whatever the shares say.
+ *
+ * Share balances alone bound a class's gap only while the competing set stays
+ * fixed: classes drain and re-enter, and an allowed ratio (1000:1) would stretch
+ * the hidden class's share-driven gap past the parsed-progress and checkpoint
+ * catch-up contracts. This floor is absolute and share-independent. With the
+ * default shares the share-driven gap (at most 5 turns) always arrives first, so
+ * the floor only rescues extreme configurations and class churn.
+ */
+export const TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS = 32;
+
+const TERMINAL_WRITE_PRIORITY_CLASSES: readonly TerminalWritePriority[] = [
+  "focused",
+  "foreground",
+  "background",
+];
+
+/** Reduce a settings-provided share table to integers the scheduler can use. */
+export function sanitizeTerminalWriteClassShare(share: unknown): TerminalWriteClassShare {
+  const source = (share ?? {}) as Partial<Record<TerminalWritePriority, unknown>>;
+  const sanitized = { ...TERMINAL_WRITE_DEFAULT_CLASS_SHARE };
+  for (const priority of TERMINAL_WRITE_PRIORITY_CLASSES) {
+    const value = Number(source[priority]);
+    if (!Number.isFinite(value)) continue;
+    sanitized[priority] = Math.min(
+      TERMINAL_WRITE_MAX_CLASS_SHARE,
+      Math.max(TERMINAL_WRITE_MIN_CLASS_SHARE, Math.floor(value)),
+    );
+  }
+  return sanitized;
+}
 
 /** Let non-MessageChannel browser task sources compete at least once per pane round. */
 export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 8;
@@ -84,21 +133,26 @@ type ActiveTurn = {
 type PendingTurn = {
   turn: TerminalWriteFairTurn;
   resolvePriority: TerminalWritePriorityResolver;
-  skippedTurns: number;
 };
 
 /**
- * App-wide round-robin admission for physical xterm writes.
+ * App-wide two-tier admission for physical xterm writes.
  *
  * A TerminalView keeps ownership of its byte FIFO and parse completion. This
  * scheduler owns only the scarce main-thread admission turn: one pane submits
  * one bounded parser quantum, holds the turn through its parse callback(s),
  * then returns to the tail if it still has work. The next pane always starts
  * in a fresh macrotask so input, paint, and control work can run between turns.
+ *
+ * Turns go first to a priority class by its configured share, then to the
+ * longest-waiting pane of that class. So the active workspace keeps its share
+ * whether three or three hundred hidden panes are flooding.
  */
 export class TerminalWriteFairScheduler {
   private readonly pendingTurns = new Map<TerminalWriteFairOwner, PendingTurn>();
-  private readonly balances = new Map<TerminalWriteFairOwner, number>();
+  private readonly classBalances = new Map<TerminalWritePriority, number>();
+  private readonly classSkippedTurns = new Map<TerminalWritePriority, number>();
+  private classShare: TerminalWriteClassShare = { ...TERMINAL_WRITE_DEFAULT_CLASS_SHARE };
   private pendingOwners: TerminalWriteFairOwner[] = [];
   private activeTurn: ActiveTurn | undefined;
   private macrotaskScheduled = false;
@@ -115,7 +169,7 @@ export class TerminalWriteFairScheduler {
     resolvePriority: TerminalWritePriorityResolver = () => "foreground",
   ): void {
     if (this.pendingTurns.has(owner)) return;
-    this.pendingTurns.set(owner, { turn, resolvePriority, skippedTurns: 0 });
+    this.pendingTurns.set(owner, { turn, resolvePriority });
     this.pendingOwners.push(owner);
     // Preserve the existing zero-backlog path: terminal.write admission itself
     // is cheap and xterm schedules parsing internally. Fairness is needed once a
@@ -127,13 +181,21 @@ export class TerminalWriteFairScheduler {
     this.scheduleNext();
   }
 
+  /**
+   * Adopt the configured class shares (`terminal.parserAdmission` in
+   * settings.json). Invalid or missing entries fall back to the defaults.
+   */
+  setClassShare(share: unknown): void {
+    this.classShare = sanitizeTerminalWriteClassShare(share);
+    // Balances are denominated in the old shares. Drop them so the next cycle
+    // starts from the new ratio instead of paying off a rescaled debt. Skip
+    // counts stay: they bound how long a pending class has already waited.
+    this.classBalances.clear();
+  }
+
   /** Remove only a future turn while preserving an accepted active write. */
   cancelPending(owner: TerminalWriteFairOwner): void {
-    if (!this.pendingTurns.delete(owner)) {
-      if (this.activeTurn?.owner !== owner) this.balances.delete(owner);
-      return;
-    }
-    this.balances.delete(owner);
+    if (!this.pendingTurns.delete(owner)) return;
     this.pendingOwners = this.pendingOwners.filter((pending) => pending !== owner);
     if (this.pendingTurns.size === 0 && this.activeTurn === undefined && this.macrotaskScheduled) {
       // The host timer API does not expose a common cancellation handle. Make
@@ -153,6 +215,11 @@ export class TerminalWriteFairScheduler {
   cancel(owner: TerminalWriteFairOwner): void {
     this.cancelPending(owner);
     if (this.activeTurn?.owner === owner) this.release(this.activeTurn);
+  }
+
+  /** Test/diagnostic visibility of the shares currently in force. */
+  classShareForTests(): TerminalWriteClassShare {
+    return { ...this.classShare };
   }
 
   /** Test/diagnostic visibility without exposing mutable scheduler state. */
@@ -178,7 +245,9 @@ export class TerminalWriteFairScheduler {
     if (this.activeTurn !== undefined) this.activeTurn.released = true;
     this.activeTurn = undefined;
     this.pendingTurns.clear();
-    this.balances.clear();
+    this.classBalances.clear();
+    this.classSkippedTurns.clear();
+    this.classShare = { ...TERMINAL_WRITE_DEFAULT_CLASS_SHARE };
     this.pendingOwners.length = 0;
     this.macrotaskScheduled = false;
     // Host timers have no shared cancellation API. Invalidate every callback
@@ -210,9 +279,6 @@ export class TerminalWriteFairScheduler {
     this.pendingTurns.delete(owner);
     const ownerIndex = this.pendingOwners.indexOf(owner);
     if (ownerIndex >= 0) this.pendingOwners.splice(ownerIndex, 1);
-    for (const waiting of this.pendingTurns.values()) {
-      waiting.skippedTurns = Math.min(TERMINAL_WRITE_MAX_SKIPPED_TURNS, waiting.skippedTurns + 1);
-    }
     const activeTurn: ActiveTurn = { owner, released: false };
     this.activeTurn = activeTurn;
     const release = () => this.release(activeTurn);
@@ -225,34 +291,81 @@ export class TerminalWriteFairScheduler {
   }
 
   private selectNextOwner(): TerminalWriteFairOwner | undefined {
-    const urgent = this.pendingOwners.find(
-      (owner) =>
-        (this.pendingTurns.get(owner)?.skippedTurns ?? 0) >= TERMINAL_WRITE_MAX_SKIPPED_TURNS,
-    );
-    if (urgent !== undefined) {
-      this.balances.set(urgent, 0);
-      return urgent;
-    }
-
-    let selected: TerminalWriteFairOwner | undefined;
-    let selectedBalance = Number.NEGATIVE_INFINITY;
-    let totalWeight = 0;
+    // Tier 1 picks a class by its share; tier 2 picks that class's
+    // longest-waiting pane. Only classes that actually have a pending pane join
+    // the cycle, so an idle class lends its share to the busy ones.
+    const longestWaitingPerClass = new Map<TerminalWritePriority, TerminalWriteFairOwner>();
     for (const owner of this.pendingOwners) {
       const pending = this.pendingTurns.get(owner);
       if (!pending) continue;
-      const weight = TERMINAL_WRITE_PRIORITY_WEIGHT[this.resolvePriority(pending)];
-      totalWeight += weight;
-      const balance = (this.balances.get(owner) ?? 0) + weight;
-      this.balances.set(owner, balance);
+      const priority = this.resolvePriority(pending);
+      if (!longestWaitingPerClass.has(priority)) longestWaitingPerClass.set(priority, owner);
+    }
+    if (longestWaitingPerClass.size === 0) return undefined;
+    // A class that stopped competing keeps neither debt nor credit: carrying it
+    // across an absence would let a re-entering class jump the cycle or serve a
+    // sentence, and either one breaks the other classes' gap bound.
+    for (const priority of this.classBalances.keys()) {
+      if (!longestWaitingPerClass.has(priority)) this.classBalances.delete(priority);
+    }
+    for (const priority of this.classSkippedTurns.keys()) {
+      if (!longestWaitingPerClass.has(priority)) this.classSkippedTurns.delete(priority);
+    }
+
+    const selectedClass =
+      this.overdueClass(longestWaitingPerClass) ?? this.highestBalanceClass(longestWaitingPerClass);
+    if (selectedClass === undefined) return undefined;
+    for (const priority of longestWaitingPerClass.keys()) {
+      if (priority === selectedClass) {
+        this.classSkippedTurns.set(priority, 0);
+        continue;
+      }
+      this.classSkippedTurns.set(
+        priority,
+        Math.min(
+          TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS,
+          (this.classSkippedTurns.get(priority) ?? 0) + 1,
+        ),
+      );
+    }
+    return longestWaitingPerClass.get(selectedClass);
+  }
+
+  /** The absolute floor: whichever pending class has waited out its bound. */
+  private overdueClass(
+    pendingClasses: Map<TerminalWritePriority, TerminalWriteFairOwner>,
+  ): TerminalWritePriority | undefined {
+    for (const priority of pendingClasses.keys()) {
+      if ((this.classSkippedTurns.get(priority) ?? 0) >= TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS) {
+        // Neither debt nor credit for a rescued class, so the floor cannot turn
+        // into extra long-run share the way per-pane promotion did (issue #686).
+        this.classBalances.set(priority, 0);
+        return priority;
+      }
+    }
+    return undefined;
+  }
+
+  private highestBalanceClass(
+    pendingClasses: Map<TerminalWritePriority, TerminalWriteFairOwner>,
+  ): TerminalWritePriority | undefined {
+    let selectedClass: TerminalWritePriority | undefined;
+    let selectedBalance = Number.NEGATIVE_INFINITY;
+    let totalShare = 0;
+    for (const priority of pendingClasses.keys()) {
+      const share = this.classShare[priority];
+      totalShare += share;
+      const balance = (this.classBalances.get(priority) ?? 0) + share;
+      this.classBalances.set(priority, balance);
       if (balance > selectedBalance) {
-        selected = owner;
+        selectedClass = priority;
         selectedBalance = balance;
       }
     }
-    if (selected !== undefined) {
-      this.balances.set(selected, selectedBalance - totalWeight);
+    if (selectedClass !== undefined) {
+      this.classBalances.set(selectedClass, selectedBalance - totalShare);
     }
-    return selected;
+    return selectedClass;
   }
 
   private resolvePriority(pending: PendingTurn): TerminalWritePriority {
@@ -271,11 +384,13 @@ export class TerminalWriteFairScheduler {
     if (turn.released) return;
     turn.released = true;
     if (this.activeTurn === turn) this.activeTurn = undefined;
-    // A pane that requeued before releasing is continuously backlogged and
-    // keeps its smooth-WRR balance. A drained pane starts a later burst fresh.
-    if (!this.pendingTurns.has(turn.owner)) this.balances.delete(turn.owner);
     this.scheduleNext();
-    if (this.activeTurn === undefined && this.pendingTurns.size === 0) this.balances.clear();
+    // Class balances and skip counts only mean something while classes compete.
+    // Once the app drains, a later burst starts from an even cycle.
+    if (this.activeTurn === undefined && this.pendingTurns.size === 0) {
+      this.classBalances.clear();
+      this.classSkippedTurns.clear();
+    }
   }
 }
 

@@ -18,6 +18,7 @@ import {
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
 import type { PastePathSeparator } from "../lib/smart-text";
+import { TERMINAL_WRITE_DEFAULT_CLASS_SHARE } from "../lib/terminal-write-fair-scheduler";
 import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
   type ComposerHistoryScope,
@@ -114,6 +115,13 @@ export interface PasteSettings {
 export interface TerminalSettings {
   /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
   outputActivityBurst?: { windowMs: number; threshold: number; throttleMs: number };
+  /**
+   * ADR-0101: how xterm parser admission turns are split between the focused
+   * pane, the active workspace's other visible panes, and every hidden pane.
+   * Shares are relative and belong to the class, not to a pane. No settings UI —
+   * this is a settings.json tuning knob.
+   */
+  parserAdmission?: { focusedShare: number; visibleShare: number; hiddenShare: number };
   /** Advertise 24-bit color support to programs started in newly created terminals. */
   advertiseTrueColor: boolean;
   /** Automatically copy text to clipboard when selected in terminal. */
@@ -559,6 +567,11 @@ export const DEFAULT_PASTE: PasteSettings = {
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
   outputActivityBurst: { windowMs: 2000, threshold: 6, throttleMs: 1000 },
+  parserAdmission: {
+    focusedShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused,
+    visibleShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,
+    hiddenShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
+  },
   advertiseTrueColor: true,
   copyOnSelect: true,
   scrollbarStyle: "overlay",

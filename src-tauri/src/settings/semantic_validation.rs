@@ -3,9 +3,9 @@ use std::net::IpAddr;
 
 use crate::constants::{
     APP_THEME_IDS, COMPOSER_HISTORY_SCOPES, CONTROL_BAR_MODES, NOTIFICATION_DISMISS_MODES,
-    PASTE_PATH_SEPARATORS, PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES,
-    PROFILE_CLOSE_ON_EXIT_VALUES, PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES,
-    TERMINAL_SCROLLBAR_STYLES, WORKSPACE_SORT_ORDERS,
+    PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PASTE_PATH_SEPARATORS,
+    PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
+    PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_SCROLLBAR_STYLES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -310,6 +310,28 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         100,
         u64::MAX,
     );
+    for (path, share) in [
+        (
+            "/terminal/parserAdmission/focusedShare",
+            settings.terminal.parser_admission.focused_share,
+        ),
+        (
+            "/terminal/parserAdmission/visibleShare",
+            settings.terminal.parser_admission.visible_share,
+        ),
+        (
+            "/terminal/parserAdmission/hiddenShare",
+            settings.terminal.parser_admission.hidden_share,
+        ),
+    ] {
+        range_u64(
+            issues,
+            path,
+            u64::from(share),
+            u64::from(PARSER_ADMISSION_SHARE_MIN),
+            u64::from(PARSER_ADMISSION_SHARE_MAX),
+        );
+    }
 }
 
 fn validate_exit(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
