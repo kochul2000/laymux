@@ -36,6 +36,7 @@ import {
   decidePathLinkAction,
   mapSelectionToPathRange,
 } from "@/lib/path-link-detect";
+import { readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
@@ -1449,7 +1450,17 @@ export function TerminalView({
       // (getSelectionPosition 과 provideLinks/ILink.range 의 좌표계 불일치 보정 —
       //  mapSelectionToPathRange 주석 참고. 여러 줄 선택은 첫 줄만 사용.)
       const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
-      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(pos, rawFirstLine, token);
+      // #691: 밑줄 폭은 문자 수가 아니라 **셀 수**다. 한글/CJK 는 한 글자가 두
+      // 셀, 이모지는 UTF-16 두 칸이 한 셀 쌍이라 문자열 길이로 계산하면 밑줄이
+      // 절반만 그어지거나 어긋난다. 선택 시작 줄의 실제 셀을 넘겨 보정한다.
+      const selectionLine = t.buffer.active.getLine(pos.start.y);
+      const lineCells = selectionLine ? readLineCells(selectionLine) : undefined;
+      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(
+        pos,
+        rawFirstLine,
+        token,
+        lineCells,
+      );
 
       const seq = ++pathLinkSelectionSeq;
       statPath(absPath)

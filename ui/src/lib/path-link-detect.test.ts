@@ -165,6 +165,70 @@ describe("mapSelectionToPathRange", () => {
     expect(r.endCol).toBe(5); // end exclusive 5 → 마지막 셀 4(0-based) → 1-based 5
   });
 
+  // #691: 셀 정보를 주면 와이드 문자(한글/CJK/이모지)를 셀 단위로 매핑한다.
+  // 문자 수로 계산하면 한글 경로의 밑줄이 절반 길이로 그어진다.
+  describe("셀 정보가 주어지면 (#691)", () => {
+    const ascii = (text: string) => [...text].map((c) => ({ chars: c, width: 1 }));
+    const wide = (char: string) => [
+      { chars: char, width: 2 },
+      { chars: "", width: 0 },
+    ];
+    const cellsOf = (parts: { chars: string; width: number }[][]) => parts.flat();
+
+    it("경로 전체가 한글이면 밑줄이 두 배 폭을 덮는다", () => {
+      // 화면: "한글" (셀 1~4). 선택은 셀 0-based 0 에서 시작.
+      const cells = cellsOf([wide("한"), wide("글")]);
+      const pos = { start: { x: 0, y: 0 }, end: { x: 2, y: 0 } };
+      const r = mapSelectionToPathRange(pos, "한글", "한글", cells);
+      expect(r.startCol).toBe(1);
+      expect(r.endCol).toBe(4); // 문자 수(2)가 아니라 셀 수(4)
+    });
+
+    it("앞선 한글이 시작 컬럼을 밀어낸다", () => {
+      // 화면: "한글 src/a.ts" — "한글"(셀 1~4) + 공백(5) + 토큰(셀 6~13)
+      const cells = cellsOf([wide("한"), wide("글"), ascii(" src/a.ts")]);
+      const pos = { start: { x: 5, y: 3 }, end: { x: 13, y: 3 } };
+      const r = mapSelectionToPathRange(pos, "src/a.ts", "src/a.ts", cells);
+      expect(r.bufferLine).toBe(4);
+      expect(r.startCol).toBe(6);
+      expect(r.endCol).toBe(13);
+    });
+
+    it("한글 디렉터리 + ASCII 파일명을 끝까지 덮는다", () => {
+      // "문서/a.txt" — 문서(셀 1~4) + "/a.txt"(셀 5~10)
+      const cells = cellsOf([wide("문"), wide("서"), ascii("/a.txt")]);
+      const pos = { start: { x: 0, y: 0 }, end: { x: 10, y: 0 } };
+      const r = mapSelectionToPathRange(pos, "문서/a.txt", "문서/a.txt", cells);
+      expect(r.startCol).toBe(1);
+      expect(r.endCol).toBe(10);
+    });
+
+    it("이모지(서로게이트 페어)도 셀 기준으로 끝난다", () => {
+      const cells = cellsOf([ascii("a"), wide("😀"), ascii("b")]);
+      const pos = { start: { x: 0, y: 0 }, end: { x: 4, y: 0 } };
+      const r = mapSelectionToPathRange(pos, "a😀b", "a😀b", cells);
+      expect(r.startCol).toBe(1);
+      expect(r.endCol).toBe(4); // a(1) + 이모지(2~3) + b(4)
+    });
+
+    it("같은 토큰이 여러 번 나오면 선택 시작에 가까운 쪽을 쓴다", () => {
+      // "a.txt 한 a.txt" — 두 번째 토큰(셀 9~13)을 선택했다.
+      const cells = cellsOf([ascii("a.txt "), wide("한"), ascii(" a.txt")]);
+      const pos = { start: { x: 9, y: 0 }, end: { x: 14, y: 0 } };
+      const r = mapSelectionToPathRange(pos, "a.txt", "a.txt", cells);
+      expect(r.startCol).toBe(10);
+      expect(r.endCol).toBe(14);
+    });
+
+    it("셀에서 토큰을 못 찾으면 문자열 기반 계산으로 떨어진다", () => {
+      const cells = cellsOf([ascii("nothing here")]);
+      const pos = { start: { x: 0, y: 0 }, end: { x: 3, y: 0 } };
+      const r = mapSelectionToPathRange(pos, "zzz", "zzz", cells);
+      expect(r.startCol).toBe(1);
+      expect(r.endCol).toBe(3);
+    });
+  });
+
   it("여러 줄 선택이면 첫 줄(start.y)만 사용한다", () => {
     const pos = { start: { x: 3, y: 7 }, end: { x: 2, y: 9 } };
     const r = mapSelectionToPathRange(pos, "/etc/hosts", "/etc/hosts");
