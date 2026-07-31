@@ -47,6 +47,7 @@ function harness(
     current?: { value: boolean };
     controlTimeoutMs?: number;
     pendingVisibleParsers?: Array<() => void>;
+    onRepairEventPending?: () => void;
   },
 ) {
   const current = options?.current ?? { value: true };
@@ -85,6 +86,7 @@ function harness(
     },
     sendParsedRange: () => Promise.resolve(true),
     repairEnvelope,
+    onRepairEventPending: options?.onRepairEventPending ?? (() => undefined),
     onFailStop: (reason) => failStops.push(reason),
   });
   return { runtime, current, visible, checkpoints, failStops };
@@ -220,6 +222,41 @@ describe("TerminalOutputV3Runtime exact repair", () => {
     pendingVisibleParsers[0]?.();
     await vi.waitFor(() => expect(h.runtime.diagnostics().parsedSeq).toBe(1));
   });
+
+  it("treats a fresh frozen envelope as eventPending during its server grace", async () => {
+    const repair = vi.fn(() =>
+      Promise.resolve({ status: "eventPending" as const, envelope: null }),
+    );
+    const onRepairEventPending = vi.fn();
+    const h = harness(repair, { onRepairEventPending });
+
+    await expect(h.runtime.pollExactRepair(1_000)).resolves.toBeUndefined();
+    expect(repair).toHaveBeenCalledOnce();
+    expect(onRepairEventPending).toHaveBeenCalledOnce();
+    expect(h.failStops).toEqual([]);
+    expect(h.runtime.diagnostics()).toMatchObject({
+      admittedSeq: 0,
+      parsedSeq: 0,
+      repairCount: 0,
+      lastRepairReason: null,
+    });
+  });
+
+  it.each([{ status: "eventPending" }, { status: "eventPending", envelope: payload(1, 0, "A") }])(
+    "fail-stops a malformed event-pending repair response %#",
+    async (response) => {
+      const repair = vi.fn(() =>
+        Promise.resolve(response as unknown as TerminalOutputV3RepairResponse),
+      );
+      const h = harness(repair);
+
+      await expect(h.runtime.pollExactRepair(1_000)).resolves.toEqual({
+        kind: "fail-stop",
+        reason: "repair:malformed_response",
+      });
+      expect(h.failStops).toEqual(["repair:malformed_response"]);
+    },
+  );
 
   it("does not poll while a receipt response is unsettled, then permits the next watchdog", async () => {
     vi.useFakeTimers();

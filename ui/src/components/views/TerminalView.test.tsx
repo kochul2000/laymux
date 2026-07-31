@@ -10227,6 +10227,49 @@ describe("TerminalView desktop input composer", () => {
     expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
   });
 
+  it("retries the next watchdog tick after eventPending and applies the exact envelope", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminalId = "t-output-v3-event-pending";
+      mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment());
+      mockRepairTerminalOutputEnvelope
+        .mockResolvedValueOnce({ status: "eventPending", envelope: null })
+        .mockResolvedValueOnce({ status: "exact", envelope: v3Envelope(1, 0, "A") });
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      mockWrite.mockClear();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+
+      expect(mockRepairTerminalOutputEnvelope).toHaveBeenCalledTimes(1);
+      expect(writtenStream()).toBe("");
+      expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+        state: "active",
+        repairCount: 0,
+        lastRepairReason: null,
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+
+      expect(mockRepairTerminalOutputEnvelope).toHaveBeenCalledTimes(2);
+      expect(writtenStream()).toBe("A");
+      expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
+        state: "active",
+        admittedSeq: 1,
+        nextEnvelopeId: 2,
+        repairCount: 1,
+        lastRepairReason: "watchdog:exact",
+      });
+      expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("holds an active DECSET frame across a control delay above 50ms", async () => {
     const terminalId = "t-output-v3-hold-delay";
     mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(3));

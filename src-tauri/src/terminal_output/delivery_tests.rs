@@ -232,6 +232,18 @@ fn repair_distinguishes_receipted_parser_backlog_from_a_lost_in_flight_event() {
         delivery.inner.changed.notify_all();
     }
     let emitted = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let fresh_event = delivery
+        .repair_envelope(&identity(&emitted), emitted.seq_start)
+        .unwrap();
+    assert_eq!(
+        fresh_event.status,
+        TerminalOutputEnvelopeRepairStatus::EventPending
+    );
+    assert!(fresh_event.envelope.is_none());
+    {
+        let mut state = delivery.inner.state.lock().unwrap();
+        state.in_flight.as_mut().unwrap().repair_not_before = Instant::now();
+    }
     let lost_event = delivery
         .repair_envelope(&identity(&emitted), emitted.seq_start)
         .unwrap();
@@ -403,6 +415,11 @@ fn receipt_payload_conflict_does_not_release_the_in_flight_slot() {
     let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
     assert!(delivery
         .acknowledge_receipt(&identity(&envelope), envelope.seq_end - 1)
+        .is_err());
+    let mut foreign_grant = identity(&envelope);
+    foreign_grant.grant_id = Some("foreign-grant".into());
+    assert!(delivery
+        .acknowledge_receipt(&foreign_grant, envelope.seq_end)
         .is_err());
     assert_eq!(
         delivery

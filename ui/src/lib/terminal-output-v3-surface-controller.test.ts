@@ -345,15 +345,14 @@ describe("TerminalOutputV3SurfaceController", () => {
     await Promise.resolve();
     expect(h.failStops).toEqual(["discarded:checkpoint_failed"]);
     expect(h.deliveryDisposed).toBe(1);
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([]);
     expect(parsedAck).not.toHaveBeenCalled();
 
-    hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
     await expect(receive).resolves.toEqual({
       kind: "fail-stop",
       reason: "discarded:checkpoint_failed",
     });
-    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold"]);
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([]);
     expect(parsedAck).not.toHaveBeenCalled();
     expect(h.ingress.parsedSeq).toBe(0);
   });

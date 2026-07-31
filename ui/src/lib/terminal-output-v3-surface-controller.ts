@@ -284,6 +284,7 @@ export class TerminalOutputV3SurfaceController {
 
     completion.transferred = true;
     this.completePendingEnvelope(completion);
+    if (this.failure) return this.failure;
 
     if (transitionControls.length > 0) {
       await this.continuationControl.sendControls(transitionControls);

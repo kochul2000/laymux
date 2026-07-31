@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import sys
 
 import pytest
@@ -63,6 +64,159 @@ def test_focused_terminal_id_refuses_a_dev_build_without_the_field(monkeypatch):
     _grid(monkeypatch, {"focusedPaneIndex": 0, "panes": [{"paneIndex": 0, "terminalId": "t0"}]})
     with pytest.raises(guard.GuardError, match="predates it"):
         probe.focused_terminal_id(guard.DEV_PORT)
+
+
+# -- pick_shell_terminal ----------------------------------------------------
+
+
+def _shell(terminal_id: str, pane_index):
+    return {
+        "id": terminal_id,
+        "paneIndex": pane_index,
+        "activity": {"type": "shell"},
+    }
+
+
+def test_pick_shell_terminal_sorts_grid_before_an_unfocused_dock(monkeypatch):
+    """Dock terminals report paneIndex=null; mixed grid/dock lists must still sort."""
+    monkeypatch.setattr(
+        probe,
+        "terminals",
+        lambda _port: [_shell("dock", None), _shell("grid", 0)],
+    )
+    monkeypatch.setattr(probe, "focused_terminal_id", lambda _port: None)
+
+    assert probe.pick_shell_terminal(guard.DEV_PORT)["id"] == "grid"
+
+
+def test_pick_shell_terminal_prefers_a_focused_dock_with_null_index(monkeypatch):
+    monkeypatch.setattr(
+        probe,
+        "terminals",
+        lambda _port: [_shell("grid", 0), _shell("dock", None)],
+    )
+    monkeypatch.setattr(probe, "focused_terminal_id", lambda _port: "dock")
+
+    assert probe.pick_shell_terminal(guard.DEV_PORT)["id"] == "dock"
+
+
+# -- lease cleanup ----------------------------------------------------------
+
+
+def _lease_args(**over):
+    args = cli.argparse.Namespace(duration="15m", note="test", focus_dev=False)
+    for key, value in over.items():
+        setattr(args, key, value)
+    return args
+
+
+def test_lease_revokes_delegation_when_post_grant_setup_crashes(monkeypatch, capsys):
+    cleared = []
+    monkeypatch.setattr(guard.TargetLock, "resolve", classmethod(lambda cls: _Lock()))
+    monkeypatch.setattr(
+        guard,
+        "write_lease",
+        lambda _seconds, note="": type("Lease", (), {"remaining": 900.0})(),
+    )
+    monkeypatch.setattr(guard, "lease_path", lambda: "lease.json")
+    monkeypatch.setattr(guard, "clear_lease", lambda: cleared.append(True) or True)
+    monkeypatch.setattr(
+        probe,
+        "pick_shell_terminal",
+        lambda _port: (_ for _ in ()).throw(TypeError("bad terminal shape")),
+    )
+
+    assert cli.cmd_lease(_lease_args()) == 1
+    assert cleared == [True]
+    assert "lease revoked" in capsys.readouterr().out
+
+
+def test_lease_revokes_delegation_when_post_grant_reporting_crashes(monkeypatch):
+    cleared = []
+    monkeypatch.setattr(guard.TargetLock, "resolve", classmethod(lambda cls: _Lock()))
+    monkeypatch.setattr(
+        guard,
+        "write_lease",
+        lambda _seconds, note="": type("Lease", (), {"remaining": 900.0})(),
+    )
+    monkeypatch.setattr(
+        guard,
+        "lease_path",
+        lambda: (_ for _ in ()).throw(RuntimeError("cannot report path")),
+    )
+    monkeypatch.setattr(guard, "clear_lease", lambda: cleared.append(True) or True)
+
+    assert cli.cmd_lease(_lease_args()) == 1
+    assert cleared == [True]
+
+
+def test_lease_revokes_delegation_before_propagating_keyboard_interrupt(monkeypatch):
+    events = []
+    monkeypatch.setattr(guard.TargetLock, "resolve", classmethod(lambda cls: _Lock()))
+    monkeypatch.setattr(
+        guard,
+        "write_lease",
+        lambda _seconds, note="": type("Lease", (), {"remaining": 900.0})(),
+    )
+    monkeypatch.setattr(guard, "lease_path", lambda: "lease.json")
+    monkeypatch.setattr(guard, "clear_lease", lambda: events.append("clear") or True)
+    monkeypatch.setattr(
+        probe,
+        "pick_shell_terminal",
+        lambda _port: (_ for _ in ()).throw(KeyboardInterrupt()),
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        cli.cmd_lease(_lease_args())
+    assert events == ["clear"]
+
+
+def test_unlease_still_succeeds_when_release_banner_crashes(monkeypatch):
+    events = []
+    monkeypatch.setattr(guard, "clear_lease", lambda: events.append("clear") or True)
+    monkeypatch.setattr(guard.TargetLock, "resolve", classmethod(lambda cls: _Lock()))
+
+    def fail_banner(_port):
+        events.append("banner")
+        raise TypeError("bad terminal shape")
+
+    monkeypatch.setattr(
+        probe,
+        "pick_shell_terminal",
+        fail_banner,
+    )
+
+    assert cli.cmd_unlease(cli.argparse.Namespace()) == 0
+    assert events == ["clear", "banner"]
+
+
+class _Cp949Stream(io.StringIO):
+    def __init__(self):
+        super().__init__()
+        self.configured_errors = "strict"
+
+    def reconfigure(self, *, errors):
+        self.configured_errors = errors
+
+    def write(self, value):
+        encoded = value.encode("cp949", errors=self.configured_errors)
+        return super().write(encoded.decode("cp949"))
+
+
+def test_main_makes_both_cp949_console_streams_replacement_safe(monkeypatch):
+    stdout = _Cp949Stream()
+    stderr = _Cp949Stream()
+    args = cli.argparse.Namespace(func=lambda _args: print("lease — active") or 0)
+    parser = type("Parser", (), {"parse_args": lambda self, _argv: args})()
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli.sys, "stdout", stdout)
+    monkeypatch.setattr(cli.sys, "stderr", stderr)
+    monkeypatch.setattr(cli, "build_parser", lambda: parser)
+
+    assert cli.main([]) == 0
+    assert stdout.configured_errors == "replace"
+    assert stderr.configured_errors == "replace"
+    assert "lease ? active" in stdout.getvalue()
 
 
 # -- wait_for_focus ---------------------------------------------------------

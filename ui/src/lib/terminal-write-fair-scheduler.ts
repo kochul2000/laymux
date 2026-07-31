@@ -8,6 +8,20 @@ export type TerminalWriteFairTurn = (
   context: TerminalWriteFairTurnContext,
 ) => void;
 export type TerminalWriteFairOwner = symbol;
+export type TerminalWritePriority = "focused" | "foreground" | "background";
+export type TerminalWritePriorityResolver = () => TerminalWritePriority;
+
+const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
+  focused: 4,
+  foreground: 2,
+  background: 1,
+};
+
+/** A waiting owner becomes urgent after this many other completed admissions. */
+export const TERMINAL_WRITE_MAX_SKIPPED_TURNS = 8;
+
+/** Let non-MessageChannel browser task sources compete at least once per pane round. */
+export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 8;
 
 /** Create an identity token scoped to one TerminalView xterm effect lifetime. */
 export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWriteFairOwner {
@@ -16,9 +30,61 @@ export function createTerminalWriteFairOwner(debugLabel?: string): TerminalWrite
 
 type ScheduleMacrotask = (task: () => void) => void;
 
+function createTerminalWriteMacrotaskScheduler(): ScheduleMacrotask {
+  const tasks: Array<() => void> = [];
+  let channel: MessageChannel | undefined;
+  let channelUnavailable = false;
+  let messageHandoffsSinceControlYield = 0;
+  const postMessageTask = (task: () => void): boolean => {
+    const MessageChannelConstructor =
+      typeof window === "undefined" ? undefined : window.MessageChannel;
+    if (!channelUnavailable && typeof MessageChannelConstructor === "function") {
+      try {
+        if (!channel) {
+          channel = new MessageChannelConstructor();
+          channel.port1.onmessage = () => tasks.shift()?.();
+        }
+        tasks.push(task);
+        channel.port2.postMessage(undefined);
+        return true;
+      } catch {
+        tasks.length = 0;
+        channel?.port1.close();
+        channel?.port2.close();
+        channel = undefined;
+        channelUnavailable = true;
+      }
+    }
+    return false;
+  };
+  return (task) => {
+    if (messageHandoffsSinceControlYield >= TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS - 1) {
+      messageHandoffsSinceControlYield = 0;
+      // The timer is only a gate. Run the parser turn from a subsequent
+      // MessageChannel task so xterm's own timer chain starts non-nested.
+      setTimeout(() => {
+        if (!postMessageTask(task)) task();
+      }, 0);
+      return;
+    }
+    if (postMessageTask(task)) {
+      messageHandoffsSinceControlYield += 1;
+      return;
+    }
+    messageHandoffsSinceControlYield = 0;
+    setTimeout(task, 0);
+  };
+}
+
 type ActiveTurn = {
   owner: TerminalWriteFairOwner;
   released: boolean;
+};
+
+type PendingTurn = {
+  turn: TerminalWriteFairTurn;
+  resolvePriority: TerminalWritePriorityResolver;
+  skippedTurns: number;
 };
 
 /**
@@ -26,27 +92,30 @@ type ActiveTurn = {
  *
  * A TerminalView keeps ownership of its byte FIFO and parse completion. This
  * scheduler owns only the scarce main-thread admission turn: one pane submits
- * one physical write, holds the turn through its parse callback, then returns
- * to the tail if it still has work. The next pane always starts in a fresh
- * macrotask so input, paint, and control work can run between turns.
+ * one bounded parser quantum, holds the turn through its parse callback(s),
+ * then returns to the tail if it still has work. The next pane always starts
+ * in a fresh macrotask so input, paint, and control work can run between turns.
  */
 export class TerminalWriteFairScheduler {
-  private readonly pendingTurns = new Map<TerminalWriteFairOwner, TerminalWriteFairTurn>();
+  private readonly pendingTurns = new Map<TerminalWriteFairOwner, PendingTurn>();
+  private readonly balances = new Map<TerminalWriteFairOwner, number>();
   private pendingOwners: TerminalWriteFairOwner[] = [];
   private activeTurn: ActiveTurn | undefined;
   private macrotaskScheduled = false;
   private macrotaskGeneration = 0;
 
   constructor(
-    private readonly scheduleMacrotask: ScheduleMacrotask = (task) => {
-      setTimeout(task, 0);
-    },
+    private readonly scheduleMacrotask: ScheduleMacrotask = createTerminalWriteMacrotaskScheduler(),
   ) {}
 
   /** Queue at most one future turn for a mounted terminal pane. */
-  request(owner: TerminalWriteFairOwner, turn: TerminalWriteFairTurn): void {
+  request(
+    owner: TerminalWriteFairOwner,
+    turn: TerminalWriteFairTurn,
+    resolvePriority: TerminalWritePriorityResolver = () => "foreground",
+  ): void {
     if (this.pendingTurns.has(owner)) return;
-    this.pendingTurns.set(owner, turn);
+    this.pendingTurns.set(owner, { turn, resolvePriority, skippedTurns: 0 });
     this.pendingOwners.push(owner);
     // Preserve the existing zero-backlog path: terminal.write admission itself
     // is cheap and xterm schedules parsing internally. Fairness is needed once a
@@ -60,7 +129,11 @@ export class TerminalWriteFairScheduler {
 
   /** Remove only a future turn while preserving an accepted active write. */
   cancelPending(owner: TerminalWriteFairOwner): void {
-    if (!this.pendingTurns.delete(owner)) return;
+    if (!this.pendingTurns.delete(owner)) {
+      if (this.activeTurn?.owner !== owner) this.balances.delete(owner);
+      return;
+    }
+    this.balances.delete(owner);
     this.pendingOwners = this.pendingOwners.filter((pending) => pending !== owner);
     if (this.pendingTurns.size === 0 && this.activeTurn === undefined && this.macrotaskScheduled) {
       // The host timer API does not expose a common cancellation handle. Make
@@ -92,11 +165,20 @@ export class TerminalWriteFairScheduler {
     );
   }
 
+  /** Whether another pane owner is queued behind the current owner. */
+  hasPendingOtherOwner(owner: TerminalWriteFairOwner): boolean {
+    for (const pendingOwner of this.pendingTurns.keys()) {
+      if (pendingOwner !== owner) return true;
+    }
+    return false;
+  }
+
   /** Test-only isolation for the app-global scheduler fixture. */
   resetForTests(): void {
     if (this.activeTurn !== undefined) this.activeTurn.released = true;
     this.activeTurn = undefined;
     this.pendingTurns.clear();
+    this.balances.clear();
     this.pendingOwners.length = 0;
     this.macrotaskScheduled = false;
     // Host timers have no shared cancellation API. Invalidate every callback
@@ -120,31 +202,80 @@ export class TerminalWriteFairScheduler {
   private runNext(): void {
     if (this.activeTurn !== undefined) return;
 
-    let owner: TerminalWriteFairOwner | undefined;
-    let turn: TerminalWriteFairTurn | undefined;
-    while ((owner = this.pendingOwners.shift()) !== undefined) {
-      turn = this.pendingTurns.get(owner);
-      if (turn !== undefined) break;
-    }
-    if (owner === undefined || turn === undefined) return;
+    const owner = this.selectNextOwner();
+    if (owner === undefined) return;
+    const pending = this.pendingTurns.get(owner);
+    if (pending === undefined) return;
 
     this.pendingTurns.delete(owner);
+    const ownerIndex = this.pendingOwners.indexOf(owner);
+    if (ownerIndex >= 0) this.pendingOwners.splice(ownerIndex, 1);
+    for (const waiting of this.pendingTurns.values()) {
+      waiting.skippedTurns = Math.min(TERMINAL_WRITE_MAX_SKIPPED_TURNS, waiting.skippedTurns + 1);
+    }
     const activeTurn: ActiveTurn = { owner, released: false };
     this.activeTurn = activeTurn;
     const release = () => this.release(activeTurn);
     try {
-      turn(release, { contended: this.pendingTurns.size > 0 });
+      pending.turn(release, { contended: this.pendingTurns.size > 0 });
     } catch (error) {
       release();
       throw error;
     }
   }
 
+  private selectNextOwner(): TerminalWriteFairOwner | undefined {
+    const urgent = this.pendingOwners.find(
+      (owner) =>
+        (this.pendingTurns.get(owner)?.skippedTurns ?? 0) >= TERMINAL_WRITE_MAX_SKIPPED_TURNS,
+    );
+    if (urgent !== undefined) {
+      this.balances.set(urgent, 0);
+      return urgent;
+    }
+
+    let selected: TerminalWriteFairOwner | undefined;
+    let selectedBalance = Number.NEGATIVE_INFINITY;
+    let totalWeight = 0;
+    for (const owner of this.pendingOwners) {
+      const pending = this.pendingTurns.get(owner);
+      if (!pending) continue;
+      const weight = TERMINAL_WRITE_PRIORITY_WEIGHT[this.resolvePriority(pending)];
+      totalWeight += weight;
+      const balance = (this.balances.get(owner) ?? 0) + weight;
+      this.balances.set(owner, balance);
+      if (balance > selectedBalance) {
+        selected = owner;
+        selectedBalance = balance;
+      }
+    }
+    if (selected !== undefined) {
+      this.balances.set(selected, selectedBalance - totalWeight);
+    }
+    return selected;
+  }
+
+  private resolvePriority(pending: PendingTurn): TerminalWritePriority {
+    try {
+      const priority = pending.resolvePriority();
+      if (priority === "focused" || priority === "foreground" || priority === "background") {
+        return priority;
+      }
+    } catch {
+      // Visibility diagnostics must not strand parser admission.
+    }
+    return "background";
+  }
+
   private release(turn: ActiveTurn): void {
     if (turn.released) return;
     turn.released = true;
     if (this.activeTurn === turn) this.activeTurn = undefined;
+    // A pane that requeued before releasing is continuously backlogged and
+    // keeps its smooth-WRR balance. A drained pane starts a later burst fresh.
+    if (!this.pendingTurns.has(turn.owner)) this.balances.delete(turn.owner);
     this.scheduleNext();
+    if (this.activeTurn === undefined && this.pendingTurns.size === 0) this.balances.clear();
   }
 }
 

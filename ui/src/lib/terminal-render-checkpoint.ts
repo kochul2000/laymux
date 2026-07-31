@@ -6,6 +6,7 @@ import type {
   TerminalOutputAppliedSegment,
   TerminalOutputAttachment,
 } from "./terminal-output-attach-coordinator";
+import type { TerminalParserAdmission } from "./terminal-parser-admission";
 
 const CAPTURE_WAIT_MS = 3_000;
 const CAPTURE_POLL_MS = 10;
@@ -23,6 +24,11 @@ export interface TerminalRenderCheckpoint {
   seq: number;
   geometry: TerminalGeometry;
   data: string;
+}
+
+export interface TerminalRenderCheckpointModelOptions {
+  admission?: Pick<TerminalParserAdmission, "request" | "cancel">;
+  write?: (data: Uint8Array) => Promise<void>;
 }
 
 function writeTerminal(term: Terminal, data: string | Uint8Array): Promise<void> {
@@ -47,8 +53,12 @@ export class TerminalRenderCheckpointModel {
   private geometry: TerminalGeometry | null = null;
   private reconstructable = false;
   private disposed = false;
+  private readonly admission: Pick<TerminalParserAdmission, "request" | "cancel"> | undefined;
+  private readonly write: (data: Uint8Array) => Promise<void>;
+  private rejectScheduledWrite: ((error: Error) => void) | undefined;
 
-  constructor() {
+  constructor(options: TerminalRenderCheckpointModelOptions = {}) {
+    this.admission = options.admission;
     this.terminal = new Terminal({
       allowProposedApi: true,
       cols: 80,
@@ -59,6 +69,7 @@ export class TerminalRenderCheckpointModel {
     activateTerminalUnicodeProvider(this.terminal);
     this.serializeAddon = new SerializeAddon();
     this.terminal.loadAddon(this.serializeAddon);
+    this.write = options.write ?? ((data) => writeTerminal(this.terminal, data));
   }
 
   attach(attachment: TerminalOutputAttachment): Promise<void> {
@@ -66,7 +77,7 @@ export class TerminalRenderCheckpointModel {
       this.terminal.reset();
       this.resize(attachment.state.geometry);
       if (attachment.snapshot.length > 0) {
-        await writeTerminal(this.terminal, attachment.snapshot);
+        await this.writeData(attachment.snapshot);
       }
       this.generation = attachment.state.generation;
       this.seq = attachment.state.snapshotSeq;
@@ -96,7 +107,7 @@ export class TerminalRenderCheckpointModel {
         throw new Error("terminal render checkpoint geometry revision is inconsistent");
       }
       if (!sameGeometry(segment.geometry, currentGeometry)) this.resize(segment.geometry);
-      if (segment.data.length > 0) await writeTerminal(this.terminal, segment.data);
+      if (segment.data.length > 0) await this.writeData(segment.data);
       this.seq = segment.seqEnd;
       this.geometry = { ...segment.geometry };
     });
@@ -182,7 +193,62 @@ export class TerminalRenderCheckpointModel {
 
   dispose(): void {
     this.disposed = true;
+    this.admission?.cancel("checkpoint");
+    this.rejectScheduledWrite?.(new Error("terminal render checkpoint is disposed"));
+    this.rejectScheduledWrite = undefined;
     this.terminal.dispose();
+  }
+
+  private writeData(data: Uint8Array): Promise<void> {
+    const admission = this.admission;
+    if (!admission) return this.write(data);
+
+    return new Promise<void>((resolve, reject) => {
+      let offset = 0;
+      let settled = false;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        this.rejectScheduledWrite = undefined;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      };
+      this.rejectScheduledWrite = fail;
+      const requestNext = () => {
+        if (this.disposed) {
+          fail(new Error("terminal render checkpoint is disposed"));
+          return;
+        }
+        admission.request(
+          "checkpoint",
+          (release, { maxBytes }) => {
+            if (this.disposed) {
+              release();
+              fail(new Error("terminal render checkpoint is disposed"));
+              return;
+            }
+            const end = Math.min(data.length, offset + maxBytes);
+            void this.write(data.subarray(offset, end)).then(
+              () => {
+                offset = end;
+                if (offset < data.length) requestNext();
+                release();
+                if (offset === data.length && !settled) {
+                  settled = true;
+                  this.rejectScheduledWrite = undefined;
+                  resolve();
+                }
+              },
+              (error) => {
+                release();
+                fail(error);
+              },
+            );
+          },
+          data.length - offset,
+        );
+      };
+      requestNext();
+    });
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {

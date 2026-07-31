@@ -43,6 +43,7 @@ import {
 } from "@/lib/workspace-transition";
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
+import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 
 interface HandlerResult {
   success: boolean;
@@ -1309,8 +1310,14 @@ export async function handleAsyncAutomationRequest(
     try {
       const paneIndex =
         typeof request.params.paneIndex === "number" ? request.params.paneIndex : undefined;
+      // This runs on the WebView main thread immediately before capture starts.
+      // It is the authoritative point-in-time parser frontier for flood probes;
+      // a backend sample taken before dispatch cannot rule out queue drain while
+      // the screenshot request waits behind other browser tasks.
+      const captureStartedAtMs = Date.now();
+      const terminalOutputV3AtCaptureStart = allLiveTerminalOutputV3Diagnostics();
       const dataUrl = await captureScreenshot(paneIndex);
-      return ok({ dataUrl });
+      return ok({ dataUrl, captureStartedAtMs, terminalOutputV3AtCaptureStart });
     } catch (e) {
       return err(`Screenshot error: ${e instanceof Error ? e.message : String(e)}`);
     }

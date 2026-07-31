@@ -952,6 +952,14 @@ pub async fn screenshot_capture(AxumState(state): AxumState<ServerState>) -> imp
             )
         }
     };
+    let capture_started_at_ms = data
+        .get("captureStartedAtMs")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let terminal_output_v3_at_capture_start = data
+        .get("terminalOutputV3AtCaptureStart")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
 
     // Strip "data:image/png;base64," prefix
     let base64_data = data_url
@@ -996,6 +1004,8 @@ pub async fn screenshot_capture(AxumState(state): AxumState<ServerState>) -> imp
                 "filename": filename,
                 "size": bytes.len(),
                 "dataUrl": data_url,
+                "captureStartedAtMs": capture_started_at_ms,
+                "terminalOutputV3AtCaptureStart": terminal_output_v3_at_capture_start,
             })),
         ),
         Err(e) => (

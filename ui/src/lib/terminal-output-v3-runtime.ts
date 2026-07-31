@@ -61,6 +61,7 @@ export interface TerminalOutputV3RuntimeOptions {
   ): void;
   sendParsedRange(seqStart: number, seqEnd: number): Promise<boolean>;
   repairEnvelope?: TerminalOutputV3Repairer;
+  onRepairEventPending(): void;
   onFailStop(reason: string): void;
 }
 
@@ -310,6 +311,10 @@ export class TerminalOutputV3Runtime {
       return;
     }
     if (response.status === "idle") return;
+    if (response.status === "eventPending") {
+      this.options.onRepairEventPending();
+      return;
+    }
     if (response.status === "alreadyReceipted") {
       const witness = this.repairState.witness(request);
       if (witness) return;
@@ -407,16 +412,15 @@ export class TerminalOutputV3Runtime {
 }
 
 function isRepairResponse(value: unknown): value is TerminalOutputV3RepairResponse {
+  if (typeof value !== "object" || value === null || !("status" in value)) return false;
+  if (value.status === "eventPending") return "envelope" in value && value.envelope === null;
   return (
-    typeof value === "object" &&
-    value !== null &&
-    "status" in value &&
-    (value.status === "idle" ||
-      value.status === "exact" ||
-      value.status === "stale" ||
-      value.status === "alreadyReceipted" ||
-      value.status === "mismatch" ||
-      value.status === "exhausted")
+    value.status === "idle" ||
+    value.status === "exact" ||
+    value.status === "stale" ||
+    value.status === "alreadyReceipted" ||
+    value.status === "mismatch" ||
+    value.status === "exhausted"
   );
 }
 

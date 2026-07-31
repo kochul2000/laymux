@@ -32,6 +32,12 @@ import {
   unregisterTerminalRenderCheckpointProvider,
   unregisterTerminalScroller,
 } from "@/lib/terminal-serialize-registry";
+import {
+  recordTerminalOutputV3Diagnostics,
+  registerTerminalOutputV3DiagnosticsProvider,
+  resetTerminalOutputV3DiagnosticsForTest,
+  type TerminalOutputV3DiagnosticEntry,
+} from "@/lib/terminal-output-v3-diagnostics";
 vi.mock("@/lib/tauri-api", () => ({
   onAutomationRequest: vi.fn().mockResolvedValue(vi.fn()),
   automationResponse: vi.fn().mockResolvedValue(undefined),
@@ -49,14 +55,17 @@ vi.mock("html2canvas", () => ({
   default: vi.fn(),
 }));
 
-function mockScreenshotCanvas() {
+function mockScreenshotCanvas(onCapture?: () => void) {
   const drawImage = vi.fn();
   const resultCanvas = {
     getContext: vi.fn(() => ({ drawImage })),
     toDataURL: vi.fn(() => "data:image/png;base64,test"),
   } as unknown as HTMLCanvasElement;
 
-  vi.mocked(html2canvas).mockResolvedValueOnce(resultCanvas);
+  vi.mocked(html2canvas).mockImplementationOnce(async () => {
+    onCapture?.();
+    return resultCanvas;
+  });
   return { drawImage };
 }
 
@@ -1007,6 +1016,7 @@ describe("handleAsyncAutomationRequest", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
     unregisterTerminalRenderCheckpointProvider("t-checkpoint");
+    resetTerminalOutputV3DiagnosticsForTest();
   });
 
   it("returns the exact renderer checkpoint requested by the backend", async () => {
@@ -1260,18 +1270,45 @@ describe("handleAsyncAutomationRequest", () => {
     expect(result.data).toHaveProperty("workspaces");
   });
 
-  it("handles screenshot target", async () => {
-    // html2canvas is hard to test in jsdom, so we verify it attempts capture
-    // and handles the error gracefully (jsdom has no real rendering)
+  it("snapshots v3 parser frontiers at screenshot handler entry", async () => {
+    const beforeCapture: TerminalOutputV3DiagnosticEntry = {
+      state: "active",
+      reason: null,
+      generation: 1,
+      leaseToken: "lease-1",
+      attachEpoch: 1,
+      snapshotSeq: 0,
+      admittedSeq: 131_072,
+      parsedSeq: 32_768,
+      nextEnvelopeId: 3,
+      activeGrantId: null,
+      repairCount: 0,
+      lastRepairReason: null,
+    };
+    recordTerminalOutputV3Diagnostics("terminal-hot", beforeCapture);
+    let live = beforeCapture;
+    const disposeProvider = registerTerminalOutputV3DiagnosticsProvider("terminal-hot", () => live);
+    mockScreenshotCanvas(() => {
+      live = { ...beforeCapture, parsedSeq: 131_072 };
+    });
+
     const result = await handleAsyncAutomationRequest({
       requestId: "async-2",
       category: "action",
       target: "screenshot",
       method: "capture",
       params: {},
+    }).finally(disposeProvider);
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        dataUrl: "data:image/png;base64,test",
+        captureStartedAtMs: expect.any(Number),
+        terminalOutputV3AtCaptureStart: {
+          "terminal-hot": { admittedSeq: 131_072, parsedSeq: 32_768 },
+        },
+      },
     });
-    // In jsdom, html2canvas may fail or return empty — either way, no crash
-    expect(result).toHaveProperty("success");
   });
 });
 

@@ -239,8 +239,13 @@ import type { TerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime";
 import { loadTerminalOutputV3Runtime } from "@/lib/terminal-output-v3-runtime-loader";
 import { TerminalOutputV3FailureCoordinator } from "@/lib/terminal-output-v3-failure-coordinator";
 import {
+  TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS,
+  TerminalOutputPullWatchdogCadence,
+} from "@/lib/terminal-output-pull-watchdog";
+import {
   forgetTerminalOutputV3Diagnostics,
   recordTerminalOutputV3Diagnostics,
+  registerTerminalOutputV3DiagnosticsProvider,
   type TerminalOutputV3DiagnosticEntry,
 } from "@/lib/terminal-output-v3-diagnostics";
 import {
@@ -257,6 +262,7 @@ import {
   createTerminalWriteFairOwner,
   terminalWriteFairScheduler,
 } from "@/lib/terminal-write-fair-scheduler";
+import { TerminalParserAdmission, terminalParserPriority } from "@/lib/terminal-parser-admission";
 
 type TerminalWriteCallbackFailureStage =
   | "metrics"
@@ -327,16 +333,6 @@ const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
 
 /** Local attach/ACK bridge calls should settle far below this on a live WebView. */
 const TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS = 5000;
-
-/**
- * Low-frequency exact pull while a desktop parsed-credit lease is active.
- *
- * A v2 event can be lost at the precise chunk that fills the backend window;
- * no later event then exists to expose a sequence gap. Pulling from the last
- * contiguous prefix makes that edge recoverable without allowing another PTY
- * read or weakening the fixed producer bound.
- */
-const TERMINAL_OUTPUT_PULL_WATCHDOG_MS = 1000;
 
 /**
  * How many `resume` round-trips a single hole may take before escalating.
@@ -1165,6 +1161,11 @@ export function TerminalView({
     // owner must not: a late callback from the old xterm generation may only
     // cancel/release turns registered by that exact effect lifetime.
     const terminalWriteFairOwner = createTerminalWriteFairOwner(instanceId);
+    const terminalParserAdmission = new TerminalParserAdmission(
+      terminalWriteFairScheduler,
+      terminalWriteFairOwner,
+      () => terminalParserPriority(isContainerHiddenRef.current, isFocusedRef.current),
+    );
     let terminalSessionReady = false;
     let initialExecutionHost: InitialExecutionHost = "unknown";
     let stabilizeNativeWindowsOutput = false;
@@ -3418,7 +3419,7 @@ export function TerminalView({
         clearTimeout(terminalWriteRetryTimer);
         terminalWriteRetryTimer = undefined;
       }
-      terminalWriteFairScheduler.cancelPending(terminalWriteFairOwner);
+      terminalParserAdmission.cancelPending("visible");
     };
     const releaseCurrentTerminalWriteTurn = () => {
       const release = releaseTerminalWriteTurn;
@@ -3441,7 +3442,7 @@ export function TerminalView({
         }, delayMs);
         return;
       }
-      terminalWriteFairScheduler.request(terminalWriteFairOwner, (release, { contended }) => {
+      terminalParserAdmission.request("visible", (release, { contended }) => {
         if (cancelled || pendingTerminalWrites > 0 || terminalWriteQueue.depth === 0) {
           release();
           return;
@@ -3769,6 +3770,7 @@ export function TerminalView({
     let hasBufferedOutputV3 = false;
     let outputV3FailStoppedReason: string | null = null;
     let outputV3Runtime: TerminalOutputV3Runtime | undefined;
+    const outputPullWatchdogCadence = new TerminalOutputPullWatchdogCadence(monotonicNow());
     const outputV3FailureCoordinator = new TerminalOutputV3FailureCoordinator(
       instanceId,
       failStopTerminalOutputSurface,
@@ -3777,9 +3779,12 @@ export function TerminalView({
     let outputV3ParsersReady = false;
     let outputV3DiagnosticEntry: TerminalOutputV3DiagnosticEntry | undefined;
     let publishOutputV3Diagnostics: (() => void) | undefined;
+    let disposeOutputV3DiagnosticsProvider: (() => void) | undefined;
     let cacheRestorePromise: Promise<string | null> = Promise.resolve(null);
     const outputCoordinator = new TerminalOutputAttachCoordinator();
-    const renderCheckpointModel = new TerminalRenderCheckpointModel();
+    const renderCheckpointModel = new TerminalRenderCheckpointModel({
+      admission: terminalParserAdmission,
+    });
     registerTerminalRenderCheckpointProvider(instanceId, (target, maxBytes) =>
       renderCheckpointModel.capture(target, maxBytes),
     );
@@ -4342,6 +4347,7 @@ export function TerminalView({
           if (isCurrent()) publishOutputV3Diagnostics?.();
           return accepted;
         },
+        onRepairEventPending: () => outputPullWatchdogCadence.requireNextPoll(),
         onFailStop: failStopOutputV3,
         getLifecycleFacts: () => ({
           parsersReady: outputV3ParsersReady,
@@ -4353,9 +4359,10 @@ export function TerminalView({
       });
       outputV3Runtime = runtime;
       outputV3ParsersReady = true;
-      publishOutputV3Diagnostics = () => {
+      const readOutputV3Diagnostics = (): TerminalOutputV3DiagnosticEntry | undefined => {
+        if (!isCurrent()) return undefined;
         const snapshot = runtime.diagnostics();
-        outputV3DiagnosticEntry = {
+        return {
           state: outputV3FailStoppedReason === null ? "active" : "fail-stopped",
           reason: outputV3FailStoppedReason,
           generation,
@@ -4369,8 +4376,18 @@ export function TerminalView({
           repairCount: snapshot.repairCount,
           lastRepairReason: snapshot.lastRepairReason,
         };
+      };
+      publishOutputV3Diagnostics = () => {
+        const entry = readOutputV3Diagnostics();
+        if (!entry) return;
+        outputV3DiagnosticEntry = entry;
         recordTerminalOutputV3Diagnostics(instanceId, outputV3DiagnosticEntry);
       };
+      disposeOutputV3DiagnosticsProvider?.();
+      disposeOutputV3DiagnosticsProvider = registerTerminalOutputV3DiagnosticsProvider(
+        instanceId,
+        readOutputV3Diagnostics,
+      );
       publishOutputV3Diagnostics();
 
       if (!hasBufferedOutputV3) return;
@@ -5206,10 +5223,15 @@ export function TerminalView({
 
     const outputPullWatchdogTimer = setInterval(() => {
       if (cancelled) return;
+      const now = monotonicNow();
+      // A moderate host-task stall can queue this timer beside the output edge
+      // it is meant to recover. Give the direct event one full watchdog period
+      // after the stall; long stalls still poll within the hard window.
+      if (!outputPullWatchdogCadence.shouldPoll(now)) return;
       if (outputTransportMode === "v3") {
         const runtime = outputV3Runtime;
         if (!runtime || outputV3FailStoppedReason !== null) return;
-        void runtime.pollExactRepair(monotonicNow()).then((result) => {
+        void runtime.pollExactRepair(now).then((result) => {
           publishOutputV3Diagnostics?.();
           if (result?.kind === "fail-stop") failStopOutputV3(result.reason);
         });
@@ -5231,7 +5253,7 @@ export function TerminalView({
       // first await, so adjacent interval ticks and live gap detection share a
       // single in-flight exact-resume request.
       void startOutputRepair({ expectedSeq, actualSeq: expectedSeq }, "pull-watchdog");
-    }, TERMINAL_OUTPUT_PULL_WATCHDOG_MS);
+    }, TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS);
 
     // Right-click: copy selection or paste (no context menu in terminal)
     const outerContainer = containerRef.current?.parentElement;
@@ -5555,6 +5577,8 @@ export function TerminalView({
       cancelled = true;
       outputV3Runtime?.dispose();
       outputV3Runtime = undefined;
+      disposeOutputV3DiagnosticsProvider?.();
+      disposeOutputV3DiagnosticsProvider = undefined;
       publishOutputV3Diagnostics = undefined;
       outputV3DiagnosticEntry = undefined;
       forgetTerminalOutputV3Diagnostics(instanceId);
@@ -5583,7 +5607,7 @@ export function TerminalView({
       clearCurrentParsingWrite();
       resumeDeferredTerminalWrites = undefined;
       clearTerminalWriteRetryTimer();
-      terminalWriteFairScheduler.cancel(terminalWriteFairOwner);
+      terminalParserAdmission.cancel("visible");
       releaseTerminalWriteTurn = undefined;
       remoteResizeSyncAttempt += 1;
       remoteResizeSyncInFlight = false;
@@ -5672,6 +5696,7 @@ export function TerminalView({
       closeTerminalSession(instanceId).catch(() => {});
       terminal.dispose();
       renderCheckpointModel.dispose();
+      terminalParserAdmission.dispose();
       unregisterInstance(instanceId);
     };
     // syncGroup intentionally excluded: changes (e.g. workspace rename) must NOT

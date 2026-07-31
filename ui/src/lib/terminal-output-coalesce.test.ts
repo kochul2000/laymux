@@ -59,6 +59,17 @@ describe("coalesceTerminalOutputSegments", () => {
     expect(merged[1].seqEnd).toBe(9);
   });
 
+  it("does not hide inconsistent dimensions within one geometry revision", () => {
+    const merged = coalesceTerminalOutputSegments([
+      segment(0, 3),
+      segment(3, 3, { geometry: { revision: 3, cols: 100, rows: 30 } }),
+    ]);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0].geometry).toEqual({ revision: 3, cols: 80, rows: 24 });
+    expect(merged[1].geometry).toEqual({ revision: 3, cols: 100, rows: 30 });
+  });
+
   it("splits at a generation change", () => {
     const merged = coalesceTerminalOutputSegments([
       segment(0, 3),

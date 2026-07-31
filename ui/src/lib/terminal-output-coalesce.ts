@@ -19,9 +19,10 @@ export const TERMINAL_OUTPUT_COALESCE_MAX_BYTES = TERMINAL_WRITE_BATCH_MAX_BYTES
  * Merging is only ever legal where the stream is genuinely one run of bytes on
  * one grid, so a merge is refused at:
  * - a generation change — a different PTY, different sequence space;
- * - a geometry revision change — the bytes on either side are addressed to
- *   different grids and the checkpoint model must resize between them
- *   (ADR-0069), exactly the boundary ADR-0072 refuses to repair across;
+ * - any geometry change — the bytes on either side are addressed to different
+ *   grids and the checkpoint model must resize between them (ADR-0069), exactly
+ *   the boundary ADR-0072 refuses to repair across; checking dimensions as well
+ *   as revision also preserves detection of contradictory metadata;
  * - a sequence discontinuity — a hole must stay visible to the gap logic;
  * - {@link TERMINAL_OUTPUT_COALESCE_MAX_BYTES}.
  *
@@ -72,6 +73,8 @@ export function coalesceTerminalOutputSegments(
       previous !== undefined &&
       previous.generation === segment.generation &&
       previous.geometry.revision === segment.geometry.revision &&
+      previous.geometry.cols === segment.geometry.cols &&
+      previous.geometry.rows === segment.geometry.rows &&
       previous.seqEnd === segment.seqStart &&
       runBytes + segment.data.length <= TERMINAL_OUTPUT_COALESCE_MAX_BYTES;
     if (!mergeable) flush();

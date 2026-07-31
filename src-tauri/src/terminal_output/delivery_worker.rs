@@ -124,17 +124,9 @@ fn emit_with_retry(
     let identity = TerminalOutputEnvelopeIdentity::from(envelope);
     let event = format!("{EVENT_TERMINAL_OUTPUT_V3_PREFIX}{}", inner.terminal_id);
     for attempt in 1..=TERMINAL_OUTPUT_ENVELOPE_EMIT_MAX_ATTEMPTS {
-        let current = inner.state.lock().ok().is_some_and(|state| {
-            !state.closed
-                && state
-                    .in_flight
-                    .as_ref()
-                    .is_some_and(|in_flight| in_flight.identity() == identity)
-        });
-        if !current {
+        if !arm_emitter_call(inner, &identity)? {
             return Ok(());
         }
-        arm_emitter_call(inner, &identity)?;
         let result = emitter(&event, envelope);
         disarm_emitter_call(inner)?;
         match result {
@@ -197,10 +189,19 @@ fn emit_with_retry(
     Ok(())
 }
 
-fn arm_emitter_call(
+fn disarm_emitter_call(inner: &DeliveryInner) -> Result<(), TerminalOutputDeliveryCloseReason> {
+    let mut state = inner.state.lock().map_err(|poisoned| {
+        TerminalOutputDeliveryCloseReason::ContractViolation(poisoned.to_string())
+    })?;
+    state.emitter_call_expires_at = None;
+    inner.changed.notify_all();
+    Ok(())
+}
+
+pub(super) fn arm_emitter_call(
     inner: &DeliveryInner,
     identity: &TerminalOutputEnvelopeIdentity,
-) -> Result<(), TerminalOutputDeliveryCloseReason> {
+) -> Result<bool, TerminalOutputDeliveryCloseReason> {
     let mut state = inner.state.lock().map_err(|poisoned| {
         TerminalOutputDeliveryCloseReason::ContractViolation(poisoned.to_string())
     })?;
@@ -210,20 +211,11 @@ fn arm_emitter_call(
             .as_ref()
             .is_some_and(|in_flight| in_flight.identity() == *identity)
     {
-        return Ok(());
+        return Ok(false);
     }
     state.emitter_call_expires_at = Some(Instant::now() + inner.receipt_timeout);
     inner.changed.notify_all();
-    Ok(())
-}
-
-fn disarm_emitter_call(inner: &DeliveryInner) -> Result<(), TerminalOutputDeliveryCloseReason> {
-    let mut state = inner.state.lock().map_err(|poisoned| {
-        TerminalOutputDeliveryCloseReason::ContractViolation(poisoned.to_string())
-    })?;
-    state.emitter_call_expires_at = None;
-    inner.changed.notify_all();
-    Ok(())
+    Ok(true)
 }
 
 fn next_envelope(
@@ -370,9 +362,14 @@ fn build_next(
         ));
     }
     state.next_envelope_id = envelope_id;
+    let created_at = Instant::now();
+    let direct_event_grace =
+        Duration::from_millis(crate::constants::TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS)
+            .min(receipt_timeout / 2);
     state.in_flight = Some(InFlightEnvelope {
         envelope: envelope.clone(),
-        expires_at: Instant::now() + receipt_timeout,
+        repair_not_before: created_at + direct_event_grace,
+        expires_at: created_at + receipt_timeout,
         repair_attempts: 0,
     });
     state.pending_bytes = state.pending.iter().map(|item| item.0.data.len()).sum();

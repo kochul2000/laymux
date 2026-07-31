@@ -90,6 +90,7 @@ describe("v3 exact envelope repair on a real xterm", () => {
       },
       sendParsedRange: () => Promise.resolve(true),
       repairEnvelope: () => Promise.resolve({ status: "exact", envelope: repaired }),
+      onRepairEventPending: () => undefined,
       onFailStop: (reason) => {
         throw new Error(reason);
       },

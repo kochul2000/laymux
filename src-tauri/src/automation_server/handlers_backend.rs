@@ -212,7 +212,7 @@ pub async fn api_docs() -> impl IntoResponse {
             {
                 "method": "POST", "path": "/api/v1/screenshot",
                 "description": "Capture a screenshot of the current UI. Saved to .screenshots/ dir.",
-                "response": "{ path: string, filename: string, size: number }"
+                "response": "{ path: string, filename: string, size: number, captureStartedAtMs: number, terminalOutputV3AtCaptureStart: { [terminalId]: { admittedSeq, parsedSeq, ... } } }"
             },
             {
                 "method": "POST", "path": "/api/v1/ui/settings",

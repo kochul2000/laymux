@@ -169,6 +169,8 @@ pub const TERMINAL_OUTPUT_ENVELOPE_QUIET_MS: u64 = 4;
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS: u64 = 16;
 /// Server-side bound for a lost envelope receipt.
 pub const TERMINAL_OUTPUT_ENVELOPE_RECEIPT_TIMEOUT_MS: u64 = 5_000;
+/// Maximum direct-event head start before an exact pull may return its envelope.
+pub const TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS: u64 = 1_000;
 /// Total attempts for one immutable envelope before emit fail-stop.
 pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_MAX_ATTEMPTS: usize = 3;
 pub const TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS: u8 = 3;

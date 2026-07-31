@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn receipted_envelope_cannot_rearm_a_synchronous_emitter_call() {
+    let delivery = DesktopOutputDelivery::new("receipt-before-arm".into(), 1);
+    install(&delivery, 0);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_, envelope| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+    delivery.enqueue(delta(0, 1)).unwrap();
+    let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let envelope_identity = identity(&envelope);
+    assert_eq!(
+        delivery
+            .acknowledge_receipt(&envelope_identity, envelope.seq_end)
+            .unwrap(),
+        TerminalOutputReceiptCompletion::Accepted
+    );
+
+    assert!(
+        !super::super::delivery_worker::arm_emitter_call(&delivery.inner, &envelope_identity,)
+            .unwrap()
+    );
+    assert!(delivery
+        .inner
+        .state
+        .lock()
+        .unwrap()
+        .emitter_call_expires_at
+        .is_none());
+
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+    delivery.join().unwrap();
+}
+
+#[test]
 fn hung_emitter_after_exact_repair_receipt_still_releases_the_pending_cap_waiter() {
     let delivery = Arc::new(DesktopOutputDelivery::with_test_timeouts(
         "hung-after-repair".into(),
@@ -27,6 +67,28 @@ fn hung_emitter_after_exact_repair_receipt_still_releases_the_pending_cap_waiter
     let cap = TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES;
     delivery.enqueue(delta(0, cap)).unwrap();
     let frozen = entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let before_pending = {
+        let state = delivery.inner.state.lock().unwrap();
+        let in_flight = state.in_flight.as_ref().unwrap();
+        (in_flight.expires_at, in_flight.repair_attempts)
+    };
+    let pending = delivery
+        .repair_envelope(&identity(&frozen), frozen.seq_start)
+        .unwrap();
+    assert_eq!(
+        pending.status,
+        TerminalOutputEnvelopeRepairStatus::EventPending
+    );
+    assert!(pending.envelope.is_none());
+    {
+        let mut state = delivery.inner.state.lock().unwrap();
+        let in_flight = state.in_flight.as_mut().unwrap();
+        assert_eq!(
+            (in_flight.expires_at, in_flight.repair_attempts),
+            before_pending
+        );
+        in_flight.repair_not_before = Instant::now();
+    }
     let repaired = delivery
         .repair_envelope(&identity(&frozen), frozen.seq_start)
         .unwrap();
@@ -98,6 +160,20 @@ fn emit_failure_preserves_frozen_envelope_for_exact_repair() {
         reason_rx.try_recv(),
         Err(std_mpsc::TryRecvError::Empty)
     ));
+    let pending = delivery
+        .repair_envelope(&identity(&envelope), envelope.seq_start)
+        .unwrap();
+    assert_eq!(
+        pending.status,
+        TerminalOutputEnvelopeRepairStatus::EventPending
+    );
+    assert!(pending.envelope.is_none());
+    {
+        let mut state = delivery.inner.state.lock().unwrap();
+        let in_flight = state.in_flight.as_mut().unwrap();
+        assert_eq!(in_flight.repair_attempts, 0);
+        in_flight.repair_not_before = Instant::now();
+    }
     let repaired = delivery
         .repair_envelope(&identity(&envelope), envelope.seq_start)
         .unwrap();

@@ -377,6 +377,12 @@ impl DesktopOutputDelivery {
                 None,
             ));
         }
+        if Instant::now() < in_flight.repair_not_before {
+            return Ok(repair_response(
+                TerminalOutputEnvelopeRepairStatus::EventPending,
+                None,
+            ));
+        }
         if in_flight.repair_attempts >= TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS {
             return Ok(repair_response(
                 TerminalOutputEnvelopeRepairStatus::Exhausted,
