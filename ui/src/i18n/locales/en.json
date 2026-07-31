@@ -7,8 +7,10 @@
     },
     "terminal": {
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
-      "osOpenConfirm": "Open this file with its associated app on this PC.\n\n{{path}}\n\nContinue?",
-      "osOpenConfirmExecutable": "Warning: this is an executable. Opening it runs it on this PC.\n\n{{path}}\n\nContinue?",
+      "pathLinkHintFile": "Click: viewer · Ctrl: open on this PC · Ctrl+Shift: show location",
+      "pathLinkHintDir": "Click: go to folder · Ctrl: open in file manager · Ctrl+Shift: show location",
+      "osOpenConfirm": "Open this file with its associated app on this PC. Depending on the extension, that app may run it straight away.\n\n{{path}}\n\nContinue?",
+      "osOpenConfirmExecutable": "Warning: opening this extension runs it on this PC or changes the system (executable, script, installer, registry, …).\n\n{{path}}\n\nContinue?",
       "osOpenFailed": "Failed to open in the OS: {{message}}",
       "scrollToBottom": "Scroll to bottom",
       "composerEditor": "Terminal input draft",

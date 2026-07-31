@@ -537,7 +537,8 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
             "pathLinkEnabled": false,
             "pathLinkMaxLength": 1024,
             "showScrollToBottomButton": false,
-            "composerAutocomplete": false
+            "composerAutocomplete": false,
+            "pathLinkOsOpenConfirm": false
         }
     }))
     .unwrap();
@@ -552,6 +553,10 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     assert!(!settings.terminal.show_scroll_to_bottom_button);
     // Issue #505: the autocomplete toggle round-trips like the other terminal leaves.
     assert!(!settings.terminal.composer_autocomplete);
+    // ADR-0099: the OS-open confirmation can be relaxed explicitly, but the
+    // feature toggle defaults on when omitted — neither may flip silently.
+    assert!(!settings.terminal.path_link_os_open_confirm);
+    assert!(settings.terminal.path_link_os_open_enabled);
     // Both composer recall toggles default on when omitted from the JSON above.
     assert!(settings.terminal.composer_history_popup);
     // ADR-0055: history sharing defaults to the whole app when omitted.
@@ -560,4 +565,6 @@ fn rust_settings_model_preserves_frontend_owned_fields() {
     let serialized = serde_json::to_value(settings).unwrap();
     assert_eq!(serialized["profileDefaults"]["maxOutputCacheKB"], 512);
     assert_eq!(serialized["terminal"]["pathLinkMaxLength"], 1024);
+    assert_eq!(serialized["terminal"]["pathLinkOsOpenConfirm"], false);
+    assert_eq!(serialized["terminal"]["pathLinkOsOpenEnabled"], true);
 }

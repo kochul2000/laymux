@@ -3,6 +3,7 @@ import {
   decidePathLinkClickAction,
   isOsHandoffAction,
   needsOsOpenConfirm,
+  pathLinkHintKey,
   requiresHardConfirm,
   HARD_CONFIRM_EXTENSIONS,
 } from "./path-link-os-open";
@@ -35,9 +36,11 @@ describe("decidePathLinkClickAction", () => {
     expect(decidePathLinkClickAction(alt, true, true)).toBe("changeDir");
   });
 
-  it("does not claim Ctrl+Alt", () => {
+  it("does not claim Ctrl+Alt or Ctrl+Meta", () => {
     const ctrlAlt = { ctrlKey: true, shiftKey: false, altKey: true };
+    const ctrlMeta = { ctrlKey: true, shiftKey: false, altKey: false, metaKey: true };
     expect(decidePathLinkClickAction(ctrlAlt, false, true)).toBe("viewer");
+    expect(decidePathLinkClickAction(ctrlMeta, false, true)).toBe("viewer");
   });
 
   it("falls back to the existing behavior when the feature is disabled", () => {
@@ -52,6 +55,18 @@ describe("isOsHandoffAction", () => {
     expect(isOsHandoffAction("osReveal")).toBe(true);
     expect(isOsHandoffAction("viewer")).toBe(false);
     expect(isOsHandoffAction("changeDir")).toBe(false);
+  });
+});
+
+describe("pathLinkHintKey", () => {
+  it("tells the user which modifiers do what, per target kind", () => {
+    expect(pathLinkHintKey(false, true)).toBe("terminal.pathLinkHintFile");
+    expect(pathLinkHintKey(true, true)).toBe("terminal.pathLinkHintDir");
+  });
+
+  it("says nothing when the feature is disabled", () => {
+    expect(pathLinkHintKey(false, false)).toBeNull();
+    expect(pathLinkHintKey(true, false)).toBeNull();
   });
 });
 

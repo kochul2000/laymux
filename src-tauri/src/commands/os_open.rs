@@ -71,28 +71,84 @@ pub fn parent_dir(path: &str) -> Option<String> {
     Some(head.to_string())
 }
 
-/// Arguments for `explorer.exe`.
+/// Strip trailing separators so a selected `src/` and `src` produce the same
+/// argument. Roots (`/`, `D:\`, `\\host\share`) keep their separator because
+/// removing it changes what they address.
+pub fn normalize_target(resolved: &str) -> String {
+    let trimmed = resolved.trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() || trimmed.ends_with(':') || parent_dir(resolved).is_none() {
+        return resolved.to_string();
+    }
+    trimmed.to_string()
+}
+
+/// How the argument must reach the child process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OsOpenArg {
+    /// Normal argument — the standard Windows/POSIX escaping is correct.
+    Escaped(String),
+    /// Verbatim command line. `explorer.exe` does not parse its command line
+    /// with `CommandLineToArgvW`: it reads everything after `/select,` with its
+    /// own rules, so the quotes must wrap the **path only**. Rust's normal
+    /// escaping wraps the whole `/select,<path>` argument once the path
+    /// contains a space, which explorer then fails to recognize as a switch —
+    /// verified on Windows 11: it silently opens the default folder instead of
+    /// the target. Windows paths cannot contain `"`, so embedding the path in
+    /// quotes adds no injection surface.
+    Raw(String),
+}
+
+/// Program + argument to hand the target to the host desktop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OsOpenPlan {
+    pub program: &'static str,
+    pub arg: OsOpenArg,
+}
+
+/// Build the invocation for an already-resolved **host** path.
 ///
-/// `Reveal` uses `/select,<path>`; when the target has no parent (drive root,
-/// UNC share root) there is nothing to select inside, so it degrades to `Open`
-/// (ADR-0099 Decision 2).
-pub fn explorer_args(mode: OsOpenMode, resolved: &str) -> Vec<String> {
-    match mode {
-        OsOpenMode::Open => vec![resolved.to_string()],
-        OsOpenMode::Reveal => match parent_dir(resolved) {
-            Some(_) => vec![format!("/select,{resolved}")],
-            None => vec![resolved.to_string()],
-        },
+/// `Reveal` uses `/select,` on Windows; when the target has no parent (drive
+/// root, UNC share root) there is nothing to select inside, so it degrades to
+/// `Open` (ADR-0099 Decision 2). Linux has no portable "select this entry"
+/// verb, so `Reveal` opens the parent directory instead (Decision 6).
+pub fn plan_for_resolved(mode: OsOpenMode, resolved: &str) -> OsOpenPlan {
+    let target = normalize_target(resolved);
+
+    #[cfg(target_os = "windows")]
+    {
+        let arg = match mode {
+            OsOpenMode::Open => OsOpenArg::Escaped(target),
+            OsOpenMode::Reveal => match parent_dir(&target) {
+                Some(_) => OsOpenArg::Raw(format!("/select,\"{target}\"")),
+                None => OsOpenArg::Escaped(target),
+            },
+        };
+        OsOpenPlan {
+            program: "explorer.exe",
+            arg,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let arg = match mode {
+            OsOpenMode::Open => target,
+            OsOpenMode::Reveal => parent_dir(&target).unwrap_or(target),
+        };
+        OsOpenPlan {
+            program: "xdg-open",
+            arg: OsOpenArg::Escaped(arg),
+        }
     }
 }
 
-/// Target for `xdg-open`. Linux has no portable "select this entry" verb, so
-/// `Reveal` opens the parent directory instead (ADR-0099 Decision 6).
-pub fn xdg_open_target(mode: OsOpenMode, resolved: &str) -> String {
-    match mode {
-        OsOpenMode::Open => resolved.to_string(),
-        OsOpenMode::Reveal => parent_dir(resolved).unwrap_or_else(|| resolved.to_string()),
-    }
+/// Resolve `path` to a host path and build the invocation.
+///
+/// The resolution is deliberately the same call `stat_path` makes, with the
+/// same `(path, wsl_distro)` pair, so the underline that lit up and the target
+/// handed to the OS can never disagree (ADR-0099 Decision 1 / 7).
+pub fn plan_os_open(path: &str, wsl_distro: Option<&str>, mode: OsOpenMode) -> OsOpenPlan {
+    let resolved = path_utils::resolve_address_path_following_symlinks(path, wsl_distro);
+    plan_for_resolved(mode, &resolved)
 }
 
 /// Hand `path` to the host desktop. `mode` is `"open"` or `"reveal"`.
@@ -105,23 +161,28 @@ pub fn xdg_open_target(mode: OsOpenMode, resolved: &str) -> String {
 #[tauri::command]
 pub fn open_in_os(path: String, wsl_distro: Option<String>, mode: String) -> Result<(), String> {
     let mode = parse_os_open_mode(&mode)?;
-    let resolved =
-        path_utils::resolve_address_path_following_symlinks(&path, wsl_distro.as_deref());
+    let plan = plan_os_open(&path, wsl_distro.as_deref(), mode);
 
-    #[cfg(target_os = "windows")]
-    {
-        crate::process::headless_command("explorer.exe")
-            .args(explorer_args(mode, &resolved))
-            .spawn()
-            .map_err(|e| format!("Failed to launch explorer.exe: {e}"))?;
+    let mut command = crate::process::headless_command(plan.program);
+    match &plan.arg {
+        OsOpenArg::Escaped(arg) => {
+            command.arg(arg);
+        }
+        OsOpenArg::Raw(raw) => {
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                command.raw_arg(raw);
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                command.arg(raw);
+            }
+        }
     }
-    #[cfg(target_os = "linux")]
-    {
-        crate::process::headless_command("xdg-open")
-            .arg(xdg_open_target(mode, &resolved))
-            .spawn()
-            .map_err(|e| format!("Failed to launch xdg-open: {e}"))?;
-    }
+    command
+        .spawn()
+        .map_err(|e| format!("Failed to launch {}: {e}", plan.program))?;
 
     Ok(())
 }
@@ -177,48 +238,113 @@ mod tests {
     }
 
     #[test]
-    fn explorer_open_passes_the_path_as_a_single_argument() {
-        // No shell involved: the path never reaches a command interpreter.
+    fn normalize_target_drops_a_trailing_separator_but_keeps_roots() {
+        // A selected `src/` and `src` must produce the same argument.
+        assert_eq!(normalize_target("D:\\proj\\src\\"), "D:\\proj\\src");
+        assert_eq!(normalize_target("/home/u/src/"), "/home/u/src");
+        // Roots address something different without their separator.
+        assert_eq!(normalize_target("D:\\"), "D:\\");
+        assert_eq!(normalize_target("/"), "/");
         assert_eq!(
-            explorer_args(OsOpenMode::Open, "D:\\proj\\a b.txt"),
-            vec!["D:\\proj\\a b.txt".to_string()]
+            normalize_target("\\\\wsl.localhost\\Ubuntu\\"),
+            "\\\\wsl.localhost\\Ubuntu\\"
         );
     }
 
-    #[test]
-    fn explorer_reveal_uses_select() {
-        assert_eq!(
-            explorer_args(
+    #[cfg(target_os = "windows")]
+    mod windows_plan {
+        use super::*;
+
+        #[test]
+        fn open_passes_the_path_as_a_normal_argument() {
+            // No shell involved: the path never reaches a command interpreter,
+            // and the standard escaping quotes a spaced path correctly.
+            let plan = plan_for_resolved(OsOpenMode::Open, "D:\\proj\\a b.txt");
+            assert_eq!(plan.program, "explorer.exe");
+            assert_eq!(plan.arg, OsOpenArg::Escaped("D:\\proj\\a b.txt".into()));
+        }
+
+        #[test]
+        fn reveal_quotes_the_path_only_inside_a_raw_command_line() {
+            // Verified on Windows 11: with the whole `/select,<path>` argument
+            // quoted (what the normal escaping produces for a spaced path)
+            // explorer opens the default folder instead of the target.
+            let plan = plan_for_resolved(OsOpenMode::Reveal, "D:\\proj dir\\a b.txt");
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Raw("/select,\"D:\\proj dir\\a b.txt\"".into())
+            );
+        }
+
+        #[test]
+        fn reveal_works_for_a_wsl_unc_path() {
+            let plan = plan_for_resolved(
                 OsOpenMode::Reveal,
-                "\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt"
-            ),
-            vec!["/select,\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt".to_string()]
-        );
+                "\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt",
+            );
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Raw("/select,\"\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt\"".into())
+            );
+        }
+
+        #[test]
+        fn reveal_degrades_to_open_without_a_parent() {
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Reveal, "D:\\").arg,
+                OsOpenArg::Escaped("D:\\".into())
+            );
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Reveal, "\\\\wsl.localhost\\Ubuntu").arg,
+                OsOpenArg::Escaped("\\\\wsl.localhost\\Ubuntu".into())
+            );
+        }
+
+        #[test]
+        fn reveal_normalizes_a_trailing_separator() {
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Reveal, "D:\\proj\\src\\").arg,
+                OsOpenArg::Raw("/select,\"D:\\proj\\src\"".into())
+            );
+        }
+
+        #[test]
+        fn plan_reuses_the_stat_path_resolution() {
+            // ADR-0099 Decision 1: the argument is the host path `stat_path`
+            // resolved from the same (path, distro) pair — not a second rule.
+            assert_eq!(
+                plan_os_open("/mnt/c/Users/u/a.txt", None, OsOpenMode::Open).arg,
+                OsOpenArg::Escaped("C:\\Users\\u\\a.txt".into())
+            );
+            assert_eq!(
+                plan_os_open("/home/u/a.txt", Some("Ubuntu"), OsOpenMode::Open).arg,
+                OsOpenArg::Escaped("\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt".into())
+            );
+            assert_eq!(
+                plan_os_open("/home/u/a.txt", Some("Ubuntu"), OsOpenMode::Reveal).arg,
+                OsOpenArg::Raw("/select,\"\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt\"".into())
+            );
+        }
     }
 
-    #[test]
-    fn explorer_reveal_degrades_to_open_without_a_parent() {
-        assert_eq!(
-            explorer_args(OsOpenMode::Reveal, "D:\\"),
-            vec!["D:\\".to_string()]
-        );
-        assert_eq!(
-            explorer_args(OsOpenMode::Reveal, "\\\\wsl.localhost\\Ubuntu"),
-            vec!["\\\\wsl.localhost\\Ubuntu".to_string()]
-        );
-    }
+    #[cfg(not(target_os = "windows"))]
+    mod posix_plan {
+        use super::*;
 
-    #[test]
-    fn xdg_open_reveal_falls_back_to_the_parent_directory() {
-        assert_eq!(
-            xdg_open_target(OsOpenMode::Open, "/home/u/a.txt"),
-            "/home/u/a.txt"
-        );
-        assert_eq!(
-            xdg_open_target(OsOpenMode::Reveal, "/home/u/a.txt"),
-            "/home/u"
-        );
-        assert_eq!(xdg_open_target(OsOpenMode::Reveal, "/"), "/");
+        #[test]
+        fn reveal_falls_back_to_the_parent_directory() {
+            let plan = plan_for_resolved(OsOpenMode::Open, "/home/u/a.txt");
+            assert_eq!(plan.program, "xdg-open");
+            assert_eq!(plan.arg, OsOpenArg::Escaped("/home/u/a.txt".into()));
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Reveal, "/home/u/a.txt").arg,
+                OsOpenArg::Escaped("/home/u".into())
+            );
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Reveal, "/").arg,
+                OsOpenArg::Escaped("/".into())
+            );
+        }
     }
 
     #[test]

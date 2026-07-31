@@ -26,13 +26,9 @@ import {
   shouldEnableTerminalWebgl,
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
-import {
-  decidePathLinkClickAction,
-  isOsHandoffAction,
-  needsOsOpenConfirm,
-  requiresHardConfirm,
-  type PathLinkClickAction,
-} from "@/lib/path-link-os-open";
+import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
+import { createPathLinkClickHandlers } from "@/lib/path-link-click";
+import { createPathLinkHint } from "@/lib/path-link-hint";
 import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
@@ -1354,16 +1350,25 @@ export function TerminalView({
     // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
+    // #687: 밑줄 위 hover 힌트 라벨. wrapper 안에 붙이고 effect cleanup 에서 제거.
+    const pathLinkHint = createPathLinkHint(wrapperRef.current ?? containerRef.current!);
     const pathLink = createPathLinkController(terminal, {
       onOpenPath: (absPath) => {
         useFileViewerStore.getState().openFileViewer(absPath);
       },
       // #687: 호스트 OS 로 위임한다. 확인 대화상자는 이미 mouseup 에서 끝났다.
       // 실패는 spawn 실패뿐이며(그 이후는 OS 소관), 조용히 삼키지 않고 알린다.
+      // 모달(alert)이 아니라 알림 스토어를 쓴다 — 모달은 터미널 입력을 막고
+      // dev 자동화 루프(스크린샷/Automation)를 세운다.
       onOsAction: (absPath, mode) => {
         openInOs(absPath, mode).catch((err) => {
           console.warn(`[pathLink] ${instanceId} OS ${mode} 실패:`, err);
-          window.alert(i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }));
+          useNotificationStore.getState().addNotification({
+            terminalId: instanceId,
+            workspaceId: resolveWorkspaceId(instanceId),
+            message: i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }),
+            level: "error",
+          });
         });
       },
       onChangeDir: (absPath) => {
@@ -1402,6 +1407,7 @@ export function TerminalView({
     // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
+      pathLinkHint.hide();
       pathLink.clear();
     };
 
@@ -2839,10 +2845,25 @@ export function TerminalView({
     const handleMouseMove = (e: MouseEvent) => {
       if (outerEl) outerEl.style.cursor = "";
       // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
-      setPathLinkCursor(pathLink.hitTest(e.clientX, e.clientY));
+      const inside = pathLink.hitTest(e.clientX, e.clientY);
+      setPathLinkCursor(inside);
+      // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
+      // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
+      const sel = inside ? pathLink.getCurrent() : null;
+      const rect = sel ? pathLink.getRect() : null;
+      const hintKey = sel
+        ? pathLinkHintKey(
+            sel.isDirectory,
+            useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
+          )
+        : null;
+      if (rect && hintKey) pathLinkHint.show(rect, i18n.t(hintKey, { ns: "common" }));
+      else pathLinkHint.hide();
     };
+    const handleMouseLeave = () => pathLinkHint.hide();
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
+    outerEl?.addEventListener("mouseleave", handleMouseLeave);
 
     // #363: 밑줄(검증된 경로) 클릭으로 열기/이동. 데코레이션은 pointer-events:none
     // 이라 mousedown/up 은 그대로 xterm 으로 흘러가 선택/드래그가 정상 동작한다.
@@ -2856,67 +2877,39 @@ export function TerminalView({
     // preventDefault + stopImmediatePropagation 으로 종결해, xterm 의 선택 확장,
     // TUI 로의 마우스 리포팅 전달, #352 우회가 같은 클릭을 함께 처리하지 못하게
     // 한다(#352 쪽은 isModifierLinkClick 이 Ctrl 조합을 배제해 이중 안전).
-    // 액션은 mousedown 시점에 확정해 두었다가 mouseup 에서 실행한다.
-    let pathLinkPress: {
-      sel: VerifiedPathSelection;
-      action: PathLinkClickAction;
-      x: number;
-      y: number;
-    } | null = null;
-    const PATH_LINK_CLICK_SLOP = 4;
-    const handlePathLinkMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0) {
-        pathLinkPress = null;
-        return;
-      }
-      const sel = pathLink.getCurrent();
-      if (!sel || !pathLink.hitTest(e.clientX, e.clientY)) {
-        pathLinkPress = null;
-        return;
-      }
-      const action = decidePathLinkClickAction(
-        e,
-        sel.isDirectory,
-        useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
-      );
-      pathLinkPress = { sel, action, x: e.clientX, y: e.clientY };
-      if (isOsHandoffAction(action)) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-      }
-    };
-    const handlePathLinkMouseUp = (e: MouseEvent) => {
-      const press = pathLinkPress;
-      pathLinkPress = null;
-      if (!press) return;
-      const moved =
-        Math.abs(e.clientX - press.x) > PATH_LINK_CLICK_SLOP ||
-        Math.abs(e.clientY - press.y) > PATH_LINK_CLICK_SLOP;
-      if (moved) return; // 드래그 → 열지 않음(재선택 의도).
-      if (isOsHandoffAction(press.action)) {
-        // 실행으로 이어지는 경로만 확인한다(reveal·디렉토리 열기는 실행이 아님).
-        const confirmAlways = useSettingsStore.getState().terminal.pathLinkOsOpenConfirm;
-        const needsConfirm = needsOsOpenConfirm({
-          action: press.action,
-          path: press.sel.absPath,
-          isDirectory: press.sel.isDirectory,
-          confirmAlways,
-        });
-        if (needsConfirm) {
-          const key = requiresHardConfirm(press.sel.absPath)
-            ? "terminal.osOpenConfirmExecutable"
-            : "terminal.osOpenConfirm";
-          if (!window.confirm(i18n.t(key, { ns: "common", path: press.sel.absPath }))) return;
-        }
-        // mousedown 을 preventDefault 했으므로 포커스가 이동하지 않았다 —
-        // 사용자가 대화상자를 닫은 뒤 그대로 타이핑할 수 있게 되돌려 준다.
-        terminalRef.current?.focus();
-      }
-      pathLink.activate(press.sel, press.action);
-    };
+    // 상태 기계는 path-link-click.ts 가 소유한다(단위 테스트 대상). 여기서는
+    // 스토어·i18n·터미널 포커스만 주입해 배선한다.
+    const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
+      getSelection: () => pathLink.getCurrent(),
+      hitTest: (x, y) => pathLink.hitTest(x, y),
+      getSettings: () => {
+        const terminalSettings = useSettingsStore.getState().terminal;
+        return {
+          osOpenEnabled: terminalSettings.pathLinkOsOpenEnabled,
+          confirmAlways: terminalSettings.pathLinkOsOpenConfirm,
+        };
+      },
+      confirm: ({ path }) =>
+        window.confirm(
+          i18n.t(
+            requiresHardConfirm(path)
+              ? "terminal.osOpenConfirmExecutable"
+              : "terminal.osOpenConfirm",
+            { ns: "common", path },
+          ),
+        ),
+      activate: (sel, action) => pathLink.activate(sel, action),
+      // mousedown 을 preventDefault 했고 네이티브 대화상자가 포커스를 가져가므로,
+      // 진행·취소 어느 쪽이든 터미널 포커스를 되돌려 준다.
+      onOsHandoffSettled: () => terminalRef.current?.focus(),
+    });
     // capture 단계로 xterm 핸들러보다 먼저 관찰한다. 전파를 막는 것은 위의
-    // 호스트 OS 위임 조합뿐이고, 나머지 클릭은 그대로 흘려보낸다.
+    // 호스트 OS 위임 조합뿐이고, 나머지 클릭은 그대로 흘려보낸다. #352 우회
+    // 리스너도 같은 wrapper 엘리먼트의 capture 에 등록되므로, 여기서 먼저
+    // 등록해 두는 것이 순서상 우선한다(실질 방어는 isModifierLinkClick 의 Ctrl
+    // 배제이며, 이 등록 순서는 그 이중 안전이다).
+    const handlePathLinkMouseDown = (e: MouseEvent) => pathLinkClick.onMouseDown(e);
+    const handlePathLinkMouseUp = (e: MouseEvent) => pathLinkClick.onMouseUp(e);
     outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
     window.addEventListener("mouseup", handlePathLinkMouseUp);
 
@@ -5691,6 +5684,8 @@ export function TerminalView({
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
+      outerEl?.removeEventListener("mouseleave", handleMouseLeave);
+      pathLinkHint.dispose();
       outerEl?.removeEventListener("pointerdown", handlePointerDown);
       outerEl?.removeEventListener("mousedown", handlePathLinkMouseDown, true);
       window.removeEventListener("mouseup", handlePathLinkMouseUp);

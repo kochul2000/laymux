@@ -54,6 +54,8 @@ export interface PathLinkController {
   getCurrent: () => VerifiedPathSelection | null;
   /** viewport 좌표가 현재 밑줄(데코레이션) 영역 안인지. 없으면 false. */
   hitTest: (clientX: number, clientY: number) => boolean;
+  /** 현재 밑줄의 뷰포트 사각형(힌트 라벨 배치용). 없으면 null. */
+  getRect: () => DOMRect | null;
   /**
    * 주어진 선택을 결정된 액션에 따라 라우팅. 액션 판정(수정자 해석·설정
    * 반영·확인 대화상자)은 호출부가 `path-link-os-open` 의 순수 함수로 한다.
@@ -134,6 +136,11 @@ export function createPathLinkController(
       if (!current || !el) return false;
       const r = el.getBoundingClientRect();
       return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    },
+    getRect: () => {
+      const el = decoration?.element;
+      if (!current || !el) return null;
+      return el.getBoundingClientRect();
     },
     activate: (sel: VerifiedPathSelection, action: PathLinkClickAction) => {
       switch (action) {
