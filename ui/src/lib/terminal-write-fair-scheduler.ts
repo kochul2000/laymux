@@ -35,6 +35,19 @@ export const TERMINAL_WRITE_MIN_CLASS_SHARE = 1;
 /** Bounds the cycle length a settings file can ask the scheduler to honour. */
 export const TERMINAL_WRITE_MAX_CLASS_SHARE = 1000;
 
+/**
+ * A pending class is served after this many consecutive turns went elsewhere,
+ * whatever the shares say.
+ *
+ * Share balances alone bound a class's gap only while the competing set stays
+ * fixed: classes drain and re-enter, and an allowed ratio (1000:1) would stretch
+ * the hidden class's share-driven gap past the parsed-progress and checkpoint
+ * catch-up contracts. This floor is absolute and share-independent. With the
+ * default shares the share-driven gap (at most 5 turns) always arrives first, so
+ * the floor only rescues extreme configurations and class churn.
+ */
+export const TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS = 32;
+
 const TERMINAL_WRITE_PRIORITY_CLASSES: readonly TerminalWritePriority[] = [
   "focused",
   "foreground",
@@ -138,6 +151,7 @@ type PendingTurn = {
 export class TerminalWriteFairScheduler {
   private readonly pendingTurns = new Map<TerminalWriteFairOwner, PendingTurn>();
   private readonly classBalances = new Map<TerminalWritePriority, number>();
+  private readonly classSkippedTurns = new Map<TerminalWritePriority, number>();
   private classShare: TerminalWriteClassShare = { ...TERMINAL_WRITE_DEFAULT_CLASS_SHARE };
   private pendingOwners: TerminalWriteFairOwner[] = [];
   private activeTurn: ActiveTurn | undefined;
@@ -174,7 +188,8 @@ export class TerminalWriteFairScheduler {
   setClassShare(share: unknown): void {
     this.classShare = sanitizeTerminalWriteClassShare(share);
     // Balances are denominated in the old shares. Drop them so the next cycle
-    // starts from the new ratio instead of paying off a rescaled debt.
+    // starts from the new ratio instead of paying off a rescaled debt. Skip
+    // counts stay: they bound how long a pending class has already waited.
     this.classBalances.clear();
   }
 
@@ -231,6 +246,7 @@ export class TerminalWriteFairScheduler {
     this.activeTurn = undefined;
     this.pendingTurns.clear();
     this.classBalances.clear();
+    this.classSkippedTurns.clear();
     this.classShare = { ...TERMINAL_WRITE_DEFAULT_CLASS_SHARE };
     this.pendingOwners.length = 0;
     this.macrotaskScheduled = false;
@@ -286,11 +302,57 @@ export class TerminalWriteFairScheduler {
       if (!longestWaitingPerClass.has(priority)) longestWaitingPerClass.set(priority, owner);
     }
     if (longestWaitingPerClass.size === 0) return undefined;
+    // A class that stopped competing keeps neither debt nor credit: carrying it
+    // across an absence would let a re-entering class jump the cycle or serve a
+    // sentence, and either one breaks the other classes' gap bound.
+    for (const priority of this.classBalances.keys()) {
+      if (!longestWaitingPerClass.has(priority)) this.classBalances.delete(priority);
+    }
+    for (const priority of this.classSkippedTurns.keys()) {
+      if (!longestWaitingPerClass.has(priority)) this.classSkippedTurns.delete(priority);
+    }
 
+    const selectedClass =
+      this.overdueClass(longestWaitingPerClass) ?? this.highestBalanceClass(longestWaitingPerClass);
+    if (selectedClass === undefined) return undefined;
+    for (const priority of longestWaitingPerClass.keys()) {
+      if (priority === selectedClass) {
+        this.classSkippedTurns.set(priority, 0);
+        continue;
+      }
+      this.classSkippedTurns.set(
+        priority,
+        Math.min(
+          TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS,
+          (this.classSkippedTurns.get(priority) ?? 0) + 1,
+        ),
+      );
+    }
+    return longestWaitingPerClass.get(selectedClass);
+  }
+
+  /** The absolute floor: whichever pending class has waited out its bound. */
+  private overdueClass(
+    pendingClasses: Map<TerminalWritePriority, TerminalWriteFairOwner>,
+  ): TerminalWritePriority | undefined {
+    for (const priority of pendingClasses.keys()) {
+      if ((this.classSkippedTurns.get(priority) ?? 0) >= TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS) {
+        // Neither debt nor credit for a rescued class, so the floor cannot turn
+        // into extra long-run share the way per-pane promotion did (issue #686).
+        this.classBalances.set(priority, 0);
+        return priority;
+      }
+    }
+    return undefined;
+  }
+
+  private highestBalanceClass(
+    pendingClasses: Map<TerminalWritePriority, TerminalWriteFairOwner>,
+  ): TerminalWritePriority | undefined {
     let selectedClass: TerminalWritePriority | undefined;
     let selectedBalance = Number.NEGATIVE_INFINITY;
     let totalShare = 0;
-    for (const priority of longestWaitingPerClass.keys()) {
+    for (const priority of pendingClasses.keys()) {
       const share = this.classShare[priority];
       totalShare += share;
       const balance = (this.classBalances.get(priority) ?? 0) + share;
@@ -300,9 +362,10 @@ export class TerminalWriteFairScheduler {
         selectedBalance = balance;
       }
     }
-    if (selectedClass === undefined) return undefined;
-    this.classBalances.set(selectedClass, selectedBalance - totalShare);
-    return longestWaitingPerClass.get(selectedClass);
+    if (selectedClass !== undefined) {
+      this.classBalances.set(selectedClass, selectedBalance - totalShare);
+    }
+    return selectedClass;
   }
 
   private resolvePriority(pending: PendingTurn): TerminalWritePriority {
@@ -322,9 +385,12 @@ export class TerminalWriteFairScheduler {
     turn.released = true;
     if (this.activeTurn === turn) this.activeTurn = undefined;
     this.scheduleNext();
-    // Class balances only mean something while classes are competing. Once the
-    // app drains, a later burst starts from an even cycle instead of old debt.
-    if (this.activeTurn === undefined && this.pendingTurns.size === 0) this.classBalances.clear();
+    // Class balances and skip counts only mean something while classes compete.
+    // Once the app drains, a later burst starts from an even cycle.
+    if (this.activeTurn === undefined && this.pendingTurns.size === 0) {
+      this.classBalances.clear();
+      this.classSkippedTurns.clear();
+    }
   }
 }
 

@@ -25,10 +25,14 @@ ADR-0098 은 pane owner 하나하나에 가중치를 주고(focused 4, visible 2
 
 1. **2단 배분.** 1단은 클래스 선택이다. pending pane 이 하나라도 있는 클래스만 cycle 에 참여하고, 그 클래스들의 몫으로 smooth weighted round-robin 을 돌린다. 2단은 선택된 클래스 안에서 가장 오래 기다린 pane(pending FIFO 선두)을 고르고, 서비스된 pane 은 다시 대기열 꼬리로 간다. 따라서 클래스 몫은 pane 수와 무관하고, pane 수는 그 클래스 **안에서만** 몫을 나눈다.
 2. **클래스 판정 입력은 ADR-0098 Decision 3 그대로다.** container 가 `display:none` 또는 0 px 이면 focus 표시보다 우선해 hidden 으로 판정하고, 값은 request 시점에 동결하지 않고 dequeue 시점의 최신 committed visibility/focus ref 에서 읽는다. resolver 실패는 hidden 으로 fail-safe 하며 admission 을 멈추지 않는다. 클래스가 바뀐 pane 은 다음 dequeue 부터 새 클래스의 대기열에서 자기 차례를 받는다.
-3. **몫은 설정값이다.** `terminal.parserAdmission.{focusedShare,visibleShare,hiddenShare}` 는 상대값이고 합이 한 cycle 이다. 유효 범위는 `1..=1000` 이며 `0` 은 그 클래스의 parser 를 멈추는 뜻이므로 허용하지 않는다. Rust `ParserAdmissionSettings::sanitized()` 와 프론트엔드 `sanitizeTerminalWriteClassShare()` 가 같은 범위로 clamp 하고 누락·비수치 항목은 기본값으로 되돌리므로, 잘못된 파일이 admission 을 멈추게 할 수 없다. `validate_settings` 는 범위 위반을 `/terminal/parserAdmission/<field>` 로 보고한다. 기본값·범위 상수는 Rust `constants.rs` 와 `terminal-write-fair-scheduler.ts` 에 각각 한 곳만 둔다.
+3. **몫은 설정값이다.** `terminal.parserAdmission.{focusedShare,visibleShare,hiddenShare}` 는 상대값이고 합이 한 cycle 이다. 유효 범위는 `1..=1000` 이며 `0` 은 그 클래스의 parser 를 멈추는 뜻이므로 허용하지 않는다. Rust `ParserAdmissionSettings::sanitized()` 와 프론트엔드 `sanitizeTerminalWriteClassShare()` 가 같은 범위로 clamp 하므로 범위 밖 수치가 admission 을 멈추게 할 수 없다. 누락은 `#[serde(default)]`·프론트 기본값으로 채운다. **타입 오류는 이 필드만 관용적으로 파싱하지 않는다** — `Settings` 역직렬화 실패는 파일 전체를 `ParseError` 로 만들고 기본 설정 기동 + `SettingsRecoveryModal` 로 이어지는 기존 경로를 그대로 따른다. 이는 모든 수치 설정에 공통인 동작이며, 필드별 관용 파싱은 이 결정의 범위가 아니라 설정 로딩 정책 전반의 별도 결정이다. `validate_settings` 는 범위 위반을 `/terminal/parserAdmission/<field>` 로 보고한다. 기본값·범위 상수는 Rust `constants.rs` 와 `terminal-write-fair-scheduler.ts` 에 각각 한 곳만 둔다.
 4. **Settings UI 는 만들지 않는다.** 이 값은 정책 튜닝 knob 이며 settings.json 직접 편집 경로만 지원한다. ADR-0098 은 "재현성이 낮아진다" 는 이유로 노출 자체를 기각했지만, 실측 결과 적정 비율이 pane 구성과 사용 습관에 따라 달라진다는 것이 확인됐으므로 기본값은 코드가 고정하고 조정 여지는 파일로 남긴다.
 5. **적용 시점.** 몫 변경은 다음 dequeue 부터 반영한다. 이미 active 인 write 를 선점하지 않고 materialized batch·envelope identity·sequence·callback 을 바꾸지 않으며 xterm 을 재생성하지 않는다. 이전 몫으로 계산된 클래스 balance 는 폐기해 새 비율로 다음 cycle 을 시작한다. 앱 전체가 drain 되면 balance 를 비워 다음 burst 가 균등한 cycle 에서 시작한다.
-6. **starvation floor 는 클래스 몫에서 파생된다.** pane 단위 절대 turn bound(age promotion)는 제거한다 — 그것이 위 Context 1·3 의 원인이다. 모든 클래스 몫이 양수이므로 각 클래스는 `cycle / 자기 몫` turn 마다 한 turn 을 받고, 클래스 안에서는 round-robin 이므로 pane 은 자기 클래스 구성원 수만큼의 자기 클래스 turn 안에 반드시 서비스된다. 즉 pending pane 의 최대 대기는 `ceil(cycle / 자기 클래스 몫) × 자기 클래스 pane 수` turn 이며, 기본값에서 hidden pane N개면 `5N` turn 이다. wall-clock 상한은 이 bound 가 아니라 ADR-0098 의 3초 checkpoint catch-up·5초 parsed-progress 계약으로 검증한다.
+6. **starvation floor 는 클래스 단위이고 두 겹이다.** pane 단위 절대 turn bound(age promotion)는 제거한다 — 그것이 위 Context 1·3 의 원인이다.
+   - **몫에서 파생되는 bound.** 모든 클래스 몫이 양수이므로, 경쟁하는 클래스 집합이 고정된 구간에서 각 클래스는 `ceil(cycle / 자기 몫)` turn 마다 한 turn 을 받는다. 클래스 안은 round-robin 이므로 pending pane 의 대기는 `ceil(cycle / 자기 클래스 몫) × 자기 클래스 pane 수` turn 이고 기본값에서 hidden pane N개면 `5N` turn 이다.
+   - **절대 bound.** smooth balance 만으로는 클래스가 drain·재진입하는 구간과 설정이 허용하는 극단 비율(예 `1000/1000/1` 은 몫만으로 2,001 turn 간격)에서 위 bound 가 성립하지 않는다. 그래서 pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) 연속 turn 안에 반드시 한 turn 을 받는다. 두 bound 중 먼저 도달하는 쪽이 실제 상한이며, 기본값에서는 항상 몫 쪽(hidden 5 turn)이 먼저다. floor 로 구제된 클래스는 balance 를 0 으로 되돌려 빚도 credit 도 남기지 않으므로 floor 가 장기 지분으로 바뀌지 않는다.
+   - **경쟁에서 빠진 클래스는 balance·skip 카운터를 버린다.** 재진입 클래스가 옛 credit 으로 cycle 을 앞지르거나 옛 debt 으로 자기 차례를 놓치면 다른 클래스의 bound 가 깨지기 때문이다.
+   - wall-clock 상한은 이 turn bound 가 아니라 ADR-0098 의 3초 checkpoint catch-up·5초 parsed-progress 계약으로 검증한다. 32 turn 은 그 계약 아래에서 잡은 값이다.
 7. **hidden 은 pause 가 아니다.** hidden 몫 20% 는 pane 수가 늘어도 사라지지 않고 N 등분된다. hidden 의 두 parser 와 parsed ACK 는 계속 전진하고 부족한 처리량은 ADR-0097 대로 PTY backpressure 로 전달한다. congestion 을 reset/replay/replacement attach/fail-stop 사유로 승격하거나 visible parse 전에 ACK 하지 않는다.
 
 ## Alternatives Considered
@@ -38,6 +42,9 @@ ADR-0098 은 pane owner 하나하나에 가중치를 주고(focused 4, visible 2
 - **strict foreground priority 또는 hidden parser pause.** ADR-0098 이 기각한 대안 그대로다. hidden 의 5초 parsed-progress expiry, ring pressure, reconnect checkpoint stale 을 정상 부하에서 만들 수 있다.
 - **클래스 몫을 pane 수로 다시 나눠 "pane 당 몫" 으로 환산한다.** pane 단위 가중치와 수학적으로 같아지므로 같은 희석 문제로 되돌아간다.
 - **몫을 자동 튜닝한다(부하·backlog 기반 적응).** 재현성이 떨어지고 acceptance 를 고정할 수 없다. 고정 기본값 + 설정 override 로 둔다.
+- **절대 bound 없이 몫만으로 starvation 을 보장한다.** 처음 구현이 이것이었고, 리뷰에서 두 반례가 나왔다 — 클래스 집합이 바뀌는 구간(drain/재진입으로 balance 가 얼어 있다가 돌아옴)과 설정이 허용하는 극단 비율(`1000/1000/1` 에서 hidden 간격 2,001 turn, parsed frontier 는 약 4,002 turn). 어느 쪽도 3초·5초 계약을 보장할 수 없어 클래스 단위 절대 floor 를 추가했다.
+- **설정 범위를 좁혀(예 최대 비율 20:1) 극단값을 막는다.** 극단 비율은 막히지만 클래스 drain/재진입에서 bound 가 깨지는 문제는 남는다. 절대 floor 는 두 경우를 한 규칙으로 덮으므로 범위는 `1..=1000` 으로 두고 floor 에 보장을 맡겼다.
+- **타입 오류를 필드별 관용 deserializer 로 흡수한다.** 이 세 필드만 관용적으로 파싱하면 나머지 수백 개 수치 설정은 여전히 파일 전체 `ParseError` 로 떨어지므로 계약이 필드마다 달라진다. 로딩 정책은 한 곳에 두고, 관용 파싱이 필요하다면 설정 로딩 전반의 별도 결정으로 다룬다.
 - **클래스를 더 쪼갠다(workspace 별, pane group 별).** 정책 공간이 커지고 상태가 늘어난다. 요구는 활성 workspace 대 나머지의 구분이므로 세 클래스로 충분하다.
 
 ## Consequences
@@ -48,5 +55,6 @@ ADR-0098 은 pane owner 하나하나에 가중치를 주고(focused 4, visible 2
 - 활성 pane 하나만 flood 하는 구성(활성 1 + hidden 8)은 두 정책을 구분하지 못한다 — 그 pane 의 producer 가 먼저 한계라 어느 정책에서도 활성:hidden 비가 2.6~3.2 로 비슷하게 나온다. 정책 비교는 활성 클래스가 요구 포화인 구성에서 해야 한다.
 - ADR-0098 Decision 11 하네스(8 hot pane, `background`, 150,000 라인)에서는 두 정책의 drain·service gap·screenshot 이 인접 실행 비교에서 사실상 동일했다(candidate 23.7/24.7 s vs 직후 재측정한 main 24.3/24.6 s). 같은 코드의 세션 초반 실행이 21.2/22.2 s 였으므로 이 환경에는 세션 드리프트가 있고, 정책 간 차이를 주장할 때는 인접 교차 실행이 필요하다.
 - 설정값이 생겼으므로 성능 회귀 보고에는 `terminal.parserAdmission` 값이 함께 필요하다. acceptance·벤치는 기본값에서 수행한다.
-- 결정적 테스트가 (a) 한 cycle 의 클래스 배분, (b) hidden pane 2/8/40 에서 활성 몫 불변(issue #686 회귀), (c) 클래스 안 round-robin 순서, (d) focused pane 을 늘려도 hidden 몫이 줄지 않음, (e) idle 클래스의 몫이 backlog 클래스로 넘어감, (f) 클래스 몫 starvation bound 안에서 모든 hidden pane 서비스, (g) 설정값 채택과 clamp, (h) 설정 변경 구독을 고정한다.
+- 결정적 테스트가 (a) 한 cycle 의 클래스 배분, (b) hidden pane 2/8/40 에서 활성 몫 불변(issue #686 회귀), (c) 클래스 안 round-robin 순서, (d) focused pane 을 늘려도 hidden 몫이 줄지 않음, (e) idle 클래스의 몫이 backlog 클래스로 넘어감, (f) 클래스 몫 starvation bound 안에서 모든 hidden pane 서비스, (g) `1000/1000/1` 극단 설정에서도 32 turn 절대 floor 로 hidden 클래스가 서비스됨, (h) 클래스 drain·재진입 뒤에도 몫 간격이 유지됨, (i) 설정값 채택과 clamp, (j) 설정 변경 구독을 고정한다. floor 상수를 사실상 무한으로 바꾸는 사보타주에서 (g) 가 실패한다.
+- 설정 파일에 타입 오류를 넣으면 이 knob 하나 때문에 전체 설정이 기본값으로 기동한다. 손으로 편집하는 값이라 오타 위험이 실재하는 비용이며, 완화하려면 설정 로딩 정책 전반(필드별 관용 파싱 또는 부분 복구)을 별도 결정으로 다뤄야 한다.
 - ADR-0098 Decision 11 하네스(`terminal_output_661.py`, `background`, 150,000 라인)는 그대로 acceptance 다. 재검토 조건은 "hidden 의 sampled service gap 또는 고정 `writeSeq` target catch-up 이 screenshot capture 정지와 무관하게 3초에 도달" 이다. 이 환경에서 `screenshotSucceeded` 는 정책과 무관하게 이미 실패하며(dev debug 빌드 html2canvas capture 3.3~3.9 s > 3 s) 별도 이슈(#700)로 분리했다.

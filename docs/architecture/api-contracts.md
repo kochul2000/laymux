@@ -70,7 +70,11 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 `terminal.parserAdmission`은 앱 전역 xterm parser admission turn 을 **pane 단위가 아니라 클래스 단위**로 나누는 비율이다([ADR-0101](../adr/0101-active-workspace-weighted-parser-admission.md)). 세 값은 상대값이고 합이 한 admission cycle 이므로 기본값 `5/3/2`는 focused 50%, 활성 workspace 의 나머지 visible 30%, hidden 전체 20%를 뜻한다. 클래스 안에서는 pane 들이 round-robin 으로 돌아가므로 hidden pane 이 3개든 300개든 활성 workspace 몫은 변하지 않는다.
 
-**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 하고 누락·비수치 항목은 기본값으로 되돌린다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
+**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
+
+값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만의 문제가 아니라 `Settings` 역직렬화 자체를 실패시키므로 `load_settings_validated`가 파일 전체를 `ParseError`로 판정하고 기본 설정으로 기동한 뒤 `SettingsRecoveryModal`로 알린다 — 모든 수치 설정에 공통인 기존 동작이며 이 필드만 관용적으로 파싱하지 않는다. 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
+
+극단 비율을 넣어도 한 클래스가 무한정 밀리지 않는다. pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) turn 안에 반드시 한 turn 을 받는다. 기본값에서는 몫이 만드는 간격(hidden 최대 5 turn)이 늘 먼저 도달하므로 이 floor 는 극단 설정과 클래스 drain/재진입에서만 작동한다.
 
 적용 시점은 저장 직후 다음 admission turn 이다. 프론트엔드는 `useTerminalParserAdmissionSettings`가 store 변경을 구독해 scheduler 에 넣으며, 진행 중인 physical write 를 선점하거나 xterm 을 재생성하지 않는다. 클래스 몫이 바뀌면 이전 몫으로 계산된 balance 는 폐기해 새 비율로 다음 cycle 을 시작한다.
 

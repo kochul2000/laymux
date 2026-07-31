@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTerminalWriteFairOwner,
   sanitizeTerminalWriteClassShare,
+  TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS,
   TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS,
   TERMINAL_WRITE_DEFAULT_CLASS_SHARE,
   TERMINAL_WRITE_MAX_CLASS_SHARE,
@@ -369,6 +370,73 @@ describe("TerminalWriteFairScheduler", () => {
     // Adding focused panes divides the focused class's share among them; it
     // never consumes the hidden class's share.
     expect(countOf(served, "hidden")).toBe(TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background);
+  });
+
+  it("serves a starved class within the absolute floor even under an extreme ratio", () => {
+    const { scheduler, runNextTask } = createHarness();
+    // The settings range allows this. Its share-driven gap would be 2001 turns,
+    // far past the parsed-progress contracts, so the floor has to govern.
+    scheduler.setClassShare({
+      focused: TERMINAL_WRITE_MAX_CLASS_SHARE,
+      foreground: TERMINAL_WRITE_MAX_CLASS_SHARE,
+      background: TERMINAL_WRITE_MIN_CLASS_SHARE,
+    });
+    const turns = TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS + 1;
+
+    const served = runSaturated(
+      scheduler,
+      runNextTask,
+      [
+        { label: "focused", priority: "focused" },
+        { label: "hidden", priority: "background" },
+      ],
+      turns,
+    );
+
+    expect(countOf(served, "hidden")).toBe(1);
+    expect(served.indexOf("hidden")).toBe(TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS);
+  });
+
+  it("keeps a class's gap bound when another class drains and re-enters", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const served: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    scheduler.request(owner("blocker"), (release) => {
+      releaseBlocker = release;
+    });
+
+    const focusedOwner = owner("focused");
+    const focusedTurn = (release: () => void) => {
+      served.push("focused");
+      scheduler.request(focusedOwner, focusedTurn, () => "focused");
+      release();
+    };
+    const hiddenOwner = owner("hidden");
+    let hiddenRequeues = 0;
+    const hiddenTurn = (release: () => void) => {
+      served.push("hidden");
+      // Drain after the first turn: the hidden class leaves the cycle entirely.
+      if (hiddenRequeues > 0) scheduler.request(hiddenOwner, hiddenTurn, () => "background");
+      hiddenRequeues += 1;
+      release();
+    };
+    scheduler.request(focusedOwner, focusedTurn, () => "focused");
+    scheduler.request(hiddenOwner, hiddenTurn, () => "background");
+    releaseBlocker?.();
+
+    const shareDrivenGap = Math.ceil(
+      CLASS_SHARE_CYCLE_TURNS / TERMINAL_WRITE_DEFAULT_CLASS_SHARE.background,
+    );
+    for (let index = 0; index < shareDrivenGap * 2; index += 1) runNextTask();
+    expect(countOf(served, "hidden")).toBe(1);
+
+    // The hidden class re-enters after its absence. Stale debt from before must
+    // not push its next turn past the share-driven gap.
+    const servedBeforeReentry = served.length;
+    scheduler.request(hiddenOwner, hiddenTurn, () => "background");
+    for (let index = 0; index < shareDrivenGap; index += 1) runNextTask();
+
+    expect(served.slice(servedBeforeReentry)).toContain("hidden");
   });
 
   it("lends an idle class's share to the classes that are backlogged", () => {
