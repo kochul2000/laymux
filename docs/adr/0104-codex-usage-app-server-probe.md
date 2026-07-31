@@ -1,6 +1,6 @@
 # 0104. Codex 사용량은 app-server rate-limit API로 수집한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-31
 - Source: 사용자 요구; issue #688; [ADR-0102](0102-claude-usage-probe-headless-pty.md); `docs/architecture/data-flow.md` §10.5
 
