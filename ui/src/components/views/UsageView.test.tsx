@@ -147,10 +147,20 @@ describe("UsageView", () => {
     const label = row.firstElementChild?.firstElementChild;
     expect(label).toHaveStyle({ fontSize: "13px", fontWeight: "400" });
     expect(screen.getByTestId("usage-percent-week-all")).toHaveStyle({
-      fontSize: "var(--fs-md)",
+      fontSize: "13px",
       fontWeight: "600",
       color: "var(--text-secondary)",
     });
+  });
+
+  it("shrinks the heading and quota percentage together", async () => {
+    mockBox(200, 100);
+    await renderView({ paneId: "pane-1" });
+
+    const row = screen.getByTestId("usage-row-week-all");
+    const label = row.firstElementChild?.firstElementChild as HTMLElement;
+    const percent = screen.getByTestId("usage-percent-week-all");
+    expect(percent.style.fontSize).toBe(label.style.fontSize);
   });
 
   it("shows Claude's reset text on the left and elapsed pace on the right", async () => {

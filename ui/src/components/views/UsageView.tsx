@@ -158,7 +158,11 @@ function RowBlock({
         </span>
         <span
           data-testid={`usage-percent-${row.key}`}
-          style={{ color: "var(--text-secondary)", fontSize: "var(--fs-md)", fontWeight: 600 }}
+          style={{
+            color: "var(--text-secondary)",
+            fontSize: density.labelFontSize,
+            fontWeight: 600,
+          }}
         >
           {used == null ? "--" : `${used}%`}
         </span>
