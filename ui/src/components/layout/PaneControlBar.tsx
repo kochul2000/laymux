@@ -238,8 +238,18 @@ function ViewSelect({
     currentView.type === "TerminalView"
       ? (currentView.profile as string) || defaultProfile || visibleProfiles[0]?.name || ""
       : "";
+  // Extra CLAUDE_CONFIG_DIRs are offered as sibling options, so switching the
+  // monitored account is the same gesture as switching a terminal profile.
+  const usageConfigDirs = useSettingsStore((s) => s.usage.configDirs);
+  const usageConfigDir =
+    currentView.type === "UsageView" ? (currentView.configDir as string) || "" : "";
+
   const value =
-    currentView.type === "TerminalView" ? `TerminalView:${effectiveProfile}` : currentView.type;
+    currentView.type === "TerminalView"
+      ? `TerminalView:${effectiveProfile}`
+      : currentView.type === "UsageView"
+        ? `UsageView:${usageConfigDir}`
+        : currentView.type;
 
   return (
     <select
@@ -254,6 +264,8 @@ function ViewSelect({
         e.currentTarget.blur();
         if (val.startsWith("TerminalView:")) {
           onChange({ type: "TerminalView", profile: val.slice("TerminalView:".length) });
+        } else if (val.startsWith("UsageView:")) {
+          onChange({ type: "UsageView", configDir: val.slice("UsageView:".length) });
         } else {
           onChange({ type: val as ViewType });
         }
@@ -280,6 +292,12 @@ function ViewSelect({
         </option>
       ))}
       <option value="MemoView">Memo</option>
+      <option value="UsageView:">Claude Usage</option>
+      {usageConfigDirs.map((dir) => (
+        <option key={dir} value={`UsageView:${dir}`}>
+          Usage: {dir}
+        </option>
+      ))}
       <option value="IssueReporterView">Issue Reporter</option>
     </select>
   );
@@ -791,6 +809,7 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
 const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   EmptyView: "Empty",
   MemoView: "Memo",
+  UsageView: "Claude Usage",
   IssueReporterView: "Issue Reporter",
   FileExplorerView: "File Explorer",
 };

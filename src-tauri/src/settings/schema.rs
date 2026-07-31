@@ -106,6 +106,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/usage",
+        description: "Claude 사용량 모니터(UsageView) 설정입니다. refreshSeconds 는 rate limit 때문에 600초 미만으로는 적용되지 않습니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/dock",
         description: "구조적 docks 배열과 별개인 dock 동작 기본값입니다.",
         sensitive: false,

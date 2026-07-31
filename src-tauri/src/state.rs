@@ -49,6 +49,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// outside this ordering.
 /// `settings_update_lock` is also async and is held only across frontend settings
 /// snapshot/validation/apply awaits, never together with a synchronous AppState lock.
+/// `usage_probe` owns its own registry mutex and participates in no ordering with
+/// the locks above: nothing acquires it while holding another `AppState` lock, and
+/// its worker threads touch no `AppState` state (ADR-0099).
 ///
 /// ## Poison policy
 ///
@@ -141,6 +144,9 @@ pub struct AppState {
     /// `Mutex`/atomics participate in no ordering with the locks above because
     /// nothing reads it while holding another AppState lock.
     pub frontend_health: Arc<crate::frontend_health::FrontendHealthState>,
+    /// Claude usage probes. Owns headless `claude` PTYs that are deliberately
+    /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0099).
+    pub usage_probe: Arc<crate::usage_probe::UsageProbe>,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -309,6 +315,7 @@ impl AppState {
             terminal_teardown_dispatcher: TerminalTeardownDispatcher::new(),
             settings_update_lock: tokio::sync::Mutex::new(()),
             frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
+            usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
         }
     }
 }
@@ -321,6 +328,11 @@ impl Default for AppState {
 
 impl Drop for AppState {
     fn drop(&mut self) {
+        // Probe PTYs are intentionally absent from `pty_handles` (ADR-0099), so
+        // they need their own teardown or the `claude` children outlive the app.
+        if let Err(err) = self.usage_probe.shutdown_all() {
+            tracing::warn!(error = %err, "usage probe cleanup during app shutdown failed");
+        }
         let handles = self
             .pty_handles
             .get_mut_or_recover_for_discard("dropping PTY handle registry");

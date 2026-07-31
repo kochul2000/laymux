@@ -736,6 +736,37 @@ impl Default for PasteSettings {
     }
 }
 
+/// Claude usage monitor settings (`UsageView` / usage probe, ADR-0099).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSettings {
+    /// Terminal profile whose shell can run `claude`. Empty = `defaultProfile`.
+    #[serde(default)]
+    pub profile: String,
+    /// Seconds between `/usage` queries. Clamped to the rate-limit floor of 600
+    /// on use — values below it are not honored.
+    #[serde(default = "default_usage_refresh_seconds")]
+    pub refresh_seconds: u64,
+    /// Additional `CLAUDE_CONFIG_DIR` values offered in the view's profile
+    /// picker. The default config dir is always available and is not listed here.
+    #[serde(default)]
+    pub config_dirs: Vec<String>,
+}
+
+fn default_usage_refresh_seconds() -> u64 {
+    crate::usage_probe::MIN_REFRESH_SECS
+}
+
+impl Default for UsageSettings {
+    fn default() -> Self {
+        Self {
+            profile: String::new(),
+            refresh_seconds: default_usage_refresh_seconds(),
+            config_dirs: Vec::new(),
+        }
+    }
+}
+
 /// Pane control bar settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1285,6 +1316,9 @@ pub struct Settings {
     pub paste: PasteSettings,
     #[serde(default)]
     pub control_bar: ControlBarSettings,
+    /// Claude usage monitor settings.
+    #[serde(default)]
+    pub usage: UsageSettings,
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
@@ -1387,6 +1421,7 @@ impl Default for Settings {
             terminal: TerminalSettings::default(),
             paste: PasteSettings::default(),
             control_bar: ControlBarSettings::default(),
+            usage: UsageSettings::default(),
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),

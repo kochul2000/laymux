@@ -177,6 +177,7 @@ fn settings_round_trip_with_full_config() {
         terminal: TerminalSettings::default(),
         paste: Default::default(),
         control_bar: Default::default(),
+        usage: Default::default(),
         dock: Default::default(),
         notifications: Default::default(),
         workspace_selector: Default::default(),

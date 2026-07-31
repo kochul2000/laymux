@@ -145,6 +145,16 @@ export interface ControlBarSettings {
   defaultMode: ControlBarMode;
 }
 
+/** Claude usage monitor (UsageView / usage probe, ADR-0099). */
+export interface UsageSettings {
+  /** Terminal profile whose shell can run `claude`. Empty = defaultProfile. */
+  profile: string;
+  /** Seconds between `/usage` queries. The backend clamps this to >= 600. */
+  refreshSeconds: number;
+  /** Extra CLAUDE_CONFIG_DIR values offered as monitorable profiles. */
+  configDirs: string[];
+}
+
 /** Dock behavior (distinct from the structural docks array). */
 export interface DockSettings {
   /** Keep dock state in background when hidden. */
@@ -379,6 +389,7 @@ interface SettingsState {
   paste: PasteSettings;
   terminal: TerminalSettings;
   controlBar: ControlBarSettings;
+  usage: UsageSettings;
   dock: DockSettings;
   notifications: NotificationSettings;
   workspaceSelector: WorkspaceSelectorSettings;
@@ -445,6 +456,7 @@ interface SettingsState {
         | "paste"
         | "terminal"
         | "controlBar"
+        | "usage"
         | "dock"
         | "notifications"
         | "workspaceSelector"
@@ -563,6 +575,13 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
 export const DEFAULT_CONTROL_BAR: ControlBarSettings = {
   hoverIdleSeconds: 2,
   defaultMode: "minimized",
+};
+
+/** Mirrors the Rust default; 600 is the rate-limit floor, not a preference. */
+export const DEFAULT_USAGE: UsageSettings = {
+  profile: "",
+  refreshSeconds: 600,
+  configDirs: [],
 };
 
 export const DEFAULT_DOCK: DockSettings = {
@@ -958,6 +977,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   paste: { ...DEFAULT_PASTE },
   terminal: { ...DEFAULT_TERMINAL },
   controlBar: { ...DEFAULT_CONTROL_BAR },
+  usage: { ...DEFAULT_USAGE, configDirs: [] },
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   workspaceSelector: {
@@ -1213,6 +1233,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const paste = data.paste ? { ...DEFAULT_PASTE, ...data.paste } : undefined;
     const terminal = data.terminal ? { ...DEFAULT_TERMINAL, ...data.terminal } : undefined;
     const controlBar = data.controlBar ? { ...DEFAULT_CONTROL_BAR, ...data.controlBar } : undefined;
+    const usage = data.usage
+      ? {
+          ...DEFAULT_USAGE,
+          ...data.usage,
+          // A malformed configDirs must not break the view selector.
+          configDirs: Array.isArray(data.usage.configDirs) ? data.usage.configDirs : [],
+        }
+      : undefined;
     const dock = data.dock ? { ...DEFAULT_DOCK, ...data.dock } : undefined;
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
@@ -1298,6 +1326,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       paste: _rawPaste,
       terminal: _rawTerminal,
       controlBar: _rawControlBar,
+      usage: _rawUsage,
       dock: _rawDock,
       notifications: _rawNotifications,
       workspaceSelector: _rawWorkspaceSelector,
@@ -1323,6 +1352,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(paste ? { paste } : {}),
       ...(terminal ? { terminal } : {}),
       ...(controlBar ? { controlBar } : {}),
+      ...(usage ? { usage } : {}),
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),

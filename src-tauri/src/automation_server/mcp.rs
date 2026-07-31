@@ -2920,6 +2920,28 @@ impl McpHandler {
         })))
     }
 
+    /// Read cached Claude Code usage — session and weekly limits with the
+    /// percentage used and the raw reset text, one entry per monitored
+    /// `CLAUDE_CONFIG_DIR`.
+    ///
+    /// Numbers come from Claude Code's own `/usage` panel, so they match what it
+    /// reports rather than an estimate, but they are up to ten minutes old
+    /// (`capturedAtMs`) and are meaningful only when `status.type` is `ready`.
+    /// Reading never starts a probe: an empty list means no `UsageView` pane is
+    /// open, not that usage is zero.
+    #[tool]
+    async fn get_claude_usage(&self) -> Result<CallToolResult, ErrorData> {
+        let snapshots = match self.state.app_state.usage_probe.snapshots() {
+            Ok(snapshots) => snapshots,
+            Err(error) => {
+                let message: String = error.to_string();
+                return Ok(CallToolResult::error(vec![Content::text(message)]));
+            }
+        };
+        let payload = super::handlers_backend::build_usage_payload(snapshots);
+        Ok(json_result(&payload))
+    }
+
     /// List all memos stored in `cache/memo.json` as `{ key, content }` entries.
     /// Returns an empty list when the memo file is missing or unreadable.
     /// Memo keys are typically workspace pane IDs (e.g. `pane-abc12345`) so

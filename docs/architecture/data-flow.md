@@ -1049,6 +1049,43 @@ document 레벨 단축키 실행은 `useKeyboardShortcuts` 의 **액션 ID → �
 
 ---
 
+## 10.5 UsageView (Claude 사용량)
+
+Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usage` TUI 화면이다. 수집은 Rust `usage_probe` 가 소유하고 표시만 프론트가 한다 ([ADR-0099](../adr/0099-claude-usage-probe-headless-pty.md)).
+
+```
+[UsageView 마운트]
+    │  subscribe_usage_probe(subscriberId="usage-<paneId>", configDir)
+    ▼
+[usage_probe: config dir 당 워커 1개]
+    │  구독자 0 → 1 이면 워커 spawn. 구독자 0 이 되면 워커 종료(claude 프로세스 종료)
+    ▼
+[worker 스레드]
+    │  pty::spawn_pty(200x60)  — terminals 레지스트리에 등록하지 않는다
+    │  PTY 출력 → vt100 화면 모델(usage_probe::screen)
+    │  "claude\r" → trust 프롬프트("y\r") → welcome 감지 → 계정/플랜 파싱
+    │  루프: ESC → "/usage" → ENTER → Right×3 → 화면 캡처 → parse_usage
+    │        파싱 실패 시 같은 조회 안에서 Tab 재캡처(최대 3회, 추가 서버 조회 없음)
+    ▼
+[publish]
+    │  UsageSnapshot(원시값: percent / reset 원문 / capturedAt / status) 캐시 갱신
+    │  → Tauri 이벤트 `usage-snapshot-changed`
+    ▼
+[UsageView]
+       configDir 일치하는 스냅샷만 채택
+       pace = lib/usage-pace.ts 가 reset 원문 + 현재 시각에서 도출 (Rust 는 계산하지 않음)
+       배치 = lib/usage-layout.ts 가 측정된 박스에서 도출 (stacked / columns / compact)
+```
+
+- **갱신 간격**: 정상 `settings.usage.refreshSeconds`(하한 600s, 상한 3600s), 실패 시 60s 로 최대 3회 재조회 후 정상 간격 복귀.
+- **구독 id 는 이펙트 실행마다 고유하다** (`usage-<paneId>#<seq>`). pane 당 고정 id 를 쓰면 React 가 이펙트를 실행→정리→재실행할 때 **죽은 정리 콜백이 살아있는 구독을 취소**해 수요가 0 이 되고, 마운트된 view 앞에서 probe 가 은퇴한다(실기에서 `idle` 로 관측). 백엔드도 같은 id·같은 config dir 재구독을 no-op 으로 처리해 정상 `claude` 를 죽이고 다시 띄우지 않는다.
+- **읽기 경로는 부작용이 없다**: `get_usage_snapshot` / `GET /api/v1/usage` / MCP `get_claude_usage` 는 워커를 기동시키지 않으며, 구독이 없으면 `status: idle` 또는 빈 목록을 반환한다.
+- **실패는 표시된다**: `claudeMissing` / `startupTimeout` / `parseFailed` / `upstreamError` / `failed` 를 구분해 view 푸터에 그대로 노출하고, 마지막 캡처 화면을 `rawScreen` 으로 남긴다(부팅 실패도 포함 — 화면이 비었는지 프롬프트에 막혔는지가 진단의 핵심이다).
+- **모델명에 의존하지 않는다**: 준비 판정은 배너의 `Claude Code` 문자열, 세 번째 행은 `Current week (<라벨>)` 의 괄호 라벨을 그대로 읽는 모델 무관 행(`weekModel` + `weekModelLabel`)이다. 퍼센트는 `used` 가 있는 줄에서만 읽어 `+50% ... promo` 같은 무관한 숫자를 배제한다. 실제 관측된 라벨: `Sonnet only`, `Fable`.
+- **실기 확인**: `cargo test --test usage_probe_live -- --ignored --nocapture` 가 실제 `claude` 를 띄워 1회 조회한다. `LAYMUX_PROBE_SCREEN_OUT=<path>` 를 주면 캡처를 파일로 남겨 재조회 없이 분석할 수 있다.
+
+---
+
 ## 11. 전체 데이터 흐름 요약
 
 ```

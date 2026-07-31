@@ -587,6 +587,7 @@ fn view_label(view_type: &str) -> &str {
         "SettingsView" => "Settings",
         "IssueReporterView" => "Issue Reporter",
         "MemoView" => "Memo",
+        "UsageView" => "Claude Usage",
         "FileExplorerView" => "File Explorer",
         "TerminalView" => "Terminal",
         _ => "Empty",

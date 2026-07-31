@@ -9,6 +9,7 @@ import { TerminalView } from "./TerminalView";
 import { SettingsView } from "./SettingsView";
 import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
+import { UsageView } from "./UsageView";
 import { FileExplorerView } from "./FileExplorerView";
 
 export interface ViewRendererProps {
@@ -241,6 +242,14 @@ export function ViewRenderer({
       return (
         <div data-testid="view-memo" className="h-full">
           <MemoView memoKey={memoKey} paneId={paneId ?? fallbackId} isFocused={isFocused} />
+        </div>
+      );
+    }
+    case "UsageView": {
+      const configDir = typeof viewConfig?.configDir === "string" ? viewConfig.configDir : "";
+      return (
+        <div data-testid="view-usage" className="h-full">
+          <UsageView configDir={configDir} paneId={paneId ?? fallbackId} />
         </div>
       );
     }
