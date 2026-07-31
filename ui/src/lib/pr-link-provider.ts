@@ -82,7 +82,7 @@ export function createPrLinkProvider(
 
       // Reconstruct text + offset→cell-column map in one pass so wide chars
       // (CJK/emoji) don't shift the underline/hit area (#441).
-      const { text, columns } = reconstructLine(readLineCells(bufLine));
+      const { text, columns, endColumns } = reconstructLine(readLineCells(bufLine));
       const matches = findPrTokens(text);
       if (matches.length === 0) {
         callback(undefined);
@@ -91,9 +91,12 @@ export function createPrLinkProvider(
 
       const links: ILink[] = [];
       for (const match of matches) {
-        // token cols are 1-based string offsets; map to cell columns.
+        // token cols are 1-based string offsets; map to cell columns. `end` is
+        // inclusive, so it takes the *last* cell the character occupies —
+        // identical for `#\d+` (all width 1), but correct if the pattern ever
+        // grows to include a wide char.
         const startX = columns[match.startCol - 1];
-        const endX = columns[match.endCol - 1];
+        const endX = endColumns[match.endCol - 1];
         if (startX === undefined || endX === undefined) continue; // out-of-range guard
         links.push({
           range: {

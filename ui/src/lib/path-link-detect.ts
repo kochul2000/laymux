@@ -184,8 +184,13 @@ export interface SelectionPos {
  * 셀 정보로 토큰의 실제 셀 범위를 찾는다(#691). 실패하면 null → 호출부가
  * 문자열 기반 계산으로 떨어진다.
  *
- * 선택 시작 셀보다 앞에서 찾지 않는다. 같은 토큰이 한 줄에 여러 번 나오면
- * (`a.txt ... a.txt`) 사용자가 고른 쪽에 밑줄이 가야 하기 때문이다.
+ * 선택 시작 셀보다 앞에서는 찾지 않는다. 같은 토큰이 한 줄에 여러 번 나오면
+ * (`a.txt ... a.txt`) 사용자가 고른 쪽에 밑줄이 가야 하므로, 앞쪽 인스턴스로
+ * 되돌아가는 재검색을 두지 않는다(그건 실패를 오답으로 바꾼다).
+ *
+ * 앵커를 `endColumns` 로 잡는 이유: xterm 은 와이드 문자의 **뒷칸**을 선택
+ * 시작으로 보고할 수 있다(`Mouse.getCoords` 가 셀 중앙을 기준으로 반올림).
+ * 끝 컬럼으로 비교하면 그 경우에도 해당 문자 자신의 오프셋에서 검색이 시작된다.
  */
 function mapWithCells(
   pos: SelectionPos,
@@ -194,9 +199,9 @@ function mapWithCells(
 ): MappedPathRange | null {
   const { text, columns, endColumns } = reconstructLine(lineCells);
   const startCell = pos.start.x + 1; // 0-based 셀 → 1-based 컬럼
-  const searchFrom = columns.findIndex((col) => col >= startCell);
-  let index = searchFrom >= 0 ? text.indexOf(token, searchFrom) : -1;
-  if (index < 0) index = text.indexOf(token); // 선택 앞쪽에서라도 찾는다.
+  const searchFrom = endColumns.findIndex((col) => col >= startCell);
+  if (searchFrom < 0) return null;
+  const index = text.indexOf(token, searchFrom);
   if (index < 0) return null;
 
   const lastOffset = index + token.length - 1;

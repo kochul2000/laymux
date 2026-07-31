@@ -32,10 +32,19 @@ afterEach(() => {
 async function underlineFor(text: string, token: string, startCell: number) {
   const s = screen();
   await s.write(text);
-  const line = s.terminal.buffer.active.getLine(0);
+  return rangeAt(s, 0, token, startCell);
+}
+
+/**
+ * 절대 버퍼 행 `row` 의 실제 셀로 범위를 계산한다. `TerminalView` 와 같은 순서:
+ * `getSelectionPosition()` 의 절대 행 → `buffer.active.getLine(row)` → 셀.
+ * `pos.end` 는 이 매핑이 쓰지 않지만, 셀 단위 값으로 두어 의도를 흐리지 않는다.
+ */
+function rangeAt(s: ScreenTerminal, row: number, token: string, startCell: number) {
+  const line = s.terminal.buffer.active.getLine(row);
   expect(line).toBeTruthy();
   const cells = readLineCells(line!);
-  const pos = { start: { x: startCell, y: 0 }, end: { x: startCell + token.length, y: 0 } };
+  const pos = { start: { x: startCell, y: row }, end: { x: startCell, y: row } };
   return mapSelectionToPathRange(pos, token, token, cells);
 }
 
@@ -72,5 +81,19 @@ describe("path-link 밑줄 범위 (실제 xterm 셀)", () => {
     // プロジェクト(12) + /(1) + a.md(4) = 17셀
     expect(r.startCol).toBe(1);
     expect(r.endCol).toBe(17);
+  });
+
+  it("스크롤백으로 밀려난 줄도 절대 버퍼 행으로 찾는다", async () => {
+    // 선택 좌표는 뷰포트가 아니라 절대 버퍼 행이다(SelectionService 가 ydisp 를
+    // 더해 준다). 행을 잘못 읽으면 조용히 폴백하거나 다른 줄에 밑줄이 간다.
+    const s = screen();
+    await s.write("문서/보고서.txt\r\n");
+    for (let i = 0; i < 10; i++) await s.write(`filler ${i}\r\n`);
+    expect(s.terminal.buffer.active.baseY).toBeGreaterThan(0);
+
+    const r = rangeAt(s, 0, "문서/보고서.txt", 0);
+    expect(r.bufferLine).toBe(1); // 절대 행 0 → 1-based 1
+    expect(r.startCol).toBe(1);
+    expect(r.endCol).toBe(15);
   });
 });
