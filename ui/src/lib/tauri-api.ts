@@ -515,9 +515,13 @@ export type CodexUsageStatus =
   | { type: "unauthorized" }
   | { type: "failed"; message: string };
 
+/** Which window of a quota family a limit row describes. */
+export type CodexUsageWindowKind = "primary" | "secondary";
+
 export interface CodexUsageLimit {
   key: string;
   label: string;
+  kind: CodexUsageWindowKind;
   usedPercent: number;
   windowDurationMins: number;
   resetsAtSecs: number;

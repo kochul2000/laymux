@@ -588,6 +588,7 @@ fn view_label(view_type: &str) -> &str {
         "IssueReporterView" => "Issue Reporter",
         "MemoView" => "Memo",
         "UsageView" => "Claude Usage",
+        "CodexUsageView" => "Codex Usage",
         "FileExplorerView" => "File Explorer",
         "TerminalView" => "Terminal",
         _ => "Empty",
@@ -1070,6 +1071,15 @@ mod tests {
         assert_eq!(payload["activeWorkspace"]["panes"][0]["title"], "Settings");
         assert_eq!(payload["workspaces"][0]["unreadCount"], 1);
         assert_eq!(payload["activeWorkspace"]["panes"][0]["unreadCount"], 0);
+    }
+
+    #[test]
+    fn view_label_names_every_usage_view() {
+        // A view type missing from this map falls through to "Empty", which reads
+        // to the user as an empty pane rather than an unlabeled one.
+        assert_eq!(view_label("UsageView"), "Claude Usage");
+        assert_eq!(view_label("CodexUsageView"), "Codex Usage");
+        assert_eq!(view_label("SomeFutureView"), "Empty");
     }
 
     #[test]

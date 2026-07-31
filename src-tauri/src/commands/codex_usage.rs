@@ -49,9 +49,19 @@ pub enum CodexUsageStatus {
 pub struct CodexUsageLimit {
     pub key: String,
     pub label: String,
+    /// Which window of its quota family this row is. Carried as a field rather
+    /// than encoded in `key`, so the view never has to parse the key format.
+    pub kind: CodexUsageWindowKind,
     pub used_percent: u8,
     pub window_duration_mins: u64,
     pub resets_at_secs: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodexUsageWindowKind {
+    Primary,
+    Secondary,
 }
 
 #[derive(Debug, Deserialize)]
@@ -304,22 +314,33 @@ fn parse_rate_limit_response(response: RpcEnvelope) -> Result<CodexUsageSnapshot
 
 fn flatten_bucket(bucket: RawBucket) -> Vec<CodexUsageLimit> {
     let base = bucket.limit_name.unwrap_or_else(|| bucket.limit_id.clone());
-    [("primary", bucket.primary), ("secondary", bucket.secondary)]
-        .into_iter()
-        .filter_map(|(kind, window)| {
-            window.map(|window| CodexUsageLimit {
-                key: format!("{}-{kind}", bucket.limit_id),
-                label: if kind == "primary" {
-                    base.clone()
-                } else {
-                    format!("{base} ({kind})")
-                },
-                used_percent: window.used_percent.round().clamp(0.0, 100.0) as u8,
-                window_duration_mins: window.window_duration_mins,
-                resets_at_secs: window.resets_at,
-            })
+    [
+        (CodexUsageWindowKind::Primary, bucket.primary),
+        (CodexUsageWindowKind::Secondary, bucket.secondary),
+    ]
+    .into_iter()
+    .filter_map(|(kind, window)| {
+        window.map(|window| CodexUsageLimit {
+            key: format!("{}-{}", bucket.limit_id, window_kind_slug(kind)),
+            label: match kind {
+                CodexUsageWindowKind::Primary => base.clone(),
+                CodexUsageWindowKind::Secondary => format!("{base} (secondary)"),
+            },
+            kind,
+            used_percent: window.used_percent.round().clamp(0.0, 100.0) as u8,
+            window_duration_mins: window.window_duration_mins,
+            resets_at_secs: window.resets_at,
         })
-        .collect()
+    })
+    .collect()
+}
+
+/// `key` stays human-readable for React keys and test ids. It is not parsed.
+fn window_kind_slug(kind: CodexUsageWindowKind) -> &'static str {
+    match kind {
+        CodexUsageWindowKind::Primary => "primary",
+        CodexUsageWindowKind::Secondary => "secondary",
+    }
 }
 
 fn now_ms() -> u64 {
@@ -351,8 +372,22 @@ mod tests {
         let snapshot = parse_rate_limits(output).unwrap();
         assert_eq!(snapshot.limits.len(), 2);
         assert_eq!(snapshot.limits[0].label, "Codex");
+        assert_eq!(snapshot.limits[0].kind, CodexUsageWindowKind::Primary);
         assert_eq!(snapshot.limits[1].label, "Codex (secondary)");
+        assert_eq!(snapshot.limits[1].kind, CodexUsageWindowKind::Secondary);
         assert_eq!(snapshot.plan.as_deref(), Some("pro"));
+    }
+
+    #[test]
+    fn window_kind_survives_a_limit_id_that_looks_like_a_key_suffix() {
+        // The view selects primary windows by `kind`, so a limit id ending in
+        // "-primary" can no longer be mistaken for one.
+        let output = r#"{"id":1,"result":{"rateLimits":{"limitId":"weird-primary","primary":{"usedPercent":5,"windowDurationMins":300,"resetsAt":1730950800},"secondary":{"usedPercent":6,"windowDurationMins":10080,"resetsAt":1731550800}}}}"#;
+        let snapshot = parse_rate_limits(output).unwrap();
+        assert_eq!(snapshot.limits[0].key, "weird-primary-primary");
+        assert_eq!(snapshot.limits[0].kind, CodexUsageWindowKind::Primary);
+        assert_eq!(snapshot.limits[1].key, "weird-primary-secondary");
+        assert_eq!(snapshot.limits[1].kind, CodexUsageWindowKind::Secondary);
     }
 
     #[test]

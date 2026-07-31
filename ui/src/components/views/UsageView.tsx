@@ -5,7 +5,7 @@ import { ViewBody } from "@/components/ui/ViewBody";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { useNowTick, useUsageSnapshot } from "@/hooks/useUsageSnapshot";
 import { useOverridesStore } from "@/stores/overrides-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { useSettingsStore, type UsageVisibleRow } from "@/stores/settings-store";
 import {
   resolveUsageDensity,
   resolveUsageLayout,
@@ -13,21 +13,13 @@ import {
   type UsageLayoutPreference,
 } from "@/lib/usage-layout";
 import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
+import { selectVisibleRows, type KeyedUsageRow, type UsageDisplayRow } from "@/lib/usage-rows";
 import type { UsageProbeStatus, UsageSnapshot } from "@/lib/tauri-api";
 
 const TICK_MS = 30_000;
 const PACE_METER_HEIGHT = "3px";
 const ABBREVIATED_ROW_MAX_WIDTH = 240;
 const LAYOUT_CYCLE: UsageLayoutPreference[] = ["auto", "stacked", "columns", "compact"];
-
-export interface UsageDisplayRow {
-  key: string;
-  label: string;
-  abbreviatedLabel?: string;
-  percent: number | null;
-  reset: string | null;
-  elapsed: number | null;
-}
 
 interface UsageViewProps {
   configDir?: string;
@@ -184,6 +176,7 @@ export function UsagePresentation({
   message,
   capturedAtMs,
   refresh,
+  refreshTitle,
   paneId,
   fontFamily,
 }: {
@@ -195,6 +188,8 @@ export function UsagePresentation({
   message: string | null;
   capturedAtMs: number | null;
   refresh: () => void;
+  /** Tooltip for the refresh button. Provider-specific, so the caller owns it. */
+  refreshTitle: string;
   paneId?: string;
   fontFamily: string;
 }) {
@@ -241,9 +236,12 @@ export function UsagePresentation({
             </span>
           )}
           {configDir && (
+            // Truncated on purpose, so the tooltip is the only way to read a
+            // long account path — required once several accounts are monitored.
             <span
               className="truncate"
               style={{ color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}
+              title={configDir}
             >
               {configDir}
             </span>
@@ -260,6 +258,7 @@ export function UsagePresentation({
             color: "var(--text-secondary)",
             fontSize: "var(--fs-xs)",
           }}
+          title={`Layout: ${preference ?? "auto"} (click to change)`}
         >
           {preference ?? "auto"}
         </button>
@@ -274,6 +273,7 @@ export function UsagePresentation({
             color: "var(--text-secondary)",
             fontSize: "var(--fs-xs)",
           }}
+          title={refreshTitle}
         >
           refresh
         </button>
@@ -333,43 +333,70 @@ export function UsagePresentation({
   );
 }
 
+/**
+ * Exhaustive on purpose: the `never` binding makes a new `UsageProbeStatus`
+ * variant a compile error instead of a silent generic message.
+ */
 function statusMessage(status: UsageProbeStatus): string | null {
-  if (status.type === "ready") return null;
-  if (status.type === "idle") return "Probe stopped";
-  if (status.type === "starting") return "Starting Claude Code";
-  if (status.type === "claudeMissing") return "`claude` not found in this profile's shell";
-  if (status.type === "startupTimeout") return "Claude Code did not become ready";
-  if (status.type === "parseFailed") return "Could not read the /usage panel";
-  return "message" in status ? status.message : "Usage unavailable";
+  switch (status.type) {
+    case "ready":
+      return null;
+    case "idle":
+      return "Probe stopped";
+    case "starting":
+      return "Starting Claude Code…";
+    case "claudeMissing":
+      return "`claude` not found in this profile's shell";
+    case "startupTimeout":
+      return "Claude Code did not become ready";
+    case "parseFailed":
+      return "Could not read the /usage panel";
+    case "upstreamError":
+    case "failed":
+      return status.message;
+    default: {
+      const unhandled: never = status;
+      return unhandled;
+    }
+  }
 }
 
-function buildRows(snapshot: UsageSnapshot, now: Date): UsageDisplayRow[] {
+function buildRows(snapshot: UsageSnapshot, now: Date): KeyedUsageRow<UsageVisibleRow>[] {
   return [
     {
-      key: "session",
-      label: "Current session",
-      abbreviatedLabel: "session",
-      percent: snapshot.session.percent,
-      reset: snapshot.session.reset,
-      elapsed: sessionElapsedPercent(snapshot.session.reset, now),
+      visibleKey: "session",
+      row: {
+        key: "session",
+        label: "Current session",
+        abbreviatedLabel: "session",
+        percent: snapshot.session.percent,
+        reset: snapshot.session.reset,
+        elapsed: sessionElapsedPercent(snapshot.session.reset, now),
+      },
     },
     {
-      key: "week-all",
-      label: "Current week (all models)",
-      abbreviatedLabel: "week (all)",
-      percent: snapshot.weekAll.percent,
-      reset: snapshot.weekAll.reset,
-      elapsed: weekElapsedPercent(snapshot.weekAll.reset, now),
+      visibleKey: "weekAll",
+      row: {
+        key: "week-all",
+        label: "Current week (all models)",
+        abbreviatedLabel: "week (all)",
+        percent: snapshot.weekAll.percent,
+        reset: snapshot.weekAll.reset,
+        elapsed: weekElapsedPercent(snapshot.weekAll.reset, now),
+      },
     },
     {
-      key: "week-model",
-      label: snapshot.weekModelLabel
-        ? `Current week (${snapshot.weekModelLabel})`
-        : "Current week (per model)",
-      abbreviatedLabel: snapshot.weekModelLabel ? `week (${snapshot.weekModelLabel})` : "week",
-      percent: snapshot.weekModel.percent,
-      reset: snapshot.weekModel.reset,
-      elapsed: weekElapsedPercent(snapshot.weekModel.reset, now),
+      visibleKey: "weekModel",
+      row: {
+        key: "week-model",
+        label: snapshot.weekModelLabel
+          ? `Current week (${snapshot.weekModelLabel})`
+          : "Current week (per model)",
+        abbreviatedLabel: snapshot.weekModelLabel ? `week (${snapshot.weekModelLabel})` : "week",
+        percent: snapshot.weekModel.percent,
+        reset: snapshot.weekModel.reset,
+        elapsed: weekElapsedPercent(snapshot.weekModel.reset, now),
+      },
     },
   ];
 }
@@ -383,17 +410,13 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
     return `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
   });
   const rows = useMemo(
-    () =>
-      buildRows(snapshot, now).filter((_, index) =>
-        visibleRows.includes(
-          ["session", "weekAll", "weekModel"][index] as (typeof visibleRows)[number],
-        ),
-      ),
+    () => selectVisibleRows(buildRows(snapshot, now), visibleRows),
     [snapshot, now, visibleRows],
   );
   return (
     <UsagePresentation
       title="Claude Usage"
+      refreshTitle="Query /usage now"
       plan={snapshot.plan}
       model={snapshot.model}
       configDir={configDir}
