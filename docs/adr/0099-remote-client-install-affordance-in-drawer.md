@@ -26,7 +26,7 @@ ADR-0091 이 `/remote/` 에 web app manifest 와 launcher 아이콘을 붙여 �
 - 버튼의 기본 상태는 `hidden` 이다. 다음 중 하나라도 해당하면 계속 숨긴다: 이미 standalone 실행 중(`matchMedia("(display-mode: standalone)")` 또는 `navigator.standalone`), `window.isSecureContext` 가 거짓(HTTP direct mode), 그리고 아래 두 경로 어느 것도 성립하지 않는 브라우저.
 - **Chromium 경로:** `beforeinstallprompt` 를 받아 기본 동작을 막고 이벤트를 보관한 뒤 버튼을 드러낸다. 이벤트 수신 자체가 "브라우저가 설치 가능하다고 판정했다"는 증거이므로 별도 판정을 하지 않는다. 클릭은 보관한 이벤트의 `prompt()` 를 호출하고, 결과와 무관하게 이벤트를 버리고 버튼을 숨긴다 — 같은 이벤트는 재사용할 수 없다.
 - **iOS/iPadOS 경로:** `beforeinstallprompt` 가 없으므로 이벤트를 기다리지 않고, iOS Safari 로 식별되면 버튼을 바로 드러낸다. 클릭은 존재하지 않는 API 를 부르는 대신 "공유 → 홈 화면에 추가" 한 줄 안내를 토글한다.
-- `appinstalled` 이벤트를 받으면 섹션을 숨긴다.
+- `appinstalled` 이벤트를 받으면 섹션을 숨긴다. 이 신호는 Chromium 경로에만 온다 — iOS 는 공유 시트 설치에서 이 이벤트를 발생시키지 않으므로, 그 브라우저 탭의 섹션은 다음 방문 때 standalone 판정으로만 사라진다. 탭은 여전히 설치 전 문맥이므로 이를 결함으로 보지 않는다.
 - 설치 프롬프트를 자동으로 띄우지 않는다. 사용자 제스처 없는 `prompt()` 는 Chromium 이 거부하고, 열지도 않은 메뉴 대신 화면을 가로채는 동작은 이 결정이 피하려는 것이다.
 
 ## Alternatives Considered
