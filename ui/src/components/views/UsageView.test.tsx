@@ -149,7 +149,7 @@ describe("UsageView", () => {
     expect(screen.getByTestId("usage-percent-week-all")).toHaveStyle({
       fontSize: "var(--fs-md)",
       fontWeight: "600",
-      color: "var(--usage-used)",
+      color: "var(--text-secondary)",
     });
   });
 
