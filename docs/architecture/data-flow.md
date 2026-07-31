@@ -1077,7 +1077,7 @@ Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usa
        배치 = lib/usage-layout.ts 가 측정된 박스에서 도출 (stacked / columns / compact)
 ```
 
-- **갱신 간격**: 정상 `settings.usage.refreshSeconds`(하한 600s, 상한 3600s), 실패 시 60s 로 최대 3회 재조회 후 정상 간격 복귀.
+- **갱신 간격**: 정상 `settings.usage.claude.refreshSeconds`(하한 600s, 상한 3600s), 실패 시 60s 로 최대 3회 재조회 후 정상 간격 복귀.
 - **구독 id 는 이펙트 실행마다 고유하다** (`usage-<paneId>#<seq>`). pane 당 고정 id 를 쓰면 React 가 이펙트를 실행→정리→재실행할 때 **죽은 정리 콜백이 살아있는 구독을 취소**해 수요가 0 이 되고, 마운트된 view 앞에서 probe 가 은퇴한다(실기에서 `idle` 로 관측). 백엔드도 같은 id·같은 config dir 재구독을 no-op 으로 처리해 정상 `claude` 를 죽이고 다시 띄우지 않는다.
 - **읽기 경로는 부작용이 없다**: `get_usage_snapshot` / `GET /api/v1/usage` / MCP `get_claude_usage` 는 워커를 기동시키지 않으며, 구독이 없으면 `status: idle` 또는 빈 목록을 반환한다.
 - **실패는 표시된다**: `claudeMissing` / `startupTimeout` / `parseFailed` / `upstreamError` / `failed` 를 구분해 view 푸터에 그대로 노출하고, 마지막 캡처 화면을 `rawScreen` 으로 남긴다(부팅 실패도 포함 — 화면이 비었는지 프롬프트에 막혔는지가 진단의 핵심이다).

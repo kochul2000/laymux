@@ -77,7 +77,8 @@
       "issueReporter": "이슈 리포터",
       "keybindings": "키 바인딩",
       "profileDefaults": "기본값",
-      "deleteProfile": "프로필 삭제"
+      "deleteProfile": "프로필 삭제",
+      "usage": "사용량"
     },
     "save": {
       "save": "저장",
@@ -494,6 +495,20 @@
       "resetToDefault": "기본값으로 초기화",
       "continueWithDefaults": "기본 설정으로 계속",
       "confirm": "확인"
+    },
+    "usage": {
+      "title": "사용량 모니터",
+      "groupClaude": "Claude Code",
+      "intro": "Claude Code 의 /usage 화면을 숨은 세션으로 조회해 UsageView pane 에 표시한다. UsageView pane 이 하나라도 열려 있을 때만 조회 프로세스가 뜬다.",
+      "profile": "실행 프로필",
+      "profileDesc": "claude 가 설치된 셸의 터미널 프로필. 비우면 기본 프로필을 쓴다",
+      "profileDefault": "기본 프로필 사용",
+      "refresh": "조회 간격",
+      "refreshDesc": "초 단위. rate limit 때문에 600초 미만은 적용되지 않고 3600초를 넘지 않는다",
+      "configDirs": "추가 계정",
+      "configDirsDesc": "함께 모니터링할 CLAUDE_CONFIG_DIR 경로. pane 컨트롤 바의 view 목록에 항목으로 추가된다. 기본 계정은 항상 포함되므로 여기 적지 않는다",
+      "configDirPlaceholder": "/home/me/.claude-personal",
+      "addConfigDir": "계정 추가"
     }
   },
   "workspace": {

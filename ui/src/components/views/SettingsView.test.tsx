@@ -2346,6 +2346,77 @@ describe("SettingsView", () => {
     });
   });
 
+  describe("UsageSection", () => {
+    async function openUsage() {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-usage"));
+      return user;
+    }
+
+    it("renders the usage settings under the Views group", async () => {
+      await openUsage();
+      expect(screen.getByTestId("settings-usage-section")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-profile-select")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-refresh-input")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-config-dir-add")).toBeInTheDocument();
+    });
+
+    it("offers every terminal profile plus a default option", async () => {
+      await openUsage();
+      const select = screen.getByTestId("usage-profile-select") as HTMLSelectElement;
+      const values = Array.from(select.options).map((o) => o.value);
+      // Empty value = follow defaultProfile.
+      expect(values[0]).toBe("");
+      for (const profile of useSettingsStore.getState().profiles) {
+        expect(values).toContain(profile.name);
+      }
+    });
+
+    it("hints the rate-limit bounds on the interval input", async () => {
+      // The floor is a provider constraint, so the control must not invite
+      // values the backend will silently clamp.
+      await openUsage();
+      const input = screen.getByTestId("usage-refresh-input") as HTMLInputElement;
+      expect(input.min).toBe("600");
+      expect(input.max).toBe("3600");
+      expect(input.value).toBe("600");
+    });
+
+    it("edits stay in the draft until saved", async () => {
+      const user = await openUsage();
+      const input = screen.getByTestId("usage-refresh-input");
+      await user.clear(input);
+      await user.type(input, "900");
+
+      expect(useSettingsStore.getState().usage.claude.refreshSeconds).toBe(600);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().usage.claude.refreshSeconds).toBe(900);
+    });
+
+    it("adds and removes config dirs", async () => {
+      const user = await openUsage();
+      await user.click(screen.getByTestId("usage-config-dir-add"));
+      await user.type(screen.getByTestId("usage-config-dir-input-0"), "/home/me/.claude-personal");
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([
+        "/home/me/.claude-personal",
+      ]);
+
+      await user.click(screen.getByTestId("usage-config-dir-remove-0"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
+    });
+
+    it("discards unsaved usage edits", async () => {
+      const user = await openUsage();
+      await user.click(screen.getByTestId("usage-config-dir-add"));
+      await user.click(screen.getByTestId("discard-settings-btn"));
+      expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
+    });
+  });
+
   describe("WorkspaceDisplaySection", () => {
     it("renders all workspace display toggles", async () => {
       const user = userEvent.setup();

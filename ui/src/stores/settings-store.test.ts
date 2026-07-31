@@ -925,4 +925,43 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.preferredHost).toBe("100.64.0.2");
     expect(useSettingsStore.getState().remote.customHosts).toEqual(["devbox.tailnet.ts.net"]);
   });
+
+  describe("usage", () => {
+    it("defaults the claude agent to the rate-limit floor", () => {
+      const { usage } = useSettingsStore.getState();
+      expect(usage.claude.profile).toBe("");
+      expect(usage.claude.refreshSeconds).toBe(600);
+      expect(usage.claude.configDirs).toEqual([]);
+    });
+
+    it("fills missing agent fields from defaults", () => {
+      useSettingsStore.getState().loadFromSettings({
+        usage: { claude: { profile: "WSL" } },
+      } as never);
+      const { usage } = useSettingsStore.getState();
+      expect(usage.claude.profile).toBe("WSL");
+      expect(usage.claude.refreshSeconds).toBe(600);
+      expect(usage.claude.configDirs).toEqual([]);
+    });
+
+    it("survives a settings.json with no usage key", () => {
+      useSettingsStore.getState().loadFromSettings({ language: "ko" } as never);
+      expect(useSettingsStore.getState().usage.claude.refreshSeconds).toBe(600);
+    });
+
+    it("coerces a malformed configDirs to an empty list", () => {
+      // A hand-edited settings.json must not break the pane view selector.
+      useSettingsStore.getState().loadFromSettings({
+        usage: { claude: { configDirs: "oops" } },
+      } as never);
+      expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
+    });
+
+    it("patches one agent without touching the rest of usage", () => {
+      useSettingsStore.getState().setUsageAgent("claude", { refreshSeconds: 900 });
+      const { usage } = useSettingsStore.getState();
+      expect(usage.claude.refreshSeconds).toBe(900);
+      expect(usage.claude.profile).toBe("");
+    });
+  });
 });

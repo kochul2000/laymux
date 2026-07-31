@@ -736,19 +736,31 @@ impl Default for PasteSettings {
     }
 }
 
-/// Claude usage monitor settings (`UsageView` / usage probe, ADR-0099).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+/// Usage monitor settings (`UsageView`, ADR-0099).
+///
+/// Keyed by agent because each agent is monitored by its own probe with its own
+/// shell, config dirs, and provider rate limit. Adding Codex later means adding
+/// a sibling field, not reshaping this one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSettings {
-    /// Terminal profile whose shell can run `claude`. Empty = `defaultProfile`.
+    #[serde(default)]
+    pub claude: UsageAgentSettings,
+}
+
+/// One monitored agent's probe settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAgentSettings {
+    /// Terminal profile whose shell can run the agent CLI. Empty = `defaultProfile`.
     #[serde(default)]
     pub profile: String,
-    /// Seconds between `/usage` queries. Clamped to the rate-limit floor of 600
-    /// on use — values below it are not honored.
+    /// Seconds between usage queries. Clamped to the provider's rate-limit floor
+    /// on use — a lower value is not honored.
     #[serde(default = "default_usage_refresh_seconds")]
     pub refresh_seconds: u64,
-    /// Additional `CLAUDE_CONFIG_DIR` values offered in the view's profile
-    /// picker. The default config dir is always available and is not listed here.
+    /// Additional agent config directories offered in the view's picker. The
+    /// default config dir is always available and is not listed here.
     #[serde(default)]
     pub config_dirs: Vec<String>,
 }
@@ -757,7 +769,7 @@ fn default_usage_refresh_seconds() -> u64 {
     crate::usage_probe::MIN_REFRESH_SECS
 }
 
-impl Default for UsageSettings {
+impl Default for UsageAgentSettings {
     fn default() -> Self {
         Self {
             profile: String::new(),

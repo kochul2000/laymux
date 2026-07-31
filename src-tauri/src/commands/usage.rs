@@ -18,10 +18,11 @@ use crate::usage_probe::{UsageSnapshot, WorkerSpec};
 /// `defaultProfile`.
 fn resolve_spec(config_dir: String) -> Result<WorkerSpec, String> {
     let settings = crate::settings::load_settings();
-    let profile_name = if settings.usage.profile.is_empty() {
+    let usage = &settings.usage.claude;
+    let profile_name = if usage.profile.is_empty() {
         settings.default_profile.clone()
     } else {
-        settings.usage.profile.clone()
+        usage.profile.clone()
     };
     let profile = settings
         .profiles
@@ -34,7 +35,7 @@ fn resolve_spec(config_dir: String) -> Result<WorkerSpec, String> {
         profile: profile.name.clone(),
         command_line: profile.command_line.clone(),
         starting_directory: profile.starting_directory.clone(),
-        refresh_seconds: settings.usage.refresh_seconds,
+        refresh_seconds: usage.refresh_seconds,
     })
 }
 
@@ -98,7 +99,7 @@ mod tests {
         // relationship the resolver must preserve.
         let settings = crate::settings::load_settings();
         let spec = resolve_spec(String::new());
-        if settings.usage.profile.is_empty() {
+        if settings.usage.claude.profile.is_empty() {
             let expected = settings.default_profile.clone();
             match spec {
                 Ok(spec) => assert_eq!(spec.profile, expected),

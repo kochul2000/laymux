@@ -77,7 +77,8 @@
       "issueReporter": "Issue Reporter",
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
-      "deleteProfile": "Delete profile"
+      "deleteProfile": "Delete profile",
+      "usage": "Usage"
     },
     "save": {
       "save": "Save",
@@ -494,6 +495,20 @@
       "resetToDefault": "Reset to default",
       "continueWithDefaults": "Continue with defaults",
       "confirm": "OK"
+    },
+    "usage": {
+      "title": "Usage Monitor",
+      "groupClaude": "Claude Code",
+      "intro": "Reads Claude Code's /usage panel in a hidden session and shows it in a UsageView pane. The query process only runs while at least one UsageView pane is open.",
+      "profile": "Shell profile",
+      "profileDesc": "Terminal profile whose shell has claude installed. Leave empty to use the default profile",
+      "profileDefault": "Use default profile",
+      "refresh": "Refresh interval",
+      "refreshDesc": "Seconds. Rate limits mean values under 600 are not honored, and 3600 is the ceiling",
+      "configDirs": "Additional accounts",
+      "configDirsDesc": "CLAUDE_CONFIG_DIR paths to monitor alongside the default. Each becomes an entry in the pane control bar view list. The default account is always included, so do not list it here",
+      "configDirPlaceholder": "/home/me/.claude-personal",
+      "addConfigDir": "Add account"
     }
   },
   "workspace": {

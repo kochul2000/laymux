@@ -107,7 +107,13 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/usage",
-        description: "Claude 사용량 모니터(UsageView) 설정입니다. refreshSeconds 는 rate limit 때문에 600초 미만으로는 적용되지 않습니다.",
+        description: "사용량 모니터(UsageView) 설정입니다. 모니터 대상 에이전트별로 키가 나뉩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/usage/claude",
+        description: "Claude Code 사용량 probe 설정입니다. profile 은 claude 를 실행할 터미널 프로필(빈 값이면 defaultProfile), refreshSeconds 는 rate limit 때문에 600초 미만으로는 적용되지 않습니다, configDirs 는 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록입니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

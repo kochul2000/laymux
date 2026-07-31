@@ -240,7 +240,7 @@ function ViewSelect({
       : "";
   // Extra CLAUDE_CONFIG_DIRs are offered as sibling options, so switching the
   // monitored account is the same gesture as switching a terminal profile.
-  const usageConfigDirs = useSettingsStore((s) => s.usage.configDirs);
+  const usageConfigDirs = useSettingsStore((s) => s.usage.claude.configDirs);
   const usageConfigDir =
     currentView.type === "UsageView" ? (currentView.configDir as string) || "" : "";
 

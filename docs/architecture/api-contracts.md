@@ -54,21 +54,27 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 `export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
 버리지 않고 제거 대상 항목만 정리한다.
 
-### Claude 사용량 모니터 설정
+### 사용량 모니터 설정
 
 ```jsonc
 {
   "usage": {
-    "profile": "", // claude 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
-    "refreshSeconds": 600, // /usage 조회 간격. 600 미만은 적용되지 않는다
-    "configDirs": [] // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
+    "claude": {
+      "profile": "", // claude 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
+      "refreshSeconds": 600, // 조회 간격. 600 미만은 적용되지 않는다
+      "configDirs": [] // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
+    }
   }
 }
 ```
 
-`usage.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
+**에이전트별로 키가 나뉜다.** 각 에이전트는 자기 probe·셸·config dir·provider rate limit 을 갖기 때문이다. Codex 사용량을 붙일 때는 `usage.codex` 를 형제 필드로 추가하며 기존 키 모양은 바뀌지 않는다.
+
+`usage.claude.profile` 은 `claude` 가 설치된 셸을 고른다 — WSL 에만 설치했다면 `"WSL"`. 존재하지 않는 프로필이면 구독이 오류로 실패하고 UsageView 푸터에 그대로 표시된다.
 
 `refreshSeconds` 는 **적용 시점에 600~3600 으로 clamp** 된다. 600 초 하한은 Anthropic 의 rate limit 때문이며 설정으로 내릴 수 없다 — 스키마는 값을 거부하지 않고 조용히 올려 적용한다([ADR-0099](../adr/0099-claude-usage-probe-headless-pty.md)). metadata apply mode 는 `nextUse` 다(다음 워커 기동부터 적용).
+
+편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
 
 ### Direct Remote Mode 설정
 
