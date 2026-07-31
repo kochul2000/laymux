@@ -94,6 +94,18 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/terminal/pathLinkOsOpenEnabled",
+        description: "밑줄 친 경로를 Ctrl+클릭하면 이 PC의 연결 프로그램으로, Ctrl+Shift+클릭하면 파일 관리자에서 열도록 허용합니다. 실행에는 항상 사용자의 로컬 클릭이 필요합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/pathLinkOsOpenConfirm",
+        description: "파일을 연결 프로그램으로 열 때마다 확인합니다. 끄면 확인 범위가 줄어드니 사용자가 직접 요청할 때만 끄십시오. 꺼도 실행 파일·스크립트 등 위험한 확장자는 계속 확인합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/paste",
         description: "클립보드와 smart paste 동작 설정입니다.",
         sensitive: false,

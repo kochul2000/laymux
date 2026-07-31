@@ -191,6 +191,7 @@ pub fn run() {
             commands::load_memo,
             commands::save_memo,
             commands::open_settings_file,
+            commands::open_in_os,
             commands::submit_github_issue,
             commands::get_listening_ports,
             commands::get_git_branch,

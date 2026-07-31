@@ -124,6 +124,16 @@ export interface TerminalSettings {
   pathLinkEnabled: boolean;
   /** Max selection length (chars) considered for a path link. Longer selections are ignored. */
   pathLinkMaxLength: number;
+  /**
+   * Issue #687 / ADR-0099: Ctrl click opens a path link in the host OS and
+   * Ctrl+Shift shows it in the host file manager.
+   */
+  pathLinkOsOpenEnabled: boolean;
+  /**
+   * Confirm every host OS open. When off, only the always-confirmed executable
+   * class (see `HARD_CONFIRM_EXTENSIONS`) still asks.
+   */
+  pathLinkOsOpenConfirm: boolean;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
   /**
@@ -554,6 +564,8 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   scrollbarStyle: "overlay",
   pathLinkEnabled: true,
   pathLinkMaxLength: 256,
+  pathLinkOsOpenEnabled: true,
+  pathLinkOsOpenConfirm: true,
   showScrollToBottomButton: true,
   composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,

@@ -27,6 +27,13 @@ import {
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
 import {
+  decidePathLinkClickAction,
+  isOsHandoffAction,
+  needsOsOpenConfirm,
+  requiresHardConfirm,
+  type PathLinkClickAction,
+} from "@/lib/path-link-os-open";
+import {
   trimSelectionToPath,
   isWithinPathLengthLimit,
   joinCwdPath,
@@ -61,6 +68,7 @@ import {
   setTerminalCwdReceive,
   updateTerminalSyncGroup,
   openExternal,
+  openInOs,
   resolveGitRemote,
   statPath,
   handleLxMessage,
@@ -1349,6 +1357,14 @@ export function TerminalView({
     const pathLink = createPathLinkController(terminal, {
       onOpenPath: (absPath) => {
         useFileViewerStore.getState().openFileViewer(absPath);
+      },
+      // #687: 호스트 OS 로 위임한다. 확인 대화상자는 이미 mouseup 에서 끝났다.
+      // 실패는 spawn 실패뿐이며(그 이후는 OS 소관), 조용히 삼키지 않고 알린다.
+      onOsAction: (absPath, mode) => {
+        openInOs(absPath, mode).catch((err) => {
+          console.warn(`[pathLink] ${instanceId} OS ${mode} 실패:`, err);
+          window.alert(i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }));
+        });
       },
       onChangeDir: (absPath) => {
         // 클릭한 디렉토리를 새 cwd 로 **제안**해 기존 중앙화 전파 경로(do_sync_cwd)에
@@ -2834,7 +2850,19 @@ export function TerminalView({
     // 경로를 연다(파일=viewer, 디렉토리=cwd 전파). 드래그면 무시해 일반 재선택이
     // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
     // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
-    let pathLinkPress: { sel: VerifiedPathSelection; x: number; y: number } | null = null;
+    //
+    // #687(ADR-0099): Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 이 조합만은
+    // "관찰"이 아니라 **소유**한다 — 밑줄 안에서 성립하면 mousedown 을
+    // preventDefault + stopImmediatePropagation 으로 종결해, xterm 의 선택 확장,
+    // TUI 로의 마우스 리포팅 전달, #352 우회가 같은 클릭을 함께 처리하지 못하게
+    // 한다(#352 쪽은 isModifierLinkClick 이 Ctrl 조합을 배제해 이중 안전).
+    // 액션은 mousedown 시점에 확정해 두었다가 mouseup 에서 실행한다.
+    let pathLinkPress: {
+      sel: VerifiedPathSelection;
+      action: PathLinkClickAction;
+      x: number;
+      y: number;
+    } | null = null;
     const PATH_LINK_CLICK_SLOP = 4;
     const handlePathLinkMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) {
@@ -2842,8 +2870,21 @@ export function TerminalView({
         return;
       }
       const sel = pathLink.getCurrent();
-      pathLinkPress =
-        sel && pathLink.hitTest(e.clientX, e.clientY) ? { sel, x: e.clientX, y: e.clientY } : null;
+      if (!sel || !pathLink.hitTest(e.clientX, e.clientY)) {
+        pathLinkPress = null;
+        return;
+      }
+      const action = decidePathLinkClickAction(
+        e,
+        sel.isDirectory,
+        useSettingsStore.getState().terminal.pathLinkOsOpenEnabled,
+      );
+      pathLinkPress = { sel, action, x: e.clientX, y: e.clientY };
+      if (isOsHandoffAction(action)) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
     };
     const handlePathLinkMouseUp = (e: MouseEvent) => {
       const press = pathLinkPress;
@@ -2853,9 +2894,29 @@ export function TerminalView({
         Math.abs(e.clientX - press.x) > PATH_LINK_CLICK_SLOP ||
         Math.abs(e.clientY - press.y) > PATH_LINK_CLICK_SLOP;
       if (moved) return; // 드래그 → 열지 않음(재선택 의도).
-      pathLink.activate(press.sel);
+      if (isOsHandoffAction(press.action)) {
+        // 실행으로 이어지는 경로만 확인한다(reveal·디렉토리 열기는 실행이 아님).
+        const confirmAlways = useSettingsStore.getState().terminal.pathLinkOsOpenConfirm;
+        const needsConfirm = needsOsOpenConfirm({
+          action: press.action,
+          path: press.sel.absPath,
+          isDirectory: press.sel.isDirectory,
+          confirmAlways,
+        });
+        if (needsConfirm) {
+          const key = requiresHardConfirm(press.sel.absPath)
+            ? "terminal.osOpenConfirmExecutable"
+            : "terminal.osOpenConfirm";
+          if (!window.confirm(i18n.t(key, { ns: "common", path: press.sel.absPath }))) return;
+        }
+        // mousedown 을 preventDefault 했으므로 포커스가 이동하지 않았다 —
+        // 사용자가 대화상자를 닫은 뒤 그대로 타이핑할 수 있게 되돌려 준다.
+        terminalRef.current?.focus();
+      }
+      pathLink.activate(press.sel, press.action);
     };
-    // capture 단계로 xterm 핸들러보다 먼저 관찰(전파는 막지 않는다).
+    // capture 단계로 xterm 핸들러보다 먼저 관찰한다. 전파를 막는 것은 위의
+    // 호스트 OS 위임 조합뿐이고, 나머지 클릭은 그대로 흘려보낸다.
     outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
     window.addEventListener("mouseup", handlePathLinkMouseUp);
 

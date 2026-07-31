@@ -54,6 +54,32 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 `export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
 버리지 않고 제거 대상 항목만 정리한다.
 
+### 경로 링크의 호스트 OS 열기
+
+```jsonc
+{
+  "terminal": {
+    "pathLinkOsOpenEnabled": true, // 기본값. Ctrl/Ctrl+Shift 클릭으로 호스트 OS 에 위임
+    "pathLinkOsOpenConfirm": true // 기본값. 파일을 연결 프로그램으로 열 때마다 확인
+  }
+}
+```
+
+두 Boolean 모두 Settings → Terminal → 파일 경로 링크에서 편집하며, Rust serde 와 프론트엔드
+settings store 가 누락값을 `true`로 보완한다([ADR-0099](../adr/0099-path-link-host-os-open-modifier-contract.md)).
+`pathLinkOsOpenEnabled` 가 꺼져 있으면 수정자 클릭도 기존 동작(파일=뷰어, 디렉터리=CWD 전파)으로
+떨어진다. `pathLinkOsOpenConfirm` 은 **완화만** 할 수 있다 — 꺼도 직접 실행·설치·스크립트 호스트·
+레지스트리 병합 확장자(코드 상수 `HARD_CONFIRM_EXTENSIONS`)는 계속 확인을 받는다. 이 하드 클래스는
+설정 키로 노출하지 않으므로 설정 patch 로 소거할 수 없다. 확인은 실행으로 이어지는 파일 `open` 에만
+적용되고 `reveal` 과 디렉터리 열기에는 적용되지 않는다.
+
+실행 커맨드 `open_in_os(path, wslDistro, mode)` 는 데스크톱 프론트엔드 전용이며 Automation API·MCP
+툴·Remote 라우트 어디에도 노출하지 않는다. 원격이 파일 읽기 권한을 호스트 프로세스 실행으로 넓히지
+못하게 하는 [ADR-0045](../adr/0045-remote-path-link-reuses-desktop-parser.md) 경계를 그대로 따른다.
+`mode` 는 `"open"`/`"reveal"` 두 값만 허용하고 그 외는 오류다. 호스트 경로는 `stat_path` 와 같은
+`resolve_address_path_following_symlinks` 로 산출하며, 커맨드는 프로세스 spawn 실패만 오류로
+보고한다(Windows `explorer.exe` 는 성공해도 0 이 아닌 종료 코드를 반환하므로 종료 코드를 보지 않는다).
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).

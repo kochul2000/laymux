@@ -1621,6 +1621,22 @@ function TerminalSection() {
             }
           />
         </SettingRow>
+
+        <ToggleRow
+          label={t("terminal.pathLinkOsOpen")}
+          desc={t("terminal.pathLinkOsOpenDesc")}
+          testid="path-link-os-open-toggle"
+          checked={terminal.pathLinkOsOpenEnabled}
+          onChange={(v) => update({ pathLinkOsOpenEnabled: v })}
+        />
+
+        <ToggleRow
+          label={t("terminal.pathLinkOsOpenConfirm")}
+          desc={t("terminal.pathLinkOsOpenConfirmDesc")}
+          testid="path-link-os-open-confirm-toggle"
+          checked={terminal.pathLinkOsOpenConfirm}
+          onChange={(v) => update({ pathLinkOsOpenConfirm: v })}
+        />
       </SubGroup>
 
       <SubGroup title={t("terminal.exitGroup")}>

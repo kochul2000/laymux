@@ -833,6 +833,18 @@ export async function statPath(path: string, wslDistro?: string): Promise<PathIn
   return invoke("stat_path", { path, wslDistro: wslDistro ?? null });
 }
 
+/**
+ * Hand a verified path-link target to the host desktop (issue #687, ADR-0099).
+ * `open` uses the host file association (file) or file manager (directory);
+ * `reveal` shows the target inside its parent directory.
+ *
+ * Only a spawn failure rejects — the host decides everything after that, so an
+ * "how do you want to open this file?" dialog is a success, not an error.
+ */
+export async function openInOs(path: string, mode: "open" | "reveal"): Promise<void> {
+  return invoke("open_in_os", { path, wslDistro: null, mode });
+}
+
 /** Resolve the user's home directory (fallback CWD for File Explorer). */
 export async function getHomeDirectory(): Promise<string> {
   return invoke("get_home_directory");
