@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createTerminalWriteFairOwner,
   TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS,
-  TERMINAL_WRITE_MAX_SKIPPED_TURNS,
+  TERMINAL_WRITE_PRIORITY_WEIGHT,
+  TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS,
   TerminalWriteFairScheduler,
   type TerminalWritePriority,
 } from "./terminal-write-fair-scheduler";
@@ -167,7 +168,7 @@ describe("TerminalWriteFairScheduler", () => {
     }
   });
 
-  it("serves saturated focused, foreground, and background parsers with 4:2:1 weight", () => {
+  it("serves saturated focused, foreground, and background parsers with 16:8:1 weight", () => {
     const { scheduler, runNextTask } = createHarness();
     const order: string[] = [];
     let releaseBlocker: (() => void) | undefined;
@@ -175,6 +176,7 @@ describe("TerminalWriteFairScheduler", () => {
     const focused = owner("focused");
     const foreground = owner("foreground");
     const background = owner("background");
+    const cycleTurns = 25;
 
     scheduler.request(blocker, (release) => {
       releaseBlocker = release;
@@ -187,7 +189,7 @@ describe("TerminalWriteFairScheduler", () => {
     ) => {
       const turn = (release: () => void) => {
         order.push(label);
-        if (order.length < 7) scheduler.request(currentOwner, turn, () => priority);
+        if (order.length < cycleTurns) scheduler.request(currentOwner, turn, () => priority);
         release();
       };
       scheduler.request(currentOwner, turn, () => priority);
@@ -199,17 +201,59 @@ describe("TerminalWriteFairScheduler", () => {
     saturate(focused, "focused", "focused");
 
     releaseBlocker?.();
-    for (let index = 0; index < 7; index += 1) runNextTask();
+    for (let index = 0; index < cycleTurns; index += 1) runNextTask();
 
-    expect(order).toEqual([
+    expect(order.slice(0, 7)).toEqual([
       "focused",
       "foreground",
       "focused",
-      "background",
       "focused",
       "foreground",
+      "focused",
       "focused",
     ]);
+    expect(order.filter((label) => label === "focused")).toHaveLength(16);
+    expect(order.filter((label) => label === "foreground")).toHaveLength(8);
+    expect(order.filter((label) => label === "background")).toHaveLength(1);
+  });
+
+  it("keeps a focused parser's weighted share when many hidden parsers flood", () => {
+    // issue #686: the age-promotion floor used to be one class-independent
+    // bound, so a crowd of hidden flooders each went overdue every K turns and
+    // the weighted share degenerated into plain round-robin.
+    const { scheduler, runNextTask } = createHarness();
+    const served: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    const hiddenPaneCount = 8;
+    const cycleTurns = TERMINAL_WRITE_PRIORITY_WEIGHT.focused + hiddenPaneCount;
+
+    scheduler.request(owner("blocker"), (release) => {
+      releaseBlocker = release;
+    });
+
+    const saturate = (label: string, priority: TerminalWritePriority) => {
+      const currentOwner = owner(label);
+      const turn = (release: () => void) => {
+        served.push(label);
+        if (served.length < cycleTurns) scheduler.request(currentOwner, turn, () => priority);
+        release();
+      };
+      scheduler.request(currentOwner, turn, () => priority);
+    };
+    for (let index = 0; index < hiddenPaneCount; index += 1) {
+      saturate(`hidden-${index}`, "background");
+    }
+    saturate("focused", "focused");
+
+    releaseBlocker?.();
+    for (let index = 0; index < cycleTurns; index += 1) runNextTask();
+
+    expect(served.filter((label) => label === "focused")).toHaveLength(
+      TERMINAL_WRITE_PRIORITY_WEIGHT.focused,
+    );
+    for (let index = 0; index < hiddenPaneCount; index += 1) {
+      expect(served.filter((label) => label === `hidden-${index}`)).toHaveLength(1);
+    }
   });
 
   it("samples the latest priority when a queued pane reaches dequeue", () => {
@@ -253,6 +297,7 @@ describe("TerminalWriteFairScheduler", () => {
     const servicedBackground = new Set<string>();
     let releaseBlocker: (() => void) | undefined;
     const blocker = owner("blocker");
+    const backgroundBound = TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS.background;
 
     scheduler.request(blocker, (release) => {
       releaseBlocker = release;
@@ -274,21 +319,17 @@ describe("TerminalWriteFairScheduler", () => {
       const currentOwner = owner(label);
       saturate(currentOwner, "background", () => servicedBackground.add(label));
     }
-    // K+1 distinct focused owners make ordinary smooth weighting choose the
-    // ninth focused owner next. Aging must instead select the earlier-enqueued
-    // background FIFO after exactly K skips.
-    for (let index = 0; index <= TERMINAL_WRITE_MAX_SKIPPED_TURNS; index += 1) {
+    // Enough focused owners that ordinary smooth weighting keeps choosing one of
+    // them. Aging must instead select the earlier-enqueued background FIFO after
+    // exactly the background bound's worth of skips.
+    for (let index = 0; index <= backgroundBound; index += 1) {
       saturate(owner(`focused-${index}`), "focused", () => {});
     }
 
     releaseBlocker?.();
     // Three overdue owners are serviced on selections K+1 through K+3.
     const initialBackgroundOwnerCount = 3;
-    for (
-      let index = 0;
-      index < TERMINAL_WRITE_MAX_SKIPPED_TURNS + initialBackgroundOwnerCount;
-      index += 1
-    ) {
+    for (let index = 0; index < backgroundBound + initialBackgroundOwnerCount; index += 1) {
       runNextTask();
     }
 
@@ -297,6 +338,40 @@ describe("TerminalWriteFairScheduler", () => {
       "background-b",
       "background-c",
     ]);
+  });
+
+  it("age-promotes an overdue visible parser sooner than a hidden one", () => {
+    const { scheduler, runNextTask } = createHarness();
+    const served: string[] = [];
+    let releaseBlocker: (() => void) | undefined;
+    const foregroundBound = TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS.foreground;
+
+    scheduler.request(owner("blocker"), (release) => {
+      releaseBlocker = release;
+    });
+
+    const saturate = (label: string, priority: TerminalWritePriority) => {
+      const currentOwner = owner(label);
+      const turn = (release: () => void) => {
+        served.push(label);
+        scheduler.request(currentOwner, turn, () => priority);
+        release();
+      };
+      scheduler.request(currentOwner, turn, () => priority);
+    };
+    // Hidden and visible flooders enqueue before the focused crowd, so FIFO
+    // order alone would serve the hidden pane first once both go overdue.
+    saturate("hidden", "background");
+    saturate("visible", "foreground");
+    for (let index = 0; index <= foregroundBound; index += 1) {
+      saturate(`focused-${index}`, "focused");
+    }
+
+    releaseBlocker?.();
+    for (let index = 0; index < foregroundBound + 1; index += 1) runNextTask();
+
+    expect(served).toContain("visible");
+    expect(served).not.toContain("hidden");
   });
 
   it("admits one physical write at a time and rotates waiting panes", () => {

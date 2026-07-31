@@ -11,14 +11,37 @@ export type TerminalWriteFairOwner = symbol;
 export type TerminalWritePriority = "focused" | "foreground" | "background";
 export type TerminalWritePriorityResolver = () => TerminalWritePriority;
 
-const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
-  focused: 4,
-  foreground: 2,
+/**
+ * Whether the surface is on screen outweighs which pane holds focus: an
+ * inactive workspace's panes are hidden, so the visible:hidden gap carries the
+ * active-workspace priority (issue #686).
+ */
+export const TERMINAL_WRITE_PRIORITY_WEIGHT: Record<TerminalWritePriority, number> = {
+  focused: 16,
+  foreground: 8,
   background: 1,
 };
 
-/** A waiting owner becomes urgent after this many other completed admissions. */
-export const TERMINAL_WRITE_MAX_SKIPPED_TURNS = 8;
+/**
+ * A waiting owner becomes urgent after this many other completed admissions.
+ *
+ * The bound is per class because it is a starvation floor, not a share. One
+ * class-independent bound let a crowd of hidden flooders all go overdue every K
+ * turns, and since promotion ignores the weighted balance the share flattened
+ * back into plain round-robin. The hidden bound stays above the weighted service
+ * gap of a realistic pane count, so weights decide the ordinary case and aging
+ * only backstops it.
+ */
+export const TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS: Record<TerminalWritePriority, number> = {
+  focused: 8,
+  foreground: 8,
+  background: 32,
+};
+
+/** No class waits past its own bound, so skip counting saturates at the largest. */
+const TERMINAL_WRITE_MAX_TRACKED_SKIPPED_TURNS = Math.max(
+  ...Object.values(TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS),
+);
 
 /** Let non-MessageChannel browser task sources compete at least once per pane round. */
 export const TERMINAL_WRITE_CONTROL_YIELD_INTERVAL_TURNS = 8;
@@ -211,7 +234,10 @@ export class TerminalWriteFairScheduler {
     const ownerIndex = this.pendingOwners.indexOf(owner);
     if (ownerIndex >= 0) this.pendingOwners.splice(ownerIndex, 1);
     for (const waiting of this.pendingTurns.values()) {
-      waiting.skippedTurns = Math.min(TERMINAL_WRITE_MAX_SKIPPED_TURNS, waiting.skippedTurns + 1);
+      waiting.skippedTurns = Math.min(
+        TERMINAL_WRITE_MAX_TRACKED_SKIPPED_TURNS,
+        waiting.skippedTurns + 1,
+      );
     }
     const activeTurn: ActiveTurn = { owner, released: false };
     this.activeTurn = activeTurn;
@@ -225,10 +251,17 @@ export class TerminalWriteFairScheduler {
   }
 
   private selectNextOwner(): TerminalWriteFairOwner | undefined {
-    const urgent = this.pendingOwners.find(
-      (owner) =>
-        (this.pendingTurns.get(owner)?.skippedTurns ?? 0) >= TERMINAL_WRITE_MAX_SKIPPED_TURNS,
-    );
+    // The starvation floor runs before the weighted balance, so its bound must be
+    // per class: a class-independent bound turns a hidden crowd's floor into the
+    // whole schedule and erases the active workspace's share (issue #686).
+    const urgent = this.pendingOwners.find((owner) => {
+      const pending = this.pendingTurns.get(owner);
+      if (!pending) return false;
+      return (
+        pending.skippedTurns >=
+        TERMINAL_WRITE_PROMOTION_SKIPPED_TURNS[this.resolvePriority(pending)]
+      );
+    });
     if (urgent !== undefined) {
       this.balances.set(urgent, 0);
       return urgent;
