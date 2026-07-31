@@ -6,7 +6,23 @@ vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Explicit allowlist, not a spread of the real module: every Tauri touchpoint
+// AppLayout's tree reaches has to be stubbed here, or the real `invoke`/`listen`
+// would run without an IPC host. Keep it in step with what the rendered tree
+// imports — `useSyncEvents` owns most of the listeners below.
 vi.mock("@/lib/tauri-api", () => ({
+  onSyncCwd: vi.fn().mockResolvedValue(() => {}),
+  onSyncBranch: vi.fn().mockResolvedValue(() => {}),
+  onLxNotify: vi.fn().mockResolvedValue(() => {}),
+  onSetTabTitle: vi.fn().mockResolvedValue(() => {}),
+  onCommandStatus: vi.fn().mockResolvedValue(() => {}),
+  onClaudeTerminalDetected: vi.fn().mockResolvedValue(() => {}),
+  onClaudeMessageChanged: vi.fn().mockResolvedValue(() => {}),
+  onTerminalCwdChanged: vi.fn().mockResolvedValue(() => {}),
+  onTerminalTitleChanged: vi.fn().mockResolvedValue(() => {}),
+  onTerminalOutputActivity: vi.fn().mockResolvedValue(() => {}),
+  getTerminalStates: vi.fn().mockResolvedValue([]),
+  getHomeDirectory: vi.fn().mockResolvedValue("/home/mock"),
   createTerminalSession: vi.fn().mockResolvedValue("t-mock"),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
   resizeTerminal: vi.fn().mockResolvedValue(undefined),

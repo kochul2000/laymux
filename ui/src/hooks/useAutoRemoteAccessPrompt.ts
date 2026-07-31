@@ -87,10 +87,7 @@ export function useAutoRemoteAccessPrompt(enabled = true) {
       // re-registering the OS listener.
       const currentThreshold = useSettingsStore.getState().remote.autoMobileModeMinWidth;
       if (!Number.isFinite(currentThreshold) || currentThreshold <= 0) return;
-      if (
-        window.innerWidth > currentThreshold &&
-        !isPhoneLikeRemoteScreen(currentThreshold)
-      ) {
+      if (window.innerWidth > currentThreshold && !isPhoneLikeRemoteScreen(currentThreshold)) {
         return;
       }
       useUiStore.getState().openRemoteAccessModal();
