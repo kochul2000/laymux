@@ -45,6 +45,7 @@ describe("CodexUsageView", () => {
           {
             key: "codex-primary",
             label: "Codex",
+            kind: "primary",
             usedPercent: 42,
             windowDurationMins: 300,
             resetsAtSecs: Math.floor(Date.now() / 1000) + 120_000,
@@ -66,6 +67,40 @@ describe("CodexUsageView", () => {
       height: "16px",
     });
     expect(meter.firstElementChild).toHaveStyle({ background: "rgb(88, 209, 235)" });
+  });
+
+  it("excludes secondary windows by kind even when a key ends in -primary", () => {
+    useCodexUsageSnapshot.mockReturnValue({
+      snapshot: {
+        status: { type: "ready" },
+        limits: [
+          {
+            key: "weird-primary-primary",
+            label: "Weird",
+            kind: "primary",
+            usedPercent: 5,
+            windowDurationMins: 300,
+            resetsAtSecs: 1_800_000_000,
+          },
+          {
+            key: "weird-primary",
+            label: "Weird",
+            kind: "secondary",
+            usedPercent: 6,
+            windowDurationMins: 10_080,
+            resetsAtSecs: 1_800_000_000,
+          },
+        ],
+        plan: null,
+        capturedAtMs: null,
+      },
+      refresh: vi.fn(),
+    });
+
+    render(<CodexUsageView />);
+
+    expect(screen.getByTestId("usage-row-weird-primary-primary")).toBeInTheDocument();
+    expect(screen.queryByTestId("usage-row-weird-primary")).not.toBeInTheDocument();
   });
 
   it("shows the shared surface's status area for an unauthenticated CLI", () => {
@@ -92,6 +127,7 @@ describe("CodexUsageView", () => {
           {
             key: "codex-primary",
             label: "Codex",
+            kind: "primary",
             usedPercent: 8,
             windowDurationMins: 300,
             resetsAtSecs: 1_800_000_000,
@@ -99,6 +135,7 @@ describe("CodexUsageView", () => {
           {
             key: "gpt-5.3-codex-spark-primary",
             label: "GPT-5.3-Codex-Spark",
+            kind: "primary",
             usedPercent: 17,
             windowDurationMins: 300,
             resetsAtSecs: 1_800_000_000,
@@ -106,6 +143,7 @@ describe("CodexUsageView", () => {
           {
             key: "codex-secondary",
             label: "Codex",
+            kind: "secondary",
             usedPercent: 2,
             windowDurationMins: 10_080,
             resetsAtSecs: 1_800_000_000,

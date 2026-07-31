@@ -810,9 +810,13 @@ impl Default for PasteSettings {
 
 /// Usage monitor settings (`UsageView`, ADR-0102).
 ///
-/// Keyed by agent because each agent is monitored by its own probe with its own
-/// shell, config dirs, and provider rate limit. Adding Codex later means adding
-/// a sibling field, not reshaping this one.
+/// Collection is keyed by agent because each one has its own source: Claude is
+/// read by a headless PTY probe ([ADR-0102]), Codex by its local app-server
+/// account API ([ADR-0104]). Presentation is not keyed by agent — `colors` is
+/// shared by every provider's view, so a display rule lives in exactly one place.
+///
+/// [ADR-0102]: ../../../docs/adr/0102-claude-usage-probe-headless-pty.md
+/// [ADR-0104]: ../../../docs/adr/0104-codex-usage-app-server-probe.md
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSettings {

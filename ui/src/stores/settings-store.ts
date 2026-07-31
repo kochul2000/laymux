@@ -207,8 +207,9 @@ export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visib
 /**
  * Usage monitor (UsageView, ADR-0102).
  *
- * Keyed by agent: each is monitored by its own probe with its own shell, config
- * dirs, and provider rate limit. Codex arrives as a sibling field.
+ * Collection is keyed by agent: Claude comes from a headless PTY probe
+ * (ADR-0102), Codex from its local app-server account API (ADR-0104).
+ * Presentation is not — `colors` is shared by every provider's view.
  */
 export interface UsageSettings {
   claude: UsageAgentSettings;

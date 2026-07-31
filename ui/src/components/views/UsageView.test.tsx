@@ -254,6 +254,19 @@ describe("UsageView", () => {
     expect(screen.queryByTestId("usage-row-week-model")).not.toBeInTheDocument();
   });
 
+  it("keeps the header controls and truncated account path discoverable by tooltip", async () => {
+    await renderView({ paneId: "pane-1", configDir: "/home/me/.claude-personal" });
+
+    // The path span is `truncate`, so its tooltip is the only way to read a long
+    // account path once several accounts are monitored.
+    expect(screen.getByTitle("/home/me/.claude-personal")).toBeInTheDocument();
+    expect(screen.getByTestId("usage-layout-toggle")).toHaveAttribute(
+      "title",
+      "Layout: auto (click to change)",
+    );
+    expect(screen.getByTestId("usage-refresh")).toHaveAttribute("title", "Query /usage now");
+  });
+
   it("abbreviates labels and detail words only when the row becomes narrow", async () => {
     mockBox(230, 600);
     await renderView({ paneId: "pane-1" });
