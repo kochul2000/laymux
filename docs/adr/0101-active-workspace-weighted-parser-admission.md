@@ -1,6 +1,6 @@
 # 0101. parser admission 은 pane 가중치가 아니라 클래스 몫으로 나누고 그 몫은 설정값이다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-31
 - Source: 사용자 요구(issue #686: 렌더 round robin 에서 활성 워크스페이스 우선순위를 높여 달라 — "현재는 그냥 공평하게 배분됨") · 사용자 지적(pane 100개·workspace 10개 규모에서는 pane 단위 가중치로 활성 workspace 몫을 지킬 수 없다) · [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) · [ADR-0092](0092-app-wide-terminal-write-round-robin.md) · [architecture/data-flow.md §8.8](../architecture/data-flow.md)
 - Amends: [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) Decision 3·4 의 pane 단위 4:2:1 가중치와 `K=8` age promotion 을 **클래스 단위 몫 + 클래스 내 round-robin** 으로 대체한다. Decision 4 의 `K + P - 1` bound 는 클래스 몫에서 파생되는 bound 로 대체된다. Alternatives 의 "가중치를 사용자 설정으로 노출한다 → 기각" 판단도 정정한다(설정 노출, Settings UI 는 비목표). Decision 7 의 quantum, Decision 5·6·8·9·10 의 lossless·lease·watchdog 계약, Decision 11 의 acceptance 구성은 유지한다.
