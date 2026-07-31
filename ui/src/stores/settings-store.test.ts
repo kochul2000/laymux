@@ -937,7 +937,7 @@ describe("settings-store", () => {
       expect(usage.codex.refreshSeconds).toBe(600);
       expect(usage.codex.configDirs).toEqual([]);
       expect(usage.codex.visibleRows).toEqual(["weekly", "sparkWeekly"]);
-      expect(usage.colors).toEqual({ used: "#89dceb", pace: "#f9e2af", track: "#45475a" });
+      expect(usage.colors).toEqual({ used: "#58d1eb", pace: "#fd971f", track: "#585858" });
     });
 
     it("fills missing agent fields from defaults", () => {
@@ -1003,17 +1003,17 @@ describe("settings-store", () => {
       useSettingsStore.getState().setUsageColors({ used: "#112233" });
       const { usage } = useSettingsStore.getState();
       expect(usage.codex.configDirs).toEqual(["C:\\Users\\me\\.codex-work"]);
-      expect(usage.colors).toEqual({ used: "#112233", pace: "#f9e2af", track: "#45475a" });
+      expect(usage.colors).toEqual({ used: "#112233", pace: "#fd971f", track: "#585858" });
     });
 
     it("restores original meter colors for malformed saved values", () => {
       useSettingsStore.getState().loadFromSettings({
-        usage: { colors: { used: "cyan", pace: "#f9e2af", track: 12 } },
+        usage: { colors: { used: "cyan", pace: "#fd971f", track: 12 } },
       } as never);
       expect(useSettingsStore.getState().usage.colors).toEqual({
-        used: "#89dceb",
-        pace: "#f9e2af",
-        track: "#45475a",
+        used: "#58d1eb",
+        pace: "#fd971f",
+        track: "#585858",
       });
     });
   });

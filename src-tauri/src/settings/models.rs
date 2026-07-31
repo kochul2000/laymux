@@ -847,13 +847,13 @@ pub struct UsageColorSettings {
 }
 
 fn default_usage_used_color() -> String {
-    "#89dceb".into()
+    "#58d1eb".into()
 }
 fn default_usage_pace_color() -> String {
-    "#f9e2af".into()
+    "#fd971f".into()
 }
 fn default_usage_track_color() -> String {
-    "#45475a".into()
+    "#585858".into()
 }
 
 impl Default for UsageColorSettings {

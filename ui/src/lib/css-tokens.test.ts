@@ -68,9 +68,9 @@ describe("CSS design tokens — border-radius", () => {
 
 describe("CSS design tokens — Claude usage meters", () => {
   const usageColors: [string, string][] = [
-    ["--usage-used", "#89dceb"],
-    ["--usage-pace", "#f9e2af"],
-    ["--usage-track", "#45475a"],
+    ["--usage-used", "#58d1eb"],
+    ["--usage-pace", "#fd971f"],
+    ["--usage-track", "#585858"],
   ];
 
   it.each(usageColors)("sets %s to %s", (token, color) => {
