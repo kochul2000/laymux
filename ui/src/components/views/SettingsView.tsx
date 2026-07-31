@@ -3331,8 +3331,10 @@ function UsageSection() {
           <FocusInput
             data-testid="usage-refresh-input"
             type="number"
-            className="w-24 rounded px-2 py-1.5 text-xs"
-            style={inputStyle}
+            // `inputStyle`, not `style`: FocusInput overwrites `style` with its
+            // own. A width here also beats `inputCls`'s `w-full`, which a
+            // `w-24` class would lose to depending on stylesheet order.
+            inputStyle={{ width: "7rem" }}
             min={USAGE_REFRESH_MIN_SECONDS}
             max={USAGE_REFRESH_MAX_SECONDS}
             step={30}
@@ -3358,8 +3360,6 @@ function UsageSection() {
               <div key={i} className="mb-2 flex items-center gap-2">
                 <FocusInput
                   data-testid={`usage-config-dir-input-${i}`}
-                  className={inputCls}
-                  style={{ ...inputStyle, flex: 1 }}
                   placeholder={t("usage.configDirPlaceholder")}
                   value={dir}
                   onChange={(e) => updateConfigDir(i, e.target.value)}
