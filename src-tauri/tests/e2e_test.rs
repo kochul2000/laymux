@@ -208,11 +208,6 @@ fn settings_round_trip_with_full_config() {
         exit: Default::default(),
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
-        github: GithubSettings {
-            default_tab: "pulls".into(),
-            refresh_seconds: 45,
-            hide_draft_pulls: true,
-        },
         file_explorer: FileExplorerSettings::default(),
         // Non-default on every field: this test compares the whole struct after
         // a round trip, so a field left at its default would still pass even if
