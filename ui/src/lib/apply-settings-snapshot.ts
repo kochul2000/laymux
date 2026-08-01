@@ -86,6 +86,8 @@ export function applySettingsSnapshot(
     ...(rawSettings.paste ? { paste: rawSettings.paste } : {}),
     ...(rawSettings.terminal ? { terminal: rawSettings.terminal } : {}),
     ...(rawSettings.controlBar ? { controlBar: rawSettings.controlBar } : {}),
+    ...(rawSettings.usage ? { usage: rawSettings.usage } : {}),
+    ...(rawSettings.widgets ? { widgets: rawSettings.widgets } : {}),
     ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
     ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
     ...(rawSettings.workspaceSelector ? { workspaceSelector: rawSettings.workspaceSelector } : {}),

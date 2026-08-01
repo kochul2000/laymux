@@ -824,8 +824,6 @@ pub struct UsageSettings {
     pub claude: UsageAgentSettings,
     #[serde(default = "default_codex_usage_settings")]
     pub codex: UsageAgentSettings,
-    #[serde(default)]
-    pub colors: UsageColorSettings,
 }
 
 impl Default for UsageSettings {
@@ -833,16 +831,21 @@ impl Default for UsageSettings {
         Self {
             claude: UsageAgentSettings::default(),
             codex: default_codex_usage_settings(),
-            colors: UsageColorSettings::default(),
         }
     }
 }
 
-/// Shared colors for all provider usage meters.
+/// Meter colors for one provider.
+///
+/// Owned per agent rather than globally: two providers shown side by side on the
+/// same status line are only telling apart by colour, so a shared palette makes
+/// the surface unreadable.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageColorSettings {
-    #[serde(default = "default_usage_used_color")]
+    /// Falls back to Claude's colour when a hand-edited file omits it; the agent
+    /// defaults above are what actually seed a fresh install.
+    #[serde(default = "default_claude_used_color")]
     pub used: String,
     #[serde(default = "default_usage_pace_color")]
     pub pace: String,
@@ -850,23 +853,38 @@ pub struct UsageColorSettings {
     pub track: String,
 }
 
-fn default_usage_used_color() -> String {
-    "#58d1eb".into()
+/// Claude's brand orange — the same colour the workspace selector marks a
+/// Claude pane with, so one agent reads the same everywhere in the app.
+fn default_claude_used_color() -> String {
+    "#d97757".into()
 }
+/// Codex's brand green, for the same reason.
+fn default_codex_used_color() -> String {
+    "#10a37f".into()
+}
+/// Elapsed time is provider-neutral, so it keeps one colour across agents —
+/// yellow, far enough from both brand colours to never be mistaken for the
+/// consumption bar sitting directly above it.
 fn default_usage_pace_color() -> String {
-    "#fd971f".into()
+    "#f9e2af".into()
 }
 fn default_usage_track_color() -> String {
     "#585858".into()
 }
 
-impl Default for UsageColorSettings {
-    fn default() -> Self {
+impl UsageColorSettings {
+    fn for_agent(used: String) -> Self {
         Self {
-            used: default_usage_used_color(),
+            used,
             pace: default_usage_pace_color(),
             track: default_usage_track_color(),
         }
+    }
+}
+
+impl Default for UsageColorSettings {
+    fn default() -> Self {
+        Self::for_agent(default_claude_used_color())
     }
 }
 
@@ -889,6 +907,9 @@ pub struct UsageAgentSettings {
     /// least one selected and falls back to all rows for malformed input.
     #[serde(default = "default_usage_visible_rows")]
     pub visible_rows: Vec<String>,
+    /// Meter colors for this agent's views and widgets.
+    #[serde(default)]
+    pub colors: UsageColorSettings,
 }
 
 fn default_usage_refresh_seconds() -> u64 {
@@ -905,6 +926,7 @@ fn default_codex_usage_settings() -> UsageAgentSettings {
         refresh_seconds: default_usage_refresh_seconds(),
         config_dirs: Vec::new(),
         visible_rows: vec!["weekly".into(), "sparkWeekly".into()],
+        colors: UsageColorSettings::for_agent(default_codex_used_color()),
     }
 }
 
@@ -915,8 +937,89 @@ impl Default for UsageAgentSettings {
             refresh_seconds: default_usage_refresh_seconds(),
             config_dirs: Vec::new(),
             visible_rows: default_usage_visible_rows(),
+            colors: UsageColorSettings::default(),
         }
     }
+}
+
+/// Where the user placed status widgets, per [ADR-0105].
+///
+/// Placement is nothing but the order of these four arrays: a widget is on the
+/// left because it sits in a `left` slot, and it comes first because it is first
+/// in that array. The top bar's slots always exist; `statusLine.enabled` decides
+/// only whether the bottom surface is drawn, never whether its placement is kept.
+///
+/// [ADR-0105]: ../../../docs/adr/0105-widget-slots-and-status-line.md
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetsSettings {
+    #[serde(default)]
+    pub top_bar: WidgetSlots,
+    #[serde(default)]
+    pub status_line: StatusLineWidgets,
+    /// What a slot does when its width budget runs out. Only `collapse` exists
+    /// today; the key is here so a second policy is a value change, not a
+    /// schema change.
+    #[serde(default = "default_widget_overflow")]
+    pub overflow: String,
+}
+
+fn default_widget_overflow() -> String {
+    "collapse".into()
+}
+
+impl Default for WidgetsSettings {
+    fn default() -> Self {
+        Self {
+            top_bar: WidgetSlots::default(),
+            status_line: StatusLineWidgets::default(),
+            overflow: default_widget_overflow(),
+        }
+    }
+}
+
+/// One surface's two slots. Empty by default — nothing is placed for the user.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetSlots {
+    #[serde(default)]
+    pub left: Vec<WidgetInstance>,
+    #[serde(default)]
+    pub right: Vec<WidgetInstance>,
+}
+
+/// The bottom surface: the same two slots plus the switch that draws them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusLineWidgets {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub left: Vec<WidgetInstance>,
+    #[serde(default)]
+    pub right: Vec<WidgetInstance>,
+}
+
+/// One placed widget.
+///
+/// `options` stays untyped here because each widget type owns its own value
+/// domain; the backend validates the domains it knows and carries the rest
+/// through untouched rather than dropping keys it cannot interpret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetInstance {
+    /// Unique across all four slots. Survives moves between slots.
+    pub id: String,
+    /// Registry name. Unknown values are kept on load and skipped when
+    /// rendering, so a settings file from another version loses nothing.
+    #[serde(rename = "type")]
+    pub widget_type: String,
+    #[serde(default = "default_widget_options")]
+    pub options: serde_json::Value,
+}
+
+fn default_widget_options() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
 }
 
 /// Pane control bar settings.
@@ -1471,6 +1574,9 @@ pub struct Settings {
     /// Claude usage monitor settings.
     #[serde(default)]
     pub usage: UsageSettings,
+    /// Status widget placement for the top bar and the status line.
+    #[serde(default)]
+    pub widgets: WidgetsSettings,
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
@@ -1574,6 +1680,7 @@ impl Default for Settings {
             paste: PasteSettings::default(),
             control_bar: ControlBarSettings::default(),
             usage: UsageSettings::default(),
+            widgets: WidgetsSettings::default(),
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),

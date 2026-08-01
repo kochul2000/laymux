@@ -6,7 +6,14 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import type { DockPosition } from "@/stores/types";
+import { WidgetSlot } from "@/components/widgets/WidgetSlot";
 import logoSvg from "@/assets/logo.svg";
+
+/**
+ * Width the window drag region keeps no matter how many widgets are placed.
+ * Without it a full top bar would leave nothing to grab the window by.
+ */
+const MIN_DRAG_REGION_PX = 80;
 
 /** Window control helpers — lazy-loaded to avoid SSR/test issues */
 async function getWindow() {
@@ -23,6 +30,7 @@ export function GridEditToolbar() {
   const remoteAccessStatus = useRemoteAccessStore((s) => s.status);
   const docks = useDockStore((s) => s.docks);
   const toggleDockVisible = useDockStore((s) => s.toggleDockVisible);
+  const widgets = useSettingsStore((s) => s.widgets);
   const layoutMode = useDockStore((s) => s.layoutMode);
   const toggleLayoutMode = useDockStore((s) => s.toggleLayoutMode);
 
@@ -157,12 +165,23 @@ export function GridEditToolbar() {
         )}
       </div>
 
-      {/* Center: Drag region — fills remaining space */}
+      {/* Left widget slot — shrinks before the drag region does */}
+      <WidgetSlot slot={{ surface: "topBar", side: "left" }} instances={widgets.topBar.left} />
+
+      {/* Center: Drag region. It shares the free space with the two slots but
+          keeps `MIN_DRAG_REGION_PX` no matter how full they are, so a crowded
+          top bar costs widgets rather than the ability to move the window
+          (ADR-0105). Double-click to maximize lives here, not on the slots. */}
       <div
         data-tauri-drag-region="true"
-        className="min-w-0 flex-1 self-stretch"
+        className="self-stretch"
+        style={{ flex: "1 1 0%", minWidth: MIN_DRAG_REGION_PX }}
         onDoubleClick={handleToggleMaximize}
       />
+
+      {/* Right widget slot — sits left of the control cluster: widgets inform,
+          the buttons beyond act. */}
+      <WidgetSlot slot={{ surface: "topBar", side: "right" }} instances={widgets.topBar.right} />
 
       {/* Right: Dock toggles + settings + window controls */}
       <div className="flex shrink-0 items-center gap-1 px-1">

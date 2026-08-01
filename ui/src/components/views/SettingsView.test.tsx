@@ -2396,9 +2396,11 @@ describe("SettingsView", () => {
       expect(screen.getByTestId("codex-usage-visible-row-weekly")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-visible-row-sparkWeekly")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-config-dir-add")).toBeInTheDocument();
-      expect(screen.getByTestId("usage-color-used")).toBeInTheDocument();
-      expect(screen.getByTestId("usage-color-pace")).toBeInTheDocument();
-      expect(screen.getByTestId("usage-color-track")).toBeInTheDocument();
+      // Each agent has its own palette pickers, on its own sub-group.
+      expect(screen.getByTestId("usage-claude-color-used")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-claude-color-pace")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-claude-color-track")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-codex-color-used")).toBeInTheDocument();
     });
 
     it("offers every terminal profile plus a default option", async () => {
@@ -2474,20 +2476,24 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
     });
 
-    it("adds a separately signed-in Codex account and saves shared colors", async () => {
+    it("adds a separately signed-in Codex account and saves its own colors", async () => {
       const user = await openUsage();
       await user.click(screen.getByTestId("codex-usage-config-dir-add"));
       await user.type(
         screen.getByTestId("codex-usage-config-dir-input-0"),
         "C:\\Users\\me\\.codex-work",
       );
-      fireEvent.change(screen.getByTestId("usage-color-used"), { target: { value: "#112233" } });
+      fireEvent.change(screen.getByTestId("usage-codex-color-used"), {
+        target: { value: "#112233" },
+      });
       await user.click(screen.getByTestId("save-settings-btn"));
 
       expect(useSettingsStore.getState().usage.codex.configDirs).toEqual([
         "C:\\Users\\me\\.codex-work",
       ]);
-      expect(useSettingsStore.getState().usage.colors.used).toBe("#112233");
+      expect(useSettingsStore.getState().usage.codex.colors.used).toBe("#112233");
+      // Claude keeps its own.
+      expect(useSettingsStore.getState().usage.claude.colors.used).toBe("#d97757");
     });
 
     it("discards unsaved usage edits", async () => {

@@ -1,4 +1,4 @@
-# 0105. GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다
+# 0106. GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다
 
 - Status: Proposed
 - Date: 2026-08-01

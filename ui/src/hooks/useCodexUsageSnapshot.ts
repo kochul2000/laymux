@@ -1,35 +1,31 @@
-import { useCallback, useEffect, useState } from "react";
-import { getCodexUsageSnapshot, type CodexUsageSnapshot } from "@/lib/tauri-api";
+import { useCallback, useSyncExternalStore } from "react";
+import {
+  readCodexSnapshot,
+  refreshCodexSnapshot,
+  subscribeCodexUsage,
+} from "@/lib/codex-usage-subscription";
 
-const pending: CodexUsageSnapshot = {
-  status: { type: "failed", message: "Starting Codex usage reader" },
-  limits: [],
-  plan: null,
-  capturedAtMs: null,
-};
-
-/** Poll Codex app-server only while a Codex UsageView is mounted. */
+/**
+ * Read the shared Codex snapshot for one account.
+ *
+ * Every consumer of the same config dir joins one poller, so a UsageView and a
+ * status widget always show the same capture and only one `codex app-server`
+ * runs per interval (ADR-0104, ADR-0105).
+ */
 export function useCodexUsageSnapshot(refreshSeconds: number, configDir = "") {
-  const [snapshot, setSnapshot] = useState<CodexUsageSnapshot>(pending);
-  const refresh = useCallback(() => {
-    getCodexUsageSnapshot(configDir)
-      .then(setSnapshot)
-      .catch((error: unknown) => {
-        setSnapshot({
-          status: { type: "failed", message: String(error) },
-          limits: [],
-          plan: null,
-          capturedAtMs: null,
-        });
-      });
-  }, [configDir]);
+  const intervalMs = Math.min(3_600, Math.max(600, refreshSeconds)) * 1_000;
 
-  useEffect(() => {
-    refresh();
-    const intervalMs = Math.min(3_600, Math.max(600, refreshSeconds)) * 1_000;
-    const timer = setInterval(refresh, intervalMs);
-    return () => clearInterval(timer);
-  }, [refresh, refreshSeconds]);
+  const subscribe = useCallback(
+    (onChange: () => void) => subscribeCodexUsage(configDir, intervalMs, onChange),
+    [configDir, intervalMs],
+  );
+  const snapshot = useSyncExternalStore(
+    subscribe,
+    () => readCodexSnapshot(configDir),
+    () => readCodexSnapshot(configDir),
+  );
+
+  const refresh = useCallback(() => refreshCodexSnapshot(configDir), [configDir]);
 
   return { snapshot, refresh };
 }

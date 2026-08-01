@@ -5,11 +5,13 @@ use crate::constants::{
     APP_THEME_IDS, COMPOSER_HISTORY_SCOPES, CONTROL_BAR_MODES, NOTIFICATION_DISMISS_MODES,
     PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PASTE_PATH_SEPARATORS,
     PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
-    PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_SCROLLBAR_STYLES, WORKSPACE_SORT_ORDERS,
+    PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_ACTIVITY_WIDGET_SCOPES,
+    TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_BAR_HEIGHT_MAX, USAGE_WIDGET_BAR_HEIGHT_MIN,
+    USAGE_WIDGET_DISPLAY_MODES, WIDGET_OVERFLOW_MODES, WIDGET_TYPES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
-use super::models::{FontSettings, PaddingSettings, Profile, Settings};
+use super::models::{FontSettings, PaddingSettings, Profile, Settings, WidgetInstance};
 
 pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     let mut issues = Vec::new();
@@ -70,6 +72,7 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     validate_exit(settings, &mut issues);
     validate_remote(settings, &mut issues);
     validate_view_settings(settings, &mut issues);
+    validate_widgets(settings, &mut issues);
     validate_extension_viewers(settings, &mut issues);
     validate_workspace_profile_references(settings, &mut issues);
 
@@ -462,6 +465,140 @@ fn validate_view_settings(settings: &Settings, issues: &mut Vec<SettingsIssue>) 
 fn optional_font_size(issues: &mut Vec<SettingsIssue>, path: &str, value: u16, min: u64, max: u64) {
     if value != 0 {
         range_u64(issues, path, u64::from(value), min, max);
+    }
+}
+
+/// Check widget placement against the registry contract (ADR-0105).
+///
+/// Every issue reported here is about a value the write path must refuse, not a
+/// value to repair: a placement this build cannot render is still the user's
+/// placement, so loading keeps it and only rendering skips it.
+fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    let widgets = &settings.widgets;
+    enum_value(
+        issues,
+        "/widgets/overflow",
+        &widgets.overflow,
+        WIDGET_OVERFLOW_MODES,
+    );
+
+    // `id` is unique across every slot, not per slot, so a widget keeps its
+    // identity when the user moves it between the top bar and the status line.
+    let mut seen_ids: HashSet<&str> = HashSet::new();
+    let slots = [
+        ("/widgets/topBar/left", &widgets.top_bar.left),
+        ("/widgets/topBar/right", &widgets.top_bar.right),
+        ("/widgets/statusLine/left", &widgets.status_line.left),
+        ("/widgets/statusLine/right", &widgets.status_line.right),
+    ];
+
+    // The account picker offers the default dir plus whatever the user
+    // registered, so a widget may not name anything else.
+    let mut claude_config_dirs: Vec<&str> = vec![""];
+    claude_config_dirs.extend(settings.usage.claude.config_dirs.iter().map(String::as_str));
+
+    for (slot_path, instances) in slots {
+        for (index, instance) in instances.iter().enumerate() {
+            let base = format!("{slot_path}/{index}");
+            enum_value(
+                issues,
+                &format!("{base}/type"),
+                &instance.widget_type,
+                WIDGET_TYPES,
+            );
+            if instance.id.is_empty() {
+                issue(
+                    issues,
+                    "invalid_value",
+                    format!("{base}/id"),
+                    "위젯 id 는 비어 있을 수 없습니다.".to_string(),
+                );
+            } else if !seen_ids.insert(instance.id.as_str()) {
+                issue(
+                    issues,
+                    "duplicate_value",
+                    format!("{base}/id"),
+                    format!("위젯 id '{}'가 중복됩니다.", instance.id),
+                );
+            }
+            validate_widget_options(issues, &base, instance, &claude_config_dirs);
+        }
+    }
+}
+
+/// Validate the option domains this build knows.
+///
+/// Options a widget type does not declare are carried through untouched — the
+/// backend refuses wrong values, not unfamiliar ones. A value that is present
+/// but not a string is a wrong value, not an unfamiliar one: letting it through
+/// would leave the frontend silently substituting a default the user never
+/// chose, which is exactly what [ADR-0032] forbids.
+///
+/// [ADR-0032]: ../../../docs/adr/0032-llm-settings-introspection-and-safe-mutation.md
+fn validate_widget_options(
+    issues: &mut Vec<SettingsIssue>,
+    base: &str,
+    instance: &WidgetInstance,
+    claude_config_dirs: &[&str],
+) {
+    if !instance.options.is_object() && !instance.options.is_null() {
+        issue(
+            issues,
+            "type_error",
+            format!("{base}/options"),
+            "위젯 options 는 객체여야 합니다.".to_string(),
+        );
+        return;
+    }
+
+    let mut string_option = |key: &str, allowed: &[&str]| {
+        let Some(value) = instance.options.get(key) else {
+            return;
+        };
+        let path = format!("{base}/options/{key}");
+        match value.as_str() {
+            Some(text) => enum_value(issues, &path, text, allowed),
+            None => issue(
+                issues,
+                "type_error",
+                path,
+                format!("위젯 옵션 '{key}' 는 문자열이어야 합니다."),
+            ),
+        }
+    };
+
+    match instance.widget_type.as_str() {
+        "claudeUsage" => {
+            string_option("display", USAGE_WIDGET_DISPLAY_MODES);
+            string_option("configDir", claude_config_dirs);
+        }
+        "codexUsage" => string_option("display", USAGE_WIDGET_DISPLAY_MODES),
+        "terminalActivity" => string_option("scope", TERMINAL_ACTIVITY_WIDGET_SCOPES),
+        _ => {}
+    }
+
+    if matches!(instance.widget_type.as_str(), "claudeUsage" | "codexUsage") {
+        for key in ["barHeight", "elapsedHeight"] {
+            let Some(value) = instance.options.get(key) else {
+                continue;
+            };
+            let path = format!("{base}/options/{key}");
+            match value.as_u64() {
+                Some(height) => range_u64(
+                    issues,
+                    &path,
+                    height,
+                    USAGE_WIDGET_BAR_HEIGHT_MIN,
+                    USAGE_WIDGET_BAR_HEIGHT_MAX,
+                ),
+                None => issue(
+                    issues,
+                    "type_error",
+                    path,
+                    format!("위젯 옵션 '{key}' 는 정수 픽셀 값이어야 합니다."),
+                ),
+            }
+        }
     }
 }
 

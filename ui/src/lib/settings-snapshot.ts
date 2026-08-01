@@ -137,6 +137,11 @@ export async function collectSettingsSnapshot(
     paste: { ...settingsState.paste },
     terminal: { ...settingsState.terminal },
     controlBar: { ...settingsState.controlBar },
+    usage: {
+      claude: { ...settingsState.usage.claude, colors: { ...settingsState.usage.claude.colors } },
+      codex: { ...settingsState.usage.codex, colors: { ...settingsState.usage.codex.colors } },
+    },
+    widgets: settingsState.widgets,
     dock: { ...settingsState.dock },
     notifications: { ...settingsState.notifications },
     workspaceSelector: {

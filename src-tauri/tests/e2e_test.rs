@@ -5,8 +5,8 @@ use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
     FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
     OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
-    SettingsLoadResult, TerminalSettings, ValidationWarning, Workspace, WorkspacePane,
-    WorkspacePaneView,
+    SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, WidgetInstance,
+    WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -178,6 +178,26 @@ fn settings_round_trip_with_full_config() {
         paste: Default::default(),
         control_bar: Default::default(),
         usage: Default::default(),
+        widgets: WidgetsSettings {
+            top_bar: WidgetSlots {
+                left: Vec::new(),
+                right: vec![WidgetInstance {
+                    id: "w1".into(),
+                    widget_type: "claudeUsage".into(),
+                    options: serde_json::json!({ "configDir": "", "display": "bar" }),
+                }],
+            },
+            status_line: StatusLineWidgets {
+                enabled: true,
+                left: vec![WidgetInstance {
+                    id: "w2".into(),
+                    widget_type: "cwd".into(),
+                    options: serde_json::json!({}),
+                }],
+                right: Vec::new(),
+            },
+            overflow: "collapse".into(),
+        },
         dock: Default::default(),
         notifications: Default::default(),
         workspace_selector: Default::default(),
@@ -213,6 +233,47 @@ fn settings_round_trip_with_full_config() {
     let loaded: Settings = serde_json::from_str(&content).unwrap();
 
     assert_eq!(settings, loaded);
+}
+
+#[test]
+fn hand_edited_widget_placement_survives_load_and_repair() {
+    // A settings.json written by another build can name a widget this one has
+    // never heard of. Repair must not treat that as damage (ADR-0105).
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    fs::write(
+        &path,
+        r#"{
+          "widgets": {
+            "topBar": { "left": [{ "id": "w1", "type": "fromTheFuture" }] },
+            "statusLine": { "enabled": true, "right": [{ "id": "w2", "type": "cwd" }] }
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let mut settings: Settings = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let warnings = validate_and_repair(&mut settings);
+
+    assert_eq!(
+        settings.widgets.top_bar.left[0].widget_type,
+        "fromTheFuture"
+    );
+    // An omitted `options` must materialize as an object so consumers can read
+    // keys off it without a null guard.
+    assert_eq!(
+        settings.widgets.top_bar.left[0].options,
+        serde_json::json!({})
+    );
+    assert!(settings.widgets.status_line.enabled);
+    assert_eq!(settings.widgets.status_line.right[0].widget_type, "cwd");
+    assert_eq!(settings.widgets.overflow, "collapse");
+    assert!(
+        !warnings
+            .iter()
+            .any(|warning| format!("{warning:?}").contains("widget")),
+        "repair must not rewrite widget placement, got {warnings:?}"
+    );
 }
 
 #[tokio::test]

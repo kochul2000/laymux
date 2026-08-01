@@ -5,7 +5,7 @@
 //! snapshots therefore live in a process-wide registry keyed by
 //! `owner/repo`: the first caller inside a refresh window runs `gh`, every
 //! other caller — pane, worktree, or workspace — reads that result.
-//! (ADR-0105)
+//! (ADR-0106)
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};

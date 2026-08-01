@@ -54,7 +54,7 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// its worker threads touch no `AppState` state (ADR-0102).
 /// `commands::github_repo` owns its per-repository snapshot registry on the same
 /// terms: its locks are taken only on `spawn_blocking` workers that touch no
-/// `AppState` state, so they join no ordering above (ADR-0105).
+/// `AppState` state, so they join no ordering above (ADR-0106).
 ///
 /// ## Poison policy
 ///

@@ -40,6 +40,8 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 
 ```
 ┌─────────────────────────────────────────┐
+│  GridEditToolbar (위젯 슬롯 좌/우 포함)  │
+├─────────────────────────────────────────┤
 │               TopDock                   │
 ├────────┬────────────────────┬───────────┤
 │        │                    │           │
@@ -48,8 +50,12 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 │        │                    │           │
 ├────────┴────────────────────┴───────────┤
 │              BottomDock                 │
+├─────────────────────────────────────────┤
+│  StatusLine (선택, dock 격자 바깥 최하단) │
 └─────────────────────────────────────────┘
 ```
+
+`GridEditToolbar` 와 `StatusLine` 은 dock 격자 바깥에 있는 **위젯 슬롯 영역**이다([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). StatusLine 은 격자 다음 형제로 렌더되므로 BottomDock 보다 아래에 창 전체 폭으로 놓이며, dock 의 분할·포커스·리사이즈 계약을 상속하지 않는다. 표시 여부는 `widgets.statusLine.enabled` 가 정한다.
 
 ### 3.1 Dock
 
@@ -207,11 +213,11 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | `WorkspaceSelectorView` | Dock only | Workspace 목록 및 전환. cmux UI 클론 |
 | `SettingsView` | Dock only (또는 모달) | 설정 화면 |
 | `TerminalView` | 자유 | WSL / PowerShell 실행. xterm 직접 입력과 분리된 native textarea composer를 terminal별로 토글 |
-| `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장 |
+| `MemoView` | 자유 | 간단한 텍스트 메모장. 내용은 `cache/memo.json`에 pane별로 저장. `memo.copyOnSelect` 는 **lazy** 다 — 선택은 pending 으로만 잡아두고, **선택이 사라질 때만** 클립보드로 flush 한다: pane 안에서 선택이 붕괴하거나(타이핑·화살표·클릭), 메모가 포커스를 잃거나(textarea blur·다른 pane mousedown·window blur). 마우스 릴리즈는 트리거가 아니다 — 드래그가 pane 밖에서 끝나는 건 흔한 일이고, 선택이 살아 있는 동안은 사용자가 아직 그 영역을 Ctrl+V 로 치환할 수 있어야 하기 때문. paste 이벤트는 pending 을 폐기한다 (#307, #710) |
 | `UsageView` | 자유 | Claude Code 사용량 모니터. Rust `usage_probe` 가 숨은 PTY 로 `claude` 를 띄워 `/usage` 화면을 파싱한 스냅샷(세션 · 주간 all models · 주간 모델별)을 표시하고, pane 종횡비에 따라 stacked / columns / compact 배치를 자동 선택한다(`viewOverrides.usageLayout` 으로 고정 가능). 모니터링 대상 `CLAUDE_CONFIG_DIR` 은 pane view config 의 `configDir` 이며 컨트롤 바의 view 선택에서 `settings.usage.claude.configDirs` 항목으로 전환한다. 전역 설정은 Settings → Views → 사용량. pace(창 경과율)는 프론트 `lib/usage-pace.ts` 단일 구현 ([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)) |
 | `FileExplorerView` | 자유 | CWD 동기화 기반 파일 탐색기. Rust `list_directory`로 디렉터리 나열, 편집 가능한 주소창(경로 직접 입력/붙여넣기 → `stat_path`로 검증 후 디렉터리 이동 또는 파일이면 부모 이동+통합 뷰어 open, #278), 파일 뷰어(텍스트/이미지/HTML·Markdown preview/source/터미널) 지원. `.html`·`.md`는 기본 preview와 source 토글을 제공하되, `extensionViewers`에 해당 확장자·command·profile 매핑이 있으면 그 명시적 터미널 프로필의 외부 뷰어를 우선한다(#404/#446, [ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). Remote Focused UI는 host path 입력과 현재 데스크톱 viewer path를 명시적으로 가져오는 `From host` action을 제공하고, `Open viewer` 클릭 시점의 exact path를 active lease와 claim 전용 FileViewer capability로 읽어 별도 브라우저 탭의 안전한 웹 renderer로 표시한다([ADR-0041](../adr/0041-remote-served-file-viewer.md), [ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md)). |
 | `IssueReporterView` | 자유 | GitHub 이슈 리포터. 제출은 `issueReporter.submit` 키바인딩(기본 `Ctrl+Enter`) |
-| `GitHubView` | 자유 | 현재 CWD 리포의 열린 이슈/PR 목록. sync group CWD 를 **수신만** 하며(컨트롤 바에 receive 토글만 노출), 백엔드의 `owner/repo` 레지스트리가 10초 주기로 `gh issue/pr list` 결과를 공유한다. 행 클릭은 브라우저 열기, 링크 복사 버튼은 상시 노출, `⋯` 메뉴는 이슈 close(completed/not planned)·PR merge/close 를 2단계 확인으로 실행한다 (#708, [ADR-0105](../adr/0105-github-list-view-repo-registry.md)) |
+| `GitHubView` | 자유 | 현재 CWD 리포의 열린 이슈/PR 목록. sync group CWD 를 **수신만** 하며(컨트롤 바에 receive 토글만 노출), 백엔드의 `owner/repo` 레지스트리가 10초 주기로 `gh issue/pr list` 결과를 공유한다. 행 클릭은 브라우저 열기, 링크 복사 버튼은 상시 노출, `⋯` 메뉴는 이슈 close(completed/not planned)·PR merge/close 를 2단계 확인으로 실행한다 (#708, [ADR-0106](../adr/0106-github-list-view-repo-registry.md)) |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |
 
 ### 6.2 EmptyView
