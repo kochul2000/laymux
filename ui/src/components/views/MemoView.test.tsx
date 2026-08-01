@@ -395,67 +395,52 @@ describe("MemoView", () => {
       expect(clipboardWriteText).toHaveBeenCalledWith("aaa");
     });
 
-    // Issue #307: drag-select ending outside the pane. The pointer is
-    // pressed inside the textarea, dragged out (over a neighbouring pane
-    // or the window chrome), and released there. No blur, no mousedown
-    // outside, and the selection never collapses, so the lazy-copy model
-    // would otherwise leave the pending text unflushed until some later
-    // interaction. A pointerdown→window-pointerup watcher flushes it on
-    // release so the copy lands the moment the drag ends.
-    it("issue #307: drag-select released outside the pane flushes to clipboard", async () => {
-      const textarea = await setupCopyOnSelect("pane-307-drag-outside");
-      // Drag started inside the textarea.
+    // Issue #710: releasing the pointer is not a trigger — only the selection
+    // going away is. Dragging past the pane edge is routine, so the #307
+    // pointerup watcher is gone: both an in-pane and an out-of-pane release
+    // leave the selection (and the pending copy) alone.
+    it("issue #710: drag-select released inside the pane stays lazy", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-inside");
       fireEvent.pointerDown(textarea);
-      // Pending stored during the drag; nothing copied yet.
+      fireEvent.pointerUp(textarea);
       expect(clipboardWriteText).not.toHaveBeenCalled();
-      // Release happens outside the textarea — pointerup fires on window,
-      // textarea keeps focus, selection stays put.
+    });
+
+    it("issue #710: drag-select released outside the pane stays lazy too", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-outside");
+      fireEvent.pointerDown(textarea);
+      // Released over a neighbouring pane / the window chrome. The textarea
+      // keeps focus and the selection stays put, so nothing is copied yet.
       fireEvent.pointerUp(window);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("issue #710: Ctrl+V right after a drag-select discards pending", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-then-paste");
+      fireEvent.pointerDown(textarea);
+      fireEvent.pointerUp(textarea);
+      // Paste replaces the selection — the pending copy must be dropped, not
+      // written, otherwise the user pastes the selection over itself.
+      fireEvent.paste(textarea);
+      fireEvent.blur(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("issue #710: out-of-pane release still flushes on the next click elsewhere", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-outside-then-click");
+      fireEvent.pointerDown(textarea);
+      fireEvent.pointerUp(window);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+      fireEvent.mouseDown(document.body);
       expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
 
-    it("issue #307: window pointerup without a preceding pointerdown does not copy", async () => {
-      // Guard: a stray pointerup elsewhere on the page must not flush.
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      render(<MemoView memoKey="pane-307-guard" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-      vi.mocked(clipboardWriteText).mockClear();
-      // No selection / no pointerdown in the textarea.
-      fireEvent.pointerUp(window);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
-    });
-
-    it("issue #307: unmount mid-drag tears down the one-shot pointerup watcher", async () => {
-      // A pointerdown registers a one-shot window pointerup watcher. If the
-      // memo unmounts before the release fires (pane closed mid-drag), the
-      // watcher must be removed — otherwise it lingers on window and flushes
-      // against a stale ref on the next, unrelated release.
-      useSettingsStore.setState({
-        ...useSettingsStore.getState(),
-        memo: { ...useSettingsStore.getState().memo, copyOnSelect: true },
-      });
-      vi.mocked(loadMemo).mockResolvedValue("hello world");
-      const { unmount } = render(<MemoView memoKey="pane-307-unmount" />);
-      await act(async () => {
-        await vi.runAllTimersAsync();
-      });
-      const textarea = screen.getByTestId("memo-textarea") as HTMLTextAreaElement;
-      textarea.focus();
-      textarea.setSelectionRange(0, 5); // select "hello" → pending stored
-      fireEvent(document, new Event("selectionchange"));
-      fireEvent.pointerDown(textarea);
-      vi.mocked(clipboardWriteText).mockClear();
-
-      // Pane closes mid-drag, then a later release fires on window.
-      unmount();
-      fireEvent.pointerUp(window);
-      expect(clipboardWriteText).not.toHaveBeenCalled();
+    it("issue #710: textarea blur flushes even without a window blur", async () => {
+      // Focus moving to another element in the same document (Tab, or a
+      // click that lands on a non-textarea target) is a focus-out too.
+      const textarea = await setupCopyOnSelect("pane-710-textarea-blur");
+      fireEvent.blur(textarea);
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
     });
   });
 

@@ -113,7 +113,8 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
     [paneId, memo.fontSize, appFont.size],
   );
 
-  // Lazy copy on select: remember selected text, copy on deselect / blur / Ctrl+C
+  // Lazy copy on select: remember selected text, copy when the selection goes
+  // away — collapsed in-pane, or dropped because the memo lost focus.
   const pendingCopyRef = useRef<string | null>(null);
   const prevSelRef = useRef<string | null>(null);
   const flushPendingCopy = useCallback(() => {
@@ -162,45 +163,21 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
     discardPendingCopy();
   }, [discardPendingCopy]);
 
-  // Issue #307: drag-select ending outside the pane. When the user presses
-  // inside the textarea and drags the pointer out (over a neighbouring pane
-  // or the window chrome) before releasing, the textarea keeps focus, no
-  // mousedown-outside fires, and the selection never collapses — so the
-  // lazy-copy model would leave the pending text unflushed until some later
-  // interaction. Pair pointerdown on the textarea with a one-shot window
-  // pointerup so the pending copy flushes the moment the drag ends, wherever
-  // it ends. Mirrors the TerminalView #230 watcher. `flushPendingCopy` no-ops
-  // when there's nothing pending, so a plain click (no selection) is harmless.
+  // Issue #710: the only trigger is the selection going away. A release —
+  // wherever the pointer happens to be when the button comes up — is not one.
+  // Dragging past the pane edge is routine, so the earlier pointerup watcher
+  // (#307) turned ordinary drag-selects into eager copies, and a following
+  // Ctrl+V then pasted the just-copied selection over itself instead of
+  // replacing it (Rule 3 never got a chance to discard). The selection
+  // outliving the drag is exactly the state where the user may still want to
+  // replace it, so the pending copy waits there.
   //
-  // The watcher is tracked in a ref so it can be torn down: if the component
-  // unmounts mid-drag (before pointerup fires) the one-shot listener would
-  // otherwise linger on window and flush against a stale ref on some later,
-  // unrelated release. We also drop any prior watcher when a fresh pointerdown
-  // arrives without an intervening pointerup (e.g. a missed/cancelled release).
-  const pointerUpWatcherRef = useRef<(() => void) | null>(null);
-  const handlePointerDown = useCallback(() => {
-    if (pointerUpWatcherRef.current) {
-      window.removeEventListener("pointerup", pointerUpWatcherRef.current);
-    }
-    const onWindowPointerUp = () => {
-      pointerUpWatcherRef.current = null;
-      flushPendingCopy();
-    };
-    pointerUpWatcherRef.current = onWindowPointerUp;
-    window.addEventListener("pointerup", onWindowPointerUp, { once: true });
-  }, [flushPendingCopy]);
+  // Flush when the memo loses focus (the selection stops being the user's
+  // live one): textarea blur, click outside the textarea, or window blur for
+  // an external app. Capture-phase mousedown runs ahead of the click's own
+  // handling so a paste target elsewhere sees the clipboard already written.
+  const handleBlur = useCallback(() => flushPendingCopy(), [flushPendingCopy]);
 
-  useEffect(() => {
-    return () => {
-      if (pointerUpWatcherRef.current) {
-        window.removeEventListener("pointerup", pointerUpWatcherRef.current);
-        pointerUpWatcherRef.current = null;
-      }
-    };
-  }, []);
-
-  // Flush pending copy when focus leaves memo: window blur (external app)
-  // or click outside textarea (dock/sidebar/other pane)
   useEffect(() => {
     const onWindowBlur = () => flushPendingCopy();
     const onDocumentMouseDown = (e: MouseEvent) => {
@@ -455,7 +432,7 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
           onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           onClick={handleClick}
-          onPointerDown={handlePointerDown}
+          onBlur={handleBlur}
           className="h-full w-full resize-none border-none outline-none"
           style={{
             background: "var(--bg-base)",
