@@ -932,7 +932,11 @@ export function PaneControlBar({
   // 이어서 pane 바가 사라질 때의 detach 가 살아 있는 ViewHeader 트리거까지 지우면 위치
   // 측정이 실패해 메뉴가 pane 이 아니라 앱 화면 우상단에 붙는다. React 19 의 콜백 ref
   // cleanup 으로 "지금 들고 있는 노드가 나일 때만" 비운다.
-  const setMenuBtnRef = useCallback((node: HTMLButtonElement) => {
+  // cleanup 을 반환하므로 React 19 는 이 콜백을 null 로 호출하지 않는다. 그래도 시그니처는
+  // RefCallback 그대로 두고 null 을 무시한다 — 레거시 호출 규약으로 떨어지더라도 살아 있는
+  // 트리거를 지우지 않는 쪽이 안전하다(측정 실패 시엔 아래 pane 폴백이 받는다).
+  const setMenuBtnRef = useCallback((node: HTMLButtonElement | null) => {
+    if (!node) return;
     menuBtnRef.current = node;
     return () => {
       if (menuBtnRef.current === node) menuBtnRef.current = null;
