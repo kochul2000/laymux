@@ -73,6 +73,12 @@ export function resolveChunkGroup(id: string): string | undefined {
     return "i18n";
   }
   if (/\/node_modules\/react(?:-dom)?\//.test(normalizedId)) return "react";
+  if (
+    normalizedId.includes("/node_modules/marked/") ||
+    normalizedId.includes("/node_modules/github-markdown-css/")
+  ) {
+    return "markdown-preview";
+  }
 
   return undefined;
 }

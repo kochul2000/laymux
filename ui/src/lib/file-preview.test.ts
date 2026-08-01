@@ -19,7 +19,7 @@ describe("filePreviewKind", () => {
 });
 
 describe("markdownToSafeHtml", () => {
-  it("renders common markdown blocks", () => {
+  it("renders GitHub-flavored markdown", () => {
     const html = markdownToSafeHtml(
       [
         "# Title",
@@ -36,16 +36,44 @@ describe("markdownToSafeHtml", () => {
         "| A | B |",
         "",
         "[docs](https://example.com)",
+        "",
+        "~~removed~~",
+        "",
+        "https://example.org",
       ].join("\n"),
     );
+    const rendered = new DOMParser().parseFromString(html, "text/html");
+    const task = rendered.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
 
     expect(html).toContain("<h1>Title</h1>");
     expect(html).toContain("<li>first</li>");
-    expect(html).toContain('type="checkbox" checked="" disabled=""');
+    expect(task?.checked).toBe(true);
+    expect(task?.disabled).toBe(true);
     expect(html).toContain('class="language-ts"');
     expect(html).toContain("const value = 1;");
     expect(html).toContain("<table>");
     expect(html).toContain('href="https://example.com"');
+    expect(html).toContain("<del>removed</del>");
+    expect(html).toContain('href="https://example.org"');
+    expect(html).toContain(">https://example.org</a>");
+  });
+
+  it("supports nested CommonMark blocks and sanitizes embedded HTML", () => {
+    const html = markdownToSafeHtml(
+      [
+        "- parent",
+        "  - child with **strong** text",
+        "",
+        '<details open onclick="alert(1)"><summary>More</summary><script>alert(2)</script>Safe</details>',
+      ].join("\n"),
+    );
+
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<strong>strong</strong>");
+    expect(html).toContain('<details open="">');
+    expect(html).toContain("<summary>More</summary>");
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("<script");
   });
 });
 
@@ -92,5 +120,13 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("Content-Security-Policy");
     expect(doc).toContain("default-src 'none'");
     expect(doc).toContain("<h1>Safe</h1>");
+  });
+
+  it("wraps markdown in the GitHub markdown container and embeds its stylesheet", () => {
+    const doc = buildPreviewDocument("<h1>GitHub style</h1>", "markdown");
+
+    expect(doc).toContain('<article class="markdown-body">');
+    expect(doc).toContain(".markdown-body");
+    expect(doc).not.toContain("color-mix(");
   });
 });
