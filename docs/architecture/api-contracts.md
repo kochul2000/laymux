@@ -188,7 +188,7 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 | `run_github_item_action` | `workingDir`, `action`, `number` | `Ok(())` 또는 `gh` 오류 메시지 |
 
 - **스냅샷 소유자는 `owner/repo` 키 레지스트리다.** 갱신 주기는 10초이며, 그 창 안의 요청은 리포별 `fetch` 토큰으로 합쳐져 `gh` 를 한 번만 실행한다. 같은 리포를 보는 pane 이 몇 개든 비용은 동일하다. 이 레지스트리는 `AppState` 를 건드리지 않아 `state.rs` 락 순서에 참여하지 않는다.
-- **만료는 캐시 미스가 아니다 — stale-while-revalidate.** 갱신 주기를 넘긴 읽기는 기억된 스냅샷을 그대로(만료 표시 없이, 저장 당시 `fetchedAtMs` 로) 즉시 반환하고 `gh` 재조회는 응답 뒤 백그라운드에서 돈다. 기억된 스냅샷이 없을 때만 인라인으로 기다린다. `force`(사용자 새로고침)는 stale 을 받지 않고 인라인 조회한다. 오랜만에 워크스페이스에 들어온 pane 이 빈 목록을 보지 않게 하는 정책이다([ADR-0109](../adr/0109-github-snapshot-stale-while-revalidate.md)).
+- **만료는 캐시 미스가 아니다 — stale-while-revalidate.** 갱신 주기를 넘긴 읽기는 기억된 스냅샷을 그대로(만료 표시 없이, 저장 당시 `fetchedAtMs` 로) 즉시 반환하고 `gh` 재조회는 응답 뒤 백그라운드에서 돈다. 기억된 스냅샷이 없을 때만 인라인으로 기다린다. `force`(사용자 새로고침)는 stale 을 받지 않고 인라인 조회한다. 오랜만에 워크스페이스에 들어온 pane 이 빈 목록을 보지 않게 하는 정책이다([ADR-0110](../adr/0110-github-snapshot-stale-while-revalidate.md)).
 - **토큰은 `try_lock` 으로만 잡는다 — 대기열이 없다.** 진행 중인 조회가 있으면 다른 호출자는 기다리지 않고 캐시된 스냅샷을, 캐시가 없으면 `pending` 상태를 즉시 받는다. `pending` 은 "아직 답이 없다"는 뜻이고 빈 목록이 아니다 — 프론트는 이를 표시하지 않고 1초 뒤 재조회한다(`GITHUB_PENDING_RETRY_MS`).
 - **`gh` 는 마감을 넘기면 죽는다.** 목록 15초, 변경 조작 60초(`process::output_with_timeout`). 초과하면 `failed{message}` 로 내려온다.
 - **조회는 항상 `gh {issue|pr} list --repo owner/repo --state open --limit 50 --json …`** 이다. CWD 상속으로 실행하지 않으므로 레지스트리 키와 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스(예: WSL)에서도 그대로 동작한다.
@@ -710,7 +710,37 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 | `show_image` | base64 디코드 → 임시 파일 → bridge_request | MCP 클라이언트가 메모리에 가진 이미지를 바로 표시 (`data` 필수: base64 또는 `data:` URI, `mime_type`·`new_window` 선택). cache `mcp-images/`에 임시 저장 후 `open_file_viewer`와 동일 뷰어 재사용 (#287) |
 | `close_file_viewer` | bridge_request | 파일 뷰어 오버레이 닫기 (`ui.closeFileViewer`). 열려 있지 않으면 no-op — `open_file_viewer`/`show_image`와 짝 |
 
-**FileViewer preview 정책 (#404/#446)** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다. `.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. explicit `\\wsl.localhost\<distro>` pure-Linux 경로를 WSL profile에 전달할 때는 unquoted `-d`/`--distribution` 선택 distro와 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 거부한다(`/mnt/<drive>`는 distro 공용 예외). 일반 `startupCommandOverride`는 `claude --resume <session-id>`만 허용하며 raw viewer 문자열은 거부한다. 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용한다. Markdown은 `marked`의 동기 GFM 모드로 HTML을 만들고 `github-markdown-css`의 `markdown-body` 스타일을 iframe 문서에 내장한 뒤, HTML preview와 동일한 sanitizer/CSP 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
+**FileViewer preview 정책 (#404/#446, [ADR-0109](../adr/0109-file-viewer-typed-preview-renderers.md))** — File Explorer, `Ctrl+Shift+O`, REST `/api/v1/ui/file-viewer`, MCP `open_file_viewer`/`show_image`는 모두 `ui/src/components/ui/FileViewer.tsx`의 단일 렌더 경로를 재사용한다.
+
+렌더러 선택은 두 축이고 소유자가 다르다. **내용 종류(`kind`)는 Rust `read_file_for_viewer`가 소유**하며 `text | image | pdf | archive | binary` 중 하나다. **preview 종류는 프론트엔드가 경로 확장자로 소유**하고(`ui/src/lib/file-preview-kind.ts`), 내용 스니핑은 하지 않는다. 둘 중 어느 쪽보다 `settings.fileExplorer.extensionViewers` 매핑이 우선하므로, 사용자가 확장자에 외부 터미널 뷰어를 걸어 두면 내장 렌더러가 그것을 빼앗지 않는다.
+
+preview 종류는 신뢰 경계로 두 계열로 갈리고, 계열이 렌더 방식을 강제한다.
+
+| 계열 | previewKind | 확장자 | 렌더 |
+|---|---|---|---|
+| document | `html`, `markdown` | `.html .htm` / `.md .markdown` | sanitizer → 제한 CSP → `sandbox` iframe `srcdoc` |
+| structured | `json` | `.json .jsonc` | 접이식 트리 (React DOM) |
+| structured | `jsonl` | `.jsonl .ndjson` | 행 목록, 펼치면 JSON 트리 재사용 |
+| structured | `diff` | `.diff .patch` | 파일/헝크 단위 색상 diff |
+| structured | `csv` | `.csv .tsv .tab` | sticky 헤더 테이블 |
+| structured | `log` | `.log` | ANSI SGR 색상 + 레벨 하이라이팅 |
+| structured | `code` | 문법이 있는 소스 확장자 | shiki 토큰 하이라이팅 |
+
+**structured 계열은 HTML 문자열을 만들지 않는다.** 순수 파서(`ui/src/lib/preview/`)가 텍스트를 값으로 바꾸고 컴포넌트(`ui/src/components/ui/preview/`)가 그 값을 React 로 그린다. 이 경로에는 `dangerouslySetInnerHTML`·`innerHTML`·`DOMParser` 가 없으며, 그래서 sanitizer 도 없다. 문법 하이라이터는 토큰 배열을 돌려주는 API 로만 호출하고 HTML 을 돌려주는 API 는 쓰지 않는다. document 계열만 아래의 sanitizer/CSP 경로를 탄다.
+
+`kind: "image"` 중 `.svg` 는 이미지↔소스 토글을 갖는다. 소스는 재요청 없이 backend 가 보낸 base64 를 디코드해 얻고, 렌더 측은 `<img>` 를 유지한다(마크업을 문서에 인라인하면 내부 스크립트가 실행된다). `kind: "pdf"` 는 blob URL 을 `<iframe>` 에 실어 호스트 WebView 의 내장 뷰어에 위임한다. `<object>` 가 아닌 이유는 실측이다 — WebView2 는 `<object>`(type 유무 무관)로는 PDF 를 렌더하지 않고 곧장 fallback 으로 떨어지지만 같은 blob 을 iframe 에 실으면 Chromium 뷰어가 뜬다. iframe 에는 fallback 슬롯이 없고 렌더 실패를 감지할 방법도 없으므로(`load` 는 양쪽에서 발화) 외부 열기 버튼을 상시 노출한다. 엔진에 PDF 뷰어가 없는 플랫폼(Linux WebKitGTK)에서는 프레임이 비고 그 버튼이 출구다 — 플랫폼 간 렌더 동등성은 비목표다. `kind: "archive"`(zip 계열·tar·tar.gz)는 압축을 풀지 않고 중앙 디렉터리/헤더 메타데이터만 나열한다.
+
+Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니라 **분류 게이트**다. 목록에 없는 확장자는 크기 상한(`DEFAULT_FILE_VIEWER_BYTES`, 1 MiB)을 넘는 순간 `binary` 가 되어 preview 경로에 도달하지 못하므로, 렌더러가 주장하는 확장자는 이 목록에도 있어야 한다.
+
+모든 structured 렌더러는 표시량 상한을 가지며 **잘렸으면 화면에 전체 개수와 함께 그 사실을 표시한다**. 절단은 두 층에서 일어나며 둘 다 표시 대상이다 — 렌더러 자신의 상한(행·레코드 수)과, 그보다 앞서는 backend 의 `truncated`(읽기 바이트 상한). 후자는 렌더러가 알 수 없으므로 `FileViewer` 가 structured 분기 위에 공통 배너로 붙인다. 붙이지 않으면 잘린 CSV 가 완전한 것처럼 보이고, 잘린 JSON 은 파일에 없는 구문 오류를 보고한다(그래서 JSON 은 절단 시 오류 문구 자체를 바꾼다).
+
+`.jsonc` 의 관용 범위는 **주석과 trailing comma 까지**다. `.json5` 는 unquoted key·single-quote 문자열·`Infinity` 등 그 범위를 넘으므로 **claim 하지 않고** plain source 로 떨어뜨린다 — claim 한 뒤 실패시키면 멀쩡한 JSON5 파일을 "invalid JSON" 이라고 고발하게 된다.
+
+파싱 실패·손상 아카이브·하이라이터 로드 실패는 뷰어 실패가 아니라 원문 표시 폴백이며 사유를 함께 보여준다.
+
+이하 document 계열 세부:
+
+`.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. explicit `\\wsl.localhost\<distro>` pure-Linux 경로를 WSL profile에 전달할 때는 unquoted `-d`/`--distribution` 선택 distro와 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 거부한다(`/mnt/<drive>`는 distro 공용 예외). 일반 `startupCommandOverride`는 `claude --resume <session-id>`만 허용하며 raw viewer 문자열은 거부한다. 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용한다. Markdown은 `marked`의 동기 GFM 모드로 HTML을 만들고 `github-markdown-css`의 `markdown-body` 스타일을 iframe 문서에 내장한 뒤, HTML preview와 동일한 sanitizer/CSP 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
 **메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
 
@@ -1009,7 +1039,9 @@ Remote drawer의 File viewer는 host file path 입력, 명시적 `From host`, `O
 
 `path-link` body는 `{ "terminalId": "...", "selection": "..." }`이며 client CWD·path·좌표는 받지 않는다. Rust는 빈 필드, Unicode scalar 256자 초과 terminal id, 4096자 초과 selection을 `400`으로 거르고 `fileViewer.pathLink` async bridge에 원문을 전달한다. frontend는 해당 terminal의 최신 store CWD와 `terminal.pathLinkEnabled`/`pathLinkMaxLength`를 읽어 desktop `isWithinPathLengthLimit`·`trimSelectionToPath`·`joinCwdPath`·`statPath`를 그대로 사용한다. 설정 off, 부적합/초과 선택, CWD 없음, 없는 path, 디렉터리는 `{valid:false}`이고 존재하는 일반 파일만 `{valid:true,token,path}`다. token은 선택 밑줄 좌표 보정용으로만, path는 기존 새 탭 handshake의 `source="path"` 입력으로만 쓴다. 브라우저는 드래그 중 selection 변화를 trailing debounce하고 새 선택에서 진행 중 요청을 취소한다. 요청 당시 selection revision·terminal·lease·capability가 하나라도 바뀐 응답은 버리며, 응답 시점의 최신 xterm selection 좌표로 밑줄 범위를 다시 계산한다. 좌표/decoration은 ADR-0015의 surface-local 상태로 유지한다. 검증은 stat만 수행하며 파일 내용은 prefetch하지 않는다.
 
-`render`는 Rust route가 고정한 8 MiB `maxBytes`를 frontend async bridge에 전달한다. `readFileForViewer`는 image에도 상한을 적용한 bounded read를 수행한다. 일반 text 응답은 `{path,kind:"text",content,truncated}`, HTML/Markdown preview 응답은 원문 중복을 제거한 `{path,kind:"text",truncated,previewKind,previewDocument}`, 그 밖에는 `{path,kind:"image",dataUrl}` 또는 `{path,kind:"binary",size}`다. HTML/Markdown `previewDocument`는 데스크톱 FileViewer와 같은 sanitizer/CSP builder의 결과이며 새 탭은 sandbox iframe `srcdoc`으로만 표시하고 `truncated=true`이면 잘림 경고를 함께 표시한다. 일반 text는 `textContent`, image는 `data:image/*`만 사용한다. Remote에서는 settings의 `extensionViewers` shell 매핑을 실행하지 않고 항상 이 built-in web renderer를 사용한다.
+`render`는 Rust route가 고정한 8 MiB `maxBytes`를 frontend async bridge에 전달한다. `readFileForViewer`는 image·PDF에도 상한을 적용한 bounded read를 수행한다. 일반 text 응답은 `{path,kind:"text",content,truncated}`, HTML/Markdown preview 응답은 원문 중복을 제거한 `{path,kind:"text",truncated,previewKind,previewDocument}`, 그 밖에는 `{path,kind:"image",dataUrl}`, `{path,kind:"pdf",dataUrl}`, `{path,kind:"archive",format,entries,totalEntries,totalBytes,truncated}`, `{path,kind:"binary",size}`다. HTML/Markdown `previewDocument`는 데스크톱 FileViewer와 같은 sanitizer/CSP builder의 결과이며 새 탭은 sandbox iframe `srcdoc`으로만 표시하고 `truncated=true`이면 잘림 경고를 함께 표시한다. 일반 text는 `textContent`, image는 `data:image/*`만 사용한다. Remote에서는 settings의 `extensionViewers` shell 매핑을 실행하지 않고 항상 이 built-in web renderer를 사용한다.
+
+**Remote 는 데스크톱의 typed preview 렌더러를 확장하지 않는다([ADR-0109](../adr/0109-file-viewer-typed-preview-renderers.md)).** `previewDocument`를 만들 수 있는 것은 document 계열(`html`/`markdown`)뿐이며, bridge 는 그 판정에 데스크톱 분류기(`filePreviewKind`)가 아니라 document 전용 분류기(`documentPreviewKind`)를 쓴다. JSON/CSV/diff/log/source 같은 structured 종류는 Remote 에서 지금까지와 동일하게 원문 text 로 내려가고 새 탭이 `textContent` 로 표시한다 — structured 렌더러는 React 컴포넌트라 프레임워크 없는 임베드 자산인 `viewer_page.js` 로 옮길 수 없고, 두 벌을 동기화하는 비용이 이득을 넘는다. 데스크톱과 Remote 의 표시 능력 격차는 의도된 것이며 Remote 클라이언트 통합 시 재검토한다. 공유 커맨드가 만들어 Remote 에도 도달하는 `pdf`/`archive` 는 새 탭에서 렌더하지 않고 파일 종류와 개수를 알리는 플레이스홀더로 표시한다(알 수 없는 응답으로 실패하지 않도록).
 
 새 탭은 반드시 사용자의 button/일반 Enter action에서 `window.open("/remote/viewer/")`으로 먼저 연다. IME 조합 중 Enter와 legacy `keyCode=229`는 제출하지 않고, host path 입력은 모바일 키보드가 대소문자를 바꾸지 않도록 자동 대문자화를 끈다. child가 exact same-origin `laymux:file-viewer-ready` 메시지를 보내면 opener는 해당 `Window` 객체가 자신이 연 pending child인지 확인하고, token·lease·fileViewerToken과 클릭 때 스냅샷한 `source="path"`/path를 `laymux:file-viewer-session` 메시지로 한 번 전달한다. child URL(query/fragment)·bootstrap DOM·localStorage/sessionStorage·문서 제목에는 token·lease·capability·path를 기록하지 않는다. 제목은 일반적인 `Laymux File Viewer`로 유지하고 path는 본문에만 표시한다. child는 exact origin과 `event.source === window.opener`를 확인해 최초 한 세션만 받고 즉시 opener 참조를 끊는다. 비동기 MCP/desktop viewer 변경은 Remote 입력을 자동 갱신하거나 popup을 만들지 않으며, 사용자가 `From host`를 다시 눌러 명시적으로 가져온다.
 

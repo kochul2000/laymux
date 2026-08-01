@@ -767,9 +767,34 @@ export interface GithubSettings {
   hideDraftPulls: boolean;
 }
 
+/** One entry of an archive listing; mirrors Rust `commands::ArchiveEntry`. */
+export interface ArchiveEntry {
+  name: string;
+  size: number;
+  compressedSize: number;
+  isDirectory: boolean;
+}
+
+/**
+ * What `read_file_for_viewer` decided a file is. Hand-mirrored from the Rust
+ * `FileViewerContent` enum (`commands/file_viewer.rs`) — there is no codegen,
+ * so a new variant has to be added on both sides.
+ */
 export type FileViewerContent =
   | { kind: "text"; content: string; truncated: boolean }
   | { kind: "image"; dataUrl: string }
+  | { kind: "pdf"; dataUrl: string }
+  | {
+      kind: "archive";
+      /** `"zip" | "tar" | "tar.gz"`. */
+      format: string;
+      entries: ArchiveEntry[];
+      /** Entries in the archive, which exceeds `entries.length` when capped. */
+      totalEntries: number;
+      /** Uncompressed bytes across every entry, not only the listed ones. */
+      totalBytes: number;
+      truncated: boolean;
+    }
   | { kind: "binary"; size: number };
 
 export type {

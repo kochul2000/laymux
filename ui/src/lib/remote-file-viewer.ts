@@ -7,7 +7,7 @@ import {
   trimSelectionToPath,
 } from "./path-link-detect";
 import {
-  filePreviewKind,
+  documentPreviewKind,
   htmlToSafePreviewDocument,
   markdownToSafePreviewDocument,
 } from "./file-preview";
@@ -88,7 +88,11 @@ export async function handleRemoteFileViewerRequest(
     const content = await readFileForViewer(path, maxBytes as number);
     if (content.kind !== "text") return ok({ path, ...content });
 
-    const previewKind = filePreviewKind(path);
+    // Deliberately the document classifier, not the desktop one: Remote renders
+    // no structured previews (ADR-0109), and only document kinds may be turned
+    // into a `previewDocument`. A JSON or CSV file goes down the plain-text
+    // branch above and the Remote tab shows its source, exactly as before.
+    const previewKind = documentPreviewKind(path);
     if (!previewKind) return ok({ path, ...content });
     const previewDocument =
       previewKind === "markdown"

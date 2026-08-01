@@ -214,6 +214,14 @@ fn settings_round_trip_with_full_config() {
             hide_draft_pulls: true,
         },
         file_explorer: FileExplorerSettings::default(),
+        // Non-default on every field: this test compares the whole struct after
+        // a round trip, so a field left at its default would still pass even if
+        // it never reached the file.
+        github: GithubSettings {
+            default_tab: "pulls".into(),
+            refresh_seconds: 90,
+            hide_draft_pulls: true,
+        },
         remote: RemoteSettings {
             enabled: true,
             allowed_origins: vec!["http://100.64.0.2:19281".into()],

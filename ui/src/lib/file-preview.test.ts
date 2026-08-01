@@ -1,20 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPreviewDocument,
-  filePreviewKind,
+  documentPreviewKind,
   markdownToSafeHtml,
   sanitizePreviewHtml,
 } from "./file-preview";
 
-describe("filePreviewKind", () => {
+describe("documentPreviewKind", () => {
   it("defaults html and markdown files to preview mode", () => {
-    expect(filePreviewKind("/tmp/report.HTML")).toBe("html");
-    expect(filePreviewKind("/tmp/readme.md")).toBe("markdown");
-    expect(filePreviewKind("/tmp/readme.markdown")).toBe("markdown");
+    expect(documentPreviewKind("/tmp/report.HTML")).toBe("html");
+    expect(documentPreviewKind("/tmp/readme.md")).toBe("markdown");
+    expect(documentPreviewKind("/tmp/readme.markdown")).toBe("markdown");
   });
 
   it("returns null for regular text files", () => {
-    expect(filePreviewKind("/tmp/a.txt")).toBeNull();
+    expect(documentPreviewKind("/tmp/a.txt")).toBeNull();
+  });
+
+  it("claims none of the structured preview types", () => {
+    // These render as React DOM, never as a sanitized HTML document. Remote
+    // uses this classifier to decide what may become a `previewDocument`, so a
+    // leak here would push structured content through the sanitizer.
+    for (const path of ["/tmp/a.json", "/tmp/a.csv", "/tmp/a.diff", "/tmp/a.log", "/tmp/a.ts"]) {
+      expect(documentPreviewKind(path)).toBeNull();
+    }
   });
 });
 

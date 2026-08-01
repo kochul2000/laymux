@@ -276,6 +276,27 @@ pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
 /// Secret-capability header required by Remote FileViewer endpoints.
 pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
 
+/// Source bytes the desktop FileViewer reads when the caller names no limit.
+/// Remote always passes `MAX_REMOTE_FILE_VIEWER_BYTES` instead; this is the
+/// in-process default, so it only has to stay under "instant to render".
+pub const DEFAULT_FILE_VIEWER_BYTES: usize = 1024 * 1024;
+
+/// Largest PDF the desktop viewer inlines as a base64 data URL. Past this the
+/// viewer reports the file as binary and offers to open it in the host app —
+/// base64 inflates by a third and the whole string crosses the IPC boundary,
+/// so a large PDF costs far more than it looks.
+pub const MAX_INLINE_PDF_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Archive entries listed in one viewer response. Past this the listing reports
+/// itself truncated together with the real total, so a jar with 50k class files
+/// stays readable instead of freezing the pane.
+pub const MAX_ARCHIVE_ENTRIES: usize = 5_000;
+
+/// Inflated bytes a `.tar.gz` listing may consume while walking headers. Only
+/// the gzip layer is decompressed and only far enough to read 512-byte headers,
+/// but a crafted archive can inflate without ever ending — this bounds it.
+pub const MAX_ARCHIVE_INFLATE_BYTES: u64 = 256 * 1024 * 1024;
+
 /// Number of bytes to scan from the end of a terminal output buffer when
 /// detecting activity state or Claude Code presence. 16KB covers terminal
 /// title sequences even when OSC 133 markers have scrolled out.
