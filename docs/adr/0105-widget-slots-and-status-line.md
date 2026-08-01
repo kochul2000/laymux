@@ -1,6 +1,6 @@
 # 0105. 위젯 배치는 설정의 슬롯 배열이 소유하고 status line 은 슬롯 영역 하나일 뿐이다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-01
 - Source: 사용자 요구(상단 바·하단 status line 에 사용량 위젯 배치); `docs/architecture/api-contracts.md` §10 Settings·§15 UI 코드 설계 원칙; [ADR-0004](0004-settings-vs-ui-state-separation.md), [ADR-0005](0005-display-state-raw-separation-compute.md), [ADR-0032](0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0102](0102-claude-usage-probe-headless-pty.md), [ADR-0104](0104-codex-usage-app-server-probe.md)
 - Extends: [ADR-0103](0103-usage-view-visible-rows.md) — `usage.*.visibleRows` 의 적용 범위를 UsageView 에서 사용량을 그리는 모든 표면으로 넓힌다. 행 선택의 SoT 가 전역 설정이라는 결론 자체는 유지한다.
