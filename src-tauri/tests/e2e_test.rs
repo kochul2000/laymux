@@ -216,6 +216,14 @@ fn settings_round_trip_with_full_config() {
             default_tab: "pulls".into(),
             refresh_seconds: 90,
             hide_draft_pulls: true,
+            font_family: "Fira Code".into(),
+            font_size: 15,
+            number_color: "accent".into(),
+            show_author: false,
+            show_updated: false,
+            show_draft_badge: false,
+            label_max_count: 4,
+            label_max_width: 120,
         },
         remote: RemoteSettings {
             enabled: true,
@@ -291,20 +299,40 @@ fn hand_edited_widget_placement_survives_load_and_repair() {
 #[test]
 fn hand_edited_github_section_loads_and_an_omitted_one_falls_back_to_defaults() {
     let configured: Settings = serde_json::from_str(
-        r#"{ "github": { "defaultTab": "pulls", "refreshSeconds": 30, "hideDraftPulls": true } }"#,
+        r#"{ "github": { "defaultTab": "pulls", "refreshSeconds": 30, "hideDraftPulls": true,
+             "fontFamily": "Fira Code", "fontSize": 15, "numberColor": "accent",
+             "showAuthor": false, "showUpdated": false, "showDraftBadge": false,
+             "labelMaxCount": 0, "labelMaxWidth": 140 } }"#,
     )
     .unwrap();
     assert_eq!(configured.github.default_tab, "pulls");
     assert_eq!(configured.github.refresh_seconds, 30);
     assert!(configured.github.hide_draft_pulls);
+    assert_eq!(configured.github.font_family, "Fira Code");
+    assert_eq!(configured.github.font_size, 15);
+    assert_eq!(configured.github.number_color, "accent");
+    assert!(!configured.github.show_author);
+    assert!(!configured.github.show_updated);
+    assert!(!configured.github.show_draft_badge);
+    assert_eq!(configured.github.label_max_count, 0);
+    assert_eq!(configured.github.label_max_width, 140);
 
     // A settings.json written before the section existed must still open the
-    // view on issues at the stock cadence.
+    // view on issues at the stock cadence, and one written before the display
+    // knobs existed must keep the row it already had.
     let bare: Settings = serde_json::from_str(r#"{ "github": {} }"#).unwrap();
     assert_eq!(bare.github, GithubSettings::default());
     assert_eq!(bare.github.default_tab, "issues");
     assert_eq!(bare.github.refresh_seconds, 10);
     assert!(!bare.github.hide_draft_pulls);
+    assert_eq!(bare.github.font_family, "");
+    assert_eq!(bare.github.font_size, 11);
+    assert_eq!(bare.github.number_color, "yellow");
+    assert!(bare.github.show_author);
+    assert!(bare.github.show_updated);
+    assert!(bare.github.show_draft_badge);
+    assert_eq!(bare.github.label_max_count, 2);
+    assert_eq!(bare.github.label_max_width, 80);
 }
 
 #[tokio::test]

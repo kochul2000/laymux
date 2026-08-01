@@ -12,7 +12,16 @@ import {
   runGithubItemAction,
   type GithubItem,
   type GithubItemAction,
+  type GithubNumberColor,
 } from "@/lib/tauri-api";
+import {
+  numberColorVar,
+  readGithubFontSize,
+  readGithubLabelMaxCount,
+  readGithubLabelMaxWidth,
+  rowFontFamily,
+  secondaryFontSize,
+} from "@/lib/github-display";
 
 export interface GitHubViewProps {
   instanceId: string;
@@ -24,6 +33,17 @@ export interface GitHubViewProps {
   defaultTab?: "issues" | "pulls";
   refreshSeconds?: number;
   hideDraftPulls?: boolean;
+  /** Row typeface; "" (the default) means the app UI font. */
+  fontFamily?: string;
+  /** Row size in px for the number and title; the rest of the row derives from it. */
+  fontSize?: number;
+  numberColor?: GithubNumberColor;
+  showAuthor?: boolean;
+  showUpdated?: boolean;
+  showDraftBadge?: boolean;
+  /** Labels per row; `0` hides the column. */
+  labelMaxCount?: number;
+  labelMaxWidth?: number;
 }
 
 type Tab = "issues" | "pulls";
@@ -92,6 +112,14 @@ export function GitHubView({
   defaultTab = "issues",
   refreshSeconds = 10,
   hideDraftPulls = false,
+  fontFamily = "",
+  fontSize,
+  numberColor = "yellow",
+  showAuthor = true,
+  showUpdated = true,
+  showDraftBadge = true,
+  labelMaxCount,
+  labelMaxWidth,
 }: GitHubViewProps) {
   const cwd = useSyncGroupCwd({ syncGroup, instanceId, cwdReceive });
   // A hand-edited settings.json can set refreshSeconds to 0 or negative,
@@ -125,6 +153,15 @@ export function GitHubView({
   // broken, so neither explanation is shown yet.
   const message = loading ? null : statusMessage(snapshot.status);
   const nowMs = useNowTick(RELATIVE_TIME_TICK_MS).getTime();
+
+  // Display knobs read through their clamps: settings.json can be hand-edited,
+  // so the row never renders a raw value from it.
+  const rowFont = rowFontFamily(fontFamily);
+  const titleSize = readGithubFontSize(fontSize);
+  const metaSize = secondaryFontSize(titleSize);
+  const numberCss = numberColorVar(numberColor);
+  const labelCount = readGithubLabelMaxCount(labelMaxCount);
+  const labelWidth = readGithubLabelMaxWidth(labelMaxWidth);
 
   useEffect(
     () => () => {
@@ -278,7 +315,11 @@ export function GitHubView({
             key={item.number}
             data-testid={`github-item-${item.number}`}
             className="hover-bg group flex items-center gap-1 px-2"
-            style={{ minHeight: "var(--pane-row-max-h)", cursor: "pointer" }}
+            style={{
+              minHeight: "var(--pane-row-max-h)",
+              cursor: "pointer",
+              fontFamily: rowFont,
+            }}
             onClick={() => openExternal(item.url)}
             title={item.title}
           >
@@ -287,51 +328,59 @@ export function GitHubView({
             <span
               data-testid={`github-number-${item.number}`}
               className="shrink-0"
-              style={{ color: "var(--yellow)", fontSize: "var(--fs-sm)" }}
+              style={{ color: numberCss, fontSize: titleSize }}
             >
               #{item.number}
             </span>
-            {item.isDraft && (
+            {showDraftBadge && item.isDraft && (
               <span
                 data-testid={`github-draft-${item.number}`}
                 className="shrink-0"
-                style={{ color: "var(--yellow)", fontSize: "var(--fs-2xs)" }}
+                style={{ color: "var(--yellow)", fontSize: metaSize }}
               >
                 DRAFT
               </span>
             )}
             <span
               className="min-w-0 flex-1 truncate"
-              style={{ color: "var(--text-primary)", fontSize: "var(--fs-sm)" }}
+              style={{ color: "var(--text-primary)", fontSize: titleSize }}
             >
               {item.title}
             </span>
-            {item.labels.slice(0, 2).map((label) => (
+            {labelCount > 0 &&
+              item.labels.slice(0, labelCount).map((label) => (
+                <span
+                  key={label}
+                  data-testid={`github-label-${item.number}-${label}`}
+                  className="shrink-0 truncate rounded px-1"
+                  style={{
+                    maxWidth: labelWidth,
+                    background: "var(--accent-10)",
+                    color: "var(--text-secondary)",
+                    fontSize: metaSize,
+                  }}
+                >
+                  {label}
+                </span>
+              ))}
+            {showAuthor && (
               <span
-                key={label}
-                className="shrink-0 truncate rounded px-1"
-                style={{
-                  maxWidth: 80,
-                  background: "var(--accent-10)",
-                  color: "var(--text-secondary)",
-                  fontSize: "var(--fs-2xs)",
-                }}
+                data-testid={`github-author-${item.number}`}
+                className="shrink-0"
+                style={{ color: "var(--text-muted)", fontSize: metaSize }}
               >
-                {label}
+                {item.author}
               </span>
-            ))}
-            <span
-              className="shrink-0"
-              style={{ color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}
-            >
-              {item.author}
-            </span>
-            <span
-              className="shrink-0"
-              style={{ color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}
-            >
-              {relativeTime(item.updatedAt, nowMs)}
-            </span>
+            )}
+            {showUpdated && (
+              <span
+                data-testid={`github-updated-${item.number}`}
+                className="shrink-0"
+                style={{ color: "var(--text-muted)", fontSize: metaSize }}
+              >
+                {relativeTime(item.updatedAt, nowMs)}
+              </span>
+            )}
             {/* Copy link stays visible at all times (issue #708) — it is the
                 one action that is safe to hit by accident. */}
             <button
