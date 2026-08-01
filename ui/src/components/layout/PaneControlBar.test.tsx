@@ -18,6 +18,7 @@ vi.mock("@/lib/tauri-api", () => ({
 import { useContext, useEffect, type ReactNode } from "react";
 import { PaneControlBar } from "./PaneControlBar";
 import { PaneControlContext } from "./PaneControlContext";
+import { ViewHeader } from "@/components/ui/ViewHeader";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useUiStore } from "@/stores/ui-store";
@@ -507,6 +508,83 @@ describe("PaneControlBar", () => {
     emitWidth(200);
     await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
     expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
+  });
+
+  // -- Narrow floating menu placement --
+
+  it("anchors the narrow menu to the trigger after a ViewHeader view takes over the bar", async () => {
+    // Switching a narrow pane to a View that owns its header (UsageView,
+    // CodexUsageView, …) briefly mounts two ⋯ triggers: the pane's own bar and
+    // the ViewHeader's. When the pane bar then unmounts, its ref detach must not
+    // wipe the still-mounted ViewHeader trigger — otherwise the menu falls back
+    // to {top: 0, right: 0} and lands in the top-right corner of the app window.
+    stubPaneWidth(200);
+    useSettingsStore.setState((s) => ({
+      controlBar: { ...s.controlBar, defaultMode: "pinned" },
+    }));
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      top: 100,
+      bottom: 120,
+      left: 380,
+      right: 400,
+      width: 20,
+      height: 20,
+    } as DOMRect);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <ViewHeader testId="view-header" title="Codex Usage" />
+      </PaneControlBar>,
+    );
+    await waitFor(() => expect(screen.getByTestId("view-header")).toBeInTheDocument());
+
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    const menu = screen.getByTestId("pane-control-floating-menu");
+    expect(menu.style.top).toBe("122px");
+    expect(menu.style.right).toBe(`${window.innerWidth - 400}px`);
+    rectSpy.mockRestore();
+  });
+
+  it("falls back to the pane's own top-right when the trigger cannot be measured", async () => {
+    // A zero-sized rect means the trigger is not laid out (detached / clipped).
+    // Anchoring to the pane keeps the menu next to its pane instead of jumping
+    // to the app window corner.
+    stubPaneWidth(200);
+    const paneRect = {
+      top: 300,
+      bottom: 800,
+      left: 40,
+      right: 240,
+      width: 200,
+      height: 500,
+    } as DOMRect;
+    const zeroRect = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 } as DOMRect;
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.tagName === "BUTTON" ? zeroRect : paneRect;
+      });
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+
+    const menu = screen.getByTestId("pane-control-floating-menu");
+    expect(menu.style.top).toBe("302px");
+    expect(menu.style.right).toBe(`${window.innerWidth - 240}px`);
+    rectSpy.mockRestore();
   });
 
   it("keeps unpin available in the narrow pinned menu", async () => {
