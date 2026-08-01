@@ -1247,6 +1247,34 @@ pub struct GithubSettings {
     /// Hide draft pull requests from the pulls tab.
     #[serde(default)]
     pub hide_draft_pulls: bool,
+    /// Row typeface. Empty string means the app UI font.
+    #[serde(default)]
+    pub font_family: String,
+    /// Row font size in px for the number and the title. The secondary columns
+    /// (author, age, labels) are derived from it by the frontend so one knob
+    /// keeps the row proportional.
+    #[serde(default = "default_github_font_size")]
+    pub font_size: u32,
+    /// Which palette token paints `#123`. A named token, never a raw color:
+    /// the row has to stay legible in every app theme.
+    #[serde(default = "default_github_number_color")]
+    pub number_color: String,
+    /// Show the author column.
+    #[serde(default = "default_true")]
+    pub show_author: bool,
+    /// Show the "updated N ago" column.
+    #[serde(default = "default_true")]
+    pub show_updated: bool,
+    /// Show the DRAFT badge on draft pull requests.
+    #[serde(default = "default_true")]
+    pub show_draft_badge: bool,
+    /// How many labels one row may show. `0` hides the labels entirely — the
+    /// count is the single switch for that column.
+    #[serde(default = "default_github_label_max_count")]
+    pub label_max_count: u32,
+    /// Widest one label chip may get, in px.
+    #[serde(default = "default_github_label_max_width")]
+    pub label_max_width: u32,
 }
 
 fn default_github_tab() -> String {
@@ -1257,12 +1285,36 @@ fn default_github_refresh_seconds() -> u32 {
     10
 }
 
+fn default_github_font_size() -> u32 {
+    11
+}
+
+fn default_github_number_color() -> String {
+    "yellow".to_string()
+}
+
+fn default_github_label_max_count() -> u32 {
+    2
+}
+
+fn default_github_label_max_width() -> u32 {
+    80
+}
+
 impl Default for GithubSettings {
     fn default() -> Self {
         Self {
             default_tab: default_github_tab(),
             refresh_seconds: default_github_refresh_seconds(),
             hide_draft_pulls: false,
+            font_family: String::new(),
+            font_size: default_github_font_size(),
+            number_color: default_github_number_color(),
+            show_author: true,
+            show_updated: true,
+            show_draft_badge: true,
+            label_max_count: default_github_label_max_count(),
+            label_max_width: default_github_label_max_width(),
         }
     }
 }

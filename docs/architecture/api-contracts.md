@@ -198,6 +198,21 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 
 뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
 
+행 표시도 같은 섹션이 소유한다(전역 전용 — pane 별 오버라이드 없음, [ADR-0111](../adr/0111-github-view-display-settings.md)).
+
+| 키 | 기본 | 범위·의미 |
+|---|---|---|
+| `fontFamily` | `""` | 빈 문자열이면 앱 UI 글꼴(`var(--ui-font)`). 목록은 설치된 mono 글꼴 |
+| `fontSize` | `11` | 번호·제목 크기(px), 8~24. 작성자·경과시각·라벨은 `fontSize - 2`(하한 7px)로 파생 |
+| `numberColor` | `"yellow"` | `yellow`\|`accent`\|`green`\|`red`\|`primary`\|`secondary`\|`muted`. **이름만** 받는다 — 원시 색을 넣으면 기본값으로 되돌린다 |
+| `showAuthor` | `true` | 작성자 열 |
+| `showUpdated` | `true` | 경과시각 열 |
+| `showDraftBadge` | `true` | DRAFT 배지. `hideDraftPulls` 는 행 자체를 없애므로 축이 다르다 |
+| `labelMaxCount` | `2` | 행당 라벨 수, 0~5. **0 이 라벨 열의 off 스위치**다(별도 토글 없음) |
+| `labelMaxWidth` | `80` | 라벨 한 개 최대 폭(px), 24~240 |
+
+읽기 경로는 `lib/github-display.ts` 단일 clamp 를 지난다. 스키마는 값을 거부하지 않고 조용히 clamp 하며(`refreshSeconds` 하한 처리와 같은 방식), 뷰는 settings.json 의 원시 값을 style 로 직접 흘리지 않는다.
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).

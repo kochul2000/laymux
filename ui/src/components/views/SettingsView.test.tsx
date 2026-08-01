@@ -206,6 +206,43 @@ describe("SettingsView", () => {
         defaultTab: "pulls",
         refreshSeconds: 30,
         hideDraftPulls: true,
+        fontFamily: "",
+        fontSize: 11,
+        numberColor: "yellow",
+        showAuthor: true,
+        showUpdated: true,
+        showDraftBadge: true,
+        labelMaxCount: 2,
+        labelMaxWidth: 80,
+      });
+    });
+
+    it("saves the display knobs and clamps a value typed past the offered range", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-github"));
+      expect(screen.getByTestId("github-font-size")).toHaveValue(11);
+      expect(screen.getByTestId("github-number-color")).toHaveValue("yellow");
+
+      fireEvent.change(screen.getByTestId("github-font-size"), { target: { value: "16" } });
+      await user.selectOptions(screen.getByTestId("github-number-color"), "accent");
+      await user.click(screen.getByTestId("github-show-author"));
+      await user.click(screen.getByTestId("github-show-updated"));
+      await user.click(screen.getByTestId("github-show-draft-badge"));
+      fireEvent.change(screen.getByTestId("github-label-max-count"), { target: { value: "0" } });
+      // Past the max: the row would otherwise render whatever was typed.
+      fireEvent.change(screen.getByTestId("github-label-max-width"), { target: { value: "900" } });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().github).toMatchObject({
+        fontSize: 16,
+        numberColor: "accent",
+        showAuthor: false,
+        showUpdated: false,
+        showDraftBadge: false,
+        labelMaxCount: 0,
+        labelMaxWidth: 240,
       });
     });
   });

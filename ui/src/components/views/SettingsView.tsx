@@ -48,6 +48,17 @@ import {
   type RemoteSettings,
 } from "@/lib/tauri-api";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
+import {
+  GITHUB_FONT_SIZE_MAX,
+  GITHUB_FONT_SIZE_MIN,
+  GITHUB_LABEL_MAX_COUNT_MAX,
+  GITHUB_LABEL_MAX_WIDTH_MAX,
+  GITHUB_LABEL_MAX_WIDTH_MIN,
+  GITHUB_NUMBER_COLORS,
+  readGithubFontSize,
+  readGithubLabelMaxCount,
+  readGithubLabelMaxWidth,
+} from "@/lib/github-display";
 import { persistSession } from "@/lib/persist-session";
 import {
   DEFAULT_KEYBINDINGS,
@@ -3296,6 +3307,7 @@ function GitHubSection() {
   const { t } = useTranslation("settings");
   const storeGithub = useSettingsStore((s) => s.github);
   const setGithub = useSettingsStore((s) => s.setGithub);
+  const monoFonts = useMonospacedFonts();
   const [github, setDraftGithub] = useDraft("github", storeGithub, (v) => setGithub(v));
   const updateGithub = (partial: Partial<GithubSettings>) =>
     setDraftGithub((prev) => ({ ...prev, ...partial }));
@@ -3348,6 +3360,127 @@ function GitHubSection() {
               {t("common.enabledShort")}
             </span>
           </label>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("github.groupDisplay")}>
+        <SettingRow label={t("github.fontFamily")} desc={t("github.fontFamilyDesc")}>
+          <FocusSelect
+            data-testid="github-font-family"
+            className={inputCls}
+            value={github.fontFamily}
+            onChange={(e) => updateGithub({ fontFamily: e.target.value })}
+          >
+            <option value="">{t("github.fontFamilyDefault")}</option>
+            {github.fontFamily && !monoFonts.includes(github.fontFamily) && (
+              <option value={github.fontFamily}>{github.fontFamily}</option>
+            )}
+            {monoFonts.map((family) => (
+              <option key={family} value={family}>
+                {family}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow label={t("github.fontSize")} desc={t("github.fontSizeDesc")}>
+          <FocusInput
+            data-testid="github-font-size"
+            type="number"
+            inputStyle={{ width: "7rem" }}
+            min={GITHUB_FONT_SIZE_MIN}
+            max={GITHUB_FONT_SIZE_MAX}
+            value={github.fontSize}
+            onChange={(e) => updateGithub({ fontSize: readGithubFontSize(Number(e.target.value)) })}
+          />
+        </SettingRow>
+
+        <SettingRow label={t("github.numberColor")} desc={t("github.numberColorDesc")}>
+          <FocusSelect
+            data-testid="github-number-color"
+            className={inputCls}
+            value={github.numberColor}
+            onChange={(e) =>
+              updateGithub({ numberColor: e.target.value as GithubSettings["numberColor"] })
+            }
+          >
+            {GITHUB_NUMBER_COLORS.map((token) => (
+              <option key={token} value={token}>
+                {t(`github.numberColorOption.${token}`)}
+              </option>
+            ))}
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow label={t("github.showAuthor")} desc={t("github.showAuthorDesc")}>
+          <label className="flex items-center gap-2">
+            <input
+              data-testid="github-show-author"
+              type="checkbox"
+              checked={github.showAuthor}
+              onChange={(e) => updateGithub({ showAuthor: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.enabledShort")}
+            </span>
+          </label>
+        </SettingRow>
+
+        <SettingRow label={t("github.showUpdated")} desc={t("github.showUpdatedDesc")}>
+          <label className="flex items-center gap-2">
+            <input
+              data-testid="github-show-updated"
+              type="checkbox"
+              checked={github.showUpdated}
+              onChange={(e) => updateGithub({ showUpdated: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.enabledShort")}
+            </span>
+          </label>
+        </SettingRow>
+
+        <SettingRow label={t("github.showDraftBadge")} desc={t("github.showDraftBadgeDesc")}>
+          <label className="flex items-center gap-2">
+            <input
+              data-testid="github-show-draft-badge"
+              type="checkbox"
+              checked={github.showDraftBadge}
+              onChange={(e) => updateGithub({ showDraftBadge: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.enabledShort")}
+            </span>
+          </label>
+        </SettingRow>
+
+        <SettingRow label={t("github.labelMaxCount")} desc={t("github.labelMaxCountDesc")}>
+          <FocusInput
+            data-testid="github-label-max-count"
+            type="number"
+            inputStyle={{ width: "7rem" }}
+            min={0}
+            max={GITHUB_LABEL_MAX_COUNT_MAX}
+            value={github.labelMaxCount}
+            onChange={(e) =>
+              updateGithub({ labelMaxCount: readGithubLabelMaxCount(Number(e.target.value)) })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow label={t("github.labelMaxWidth")} desc={t("github.labelMaxWidthDesc")}>
+          <FocusInput
+            data-testid="github-label-max-width"
+            type="number"
+            inputStyle={{ width: "7rem" }}
+            min={GITHUB_LABEL_MAX_WIDTH_MIN}
+            max={GITHUB_LABEL_MAX_WIDTH_MAX}
+            step={4}
+            value={github.labelMaxWidth}
+            onChange={(e) =>
+              updateGithub({ labelMaxWidth: readGithubLabelMaxWidth(Number(e.target.value)) })
+            }
+          />
         </SettingRow>
       </SubGroup>
     </div>

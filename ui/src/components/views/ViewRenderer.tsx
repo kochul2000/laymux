@@ -211,6 +211,14 @@ function GitHubViewWithSyncCwd({
       defaultTab={githubSettings.defaultTab}
       refreshSeconds={githubSettings.refreshSeconds}
       hideDraftPulls={githubSettings.hideDraftPulls}
+      fontFamily={githubSettings.fontFamily}
+      fontSize={githubSettings.fontSize}
+      numberColor={githubSettings.numberColor}
+      showAuthor={githubSettings.showAuthor}
+      showUpdated={githubSettings.showUpdated}
+      showDraftBadge={githubSettings.showDraftBadge}
+      labelMaxCount={githubSettings.labelMaxCount}
+      labelMaxWidth={githubSettings.labelMaxWidth}
     />
   );
 }

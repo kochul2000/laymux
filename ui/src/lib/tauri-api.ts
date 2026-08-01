@@ -757,6 +757,16 @@ export interface FileExplorerSettings {
   extensionViewers: ExtensionViewer[];
 }
 
+/** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
+export type GithubNumberColor =
+  | "yellow"
+  | "accent"
+  | "green"
+  | "red"
+  | "primary"
+  | "secondary"
+  | "muted";
+
 export interface GithubSettings {
   /** Tab shown when the view first mounts. */
   defaultTab: "issues" | "pulls";
@@ -765,6 +775,19 @@ export interface GithubSettings {
   refreshSeconds: number;
   /** Hide draft pull requests from the pulls tab. */
   hideDraftPulls: boolean;
+  /** Row typeface; "" means the app UI font. */
+  fontFamily: string;
+  /** Row font size in px for the number and title; secondary columns derive from it. */
+  fontSize: number;
+  /** Palette token that paints `#123` — a name, never a raw color. */
+  numberColor: GithubNumberColor;
+  showAuthor: boolean;
+  showUpdated: boolean;
+  showDraftBadge: boolean;
+  /** Labels shown per row; `0` hides the column. */
+  labelMaxCount: number;
+  /** Widest one label chip may get, in px. */
+  labelMaxWidth: number;
 }
 
 /** One entry of an archive listing; mirrors Rust `commands::ArchiveEntry`. */

@@ -95,7 +95,51 @@ describe("GitHubView", () => {
     const number = screen.getByTestId("github-number-708");
     expect(number).toHaveTextContent("#708");
     expect(number.style.color).toBe("var(--yellow)");
-    expect(number.style.fontSize).toBe("var(--fs-sm)");
+    expect(number.style.fontSize).toBe("11px");
+  });
+
+  it("applies the display settings to the row", () => {
+    renderView({
+      fontFamily: "Fira Code",
+      fontSize: 16,
+      numberColor: "accent",
+      labelMaxWidth: 120,
+    });
+
+    const number = screen.getByTestId("github-number-708");
+    expect(number.style.color).toBe("var(--accent)");
+    expect(number.style.fontSize).toBe("16px");
+    // jsdom serializes a family with a space back with quotes.
+    expect(screen.getByTestId("github-item-708").style.fontFamily).toBe('"Fira Code"');
+    // Secondary columns follow the row size instead of staying at a fixed 9px.
+    expect(screen.getByTestId("github-author-708").style.fontSize).toBe("14px");
+    expect(screen.getByTestId("github-label-708-enhancement").style.maxWidth).toBe("120px");
+  });
+
+  it("clamps display values a hand-edited settings.json can carry", () => {
+    renderView({ fontSize: 400, numberColor: "#ff0000" as never, labelMaxWidth: -5 });
+
+    const number = screen.getByTestId("github-number-708");
+    expect(number.style.fontSize).toBe("24px");
+    expect(number.style.color).toBe("var(--yellow)");
+    expect(screen.getByTestId("github-label-708-enhancement").style.maxWidth).toBe("24px");
+  });
+
+  it("drops the columns the settings turn off", () => {
+    renderView({ showAuthor: false, showUpdated: false, labelMaxCount: 0 });
+
+    expect(screen.queryByTestId("github-author-708")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("github-updated-708")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("github-label-708-enhancement")).not.toBeInTheDocument();
+    // The row itself still lists the item — only its metadata is gone.
+    expect(screen.getByTestId("github-item-708")).toHaveTextContent("gh issue/pr list view");
+  });
+
+  it("hides the DRAFT badge without hiding the draft pull request", () => {
+    renderView({ defaultTab: "pulls", showDraftBadge: false });
+
+    expect(screen.getByTestId("github-item-12")).toHaveTextContent("wip pull");
+    expect(screen.queryByTestId("github-draft-12")).not.toBeInTheDocument();
   });
 
   it("opens on the pulls tab when defaultTab is set", () => {

@@ -10,6 +10,7 @@ import type {
   MemoSettings,
   RemoteSettings,
 } from "../lib/tauri-api";
+import { GITHUB_FONT_SIZE_DEFAULT, GITHUB_LABEL_MAX_WIDTH_DEFAULT } from "../lib/github-display";
 import {
   resolveSyncCwd,
   DEFAULT_SYNC_CWD_DEFAULTS,
@@ -610,6 +611,14 @@ const DEFAULT_GITHUB: GithubSettings = {
   defaultTab: "issues",
   refreshSeconds: 10,
   hideDraftPulls: false,
+  fontFamily: "",
+  fontSize: GITHUB_FONT_SIZE_DEFAULT,
+  numberColor: "yellow",
+  showAuthor: true,
+  showUpdated: true,
+  showDraftBadge: true,
+  labelMaxCount: 2,
+  labelMaxWidth: GITHUB_LABEL_MAX_WIDTH_DEFAULT,
 };
 
 const DEFAULT_REMOTE: RemoteSettings = {
