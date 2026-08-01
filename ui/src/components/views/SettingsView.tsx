@@ -44,6 +44,7 @@ import {
   type CloudStatus,
   type ExtensionViewer,
   type FileExplorerSettings,
+  type GithubSettings,
   type RemoteSettings,
 } from "@/lib/tauri-api";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
@@ -3289,6 +3290,70 @@ function IssueReporterSection() {
   );
 }
 
+// -- Section: GitHub --
+
+function GitHubSection() {
+  const { t } = useTranslation("settings");
+  const storeGithub = useSettingsStore((s) => s.github);
+  const setGithub = useSettingsStore((s) => s.setGithub);
+  const [github, setDraftGithub] = useDraft("github", storeGithub, (v) => setGithub(v));
+  const updateGithub = (partial: Partial<GithubSettings>) =>
+    setDraftGithub((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>{t("github.title")}</SectionTitle>
+
+      <SubGroup title={t("github.groupBehavior")}>
+        <SettingRow label={t("github.defaultTab")} desc={t("github.defaultTabDesc")}>
+          <FocusSelect
+            data-testid="github-default-tab"
+            className={inputCls}
+            value={github.defaultTab}
+            onChange={(e) =>
+              updateGithub({ defaultTab: e.target.value as GithubSettings["defaultTab"] })
+            }
+          >
+            <option value="issues">{t("github.defaultTabIssues")}</option>
+            <option value="pulls">{t("github.defaultTabPulls")}</option>
+          </FocusSelect>
+        </SettingRow>
+
+        <SettingRow label={t("github.refreshSeconds")} desc={t("github.refreshSecondsDesc")}>
+          <FocusInput
+            data-testid="github-refresh-input"
+            type="number"
+            inputStyle={{ width: "7rem" }}
+            min={10}
+            max={3600}
+            step={10}
+            value={github.refreshSeconds}
+            onChange={(e) =>
+              updateGithub({
+                refreshSeconds: Math.max(10, Math.min(3600, Number(e.target.value) || 10)),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow label={t("github.hideDraftPulls")} desc={t("github.hideDraftPullsDesc")}>
+          <label className="flex items-center gap-2">
+            <input
+              data-testid="github-hide-draft-pulls"
+              type="checkbox"
+              checked={github.hideDraftPulls}
+              onChange={(e) => updateGithub({ hideDraftPulls: e.target.checked })}
+            />
+            <span className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              {t("common.enabledShort")}
+            </span>
+          </label>
+        </SettingRow>
+      </SubGroup>
+    </div>
+  );
+}
+
 // -- Section: Memo --
 
 /**
@@ -4623,6 +4688,16 @@ export function SettingsView() {
           >
             {t("nav.issueReporter")}
           </button>
+          <button
+            data-testid="nav-github"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("github")}
+            onClick={() => setActiveNav("github")}
+            onMouseEnter={() => setNavHover("github")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.github")}
+          </button>
 
           {/* Input */}
           <NavGroupHeader label={t("nav.groupInput")} />
@@ -4733,6 +4808,7 @@ export function SettingsView() {
             {activeNav === "usage" && <UsageSection />}
             {activeNav === "widgets" && <WidgetsSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
+            {activeNav === "github" && <GitHubSection />}
           </div>
 
           {/* Sticky save bar — always visible at bottom */}

@@ -5,6 +5,7 @@ import type {
   CodexSettings,
   ExitSettings,
   FileExplorerSettings,
+  GithubSettings,
   IssueReporterSettings,
   MemoSettings,
   RemoteSettings,
@@ -473,6 +474,7 @@ interface SettingsState {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
+  github: GithubSettings;
   remote: RemoteSettings;
   syncCwdDefaults: SyncCwdDefaults;
 
@@ -505,6 +507,7 @@ interface SettingsState {
    */
   setWidgets: (widgets: WidgetsSettings) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
+  setGithub: (data: Partial<GithubSettings>) => void;
   setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
   setSyncCwdDefaults: (data: Partial<SyncCwdDefaults>) => void;
@@ -554,6 +557,7 @@ interface SettingsState {
         | "memo"
         | "issueReporter"
         | "fileExplorer"
+        | "github"
         | "remote"
         | "syncCwdDefaults"
       >
@@ -600,6 +604,12 @@ const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
   fontSize: 13,
   copyOnSelect: false,
   extensionViewers: [],
+};
+
+const DEFAULT_GITHUB: GithubSettings = {
+  defaultTab: "issues",
+  refreshSeconds: 10,
+  hideDraftPulls: false,
 };
 
 const DEFAULT_REMOTE: RemoteSettings = {
@@ -1165,6 +1175,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
+  github: { ...DEFAULT_GITHUB },
   remote: { ...DEFAULT_REMOTE },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
 
@@ -1269,6 +1280,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setFileExplorer: (data) =>
     set((state) => ({
       fileExplorer: { ...state.fileExplorer, ...data },
+    })),
+
+  setGithub: (data) =>
+    set((state) => ({
+      github: { ...state.github, ...data },
     })),
 
   setRemote: (data) =>
@@ -1524,6 +1540,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const remote = data.remote
       ? { ...DEFAULT_REMOTE, ...(data.remote as Partial<RemoteSettings>) }
       : undefined;
+    // Ensure github settings have all fields (backwards compat)
+    const github = data.github
+      ? { ...DEFAULT_GITHUB, ...(data.github as Partial<GithubSettings>) }
+      : undefined;
     // Ensure syncCwdDefaults settings have all fields (backwards compat)
     const syncCwdDefaults = data.syncCwdDefaults
       ? {
@@ -1583,6 +1603,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),
+      ...(github ? { github } : {}),
       ...(remote ? { remote } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),
     }));
