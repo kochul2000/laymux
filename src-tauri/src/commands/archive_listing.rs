@@ -29,6 +29,12 @@ pub struct ArchiveListing {
     pub entries: Vec<ArchiveEntry>,
     /// Entries in the archive, which exceeds `entries.len()` when capped.
     pub total_entries: usize,
+    /// Uncompressed bytes across **every** entry, not only the listed ones.
+    /// Summing `entries` in the frontend would pair a whole-archive count with
+    /// a partial size and read as though the archive were far smaller than it
+    /// is; both walks below already visit every header, so the real total costs
+    /// nothing extra.
+    pub total_bytes: u64,
     pub truncated: bool,
 }
 
@@ -111,13 +117,20 @@ fn read_zip_listing(path: &str) -> Result<ArchiveListing, String> {
     let total_entries = archive.len();
     let listed = total_entries.min(MAX_ARCHIVE_ENTRIES);
     let mut entries = Vec::with_capacity(listed);
-    for index in 0..listed {
+    let mut total_bytes = 0_u64;
+    // Walk every entry for the size total even when the listing is capped; the
+    // central directory is already parsed, so this is a loop over memory.
+    for index in 0..total_entries {
         // `by_index_raw` reads the header without preparing a decompressor, so
         // an entry compressed with a method this build does not support (the
         // crate is pulled in without its optional codecs) still lists.
         let entry = archive
             .by_index_raw(index)
             .map_err(|e| format!("Cannot read zip entry {index}: {e}"))?;
+        total_bytes = total_bytes.saturating_add(entry.size());
+        if index >= listed {
+            continue;
+        }
         entries.push(ArchiveEntry {
             name: entry.name().to_string(),
             size: entry.size(),
@@ -130,6 +143,7 @@ fn read_zip_listing(path: &str) -> Result<ArchiveListing, String> {
         format: ArchiveFormat::Zip,
         entries,
         total_entries,
+        total_bytes,
         truncated: total_entries > listed,
     })
 }
@@ -142,6 +156,7 @@ fn read_tar_listing<R: Read>(reader: R, format: ArchiveFormat) -> Result<Archive
 
     let mut entries = Vec::new();
     let mut total_entries = 0_usize;
+    let mut total_bytes = 0_u64;
     let mut truncated = false;
     for entry in iter {
         // A tar stream is walked sequentially, so a read error partway through
@@ -157,16 +172,21 @@ fn read_tar_listing<R: Read>(reader: R, format: ArchiveFormat) -> Result<Archive
             Err(e) => return Err(format!("Cannot read tar archive: {e}")),
         };
         total_entries += 1;
+        let header = entry.header();
+        let size = header.size().unwrap_or(0);
+        total_bytes = total_bytes.saturating_add(size);
+        // Keep walking past the cap rather than stopping: the count and the
+        // size total are only honest if every header is visited, and a listing
+        // that under-reports both is worse than one that reads a few more
+        // headers. The gzip path is bounded separately by the inflate limit.
         if entries.len() >= MAX_ARCHIVE_ENTRIES {
             truncated = true;
             continue;
         }
-        let header = entry.header();
         let name = entry
             .path()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| String::from_utf8_lossy(&entry.path_bytes()).into_owned());
-        let size = header.size().unwrap_or(0);
         entries.push(ArchiveEntry {
             name,
             size,
@@ -179,6 +199,7 @@ fn read_tar_listing<R: Read>(reader: R, format: ArchiveFormat) -> Result<Archive
         format,
         entries,
         total_entries,
+        total_bytes,
         truncated,
     })
 }
@@ -308,6 +329,32 @@ mod tests {
         assert_eq!(listing.total_entries, 1);
         assert_eq!(listing.entries[0].name, "only.txt");
         assert_eq!(listing.entries[0].size, 7);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_size_total_covers_entries_the_listing_cap_dropped() {
+        // The frontend pairs `total_bytes` with `total_entries` in one summary
+        // line. If the total only counted listed entries, a capped archive
+        // would advertise its full entry count next to a fraction of its size.
+        let over_cap = MAX_ARCHIVE_ENTRIES + 5;
+        let bodies: Vec<(String, Vec<u8>)> = (0..over_cap)
+            .map(|index| (format!("f{index}.bin"), vec![b'x'; 10]))
+            .collect();
+        let refs: Vec<(&str, &[u8])> = bodies
+            .iter()
+            .map(|(name, body)| (name.as_str(), body.as_slice()))
+            .collect();
+        let path = temp_path("capped.tar");
+        write_tar(&path, &refs);
+
+        let listing = read_archive_listing(&path.to_string_lossy(), ArchiveFormat::Tar)
+            .expect("tar must list");
+
+        assert!(listing.truncated);
+        assert_eq!(listing.entries.len(), MAX_ARCHIVE_ENTRIES);
+        assert_eq!(listing.total_entries, over_cap);
+        assert_eq!(listing.total_bytes, over_cap as u64 * 10);
         let _ = std::fs::remove_file(&path);
     }
 

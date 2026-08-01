@@ -22,11 +22,22 @@ const UI_ROOT = process.cwd();
 const STARTUP_CHUNK_BUDGET_BYTES = 500_000;
 
 /**
- * Ceiling for chunks reached only through a dynamic import. Generous, because a
- * grammar's size is upstream's business, but present so a lazy chunk cannot
- * grow without anyone noticing.
+ * Ceiling for a lazily-imported **syntax grammar**. Generous because a
+ * grammar's size is upstream's business — C++ alone is ~800 kB — but present so
+ * one cannot grow without anyone noticing.
  */
-const LAZY_CHUNK_CEILING_BYTES = 1_000_000;
+const GRAMMAR_CHUNK_CEILING_BYTES = 1_000_000;
+
+/**
+ * Grammar chunks are named after the language they carry and are the only
+ * modules under `@shikijs/langs`. Everything else that happens to be lazy —
+ * a future split-out view, say — stays on the startup budget, so relaxing the
+ * limit for grammars does not quietly relax it for the whole build.
+ */
+function isGrammarChunk(chunk: ChunkOutput): boolean {
+  const modules = Object.keys(chunk.modules).map((id) => id.replaceAll("\\", "/"));
+  return modules.length > 0 && modules.every((id) => id.includes("/node_modules/@shikijs/langs/"));
+}
 
 /** Chunks reachable from the entry through static imports only. */
 function staticImportClosure(chunks: ChunkOutput[], entry: ChunkOutput): ChunkOutput[] {
@@ -150,12 +161,24 @@ describe("production UI bundle", () => {
       ).toEqual([]);
 
       const startupNames = new Set(startupChunks.map((chunk) => chunk.fileName));
+      const lazyChunks = chunks.filter((chunk) => !startupNames.has(chunk.fileName));
+      const grammarChunks = lazyChunks.filter(isGrammarChunk);
+
+      // The relaxed ceiling applies to grammars only.
       expect(
-        chunks
-          .filter((chunk) => !startupNames.has(chunk.fileName))
-          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > LAZY_CHUNK_CEILING_BYTES)
+        grammarChunks
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > GRAMMAR_CHUNK_CEILING_BYTES)
           .map((chunk) => chunk.fileName),
       ).toEqual([]);
+      expect(
+        lazyChunks
+          .filter((chunk) => !isGrammarChunk(chunk))
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > STARTUP_CHUNK_BUDGET_BYTES)
+          .map((chunk) => chunk.fileName),
+      ).toEqual([]);
+      // Guard the classifier: if grammars stop being recognised, the assertion
+      // above silently becomes the only one that runs.
+      expect(grammarChunks.length).toBeGreaterThan(10);
       expect(production.logs.filter((log) => LARGE_CHUNK_WARNING.test(log.message))).toEqual([]);
 
       const settingsModules = Object.keys(settings?.modules ?? {}).map((id) =>

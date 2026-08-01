@@ -16,12 +16,19 @@ export function ArchivePreview({
   format,
   entries,
   totalEntries,
+  totalBytes,
   truncated,
   bodyStyle,
 }: {
   format: string;
   entries: ArchiveEntry[];
   totalEntries: number;
+  /**
+   * Whole-archive size from the backend. Summing `entries` here would pair a
+   * whole-archive count with a listed-entries-only size, which reads as though
+   * a capped archive were a fraction of its real weight.
+   */
+  totalBytes: number;
   truncated: boolean;
   bodyStyle?: React.CSSProperties;
 }) {
@@ -36,11 +43,6 @@ export function ArchivePreview({
     }
     return rows;
   }, [entries, sortKey]);
-
-  const uncompressed = useMemo(
-    () => entries.reduce((total, entry) => total + entry.size, 0),
-    [entries],
-  );
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
@@ -57,7 +59,7 @@ export function ArchivePreview({
       >
         <span style={{ color: "var(--text-primary)" }}>{format}</span>
         <span>{pluralize(totalEntries, "entry", "entries")}</span>
-        <span>{`${formatBytes(uncompressed)} uncompressed`}</span>
+        <span>{`${formatBytes(totalBytes)} uncompressed`}</span>
       </div>
       {truncated && (
         <PreviewNotice testId="archive-preview-truncated">
@@ -86,8 +88,14 @@ export function ArchivePreview({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((entry) => (
-              <tr key={entry.name} className="hover-bg" data-testid="archive-preview-row">
+            {/* Index-qualified key: a zip can legally carry two entries with
+                the same name, and patched or tool-generated archives do. */}
+            {sorted.map((entry, index) => (
+              <tr
+                key={`${index}:${entry.name}`}
+                className="hover-bg"
+                data-testid="archive-preview-row"
+              >
                 <td style={{ ...cellStyle, overflowWrap: "anywhere" }}>
                   <span style={{ color: "var(--text-muted)", userSelect: "none" }}>
                     {entry.isDirectory ? "▸ " : "  "}

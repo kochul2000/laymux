@@ -17,6 +17,7 @@ import { JsonPreview } from "@/components/ui/preview/JsonPreview";
 import { JsonlPreview } from "@/components/ui/preview/JsonlPreview";
 import { LogPreview } from "@/components/ui/preview/LogPreview";
 import { PdfPreview } from "@/components/ui/preview/PdfPreview";
+import { PreviewNotice } from "@/components/ui/preview/PreviewNotice";
 import { SvgPreview } from "@/components/ui/preview/SvgPreview";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
@@ -202,6 +203,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         format={content.format}
         entries={content.entries}
         totalEntries={content.totalEntries}
+        totalBytes={content.totalBytes}
         truncated={content.truncated}
         bodyStyle={bodyStyle}
       />
@@ -298,12 +300,48 @@ function TypedPreview({
     return <PreviewFrame documentHtml={documentHtml ?? ""} bodyStyle={bodyStyle} />;
   }
 
+  // A structured renderer that is handed a truncated file parses a fragment and
+  // has no way to know it. Without this banner a cut-off CSV looks complete and
+  // a cut-off JSON reports a syntax error the file does not actually have — the
+  // renderers' own caps only cover what *they* dropped, never the backend read
+  // limit. Silent truncation is exactly what ADR-0109 forbids.
+  return (
+    <div className="flex h-full min-h-0 flex-1 flex-col">
+      {content.truncated && (
+        <PreviewNotice testId="file-viewer-source-truncated">
+          This file is larger than the viewer&rsquo;s read limit, so only the beginning was loaded.
+          Anything below is parsed from that fragment.
+        </PreviewNotice>
+      )}
+      <StructuredPreview
+        path={path}
+        content={content}
+        previewKind={previewKind}
+        bodyStyle={bodyStyle}
+      />
+    </div>
+  );
+}
+
+/** The React-rendered half of the split; never builds an HTML string. */
+function StructuredPreview({
+  path,
+  content,
+  previewKind,
+  bodyStyle,
+}: {
+  path: string;
+  content: Extract<FileViewerContent, { kind: "text" }>;
+  previewKind: Exclude<FilePreviewKind, "html" | "markdown">;
+  bodyStyle?: React.CSSProperties;
+}) {
   switch (previewKind) {
     case "json":
       return (
         <JsonPreview
           content={content.content}
           allowComments={fileExtension(path) !== ".json"}
+          sourceTruncated={content.truncated}
           bodyStyle={bodyStyle}
         />
       );

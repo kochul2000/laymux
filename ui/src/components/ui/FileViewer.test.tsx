@@ -335,6 +335,38 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("name,size");
   });
 
+  it("tells structured renderers when the backend cut the file", async () => {
+    // The renderers' own caps only describe what they dropped. A file cut at
+    // the backend read limit is parsed from a fragment, and without this banner
+    // a truncated CSV looks complete.
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "name,size\na,1\n",
+      truncated: true,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/huge.csv" />);
+    });
+
+    expect(screen.getByTestId("file-viewer-source-truncated")).toBeInTheDocument();
+    expect(screen.getByTestId("csv-preview")).toBeInTheDocument();
+  });
+
+  it("blames truncation, not the file, when a cut JSON fails to parse", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '{"items": [1, 2, 3',
+      truncated: true,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/huge.json" />);
+    });
+
+    const error = screen.getByTestId("json-preview-error");
+    expect(error).toHaveTextContent("cut at the viewer's read limit");
+    expect(error).not.toHaveTextContent("Invalid JSON");
+  });
+
   it("reports invalid JSON without losing the file", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "text",
@@ -391,6 +423,7 @@ describe("FileViewer", () => {
         { name: "src/", size: 0, compressedSize: 0, isDirectory: true },
       ],
       totalEntries: 5000,
+      totalBytes: 41_943_040,
       truncated: true,
     });
     await act(async () => {
@@ -400,6 +433,11 @@ describe("FileViewer", () => {
     expect(screen.getAllByTestId("archive-preview-row")).toHaveLength(2);
     expect(screen.getByTestId("archive-preview-truncated")).toHaveTextContent(
       "Showing the first 2 of 5,000 entries.",
+    );
+    // The size must describe the whole archive, not just the listed rows —
+    // pairing a full count with a partial size understates it ~2500x here.
+    expect(screen.getByTestId("archive-preview-summary")).toHaveTextContent(
+      "40.0 MiB uncompressed",
     );
   });
 

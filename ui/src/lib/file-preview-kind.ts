@@ -30,7 +30,14 @@ export function isDocumentPreviewKind(kind: FilePreviewKind): kind is DocumentPr
   return kind === "html" || kind === "markdown";
 }
 
-const JSON_EXTENSIONS = new Set([".json", ".jsonc", ".json5"]);
+/**
+ * `.json5` is deliberately absent. The relaxed mode only strips comments and
+ * trailing commas, which is all `.jsonc` needs, whereas JSON5 also allows
+ * unquoted keys, single-quoted strings, hex and leading-`+` numbers and
+ * `Infinity`/`NaN`. A valid JSON5 file would be reported as invalid JSON, so it
+ * falls through to plain source instead of being claimed and then failed.
+ */
+const JSON_EXTENSIONS = new Set([".json", ".jsonc"]);
 const JSONL_EXTENSIONS = new Set([".jsonl", ".ndjson"]);
 const DIFF_EXTENSIONS = new Set([".diff", ".patch"]);
 const DELIMITED_EXTENSIONS = new Set([".csv", ".tsv", ".tab"]);

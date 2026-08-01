@@ -36,6 +36,8 @@ pub enum FileViewerContent {
         format: String,
         entries: Vec<ArchiveEntry>,
         total_entries: usize,
+        /// Uncompressed bytes across every entry, not only the listed ones.
+        total_bytes: u64,
         truncated: bool,
     },
     /// Binary/unsupported — show info only.
@@ -180,6 +182,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
     ".avsc",
     // Build and infra
     ".mk",
+    ".make",
     ".cmake",
     ".gradle",
     ".sbt",
@@ -241,6 +244,7 @@ pub fn read_file_for_viewer(
                 format: listing.format.as_str().to_string(),
                 entries: listing.entries,
                 total_entries: listing.total_entries,
+                total_bytes: listing.total_bytes,
                 truncated: listing.truncated,
             });
         }
@@ -398,9 +402,17 @@ mod tests {
                         is_directory: false,
                     }],
                     total_entries: 1,
+                    total_bytes: 1,
                     truncated: false,
                 },
-                vec!["kind", "format", "entries", "totalEntries", "truncated"],
+                vec![
+                    "kind",
+                    "format",
+                    "entries",
+                    "totalEntries",
+                    "totalBytes",
+                    "truncated",
+                ],
                 "archive",
             ),
             (
@@ -519,10 +531,12 @@ mod tests {
                 format,
                 entries,
                 total_entries,
+                total_bytes,
                 truncated,
             } => {
                 assert_eq!(format, "zip");
                 assert_eq!(total_entries, 1);
+                assert_eq!(total_bytes, 5);
                 assert!(!truncated);
                 assert_eq!(entries[0].name, "inner.txt");
                 assert_eq!(entries[0].size, 5);
@@ -550,8 +564,10 @@ mod tests {
 
     #[test]
     fn newly_previewable_extensions_stay_text_past_the_size_limit() {
-        // These extensions gained frontend renderers; if the gate forgets them,
-        // a large file is reported as binary and the renderer never runs.
+        // Covers the *behavior* of the gate on a sample. Whether the list is
+        // complete is a different question, and a sample cannot answer it —
+        // `ui/src/lib/preview/extension-gate.test.ts` reads this constant and
+        // diffs it against every extension the frontend actually claims.
         for ext in [".jsonl", ".ndjson", ".diff", ".patch", ".tsv", ".rs", ".py"] {
             let path = temp_path(&format!("large{ext}"));
             std::fs::write(&path, vec![b'a'; DEFAULT_FILE_VIEWER_BYTES + 10])

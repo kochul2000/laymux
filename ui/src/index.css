@@ -23,10 +23,8 @@
   /* Tinted semantic fills for the file viewer's diff and log rows. Pre-mixed
      because color-mix() breaks html2canvas and the screenshot API with it. */
   --green-15: rgba(166, 227, 161, 0.15);
-  --green-08: rgba(166, 227, 161, 0.08);
   --red-15: rgba(243, 139, 168, 0.15);
   --red-08: rgba(243, 139, 168, 0.08);
-  --yellow-15: rgba(249, 226, 175, 0.15);
   --yellow-08: rgba(249, 226, 175, 0.08);
   --border: #313244;
 

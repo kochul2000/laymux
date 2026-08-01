@@ -716,7 +716,7 @@ preview 종류는 신뢰 경계로 두 계열로 갈리고, 계열이 렌더 방
 | 계열 | previewKind | 확장자 | 렌더 |
 |---|---|---|---|
 | document | `html`, `markdown` | `.html .htm` / `.md .markdown` | sanitizer → 제한 CSP → `sandbox` iframe `srcdoc` |
-| structured | `json` | `.json .jsonc .json5` | 접이식 트리 (React DOM) |
+| structured | `json` | `.json .jsonc` | 접이식 트리 (React DOM) |
 | structured | `jsonl` | `.jsonl .ndjson` | 행 목록, 펼치면 JSON 트리 재사용 |
 | structured | `diff` | `.diff .patch` | 파일/헝크 단위 색상 diff |
 | structured | `csv` | `.csv .tsv .tab` | sticky 헤더 테이블 |
@@ -729,7 +729,11 @@ preview 종류는 신뢰 경계로 두 계열로 갈리고, 계열이 렌더 방
 
 Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니라 **분류 게이트**다. 목록에 없는 확장자는 크기 상한(`DEFAULT_FILE_VIEWER_BYTES`, 1 MiB)을 넘는 순간 `binary` 가 되어 preview 경로에 도달하지 못하므로, 렌더러가 주장하는 확장자는 이 목록에도 있어야 한다.
 
-모든 structured 렌더러는 표시량 상한을 가지며 **잘렸으면 화면에 전체 개수와 함께 그 사실을 표시한다**. 파싱 실패·손상 아카이브·하이라이터 로드 실패는 뷰어 실패가 아니라 원문 표시 폴백이며 사유를 함께 보여준다.
+모든 structured 렌더러는 표시량 상한을 가지며 **잘렸으면 화면에 전체 개수와 함께 그 사실을 표시한다**. 절단은 두 층에서 일어나며 둘 다 표시 대상이다 — 렌더러 자신의 상한(행·레코드 수)과, 그보다 앞서는 backend 의 `truncated`(읽기 바이트 상한). 후자는 렌더러가 알 수 없으므로 `FileViewer` 가 structured 분기 위에 공통 배너로 붙인다. 붙이지 않으면 잘린 CSV 가 완전한 것처럼 보이고, 잘린 JSON 은 파일에 없는 구문 오류를 보고한다(그래서 JSON 은 절단 시 오류 문구 자체를 바꾼다).
+
+`.jsonc` 의 관용 범위는 **주석과 trailing comma 까지**다. `.json5` 는 unquoted key·single-quote 문자열·`Infinity` 등 그 범위를 넘으므로 **claim 하지 않고** plain source 로 떨어뜨린다 — claim 한 뒤 실패시키면 멀쩡한 JSON5 파일을 "invalid JSON" 이라고 고발하게 된다.
+
+파싱 실패·손상 아카이브·하이라이터 로드 실패는 뷰어 실패가 아니라 원문 표시 폴백이며 사유를 함께 보여준다.
 
 이하 document 계열 세부:
 
@@ -1032,7 +1036,7 @@ Remote drawer의 File viewer는 host file path 입력, 명시적 `From host`, `O
 
 `path-link` body는 `{ "terminalId": "...", "selection": "..." }`이며 client CWD·path·좌표는 받지 않는다. Rust는 빈 필드, Unicode scalar 256자 초과 terminal id, 4096자 초과 selection을 `400`으로 거르고 `fileViewer.pathLink` async bridge에 원문을 전달한다. frontend는 해당 terminal의 최신 store CWD와 `terminal.pathLinkEnabled`/`pathLinkMaxLength`를 읽어 desktop `isWithinPathLengthLimit`·`trimSelectionToPath`·`joinCwdPath`·`statPath`를 그대로 사용한다. 설정 off, 부적합/초과 선택, CWD 없음, 없는 path, 디렉터리는 `{valid:false}`이고 존재하는 일반 파일만 `{valid:true,token,path}`다. token은 선택 밑줄 좌표 보정용으로만, path는 기존 새 탭 handshake의 `source="path"` 입력으로만 쓴다. 브라우저는 드래그 중 selection 변화를 trailing debounce하고 새 선택에서 진행 중 요청을 취소한다. 요청 당시 selection revision·terminal·lease·capability가 하나라도 바뀐 응답은 버리며, 응답 시점의 최신 xterm selection 좌표로 밑줄 범위를 다시 계산한다. 좌표/decoration은 ADR-0015의 surface-local 상태로 유지한다. 검증은 stat만 수행하며 파일 내용은 prefetch하지 않는다.
 
-`render`는 Rust route가 고정한 8 MiB `maxBytes`를 frontend async bridge에 전달한다. `readFileForViewer`는 image·PDF에도 상한을 적용한 bounded read를 수행한다. 일반 text 응답은 `{path,kind:"text",content,truncated}`, HTML/Markdown preview 응답은 원문 중복을 제거한 `{path,kind:"text",truncated,previewKind,previewDocument}`, 그 밖에는 `{path,kind:"image",dataUrl}`, `{path,kind:"pdf",dataUrl}`, `{path,kind:"archive",format,entries,totalEntries,truncated}`, `{path,kind:"binary",size}`다. HTML/Markdown `previewDocument`는 데스크톱 FileViewer와 같은 sanitizer/CSP builder의 결과이며 새 탭은 sandbox iframe `srcdoc`으로만 표시하고 `truncated=true`이면 잘림 경고를 함께 표시한다. 일반 text는 `textContent`, image는 `data:image/*`만 사용한다. Remote에서는 settings의 `extensionViewers` shell 매핑을 실행하지 않고 항상 이 built-in web renderer를 사용한다.
+`render`는 Rust route가 고정한 8 MiB `maxBytes`를 frontend async bridge에 전달한다. `readFileForViewer`는 image·PDF에도 상한을 적용한 bounded read를 수행한다. 일반 text 응답은 `{path,kind:"text",content,truncated}`, HTML/Markdown preview 응답은 원문 중복을 제거한 `{path,kind:"text",truncated,previewKind,previewDocument}`, 그 밖에는 `{path,kind:"image",dataUrl}`, `{path,kind:"pdf",dataUrl}`, `{path,kind:"archive",format,entries,totalEntries,totalBytes,truncated}`, `{path,kind:"binary",size}`다. HTML/Markdown `previewDocument`는 데스크톱 FileViewer와 같은 sanitizer/CSP builder의 결과이며 새 탭은 sandbox iframe `srcdoc`으로만 표시하고 `truncated=true`이면 잘림 경고를 함께 표시한다. 일반 text는 `textContent`, image는 `data:image/*`만 사용한다. Remote에서는 settings의 `extensionViewers` shell 매핑을 실행하지 않고 항상 이 built-in web renderer를 사용한다.
 
 **Remote 는 데스크톱의 typed preview 렌더러를 확장하지 않는다([ADR-0109](../adr/0109-file-viewer-typed-preview-renderers.md)).** `previewDocument`를 만들 수 있는 것은 document 계열(`html`/`markdown`)뿐이며, bridge 는 그 판정에 데스크톱 분류기(`filePreviewKind`)가 아니라 document 전용 분류기(`documentPreviewKind`)를 쓴다. JSON/CSV/diff/log/source 같은 structured 종류는 Remote 에서 지금까지와 동일하게 원문 text 로 내려가고 새 탭이 `textContent` 로 표시한다 — structured 렌더러는 React 컴포넌트라 프레임워크 없는 임베드 자산인 `viewer_page.js` 로 옮길 수 없고, 두 벌을 동기화하는 비용이 이득을 넘는다. 데스크톱과 Remote 의 표시 능력 격차는 의도된 것이며 Remote 클라이언트 통합 시 재검토한다. 공유 커맨드가 만들어 Remote 에도 도달하는 `pdf`/`archive` 는 새 탭에서 렌더하지 않고 파일 종류와 개수를 알리는 플레이스홀더로 표시한다(알 수 없는 응답으로 실패하지 않도록).
 

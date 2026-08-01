@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { openExternal } from "@/lib/tauri-api";
+import { decodeDataUrlBytes } from "@/lib/preview/base64";
 
 /**
  * PDF handed to the host WebView's own viewer.
@@ -79,14 +80,7 @@ export function PdfPreview({ dataUrl, path }: { dataUrl: string; path: string })
 }
 
 function createPdfObjectUrl(dataUrl: string): string | null {
-  try {
-    const binary = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
-  } catch {
-    return null;
-  }
+  const bytes = decodeDataUrlBytes(dataUrl);
+  if (!bytes) return null;
+  return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
 }

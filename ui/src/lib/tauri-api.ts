@@ -781,6 +781,8 @@ export type FileViewerContent =
       entries: ArchiveEntry[];
       /** Entries in the archive, which exceeds `entries.length` when capped. */
       totalEntries: number;
+      /** Uncompressed bytes across every entry, not only the listed ones. */
+      totalBytes: number;
       truncated: boolean;
     }
   | { kind: "binary"; size: number };

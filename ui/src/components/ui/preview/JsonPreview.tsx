@@ -28,12 +28,19 @@ const KIND_COLOR: Record<string, string> = {
 export function JsonPreview({
   content,
   allowComments,
+  sourceTruncated,
   bodyStyle,
   embedded,
 }: {
   content: string;
-  /** `.jsonc`/`.json5` tolerate comments and trailing commas. */
+  /** `.jsonc` tolerates comments and trailing commas. */
   allowComments?: boolean;
+  /**
+   * The backend cut the file at its read limit. A truncated JSON document
+   * always fails to parse, so the error has to say so — otherwise the viewer
+   * accuses a perfectly valid file of a syntax error it does not have.
+   */
+  sourceTruncated?: boolean;
   bodyStyle?: React.CSSProperties;
   /**
    * Render inside another scroll container (the JSONL row expander) instead of
@@ -61,10 +68,13 @@ export function JsonPreview({
       parsed.line !== undefined
         ? ` at line ${parsed.line}${parsed.column !== undefined ? `, column ${parsed.column}` : ""}`
         : "";
+    const message = sourceTruncated
+      ? `Could not parse the part of this file that was loaded${at}: ${parsed.error}. The file was cut at the viewer's read limit, so this is most likely not a real syntax error.`
+      : `Invalid JSON${at}: ${parsed.error}. Switch to Source to read the file as text.`;
     return (
       <div className={shellClass}>
         <PreviewNotice tone="error" testId="json-preview-error">
-          {`Invalid JSON${at}: ${parsed.error}. Switch to Source to read the file as text.`}
+          {message}
         </PreviewNotice>
       </div>
     );

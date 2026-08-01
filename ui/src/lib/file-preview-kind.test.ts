@@ -12,7 +12,6 @@ describe("filePreviewKind", () => {
   it("routes each structured extension to its own renderer", () => {
     expect(filePreviewKind("/tmp/package.json")).toBe("json");
     expect(filePreviewKind("/tmp/tsconfig.jsonc")).toBe("json");
-    expect(filePreviewKind("/tmp/a.json5")).toBe("json");
     expect(filePreviewKind("/tmp/session.jsonl")).toBe("jsonl");
     expect(filePreviewKind("/tmp/events.ndjson")).toBe("jsonl");
     expect(filePreviewKind("/tmp/fix.diff")).toBe("diff");
@@ -26,6 +25,13 @@ describe("filePreviewKind", () => {
     expect(filePreviewKind("/tmp/main.rs")).toBe("code");
     expect(filePreviewKind("/tmp/App.tsx")).toBe("code");
     expect(filePreviewKind("/tmp/script.PY")).toBe("code");
+  });
+
+  it("does not claim .json5, whose syntax the relaxed parser cannot read", () => {
+    // Claiming it would mean reporting a valid JSON5 file as invalid JSON:
+    // unquoted keys, single-quoted strings and `Infinity` are all beyond what
+    // stripping comments and trailing commas can rescue.
+    expect(filePreviewKind("/tmp/a.json5")).toBeNull();
   });
 
   it("returns null when nothing claims the file", () => {

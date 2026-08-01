@@ -149,8 +149,17 @@ export function parseDelimited(
 }
 
 function firstNonEmptyLine(sample: string): string {
-  for (const line of sample.split(/\r?\n/)) {
+  // Scan rather than `split`: only the first line is ever needed, and the
+  // sample here is the whole file — splitting it would allocate an array of
+  // every row just to read row one.
+  let start = 0;
+  while (start < sample.length) {
+    const breakAt = sample.indexOf("\n", start);
+    const end = breakAt === -1 ? sample.length : breakAt;
+    const line = sample.slice(start, end > start && sample[end - 1] === "\r" ? end - 1 : end);
     if (line.trim().length > 0) return line;
+    if (breakAt === -1) break;
+    start = breakAt + 1;
   }
   return "";
 }

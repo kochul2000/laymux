@@ -29,14 +29,7 @@ describe("CSS design tokens — semantic fills", () => {
   // The file viewer's diff and log rows tint their background from these.
   // color-mix() would be the obvious alternative and is banned: html2canvas
   // cannot parse it, which breaks the screenshot API.
-  const semanticTokens = [
-    "--green-15",
-    "--green-08",
-    "--red-15",
-    "--red-08",
-    "--yellow-15",
-    "--yellow-08",
-  ];
+  const semanticTokens = ["--green-15", "--red-15", "--red-08", "--yellow-08"];
 
   it.each(semanticTokens)("defines %s in :root", (token) => {
     expect(cssContent).toMatch(new RegExp(`${token.replace(/[-/]/g, "\\$&")}\\s*:`));

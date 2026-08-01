@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { decodeDataUrlText } from "@/lib/preview/base64";
 
 /**
  * SVG shown as a picture, with its markup available behind the Source toggle.
@@ -22,7 +23,7 @@ export function SvgPreview({
   bodyStyle?: React.CSSProperties;
 }) {
   const source = useMemo(
-    () => (showSource ? decodeSvgSource(dataUrl) : null),
+    () => (showSource ? decodeDataUrlText(dataUrl) : null),
     [dataUrl, showSource],
   );
 
@@ -50,20 +51,4 @@ export function SvgPreview({
       />
     </div>
   );
-}
-
-function decodeSvgSource(dataUrl: string): string | null {
-  try {
-    const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      bytes[index] = binary.charCodeAt(index);
-    }
-    // The file is bytes, not latin-1 characters — decode as UTF-8 so a title or
-    // comment in a non-ASCII language is readable rather than mojibake.
-    return new TextDecoder("utf-8").decode(bytes);
-  } catch {
-    return null;
-  }
 }

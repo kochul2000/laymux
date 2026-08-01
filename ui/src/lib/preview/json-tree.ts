@@ -193,22 +193,26 @@ function lineColumnAt(text: string, offset: number): { line: number; column: num
  * reported line/column would drift.
  */
 function relaxJsonSyntax(text: string): string {
-  return blankTrailingCommas(blankComments(text));
-}
-
-function blankComments(text: string): string {
+  // Comments and trailing commas are blanked in the same pass over one array.
+  // Two passes each did their own `split("")`, which is two whole extra copies
+  // of the file — noticeable on a megabyte of `.jsonc`.
   const out = text.split("");
+  // Index of a comma that has seen nothing but whitespace and comments since,
+  // so it still might turn out to be a trailing one; -1 when there is none.
+  let pendingComma = -1;
   let index = 0;
 
   while (index < text.length) {
     const char = text[index];
 
     if (char === '"') {
+      pendingComma = -1;
       index = skipString(text, index);
       continue;
     }
 
     if (char === "/" && text[index + 1] === "/") {
+      // A comment does not settle the question of the comma before it.
       while (index < text.length && text[index] !== "\n") {
         out[index] = " ";
         index += 1;
@@ -234,28 +238,13 @@ function blankComments(text: string): string {
       continue;
     }
 
-    index += 1;
-  }
-
-  return out.join("");
-}
-
-function blankTrailingCommas(text: string): string {
-  const out = text.split("");
-  let index = 0;
-
-  while (index < text.length) {
-    if (text[index] === '"') {
-      index = skipString(text, index);
-      continue;
-    }
-
-    if (text[index] === ",") {
-      // Comments are already spaces at this point, so plain whitespace skipping
-      // is enough to see the `}`/`]` behind `, // note`.
-      let next = index + 1;
-      while (next < text.length && /\s/.test(text[next])) next += 1;
-      if (text[next] === "}" || text[next] === "]") out[index] = " ";
+    if (char === ",") {
+      pendingComma = index;
+    } else if (char === "}" || char === "]") {
+      if (pendingComma !== -1) out[pendingComma] = " ";
+      pendingComma = -1;
+    } else if (!/\s/.test(char)) {
+      pendingComma = -1;
     }
 
     index += 1;
