@@ -1,6 +1,6 @@
 # 0112. 색상 리터럴은 hex 색상 코드로 표기한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-02
 - Source: issue #713, architecture/api-contracts.md §15.1, AGENTS.md `color-mix()` 금지 규칙
 
