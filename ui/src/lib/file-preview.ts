@@ -2,7 +2,19 @@ import githubMarkdownCss from "github-markdown-css/github-markdown.css?raw";
 import { Marked } from "marked";
 import { fileExtension } from "./file-viewer";
 
-export type FilePreviewKind = "html" | "markdown";
+/**
+ * The document family of file previews (ADR-0109): file types whose content is
+ * a document and must therefore be parsed as HTML, sanitized, and shown behind
+ * a restricted CSP inside a sandboxed iframe.
+ *
+ * Everything else the viewer renders — JSON, CSV, diffs, logs, source code —
+ * belongs to the structured family in `file-preview-kind.ts`, is turned into
+ * plain values by a pure parser, and is rendered as React DOM. That family must
+ * never reach the functions in this module: they exist to build HTML, and
+ * sending non-document content through them would create an HTML string where
+ * the design says there is none.
+ */
+export type DocumentPreviewKind = "html" | "markdown";
 
 const HTML_EXTENSIONS = new Set([".html", ".htm"]);
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
@@ -109,7 +121,7 @@ const MARKDOWN_PREVIEW_LAYOUT_CSS = [
   "@media(max-width:767px){.markdown-body{padding:15px;}}",
 ].join("");
 
-export function filePreviewKind(path: string): FilePreviewKind | null {
+export function documentPreviewKind(path: string): DocumentPreviewKind | null {
   const ext = fileExtension(path);
   if (HTML_EXTENSIONS.has(ext)) return "html";
   if (MARKDOWN_EXTENSIONS.has(ext)) return "markdown";
@@ -143,13 +155,22 @@ export function sanitizePreviewHtml(html: string): string {
 
 export function buildPreviewDocument(
   safeHtml: string,
-  previewKind: FilePreviewKind = "html",
+  previewKind: DocumentPreviewKind = "html",
 ): string {
-  const isMarkdown = previewKind === "markdown";
-  const stylesheet = isMarkdown
-    ? `${githubMarkdownCss}\n${MARKDOWN_PREVIEW_LAYOUT_CSS}`
-    : HTML_PREVIEW_CSS;
-  const body = isMarkdown ? `<article class="markdown-body">${safeHtml}</article>` : safeHtml;
+  // Switch rather than a boolean so a future document kind has to state its own
+  // stylesheet instead of silently inheriting the raw-HTML one.
+  let stylesheet: string;
+  let body: string;
+  switch (previewKind) {
+    case "markdown":
+      stylesheet = `${githubMarkdownCss}\n${MARKDOWN_PREVIEW_LAYOUT_CSS}`;
+      body = `<article class="markdown-body">${safeHtml}</article>`;
+      break;
+    case "html":
+      stylesheet = HTML_PREVIEW_CSS;
+      body = safeHtml;
+      break;
+  }
 
   return [
     "<!doctype html>",

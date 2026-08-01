@@ -71,6 +71,24 @@
       binaryElement.hidden = false;
       return;
     }
+    // PDF and archive are classified by the shared desktop command, so they
+    // reach Remote too. Remote deliberately does not render them (ADR-0109):
+    // say what the file is instead of throwing "unsupported".
+    if (payload.kind === "pdf") {
+      binaryElement.textContent =
+        "PDF · open this file in the desktop viewer to read it.";
+      binaryElement.hidden = false;
+      return;
+    }
+    if (payload.kind === "archive") {
+      const count = Number.isFinite(payload.totalEntries)
+        ? payload.totalEntries
+        : (payload.entries || []).length;
+      const suffix = count === 1 ? "entry" : "entries";
+      binaryElement.textContent = `Archive (${payload.format || "unknown"}) · ${count} ${suffix} · open this file in the desktop viewer to browse it.`;
+      binaryElement.hidden = false;
+      return;
+    }
     throw new Error("Unsupported viewer response");
   }
 

@@ -17,6 +17,13 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    // Raised above the 500 kB default for one reason: syntax grammars. Each is
+    // its own lazily-imported chunk and the largest (C++, whose TextMate rules
+    // embed several other languages) is ~800 kB. Nothing downloads it — the
+    // desktop app ships its assets locally — and it is only parsed if someone
+    // opens a C++ file. The budget that actually matters, the entry chunk's
+    // static import closure, is asserted at 500 kB in production-bundle.test.ts.
+    chunkSizeWarningLimit: 1000,
     rolldownOptions: {
       output: {
         // Explicit groups must not absorb shared stores or Tauri modules. Once

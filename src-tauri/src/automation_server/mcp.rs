@@ -3466,7 +3466,7 @@ fn json_result(data: &Value) -> CallToolResult {
 /// Map a MIME type to a sensible image file extension (no leading dot).
 ///
 /// Only emits extensions the shared FileViewer classifier
-/// (`commands::file_ops::IMAGE_EXTENSIONS`) can actually render in the webview;
+/// (`commands::file_viewer::IMAGE_EXTENSIONS`) can actually render in the webview;
 /// otherwise `read_file_for_viewer` would classify the saved file as text/binary
 /// and the image would never display (see PR #289 review). Unknown/blank types
 /// and non-webview-renderable formats (e.g. TIFF) fall back to "png" so the

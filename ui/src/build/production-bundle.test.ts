@@ -8,6 +8,52 @@ const LARGE_CHUNK_WARNING = /Some chunks are larger than/;
 const SETTINGS_VIEW_SUFFIX = "/src/components/views/SettingsView.tsx";
 const UI_ROOT = process.cwd();
 
+/**
+ * Byte budget for the chunks the entry pulls in **statically** — everything the
+ * app parses before it can show a window.
+ *
+ * Deliberately tighter than the build's own `chunkSizeWarningLimit`. That one
+ * has to tolerate a lazily-imported syntax grammar (C++ alone is ~800 kB of
+ * TextMate rules with several languages embedded), which is never fetched over
+ * a network — the desktop app ships its assets locally — and is never parsed
+ * unless someone opens a C++ file. This constant guards the thing that is
+ * actually paid for on every launch.
+ */
+const STARTUP_CHUNK_BUDGET_BYTES = 500_000;
+
+/**
+ * Ceiling for a lazily-imported **syntax grammar**. Generous because a
+ * grammar's size is upstream's business — C++ alone is ~800 kB — but present so
+ * one cannot grow without anyone noticing.
+ */
+const GRAMMAR_CHUNK_CEILING_BYTES = 1_000_000;
+
+/**
+ * Grammar chunks are named after the language they carry and are the only
+ * modules under `@shikijs/langs`. Everything else that happens to be lazy —
+ * a future split-out view, say — stays on the startup budget, so relaxing the
+ * limit for grammars does not quietly relax it for the whole build.
+ */
+function isGrammarChunk(chunk: ChunkOutput): boolean {
+  const modules = Object.keys(chunk.modules).map((id) => id.replaceAll("\\", "/"));
+  return modules.length > 0 && modules.every((id) => id.includes("/node_modules/@shikijs/langs/"));
+}
+
+/** Chunks reachable from the entry through static imports only. */
+function staticImportClosure(chunks: ChunkOutput[], entry: ChunkOutput): ChunkOutput[] {
+  const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+  const seen = new Set<string>();
+  const pending = [entry.fileName];
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (name === undefined || seen.has(name)) continue;
+    seen.add(name);
+    const chunk = byName.get(name);
+    if (chunk) pending.push(...chunk.imports);
+  }
+  return [...seen].flatMap((name) => byName.get(name) ?? []);
+}
+
 interface ChunkOutput {
   type: "chunk";
   fileName: string;
@@ -103,15 +149,36 @@ describe("production UI bundle", () => {
       );
       const entry = chunks.find((chunk) => chunk.isEntry);
       const settings = chunks.find((chunk) => chunk.fileName.includes("settings-view"));
-      const warningLimitBytes = production.resolvedConfig.build.chunkSizeWarningLimit * 1000;
 
       expect(entry).toBeDefined();
       expect(settings).toBeDefined();
+
+      const startupChunks = staticImportClosure(chunks, entry!);
       expect(
-        chunks
-          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > warningLimitBytes)
+        startupChunks
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > STARTUP_CHUNK_BUDGET_BYTES)
           .map((chunk) => chunk.fileName),
       ).toEqual([]);
+
+      const startupNames = new Set(startupChunks.map((chunk) => chunk.fileName));
+      const lazyChunks = chunks.filter((chunk) => !startupNames.has(chunk.fileName));
+      const grammarChunks = lazyChunks.filter(isGrammarChunk);
+
+      // The relaxed ceiling applies to grammars only.
+      expect(
+        grammarChunks
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > GRAMMAR_CHUNK_CEILING_BYTES)
+          .map((chunk) => chunk.fileName),
+      ).toEqual([]);
+      expect(
+        lazyChunks
+          .filter((chunk) => !isGrammarChunk(chunk))
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > STARTUP_CHUNK_BUDGET_BYTES)
+          .map((chunk) => chunk.fileName),
+      ).toEqual([]);
+      // Guard the classifier: if grammars stop being recognised, the assertion
+      // above silently becomes the only one that runs.
+      expect(grammarChunks.length).toBeGreaterThan(10);
       expect(production.logs.filter((log) => LARGE_CHUNK_WARNING.test(log.message))).toEqual([]);
 
       const settingsModules = Object.keys(settings?.modules ?? {}).map((id) =>
