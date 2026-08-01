@@ -23,6 +23,14 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(10);
 /// Upper bound per list. The view is a watch surface, not an issue browser.
 const LIST_LIMIT: u32 = 50;
 
+/// A list read is on a poll timer, so a stalled network call must not hold its
+/// worker past the next tick or two.
+const LIST_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// A merge or close is a one-shot user action and may legitimately take longer
+/// than a list, but it still may not hang forever.
+const ACTION_TIMEOUT: Duration = Duration::from_secs(60);
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubRepoSnapshot {
@@ -52,6 +60,10 @@ impl GithubRepoSnapshot {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GithubRepoStatus {
     Ready,
+    /// Another caller is already running `gh` for this repository and there is
+    /// no cached result to serve yet. Not an error and not an empty list — the
+    /// caller simply has no answer yet and should ask again shortly.
+    Pending,
     /// The working dir has no GitHub `origin` — a normal display state, not an
     /// error: a pane may simply be parked outside a repository.
     NotAGithubRepo,
@@ -129,12 +141,28 @@ fn parse_item_list(stdout: &str) -> Result<Vec<GithubItem>, String> {
 
 // -- Registry ----------------------------------------------------------------
 
-struct RepoEntry {
+#[derive(Default)]
+struct RepoCache {
     snapshot: Option<GithubRepoSnapshot>,
     fetched_at: Option<Instant>,
 }
 
-type Registry = Mutex<HashMap<String, Arc<Mutex<RepoEntry>>>>;
+/// One repository's registry entry.
+///
+/// The two locks are deliberately separate. `cache` is only ever held for the
+/// few instructions that read or replace a snapshot. `fetch` is the
+/// single-flight token and is held across the `gh` run — but it is only ever
+/// taken with `try_lock`, so a caller that loses the race returns immediately
+/// with whatever is cached instead of queueing behind the network. Panes poll
+/// on a timer, and a queue of blocked pollers would occupy one blocking worker
+/// each until the pool ran dry.
+#[derive(Default)]
+struct RepoEntry {
+    cache: Mutex<RepoCache>,
+    fetch: Mutex<()>,
+}
+
+type Registry = Mutex<HashMap<String, Arc<RepoEntry>>>;
 
 fn registry() -> &'static Registry {
     static REGISTRY: OnceLock<Registry> = OnceLock::new();
@@ -143,17 +171,9 @@ fn registry() -> &'static Registry {
 
 /// The table lock is held only to hand out one repository's entry, never
 /// across a `gh` run, so two repositories still refresh concurrently.
-fn repo_entry(repo: &str) -> Result<Arc<Mutex<RepoEntry>>, String> {
+fn repo_entry(repo: &str) -> Result<Arc<RepoEntry>, String> {
     let mut table = registry().lock_or_err().map_err(|e| e.to_string())?;
-    Ok(table
-        .entry(repo.to_string())
-        .or_insert_with(|| {
-            Arc::new(Mutex::new(RepoEntry {
-                snapshot: None,
-                fetched_at: None,
-            }))
-        })
-        .clone())
+    Ok(table.entry(repo.to_string()).or_default().clone())
 }
 
 /// A cached snapshot is reused until it is `REFRESH_INTERVAL` old.
@@ -309,18 +329,19 @@ fn gh_error_from_stderr(stderr: &str) -> GhError {
     }
 }
 
-fn run_gh(args: &[String]) -> Result<GhOutput, GhError> {
+fn run_gh(args: &[String], timeout: Duration) -> Result<GhOutput, GhError> {
     let shell_prefix = crate::settings::load_settings().issue_reporter.shell;
-    let output = super::misc::gh_command(&shell_prefix)
-        .args(args)
-        .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                GhError::Missing
-            } else {
-                GhError::Failed(e.to_string())
-            }
-        })?;
+    let mut command = super::misc::gh_command(&shell_prefix);
+    command.args(args);
+    // A `gh` that never returns would otherwise hold this repository's
+    // single-flight token forever and the list would never refresh again.
+    let output = crate::process::output_with_timeout(&mut command, timeout).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            GhError::Missing
+        } else {
+            GhError::Failed(e.to_string())
+        }
+    })?;
     Ok(GhOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
@@ -329,7 +350,7 @@ fn run_gh(args: &[String]) -> Result<GhOutput, GhError> {
 }
 
 fn list_items(kind: ItemKind, repo: &str) -> Result<Vec<GithubItem>, GhError> {
-    let output = run_gh(&build_list_args(kind, repo))?;
+    let output = run_gh(&build_list_args(kind, repo), LIST_TIMEOUT)?;
     if !output.success {
         return Err(gh_error_from_stderr(&output.stderr));
     }
@@ -394,6 +415,33 @@ fn resolve_repo(working_dir: &str) -> Option<RepoRef> {
 
 // -- Commands ----------------------------------------------------------------
 
+/// The cached snapshot, if it may still be served. `force` only defeats the
+/// refresh window — it never invents a snapshot that is not there.
+fn cached(entry: &RepoEntry, force: bool) -> Result<Option<GithubRepoSnapshot>, String> {
+    let guard = entry.cache.lock_or_err().map_err(|e| e.to_string())?;
+    if force || !is_fresh(guard.fetched_at, Instant::now()) {
+        return Ok(None);
+    }
+    Ok(guard.snapshot.clone())
+}
+
+/// What a caller that lost the single-flight race is served: the stale
+/// snapshot if one exists, otherwise `Pending`. Never an empty `Ready`, which
+/// the view would render as "no open issues".
+fn snapshot_for_contention(
+    entry: &RepoEntry,
+    repo: &RepoRef,
+) -> Result<GithubRepoSnapshot, String> {
+    let guard = entry.cache.lock_or_err().map_err(|e| e.to_string())?;
+    Ok(guard.snapshot.clone().unwrap_or_else(|| {
+        GithubRepoSnapshot::failed(
+            Some(repo.slug.clone()),
+            Some(repo.url.clone()),
+            GithubRepoStatus::Pending,
+        )
+    }))
+}
+
 fn snapshot_blocking(working_dir: String, force: bool) -> GithubRepoSnapshot {
     let Some(repo) = resolve_repo(&working_dir) else {
         return GithubRepoSnapshot::failed(None, None, GithubRepoStatus::NotAGithubRepo);
@@ -409,21 +457,36 @@ fn snapshot_blocking(working_dir: String, force: bool) -> GithubRepoSnapshot {
         Ok(entry) => entry,
         Err(message) => return failure(message),
     };
-    // Holding the per-repo lock across the fetch is what collapses a burst of
-    // pane polls into one `gh` run: latecomers block, then read the result the
-    // first caller just stored.
-    let mut guard = match entry.lock_or_err() {
-        Ok(guard) => guard,
-        Err(error) => return failure(error.to_string()),
+    match cached(&entry, force) {
+        Ok(Some(snapshot)) => return snapshot,
+        Ok(None) => {}
+        Err(message) => return failure(message),
+    }
+    // Single-flight, but never a queue: the caller that wins the token runs
+    // `gh`, and everyone else returns at once. Blocking here instead would tie
+    // up one blocking worker per polling pane for as long as the network took,
+    // and a stalled `gh` would drain the pool the whole app shares.
+    let Ok(_token) = entry.fetch.try_lock() else {
+        return match snapshot_for_contention(&entry, &repo) {
+            Ok(snapshot) => snapshot,
+            Err(message) => failure(message),
+        };
     };
-    if !force && is_fresh(guard.fetched_at, Instant::now()) {
-        if let Some(snapshot) = guard.snapshot.clone() {
-            return snapshot;
-        }
+    // The token may have been held by a run that finished moments ago, so the
+    // window is re-checked before spending another `gh` invocation on it.
+    match cached(&entry, force) {
+        Ok(Some(snapshot)) => return snapshot,
+        Ok(None) => {}
+        Err(message) => return failure(message),
     }
     let snapshot = fetch_snapshot(&repo.slug, &repo.url);
-    guard.snapshot = Some(snapshot.clone());
-    guard.fetched_at = Some(Instant::now());
+    match entry.cache.lock_or_err() {
+        Ok(mut guard) => {
+            guard.snapshot = Some(snapshot.clone());
+            guard.fetched_at = Some(Instant::now());
+        }
+        Err(error) => return failure(error.to_string()),
+    }
     snapshot
 }
 
@@ -448,8 +511,11 @@ fn run_action_blocking(working_dir: String, action: String, number: u64) -> Resu
     let action = parse_item_action(&action)?;
     let repo = resolve_repo(&working_dir)
         .ok_or_else(|| "Not a GitHub repository for this working directory".to_string())?;
-    let output =
-        run_gh(&build_action_args(action, &repo.slug, number)).map_err(|error| error.message())?;
+    let output = run_gh(
+        &build_action_args(action, &repo.slug, number),
+        ACTION_TIMEOUT,
+    )
+    .map_err(|error| error.message())?;
     if !output.success {
         return Err(gh_error_from_stderr(&output.stderr).message());
     }
@@ -461,7 +527,7 @@ fn run_action_blocking(working_dir: String, action: String, number: u64) -> Resu
 
 fn invalidate(repo: &str) {
     let Ok(entry) = repo_entry(repo) else { return };
-    let Ok(mut guard) = entry.lock_or_err() else {
+    let Ok(mut guard) = entry.cache.lock_or_err() else {
         return;
     };
     guard.snapshot = None;
@@ -595,19 +661,56 @@ mod tests {
     fn an_action_drops_the_repository_snapshot_so_the_next_poll_refetches() {
         let slug = "owner/invalidate";
         let entry = repo_entry(slug).unwrap();
-        {
-            let mut guard = entry.lock_or_err().unwrap();
-            guard.snapshot = Some(GithubRepoSnapshot::failed(
-                None,
-                None,
-                GithubRepoStatus::Ready,
-            ));
-            guard.fetched_at = Some(Instant::now());
-        }
+        store(&entry, GithubRepoStatus::Ready);
         invalidate(slug);
-        let guard = entry.lock_or_err().unwrap();
+        let guard = entry.cache.lock_or_err().unwrap();
         assert!(guard.snapshot.is_none());
         assert!(!is_fresh(guard.fetched_at, Instant::now()));
+    }
+
+    fn store(entry: &RepoEntry, status: GithubRepoStatus) {
+        let mut guard = entry.cache.lock_or_err().unwrap();
+        guard.snapshot = Some(GithubRepoSnapshot::failed(None, None, status));
+        guard.fetched_at = Some(Instant::now());
+    }
+
+    fn repo_ref() -> RepoRef {
+        RepoRef {
+            slug: "owner/repo".to_string(),
+            url: "https://github.com/owner/repo".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_caller_that_loses_the_race_reads_the_cache_instead_of_queueing() {
+        let entry = repo_entry("owner/contended").unwrap();
+        store(&entry, GithubRepoStatus::Ready);
+        let _token = entry.fetch.try_lock().expect("the token starts free");
+
+        // The point of splitting the locks: a fetch in flight must not stop
+        // anyone else from reading, and the second caller must not block.
+        assert!(entry.fetch.try_lock().is_err());
+        let served = snapshot_for_contention(&entry, &repo_ref()).unwrap();
+        assert!(matches!(served.status, GithubRepoStatus::Ready));
+    }
+
+    #[test]
+    fn a_first_read_that_loses_the_race_is_pending_not_an_empty_list() {
+        let entry = repo_entry("owner/first-read").unwrap();
+        let _token = entry.fetch.try_lock().expect("the token starts free");
+
+        let served = snapshot_for_contention(&entry, &repo_ref()).unwrap();
+        assert!(matches!(served.status, GithubRepoStatus::Pending));
+        assert_eq!(served.repo.as_deref(), Some("owner/repo"));
+        assert!(served.issues.is_empty());
+    }
+
+    #[test]
+    fn a_fresh_snapshot_is_served_without_the_fetch_token_but_force_is_not() {
+        let entry = repo_entry("owner/fresh").unwrap();
+        store(&entry, GithubRepoStatus::Ready);
+        assert!(cached(&entry, false).unwrap().is_some());
+        assert!(cached(&entry, true).unwrap().is_none());
     }
 
     #[test]

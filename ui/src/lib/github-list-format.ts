@@ -6,7 +6,10 @@ import type { GithubRepoStatus } from "@/lib/tauri-api";
  */
 export function statusMessage(status: GithubRepoStatus): string | null {
   switch (status.type) {
+    // A pending read is not a reason either — the hook keeps the view in its
+    // loading state instead of publishing it.
     case "ready":
+    case "pending":
       return null;
     case "notAGithubRepo":
       return "No GitHub repository for this pane's CWD";
@@ -17,6 +20,23 @@ export function statusMessage(status: GithubRepoStatus): string | null {
     case "failed":
       return status.message;
   }
+}
+
+/**
+ * Whether a row's menu has to open upward.
+ *
+ * The list scrolls, so a menu anchored below a row near the bottom edge lands
+ * outside the visible area and the user has to scroll to reach what they just
+ * opened. All coordinates are viewport-relative rects.
+ */
+export function shouldOpenUpward(
+  anchor: { top: number; bottom: number },
+  container: { top: number; bottom: number },
+  menuHeight: number,
+): boolean {
+  const below = container.bottom - anchor.bottom;
+  const above = anchor.top - container.top;
+  return below < menuHeight && above > below;
 }
 
 /** Compact "updated" stamp; the list is a watch surface, not an audit log. */

@@ -185,4 +185,54 @@ describe("GitHubView", () => {
 
     expect(refresh).toHaveBeenCalled();
   });
+
+  /** jsdom has no layout, so the rects the placement decision reads are stubbed. */
+  function stubRects(rects: Record<string, { top: number; bottom: number }>) {
+    return vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (
+      this: Element,
+    ) {
+      const testId = this.getAttribute("data-testid") ?? "";
+      const { top, bottom } = rects[testId] ?? { top: 0, bottom: 0 };
+      return {
+        top,
+        bottom,
+        height: bottom - top,
+        left: 0,
+        right: 0,
+        width: 0,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    });
+  }
+
+  it("opens a row menu downward when the list has room below it", () => {
+    const spy = stubRects({
+      "github-list": { top: 0, bottom: 400 },
+      "github-menu-708": { top: 0, bottom: 24 },
+    });
+    renderView();
+
+    fireEvent.click(screen.getByTestId("github-menu-708"));
+
+    expect(screen.getByTestId("github-menu-panel-708")).toHaveAttribute("data-placement", "down");
+    spy.mockRestore();
+  });
+
+  it("flips the menu upward for a row at the bottom edge so it is not cut off", () => {
+    const spy = stubRects({
+      "github-list": { top: 0, bottom: 200 },
+      "github-menu-708": { top: 176, bottom: 200 },
+    });
+    renderView();
+
+    fireEvent.click(screen.getByTestId("github-menu-708"));
+
+    const panel = screen.getByTestId("github-menu-panel-708");
+    expect(panel).toHaveAttribute("data-placement", "up");
+    expect(panel.style.bottom).toBe("100%");
+    expect(panel.style.top).toBe("");
+    spy.mockRestore();
+  });
 });

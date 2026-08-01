@@ -8,6 +8,13 @@ import { getGithubRepoSnapshot, type GithubRepoSnapshot } from "@/lib/tauri-api"
  */
 export const GITHUB_POLL_MS = 10_000;
 
+/**
+ * A `pending` reply means another pane's read is already in flight for this
+ * repository. The backend answers immediately rather than queueing, so the
+ * wait happens here — and it is far shorter than a whole poll interval.
+ */
+export const GITHUB_PENDING_RETRY_MS = 1_000;
+
 const idle: GithubRepoSnapshot = {
   status: { type: "notAGithubRepo" },
   repo: null,
@@ -33,6 +40,8 @@ export function useGithubRepoSnapshot(workingDir: string) {
   // Only the newest read may publish: a CWD change during an in-flight poll
   // would otherwise let the previous repository's list land afterwards.
   const requestSeq = useRef(0);
+  // Bumped for every `pending` reply, which is what schedules the short retry.
+  const [pendingNonce, setPendingNonce] = useState(0);
 
   const read = useCallback(
     (force: boolean) => {
@@ -43,7 +52,14 @@ export function useGithubRepoSnapshot(workingDir: string) {
       const seq = ++requestSeq.current;
       getGithubRepoSnapshot(workingDir, force)
         .then((next) => {
-          if (seq === requestSeq.current) setResult({ cwd: workingDir, snapshot: next });
+          if (seq !== requestSeq.current) return;
+          // Publishing a pending reply would show its empty lists as "no open
+          // issues"; the view stays in whatever state it already had.
+          if (next.status.type === "pending") {
+            setPendingNonce((n) => n + 1);
+            return;
+          }
+          setResult({ cwd: workingDir, snapshot: next });
         })
         .catch((error: unknown) => {
           if (seq === requestSeq.current)
@@ -58,6 +74,12 @@ export function useGithubRepoSnapshot(workingDir: string) {
     const timer = setInterval(() => read(false), GITHUB_POLL_MS);
     return () => clearInterval(timer);
   }, [read]);
+
+  useEffect(() => {
+    if (pendingNonce === 0) return;
+    const timer = setTimeout(() => read(false), GITHUB_PENDING_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [pendingNonce, read]);
 
   const refresh = useCallback(() => read(true), [read]);
   const matches = result?.cwd === workingDir;

@@ -5,7 +5,7 @@ import { ViewBody } from "@/components/ui/ViewBody";
 import { useSyncGroupCwd } from "@/hooks/useSyncGroupCwd";
 import { useGithubRepoSnapshot } from "@/hooks/useGithubRepoSnapshot";
 import { useNowTick } from "@/hooks/useUsageSnapshot";
-import { relativeTime, statusMessage } from "@/lib/github-list-format";
+import { relativeTime, shouldOpenUpward, statusMessage } from "@/lib/github-list-format";
 import {
   clipboardWriteText,
   openExternal,
@@ -50,6 +50,13 @@ const PULL_ACTIONS: MenuAction[] = [
 /** Rows show ages, not clocks — a coarse tick is enough to keep them honest. */
 const RELATIVE_TIME_TICK_MS = 30_000;
 
+/**
+ * Tallest the row menu gets (armed state: prompt + Confirm + Cancel). Used to
+ * decide which way it opens, so it is a deliberate over-estimate — opening
+ * upward with room to spare is harmless, opening downward without it is not.
+ */
+const MENU_MAX_H = 96;
+
 const ROW_BTN: React.CSSProperties = {
   width: "var(--btn-min-w)",
   height: "var(--btn-min-w)",
@@ -74,8 +81,12 @@ export function GitHubView({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+  // Which way the open menu points. Decided from the anchor's position inside
+  // the scrolling list at the moment it opens.
+  const [menuUp, setMenuUp] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const items = tab === "issues" ? snapshot.issues : snapshot.pulls;
   const actions = tab === "issues" ? ISSUE_ACTIONS : PULL_ACTIONS;
@@ -193,7 +204,12 @@ export function GitHubView({
           </button>
         </div>
       </ViewHeader>
-      <ViewBody testId="github-list" tabIndex={-1} data-focused={isFocused ? "true" : undefined}>
+      <ViewBody
+        ref={listRef}
+        testId="github-list"
+        tabIndex={-1}
+        data-focused={isFocused ? "true" : undefined}
+      >
         {message && (
           <div
             data-testid="github-status"
@@ -299,8 +315,18 @@ export function GitHubView({
                 data-testid={`github-menu-${item.number}`}
                 onClick={(e) => {
                   e.stopPropagation();
+                  const next = openMenu === item.number ? null : item.number;
                   setConfirming(null);
-                  setOpenMenu((prev) => (prev === item.number ? null : item.number));
+                  if (next !== null && listRef.current) {
+                    setMenuUp(
+                      shouldOpenUpward(
+                        e.currentTarget.getBoundingClientRect(),
+                        listRef.current.getBoundingClientRect(),
+                        MENU_MAX_H,
+                      ),
+                    );
+                  }
+                  setOpenMenu(next);
                 }}
                 title="More actions"
                 style={ROW_BTN}
@@ -311,9 +337,10 @@ export function GitHubView({
               {openMenu === item.number && (
                 <div
                   data-testid={`github-menu-panel-${item.number}`}
+                  data-placement={menuUp ? "up" : "down"}
                   className="absolute right-0 z-30 flex flex-col"
                   style={{
-                    top: "100%",
+                    ...(menuUp ? { bottom: "100%" } : { top: "100%" }),
                     minWidth: 160,
                     background: "var(--bg-overlay)",
                     border: "1px solid var(--border)",

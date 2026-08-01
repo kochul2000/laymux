@@ -569,6 +569,8 @@ export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageS
 
 export type GithubRepoStatus =
   | { type: "ready" }
+  /** A read for this repo is already in flight and nothing is cached yet. */
+  | { type: "pending" }
   | { type: "notAGithubRepo" }
   | { type: "ghMissing" }
   | { type: "unauthorized" }

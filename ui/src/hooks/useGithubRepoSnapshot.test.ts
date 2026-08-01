@@ -6,7 +6,11 @@ const getGithubRepoSnapshot = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/tauri-api", () => ({ getGithubRepoSnapshot }));
 
-import { GITHUB_POLL_MS, useGithubRepoSnapshot } from "./useGithubRepoSnapshot";
+import {
+  GITHUB_PENDING_RETRY_MS,
+  GITHUB_POLL_MS,
+  useGithubRepoSnapshot,
+} from "./useGithubRepoSnapshot";
 
 function ready(repo: string): GithubRepoSnapshot {
   return {
@@ -81,5 +85,27 @@ describe("useGithubRepoSnapshot", () => {
     });
 
     expect(result.current.snapshot.repo).toBe("owner/second");
+  });
+
+  it("keeps a pending reply out of the view and retries sooner than a poll", async () => {
+    const pending: GithubRepoSnapshot = {
+      ...ready("owner/repo"),
+      status: { type: "pending" },
+    };
+    getGithubRepoSnapshot.mockResolvedValueOnce(pending);
+    getGithubRepoSnapshot.mockResolvedValue(ready("owner/repo"));
+
+    const { result } = renderHook(() => useGithubRepoSnapshot("/repo"));
+
+    // Pending carries empty lists; publishing it would read as "no issues".
+    await waitFor(() => expect(getGithubRepoSnapshot).toHaveBeenCalledTimes(1));
+    expect(result.current.loading).toBe(true);
+    expect(result.current.snapshot.status).toEqual({ type: "notAGithubRepo" });
+
+    await waitFor(() => expect(result.current.snapshot.repo).toBe("owner/repo"), {
+      timeout: GITHUB_PENDING_RETRY_MS + 1_000,
+    });
+    // The retry beat the poll interval it would otherwise have waited for.
+    expect(GITHUB_PENDING_RETRY_MS).toBeLessThan(GITHUB_POLL_MS);
   });
 });
