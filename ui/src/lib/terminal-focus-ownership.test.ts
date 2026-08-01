@@ -37,6 +37,23 @@ function createManualFrames() {
   };
 }
 
+/** Deferred microtask queue so tests model the end of the window-focus task. */
+function createManualMicrotasks() {
+  const queue: (() => void)[] = [];
+  return {
+    schedule: (cb: () => void) => {
+      queue.push(cb);
+    },
+    runAll: () => {
+      const pending = queue.splice(0, queue.length);
+      for (const cb of pending) cb();
+    },
+    get pending() {
+      return queue.length;
+    },
+  };
+}
+
 describe("terminal-focus-ownership predicates", () => {
   beforeEach(() => {
     document.body.replaceChildren();
@@ -239,11 +256,13 @@ describe("createTerminalFocusOwnership", () => {
     // DOM no-op in that state, so the same pane click cannot recover input.
     const { container, helper } = buildPane();
     const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
     const onTrace = vi.fn();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
       refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
       onTrace,
     });
     const focusEvents: string[] = [];
@@ -255,7 +274,8 @@ describe("createTerminalFocusOwnership", () => {
     expect(ownership.captureOnAppBlur()).toBe(true);
     expect(document.activeElement).toBe(helper);
     expect(ownership.reclaimOnAppFocus()).toBe(true);
-    frames.runAll();
+    expect(frames.pending).toBe(0);
+    microtasks.runAll();
 
     expect(focusEvents).toEqual(["blur", "focus"]);
     expect(document.activeElement).toBe(helper);
@@ -265,13 +285,90 @@ describe("createTerminalFocusOwnership", () => {
     );
   });
 
-  it("cancels a scheduled refresh when helper input starts before the reclaim frame", () => {
+  it("routes a stale active helper through a relay before the next input task", () => {
+    // A same-element blur/focus can complete while WebView2 keeps the stale TSF
+    // document context. A different editable identity must own focus in between,
+    // matching the observed other-pane-and-back recovery path.
     const { container, helper } = buildPane();
     const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
+    const relay = document.createElement("textarea");
+    relay.tabIndex = -1;
+    container.appendChild(relay);
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => relay,
+      scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => focusEvents.push("helper-blur"));
+    helper.addEventListener("focus", () => focusEvents.push("helper-focus"));
+    relay.addEventListener("focus", () => focusEvents.push("relay-focus"));
+    relay.addEventListener("blur", () => focusEvents.push("relay-blur"));
+    expect(ownership.captureOnAppBlur()).toBe(true);
+    expect(ownership.reclaimOnAppFocus()).toBe(true);
+    expect(focusEvents).toEqual([]);
+    expect(microtasks.pending).toBe(1);
+    expect(frames.pending).toBe(0);
+
+    // The stale context is repaired at the end of the window-focus task. A
+    // physical key/composition event queued immediately after activation can
+    // therefore no longer cancel the relay while waiting for the next frame.
+    microtasks.runAll();
+    ownership.releaseForHelperInput(helper);
+    expect(focusEvents).toEqual(["helper-blur", "relay-focus", "relay-blur", "helper-focus"]);
+    expect(document.activeElement).toBe(helper);
+  });
+
+  it("ignores helper input side effects caused by its own editable handoff", () => {
+    const { container, helper } = buildPane();
+    const relay = document.createElement("textarea");
+    container.appendChild(relay);
+    const microtasks = createManualMicrotasks();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => relay,
+      scheduleMicrotask: microtasks.schedule,
+    });
+    const focusEvents: string[] = [];
+
+    helper.focus();
+    helper.addEventListener("blur", () => {
+      focusEvents.push("helper-blur");
+      // A native IME can commit composition while the controller blurs the
+      // helper. TerminalView reports that resulting input synchronously.
+      ownership.releaseForHelperInput(helper);
+    });
+    helper.addEventListener("focus", () => {
+      focusEvents.push("helper-focus");
+      ownership.releaseForHelperInput(helper);
+    });
+    relay.addEventListener("focus", () => focusEvents.push("relay-focus"));
+    relay.addEventListener("blur", () => focusEvents.push("relay-blur"));
+
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(focusEvents).toEqual(["helper-blur", "relay-focus", "relay-blur", "helper-focus"]);
+    expect(document.activeElement).toBe(helper);
+    expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("cancels a stale refresh when synthetic helper input starts in the same task", () => {
+    const { container, helper } = buildPane();
+    const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
       refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
     });
     const focusEvents: string[] = [];
 
@@ -281,12 +378,183 @@ describe("createTerminalFocusOwnership", () => {
     expect(ownership.captureOnAppBlur()).toBe(true);
     expect(ownership.reclaimOnAppFocus()).toBe(true);
 
+    // A programmatic/nested event can still run before the current task reaches
+    // its microtask checkpoint. Do not blur an input already in that stack.
     ownership.releaseForHelperInput(helper);
-    frames.runAll();
+    microtasks.runAll();
 
     expect(focusEvents).toEqual([]);
     expect(document.activeElement).toBe(helper);
     expect(ownership.getOwnedHelper()).toBe(null);
+  });
+
+  it("does not steal focus when another element wins during the relay handoff", () => {
+    const { container, helper } = buildPane();
+    const relay = document.createElement("textarea");
+    const modalInput = document.createElement("input");
+    container.appendChild(relay);
+    document.body.appendChild(modalInput);
+    const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => relay,
+      scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    relay.addEventListener("blur", () => modalInput.focus());
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(document.activeElement).toBe(modalInput);
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaim-declined",
+      expect.objectContaining({ reason: "focus-won-during-relay-blur" }),
+    );
+  });
+
+  it("aborts when a relay focus handler invalidates the pane lifecycle", () => {
+    const { container, helper } = buildPane();
+    const relay = document.createElement("textarea");
+    container.appendChild(relay);
+    const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
+    const onTrace = vi.fn();
+    const focusEvents: string[] = [];
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => relay,
+      scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    helper.addEventListener("focus", () => focusEvents.push("helper-focus"));
+    relay.addEventListener("focus", () => {
+      focusEvents.push("relay-focus");
+      ownership.clear("pane-unfocused");
+    });
+    relay.addEventListener("blur", () => focusEvents.push("relay-blur"));
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(focusEvents).toEqual(["relay-focus", "relay-blur"]);
+    expect(document.activeElement).toBe(document.body);
+    expect(onTrace).not.toHaveBeenCalledWith("focus-ownership-reclaimed", expect.anything());
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaim-declined",
+      expect.objectContaining({ reason: "ownership-changed-during-relay-focus" }),
+    );
+  });
+
+  it("aborts when the captured relay leaves the current surface during handoff", () => {
+    const { container, helper } = buildPane();
+    const relay = document.createElement("textarea");
+    const nextContainer = document.createElement("div");
+    const replacementRelay = document.createElement("textarea");
+    container.appendChild(relay);
+    nextContainer.appendChild(replacementRelay);
+    document.body.appendChild(nextContainer);
+    let currentContainer = container;
+    let currentRelay = relay;
+    const microtasks = createManualMicrotasks();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => currentContainer,
+      refreshActiveHelper: true,
+      getFocusRelay: () => currentRelay,
+      scheduleMicrotask: microtasks.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    relay.addEventListener("focus", () => {
+      nextContainer.appendChild(helper);
+      currentContainer = nextContainer;
+      currentRelay = replacementRelay;
+    });
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(document.activeElement).toBe(document.body);
+    expect(onTrace).not.toHaveBeenCalledWith("focus-ownership-reclaimed", expect.anything());
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaim-declined",
+      expect.objectContaining({ reason: "ownership-changed-during-relay-focus" }),
+    );
+  });
+
+  it("releases a helper whose final focus handler disposes the controller", () => {
+    const { container, helper } = buildPane();
+    const relay = document.createElement("textarea");
+    container.appendChild(relay);
+    const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => relay,
+      scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    ownership.captureOnAppBlur();
+    helper.addEventListener("focus", () => ownership.dispose(), { once: true });
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(document.activeElement).toBe(document.body);
+    expect(onTrace).not.toHaveBeenCalledWith("focus-ownership-reclaimed", expect.anything());
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaim-declined",
+      expect.objectContaining({ reason: "ownership-changed-during-helper-focus" }),
+    );
+  });
+
+  it("falls back to the helper when the relay cannot receive focus", () => {
+    const { container, helper } = buildPane();
+    const unfocusableRelay = document.createElement("textarea");
+    vi.spyOn(unfocusableRelay, "focus").mockImplementation(() => undefined);
+    container.appendChild(unfocusableRelay);
+    const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
+    const onTrace = vi.fn();
+    const ownership = createTerminalFocusOwnership({
+      getContainer: () => container,
+      refreshActiveHelper: true,
+      getFocusRelay: () => unfocusableRelay,
+      scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
+      onTrace,
+    });
+
+    helper.focus();
+    ownership.captureOnAppBlur();
+    ownership.reclaimOnAppFocus();
+    microtasks.runAll();
+
+    expect(document.activeElement).toBe(helper);
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-relay-skipped",
+      expect.objectContaining({ reason: "relay-focus-failed" }),
+    );
+    expect(onTrace).toHaveBeenCalledWith(
+      "focus-ownership-reclaimed",
+      expect.objectContaining({ usedFocusRelay: false }),
+    );
   });
 
   it("keeps a DOM-active helper untouched when active refresh is disabled", () => {
@@ -315,11 +583,13 @@ describe("createTerminalFocusOwnership", () => {
     const modalInput = document.createElement("input");
     document.body.appendChild(modalInput);
     const frames = createManualFrames();
+    const microtasks = createManualMicrotasks();
     const onTrace = vi.fn();
     const ownership = createTerminalFocusOwnership({
       getContainer: () => container,
       refreshActiveHelper: true,
       scheduleFrame: frames.schedule,
+      scheduleMicrotask: microtasks.schedule,
       onTrace,
     });
 
@@ -327,7 +597,7 @@ describe("createTerminalFocusOwnership", () => {
     helper.addEventListener("blur", () => modalInput.focus());
     ownership.captureOnAppBlur();
     ownership.reclaimOnAppFocus();
-    frames.runAll();
+    microtasks.runAll();
 
     expect(document.activeElement).toBe(modalInput);
     expect(ownership.getOwnedHelper()).toBe(null);

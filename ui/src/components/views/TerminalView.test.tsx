@@ -4941,7 +4941,7 @@ describe("TerminalView", () => {
     });
   }
 
-  /** Reactivate the app and let the scheduled restore frame run. */
+  /** Reactivate the app and flush both the microtask and frame restore phases. */
   async function reactivateApp(duringFocus?: () => void) {
     await act(async () => {
       fireEvent(window, new Event("focus"));
@@ -4969,9 +4969,29 @@ describe("TerminalView", () => {
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     try {
       const { helper } = await mountPaneWithFocusedHelper("t-focus-ownership-stale-active");
+      const relay = screen.getByTestId(
+        "terminal-ime-focus-relay-t-focus-ownership-stale-active",
+      ) as HTMLTextAreaElement;
       const focusEvents: string[] = [];
-      helper.addEventListener("blur", () => focusEvents.push("blur"));
-      helper.addEventListener("focus", () => focusEvents.push("focus"));
+      const relayAccessibilityDuringFocus: Array<{
+        disabled: boolean;
+        ariaHidden: string | null;
+        ariaLabel: string | null;
+      }> = [];
+      expect(relay).toBeDisabled();
+      expect(relay).toHaveAttribute("aria-hidden", "true");
+      expect(relay).toHaveAttribute("aria-label", "Terminal input focus relay");
+      helper.addEventListener("blur", () => focusEvents.push("helper-blur"));
+      helper.addEventListener("focus", () => focusEvents.push("helper-focus"));
+      relay.addEventListener("focus", () => {
+        focusEvents.push("relay-focus");
+        relayAccessibilityDuringFocus.push({
+          disabled: relay.disabled,
+          ariaHidden: relay.getAttribute("aria-hidden"),
+          ariaLabel: relay.getAttribute("aria-label"),
+        });
+      });
+      relay.addEventListener("blur", () => focusEvents.push("relay-blur"));
 
       // WebView2 may detach the native IME context without changing
       // document.activeElement. A plain helper.focus() on return is then a no-op.
@@ -4982,19 +5002,24 @@ describe("TerminalView", () => {
 
       await reactivateApp();
 
-      expect(focusEvents).toEqual(["blur", "focus"]);
+      expect(focusEvents).toEqual(["helper-blur", "relay-focus", "relay-blur", "helper-focus"]);
+      expect(relayAccessibilityDuringFocus).toEqual([
+        { disabled: false, ariaHidden: null, ariaLabel: "Terminal input focus relay" },
+      ]);
+      expect(relay).toBeDisabled();
+      expect(relay).toHaveAttribute("aria-hidden", "true");
       expect(document.activeElement).toBe(helper);
     } finally {
       userAgent.mockRestore();
     }
   });
 
-  it("does not blur a new IME composition that starts before the reclaim frame", async () => {
+  it("does not blur a synthetic IME composition started inside the focus task", async () => {
     const userAgent = vi
       .spyOn(window.navigator, "userAgent", "get")
       .mockReturnValue("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
     try {
-      const instanceId = "t-focus-ownership-ime-before-frame";
+      const instanceId = "t-focus-ownership-ime-same-task";
       const { helper, wrapper } = await mountPaneWithFocusedHelper(instanceId);
       const focusEvents: string[] = [];
       helper.addEventListener("blur", () => focusEvents.push("blur"));
