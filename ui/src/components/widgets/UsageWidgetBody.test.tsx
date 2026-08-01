@@ -6,8 +6,22 @@ import { estimateUsageWidgetWidth, readDisplay } from "./widget-options";
 import type { UsageDisplayRow } from "@/lib/usage-rows";
 
 const rows: UsageDisplayRow[] = [
-  { key: "session", label: "Current session", percent: 42, reset: "7pm", elapsed: 30 },
-  { key: "week-all", label: "Current week (all models)", percent: 71, reset: "Mar 6", elapsed: 50 },
+  {
+    key: "session",
+    label: "Current session",
+    statuslineLabel: "SS",
+    percent: 42,
+    reset: "7pm",
+    elapsed: 30,
+  },
+  {
+    key: "week-all",
+    label: "Current week (all models)",
+    statuslineLabel: "WK",
+    percent: 71,
+    reset: "Mar 6",
+    elapsed: 50,
+  },
 ];
 
 const colors = { used: "#d97757", pace: "#f9e2af", track: "#585858" };
@@ -34,8 +48,8 @@ describe("UsageWidgetBody", () => {
   it("draws one bar and one number per visible row in `both`", () => {
     renderBody();
     expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
-    expect(screen.getByTestId("w-number-session")).toHaveTextContent("42%");
-    expect(screen.getByTestId("w-number-week-all")).toHaveTextContent("71%");
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS 42%");
+    expect(screen.getByTestId("w-number-week-all")).toHaveTextContent("WK 71%");
   });
 
   it("stacks an elapsed bar under the consumed one", () => {
@@ -74,7 +88,7 @@ describe("UsageWidgetBody", () => {
   it("draws numbers only in `number`", () => {
     renderBody({ display: "number" });
     expect(screen.queryByTestId("w-bar-session")).not.toBeInTheDocument();
-    expect(screen.getByTestId("w-number-session")).toBeInTheDocument();
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS 42%");
   });
 
   it("replaces the numbers when the probe has nothing usable", () => {
@@ -95,7 +109,7 @@ describe("UsageWidgetBody", () => {
 
   it("shows a placeholder for a row the probe could not read", () => {
     renderBody({ rows: [{ ...rows[0], percent: null }] });
-    expect(screen.getByTestId("w-number-session")).toHaveTextContent("--");
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS --");
   });
 });
 
