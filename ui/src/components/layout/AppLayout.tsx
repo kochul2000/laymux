@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useNotificationStore } from "@/stores/notification-store";
 import { Dock } from "./Dock";
 import { GridEditToolbar } from "./GridEditToolbar";
+import { StatusLine } from "./StatusLine";
 import { WorkspaceArea } from "./WorkspaceArea";
 import { SettingsView } from "@/components/views/SettingsView";
 import { NotificationPanel } from "@/components/views/NotificationPanel";
@@ -358,6 +359,9 @@ export function AppLayout() {
           {renderDockContent(bottom, "bottom", "Top")}
         </div>
       </div>
+
+      {/* Status line — outside the dock grid, so it stays below the bottom dock */}
+      <StatusLine />
 
       {/* Notification Panel Overlay */}
       {notificationPanelOpen && (

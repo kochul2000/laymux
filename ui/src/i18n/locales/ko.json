@@ -83,7 +83,8 @@
       "keybindings": "키 바인딩",
       "profileDefaults": "기본값",
       "deleteProfile": "프로필 삭제",
-      "usage": "사용량"
+      "usage": "사용량",
+      "widgets": "위젯"
     },
     "save": {
       "save": "저장",
@@ -504,6 +505,48 @@
       "resetToDefault": "기본값으로 초기화",
       "continueWithDefaults": "기본 설정으로 계속",
       "confirm": "확인"
+    },
+    "widgets": {
+      "title": "위젯",
+      "intro": "상단 바와 status line 에 놓을 위젯을 정한다. 슬롯의 순서가 화면 순서이며, 좌·우 붙임은 어느 슬롯에 넣었는지로 정해진다. 상단 바에서는 창 드래그 영역이 먼저 확보되고, 남는 폭이 모자라면 화면 가장자리에서 먼 위젯부터 접힌다.",
+      "statusLineEnabled": "하단 status line 표시",
+      "statusLineEnabledDesc": "창 맨 아래(dock 보다 아래)에 위젯 줄을 하나 둔다. 꺼도 배치는 그대로 남는다.",
+      "slot": {
+        "topBar.left": "상단 바 · 왼쪽",
+        "topBar.right": "상단 바 · 오른쪽",
+        "statusLine.left": "Status line · 왼쪽",
+        "statusLine.right": "Status line · 오른쪽"
+      },
+      "add": "위젯 추가…",
+      "empty": "비어 있음",
+      "remove": "제거",
+      "moveUp": "앞으로",
+      "moveDown": "뒤로",
+      "unknownType": "알 수 없는 위젯 ({{type}})",
+      "configDirDefault": "기본 config dir",
+      "type": {
+        "claudeUsage": "Claude 사용량",
+        "codexUsage": "Codex 사용량",
+        "terminalActivity": "터미널 활동",
+        "notifications": "알림",
+        "cwd": "현재 디렉터리"
+      },
+      "option": {
+        "configDir": "계정 config dir",
+        "display": "표시 방식",
+        "scope": "집계 범위"
+      },
+      "value": {
+        "display": {
+          "bar": "막대",
+          "number": "숫자",
+          "both": "막대+숫자"
+        },
+        "scope": {
+          "workspace": "현재 워크스페이스",
+          "all": "전체"
+        }
+      }
     },
     "usage": {
       "title": "사용량 모니터",

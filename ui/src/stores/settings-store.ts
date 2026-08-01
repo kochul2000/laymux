@@ -18,6 +18,7 @@ import {
   type TerminalLocation,
 } from "../lib/sync-cwd-config";
 import type { PastePathSeparator } from "../lib/smart-text";
+import { defaultWidgets, normalizeWidgets, type WidgetsSettings } from "../lib/widget-placement";
 import { TERMINAL_WRITE_DEFAULT_CLASS_SHARE } from "../lib/terminal-write-fair-scheduler";
 import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
@@ -459,6 +460,8 @@ interface SettingsState {
   terminal: TerminalSettings;
   controlBar: ControlBarSettings;
   usage: UsageSettings;
+  /** Status widget placement for the top bar and the status line (ADR-0105). */
+  widgets: WidgetsSettings;
   dock: DockSettings;
   notifications: NotificationSettings;
   workspaceSelector: WorkspaceSelectorSettings;
@@ -490,6 +493,14 @@ interface SettingsState {
   setUsageAgent: (agent: "claude", data: Partial<UsageAgentSettings>) => void;
   setCodexUsage: (data: Partial<CodexUsageAgentSettings>) => void;
   setUsageColors: (data: Partial<UsageColorSettings>) => void;
+  /**
+   * Replace the whole widget placement.
+   *
+   * Placement edits are array transforms over four slots at once (a move leaves
+   * one and joins another), so the store takes the finished value rather than a
+   * patch — `lib/widget-placement` owns the transforms.
+   */
+  setWidgets: (widgets: WidgetsSettings) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
   setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
@@ -530,6 +541,7 @@ interface SettingsState {
         | "terminal"
         | "controlBar"
         | "usage"
+        | "widgets"
         | "dock"
         | "notifications"
         | "workspaceSelector"
@@ -1102,6 +1114,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     },
     colors: { ...DEFAULT_USAGE_COLORS },
   },
+  widgets: defaultWidgets(),
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   workspaceSelector: {
@@ -1221,6 +1234,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set((state) => ({
       usage: { ...state.usage, colors: { ...state.usage.colors, ...data } },
     })),
+
+  setWidgets: (widgets) => set({ widgets }),
 
   setFileExplorer: (data) =>
     set((state) => ({
@@ -1416,6 +1431,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           },
         }
       : undefined;
+    // Always normalized, never spread: a hand-edited slot can be any shape, and
+    // an unknown widget type has to survive the trip (ADR-0105).
+    const widgets = data.widgets ? normalizeWidgets(data.widgets) : undefined;
     const dock = data.dock ? { ...DEFAULT_DOCK, ...data.dock } : undefined;
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
@@ -1502,6 +1520,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       terminal: _rawTerminal,
       controlBar: _rawControlBar,
       usage: _rawUsage,
+      widgets: _rawWidgets,
       dock: _rawDock,
       notifications: _rawNotifications,
       workspaceSelector: _rawWorkspaceSelector,
@@ -1528,6 +1547,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(terminal ? { terminal } : {}),
       ...(controlBar ? { controlBar } : {}),
       ...(usage ? { usage } : {}),
+      ...(widgets ? { widgets } : {}),
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),

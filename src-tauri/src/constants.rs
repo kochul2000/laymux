@@ -121,6 +121,26 @@ pub const PROFILE_BELL_STYLES: &[&str] = &["audible", "none", "window", "taskbar
 pub const PROFILE_CLOSE_ON_EXIT_VALUES: &[&str] = &["automatic", "graceful", "always", "never"];
 pub const PROFILE_ANTIALIASING_MODES: &[&str] = &["grayscale", "cleartype", "aliased"];
 
+/// Widget `type` names that may appear in `widgets.*` slots (ADR-0105).
+///
+/// This is the canonical list the write path validates against; the frontend
+/// registry must offer exactly these. A name here is an external contract —
+/// renaming one orphans the placements users already saved.
+pub const WIDGET_TYPES: &[&str] = &[
+    "claudeUsage",
+    "codexUsage",
+    "terminalActivity",
+    "notifications",
+    "cwd",
+];
+/// How a slot sheds widgets when its width budget runs out (ADR-0105).
+pub const WIDGET_OVERFLOW_MODES: &[&str] = &["collapse"];
+/// Rendering styles a usage widget may pick. The rows themselves stay owned by
+/// `usage.*.visibleRows` (ADR-0103), so this only decides how each row is drawn.
+pub const USAGE_WIDGET_DISPLAY_MODES: &[&str] = &["bar", "number", "both"];
+/// Which terminals a `terminalActivity` widget counts.
+pub const TERMINAL_ACTIVITY_WIDGET_SCOPES: &[&str] = &["workspace", "all"];
+
 /// Maximum number of notifications to keep. When exceeded, oldest read
 /// notifications are evicted first. Unread notifications are never evicted.
 pub const MAX_NOTIFICATIONS: usize = 500;

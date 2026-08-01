@@ -628,3 +628,151 @@ fn parser_admission_sanitize_clamps_a_hand_edited_file() {
     assert_eq!(sanitized.visible_share, 1000);
     assert_eq!(sanitized.hidden_share, 2);
 }
+
+// --- Widget placement contract (ADR-0105) ---
+
+fn widget_patch(instances: serde_json::Value) -> serde_json::Value {
+    json!({ "widgets": { "topBar": { "left": instances } } })
+}
+
+#[test]
+fn widget_placement_round_trips_with_its_options() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([
+            { "id": "w1", "type": "claudeUsage", "options": { "configDir": "", "display": "bar" } },
+            { "id": "w2", "type": "cwd" }
+        ])),
+    );
+
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    let left = &candidate.widgets.top_bar.left;
+    assert_eq!(left.len(), 2);
+    assert_eq!(left[0].widget_type, "claudeUsage");
+    assert_eq!(left[0].options["display"], json!("bar"));
+    // An omitted `options` must arrive as an empty object, not null — the
+    // frontend reads keys off it without a null guard.
+    assert_eq!(left[1].options, json!({}));
+}
+
+#[test]
+fn unknown_widget_type_is_rejected_on_write() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "w1", "type": "notAWidget" }])),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared.errors.iter().any(|issue| {
+        issue.code == "invalid_value" && issue.path == "/widgets/topBar/left/0/type"
+    }));
+}
+
+#[test]
+fn unknown_widget_type_already_on_disk_does_not_block_an_unrelated_patch() {
+    // Loading must preserve a placement this build does not know: the write
+    // path refuses new ones, but an existing one is the user's, not a defect
+    // to repair away.
+    let current: Settings = serde_json::from_str(
+        r#"{ "widgets": { "topBar": { "left": [{ "id": "w1", "type": "fromTheFuture" }] } } }"#,
+    )
+    .unwrap();
+    assert_eq!(current.widgets.top_bar.left.len(), 1);
+
+    let prepared = prepare_settings_update(
+        &current,
+        &json!({ "appearance": { "font": { "size": 20 } } }),
+    );
+
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    assert!(prepared
+        .existing_issues
+        .iter()
+        .any(|issue| issue.path == "/widgets/topBar/left/0/type"));
+    assert_eq!(
+        prepared.candidate.unwrap().widgets.top_bar.left[0].widget_type,
+        "fromTheFuture"
+    );
+}
+
+#[test]
+fn duplicate_widget_id_across_slots_is_rejected() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "widgets": {
+            "topBar": { "left": [{ "id": "dup", "type": "cwd" }] },
+            "statusLine": { "right": [{ "id": "dup", "type": "notifications" }] }
+        }}),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.code == "duplicate_value"
+            && issue.path == "/widgets/statusLine/right/0/id"));
+}
+
+#[test]
+fn widget_option_domains_are_validated() {
+    let bad_display = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "codexUsage", "options": { "display": "sparkline" } }]),
+        ),
+    );
+    assert!(!bad_display.valid);
+    assert!(bad_display
+        .errors
+        .iter()
+        .any(|issue| { issue.path == "/widgets/topBar/left/0/options/display" }));
+
+    let bad_scope = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "terminalActivity", "options": { "scope": "galaxy" } }]),
+        ),
+    );
+    assert!(!bad_scope.valid);
+    assert!(bad_scope
+        .errors
+        .iter()
+        .any(|issue| { issue.path == "/widgets/topBar/left/0/options/scope" }));
+}
+
+#[test]
+fn widget_overflow_mode_is_validated() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "widgets": { "overflow": "hide" } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/widgets/overflow"));
+}
+
+#[test]
+fn widgets_apply_live_and_are_writable() {
+    let metadata = metadata_for_path("/widgets");
+    assert!(metadata.writable);
+    assert!(!metadata.sensitive);
+    assert_eq!(
+        metadata.apply_mode,
+        laymux_lib::settings::contract::ApplyMode::Live
+    );
+}
+
+#[test]
+fn status_line_starts_off_with_empty_slots() {
+    let widgets = Settings::default().widgets;
+    assert!(!widgets.status_line.enabled);
+    assert!(widgets.top_bar.left.is_empty());
+    assert!(widgets.top_bar.right.is_empty());
+    assert!(widgets.status_line.left.is_empty());
+    assert!(widgets.status_line.right.is_empty());
+    assert_eq!(widgets.overflow, "collapse");
+}

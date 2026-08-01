@@ -140,9 +140,40 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
 
-`visibleRows`는 같은 provider를 보는 모든 UsageView가 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
+`visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 
 `usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 각각 청록 `#58d1eb`, 주황 `#fd971f`, 회색 `#585858`이다. 이 색은 사용자가 Views → 사용량에서 바꾸는 표시 선호이며 앱 테마 토큰에 속하지 않는다. 따라서 테마 전환만으로는 바뀌지 않고, 사용자가 명시적으로 바꿀 때만 두 provider에 함께 적용된다.
+
+### 상태 위젯 배치 (widgets)
+
+```jsonc
+{
+  "widgets": {
+    "topBar": {
+      "left": [],
+      "right": [
+        { "id": "w1", "type": "claudeUsage", "options": { "configDir": "", "display": "both" } }
+      ]
+    },
+    "statusLine": {
+      "enabled": false, // 창 최하단 위젯 줄 표시 여부. 꺼도 아래 배치는 보존된다
+      "left": [],
+      "right": []
+    },
+    "overflow": "collapse" // 폭 부족 시 정책. 현재 허용값은 collapse 뿐
+  }
+}
+```
+
+**배치의 SoT 는 네 슬롯의 순서 배열이다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 좌·우 붙임은 어느 슬롯에 넣었는지로만 표현하고, 배열 순서가 화면 순서다. 상단 바 슬롯은 항상 존재하며 `statusLine.enabled` 는 하단 영역의 표시 여부만 정한다. 네 슬롯의 기본값은 빈 배열이고 metadata apply mode 는 `live` 다.
+
+`type` 은 프론트 위젯 레지스트리(`ui/src/components/widgets/registry.ts`)가 정의하는 이름이며 정본 목록은 Rust `constants.rs::WIDGET_TYPES` 다. 두 목록의 일치는 `registry.test.ts` 가 강제한다. 쓰기 경로는 미등록 `type` 과 중복 `id` 를 [ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md) 대로 거부하고, 이미 디스크에 있던 위반은 `existingIssues` 로 보고하며 값은 보존한다 — 로드는 미등록 위젯을 지우지 않고 렌더만 건너뛴다.
+
+`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열) 과 `display`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`), `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 `usage.colors` 를 공유한다.
+
+폭이 모자라면 위젯을 자르지 않는다. 상단 바에서는 창 드래그 영역의 최소 폭이 먼저 확보되고, 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
+
+편집 UI 는 Settings → **Views → 위젯** 한 곳이다. 상단 바에는 배치 조작 버튼을 두지 않는다.
 
 ### Direct Remote Mode 설정
 

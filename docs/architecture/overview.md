@@ -40,6 +40,8 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 
 ```
 ┌─────────────────────────────────────────┐
+│  GridEditToolbar (위젯 슬롯 좌/우 포함)  │
+├─────────────────────────────────────────┤
 │               TopDock                   │
 ├────────┬────────────────────┬───────────┤
 │        │                    │           │
@@ -48,8 +50,12 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 │        │                    │           │
 ├────────┴────────────────────┴───────────┤
 │              BottomDock                 │
+├─────────────────────────────────────────┤
+│  StatusLine (선택, dock 격자 바깥 최하단) │
 └─────────────────────────────────────────┘
 ```
+
+`GridEditToolbar` 와 `StatusLine` 은 dock 격자 바깥에 있는 **위젯 슬롯 영역**이다([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). StatusLine 은 격자 다음 형제로 렌더되므로 BottomDock 보다 아래에 창 전체 폭으로 놓이며, dock 의 분할·포커스·리사이즈 계약을 상속하지 않는다. 표시 여부는 `widgets.statusLine.enabled` 가 정한다.
 
 ### 3.1 Dock
 

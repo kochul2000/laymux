@@ -130,6 +130,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/widgets",
+        description: "상단 바와 status line 의 위젯 배치입니다. topBar/statusLine 각각 left·right 슬롯의 배열 순서가 화면 순서이며, statusLine.enabled 는 하단 영역 표시만 결정합니다(끄더라도 배치는 보존). 각 항목은 { id, type, options } 이고 type 은 등록된 위젯 이름이어야 합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/dock",
         description: "구조적 docks 배열과 별개인 dock 동작 기본값입니다.",
         sensitive: false,

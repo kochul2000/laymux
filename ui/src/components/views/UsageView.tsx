@@ -5,16 +5,15 @@ import { ViewBody } from "@/components/ui/ViewBody";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { useNowTick, useUsageSnapshot } from "@/hooks/useUsageSnapshot";
 import { useOverridesStore } from "@/stores/overrides-store";
-import { useSettingsStore, type UsageVisibleRow } from "@/stores/settings-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   resolveUsageDensity,
   resolveUsageLayout,
   showsDetail,
   type UsageLayoutPreference,
 } from "@/lib/usage-layout";
-import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
-import { selectVisibleRows, type KeyedUsageRow, type UsageDisplayRow } from "@/lib/usage-rows";
-import type { UsageProbeStatus, UsageSnapshot } from "@/lib/tauri-api";
+import { buildClaudeUsageRows, selectVisibleRows, type UsageDisplayRow } from "@/lib/usage-rows";
+import { claudeUsageStatusMessage } from "@/lib/usage-status";
 
 const TICK_MS = 30_000;
 const PACE_METER_HEIGHT = "3px";
@@ -333,74 +332,6 @@ export function UsagePresentation({
   );
 }
 
-/**
- * Exhaustive on purpose: the `never` binding makes a new `UsageProbeStatus`
- * variant a compile error instead of a silent generic message.
- */
-function statusMessage(status: UsageProbeStatus): string | null {
-  switch (status.type) {
-    case "ready":
-      return null;
-    case "idle":
-      return "Probe stopped";
-    case "starting":
-      return "Starting Claude Code…";
-    case "claudeMissing":
-      return "`claude` not found in this profile's shell";
-    case "startupTimeout":
-      return "Claude Code did not become ready";
-    case "parseFailed":
-      return "Could not read the /usage panel";
-    case "upstreamError":
-    case "failed":
-      return status.message;
-    default: {
-      const unhandled: never = status;
-      return unhandled;
-    }
-  }
-}
-
-function buildRows(snapshot: UsageSnapshot, now: Date): KeyedUsageRow<UsageVisibleRow>[] {
-  return [
-    {
-      visibleKey: "session",
-      row: {
-        key: "session",
-        label: "Current session",
-        abbreviatedLabel: "session",
-        percent: snapshot.session.percent,
-        reset: snapshot.session.reset,
-        elapsed: sessionElapsedPercent(snapshot.session.reset, now),
-      },
-    },
-    {
-      visibleKey: "weekAll",
-      row: {
-        key: "week-all",
-        label: "Current week (all models)",
-        abbreviatedLabel: "week (all)",
-        percent: snapshot.weekAll.percent,
-        reset: snapshot.weekAll.reset,
-        elapsed: weekElapsedPercent(snapshot.weekAll.reset, now),
-      },
-    },
-    {
-      visibleKey: "weekModel",
-      row: {
-        key: "week-model",
-        label: snapshot.weekModelLabel
-          ? `Current week (${snapshot.weekModelLabel})`
-          : "Current week (per model)",
-        abbreviatedLabel: snapshot.weekModelLabel ? `week (${snapshot.weekModelLabel})` : "week",
-        percent: snapshot.weekModel.percent,
-        reset: snapshot.weekModel.reset,
-        elapsed: weekElapsedPercent(snapshot.weekModel.reset, now),
-      },
-    },
-  ];
-}
-
 export function UsageView({ configDir = "", paneId }: UsageViewProps) {
   const now = useNowTick(TICK_MS);
   const { snapshot, error, refresh } = useUsageSnapshot(`usage-${paneId ?? "dock"}`, configDir);
@@ -410,7 +341,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
     return `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
   });
   const rows = useMemo(
-    () => selectVisibleRows(buildRows(snapshot, now), visibleRows),
+    () => selectVisibleRows(buildClaudeUsageRows(snapshot, now), visibleRows),
     [snapshot, now, visibleRows],
   );
   return (
@@ -421,7 +352,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
       model={snapshot.model}
       configDir={configDir}
       rows={rows}
-      message={error ?? statusMessage(snapshot.status)}
+      message={error ?? claudeUsageStatusMessage(snapshot.status)}
       capturedAtMs={snapshot.capturedAtMs}
       refresh={refresh}
       paneId={paneId}

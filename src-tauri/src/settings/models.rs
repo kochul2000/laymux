@@ -919,6 +919,86 @@ impl Default for UsageAgentSettings {
     }
 }
 
+/// Where the user placed status widgets, per [ADR-0105].
+///
+/// Placement is nothing but the order of these four arrays: a widget is on the
+/// left because it sits in a `left` slot, and it comes first because it is first
+/// in that array. The top bar's slots always exist; `statusLine.enabled` decides
+/// only whether the bottom surface is drawn, never whether its placement is kept.
+///
+/// [ADR-0105]: ../../../docs/adr/0105-widget-slots-and-status-line.md
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetsSettings {
+    #[serde(default)]
+    pub top_bar: WidgetSlots,
+    #[serde(default)]
+    pub status_line: StatusLineWidgets,
+    /// What a slot does when its width budget runs out. Only `collapse` exists
+    /// today; the key is here so a second policy is a value change, not a
+    /// schema change.
+    #[serde(default = "default_widget_overflow")]
+    pub overflow: String,
+}
+
+fn default_widget_overflow() -> String {
+    "collapse".into()
+}
+
+impl Default for WidgetsSettings {
+    fn default() -> Self {
+        Self {
+            top_bar: WidgetSlots::default(),
+            status_line: StatusLineWidgets::default(),
+            overflow: default_widget_overflow(),
+        }
+    }
+}
+
+/// One surface's two slots. Empty by default — nothing is placed for the user.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetSlots {
+    #[serde(default)]
+    pub left: Vec<WidgetInstance>,
+    #[serde(default)]
+    pub right: Vec<WidgetInstance>,
+}
+
+/// The bottom surface: the same two slots plus the switch that draws them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusLineWidgets {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub left: Vec<WidgetInstance>,
+    #[serde(default)]
+    pub right: Vec<WidgetInstance>,
+}
+
+/// One placed widget.
+///
+/// `options` stays untyped here because each widget type owns its own value
+/// domain; the backend validates the domains it knows and carries the rest
+/// through untouched rather than dropping keys it cannot interpret.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WidgetInstance {
+    /// Unique across all four slots. Survives moves between slots.
+    pub id: String,
+    /// Registry name. Unknown values are kept on load and skipped when
+    /// rendering, so a settings file from another version loses nothing.
+    #[serde(rename = "type")]
+    pub widget_type: String,
+    #[serde(default = "default_widget_options")]
+    pub options: serde_json::Value,
+}
+
+fn default_widget_options() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
 /// Pane control bar settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1471,6 +1551,9 @@ pub struct Settings {
     /// Claude usage monitor settings.
     #[serde(default)]
     pub usage: UsageSettings,
+    /// Status widget placement for the top bar and the status line.
+    #[serde(default)]
+    pub widgets: WidgetsSettings,
     /// Dock behavior settings (distinct from the structural `docks` array).
     #[serde(default)]
     pub dock: DockSettings,
@@ -1574,6 +1657,7 @@ impl Default for Settings {
             paste: PasteSettings::default(),
             control_bar: ControlBarSettings::default(),
             usage: UsageSettings::default(),
+            widgets: WidgetsSettings::default(),
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),

@@ -66,6 +66,7 @@ import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
+import { WidgetsSectionBody } from "./settings/WidgetsSection";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import {
   appendAllowedIps,
@@ -3437,6 +3438,31 @@ function UsageColorFields({
   );
 }
 
+function WidgetsSection() {
+  const { t } = useTranslation("settings");
+  const storeWidgets = useSettingsStore((s) => s.widgets);
+  const setWidgets = useSettingsStore((s) => s.setWidgets);
+  const claudeConfigDirs = useSettingsStore((s) => s.usage.claude.configDirs);
+  const [widgets, setDraftWidgets] = useDraft("widgets", storeWidgets, setWidgets);
+
+  return (
+    <div data-testid="settings-widgets-section">
+      <SectionTitle>{t("widgets.title")}</SectionTitle>
+      <p
+        className="px-4 pb-2 text-[11px] leading-relaxed"
+        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+      >
+        {t("widgets.intro")}
+      </p>
+      <WidgetsSectionBody
+        widgets={widgets}
+        onChange={setDraftWidgets}
+        claudeConfigDirs={claudeConfigDirs}
+      />
+    </div>
+  );
+}
+
 function UsageSection() {
   const { t } = useTranslation("settings");
   const storeClaudeUsage = useSettingsStore((s) => s.usage.claude);
@@ -4553,6 +4579,16 @@ export function SettingsView() {
             {t("nav.usage")}
           </button>
           <button
+            data-testid="nav-widgets"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("widgets")}
+            onClick={() => setActiveNav("widgets")}
+            onMouseEnter={() => setNavHover("widgets")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.widgets")}
+          </button>
+          <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("memo")}
@@ -4690,6 +4726,7 @@ export function SettingsView() {
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
             {activeNav === "usage" && <UsageSection />}
+            {activeNav === "widgets" && <WidgetsSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
           </div>
 

@@ -200,3 +200,57 @@ describe("settings snapshot", () => {
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(secondId);
   });
 });
+
+describe("settings snapshot — widget placement and usage", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("round-trips widget placement through collect and apply", async () => {
+    useSettingsStore.getState().setWidgets({
+      topBar: {
+        left: [{ id: "w1", type: "claudeUsage", options: { display: "bar", configDir: "" } }],
+        right: [],
+      },
+      statusLine: { enabled: true, left: [], right: [{ id: "w2", type: "cwd", options: {} }] },
+      overflow: "collapse",
+    });
+
+    const snapshot = await collectSettingsSnapshot();
+    expect(snapshot.widgets.topBar.left[0].options).toEqual({ display: "bar", configDir: "" });
+
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    applySettingsSnapshot(snapshot, { includeStructural: false });
+
+    const widgets = useSettingsStore.getState().widgets;
+    expect(widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
+    expect(widgets.statusLine.enabled).toBe(true);
+    expect(widgets.statusLine.right.map((w) => w.id)).toEqual(["w2"]);
+  });
+
+  it("keeps an unknown widget type across a save round trip", async () => {
+    // Loading a file from another build must not quietly delete a placement.
+    applySettingsSnapshot(
+      {
+        widgets: {
+          topBar: { left: [{ id: "w1", type: "fromTheFuture", options: {} }], right: [] },
+          statusLine: { enabled: false, left: [], right: [] },
+          overflow: "collapse",
+        },
+      } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    const snapshot = await collectSettingsSnapshot();
+    expect(snapshot.widgets.topBar.left[0].type).toBe("fromTheFuture");
+  });
+
+  it("carries usage settings so they survive the next save", async () => {
+    useSettingsStore.getState().setUsageAgent("claude", { visibleRows: ["session"] });
+
+    const snapshot = await collectSettingsSnapshot();
+
+    expect(snapshot.usage.claude.visibleRows).toEqual(["session"]);
+  });
+});

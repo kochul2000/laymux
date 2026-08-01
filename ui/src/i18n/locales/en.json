@@ -83,7 +83,8 @@
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
       "deleteProfile": "Delete profile",
-      "usage": "Usage"
+      "usage": "Usage",
+      "widgets": "Widgets"
     },
     "save": {
       "save": "Save",
@@ -504,6 +505,48 @@
       "resetToDefault": "Reset to default",
       "continueWithDefaults": "Continue with defaults",
       "confirm": "OK"
+    },
+    "widgets": {
+      "title": "Widgets",
+      "intro": "Choose what sits in the top bar and the status line. A slot's order is the on-screen order, and left or right is decided by which slot you place it in. The top bar reserves its window drag region first; when the remaining width runs out, the widgets farthest from the window edge collapse first.",
+      "statusLineEnabled": "Show bottom status line",
+      "statusLineEnabledDesc": "Adds one widget row at the very bottom of the window, below every dock. Turning it off keeps the placement.",
+      "slot": {
+        "topBar.left": "Top Bar · Left",
+        "topBar.right": "Top Bar · Right",
+        "statusLine.left": "Status Line · Left",
+        "statusLine.right": "Status Line · Right"
+      },
+      "add": "Add widget…",
+      "empty": "Empty",
+      "remove": "Remove",
+      "moveUp": "Move earlier",
+      "moveDown": "Move later",
+      "unknownType": "Unknown widget ({{type}})",
+      "configDirDefault": "Default config dir",
+      "type": {
+        "claudeUsage": "Claude Usage",
+        "codexUsage": "Codex Usage",
+        "terminalActivity": "Terminal Activity",
+        "notifications": "Notifications",
+        "cwd": "Working Directory"
+      },
+      "option": {
+        "configDir": "Account config dir",
+        "display": "Display",
+        "scope": "Scope"
+      },
+      "value": {
+        "display": {
+          "bar": "Bar",
+          "number": "Number",
+          "both": "Bar + Number"
+        },
+        "scope": {
+          "workspace": "Active Workspace",
+          "all": "All Workspaces"
+        }
+      }
     },
     "usage": {
       "title": "Usage Monitor",
