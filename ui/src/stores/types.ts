@@ -7,6 +7,7 @@ export type ViewType =
   | "UsageView"
   | "CodexUsageView"
   | "FileExplorerView"
+  | "GitHubView"
   | "EmptyView";
 
 export type DockPosition = "top" | "bottom" | "left" | "right";

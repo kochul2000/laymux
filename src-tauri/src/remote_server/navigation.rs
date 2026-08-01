@@ -590,6 +590,7 @@ fn view_label(view_type: &str) -> &str {
         "UsageView" => "Claude Usage",
         "CodexUsageView" => "Codex Usage",
         "FileExplorerView" => "File Explorer",
+        "GitHubView" => "GitHub",
         "TerminalView" => "Terminal",
         _ => "Empty",
     }

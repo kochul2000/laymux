@@ -211,6 +211,8 @@ pub fn run() {
             commands::open_settings_file,
             commands::open_in_os,
             commands::submit_github_issue,
+            commands::get_github_repo_snapshot,
+            commands::run_github_item_action,
             commands::get_listening_ports,
             commands::get_git_branch,
             commands::resolve_git_remote,

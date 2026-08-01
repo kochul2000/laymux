@@ -18,6 +18,11 @@ describe("resolveChunkGroup", () => {
     ).toBeUndefined();
   });
 
+  it("isolates the GitHub view from the near-limit entry chunk", () => {
+    expect(resolveChunkGroup("/repo/ui/src/components/views/GitHubView.tsx")).toBe("github-view");
+    expect(resolveChunkGroup("/repo/ui/src/components/views/GitHubView.test.tsx")).toBeUndefined();
+  });
+
   it("isolates the static v3 failure coordinator from the near-limit entry chunk", () => {
     expect(resolveChunkGroup("/repo/ui/src/lib/terminal-output-v3-failure-coordinator.ts")).toBe(
       "terminal-output-v3-failure",

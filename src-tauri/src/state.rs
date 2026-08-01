@@ -52,6 +52,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// `usage_probe` owns its own registry mutex and participates in no ordering with
 /// the locks above: nothing acquires it while holding another `AppState` lock, and
 /// its worker threads touch no `AppState` state (ADR-0102).
+/// `commands::github_repo` owns its per-repository snapshot registry on the same
+/// terms: its locks are taken only on `spawn_blocking` workers that touch no
+/// `AppState` state, so they join no ordering above (ADR-0105).
 ///
 /// ## Poison policy
 ///

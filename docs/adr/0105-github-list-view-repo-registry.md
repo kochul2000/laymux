@@ -1,0 +1,48 @@
+# 0105. GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다
+
+- Status: Proposed
+- Date: 2026-08-01
+- Source: issue #708, [ADR-0003](0003-cwd-single-source-syncgroup.md)(CWD SoT), [ADR-0102](0102-claude-usage-probe-headless-pty.md)(외부 CLI 수집 뷰의 선례), architecture/api-contracts.md §12
+
+## Context
+
+지금까지 열린 이슈/PR 을 보려면 터미널 pane 하나를 `watch gh issue list` 로 태워 두어야 했다. 목록이 텍스트라 클릭할 수도 없고, pane 하나를 영구히 점유하며, 같은 리포를 보는 pane 이 늘수록 `gh` 프로세스가 그만큼 늘어난다.
+
+이를 View 로 옮길 때 결정해야 할 것은 세 가지다.
+
+1. **어떤 리포를 보여줄 것인가.** laymux 의 pane 은 sync group 으로 CWD 를 주고받는다([ADR-0003](0003-cwd-single-source-syncgroup.md)). View 마다 리포를 따로 지정하게 하면 CWD 와 표시 대상이 어긋나고, 사용자는 pane 마다 같은 설정을 반복해야 한다.
+2. **얼마나 자주, 누가 조회할 것인가.** `gh` 는 프로세스 기동 + 네트워크 왕복이 있는 비싼 호출이다. pane 별로 독립 폴링하면 같은 리포를 보는 pane 수만큼 API 호출과 프로세스가 배수로 늘고, GitHub rate limit 도 그만큼 빨리 닳는다.
+3. **목록에서 상태를 바꿀 수 있는가.** 이슈 close(completed / not planned), PR merge·close 는 GitHub 상태를 되돌리기 어렵게 바꾸는 조작이다. View 가 이런 조작의 실행 주체가 되어야 하는지, 된다면 어떤 안전장치가 필요한지 정해야 한다.
+
+범위는 데스크톱 View 하나와 그것을 받치는 Tauri command 두 개다. Remote UI 노출, Automation/MCP 엔드포인트, 이슈 생성(이미 `IssueReporterView` 가 담당), 검색·필터·페이지네이션은 비목표다.
+
+## Decision
+
+**GitHub 목록의 단일 진실원은 pane 이 아니라 `owner/repo` 키를 가진 백엔드 레지스트리다. View 는 sync group 에서 받은 CWD 로 리포를 식별하고, 그 레지스트리를 읽기만 한다.**
+
+- **리포 식별은 CWD 에서 파생한다.** `GitHubView` 는 CWD 를 받기만 하는 뷰다 — sync group CWD 를 수신(`cwdReceive`)하고, 스스로 전파하지는 않는다. CWD → `owner/repo` 변환은 기존 `git_watcher::resolve_github_base_from_working_dir` 단일 구현을 쓴다. GitHub `origin` 이 없으면 오류가 아니라 정상 표시 상태(`notAGithubRepo`)다.
+- **CWD 능력은 send/receive 로 분리한다.** 컨트롤 바는 이제 "CWD 를 쓰는 뷰"가 아니라 "보낼 수 있는 뷰 / 받을 수 있는 뷰"를 따로 판정한다. `GitHubView` 에는 receive 토글만 노출하고 send·1회 전파 버튼은 노출하지 않는다.
+- **캐시 소유자는 백엔드 레지스트리다.** 프로세스 전역 `owner/repo → 스냅샷` 레지스트리가 갱신 주기(10초)를 소유한다. 창 안의 어떤 pane 이 먼저 요청하든 그 주기 안에서는 `gh` 를 한 번만 실행하고, 나머지 pane·워크트리·워크스페이스는 같은 결과를 읽는다. 리포별 락을 조회 동안 잡아 동시 요청을 단일 실행으로 합친다(single-flight). 이 레지스트리는 `AppState` 를 건드리지 않으므로 `state.rs` 의 락 순서에 참여하지 않는다.
+- **조회는 `--repo owner/repo` 로 고정한다.** `gh` 를 CWD 상속으로 실행하지 않는다. 레지스트리 키와 실제 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스로 WSL 안에서 `gh` 를 돌리는 구성에서도 Windows 경로 문제 없이 동작한다.
+- **변경 조작은 열거된 4개뿐이다.** `issue.close`, `issue.closeNotPlanned`, `pr.merge`, `pr.close` 만 백엔드가 받아들이고, 문자열 파싱은 프로세스 기동 전에 끝난다. 프론트가 임의의 `gh` 인자를 백엔드로 흘릴 수 없다.
+- **되돌리기 어려운 조작은 2단계 확인을 거친다.** `⋯` 메뉴의 항목 클릭은 조작을 "장전"만 하고, 실제 `gh` 실행은 그다음 명시적 Confirm 클릭이다. 링크 복사는 사고로 눌러도 안전하므로 항상 노출한다.
+- **조작 성공은 해당 리포 캐시를 무효화한다.** 방금 닫은 이슈가 남은 갱신 주기 동안 목록에 남아 있지 않는다.
+
+## Alternatives Considered
+
+- **pane 별 독립 폴링(레지스트리 없음).** 구현은 가장 단순하지만 같은 리포를 보는 pane 수만큼 `gh` 프로세스와 API 호출이 늘어난다. issue #708 이 레지스트리를 명시적으로 요구한 이유이기도 하다.
+- **프론트엔드 캐시.** 창 하나 안에서는 동작하지만 캐시 소유자가 View 트리 수명에 묶인다. pane 을 닫았다 열면 캐시가 사라지고, 백엔드가 이미 갖고 있는 리포 해석(`git_watcher`)과 소유권이 갈라진다.
+- **`gh` 대신 GitHub REST/GraphQL 직접 호출.** 토큰 저장·갱신·스코프 관리를 laymux 가 떠안게 된다. `gh` 는 이미 인증되어 있고 `IssueReporterView` 도 같은 CLI 를 쓴다 — 인증 경로를 하나로 유지한다.
+- **`watch` 처럼 백엔드가 상시 폴링.** View 가 없어도 API 를 소모한다. 지금은 View 가 마운트된 동안에만 폴링하고, 레지스트리는 그 요청들을 합치는 역할만 한다.
+- **merge 전략 선택 UI(squash/rebase).** 첫 버전의 범위를 넘는다. `gh pr merge --merge` 로 고정하고, 리포 설정이 merge commit 을 막으면 `gh` 의 오류 메시지를 그대로 보여준다.
+- **확인 없는 즉시 실행.** 클릭 한 번으로 PR 이 머지된다. 목록 행은 밀집해 있어 오조작 비용이 너무 크다.
+
+## Consequences
+
+- 같은 리포를 보는 pane 이 몇 개든 `gh` 실행 횟수는 갱신 주기당 2회(이슈·PR 각 1회)로 유지된다. 반대로 서로 다른 리포를 보는 pane 이 많으면 비용은 리포 수에 비례한다 — 이 축은 의도적으로 제한하지 않았다.
+- 갱신 주기(10초)와 목록 상한(50건)은 코드 상수다. 사용자 설정으로 열지 않았으므로, 조정이 필요해지면 설정 스키마 확장이 후속 작업이 된다.
+- 레지스트리가 프로세스 전역이라 항목이 리포 수만큼 남는다. 항목 하나는 스냅샷 하나 크기이며 만료 후에도 제거되지 않는다 — 리포 수가 실사용에서 문제가 될 만큼 늘면 그때 정리 정책을 추가한다.
+- `gh` 미설치·미인증은 오류가 아니라 표시 상태로 내려온다. 프론트는 상태별 문구만 렌더하고, 실패 원인 분류(missing/unauthorized/failed)는 백엔드 stderr 분류에 단일화된다.
+- merge/close 를 laymux 가 실행하게 되면서, 이 View 는 읽기 전용 모니터가 아니라 GitHub 상태 변경 지점이 되었다. 이후 조작을 추가할 때는 열거형 확장 + 확인 단계 유지가 전제다.
+- 엔트리 청크가 크기 경고 한계에 근접해 있어 이 기능 모듈들은 별도 청크 그룹(`github-view`)으로 분리했다. 뷰를 확장할 때 같은 그룹에 모듈을 추가해야 엔트리가 다시 부풀지 않는다.
+- 재검토 조건: rate limit 에 걸리기 시작하거나, 여러 리포를 동시에 보는 사용이 일반화되어 갱신 주기·상한을 사용자별로 조정해야 할 때.

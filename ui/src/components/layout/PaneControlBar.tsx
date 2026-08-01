@@ -8,6 +8,7 @@ import type { ViewInstanceConfig, ViewType } from "@/stores/types";
 import { PaneControlContext, type PaneInputModeToggle } from "./PaneControlContext";
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
+import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
@@ -311,6 +312,7 @@ function ViewSelect({
           Codex: {dir}
         </option>
       ))}
+      <option value="GitHubView">GitHub</option>
       <option value="IssueReporterView">Issue Reporter</option>
     </select>
   );
@@ -377,7 +379,7 @@ function BarContent({
             />
           )}
 
-          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+          {supportsCwdSend(currentView.type) &&
             actions.onToggleCwdSend &&
             (() => {
               // Effective state must come from the caller (resolveSyncCwd + per-pane override).
@@ -419,7 +421,7 @@ function BarContent({
                 </>
               );
             })()}
-          {(currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
+          {supportsCwdReceive(currentView.type) &&
             actions.onToggleCwdReceive &&
             (() => {
               const isOn = cwdReceiveOn ?? false;
@@ -825,6 +827,7 @@ const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   CodexUsageView: "Codex Usage",
   IssueReporterView: "Issue Reporter",
   FileExplorerView: "File Explorer",
+  GitHubView: "GitHub",
 };
 
 // ─── Bar left section (view label) ──────────────────────
@@ -973,9 +976,7 @@ export function PaneControlBar({
   const hasBarLabel = currentView.type !== "TerminalView" && currentView.type !== "EmptyView";
 
   // 1회성 CWD 전파 버튼 (issue #293) — 좌측, pane 번호 배지 우측에 정렬 (issue #324).
-  const showPropagateCwd =
-    (currentView.type === "TerminalView" || currentView.type === "FileExplorerView") &&
-    actions.onPropagateCwdOnce != null;
+  const showPropagateCwd = supportsCwdSend(currentView.type) && actions.onPropagateCwdOnce != null;
   const leftPaneControls = useMemo(
     () =>
       showPropagateCwd && actions.onPropagateCwdOnce ? (

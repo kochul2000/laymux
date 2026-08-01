@@ -144,6 +144,23 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 각각 청록 `#58d1eb`, 주황 `#fd971f`, 회색 `#585858`이다. 이 색은 사용자가 Views → 사용량에서 바꾸는 표시 선호이며 앱 테마 토큰에 속하지 않는다. 따라서 테마 전환만으로는 바뀌지 않고, 사용자가 명시적으로 바꿀 때만 두 provider에 함께 적용된다.
 
+### GitHub 이슈/PR 목록 (GitHubView)
+
+`GitHubView` 는 pane 이 sync group 에서 **받은 CWD** 로 대상 리포를 정한다. CWD → `owner/repo` 변환은 `git_watcher::resolve_github_base_from_working_dir` 단일 구현을 쓰며, GitHub `origin` 이 없으면 오류가 아니라 `notAGithubRepo` 표시 상태다. 이 뷰는 CWD 를 받기만 하므로 컨트롤 바에 receive 토글만 노출된다 — send/1회 전파 노출 여부는 `lib/view-cwd-capability.ts` 의 `supportsCwdSend`/`supportsCwdReceive` 가 결정한다.
+
+Tauri command 는 두 개다([ADR-0105](../adr/0105-github-list-view-repo-registry.md)).
+
+| Command | 인자 | 반환 |
+|---|---|---|
+| `get_github_repo_snapshot` | `workingDir`, `force` | `{ status, repo, repoUrl, issues[], pulls[], fetchedAtMs }` |
+| `run_github_item_action` | `workingDir`, `action`, `number` | `Ok(())` 또는 `gh` 오류 메시지 |
+
+- **스냅샷 소유자는 `owner/repo` 키 레지스트리다.** 갱신 주기는 10초이며, 그 창 안의 요청은 리포별 락으로 합쳐져 `gh` 를 한 번만 실행한다. 같은 리포를 보는 pane 이 몇 개든 비용은 동일하다. 이 레지스트리는 `AppState` 를 건드리지 않아 `state.rs` 락 순서에 참여하지 않는다.
+- **조회는 항상 `gh {issue|pr} list --repo owner/repo --state open --limit 50 --json …`** 이다. CWD 상속으로 실행하지 않으므로 레지스트리 키와 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스(예: WSL)에서도 그대로 동작한다.
+- **`action` 은 `issue.close`, `issue.closeNotPlanned`, `pr.merge`, `pr.close` 만 허용**하며, 파싱 실패는 프로세스 기동 전에 거부된다. `pr.merge` 는 `--merge`(merge commit) 고정이다.
+- **성공한 조작은 해당 리포 캐시를 무효화**해 다음 폴링이 즉시 재조회한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
+- `gh` 미설치·미인증은 각각 `ghMissing`/`unauthorized` 상태로 내려오며, 그 외 실패는 `failed{message}` 로 `gh` stderr 를 그대로 전달한다.
+
 ### Direct Remote Mode 설정
 
 브라우저 원격 접속은 명시적 opt-in 설정이다. 기본값은 꺼짐이며, remote API는 Automation API/MCP의 IP allowlist와 별도 인증/Origin/IP 정책을 사용한다([ADR-0013](../adr/0013-direct-remote-mode.md)).
