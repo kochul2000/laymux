@@ -94,7 +94,13 @@ export function GitHubView({
   hideDraftPulls = false,
 }: GitHubViewProps) {
   const cwd = useSyncGroupCwd({ syncGroup, instanceId, cwdReceive });
-  const { snapshot, loading, refresh } = useGithubRepoSnapshot(cwd, refreshSeconds * 1000);
+  // A hand-edited settings.json can set refreshSeconds to 0 or negative,
+  // bypassing the settings UI's min=10 clamp; floor it so the poll interval
+  // never degenerates into a tight loop.
+  const { snapshot, loading, refresh } = useGithubRepoSnapshot(
+    cwd,
+    Math.max(1000, refreshSeconds * 1000),
+  );
   const [tab, setTab] = useState<Tab>(defaultTab);
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<{ number: number; action: MenuAction } | null>(null);
