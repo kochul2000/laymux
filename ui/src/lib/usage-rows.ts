@@ -13,6 +13,8 @@ import type { CodexUsageVisibleRow, UsageVisibleRow } from "@/stores/settings-st
 export interface UsageDisplayRow {
   key: string;
   label: string;
+  /** Short label used by one-line statusline rows. */
+  statuslineLabel?: string;
   abbreviatedLabel?: string;
   percent: number | null;
   reset: string | null;
@@ -52,6 +54,7 @@ export function buildClaudeUsageRows(
       row: {
         key: "session",
         label: "Current session",
+        statuslineLabel: "SS",
         abbreviatedLabel: "session",
         percent: snapshot.session.percent,
         reset: snapshot.session.reset,
@@ -63,6 +66,7 @@ export function buildClaudeUsageRows(
       row: {
         key: "week-all",
         label: "Current week (all models)",
+        statuslineLabel: "WK",
         abbreviatedLabel: "week (all)",
         percent: snapshot.weekAll.percent,
         reset: snapshot.weekAll.reset,
@@ -76,6 +80,7 @@ export function buildClaudeUsageRows(
         label: snapshot.weekModelLabel
           ? `Current week (${snapshot.weekModelLabel})`
           : "Current week (per model)",
+        statuslineLabel: "WF",
         abbreviatedLabel: snapshot.weekModelLabel ? `week (${snapshot.weekModelLabel})` : "week",
         percent: snapshot.weekModel.percent,
         reset: snapshot.weekModel.reset,
@@ -124,6 +129,7 @@ export function buildCodexUsageRows(
         row: {
           key: limit.key,
           label: spark ? "Spark Weekly limit" : "Weekly limit",
+          statuslineLabel: spark ? "WS" : "WK",
           abbreviatedLabel: spark ? "Spark" : "Weekly",
           percent: limit.usedPercent,
           reset: resetText(limit.resetsAtSecs),

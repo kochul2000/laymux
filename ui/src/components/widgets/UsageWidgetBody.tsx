@@ -177,7 +177,7 @@ export function UsageWidgetBody({
               />
             )}
             {display !== "bar" && (
-              <span data-testid={`${testId}-number-${row.key}`}>{percentText(row.percent)}</span>
+              <span data-testid={`${testId}-number-${row.key}`}>{statuslineText(row)}</span>
             )}
           </span>
         ))}
@@ -190,4 +190,9 @@ export function UsageWidgetBody({
 
 function percentText(percent: number | null): string {
   return percent == null ? USAGE_UNAVAILABLE_TEXT : `${percent}%`;
+}
+
+function statuslineText(row: UsageDisplayRow): string {
+  const percent = percentText(row.percent);
+  return row.statuslineLabel == null ? percent : `${row.statuslineLabel} ${percent}`;
 }
