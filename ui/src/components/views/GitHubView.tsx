@@ -21,6 +21,9 @@ export interface GitHubViewProps {
   cwdReceive?: boolean;
   workspaceId?: string;
   isFocused?: boolean;
+  defaultTab?: "issues" | "pulls";
+  refreshSeconds?: number;
+  hideDraftPulls?: boolean;
 }
 
 type Tab = "issues" | "pulls";
@@ -44,8 +47,18 @@ const ISSUE_ACTIONS: MenuAction[] = [
 
 const PULL_ACTIONS: MenuAction[] = [
   { action: "pr.merge", label: "Merge", confirmLabel: "Merge (merge commit)", danger: true },
-  { action: "pr.squash", label: "Squash and merge", confirmLabel: "Squash and merge", danger: true },
-  { action: "pr.rebase", label: "Rebase and merge", confirmLabel: "Rebase and merge", danger: true },
+  {
+    action: "pr.squash",
+    label: "Squash and merge",
+    confirmLabel: "Squash and merge",
+    danger: true,
+  },
+  {
+    action: "pr.rebase",
+    label: "Rebase and merge",
+    confirmLabel: "Rebase and merge",
+    danger: true,
+  },
   { action: "pr.close", label: "Close", confirmLabel: "Close" },
 ];
 
@@ -76,10 +89,13 @@ export function GitHubView({
   syncGroup,
   cwdReceive = true,
   isFocused,
+  defaultTab = "issues",
+  refreshSeconds = 10,
+  hideDraftPulls = false,
 }: GitHubViewProps) {
   const cwd = useSyncGroupCwd({ syncGroup, instanceId, cwdReceive });
-  const { snapshot, loading, refresh } = useGithubRepoSnapshot(cwd);
-  const [tab, setTab] = useState<Tab>("issues");
+  const { snapshot, loading, refresh } = useGithubRepoSnapshot(cwd, refreshSeconds * 1000);
+  const [tab, setTab] = useState<Tab>(defaultTab);
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<{ number: number; action: MenuAction } | null>(null);
   const [running, setRunning] = useState(false);
@@ -92,7 +108,12 @@ export function GitHubView({
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const items = tab === "issues" ? snapshot.issues : snapshot.pulls;
+  const items =
+    tab === "issues"
+      ? snapshot.issues
+      : hideDraftPulls
+        ? snapshot.pulls.filter((item) => !item.isDraft)
+        : snapshot.pulls;
   const actions = tab === "issues" ? ISSUE_ACTIONS : PULL_ACTIONS;
   // While the first read for a CWD is in flight the pane is neither empty nor
   // broken, so neither explanation is shown yet.
@@ -169,7 +190,12 @@ export function GitHubView({
         <div className="ml-2 flex min-w-0 flex-1 items-center gap-1">
           {(["issues", "pulls"] as Tab[]).map((key) => {
             const active = tab === key;
-            const count = key === "issues" ? snapshot.issues.length : snapshot.pulls.length;
+            const count =
+              key === "issues"
+                ? snapshot.issues.length
+                : hideDraftPulls
+                  ? snapshot.pulls.filter((item) => !item.isDraft).length
+                  : snapshot.pulls.length;
             return (
               <button
                 key={key}

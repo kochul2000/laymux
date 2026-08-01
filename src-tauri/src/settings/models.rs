@@ -1233,6 +1233,40 @@ impl Default for IssueReporterSettings {
     }
 }
 
+/// GitHub issues/pulls view settings.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSettings {
+    /// Tab shown when the view first mounts: "issues" or "pulls".
+    #[serde(default = "default_github_tab")]
+    pub default_tab: String,
+    /// Seconds between snapshot polls. The backend caches `gh` output for its
+    /// own refresh window, so values below that just re-read the cache.
+    #[serde(default = "default_github_refresh_seconds")]
+    pub refresh_seconds: u32,
+    /// Hide draft pull requests from the pulls tab.
+    #[serde(default)]
+    pub hide_draft_pulls: bool,
+}
+
+fn default_github_tab() -> String {
+    "issues".to_string()
+}
+
+fn default_github_refresh_seconds() -> u32 {
+    10
+}
+
+impl Default for GithubSettings {
+    fn default() -> Self {
+        Self {
+            default_tab: default_github_tab(),
+            refresh_seconds: default_github_refresh_seconds(),
+            hide_draft_pulls: false,
+        }
+    }
+}
+
 /// Paragraph copy feature settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1610,6 +1644,8 @@ pub struct Settings {
     #[serde(default)]
     pub file_explorer: FileExplorerSettings,
     #[serde(default)]
+    pub github: GithubSettings,
+    #[serde(default)]
     pub remote: RemoteSettings,
     /// Location-based CWD sync defaults. Opaque to backend — passed through to frontend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1703,6 +1739,7 @@ impl Default for Settings {
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),
+            github: GithubSettings::default(),
             remote: RemoteSettings::default(),
             sync_cwd_defaults: None,
             workspace_display_order: Vec::new(),

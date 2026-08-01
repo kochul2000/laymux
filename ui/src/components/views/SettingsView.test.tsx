@@ -185,6 +185,31 @@ describe("SettingsView", () => {
     );
   });
 
+  describe("GitHub section", () => {
+    it("shows defaults and saves edits to the store", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-github"));
+      expect(screen.getByTestId("github-default-tab")).toHaveValue("issues");
+      expect(screen.getByTestId("github-refresh-input")).toHaveValue(10);
+      expect(screen.getByTestId("github-hide-draft-pulls")).not.toBeChecked();
+
+      await user.selectOptions(screen.getByTestId("github-default-tab"), "pulls");
+      // user.clear() on the number input briefly yields "" which the onChange
+      // handler coerces back to the default 10; replace the value atomically.
+      fireEvent.change(screen.getByTestId("github-refresh-input"), { target: { value: "30" } });
+      await user.click(screen.getByTestId("github-hide-draft-pulls"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().github).toEqual({
+        defaultTab: "pulls",
+        refreshSeconds: 30,
+        hideDraftPulls: true,
+      });
+    });
+  });
+
   // -- Startup section (renamed from General) --
 
   it("displays Startup section", () => {

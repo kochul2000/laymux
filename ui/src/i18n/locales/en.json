@@ -80,6 +80,7 @@
       "memo": "Memo",
       "fileExplorer": "File Explorer",
       "issueReporter": "Issue Reporter",
+      "github": "GitHub",
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
       "deleteProfile": "Delete profile",
@@ -468,6 +469,18 @@
       "addRepository": "+ Add Repository",
       "padding": "Padding",
       "paddingDesc": "Inner padding of the issue reporter area (px)"
+    },
+    "github": {
+      "title": "GitHub",
+      "groupBehavior": "Behavior",
+      "defaultTab": "Default tab",
+      "defaultTabDesc": "Tab shown when the view first opens.",
+      "defaultTabIssues": "Issues",
+      "defaultTabPulls": "PRs",
+      "refreshSeconds": "Refresh interval",
+      "refreshSecondsDesc": "Seconds between issue/PR list polls. Below 10s just re-reads the server's own cache.",
+      "hideDraftPulls": "Hide draft PRs",
+      "hideDraftPullsDesc": "Exclude draft pull requests from the PRs tab's list and count."
     },
     "memo": {
       "title": "Memo",
