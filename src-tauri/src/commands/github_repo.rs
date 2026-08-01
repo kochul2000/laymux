@@ -433,6 +433,38 @@ fn cached(entry: &RepoEntry, force: bool) -> Result<Option<GithubRepoSnapshot>, 
     Ok(guard.snapshot.clone())
 }
 
+/// What the registry can hand a read before any `gh` run.
+#[derive(Debug)]
+enum CacheServe {
+    /// Answer with this snapshot. `revalidate` marks it as past the refresh
+    /// window: the last thing we knew, to be replaced in the background.
+    Serve {
+        snapshot: GithubRepoSnapshot,
+        revalidate: bool,
+    },
+    /// Nothing remembered for this repository — `gh` has to run first.
+    Fetch,
+}
+
+/// A stale snapshot beats an empty view: entering a workspace long after the
+/// refresh window closed used to leave the pane blank for as long as two `gh`
+/// calls took. The remembered list is served at once and the refresh happens
+/// behind it. An explicit user refresh still waits for the real answer.
+fn serve_from_cache(entry: &RepoEntry, force: bool) -> Result<CacheServe, String> {
+    if force {
+        return Ok(CacheServe::Fetch);
+    }
+    let guard = entry.cache.lock_or_err().map_err(|e| e.to_string())?;
+    let Some(snapshot) = guard.snapshot.clone() else {
+        return Ok(CacheServe::Fetch);
+    };
+    let revalidate = !is_fresh(guard.fetched_at, Instant::now());
+    Ok(CacheServe::Serve {
+        snapshot,
+        revalidate,
+    })
+}
+
 /// What a caller that lost the single-flight race is served: the stale
 /// snapshot if one exists, otherwise `Pending`. Never an empty `Ready`, which
 /// the view would render as "no open issues".
@@ -450,42 +482,49 @@ fn snapshot_for_contention(
     }))
 }
 
-fn snapshot_blocking(working_dir: String, force: bool) -> GithubRepoSnapshot {
-    let Some(repo) = resolve_repo(&working_dir) else {
-        return GithubRepoSnapshot::failed(None, None, GithubRepoStatus::NotAGithubRepo);
-    };
-    let failure = |message: String| {
-        GithubRepoSnapshot::failed(
-            Some(repo.slug.clone()),
-            Some(repo.url.clone()),
-            GithubRepoStatus::Failed { message },
-        )
-    };
-    let entry = match repo_entry(&repo.slug) {
-        Ok(entry) => entry,
-        Err(message) => return failure(message),
-    };
-    match cached(&entry, force) {
-        Ok(Some(snapshot)) => return snapshot,
-        Ok(None) => {}
-        Err(message) => return failure(message),
+fn failed_for(repo: &RepoRef, message: String) -> GithubRepoSnapshot {
+    GithubRepoSnapshot::failed(
+        Some(repo.slug.clone()),
+        Some(repo.url.clone()),
+        GithubRepoStatus::Failed { message },
+    )
+}
+
+/// A read's answer, plus the repository it left to be refreshed in the
+/// background when the answer was a remembered-but-stale snapshot.
+struct Served {
+    snapshot: GithubRepoSnapshot,
+    revalidate: Option<RepoRef>,
+}
+
+impl Served {
+    fn now(snapshot: GithubRepoSnapshot) -> Self {
+        Self {
+            snapshot,
+            revalidate: None,
+        }
     }
-    // Single-flight, but never a queue: the caller that wins the token runs
-    // `gh`, and everyone else returns at once. Blocking here instead would tie
-    // up one blocking worker per polling pane for as long as the network took,
-    // and a stalled `gh` would drain the pool the whole app shares.
+}
+
+/// Run `gh` for one repository and store the result.
+///
+/// Single-flight, but never a queue: the caller that wins the token runs `gh`,
+/// and everyone else returns at once. Blocking here instead would tie up one
+/// blocking worker per polling pane for as long as the network took, and a
+/// stalled `gh` would drain the pool the whole app shares.
+fn fetch_into_cache(entry: &RepoEntry, repo: &RepoRef, force: bool) -> GithubRepoSnapshot {
     let Ok(_token) = entry.fetch.try_lock() else {
-        return match snapshot_for_contention(&entry, &repo) {
+        return match snapshot_for_contention(entry, repo) {
             Ok(snapshot) => snapshot,
-            Err(message) => failure(message),
+            Err(message) => failed_for(repo, message),
         };
     };
     // The token may have been held by a run that finished moments ago, so the
     // window is re-checked before spending another `gh` invocation on it.
-    match cached(&entry, force) {
+    match cached(entry, force) {
         Ok(Some(snapshot)) => return snapshot,
         Ok(None) => {}
-        Err(message) => return failure(message),
+        Err(message) => return failed_for(repo, message),
     }
     let snapshot = fetch_snapshot(&repo.slug, &repo.url);
     match entry.cache.lock_or_err() {
@@ -493,26 +532,71 @@ fn snapshot_blocking(working_dir: String, force: bool) -> GithubRepoSnapshot {
             guard.snapshot = Some(snapshot.clone());
             guard.fetched_at = Some(Instant::now());
         }
-        Err(error) => return failure(error.to_string()),
+        Err(error) => return failed_for(repo, error.to_string()),
     }
     snapshot
+}
+
+fn serve_blocking(working_dir: String, force: bool) -> Served {
+    let Some(repo) = resolve_repo(&working_dir) else {
+        return Served::now(GithubRepoSnapshot::failed(
+            None,
+            None,
+            GithubRepoStatus::NotAGithubRepo,
+        ));
+    };
+    let entry = match repo_entry(&repo.slug) {
+        Ok(entry) => entry,
+        Err(message) => return Served::now(failed_for(&repo, message)),
+    };
+    match serve_from_cache(&entry, force) {
+        Ok(CacheServe::Serve {
+            snapshot,
+            revalidate,
+        }) => {
+            return Served {
+                snapshot,
+                revalidate: revalidate.then_some(repo),
+            }
+        }
+        Ok(CacheServe::Fetch) => {}
+        Err(message) => return Served::now(failed_for(&repo, message)),
+    }
+    Served::now(fetch_into_cache(&entry, &repo, force))
+}
+
+/// The background half of a stale read. The snapshot it produces is not
+/// returned anywhere — the next poll picks it up from the cache.
+fn revalidate_blocking(repo: RepoRef) {
+    let Ok(entry) = repo_entry(&repo.slug) else {
+        return;
+    };
+    fetch_into_cache(&entry, &repo, false);
 }
 
 /// Read the shared snapshot for the repository containing `working_dir`.
 /// `force` skips the refresh window for an explicit user refresh.
 #[tauri::command]
 pub async fn get_github_repo_snapshot(working_dir: String, force: bool) -> GithubRepoSnapshot {
-    tokio::task::spawn_blocking(move || snapshot_blocking(working_dir, force))
-        .await
-        .unwrap_or_else(|e| {
-            GithubRepoSnapshot::failed(
+    let served = match tokio::task::spawn_blocking(move || serve_blocking(working_dir, force)).await
+    {
+        Ok(served) => served,
+        Err(e) => {
+            return GithubRepoSnapshot::failed(
                 None,
                 None,
                 GithubRepoStatus::Failed {
                     message: format!("GitHub snapshot task failed: {e}"),
                 },
             )
-        })
+        }
+    };
+    if let Some(repo) = served.revalidate {
+        // The remembered list is already on its way to the view; the `gh` run
+        // that replaces it must not hold this reply back.
+        tokio::task::spawn_blocking(move || revalidate_blocking(repo));
+    }
+    served.snapshot
 }
 
 fn run_action_blocking(working_dir: String, action: String, number: u64) -> Result<(), String> {
@@ -695,9 +779,19 @@ mod tests {
     }
 
     fn store(entry: &RepoEntry, status: GithubRepoStatus) {
+        store_at(entry, status, Instant::now());
+    }
+
+    fn store_at(entry: &RepoEntry, status: GithubRepoStatus, at: Instant) {
         let mut guard = entry.cache.lock_or_err().unwrap();
         guard.snapshot = Some(GithubRepoSnapshot::failed(None, None, status));
-        guard.fetched_at = Some(Instant::now());
+        guard.fetched_at = Some(at);
+    }
+
+    fn stale_moment() -> Instant {
+        Instant::now()
+            .checked_sub(REFRESH_INTERVAL * 100)
+            .expect("monotonic clock")
     }
 
     fn repo_ref() -> RepoRef {
@@ -737,6 +831,57 @@ mod tests {
         store(&entry, GithubRepoStatus::Ready);
         assert!(cached(&entry, false).unwrap().is_some());
         assert!(cached(&entry, true).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_stale_snapshot_is_served_at_once_and_flagged_for_revalidation() {
+        let entry = repo_entry("owner/stale").unwrap();
+        store_at(&entry, GithubRepoStatus::Ready, stale_moment());
+
+        // The pane paints the last thing we knew instead of an empty list, and
+        // the caller is told to refresh it behind that paint.
+        let served = serve_from_cache(&entry, false).unwrap();
+        let CacheServe::Serve {
+            snapshot,
+            revalidate,
+        } = served
+        else {
+            panic!("a remembered snapshot must be served, not withheld");
+        };
+        assert!(matches!(snapshot.status, GithubRepoStatus::Ready));
+        assert!(revalidate);
+    }
+
+    #[test]
+    fn a_fresh_snapshot_is_served_without_scheduling_a_refresh() {
+        let entry = repo_entry("owner/still-fresh").unwrap();
+        store(&entry, GithubRepoStatus::Ready);
+
+        let CacheServe::Serve { revalidate, .. } = serve_from_cache(&entry, false).unwrap() else {
+            panic!("a fresh snapshot must be served");
+        };
+        assert!(!revalidate);
+    }
+
+    #[test]
+    fn a_repository_with_nothing_remembered_still_fetches_inline() {
+        let entry = repo_entry("owner/unknown-repo").unwrap();
+
+        assert!(matches!(
+            serve_from_cache(&entry, false).unwrap(),
+            CacheServe::Fetch
+        ));
+    }
+
+    #[test]
+    fn an_explicit_refresh_waits_for_gh_instead_of_serving_the_stale_list() {
+        let entry = repo_entry("owner/forced").unwrap();
+        store_at(&entry, GithubRepoStatus::Ready, stale_moment());
+
+        assert!(matches!(
+            serve_from_cache(&entry, true).unwrap(),
+            CacheServe::Fetch
+        ));
     }
 
     #[test]
