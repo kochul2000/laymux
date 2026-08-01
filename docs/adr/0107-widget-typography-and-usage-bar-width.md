@@ -1,6 +1,6 @@
 # 0107. 위젯 글꼴은 전역 표시 설정이, 사용량 막대 너비는 인스턴스 옵션이 소유한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-01
 - Source: 사용자 요구(설정 UI에서 위젯 글꼴·크기와 사용량 위젯 width 조정); `docs/architecture/api-contracts.md` §10 Settings·§15 UI 코드 설계 원칙; [ADR-0004](0004-settings-vs-ui-state-separation.md), [ADR-0032](0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0105](0105-widget-slots-and-status-line.md)
 - Extends: [ADR-0105](0105-widget-slots-and-status-line.md) — 위젯 공용 typography와 사용량 위젯의 가로 표현 옵션을 추가하되 슬롯 배치·접힘·원자성 계약은 유지한다.

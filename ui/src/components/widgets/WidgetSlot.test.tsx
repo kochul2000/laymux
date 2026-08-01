@@ -195,4 +195,19 @@ describe("WidgetSlot", () => {
       flexBasis: "66px",
     });
   });
+
+  it("keeps the maximum widget font inside the fixed-height bar", () => {
+    useSettingsStore.setState((state) => ({
+      widgets: { ...state.widgets, fontSize: 20 },
+    }));
+    render(
+      <WidgetSlot
+        slot={{ surface: "topBar", side: "left" }}
+        instances={[instance("w1", "notifications")]}
+      />,
+    );
+
+    expect(screen.getByTestId("widget-slot-topBar-left")).toHaveStyle({ fontSize: "20px" });
+    expect(screen.getByTestId("widget-notifications-w1")).toHaveStyle({ lineHeight: "1" });
+  });
 });
