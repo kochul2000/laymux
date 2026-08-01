@@ -264,7 +264,9 @@ fn build_gh_command(shell_prefix: &str) -> std::process::Command {
 }
 
 /// Build a `gh` CLI command that runs without a visible console window on Windows.
-fn gh_command(shell_prefix: &str) -> std::process::Command {
+/// Shared with `github_repo` so every `gh` call honours the same configured
+/// shell prefix (e.g. running gh inside WSL).
+pub(crate) fn gh_command(shell_prefix: &str) -> std::process::Command {
     build_gh_command(shell_prefix)
 }
 

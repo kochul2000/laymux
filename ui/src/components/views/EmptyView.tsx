@@ -183,6 +183,14 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
   });
 
   options.push({
+    key: "github",
+    label: "GitHub",
+    category: "tool",
+    config: { type: "GitHubView" },
+    testId: "empty-view-github",
+  });
+
+  options.push({
     key: "issue-reporter",
     label: "Report Issue",
     category: "tool",

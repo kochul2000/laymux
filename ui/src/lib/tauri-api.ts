@@ -565,6 +565,62 @@ export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageS
   return invoke("get_codex_usage_snapshot", { configDir });
 }
 
+// -- GitHub issue/PR list (issue #708) --
+
+export type GithubRepoStatus =
+  | { type: "ready" }
+  /** A read for this repo is already in flight and nothing is cached yet. */
+  | { type: "pending" }
+  | { type: "notAGithubRepo" }
+  | { type: "ghMissing" }
+  | { type: "unauthorized" }
+  | { type: "failed"; message: string };
+
+export interface GithubItem {
+  number: number;
+  title: string;
+  author: string;
+  url: string;
+  updatedAt: string;
+  labels: string[];
+  isDraft: boolean;
+}
+
+export interface GithubRepoSnapshot {
+  status: GithubRepoStatus;
+  /** `owner/repo`, or null when the working dir is not a GitHub repo. */
+  repo: string | null;
+  repoUrl: string | null;
+  issues: GithubItem[];
+  pulls: GithubItem[];
+  fetchedAtMs: number | null;
+}
+
+/** Every mutating action the GitHub view may ask the backend to run. */
+export type GithubItemAction = "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.close";
+
+/**
+ * Read the shared open issue/PR snapshot for the repository containing
+ * `workingDir`. The backend serves one repository's snapshot from a registry,
+ * so polling panes that watch the same repo do not each run `gh`.
+ * `force` skips that refresh window for an explicit user refresh.
+ */
+export async function getGithubRepoSnapshot(
+  workingDir: string,
+  force = false,
+): Promise<GithubRepoSnapshot> {
+  return invoke("get_github_repo_snapshot", { workingDir, force });
+}
+
+/** Close/merge one issue or PR through `gh`. Rejects with gh's message. */
+export async function runGithubItemAction(
+  workingDir: string,
+  action: GithubItemAction,
+  number: number,
+): Promise<void> {
+  return invoke("run_github_item_action", { workingDir, action, number });
+}
+
 /** Listen for fresh usage captures so the view need not poll. */
 export function onUsageSnapshotChanged(
   callback: (snapshot: UsageSnapshot) => void,

@@ -12,6 +12,7 @@ import { PaneGrid } from "./PaneGrid";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 import { getTerminalRestartCwd } from "@/lib/terminal-restart";
+import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 
 interface DockProps {
   position: DockPosition;
@@ -33,6 +34,7 @@ const viewIcons: Record<ViewType, string> = {
   UsageView: "\u25f4",
   CodexUsageView: "\u25f4",
   FileExplorerView: "\ud83d\udcc2",
+  GitHubView: "\u25c9",
   IssueReporterView: "!",
   EmptyView: "\u25cb",
 };
@@ -93,12 +95,14 @@ export function Dock({
   const singleViewRevealed =
     renderedViewType !== "TerminalView" ||
     (singlePaneId !== undefined && startupRevealedPaneIds.has(singlePaneId));
-  const hasSingleCwdView =
-    singleView?.type === "TerminalView" || singleView?.type === "FileExplorerView";
-  const singleCwdDefaults = hasSingleCwdView && singleView ? resolveCwdDefaults(singleView) : null;
-  const singleCwdSendOn = singleCwdDefaults
-    ? ((singleView?.cwdSend as boolean | undefined) ?? singleCwdDefaults.send)
-    : undefined;
+  const singleCanSendCwd = supportsCwdSend(singleView?.type);
+  const singleCanReceiveCwd = supportsCwdReceive(singleView?.type);
+  const singleCwdDefaults =
+    singleCanReceiveCwd && singleView ? resolveCwdDefaults(singleView) : null;
+  const singleCwdSendOn =
+    singleCwdDefaults && singleCanSendCwd
+      ? ((singleView?.cwdSend as boolean | undefined) ?? singleCwdDefaults.send)
+      : undefined;
   const singleCwdReceiveOn = singleCwdDefaults
     ? ((singleView?.cwdReceive as boolean | undefined) ?? singleCwdDefaults.receive)
     : undefined;
@@ -171,7 +175,7 @@ export function Dock({
                   }
                 : undefined,
             onToggleCwdSend:
-              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+              singlePaneId && onSetPaneView && singleCanSendCwd && singleCwdDefaults
                 ? () => {
                     const current =
                       (panes[0].view.cwdSend as boolean | undefined) ?? singleCwdDefaults.send;
@@ -179,7 +183,7 @@ export function Dock({
                   }
                 : undefined,
             onToggleCwdReceive:
-              singlePaneId && onSetPaneView && hasSingleCwdView && singleCwdDefaults
+              singlePaneId && onSetPaneView && singleCanReceiveCwd && singleCwdDefaults
                 ? () => {
                     const current =
                       (panes[0].view.cwdReceive as boolean | undefined) ??

@@ -1028,6 +1028,29 @@ describe("PaneControlBar", () => {
     );
   });
 
+  it("offers GitHubView the receive toggle only — it follows a CWD but never sends one", () => {
+    render(
+      <PaneControlBar
+        currentView={{ type: "GitHubView" as const }}
+        actions={{
+          ...defaultActions,
+          onToggleCwdSend: vi.fn(),
+          onToggleCwdReceive: vi.fn(),
+          onPropagateCwdOnce: vi.fn(),
+        }}
+        cwdReceiveOn={true}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.getByTestId("pane-control-cwd-receive").getAttribute("title")).toBe(
+      "CWD Receive (on)",
+    );
+    expect(screen.queryByTestId("pane-control-cwd-send")).toBeNull();
+    expect(screen.queryByTestId("pane-control-cwd-propagate-once")).toBeNull();
+  });
+
   it("displays CWD toggles for FileExplorerView too", () => {
     render(
       <PaneControlBar

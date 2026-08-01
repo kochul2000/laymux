@@ -12,6 +12,7 @@ import { MemoView } from "./MemoView";
 import { UsageView } from "./UsageView";
 import { CodexUsageView } from "./CodexUsageView";
 import { FileExplorerView } from "./FileExplorerView";
+import { GitHubView } from "./GitHubView";
 
 export interface ViewRendererProps {
   viewType: ViewType | null;
@@ -159,6 +160,57 @@ function FileExplorerViewWithSyncCwd({
   );
 }
 
+/**
+ * Wrapper that resolves the sync-cwd receive gate for GitHubView instances.
+ * The view only follows a CWD (it never propagates one), so the send half of
+ * the resolved defaults is not read here.
+ */
+function GitHubViewWithSyncCwd({
+  viewConfig,
+  workspaceId,
+  paneId,
+  isFocused,
+  location,
+}: {
+  viewConfig?: ViewInstanceConfig;
+  workspaceId?: string;
+  paneId?: string;
+  isFocused?: boolean;
+  location: TerminalLocation;
+}) {
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
+  const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
+  const fallbackId = useId();
+
+  const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
+  const effectiveSyncGroup = configSyncGroup || workspaceId || "";
+  const instanceId = getInstanceId("GitHubView", paneId || fallbackId);
+  const profileName = defaultProfile || FALLBACK_PROFILE;
+  const profileSyncCwd = useSettingsStore(
+    (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
+  );
+  const resolvedDefaults = resolveSyncCwd({
+    profileName,
+    location,
+    profileSyncCwd,
+    profileDefaultsSyncCwd,
+    syncCwdDefaults,
+  });
+  const cwdReceive = (viewConfig?.cwdReceive as boolean | undefined) ?? resolvedDefaults.receive;
+
+  return (
+    <GitHubView
+      instanceId={instanceId}
+      paneId={paneId}
+      syncGroup={effectiveSyncGroup}
+      cwdReceive={cwdReceive}
+      workspaceId={workspaceId}
+      isFocused={isFocused}
+    />
+  );
+}
+
 /** Wrapper that grabs DOM focus for views that don't manage it themselves. */
 function FocusableView({
   isFocused,
@@ -266,6 +318,18 @@ export function ViewRenderer({
       return (
         <div data-testid="view-file-explorer" className="h-full">
           <FileExplorerViewWithSyncCwd
+            viewConfig={viewConfig}
+            workspaceId={workspaceId}
+            paneId={paneId}
+            isFocused={isFocused}
+            location={location}
+          />
+        </div>
+      );
+    case "GitHubView":
+      return (
+        <div data-testid="view-github-wrapper" className="h-full">
+          <GitHubViewWithSyncCwd
             viewConfig={viewConfig}
             workspaceId={workspaceId}
             paneId={paneId}

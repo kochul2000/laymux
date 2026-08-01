@@ -128,6 +128,12 @@ export const TAURI_MOCK_SCRIPT = `
         case 'get_sync_group_terminals':
           return Promise.resolve([]);
 
+        // A CWD event reaches every mounted FileExplorerView, which then lists
+        // the new directory. Without a listing shaped like the real one it
+        // renders against null and takes the whole app down with it.
+        case 'list_directory':
+          return Promise.resolve([]);
+
         case 'handle_ide_message':
           return Promise.resolve({ success: true, data: null, error: null });
 
@@ -139,6 +145,33 @@ export const TAURI_MOCK_SCRIPT = `
 
         case 'get_git_branch':
           return Promise.resolve('main');
+
+        // Enough rows that the list scrolls inside a pane, which is what makes
+        // the row menu's placement observable at all.
+        case 'get_github_repo_snapshot':
+          var issues = [];
+          for (var n = 1; n <= 30; n++) {
+            issues.push({
+              number: n,
+              title: 'Issue number ' + n,
+              author: 'kochul2000',
+              url: 'https://github.com/owner/repo/issues/' + n,
+              updatedAt: '2026-08-01T00:00:00Z',
+              labels: [],
+              isDraft: false,
+            });
+          }
+          return Promise.resolve({
+            status: { type: 'ready' },
+            repo: 'owner/repo',
+            repoUrl: 'https://github.com/owner/repo',
+            issues: issues,
+            pulls: [],
+            fetchedAtMs: 1,
+          });
+
+        case 'run_github_item_action':
+          return Promise.resolve(undefined);
 
         case 'get_automation_info':
           return Promise.resolve({ port: 19280, key: 'mock-key' });

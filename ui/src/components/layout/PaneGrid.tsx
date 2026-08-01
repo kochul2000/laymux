@@ -10,6 +10,7 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useSettingsStore } from "@/stores/settings-store";
 import { computePaneNumbers } from "@/lib/pane-numbers";
 import { propagateCwdOnceForPane } from "@/lib/propagate-cwd-once";
+import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
@@ -190,16 +191,17 @@ export function PaneGrid({
         const focused = isFocused(pane.id);
         const isHovered = hover.hoveredId === pane.id || (isHoveredOverride?.(pane.id) ?? false);
 
-        const hasCwdView =
-          pane.view.type === "TerminalView" || pane.view.type === "FileExplorerView";
+        const canSendCwd = supportsCwdSend(pane.view.type);
+        const canReceiveCwd = supportsCwdReceive(pane.view.type);
 
         // Effective CWD send/receive: per-pane override beats getCwdDefaults cascade.
         // This is the same precedence the backend applies via ViewRenderer → resolveSyncCwd,
         // so the indicator and the actual propagation stay in sync.
-        const cwdDefaults = hasCwdView && getCwdDefaults ? getCwdDefaults(pane.view) : null;
-        const cwdSendOn = cwdDefaults
-          ? ((pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send)
-          : undefined;
+        const cwdDefaults = canReceiveCwd && getCwdDefaults ? getCwdDefaults(pane.view) : null;
+        const cwdSendOn =
+          cwdDefaults && canSendCwd
+            ? ((pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send)
+            : undefined;
         const cwdReceiveOn = cwdDefaults
           ? ((pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive)
           : undefined;
@@ -272,7 +274,7 @@ export function PaneGrid({
                 onDelete:
                   panes.length > 1 && onRemovePane ? () => onRemovePane(pane.id) : undefined,
                 onToggleCwdSend:
-                  hasCwdView && onSetPaneView && cwdDefaults
+                  canSendCwd && onSetPaneView && cwdDefaults
                     ? () => {
                         const current =
                           (pane.view.cwdSend as boolean | undefined) ?? cwdDefaults.send;
@@ -280,7 +282,7 @@ export function PaneGrid({
                       }
                     : undefined,
                 onToggleCwdReceive:
-                  hasCwdView && onSetPaneView && cwdDefaults
+                  canReceiveCwd && onSetPaneView && cwdDefaults
                     ? () => {
                         const current =
                           (pane.view.cwdReceive as boolean | undefined) ?? cwdDefaults.receive;
@@ -289,7 +291,7 @@ export function PaneGrid({
                     : undefined,
                 // 1회성 CWD 전파 (issue #293). 디스패치 로직은 키바인딩
                 // (`pane.propagateCwdOnce`, issue #324)과 공유하는 propagate-cwd-once 헬퍼에 있다.
-                onPropagateCwdOnce: hasCwdView
+                onPropagateCwdOnce: canSendCwd
                   ? () => {
                       propagateCwdOnceForPane(pane);
                     }
