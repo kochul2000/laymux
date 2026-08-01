@@ -38,6 +38,7 @@ export function CodexUsageView({
       refreshTitle="Read Codex rate limits now"
       paneId={paneId}
       fontFamily={fontFamily}
+      colors={usage.colors}
     />
   );
 }

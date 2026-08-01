@@ -824,8 +824,6 @@ pub struct UsageSettings {
     pub claude: UsageAgentSettings,
     #[serde(default = "default_codex_usage_settings")]
     pub codex: UsageAgentSettings,
-    #[serde(default)]
-    pub colors: UsageColorSettings,
 }
 
 impl Default for UsageSettings {
@@ -833,16 +831,21 @@ impl Default for UsageSettings {
         Self {
             claude: UsageAgentSettings::default(),
             codex: default_codex_usage_settings(),
-            colors: UsageColorSettings::default(),
         }
     }
 }
 
-/// Shared colors for all provider usage meters.
+/// Meter colors for one provider.
+///
+/// Owned per agent rather than globally: two providers shown side by side on the
+/// same status line are only telling apart by colour, so a shared palette makes
+/// the surface unreadable.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageColorSettings {
-    #[serde(default = "default_usage_used_color")]
+    /// Falls back to Claude's colour when a hand-edited file omits it; the agent
+    /// defaults above are what actually seed a fresh install.
+    #[serde(default = "default_claude_used_color")]
     pub used: String,
     #[serde(default = "default_usage_pace_color")]
     pub pace: String,
@@ -850,23 +853,38 @@ pub struct UsageColorSettings {
     pub track: String,
 }
 
-fn default_usage_used_color() -> String {
-    "#58d1eb".into()
+/// Claude's brand orange — the same colour the workspace selector marks a
+/// Claude pane with, so one agent reads the same everywhere in the app.
+fn default_claude_used_color() -> String {
+    "#d97757".into()
 }
+/// Codex's brand green, for the same reason.
+fn default_codex_used_color() -> String {
+    "#10a37f".into()
+}
+/// Elapsed time is provider-neutral, so it keeps one colour across agents —
+/// yellow, far enough from both brand colours to never be mistaken for the
+/// consumption bar sitting directly above it.
 fn default_usage_pace_color() -> String {
-    "#fd971f".into()
+    "#f9e2af".into()
 }
 fn default_usage_track_color() -> String {
     "#585858".into()
 }
 
-impl Default for UsageColorSettings {
-    fn default() -> Self {
+impl UsageColorSettings {
+    fn for_agent(used: String) -> Self {
         Self {
-            used: default_usage_used_color(),
+            used,
             pace: default_usage_pace_color(),
             track: default_usage_track_color(),
         }
+    }
+}
+
+impl Default for UsageColorSettings {
+    fn default() -> Self {
+        Self::for_agent(default_claude_used_color())
     }
 }
 
@@ -889,6 +907,9 @@ pub struct UsageAgentSettings {
     /// least one selected and falls back to all rows for malformed input.
     #[serde(default = "default_usage_visible_rows")]
     pub visible_rows: Vec<String>,
+    /// Meter colors for this agent's views and widgets.
+    #[serde(default)]
+    pub colors: UsageColorSettings,
 }
 
 fn default_usage_refresh_seconds() -> u64 {
@@ -905,6 +926,7 @@ fn default_codex_usage_settings() -> UsageAgentSettings {
         refresh_seconds: default_usage_refresh_seconds(),
         config_dirs: Vec::new(),
         visible_rows: vec!["weekly".into(), "sparkWeekly".into()],
+        colors: UsageColorSettings::for_agent(default_codex_used_color()),
     }
 }
 
@@ -915,6 +937,7 @@ impl Default for UsageAgentSettings {
             refresh_seconds: default_usage_refresh_seconds(),
             config_dirs: Vec::new(),
             visible_rows: default_usage_visible_rows(),
+            colors: UsageColorSettings::default(),
         }
     }
 }

@@ -47,3 +47,28 @@ export function readTerminalActivityScope(options: Record<string, unknown>): Ter
  * it then clips in half (ADR-0105).
  */
 export const CWD_WIDGET_WIDTH = 200;
+
+/**
+ * Bar thickness, in px, owned per widget instance.
+ *
+ * Two placements of the same account are read at different distances — a status
+ * line glance and a top bar glance are not the same look — so thickness belongs
+ * to the placement, not to a global usage setting.
+ */
+export const USAGE_BAR_HEIGHT_MIN = 1;
+export const USAGE_BAR_HEIGHT_MAX = 10;
+export const DEFAULT_USED_BAR_HEIGHT = 4;
+export const DEFAULT_ELAPSED_BAR_HEIGHT = 2;
+
+function readHeight(value: unknown, fallback: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.max(USAGE_BAR_HEIGHT_MIN, Math.min(USAGE_BAR_HEIGHT_MAX, Math.round(value)));
+}
+
+export function readBarHeight(options: Record<string, unknown>): number {
+  return readHeight(options.barHeight, DEFAULT_USED_BAR_HEIGHT);
+}
+
+export function readElapsedHeight(options: Record<string, unknown>): number {
+  return readHeight(options.elapsedHeight, DEFAULT_ELAPSED_BAR_HEIGHT);
+}

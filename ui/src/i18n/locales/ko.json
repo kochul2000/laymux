@@ -541,7 +541,9 @@
       "option": {
         "configDir": "계정 config dir",
         "display": "표시 방식",
-        "scope": "집계 범위"
+        "scope": "집계 범위",
+        "barHeight": "사용량 막대 두께",
+        "elapsedHeight": "경과 막대 두께"
       },
       "value": {
         "display": {
@@ -553,7 +555,10 @@
           "workspace": "현재 워크스페이스",
           "all": "전체"
         }
-      }
+      },
+      "previewTopBar": "상단 바",
+      "previewStatusLine": "Status line",
+      "selectHint": "위젯을 고르면 상세 설정이 여기 나온다."
     },
     "usage": {
       "title": "사용량 모니터",

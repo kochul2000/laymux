@@ -7,25 +7,85 @@
  * exists to prevent.
  */
 
-import { useSettingsStore } from "@/stores/settings-store";
 import type { UsageDisplayRow } from "@/lib/usage-rows";
+import type { UsageColorSettings } from "@/stores/settings-store";
 import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
 import type { UsageWidgetDisplay } from "./widget-options";
 
-function Bar({ percent, testId }: { percent: number | null; testId: string }) {
-  const colors = useSettingsStore((s) => s.usage.colors);
+type UsageMeterColors = UsageColorSettings;
+
+const METER_WIDTH = 26;
+
+function Track({
+  percent,
+  color,
+  track,
+  height,
+  testId,
+}: {
+  percent: number | null;
+  color: string;
+  track: string;
+  height: number;
+  testId: string;
+}) {
   const width = percent == null ? 0 : Math.max(0, Math.min(100, percent));
   return (
     <span
       data-testid={testId}
-      className="inline-block overflow-hidden align-middle"
-      style={{ width: 26, height: 4, background: colors.track, borderRadius: 2 }}
+      className="block overflow-hidden"
+      style={{ width: METER_WIDTH, height, background: track }}
     >
-      <span
-        className="block"
-        style={{ width: `${width}%`, height: "100%", background: colors.used }}
+      <span className="block" style={{ width: `${width}%`, height: "100%", background: color }} />
+    </span>
+  );
+}
+
+/**
+ * Consumed over elapsed, the same pairing `UsageView` draws.
+ *
+ * The second bar is what makes the first one readable: 40% used means one thing
+ * a tenth of the way into a window and another thing nine tenths in. Showing
+ * consumption without the clock invites exactly that misreading, so the two
+ * stack together and the elapsed bar is omitted only when the provider gave no
+ * window to derive it from.
+ */
+function Bar({
+  percent,
+  elapsed,
+  usedHeight,
+  elapsedHeight,
+  colors,
+  testId,
+  paceTestId,
+}: {
+  percent: number | null;
+  elapsed: number | null;
+  usedHeight: number;
+  elapsedHeight: number;
+  colors: UsageMeterColors;
+  testId: string;
+  paceTestId: string;
+}) {
+  return (
+    <span className="inline-flex flex-col justify-center gap-0.5 align-middle">
+      <Track
+        percent={percent}
+        color={colors.used}
+        track={colors.track}
+        height={usedHeight}
+        testId={testId}
       />
+      {elapsed != null && (
+        <Track
+          percent={elapsed}
+          color={colors.pace}
+          track={colors.track}
+          height={elapsedHeight}
+          testId={paceTestId}
+        />
+      )}
     </span>
   );
 }
@@ -39,6 +99,9 @@ export function UsageWidgetBody({
   capturedAtMs,
   configDir,
   dragRegion,
+  colors,
+  usedHeight,
+  elapsedHeight,
 }: {
   testId: string;
   /** Short provider name, e.g. `Claude`. */
@@ -50,6 +113,10 @@ export function UsageWidgetBody({
   capturedAtMs: number | null;
   configDir?: string;
   dragRegion?: boolean;
+  /** The agent's own palette — providers are told apart by colour. */
+  colors: UsageMeterColors;
+  usedHeight: number;
+  elapsedHeight: number;
 }) {
   const usable = message === null;
   const capturedLabel =
@@ -59,7 +126,16 @@ export function UsageWidgetBody({
 
   const title = [
     configDir ? `${label} (${configDir})` : label,
-    message ?? rows.map((row) => `${row.label}: ${percentText(row.percent)}`).join("\n"),
+    // Both numbers, because the two stacked bars are too small to read a gap
+    // between consumption and elapsed time off the pixels alone.
+    message ??
+      rows
+        .map(
+          (row) =>
+            `${row.label}: ${percentText(row.percent)}` +
+            (row.elapsed == null ? "" : ` · ${row.elapsed}% elapsed`),
+        )
+        .join("\n"),
     ...rows.filter((row) => row.reset).map((row) => `${row.label} resets ${row.reset}`),
     `Updated ${capturedLabel}`,
   ]
@@ -80,7 +156,15 @@ export function UsageWidgetBody({
         rows.map((row) => (
           <span key={row.key} className="flex items-center gap-1">
             {display !== "number" && (
-              <Bar percent={row.percent} testId={`${testId}-bar-${row.key}`} />
+              <Bar
+                percent={row.percent}
+                elapsed={row.elapsed}
+                usedHeight={usedHeight}
+                elapsedHeight={elapsedHeight}
+                colors={colors}
+                testId={`${testId}-bar-${row.key}`}
+                paceTestId={`${testId}-pace-${row.key}`}
+              />
             )}
             {display !== "bar" && (
               <span data-testid={`${testId}-number-${row.key}`}>{percentText(row.percent)}</span>

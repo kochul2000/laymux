@@ -4,7 +4,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { buildClaudeUsageRows, selectVisibleRows } from "@/lib/usage-rows";
 import { claudeUsageStatusMessage } from "@/lib/usage-status";
 import { UsageWidgetBody } from "./UsageWidgetBody";
-import { readDisplay } from "./widget-options";
+import { readBarHeight, readDisplay, readElapsedHeight } from "./widget-options";
 import type { WidgetComponentProps } from "./types";
 
 const TICK_MS = 30_000;
@@ -22,6 +22,7 @@ export function ClaudeUsageWidget({ instance, dragRegion }: WidgetComponentProps
   const now = useNowTick(TICK_MS);
   const { snapshot, error } = useUsageSnapshot(`widget-${instance.id}`, configDir);
   const visibleRows = useSettingsStore((s) => s.usage.claude.visibleRows);
+  const colors = useSettingsStore((s) => s.usage.claude.colors);
   const rows = useMemo(
     () => selectVisibleRows(buildClaudeUsageRows(snapshot, now), visibleRows),
     [snapshot, now, visibleRows],
@@ -33,6 +34,9 @@ export function ClaudeUsageWidget({ instance, dragRegion }: WidgetComponentProps
       label="Claude"
       rows={rows}
       display={readDisplay(instance.options)}
+      colors={colors}
+      usedHeight={readBarHeight(instance.options)}
+      elapsedHeight={readElapsedHeight(instance.options)}
       message={error ?? claudeUsageStatusMessage(snapshot.status)}
       capturedAtMs={snapshot.capturedAtMs}
       configDir={configDir}

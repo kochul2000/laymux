@@ -7,17 +7,17 @@ import { defaultWidgets, type WidgetsSettings } from "@/lib/widget-placement";
 
 function setup(initial: WidgetsSettings = defaultWidgets()) {
   const onChange = vi.fn();
-  render(
+  const view = render(
     <WidgetsSectionBody widgets={initial} onChange={onChange} claudeConfigDirs={["", "/alt"]} />,
   );
-  return onChange;
+  return { onChange, view };
 }
 
 const placed = (): WidgetsSettings => ({
   ...defaultWidgets(),
   topBar: {
     left: [
-      { id: "w1", type: "claudeUsage", options: { display: "both", configDir: "" } },
+      { id: "w1", type: "claudeUsage", options: { display: "both", configDir: "", barHeight: 4 } },
       { id: "w2", type: "cwd", options: {} },
     ],
     right: [],
@@ -32,22 +32,70 @@ describe("WidgetsSectionBody", () => {
     }
   });
 
-  it("adds a widget with its default options", async () => {
+  it("previews both surfaces with the real widgets", () => {
+    // A mock preview would drift from the bar it depicts.
+    setup(placed());
+    expect(screen.getByTestId("widgets-preview-topBar")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-preview-statusLine")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-preview-item-w2")).toBeInTheDocument();
+    expect(screen.getByTestId("widget-cwd-w2")).toBeInTheDocument();
+  });
+
+  it("shows no options until a widget is picked", () => {
+    setup(placed());
+    expect(screen.getByTestId("widgets-select-hint")).toBeInTheDocument();
+    expect(screen.queryByTestId("widgets-detail-w1")).not.toBeInTheDocument();
+  });
+
+  it("opens the detail panel for the widget picked in the list", async () => {
     const user = userEvent.setup();
-    const onChange = setup();
+    setup(placed());
+
+    await user.click(screen.getByTestId("widgets-chip-w1"));
+
+    expect(screen.getByTestId("widgets-detail-w1")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-option-w1-display")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-option-w1-barHeight")).toBeInTheDocument();
+    // Only the picked one.
+    expect(screen.queryByTestId("widgets-detail-w2")).not.toBeInTheDocument();
+  });
+
+  it("opens the detail panel for the widget picked in the preview", async () => {
+    const user = userEvent.setup();
+    setup(placed());
+
+    await user.click(screen.getByTestId("widgets-preview-item-w2"));
+
+    expect(screen.getByTestId("widgets-detail-w2")).toBeInTheDocument();
+  });
+
+  it("adds a widget with its default options and selects it", async () => {
+    const user = userEvent.setup();
+    const { onChange, view } = setup();
 
     await user.selectOptions(screen.getByTestId("widgets-add-topBar.left"), "codexUsage");
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
     expect(next.topBar.left).toHaveLength(1);
     expect(next.topBar.left[0].type).toBe("codexUsage");
-    expect(next.topBar.left[0].options).toEqual({ display: "both" });
+    expect(next.topBar.left[0].options).toEqual({
+      display: "both",
+      barHeight: 4,
+      elapsedHeight: 2,
+    });
+
+    // The next thing wanted is its options, so it opens straight away.
+    view.rerender(
+      <WidgetsSectionBody widgets={next} onChange={onChange} claudeConfigDirs={[""]} />,
+    );
+    expect(screen.getByTestId(`widgets-detail-${next.topBar.left[0].id}`)).toBeInTheDocument();
   });
 
-  it("reorders within a slot", async () => {
+  it("reorders within a slot from the detail panel", async () => {
     const user = userEvent.setup();
-    const onChange = setup(placed());
+    const { onChange } = setup(placed());
 
+    await user.click(screen.getByTestId("widgets-chip-w1"));
     await user.click(screen.getByTestId("widgets-down-w1"));
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
@@ -56,8 +104,9 @@ describe("WidgetsSectionBody", () => {
 
   it("moves a widget to another slot keeping its id", async () => {
     const user = userEvent.setup();
-    const onChange = setup(placed());
+    const { onChange } = setup(placed());
 
+    await user.click(screen.getByTestId("widgets-chip-w1"));
     await user.selectOptions(screen.getByTestId("widgets-move-w1"), "statusLine.right");
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
@@ -67,22 +116,42 @@ describe("WidgetsSectionBody", () => {
 
   it("edits an option without touching the others", async () => {
     const user = userEvent.setup();
-    const onChange = setup(placed());
+    const { onChange } = setup(placed());
 
+    await user.click(screen.getByTestId("widgets-chip-w1"));
     await user.selectOptions(screen.getByTestId("widgets-option-w1-display"), "bar");
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
-    expect(next.topBar.left[0].options).toEqual({ display: "bar", configDir: "" });
+    expect(next.topBar.left[0].options).toEqual({ display: "bar", configDir: "", barHeight: 4 });
   });
 
-  it("removes a widget", async () => {
+  it("clamps a bar thickness typed outside the allowed range", async () => {
     const user = userEvent.setup();
-    const onChange = setup(placed());
+    const { onChange } = setup(placed());
 
+    await user.click(screen.getByTestId("widgets-chip-w1"));
+    await user.clear(screen.getByTestId("widgets-option-w1-barHeight"));
+    await user.type(screen.getByTestId("widgets-option-w1-barHeight"), "40");
+
+    const last = onChange.mock.calls.at(-1)?.[0] as WidgetsSettings;
+    expect(last.topBar.left[0].options.barHeight).toBe(10);
+  });
+
+  it("removes a widget and closes its detail panel", async () => {
+    const user = userEvent.setup();
+    const { onChange, view } = setup(placed());
+
+    await user.click(screen.getByTestId("widgets-chip-w2"));
     await user.click(screen.getByTestId("widgets-remove-w2"));
 
     const next = onChange.mock.calls[0][0] as WidgetsSettings;
     expect(next.topBar.left.map((w) => w.id)).toEqual(["w1"]);
+
+    view.rerender(
+      <WidgetsSectionBody widgets={next} onChange={onChange} claudeConfigDirs={[""]} />,
+    );
+    expect(screen.queryByTestId("widgets-detail-w2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("widgets-select-hint")).toBeInTheDocument();
   });
 
   it("toggles the status line without discarding what is placed on it", async () => {
@@ -91,7 +160,7 @@ describe("WidgetsSectionBody", () => {
       ...defaultWidgets(),
       statusLine: { enabled: false, left: [{ id: "w9", type: "cwd", options: {} }], right: [] },
     };
-    const onChange = setup(withStatusLine);
+    const { onChange } = setup(withStatusLine);
 
     await user.click(screen.getByTestId("widgets-status-line-toggle"));
 
@@ -106,7 +175,6 @@ describe("WidgetsSectionBody", () => {
       ...defaultWidgets(),
       topBar: { left: [{ id: "w1", type: "fromTheFuture", options: {} }], right: [] },
     });
-    expect(screen.getByTestId("widgets-row-w1")).toBeInTheDocument();
-    expect(screen.getByTestId("widgets-remove-w1")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-chip-w1")).toBeInTheDocument();
   });
 });

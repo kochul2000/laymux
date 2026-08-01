@@ -271,9 +271,15 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
           refreshSeconds: 900,
           configDirs: ["/alt"],
           visibleRows: ["session"],
+          colors: { used: "#111111", pace: "#222222", track: "#333333" },
         },
-        codex: { profile: "", refreshSeconds: 600, configDirs: [], visibleRows: ["weekly"] },
-        colors: { used: "#111111", pace: "#222222", track: "#333333" },
+        codex: {
+          profile: "",
+          refreshSeconds: 600,
+          configDirs: [],
+          visibleRows: ["weekly"],
+          colors: { used: "#444444", pace: "#555555", track: "#666666" },
+        },
       },
       widgets: {
         topBar: { left: [{ id: "w1", type: "cwd", options: {} }], right: [] },
@@ -288,7 +294,8 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(written.usage.claude.profile).toBe("WSL");
     expect(written.usage.claude.configDirs).toEqual(["/alt"]);
     expect(written.usage.claude.visibleRows).toEqual(["session"]);
-    expect(written.usage.colors.used).toBe("#111111");
+    expect(written.usage.claude.colors.used).toBe("#111111");
+    expect(written.usage.codex.colors.used).toBe("#444444");
     expect(written.widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
     expect(written.widgets.statusLine.enabled).toBe(true);
   });

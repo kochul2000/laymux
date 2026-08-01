@@ -844,3 +844,53 @@ fn empty_widget_id_is_rejected() {
         .iter()
         .any(|issue| issue.code == "invalid_value" && issue.path == "/widgets/topBar/left/0/id"));
 }
+
+#[test]
+fn usage_colors_are_owned_per_agent() {
+    // Two providers on one status line are told apart by colour, so one agent's
+    // palette must never follow the other's.
+    let defaults = Settings::default();
+    assert_eq!(defaults.usage.claude.colors.used, "#d97757");
+    assert_eq!(defaults.usage.codex.colors.used, "#10a37f");
+    assert_eq!(defaults.usage.claude.colors.pace, defaults.usage.codex.colors.pace);
+
+    let prepared = prepare_settings_update(
+        &defaults,
+        &json!({ "usage": { "codex": { "colors": { "used": "#112233" } } } }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    assert_eq!(candidate.usage.codex.colors.used, "#112233");
+    assert_eq!(candidate.usage.claude.colors.used, "#d97757");
+}
+
+#[test]
+fn usage_widget_bar_thickness_is_bounded() {
+    let too_thick = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "w1", "type": "claudeUsage", "options": { "barHeight": 99 } }])),
+    );
+    assert!(!too_thick.valid);
+    assert!(too_thick.errors.iter().any(|issue| {
+        issue.code == "out_of_range" && issue.path == "/widgets/topBar/left/0/options/barHeight"
+    }));
+
+    let not_a_number = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "codexUsage", "options": { "elapsedHeight": "thin" } }]),
+        ),
+    );
+    assert!(!not_a_number.valid);
+    assert!(not_a_number.errors.iter().any(|issue| {
+        issue.code == "type_error" && issue.path == "/widgets/topBar/left/0/options/elapsedHeight"
+    }));
+
+    let ok = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "claudeUsage", "options": { "barHeight": 6, "elapsedHeight": 1 } }]),
+        ),
+    );
+    assert!(ok.valid, "errors: {:?}", ok.errors);
+}

@@ -35,7 +35,6 @@ export function WidgetChrome({
     fontSize: "var(--fs-2xs)",
     background: "transparent",
     border: "none",
-    borderRadius: "var(--radius-sm)",
   } as const;
 
   if (!onClick) {

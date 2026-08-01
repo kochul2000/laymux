@@ -113,18 +113,15 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
       "profile": "", // claude 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
       "refreshSeconds": 600, // 조회 간격. 600 미만은 적용되지 않는다
       "configDirs": [], // 추가로 모니터링할 CLAUDE_CONFIG_DIR 목록 (기본 config dir 은 항상 포함)
-      "visibleRows": ["session", "weekAll", "weekModel"] // 모든 UsageView에 표시할 한도 행. 하나 이상 필수
+      "visibleRows": ["session", "weekAll", "weekModel"], // 모든 UsageView에 표시할 한도 행. 하나 이상 필수
+      "colors": { "used": "#d97757", "pace": "#f9e2af", "track": "#585858" }
     },
     "codex": {
       "profile": "", // Codex UsageView의 terminal font profile. 빈 값이면 defaultProfile
       "refreshSeconds": 600, // 로컬 app-server 조회 간격. 600~3600으로 적용
       "configDirs": [], // 별도 로그인한 CODEX_HOME 목록. 기본 CODEX_HOME은 항상 포함
-      "visibleRows": ["weekly", "sparkWeekly"] // Weekly limit / Spark Weekly limit. 하나 이상 필수
-    },
-    "colors": {
-      "used": "#58d1eb",
-      "pace": "#fd971f",
-      "track": "#585858"
+      "visibleRows": ["weekly", "sparkWeekly"], // Weekly limit / Spark Weekly limit. 하나 이상 필수
+      "colors": { "used": "#10a37f", "pace": "#f9e2af", "track": "#585858" }
     }
   }
 }
@@ -142,7 +139,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 
-`usage.colors`는 Claude/Codex 공통 UsagePresentation의 consumed fill, elapsed fill, track 색을 소유한다. 기본값은 각각 청록 `#58d1eb`, 주황 `#fd971f`, 회색 `#585858`이다. 이 색은 사용자가 Views → 사용량에서 바꾸는 표시 선호이며 앱 테마 토큰에 속하지 않는다. 따라서 테마 전환만으로는 바뀌지 않고, 사용자가 명시적으로 바꿀 때만 두 provider에 함께 적용된다.
+**`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 두 에이전트 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 두 브랜드색과 떨어져 있다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
 
 ### 상태 위젯 배치 (widgets)
 
@@ -169,11 +166,11 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `type` 은 프론트 위젯 레지스트리(`ui/src/components/widgets/registry.ts`)가 정의하는 이름이며 정본 목록은 Rust `constants.rs::WIDGET_TYPES` 다. 두 목록의 일치는 `registry.test.ts` 가 강제한다. 쓰기 경로는 미등록 `type` 과 중복 `id` 를 [ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md) 대로 거부하고, 이미 디스크에 있던 위반은 `existingIssues` 로 보고하며 값은 보존한다 — 로드는 미등록 위젯을 지우지 않고 렌더만 건너뛴다.
 
-`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열) 과 `display`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`), `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 `usage.colors` 를 공유한다.
+`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 두께가 맞지 않는다. **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
 
 폭이 모자라면 위젯을 자르지 않는다. 상단 바에서는 창 드래그 영역의 최소 폭이 먼저 확보되고, 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
 
-편집 UI 는 Settings → **Views → 위젯** 한 곳이다. 상단 바에는 배치 조작 버튼을 두지 않는다.
+편집 UI 는 Settings → **Interface → 위젯** 한 곳이다. 위젯은 pane 에 놓는 view 가 아니라 앱 크롬이므로 Views 가 아닌 Interface 그룹에 둔다. 상단 바에는 배치 조작 버튼을 두지 않는다.
 
 ### Direct Remote Mode 설정
 
@@ -1319,6 +1316,15 @@ pub fn get_terminal_summaries_inner(
 | Tailwind + CSS 변수 하이브리드 | 레이아웃(flex, grid, spacing)은 Tailwind 유틸리티 클래스, 테마 의존 값(색상, 배경)은 `style={{ }}` 내 CSS 변수로 지정한다. |
 | 인라인 스타일 제한 | 인라인 `style`은 CSS 변수 참조, 동적 계산값, 조건부 스타일에만 사용한다. 정적 값은 Tailwind 클래스 또는 CSS 클래스를 사용한다. |
 | `color-mix()` 금지 | html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. `var(--accent-50)` 등 사전 정의된 CSS 변수를 사용한다. |
+| **각진 모서리가 기본** | laymux 는 각진 UI 를 채용한다. 새 표면·요소는 모서리 반경 없이 그리는 것을 기본값으로 하고, 둥글릴 때만 이유가 있어야 한다. |
+
+#### 각진 디자인
+
+터미널 IDE 의 밀도 높은 격자와 어울리도록 **모서리는 각지게** 유지한다. 이는 취향이 아니라 제품의 시각적 정체성이므로 새 컴포넌트가 임의로 부드러운 모서리를 들여오지 않는다.
+
+- 기본은 반경 0 이다. 사용량 막대, 위젯 표면, 상태 줄처럼 정보를 조밀하게 늘어놓는 요소는 반경을 주지 않는다.
+- 반경이 정말 필요하면 `--radius-sm`(2px)·`--radius-md`(3px)·`--radius-lg`(6px) 토큰만 쓴다. 숫자 하드코딩(`borderRadius: 2`)은 금지다 — 토큰을 안 쓴 값은 나중에 정체성을 조정할 때 잡히지 않는다.
+- `--radius-lg` 는 모달처럼 배경에서 확실히 떠 있어야 하는 큰 표면에 한정한다. 버튼·칩·막대에는 쓰지 않는다.
 
 ### 15.2 호버/인터랙션
 

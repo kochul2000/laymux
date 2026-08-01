@@ -178,6 +178,7 @@ export function UsagePresentation({
   refreshTitle,
   paneId,
   fontFamily,
+  colors,
 }: {
   title: string;
   plan: string | null;
@@ -191,8 +192,9 @@ export function UsagePresentation({
   refreshTitle: string;
   paneId?: string;
   fontFamily: string;
+  /** Owned per provider, so the caller passes its agent's palette. */
+  colors: { used: string; pace: string; track: string };
 }) {
-  const colors = useSettingsStore((s) => s.usage.colors);
   const containerRef = useRef<HTMLDivElement>(null);
   const size = useContainerSize(containerRef);
   const preference = useOverridesStore((s) =>
@@ -336,6 +338,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
   const now = useNowTick(TICK_MS);
   const { snapshot, error, refresh } = useUsageSnapshot(`usage-${paneId ?? "dock"}`, configDir);
   const visibleRows = useSettingsStore((s) => s.usage.claude.visibleRows);
+  const colors = useSettingsStore((s) => s.usage.claude.colors);
   const fontFamily = useSettingsStore((s) => {
     const font = s.resolveFont(s.usage.claude.profile || s.defaultProfile);
     return `'${font.face}', 'Cascadia Mono', 'Consolas', monospace`;
@@ -357,6 +360,7 @@ export function UsageView({ configDir = "", paneId }: UsageViewProps) {
       refresh={refresh}
       paneId={paneId}
       fontFamily={fontFamily}
+      colors={colors}
     />
   );
 }

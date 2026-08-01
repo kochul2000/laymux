@@ -541,7 +541,9 @@
       "option": {
         "configDir": "Account config dir",
         "display": "Display",
-        "scope": "Scope"
+        "scope": "Scope",
+        "barHeight": "Used bar thickness",
+        "elapsedHeight": "Elapsed bar thickness"
       },
       "value": {
         "display": {
@@ -553,7 +555,10 @@
           "workspace": "Active Workspace",
           "all": "All Workspaces"
         }
-      }
+      },
+      "previewTopBar": "Top Bar",
+      "previewStatusLine": "Status Line",
+      "selectHint": "Pick a widget to edit its settings here."
     },
     "usage": {
       "title": "Usage Monitor",

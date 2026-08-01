@@ -10,7 +10,7 @@ import {
 } from "@/lib/tauri-api";
 import { useOverridesStore } from "@/stores/overrides-store";
 import {
-  DEFAULT_USAGE_COLORS,
+  DEFAULT_CLAUDE_USAGE_COLORS,
   DEFAULT_USAGE_VISIBLE_ROWS,
   useSettingsStore,
 } from "@/stores/settings-store";
@@ -81,7 +81,7 @@ describe("UsageView", () => {
     useSettingsStore
       .getState()
       .setUsageAgent("claude", { visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS] });
-    useSettingsStore.getState().setUsageColors({ ...DEFAULT_USAGE_COLORS });
+    useSettingsStore.getState().setUsageColors("claude", { ...DEFAULT_CLAUDE_USAGE_COLORS });
     mockBox(400, 600);
   });
 
@@ -176,7 +176,7 @@ describe("UsageView", () => {
     expect(detail.firstElementChild).toHaveStyle({ color: "var(--text-secondary)" });
     expect(detail.lastElementChild).toHaveTextContent("0% elapsed");
     expect(detail).not.toHaveTextContent("resets in");
-    expect(detail.lastElementChild).toHaveStyle({ color: "rgb(253, 151, 31)" });
+    expect(detail.lastElementChild).toHaveStyle({ color: "rgb(249, 226, 175)" });
   });
 
   it("uses the configured usage profile's terminal font", async () => {
@@ -206,10 +206,10 @@ describe("UsageView", () => {
     });
   });
 
-  it("uses the shared configured colors for Claude and Codex-compatible meters", async () => {
+  it("uses the agent's own configured meter colors", async () => {
     useSettingsStore
       .getState()
-      .setUsageColors({ used: "#112233", pace: "#445566", track: "#778899" });
+      .setUsageColors("claude", { used: "#112233", pace: "#445566", track: "#778899" });
     await renderView({ paneId: "pane-1" });
 
     expect(screen.getByTestId("usage-meter-used-session")).toHaveStyle({

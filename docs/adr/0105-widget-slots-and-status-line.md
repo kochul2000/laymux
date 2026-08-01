@@ -4,6 +4,7 @@
 - Date: 2026-08-01
 - Source: 사용자 요구(상단 바·하단 status line 에 사용량 위젯 배치); `docs/architecture/api-contracts.md` §10 Settings·§15 UI 코드 설계 원칙; [ADR-0004](0004-settings-vs-ui-state-separation.md), [ADR-0005](0005-display-state-raw-separation-compute.md), [ADR-0032](0032-llm-settings-introspection-and-safe-mutation.md), [ADR-0102](0102-claude-usage-probe-headless-pty.md), [ADR-0104](0104-codex-usage-app-server-probe.md)
 - Extends: [ADR-0103](0103-usage-view-visible-rows.md) — `usage.*.visibleRows` 의 적용 범위를 UsageView 에서 사용량을 그리는 모든 표면으로 넓힌다. 행 선택의 SoT 가 전역 설정이라는 결론 자체는 유지한다.
+- Amends: [ADR-0104](0104-codex-usage-app-server-probe.md) — "표시는 provider 로 키를 나누지 않는다"를 정정한다. 사용량 색은 에이전트마다 소유하고, Codex 읽기는 계정별 단일 폴러를 모든 표면이 공유한다.
 
 ## Context
 
@@ -60,7 +61,8 @@ Claude·Codex 사용량은 pane 을 하나 차지하는 `UsageView` 로만 볼 �
 - **위젯은 데이터의 SoT 를 새로 만들지 않는다.** 기존 store 와 probe 구독 경로를 그대로 재사용하고, 표시는 원시 상태에서 도출한다([ADR-0005](0005-display-state-raw-separation-compute.md)).
 - 사용량 위젯이 **어떤 한도 행을 보이는지는 위젯이 소유하지 않는다.** 전역 `usage.claude.visibleRows` / `usage.codex.visibleRows` 를 그대로 따른다. 이 결정은 [ADR-0103](0103-usage-view-visible-rows.md) 의 적용 범위를 UsageView 에서 사용량을 그리는 모든 표면으로 넓히되, 행 선택의 SoT 가 전역 설정이라는 결론은 유지한다.
 - 위젯 `options` 가 소유하는 것은 **표현 방식과 인스턴스 대상**뿐이다. 값 도메인도 `settings.json` 에 드러나는 외부 계약이므로 위젯마다 허용값을 못박는다 — 사용량 위젯의 `display` 는 `"bar" | "number" | "both"`(기본 `"both"`), `claudeUsage.configDir` 는 `usage.claude.configDirs` 와 기본 config dir 중 하나, `terminalActivity.scope` 는 `"workspace" | "all"`(기본 `"workspace"`).
-- 사용량 색은 위젯이 따로 갖지 않고 공통 `usage.colors` 를 쓴다. 표시 규칙은 한 곳에 둔다.
+- 사용량 색은 위젯이 따로 갖지 않고 해당 에이전트의 `usage.<agent>.colors` 를 쓴다. **색은 에이전트마다 소유한다** — 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로, [ADR-0104](0104-codex-usage-app-server-probe.md) 가 둔 provider 공통 팔레트로는 읽을 수 없다. 기본값은 앱이 이미 각 에이전트를 표시하는 색(워크스페이스 선택기의 Claude/Codex 표기색)과 같게 두되, CSS 토큰에 묶지 않고 사용자가 바꿀 수 있는 값으로 남긴다.
+- 막대 두께는 **인스턴스가 소유한다**. 행 선택과 달리 두께는 데이터가 아니라 그 자리에서의 읽기 거리에 달렸고, 같은 계정을 상단 바와 status line 에 함께 두는 것이 정상 사용이기 때문이다.
 - **위젯은 실패를 삼키지 않는다.** 한 줄 표면에도 실패·미기동·최초 대기를 축약된 형태로 구분해 보이며, 이 상태를 마지막 성공값으로 대체하지 않는다([ADR-0102](0102-claude-usage-probe-headless-pty.md) 의 "실패는 표시되고 삼켜지지 않는다" 불변식이 위젯에도 그대로 적용된다). 상세 사유는 툴팁 등 축약 표면 밖에서 확인할 수 있어야 한다.
 
 ### probe 수요 정책
@@ -73,11 +75,11 @@ Claude·Codex 사용량은 pane 을 하나 차지하는 `UsageView` 로만 볼 �
 
 ### 조작 표면
 
-배치·표시 조작은 Settings 의 위젯 섹션 한 곳만 소유한다. 상단 바에 배치 조작용 팝오버 버튼을 두지 않는다.
+배치·표시 조작은 Settings 의 위젯 섹션 한 곳만 소유하며, 그 섹션은 Views 가 아니라 **Interface** 그룹에 둔다 — 위젯은 pane 에 놓는 view 가 아니라 앱 크롬이다. 상단 바에 배치 조작용 팝오버 버튼을 두지 않는다.
 
 ### 초기 위젯
 
-`claudeUsage`(`configDir`, `display`), `codexUsage`(`display`), `terminalActivity`(`scope`), `notifications`, `cwd`. 새 위젯 추가는 레지스트리 항목 하나를 늘리는 일이며 슬롯·설정 계약을 바꾸지 않는다.
+`claudeUsage`(`configDir`·`display`·`barHeight`·`elapsedHeight`), `codexUsage`(`display`·`barHeight`·`elapsedHeight`), `terminalActivity`(`scope`), `notifications`, `cwd`. 새 위젯 추가는 레지스트리 항목 하나를 늘리는 일이며 슬롯·설정 계약을 바꾸지 않는다.
 
 ## Alternatives Considered
 

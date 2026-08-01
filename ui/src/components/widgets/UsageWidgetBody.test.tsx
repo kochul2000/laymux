@@ -10,6 +10,8 @@ const rows: UsageDisplayRow[] = [
   { key: "week-all", label: "Current week (all models)", percent: 71, reset: "Mar 6", elapsed: 50 },
 ];
 
+const colors = { used: "#d97757", pace: "#f9e2af", track: "#585858" };
+
 function renderBody(overrides: Partial<Parameters<typeof UsageWidgetBody>[0]> = {}) {
   return render(
     <UsageWidgetBody
@@ -19,6 +21,9 @@ function renderBody(overrides: Partial<Parameters<typeof UsageWidgetBody>[0]> = 
       display="both"
       message={null}
       capturedAtMs={null}
+      colors={colors}
+      usedHeight={4}
+      elapsedHeight={2}
       {...overrides}
     />,
   );
@@ -30,6 +35,27 @@ describe("UsageWidgetBody", () => {
     expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
     expect(screen.getByTestId("w-number-session")).toHaveTextContent("42%");
     expect(screen.getByTestId("w-number-week-all")).toHaveTextContent("71%");
+  });
+
+  it("stacks an elapsed bar under the consumed one", () => {
+    // Consumption alone is ambiguous: 42% means one thing early in a window and
+    // another thing late, so the clock has to be visible beside it.
+    renderBody({ display: "bar" });
+    expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
+    expect(screen.getByTestId("w-pace-session")).toBeInTheDocument();
+  });
+
+  it("omits the elapsed bar when the provider gave no window to derive it", () => {
+    renderBody({ rows: [{ ...rows[0], elapsed: null }] });
+    expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
+    expect(screen.queryByTestId("w-pace-session")).not.toBeInTheDocument();
+  });
+
+  it("puts both numbers in the tooltip, since the bars are too small to read", () => {
+    renderBody();
+    const title = screen.getByTestId("w").getAttribute("title") ?? "";
+    expect(title).toContain("42%");
+    expect(title).toContain("30% elapsed");
   });
 
   it("draws bars only in `bar`", () => {

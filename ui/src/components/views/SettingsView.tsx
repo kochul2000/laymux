@@ -3407,9 +3407,12 @@ function UsageRowSelection<Row extends string>({
 function UsageColorFields({
   colors,
   update,
+  testIdPrefix,
 }: {
   colors: { used: string; pace: string; track: string };
   update: (partial: { used?: string; pace?: string; track?: string }) => void;
+  /** Distinguishes the two agents' pickers, which now sit on the same page. */
+  testIdPrefix: string;
 }) {
   const { t } = useTranslation("settings");
   const entries = [
@@ -3418,7 +3421,7 @@ function UsageColorFields({
     ["track", t("usage.colorTrack")],
   ] as const;
   return (
-    <SubGroup title={t("usage.groupAppearance")}>
+    <>
       {entries.map(([key, label]) => (
         <SettingRow
           key={key}
@@ -3426,7 +3429,7 @@ function UsageColorFields({
           desc={t(`usage.color${key[0].toUpperCase()}${key.slice(1)}Desc`)}
         >
           <input
-            data-testid={`usage-color-${key}`}
+            data-testid={`${testIdPrefix}-color-${key}`}
             type="color"
             value={colors[key]}
             onChange={(event) => update({ [key]: event.target.value })}
@@ -3434,7 +3437,7 @@ function UsageColorFields({
           />
         </SettingRow>
       ))}
-    </SubGroup>
+    </>
   );
 }
 
@@ -3469,26 +3472,17 @@ function UsageSection() {
   const storeCodexUsage = useSettingsStore((s) => s.usage.codex);
   const setUsageAgent = useSettingsStore((s) => s.setUsageAgent);
   const setCodexUsage = useSettingsStore((s) => s.setCodexUsage);
-  const storeUsageColors = useSettingsStore((s) => s.usage.colors);
-  const setUsageColors = useSettingsStore((s) => s.setUsageColors);
   const profiles = useSettingsStore((s) => s.profiles);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const [claudeUsage, setDraftClaudeUsage] = useDraft("usage-claude", storeClaudeUsage, (v) =>
     setUsageAgent("claude", v),
   );
   const [codexUsage, setDraftCodexUsage] = useDraft("usage-codex", storeCodexUsage, setCodexUsage);
-  const [usageColors, setDraftUsageColors] = useDraft(
-    "usage-colors",
-    storeUsageColors,
-    setUsageColors,
-  );
 
   const updateClaude = (partial: Partial<typeof claudeUsage>) =>
     setDraftClaudeUsage((prev) => ({ ...prev, ...partial }));
   const updateCodex = (partial: Partial<typeof codexUsage>) =>
     setDraftCodexUsage((prev) => ({ ...prev, ...partial }));
-  const updateColors = (partial: Partial<typeof usageColors>) =>
-    setDraftUsageColors((prev) => ({ ...prev, ...partial }));
 
   const addConfigDir = () => updateClaude({ configDirs: [...claudeUsage.configDirs, ""] });
   const removeConfigDir = (index: number) =>
@@ -3584,6 +3578,11 @@ function UsageSection() {
             </button>
           </div>
         </div>
+        <UsageColorFields
+          testIdPrefix="usage-claude"
+          colors={claudeUsage.colors}
+          update={(partial) => updateClaude({ colors: { ...claudeUsage.colors, ...partial } })}
+        />
       </SubGroup>
 
       <SubGroup title={t("usage.groupCodex")}>
@@ -3663,8 +3662,12 @@ function UsageSection() {
             </button>
           </div>
         </div>
+        <UsageColorFields
+          testIdPrefix="usage-codex"
+          colors={codexUsage.colors}
+          update={(partial) => updateCodex({ colors: { ...codexUsage.colors, ...partial } })}
+        />
       </SubGroup>
-      <UsageColorFields colors={usageColors} update={updateColors} />
     </div>
   );
 }
@@ -4523,6 +4526,16 @@ export function SettingsView() {
             {t("nav.interface")}
           </button>
           <button
+            data-testid="nav-widgets"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("widgets")}
+            onClick={() => setActiveNav("widgets")}
+            onMouseEnter={() => setNavHover("widgets")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.widgets")}
+          </button>
+          <button
             data-testid="nav-workspaceDisplay"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("workspaceDisplay")}
@@ -4577,16 +4590,6 @@ export function SettingsView() {
             onMouseLeave={() => setNavHover(null)}
           >
             {t("nav.usage")}
-          </button>
-          <button
-            data-testid="nav-widgets"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("widgets")}
-            onClick={() => setActiveNav("widgets")}
-            onMouseEnter={() => setNavHover("widgets")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.widgets")}
           </button>
           <button
             data-testid="nav-memo"

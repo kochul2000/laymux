@@ -6,8 +6,8 @@ use crate::constants::{
     PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PASTE_PATH_SEPARATORS,
     PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
     PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_ACTIVITY_WIDGET_SCOPES,
-    TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_DISPLAY_MODES, WIDGET_OVERFLOW_MODES, WIDGET_TYPES,
-    WORKSPACE_SORT_ORDERS,
+    TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_BAR_HEIGHT_MAX, USAGE_WIDGET_BAR_HEIGHT_MIN,
+    USAGE_WIDGET_DISPLAY_MODES, WIDGET_OVERFLOW_MODES, WIDGET_TYPES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -575,6 +575,30 @@ fn validate_widget_options(
         "codexUsage" => string_option("display", USAGE_WIDGET_DISPLAY_MODES),
         "terminalActivity" => string_option("scope", TERMINAL_ACTIVITY_WIDGET_SCOPES),
         _ => {}
+    }
+
+    if matches!(instance.widget_type.as_str(), "claudeUsage" | "codexUsage") {
+        for key in ["barHeight", "elapsedHeight"] {
+            let Some(value) = instance.options.get(key) else {
+                continue;
+            };
+            let path = format!("{base}/options/{key}");
+            match value.as_u64() {
+                Some(height) => range_u64(
+                    issues,
+                    &path,
+                    height,
+                    USAGE_WIDGET_BAR_HEIGHT_MIN,
+                    USAGE_WIDGET_BAR_HEIGHT_MAX,
+                ),
+                None => issue(
+                    issues,
+                    "type_error",
+                    path,
+                    format!("위젯 옵션 '{key}' 는 정수 픽셀 값이어야 합니다."),
+                ),
+            }
+        }
     }
 }
 

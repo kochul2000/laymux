@@ -34,6 +34,13 @@ export type WidgetOptionSpec =
       key: string;
       kind: "claudeConfigDir";
       labelKey: string;
+    }
+  | {
+      key: string;
+      kind: "number";
+      labelKey: string;
+      min: number;
+      max: number;
     };
 
 export interface WidgetDefinition {

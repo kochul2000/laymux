@@ -196,8 +196,10 @@ export interface UsageAgentSettings {
   refreshSeconds: number;
   /** Extra agent config directories offered as monitorable profiles. */
   configDirs: string[];
-  /** Usage limit rows shown in every Claude UsageView. At least one is required. */
+  /** Usage limit rows shown on every Claude usage surface. At least one is required. */
   visibleRows: UsageVisibleRow[];
+  /** Meter colours for this agent, shared by its views and widgets. */
+  colors: UsageColorSettings;
 }
 
 export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visibleRows"> {
@@ -209,16 +211,16 @@ export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visib
  * Usage monitor (UsageView, ADR-0102).
  *
  * Collection is keyed by agent: Claude comes from a headless PTY probe
- * (ADR-0102), Codex from its local app-server account API (ADR-0104).
- * Presentation is not — `colors` is shared by every provider's view.
+ * (ADR-0102), Codex from its local app-server account API (ADR-0104). So is
+ * presentation: each agent owns its meter colours, because two providers on one
+ * status line are told apart by colour alone.
  */
 export interface UsageSettings {
   claude: UsageAgentSettings;
   codex: CodexUsageAgentSettings;
-  colors: UsageColorSettings;
 }
 
-/** Shared colors for every provider's UsagePresentation. */
+/** Meter colors for one provider. */
 export interface UsageColorSettings {
   used: string;
   pace: string;
@@ -492,7 +494,8 @@ interface SettingsState {
   /** Patch one monitored agent's usage settings. */
   setUsageAgent: (agent: "claude", data: Partial<UsageAgentSettings>) => void;
   setCodexUsage: (data: Partial<CodexUsageAgentSettings>) => void;
-  setUsageColors: (data: Partial<UsageColorSettings>) => void;
+  /** Patch one agent's meter colours. Each provider owns its own palette. */
+  setUsageColors: (agent: "claude" | "codex", data: Partial<UsageColorSettings>) => void;
   /**
    * Replace the whole widget placement.
    *
@@ -678,11 +681,30 @@ export const USAGE_REFRESH_MIN_SECONDS = 600;
 export const USAGE_REFRESH_MAX_SECONDS = 3600;
 
 /** Mirrors the Rust default; 600 is Anthropic's rate-limit floor, not a preference. */
+/**
+ * Each agent takes the colour the rest of the app already marks it with, so a
+ * Claude bar and a Claude pane read as the same thing. Elapsed stays neutral
+ * yellow — distinct from both brand colours, since it sits directly under the
+ * consumption bar.
+ */
+export const DEFAULT_CLAUDE_USAGE_COLORS: UsageColorSettings = {
+  used: "#d97757",
+  pace: "#f9e2af",
+  track: "#585858",
+};
+
+export const DEFAULT_CODEX_USAGE_COLORS: UsageColorSettings = {
+  used: "#10a37f",
+  pace: "#f9e2af",
+  track: "#585858",
+};
+
 export const DEFAULT_USAGE_AGENT: UsageAgentSettings = {
   profile: "",
   refreshSeconds: 600,
   configDirs: [],
   visibleRows: [...DEFAULT_USAGE_VISIBLE_ROWS],
+  colors: { ...DEFAULT_CLAUDE_USAGE_COLORS },
 };
 
 export const DEFAULT_CODEX_USAGE_AGENT: CodexUsageAgentSettings = {
@@ -690,13 +712,19 @@ export const DEFAULT_CODEX_USAGE_AGENT: CodexUsageAgentSettings = {
   refreshSeconds: 600,
   configDirs: [],
   visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
+  colors: { ...DEFAULT_CODEX_USAGE_COLORS },
 };
 
-export const DEFAULT_USAGE_COLORS: UsageColorSettings = {
-  used: "#58d1eb",
-  pace: "#fd971f",
-  track: "#585858",
-};
+function normalizeUsageColors(
+  value: Partial<UsageColorSettings> | undefined,
+  fallback: UsageColorSettings,
+): UsageColorSettings {
+  return {
+    used: normalizeUsageColor(value?.used, fallback.used),
+    pace: normalizeUsageColor(value?.pace, fallback.pace),
+    track: normalizeUsageColor(value?.track, fallback.track),
+  };
+}
 
 function normalizeUsageColor(value: unknown, fallback: string): string {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
@@ -705,7 +733,6 @@ function normalizeUsageColor(value: unknown, fallback: string): string {
 export const DEFAULT_USAGE: UsageSettings = {
   claude: { ...DEFAULT_USAGE_AGENT },
   codex: { ...DEFAULT_CODEX_USAGE_AGENT },
-  colors: { ...DEFAULT_USAGE_COLORS },
 };
 
 export const DEFAULT_DOCK: DockSettings = {
@@ -1112,7 +1139,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       configDirs: [],
       visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
     },
-    colors: { ...DEFAULT_USAGE_COLORS },
   },
   widgets: defaultWidgets(),
   dock: { ...DEFAULT_DOCK },
@@ -1230,9 +1256,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       },
     })),
 
-  setUsageColors: (data) =>
+  setUsageColors: (agent, data) =>
     set((state) => ({
-      usage: { ...state.usage, colors: { ...state.usage.colors, ...data } },
+      usage: {
+        ...state.usage,
+        [agent]: { ...state.usage[agent], colors: { ...state.usage[agent].colors, ...data } },
+      },
     })),
 
   setWidgets: (widgets) => set({ widgets }),
@@ -1415,6 +1444,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
               ? data.usage.claude.configDirs
               : [],
             visibleRows: normalizeUsageVisibleRows(data.usage.claude?.visibleRows),
+            colors: normalizeUsageColors(data.usage.claude?.colors, DEFAULT_CLAUDE_USAGE_COLORS),
           },
           codex: {
             ...DEFAULT_CODEX_USAGE_AGENT,
@@ -1423,11 +1453,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
               ? data.usage.codex.configDirs
               : [],
             visibleRows: normalizeCodexUsageVisibleRows(data.usage.codex?.visibleRows),
-          },
-          colors: {
-            used: normalizeUsageColor(data.usage.colors?.used, DEFAULT_USAGE_COLORS.used),
-            pace: normalizeUsageColor(data.usage.colors?.pace, DEFAULT_USAGE_COLORS.pace),
-            track: normalizeUsageColor(data.usage.colors?.track, DEFAULT_USAGE_COLORS.track),
+            colors: normalizeUsageColors(data.usage.codex?.colors, DEFAULT_CODEX_USAGE_COLORS),
           },
         }
       : undefined;

@@ -140,6 +140,11 @@ pub const WIDGET_OVERFLOW_MODES: &[&str] = &["collapse"];
 pub const USAGE_WIDGET_DISPLAY_MODES: &[&str] = &["bar", "number", "both"];
 /// Which terminals a `terminalActivity` widget counts.
 pub const TERMINAL_ACTIVITY_WIDGET_SCOPES: &[&str] = &["workspace", "all"];
+/// Bar thickness a usage widget may ask for, in px. The floor is 1 because a
+/// zero-height bar is an invisible one; the ceiling keeps a widget inside the
+/// single row every surface gives it.
+pub const USAGE_WIDGET_BAR_HEIGHT_MIN: u64 = 1;
+pub const USAGE_WIDGET_BAR_HEIGHT_MAX: u64 = 10;
 
 /// Maximum number of notifications to keep. When exceeded, oldest read
 /// notifications are evicted first. Unread notifications are never evicted.
