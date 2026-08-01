@@ -1112,6 +1112,28 @@ impl Default for NotificationSettings {
     }
 }
 
+/// OS power behavior (ADR-0113).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerSettings {
+    /// When to keep the machine awake:
+    /// "off" (default) | "always" | "whenBusy" (a terminal is running).
+    #[serde(default = "default_sleep_prevention")]
+    pub sleep_prevention: String,
+}
+
+fn default_sleep_prevention() -> String {
+    "off".to_string()
+}
+
+impl Default for PowerSettings {
+    fn default() -> Self {
+        Self {
+            sleep_prevention: default_sleep_prevention(),
+        }
+    }
+}
+
 /// Which elements to display in WorkspaceSelectorView pane rows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1682,6 +1704,8 @@ pub struct Settings {
     #[serde(default)]
     pub notifications: NotificationSettings,
     #[serde(default)]
+    pub power: PowerSettings,
+    #[serde(default)]
     pub workspace_selector: WorkspaceSelectorSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
@@ -1784,6 +1808,7 @@ impl Default for Settings {
             widgets: WidgetsSettings::default(),
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
+            power: PowerSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),

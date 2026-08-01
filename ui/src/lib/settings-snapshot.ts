@@ -144,6 +144,7 @@ export async function collectSettingsSnapshot(
     widgets: settingsState.widgets,
     dock: { ...settingsState.dock },
     notifications: { ...settingsState.notifications },
+    power: { ...settingsState.power },
     workspaceSelector: {
       ...settingsState.workspaceSelector,
       display: { ...settingsState.workspaceSelector.display },

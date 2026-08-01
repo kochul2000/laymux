@@ -202,6 +202,7 @@ fn settings_round_trip_with_full_config() {
         },
         dock: Default::default(),
         notifications: Default::default(),
+        power: Default::default(),
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),

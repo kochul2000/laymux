@@ -1,14 +1,10 @@
 import { useTranslation } from "react-i18next";
-import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
+import { isTerminalBusy } from "@/lib/terminal-busy";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
 import type { WidgetComponentProps } from "./types";
 import { readTerminalActivityScope } from "./widget-options";
-
-/** A terminal counts as busy while a command runs or output is still flowing. */
-function isBusy(instance: TerminalInstance): boolean {
-  return instance.activity?.type === "running" || instance.outputActive === true;
-}
 
 export function TerminalActivityWidget({ instance, dragRegion }: WidgetComponentProps) {
   const { t } = useTranslation("settings");
@@ -20,7 +16,7 @@ export function TerminalActivityWidget({ instance, dragRegion }: WidgetComponent
     scope === "all"
       ? instances
       : instances.filter((terminal) => terminal.workspaceId === activeWorkspaceId);
-  const busy = counted.filter(isBusy).length;
+  const busy = counted.filter(isTerminalBusy).length;
 
   return (
     <WidgetChrome

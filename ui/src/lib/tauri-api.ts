@@ -894,6 +894,7 @@ export interface Settings {
   widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
+  power?: import("@/stores/settings-store").PowerSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
@@ -1483,6 +1484,15 @@ export async function getTerminalSummaries(
   terminalIds: string[],
 ): Promise<TerminalSummaryResponse[]> {
   return invoke("get_terminal_summaries", { terminalIds });
+}
+
+/**
+ * Hold or release the OS sleep inhibitor (ADR-0113). Idempotent — the backend
+ * only touches the OS when the state actually changes. Resolves to the state
+ * in effect afterwards.
+ */
+export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
+  return invoke("set_sleep_inhibit", { enabled });
 }
 
 /** Mark notifications as read for the given terminal IDs. Returns count of marked. */

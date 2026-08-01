@@ -74,6 +74,7 @@ import {
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
+import type { SleepPreventionMode } from "@/lib/sleep-prevention";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
@@ -1720,7 +1721,7 @@ function TerminalSection() {
   );
 }
 
-// -- Section: Interface (control bar, dock, notifications) --
+// -- Section: Interface (control bar, dock, notifications, power) --
 
 function InterfaceSection() {
   const { t } = useTranslation("settings");
@@ -1730,6 +1731,8 @@ function InterfaceSection() {
   const setDock = useSettingsStore((s) => s.setDock);
   const storeNotifications = useSettingsStore((s) => s.notifications);
   const setNotifications = useSettingsStore((s) => s.setNotifications);
+  const storePower = useSettingsStore((s) => s.power);
+  const setPower = useSettingsStore((s) => s.setPower);
 
   const [controlBar, setDraftControlBar] = useDraft("controlBar", storeControlBar, (v) =>
     setControlBar(v),
@@ -1740,6 +1743,7 @@ function InterfaceSection() {
     storeNotifications,
     (v) => setNotifications(v),
   );
+  const [power, setDraftPower] = useDraft("power", storePower, (v) => setPower(v));
   const updateControlBar = (partial: Partial<typeof controlBar>) =>
     setDraftControlBar((prev) => ({ ...prev, ...partial }));
   const updateDock = (partial: Partial<typeof dock>) =>
@@ -1829,6 +1833,26 @@ function InterfaceSection() {
             <option value="workspace">{t("interface.dismissWorkspace")}</option>
             <option value="paneFocus">{t("interface.dismissPaneFocus")}</option>
             <option value="manual">{t("interface.dismissManual")}</option>
+          </FocusSelect>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("interface.groupPower")}>
+        <SettingRow
+          label={t("interface.sleepPrevention")}
+          desc={t("interface.sleepPreventionDesc")}
+        >
+          <FocusSelect
+            data-testid="sleep-prevention-select"
+            className={inputCls}
+            value={power.sleepPrevention}
+            onChange={(e) =>
+              setDraftPower({ sleepPrevention: e.target.value as SleepPreventionMode })
+            }
+          >
+            <option value="off">{t("interface.sleepPreventionOff")}</option>
+            <option value="always">{t("interface.sleepPreventionAlways")}</option>
+            <option value="whenBusy">{t("interface.sleepPreventionWhenBusy")}</option>
           </FocusSelect>
         </SettingRow>
       </SubGroup>

@@ -329,6 +329,24 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 **`! cd` 형식**: Claude Code는 프롬프트에서 `! <shell_command>` 구문으로 인라인 셸 실행을 지원. `command` 모드에서는 이 형식으로 cd를 전달하며, `LX_PROPAGATED` 래핑이 불필요하다.
 
+### 절전 방지(sleep prevention) 설정
+
+OS 절전 진입을 막는 정책이다(issue #727, [ADR-0113](../adr/0113-sleep-prevention-mode.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
+
+```jsonc
+{
+  "power": {
+    // "off"(기본) | "always" | "whenBusy"
+    "sleepPrevention": "off"
+  }
+}
+```
+
+- **모드 소유권**: `settings.power.sleepPrevention` 이 단일 진실원이다. 상단 바 토글 버튼(`sleep-prevention-btn`)과 Settings ▸ Interface ▸ Power 의 select 가 같은 필드를 읽고 쓴다. 버튼은 `off → always → whenBusy → off` 로 순환하며 클릭 후 `persistSession()` 으로 즉시 저장한다. applyMode 는 `live`.
+- **파생**: `shouldInhibitSleep(mode, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 모드와 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). busy 판정은 `isTerminalBusy()`(`ui/src/lib/terminal-busy.ts`) — `activity.type === "running" || outputActive` — 로, 페인 모래시계·`terminalActivity` 위젯과 같은 정의를 공유한다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
+- **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 파생값이 바뀔 때만 `set_sleep_inhibit(enabled)` 커맨드를 호출한다. 마운트 시에는 백엔드 상태를 알 수 없으므로 1회 무조건 동기화하고, 언마운트 시 잡고 있던 억제를 푼다. 호출 실패는 경고 로그만 남기고 설정을 되돌리지 않는다.
+- **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. Windows 는 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`, Linux 는 `systemd-inhibit --what=idle:sleep --mode=block ... cat` 자식 프로세스 + laymux 가 쥔 stdin 파이프(프로세스가 죽으면 EOF 로 자동 해제). 그 외 플랫폼은 `enabled=true` 요청에 에러를 반환한다.
+
 ### 종료 시 동작(kill-on-exit) 설정
 
 앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 세션 ID 는 종료 시 캐시되는 스크롤백에 담겨 다음 실행에서 복원된다.

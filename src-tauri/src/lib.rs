@@ -25,6 +25,7 @@ pub mod osc_hooks;
 pub mod output_buffer;
 pub mod path_utils;
 pub mod port_detect;
+pub mod power;
 pub mod process;
 pub mod process_tree;
 pub mod pty;
@@ -256,6 +257,7 @@ pub fn run() {
             commands::get_cloud_status,
             commands::cloud_connect_start,
             commands::cloud_disconnect,
+            commands::set_sleep_inhibit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

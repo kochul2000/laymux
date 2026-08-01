@@ -108,6 +108,9 @@ pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
+/// When laymux keeps the OS awake (ADR-0113). `whenBusy` follows the same
+/// "busy" definition the pane hourglass uses.
+pub const SLEEP_PREVENTION_MODES: &[&str] = &["off", "always", "whenBusy"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
 pub const PROFILE_CURSOR_SHAPES: &[&str] = &[
     "bar",

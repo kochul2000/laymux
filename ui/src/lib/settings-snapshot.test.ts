@@ -307,4 +307,27 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(written.widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
     expect(written.widgets.statusLine.enabled).toBe(true);
   });
+
+  it("round-trips the sleep prevention mode", async () => {
+    applySettingsSnapshot(
+      { power: { sleepPrevention: "whenBusy" } } as unknown as Parameters<
+        typeof applySettingsSnapshot
+      >[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().power.sleepPrevention).toBe("whenBusy");
+    expect((await collectSettingsSnapshot()).power?.sleepPrevention).toBe("whenBusy");
+  });
+
+  it("falls back to off for a hand-edited mode instead of guessing", async () => {
+    applySettingsSnapshot(
+      { power: { sleepPrevention: "Always" } } as unknown as Parameters<
+        typeof applySettingsSnapshot
+      >[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().power.sleepPrevention).toBe("off");
+  });
 });
