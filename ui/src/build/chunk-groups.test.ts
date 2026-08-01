@@ -48,6 +48,8 @@ describe("resolveChunkGroup", () => {
     ["/repo/ui/node_modules/react-i18next/dist/es/index.js", "i18n"],
     ["/repo/ui/node_modules/react/index.js", "react"],
     ["/repo/ui/node_modules/react-dom/client.js", "react"],
+    ["/repo/ui/node_modules/marked/lib/marked.esm.js", "markdown-preview"],
+    ["/repo/ui/node_modules/github-markdown-css/github-markdown.css?raw", "markdown-preview"],
   ])("preserves the existing %s vendor split", (id, expected) => {
     expect(resolveChunkGroup(id)).toBe(expected);
   });
