@@ -43,7 +43,9 @@ const ISSUE_ACTIONS: MenuAction[] = [
 ];
 
 const PULL_ACTIONS: MenuAction[] = [
-  { action: "pr.merge", label: "Merge", confirmLabel: "Merge", danger: true },
+  { action: "pr.merge", label: "Merge", confirmLabel: "Merge (merge commit)", danger: true },
+  { action: "pr.squash", label: "Squash and merge", confirmLabel: "Squash and merge", danger: true },
+  { action: "pr.rebase", label: "Rebase and merge", confirmLabel: "Rebase and merge", danger: true },
   { action: "pr.close", label: "Close", confirmLabel: "Close" },
 ];
 
@@ -51,11 +53,13 @@ const PULL_ACTIONS: MenuAction[] = [
 const RELATIVE_TIME_TICK_MS = 30_000;
 
 /**
- * Tallest the row menu gets (armed state: prompt + Confirm + Cancel). Used to
- * decide which way it opens, so it is a deliberate over-estimate — opening
- * upward with room to spare is harmless, opening downward without it is not.
+ * Tallest the row menu gets — now the unarmed pull-request list (Merge,
+ * Squash, Rebase, Close: 4 rows), taller than the armed state's 3 rows
+ * (prompt + Confirm + Cancel). Used to decide which way it opens, so it is a
+ * deliberate over-estimate — opening upward with room to spare is harmless,
+ * opening downward without it is not.
  */
-const MENU_MAX_H = 96;
+const MENU_MAX_H = 128;
 
 const ROW_BTN: React.CSSProperties = {
   width: "var(--btn-min-w)",

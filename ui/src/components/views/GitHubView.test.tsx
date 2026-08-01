@@ -120,12 +120,15 @@ describe("GitHubView", () => {
     await waitFor(() => expect(refresh).toHaveBeenCalled());
   });
 
-  it("offers merge and close on pull requests and reports gh failures", async () => {
+  it("offers merge, squash, rebase, and close on pull requests and reports gh failures", async () => {
     runGithubItemAction.mockRejectedValueOnce("merge conflict");
     renderView();
 
     fireEvent.click(screen.getByTestId("github-tab-pulls"));
     fireEvent.click(screen.getByTestId("github-menu-12"));
+    expect(screen.getByTestId("github-action-pr.merge-12")).toBeInTheDocument();
+    expect(screen.getByTestId("github-action-pr.squash-12")).toBeInTheDocument();
+    expect(screen.getByTestId("github-action-pr.rebase-12")).toBeInTheDocument();
     expect(screen.getByTestId("github-action-pr.close-12")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("github-action-pr.merge-12"));
     fireEvent.click(screen.getByTestId("github-confirm-12"));
@@ -135,6 +138,32 @@ describe("GitHubView", () => {
     );
     await waitFor(() =>
       expect(screen.getByTestId("github-error")).toHaveTextContent("merge conflict"),
+    );
+  });
+
+  it("squashes a pull request when that option is picked", async () => {
+    renderView();
+
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+    fireEvent.click(screen.getByTestId("github-menu-12"));
+    fireEvent.click(screen.getByTestId("github-action-pr.squash-12"));
+    fireEvent.click(screen.getByTestId("github-confirm-12"));
+
+    await waitFor(() =>
+      expect(runGithubItemAction).toHaveBeenCalledWith("D:/repo", "pr.squash", 12),
+    );
+  });
+
+  it("rebases a pull request when that option is picked", async () => {
+    renderView();
+
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+    fireEvent.click(screen.getByTestId("github-menu-12"));
+    fireEvent.click(screen.getByTestId("github-action-pr.rebase-12"));
+    fireEvent.click(screen.getByTestId("github-confirm-12"));
+
+    await waitFor(() =>
+      expect(runGithubItemAction).toHaveBeenCalledWith("D:/repo", "pr.rebase", 12),
     );
   });
 

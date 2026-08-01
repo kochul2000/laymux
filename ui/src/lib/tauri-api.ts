@@ -597,7 +597,13 @@ export interface GithubRepoSnapshot {
 }
 
 /** Every mutating action the GitHub view may ask the backend to run. */
-export type GithubItemAction = "issue.close" | "issue.closeNotPlanned" | "pr.merge" | "pr.close";
+export type GithubItemAction =
+  | "issue.close"
+  | "issue.closeNotPlanned"
+  | "pr.merge"
+  | "pr.squash"
+  | "pr.rebase"
+  | "pr.close";
 
 /**
  * Read the shared open issue/PR snapshot for the repository containing
