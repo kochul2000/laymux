@@ -7,6 +7,8 @@
  * exists to prevent.
  */
 
+import { Fragment } from "react";
+
 import type { UsageDisplayRow } from "@/lib/usage-rows";
 import type { UsageColorSettings } from "@/stores/settings-store";
 import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
@@ -162,24 +164,34 @@ export function UsageWidgetBody({
         </span>
       )}
       {usable &&
-        rows.map((row) => (
-          <span key={row.key} className="flex items-center gap-1">
-            {display !== "number" && (
-              <Bar
-                percent={row.percent}
-                elapsed={row.elapsed}
-                usedHeight={usedHeight}
-                elapsedHeight={elapsedHeight}
-                barWidth={barWidth}
-                colors={colors}
-                testId={`${testId}-bar-${row.key}`}
-                paceTestId={`${testId}-pace-${row.key}`}
+        rows.map((row, index) => (
+          <Fragment key={row.key}>
+            {index > 0 && (
+              <span
+                aria-hidden="true"
+                data-testid={`${testId}-separator-${row.key}`}
+                className="h-3 w-px shrink-0"
+                style={{ background: "var(--separator-bg)" }}
               />
             )}
-            {display !== "bar" && (
-              <span data-testid={`${testId}-number-${row.key}`}>{statuslineText(row)}</span>
-            )}
-          </span>
+            <span className="flex items-center gap-1">
+              {display !== "bar" && (
+                <span data-testid={`${testId}-number-${row.key}`}>{statuslineText(row)}</span>
+              )}
+              {display !== "number" && (
+                <Bar
+                  percent={row.percent}
+                  elapsed={row.elapsed}
+                  usedHeight={usedHeight}
+                  elapsedHeight={elapsedHeight}
+                  barWidth={barWidth}
+                  colors={colors}
+                  testId={`${testId}-bar-${row.key}`}
+                  paceTestId={`${testId}-pace-${row.key}`}
+                />
+              )}
+            </span>
+          </Fragment>
         ))}
       {usable && rows.length === 0 && (
         <span style={{ color: "var(--text-muted)" }}>{USAGE_UNAVAILABLE_TEXT}</span>

@@ -9,7 +9,7 @@ const rows: UsageDisplayRow[] = [
   {
     key: "session",
     label: "Current session",
-    statuslineLabel: "SS",
+    statuslineLabel: "Session",
     percent: 42,
     reset: "7pm",
     elapsed: 30,
@@ -17,8 +17,16 @@ const rows: UsageDisplayRow[] = [
   {
     key: "week-all",
     label: "Current week (all models)",
-    statuslineLabel: "WK",
+    statuslineLabel: "Week",
     percent: 71,
+    reset: "Mar 6",
+    elapsed: 50,
+  },
+  {
+    key: "week-model",
+    label: "Current week (Fable)",
+    statuslineLabel: "Fable",
+    percent: 18,
     reset: "Mar 6",
     elapsed: 50,
   },
@@ -48,8 +56,18 @@ describe("UsageWidgetBody", () => {
   it("draws one bar and one number per visible row in `both`", () => {
     renderBody();
     expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
-    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS 42%");
-    expect(screen.getByTestId("w-number-week-all")).toHaveTextContent("WK 71%");
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("Session 42%");
+    expect(screen.getByTestId("w-number-week-all")).toHaveTextContent("Week 71%");
+    expect(screen.getByTestId("w-number-week-model")).toHaveTextContent("Fable 18%");
+  });
+
+  it("separates rows with vertical rules and keeps each number before its bar", () => {
+    renderBody();
+    expect(screen.getAllByTestId(/^w-separator-/)).toHaveLength(2);
+
+    const number = screen.getByTestId("w-number-session");
+    const bar = screen.getByTestId("w-bar-session");
+    expect(number.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("stacks an elapsed bar under the consumed one", () => {
@@ -88,7 +106,7 @@ describe("UsageWidgetBody", () => {
   it("draws numbers only in `number`", () => {
     renderBody({ display: "number" });
     expect(screen.queryByTestId("w-bar-session")).not.toBeInTheDocument();
-    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS 42%");
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("Session 42%");
   });
 
   it("replaces the numbers when the probe has nothing usable", () => {
@@ -109,7 +127,7 @@ describe("UsageWidgetBody", () => {
 
   it("shows a placeholder for a row the probe could not read", () => {
     renderBody({ rows: [{ ...rows[0], percent: null }] });
-    expect(screen.getByTestId("w-number-session")).toHaveTextContent("SS --");
+    expect(screen.getByTestId("w-number-session")).toHaveTextContent("Session --");
   });
 });
 

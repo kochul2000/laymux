@@ -17,6 +17,8 @@ export type TerminalActivityScope = "workspace" | "all";
 export const TERMINAL_ACTIVITY_SCOPES: readonly TerminalActivityScope[] = ["workspace", "all"];
 
 const LABEL_WIDTH = 44;
+const USAGE_NUMBER_WIDTH = 62;
+const USAGE_ROW_SEPARATOR_WIDTH = 5;
 
 export function scaleWidgetWidth(width: number, fontSize: number): number {
   return Math.round((width * fontSize) / DEFAULT_WIDGET_FONT_SIZE);
@@ -36,11 +38,13 @@ export function estimateUsageWidgetWidth(
 ): number {
   const rowWidth =
     display === "number"
-      ? scaleWidgetWidth(34, fontSize)
+      ? scaleWidgetWidth(USAGE_NUMBER_WIDTH, fontSize)
       : display === "bar"
         ? barWidth + 8
-        : barWidth + scaleWidgetWidth(36, fontSize);
-  return scaleWidgetWidth(LABEL_WIDTH, fontSize) + Math.max(1, rowCount) * rowWidth;
+        : barWidth + scaleWidgetWidth(USAGE_NUMBER_WIDTH + 4, fontSize);
+  const separatorWidth =
+    Math.max(0, rowCount - 1) * scaleWidgetWidth(USAGE_ROW_SEPARATOR_WIDTH, fontSize);
+  return scaleWidgetWidth(LABEL_WIDTH, fontSize) + Math.max(1, rowCount) * rowWidth + separatorWidth;
 }
 
 export function readDisplay(options: Record<string, unknown>): UsageWidgetDisplay {
