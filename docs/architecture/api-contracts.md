@@ -1388,7 +1388,8 @@ pub fn get_terminal_summaries_inner(
 | CSS 변수 우선 | 모든 공통 값(색상, 간격, 반경, 폰트 크기, hover overlay)은 `index.css` `:root`에 CSS 변수로 정의한다. 하드코딩된 매직 넘버를 직접 사용하지 않는다. |
 | Tailwind + CSS 변수 하이브리드 | 레이아웃(flex, grid, spacing)은 Tailwind 유틸리티 클래스, 테마 의존 값(색상, 배경)은 `style={{ }}` 내 CSS 변수로 지정한다. |
 | 인라인 스타일 제한 | 인라인 `style`은 CSS 변수 참조, 동적 계산값, 조건부 스타일에만 사용한다. 정적 값은 Tailwind 클래스 또는 CSS 클래스를 사용한다. |
-| `color-mix()` 금지 | html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. `var(--accent-50)` 등 사전 정의된 CSS 변수를 사용한다. |
+| `color-mix()` 금지 | html2canvas가 파싱하지 못해 스크린샷 API가 깨진다. `var(--accent-50)` 등 사전 정의된 CSS 변수를 사용한다. 상대 색상 문법(`rgb(from …)`)도 같은 이유로 금지다. |
+| 색상은 색상 코드로 | 손으로 적는 색상은 `#rrggbb`, 반투명은 8자리 `#rrggbbaa` 로만 쓴다. `rgb()`/`rgba()` 채널 표기는 쓰지 않는다 — 알파는 `round(a * 255)` 로 양자화한 한 바이트다. ([ADR-0112](../adr/0112-hex-color-code-authoring.md)) |
 | **각진 모서리가 기본** | laymux 는 각진 UI 를 채용한다. 새 표면·요소는 모서리 반경 없이 그리는 것을 기본값으로 하고, 둥글릴 때만 이유가 있어야 한다. |
 
 #### 각진 디자인

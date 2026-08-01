@@ -167,11 +167,22 @@ describe("CSS utility classes — terminal IME composition", () => {
 
 describe("CSS design tokens — control bar overlay opacity", () => {
   it("keeps --bar-bg-overlay semi-transparent", () => {
-    const match = cssContent.match(
-      /--bar-bg-overlay\s*:\s*rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([\d.]+)\s*\)/,
-    );
+    const match = cssContent.match(/--bar-bg-overlay\s*:\s*#[0-9a-f]{6}([0-9a-f]{2})/i);
     expect(match).not.toBeNull();
-    expect(parseFloat(match![1])).toBeLessThanOrEqual(0.75);
+    expect(parseInt(match![1], 16) / 255).toBeLessThanOrEqual(0.75);
+  });
+});
+
+describe("CSS colors are written as color codes", () => {
+  // ADR-0112: colors are authored as #rrggbb / #rrggbbaa, never as separate
+  // r/g/b channels. color-mix() stays banned (html2canvas), so alpha variants
+  // are pre-mixed 8-digit hex.
+  it("has no rgb()/rgba() literals in index.css", () => {
+    const offenders = cssContent
+      .split("\n")
+      .map((line, i) => [i + 1, line] as const)
+      .filter(([, line]) => /\brgba?\(/.test(line));
+    expect(offenders).toEqual([]);
   });
 });
 

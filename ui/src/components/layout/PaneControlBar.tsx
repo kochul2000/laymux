@@ -722,7 +722,7 @@ function NarrowControlMenu({
         background: "var(--bar-bg-hover)",
         border: `1px solid ${sepClr}`,
         borderRadius: "var(--radius-sm)",
-        boxShadow: "0 8px 18px rgba(0, 0, 0, 0.35)",
+        boxShadow: "0 8px 18px #00000059",
         backdropFilter: "blur(8px)",
       }}
       onClick={(e) => e.stopPropagation()}

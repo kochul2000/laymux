@@ -916,13 +916,27 @@ mod tests {
         assert!(html.contains("if (persist) saveKeyBarConfig();\n          scheduleTerminalFit();"));
     }
 
+    /// ADR-0112: colors are authored as `#rrggbb` / `#rrggbbaa`, never as separate
+    /// r/g/b channels. `color-mix()` stays banned (html2canvas), so alpha variants
+    /// are pre-mixed 8-digit hex — the same form the desktop tokens use.
+    #[test]
+    fn remote_page_writes_colors_as_color_codes() {
+        let offenders: Vec<(usize, &str)> = remote_page_html()
+            .lines()
+            .enumerate()
+            .filter(|(_, line)| line.contains("rgb(") || line.contains("rgba("))
+            .map(|(i, line)| (i + 1, line.trim()))
+            .collect();
+        assert!(offenders.is_empty(), "rgb()/rgba() literals: {offenders:?}");
+    }
+
     #[test]
     fn remote_page_activity_badge_colors_match_desktop() {
         let html = remote_page_html();
         // Palette vars ported from ui/src/index.css so badges match the desktop.
         assert!(html.contains("--claude: #d97757;"));
         assert!(html.contains("--codex: #10a37f;"));
-        assert!(html.contains("--orange-15: rgba(217, 119, 87, 0.15);"));
+        assert!(html.contains("--orange-15: #d9775726;"));
         // Per-app badge classes with desktop-matching color + background.
         assert!(html.contains(".pane-activity.claude {\n        color: var(--claude);\n        background: var(--orange-15);\n      }"));
         assert!(html.contains(".pane-activity.codex {\n        color: var(--codex);\n        background: var(--accent-12);\n      }"));

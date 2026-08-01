@@ -58,7 +58,7 @@ export function SettingsRecoveryModal({
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center"
-      style={{ background: "rgba(0, 0, 0, 0.6)" }}
+      style={{ background: "#00000099" }}
       data-testid="settings-recovery-overlay"
     >
       <div

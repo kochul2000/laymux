@@ -8,13 +8,15 @@
   --text-secondary: #a6adc8;
   --text-muted: #6c7086;
   --accent: #89b4fa;
-  --accent-50: rgba(137, 180, 250, 0.5);
-  --accent-20: rgba(137, 180, 250, 0.2);
-  --accent-12: rgba(137, 180, 250, 0.12);
-  --accent-10: rgba(137, 180, 250, 0.1);
-  --accent-08: rgba(137, 180, 250, 0.08);
-  --accent-06: rgba(137, 180, 250, 0.06);
-  --orange-15: rgba(217, 119, 87, 0.15);
+  /* Alpha variants are 8-digit hex (#rrggbbaa) — colors are always written as a
+     color code, never as separate r/g/b channels (ADR-0112). */
+  --accent-50: #89b4fa80;
+  --accent-20: #89b4fa33;
+  --accent-12: #89b4fa1f;
+  --accent-10: #89b4fa1a;
+  --accent-08: #89b4fa14;
+  --accent-06: #89b4fa0f;
+  --orange-15: #d9775726;
   --claude: #d97757;
   --codex: #10a37f;
   --green: #a6e3a1;
@@ -22,22 +24,22 @@
   --yellow: #f9e2af;
   /* Tinted semantic fills for the file viewer's diff and log rows. Pre-mixed
      because color-mix() breaks html2canvas and the screenshot API with it. */
-  --green-15: rgba(166, 227, 161, 0.15);
-  --red-15: rgba(243, 139, 168, 0.15);
-  --red-08: rgba(243, 139, 168, 0.08);
-  --yellow-08: rgba(249, 226, 175, 0.08);
+  --green-15: #a6e3a126;
+  --red-15: #f38ba826;
+  --red-08: #f38ba814;
+  --yellow-08: #f9e2af14;
   --border: #313244;
 
   /* hover / interaction overlays */
-  --hover-bg: rgba(255, 255, 255, 0.06);
-  --hover-bg-strong: rgba(255, 255, 255, 0.08); /* intentionally same as --separator-bg */
-  --active-bg: rgba(255, 255, 255, 0.04);
-  --backdrop-light: rgba(0, 0, 0, 0.3);
-  --backdrop-heavy: rgba(0, 0, 0, 0.5);
-  --hover-bg-subtle: rgba(255, 255, 255, 0.03);
-  --bar-bg-hover: rgba(24, 24, 37, 0.96);
+  --hover-bg: #ffffff0f;
+  --hover-bg-strong: #ffffff14; /* intentionally same as --separator-bg */
+  --active-bg: #ffffff0a;
+  --backdrop-light: #0000004d;
+  --backdrop-heavy: #00000080;
+  --hover-bg-subtle: #ffffff08;
+  --bar-bg-hover: #181825f5;
   /* pane 컨트롤 바 hover 오버레이 — 아래 콘텐츠가 비치도록 반투명 (issue #320) */
-  --bar-bg-overlay: rgba(24, 24, 37, 0.6);
+  --bar-bg-overlay: #18182599;
 
   /* dimensions */
   --bar-h: 28px;
@@ -57,7 +59,7 @@
   --fs-lg: 15px;
 
   /* utility */
-  --separator-bg: rgba(255, 255, 255, 0.08); /* intentionally same as --hover-bg-strong */
+  --separator-bg: #ffffff14; /* intentionally same as --hover-bg-strong */
 
   /* App UI chrome font (titles, buttons, lists, workspace selector).
      --ui-font-default is the single source of truth for the built-in fallback stack
@@ -130,12 +132,12 @@
   width: 20px;
 }
 .empty-view-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+  background: #ffffff33;
   border: 6px solid transparent;
   background-clip: padding-box;
 }
 .empty-view-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.35);
+  background: #ffffff59;
   border: 6px solid transparent;
   background-clip: padding-box;
 }
@@ -372,7 +374,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--bg-surface);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+    box-shadow: 0 18px 48px #00000073;
     padding: 18px;
   }
 
