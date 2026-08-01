@@ -753,7 +753,8 @@ function NarrowControlAnchor({
 }: {
   menuOpen: boolean;
   onToggleMenu: () => void;
-  buttonRef: React.RefObject<HTMLButtonElement | null>;
+  /** 콜백 ref — 트리거가 어느 바에서 렌더되든 살아 있는 노드 하나만 추적한다. */
+  buttonRef: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <div className="flex shrink-0 justify-end" onClick={(e) => e.stopPropagation()}>
@@ -922,19 +923,37 @@ export function PaneControlBar({
   const isPinned = mode === "pinned";
   const narrowBar = paneWidth > 0 && paneWidth < 360;
 
-  // 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384). ⋯ 버튼(NarrowControlAnchor)이
-  // 어느 바에 있든 단 하나만 마운트되므로(pinned XOR hover XOR ViewHeader) 단일
-  // buttonRef 로 위치 기준점을 공유한다. 메뉴 자체는 컴포넌트 루트에서 portal 로
-  // 한 번만 렌더해 pane hover 생명주기와 분리한다.
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  // 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384). ⋯ 버튼(NarrowControlAnchor)은
+  // 어느 바에 있든(pinned / hover / ViewHeader) 하나의 ref 로 위치 기준점을 공유한다.
+  // 메뉴 자체는 컴포넌트 루트에서 portal 로 한 번만 렌더해 pane hover 생명주기와 분리한다.
+  const menuBtnRef = useRef<HTMLButtonElement | null>(null);
+  // 정상 상태에선 트리거가 한 개지만, View 가 자체 헤더를 등록하는 전환(예: 좁은 pane 을
+  // UsageView 로 바꿀 때)에는 pane 바와 ViewHeader 의 트리거가 한 커밋 동안 함께 마운트된다.
+  // 이어서 pane 바가 사라질 때의 detach 가 살아 있는 ViewHeader 트리거까지 지우면 위치
+  // 측정이 실패해 메뉴가 pane 이 아니라 앱 화면 우상단에 붙는다. React 19 의 콜백 ref
+  // cleanup 으로 "지금 들고 있는 노드가 나일 때만" 비운다.
+  // cleanup 을 반환하므로 React 19 는 이 콜백을 null 로 호출하지 않는다. 그래도 시그니처는
+  // RefCallback 그대로 두고 null 을 무시한다 — 레거시 호출 규약으로 떨어지더라도 살아 있는
+  // 트리거를 지우지 않는 쪽이 안전하다(측정 실패 시엔 아래 pane 폴백이 받는다).
+  const setMenuBtnRef = useCallback((node: HTMLButtonElement | null) => {
+    if (!node) return;
+    menuBtnRef.current = node;
+    return () => {
+      if (menuBtnRef.current === node) menuBtnRef.current = null;
+    };
+  }, []);
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const updateMenuPosition = useCallback(() => {
-    const rect = menuBtnRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setMenuPosition({
-      top: rect.bottom + 2,
-      right: Math.max(0, window.innerWidth - rect.right),
-    });
+    // 트리거를 못 재면(언마운트·미배치) pane 자신의 우상단으로 떨어진다 — 뷰포트
+    // 원점(0,0)으로 떨어지면 메뉴가 자기 pane 과 무관한 화면 구석에 나타난다.
+    const btn = menuBtnRef.current?.getBoundingClientRect();
+    if (btn && btn.width > 0 && btn.height > 0) {
+      setMenuPosition({ top: btn.bottom + 2, right: Math.max(0, window.innerWidth - btn.right) });
+      return;
+    }
+    const pane = rootRef.current?.getBoundingClientRect();
+    if (!pane) return;
+    setMenuPosition({ top: pane.top + 2, right: Math.max(0, window.innerWidth - pane.right) });
   }, []);
   const closeNarrowMenu = useCallback(() => setNarrowMenuOpen(false), []);
   const toggleNarrowMenu = useCallback(() => {
@@ -1011,7 +1030,7 @@ export function PaneControlBar({
         <NarrowControlAnchor
           menuOpen={narrowMenuOpen}
           onToggleMenu={toggleNarrowMenu}
-          buttonRef={menuBtnRef}
+          buttonRef={setMenuBtnRef}
         />
       ) : (
         <BarContent
@@ -1034,6 +1053,7 @@ export function PaneControlBar({
       narrowBar,
       narrowMenuOpen,
       toggleNarrowMenu,
+      setMenuBtnRef,
       cwdSendOn,
       cwdReceiveOn,
       inputModeToggle,
@@ -1130,7 +1150,7 @@ export function PaneControlBar({
               <NarrowControlAnchor
                 menuOpen={narrowMenuOpen}
                 onToggleMenu={toggleNarrowMenu}
-                buttonRef={menuBtnRef}
+                buttonRef={setMenuBtnRef}
               />
             ) : (
               <BarContent
@@ -1186,7 +1206,7 @@ export function PaneControlBar({
                 <NarrowControlAnchor
                   menuOpen={narrowMenuOpen}
                   onToggleMenu={toggleNarrowMenu}
-                  buttonRef={menuBtnRef}
+                  buttonRef={setMenuBtnRef}
                 />
               ) : (
                 <BarContent
