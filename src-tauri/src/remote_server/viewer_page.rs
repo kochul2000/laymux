@@ -104,6 +104,17 @@ mod tests {
     }
 
     #[test]
+    fn kinds_remote_does_not_render_report_themselves_instead_of_throwing() {
+        // `read_file_for_viewer` is shared with the desktop, so every kind it
+        // can produce reaches this page. Remote renders neither PDF nor archive
+        // (ADR-0109) but must still name the file rather than fall through to
+        // "Unsupported viewer response".
+        assert!(REMOTE_VIEWER_JS.contains("payload.kind === \"pdf\""));
+        assert!(REMOTE_VIEWER_JS.contains("payload.kind === \"archive\""));
+        assert!(REMOTE_VIEWER_JS.contains("payload.totalEntries"));
+    }
+
+    #[test]
     fn viewer_csp_blocks_inline_and_remote_scripts() {
         assert!(VIEWER_CSP.contains("script-src 'self'"));
         assert!(!VIEWER_CSP.contains("script-src 'unsafe-inline'"));

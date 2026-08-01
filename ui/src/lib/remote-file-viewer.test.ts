@@ -7,7 +7,7 @@ vi.mock("./tauri-api", () => ({
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { statPath } from "./tauri-api";
+import { readFileForViewer, statPath } from "./tauri-api";
 import { handleRemoteFileViewerRequest } from "./remote-file-viewer";
 
 function registerTerminal(cwd?: string) {
@@ -117,5 +117,79 @@ describe("Remote FileViewer path-link bridge", () => {
     expect(noTerminal).toEqual({ success: true, data: { valid: false } });
     expect(noCwd).toEqual({ success: true, data: { valid: false } });
     expect(statPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("Remote FileViewer render payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("structured preview 종류는 previewDocument 없이 원문 텍스트로 내려간다", async () => {
+    // ADR-0109: only the document family may become a sanitized preview
+    // document. JSON/CSV/diff/log/source render as React DOM on the desktop and
+    // Remote keeps showing their source, exactly as it did before those
+    // renderers existed. Routing them through the sanitizer here would create
+    // an HTML string the design says never exists.
+    for (const path of [
+      "C:\\work\\package.json",
+      "C:\\work\\rows.csv",
+      "C:\\work\\fix.diff",
+      "C:\\work\\build.log",
+      "C:\\work\\main.rs",
+    ]) {
+      vi.mocked(readFileForViewer).mockResolvedValue({
+        kind: "text",
+        content: "raw source",
+        truncated: false,
+      });
+
+      const result = await handleRemoteFileViewerRequest("render", {
+        source: "path",
+        path,
+        maxBytes: 1024,
+      });
+
+      expect(result).toEqual({
+        success: true,
+        data: { path, kind: "text", content: "raw source", truncated: false },
+      });
+    }
+  });
+
+  it("markdown 은 기존대로 previewDocument 로 내려간다", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "# title",
+      truncated: false,
+    });
+
+    const result = await handleRemoteFileViewerRequest("render", {
+      source: "path",
+      path: "C:\\work\\README.md",
+      maxBytes: 1024,
+    });
+
+    expect(result.data).toMatchObject({ kind: "text", previewKind: "markdown" });
+    expect(result.data).toHaveProperty("previewDocument");
+    expect(result.data).not.toHaveProperty("content");
+  });
+
+  it("pdf 와 archive 는 분류 그대로 전달된다", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "archive",
+      format: "zip",
+      entries: [{ name: "a.txt", size: 3, compressedSize: 3, isDirectory: false }],
+      totalEntries: 1,
+      truncated: false,
+    });
+
+    const result = await handleRemoteFileViewerRequest("render", {
+      source: "path",
+      path: "C:\\work\\bundle.zip",
+      maxBytes: 1024,
+    });
+
+    expect(result.data).toMatchObject({ kind: "archive", format: "zip", totalEntries: 1 });
   });
 });

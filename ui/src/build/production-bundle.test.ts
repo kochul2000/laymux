@@ -8,6 +8,41 @@ const LARGE_CHUNK_WARNING = /Some chunks are larger than/;
 const SETTINGS_VIEW_SUFFIX = "/src/components/views/SettingsView.tsx";
 const UI_ROOT = process.cwd();
 
+/**
+ * Byte budget for the chunks the entry pulls in **statically** — everything the
+ * app parses before it can show a window.
+ *
+ * Deliberately tighter than the build's own `chunkSizeWarningLimit`. That one
+ * has to tolerate a lazily-imported syntax grammar (C++ alone is ~800 kB of
+ * TextMate rules with several languages embedded), which is never fetched over
+ * a network — the desktop app ships its assets locally — and is never parsed
+ * unless someone opens a C++ file. This constant guards the thing that is
+ * actually paid for on every launch.
+ */
+const STARTUP_CHUNK_BUDGET_BYTES = 500_000;
+
+/**
+ * Ceiling for chunks reached only through a dynamic import. Generous, because a
+ * grammar's size is upstream's business, but present so a lazy chunk cannot
+ * grow without anyone noticing.
+ */
+const LAZY_CHUNK_CEILING_BYTES = 1_000_000;
+
+/** Chunks reachable from the entry through static imports only. */
+function staticImportClosure(chunks: ChunkOutput[], entry: ChunkOutput): ChunkOutput[] {
+  const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+  const seen = new Set<string>();
+  const pending = [entry.fileName];
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (name === undefined || seen.has(name)) continue;
+    seen.add(name);
+    const chunk = byName.get(name);
+    if (chunk) pending.push(...chunk.imports);
+  }
+  return [...seen].flatMap((name) => byName.get(name) ?? []);
+}
+
 interface ChunkOutput {
   type: "chunk";
   fileName: string;
@@ -103,13 +138,22 @@ describe("production UI bundle", () => {
       );
       const entry = chunks.find((chunk) => chunk.isEntry);
       const settings = chunks.find((chunk) => chunk.fileName.includes("settings-view"));
-      const warningLimitBytes = production.resolvedConfig.build.chunkSizeWarningLimit * 1000;
 
       expect(entry).toBeDefined();
       expect(settings).toBeDefined();
+
+      const startupChunks = staticImportClosure(chunks, entry!);
+      expect(
+        startupChunks
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > STARTUP_CHUNK_BUDGET_BYTES)
+          .map((chunk) => chunk.fileName),
+      ).toEqual([]);
+
+      const startupNames = new Set(startupChunks.map((chunk) => chunk.fileName));
       expect(
         chunks
-          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > warningLimitBytes)
+          .filter((chunk) => !startupNames.has(chunk.fileName))
+          .filter((chunk) => Buffer.byteLength(chunk.code, "utf8") > LAZY_CHUNK_CEILING_BYTES)
           .map((chunk) => chunk.fileName),
       ).toEqual([]);
       expect(production.logs.filter((log) => LARGE_CHUNK_WARNING.test(log.message))).toEqual([]);

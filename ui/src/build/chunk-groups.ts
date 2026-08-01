@@ -34,6 +34,13 @@ const USAGE_SUFFIXES = [
   "/src/hooks/useUsageSnapshot.ts",
   "/src/hooks/useCodexUsageSnapshot.ts",
 ];
+/**
+ * The file viewer's typed preview renderers and the pure parsers behind them
+ * (ADR-0109). Only reached once a file of that type is opened, so keeping the
+ * whole family out of the entry chunk costs nothing at startup.
+ */
+const FILE_PREVIEW_SEGMENTS = ["/src/lib/preview/", "/src/components/ui/preview/"];
+const FILE_PREVIEW_SUFFIXES = ["/src/lib/file-preview-kind.ts"];
 const TERMINAL_OUTPUT_V3_FAILURE_SUFFIX = "/src/lib/terminal-output-v3-failure-coordinator.ts";
 const TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX = "/src/lib/terminal-input-delivery-metrics.ts";
 const NODE_MODULES_SEGMENT = "/node_modules/";
@@ -56,6 +63,12 @@ export function resolveChunkGroup(id: string): string | undefined {
     return "widgets";
   }
   if (USAGE_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix))) return "usage";
+  if (
+    FILE_PREVIEW_SEGMENTS.some((segment) => normalizedId.includes(segment)) ||
+    FILE_PREVIEW_SUFFIXES.some((suffix) => normalizedId.endsWith(suffix))
+  ) {
+    return "file-preview";
+  }
   if (normalizedId.endsWith(TERMINAL_OUTPUT_V3_FAILURE_SUFFIX)) {
     return "terminal-output-v3-failure";
   }
@@ -79,6 +92,12 @@ export function resolveChunkGroup(id: string): string | undefined {
   ) {
     return "markdown-preview";
   }
+  // Shiki is deliberately NOT grouped. Its grammars live under
+  // `@shikijs/langs`, one module per language, and every one is reached through
+  // its own dynamic import. Naming a group for them collapses all 700-odd
+  // grammars into a single 3 MB chunk — the opposite of what the lazy imports
+  // are for. Leaving them ungrouped lets Rolldown split per dynamic import, so
+  // opening a Rust file downloads the Rust grammar and nothing else.
 
   return undefined;
 }

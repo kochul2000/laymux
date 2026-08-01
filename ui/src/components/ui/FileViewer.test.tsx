@@ -277,4 +277,144 @@ describe("FileViewer", () => {
       'Terminal profile "Deleted" does not exist.',
     );
   });
+
+  it("routes each structured extension to its own renderer", async () => {
+    const cases = [
+      { path: "/w/package.json", content: '{"name":"laymux"}', testId: "json-preview" },
+      { path: "/w/session.jsonl", content: '{"a":1}\n{"b":2}', testId: "jsonl-preview" },
+      {
+        path: "/w/fix.diff",
+        content: "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-old\n+new\n",
+        testId: "diff-preview",
+      },
+      { path: "/w/rows.csv", content: "name,size\na,1\n", testId: "csv-preview" },
+      { path: "/w/build.log", content: "starting\nERROR boom\n", testId: "log-preview" },
+    ];
+
+    for (const { path, content, testId } of cases) {
+      vi.mocked(readFileForViewer).mockResolvedValue({ kind: "text", content, truncated: false });
+      const view = await act(async () => render(<FileViewer {...baseProps} path={path} />));
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      // Every structured preview keeps the Source escape hatch.
+      expect(screen.getByTestId("file-viewer-source-mode")).toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
+  it("sends source files to the highlighter", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "fn main() {}",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/main.rs" />);
+    });
+
+    // Asserting the loading state keeps this test off the real shiki chunk;
+    // the highlighter's own behavior is covered in code-highlight.test.ts.
+    expect(screen.getByTestId("code-preview-loading")).toBeInTheDocument();
+  });
+
+  it("shows source instead of a renderer once Source is selected", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "name,size\na,1\n",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/rows.csv" />);
+    });
+
+    expect(screen.getByTestId("csv-preview")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("file-viewer-source-mode"));
+    });
+
+    expect(screen.queryByTestId("csv-preview")).not.toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("name,size");
+  });
+
+  it("reports invalid JSON without losing the file", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: '{"name": }',
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/broken.json" />);
+    });
+
+    // A parse failure is not a viewer failure: say where it broke and leave the
+    // Source toggle in place.
+    expect(screen.getByTestId("json-preview-error")).toHaveTextContent("Invalid JSON");
+    expect(screen.getByTestId("file-viewer-source-mode")).toBeInTheDocument();
+  });
+
+  it("gives svg an image/source toggle instead of a bare image", async () => {
+    // base64 of `<svg xmlns="http://www.w3.org/2000/svg"/>`
+    const dataUrl = `data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg"/>')}`;
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "image", dataUrl });
+
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/icon.svg" />);
+    });
+    expect(screen.getByTestId("svg-preview-image")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("file-viewer-source-mode"));
+    });
+    expect(screen.getByTestId("svg-preview-source")).toHaveTextContent(
+      "http://www.w3.org/2000/svg",
+    );
+  });
+
+  it("keeps a plain image on the bare image path", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "image",
+      dataUrl: "data:image/png;base64,AAAA",
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/shot.png" />);
+    });
+
+    expect(screen.getByTestId("file-viewer-image")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-viewer-source-mode")).not.toBeInTheDocument();
+  });
+
+  it("lists archive entries and admits when the listing was capped", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "archive",
+      format: "zip",
+      entries: [
+        { name: "src/main.rs", size: 2048, compressedSize: 700, isDirectory: false },
+        { name: "src/", size: 0, compressedSize: 0, isDirectory: true },
+      ],
+      totalEntries: 5000,
+      truncated: true,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/bundle.zip" />);
+    });
+
+    expect(screen.getAllByTestId("archive-preview-row")).toHaveLength(2);
+    expect(screen.getByTestId("archive-preview-truncated")).toHaveTextContent(
+      "Showing the first 2 of 5,000 entries.",
+    );
+  });
+
+  it("hands a pdf to the host webview viewer", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "pdf",
+      dataUrl: `data:application/pdf;base64,${btoa("%PDF-1.7")}`,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/w/doc.pdf" />);
+    });
+
+    expect(screen.getByTestId("pdf-preview")).toBeInTheDocument();
+    // The fallback slot is what a WebView without a PDF engine shows instead of
+    // a blank rectangle.
+    expect(screen.getByTestId("pdf-preview-fallback")).toBeInTheDocument();
+  });
 });

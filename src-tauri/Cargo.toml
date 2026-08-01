@@ -37,6 +37,9 @@ keyring = { version = "3", features = ["windows-native", "linux-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 vt100 = "0.16"
+zip = { version = "8.6.0", default-features = false }
+tar = "0.4.46"
+flate2 = "1.1.9"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"
