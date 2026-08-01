@@ -3,8 +3,8 @@ use laymux_lib::commands::get_remote_host_candidates;
 use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
-    FontSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane, MemoSettings,
-    OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
+    FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
+    MemoSettings, OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
     SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, WidgetInstance,
     WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
 };
@@ -208,6 +208,11 @@ fn settings_round_trip_with_full_config() {
         exit: Default::default(),
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
+        github: GithubSettings {
+            default_tab: "pulls".into(),
+            refresh_seconds: 45,
+            hide_draft_pulls: true,
+        },
         file_explorer: FileExplorerSettings::default(),
         remote: RemoteSettings {
             enabled: true,
@@ -278,6 +283,25 @@ fn hand_edited_widget_placement_survives_load_and_repair() {
             .any(|warning| format!("{warning:?}").contains("widget")),
         "repair must not rewrite widget placement, got {warnings:?}"
     );
+}
+
+#[test]
+fn hand_edited_github_section_loads_and_an_omitted_one_falls_back_to_defaults() {
+    let configured: Settings = serde_json::from_str(
+        r#"{ "github": { "defaultTab": "pulls", "refreshSeconds": 30, "hideDraftPulls": true } }"#,
+    )
+    .unwrap();
+    assert_eq!(configured.github.default_tab, "pulls");
+    assert_eq!(configured.github.refresh_seconds, 30);
+    assert!(configured.github.hide_draft_pulls);
+
+    // A settings.json written before the section existed must still open the
+    // view on issues at the stock cadence.
+    let bare: Settings = serde_json::from_str(r#"{ "github": {} }"#).unwrap();
+    assert_eq!(bare.github, GithubSettings::default());
+    assert_eq!(bare.github.default_tab, "issues");
+    assert_eq!(bare.github.refresh_seconds, 10);
+    assert!(!bare.github.hide_draft_pulls);
 }
 
 #[tokio::test]
