@@ -87,6 +87,30 @@ describe("useGithubRepoSnapshot", () => {
     expect(result.current.snapshot.repo).toBe("owner/second");
   });
 
+  it("ignores a refresh left over from the previous repository", async () => {
+    const { result, rerender } = renderHook(({ cwd }) => useGithubRepoSnapshot(cwd), {
+      initialProps: { cwd: "/first" },
+    });
+    await waitFor(() => expect(result.current.snapshot.repo).toBe("owner/repo"));
+    // Captured while the view was on /first — the action it belongs to is
+    // still running when the sync group moves the pane to /second.
+    const staleRefresh = result.current.refresh;
+
+    getGithubRepoSnapshot.mockResolvedValue(ready("owner/second"));
+    rerender({ cwd: "/second" });
+    await waitFor(() => expect(result.current.snapshot.repo).toBe("owner/second"));
+    const callsBefore = getGithubRepoSnapshot.mock.calls.length;
+
+    await act(async () => {
+      staleRefresh();
+    });
+
+    // It neither re-reads the abandoned repository nor cancels the current one.
+    expect(getGithubRepoSnapshot).toHaveBeenCalledTimes(callsBefore);
+    expect(result.current.snapshot.repo).toBe("owner/second");
+    expect(result.current.loading).toBe(false);
+  });
+
   it("keeps a pending reply out of the view and retries sooner than a poll", async () => {
     const pending: GithubRepoSnapshot = {
       ...ready("owner/repo"),

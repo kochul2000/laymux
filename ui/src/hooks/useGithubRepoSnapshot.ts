@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getGithubRepoSnapshot, type GithubRepoSnapshot } from "@/lib/tauri-api";
 
 /**
@@ -42,9 +42,23 @@ export function useGithubRepoSnapshot(workingDir: string) {
   const requestSeq = useRef(0);
   // Bumped for every `pending` reply, which is what schedules the short retry.
   const [pendingNonce, setPendingNonce] = useState(0);
+  // The CWD this hook is currently tracking. `refresh` outlives the render it
+  // came from — a view holds one across an await — so a read has to be able to
+  // tell that it belongs to a repository the hook has already left.
+  // Mirrored in a layout effect, never during render.
+  const currentDirRef = useRef(workingDir);
+  useLayoutEffect(() => {
+    currentDirRef.current = workingDir;
+  }, [workingDir]);
 
   const read = useCallback(
     (force: boolean) => {
+      // A read for the previous CWD must not touch `requestSeq`: bumping it
+      // would cancel the read the new CWD already started and then store a
+      // result the view cannot use, stranding it in `loading` until the next
+      // poll. The repository it was going to refresh is unaffected — the
+      // backend already dropped that repo's cache when the action succeeded.
+      if (workingDir !== currentDirRef.current) return;
       if (!workingDir) {
         requestSeq.current += 1;
         return;
