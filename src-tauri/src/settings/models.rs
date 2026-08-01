@@ -5,6 +5,7 @@ use crate::constants::{
     DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB,
     PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT, PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT,
     PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT,
+    WIDGET_FONT_SIZE_DEFAULT,
 };
 
 /// Color scheme definition (Windows Terminal compatible).
@@ -953,6 +954,12 @@ impl Default for UsageAgentSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WidgetsSettings {
+    /// Empty inherits the app interface font.
+    #[serde(default)]
+    pub font_family: String,
+    /// Text size shared by every widget surface.
+    #[serde(default = "default_widget_font_size")]
+    pub font_size: u16,
     #[serde(default)]
     pub top_bar: WidgetSlots,
     #[serde(default)]
@@ -968,9 +975,15 @@ fn default_widget_overflow() -> String {
     "collapse".into()
 }
 
+fn default_widget_font_size() -> u16 {
+    WIDGET_FONT_SIZE_DEFAULT
+}
+
 impl Default for WidgetsSettings {
     fn default() -> Self {
         Self {
+            font_family: String::new(),
+            font_size: default_widget_font_size(),
             top_bar: WidgetSlots::default(),
             status_line: StatusLineWidgets::default(),
             overflow: default_widget_overflow(),

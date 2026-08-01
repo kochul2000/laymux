@@ -124,6 +124,7 @@ ADR 이 필요한 대표 기준:
 | [0104](0104-codex-usage-app-server-probe.md) | Codex 사용량은 app-server rate-limit API로 수집한다 | Accepted |
 | [0105](0105-widget-slots-and-status-line.md) | 위젯 배치는 설정의 슬롯 배열이 소유하고 status line 은 슬롯 영역 하나일 뿐이다 | Accepted |
 | [0106](0106-github-list-view-repo-registry.md) | GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다 | Proposed |
+| [0107](0107-widget-typography-and-usage-bar-width.md) | 위젯 글꼴은 전역 표시 설정이, 사용량 막대 너비는 인스턴스 옵션이 소유한다 | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

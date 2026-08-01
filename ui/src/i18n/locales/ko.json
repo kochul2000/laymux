@@ -509,6 +509,9 @@
     "widgets": {
       "title": "위젯",
       "intro": "상단 바와 status line 에 놓을 위젯을 정한다. 슬롯의 순서가 화면 순서이며, 좌·우 붙임은 어느 슬롯에 넣었는지로 정해진다. 상단 바에서는 창 드래그 영역이 먼저 확보되고, 남는 폭이 모자라면 화면 가장자리에서 먼 위젯부터 접힌다.",
+      "fontFamily": "공용 글꼴",
+      "fontFamilyDefault": "인터페이스 글꼴 사용",
+      "fontSize": "공용 글자 크기",
       "statusLineEnabled": "하단 status line 표시",
       "statusLineEnabledDesc": "창 맨 아래(dock 보다 아래)에 위젯 줄을 하나 둔다. 꺼도 배치는 그대로 남는다.",
       "slot": {
@@ -542,6 +545,7 @@
         "configDir": "계정 config dir",
         "display": "표시 방식",
         "scope": "집계 범위",
+        "barWidth": "사용량 막대 너비",
         "barHeight": "사용량 막대 두께",
         "elapsedHeight": "경과 막대 두께"
       },

@@ -10,6 +10,7 @@ import { getClaudeSessionIds, getTerminalCwds, saveSettings } from "@/lib/tauri-
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
+import { defaultWidgets } from "@/lib/widget-placement";
 import {
   applySettingsSnapshot,
   collectSettingsSnapshot,
@@ -209,6 +210,9 @@ describe("settings snapshot — widget placement and usage", () => {
 
   it("round-trips widget placement through collect and apply", async () => {
     useSettingsStore.getState().setWidgets({
+      ...defaultWidgets(),
+      fontFamily: "JetBrains Mono",
+      fontSize: 12,
       topBar: {
         left: [{ id: "w1", type: "claudeUsage", options: { display: "bar", configDir: "" } }],
         right: [],
@@ -219,6 +223,8 @@ describe("settings snapshot — widget placement and usage", () => {
 
     const snapshot = await collectSettingsSnapshot();
     expect(snapshot.widgets.topBar.left[0].options).toEqual({ display: "bar", configDir: "" });
+    expect(snapshot.widgets.fontFamily).toBe("JetBrains Mono");
+    expect(snapshot.widgets.fontSize).toBe(12);
 
     useSettingsStore.setState(useSettingsStore.getInitialState());
     applySettingsSnapshot(snapshot, { includeStructural: false });
@@ -227,6 +233,8 @@ describe("settings snapshot — widget placement and usage", () => {
     expect(widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
     expect(widgets.statusLine.enabled).toBe(true);
     expect(widgets.statusLine.right.map((w) => w.id)).toEqual(["w2"]);
+    expect(widgets.fontFamily).toBe("JetBrains Mono");
+    expect(widgets.fontSize).toBe(12);
   });
 
   it("keeps an unknown widget type across a save round trip", async () => {

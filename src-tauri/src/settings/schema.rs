@@ -131,7 +131,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/widgets",
-        description: "상단 바와 status line 의 위젯 배치입니다. topBar/statusLine 각각 left·right 슬롯의 배열 순서가 화면 순서이며, statusLine.enabled 는 하단 영역 표시만 결정합니다(끄더라도 배치는 보존). 각 항목은 { id, type, options } 이고 type 은 등록된 위젯 이름이어야 합니다.",
+        description: "상단 바와 status line 의 위젯 배치·공용 표시 설정입니다. fontFamily(빈 값은 인터페이스 글꼴 상속)와 fontSize(6~20px)는 모든 위젯이 공유합니다. topBar/statusLine 각각 left·right 슬롯의 배열 순서가 화면 순서이며, statusLine.enabled 는 하단 영역 표시만 결정합니다(끄더라도 배치는 보존). 각 항목은 { id, type, options } 이고 type 은 등록된 위젯 이름이어야 하며, 사용량 위젯의 barWidth는 8~200px입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

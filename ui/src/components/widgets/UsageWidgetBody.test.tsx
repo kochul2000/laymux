@@ -24,6 +24,7 @@ function renderBody(overrides: Partial<Parameters<typeof UsageWidgetBody>[0]> = 
       colors={colors}
       usedHeight={4}
       elapsedHeight={2}
+      barWidth={26}
       {...overrides}
     />,
   );
@@ -43,6 +44,12 @@ describe("UsageWidgetBody", () => {
     renderBody({ display: "bar" });
     expect(screen.getByTestId("w-bar-session")).toBeInTheDocument();
     expect(screen.getByTestId("w-pace-session")).toBeInTheDocument();
+  });
+
+  it("applies the configured width to both usage tracks", () => {
+    renderBody({ display: "bar", barWidth: 64 });
+    expect(screen.getByTestId("w-bar-session")).toHaveStyle({ width: "64px" });
+    expect(screen.getByTestId("w-pace-session")).toHaveStyle({ width: "64px" });
   });
 
   it("omits the elapsed bar when the provider gave no window to derive it", () => {
@@ -104,5 +111,11 @@ describe("usage widget option reading", () => {
       estimateUsageWidgetWidth("both", 1),
     );
     expect(estimateUsageWidgetWidth("both", 2)).toBeGreaterThan(estimateUsageWidgetWidth("bar", 2));
+  });
+
+  it("uses the configured bar width in the slot budget", () => {
+    expect(estimateUsageWidgetWidth("bar", 2, 64)).toBeGreaterThan(
+      estimateUsageWidgetWidth("bar", 2, 26),
+    );
   });
 });

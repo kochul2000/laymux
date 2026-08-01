@@ -19,6 +19,7 @@ import type { WidgetInstance } from "@/lib/widget-placement";
 export interface WidgetEnv {
   claudeVisibleRows: number;
   codexVisibleRows: number;
+  fontSize: number;
 }
 
 /** One editable option, rendered by the Settings widget section. */

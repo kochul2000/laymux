@@ -15,29 +15,32 @@ import type { UsageWidgetDisplay } from "./widget-options";
 
 type UsageMeterColors = UsageColorSettings;
 
-const METER_WIDTH = 26;
-
 function Track({
   percent,
   color,
   track,
   height,
+  width,
   testId,
 }: {
   percent: number | null;
   color: string;
   track: string;
   height: number;
+  width: number;
   testId: string;
 }) {
-  const width = percent == null ? 0 : Math.max(0, Math.min(100, percent));
+  const fillWidth = percent == null ? 0 : Math.max(0, Math.min(100, percent));
   return (
     <span
       data-testid={testId}
       className="block overflow-hidden"
-      style={{ width: METER_WIDTH, height, background: track }}
+      style={{ width, height, background: track }}
     >
-      <span className="block" style={{ width: `${width}%`, height: "100%", background: color }} />
+      <span
+        className="block"
+        style={{ width: `${fillWidth}%`, height: "100%", background: color }}
+      />
     </span>
   );
 }
@@ -56,6 +59,7 @@ function Bar({
   elapsed,
   usedHeight,
   elapsedHeight,
+  barWidth,
   colors,
   testId,
   paceTestId,
@@ -64,6 +68,7 @@ function Bar({
   elapsed: number | null;
   usedHeight: number;
   elapsedHeight: number;
+  barWidth: number;
   colors: UsageMeterColors;
   testId: string;
   paceTestId: string;
@@ -75,6 +80,7 @@ function Bar({
         color={colors.used}
         track={colors.track}
         height={usedHeight}
+        width={barWidth}
         testId={testId}
       />
       {elapsed != null && (
@@ -83,6 +89,7 @@ function Bar({
           color={colors.pace}
           track={colors.track}
           height={elapsedHeight}
+          width={barWidth}
           testId={paceTestId}
         />
       )}
@@ -102,6 +109,7 @@ export function UsageWidgetBody({
   colors,
   usedHeight,
   elapsedHeight,
+  barWidth,
 }: {
   testId: string;
   /** Short provider name, e.g. `Claude`. */
@@ -117,6 +125,7 @@ export function UsageWidgetBody({
   colors: UsageMeterColors;
   usedHeight: number;
   elapsedHeight: number;
+  barWidth: number;
 }) {
   const usable = message === null;
   const capturedLabel =
@@ -161,6 +170,7 @@ export function UsageWidgetBody({
                 elapsed={row.elapsed}
                 usedHeight={usedHeight}
                 elapsedHeight={elapsedHeight}
+                barWidth={barWidth}
                 colors={colors}
                 testId={`${testId}-bar-${row.key}`}
                 paceTestId={`${testId}-pace-${row.key}`}

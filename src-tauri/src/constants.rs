@@ -135,6 +135,11 @@ pub const WIDGET_TYPES: &[&str] = &[
 ];
 /// How a slot sheds widgets when its width budget runs out (ADR-0105).
 pub const WIDGET_OVERFLOW_MODES: &[&str] = &["collapse"];
+/// Shared widget text size. The upper bound keeps one-line chrome inside the
+/// fixed 28 px top/status bars while still allowing a clearly larger label.
+pub const WIDGET_FONT_SIZE_MIN: u64 = 6;
+pub const WIDGET_FONT_SIZE_MAX: u64 = 20;
+pub const WIDGET_FONT_SIZE_DEFAULT: u16 = 9;
 /// Rendering styles a usage widget may pick. The rows themselves stay owned by
 /// `usage.*.visibleRows` (ADR-0103), so this only decides how each row is drawn.
 pub const USAGE_WIDGET_DISPLAY_MODES: &[&str] = &["bar", "number", "both"];
@@ -145,6 +150,9 @@ pub const TERMINAL_ACTIVITY_WIDGET_SCOPES: &[&str] = &["workspace", "all"];
 /// single row every surface gives it.
 pub const USAGE_WIDGET_BAR_HEIGHT_MIN: u64 = 1;
 pub const USAGE_WIDGET_BAR_HEIGHT_MAX: u64 = 10;
+/// Width of each consumed/elapsed track in a usage widget, in px.
+pub const USAGE_WIDGET_BAR_WIDTH_MIN: u64 = 8;
+pub const USAGE_WIDGET_BAR_WIDTH_MAX: u64 = 200;
 
 /// Maximum number of notifications to keep. When exceeded, oldest read
 /// notifications are evicted first. Unread notifications are never evicted.

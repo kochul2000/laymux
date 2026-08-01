@@ -14,14 +14,19 @@ import { NotificationsWidget } from "./NotificationsWidget";
 import { TerminalActivityWidget } from "./TerminalActivityWidget";
 import {
   CWD_WIDGET_WIDTH,
+  DEFAULT_USAGE_BAR_WIDTH,
   DEFAULT_ELAPSED_BAR_HEIGHT,
   DEFAULT_USED_BAR_HEIGHT,
   estimateUsageWidgetWidth,
+  readBarWidth,
   readDisplay,
   TERMINAL_ACTIVITY_SCOPES,
+  USAGE_BAR_WIDTH_MAX,
+  USAGE_BAR_WIDTH_MIN,
   USAGE_BAR_HEIGHT_MAX,
   USAGE_BAR_HEIGHT_MIN,
   USAGE_WIDGET_DISPLAYS,
+  scaleWidgetWidth,
 } from "./widget-options";
 import type { WidgetDefinition } from "./types";
 
@@ -45,6 +50,15 @@ const BAR_HEIGHT_SPECS = [
 const BAR_HEIGHT_DEFAULTS = {
   barHeight: DEFAULT_USED_BAR_HEIGHT,
   elapsedHeight: DEFAULT_ELAPSED_BAR_HEIGHT,
+  barWidth: DEFAULT_USAGE_BAR_WIDTH,
+};
+
+const BAR_WIDTH_SPEC = {
+  key: "barWidth",
+  kind: "number" as const,
+  labelKey: "widgets.option.barWidth",
+  min: USAGE_BAR_WIDTH_MIN,
+  max: USAGE_BAR_WIDTH_MAX,
 };
 
 export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
@@ -61,10 +75,16 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
         labelKey: "widgets.option.display",
         choices: USAGE_WIDGET_DISPLAYS,
       },
+      BAR_WIDTH_SPEC,
       ...BAR_HEIGHT_SPECS,
     ],
     estimateWidth: (instance, env) =>
-      estimateUsageWidgetWidth(readDisplay(instance.options), env.claudeVisibleRows),
+      estimateUsageWidgetWidth(
+        readDisplay(instance.options),
+        env.claudeVisibleRows,
+        readBarWidth(instance.options),
+        env.fontSize,
+      ),
     Component: ClaudeUsageWidget,
   },
   {
@@ -79,10 +99,16 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
         labelKey: "widgets.option.display",
         choices: USAGE_WIDGET_DISPLAYS,
       },
+      BAR_WIDTH_SPEC,
       ...BAR_HEIGHT_SPECS,
     ],
     estimateWidth: (instance, env) =>
-      estimateUsageWidgetWidth(readDisplay(instance.options), env.codexVisibleRows),
+      estimateUsageWidgetWidth(
+        readDisplay(instance.options),
+        env.codexVisibleRows,
+        readBarWidth(instance.options),
+        env.fontSize,
+      ),
     Component: CodexUsageWidget,
   },
   {
@@ -98,7 +124,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
         choices: TERMINAL_ACTIVITY_SCOPES,
       },
     ],
-    estimateWidth: () => 58,
+    estimateWidth: (_instance, env) => scaleWidgetWidth(58, env.fontSize),
     Component: TerminalActivityWidget,
   },
   {
@@ -109,7 +135,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
     interactive: true,
     defaultOptions: {},
     optionSpecs: [],
-    estimateWidth: () => 46,
+    estimateWidth: (_instance, env) => scaleWidgetWidth(46, env.fontSize),
     Component: NotificationsWidget,
   },
   {

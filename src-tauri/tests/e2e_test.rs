@@ -179,6 +179,8 @@ fn settings_round_trip_with_full_config() {
         control_bar: Default::default(),
         usage: Default::default(),
         widgets: WidgetsSettings {
+            font_family: "JetBrains Mono".into(),
+            font_size: 11,
             top_bar: WidgetSlots {
                 left: Vec::new(),
                 right: vec![WidgetInstance {
@@ -268,6 +270,8 @@ fn hand_edited_widget_placement_survives_load_and_repair() {
     assert!(settings.widgets.status_line.enabled);
     assert_eq!(settings.widgets.status_line.right[0].widget_type, "cwd");
     assert_eq!(settings.widgets.overflow, "collapse");
+    assert_eq!(settings.widgets.font_family, "");
+    assert_eq!(settings.widgets.font_size, 9);
     assert!(
         !warnings
             .iter()

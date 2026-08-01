@@ -5,7 +5,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { buildCodexUsageRows, selectVisibleRows } from "@/lib/usage-rows";
 import { codexUsageStatusMessage } from "@/lib/usage-status";
 import { UsageWidgetBody } from "./UsageWidgetBody";
-import { readBarHeight, readDisplay, readElapsedHeight } from "./widget-options";
+import { readBarHeight, readBarWidth, readDisplay, readElapsedHeight } from "./widget-options";
 import type { WidgetComponentProps } from "./types";
 
 const TICK_MS = 30_000;
@@ -29,6 +29,7 @@ export function CodexUsageWidget({ instance, dragRegion }: WidgetComponentProps)
       colors={usage.colors}
       usedHeight={readBarHeight(instance.options)}
       elapsedHeight={readElapsedHeight(instance.options)}
+      barWidth={readBarWidth(instance.options)}
       message={codexUsageStatusMessage(snapshot.status)}
       capturedAtMs={snapshot.capturedAtMs}
       dragRegion={dragRegion}

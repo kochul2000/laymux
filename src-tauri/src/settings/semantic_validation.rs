@@ -7,7 +7,9 @@ use crate::constants::{
     PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
     PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_ACTIVITY_WIDGET_SCOPES,
     TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_BAR_HEIGHT_MAX, USAGE_WIDGET_BAR_HEIGHT_MIN,
-    USAGE_WIDGET_DISPLAY_MODES, WIDGET_OVERFLOW_MODES, WIDGET_TYPES, WORKSPACE_SORT_ORDERS,
+    USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN, USAGE_WIDGET_DISPLAY_MODES,
+    WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES, WIDGET_TYPES,
+    WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -475,6 +477,13 @@ fn optional_font_size(issues: &mut Vec<SettingsIssue>, path: &str, value: u16, m
 /// placement, so loading keeps it and only rendering skips it.
 fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let widgets = &settings.widgets;
+    range_u64(
+        issues,
+        "/widgets/fontSize",
+        u64::from(widgets.font_size),
+        WIDGET_FONT_SIZE_MIN,
+        WIDGET_FONT_SIZE_MAX,
+    );
     enum_value(
         issues,
         "/widgets/overflow",
@@ -596,6 +605,24 @@ fn validate_widget_options(
                     "type_error",
                     path,
                     format!("위젯 옵션 '{key}' 는 정수 픽셀 값이어야 합니다."),
+                ),
+            }
+        }
+        if let Some(value) = instance.options.get("barWidth") {
+            let path = format!("{base}/options/barWidth");
+            match value.as_u64() {
+                Some(width) => range_u64(
+                    issues,
+                    &path,
+                    width,
+                    USAGE_WIDGET_BAR_WIDTH_MIN,
+                    USAGE_WIDGET_BAR_WIDTH_MAX,
+                ),
+                None => issue(
+                    issues,
+                    "type_error",
+                    path,
+                    "위젯 옵션 'barWidth' 는 정수 픽셀 값이어야 합니다.".to_string(),
                 ),
             }
         }

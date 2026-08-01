@@ -775,6 +775,22 @@ fn status_line_starts_off_with_empty_slots() {
     assert!(widgets.status_line.left.is_empty());
     assert!(widgets.status_line.right.is_empty());
     assert_eq!(widgets.overflow, "collapse");
+    assert_eq!(widgets.font_family, "");
+    assert_eq!(widgets.font_size, 9);
+}
+
+#[test]
+fn widget_font_size_is_bounded() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "widgets": { "fontFamily": "JetBrains Mono", "fontSize": 99 } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| { issue.code == "out_of_range" && issue.path == "/widgets/fontSize" }));
 }
 
 #[test]
@@ -852,7 +868,10 @@ fn usage_colors_are_owned_per_agent() {
     let defaults = Settings::default();
     assert_eq!(defaults.usage.claude.colors.used, "#d97757");
     assert_eq!(defaults.usage.codex.colors.used, "#10a37f");
-    assert_eq!(defaults.usage.claude.colors.pace, defaults.usage.codex.colors.pace);
+    assert_eq!(
+        defaults.usage.claude.colors.pace,
+        defaults.usage.codex.colors.pace
+    );
 
     let prepared = prepare_settings_update(
         &defaults,
@@ -868,7 +887,9 @@ fn usage_colors_are_owned_per_agent() {
 fn usage_widget_bar_thickness_is_bounded() {
     let too_thick = prepare_settings_update(
         &Settings::default(),
-        &widget_patch(json!([{ "id": "w1", "type": "claudeUsage", "options": { "barHeight": 99 } }])),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "claudeUsage", "options": { "barHeight": 99 } }]),
+        ),
     );
     assert!(!too_thick.valid);
     assert!(too_thick.errors.iter().any(|issue| {
@@ -891,6 +912,26 @@ fn usage_widget_bar_thickness_is_bounded() {
         &widget_patch(
             json!([{ "id": "w1", "type": "claudeUsage", "options": { "barHeight": 6, "elapsedHeight": 1 } }]),
         ),
+    );
+    assert!(ok.valid, "errors: {:?}", ok.errors);
+}
+
+#[test]
+fn usage_widget_bar_width_is_bounded() {
+    let too_wide = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "claudeUsage", "options": { "barWidth": 999 } }]),
+        ),
+    );
+    assert!(!too_wide.valid);
+    assert!(too_wide.errors.iter().any(|issue| {
+        issue.code == "out_of_range" && issue.path == "/widgets/topBar/left/0/options/barWidth"
+    }));
+
+    let ok = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "w1", "type": "codexUsage", "options": { "barWidth": 64 } }])),
     );
     assert!(ok.valid, "errors: {:?}", ok.errors);
 }
