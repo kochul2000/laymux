@@ -26,9 +26,22 @@ export interface StatusLineWidgets extends WidgetSlots {
 }
 
 export interface WidgetsSettings {
+  /** Empty follows the app interface font. Shared by every widget surface. */
+  fontFamily: string;
+  /** Shared widget text size in px. */
+  fontSize: number;
   topBar: WidgetSlots;
   statusLine: StatusLineWidgets;
   overflow: "collapse";
+}
+
+export const DEFAULT_WIDGET_FONT_SIZE = 9;
+export const WIDGET_FONT_SIZE_MIN = 6;
+export const WIDGET_FONT_SIZE_MAX = 20;
+
+export function readWidgetFontSize(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_WIDGET_FONT_SIZE;
+  return Math.max(WIDGET_FONT_SIZE_MIN, Math.min(WIDGET_FONT_SIZE_MAX, Math.round(value)));
 }
 
 export type WidgetSurface = "topBar" | "statusLine";
@@ -53,6 +66,8 @@ export function slotKey(slot: WidgetSlotId): string {
 
 export function defaultWidgets(): WidgetsSettings {
   return {
+    fontFamily: "",
+    fontSize: DEFAULT_WIDGET_FONT_SIZE,
     topBar: { left: [], right: [] },
     statusLine: { enabled: false, left: [], right: [] },
     overflow: "collapse",
@@ -108,6 +123,11 @@ export function normalizeWidgets(raw: unknown): WidgetsSettings {
   };
 
   return {
+    fontFamily: typeof source.fontFamily === "string" ? source.fontFamily : "",
+    fontSize:
+      typeof source.fontSize === "number" && Number.isFinite(source.fontSize)
+        ? source.fontSize
+        : DEFAULT_WIDGET_FONT_SIZE,
     topBar: {
       left: slot(source.topBar?.left, "topBar.left"),
       right: slot(source.topBar?.right, "topBar.right"),

@@ -146,10 +146,12 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 ```jsonc
 {
   "widgets": {
+    "fontFamily": "", // 빈 값이면 appearance.uiFontFamily 상속
+    "fontSize": 9, // 모든 위젯의 공용 글자 크기(px), 6~20
     "topBar": {
       "left": [],
       "right": [
-        { "id": "w1", "type": "claudeUsage", "options": { "configDir": "", "display": "both" } }
+        { "id": "w1", "type": "claudeUsage", "options": { "configDir": "", "display": "both", "barWidth": 26 } }
       ]
     },
     "statusLine": {
@@ -164,9 +166,11 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 **배치의 SoT 는 네 슬롯의 순서 배열이다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 좌·우 붙임은 어느 슬롯에 넣었는지로만 표현하고, 배열 순서가 화면 순서다. 상단 바 슬롯은 항상 존재하며 `statusLine.enabled` 는 하단 영역의 표시 여부만 정한다. 네 슬롯의 기본값은 빈 배열이고 metadata apply mode 는 `live` 다.
 
+`fontFamily`와 `fontSize`는 모든 위젯 표면이 공유하는 typography다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). `fontFamily` 기본값 `""`은 인터페이스 글꼴 상속이고, `fontSize` 기본값 9px·허용 범위 6~20px다. Settings 미리보기와 실제 슬롯은 같은 값을 적용하며, 슬롯의 요구 폭 계산도 `fontSize`를 입력으로 받아 큰 글자가 콘텐츠 폭을 넘기기 전에 접힘 예산에 반영한다.
+
 `type` 은 프론트 위젯 레지스트리(`ui/src/components/widgets/registry.ts`)가 정의하는 이름이며 정본 목록은 Rust `constants.rs::WIDGET_TYPES` 다. 두 목록의 일치는 `registry.test.ts` 가 강제한다. 쓰기 경로는 미등록 `type` 과 중복 `id` 를 [ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md) 대로 거부하고, 이미 디스크에 있던 위반은 `existingIssues` 로 보고하며 값은 보존한다 — 로드는 미등록 위젯을 지우지 않고 렌더만 건너뛴다.
 
-`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 두께가 맞지 않는다. **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
+`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barWidth`·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 너비(`barWidth` 기본 26, 8~200px)와 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 크기가 맞지 않는다. `barWidth`는 consumed·elapsed 두 track과 슬롯 요구 폭 계산에 함께 적용된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
 
 폭이 모자라면 위젯을 자르지 않는다. 상단 바에서는 창 드래그 영역의 최소 폭이 먼저 확보되고, 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
 

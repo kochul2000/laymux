@@ -18,6 +18,19 @@ describe("normalizeWidgets", () => {
   it("starts empty with the status line off", () => {
     const widgets = normalizeWidgets(undefined);
     expect(widgets).toEqual(defaultWidgets());
+    expect(widgets.fontFamily).toBe("");
+    expect(widgets.fontSize).toBe(9);
+  });
+
+  it("keeps shared widget typography and fills missing values", () => {
+    expect(normalizeWidgets({ fontFamily: "JetBrains Mono", fontSize: 12 })).toMatchObject({
+      fontFamily: "JetBrains Mono",
+      fontSize: 12,
+    });
+    expect(normalizeWidgets({ fontFamily: 7, fontSize: "large" })).toMatchObject({
+      fontFamily: "",
+      fontSize: 9,
+    });
   });
 
   it("keeps an unknown type so another version's placement is not destroyed", () => {

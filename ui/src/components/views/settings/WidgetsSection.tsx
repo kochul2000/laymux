@@ -20,12 +20,15 @@ import {
   nudgeWidget,
   readSlot,
   removeWidget,
+  readWidgetFontSize,
   slotKey,
   updateWidgetOptions,
   WIDGET_SLOT_IDS,
   type WidgetInstance,
   type WidgetSlotId,
   type WidgetsSettings,
+  WIDGET_FONT_SIZE_MAX,
+  WIDGET_FONT_SIZE_MIN,
 } from "@/lib/widget-placement";
 
 export interface WidgetsSectionBodyProps {
@@ -33,6 +36,8 @@ export interface WidgetsSectionBodyProps {
   onChange: (next: WidgetsSettings) => void;
   /** Claude config dirs offered for a `claudeUsage` widget; "" is the default one. */
   claudeConfigDirs: readonly string[];
+  /** Installed font families offered for the shared widget face. */
+  fontFamilies?: readonly string[];
 }
 
 function newInstanceId(): string {
@@ -59,6 +64,7 @@ export function WidgetsSectionBody({
   widgets,
   onChange,
   claudeConfigDirs,
+  fontFamilies = [],
 }: WidgetsSectionBodyProps) {
   const { t } = useTranslation("settings");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -72,6 +78,54 @@ export function WidgetsSectionBody({
 
   return (
     <div data-testid="settings-widgets-section-body" className="flex flex-col gap-3 px-4 py-2">
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span className="w-36 shrink-0 text-[12px]" style={{ color: "var(--text-primary)" }}>
+            {t("widgets.fontFamily")}
+          </span>
+          <FocusSelect
+            data-testid="widgets-font-family"
+            style={{ ...controlStyle, minWidth: 160 }}
+            value={widgets.fontFamily}
+            onChange={(event) => change({ ...widgets, fontFamily: event.target.value })}
+          >
+            <option value="">{t("widgets.fontFamilyDefault")}</option>
+            {widgets.fontFamily && !fontFamilies.includes(widgets.fontFamily) && (
+              <option value={widgets.fontFamily}>{widgets.fontFamily}</option>
+            )}
+            {fontFamilies.map((family) => (
+              <option key={family} value={family}>
+                {family}
+              </option>
+            ))}
+          </FocusSelect>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="w-36 shrink-0 text-[12px]" style={{ color: "var(--text-primary)" }}>
+            {t("widgets.fontSize")}
+          </span>
+          <FocusInput
+            type="number"
+            data-testid="widgets-font-size"
+            inputStyle={{ ...controlStyle, width: 60 }}
+            min={WIDGET_FONT_SIZE_MIN}
+            max={WIDGET_FONT_SIZE_MAX}
+            value={readWidgetFontSize(widgets.fontSize)}
+            onChange={(event) => {
+              const size = Number(event.target.value);
+              if (!Number.isFinite(size)) return;
+              change({
+                ...widgets,
+                fontSize: Math.max(
+                  WIDGET_FONT_SIZE_MIN,
+                  Math.min(WIDGET_FONT_SIZE_MAX, Math.round(size)),
+                ),
+              });
+            }}
+          />
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="min-w-0">
           <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
@@ -177,6 +231,8 @@ function WidgetsPreview({
               // Off is not gone: the placement stays visible so turning the
               // surface back on holds no surprises.
               opacity: dimmed ? 0.4 : 1,
+              fontFamily: widgets.fontFamily || "var(--ui-font)",
+              fontSize: readWidgetFontSize(widgets.fontSize),
             }}
           >
             <PreviewSlot
@@ -236,6 +292,8 @@ function PreviewSlot({
               background: isSelected ? "var(--hover-bg, rgba(255,255,255,0.08))" : "transparent",
               border: "none",
               outline: isSelected ? "1px solid var(--accent)" : "none",
+              fontFamily: "inherit",
+              fontSize: "inherit",
             }}
             onClick={() => onSelect(instance.id)}
           >
@@ -444,6 +502,7 @@ function WidgetDetail({
               <OptionControl
                 spec={spec}
                 instance={instance}
+                defaultValue={definition.defaultOptions[spec.key]}
                 widgets={widgets}
                 onChange={onChange}
                 claudeConfigDirs={claudeConfigDirs}
@@ -459,12 +518,14 @@ function WidgetDetail({
 function OptionControl({
   spec,
   instance,
+  defaultValue,
   widgets,
   onChange,
   claudeConfigDirs,
 }: {
   spec: WidgetOptionSpec;
   instance: WidgetInstance;
+  defaultValue: unknown;
   widgets: WidgetsSettings;
   onChange: (next: WidgetsSettings) => void;
   claudeConfigDirs: readonly string[];
@@ -473,15 +534,17 @@ function OptionControl({
 
   if (spec.kind === "number") {
     const current = instance.options[spec.key];
+    const value =
+      typeof current === "number" ? current : typeof defaultValue === "number" ? defaultValue : "";
     return (
       <FocusInput
         type="number"
         data-testid={`widgets-option-${instance.id}-${spec.key}`}
         aria-label={t(spec.labelKey)}
-        style={{ ...controlStyle, width: 60 }}
+        inputStyle={{ ...controlStyle, width: 60 }}
         min={spec.min}
         max={spec.max}
-        value={typeof current === "number" ? current : ""}
+        value={value}
         onChange={(event) => {
           const next = Number(event.target.value);
           if (!Number.isFinite(next)) return;
@@ -495,8 +558,9 @@ function OptionControl({
     );
   }
 
+  const rawValue = instance.options[spec.key];
   const value =
-    typeof instance.options[spec.key] === "string" ? String(instance.options[spec.key]) : "";
+    typeof rawValue === "string" ? rawValue : typeof defaultValue === "string" ? defaultValue : "";
   const choices =
     spec.kind === "claudeConfigDir" ? ["", ...claudeConfigDirs.filter(Boolean)] : spec.choices;
 

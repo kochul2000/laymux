@@ -509,6 +509,9 @@
     "widgets": {
       "title": "Widgets",
       "intro": "Choose what sits in the top bar and the status line. A slot's order is the on-screen order, and left or right is decided by which slot you place it in. The top bar reserves its window drag region first; when the remaining width runs out, the widgets farthest from the window edge collapse first.",
+      "fontFamily": "Shared font",
+      "fontFamilyDefault": "Use interface font",
+      "fontSize": "Shared font size",
       "statusLineEnabled": "Show bottom status line",
       "statusLineEnabledDesc": "Adds one widget row at the very bottom of the window, below every dock. Turning it off keeps the placement.",
       "slot": {
@@ -542,6 +545,7 @@
         "configDir": "Account config dir",
         "display": "Display",
         "scope": "Scope",
+        "barWidth": "Usage bar width",
         "barHeight": "Used bar thickness",
         "elapsedHeight": "Elapsed bar thickness"
       },

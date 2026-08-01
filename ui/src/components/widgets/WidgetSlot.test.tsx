@@ -178,4 +178,21 @@ describe("WidgetSlot", () => {
     // row regardless of what is placed.
     expect(screen.getByTestId("widget-slot-topBar-left")).toHaveStyle({ flexBasis: "46px" });
   });
+
+  it("applies the shared widget font family and size", () => {
+    useSettingsStore.setState((state) => ({
+      widgets: { ...state.widgets, fontFamily: "JetBrains Mono", fontSize: 13 },
+    }));
+    render(
+      <WidgetSlot
+        slot={{ surface: "topBar", side: "left" }}
+        instances={[instance("w1", "notifications")]}
+      />,
+    );
+    expect(screen.getByTestId("widget-slot-topBar-left")).toHaveStyle({
+      fontFamily: "JetBrains Mono",
+      fontSize: "13px",
+      flexBasis: "66px",
+    });
+  });
 });

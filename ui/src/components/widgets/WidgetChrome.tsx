@@ -32,7 +32,7 @@ export function WidgetChrome({
 }) {
   const style = {
     color: "var(--text-secondary)",
-    fontSize: "var(--fs-2xs)",
+    fontSize: "inherit",
     background: "transparent",
     border: "none",
   } as const;

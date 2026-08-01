@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -32,6 +32,39 @@ describe("WidgetsSectionBody", () => {
     }
   });
 
+  it("edits the shared widget font family and size", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const view = render(
+      <WidgetsSectionBody
+        widgets={defaultWidgets()}
+        onChange={onChange}
+        claudeConfigDirs={[""]}
+        fontFamilies={["JetBrains Mono"]}
+      />,
+    );
+
+    expect(screen.getByTestId("widgets-font-family")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-font-size")).toHaveValue(9);
+    expect(screen.getByTestId("widgets-font-size")).toHaveStyle({ width: "60px" });
+    await user.selectOptions(screen.getByTestId("widgets-font-family"), "JetBrains Mono");
+    const withFamily = onChange.mock.calls.at(-1)?.[0] as WidgetsSettings;
+    expect(withFamily.fontFamily).toBe("JetBrains Mono");
+    expect(screen.getByTestId("widgets-preview-topBar")).toHaveStyle({ fontSize: "9px" });
+
+    view.rerender(
+      <WidgetsSectionBody
+        widgets={withFamily}
+        onChange={onChange}
+        claudeConfigDirs={[""]}
+        fontFamilies={["JetBrains Mono"]}
+      />,
+    );
+    fireEvent.change(screen.getByTestId("widgets-font-size"), { target: { value: "13" } });
+    const withSize = onChange.mock.calls.at(-1)?.[0] as WidgetsSettings;
+    expect(withSize.fontSize).toBe(13);
+  });
+
   it("previews both surfaces with the real widgets", () => {
     // A mock preview would drift from the bar it depicts.
     setup(placed());
@@ -56,6 +89,9 @@ describe("WidgetsSectionBody", () => {
     expect(screen.getByTestId("widgets-detail-w1")).toBeInTheDocument();
     expect(screen.getByTestId("widgets-option-w1-display")).toBeInTheDocument();
     expect(screen.getByTestId("widgets-option-w1-barHeight")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-option-w1-barWidth")).toBeInTheDocument();
+    expect(screen.getByTestId("widgets-option-w1-barWidth")).toHaveValue(26);
+    expect(screen.getByTestId("widgets-option-w1-barWidth")).toHaveStyle({ width: "60px" });
     // Only the picked one.
     expect(screen.queryByTestId("widgets-detail-w2")).not.toBeInTheDocument();
   });
@@ -82,6 +118,7 @@ describe("WidgetsSectionBody", () => {
       display: "both",
       barHeight: 4,
       elapsedHeight: 2,
+      barWidth: 26,
     });
 
     // The next thing wanted is its options, so it opens straight away.

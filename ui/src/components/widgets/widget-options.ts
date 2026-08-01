@@ -6,6 +6,8 @@
  * each component file stays a component file.
  */
 
+import { DEFAULT_WIDGET_FONT_SIZE } from "@/lib/widget-placement";
+
 export type UsageWidgetDisplay = "bar" | "number" | "both";
 
 export const USAGE_WIDGET_DISPLAYS: readonly UsageWidgetDisplay[] = ["bar", "number", "both"];
@@ -14,9 +16,11 @@ export type TerminalActivityScope = "workspace" | "all";
 
 export const TERMINAL_ACTIVITY_SCOPES: readonly TerminalActivityScope[] = ["workspace", "all"];
 
-/** Width one row costs at each display mode; the label and gaps are added on top. */
-const ROW_WIDTH: Record<UsageWidgetDisplay, number> = { bar: 34, number: 34, both: 62 };
 const LABEL_WIDTH = 44;
+
+export function scaleWidgetWidth(width: number, fontSize: number): number {
+  return Math.round((width * fontSize) / DEFAULT_WIDGET_FONT_SIZE);
+}
 
 /**
  * How much a usage widget asks the slot to budget.
@@ -24,8 +28,19 @@ const LABEL_WIDTH = 44;
  * Row count comes from the global `usage.*.visibleRows`, so a wider selection
  * makes the widget collapse sooner rather than shrink (ADR-0105).
  */
-export function estimateUsageWidgetWidth(display: UsageWidgetDisplay, rowCount: number): number {
-  return LABEL_WIDTH + Math.max(1, rowCount) * ROW_WIDTH[display];
+export function estimateUsageWidgetWidth(
+  display: UsageWidgetDisplay,
+  rowCount: number,
+  barWidth = DEFAULT_USAGE_BAR_WIDTH,
+  fontSize = DEFAULT_WIDGET_FONT_SIZE,
+): number {
+  const rowWidth =
+    display === "number"
+      ? scaleWidgetWidth(34, fontSize)
+      : display === "bar"
+        ? barWidth + 8
+        : barWidth + scaleWidgetWidth(36, fontSize);
+  return scaleWidgetWidth(LABEL_WIDTH, fontSize) + Math.max(1, rowCount) * rowWidth;
 }
 
 export function readDisplay(options: Record<string, unknown>): UsageWidgetDisplay {
@@ -59,6 +74,9 @@ export const USAGE_BAR_HEIGHT_MIN = 1;
 export const USAGE_BAR_HEIGHT_MAX = 10;
 export const DEFAULT_USED_BAR_HEIGHT = 4;
 export const DEFAULT_ELAPSED_BAR_HEIGHT = 2;
+export const USAGE_BAR_WIDTH_MIN = 8;
+export const USAGE_BAR_WIDTH_MAX = 200;
+export const DEFAULT_USAGE_BAR_WIDTH = 26;
 
 function readHeight(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
@@ -71,4 +89,10 @@ export function readBarHeight(options: Record<string, unknown>): number {
 
 export function readElapsedHeight(options: Record<string, unknown>): number {
   return readHeight(options.elapsedHeight, DEFAULT_ELAPSED_BAR_HEIGHT);
+}
+
+export function readBarWidth(options: Record<string, unknown>): number {
+  const value = options.barWidth;
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_USAGE_BAR_WIDTH;
+  return Math.max(USAGE_BAR_WIDTH_MIN, Math.min(USAGE_BAR_WIDTH_MAX, Math.round(value)));
 }
