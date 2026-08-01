@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubView } from "./GitHubView";
@@ -60,8 +61,8 @@ function mockSnapshot(next: GithubRepoSnapshot) {
   useGithubRepoSnapshot.mockReturnValue({ snapshot: next, loading: false, refresh });
 }
 
-function renderView() {
-  return render(<GitHubView instanceId="github-1" syncGroup="ws-1" paneId="pane-1" />);
+function renderView(props: Partial<ComponentProps<typeof GitHubView>> = {}) {
+  return render(<GitHubView instanceId="github-1" syncGroup="ws-1" paneId="pane-1" {...props} />);
 }
 
 describe("GitHubView", () => {
@@ -86,6 +87,46 @@ describe("GitHubView", () => {
     expect(screen.queryByTestId("github-item-708")).not.toBeInTheDocument();
     expect(screen.getByTestId("github-item-12")).toHaveTextContent("wip pull");
     expect(screen.getByTestId("github-draft-12")).toBeInTheDocument();
+  });
+
+  it("opens on the pulls tab when defaultTab is set", () => {
+    renderView({ defaultTab: "pulls" });
+
+    expect(screen.getByTestId("github-item-12")).toHaveTextContent("wip pull");
+    expect(screen.queryByTestId("github-item-708")).not.toBeInTheDocument();
+  });
+
+  it("hides draft pull requests and their count when hideDraftPulls is set", () => {
+    mockSnapshot(
+      snapshot({
+        pulls: [
+          {
+            number: 12,
+            title: "wip pull",
+            author: "someone",
+            url: "https://github.com/owner/repo/pull/12",
+            updatedAt: new Date(Date.now() - 60_000).toISOString(),
+            labels: [],
+            isDraft: true,
+          },
+          {
+            number: 13,
+            title: "ready pull",
+            author: "someone",
+            url: "https://github.com/owner/repo/pull/13",
+            updatedAt: new Date(Date.now() - 60_000).toISOString(),
+            labels: [],
+            isDraft: false,
+          },
+        ],
+      }),
+    );
+
+    renderView({ defaultTab: "pulls", hideDraftPulls: true });
+
+    expect(screen.getByTestId("github-tab-pulls")).toHaveTextContent("PRs 1");
+    expect(screen.queryByTestId("github-item-12")).not.toBeInTheDocument();
+    expect(screen.getByTestId("github-item-13")).toHaveTextContent("ready pull");
   });
 
   it("opens the item in a browser when its row is clicked", () => {

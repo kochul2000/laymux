@@ -32,7 +32,7 @@ function failed(message: string): GithubRepoSnapshot {
  * Track the open issues and PRs of whichever repository `workingDir` is in.
  * Polls only while a view is mounted; a CWD change re-reads immediately.
  */
-export function useGithubRepoSnapshot(workingDir: string) {
+export function useGithubRepoSnapshot(workingDir: string, pollMs: number = GITHUB_POLL_MS) {
   // The result carries the CWD it belongs to, so a repository switch shows the
   // loading state instead of the previous repository's list, and no effect has
   // to reset anything on the way.
@@ -85,9 +85,9 @@ export function useGithubRepoSnapshot(workingDir: string) {
 
   useEffect(() => {
     read(false);
-    const timer = setInterval(() => read(false), GITHUB_POLL_MS);
+    const timer = setInterval(() => read(false), pollMs);
     return () => clearInterval(timer);
-  }, [read]);
+  }, [read, pollMs]);
 
   useEffect(() => {
     if (pendingNonce === 0) return;

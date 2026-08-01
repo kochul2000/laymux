@@ -190,6 +190,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/github",
+        description: "GitHub 뷰의 기본 탭·폴링 간격·draft PR 표시 설정입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/remote",
         description: "Direct Remote와 cloud 연결의 영속 설정입니다.",
         sensitive: false,

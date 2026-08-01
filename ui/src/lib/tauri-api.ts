@@ -757,6 +757,16 @@ export interface FileExplorerSettings {
   extensionViewers: ExtensionViewer[];
 }
 
+export interface GithubSettings {
+  /** Tab shown when the view first mounts. */
+  defaultTab: "issues" | "pulls";
+  /** Seconds between snapshot polls. Values below the backend's own refresh
+   *  window just re-read its cache instead of hitting `gh` again. */
+  refreshSeconds: number;
+  /** Hide draft pull requests from the pulls tab. */
+  hideDraftPulls: boolean;
+}
+
 /** One entry of an archive listing; mirrors Rust `commands::ArchiveEntry`. */
 export interface ArchiveEntry {
   name: string;

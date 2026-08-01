@@ -181,6 +181,7 @@ function GitHubViewWithSyncCwd({
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
   const syncCwdDefaults = useSettingsStore((s) => s.syncCwdDefaults);
+  const githubSettings = useSettingsStore((s) => s.github);
   const fallbackId = useId();
 
   const configSyncGroup = (viewConfig?.syncGroup as string) ?? "";
@@ -207,6 +208,9 @@ function GitHubViewWithSyncCwd({
       cwdReceive={cwdReceive}
       workspaceId={workspaceId}
       isFocused={isFocused}
+      defaultTab={githubSettings.defaultTab}
+      refreshSeconds={githubSettings.refreshSeconds}
+      hideDraftPulls={githubSettings.hideDraftPulls}
     />
   );
 }

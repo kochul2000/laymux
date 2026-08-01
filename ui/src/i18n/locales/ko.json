@@ -80,6 +80,7 @@
       "memo": "메모",
       "fileExplorer": "파일 탐색기",
       "issueReporter": "이슈 리포터",
+      "github": "GitHub",
       "keybindings": "키 바인딩",
       "profileDefaults": "기본값",
       "deleteProfile": "프로필 삭제",
@@ -468,6 +469,18 @@
       "addRepository": "+ 저장소 추가",
       "padding": "여백",
       "paddingDesc": "이슈 리포터 영역의 안쪽 여백 (px)"
+    },
+    "github": {
+      "title": "GitHub",
+      "groupBehavior": "동작",
+      "defaultTab": "기본 탭",
+      "defaultTabDesc": "뷰가 처음 열릴 때 표시할 탭입니다.",
+      "defaultTabIssues": "이슈",
+      "defaultTabPulls": "PR",
+      "refreshSeconds": "새로고침 간격",
+      "refreshSecondsDesc": "이슈·PR 목록을 다시 조회하는 간격(초)입니다. 10초 미만은 서버 캐시를 그대로 다시 읽습니다.",
+      "hideDraftPulls": "Draft PR 숨기기",
+      "hideDraftPullsDesc": "PR 탭에서 draft 상태의 PR을 목록과 개수에서 제외합니다."
     },
     "memo": {
       "title": "메모",
