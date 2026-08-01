@@ -539,6 +539,61 @@ fn default_exit_settle_ms() -> u64 {
     700
 }
 
+/// Workspace-wide clear settings (issue #726, ADR-0113).
+///
+/// The clear action asks each pane's activity handler what "clear" means there
+/// — the configured shell command for a shell, `/clear` for Claude Code and
+/// Codex. These keys only decide the shell command and what happens to a pane
+/// that is mid-task; the frontend owns everything else.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceClearSettings {
+    /// Command submitted to a plain shell. `cls` for cmd.exe. The app does not
+    /// interpret it. Empty falls back to `clear` at use.
+    #[serde(default = "default_workspace_clear_shell_command")]
+    pub shell_command: String,
+    /// What to do with a pane that is mid-task: `skip` (default, leave it),
+    /// `interrupt` (Ctrl+C, settle, then clear), or `restart` (fresh PTY —
+    /// discards the scrollback, unlike `clear`).
+    #[serde(default = "default_workspace_clear_busy_policy")]
+    pub busy_policy: String,
+    /// Ctrl+C presses sent before clearing under the `interrupt` policy.
+    /// Clamped to 1..=10 at use.
+    #[serde(default = "default_workspace_clear_interrupt_rounds")]
+    pub interrupt_rounds: u32,
+    /// Delay (ms) after the last Ctrl+C so the app can repaint its prompt
+    /// before the clear text is typed. Clamped to 0..=10000 at use.
+    #[serde(default = "default_workspace_clear_settle_ms")]
+    pub settle_ms: u64,
+}
+
+impl Default for WorkspaceClearSettings {
+    fn default() -> Self {
+        Self {
+            shell_command: default_workspace_clear_shell_command(),
+            busy_policy: default_workspace_clear_busy_policy(),
+            interrupt_rounds: default_workspace_clear_interrupt_rounds(),
+            settle_ms: default_workspace_clear_settle_ms(),
+        }
+    }
+}
+
+fn default_workspace_clear_shell_command() -> String {
+    "clear".to_string()
+}
+
+fn default_workspace_clear_busy_policy() -> String {
+    "skip".to_string()
+}
+
+fn default_workspace_clear_interrupt_rounds() -> u32 {
+    2
+}
+
+fn default_workspace_clear_settle_ms() -> u64 {
+    400
+}
+
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1690,6 +1745,8 @@ pub struct Settings {
     #[serde(default)]
     pub exit: ExitSettings,
     #[serde(default)]
+    pub workspace_clear: WorkspaceClearSettings,
+    #[serde(default)]
     pub memo: MemoSettings,
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
@@ -1788,6 +1845,7 @@ impl Default for Settings {
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),
             exit: ExitSettings::default(),
+            workspace_clear: WorkspaceClearSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),

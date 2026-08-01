@@ -6,7 +6,8 @@ use laymux_lib::settings::{
     FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
     MemoSettings, OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
     SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, WidgetInstance,
-    WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
+    WidgetSlots, WidgetsSettings, Workspace, WorkspaceClearSettings, WorkspacePane,
+    WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -206,6 +207,13 @@ fn settings_round_trip_with_full_config() {
         claude: ClaudeSettings::default(),
         codex: Default::default(),
         exit: Default::default(),
+        // Non-default on every field for the same reason as `github` below.
+        workspace_clear: WorkspaceClearSettings {
+            shell_command: "cls".into(),
+            busy_policy: "interrupt".into(),
+            interrupt_rounds: 5,
+            settle_ms: 900,
+        },
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
@@ -333,6 +341,34 @@ fn hand_edited_github_section_loads_and_an_omitted_one_falls_back_to_defaults() 
     assert!(bare.github.show_draft_badge);
     assert_eq!(bare.github.label_max_count, 2);
     assert_eq!(bare.github.label_max_width, 80);
+}
+
+#[test]
+fn hand_edited_workspace_clear_section_loads_and_an_omitted_one_falls_back_to_defaults() {
+    let configured: Settings = serde_json::from_str(
+        r#"{ "workspaceClear": { "shellCommand": "cls", "busyPolicy": "restart",
+             "interruptRounds": 4, "settleMs": 1200 } }"#,
+    )
+    .unwrap();
+    assert_eq!(configured.workspace_clear.shell_command, "cls");
+    assert_eq!(configured.workspace_clear.busy_policy, "restart");
+    assert_eq!(configured.workspace_clear.interrupt_rounds, 4);
+    assert_eq!(configured.workspace_clear.settle_ms, 1200);
+
+    // A settings.json written before the section existed must clear a shell with
+    // `clear` and leave busy panes alone (ADR-0113). The backend only fills serde
+    // defaults; clamping an out-of-range value is the frontend's job, so an
+    // absurd `interruptRounds` must survive the load unchanged.
+    let bare: Settings = serde_json::from_str(r#"{ "workspaceClear": {} }"#).unwrap();
+    assert_eq!(bare.workspace_clear, WorkspaceClearSettings::default());
+    assert_eq!(bare.workspace_clear.shell_command, "clear");
+    assert_eq!(bare.workspace_clear.busy_policy, "skip");
+    assert_eq!(bare.workspace_clear.interrupt_rounds, 2);
+    assert_eq!(bare.workspace_clear.settle_ms, 400);
+
+    let out_of_range: Settings =
+        serde_json::from_str(r#"{ "workspaceClear": { "interruptRounds": 999 } }"#).unwrap();
+    assert_eq!(out_of_range.workspace_clear.interrupt_rounds, 999);
 }
 
 #[tokio::test]

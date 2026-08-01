@@ -4,6 +4,7 @@ import { persistSession } from "@/lib/persist-session";
 import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
+import { useTerminalRestartStore } from "./terminal-restart-store";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 
 /** Convert a workspace pane to a layout pane (preserving view config). */
@@ -230,6 +231,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // 워크스페이스 삭제도 다중 pane 제거 경로이므로 1회성 CWD 전파 요청
         // 버스를 정리한다(issue #296 P3). removePane/removeDockPane 와 동일 계약.
         cwdPropagate.clear(p.id);
+        // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
+        useTerminalRestartStore.getState().forgetRestart(p.id);
       }
     }
   },
@@ -318,6 +321,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       // 1회성 CWD 전파 요청 버스 정리(issue #296 P3-a): 제거된 페인의 요청 카운터가
       // 누적되지 않도록 비운다.
       useCwdPropagateStore.getState().clear(removedPaneId);
+      // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
+      useTerminalRestartStore.getState().forgetRestart(removedPaneId);
     }
   },
 

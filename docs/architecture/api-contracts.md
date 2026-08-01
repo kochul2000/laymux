@@ -345,6 +345,25 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 조율은 **프론트엔드 종료 흐름**이 담당한다([ADR-0048](../adr/0048-kill-terminals-on-exit.md)). `saveBeforeClose()` 는 스크롤백을 직렬화하기 **전에** `interruptTerminalsOnExit()`(`ui/src/lib/interrupt-terminals-on-exit.ts`)를 먼저 await 하므로, 세션 ID 가 캐시에 담긴다. 인터럽트는 종료 전용 커맨드 `interrupt_terminal_on_exit` 로 `0x03` 을 PTY FIFO 에 바로 써서 ConPTY/line discipline 이 포그라운드 앱에 실제 Ctrl+C 를 전달한다. 일반 `write_to_terminal`(`HumanControlOrigin::Local`) 경로는 원격 제어 lease/claim 활성 시 거부되므로, 종료 인터럽트는 owner 게이트를 우회하는 이 전용 경로(ETX 전용)를 쓴다. 특정 앱을 감지하지 않고 열린 모든 터미널에 보내며(유휴 셸에는 무해), 개별 write 실패는 나머지 인터럽트를 막지 않는다. Ctrl+C 사이 간격은 설정이 아니라 상수(120ms)다. Rust 는 `settings.exit` 스키마·기본값·범위 검증(applyMode `live`)만 소유하고 실제 인터럽트 실행에는 관여하지 않는다.
 
+### 워크스페이스 클리어 설정
+
+한 워크스페이스의 `TerminalView` pane 을 한 번에 클리어하는 동작을 제어한다(issue #726, [ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+
+```jsonc
+{
+  "workspaceClear": {
+    "shellCommand": "clear",   // 일반 shell 에 제출할 명령. cmd.exe 는 "cls". 빈 값이면 "clear"
+    "busyPolicy": "skip",      // 작업 중인 pane: "skip"(기본) | "interrupt" | "restart"
+    "interruptRounds": 2,      // interrupt 정책의 Ctrl+C 전송 횟수. 1~10 으로 clamp
+    "settleMs": 400            // 마지막 Ctrl+C 이후 클리어 입력까지 대기(ms). 0~10000 으로 clamp
+  }
+}
+```
+
+무엇을 칠지는 pane 의 activity handler 가 소유한다 — shell 은 `shellCommand`, Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop·less 등)은 `unsupportedApp` 으로 건너뛴다. 제출은 사람 입력과 동일한 `write_terminal_input(submit: true)` 이므로 bracketed paste 처리와 human-control 게이트가 그대로 적용되고, `interrupt` 정책의 Ctrl+C 만 raw `write_to_terminal` 로 보낸다(ETX 를 bracketed paste 로 감싸면 인터럽트가 아니라 붙여넣기가 된다). 종료 시 인터럽트([위](#종료-시-동작kill-on-exit-설정))와 달리 owner 게이트를 우회하는 전용 경로는 쓰지 않는다.
+
+Rust 는 `settings.workspaceClear` 스키마·기본값(applyMode `live`)만 소유하고 clamp 는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다. Dock pane 은 대상이 아니다.
+
 ### CWD 동기화 기본값
 
 위치(workspace/dock)별로 CWD sync의 send/receive 기본값을 설정한다. 프로파일별 오버라이드도 지원한다.
@@ -555,7 +574,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 55개 = REST 54 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 57개 = REST 56 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
@@ -568,6 +587,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
+| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 TerminalView pane 클리어. 응답에 pane 별 결과(`cleared`/`interrupted`/`restarted`/`skipped`) |
 | POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
 | GET | `/api/v1/grid` | 그리드 상태 |
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |

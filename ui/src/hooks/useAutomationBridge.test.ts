@@ -23,6 +23,7 @@ import {
   automationResponse,
   readFileForViewer,
   reportFrontendHealth,
+  writeTerminalInput,
   type AutomationRequest,
 } from "@/lib/tauri-api";
 import { frontendBridgeCounters, resetFrontendHealthForTest } from "@/lib/frontend-health-reporter";
@@ -46,6 +47,8 @@ vi.mock("@/lib/tauri-api", () => ({
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   readFileForViewer: vi.fn(),
   reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
+  writeTerminalInput: vi.fn().mockResolvedValue(undefined),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -3392,5 +3395,86 @@ describe("grid.getState focus resolution", () => {
   it("reports no focused terminal when nothing holds focus", () => {
     useGridStore.getState().setFocusedPane(null);
     expect(gridState().focusedTerminalId).toBeNull();
+  });
+});
+
+describe("workspaces.clear over the async bridge (issue #726)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  function seedWorkspace() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-clear",
+          name: "Clear",
+          panes: [
+            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "busy", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-clear",
+      workspaceDisplayOrder: [],
+    });
+    for (const paneId of ["idle", "busy"]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${paneId}`,
+        profile: "WSL",
+        syncGroup: "ws-clear",
+        workspaceId: "ws-clear",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+        sessionReady: true,
+      });
+    }
+    useTerminalStore.getState().updateInstanceInfo("terminal-busy", {
+      activity: { type: "running" },
+    });
+  }
+
+  function clearRequest(id: string): AutomationRequest {
+    return {
+      requestId: "clear-1",
+      category: "action",
+      target: "workspaces",
+      method: "clear",
+      params: { id },
+    };
+  }
+
+  // The default policy is silent about busy panes, so the response is the only
+  // way a caller learns one was left running (ADR-0113).
+  it("reports what was cleared and what was skipped", async () => {
+    seedWorkspace();
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-clear"));
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      workspaceId: "ws-clear",
+      cleared: ["terminal-idle"],
+      interrupted: [],
+      restarted: [],
+      skipped: [{ terminalId: "terminal-busy", reason: "busy" }],
+    });
+    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-idle",
+      "clear",
+      true,
+    );
+  });
+
+  it("rejects an unknown workspace instead of clearing the active one", async () => {
+    seedWorkspace();
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-missing"));
+
+    expect(result.success).toBe(false);
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 });

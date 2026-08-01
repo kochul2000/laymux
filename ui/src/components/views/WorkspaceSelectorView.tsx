@@ -34,6 +34,7 @@ import { computePaneNumbers } from "@/lib/pane-numbers";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 import { switchActiveWorkspace } from "@/lib/workspace-transition";
+import { clearWorkspace } from "@/lib/workspace-clear";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
 
@@ -172,6 +173,7 @@ function WorkspaceItem({
   onDuplicate,
   onRename,
   onHideWorkspace,
+  onClearTerminals,
 }: {
   ws: { id: string; name: string };
   index: number;
@@ -194,6 +196,7 @@ function WorkspaceItem({
   onDuplicate: () => void;
   onRename: () => void;
   onHideWorkspace: () => void;
+  onClearTerminals: () => void;
 }) {
   const { t } = useTranslation("workspace");
   const [hovered, setHovered] = useState(false);
@@ -339,6 +342,38 @@ function WorkspaceItem({
             </button>
             {hovered && (
               <>
+                {panes.some((pane) => pane.view.type === "TerminalView") && (
+                  <button
+                    data-testid={`workspace-clear-${ws.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onClearTerminals();
+                    }}
+                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100"
+                    style={{
+                      color: "var(--text-secondary)",
+                      background: "transparent",
+                      border: "none",
+                    }}
+                    title={t("item.clearTerminals")}
+                  >
+                    {/* Eraser: the workspace's terminals get wiped, the panes stay. */}
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                      <path
+                        d="M2 9.5h7.5"
+                        stroke="currentColor"
+                        strokeWidth="1"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M2.2 6.6l4.2-4.2a1 1 0 011.4 0l1.4 1.4a1 1 0 010 1.4L5.6 9.1H3.6L2.2 7.7a.8.8 0 010-1.1z"
+                        stroke="currentColor"
+                        strokeWidth="1"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <button
                   data-testid={`workspace-duplicate-${ws.id}`}
                   onClick={(e) => {
@@ -1410,6 +1445,11 @@ export function WorkspaceSelectorView() {
                 useRenameWorkspaceStore.getState().openRename(ws.id, ws.name);
               }}
               onHideWorkspace={() => handleHideWorkspace(ws.id)}
+              onClearTerminals={() => {
+                void clearWorkspace(ws.id, useSettingsStore.getState().workspaceClear).catch(
+                  (err) => console.warn("[workspace clear] failed:", err),
+                );
+              }}
             />
           );
         })}

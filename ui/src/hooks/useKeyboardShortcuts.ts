@@ -20,6 +20,7 @@ import {
 } from "@/lib/workspace-transition";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
+import { clearWorkspace } from "@/lib/workspace-clear";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -321,6 +322,18 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     if (current) {
       useRenameWorkspaceStore.getState().openRename(current.id, current.name);
     }
+  },
+
+  // workspace.clearTerminals: clear every TerminalView pane of the active
+  // workspace — `clear`/`cls` in a shell, `/clear` in Claude Code and Codex.
+  // Fire-and-forget: the writes are per-terminal and a failing one must not
+  // hold the key handler (ADR-0113).
+  "workspace.clearTerminals": (e) => {
+    e.preventDefault();
+    const { activeWorkspaceId } = useWorkspaceStore.getState();
+    void clearWorkspace(activeWorkspaceId, useSettingsStore.getState().workspaceClear).catch(
+      (err) => console.warn("[workspace.clearTerminals] failed:", err),
+    );
   },
 
   // notifications.unread: jump to most recent unread notification workspace

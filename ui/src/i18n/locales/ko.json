@@ -301,7 +301,20 @@
       "interruptRounds": "Ctrl+C 전송 횟수",
       "interruptRoundsDesc": "각 터미널에 Ctrl+C를 몇 번 보낼지 정합니다 (1~10). Claude·Codex는 보통 2회 이상 필요합니다.",
       "interruptSettle": "대기 시간 (ms)",
-      "interruptSettleDesc": "마지막 Ctrl+C 이후 창을 닫기 전까지 기다리는 시간. 세션 ID가 스크롤백에 출력될 여유를 줍니다 (0~10000)."
+      "interruptSettleDesc": "마지막 Ctrl+C 이후 창을 닫기 전까지 기다리는 시간. 세션 ID가 스크롤백에 출력될 여유를 줍니다 (0~10000).",
+      "clearGroup": "워크스페이스 클리어",
+      "clearGroupDesc": "Ctrl+Alt+L 또는 워크스페이스 행의 지우개 버튼은 그 워크스페이스의 터미널 pane 을 한 번에 클리어합니다. shell 에는 아래 명령을, Claude Code·Codex 에는 /clear 를 보냅니다. 전용 처리기가 없는 대화형 앱(vim, htop 등)에는 아무것도 쓰지 않습니다.",
+      "clearShellCommand": "shell 클리어 명령",
+      "clearShellCommandDesc": "일반 shell 에 제출할 명령입니다. cmd.exe 는 cls 를 씁니다.",
+      "clearBusyPolicy": "작업 중인 pane 처리",
+      "clearBusyPolicySkip": "그냥 두기",
+      "clearBusyPolicyInterrupt": "멈추고 클리어",
+      "clearBusyPolicyRestart": "view 재시작",
+      "clearBusyPolicyDesc": "명령이나 작업이 돌고 있는 pane 을 어떻게 할지 정합니다. 재시작은 터미널 세션을 새로 만들며, 클리어와 달리 스크롤백이 사라집니다.",
+      "clearInterruptRounds": "Ctrl+C 전송 횟수",
+      "clearInterruptRoundsDesc": "클리어 전에 Ctrl+C를 몇 번 보낼지 정합니다 (1~10). Claude·Codex는 보통 2회 이상 필요합니다.",
+      "clearSettle": "대기 시간 (ms)",
+      "clearSettleDesc": "마지막 Ctrl+C 이후 클리어 명령을 입력하기까지 기다리는 시간. 앱이 프롬프트를 다시 그릴 여유를 줍니다 (0~10000)."
     },
     "interface": {
       "title": "인터페이스",
@@ -685,6 +698,7 @@
       "renamePrompt": "레이아웃 이름 변경:"
     },
     "item": {
+      "clearTerminals": "이 워크스페이스의 터미널 클리어 (Ctrl+Alt+L)",
       "duplicateWorkspace": "워크스페이스 복제 (Ctrl+Alt+D)",
       "renameWorkspace": "워크스페이스 이름 변경 (Ctrl+Alt+R)",
       "closeWorkspace": "워크스페이스 닫기 (Ctrl+Alt+W)"

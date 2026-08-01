@@ -44,6 +44,7 @@ import {
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
+import { clearWorkspace } from "@/lib/workspace-clear";
 
 interface HandlerResult {
   success: boolean;
@@ -1252,6 +1253,21 @@ export async function handleAsyncAutomationRequest(
   }
   if (request.target === "terminals" && request.method === "prepareForAutomation") {
     return prepareTerminalForAutomation(request.params.id as string);
+  }
+  // Clear every TerminalView pane of a workspace (ADR-0113). Awaited so the
+  // response carries the per-terminal outcome — with the default
+  // `busyPolicy: "skip"` a caller has no other way to learn that a busy pane
+  // was deliberately left alone.
+  if (request.target === "workspaces" && request.method === "clear") {
+    const id = request.params.id as string;
+    const wsErr = checkWorkspaceExists(id);
+    if (wsErr) return wsErr;
+    try {
+      const result = await clearWorkspace(id, useSettingsStore.getState().workspaceClear);
+      return ok({ workspaceId: id, ...result });
+    } catch (e) {
+      return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   if (request.target === "terminals" && request.method === "setFocus") {
     const result = handleAutomationRequest(request);

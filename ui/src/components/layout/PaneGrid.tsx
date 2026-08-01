@@ -14,6 +14,7 @@ import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { getTerminalRestartCwd } from "@/lib/terminal-restart";
 
 export interface GridPane {
@@ -135,24 +136,15 @@ export function PaneGrid({
   const dndEnabled = isActive && !!onSwapPanes;
   const dragSrcRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const [terminalRestarts, setTerminalRestarts] = useState<
-    Record<string, { epoch: number; cwd?: string; fresh: boolean }>
-  >({});
+  // Restart requests live in a store, not local state, so the workspace-wide
+  // clear can request one from outside this component (ADR-0113).
+  const terminalRestarts = useTerminalRestartStore((s) => s.requests);
+  const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   const restartTerminalView = useCallback((pane: GridPane) => {
-    const cwd = getTerminalRestartCwd(pane.id, pane.view);
-    setTerminalRestarts((previous) => ({
-      ...previous,
-      [pane.id]: { epoch: (previous[pane.id]?.epoch ?? 0) + 1, cwd, fresh: true },
-    }));
-  }, []);
-
-  const consumeTerminalRestart = useCallback((paneId: string) => {
-    setTerminalRestarts((previous) => {
-      const restart = previous[paneId];
-      if (!restart?.fresh) return previous;
-      return { ...previous, [paneId]: { ...restart, fresh: false } };
-    });
+    useTerminalRestartStore
+      .getState()
+      .requestRestart(pane.id, getTerminalRestartCwd(pane.id, pane.view));
   }, []);
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {

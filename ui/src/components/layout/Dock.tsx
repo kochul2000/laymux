@@ -1,9 +1,9 @@
-import { useState } from "react";
 import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "@/stores/types";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { focusDockPane } from "@/lib/workspace-transition";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
@@ -64,11 +64,9 @@ export function Dock({
   const singleHover = useHoverTimer(hoverIdleSeconds);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
-  const [terminalRestart, setTerminalRestart] = useState<{
-    epoch: number;
-    cwd?: string;
-    fresh: boolean;
-  } | null>(null);
+  // Restart requests live in a store, not local state (ADR-0113) — see PaneGrid.
+  const restartRequests = useTerminalRestartStore((s) => s.requests);
+  const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   // Split panes rendering — delegates to shared PaneGrid
   if (hasSplitPanes) {
@@ -89,6 +87,7 @@ export function Dock({
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
   const singleView = panes[0]?.view;
+  const terminalRestart = singlePaneId ? restartRequests[singlePaneId] : undefined;
   // The pane config is the coordinator's source of truth. Use the same type for
   // both gating and rendering even if a restored activeView is briefly stale.
   const renderedViewType = singleView?.type ?? activeView;
@@ -165,14 +164,10 @@ export function Dock({
                 : undefined,
             onRestart:
               singleView?.type === "TerminalView" && singlePaneId
-                ? () => {
-                    const cwd = getTerminalRestartCwd(singlePaneId, singleView);
-                    setTerminalRestart((previous) => ({
-                      epoch: (previous?.epoch ?? 0) + 1,
-                      cwd,
-                      fresh: true,
-                    }));
-                  }
+                ? () =>
+                    useTerminalRestartStore
+                      .getState()
+                      .requestRestart(singlePaneId, getTerminalRestartCwd(singlePaneId, singleView))
                 : undefined,
             onToggleCwdSend:
               singlePaneId && onSetPaneView && singleCanSendCwd && singleCwdDefaults
@@ -214,9 +209,7 @@ export function Dock({
               terminalRestartCwd={terminalRestart?.cwd}
               terminalRestartFresh={terminalRestart?.fresh}
               onTerminalRestartConsumed={() => {
-                setTerminalRestart((previous) =>
-                  previous?.fresh ? { ...previous, fresh: false } : previous,
-                );
+                if (singlePaneId) consumeTerminalRestart(singlePaneId);
               }}
             />
           ) : (

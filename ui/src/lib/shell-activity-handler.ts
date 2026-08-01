@@ -20,4 +20,18 @@ export class ShellActivityHandler implements ActivityHandler {
   computeNotification(_raw: RawTerminalState): null {
     return null;
   }
+
+  /** A plain shell clears with whatever the user configured (`clear`, `cls`, …). */
+  clearInput(shellClearCommand: string): string {
+    return shellClearCommand;
+  }
+
+  /**
+   * A shell is busy while a command is producing output or has started without
+   * exiting. `exitCode` is deliberately not consulted — it describes the
+   * PREVIOUS command and is stale at the prompt.
+   */
+  isBusy(raw: RawTerminalState): boolean {
+    return raw.outputActive || raw.activity?.type === "running";
+  }
 }
