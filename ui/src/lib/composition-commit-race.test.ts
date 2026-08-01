@@ -78,7 +78,7 @@ afterEach(async () => {
 });
 
 describe("xterm app-focus recovery with a new IME composition (issue #620)", () => {
-  it("cancels the queued refresh without extra focus reports and commits once", async () => {
+  it("finishes the stale relay before the next input task and commits once", async () => {
     const { terminal, helper } = mountTerminal();
     await writeTerminal(terminal, "\x1b[?1004h");
 
@@ -88,22 +88,32 @@ describe("xterm app-focus recovery with a new IME composition (issue #620)", () 
     expect(data).toEqual(["\x1b[I"]);
     data.length = 0;
 
-    let reclaimFrame: (() => void) | undefined;
+    const relay = document.createElement("textarea");
+    relay.disabled = true;
+    relay.setAttribute("aria-hidden", "true");
+    terminal.element?.appendChild(relay);
+    let reclaimMicrotask: (() => void) | undefined;
     const ownership = createTerminalFocusOwnership({
       getContainer: () => terminal.element,
       refreshActiveHelper: true,
-      scheduleFrame: (callback) => {
-        reclaimFrame = callback;
+      getFocusRelay: () => relay,
+      scheduleMicrotask: (callback) => {
+        reclaimMicrotask = callback;
       },
     });
     helper.addEventListener("compositionstart", () => ownership.releaseForHelperInput(helper));
 
     // WebView2 can leave the helper DOM-active across app deactivation. The
-    // focus controller schedules a blur/focus refresh, but a real IME can start
-    // using the recovered helper before that next animation frame arrives.
+    // focus controller schedules its editable handoff for the end of the
+    // window-focus task, before the browser can dispatch the next physical
+    // key/composition task.
     expect(ownership.captureOnAppBlur()).toBe(true);
     expect(ownership.reclaimOnAppFocus()).toBe(true);
-    expect(reclaimFrame).toBeTypeOf("function");
+    expect(reclaimMicrotask).toBeTypeOf("function");
+    reclaimMicrotask?.();
+    expect(document.activeElement).toBe(helper);
+    expect(data).toEqual(["\x1b[O", "\x1b[I"]);
+    data.length = 0;
 
     helper.dispatchEvent(new CompositionEvent("compositionstart", { data: "" }));
     helper.value = "ㄱ";
@@ -112,11 +122,7 @@ describe("xterm app-focus recovery with a new IME composition (issue #620)", () 
     helper.dispatchEvent(new CompositionEvent("compositionupdate", { data: "ㄱ" }));
     helper.dispatchEvent(new Event("input", { bubbles: true }));
 
-    reclaimFrame?.();
-
-    // A late refresh would make real xterm emit DEC focus-out/focus-in reports
-    // and clear the helper value in its blur handler, interrupting this new IME
-    // composition. Input ownership must cancel that frame instead.
+    // The relay already completed, so no late blur can clear the new IME value.
     expect(data).toEqual([]);
     expect(document.activeElement).toBe(helper);
     expect(helper.value).toBe("ㄱ");

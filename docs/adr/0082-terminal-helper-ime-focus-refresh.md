@@ -1,6 +1,6 @@
 # 0082. 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화한다
 
-- Status: Accepted
+- Status: Superseded by [0108](0108-windows-ime-editable-focus-relay.md)
 - Date: 2026-07-28
 - Source: 사용자 실기 보고(Windows IME 조합창이 화면 좌상단에 나타나고 같은 pane 클릭은 복구하지 못하지만 Alt+방향키 pane 왕복은 복구), architecture/data-flow.md §8.9, [ADR-0057](0057-terminal-helper-focus-ownership.md)
 - Extends: [ADR-0057](0057-terminal-helper-focus-ownership.md)의 `activeElement === helper` 복원 분기

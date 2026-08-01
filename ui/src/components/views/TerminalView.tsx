@@ -702,6 +702,7 @@ export function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayCaretRef = useRef<HTMLDivElement>(null);
   const compositionPreviewRefEl = useRef<HTMLDivElement>(null);
+  const imeFocusRelayRef = useRef<HTMLTextAreaElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   // A restart remount may subsequently recreate its session (for example, after
@@ -2619,8 +2620,8 @@ export function TerminalView({
     // DOM focus 를 body/null 로 떨어뜨려도 store 의 pane focus 는 그대로이므로
     // 어떤 effect 도 재실행되지 않는다 → 복귀 후 첫 키/첫 IME 조합이 유실된다.
     // pane focus 를 DOM focus 와 동일시하지 않고, blur 시점에 이 pane 의 helper
-    // 가 정말 focus 를 갖고 있었을 때만 identity 를 기억해 복귀 다음 프레임에
-    // 복원한다. 복귀 사이 다른 UI(모달·검색·설정·다른 pane)가 focus 를 얻으면
+    // 가 정말 focus 를 갖고 있었을 때만 identity 를 기억해 복귀 시점의 DOM
+    // 상태에 맞는 phase에서 복원한다. 다른 UI(모달·검색·설정·다른 pane)가 focus 를 얻으면
     // 절대 빼앗지 않는다 (ADR-0057).
     const focusOwnership = createTerminalFocusOwnership({
       getContainer: () => wrapperRef.current,
@@ -2628,6 +2629,9 @@ export function TerminalView({
       // Linux keeps ADR-0053's no-synthetic-blur policy until equivalent
       // headful evidence exists.
       refreshActiveHelper: navigator.userAgent.includes("Windows"),
+      // ADR-0108: unlike a same-element blur/focus pair, a different editable
+      // identity reproduces the pane-roundtrip recovery observed in Windows.
+      getFocusRelay: () => imeFocusRelayRef.current,
       onTrace: (event, payload) => trace(event, payload),
     });
     focusOwnershipRef.current = focusOwnership;
@@ -6356,6 +6360,17 @@ export function TerminalView({
           ref={containerRef}
           data-testid={`terminal-xterm-host-${instanceId}`}
           className="terminal-xterm-host"
+        />
+        <textarea
+          ref={imeFocusRelayRef}
+          data-testid={`terminal-ime-focus-relay-${instanceId}`}
+          className="terminal-ime-focus-relay"
+          tabIndex={-1}
+          disabled
+          aria-hidden
+          aria-label="Terminal input focus relay"
+          autoComplete="off"
+          spellCheck={false}
         />
         <div
           ref={compositionPreviewRefEl}

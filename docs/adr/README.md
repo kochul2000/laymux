@@ -99,7 +99,7 @@ ADR 이 필요한 대표 기준:
 | [0079](0079-dec2026-cursor-gate-lifecycle-bypass.md) | DEC 2026 커서는 renderer lifecycle 우회까지 raw gate로 막는다 | Accepted |
 | [0080](0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md) | 스트림 의미는 원래 경계에서 처리하고 xterm 물리 쓰기만 제한적으로 묶는다 | Accepted |
 | [0081](0081-pane-focus-transition-single-owner.md) | Pane 포커스 전환은 단일 도메인 액션이 소유한다 | Accepted |
-| [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Accepted |
+| [0082](0082-terminal-helper-ime-focus-refresh.md) | 앱 복귀 시 DOM-active xterm helper 는 blur/focus 로 IME 문맥을 재활성화 (0057 확장) | Superseded by [0108](0108-windows-ime-editable-focus-relay.md) |
 | [0083](0083-automation-health-instance-identity.md) | Automation health는 프로세스·빌드 신원을 함께 공개한다 | Accepted |
 | [0084](0084-desktop-terminal-output-parsed-credit.md) | desktop output은 parsed ACK credit으로 PTY producer를 유한하게 제한한다 (0072 일부 대체·0080 확장) | Accepted |
 | [0085](0085-provenance-barrier-three-phase-geometry-cutover.md) | PTY geometry cutover는 provenance barrier와 three-phase transaction이 소유 | Accepted |
@@ -125,6 +125,7 @@ ADR 이 필요한 대표 기준:
 | [0105](0105-widget-slots-and-status-line.md) | 위젯 배치는 설정의 슬롯 배열이 소유하고 status line 은 슬롯 영역 하나일 뿐이다 | Accepted |
 | [0106](0106-github-list-view-repo-registry.md) | GitHub 이슈/PR 목록은 repo 단위 레지스트리가 소유한다 | Proposed |
 | [0107](0107-widget-typography-and-usage-bar-width.md) | 위젯 글꼴은 전역 표시 설정이, 사용량 막대 너비는 인스턴스 옵션이 소유한다 | Accepted |
+| [0108](0108-windows-ime-editable-focus-relay.md) | Windows IME 복구는 별도 editable focus relay 문맥을 경유한다 (0082 대체) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
