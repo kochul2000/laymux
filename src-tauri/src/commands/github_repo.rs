@@ -230,6 +230,8 @@ pub enum ItemAction {
     CloseIssueCompleted,
     CloseIssueNotPlanned,
     MergePull,
+    SquashPull,
+    RebasePull,
     ClosePull,
 }
 
@@ -238,6 +240,8 @@ fn parse_item_action(raw: &str) -> Result<ItemAction, String> {
         "issue.close" => Ok(ItemAction::CloseIssueCompleted),
         "issue.closeNotPlanned" => Ok(ItemAction::CloseIssueNotPlanned),
         "pr.merge" => Ok(ItemAction::MergePull),
+        "pr.squash" => Ok(ItemAction::SquashPull),
+        "pr.rebase" => Ok(ItemAction::RebasePull),
         "pr.close" => Ok(ItemAction::ClosePull),
         other => Err(format!("Unknown GitHub action: {other}")),
     }
@@ -248,7 +252,9 @@ fn build_action_args(action: ItemAction, repo: &str, number: u64) -> Vec<String>
         ItemAction::CloseIssueCompleted | ItemAction::CloseIssueNotPlanned => {
             vec!["issue".into(), "close".into(), number.to_string()]
         }
-        ItemAction::MergePull => vec!["pr".into(), "merge".into(), number.to_string()],
+        ItemAction::MergePull | ItemAction::SquashPull | ItemAction::RebasePull => {
+            vec!["pr".into(), "merge".into(), number.to_string()]
+        }
         ItemAction::ClosePull => vec!["pr".into(), "close".into(), number.to_string()],
     };
     args.push("--repo".into());
@@ -258,9 +264,11 @@ fn build_action_args(action: ItemAction, repo: &str, number: u64) -> Vec<String>
             args.push("--reason".into());
             args.push("not planned".into());
         }
-        // `gh pr merge` is interactive without an explicit method; the view
-        // offers the repository's ordinary merge-commit flow.
+        // `gh pr merge` is interactive without an explicit method, so the view
+        // always passes the method the user picked from the menu.
         ItemAction::MergePull => args.push("--merge".into()),
+        ItemAction::SquashPull => args.push("--squash".into()),
+        ItemAction::RebasePull => args.push("--rebase".into()),
         _ => {}
     }
     args
@@ -627,6 +635,22 @@ mod tests {
     }
 
     #[test]
+    fn squash_passes_the_squash_flag() {
+        let args = build_action_args(ItemAction::SquashPull, "owner/repo", 9);
+        assert_eq!(args[..3], ["pr", "merge", "9"]);
+        assert!(args.iter().any(|a| a == "--squash"));
+        assert!(!args.iter().any(|a| a == "--merge" || a == "--rebase"));
+    }
+
+    #[test]
+    fn rebase_passes_the_rebase_flag() {
+        let args = build_action_args(ItemAction::RebasePull, "owner/repo", 9);
+        assert_eq!(args[..3], ["pr", "merge", "9"]);
+        assert!(args.iter().any(|a| a == "--rebase"));
+        assert!(!args.iter().any(|a| a == "--merge" || a == "--squash"));
+    }
+
+    #[test]
     fn close_pull_uses_the_pr_noun() {
         let args = build_action_args(ItemAction::ClosePull, "owner/repo", 9);
         assert_eq!(args[..3], ["pr", "close", "9"]);
@@ -637,6 +661,8 @@ mod tests {
     fn unknown_actions_never_reach_gh() {
         assert!(parse_item_action("issue.delete").is_err());
         assert!(parse_item_action("pr.merge").is_ok());
+        assert!(parse_item_action("pr.squash").is_ok());
+        assert!(parse_item_action("pr.rebase").is_ok());
     }
 
     #[test]
