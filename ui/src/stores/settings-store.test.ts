@@ -937,7 +937,9 @@ describe("settings-store", () => {
       expect(usage.codex.refreshSeconds).toBe(600);
       expect(usage.codex.configDirs).toEqual([]);
       expect(usage.codex.visibleRows).toEqual(["weekly", "sparkWeekly"]);
-      expect(usage.colors).toEqual({ used: "#58d1eb", pace: "#fd971f", track: "#585858" });
+      // Each agent defaults to the colour the rest of the app marks it with.
+      expect(usage.claude.colors).toEqual({ used: "#d97757", pace: "#f9e2af", track: "#585858" });
+      expect(usage.codex.colors).toEqual({ used: "#10a37f", pace: "#f9e2af", track: "#585858" });
     });
 
     it("fills missing agent fields from defaults", () => {
@@ -998,21 +1000,23 @@ describe("settings-store", () => {
       expect(usage.claude.visibleRows).toEqual(["session", "weekAll", "weekModel"]);
     });
 
-    it("keeps Codex account homes and shared colors in usage settings", () => {
+    it("keeps Codex account homes and per-agent colors in usage settings", () => {
       useSettingsStore.getState().setCodexUsage({ configDirs: ["C:\\Users\\me\\.codex-work"] });
-      useSettingsStore.getState().setUsageColors({ used: "#112233" });
+      useSettingsStore.getState().setUsageColors("codex", { used: "#112233" });
       const { usage } = useSettingsStore.getState();
       expect(usage.codex.configDirs).toEqual(["C:\\Users\\me\\.codex-work"]);
-      expect(usage.colors).toEqual({ used: "#112233", pace: "#fd971f", track: "#585858" });
+      expect(usage.codex.colors).toEqual({ used: "#112233", pace: "#f9e2af", track: "#585858" });
+      // One agent's palette must not follow the other's.
+      expect(usage.claude.colors.used).toBe("#d97757");
     });
 
-    it("restores original meter colors for malformed saved values", () => {
+    it("restores the agent default meter colors for malformed saved values", () => {
       useSettingsStore.getState().loadFromSettings({
-        usage: { colors: { used: "cyan", pace: "#fd971f", track: 12 } },
+        usage: { codex: { colors: { used: "cyan", pace: "#445566", track: 12 } } },
       } as never);
-      expect(useSettingsStore.getState().usage.colors).toEqual({
-        used: "#58d1eb",
-        pace: "#fd971f",
+      expect(useSettingsStore.getState().usage.codex.colors).toEqual({
+        used: "#10a37f",
+        pace: "#445566",
         track: "#585858",
       });
     });

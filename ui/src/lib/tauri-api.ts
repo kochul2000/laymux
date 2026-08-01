@@ -770,6 +770,8 @@ export interface Settings {
   paste: import("@/stores/settings-store").PasteSettings;
   terminal: import("@/stores/settings-store").TerminalSettings;
   controlBar: import("@/stores/settings-store").ControlBarSettings;
+  usage: import("@/stores/settings-store").UsageSettings;
+  widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;

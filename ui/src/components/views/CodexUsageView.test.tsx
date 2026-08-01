@@ -66,7 +66,9 @@ describe("CodexUsageView", () => {
     expect(meter).toHaveStyle({
       height: "16px",
     });
-    expect(meter.firstElementChild).toHaveStyle({ background: "rgb(88, 209, 235)" });
+    // Codex's own brand green, not Claude's colour: the two agents are told
+    // apart by the meter fill.
+    expect(meter.firstElementChild).toHaveStyle({ background: "rgb(16, 163, 127)" });
   });
 
   it("excludes secondary windows by kind even when a key ends in -primary", () => {
