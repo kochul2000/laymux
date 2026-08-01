@@ -36,20 +36,22 @@
         --text-primary: #cdd6f4;
         --text-secondary: #a6adc8;
         --accent: #89b4fa;
-        --accent-50: rgba(137, 180, 250, 0.5);
-        --accent-20: rgba(137, 180, 250, 0.2);
-        --accent-12: rgba(137, 180, 250, 0.12);
-        --accent-08: rgba(137, 180, 250, 0.08);
+        /* Alpha variants are 8-digit hex (#rrggbbaa), same as the desktop
+           tokens in ui/src/index.css — never r/g/b channels (ADR-0112). */
+        --accent-50: #89b4fa80;
+        --accent-20: #89b4fa33;
+        --accent-12: #89b4fa1f;
+        --accent-08: #89b4fa14;
         --green: #a6e3a1;
         --red: #f38ba8;
         --claude: #d97757;
         --codex: #10a37f;
-        --orange-15: rgba(217, 119, 87, 0.15);
+        --orange-15: #d9775726;
         --yellow: #f9e2af;
         --border: #313244;
-        --hover-bg: rgba(255, 255, 255, 0.06);
-        --active-bg: rgba(255, 255, 255, 0.04);
-        --backdrop-light: rgba(0, 0, 0, 0.3);
+        --hover-bg: #ffffff0f;
+        --active-bg: #ffffff0a;
+        --backdrop-light: #0000004d;
         --terminal-bg: #0c0c0c;
         /* Tracks the active terminal's own theme background; see
            applyTerminalSurfaceBackground. */
@@ -61,7 +63,7 @@
         --muted: var(--text-secondary);
         --accent-strong: #6c8fd8;
         --danger: var(--red);
-        --danger-bg: rgba(243, 139, 168, 0.18);
+        --danger-bg: #f38ba82e;
         --radius-sm: 2px;
         --radius-md: 3px;
         --radius-lg: 6px;
@@ -264,7 +266,7 @@
         border: 1px solid var(--border);
         border-bottom: 0;
         background: var(--bg-overlay);
-        box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
+        box-shadow: 0 -8px 24px #00000066;
         font-size: 14px;
       }
       .composer-suggest-list[hidden] {
@@ -328,7 +330,7 @@
         padding: 0;
         border-right: 1px solid var(--border);
         background: var(--bg-surface);
-        box-shadow: 12px 0 32px rgba(0, 0, 0, 0.38);
+        box-shadow: 12px 0 32px #00000061;
         transform: translateX(-104%);
         transition: transform 140ms ease;
       }
@@ -447,17 +449,17 @@
         gap: 7px;
         padding: 8px;
         border-bottom: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.015);
+        background: #ffffff04;
       }
       .connection-panel:not(.connected) {
         background: var(--accent-08);
       }
       .connection-panel.attention {
-        background: rgba(243, 139, 168, 0.1);
+        background: #f38ba81a;
       }
       .connection-panel.connected {
         grid-template-columns: 1fr;
-        background: rgba(255, 255, 255, 0.015);
+        background: #ffffff04;
       }
       .connection-panel label {
         display: grid;
@@ -744,7 +746,7 @@
         flex-direction: column;
         max-height: min(46vh, 360px);
         border-bottom: 1px solid var(--border);
-        background: rgba(255, 255, 255, 0.012);
+        background: #ffffff03;
       }
       .notification-actions {
         display: grid;
@@ -1179,7 +1181,7 @@
         border: 2px solid var(--terminal-bg);
         border-radius: 50%;
         background: var(--accent);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 2px 8px #00000059;
         touch-action: none;
         transform: translate(-50%, -50%);
       }
@@ -1282,7 +1284,7 @@
         border: 1px solid var(--accent-50);
         border-radius: 50%;
         background: var(--panel);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 8px 24px #00000073;
         pointer-events: none;
         transform: translate(-50%, -50%);
       }
@@ -1364,7 +1366,7 @@
         border: 1px solid var(--border);
         border-radius: var(--radius-lg);
         background: var(--panel);
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 12px 32px #00000073;
       }
       .key-popover-scroll {
         min-height: 0;

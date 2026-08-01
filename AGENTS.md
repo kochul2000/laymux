@@ -84,7 +84,8 @@ UI/디자인 변경은 `/screenshot` 스킬로 최종 결과를 확인한다. �
 - **원시 상태 분리 → 단일 계산 함수** — 여러 시스템이 한 표시에 관여할 때 각자 원시 상태만 저장하고, 표시는 계산 함수에서 도출. ([ADR-0005](docs/adr/0005-display-state-raw-separation-compute.md))
 - **UI 설계 원칙** — [api-contracts.md §15](docs/architecture/api-contracts.md). CSS 변수 우선(`index.css` `:root`), 호버는 CSS 클래스(`style.background` 직접 조작 금지), 재사용 UI 는 `components/ui/`, 키 조합 하드코딩 금지(키바인딩 레지스트리).
 - **React 훅 패턴** — 렌더 본문에서 `*Ref.current` 읽기·쓰기 금지(concurrent 렌더에서 찢어진다). 최신 props 미러링은 `useLayoutEffect`(같은 커밋에서 동기 실행 → passive effect·DOM 이벤트보다 먼저), 외부 스토어 시딩+구독은 `useSyncExternalStore`, 파생 가능한 값은 렌더 중 계산. `react-hooks/refs`·`react-hooks/set-state-in-effect` 는 `error` 이며 `eslint-disable` 로 억제하지 않는다 — 억제가 필요해 보이면 규칙을 끄지 말고 패턴을 바꾸고, 정말 정당한 예외라면 근거를 [api-contracts.md §15](docs/architecture/api-contracts.md) 에 남긴다. `react-hooks/exhaustive-deps` 도 `error` 지만 여기는 예외가 실재한다(dep 를 의도적으로 좁히는 1회성 초기화 등) — 새로 억제하기 전에 패턴 변경을 먼저 시도하되, 남긴다면 `eslint-disable-next-line` 바로 위에 이유를 적는다.
-- **`color-mix()` 금지** — html2canvas 가 파싱 못 해 스크린샷 API 가 깨진다. `var(--accent-50)` 등 사전 정의 CSS 변수 사용.
+- **`color-mix()` 금지** — html2canvas 가 파싱 못 해 스크린샷 API 가 깨진다. `var(--accent-50)` 등 사전 정의 CSS 변수 사용. 상대 색상 문법(`rgb(from …)`)도 같은 이유로 금지.
+- **색상은 색상 코드로 적는다** — 불투명은 `#rrggbb`, 반투명은 8자리 `#rrggbbaa`. `rgb()`/`rgba()` 채널 표기 금지(CSS·HTML·인라인 스타일·Rust 상수 모두). SGR·픽셀·OSC 처럼 채널이 형식 자체인 경계만 예외. ([ADR-0112](docs/adr/0112-hex-color-code-authoring.md))
 - **터미널 커서/플리커는 research 정본을 따른다** — cursor/overlay/IME/flicker/DECSET 2026 변경은 `docs/terminal/{fix-flicker,xterm-shadow-cursor-architecture,xterm-cursor-repaint-analysis}.md` 3개를 정본으로 확인. 기억·즉흥 실험만으로 수정 금지. 이 문서들은 통상 작업 중 수정하지 않는다(사용자가 명시 요청 시에만). ([ADR-0008](docs/adr/0008-shell-cursor-shadow-cursor.md))
 
 ## Claude Code 자동화 테스트

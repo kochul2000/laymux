@@ -289,7 +289,7 @@ function PreviewSlot({
             data-testid={`widgets-preview-item-${instance.id}`}
             className="flex h-full cursor-pointer items-center"
             style={{
-              background: isSelected ? "var(--hover-bg, rgba(255,255,255,0.08))" : "transparent",
+              background: isSelected ? "var(--hover-bg, #ffffff14)" : "transparent",
               border: "none",
               outline: isSelected ? "1px solid var(--accent)" : "none",
               fontFamily: "inherit",

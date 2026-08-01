@@ -15,8 +15,34 @@ use crate::constants::STATUS_MESSAGE_SCAN_BYTES;
 /// that the TUI may insert between color and marker.
 const SGR_LOOKBACK_BYTES: usize = 50;
 
-/// (UTF-8 bytes of the marker char, expected color as RGB).
-type MarkerDef = (&'static [u8], (u8, u8, u8));
+/// A 24-bit color, written as a hex color code (`0xRRGGBB`).
+///
+/// The color code is the stored form; individual channels are a derived view
+/// obtained through [`Color::channels`] (ADR-0112).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Color(u32);
+
+impl Color {
+    /// Pack separate channels — used only where the wire format hands us
+    /// channels, i.e. true-color SGR and the xterm 256-color cube.
+    const fn from_channels(r: u8, g: u8, b: u8) -> Self {
+        Color(((r as u32) << 16) | ((g as u32) << 8) | b as u32)
+    }
+
+    const fn channels(self) -> (u8, u8, u8) {
+        ((self.0 >> 16) as u8, (self.0 >> 8) as u8, self.0 as u8)
+    }
+}
+
+impl std::fmt::Debug for Color {
+    /// Print as a color code so assertion failures read like the source.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{:06x}", self.0)
+    }
+}
+
+/// (UTF-8 bytes of the marker char, expected color).
+type MarkerDef = (&'static [u8], Color);
 
 /// Marker variants emitted by Claude Code for status messages.
 ///
@@ -25,10 +51,10 @@ type MarkerDef = (&'static [u8], (u8, u8, u8));
 /// SGR and compare colors with a tolerance (±40 per channel) instead of exact
 /// byte matching.
 const MARKERS: &[MarkerDef] = &[
-    // Current (2025+): · (U+00B7 MIDDLE DOT) with salmon/terracotta color (256-color 174 = #d78787)
-    (&[0xc2, 0xb7], (215, 135, 135)),
-    // Legacy: ● (U+25CF BLACK CIRCLE) with bright-white color (256-color 231 = #ffffff)
-    (&[0xe2, 0x97, 0x8f], (255, 255, 255)),
+    // Current (2025+): · (U+00B7 MIDDLE DOT) with salmon/terracotta color (256-color 174)
+    (&[0xc2, 0xb7], Color(0xd78787)),
+    // Legacy: ● (U+25CF BLACK CIRCLE) with bright-white color (256-color 231)
+    (&[0xe2, 0x97, 0x8f], Color(0xffffff)),
 ];
 
 /// Per-channel tolerance for RGB color matching.
@@ -54,7 +80,7 @@ const STOP_CHARS: &[char] = &['✶', '✻', '✽', '✢', '●', '·', '─', '�
 pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
     let mut best: Option<(usize, String)> = None; // (position, message)
 
-    for &(marker_bytes, expected_rgb) in MARKERS {
+    for &(marker_bytes, expected_color) in MARKERS {
         let mut pos = 0;
         while pos + marker_bytes.len() <= data.len() {
             let marker_pos = match data[pos..]
@@ -77,8 +103,8 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
                 // Find the last `\x1b[38;` in the lookback window
                 if let Some(sgr_rel) = find_last_sgr_38(window) {
                     let sgr_start = search_start + sgr_rel;
-                    // Parse the SGR to extract RGB and find where it ends
-                    if let Some((rgb, sgr_end_rel)) = parse_sgr_38_color(&data[sgr_start..]) {
+                    // Parse the SGR to extract the color and find where it ends
+                    if let Some((color, sgr_end_rel)) = parse_sgr_38_color(&data[sgr_start..]) {
                         let abs_sgr_end = sgr_start + sgr_end_rel;
                         // Verify gap between SGR end and marker is only whitespace/CSI
                         let gap = &data[abs_sgr_end..marker_pos];
@@ -92,7 +118,7 @@ pub fn extract_claude_status_message(data: &[u8]) -> Option<String> {
                                 _ => break 'color false,
                             }
                         }
-                        break 'color gi == gap.len() && rgb_matches(rgb, expected_rgb);
+                        break 'color gi == gap.len() && colors_match(color, expected_color);
                     }
                 }
                 false
@@ -141,8 +167,8 @@ fn find_last_sgr_38(window: &[u8]) -> Option<usize> {
 }
 
 /// Parse an SGR `\x1b[38;5;Nm` or `\x1b[38;2;R;G;Bm` sequence starting at `data`.
-/// Returns `(rgb_tuple, byte_length_of_sequence)` on success.
-fn parse_sgr_38_color(data: &[u8]) -> Option<((u8, u8, u8), usize)> {
+/// Returns `(color, byte_length_of_sequence)` on success.
+fn parse_sgr_38_color(data: &[u8]) -> Option<(Color, usize)> {
     // Must start with ESC[38;
     if data.len() < 7 || &data[..5] != b"\x1b[38;" {
         return None;
@@ -157,7 +183,7 @@ fn parse_sgr_38_color(data: &[u8]) -> Option<((u8, u8, u8), usize)> {
     if let Some(idx_str) = params_str.strip_prefix("5;") {
         // 256-color: 38;5;N
         let idx: u8 = idx_str.parse().ok()?;
-        Some((color256_to_rgb(idx), seq_len))
+        Some((color256(idx), seq_len))
     } else if let Some(rgb_str) = params_str.strip_prefix("2;") {
         // True-color: 38;2;R;G;B
         let parts: Vec<&str> = rgb_str.split(';').collect();
@@ -165,7 +191,7 @@ fn parse_sgr_38_color(data: &[u8]) -> Option<((u8, u8, u8), usize)> {
             let r: u8 = parts[0].parse().ok()?;
             let g: u8 = parts[1].parse().ok()?;
             let b: u8 = parts[2].parse().ok()?;
-            Some(((r, g, b), seq_len))
+            Some((Color::from_channels(r, g, b), seq_len))
         } else {
             None
         }
@@ -174,9 +200,9 @@ fn parse_sgr_38_color(data: &[u8]) -> Option<((u8, u8, u8), usize)> {
     }
 }
 
-/// Convert a 256-color index to RGB using the standard xterm color cube.
+/// Convert a 256-color index to a color using the standard xterm color cube.
 /// Falls back to black for standard colors 0-15 (not used by Claude markers).
-fn color256_to_rgb(idx: u8) -> (u8, u8, u8) {
+fn color256(idx: u8) -> Color {
     /// xterm 6x6x6 color cube values (0→0, 1→95, 2→135, 3→175, 4→215, 5→255)
     const CUBE: [u8; 6] = [0, 95, 135, 175, 215, 255];
     match idx {
@@ -185,21 +211,23 @@ fn color256_to_rgb(idx: u8) -> (u8, u8, u8) {
             let r = CUBE[n / 36];
             let g = CUBE[(n / 6) % 6];
             let b = CUBE[n % 6];
-            (r, g, b)
+            Color::from_channels(r, g, b)
         }
         232..=255 => {
             let v = 8 + 10 * (idx - 232);
-            (v, v, v)
+            Color::from_channels(v, v, v)
         }
-        _ => (0, 0, 0),
+        _ => Color(0x000000),
     }
 }
 
-/// Check if two RGB colors match within [`COLOR_TOLERANCE`] per channel.
-fn rgb_matches(actual: (u8, u8, u8), expected: (u8, u8, u8)) -> bool {
-    let dr = (actual.0 as i16 - expected.0 as i16).abs();
-    let dg = (actual.1 as i16 - expected.1 as i16).abs();
-    let db = (actual.2 as i16 - expected.2 as i16).abs();
+/// Check if two colors match within [`COLOR_TOLERANCE`] per channel.
+fn colors_match(actual: Color, expected: Color) -> bool {
+    let (ar, ag, ab) = actual.channels();
+    let (er, eg, eb) = expected.channels();
+    let dr = (ar as i16 - er as i16).abs();
+    let dg = (ag as i16 - eg as i16).abs();
+    let db = (ab as i16 - eb as i16).abs();
     dr <= COLOR_TOLERANCE && dg <= COLOR_TOLERANCE && db <= COLOR_TOLERANCE
 }
 
@@ -679,27 +707,34 @@ mod tests {
     // ── Helper function tests ──
 
     #[test]
-    fn color256_to_rgb_known_values() {
-        assert_eq!(color256_to_rgb(174), (215, 135, 135)); // #d78787
-        assert_eq!(color256_to_rgb(231), (255, 255, 255)); // #ffffff
+    fn color256_known_values() {
+        assert_eq!(color256(174), Color(0xd78787));
+        assert_eq!(color256(231), Color(0xffffff));
     }
 
     #[test]
-    fn rgb_matches_exact() {
-        assert!(rgb_matches((215, 135, 135), (215, 135, 135)));
+    fn color_channels_round_trip() {
+        assert_eq!(Color(0xd78787).channels(), (215, 135, 135));
+        assert_eq!(Color::from_channels(215, 135, 135), Color(0xd78787));
+        assert_eq!(format!("{:?}", Color(0x0a1b2c)), "#0a1b2c");
     }
 
     #[test]
-    fn rgb_matches_within_tolerance() {
+    fn colors_match_exact() {
+        assert!(colors_match(Color(0xd78787), Color(0xd78787)));
+    }
+
+    #[test]
+    fn colors_match_within_tolerance() {
         // ConPTY observed variations for color 174
-        assert!(rgb_matches((215, 119, 87), (215, 135, 135)));
-        assert!(rgb_matches((225, 140, 108), (215, 135, 135)));
+        assert!(colors_match(Color(0xd77757), Color(0xd78787)));
+        assert!(colors_match(Color(0xe18c6c), Color(0xd78787)));
     }
 
     #[test]
-    fn rgb_matches_rejects_distant() {
-        assert!(!rgb_matches((0, 0, 255), (215, 135, 135)));
-        assert!(!rgb_matches((136, 136, 136), (215, 135, 135)));
+    fn colors_match_rejects_distant() {
+        assert!(!colors_match(Color(0x0000ff), Color(0xd78787)));
+        assert!(!colors_match(Color(0x888888), Color(0xd78787)));
     }
 
     #[test]
@@ -707,9 +742,9 @@ mod tests {
         let data = b"\x1b[38;5;174mrest";
         let result = parse_sgr_38_color(data);
         assert!(result.is_some());
-        let (rgb, len) = result.unwrap();
+        let (color, len) = result.unwrap();
         assert_eq!(len, 11); // \x1b[38;5;174m = 11 bytes
-        assert_eq!(rgb, color256_to_rgb(174));
+        assert_eq!(color, color256(174));
     }
 
     #[test]
@@ -717,8 +752,8 @@ mod tests {
         let data = b"\x1b[38;2;215;119;87mrest";
         let result = parse_sgr_38_color(data);
         assert!(result.is_some());
-        let (rgb, len) = result.unwrap();
-        assert_eq!(rgb, (215, 119, 87));
+        let (color, len) = result.unwrap();
+        assert_eq!(color, Color(0xd77757));
         assert_eq!(len, 18); // \x1b[38;2;215;119;87m = 18 bytes
     }
 }
