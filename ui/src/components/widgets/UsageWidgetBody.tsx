@@ -38,6 +38,7 @@ export function UsageWidgetBody({
   message,
   capturedAtMs,
   configDir,
+  dragRegion,
 }: {
   testId: string;
   /** Short provider name, e.g. `Claude`. */
@@ -48,6 +49,7 @@ export function UsageWidgetBody({
   message: string | null;
   capturedAtMs: number | null;
   configDir?: string;
+  dragRegion?: boolean;
 }) {
   const usable = message === null;
   const capturedLabel =
@@ -65,7 +67,7 @@ export function UsageWidgetBody({
     .join("\n");
 
   return (
-    <WidgetChrome testId={testId} title={title}>
+    <WidgetChrome testId={testId} title={title} dragRegion={dragRegion}>
       <WidgetLabel>{label}</WidgetLabel>
       {!usable && (
         // The reason lives in the tooltip; the line itself only has room to say

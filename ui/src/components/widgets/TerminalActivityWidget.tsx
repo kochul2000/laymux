@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
@@ -9,7 +10,8 @@ function isBusy(instance: TerminalInstance): boolean {
   return instance.activity?.type === "running" || instance.outputActive === true;
 }
 
-export function TerminalActivityWidget({ instance }: WidgetComponentProps) {
+export function TerminalActivityWidget({ instance, dragRegion }: WidgetComponentProps) {
+  const { t } = useTranslation("settings");
   const scope = readTerminalActivityScope(instance.options);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const instances = useTerminalStore((s) => s.instances);
@@ -23,11 +25,11 @@ export function TerminalActivityWidget({ instance }: WidgetComponentProps) {
   return (
     <WidgetChrome
       testId={`widget-terminal-activity-${instance.id}`}
-      title={
-        scope === "all"
-          ? `${busy} of ${counted.length} terminals busy (all workspaces)`
-          : `${busy} of ${counted.length} terminals busy (this workspace)`
-      }
+      dragRegion={dragRegion}
+      title={t(scope === "all" ? "widgets.activityBusyAll" : "widgets.activityBusyWorkspace", {
+        busy,
+        total: counted.length,
+      })}
     >
       <span style={{ color: busy > 0 ? "var(--accent)" : "var(--text-muted)" }}>●</span>
       <span data-testid={`widget-terminal-activity-${instance.id}-count`}>

@@ -46,3 +46,33 @@ describe("StatusLine", () => {
     expect(useSettingsStore.getState().widgets.statusLine.left).toHaveLength(1);
   });
 });
+
+describe("StatusLine layout", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  it("pushes the right slot to the window edge", () => {
+    // Both slots ask only for the width their placement needs, so something
+    // growable has to sit between them or the right slot hugs the left one.
+    useSettingsStore.setState({
+      widgets: {
+        ...defaultWidgets(),
+        statusLine: {
+          enabled: true,
+          left: [{ id: "w1", type: "cwd", options: {} }],
+          right: [{ id: "w2", type: "notifications", options: {} }],
+        },
+      },
+    });
+    render(<StatusLine />);
+
+    const children = Array.from(screen.getByTestId("status-line").children) as HTMLElement[];
+    const spacerIndex = children.findIndex((child) => child.style.flex.startsWith("1 1"));
+    const rightIndex = children.findIndex(
+      (child) => child.dataset.testid === "widget-slot-statusLine-right",
+    );
+    expect(spacerIndex).toBeGreaterThan(-1);
+    expect(rightIndex).toBeGreaterThan(spacerIndex);
+  });
+});

@@ -23,6 +23,11 @@ export function StatusLine() {
       }}
     >
       <WidgetSlot slot={{ surface: "statusLine", side: "left" }} instances={statusLine.left} />
+      {/* Each slot asks only for the width its placement wants, so without this
+          the right slot would sit against the left one instead of the window
+          edge. It is the status line's counterpart to the top bar's drag
+          region — the growable middle, with nothing to protect. */}
+      <div className="min-w-0" style={{ flex: "1 1 0%" }} />
       <WidgetSlot slot={{ surface: "statusLine", side: "right" }} instances={statusLine.right} />
     </div>
   );

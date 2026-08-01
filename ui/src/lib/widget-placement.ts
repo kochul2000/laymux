@@ -77,53 +77,72 @@ function writeSlot(
 /**
  * Coerce anything that came off disk into a usable placement.
  *
- * An unknown `type` is *not* dropped — the write path refuses new ones, but one
- * already on disk is the user's placement and rendering skips it instead
- * (ADR-0105). Entries without a usable id or type carry no placement at all, so
- * those are the only ones removed.
+ * **No placement is ever dropped.** The store is what the next save writes back,
+ * so discarding an entry here would delete the user's widget from settings.json
+ * the next time anything else is saved. An unknown `type` is kept and skipped at
+ * render; a missing or duplicated `id` is repaired with a deterministic one
+ * rather than removed, because the id is bookkeeping and the placement is not
+ * (ADR-0105). Only an entry with no `type` at all carries no placement and is
+ * therefore not a widget.
  */
 export function normalizeWidgets(raw: unknown): WidgetsSettings {
   const source = (raw ?? {}) as Partial<WidgetsSettings>;
   const seen = new Set<string>();
 
-  const slot = (value: unknown): WidgetInstance[] => {
+  const slot = (value: unknown, key: string): WidgetInstance[] => {
     if (!Array.isArray(value)) return [];
     const instances: WidgetInstance[] = [];
-    for (const entry of value) {
+    value.forEach((entry, index) => {
       const instance = normalizeInstance(entry);
-      // A duplicate id would make "the widget with this id" ambiguous for every
-      // move and option edit, so the later one is dropped rather than renamed.
-      if (!instance || seen.has(instance.id)) continue;
-      seen.add(instance.id);
-      instances.push(instance);
-    }
+      if (!instance) return;
+      // Identity must be unambiguous for moves and option edits, so a clashing
+      // id is rewritten — the widget itself stays where the user put it.
+      instances.push(
+        seen.has(instance.id) || instance.id.length === 0
+          ? { ...instance, id: fallbackId(key, index, seen) }
+          : instance,
+      );
+      seen.add(instances[instances.length - 1].id);
+    });
     return instances;
   };
 
   return {
     topBar: {
-      left: slot(source.topBar?.left),
-      right: slot(source.topBar?.right),
+      left: slot(source.topBar?.left, "topBar.left"),
+      right: slot(source.topBar?.right, "topBar.right"),
     },
     statusLine: {
       enabled: source.statusLine?.enabled === true,
-      left: slot(source.statusLine?.left),
-      right: slot(source.statusLine?.right),
+      left: slot(source.statusLine?.left, "statusLine.left"),
+      right: slot(source.statusLine?.right, "statusLine.right"),
     },
     overflow: "collapse",
   };
 }
 
+/** Position-derived id, so the same file always normalizes the same way. */
+function fallbackId(slotKeyName: string, index: number, seen: Set<string>): string {
+  const base = `w-${slotKeyName.replace(".", "-")}-${index}`;
+  let candidate = base;
+  let suffix = 1;
+  while (seen.has(candidate)) candidate = `${base}-${suffix++}`;
+  return candidate;
+}
+
 function normalizeInstance(entry: unknown): WidgetInstance | null {
   if (entry === null || typeof entry !== "object") return null;
   const candidate = entry as Partial<WidgetInstance>;
-  if (typeof candidate.id !== "string" || candidate.id.length === 0) return null;
   if (typeof candidate.type !== "string" || candidate.type.length === 0) return null;
   const options =
     candidate.options !== null && typeof candidate.options === "object"
       ? { ...(candidate.options as Record<string, unknown>) }
       : {};
-  return { id: candidate.id, type: candidate.type, options };
+  return {
+    id: typeof candidate.id === "string" ? candidate.id : "",
+    type: candidate.type,
+    options,
+  };
 }
 
 /** Every placed instance, paired with the slot it sits in. */

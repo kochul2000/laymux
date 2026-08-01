@@ -32,15 +32,19 @@ describe("WidgetSlot", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
-  it("keeps the window drag region on a non-interactive widget", () => {
+  it("makes a non-interactive top bar widget itself the window drag target", () => {
+    // Tauri checks the event target, not its ancestors, so the attribute has to
+    // be on the element the pointer lands on.
     render(
       <WidgetSlot
         slot={{ surface: "topBar", side: "left" }}
         instances={[instance("w1", "terminalActivity")]}
       />,
     );
-    const widget = screen.getByTestId("widget-terminal-activity-w1");
-    expect(widget.parentElement).toHaveAttribute("data-tauri-drag-region", "true");
+    expect(screen.getByTestId("widget-terminal-activity-w1")).toHaveAttribute(
+      "data-tauri-drag-region",
+      "true",
+    );
   });
 
   it("does not make an interactive widget a drag handle", () => {
@@ -51,8 +55,21 @@ describe("WidgetSlot", () => {
         instances={[instance("w1", "notifications")]}
       />,
     );
-    const widget = screen.getByTestId("widget-notifications-w1");
-    expect(widget.parentElement).not.toHaveAttribute("data-tauri-drag-region");
+    expect(screen.getByTestId("widget-notifications-w1")).not.toHaveAttribute(
+      "data-tauri-drag-region",
+    );
+  });
+
+  it("does not turn status line widgets into drag handles", () => {
+    render(
+      <WidgetSlot
+        slot={{ surface: "statusLine", side: "left" }}
+        instances={[instance("w1", "terminalActivity")]}
+      />,
+    );
+    expect(screen.getByTestId("widget-terminal-activity-w1")).not.toHaveAttribute(
+      "data-tauri-drag-region",
+    );
   });
 
   it("skips a widget type this build does not know", () => {
@@ -68,7 +85,7 @@ describe("WidgetSlot", () => {
     );
   });
 
-  it("collapses from the tail of a left slot and offers the rest behind an indicator", async () => {
+  it("collapses from the tail of a left slot and reveals the rest on demand", async () => {
     const restore = withSlotWidth(70);
     try {
       const user = userEvent.setup();
@@ -79,11 +96,27 @@ describe("WidgetSlot", () => {
         />,
       );
 
-      expect(screen.getByTestId("widget-notifications-w1")).toBeInTheDocument();
-      expect(screen.queryByTestId("widget-terminal-activity-w2")).not.toBeInTheDocument();
+      expect(screen.getByTestId("widget-notifications-w1")).toBeVisible();
+      expect(screen.getByTestId("widget-terminal-activity-w2")).not.toBeVisible();
 
-      // The collapsed widget must stay reachable — hidden, never silently gone.
       await user.click(screen.getByTestId("widget-overflow-topBar-left"));
+      expect(screen.getByTestId("widget-terminal-activity-w2")).toBeVisible();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps a collapsed widget mounted so its probe subscription survives", () => {
+    // Unmounting would drop demand to zero and retire the probe, so dragging the
+    // window across the threshold would restart `claude` every time.
+    const restore = withSlotWidth(70);
+    try {
+      render(
+        <WidgetSlot
+          slot={{ surface: "topBar", side: "left" }}
+          instances={[instance("w1", "notifications"), instance("w2", "terminalActivity")]}
+        />,
+      );
       expect(screen.getByTestId("widget-terminal-activity-w2")).toBeInTheDocument();
     } finally {
       restore();
@@ -99,8 +132,26 @@ describe("WidgetSlot", () => {
           instances={[instance("w1", "notifications"), instance("w2", "terminalActivity")]}
         />,
       );
-      expect(screen.queryByTestId("widget-notifications-w1")).not.toBeInTheDocument();
-      expect(screen.getByTestId("widget-terminal-activity-w2")).toBeInTheDocument();
+      expect(screen.getByTestId("widget-notifications-w1")).not.toBeVisible();
+      expect(screen.getByTestId("widget-terminal-activity-w2")).toBeVisible();
+    } finally {
+      restore();
+    }
+  });
+
+  it("still reports the collapse when the slot was squeezed to no width at all", () => {
+    // Zero width after measurement is real pressure, not "not measured yet" —
+    // silently clipping every widget would hide that anything was dropped.
+    const restore = withSlotWidth(0);
+    try {
+      render(
+        <WidgetSlot
+          slot={{ surface: "topBar", side: "left" }}
+          instances={[instance("w1", "notifications")]}
+        />,
+      );
+      expect(screen.getByTestId("widget-overflow-topBar-left")).toBeInTheDocument();
+      expect(screen.getByTestId("widget-notifications-w1")).not.toBeVisible();
     } finally {
       restore();
     }
@@ -114,5 +165,17 @@ describe("WidgetSlot", () => {
       />,
     );
     expect(screen.queryByTestId("widget-overflow-topBar-left")).not.toBeInTheDocument();
+  });
+
+  it("asks only for the width its placement wants", () => {
+    render(
+      <WidgetSlot
+        slot={{ surface: "topBar", side: "left" }}
+        instances={[instance("w1", "notifications")]}
+      />,
+    );
+    // 0 1 <requested> — never `1 1 0`, which would claim an equal share of the
+    // row regardless of what is placed.
+    expect(screen.getByTestId("widget-slot-topBar-left")).toHaveStyle({ flexBasis: "46px" });
   });
 });

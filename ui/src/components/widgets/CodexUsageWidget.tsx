@@ -11,7 +11,7 @@ import type { WidgetComponentProps } from "./types";
 const TICK_MS = 30_000;
 
 /** Codex usage on one line. Polls at the shared `usage.codex.refreshSeconds`. */
-export function CodexUsageWidget({ instance }: WidgetComponentProps) {
+export function CodexUsageWidget({ instance, dragRegion }: WidgetComponentProps) {
   const now = useNowTick(TICK_MS);
   const usage = useSettingsStore((s) => s.usage.codex);
   const { snapshot } = useCodexUsageSnapshot(usage.refreshSeconds);
@@ -28,6 +28,7 @@ export function CodexUsageWidget({ instance }: WidgetComponentProps) {
       display={readDisplay(instance.options)}
       message={codexUsageStatusMessage(snapshot.status)}
       capturedAtMs={snapshot.capturedAtMs}
+      dragRegion={dragRegion}
     />
   );
 }

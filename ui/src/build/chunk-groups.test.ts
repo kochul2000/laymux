@@ -51,4 +51,36 @@ describe("resolveChunkGroup", () => {
     expect(resolveChunkGroup("/repo/ui/node_modules/zustand/esm/index.mjs")).toBeUndefined();
     expect(resolveChunkGroup("/repo/ui/src/components/views/TerminalView.tsx")).toBeUndefined();
   });
+
+  it.each([
+    "/repo/ui/src/components/widgets/registry.ts",
+    "/repo/ui/src/components/widgets/ClaudeUsageWidget.tsx",
+    "/repo/ui/src/components/views/settings/WidgetsSection.tsx",
+    "/repo/ui/src/components/layout/StatusLine.tsx",
+    "/repo/ui/src/lib/widget-placement.ts",
+  ])("keeps the widget feature out of the near-limit entry chunk: %s", (id) => {
+    expect(resolveChunkGroup(id)).toBe("widgets");
+  });
+
+  it.each([
+    "/repo/ui/src/lib/usage-rows.ts",
+    "/repo/ui/src/lib/usage-status.ts",
+    "/repo/ui/src/lib/codex-usage-subscription.ts",
+    "/repo/ui/src/hooks/useUsageSnapshot.ts",
+    "/repo/ui/src/hooks/useCodexUsageSnapshot.ts",
+  ])("groups the usage data layer shared by views and widgets: %s", (id) => {
+    expect(resolveChunkGroup(id)).toBe("usage");
+  });
+
+  it("claims only the widgets settings section, not every future settings section", () => {
+    expect(
+      resolveChunkGroup("/repo/ui/src/components/views/settings/SomeOtherSection.tsx"),
+    ).toBeUndefined();
+  });
+
+  it("normalizes Windows separators for the widget group", () => {
+    expect(resolveChunkGroup("D:\\repo\\ui\\src\\components\\widgets\\registry.ts")).toBe(
+      "widgets",
+    );
+  });
 });

@@ -38,3 +38,12 @@ export function readDisplay(options: Record<string, unknown>): UsageWidgetDispla
 export function readTerminalActivityScope(options: Record<string, unknown>): TerminalActivityScope {
   return options.scope === "all" ? "all" : "workspace";
 }
+
+/**
+ * Width the cwd widget may occupy.
+ *
+ * The estimate and the render cap must be the same number: a widget is an
+ * atomic unit, so a cap wider than the estimate would let the slot admit a path
+ * it then clips in half (ADR-0105).
+ */
+export const CWD_WIDGET_WIDTH = 200;

@@ -13,11 +13,21 @@ export function WidgetChrome({
   testId,
   title,
   onClick,
+  dragRegion,
   children,
 }: {
   testId: string;
   title: string;
   onClick?: () => void;
+  /**
+   * Let the window be dragged by this widget.
+   *
+   * Tauri tests the exact event target, not its ancestors, so the attribute has
+   * to sit on the element the pointer lands on — hence here rather than on a
+   * wrapper. The content is made pointer-transparent for the same reason; the
+   * tooltip still works because `title` stays on this element.
+   */
+  dragRegion?: boolean;
   children: ReactNode;
 }) {
   const style = {
@@ -30,8 +40,20 @@ export function WidgetChrome({
 
   if (!onClick) {
     return (
-      <div data-testid={testId} className={CHROME_CLASS} style={style} title={title}>
-        {children}
+      <div
+        data-testid={testId}
+        className={CHROME_CLASS}
+        style={style}
+        title={title}
+        {...(dragRegion ? { "data-tauri-drag-region": "true" } : {})}
+      >
+        {dragRegion ? (
+          // `display: contents` keeps the layout identical; `pointer-events`
+          // inherits down so no descendant can become the drag target.
+          <span style={{ display: "contents", pointerEvents: "none" }}>{children}</span>
+        ) : (
+          children
+        )}
       </div>
     );
   }

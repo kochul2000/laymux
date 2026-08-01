@@ -54,4 +54,10 @@ export interface WidgetDefinition {
 
 export interface WidgetComponentProps {
   instance: WidgetInstance;
+  /**
+   * True when this placement may drag the window. Only ever true for a
+   * non-interactive widget on the top bar; the component forwards it to
+   * `WidgetChrome`, which is the element the pointer actually hits.
+   */
+  dragRegion?: boolean;
 }

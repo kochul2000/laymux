@@ -492,6 +492,11 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         ("/widgets/statusLine/right", &widgets.status_line.right),
     ];
 
+    // The account picker offers the default dir plus whatever the user
+    // registered, so a widget may not name anything else.
+    let mut claude_config_dirs: Vec<&str> = vec![""];
+    claude_config_dirs.extend(settings.usage.claude.config_dirs.iter().map(String::as_str));
+
     for (slot_path, instances) in slots {
         for (index, instance) in instances.iter().enumerate() {
             let base = format!("{slot_path}/{index}");
@@ -501,7 +506,14 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
                 &instance.widget_type,
                 WIDGET_TYPES,
             );
-            if !seen_ids.insert(instance.id.as_str()) {
+            if instance.id.is_empty() {
+                issue(
+                    issues,
+                    "invalid_value",
+                    format!("{base}/id"),
+                    "위젯 id 는 비어 있을 수 없습니다.".to_string(),
+                );
+            } else if !seen_ids.insert(instance.id.as_str()) {
                 issue(
                     issues,
                     "duplicate_value",
@@ -509,7 +521,7 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
                     format!("위젯 id '{}'가 중복됩니다.", instance.id),
                 );
             }
-            validate_widget_options(issues, &base, instance);
+            validate_widget_options(issues, &base, instance, &claude_config_dirs);
         }
     }
 }
@@ -517,31 +529,51 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
 /// Validate the option domains this build knows.
 ///
 /// Options a widget type does not declare are carried through untouched — the
-/// backend refuses wrong values, not unfamiliar ones.
-fn validate_widget_options(issues: &mut Vec<SettingsIssue>, base: &str, instance: &WidgetInstance) {
-    let option = |key: &str| instance.options.get(key).and_then(|value| value.as_str());
+/// backend refuses wrong values, not unfamiliar ones. A value that is present
+/// but not a string is a wrong value, not an unfamiliar one: letting it through
+/// would leave the frontend silently substituting a default the user never
+/// chose, which is exactly what [ADR-0032] forbids.
+///
+/// [ADR-0032]: ../../../docs/adr/0032-llm-settings-introspection-and-safe-mutation.md
+fn validate_widget_options(
+    issues: &mut Vec<SettingsIssue>,
+    base: &str,
+    instance: &WidgetInstance,
+    claude_config_dirs: &[&str],
+) {
+    if !instance.options.is_object() && !instance.options.is_null() {
+        issue(
+            issues,
+            "type_error",
+            format!("{base}/options"),
+            "위젯 options 는 객체여야 합니다.".to_string(),
+        );
+        return;
+    }
+
+    let mut string_option = |key: &str, allowed: &[&str]| {
+        let Some(value) = instance.options.get(key) else {
+            return;
+        };
+        let path = format!("{base}/options/{key}");
+        match value.as_str() {
+            Some(text) => enum_value(issues, &path, text, allowed),
+            None => issue(
+                issues,
+                "type_error",
+                path,
+                format!("위젯 옵션 '{key}' 는 문자열이어야 합니다."),
+            ),
+        }
+    };
 
     match instance.widget_type.as_str() {
-        "claudeUsage" | "codexUsage" => {
-            if let Some(display) = option("display") {
-                enum_value(
-                    issues,
-                    &format!("{base}/options/display"),
-                    display,
-                    USAGE_WIDGET_DISPLAY_MODES,
-                );
-            }
+        "claudeUsage" => {
+            string_option("display", USAGE_WIDGET_DISPLAY_MODES);
+            string_option("configDir", claude_config_dirs);
         }
-        "terminalActivity" => {
-            if let Some(scope) = option("scope") {
-                enum_value(
-                    issues,
-                    &format!("{base}/options/scope"),
-                    scope,
-                    TERMINAL_ACTIVITY_WIDGET_SCOPES,
-                );
-            }
-        }
+        "codexUsage" => string_option("display", USAGE_WIDGET_DISPLAY_MODES),
+        "terminalActivity" => string_option("scope", TERMINAL_ACTIVITY_WIDGET_SCOPES),
         _ => {}
     }
 }

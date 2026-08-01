@@ -254,3 +254,42 @@ describe("settings snapshot — widget placement and usage", () => {
     expect(snapshot.usage.claude.visibleRows).toEqual(["session"]);
   });
 });
+
+describe("settings snapshot — save/load round trip does not drop sections", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("writes back what it loaded for every settings-owned section", async () => {
+    // `save_settings` overwrites the whole document, so any section missing from
+    // the snapshot is silently reset on the next save of anything else.
+    const loaded = {
+      usage: {
+        claude: {
+          profile: "WSL",
+          refreshSeconds: 900,
+          configDirs: ["/alt"],
+          visibleRows: ["session"],
+        },
+        codex: { profile: "", refreshSeconds: 600, configDirs: [], visibleRows: ["weekly"] },
+        colors: { used: "#111111", pace: "#222222", track: "#333333" },
+      },
+      widgets: {
+        topBar: { left: [{ id: "w1", type: "cwd", options: {} }], right: [] },
+        statusLine: { enabled: true, left: [], right: [] },
+        overflow: "collapse",
+      },
+    } as unknown as Parameters<typeof applySettingsSnapshot>[0];
+
+    applySettingsSnapshot(loaded, { includeStructural: false });
+    const written = await collectSettingsSnapshot();
+
+    expect(written.usage.claude.profile).toBe("WSL");
+    expect(written.usage.claude.configDirs).toEqual(["/alt"]);
+    expect(written.usage.claude.visibleRows).toEqual(["session"]);
+    expect(written.usage.colors.used).toBe("#111111");
+    expect(written.widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
+    expect(written.widgets.statusLine.enabled).toBe(true);
+  });
+});

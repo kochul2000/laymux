@@ -11,6 +11,8 @@ import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { defaultWidgets } from "@/lib/widget-placement";
 
 describe("GridEditToolbar", () => {
   beforeEach(() => {
@@ -18,6 +20,7 @@ describe("GridEditToolbar", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
     useRemoteAccessStore.setState(useRemoteAccessStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   it("always shows export action buttons", () => {
@@ -98,5 +101,30 @@ describe("GridEditToolbar", () => {
     await user.click(screen.getByTestId("export-new-btn"));
 
     expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
+  });
+  it("keeps a window drag region no matter how full the widget slots are", () => {
+    // Without a floor, a crowded top bar would leave nothing to grab the window
+    // by — placement must cost widgets, never the ability to move the window.
+    useSettingsStore.setState({
+      widgets: {
+        ...defaultWidgets(),
+        topBar: {
+          left: [{ id: "w1", type: "cwd", options: {} }],
+          right: [{ id: "w2", type: "claudeUsage", options: {} }],
+        },
+      },
+    });
+    render(<GridEditToolbar />);
+
+    const dragRegions = document.querySelectorAll<HTMLElement>("[data-tauri-drag-region]");
+    const reserved = Array.from(dragRegions).find((element) => element.style.minWidth !== "");
+    expect(reserved).toBeDefined();
+    expect(parseInt(reserved!.style.minWidth, 10)).toBeGreaterThan(0);
+  });
+
+  it("renders both top bar widget slots", () => {
+    render(<GridEditToolbar />);
+    expect(screen.getByTestId("widget-slot-topBar-left")).toBeInTheDocument();
+    expect(screen.getByTestId("widget-slot-topBar-right")).toBeInTheDocument();
   });
 });

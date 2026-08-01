@@ -1,8 +1,10 @@
+import { useTranslation } from "react-i18next";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { abbreviatePath } from "@/lib/workspace-summary";
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { WidgetChrome } from "./WidgetChrome";
 import type { WidgetComponentProps } from "./types";
+import { CWD_WIDGET_WIDTH } from "./widget-options";
 
 /**
  * The focused terminal's working directory.
@@ -12,15 +14,16 @@ import type { WidgetComponentProps } from "./types";
  * says so instead of showing another pane's path.
  */
 export function CwdWidget({ instance }: WidgetComponentProps) {
+  const { t } = useTranslation("settings");
   const cwd = useTerminalStore((s) => s.instances.find((terminal) => terminal.isFocused)?.cwd);
 
   return (
     <WidgetChrome
       testId={`widget-cwd-${instance.id}`}
-      title={cwd ? `${cwd}\nClick to copy` : "No focused terminal"}
+      title={cwd ? `${cwd}\n${t("widgets.cwdCopyHint")}` : t("widgets.cwdNone")}
       onClick={cwd ? () => void clipboardWriteText(cwd).catch(() => {}) : undefined}
     >
-      <span className="truncate" style={{ maxWidth: 220 }}>
+      <span className="truncate" style={{ maxWidth: CWD_WIDGET_WIDTH }}>
         {cwd ? abbreviatePath(cwd) : "—"}
       </span>
     </WidgetChrome>

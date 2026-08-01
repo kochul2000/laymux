@@ -16,7 +16,7 @@ const TICK_MS = 30_000;
  * demand for the probe and shares its interval — no widget-only polling tier
  * (ADR-0105).
  */
-export function ClaudeUsageWidget({ instance }: WidgetComponentProps) {
+export function ClaudeUsageWidget({ instance, dragRegion }: WidgetComponentProps) {
   const configDir =
     typeof instance.options.configDir === "string" ? instance.options.configDir : "";
   const now = useNowTick(TICK_MS);
@@ -36,6 +36,7 @@ export function ClaudeUsageWidget({ instance }: WidgetComponentProps) {
       message={error ?? claudeUsageStatusMessage(snapshot.status)}
       capturedAtMs={snapshot.capturedAtMs}
       configDir={configDir}
+      dragRegion={dragRegion}
     />
   );
 }

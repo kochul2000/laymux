@@ -776,3 +776,71 @@ fn status_line_starts_off_with_empty_slots() {
     assert!(widgets.status_line.right.is_empty());
     assert_eq!(widgets.overflow, "collapse");
 }
+
+#[test]
+fn widget_option_of_the_wrong_type_is_rejected_not_defaulted() {
+    // Letting a non-string through would leave the frontend silently
+    // substituting a default the caller never asked for.
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "w1", "type": "codexUsage", "options": { "display": 3 } }])),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared.errors.iter().any(|issue| {
+        issue.code == "type_error" && issue.path == "/widgets/topBar/left/0/options/display"
+    }));
+}
+
+#[test]
+fn widget_options_must_be_an_object() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "w1", "type": "cwd", "options": 7 }])),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/widgets/topBar/left/0/options"));
+}
+
+#[test]
+fn claude_usage_widget_may_only_name_a_registered_config_dir() {
+    let unknown = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(
+            json!([{ "id": "w1", "type": "claudeUsage", "options": { "configDir": "/nope" } }]),
+        ),
+    );
+    assert!(!unknown.valid);
+    assert!(unknown.errors.iter().any(|issue| {
+        issue.code == "invalid_value" && issue.path == "/widgets/topBar/left/0/options/configDir"
+    }));
+
+    let registered = prepare_settings_update(
+        &Settings::default(),
+        &json!({
+            "usage": { "claude": { "configDirs": ["/alt"] } },
+            "widgets": { "topBar": { "left": [
+                { "id": "w1", "type": "claudeUsage", "options": { "configDir": "/alt" } }
+            ]}}
+        }),
+    );
+    assert!(registered.valid, "errors: {:?}", registered.errors);
+}
+
+#[test]
+fn empty_widget_id_is_rejected() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &widget_patch(json!([{ "id": "", "type": "cwd" }])),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.code == "invalid_value" && issue.path == "/widgets/topBar/left/0/id"));
+}

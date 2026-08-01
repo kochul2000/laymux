@@ -27,21 +27,32 @@ describe("normalizeWidgets", () => {
     expect(widgets.topBar.left).toEqual([{ id: "w1", type: "fromTheFuture", options: {} }]);
   });
 
-  it("drops entries that carry no placement at all", () => {
+  it("repairs a missing id instead of dropping the placement", () => {
+    // Anything dropped here is deleted from settings.json by the next save, so
+    // only entries with no type at all may disappear.
     const widgets = normalizeWidgets({
       topBar: { left: [{ type: "cwd" }, { id: "" }, null, "cwd", { id: "w1", type: "cwd" }] },
     });
-    expect(widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
+    expect(widgets.topBar.left.map((w) => w.type)).toEqual(["cwd", "cwd"]);
+    expect(widgets.topBar.left[0].id).toBe("w-topBar-left-0");
+    expect(widgets.topBar.left[1].id).toBe("w1");
   });
 
-  it("drops a duplicate id across slots so identity stays unambiguous", () => {
+  it("keeps a duplicate id but rewrites it so identity stays unambiguous", () => {
     const widgets = normalizeWidgets({
       topBar: { left: [{ id: "dup", type: "cwd" }] },
       statusLine: { enabled: true, right: [{ id: "dup", type: "notifications" }] },
     });
-    expect(widgets.topBar.left).toHaveLength(1);
-    expect(widgets.statusLine.right).toHaveLength(0);
+    expect(widgets.topBar.left[0].id).toBe("dup");
+    expect(widgets.statusLine.right).toHaveLength(1);
+    expect(widgets.statusLine.right[0].type).toBe("notifications");
+    expect(widgets.statusLine.right[0].id).not.toBe("dup");
     expect(widgets.statusLine.enabled).toBe(true);
+  });
+
+  it("normalizes the same file to the same ids every time", () => {
+    const raw = { topBar: { left: [{ type: "cwd" }, { type: "notifications" }] } };
+    expect(normalizeWidgets(raw)).toEqual(normalizeWidgets(raw));
   });
 
   it("coerces a non-array slot and a non-object options", () => {

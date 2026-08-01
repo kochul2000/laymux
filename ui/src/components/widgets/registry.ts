@@ -13,6 +13,7 @@ import { CwdWidget } from "./CwdWidget";
 import { NotificationsWidget } from "./NotificationsWidget";
 import { TerminalActivityWidget } from "./TerminalActivityWidget";
 import {
+  CWD_WIDGET_WIDTH,
   estimateUsageWidgetWidth,
   readDisplay,
   TERMINAL_ACTIVITY_SCOPES,
@@ -89,7 +90,9 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
     interactive: true,
     defaultOptions: {},
     optionSpecs: [],
-    estimateWidth: () => 140,
+    // Chrome padding on top of the text cap, so the slot never admits a path
+    // it would then clip.
+    estimateWidth: () => CWD_WIDGET_WIDTH + 12,
     Component: CwdWidget,
   },
 ];
