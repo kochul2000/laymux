@@ -40,7 +40,13 @@ const USAGE_SUFFIXES = [
  * whole family out of the entry chunk costs nothing at startup.
  */
 const FILE_PREVIEW_SEGMENTS = ["/src/lib/preview/", "/src/components/ui/preview/"];
-const FILE_PREVIEW_SUFFIXES = ["/src/lib/file-preview-kind.ts"];
+const FILE_PREVIEW_SUFFIXES = [
+  "/src/lib/file-preview-kind.ts",
+  // The viewer body belongs with the renderers it dispatches to. Same reason
+  // the GitHub view has its own group: the entry chunk sits right against the
+  // size budget, and a feature that grows should grow its own chunk.
+  "/src/components/ui/FileViewer.tsx",
+];
 const TERMINAL_OUTPUT_V3_FAILURE_SUFFIX = "/src/lib/terminal-output-v3-failure-coordinator.ts";
 const TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX = "/src/lib/terminal-input-delivery-metrics.ts";
 const NODE_MODULES_SEGMENT = "/node_modules/";
