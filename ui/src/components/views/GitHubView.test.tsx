@@ -89,6 +89,15 @@ describe("GitHubView", () => {
     expect(screen.getByTestId("github-draft-12")).toBeInTheDocument();
   });
 
+  it("renders the item number in the title size with an accent color", () => {
+    renderView();
+
+    const number = screen.getByTestId("github-number-708");
+    expect(number).toHaveTextContent("#708");
+    expect(number.style.color).toBe("var(--yellow)");
+    expect(number.style.fontSize).toBe("var(--fs-sm)");
+  });
+
   it("opens on the pulls tab when defaultTab is set", () => {
     renderView({ defaultTab: "pulls" });
 

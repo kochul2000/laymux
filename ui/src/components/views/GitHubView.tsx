@@ -282,9 +282,12 @@ export function GitHubView({
             onClick={() => openExternal(item.url)}
             title={item.title}
           >
+            {/* The number is what a developer actually scans for, so it gets
+                the title's size and an accent color instead of muted small. */}
             <span
+              data-testid={`github-number-${item.number}`}
               className="shrink-0"
-              style={{ color: "var(--text-muted)", fontSize: "var(--fs-xs)" }}
+              style={{ color: "var(--yellow)", fontSize: "var(--fs-sm)" }}
             >
               #{item.number}
             </span>

@@ -288,6 +288,25 @@ fn hand_edited_widget_placement_survives_load_and_repair() {
     );
 }
 
+#[test]
+fn hand_edited_github_section_loads_and_an_omitted_one_falls_back_to_defaults() {
+    let configured: Settings = serde_json::from_str(
+        r#"{ "github": { "defaultTab": "pulls", "refreshSeconds": 30, "hideDraftPulls": true } }"#,
+    )
+    .unwrap();
+    assert_eq!(configured.github.default_tab, "pulls");
+    assert_eq!(configured.github.refresh_seconds, 30);
+    assert!(configured.github.hide_draft_pulls);
+
+    // A settings.json written before the section existed must still open the
+    // view on issues at the stock cadence.
+    let bare: Settings = serde_json::from_str(r#"{ "github": {} }"#).unwrap();
+    assert_eq!(bare.github, GithubSettings::default());
+    assert_eq!(bare.github.default_tab, "issues");
+    assert_eq!(bare.github.refresh_seconds, 10);
+    assert!(!bare.github.hide_draft_pulls);
+}
+
 #[tokio::test]
 async fn remote_host_candidates_command_returns_loopback_candidate() {
     let candidates = get_remote_host_candidates().await.unwrap();
