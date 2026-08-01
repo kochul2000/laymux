@@ -457,6 +457,36 @@ describe("MemoView", () => {
       fireEvent.pointerUp(window);
       expect(clipboardWriteText).not.toHaveBeenCalled();
     });
+
+    // Issue #710: the #307 watcher must not fire for a release that lands
+    // back inside the textarea — that is an ordinary in-pane drag-select and
+    // has to stay lazy so a following Ctrl+V can still replace the selection.
+    it("issue #710: drag-select released inside the pane stays lazy", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-inside");
+      fireEvent.pointerDown(textarea);
+      fireEvent.pointerUp(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("issue #710: Ctrl+V right after an in-pane drag-select discards pending", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-then-paste");
+      fireEvent.pointerDown(textarea);
+      fireEvent.pointerUp(textarea);
+      // Paste replaces the selection — the pending copy must be dropped, not
+      // written, otherwise the user pastes the selection over itself.
+      fireEvent.paste(textarea);
+      fireEvent(window, new Event("blur"));
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+    });
+
+    it("issue #710: in-pane release still flushes on the next focus-out", async () => {
+      const textarea = await setupCopyOnSelect("pane-710-drag-then-blur");
+      fireEvent.pointerDown(textarea);
+      fireEvent.pointerUp(textarea);
+      expect(clipboardWriteText).not.toHaveBeenCalled();
+      fireEvent(window, new Event("blur"));
+      expect(clipboardWriteText).toHaveBeenCalledWith("hello");
+    });
   });
 
   describe("Tab/Shift+Tab indent", () => {

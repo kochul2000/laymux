@@ -168,22 +168,31 @@ export function MemoView({ memoKey, paneId, isFocused }: MemoViewProps) {
   // mousedown-outside fires, and the selection never collapses — so the
   // lazy-copy model would leave the pending text unflushed until some later
   // interaction. Pair pointerdown on the textarea with a one-shot window
-  // pointerup so the pending copy flushes the moment the drag ends, wherever
-  // it ends. Mirrors the TerminalView #230 watcher. `flushPendingCopy` no-ops
-  // when there's nothing pending, so a plain click (no selection) is harmless.
+  // pointerup so the pending copy flushes the moment such a drag ends.
+  // Mirrors the TerminalView #230 watcher.
+  //
+  // Issue #710: the release must be OUTSIDE the textarea for this to apply.
+  // `pointerup` bubbles to window from inside the textarea too, so flushing
+  // unconditionally made every ordinary in-pane drag-select copy eagerly —
+  // and a following Ctrl+V then pasted the just-copied selection over itself
+  // instead of replacing it (Rule 3 never got a chance to discard). An
+  // in-pane release stays lazy: the existing mousedown-outside / window-blur
+  // / selection-collapse handlers already flush it at the right moment.
   //
   // The watcher is tracked in a ref so it can be torn down: if the component
   // unmounts mid-drag (before pointerup fires) the one-shot listener would
   // otherwise linger on window and flush against a stale ref on some later,
   // unrelated release. We also drop any prior watcher when a fresh pointerdown
   // arrives without an intervening pointerup (e.g. a missed/cancelled release).
-  const pointerUpWatcherRef = useRef<(() => void) | null>(null);
+  const pointerUpWatcherRef = useRef<((e: PointerEvent) => void) | null>(null);
   const handlePointerDown = useCallback(() => {
     if (pointerUpWatcherRef.current) {
       window.removeEventListener("pointerup", pointerUpWatcherRef.current);
     }
-    const onWindowPointerUp = () => {
+    const onWindowPointerUp = (e: PointerEvent) => {
       pointerUpWatcherRef.current = null;
+      const textarea = textareaRef.current;
+      if (textarea && e.target instanceof Node && textarea.contains(e.target)) return;
       flushPendingCopy();
     };
     pointerUpWatcherRef.current = onWindowPointerUp;
