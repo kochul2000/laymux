@@ -54,7 +54,7 @@ export function buildClaudeUsageRows(
       row: {
         key: "session",
         label: "Current session",
-        statuslineLabel: "SS",
+        statuslineLabel: "Session",
         abbreviatedLabel: "session",
         percent: snapshot.session.percent,
         reset: snapshot.session.reset,
@@ -66,7 +66,7 @@ export function buildClaudeUsageRows(
       row: {
         key: "week-all",
         label: "Current week (all models)",
-        statuslineLabel: "WK",
+        statuslineLabel: "Week",
         abbreviatedLabel: "week (all)",
         percent: snapshot.weekAll.percent,
         reset: snapshot.weekAll.reset,
@@ -80,7 +80,7 @@ export function buildClaudeUsageRows(
         label: snapshot.weekModelLabel
           ? `Current week (${snapshot.weekModelLabel})`
           : "Current week (per model)",
-        statuslineLabel: "WF",
+        statuslineLabel: snapshot.weekModelLabel ?? "Model",
         abbreviatedLabel: snapshot.weekModelLabel ? `week (${snapshot.weekModelLabel})` : "week",
         percent: snapshot.weekModel.percent,
         reset: snapshot.weekModel.reset,
@@ -129,7 +129,7 @@ export function buildCodexUsageRows(
         row: {
           key: limit.key,
           label: spark ? "Spark Weekly limit" : "Weekly limit",
-          statuslineLabel: spark ? "WS" : "WK",
+          statuslineLabel: spark ? "Spark" : "Week",
           abbreviatedLabel: spark ? "Spark" : "Weekly",
           percent: limit.usedPercent,
           reset: resetText(limit.resetsAtSecs),
