@@ -60,7 +60,9 @@ Remote 는 이번 결정의 대상이 아니다. `render` 응답에서 **`previe
 
 ### PDF 는 호스트 엔진에 위임한다
 
-PDF 는 자체 렌더링하지 않고 WebView 엔진의 내장 뷰어(`<object type="application/pdf">`)에 맡긴다. 엔진에 PDF 뷰어가 없는 플랫폼(Linux WebKitGTK)에서는 빈 화면 대신 fallback 슬롯에 외부 열기 경로를 제시한다. **플랫폼 간 렌더 동등성은 이 결정의 목표가 아니다** — 동등성을 보장하려면 PDF 엔진을 번들해야 하고, 그 비용은 이 기능의 가치를 넘는다.
+PDF 는 자체 렌더링하지 않고 WebView 엔진의 내장 뷰어에 맡긴다. 전달 방식은 blob URL 을 `<iframe>` 에 싣는 것이다 — `<object>` 는 fallback 슬롯이 공짜로 딸려 와 더 나아 보였지만 **WebView2 가 `<object>` 로는 PDF 를 렌더하지 않는다는 것을 실측으로 확인**했고(`type` 유무 무관), 같은 blob 을 iframe 에 실으면 Chromium 뷰어가 그대로 뜬다. iframe 에는 fallback 슬롯이 없으므로 외부 열기는 상시 노출 버튼으로 제공한다.
+
+엔진에 PDF 뷰어가 없는 플랫폼(Linux WebKitGTK)에서는 프레임이 비고 그 버튼이 유일한 출구다. **플랫폼 간 렌더 동등성은 이 결정의 목표가 아니다** — 동등성을 보장하려면 PDF 엔진을 번들해야 하고, 그 비용은 이 기능의 가치를 넘는다. 렌더 실패를 프로그래밍으로 감지할 방법이 없다는 점도 이 결정의 일부다. iframe 의 `load` 는 성공·실패 양쪽에서 발화하므로 "이 플랫폼은 못 그린다" 는 안내를 조건부로 띄울 수 없고, 그래서 버튼을 조건 없이 항상 보여준다.
 
 ## Alternatives Considered
 

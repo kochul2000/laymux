@@ -39,7 +39,9 @@ export function SvgPreview({
   }
 
   return (
-    <div className="flex h-full items-center justify-center" style={bodyStyle}>
+    // `flex-1` matters: the toggle shell lays its child out as a flex row, so
+    // without it the centering box shrinks to the image and hugs the left edge.
+    <div className="flex h-full min-w-0 flex-1 items-center justify-center" style={bodyStyle}>
       <img
         src={dataUrl}
         alt={path}

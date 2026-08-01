@@ -413,8 +413,10 @@ describe("FileViewer", () => {
     });
 
     expect(screen.getByTestId("pdf-preview")).toBeInTheDocument();
-    // The fallback slot is what a WebView without a PDF engine shows instead of
-    // a blank rectangle.
-    expect(screen.getByTestId("pdf-preview-fallback")).toBeInTheDocument();
+    // An iframe, not an object: WebView2 will not render a PDF through
+    // `<object>`. That costs the fallback slot, so the escape hatch for an
+    // engine with no PDF viewer has to be a permanent button.
+    expect(screen.getByTestId("pdf-preview-frame")).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-preview-open-external")).toBeInTheDocument();
   });
 });

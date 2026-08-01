@@ -4,10 +4,16 @@ import { openExternal } from "@/lib/tauri-api";
 /**
  * PDF handed to the host WebView's own viewer.
  *
- * No PDF engine is bundled (ADR-0109): Windows' WebView2 has Chromium's viewer
- * built in, and where the engine has none — Linux WebKitGTK — the `<object>`
- * fallback slot renders instead of a blank rectangle, offering the host app.
- * Cross-platform render parity is explicitly not a goal here.
+ * No PDF engine is bundled (ADR-0109). The frame is an `<iframe>`, not an
+ * `<object>`: WebView2 refuses to render a PDF through `<object>` (with or
+ * without `type="application/pdf"`) and falls straight to the fallback slot,
+ * while the same blob in an iframe loads Chromium's full viewer. Measured on
+ * Windows — do not "simplify" this back to `<object>`.
+ *
+ * Losing `<object>` also loses its fallback children, so the escape hatch is a
+ * permanent toolbar button instead. On an engine with no PDF viewer (Linux
+ * WebKitGTK) the frame stays blank and that button is the way out. Render
+ * parity across platforms is explicitly not a goal.
  */
 export function PdfPreview({ dataUrl, path }: { dataUrl: string; path: string }) {
   /*
@@ -21,11 +27,11 @@ export function PdfPreview({ dataUrl, path }: { dataUrl: string; path: string })
    * `data:` URL, which is the form the backend sends.
    */
   const attachDocument = useCallback(
-    (node: HTMLObjectElement) => {
+    (node: HTMLIFrameElement) => {
       const url = createPdfObjectUrl(dataUrl);
-      // Leaving `data` unset makes the element render its fallback children,
-      // which is also the right outcome for a PDF that failed to decode.
-      if (url) node.data = url;
+      // Leaving `src` unset shows an empty frame, which is also the right
+      // outcome for a PDF whose base64 failed to decode.
+      if (url) node.src = url;
       return () => {
         if (url) URL.revokeObjectURL(url);
       };
@@ -34,33 +40,40 @@ export function PdfPreview({ dataUrl, path }: { dataUrl: string; path: string })
   );
 
   return (
-    <div className="h-full min-h-0 flex-1" data-testid="pdf-preview">
-      <object
-        ref={attachDocument}
-        type="application/pdf"
-        style={{ width: "100%", height: "100%", border: "none" }}
+    <div
+      className="flex h-full min-h-0 flex-1 flex-col"
+      style={{ background: "var(--bg-surface)" }}
+      data-testid="pdf-preview"
+    >
+      <div
+        className="flex items-center justify-end px-2 py-1"
+        style={{
+          background: "var(--bg-surface)",
+          borderBottom: "1px solid var(--border)",
+          flex: "0 0 auto",
+        }}
       >
-        <div
-          className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center"
-          style={{ color: "var(--text-secondary)" }}
-          data-testid="pdf-preview-fallback"
+        <button
+          type="button"
+          className="hover-bg-strong rounded px-2 py-1 text-xs"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border)",
+            color: "var(--text-secondary)",
+            cursor: "pointer",
+          }}
+          onClick={() => void openExternal(path)}
+          data-testid="pdf-preview-open-external"
         >
-          <div>This platform&rsquo;s WebView cannot display PDFs inline.</div>
-          <button
-            type="button"
-            className="hover-bg-strong rounded px-2 py-1"
-            style={{
-              background: "transparent",
-              border: "1px solid var(--border)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-            onClick={() => void openExternal(path)}
-          >
-            Open in the default app
-          </button>
-        </div>
-      </object>
+          Open in the default app
+        </button>
+      </div>
+      <iframe
+        title="PDF preview"
+        ref={attachDocument}
+        style={{ width: "100%", flex: "1 1 auto", minHeight: 0, border: "none" }}
+        data-testid="pdf-preview-frame"
+      />
     </div>
   );
 }

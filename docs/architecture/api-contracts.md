@@ -725,7 +725,7 @@ preview 종류는 신뢰 경계로 두 계열로 갈리고, 계열이 렌더 방
 
 **structured 계열은 HTML 문자열을 만들지 않는다.** 순수 파서(`ui/src/lib/preview/`)가 텍스트를 값으로 바꾸고 컴포넌트(`ui/src/components/ui/preview/`)가 그 값을 React 로 그린다. 이 경로에는 `dangerouslySetInnerHTML`·`innerHTML`·`DOMParser` 가 없으며, 그래서 sanitizer 도 없다. 문법 하이라이터는 토큰 배열을 돌려주는 API 로만 호출하고 HTML 을 돌려주는 API 는 쓰지 않는다. document 계열만 아래의 sanitizer/CSP 경로를 탄다.
 
-`kind: "image"` 중 `.svg` 는 이미지↔소스 토글을 갖는다. 소스는 재요청 없이 backend 가 보낸 base64 를 디코드해 얻고, 렌더 측은 `<img>` 를 유지한다(마크업을 문서에 인라인하면 내부 스크립트가 실행된다). `kind: "pdf"` 는 blob URL 을 만들어 호스트 WebView 의 내장 뷰어(`<object type="application/pdf">`)에 위임하며, 엔진에 PDF 뷰어가 없는 플랫폼(Linux WebKitGTK)에서는 fallback 슬롯이 외부 열기를 제시한다 — 플랫폼 간 렌더 동등성은 비목표다. `kind: "archive"`(zip 계열·tar·tar.gz)는 압축을 풀지 않고 중앙 디렉터리/헤더 메타데이터만 나열한다.
+`kind: "image"` 중 `.svg` 는 이미지↔소스 토글을 갖는다. 소스는 재요청 없이 backend 가 보낸 base64 를 디코드해 얻고, 렌더 측은 `<img>` 를 유지한다(마크업을 문서에 인라인하면 내부 스크립트가 실행된다). `kind: "pdf"` 는 blob URL 을 `<iframe>` 에 실어 호스트 WebView 의 내장 뷰어에 위임한다. `<object>` 가 아닌 이유는 실측이다 — WebView2 는 `<object>`(type 유무 무관)로는 PDF 를 렌더하지 않고 곧장 fallback 으로 떨어지지만 같은 blob 을 iframe 에 실으면 Chromium 뷰어가 뜬다. iframe 에는 fallback 슬롯이 없고 렌더 실패를 감지할 방법도 없으므로(`load` 는 양쪽에서 발화) 외부 열기 버튼을 상시 노출한다. 엔진에 PDF 뷰어가 없는 플랫폼(Linux WebKitGTK)에서는 프레임이 비고 그 버튼이 출구다 — 플랫폼 간 렌더 동등성은 비목표다. `kind: "archive"`(zip 계열·tar·tar.gz)는 압축을 풀지 않고 중앙 디렉터리/헤더 메타데이터만 나열한다.
 
 Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니라 **분류 게이트**다. 목록에 없는 확장자는 크기 상한(`DEFAULT_FILE_VIEWER_BYTES`, 1 MiB)을 넘는 순간 `binary` 가 되어 preview 경로에 도달하지 못하므로, 렌더러가 주장하는 확장자는 이 목록에도 있어야 한다.
 

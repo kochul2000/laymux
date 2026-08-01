@@ -11,21 +11,25 @@ use crate::constants::{DEFAULT_FILE_VIEWER_BYTES, MAX_INLINE_PDF_BYTES};
 use crate::path_utils;
 
 /// Content type classification for file viewer.
+///
+/// `rename_all` on an enum renames the *variants*; struct-variant fields need
+/// `rename_all_fields`. Without it `total_entries` reached the frontend under
+/// its snake_case name and read as `undefined`, crashing the archive renderer.
+/// The key names are pinned by a test below because the TypeScript mirror in
+/// `ui/src/lib/tauri-api.ts` is maintained by hand.
 #[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
 pub enum FileViewerContent {
     /// Text file — content included inline.
     Text { content: String, truncated: bool },
     /// Image file — inline data URL (base64).
-    Image {
-        #[serde(rename = "dataUrl")]
-        data_url: String,
-    },
+    Image { data_url: String },
     /// PDF — inline data URL handed to the host WebView's own PDF viewer.
-    Pdf {
-        #[serde(rename = "dataUrl")]
-        data_url: String,
-    },
+    Pdf { data_url: String },
     /// Archive — entry metadata only; nothing is extracted.
     Archive {
         /// `"zip" | "tar" | "tar.gz"`.
@@ -353,6 +357,88 @@ mod tests {
         let mut path = std::env::temp_dir();
         path.push(format!("laymux_file_viewer_{}_{name}", std::process::id()));
         path
+    }
+
+    /// The TypeScript `FileViewerContent` union is written by hand, so a field
+    /// renamed on one side and not the other only shows up at runtime — as an
+    /// `undefined` read, which is how `total_entries` once crashed the archive
+    /// renderer. Pin every wire key here.
+    #[test]
+    fn every_variant_serializes_with_the_key_names_the_frontend_reads() {
+        let cases = [
+            (
+                FileViewerContent::Text {
+                    content: "x".into(),
+                    truncated: false,
+                },
+                vec!["kind", "content", "truncated"],
+                "text",
+            ),
+            (
+                FileViewerContent::Image {
+                    data_url: "data:image/png;base64,".into(),
+                },
+                vec!["kind", "dataUrl"],
+                "image",
+            ),
+            (
+                FileViewerContent::Pdf {
+                    data_url: "data:application/pdf;base64,".into(),
+                },
+                vec!["kind", "dataUrl"],
+                "pdf",
+            ),
+            (
+                FileViewerContent::Archive {
+                    format: "zip".into(),
+                    entries: vec![ArchiveEntry {
+                        name: "a.txt".into(),
+                        size: 1,
+                        compressed_size: 1,
+                        is_directory: false,
+                    }],
+                    total_entries: 1,
+                    truncated: false,
+                },
+                vec!["kind", "format", "entries", "totalEntries", "truncated"],
+                "archive",
+            ),
+            (
+                FileViewerContent::Binary { size: 1 },
+                vec!["kind", "size"],
+                "binary",
+            ),
+        ];
+
+        for (content, expected_keys, expected_kind) in cases {
+            let value = serde_json::to_value(&content).expect("serialize");
+            let object = value.as_object().expect("variant serializes as an object");
+            let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+            let mut expected = expected_keys;
+            keys.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(keys, expected, "wire keys drifted for {expected_kind}");
+            assert_eq!(object["kind"], expected_kind);
+        }
+
+        let entry = serde_json::to_value(ArchiveEntry {
+            name: "a.txt".into(),
+            size: 2,
+            compressed_size: 1,
+            is_directory: true,
+        })
+        .expect("serialize entry");
+        let mut entry_keys: Vec<&str> = entry
+            .as_object()
+            .expect("entry object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        entry_keys.sort_unstable();
+        assert_eq!(
+            entry_keys,
+            vec!["compressedSize", "isDirectory", "name", "size"]
+        );
     }
 
     #[test]
