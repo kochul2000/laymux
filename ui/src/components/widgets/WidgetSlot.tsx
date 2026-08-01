@@ -68,13 +68,45 @@ export function WidgetSlot({
   const collapsed = new Set(fit.collapsed);
   const hasCollapsed = fit.collapsed.length > 0;
 
+  const overflowButton = hasCollapsed && (
+    <button
+      type="button"
+      data-testid={`widget-overflow-${slot.surface}-${slot.side}`}
+      className="hover-bg flex h-5 cursor-pointer items-center justify-center px-1"
+      style={{
+        color: "var(--text-secondary)",
+        background: "transparent",
+        border: "none",
+        fontSize: "var(--fs-2xs)",
+      }}
+      title={`${fit.collapsed.length} widgets hidden — not enough width`}
+      aria-expanded={expanded}
+      onClick={() => setExpanded((open) => !open)}
+    >
+      ⋯
+    </button>
+  );
+
   return (
     <div
       ref={containerRef}
       data-testid={`widget-slot-${slot.surface}-${slot.side}`}
-      className="relative flex min-w-0 shrink items-center overflow-hidden"
-      style={{ height: "100%" }}
+      className={`relative flex h-full min-w-0 items-center overflow-hidden ${
+        slot.side === "left" ? "justify-start" : "justify-end"
+      }`}
+      // `flex-basis: 0` on purpose: the slot's width must come from the space
+      // the row has, never from what it currently draws. Sizing it to content
+      // would feed back into the fit decision — collapse shrinks the box, the
+      // smaller box collapses more, and nothing ever comes back.
+      style={{ flex: "1 1 0%" }}
+      // The empty part of a top bar slot stays a window drag handle; widgets
+      // that need clicks opt out individually below.
+      {...(slot.surface === "topBar" ? { "data-tauri-drag-region": "true" } : {})}
     >
+      {/* The indicator sits on the side the slot sheds from, so collapsed
+          widgets read as continuing off that edge. */}
+      {slot.side === "right" && overflowButton}
+
       {renderable
         .filter(({ instance }) => !collapsed.has(instance.id))
         .map(({ instance, definition }) => (
@@ -91,22 +123,7 @@ export function WidgetSlot({
 
       {hasCollapsed && (
         <>
-          <button
-            type="button"
-            data-testid={`widget-overflow-${slot.surface}-${slot.side}`}
-            className="hover-bg flex h-5 cursor-pointer items-center justify-center px-1"
-            style={{
-              color: "var(--text-secondary)",
-              background: "transparent",
-              border: "none",
-              fontSize: "var(--fs-2xs)",
-            }}
-            title={`${fit.collapsed.length} widgets hidden — not enough width`}
-            aria-expanded={expanded}
-            onClick={() => setExpanded((open) => !open)}
-          >
-            ⋯
-          </button>
+          {slot.side === "left" && overflowButton}
           {expanded && (
             <div
               data-testid={`widget-overflow-popover-${slot.surface}-${slot.side}`}

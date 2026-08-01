@@ -168,14 +168,14 @@ export function GridEditToolbar() {
       {/* Left widget slot — shrinks before the drag region does */}
       <WidgetSlot slot={{ surface: "topBar", side: "left" }} instances={widgets.topBar.left} />
 
-      {/* Center: Drag region — fills remaining space.
-          `MIN_DRAG_REGION_PX` is the whole reason widgets can be placed here at
-          all: the slots are shrinkable and this is not, so a full top bar costs
-          widgets rather than the ability to move the window (ADR-0105). */}
+      {/* Center: Drag region. It shares the free space with the two slots but
+          keeps `MIN_DRAG_REGION_PX` no matter how full they are, so a crowded
+          top bar costs widgets rather than the ability to move the window
+          (ADR-0105). Double-click to maximize lives here, not on the slots. */}
       <div
         data-tauri-drag-region="true"
-        className="flex-1 self-stretch"
-        style={{ minWidth: MIN_DRAG_REGION_PX }}
+        className="self-stretch"
+        style={{ flex: "1 1 0%", minWidth: MIN_DRAG_REGION_PX }}
         onDoubleClick={handleToggleMaximize}
       />
 

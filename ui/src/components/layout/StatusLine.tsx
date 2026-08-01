@@ -23,7 +23,6 @@ export function StatusLine() {
       }}
     >
       <WidgetSlot slot={{ surface: "statusLine", side: "left" }} instances={statusLine.left} />
-      <div className="min-w-0 flex-1" />
       <WidgetSlot slot={{ surface: "statusLine", side: "right" }} instances={statusLine.right} />
     </div>
   );
