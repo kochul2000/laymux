@@ -10,6 +10,11 @@ describe("getInstanceId", () => {
     expect(getInstanceId("FileExplorerView", "pane-2")).toBe("file-explorer-pane-2");
   });
 
+  it("GitHubView 는 github- prefix 를 쓴다 (회귀: 실기에서 view 전환 시 throw, #708)", () => {
+    // 등록 누락 시 ViewRenderer 가 렌더 중 throw 해 앱 전체가 멈춘다.
+    expect(getInstanceId("GitHubView", "pane-9")).toBe("github-pane-9");
+  });
+
   it("ViewRenderer 와 PaneGrid 가 같은 paneId 로 동일한 id 를 만든다 (회귀: issue #293)", () => {
     // ViewRenderer 렌더링 측과 PaneGrid 전파 버튼 측이 같은 헬퍼를 쓰므로
     // 항상 동일한 instanceId 가 나와야 백엔드 terminal_id 와 일치한다.
@@ -31,6 +36,7 @@ describe("getInstanceIdPrefix", () => {
   it("cwd-bearing 타입은 prefix 를, 그 외는 undefined 를 반환한다", () => {
     expect(getInstanceIdPrefix("TerminalView")).toBe("terminal");
     expect(getInstanceIdPrefix("FileExplorerView")).toBe("file-explorer");
+    expect(getInstanceIdPrefix("GitHubView")).toBe("github");
     expect(getInstanceIdPrefix("MemoView")).toBeUndefined();
     expect(getInstanceIdPrefix("EmptyView")).toBeUndefined();
   });

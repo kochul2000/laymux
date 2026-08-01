@@ -84,6 +84,19 @@ vi.mock("./FileExplorerView", () => ({
   },
 }));
 
+// Mock GitHubView to capture props
+const githubProps: { instanceId?: string; cwdReceive?: boolean; syncGroup?: string }[] = [];
+vi.mock("./GitHubView", () => ({
+  GitHubView: (props: { instanceId: string; cwdReceive?: boolean; syncGroup: string }) => {
+    githubProps.push({
+      instanceId: props.instanceId,
+      cwdReceive: props.cwdReceive,
+      syncGroup: props.syncGroup,
+    });
+    return <div data-testid="mock-github" data-cwdreceive={String(props.cwdReceive)} />;
+  },
+}));
+
 import { ViewRenderer } from "./ViewRenderer";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -94,6 +107,7 @@ describe("ViewRenderer", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     terminalViewProps.length = 0;
     fileExplorerProps.length = 0;
+    githubProps.length = 0;
   });
 
   it("renders EmptyView for EmptyView type", () => {
@@ -244,6 +258,46 @@ describe("ViewRenderer", () => {
     );
     const last = fileExplorerProps.at(-1);
     expect(last?.cwdReceive).toBe(false);
+  });
+
+  it("renders GitHubView with a registered instanceId prefix (회귀: #708)", () => {
+    // 등록되지 않은 view 타입이면 getInstanceId 가 렌더 중 throw 해 앱이 멈춘다.
+    render(
+      <ViewRenderer
+        viewType="GitHubView"
+        viewConfig={{ type: "GitHubView" }}
+        workspaceId="ws-1"
+        paneId="pane-7"
+      />,
+    );
+    const last = githubProps.at(-1);
+    expect(screen.getByTestId("mock-github")).toBeInTheDocument();
+    expect(last?.instanceId).toBe("github-pane-7");
+    expect(last?.syncGroup).toBe("ws-1");
+  });
+
+  it("GitHubView follows the resolved receive default and an explicit override", () => {
+    const { rerender } = render(
+      <ViewRenderer
+        viewType="GitHubView"
+        viewConfig={{ type: "GitHubView" }}
+        workspaceId="ws-1"
+        paneId="pane-8"
+        location="dock"
+      />,
+    );
+    expect(githubProps.at(-1)?.cwdReceive).toBe(true);
+
+    rerender(
+      <ViewRenderer
+        viewType="GitHubView"
+        viewConfig={{ type: "GitHubView", cwdReceive: false }}
+        workspaceId="ws-1"
+        paneId="pane-8"
+        location="dock"
+      />,
+    );
+    expect(githubProps.at(-1)?.cwdReceive).toBe(false);
   });
 
   it("uses paneId for stable terminal instanceId", () => {

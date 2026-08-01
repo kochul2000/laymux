@@ -13,6 +13,9 @@ import type { ViewType } from "@/stores/types";
 const VIEW_INSTANCE_PREFIX: Partial<Record<ViewType, string>> = {
   TerminalView: "terminal",
   FileExplorerView: "file-explorer",
+  // Receive-only, but still needs an identity: sync-cwd force events carry the
+  // sender's instanceId and the view has to recognise its own echo.
+  GitHubView: "github",
 };
 
 /**
