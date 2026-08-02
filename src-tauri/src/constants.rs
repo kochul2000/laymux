@@ -377,6 +377,35 @@ pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
 /// follow-up to issue #237.
 pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 
+// ── Sleep prevention (ADR-0114) ────────────────────────────────────
+
+/// How often a held inhibitor is checked for having died behind our back.
+///
+/// The frontend only calls in on a *change*, so without this a `systemd-inhibit`
+/// child killed from outside would stay unnoticed for as long as the user's
+/// mode and terminals hold still — which in `always` mode is forever.
+pub const SLEEP_INHIBIT_WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
+
+/// How long a freshly spawned `systemd-inhibit` is watched before its lock
+/// is believed.
+///
+/// `systemd-inhibit` execs fine and *then* exits non-zero when the inhibit
+/// call itself fails — no D-Bus session, no seat, a container, a polkit
+/// denial. Without this window that failure is indistinguishable from
+/// success, and the UI would claim the machine is being kept awake while it
+/// sleeps through the user's build.
+pub const SLEEP_INHIBIT_SPAWN_GRACE: Duration = Duration::from_millis(300);
+
+/// Step between `try_wait()` checks while watching the child spawn or exit.
+pub const SLEEP_INHIBIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// How long the child is given to notice EOF on its stdin before it is killed.
+pub const SLEEP_INHIBIT_RELEASE_GRACE: Duration = Duration::from_millis(300);
+
+/// Cap on captured `systemd-inhibit` stderr. Enough for a diagnostic, bounded
+/// so a chatty child cannot grow it without limit.
+pub const SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT: usize = 4096;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -23,7 +23,7 @@
 **절전 방지 모드는 `settings.power.sleepPrevention` 이 단일 진실원으로 소유하고, 실제 OS 억제는 프론트가 계산한 boolean 하나를 Rust `power` 모듈이 멱등하게 반영한다.**
 
 - **모드 값은 `"off" | "always" | "whenBusy"` 세 가지다.** `always` 가 issue 의 모드1(절대 재우지 않기), `whenBusy` 가 모드2(busy 터미널이 있으면 재우지 않기)다. 상단 바 버튼은 `off → always → whenBusy → off` 순환이며, 버튼과 Settings 는 같은 설정 필드를 읽고 쓴다.
-- **"busy" 는 원시 필드에서 다시 유도하지 않고 상태 계산 결과를 그대로 읽는다.** `isTerminalBusy()` 는 해당 터미널의 `ActivityHandler.computeStatus()` 결과 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다. `outputActive` 와 `activity.type === "running"` 은 신호의 일부일 뿐이다 — Claude 의 local-agent 경로(issue #225)와 Codex 의 Braille 스피너는 `outputActive === false`, `activity.type === "interactiveApp"` 인 채로 모래시계를 띄우며, 그 사실을 아는 것은 각 핸들러뿐이다. 아이콘을 그리는 함수에게 되묻는 것이 "모래시계가 도는데 잠들었다"를 구조적으로 막는 유일한 방법이다. `terminalActivity` 위젯도 같은 함수를 쓴다.
+- **"busy" 는 원시 필드에서 다시 유도하지 않고 상태 계산 결과를 그대로 읽는다.** `isTerminalWorking()`(`ui/src/lib/terminal-working.ts`) 는 해당 터미널의 `ActivityHandler.computeStatus()` 결과 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다. `outputActive` 와 `activity.type === "running"` 은 신호의 일부일 뿐이다 — Claude 의 local-agent 경로(issue #225)와 Codex 의 Braille 스피너는 `outputActive === false`, `activity.type === "interactiveApp"` 인 채로 모래시계를 띄우며, 그 사실을 아는 것은 각 핸들러뿐이다. 아이콘을 그리는 함수에게 되묻는 것이 "모래시계가 도는데 잠들었다"를 구조적으로 막는 유일한 방법이다. `terminalActivity` 위젯도 같은 함수를 쓴다.
 - **에이전트가 사용자 입력을 기다리는 동안은 busy 가 아니다.** input-pending 상태의 핸들러 판정이 ⏳ 가 아니므로 자동으로 그렇게 된다. 사용자 차례라면 머신이 자도 된다.
 - **집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.** 백그라운드 워크스페이스에서 도는 빌드야말로 절전으로 끊기면 안 되는 작업이다.
 - **파생은 순수 함수 `shouldInhibitSleep(mode, hasBusyTerminal)` 이 담당한다.** 프론트는 이 결과가 바뀔 때만 `set_sleep_inhibit(enabled)` 를 호출한다. 명령은 멱등이며 값이 같으면 OS 호출을 하지 않는다.

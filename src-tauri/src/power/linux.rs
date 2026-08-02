@@ -1,27 +1,15 @@
 use std::io::Read;
 use std::process::{Child, ChildStderr, Stdio};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::InhibitBackend;
+use crate::constants::{
+    SLEEP_INHIBIT_POLL_INTERVAL, SLEEP_INHIBIT_RELEASE_GRACE, SLEEP_INHIBIT_SPAWN_GRACE,
+    SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT,
+};
 use crate::error::AppError;
 use crate::process::headless_command;
-
-/// How long a freshly spawned `systemd-inhibit` is watched before its lock
-/// is believed.
-///
-/// `systemd-inhibit` execs fine and *then* exits non-zero when the inhibit
-/// call itself fails — no D-Bus session, no seat, a container, a polkit
-/// denial. Without this window that failure is indistinguishable from
-/// success, and the UI would claim the machine is being kept awake while it
-/// sleeps through the user's build.
-const SPAWN_GRACE: Duration = Duration::from_millis(300);
-const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
-/// How long the child is given to notice EOF on its stdin before it is killed.
-const RELEASE_GRACE: Duration = Duration::from_millis(300);
-/// Cap on captured stderr. Enough for a diagnostic, bounded so a chatty
-/// child cannot grow this without limit.
-const STDERR_CAPTURE_LIMIT: usize = 4096;
 
 struct Inhibitor {
     child: Child,
@@ -42,7 +30,7 @@ impl Inhibitor {
 }
 
 /// Consume the child's stderr on its own thread, keeping the first
-/// [`STDERR_CAPTURE_LIMIT`] bytes and discarding the rest.
+/// [`SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT`] bytes and discarding the rest.
 fn drain_stderr(mut pipe: ChildStderr) -> Arc<Mutex<String>> {
     let captured = Arc::new(Mutex::new(String::new()));
     let sink = captured.clone();
@@ -55,7 +43,8 @@ fn drain_stderr(mut pipe: ChildStderr) -> Arc<Mutex<String>> {
                     Ok(0) | Err(_) => return,
                     Ok(read) => {
                         if let Ok(mut sink) = sink.lock() {
-                            let room = STDERR_CAPTURE_LIMIT.saturating_sub(sink.len());
+                            let room =
+                                SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT.saturating_sub(sink.len());
                             if room > 0 {
                                 let text = String::from_utf8_lossy(&chunk[..read.min(room)]);
                                 sink.push_str(&text);
@@ -115,7 +104,7 @@ impl InhibitBackend for PlatformBackend {
             };
             let mut inhibitor = Inhibitor { child, stderr };
 
-            let deadline = Instant::now() + SPAWN_GRACE;
+            let deadline = Instant::now() + SLEEP_INHIBIT_SPAWN_GRACE;
             loop {
                 match inhibitor.child.try_wait() {
                     Ok(Some(status)) => {
@@ -138,7 +127,7 @@ impl InhibitBackend for PlatformBackend {
                 if Instant::now() >= deadline {
                     break;
                 }
-                std::thread::sleep(SPAWN_POLL_INTERVAL);
+                std::thread::sleep(SLEEP_INHIBIT_POLL_INTERVAL);
             }
 
             self.inhibitor = Some(inhibitor);
@@ -152,7 +141,7 @@ impl InhibitBackend for PlatformBackend {
         // both processes exit.
         drop(inhibitor.child.stdin.take());
 
-        let deadline = Instant::now() + RELEASE_GRACE;
+        let deadline = Instant::now() + SLEEP_INHIBIT_RELEASE_GRACE;
         let exited = loop {
             match inhibitor.child.try_wait() {
                 Ok(Some(_)) => break true,
@@ -169,7 +158,7 @@ impl InhibitBackend for PlatformBackend {
             if Instant::now() >= deadline {
                 break false;
             }
-            std::thread::sleep(SPAWN_POLL_INTERVAL);
+            std::thread::sleep(SLEEP_INHIBIT_POLL_INTERVAL);
         };
 
         if !exited {

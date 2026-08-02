@@ -10,17 +10,10 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
+use crate::constants::SLEEP_INHIBIT_WATCHDOG_INTERVAL;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-
-/// How often a held inhibitor is checked for having died behind our back.
-///
-/// The frontend only calls in on a *change*, so without this a `systemd-inhibit`
-/// child killed from outside would stay unnoticed for as long as the user's
-/// mode and terminals hold still — which in `always` mode is forever.
-const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Platform-specific half of the inhibitor.
 ///
@@ -181,7 +174,7 @@ impl SleepInhibitor {
         let spawned = std::thread::Builder::new()
             .name("sleep-inhibitor-watchdog".into())
             .spawn(move || loop {
-                std::thread::sleep(WATCHDOG_INTERVAL);
+                std::thread::sleep(SLEEP_INHIBIT_WATCHDOG_INTERVAL);
                 // The app is gone; so is any inhibitor it held.
                 let Some(inhibitor) = weak.upgrade() else {
                     return;
