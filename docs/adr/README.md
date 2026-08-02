@@ -136,6 +136,7 @@ ADR 이 필요한 대표 기준:
 | [0116](0116-sleep-prevention-two-axes.md) | 절전 방지는 수동 스위치와 자동 정책 두 축이고 상단 바 버튼은 수동 축만 표시한다 (0114 정정) | Proposed |
 | [0117](0117-codex-session-restore.md) | Codex CLI 세션은 최상위 rollout과 terminal CWD를 연결해 안전한 resume 명령으로 복원 | Superseded by 0118 |
 | [0118](0118-codex-session-pid-attribution.md) | Codex 세션은 PTY 자식 PID와 Codex 진단 DB가 함께 증명한 thread로만 복원 | Accepted |
+| [0119](0119-settings-type-error-partial-recovery.md) | settings.json 타입 오류는 경로 단위로 드롭해 부분 복구하고, 확인 전까지 파일에 쓰지 않는다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

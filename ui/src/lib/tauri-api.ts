@@ -8,6 +8,7 @@ import type { TerminalOutputEnvelopePayload } from "./terminal-output-envelope";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
+import { assertSettingsWriteAllowed } from "./settings-write-guard";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
@@ -440,6 +441,21 @@ export interface ValidationWarning {
 export type SettingsLoadResult =
   | { status: "ok"; settings: Settings; warnings: ValidationWarning[] }
   | { status: "repaired"; settings: Settings; warnings: ValidationWarning[] }
+  /**
+   * Type-error paths were dropped in favour of their defaults (ADR-0119).
+   * User-authored values were lost, so settings writes stay blocked until the
+   * user acknowledges the listed paths.
+   *
+   * `dropped` are values the user wrote and lost; `warnings` are structures the
+   * loader fixed up. They stay apart so "N items removed" counts only losses.
+   */
+  | {
+      status: "recovered";
+      settings: Settings;
+      dropped: ValidationWarning[];
+      warnings: ValidationWarning[];
+      settingsPath: string;
+    }
   | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
 
 export async function loadSettingsValidated(): Promise<SettingsLoadResult> {
@@ -455,6 +471,7 @@ export async function getSettingsPath(): Promise<string> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  assertSettingsWriteAllowed();
   return invoke("save_settings", { settings });
 }
 

@@ -29,6 +29,21 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 - SettingsView를 Dock에 배치하여 열기 (선택, Dock only)
 - `settings.json` 직접 텍스트 편집
 
+### 로딩 실패와 부분 복구
+
+`load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0119](../adr/0119-settings-type-error-partial-recovery.md)).
+
+| status | 언제 | settings 값 | 프론트 동작 |
+| --- | --- | --- | --- |
+| `ok` | 문제 없음 | 파일 그대로 | 정상 |
+| `repaired` | 구조 문제를 `validate_and_repair` 가 고침 | 수정본 | 모달 알림, 저장 허용 |
+| `recovered` | 타입 오류 경로를 드롭하고 기본값으로 대체 | 나머지는 파일 그대로 | 모달 알림 + **저장 차단**(확인 시 해제) |
+| `parse_error` | JSON 구문 오류·중복 객체 키 또는 최상위가 객체가 아님 | 전부 기본값 | 모달 알림 + 저장 영구 차단 |
+
+**타입 오류 부분 복구.** 값 하나의 타입이 틀렸다고 파일 전체를 버리지 않는다. `settings/lenient.rs` 는 객체 키 중복을 먼저 검사해 앞 값이 `serde_json::Value` 변환에서 조용히 덮이는 일을 막고, 중복이 없을 때만 `Value` 로 읽는다. 이후 `serde_path_to_error` 로 타입 실패 경로를 얻어 그 경로를 트리에서 **제거**한 뒤 재시도한다. 제거된 필드는 자신의 `#[serde(default)]` 로 채워지므로 복구 경로는 기본값 테이블을 따로 갖지 않는다. 값 보정(`"2"` → `2`)은 하지 않는다. 객체 필드는 키를, 배열 원소는 원소를 제거하며, 기본값이 없는 필수 필드가 깨지면 손실이 부모로 번진다(예: pane 의 `view.type` 타입 오류 → 그 pane 하나가 사라짐). 배열 원소가 여러 번 제거되어도 경고 경로의 인덱스는 축소된 중간 배열이 아니라 원본 파일 위치를 가리킨다. 제거 횟수 상한은 2,000이다.
+
+**손실 정책.** 드롭이 한 건이라도 있으면 `recovered` 상태가 되고, `useSessionPersistence` 가 `setBlockPersist(true)` 로 공유 쓰기 차단 상태를 켠 채 기동한다. `saveSettings` 경계가 세션 영속과 Automation `settings.applySnapshot`을 포함한 모든 일반 `settings.json` 쓰기에 이 상태를 강제하며, 원본을 의도적으로 대체하는 `resetSettings`만 우회한다. 사용자가 `SettingsRecoveryModal` 에서 확인을 누를 때 차단이 풀린다 — 그전까지는 레이아웃 변경도 저장되지 않으며 원본 파일은 손대지 않는다. 로더 자체는 어떤 경우에도 복구 결과를 디스크에 되쓰지 않는다. 모달은 드롭된 경로를 전부 나열한다(개수 요약만으로는 무엇을 잃었는지 알 수 없다).
+
 ### 터미널 capability 광고
 
 ```jsonc
@@ -72,7 +87,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 **Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
 
-값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만의 문제가 아니라 `Settings` 역직렬화 자체를 실패시키므로 `load_settings_validated`가 파일 전체를 `ParseError`로 판정하고 기본 설정으로 기동한 뒤 `SettingsRecoveryModal`로 알린다 — 모든 수치 설정에 공통인 기존 동작이며 이 필드만 관용적으로 파싱하지 않는다. 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
+값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0119](../adr/0119-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
 
 극단 비율을 넣어도 한 클래스가 무한정 밀리지 않는다. pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) turn 안에 반드시 한 turn 을 받는다. 기본값에서는 몫이 만드는 간격(hidden 최대 5 turn)이 늘 먼저 도달하므로 이 floor 는 극단 설정과 클래스 drain/재진입에서만 작동한다.
 

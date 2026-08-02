@@ -337,7 +337,12 @@ pub struct WorkspacePane {
     /// Stable pane identifier, persisted across restarts. Empty string means unassigned (migrated).
     #[serde(default)]
     pub id: String,
+    // All four bounds carry a default so a single mistyped coordinate drops that
+    // field instead of the whole pane (ADR-0119). `validate_and_repair`
+    // normalizes the resulting zeros anyway.
+    #[serde(default)]
     pub x: f64,
+    #[serde(default)]
     pub y: f64,
     #[serde(default)]
     pub w: f64,
