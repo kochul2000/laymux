@@ -3,6 +3,7 @@ import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
 import { useSyncGroupCwd } from "@/hooks/useSyncGroupCwd";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { useGithubRepoSnapshot } from "@/hooks/useGithubRepoSnapshot";
 import { useNowTick } from "@/hooks/useUsageSnapshot";
 import { relativeTime, shouldOpenUpward, statusMessage } from "@/lib/github-list-format";
@@ -106,6 +107,7 @@ const ROW_BTN: React.CSSProperties = {
 
 export function GitHubView({
   instanceId,
+  paneId,
   syncGroup,
   cwdReceive = true,
   isFocused,
@@ -129,7 +131,23 @@ export function GitHubView({
     cwd,
     Math.max(1000, refreshSeconds * 1000),
   );
-  const [tab, setTab] = useState<Tab>(defaultTab);
+  // The chosen tab is per-pane UI state, not configuration: it survives a
+  // restart in `viewOverrides` while `defaultTab` only seeds a pane that has
+  // never been touched (ADR-0115). Panes rendered without a `paneId` have
+  // nowhere to persist, so they keep the choice in component state instead.
+  const persistedTab = useOverridesStore((s) =>
+    paneId ? s.viewOverrides[paneId]?.githubTab : undefined,
+  );
+  const setViewOverride = useOverridesStore((s) => s.setViewOverride);
+  const [unpersistedTab, setUnpersistedTab] = useState<Tab | null>(null);
+  const tab: Tab = persistedTab ?? unpersistedTab ?? defaultTab;
+  const selectTab = useCallback(
+    (next: Tab) => {
+      if (paneId) setViewOverride(paneId, { githubTab: next });
+      else setUnpersistedTab(next);
+    },
+    [paneId, setViewOverride],
+  );
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<{ number: number; action: MenuAction } | null>(null);
   const [running, setRunning] = useState(false);
@@ -243,7 +261,7 @@ export function GitHubView({
               <button
                 key={key}
                 data-testid={`github-tab-${key}`}
-                onClick={() => setTab(key)}
+                onClick={() => selectTab(key)}
                 className="cursor-pointer rounded px-1.5"
                 style={{
                   height: "var(--btn-h)",

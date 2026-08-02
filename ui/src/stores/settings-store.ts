@@ -257,7 +257,7 @@ export interface NotificationSettings {
 }
 
 /**
- * OS power behavior (ADR-0115). Two independent axes, not one mode: the
+ * OS power behavior (ADR-0116). Two independent axes, not one mode: the
  * top-bar button owns `keepAwake`, Settings owns `keepAwakeWhenBusy`.
  */
 export type PowerSettings = SleepPreventionAxes;
@@ -1529,7 +1529,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     // A hand-edited value must not reach the OS call unvalidated: anything that
     // is not literally `true` stays off rather than acquiring an inhibitor
-    // nobody asked for (ADR-0115).
+    // nobody asked for (ADR-0116).
     const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];

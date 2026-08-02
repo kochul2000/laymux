@@ -203,7 +203,7 @@ describe("SettingsView", () => {
     });
 
     it("saves the standing policy without touching the manual switch", async () => {
-      // The two axes are independent (ADR-0115) — editing one here must not
+      // The two axes are independent (ADR-0116) — editing one here must not
       // silently rewrite the other.
       const user = userEvent.setup();
       useSettingsStore.getState().setPower({ keepAwake: true });

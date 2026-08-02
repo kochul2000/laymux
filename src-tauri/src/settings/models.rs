@@ -1177,7 +1177,7 @@ impl Default for NotificationSettings {
     }
 }
 
-/// OS power behavior (ADR-0115). Two independent axes, not one mode: the
+/// OS power behavior (ADR-0116). Two independent axes, not one mode: the
 /// top-bar button owns `keep_awake`, Settings owns `keep_awake_when_busy`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]

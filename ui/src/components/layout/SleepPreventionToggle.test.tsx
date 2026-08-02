@@ -34,7 +34,7 @@ describe("SleepPreventionToggle", () => {
 
   it("leaves the standing policy alone", async () => {
     // The button owns one axis. Clicking it must not reach into the policy the
-    // user set once in Settings (ADR-0115).
+    // user set once in Settings (ADR-0116).
     useSettingsStore.getState().setPower({ keepAwakeWhenBusy: true });
     const user = userEvent.setup();
     render(<SleepPreventionToggle />);
@@ -92,7 +92,7 @@ describe("SleepPreventionToggle", () => {
 
   it("flags a failure that the policy caused, not only the switch", () => {
     // Failure is a fault, not a value on either axis: a machine with no
-    // systemd-inhibit would otherwise fail silently forever (ADR-0115).
+    // systemd-inhibit would otherwise fail silently forever (ADR-0116).
     useSettingsStore.getState().setPower({ keepAwakeWhenBusy: true });
     render(<SleepPreventionToggle />);
 

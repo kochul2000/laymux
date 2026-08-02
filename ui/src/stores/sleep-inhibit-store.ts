@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 /**
  * What the OS sleep inhibitor is actually doing, as last reported by the
- * backend (ADR-0114, ADR-0115).
+ * backend (ADR-0114, ADR-0116).
  *
  * Separate from `settings.power`, which is what the user asked for. The two
  * differ whenever a request does not take — no `systemd-inhibit`, an

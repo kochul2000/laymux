@@ -12,7 +12,7 @@ import { useTerminalStore } from "@/stores/terminal-store";
 
 /**
  * Keep the OS sleep inhibitor in step with the user's two axes and the
- * terminals' busy state (ADR-0115).
+ * terminals' busy state (ADR-0116).
  *
  * Mount once, at the app root. It subscribes to the stores instead of selecting
  * from them: the host component renders nothing from this state, and a busy

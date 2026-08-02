@@ -91,7 +91,7 @@ describe("useSleepPrevention", () => {
 
   it("keeps inhibiting when the terminals go idle but the manual switch is on", async () => {
     // The axes are independent: the policy falling quiet must not undo the
-    // switch the user flipped for this session (ADR-0115).
+    // switch the user flipped for this session (ADR-0116).
     useSettingsStore.getState().setPower({ keepAwake: true, keepAwakeWhenBusy: true });
     act(() => registerBusyTerminal("t1"));
     await mounted();

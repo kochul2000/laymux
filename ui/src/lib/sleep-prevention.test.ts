@@ -19,7 +19,7 @@ describe("shouldInhibitSleep", () => {
 
   it("keeps the manual switch effective while the policy is idle", () => {
     // The axes are independent: the policy going quiet must not undo a manual
-    // "keep awake" the user turned on for this session (ADR-0115).
+    // "keep awake" the user turned on for this session (ADR-0116).
     expect(shouldInhibitSleep({ keepAwake: true, keepAwakeWhenBusy: true }, false)).toBe(true);
   });
 });

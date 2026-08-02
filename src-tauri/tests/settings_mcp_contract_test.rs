@@ -160,7 +160,7 @@ fn semantic_enum_and_range_errors_are_rejected() {
 
 #[test]
 fn the_old_sleep_prevention_mode_is_no_longer_a_setting() {
-    // The tri-state mode became two booleans (ADR-0115). An agent still sending
+    // The tri-state mode became two booleans (ADR-0116). An agent still sending
     // the old key must be told, not silently ignored.
     let prepared = prepare_settings_update(
         &Settings::default(),

@@ -196,7 +196,7 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 - **성공한 조작은 해당 리포 캐시를 무효화**해 다음 폴링이 즉시 재조회한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
 - `gh` 미설치·미인증은 각각 `ghMissing`/`unauthorized` 상태로 내려오며, 그 외 실패는 `failed{message}` 로 `gh` stderr 를 그대로 전달한다.
 
-뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
+뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`, 아직 탭을 고르지 않은 pane 에만 적용. 고른 뒤에는 `viewOverrides.githubTab` 이 이긴다 — [ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
 
 행 표시도 같은 섹션이 소유한다(전역 전용 — pane 별 오버라이드 없음, [ADR-0111](../adr/0111-github-view-display-settings.md)).
 
@@ -331,7 +331,7 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 ### 절전 방지(sleep prevention) 설정
 
-OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114-sleep-prevention-mode.md), [ADR-0115](../adr/0115-sleep-prevention-two-axes.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
+OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114-sleep-prevention-mode.md), [ADR-0116](../adr/0116-sleep-prevention-two-axes.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
 
 ```jsonc
 {
@@ -344,14 +344,14 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 }
 ```
 
-- **두 축은 독립이다**(ADR-0115). `keepAwake` 는 세션 동안 뒤집는 수동 override 이고 `keepAwakeWhenBusy` 는 한 번 정하고 잊는 정책이다. 수명이 다르므로 컨트롤도 나눈다 — 상단 바 버튼(`sleep-prevention-btn`)은 `keepAwake` 만 토글하고 `keepAwake` 만 그린다. `keepAwakeWhenBusy` 는 Settings ▸ Interface ▸ Power 에만 있다(`keep-awake-when-busy-toggle`). 버튼 클릭은 `persistSession()` 으로 즉시 저장하며 두 필드 모두 applyMode 는 `live`.
+- **두 축은 독립이다**(ADR-0116). `keepAwake` 는 세션 동안 뒤집는 수동 override 이고 `keepAwakeWhenBusy` 는 한 번 정하고 잊는 정책이다. 수명이 다르므로 컨트롤도 나눈다 — 상단 바 버튼(`sleep-prevention-btn`)은 `keepAwake` 만 토글하고 `keepAwake` 만 그린다. `keepAwakeWhenBusy` 는 Settings ▸ Interface ▸ Power 에만 있다(`keep-awake-when-busy-toggle`). 버튼 클릭은 `persistSession()` 으로 즉시 저장하며 두 필드 모두 applyMode 는 `live`.
 - **버튼은 백엔드의 `held` 를 그리지 않는다.** 자동 정책이 잡아 놓은 억제까지 그리면 사용자가 누르지 않은 상태가 보이고, 눌러도 그림이 안 바뀌는 순간이 생긴다. 아이콘은 달(off)/사선 그은 달(on) 두 상태뿐이며, 표시 축과 조작 축이 같다.
 - **파생**: `shouldInhibitSleep(axes, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 두 축과 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). 두 축이 독립이므로 판정은 `keepAwake || (keepAwakeWhenBusy && hasBusyTerminal)` OR 이다. busy 판정 `isTerminalWorking()`(`ui/src/lib/terminal-working.ts`)는 원시 필드를 다시 조합하지 않고 그 터미널의 `ActivityHandler.computeStatus()` 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다 — Claude local-agent 경로(#225)와 Codex 스피너는 `outputActive === false` 로도 모래시계를 띄우므로, 원시 필드 조합은 페인 표시와 어긋난다. `terminalActivity` 위젯도 같은 함수를 쓴다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
 - **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 두 스토어를 **구독**해(셀렉터가 아니다 — 호스트 컴포넌트가 이 값을 렌더하지 않으므로 busy 플래그 토글이 트리를 재조정하면 안 된다) 파생값을 `requestSleepInhibit()` 로 넘긴다. 훅은 파생만 하고, 백엔드와의 대화는 전부 `lib/sleep-inhibit-coordinator.ts` 가 소유한다.
 - **커맨드 대화는 모듈 단일 coordinator 다.** in-flight 여부·확정 상태·보류 값은 *프로세스*의 상태이지 마운트된 React 트리의 상태가 아니다. hook ref 에 두면 재마운트가 두 번째 큐를 만들어 옛 release 와 새 request 가 서로 다른 큐에서 겹친다. 규칙: 동시에 하나만 in flight(커맨드가 async 라 겹치면 순서가 뒤집힌다), 그 사이 오간 중간 값은 접는다(latest wins), 거절된 값은 원하는 값이 바뀔 때까지 보류(항상 실패하는 머신에서 스핀 방지). 보류 판정을 무효화하는 "세대"(intent)는 **희망값이 실제로 바뀌거나 호출자가 떠날 때만** 올린다 — `whenBusy` 는 출력 이벤트마다 같은 값을 다시 넘기므로, 호출마다 올리면 모든 거절이 superseded 로 보여 보류가 기록되지 않고 같은 요청이 무한 재전송된다.
 - **실패는 "모름"이지 "완료"가 아니다.** 실패한 요청을 적용된 것으로 확정하면, 해제에 실패한 뒤 마지막 release 까지 중복으로 보고 건너뛰어 OS 세션 내내 억제가 남는다. 실패하면 확정 상태를 `null` 로 둔다. 커맨드가 요청과 다른 상태를 돌려줘도 같은 규칙으로 보류하고 UI 에 실패로 표시한다.
 - **release 는 dedupe 를 무시하는 별도 경로다**(`releaseSleepInhibit()`). 마지막으로 놓을 기회이므로 보류를 무시하고, 자기 자신의 실패로 취소되지 않으며, 같은 큐를 통과해 in-flight 요청을 추월하지 않는다. 다만 재시도는 유한하다(3회) — 놓지 못하는 머신에서 무한 루프가 되면 안 된다. 백엔드가 이미 해제를 확정한 상태면 아무것도 보내지 않는다.
-- **실패는 축이 아니라 고장이다.** 커맨드 결과는 `useSleepInhibitStore`(`active`/`failed`)에 기록한다. 버튼은 그중 `failed` 만 읽어, 원인이 수동이든 정책이든 경고색(`--claude`)과 tooltip 사유를 올린다 — 감추면 `systemd-inhibit` 이 없는 머신에서 정책이 세션 내내 조용히 실패한다. `active` 는 coordinator 의 상태 조정용이며 UI 는 읽지 않는다(ADR-0115).
+- **실패는 축이 아니라 고장이다.** 커맨드 결과는 `useSleepInhibitStore`(`active`/`failed`)에 기록한다. 버튼은 그중 `failed` 만 읽어, 원인이 수동이든 정책이든 경고색(`--claude`)과 tooltip 사유를 올린다 — 감추면 `systemd-inhibit` 이 없는 머신에서 정책이 세션 내내 조용히 실패한다. `active` 는 coordinator 의 상태 조정용이며 UI 는 읽지 않는다(ADR-0116).
 - **백엔드가 스스로 바꾼 상태는 이벤트로 되돌아온다.** watchdog 이 재획득하거나 잃는 전이는 요청이 없으므로 프론트의 dedupe 로는 영영 알 수 없다. `SleepInhibitor` 의 sink 가 `sleep-inhibit-changed`(`{active, satisfied}`)를 발행하고, 훅이 그것을 `observeSleepInhibitState()` 로 coordinator·표시 상태에 반영한다. 관측 결과가 원하는 값과 다르면 일반 경로가 그대로 재요청한다.
 - **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power/mod.rs`, 플랫폼 구현은 `power/{windows,linux,unsupported}.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. `set_sleep_inhibit` 는 async 커맨드로 `spawn_blocking` 에서 돈다 — Linux 획득이 짧게 블로킹하기 때문이다.
   - **Windows**: 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.

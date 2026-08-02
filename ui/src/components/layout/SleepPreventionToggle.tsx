@@ -5,7 +5,7 @@ import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 
 /**
  * Top-bar switch for the manual "keep this machine awake" axis (issue #733,
- * ADR-0115).
+ * ADR-0116).
  *
  * It shows one thing and changes the same thing. The standing "awake while a
  * terminal is busy" policy is a second, independent axis that lives in Settings

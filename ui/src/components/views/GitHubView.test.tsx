@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GitHubView } from "./GitHubView";
+import { useOverridesStore, VIEW_OVERRIDES_KEY } from "@/stores/overrides-store";
 import type { GithubRepoSnapshot } from "@/lib/tauri-api";
 
 const { useGithubRepoSnapshot, useSyncGroupCwd } = vi.hoisted(() => ({
@@ -69,6 +70,8 @@ describe("GitHubView", () => {
   beforeEach(() => {
     useSyncGroupCwd.mockReturnValue("D:/repo");
     mockSnapshot(snapshot());
+    localStorage.clear();
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
   });
 
   afterEach(() => {
@@ -147,6 +150,50 @@ describe("GitHubView", () => {
 
     expect(screen.getByTestId("github-item-12")).toHaveTextContent("wip pull");
     expect(screen.queryByTestId("github-item-708")).not.toBeInTheDocument();
+  });
+
+  it("keeps the chosen tab per pane across a remount", () => {
+    const first = renderView({ paneId: "pane-1" });
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+    expect(screen.getByTestId("github-item-12")).toBeInTheDocument();
+    first.unmount();
+
+    // A neighbouring pane keeps its own tab — the choice is not app-wide.
+    const second = renderView({ paneId: "pane-2" });
+    expect(screen.getByTestId("github-item-708")).toBeInTheDocument();
+    second.unmount();
+
+    renderView({ paneId: "pane-1" });
+    expect(screen.getByTestId("github-item-12")).toBeInTheDocument();
+    expect(screen.queryByTestId("github-item-708")).not.toBeInTheDocument();
+  });
+
+  it("persists the chosen tab so it survives a restart", () => {
+    renderView({ paneId: "pane-1" });
+
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+
+    expect(JSON.parse(localStorage.getItem(VIEW_OVERRIDES_KEY) ?? "{}")).toEqual({
+      "pane-1": { githubTab: "pulls" },
+    });
+  });
+
+  it("prefers the pane's kept tab over defaultTab", () => {
+    useOverridesStore.getState().setViewOverride("pane-1", { githubTab: "issues" });
+
+    renderView({ paneId: "pane-1", defaultTab: "pulls" });
+
+    expect(screen.getByTestId("github-item-708")).toBeInTheDocument();
+    expect(screen.queryByTestId("github-item-12")).not.toBeInTheDocument();
+  });
+
+  it("switches tabs without persisting when the view has no pane", () => {
+    renderView({ paneId: undefined });
+
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+
+    expect(screen.getByTestId("github-item-12")).toBeInTheDocument();
+    expect(localStorage.getItem(VIEW_OVERRIDES_KEY)).toBeNull();
   });
 
   it("hides draft pull requests and their count when hideDraftPulls is set", () => {

@@ -1,5 +1,5 @@
 /**
- * Sleep prevention's two axes and their single derivation (ADR-0115).
+ * Sleep prevention's two axes and their single derivation (ADR-0116).
  *
  * The user has two independent reasons to keep the machine awake: a manual
  * switch they flip for the session, and a standing policy that follows the

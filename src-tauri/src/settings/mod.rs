@@ -464,7 +464,7 @@ mod tests {
         let json = r#"{ "power": { "keepAwakeWhenBusy": true } }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.power.keep_awake_when_busy);
-        // The policy must not drag the manual switch along with it (ADR-0115).
+        // The policy must not drag the manual switch along with it (ADR-0116).
         assert!(!settings.power.keep_awake);
 
         let serialized = serde_json::to_string(&settings).unwrap();

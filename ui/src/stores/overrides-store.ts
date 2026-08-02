@@ -38,6 +38,11 @@ export interface ViewOverrides {
    * (박스에서 매번 재계산). ADR-0102.
    */
   usageLayout?: "auto" | "stacked" | "columns" | "compact";
+  /**
+   * GitHubView: 마지막으로 고른 목록 탭. 없으면 `settings.github.defaultTab`.
+   * ADR-0115.
+   */
+  githubTab?: "issues" | "pulls";
 }
 
 function loadMap<T>(key: string): Record<string, T> {
