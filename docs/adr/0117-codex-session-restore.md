@@ -1,6 +1,6 @@
 # 0117. Codex CLI 세션을 CWD 기반으로 복원한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-02
 - Source: 사용자 요구, issue #734, [architecture/api-contracts.md §10 Codex 설정](../architecture/api-contracts.md#codex-설정), [architecture/data-flow.md §13](../architecture/data-flow.md#13-session-persistence--cache), [ADR-0031](0031-extension-viewer-profile-path-conversion.md)의 startup override 경계 확장
 
