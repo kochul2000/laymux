@@ -171,6 +171,9 @@ pub fn build_router(
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
+        // Keyed by pane id, not by the grid index the routes above take: a dock
+        // pane has no grid index, and the single-pane clear accepts one (ADR-0121).
+        .route("/api/v1/panes/{paneId}/clear", post(panes_clear))
         .route("/api/v1/docks", get(docks_list))
         .route(
             "/api/v1/docks/layout-mode/toggle",

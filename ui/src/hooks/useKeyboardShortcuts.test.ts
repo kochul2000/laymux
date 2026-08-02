@@ -2058,4 +2058,76 @@ describe("useKeyboardShortcuts", () => {
       expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
     });
   });
+
+  // --- Alt+L: single-pane clear ---
+  describe("pane.clearTerminal", () => {
+    function workspaceWithTwoTerminals() {
+      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            ...active,
+            panes: [
+              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "pane-b", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+        ],
+      });
+      for (const paneId of ["pane-a", "pane-b"]) {
+        useTerminalStore.getState().registerInstance({
+          id: `terminal-${paneId}`,
+          profile: "PowerShell",
+          syncGroup: active.id,
+          workspaceId: active.id,
+        });
+        useTerminalStore
+          .getState()
+          .updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+      }
+    }
+
+    beforeEach(() => {
+      useTerminalStore.setState(useTerminalStore.getInitialState());
+      vi.mocked(writeTerminalInput).mockClear();
+    });
+
+    it("Alt+L clears only the focused pane", async () => {
+      workspaceWithTwoTerminals();
+      useDockStore.getState().setFocusedDock(null);
+      useGridStore.setState({ focusedPaneIndex: 1 });
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { altKey: true });
+
+      await vi.waitFor(() => {
+        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith(
+          "terminal-pane-b",
+          "clear",
+          true,
+        );
+      });
+      expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledTimes(1);
+    });
+
+    it("is a no-op when the focused pane is not a terminal", async () => {
+      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            ...active,
+            panes: [{ id: "pane-m", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+          },
+        ],
+      });
+      useDockStore.getState().setFocusedDock(null);
+      useGridStore.setState({ focusedPaneIndex: 0 });
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { altKey: true });
+
+      await Promise.resolve();
+      expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+    });
+  });
 });

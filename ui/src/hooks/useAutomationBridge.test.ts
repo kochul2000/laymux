@@ -3556,3 +3556,120 @@ describe("workspaces.clear over the async bridge (issue #726)", () => {
     expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 });
+
+describe("panes.clear over the async bridge (issue #741)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // `clearAllMocks` drops calls but keeps implementations, and an earlier
+    // suite leaves the write rejecting to fake a remote lease.
+    vi.mocked(writeTerminalInput).mockResolvedValue(undefined);
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  function seedPanes() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-clear",
+          name: "Clear",
+          panes: [
+            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "other", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "memo", x: 0, y: 1, w: 1, h: 0, view: { type: "MemoView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-clear",
+      workspaceDisplayOrder: [],
+    });
+    useDockStore.setState({
+      docks: [
+        {
+          position: "left",
+          activeView: "TerminalView",
+          views: ["TerminalView"],
+          visible: true,
+          size: 300,
+          panes: [{ id: "dp-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+    });
+    for (const paneId of ["idle", "other", "dp-1"]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${paneId}`,
+        profile: "WSL",
+        syncGroup: "ws-clear",
+        workspaceId: "ws-clear",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+    }
+  }
+
+  function paneClearRequest(paneId: string): AutomationRequest {
+    return {
+      requestId: "pane-clear-1",
+      category: "action",
+      target: "panes",
+      method: "clear",
+      params: { paneId },
+    };
+  }
+
+  it("clears only the named pane", async () => {
+    seedPanes();
+
+    const result = await handleAsyncAutomationRequest(paneClearRequest("idle"));
+
+    expect(result.data).toMatchObject({ paneId: "idle", cleared: ["terminal-idle"] });
+    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-idle",
+      "clear",
+      true,
+    );
+  });
+
+  // The route exists in this shape because a dock pane has no grid index
+  // (ADR-0121) — an index-keyed route could not name this target at all.
+  it("reaches a dock pane", async () => {
+    seedPanes();
+
+    const result = await handleAsyncAutomationRequest(paneClearRequest("dp-1"));
+
+    expect(result.data).toMatchObject({ paneId: "dp-1", cleared: ["terminal-dp-1"] });
+  });
+
+  it("fails a non-terminal pane rather than answering an empty run", async () => {
+    seedPanes();
+
+    for (const paneId of ["memo", "nope"]) {
+      const result = await handleAsyncAutomationRequest(paneClearRequest(paneId));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Pane clear error");
+    }
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+  });
+
+  it("caps an over-budget settle the same way the workspace clear does", async () => {
+    seedPanes();
+    useTerminalStore.getState().updateInstanceInfo("terminal-idle", {
+      activity: { type: "running" },
+    });
+    useSettingsStore.getState().setWorkspaceClear({
+      busyPolicy: "interrupt",
+      interruptRounds: 2,
+      settleMs: 9_000,
+    });
+
+    const result = await handleAsyncAutomationRequest(paneClearRequest("idle"));
+
+    expect(result.data).toMatchObject({
+      paneId: "idle",
+      waitCapped: true,
+      settleMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS - 120,
+      cleared: ["terminal-idle"],
+    });
+  });
+});

@@ -357,20 +357,16 @@ function WorkspaceItem({
                     }}
                     title={t("item.clearTerminals")}
                   >
-                    {/* Eraser: the workspace's terminals get wiped, the panes stay. */}
+                    {/* Broom: the workspace's terminals get swept, the panes stay. */}
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                       <path
-                        d="M2 9.5h7.5"
+                        d="M9.8 1.2L6.4 4.6"
                         stroke="currentColor"
-                        strokeWidth="1"
+                        strokeWidth="1.2"
                         strokeLinecap="round"
                       />
-                      <path
-                        d="M2.2 6.6l4.2-4.2a1 1 0 011.4 0l1.4 1.4a1 1 0 010 1.4L5.6 9.1H3.6L2.2 7.7a.8.8 0 010-1.1z"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                        strokeLinejoin="round"
-                      />
+                      {/* Filled head — a 1px outline blurs into a blob at 11px. */}
+                      <path d="M6.2 4.8L5.6 8.8L2.2 5.4z" fill="currentColor" />
                     </svg>
                   </button>
                 )}
