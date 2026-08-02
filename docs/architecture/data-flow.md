@@ -1194,6 +1194,8 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
     │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
     │     └─ state DB/rollout header로 top-level interactive thread 검증
+    │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
+    │        → null 귀속은 해당 pane의 양쪽 stale session ID를 제거
     ├─ 1. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
     ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장

@@ -497,6 +497,26 @@ describe("persistSession", () => {
     expect(savedView.lastClaudeSession).toBeUndefined();
   });
 
+  it("removes stale sessions when the active Codex pane cannot be attributed", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+      lastCodexSession: "stale-codex-session",
+    });
+    vi.mocked(getCodexSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: null,
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
   it("removes a stale Codex session when a pane is now running Claude", async () => {
     const wsState = useWorkspaceStore.getState();
     const paneId = wsState.workspaces[0].panes[0].id;
@@ -513,6 +533,26 @@ describe("persistSession", () => {
     const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastClaudeSession).toBe("current-claude-session");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("removes stale sessions when the active Claude pane cannot be attributed", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+      lastCodexSession: "stale-codex-session",
+    });
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: null,
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
   });
 

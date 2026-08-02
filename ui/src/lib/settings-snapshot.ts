@@ -33,8 +33,8 @@ function applyTerminalSessionFields(
   view: SavedTerminalView,
   terminalId: string,
   backendCwds: Record<string, string>,
-  claudeSessionIds: Record<string, string>,
-  codexSessionIds: Record<string, string>,
+  claudeSessionIds: Record<string, string | null>,
+  codexSessionIds: Record<string, string | null>,
 ): SavedTerminalView {
   const savedView = { ...view };
   const cwd = backendCwds[terminalId];
@@ -42,9 +42,15 @@ function applyTerminalSessionFields(
 
   const claudeSession = claudeSessionIds[terminalId];
   const codexSession = codexSessionIds[terminalId];
-  if (claudeSession && codexSession) {
-    // Provider attribution is contradictory. Persist neither, so startup
-    // cannot choose the wrong agent merely because one branch has priority.
+  const claudeActive = Object.hasOwn(claudeSessionIds, terminalId);
+  const codexActive = Object.hasOwn(codexSessionIds, terminalId);
+  if (
+    (claudeActive && codexActive) ||
+    (claudeActive && !claudeSession) ||
+    (codexActive && !codexSession)
+  ) {
+    // Provider attribution is contradictory or the active provider could not
+    // prove an exact session. Persist neither rather than resuming stale chat.
     delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
   } else if (claudeSession) {
@@ -71,8 +77,8 @@ export async function collectSettingsSnapshot(
       ? [{}, {}, {}]
       : await Promise.all([
           getTerminalCwds().catch(() => ({}) as Record<string, string>),
-          getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
-          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>),
+          getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string | null>),
+          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string | null>),
         ]);
 
   return {

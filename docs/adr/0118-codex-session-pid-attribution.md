@@ -1,6 +1,6 @@
 # 0118. Codex 세션 복원은 PTY 자식 PID로 정확히 귀속한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-02
 - Source: 사용자 요구와 리뷰 코멘트, [architecture/data-flow.md §13](../architecture/data-flow.md#13-session-persistence--cache), [ADR-0117](0117-codex-session-restore.md) 대체, Codex CLI 0.146 로컬 `logs_*.sqlite`/`state_*.sqlite` 관측
 - Supersedes: [ADR-0117](0117-codex-session-restore.md)

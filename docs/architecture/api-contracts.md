@@ -350,7 +350,7 @@ Codex 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어�
 
 rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `claude --resume <id>`와 `codex resume <id>` 두 형태만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host에서 WSL 내부 경로나 shell profile 안에서만 설정된 root, Codex config/명령행에서만 재정의한 `sqlite_home`은 자동 탐색하지 않으며 CWD fallback도 하지 않는다.
 
-한 TerminalView의 `lastClaudeSession`과 `lastCodexSession`은 상호배타적으로 영속한다. 저장 시 새 Codex ID를 얻으면 stale Claude ID를 제거하고, 새 Claude ID를 얻으면 stale Codex ID를 제거한다. backend 결과나 손편집 설정에 두 ID가 동시에 있으면 provider를 추측하지 않고 둘 다 복원하지 않는다. 사용자가 누른 Restart View는 두 agent 복원을 모두 건너뛴다.
+한 TerminalView의 `lastClaudeSession`과 `lastCodexSession`은 상호배타적으로 영속한다. 저장 시 새 Codex ID를 얻으면 stale Claude ID를 제거하고, 새 Claude ID를 얻으면 stale Codex ID를 제거한다. `get_claude_session_ids`와 `get_codex_session_ids`는 현재 provider가 실행 중이지만 정확한 ID를 증명하지 못한 terminal을 `null` 값으로 반환하며, 이 경우 저장 측은 양쪽 stale ID를 모두 제거한다. backend 결과나 손편집 설정에 두 provider가 동시에 귀속되면 provider를 추측하지 않고 둘 다 복원하지 않는다. 사용자가 누른 Restart View는 두 agent 복원을 모두 건너뛴다.
 
 metadata apply mode는 `/codex/statusMessageMode`와 `/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/codex/restoreSession`과 `/codex/sessionMaxAgeHours`는 `nextUse`다. `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 

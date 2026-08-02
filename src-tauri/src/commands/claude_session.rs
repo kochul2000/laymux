@@ -13,7 +13,7 @@ use crate::state::AppState;
 pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
-) -> Result<HashMap<String, String>, String> {
+) -> Result<HashMap<String, Option<String>>, String> {
     let known: Vec<String> = {
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
@@ -30,7 +30,8 @@ pub fn get_claude_session_ids(
     let terminal_roots: Vec<(String, u32)> = {
         let ptys = state.pty_handles.lock_or_err()?;
         known
-            .into_iter()
+            .iter()
+            .cloned()
             .filter_map(|terminal_id| {
                 let child_pid = ptys.get(&terminal_id)?.child_pid()?;
                 Some((terminal_id, child_pid))
@@ -39,7 +40,10 @@ pub fn get_claude_session_ids(
     };
     let snapshot = crate::process_tree::snapshot_processes();
     if snapshot.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(crate::process_tree::complete_agent_session_attributions(
+            &known,
+            HashMap::new(),
+        ));
     }
     let candidates = terminal_roots
         .into_iter()
@@ -49,7 +53,10 @@ pub fn get_claude_session_ids(
                 .map(|session_id| (terminal_id, session_id))
         })
         .collect();
-    Ok(remove_duplicate_attributions(candidates))
+    Ok(crate::process_tree::complete_agent_session_attributions(
+        &known,
+        remove_duplicate_attributions(candidates),
+    ))
 }
 
 /// A parsed Claude session file entry.

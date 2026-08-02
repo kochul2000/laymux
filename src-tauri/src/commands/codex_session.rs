@@ -23,14 +23,14 @@ use self::store::CodexSessionStore;
 pub fn get_codex_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,
-) -> Result<HashMap<String, String>, String> {
+) -> Result<HashMap<String, Option<String>>, String> {
     get_codex_session_ids_impl(session_max_age_hours, &state).map_err(|error| error.to_string())
 }
 
 fn get_codex_session_ids_impl(
     session_max_age_hours: Option<u64>,
     state: &AppState,
-) -> Result<HashMap<String, String>, crate::error::AppError> {
+) -> Result<HashMap<String, Option<String>>, crate::error::AppError> {
     let known: Vec<String> = state
         .known_codex_terminals
         .lock_or_err()?
@@ -44,7 +44,8 @@ fn get_codex_session_ids_impl(
     let terminal_roots: Vec<(String, u32)> = {
         let ptys = state.pty_handles.lock_or_err()?;
         known
-            .into_iter()
+            .iter()
+            .cloned()
             .filter_map(|terminal_id| {
                 let child_pid = ptys.get(&terminal_id)?.child_pid()?;
                 Some((terminal_id, child_pid))
@@ -52,12 +53,18 @@ fn get_codex_session_ids_impl(
             .collect()
     };
     if terminal_roots.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(crate::process_tree::complete_agent_session_attributions(
+            &known,
+            HashMap::new(),
+        ));
     }
 
     let snapshot = snapshot_processes();
     if snapshot.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(crate::process_tree::complete_agent_session_attributions(
+            &known,
+            HashMap::new(),
+        ));
     }
     let terminal_codex_pids: Vec<(String, u32)> = terminal_roots
         .into_iter()
@@ -68,7 +75,7 @@ fn get_codex_session_ids_impl(
         .collect();
 
     let store = CodexSessionStore::resolve();
-    Ok(assign_exact_sessions(&terminal_codex_pids, |pid| {
+    let exact = assign_exact_sessions(&terminal_codex_pids, |pid| {
         let session_id = store.find_session_for_pid(pid, session_max_age_hours);
         if session_id.is_none() {
             tracing::debug!(
@@ -77,7 +84,10 @@ fn get_codex_session_ids_impl(
             );
         }
         session_id
-    }))
+    });
+    Ok(crate::process_tree::complete_agent_session_attributions(
+        &known, exact,
+    ))
 }
 
 /// Build a one-to-one terminal/session assignment and reject any collision.

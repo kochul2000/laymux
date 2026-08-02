@@ -39,6 +39,25 @@ pub struct ProcessEntry {
     pub name: String,
 }
 
+/// Preserve every terminal that the title/process state machine identified as
+/// the provider, even when an exact session ID cannot be proven. `None` is a
+/// deliberate fail-closed attribution, distinct from a terminal where that
+/// provider is not currently running.
+pub(crate) fn complete_agent_session_attributions(
+    known_terminal_ids: &[String],
+    exact: HashMap<String, String>,
+) -> HashMap<String, Option<String>> {
+    let mut result: HashMap<String, Option<String>> = known_terminal_ids
+        .iter()
+        .cloned()
+        .map(|terminal_id| (terminal_id, None))
+        .collect();
+    for (terminal_id, session_id) in exact {
+        result.insert(terminal_id, Some(session_id));
+    }
+    result
+}
+
 /// Map an executable file name to the interactive app it represents, or `None`.
 /// Case-insensitive; a trailing `.exe` (Windows) is ignored.
 fn name_to_app(name: &str) -> Option<&'static str> {
@@ -351,6 +370,20 @@ mod tests {
             ppid,
             name: name.to_string(),
         }
+    }
+
+    #[test]
+    fn known_agent_without_exact_session_remains_explicitly_unresolved() {
+        let known = vec!["terminal-a".to_string(), "terminal-b".to_string()];
+        let exact = HashMap::from([("terminal-a".to_string(), "session-a".to_string())]);
+
+        let result = complete_agent_session_attributions(&known, exact);
+
+        assert_eq!(
+            result.get("terminal-a").and_then(|value| value.as_deref()),
+            Some("session-a")
+        );
+        assert_eq!(result.get("terminal-b"), Some(&None));
     }
 
     // ── name_to_app ──
