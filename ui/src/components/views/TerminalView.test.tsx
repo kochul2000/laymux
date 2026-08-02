@@ -9220,6 +9220,33 @@ describe("TerminalView", () => {
       });
     });
 
+    it("fails closed when both Claude and Codex session IDs are present", async () => {
+      render(
+        <TerminalView
+          instanceId="t-ambiguous-agent-restore"
+          paneId="pane-ambiguous-agent"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="claude-session"
+          lastCodexSession="codex-session"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-ambiguous-agent-restore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
     it("passes a structured external viewer request to session creation", async () => {
       const viewerStartup = { command: "vi", path: "C:\\Users\\me\\README.md" };
       render(

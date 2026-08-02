@@ -24,6 +24,10 @@ vi.mock("@/lib/tauri-api", () => ({
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
+vi.mock("@/lib/interrupt-terminals-on-exit", () => ({
+  interruptTerminalsOnExit: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/terminal-serialize-registry", () => ({
   getTerminalSerializeMap: vi.fn().mockReturnValue(new Map()),
   registerTerminalSerializer: vi.fn(),
@@ -44,6 +48,7 @@ import {
   getClaudeSessionIds,
   getCodexSessionIds,
 } from "@/lib/tauri-api";
+import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -58,6 +63,10 @@ describe("persistSession", () => {
     useDockStore.setState(useDockStore.getInitialState());
     useTerminalStore.setState({ instances: [] });
     vi.clearAllMocks();
+    vi.mocked(getTerminalCwds).mockResolvedValue({});
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({});
+    vi.mocked(getCodexSessionIds).mockResolvedValue({});
+    vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
   });
 
   it("calls saveSettings with current state from all stores", async () => {
@@ -507,20 +516,47 @@ describe("persistSession", () => {
     expect(savedView).not.toHaveProperty("lastCodexSession");
   });
 
-  it("skips Codex session collection and clears stored IDs when restore is disabled", async () => {
+  it("persists neither provider when backend attribution conflicts", async () => {
     const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
     wsState.setPaneView(0, {
       type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
       lastCodexSession: "stale-codex-session",
     });
-    useSettingsStore.getState().setCodex({ restoreSession: false });
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "current-claude-session",
+    });
+    vi.mocked(getCodexSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "current-codex-session",
+    });
 
     await persistSession();
 
     const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
-    expect(getCodexSessionIds).not.toHaveBeenCalled();
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("keeps collecting Codex attribution while restore is disabled", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    useSettingsStore.getState().setCodex({ restoreSession: false });
+    vi.mocked(getCodexSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "current-codex-session",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(getCodexSessionIds).toHaveBeenCalledWith(24);
+    expect(savedView.lastCodexSession).toBe("current-codex-session");
   });
 
   it("does not inject lastClaudeSession for non-TerminalView panes", async () => {
@@ -634,6 +670,37 @@ describe("saveBeforeClose", () => {
     vi.mocked(getTerminalSerializeMap).mockReturnValue(new Map());
 
     await saveBeforeClose();
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("captures agent session IDs before interrupting terminals", async () => {
+    let finishInterrupt: (() => void) | undefined;
+    const callOrder: string[] = [];
+    useSettingsStore.getState().setExit({
+      interruptTerminals: true,
+      interruptRounds: 1,
+      settleMs: 0,
+    });
+    vi.mocked(getCodexSessionIds).mockImplementationOnce(async () => {
+      callOrder.push("collect-codex");
+      return {};
+    });
+    vi.mocked(interruptTerminalsOnExit).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          callOrder.push("interrupt");
+          finishInterrupt = resolve;
+        }),
+    );
+
+    const saving = saveBeforeClose();
+    await vi.waitFor(() => expect(interruptTerminalsOnExit).toHaveBeenCalledTimes(1));
+    expect(callOrder).toEqual(["collect-codex", "interrupt"]);
+    expect(saveSettings).not.toHaveBeenCalled();
+
+    finishInterrupt?.();
+    await saving;
 
     expect(saveSettings).toHaveBeenCalledTimes(1);
   });

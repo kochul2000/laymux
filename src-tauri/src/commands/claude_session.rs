@@ -1,18 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tauri::State;
 
 use crate::lock_ext::MutexExt;
-use crate::path_utils;
 use crate::state::AppState;
 
 /// Resolve Claude Code session IDs for known Claude terminals.
 ///
-/// Returns a map of terminal ID → Claude session ID by:
-/// 1. (Primary) PID tree matching: walk the process tree from the PTY child PID
-///    and match against `~/.claude/sessions/<pid>.json` files.
-/// 2. (Fallback) CWD + most-recent matching: compare the terminal's CWD with
-///    session file CWD, picking the most recently started session.
+/// The PTY descendant PID must match `~/.claude/sessions/<pid>.json`.
+/// CWD is never an attribution fallback because multiple panes commonly share it.
 #[tauri::command]
 pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
@@ -31,44 +27,29 @@ pub fn get_claude_session_ids(
     let sessions_dir = resolve_claude_sessions_dir();
     let session_files = read_claude_session_files(&sessions_dir, session_max_age_hours);
 
-    let mut result = HashMap::new();
-
-    for terminal_id in &known {
-        // Get child PID from PTY handle
-        let child_pid = {
-            let ptys = state.pty_handles.lock_or_err()?;
-            ptys.get(terminal_id).and_then(|h| h.child_pid())
-        };
-
-        // Get terminal CWD for fallback
-        let terminal_cwd = {
-            let terminals = state.terminals.lock_or_err()?;
-            terminals.get(terminal_id).and_then(|s| s.cwd.clone())
-        };
-
-        // Strategy 1: PID tree matching
-        if let Some(pid) = child_pid {
-            let descendant_pids = get_descendant_pids(pid);
-            if let Some(session_id) = find_session_by_pids(&session_files, &descendant_pids) {
-                result.insert(terminal_id.clone(), session_id);
-                continue;
-            }
-        }
-
-        // Strategy 2: CWD + most-recent fallback
-        if let Some(ref cwd) = terminal_cwd {
-            if let Some(session_id) = find_session_by_cwd(&session_files, cwd) {
-                tracing::warn!(
-                    terminal_id,
-                    cwd,
-                    "PID tree match failed, using CWD fallback"
-                );
-                result.insert(terminal_id.clone(), session_id);
-            }
-        }
+    let terminal_roots: Vec<(String, u32)> = {
+        let ptys = state.pty_handles.lock_or_err()?;
+        known
+            .into_iter()
+            .filter_map(|terminal_id| {
+                let child_pid = ptys.get(&terminal_id)?.child_pid()?;
+                Some((terminal_id, child_pid))
+            })
+            .collect()
+    };
+    let snapshot = crate::process_tree::snapshot_processes();
+    if snapshot.is_empty() {
+        return Ok(HashMap::new());
     }
-
-    Ok(result)
+    let candidates = terminal_roots
+        .into_iter()
+        .filter_map(|(terminal_id, root_pid)| {
+            let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
+            find_session_by_pids(&session_files, &descendants)
+                .map(|session_id| (terminal_id, session_id))
+        })
+        .collect();
+    Ok(remove_duplicate_attributions(candidates))
 }
 
 /// A parsed Claude session file entry.
@@ -76,7 +57,6 @@ pub fn get_claude_session_ids(
 struct ClaudeSessionFile {
     pid: u32,
     session_id: String,
-    cwd: String,
     started_at: u64,
 }
 
@@ -153,11 +133,6 @@ fn read_claude_session_files(
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let cwd = val
-                    .get("cwd")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
                 let started_at = val.get("startedAt").and_then(|v| v.as_u64()).unwrap_or(0);
 
                 // Skip stale sessions
@@ -171,7 +146,6 @@ fn read_claude_session_files(
                     result.push(ClaudeSessionFile {
                         pid,
                         session_id,
-                        cwd,
                         started_at,
                     });
                 }
@@ -181,19 +155,9 @@ fn read_claude_session_files(
     result
 }
 
-/// Get all descendant PIDs of a given process (including the process itself).
-/// Delegates to the shared process enumeration in `crate::process_tree`
-/// (ADR-0009) so there is a single snapshot implementation per platform.
-fn get_descendant_pids(root_pid: u32) -> Vec<u32> {
-    let snapshot = crate::process_tree::snapshot_processes();
-    crate::process_tree::descendant_pids(&snapshot, root_pid)
-        .into_iter()
-        .collect()
-}
-
 /// Find a Claude session ID by matching any of the given PIDs against session file PIDs.
 /// When multiple sessions match, the most recently started one wins.
-fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &[u32]) -> Option<String> {
+fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &HashSet<u32>) -> Option<String> {
     sessions
         .iter()
         .filter(|s| pids.contains(&s.pid))
@@ -201,14 +165,24 @@ fn find_session_by_pids(sessions: &[ClaudeSessionFile], pids: &[u32]) -> Option<
         .map(|s| s.session_id.clone())
 }
 
-/// Find a Claude session ID by matching CWD (most recent session wins).
-fn find_session_by_cwd(sessions: &[ClaudeSessionFile], cwd: &str) -> Option<String> {
-    let normalized_cwd = path_utils::normalize_path_for_comparison(cwd);
-    sessions
-        .iter()
-        .filter(|s| path_utils::normalize_path_for_comparison(&s.cwd) == normalized_cwd)
-        .max_by_key(|s| s.started_at)
-        .map(|s| s.session_id.clone())
+fn remove_duplicate_attributions(candidates: Vec<(String, String)>) -> HashMap<String, String> {
+    let mut seen = HashSet::new();
+    let mut duplicates = HashSet::new();
+    for (_, session_id) in &candidates {
+        if !seen.insert(session_id.clone()) {
+            duplicates.insert(session_id.clone());
+        }
+    }
+    if !duplicates.is_empty() {
+        tracing::warn!(
+            ?duplicates,
+            "Claude session attribution collision; skipping restore"
+        );
+    }
+    candidates
+        .into_iter()
+        .filter(|(_, session_id)| !duplicates.contains(session_id))
+        .collect()
 }
 
 #[cfg(test)]
@@ -233,7 +207,6 @@ mod tests {
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].pid, 12345);
         assert_eq!(sessions[0].session_id, "abc-123");
-        assert_eq!(sessions[0].cwd, "/home/user");
         assert_eq!(sessions[0].started_at, 1000);
     }
 
@@ -259,53 +232,19 @@ mod tests {
             ClaudeSessionFile {
                 pid: 100,
                 session_id: "s1".into(),
-                cwd: "/a".into(),
                 started_at: 1,
             },
             ClaudeSessionFile {
                 pid: 200,
                 session_id: "s2".into(),
-                cwd: "/b".into(),
                 started_at: 2,
             },
         ];
-        assert_eq!(find_session_by_pids(&sessions, &[200]), Some("s2".into()));
-        assert_eq!(find_session_by_pids(&sessions, &[300]), None);
-    }
-
-    #[test]
-    fn find_session_by_cwd_picks_most_recent() {
-        let sessions = vec![
-            ClaudeSessionFile {
-                pid: 1,
-                session_id: "old".into(),
-                cwd: "/home/user".into(),
-                started_at: 100,
-            },
-            ClaudeSessionFile {
-                pid: 2,
-                session_id: "new".into(),
-                cwd: "/home/user".into(),
-                started_at: 200,
-            },
-            ClaudeSessionFile {
-                pid: 3,
-                session_id: "other".into(),
-                cwd: "/other".into(),
-                started_at: 300,
-            },
-        ];
         assert_eq!(
-            find_session_by_cwd(&sessions, "/home/user"),
-            Some("new".into())
+            find_session_by_pids(&sessions, &HashSet::from([200])),
+            Some("s2".into())
         );
-        assert_eq!(find_session_by_cwd(&sessions, "/nonexistent"), None);
-    }
-
-    #[test]
-    fn get_descendant_pids_includes_root() {
-        let pids = get_descendant_pids(99999);
-        assert!(pids.contains(&99999));
+        assert_eq!(find_session_by_pids(&sessions, &HashSet::from([300])), None);
     }
 
     // -- Session ID validation tests --
@@ -394,21 +333,28 @@ mod tests {
             ClaudeSessionFile {
                 pid: 100,
                 session_id: "old-session".into(),
-                cwd: "/a".into(),
                 started_at: 1,
             },
             ClaudeSessionFile {
                 pid: 200,
                 session_id: "new-session".into(),
-                cwd: "/b".into(),
                 started_at: 10,
             },
         ];
         // Both PIDs match — should pick the most recent (started_at=10)
         assert_eq!(
-            find_session_by_pids(&sessions, &[100, 200]),
+            find_session_by_pids(&sessions, &HashSet::from([100, 200])),
             Some("new-session".into())
         );
+    }
+
+    #[test]
+    fn duplicate_claude_session_attribution_fails_closed() {
+        let candidates = vec![
+            ("pane-a".into(), "same-session".into()),
+            ("pane-b".into(), "same-session".into()),
+        ];
+        assert!(remove_duplicate_attributions(candidates).is_empty());
     }
 
     // -- Stale session filtering tests --

@@ -27,6 +27,36 @@ interface CollectSettingsSnapshotOptions {
   includeRuntimeStructuralState?: boolean;
 }
 
+type SavedTerminalView = { type: string; [key: string]: unknown };
+
+function applyTerminalSessionFields(
+  view: SavedTerminalView,
+  terminalId: string,
+  backendCwds: Record<string, string>,
+  claudeSessionIds: Record<string, string>,
+  codexSessionIds: Record<string, string>,
+): SavedTerminalView {
+  const savedView = { ...view };
+  const cwd = backendCwds[terminalId];
+  if (cwd) savedView.lastCwd = cwd;
+
+  const claudeSession = claudeSessionIds[terminalId];
+  const codexSession = codexSessionIds[terminalId];
+  if (claudeSession && codexSession) {
+    // Provider attribution is contradictory. Persist neither, so startup
+    // cannot choose the wrong agent merely because one branch has priority.
+    delete savedView.lastClaudeSession;
+    delete savedView.lastCodexSession;
+  } else if (claudeSession) {
+    savedView.lastClaudeSession = claudeSession;
+    delete savedView.lastCodexSession;
+  } else if (codexSession) {
+    savedView.lastCodexSession = codexSession;
+    delete savedView.lastClaudeSession;
+  }
+  return savedView;
+}
+
 /** Collect the current settings-owned state from every frontend store. */
 export async function collectSettingsSnapshot(
   options: CollectSettingsSnapshotOptions = {},
@@ -36,16 +66,13 @@ export async function collectSettingsSnapshot(
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
   const codexMaxAge = settingsState.codex?.sessionMaxAgeHours;
-  const restoreCodexSession = settingsState.codex?.restoreSession !== false;
   const [backendCwds, claudeSessionIds, codexSessionIds] =
     options.includeRuntimeStructuralState === false
       ? [{}, {}, {}]
       : await Promise.all([
           getTerminalCwds().catch(() => ({}) as Record<string, string>),
           getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
-          restoreCodexSession
-            ? getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>)
-            : Promise.resolve({} as Record<string, string>),
+          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>),
         ]);
 
   return {
@@ -126,22 +153,16 @@ export async function collectSettingsSnapshot(
       id: workspace.id,
       name: workspace.name,
       panes: workspace.panes.map((pane) => {
-        const savedView = { ...pane.view } as { type: string; [key: string]: unknown };
-        if (pane.view.type === "TerminalView") {
-          const terminalId = toTerminalId(pane.id);
-          const cwd = backendCwds[terminalId];
-          if (cwd) savedView.lastCwd = cwd;
-          if (!restoreCodexSession) delete savedView.lastCodexSession;
-          const claudeSession = claudeSessionIds[terminalId];
-          const codexSession = codexSessionIds[terminalId];
-          if (claudeSession) {
-            savedView.lastClaudeSession = claudeSession;
-            delete savedView.lastCodexSession;
-          } else if (codexSession) {
-            savedView.lastCodexSession = codexSession;
-            delete savedView.lastClaudeSession;
-          }
-        }
+        const savedView =
+          pane.view.type === "TerminalView"
+            ? applyTerminalSessionFields(
+                pane.view as SavedTerminalView,
+                toTerminalId(pane.id),
+                backendCwds,
+                claudeSessionIds,
+                codexSessionIds,
+              )
+            : ({ ...pane.view } as SavedTerminalView);
         return {
           id: pane.id,
           x: pane.x,
@@ -184,22 +205,16 @@ export async function collectSettingsSnapshot(
       visible: dock.visible,
       size: dock.size,
       panes: dock.panes.map((pane) => {
-        const savedView = { ...pane.view } as { type: string; [key: string]: unknown };
-        if (pane.view.type === "TerminalView") {
-          const terminalId = toTerminalId(pane.id);
-          const cwd = backendCwds[terminalId];
-          if (cwd) savedView.lastCwd = cwd;
-          if (!restoreCodexSession) delete savedView.lastCodexSession;
-          const claudeSession = claudeSessionIds[terminalId];
-          const codexSession = codexSessionIds[terminalId];
-          if (claudeSession) {
-            savedView.lastClaudeSession = claudeSession;
-            delete savedView.lastCodexSession;
-          } else if (codexSession) {
-            savedView.lastCodexSession = codexSession;
-            delete savedView.lastClaudeSession;
-          }
-        }
+        const savedView =
+          pane.view.type === "TerminalView"
+            ? applyTerminalSessionFields(
+                pane.view as SavedTerminalView,
+                toTerminalId(pane.id),
+                backendCwds,
+                claudeSessionIds,
+                codexSessionIds,
+              )
+            : ({ ...pane.view } as SavedTerminalView);
         return {
           id: pane.id,
           view: savedView,

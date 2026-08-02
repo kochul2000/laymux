@@ -12,8 +12,8 @@
 //! executable name alone identifies the app, no command-line introspection.
 //! On Linux they run as `claude` / `codex` (native launchers).
 //!
-//! This module is also the single source of process enumeration; `claude_session`
-//! consumes `snapshot_processes` / `descendant_pids` for its session matching.
+//! This module is also the single source of process enumeration; agent session
+//! attribution consumes snapshots, descendant sets, and exact app PIDs here.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
@@ -81,6 +81,15 @@ pub fn descendant_pids(snapshot: &[ProcessEntry], root: u32) -> HashSet<u32> {
 /// app the shell launched sits nearer the root and is reported. Returns `None`
 /// when no `claude`/`codex` process is found in the tree.
 pub fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'static str> {
+    match_interactive_app_process(snapshot, root).map(|(_, app)| app)
+}
+
+/// Identify the shallowest interactive app and return its exact OS process ID.
+/// Session attribution needs the PID while liveness callers only consume the app name.
+pub fn match_interactive_app_process(
+    snapshot: &[ProcessEntry],
+    root: u32,
+) -> Option<(u32, &'static str)> {
     let mut children: HashMap<u32, Vec<&ProcessEntry>> = HashMap::new();
     let mut name_by_pid: HashMap<u32, &str> = HashMap::new();
     for e in snapshot {
@@ -92,7 +101,7 @@ pub fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'s
     // startup command launches `claude` directly with no intermediate shell.
     if let Some(name) = name_by_pid.get(&root) {
         if let Some(app) = name_to_app(name) {
-            return Some(app);
+            return Some((root, app));
         }
     }
 
@@ -105,7 +114,7 @@ pub fn match_interactive_app(snapshot: &[ProcessEntry], root: u32) -> Option<&'s
             for kid in kids {
                 if seen.insert(kid.pid) {
                     if let Some(app) = name_to_app(&kid.name) {
-                        return Some(app);
+                        return Some((kid.pid, app));
                     }
                     queue.push_back(kid.pid);
                 }
@@ -417,6 +426,21 @@ mod tests {
             entry(300, 200, "codex.exe"),
         ];
         assert_eq!(match_interactive_app(&snapshot, 100), Some("Codex"));
+    }
+
+    #[test]
+    fn match_returns_the_exact_shallowest_app_process_id() {
+        let snapshot = vec![
+            entry(100, 1, "pwsh.exe"),
+            entry(200, 100, "node.exe"),
+            entry(300, 200, "codex.exe"),
+            entry(400, 300, "codex.exe"),
+        ];
+
+        assert_eq!(
+            match_interactive_app_process(&snapshot, 100),
+            Some((300, "Codex"))
+        );
     }
 
     #[test]

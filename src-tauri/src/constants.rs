@@ -60,13 +60,18 @@ pub const ENV_WSLENV: &str = "WSLENV";
 pub const ENV_CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// Codex CLI's state directory override. Session rollout discovery follows it.
 pub const ENV_CODEX_HOME: &str = "CODEX_HOME";
+/// Codex CLI's SQLite state directory override. Defaults to `CODEX_HOME`.
+pub const ENV_CODEX_SQLITE_HOME: &str = "CODEX_SQLITE_HOME";
 
 /// Maximum bytes read from one Codex rollout `session_meta` JSONL header.
 pub const CODEX_SESSION_META_MAX_BYTES: usize = 256 * 1024;
 /// Codex stores rollout files below `sessions/YYYY/MM/DD`.
 pub const CODEX_SESSION_DIRECTORY_DEPTH: u8 = 3;
-/// Nanoseconds per UTC day, used to prune dated Codex rollout directories.
-pub const CODEX_SESSION_NANOS_PER_DAY: u128 = 86_400_000_000_000;
+/// Codex diagnostic DB filename prefixes. Versions are independent.
+pub const CODEX_SQLITE_LOG_PREFIX: &str = "logs_";
+pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";
+/// Do not wait through shutdown when Codex has an SQLite writer lock.
+pub const CODEX_SQLITE_BUSY_TIMEOUT: u64 = 100;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
@@ -485,6 +490,7 @@ mod tests {
             ENV_LX_AUTOMATION_PORT,
             ENV_LX_PROPAGATED,
             ENV_CODEX_HOME,
+            ENV_CODEX_SQLITE_HOME,
         ];
         for name in envs {
             assert!(

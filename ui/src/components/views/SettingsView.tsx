@@ -75,6 +75,7 @@ import {
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
+import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "@/lib/agent-session-constants";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
@@ -2712,7 +2713,9 @@ function ClaudeSection() {
                 onChange={(e) => {
                   const parsed = parseInt(e.target.value, 10);
                   updateClaude({
-                    sessionMaxAgeHours: Number.isNaN(parsed) ? 24 : Math.max(0, parsed),
+                    sessionMaxAgeHours: Number.isNaN(parsed)
+                      ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
+                      : Math.max(0, parsed),
                   });
                 }}
               />
@@ -2970,7 +2973,9 @@ function CodexSection() {
                 onChange={(e) => {
                   const parsed = parseInt(e.target.value, 10);
                   updateCodex({
-                    sessionMaxAgeHours: Number.isNaN(parsed) ? 24 : Math.max(0, parsed),
+                    sessionMaxAgeHours: Number.isNaN(parsed)
+                      ? DEFAULT_AGENT_SESSION_MAX_AGE_HOURS
+                      : Math.max(0, parsed),
                   });
                 }}
               />
