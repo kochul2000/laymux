@@ -196,7 +196,7 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 - **성공한 조작은 해당 리포 캐시를 무효화**해 다음 폴링이 즉시 재조회한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
 - `gh` 미설치·미인증은 각각 `ghMissing`/`unauthorized` 상태로 내려오며, 그 외 실패는 `failed{message}` 로 `gh` stderr 를 그대로 전달한다.
 
-뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
+뷰의 기본값은 `settings.github` 이 소유한다 — `defaultTab`(`"issues"`|`"pulls"`, 기본 `issues`, 아직 탭을 고르지 않은 pane 에만 적용. 고른 뒤에는 `viewOverrides.githubTab` 이 이긴다 — [ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)), `refreshSeconds`(기본 10, Settings UI 하한 10), `hideDraftPulls`(기본 false). 편집 UI 는 Settings → **Views → GitHub** 다. `refreshSeconds` 는 프론트가 폴링 간격으로만 쓰며 백엔드 갱신 창(10초 상수)은 바꾸지 않으므로, 10초 미만 값은 캐시를 다시 읽는 데 그친다. 손으로 0·음수를 넣은 settings.json 도 폴링이 타이트 루프가 되지 않도록 뷰에서 1초로 바닥을 잡는다.
 
 행 표시도 같은 섹션이 소유한다(전역 전용 — pane 별 오버라이드 없음, [ADR-0111](../adr/0111-github-view-display-settings.md)).
 

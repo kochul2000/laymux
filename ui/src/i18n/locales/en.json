@@ -493,7 +493,7 @@
       "title": "GitHub",
       "groupBehavior": "Behavior",
       "defaultTab": "Default tab",
-      "defaultTabDesc": "Tab shown when the view first opens.",
+      "defaultTabDesc": "Tab a pane opens on until you pick one there. A pane keeps the tab you picked.",
       "defaultTabIssues": "Issues",
       "defaultTabPulls": "PRs",
       "refreshSeconds": "Refresh interval",

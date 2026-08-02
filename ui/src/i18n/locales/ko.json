@@ -493,7 +493,7 @@
       "title": "GitHub",
       "groupBehavior": "동작",
       "defaultTab": "기본 탭",
-      "defaultTabDesc": "뷰가 처음 열릴 때 표시할 탭입니다.",
+      "defaultTabDesc": "아직 탭을 고르지 않은 pane 이 열릴 때 표시할 탭입니다. 한 번 고른 pane 은 그 탭을 계속 유지합니다.",
       "defaultTabIssues": "이슈",
       "defaultTabPulls": "PR",
       "refreshSeconds": "새로고침 간격",
