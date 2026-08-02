@@ -16,6 +16,11 @@ use serde_path_to_error::Segment;
 use super::models::Settings;
 use super::validation::ValidationWarning;
 
+mod duplicate_keys;
+mod original_paths;
+
+use original_paths::OriginalPathTree;
+
 /// Upper bound on paths a single load may drop before the file is declared
 /// unrecoverable.
 ///
@@ -42,9 +47,10 @@ pub(crate) struct LenientSettings {
 /// Deserialize `Settings` from raw JSON, dropping type-error paths one at a time.
 ///
 /// Returns `Err` only when nothing can be salvaged: a JSON syntax error, a
-/// root-level type error, or more drops than [`MAX_DROPPED_PATHS`].
+/// duplicate object key, a root-level type error, or more drops than
+/// [`MAX_DROPPED_PATHS`].
 pub(crate) fn deserialize_lenient(raw: &str) -> Result<LenientSettings, String> {
-    let mut value: Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let mut value = duplicate_keys::parse_value(raw)?;
 
     // serde accepts a struct in sequence form, so a root array would "recover"
     // by dropping every element down to an empty settings object. A settings
@@ -53,6 +59,7 @@ pub(crate) fn deserialize_lenient(raw: &str) -> Result<LenientSettings, String> 
         return Err("settings.json 최상위가 JSON 객체가 아닙니다".to_string());
     }
 
+    let mut original_paths = OriginalPathTree::from_value(&value);
     let mut dropped: Vec<ValidationWarning> = Vec::new();
 
     loop {
@@ -69,7 +76,9 @@ pub(crate) fn deserialize_lenient(raw: &str) -> Result<LenientSettings, String> 
 
         let reason = err.inner().to_string();
         let segments: Vec<Segment> = err.path().iter().cloned().collect();
-        let Some(removed_path) = drop_deepest_resolvable(&mut value, &segments) else {
+        let Some(removed_path) =
+            drop_deepest_resolvable(&mut value, &mut original_paths, &segments)
+        else {
             return Err(err.to_string());
         };
 
@@ -92,35 +101,48 @@ pub(crate) fn deserialize_lenient(raw: &str) -> Result<LenientSettings, String> 
 ///
 /// Returns the path that was removed, in the repo's `a.b[0].c` warning style,
 /// or `None` when nothing can be removed (the root itself is the wrong type).
-fn drop_deepest_resolvable(root: &mut Value, segments: &[Segment]) -> Option<String> {
+fn drop_deepest_resolvable(
+    root: &mut Value,
+    original_paths: &mut OriginalPathTree,
+    segments: &[Segment],
+) -> Option<String> {
     let depth = resolvable_depth(root, segments);
     if depth == 0 {
         return None;
     }
 
+    let removed_path = original_paths.format_path(&segments[..depth])?;
     let (parent_segments, last) = segments[..depth].split_at(depth - 1);
     let last = &last[0];
 
     let mut parent = &mut *root;
+    let mut original_parent = original_paths;
     for segment in parent_segments {
         parent = descend_mut(parent, segment)?;
+        original_parent = original_parent.descend_mut(segment)?;
     }
 
     match last {
         Segment::Map { key } => {
-            parent.as_object_mut()?.remove(key)?;
+            let object = parent.as_object_mut()?;
+            if !object.contains_key(key) || !original_parent.contains(last) {
+                return None;
+            }
+            object.remove(key);
+            original_parent.remove(last)?;
         }
         Segment::Seq { index } => {
             let array = parent.as_array_mut()?;
-            if *index >= array.len() {
+            if *index >= array.len() || !original_parent.contains(last) {
                 return None;
             }
             array.remove(*index);
+            original_parent.remove(last)?;
         }
         _ => return None,
     }
 
-    Some(format_path(&segments[..depth]))
+    Some(removed_path)
 }
 
 /// How many leading segments of `segments` actually address existing nodes.
@@ -155,33 +177,6 @@ fn descend_mut<'a>(value: &'a mut Value, segment: &Segment) -> Option<&'a mut Va
     }
 }
 
-/// Render segments the way `validate_and_repair` writes warning paths:
-/// `workspaces[0].panes[1].x`.
-fn format_path(segments: &[Segment]) -> String {
-    let mut out = String::new();
-    for segment in segments {
-        match segment {
-            Segment::Map { key } => {
-                if !out.is_empty() {
-                    out.push('.');
-                }
-                out.push_str(key);
-            }
-            Segment::Seq { index } => {
-                out.push_str(&format!("[{index}]"));
-            }
-            Segment::Enum { variant } => {
-                if !out.is_empty() {
-                    out.push('.');
-                }
-                out.push_str(variant);
-            }
-            Segment::Unknown => out.push_str(".?"),
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +190,14 @@ mod tests {
         let recovered = deserialize_lenient(&raw).unwrap();
         assert!(recovered.dropped.is_empty());
         assert_eq!(recovered.settings, original);
+    }
+
+    #[test]
+    fn duplicate_json_keys_are_rejected_before_value_conversion() {
+        let err = deserialize_lenient(r#"{"language":"en","language":"ko"}"#)
+            .expect_err("duplicate keys must not be silently overwritten");
+
+        assert!(err.contains("duplicate field `language`"), "err: {err}");
     }
 
     #[test]
@@ -317,6 +320,34 @@ mod tests {
         assert!(
             paths.contains(&"workspaces[0].panes[0]"),
             "the pane must be reported as lost: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn removed_array_items_keep_their_original_warning_indices() {
+        let raw = r#"{
+          "workspaces": [
+            {
+              "id": "ws-1",
+              "name": "Keep me",
+              "panes": [
+                { "id": "p1", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": { "type": 5 } },
+                { "id": "p2", "x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0, "view": { "type": 6 } }
+              ]
+            }
+          ]
+        }"#;
+
+        let recovered = deserialize_lenient(raw).unwrap();
+        let paths: Vec<&str> = recovered.dropped.iter().map(|w| w.path.as_str()).collect();
+
+        assert!(
+            paths.contains(&"workspaces[0].panes[0]"),
+            "first original pane must be reported: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"workspaces[0].panes[1]"),
+            "second original pane must be reported: {paths:?}"
         );
     }
 

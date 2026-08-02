@@ -5,6 +5,9 @@ import { useDockStore } from "@/stores/dock-store";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { collectSettingsSnapshot } from "@/lib/settings-snapshot";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
+import { isSettingsWriteBlocked } from "@/lib/settings-write-guard";
+
+export { setBlockPersist } from "@/lib/settings-write-guard";
 
 /** Default maximum serialized terminal output size to cache (256KB). Overridden by profileDefaults.maxOutputCacheKB. */
 const DEFAULT_MAX_CACHE_CHARS = 256 * 1024;
@@ -34,14 +37,6 @@ export function truncateFromEnd(data: string, maxChars: number): string {
 /** True once saveBeforeClose() starts — prevents duplicate persistSession() calls during teardown. */
 let closingDown = false;
 
-/** When true, persistSession/saveBeforeClose skip writing settings.json (e.g. parse_error recovery). */
-let persistBlocked = false;
-
-/** Block settings persistence (e.g. when settings.json had a parse error and we don't want to overwrite it). */
-export function setBlockPersist(blocked: boolean): void {
-  persistBlocked = blocked;
-}
-
 /** Reset closingDown flag (for tests only). */
 export function _resetClosingDown(): void {
   closingDown = false;
@@ -60,7 +55,7 @@ async function persistSessionCore(): Promise<void> {
  * No-op if saveBeforeClose() is already in progress (prevents duplicate saves during teardown).
  */
 export async function persistSession(): Promise<void> {
-  if (closingDown || persistBlocked) return;
+  if (closingDown || isSettingsWriteBlocked()) return;
   await persistSessionCore();
 }
 
@@ -80,7 +75,7 @@ export async function saveBeforeClose(): Promise<void> {
 
   // When settings had a parse error, don't overwrite the user's original file with defaults.
   // Terminal output caching is still safe — only settings.json persistence is blocked.
-  if (persistBlocked) return;
+  if (isSettingsWriteBlocked()) return;
 
   const wsState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();

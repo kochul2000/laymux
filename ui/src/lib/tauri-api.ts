@@ -8,6 +8,7 @@ import type { TerminalOutputEnvelopePayload } from "./terminal-output-envelope";
 import type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import type { InitialExecutionHost } from "./terminal-execution-host";
+import { assertSettingsWriteAllowed } from "./settings-write-guard";
 
 export type { SyncCwdConfig, SyncCwdDefaults } from "./sync-cwd-config";
 
@@ -470,6 +471,7 @@ export async function getSettingsPath(): Promise<string> {
 }
 
 export async function saveSettings(settings: Settings): Promise<void> {
+  assertSettingsWriteAllowed();
   return invoke("save_settings", { settings });
 }
 
