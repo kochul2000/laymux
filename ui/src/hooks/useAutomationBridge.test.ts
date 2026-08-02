@@ -48,6 +48,7 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
+  getCodexSessionIds: vi.fn().mockResolvedValue({}),
   readFileForViewer: vi.fn(),
   reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
   writeTerminalInput: vi.fn().mockResolvedValue(undefined),
