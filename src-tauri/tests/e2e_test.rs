@@ -2369,6 +2369,34 @@ fn settings_load_result_round_trip_repaired() {
 }
 
 #[test]
+fn settings_load_result_round_trip_recovered() {
+    // issue #701 / ADR-0119: the recovered status is its own contract entry —
+    // the frontend keys settings-write blocking off it.
+    let result = SettingsLoadResult::Recovered {
+        settings: Settings::default(),
+        dropped: vec![ValidationWarning {
+            path: "terminal.parserAdmission.hiddenShare".into(),
+            message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다".into(),
+            repaired: true,
+        }],
+        warnings: vec![ValidationWarning {
+            path: "docks[0].size".into(),
+            message: "독 크기가 음수여서 기본값(240)으로 수정했습니다.".into(),
+            repaired: true,
+        }],
+        settings_path: "C:\\Users\\test\\settings.json".into(),
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    assert!(json.contains("\"status\":\"recovered\""));
+    // Lost values and structural repairs travel as separate lists so the modal
+    // does not count a repair as a loss.
+    assert!(json.contains("\"dropped\""));
+    assert!(json.contains("\"settingsPath\""));
+    let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
+    assert_eq!(result, parsed);
+}
+
+#[test]
 fn settings_load_result_round_trip_parse_error() {
     let result = SettingsLoadResult::ParseError {
         settings: Settings::default(),
@@ -2376,6 +2404,9 @@ fn settings_load_result_round_trip_parse_error() {
         settings_path: "C:\\Users\\test\\settings.json".into(),
     };
     let json = serde_json::to_string(&result).unwrap();
+    // The frontend reads `settingsPath`; a snake_case field would silently
+    // arrive as undefined there.
+    assert!(json.contains("\"settingsPath\""), "json: {json}");
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);
 }

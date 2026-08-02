@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSyncEvents } from "@/hooks/useSyncEvents";
 import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
-import { saveBeforeClose } from "@/lib/persist-session";
+import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -12,7 +12,16 @@ import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeome
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLanguageSync } from "@/hooks/useLanguageSync";
 import { useTerminalParserAdmissionSettings } from "@/hooks/useTerminalParserAdmissionSettings";
-import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
+/**
+ * Loaded only when settings.json failed to load cleanly. A static import would
+ * put it in the startup payload of every healthy launch; splitting the chunk
+ * alone would not, since the entry would still import it eagerly.
+ */
+const SettingsRecoveryModal = lazy(() =>
+  import("@/components/views/SettingsRecoveryModal").then((m) => ({
+    default: m.SettingsRecoveryModal,
+  })),
+);
 import { closeTerminalSession } from "@/lib/tauri-api";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
@@ -103,25 +112,34 @@ export function App() {
   }
 
   // Show recovery modal when settings had issues
+  const recoveryStatus = loadStatus.result?.status;
   const showRecovery =
     !recoveryDismissed &&
     loaded &&
-    loadStatus.result != null &&
-    (loadStatus.result.status === "parse_error" || loadStatus.result.status === "repaired");
+    (recoveryStatus === "parse_error" ||
+      recoveryStatus === "repaired" ||
+      recoveryStatus === "recovered");
 
   return (
     <div className="h-screen" data-testid="app-root">
       <AppLayout />
       {showRecovery && loadStatus.result && (
-        <SettingsRecoveryModal
-          loadResult={loadStatus.result}
-          onDismiss={() => setRecoveryDismissed(true)}
-          onReset={() => {
-            setRecoveryDismissed(true);
-            // Reload to apply fresh defaults
-            window.location.reload();
-          }}
-        />
+        <Suspense fallback={null}>
+          <SettingsRecoveryModal
+            loadResult={loadStatus.result}
+            onDismiss={() => {
+              // Recovery held settings writes back until the user saw the dropped
+              // paths. Acknowledging the modal releases them (ADR-0119).
+              if (recoveryStatus === "recovered") setBlockPersist(false);
+              setRecoveryDismissed(true);
+            }}
+            onReset={() => {
+              setRecoveryDismissed(true);
+              // Reload to apply fresh defaults
+              window.location.reload();
+            }}
+          />
+        </Suspense>
       )}
       <LocalMobileModeOverlay />
       {!localMobileModeActive && <RemoteControlOverlay />}

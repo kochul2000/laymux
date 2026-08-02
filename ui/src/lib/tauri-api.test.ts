@@ -26,6 +26,7 @@ import {
   getSyncGroupTerminals,
   handleLxMessage,
   loadSettings,
+  resetSettings,
   saveSettings,
   getRemoteAccessStatus,
   getRemoteHostCandidates,
@@ -47,11 +48,13 @@ import {
   resetTerminalInputDeliveryCounters,
   settleTerminalInputDelivery,
 } from "./terminal-input-delivery-metrics";
+import { setBlockPersist } from "./settings-write-guard";
 
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
 
 beforeEach(() => {
+  setBlockPersist(false);
   vi.clearAllMocks();
   resetTerminalInputDeliveryCounters();
 });
@@ -433,6 +436,26 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("save_settings", {
         settings,
       });
+    });
+
+    it("rejects every regular settings write while recovery is unacknowledged", async () => {
+      setBlockPersist(true);
+      const settings = { defaultProfile: "PowerShell", profiles: [] } as any;
+
+      await expect(saveSettings(settings)).rejects.toThrow(
+        "Settings persistence is blocked until recovery is acknowledged",
+      );
+
+      expect(mockInvoke).not.toHaveBeenCalled();
+    });
+
+    it("still permits the explicit settings reset while regular writes are blocked", async () => {
+      setBlockPersist(true);
+      mockInvoke.mockResolvedValue({ defaultProfile: "PowerShell", profiles: [] });
+
+      await resetSettings();
+
+      expect(mockInvoke).toHaveBeenCalledWith("reset_settings");
     });
   });
 

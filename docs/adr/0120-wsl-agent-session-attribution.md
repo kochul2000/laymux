@@ -1,6 +1,6 @@
-# 0119. WSL agent 세션은 terminal 환경 marker와 Linux PID로 귀속한다
+# 0120. WSL agent 세션은 terminal 환경 marker와 Linux PID로 귀속한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-02
 - Source: 사용자 후속 요구, PR #739 실기 검증, [architecture/data-flow.md §13](../architecture/data-flow.md#13-session-persistence--cache), [ADR-0118](0118-codex-session-pid-attribution.md) 확장
 - Extends: [ADR-0118](0118-codex-session-pid-attribution.md)
