@@ -8,7 +8,7 @@
 //!
 //! Values are dropped, never coerced: dropping reuses each field's existing
 //! default as the single source of truth, so adding a field never requires
-//! touching the recovery path. See ADR-0118.
+//! touching the recovery path. See ADR-0119.
 
 use serde_json::Value;
 use serde_path_to_error::Segment;

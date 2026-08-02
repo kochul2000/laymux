@@ -338,7 +338,7 @@ pub struct WorkspacePane {
     #[serde(default)]
     pub id: String,
     // All four bounds carry a default so a single mistyped coordinate drops that
-    // field instead of the whole pane (ADR-0118). `validate_and_repair`
+    // field instead of the whole pane (ADR-0119). `validate_and_repair`
     // normalizes the resulting zeros anyway.
     #[serde(default)]
     pub x: f64,

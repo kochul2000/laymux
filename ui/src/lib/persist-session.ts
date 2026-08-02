@@ -45,8 +45,10 @@ export function _resetClosingDown(): void {
 /**
  * Core implementation: gathers state from all stores and saves to settings.json.
  */
-async function persistSessionCore(): Promise<void> {
-  await saveSettings(await collectSettingsSnapshot());
+async function persistSessionCore(
+  snapshot?: Awaited<ReturnType<typeof collectSettingsSnapshot>>,
+): Promise<void> {
+  await saveSettings(snapshot ?? (await collectSettingsSnapshot()));
 }
 
 /**
@@ -66,6 +68,12 @@ export async function persistSession(): Promise<void> {
  */
 export async function saveBeforeClose(): Promise<void> {
   closingDown = true;
+
+  // Agent process/title tracking can disappear as soon as Ctrl+C returns to
+  // the shell. Fully capture the pane/session attribution before interrupting.
+  const settingsSnapshot = isSettingsWriteBlocked()
+    ? undefined
+    : await collectSettingsSnapshot();
 
   // Kill-on-exit (issue #451): before serializing scrollback, send Ctrl+C to
   // running terminals so cron/agents wind down and Claude/Codex print their
@@ -100,7 +108,7 @@ export async function saveBeforeClose(): Promise<void> {
   }
 
   // 2. Persist session directly (bypasses closingDown guard)
-  cachePromises.push(persistSessionCore());
+  cachePromises.push(persistSessionCore(settingsSnapshot));
 
   // Wait for save + persist before cleaning — otherwise clean may race and
   // delete files that are still being written.
