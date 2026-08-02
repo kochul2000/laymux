@@ -233,8 +233,12 @@ pub const TERMINAL_OUTPUT_ENVELOPE_MAX_WIRE_BYTES: usize = 1024 * 1024;
 pub const TERMINAL_OUTPUT_ENVELOPE_QUIET_MS: u64 = 4;
 /// Maximum batching delay before a non-full envelope is emitted.
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS: u64 = 16;
-/// Server-side bound for a lost envelope receipt.
-pub const TERMINAL_OUTPUT_ENVELOPE_RECEIPT_TIMEOUT_MS: u64 = 5_000;
+/// Server-side bound for a lost envelope receipt or continuation control.
+///
+/// This is deliberately longer than the frontend's 5 s command watchdog. It
+/// covers one bounded 5 s WebView stall, the pull watchdog's 3 s recovery
+/// interval, one 5 s control attempt, and 2 s of scheduling margin (ADR-0122).
+pub const TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS: u64 = 15_000;
 /// Maximum direct-event head start before an exact pull may return its envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS: u64 = 1_000;
 /// Total attempts for one immutable envelope before emit fail-stop.
@@ -243,8 +247,6 @@ pub const TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS: u8 = 3;
 pub const EVENT_TERMINAL_OUTPUT_FAIL_STOPPED: &str = "terminal-output-fail-stopped";
 /// Interruptible delay between exact retries of the same envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_EMIT_RETRY_MS: u64 = 5;
-/// Server-side bound for a continuation whose close control was lost.
-pub const TERMINAL_OUTPUT_CONTINUATION_CONTROL_TIMEOUT_MS: u64 = 5_000;
 /// Maximum bytes in one normal DECSET 2026 frame continuation, opener through terminator.
 pub const TERMINAL_OUTPUT_DEC2026_CONTINUATION_MAX_BYTES: usize = 1024 * 1024;
 /// One platform PTY callback can already own this many bytes when a credit edge is observed.

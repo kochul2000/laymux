@@ -9,9 +9,9 @@ use super::delivery_worker::{
 };
 use super::TerminalOutputDelta;
 use crate::constants::{
-    TERMINAL_OUTPUT_CONTINUATION_CONTROL_TIMEOUT_MS, TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES,
-    TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS, TERMINAL_OUTPUT_ENVELOPE_RECEIPT_TIMEOUT_MS,
+    TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES, TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS,
     TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS, TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES,
+    TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS,
 };
 use crate::lock_ext::MutexExt;
 
@@ -55,8 +55,8 @@ impl DesktopOutputDelivery {
         Self::with_timeouts(
             terminal_id,
             generation,
-            Duration::from_millis(TERMINAL_OUTPUT_ENVELOPE_RECEIPT_TIMEOUT_MS),
-            Duration::from_millis(TERMINAL_OUTPUT_CONTINUATION_CONTROL_TIMEOUT_MS),
+            Duration::from_millis(TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS),
+            Duration::from_millis(TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS),
         )
     }
 

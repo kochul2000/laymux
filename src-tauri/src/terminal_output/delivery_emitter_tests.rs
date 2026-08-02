@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn production_delivery_expiry_outlives_a_frontend_stall_and_recovery_round() {
+    let delivery = DesktopOutputDelivery::new("production-expiry-budget".into(), 1);
+
+    // ADR-0122: one 5 s WebView stall, the pull watchdog's bounded 3 s
+    // recovery poll, and one 5 s control attempt must all fit before the
+    // backend destroys the frozen envelope/grant. The remaining 2 s is the
+    // explicit scheduling margin rather than an accidental equality race.
+    let expected = Duration::from_secs(15);
+    assert_eq!(delivery.inner.receipt_timeout, expected);
+    assert_eq!(delivery.inner.continuation_timeout, expected);
+}
+
+#[test]
 fn receipted_envelope_cannot_rearm_a_synchronous_emitter_call() {
     let delivery = DesktopOutputDelivery::new("receipt-before-arm".into(), 1);
     install(&delivery, 0);
