@@ -213,7 +213,7 @@ pub(super) fn arm_emitter_call(
     {
         return Ok(false);
     }
-    state.emitter_call_expires_at = Some(Instant::now() + inner.receipt_timeout);
+    state.emitter_call_expires_at = Some(Instant::now() + inner.emitter_call_timeout);
     inner.changed.notify_all();
     Ok(true)
 }

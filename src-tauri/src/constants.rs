@@ -237,8 +237,13 @@ pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS: u64 = 16;
 ///
 /// This is deliberately longer than the frontend's 5 s command watchdog. It
 /// covers one bounded 5 s WebView stall, the pull watchdog's 3 s recovery
-/// interval, one 5 s control attempt, and 2 s of scheduling margin (ADR-0122).
-pub const TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS: u64 = 15_000;
+/// interval, one 5 s repair invoke, the worst-case hold -> close -> receipt
+/// FIFO (3 * 5 s), and 2 s of scheduling margin (ADR-0122).
+pub const TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS: u64 = 30_000;
+/// Bound for one synchronous desktop event-emitter call.
+pub const TERMINAL_OUTPUT_ENVELOPE_EMITTER_CALL_TIMEOUT_MS: u64 = 5_000;
+/// Bound for joining the desktop delivery workers after close/retirement.
+pub const TERMINAL_OUTPUT_DELIVERY_WORKER_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
 /// Maximum direct-event head start before an exact pull may return its envelope.
 pub const TERMINAL_OUTPUT_ENVELOPE_DIRECT_EVENT_GRACE_MAX_MS: u64 = 1_000;
 /// Total attempts for one immutable envelope before emit fail-stop.

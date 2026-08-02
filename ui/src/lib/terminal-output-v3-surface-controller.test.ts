@@ -427,6 +427,34 @@ describe("TerminalOutputV3SurfaceController", () => {
     ]);
   });
 
+  it("settles a same-envelope hold and close before sending its receipt", async () => {
+    const hold = deferred<TerminalOutputDeliveryControlResult>();
+    const close = deferred<TerminalOutputDeliveryControlResult>();
+    const h = harness({
+      sendControl: (request) => {
+        if (request.identity.kind === "hold") return hold.promise;
+        if (request.identity.kind === "close") return close.promise;
+        return undefined;
+      },
+    });
+
+    const receiving = h.controller.receive(payload({ data: [...OPEN, ...CLOSE] }), 10);
+    await Promise.resolve();
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "close"]);
+
+    hold.resolve({ kind: "accepted", identity: h.controlCalls[0].identity });
+    await Promise.resolve();
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual(["hold", "close"]);
+
+    close.resolve({ kind: "accepted", identity: h.controlCalls[1].identity });
+    await expect(receiving).resolves.toEqual({ kind: "accepted", envelopeId: 1 });
+    expect(h.controlCalls.map(({ identity }) => identity.kind)).toEqual([
+      "hold",
+      "close",
+      "receipt",
+    ]);
+  });
+
   it("retains a bounded current+previous retry ledger after receipt", async () => {
     const receipt = deferred<TerminalOutputDeliveryControlResult>();
     const h = harness({ receipt });

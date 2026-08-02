@@ -9,9 +9,10 @@ use super::delivery_worker::{
 };
 use super::TerminalOutputDelta;
 use crate::constants::{
-    TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES, TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS,
-    TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS, TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES,
-    TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS,
+    TERMINAL_OUTPUT_DELIVERY_WORKER_SHUTDOWN_TIMEOUT_MS,
+    TERMINAL_OUTPUT_ENVELOPE_EMITTER_CALL_TIMEOUT_MS, TERMINAL_OUTPUT_ENVELOPE_MAX_BYTES,
+    TERMINAL_OUTPUT_ENVELOPE_MAX_DELTAS, TERMINAL_OUTPUT_ENVELOPE_REPAIR_MAX_ATTEMPTS,
+    TERMINAL_OUTPUT_MAX_DESKTOP_RETAINED_BYTES, TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS,
 };
 use crate::lock_ext::MutexExt;
 
@@ -41,6 +42,7 @@ pub(super) struct DeliveryInner {
     pub(super) changed: Condvar,
     pub(super) receipt_timeout: Duration,
     pub(super) continuation_timeout: Duration,
+    pub(super) emitter_call_timeout: Duration,
 }
 
 pub struct DesktopOutputDelivery {
@@ -57,6 +59,8 @@ impl DesktopOutputDelivery {
             generation,
             Duration::from_millis(TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS),
             Duration::from_millis(TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS),
+            Duration::from_millis(TERMINAL_OUTPUT_ENVELOPE_EMITTER_CALL_TIMEOUT_MS),
+            Duration::from_millis(TERMINAL_OUTPUT_DELIVERY_WORKER_SHUTDOWN_TIMEOUT_MS),
         )
     }
 
@@ -65,6 +69,8 @@ impl DesktopOutputDelivery {
         generation: u64,
         receipt_timeout: Duration,
         continuation_timeout: Duration,
+        emitter_call_timeout: Duration,
+        shutdown_timeout: Duration,
     ) -> Self {
         Self {
             inner: Arc::new(DeliveryInner {
@@ -74,9 +80,10 @@ impl DesktopOutputDelivery {
                 changed: Condvar::new(),
                 receipt_timeout,
                 continuation_timeout,
+                emitter_call_timeout,
             }),
             worker: Mutex::new(None),
-            shutdown_timeout: Mutex::new(continuation_timeout),
+            shutdown_timeout: Mutex::new(shutdown_timeout),
             shutdown_error: Mutex::new(None),
         }
     }
@@ -87,7 +94,7 @@ impl DesktopOutputDelivery {
         generation: u64,
         timeout: Duration,
     ) -> Self {
-        Self::with_timeouts(terminal_id, generation, timeout, timeout)
+        Self::with_timeouts(terminal_id, generation, timeout, timeout, timeout, timeout)
     }
 
     pub fn start(
@@ -390,7 +397,6 @@ impl DesktopOutputDelivery {
             ));
         }
         in_flight.repair_attempts += 1;
-        in_flight.expires_at = Instant::now() + self.inner.receipt_timeout;
         let envelope = in_flight.envelope.clone();
         self.inner.changed.notify_all();
         Ok(repair_response(
@@ -499,5 +505,10 @@ impl DesktopOutputDelivery {
     #[cfg(test)]
     pub(super) fn set_shutdown_timeout_for_test(&self, timeout: Duration) {
         *self.shutdown_timeout.lock().unwrap() = timeout;
+    }
+
+    #[cfg(test)]
+    pub(super) fn shutdown_timeout_for_test(&self) -> Duration {
+        *self.shutdown_timeout.lock().unwrap()
     }
 }
