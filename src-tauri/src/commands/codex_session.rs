@@ -7,7 +7,8 @@ use tauri::State;
 
 use super::claude_session::is_valid_session_id;
 use crate::constants::{
-    CODEX_SESSION_DIRECTORY_DEPTH, CODEX_SESSION_META_MAX_BYTES, ENV_CODEX_HOME,
+    CODEX_SESSION_DIRECTORY_DEPTH, CODEX_SESSION_META_MAX_BYTES, CODEX_SESSION_NANOS_PER_DAY,
+    ENV_CODEX_HOME,
 };
 use crate::lock_ext::MutexExt;
 use crate::path_utils;
@@ -92,7 +93,14 @@ fn resolve_codex_sessions_dir_from(
         .join("sessions")
 }
 
-fn collect_rollout_paths(dir: &Path, depth: u8, paths: &mut Vec<PathBuf>) {
+fn collect_rollout_paths(dir: &Path, depth: u8, cutoff_day: Option<i64>, paths: &mut Vec<PathBuf>) {
+    if depth == 0
+        && cutoff_day
+            .is_some_and(|minimum| rollout_day_from_path(dir).is_some_and(|day| day < minimum))
+    {
+        return;
+    }
+
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -102,7 +110,7 @@ fn collect_rollout_paths(dir: &Path, depth: u8, paths: &mut Vec<PathBuf>) {
         };
         let path = entry.path();
         if file_type.is_dir() && depth > 0 {
-            collect_rollout_paths(&path, depth - 1, paths);
+            collect_rollout_paths(&path, depth - 1, cutoff_day, paths);
         } else if file_type.is_file()
             && path
                 .file_name()
@@ -114,10 +122,44 @@ fn collect_rollout_paths(dir: &Path, depth: u8, paths: &mut Vec<PathBuf>) {
     }
 }
 
-fn read_codex_rollout_files(dir: &Path, max_age_hours: Option<u64>) -> Vec<CodexRolloutFile> {
-    let mut paths = Vec::new();
-    collect_rollout_paths(dir, CODEX_SESSION_DIRECTORY_DEPTH, &mut paths);
+fn rollout_day_from_path(path: &Path) -> Option<i64> {
+    let day = path.file_name()?.to_str()?;
+    let month = path.parent()?.file_name()?.to_str()?;
+    let year = path.parent()?.parent()?.file_name()?.to_str()?;
+    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    days_from_civil(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?)
+}
 
+/// Convert a validated Gregorian date to days since 1970-01-01.
+fn days_from_civil(year: i64, month: u32, day: u32) -> Option<i64> {
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if day == 0 || day > days_in_month {
+        return None;
+    }
+
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let adjusted_month = i64::from(month) + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * adjusted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * 146_097 + day_of_era - 719_468)
+}
+
+fn read_codex_rollout_files(dir: &Path, max_age_hours: Option<u64>) -> Vec<CodexRolloutFile> {
     let cutoff = max_age_hours.filter(|hours| *hours > 0).and_then(|hours| {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -129,6 +171,10 @@ fn read_codex_rollout_files(dir: &Path, max_age_hours: Option<u64>) -> Vec<Codex
                 now.as_nanos().saturating_sub(age_nanos)
             })
     });
+    let cutoff_day =
+        cutoff.and_then(|nanos| i64::try_from(nanos / CODEX_SESSION_NANOS_PER_DAY).ok());
+    let mut paths = Vec::new();
+    collect_rollout_paths(dir, CODEX_SESSION_DIRECTORY_DEPTH, cutoff_day, &mut paths);
 
     paths
         .into_iter()
@@ -172,7 +218,9 @@ fn parse_rollout_header(path: &Path, cutoff: Option<u128>) -> Option<CodexRollou
             .get("source")
             .and_then(|source| source.get("subagent"))
             .is_some();
-    if is_subagent {
+    let is_non_interactive_exec =
+        payload.get("source").and_then(serde_json::Value::as_str) == Some("exec");
+    if is_subagent || is_non_interactive_exec {
         return None;
     }
 
@@ -258,6 +306,62 @@ mod tests {
         let sessions = read_codex_rollout_files(temp.path(), None);
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "parent-session");
+    }
+
+    #[test]
+    fn ignores_non_interactive_exec_rollouts() {
+        let temp = tempfile::tempdir().unwrap();
+        write_rollout(
+            temp.path(),
+            "rollout-cli.jsonl",
+            "interactive-session",
+            "/work/project",
+            ",\"source\":\"cli\",\"thread_source\":\"user\"",
+        );
+        write_rollout(
+            temp.path(),
+            "rollout-exec.jsonl",
+            "exec-session",
+            "/work/project",
+            ",\"source\":\"exec\",\"thread_source\":\"user\"",
+        );
+
+        let sessions = read_codex_rollout_files(temp.path(), None);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "interactive-session");
+    }
+
+    #[test]
+    fn skips_date_directories_older_than_cutoff_day() {
+        let temp = tempfile::tempdir().unwrap();
+        let old = temp.path().join("2026").join("08").join("01");
+        let current = temp.path().join("2026").join("08").join("02");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&current).unwrap();
+        write_rollout(
+            &old,
+            "rollout-old.jsonl",
+            "old-session",
+            "/work/project",
+            "",
+        );
+        write_rollout(
+            &current,
+            "rollout-current.jsonl",
+            "current-session",
+            "/work/project",
+            "",
+        );
+
+        let mut paths = Vec::new();
+        collect_rollout_paths(
+            temp.path(),
+            CODEX_SESSION_DIRECTORY_DEPTH,
+            Some(days_from_civil(2026, 8, 2).unwrap()),
+            &mut paths,
+        );
+
+        assert_eq!(paths, vec![current.join("rollout-current.jsonl")]);
     }
 
     #[test]

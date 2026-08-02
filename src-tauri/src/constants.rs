@@ -65,6 +65,8 @@ pub const ENV_CODEX_HOME: &str = "CODEX_HOME";
 pub const CODEX_SESSION_META_MAX_BYTES: usize = 256 * 1024;
 /// Codex stores rollout files below `sessions/YYYY/MM/DD`.
 pub const CODEX_SESSION_DIRECTORY_DEPTH: u8 = 3;
+/// Nanoseconds per UTC day, used to prune dated Codex rollout directories.
+pub const CODEX_SESSION_NANOS_PER_DAY: u128 = 86_400_000_000_000;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";

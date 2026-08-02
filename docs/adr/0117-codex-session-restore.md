@@ -21,7 +21,8 @@ rollout 탐색은 다음 불변식을 따른다.
 - laymux host process의 `CODEX_HOME`이 있으면 그 디렉터리를 우선하고, 없으면 host OS 사용자 홈의 `.codex`, 마지막으로 상대 `.codex`를 사용한다.
 - 날짜 디렉터리 `sessions/YYYY/MM/DD`까지만 순회하고 `rollout-*.jsonl`만 읽는다.
 - 각 파일은 첫 `session_meta` 행만 256 KiB 상한으로 읽는다. 전체 대화 기록은 읽지 않는다.
-- `payload.source.subagent`, non-null `parent_thread_id`, 또는 `thread_source: "subagent"`가 있는 rollout은 자동 복원 후보에서 제외한다.
+- `payload.source.subagent`, non-null `parent_thread_id`, 또는 `thread_source: "subagent"`가 있는 subagent rollout과 `source: "exec"`인 비대화형 rollout은 자동 복원 후보에서 제외한다.
+- 최대 나이를 설정하면 cutoff 이전 `YYYY/MM/DD` 디렉터리는 파일을 열거하기 전에 제외하고, `restoreSession`을 끄면 rollout 수집을 생략하며 저장된 Codex ID도 제거한다.
 - 최대 나이는 파일 수정 시각의 nanosecond 정밀도로 판정한다. 같은 CWD에서는 수정 시각이 가장 최신인 후보를 선택하고, 시각이 같으면 session ID 사전순으로 결정해 파일시스템 열거 순서에 의존하지 않는다.
 
 다음 시작에서 TerminalView는 영숫자로 시작하고 이후 영숫자·하이픈·밑줄만 포함하는 ID를 `codex resume <id>`로 변환한다. Rust도 `claude --resume <id>`와 `codex resume <id>` 두 정확한 형태만 비구조화 `startupCommandOverride`로 허용한다. 사용자가 실행한 Restart View는 기존 Claude 복원과 같이 새 세션으로 시작한다.
@@ -39,6 +40,8 @@ rollout 탐색은 다음 불변식을 따른다.
 ## Consequences
 
 Codex pane도 앱 재시작 뒤 대화를 이어갈 수 있고 사용자는 복원 여부와 유효 기간을 Settings에서 제어한다. subagent와 명령 옵션을 세션 ID로 오인하는 경로를 차단하며, settings metadata는 상태 메시지 필드에는 `live`, 복원 필드에는 `nextUse`를 개별 보고한다.
+
+startup override의 공통 세션 ID 검증은 첫 문자를 영숫자로 제한하므로 기존 Claude 경로에서도 `_`나 `-`로 시작하는 값은 더 이상 허용하지 않는다. 실제 Claude/Codex UUID에는 영향이 없고, CLI 옵션을 세션 ID로 오인하지 않는 안전 경계를 우선한다.
 
 동일 CWD에 최상위 Codex session이 여러 개면 가장 최신 rollout을 선택하므로 여러 pane이 같은 대화를 복원할 수 있다. 이는 Codex metadata에 pane/PID 연결 정보가 없는 현재 제약의 보수적 결과다.
 

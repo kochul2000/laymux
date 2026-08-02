@@ -436,6 +436,7 @@ describe("persistSession", () => {
     dockState.setDockPaneView("left", dockPaneId, {
       type: "TerminalView",
       profile: "WSL",
+      lastCodexSession: "stale-codex-session",
     });
 
     vi.mocked(getClaudeSessionIds).mockResolvedValue({
@@ -447,6 +448,7 @@ describe("persistSession", () => {
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view.lastClaudeSession).toBe("dock-session-xyz");
+    expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
   });
 
   it("injects lastCodexSession into workspace TerminalView panes from backend", async () => {
@@ -502,7 +504,23 @@ describe("persistSession", () => {
     const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
       .panes[0].view;
     expect(savedView.lastClaudeSession).toBe("current-claude-session");
-    expect(savedView.lastCodexSession).toBeUndefined();
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("skips Codex session collection and clears stored IDs when restore is disabled", async () => {
+    const wsState = useWorkspaceStore.getState();
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    useSettingsStore.getState().setCodex({ restoreSession: false });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(getCodexSessionIds).not.toHaveBeenCalled();
+    expect(savedView).not.toHaveProperty("lastCodexSession");
   });
 
   it("does not inject lastClaudeSession for non-TerminalView panes", async () => {

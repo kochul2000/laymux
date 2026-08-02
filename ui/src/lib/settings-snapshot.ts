@@ -36,13 +36,16 @@ export async function collectSettingsSnapshot(
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
   const codexMaxAge = settingsState.codex?.sessionMaxAgeHours;
+  const restoreCodexSession = settingsState.codex?.restoreSession !== false;
   const [backendCwds, claudeSessionIds, codexSessionIds] =
     options.includeRuntimeStructuralState === false
       ? [{}, {}, {}]
       : await Promise.all([
           getTerminalCwds().catch(() => ({}) as Record<string, string>),
           getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
-          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>),
+          restoreCodexSession
+            ? getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>)
+            : Promise.resolve({} as Record<string, string>),
         ]);
 
   return {
@@ -123,19 +126,20 @@ export async function collectSettingsSnapshot(
       id: workspace.id,
       name: workspace.name,
       panes: workspace.panes.map((pane) => {
-        const viewExtra: Record<string, unknown> = {};
+        const savedView = { ...pane.view } as { type: string; [key: string]: unknown };
         if (pane.view.type === "TerminalView") {
           const terminalId = toTerminalId(pane.id);
           const cwd = backendCwds[terminalId];
-          if (cwd) viewExtra.lastCwd = cwd;
+          if (cwd) savedView.lastCwd = cwd;
+          if (!restoreCodexSession) delete savedView.lastCodexSession;
           const claudeSession = claudeSessionIds[terminalId];
           const codexSession = codexSessionIds[terminalId];
           if (claudeSession) {
-            viewExtra.lastClaudeSession = claudeSession;
-            viewExtra.lastCodexSession = undefined;
+            savedView.lastClaudeSession = claudeSession;
+            delete savedView.lastCodexSession;
           } else if (codexSession) {
-            viewExtra.lastCodexSession = codexSession;
-            viewExtra.lastClaudeSession = undefined;
+            savedView.lastCodexSession = codexSession;
+            delete savedView.lastClaudeSession;
           }
         }
         return {
@@ -144,7 +148,7 @@ export async function collectSettingsSnapshot(
           y: pane.y,
           w: pane.w,
           h: pane.h,
-          view: { ...pane.view, ...viewExtra } as { type: string; [key: string]: unknown },
+          view: savedView,
         };
       }),
     })),
@@ -180,24 +184,25 @@ export async function collectSettingsSnapshot(
       visible: dock.visible,
       size: dock.size,
       panes: dock.panes.map((pane) => {
-        const viewExtra: Record<string, unknown> = {};
+        const savedView = { ...pane.view } as { type: string; [key: string]: unknown };
         if (pane.view.type === "TerminalView") {
           const terminalId = toTerminalId(pane.id);
           const cwd = backendCwds[terminalId];
-          if (cwd) viewExtra.lastCwd = cwd;
+          if (cwd) savedView.lastCwd = cwd;
+          if (!restoreCodexSession) delete savedView.lastCodexSession;
           const claudeSession = claudeSessionIds[terminalId];
           const codexSession = codexSessionIds[terminalId];
           if (claudeSession) {
-            viewExtra.lastClaudeSession = claudeSession;
-            viewExtra.lastCodexSession = undefined;
+            savedView.lastClaudeSession = claudeSession;
+            delete savedView.lastCodexSession;
           } else if (codexSession) {
-            viewExtra.lastCodexSession = codexSession;
-            viewExtra.lastClaudeSession = undefined;
+            savedView.lastCodexSession = codexSession;
+            delete savedView.lastClaudeSession;
           }
         }
         return {
           id: pane.id,
-          view: { ...pane.view, ...viewExtra },
+          view: savedView,
           x: pane.x,
           y: pane.y,
           w: pane.w,

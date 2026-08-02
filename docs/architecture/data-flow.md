@@ -1196,7 +1196,7 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
     │     │     → 알려진 interactive terminal의 현재 CWD와 agent 세션 파일을 합성
     │     │     → Codex는 CODEX_HOME/sessions/**/rollout-*.jsonl의 첫 session_meta만 읽고
-    │     │       subagent를 제외한 동일 CWD 최신 ID를 lastCodexSession에 기록
+    │     │       subagent·비대화형 exec를 제외한 동일 CWD 최신 ID를 lastCodexSession에 기록
     │     └─ settings.json (lastCwd·lastClaudeSession·lastCodexSession 포함)
     └─ 3. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
