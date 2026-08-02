@@ -11,8 +11,8 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
 /**
- * Keep the OS sleep inhibitor in step with the user's mode and the terminals'
- * busy state (ADR-0114).
+ * Keep the OS sleep inhibitor in step with the user's two axes and the
+ * terminals' busy state (ADR-0115).
  *
  * Mount once, at the app root. It subscribes to the stores instead of selecting
  * from them: the host component renders nothing from this state, and a busy
@@ -26,14 +26,13 @@ import { useTerminalStore } from "@/stores/terminal-store";
 export function useSleepPrevention(): void {
   useEffect(() => {
     const sync = () => {
-      const mode = useSettingsStore.getState().power.sleepPrevention;
-      // "off" needs no answer from the terminals, which is the common case —
-      // don't walk them on every store update to reach a foregone conclusion.
-      const want =
-        mode === "off"
-          ? false
-          : shouldInhibitSleep(mode, hasWorkingTerminal(useTerminalStore.getState().instances));
-      requestSleepInhibit(want);
+      const axes = useSettingsStore.getState().power;
+      // With the policy off the terminals cannot change the answer, which is
+      // the common case — don't walk them on every store update to reach a
+      // foregone conclusion.
+      const hasBusy =
+        axes.keepAwakeWhenBusy && hasWorkingTerminal(useTerminalStore.getState().instances);
+      requestSleepInhibit(shouldInhibitSleep(axes, hasBusy));
     };
 
     // A reloaded WebView cannot know what the backend still holds, so the first

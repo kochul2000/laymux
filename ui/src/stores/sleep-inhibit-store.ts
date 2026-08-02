@@ -2,13 +2,14 @@ import { create } from "zustand";
 
 /**
  * What the OS sleep inhibitor is actually doing, as last reported by the
- * backend (ADR-0114).
+ * backend (ADR-0114, ADR-0115).
  *
- * Separate from `settings.power.sleepPrevention`, which is what the user asked
- * for. The two differ whenever a request does not take — no `systemd-inhibit`,
- * an unsupported platform, a backend that answers with a different state — and
- * the top-bar toggle has to show the difference rather than claim the machine
- * is being kept awake when it is not.
+ * Separate from `settings.power`, which is what the user asked for. The two
+ * differ whenever a request does not take — no `systemd-inhibit`, an
+ * unsupported platform, a backend that answers with a different state. The
+ * top-bar button reads `failed` from here so a refused request is visible;
+ * `active` exists for the coordinator, which needs to know what is actually
+ * held to decide what to send next.
  */
 interface SleepInhibitState {
   /** Backend-confirmed: an inhibitor is held right now. */

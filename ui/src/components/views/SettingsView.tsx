@@ -74,7 +74,6 @@ import {
   type InputMode,
 } from "@/lib/terminal-input-composer-state";
 import type { PastePathSeparator } from "@/lib/smart-text";
-import type { SleepPreventionMode } from "@/lib/sleep-prevention";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
@@ -1934,23 +1933,20 @@ function InterfaceSection() {
       </SubGroup>
 
       <SubGroup title={t("interface.groupPower")}>
-        <SettingRow
-          label={t("interface.sleepPrevention")}
-          desc={t("interface.sleepPreventionDesc")}
-        >
-          <FocusSelect
-            data-testid="sleep-prevention-select"
-            className={inputCls}
-            value={power.sleepPrevention}
-            onChange={(e) =>
-              setDraftPower({ sleepPrevention: e.target.value as SleepPreventionMode })
-            }
-          >
-            <option value="off">{t("interface.sleepPreventionOff")}</option>
-            <option value="always">{t("interface.sleepPreventionAlways")}</option>
-            <option value="whenBusy">{t("interface.sleepPreventionWhenBusy")}</option>
-          </FocusSelect>
-        </SettingRow>
+        <ToggleRow
+          label={t("interface.keepAwake")}
+          desc={t("interface.keepAwakeDesc")}
+          testid="keep-awake-toggle"
+          checked={power.keepAwake}
+          onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwake: v }))}
+        />
+        <ToggleRow
+          label={t("interface.keepAwakeWhenBusy")}
+          desc={t("interface.keepAwakeWhenBusyDesc")}
+          testid="keep-awake-when-busy-toggle"
+          checked={power.keepAwakeWhenBusy}
+          onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwakeWhenBusy: v }))}
+        />
       </SubGroup>
     </div>
   );

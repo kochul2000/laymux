@@ -308,27 +308,35 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(written.widgets.statusLine.enabled).toBe(true);
   });
 
-  it("round-trips the sleep prevention mode", async () => {
+  it("round-trips the two sleep prevention axes independently", async () => {
     applySettingsSnapshot(
-      { power: { sleepPrevention: "whenBusy" } } as unknown as Parameters<
+      { power: { keepAwakeWhenBusy: true } } as unknown as Parameters<
         typeof applySettingsSnapshot
       >[0],
       { includeStructural: false },
     );
 
-    expect(useSettingsStore.getState().power.sleepPrevention).toBe("whenBusy");
-    expect((await collectSettingsSnapshot()).power?.sleepPrevention).toBe("whenBusy");
+    expect(useSettingsStore.getState().power).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: true,
+    });
+    const snapshot = (await collectSettingsSnapshot()).power;
+    expect(snapshot?.keepAwakeWhenBusy).toBe(true);
+    expect(snapshot?.keepAwake).toBe(false);
   });
 
-  it("falls back to off for a hand-edited mode instead of guessing", async () => {
+  it("falls back to off for a hand-edited value instead of reading it for truthiness", async () => {
     applySettingsSnapshot(
-      { power: { sleepPrevention: "Always" } } as unknown as Parameters<
+      { power: { keepAwake: "true", keepAwakeWhenBusy: 1 } } as unknown as Parameters<
         typeof applySettingsSnapshot
       >[0],
       { includeStructural: false },
     );
 
-    expect(useSettingsStore.getState().power.sleepPrevention).toBe("off");
+    expect(useSettingsStore.getState().power).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: false,
+    });
   });
 });
 

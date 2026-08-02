@@ -149,7 +149,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/power",
-        description: "OS 절전 방지 설정입니다. sleepPrevention 은 off(기본), always(항상 재우지 않음), whenBusy(실행 중인 터미널이 있을 때만 재우지 않음) 중 하나입니다. 시스템 절전만 막고 화면 절전은 막지 않습니다.",
+        description: "OS 절전 방지 설정입니다. 서로 독립인 두 축이며 둘 다 기본값 false 입니다. keepAwake 는 상단 바 버튼이 소유하는 수동 스위치로 터미널 상태와 무관하게 재우지 않습니다. keepAwakeWhenBusy 는 실행 중인 터미널이 있을 때만 재우지 않는 정책입니다. 시스템 절전만 막고 화면 절전은 막지 않습니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
