@@ -1188,6 +1188,58 @@ describe("SettingsView", () => {
     expect(exit.settleMs).toBe(1200);
   });
 
+  // -- Terminal section: workspace clear (#726, ADR-0113) --
+
+  it("workspace clear defaults to `clear` and leaves busy panes alone", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("workspace-clear-shell-command-input")).toHaveValue("clear");
+    expect(screen.getByTestId("workspace-clear-busy-policy-select")).toHaveValue("skip");
+    // Ctrl+C tuning only exists for the policy that sends one.
+    expect(screen.queryByTestId("workspace-clear-rounds-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-clear-settle-input")).not.toBeInTheDocument();
+  });
+
+  it("keeps the interrupt tuning hidden for the restart policy", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.selectOptions(screen.getByTestId("workspace-clear-busy-policy-select"), "restart");
+
+    expect(screen.queryByTestId("workspace-clear-rounds-input")).not.toBeInTheDocument();
+  });
+
+  it("persists the workspace clear command and interrupt tuning on Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    const command = screen.getByTestId("workspace-clear-shell-command-input");
+    fireEvent.change(command, { target: { value: "cls" } });
+    await user.selectOptions(screen.getByTestId("workspace-clear-busy-policy-select"), "interrupt");
+
+    fireEvent.change(screen.getByTestId("workspace-clear-rounds-input"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByTestId("workspace-clear-settle-input"), {
+      target: { value: "900" },
+    });
+
+    // Draft only until Save (same contract as every other section).
+    expect(useSettingsStore.getState().workspaceClear.shellCommand).toBe("clear");
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().workspaceClear).toEqual({
+      shellCommand: "cls",
+      busyPolicy: "interrupt",
+      interruptRounds: 4,
+      settleMs: 900,
+    });
+  });
+
   // -- Terminal section: path link host OS open (#687, ADR-0100) --
 
   it("defaults both path-link OS open toggles to on", async () => {

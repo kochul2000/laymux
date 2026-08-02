@@ -331,7 +331,7 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 ### 절전 방지(sleep prevention) 설정
 
-OS 절전 진입을 막는 정책이다(issue #727, [ADR-0113](../adr/0113-sleep-prevention-mode.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
+OS 절전 진입을 막는 정책이다(issue #727, [ADR-0114](../adr/0114-sleep-prevention-mode.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
 
 ```jsonc
 {
@@ -349,6 +349,7 @@ OS 절전 진입을 막는 정책이다(issue #727, [ADR-0113](../adr/0113-sleep
 - **실패는 "모름"이지 "완료"가 아니다.** 실패한 요청을 적용된 것으로 확정하면, 해제에 실패한 뒤 마지막 release 까지 중복으로 보고 건너뛰어 OS 세션 내내 억제가 남는다. 실패하면 확정 상태를 `null` 로 둔다. 커맨드가 요청과 다른 상태를 돌려줘도 같은 규칙으로 보류하고 UI 에 실패로 표시한다.
 - **release 는 dedupe 를 무시하는 별도 경로다**(`releaseSleepInhibit()`). 마지막으로 놓을 기회이므로 보류를 무시하고, 자기 자신의 실패로 취소되지 않으며, 같은 큐를 통과해 in-flight 요청을 추월하지 않는다. 다만 재시도는 유한하다(3회) — 놓지 못하는 머신에서 무한 루프가 되면 안 된다. 백엔드가 이미 해제를 확정한 상태면 아무것도 보내지 않는다.
 - **표시 상태는 백엔드 응답이 소유한다.** `useSleepInhibitStore`(`active`/`failed`)에 커맨드 결과를 기록하고 상단 바 버튼이 그것을 읽는다. 모드에서 파생하면 억제 실패 후에도 "지금 재우지 않는 중"이라고 표시하게 된다.
+- **백엔드가 스스로 바꾼 상태는 이벤트로 되돌아온다.** watchdog 이 재획득하거나 잃는 전이는 요청이 없으므로 프론트의 dedupe 로는 영영 알 수 없다. `SleepInhibitor` 의 sink 가 `sleep-inhibit-changed`(`{active, satisfied}`)를 발행하고, 훅이 그것을 `observeSleepInhibitState()` 로 coordinator·표시 상태에 반영한다. 관측 결과가 원하는 값과 다르면 일반 경로가 그대로 재요청한다.
 - **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. `set_sleep_inhibit` 는 async 커맨드로 `spawn_blocking` 에서 돈다 — Linux 획득이 짧게 블로킹하기 때문이다.
   - **Windows**: 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.
   - **Linux**: `systemd-inhibit --what=idle:sleep --mode=block ... cat` 자식 + laymux 가 쥔 stdin 파이프(프로세스가 죽으면 EOF 로 자동 해제). `systemd-inhibit` 은 inhibit 호출이 실패해도 exec 자체는 성공하고 곧바로 종료하므로, spawn 후 300ms 동안 `try_wait()` 로 지켜본 뒤에야 lock 을 믿는다. stderr 는 전용 리더 스레드가 상한(4KiB)까지 계속 비운다 — 안 비우면 오래 사는 자식이 파이프 포화로 막히고, 실패 시점에 읽으면 억제 mutex 안에서 블로킹된다. 해제는 stdin 을 닫고 300ms 안에 정상 종료를 확인한 뒤, 안 죽으면 kill 한다. kill·wait 실패는 삼키지 않고 전파해 `held` 를 유지한다 — 자식이 살아 있는데 해제됐다고 기록하면 아무도 다시 알아차리지 못한다. 잡고 있던 자식이 나중에 죽으면 `needs_reapply()` 가 감지한다.
@@ -371,6 +372,35 @@ OS 절전 진입을 막는 정책이다(issue #727, [ADR-0113](../adr/0113-sleep
 ```
 
 조율은 **프론트엔드 종료 흐름**이 담당한다([ADR-0048](../adr/0048-kill-terminals-on-exit.md)). `saveBeforeClose()` 는 스크롤백을 직렬화하기 **전에** `interruptTerminalsOnExit()`(`ui/src/lib/interrupt-terminals-on-exit.ts`)를 먼저 await 하므로, 세션 ID 가 캐시에 담긴다. 인터럽트는 종료 전용 커맨드 `interrupt_terminal_on_exit` 로 `0x03` 을 PTY FIFO 에 바로 써서 ConPTY/line discipline 이 포그라운드 앱에 실제 Ctrl+C 를 전달한다. 일반 `write_to_terminal`(`HumanControlOrigin::Local`) 경로는 원격 제어 lease/claim 활성 시 거부되므로, 종료 인터럽트는 owner 게이트를 우회하는 이 전용 경로(ETX 전용)를 쓴다. 특정 앱을 감지하지 않고 열린 모든 터미널에 보내며(유휴 셸에는 무해), 개별 write 실패는 나머지 인터럽트를 막지 않는다. Ctrl+C 사이 간격은 설정이 아니라 상수(120ms)다. Rust 는 `settings.exit` 스키마·기본값·범위 검증(applyMode `live`)만 소유하고 실제 인터럽트 실행에는 관여하지 않는다.
+
+### 워크스페이스 클리어 설정
+
+한 워크스페이스의 `TerminalView` pane 을 한 번에 클리어하는 동작을 제어한다(issue #726, [ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+
+```jsonc
+{
+  "workspaceClear": {
+    "shellCommand": "clear",   // 일반 shell 에 제출할 명령. cmd.exe 는 "cls". 빈 값이면 "clear"
+    "busyPolicy": "skip",      // 작업 중인 pane: "skip"(기본) | "interrupt" | "restart"
+    "interruptRounds": 2,      // interrupt 정책의 Ctrl+C 전송 횟수. 1~10 으로 clamp
+    "settleMs": 400            // 마지막 Ctrl+C 이후 클리어 입력까지 대기(ms). 0~10000 으로 clamp
+  }
+}
+```
+
+무엇을 칠지는 pane 의 activity handler 가 소유한다 — shell 은 `shellCommand`, Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop·less 등)은 `unsupportedApp` 으로 건너뛴다. 제출은 사람 입력과 동일한 `write_terminal_input(submit: true)` 이므로 bracketed paste 처리와 human-control 게이트가 그대로 적용되고, `interrupt` 정책의 Ctrl+C 만 raw `write_to_terminal` 로 보낸다(ETX 를 bracketed paste 로 감싸면 인터럽트가 아니라 붙여넣기가 된다). 종료 시 인터럽트([위](#종료-시-동작kill-on-exit-설정))와 달리 owner 게이트를 우회하는 전용 경로는 쓰지 않는다.
+
+쓰기가 거부된 pane(원격이 제어 lease 를 쥐고 있거나 PTY 가 이미 죽은 경우)은 결과의 `failed` 에 담긴다 — 조용히 버리면 "터미널 pane 이 없는 워크스페이스"와 구분되지 않는다. `interruptThenSubmit` 이 중간에 실패하면 이미 들어간 Ctrl+C 때문에 `interrupted` 와 `failed` 양쪽에 남는다.
+
+`busyPolicy` 는 enum 이라 알 수 없는 값은 파싱 단계에서 거부되고 `describe_settings` 가 허용값 3개를 그대로 내보낸다. 범위 검증(`interruptRounds` 1~10, `settleMs` 0~10000)은 `/exit` 와 같은 계약으로 `semantic_validation.rs` 가 소유하며, 그 외 정규화(빈 `shellCommand` → `clear`, 손으로 편집한 값 clamp)는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다.
+
+Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)로 캡한다. 캡이 없으면 `settleMs: 5000` 같은 정상 설정에서 클리어는 성공했는데 bridge 가 먼저 5초에 끊겨 504 를 돌려주고 pane 별 결과가 유실된다. 캡은 Ctrl+C 횟수를 먼저 지키고 `settleMs` 를 줄이며, 횟수만으로 예산을 넘길 때만 횟수를 낮춘다(그때 남는 시간은 다시 settle 로 돌려준다). 응답의 `waitCapped`·`interruptRounds`·`settleMs` 가 실제로 적용된 값이다. 키보드·버튼 경로는 기다리는 쪽이 없으므로 설정값 그대로 쓴다.
+
+여기에 **새 write 를 더 내보내지 않는 절대 deadline**(`AUTOMATION_CLEAR_DEADLINE_MS`, 4s)이 따로 붙는다. 두 값은 다르다 — sleep 예산(3s)은 우리가 만드는 대기만 줄이고, deadline 은 예정대로 잔 체인이 마지막 클리어를 치는 것까지는 허용해야 하므로 그보다 커야 한다. 순서는 항상 `sleep 예산 < deadline < bridge 예산` 이고 테스트가 이 순서를 고정한다.
+
+deadline 이 필요한 이유는 개별 PTY write 가 제어 큐에서 `PTY_CONTROL_JOB_TIMEOUT_MS`(15s)까지 대기할 수 있고 JS 에서 취소할 방법이 없기 때문이다. 프론트가 보장할 수 있는 것은 "예산이 지난 뒤에는 더 치지 않는다"까지다. 이 게이트가 없으면 504 를 받은 호출자가 재시도하는 동안 원래 체인이 뒤늦게 `/clear` 를 한 번 더 넣는다. deadline 에 걸린 pane 은 이미 들어간 Ctrl+C 를 `interrupted` 에 남긴 채 `failed` 에도 사유와 함께 기록된다. 이미 진행 중인 write 하나는 응답 이후에도 도착할 수 있다 — 취소 가능한 PTY write 는 이 이슈의 범위를 넘는 별도 결정이다.
+
+Dock pane 은 대상이 아니다.
 
 ### CWD 동기화 기본값
 
@@ -582,7 +612,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 55개 = REST 54 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 57개 = REST 56 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
@@ -595,6 +625,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
+| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 TerminalView pane 클리어. 응답에 pane 별 결과(`cleared`/`interrupted`/`restarted`/`skipped`/`failed`)와 실제 적용된 대기 설정(`waitCapped`/`interruptRounds`/`settleMs`) |
 | POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
 | GET | `/api/v1/grid` | 그리드 상태 |
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
@@ -1284,7 +1315,7 @@ state.terminals.lock_or_err()?;
 | recoverable diagnostic | 범용 helper 없음 | 제어 경로와 분리된 소유 타입의 typed snapshot이 poison/degraded를 함께 표시하는 경우만 별도 근거로 허용 | recovered guard나 clone을 권한·sequence·credit·activity 판정에 사용 |
 | discard-only cleanup | `lock_or_recover_for_discard(context)` / owner `Drop`의 `get_mut_or_recover_for_discard(context)` / Condvar의 `recover_poison_for_discard(error, context)` | explicit close·creation rollback·generation retirement에서 entry 제거, clear/overwrite, waiter wake, 추출한 OS resource terminate/drop | 새 작업 승인, 정상 registry/lease 재개, poison 해제 |
 
-discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit 또는 fatal generation terminal catalog/PTY handle close, `AppState::drop`의 남은 PTY drain, 그리고 `SleepInhibitor::drop`의 OS 절전 억제 해제([ADR-0113](../adr/0113-sleep-prevention-mode.md))뿐이다. 마지막 항목은 owner `Drop`에서 보유 중인 OS 자원 하나를 해제하고 끝나며, 회수한 state 로 어떤 작업도 재개하지 않는다. fatal PTY callback은 poisoned Condvar 안에서 close를 기다리지 않고 generation-local atomic request를 claim한 뒤 reader에 `Stop`을 반환하며, cleanup coordinator가 discard-only retirement를 수행하고 독립 reaper가 handle을 종료한다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)). `exec_locks` cleanup은 다른 AppState 락과 겹치지 않으며 entry generation이 retired generation과 같을 때만 제거한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
+discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit 또는 fatal generation terminal catalog/PTY handle close, `AppState::drop`의 남은 PTY drain, 그리고 `SleepInhibitor::drop`의 OS 절전 억제 해제([ADR-0114](../adr/0114-sleep-prevention-mode.md))뿐이다. 마지막 항목은 owner `Drop`에서 보유 중인 OS 자원 하나를 해제하고 끝나며, 회수한 state 로 어떤 작업도 재개하지 않는다. fatal PTY callback은 poisoned Condvar 안에서 close를 기다리지 않고 generation-local atomic request를 claim한 뒤 reader에 `Stop`을 반환하며, cleanup coordinator가 discard-only retirement를 수행하고 독립 reaper가 handle을 종료한다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)). `exec_locks` cleanup은 다른 AppState 락과 겹치지 않으며 entry generation이 retired generation과 같을 때만 제거한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
 
 activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 
@@ -1507,7 +1538,7 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 ### 15.6 앱 전용 편의 코드 격리
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
+각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다. 표시뿐 아니라 **그 앱을 어떻게 클리어하는가**도 핸들러가 소유한다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
 
 #### ActivityHandler 인터페이스
 
@@ -1516,8 +1547,15 @@ interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
   computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
   computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
+  clearInput(shellClearCommand: string): string;             // 워크스페이스 클리어가 제출할 텍스트
+  isBusy(raw: RawTerminalState): boolean;                    // 지금 쳐도 빈 프롬프트에 닿는가
 }
 ```
+
+`clearInput`·`isBusy` 는 필수다. `ShellActivityHandler` 가 기본 구현(설정된 shell 명령 / `outputActive || activity==="running"`)을 주므로 새 핸들러는 그것을 상속하고 다른 점만 덮어쓴다 — Claude·Codex 는 `/clear` 와 자신의 working spinner·input-pending 신호를 더한다.
+
+- `isBusy` 는 표시용 아이콘과 다른 개념이다. input-pending 모달은 `computeStatus` 가 ✓ 를 주지만 그때 클리어를 치면 모달의 답으로 들어가므로 busy 다. 반대로 "작업 중 터미널 수" 위젯은 모달을 세면 안 되므로 이 술어를 쓰지 않는다.
+- **쓰는 동작은 등록 여부로 게이트한다.** `getHandler()` 는 표시가 계속 동작하도록 미등록 interactive app 에 shell 핸들러를 폴백으로 주지만, 그 폴백은 쓰기에서는 틀렸다(`nvim` 버퍼에 `clear` 가 박힌다). 클리어처럼 PTY 에 쓰는 호출부는 `isRegisteredInteractiveApp()` 으로 먼저 걸러야 한다.
 
 #### 핸들러 등록
 

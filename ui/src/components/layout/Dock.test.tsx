@@ -21,10 +21,20 @@ vi.mock("@/components/views/ViewRenderer", () => ({
     viewType: string | null;
     viewConfig?: Record<string, unknown>;
     paneId?: string;
+    terminalRestartEpoch?: number;
+    terminalRestartCwd?: string;
+    terminalRestartFresh?: boolean;
+    onTerminalRestartConsumed?: () => void;
   }) => {
     capturedViewConfigs.push(props.viewConfig);
     return (
-      <div data-testid={`view-${props.viewType?.toLowerCase().replace("view", "") ?? "empty"}`} />
+      <div
+        data-testid={`view-${props.viewType?.toLowerCase().replace("view", "") ?? "empty"}`}
+        data-restart-epoch={props.terminalRestartEpoch ?? ""}
+        data-restart-cwd={props.terminalRestartCwd ?? ""}
+        data-restart-fresh={props.terminalRestartFresh ? "true" : "false"}
+        onClick={() => props.onTerminalRestartConsumed?.()}
+      />
     );
   },
 }));
@@ -35,6 +45,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 
 describe("Dock", () => {
   beforeEach(() => {
@@ -675,5 +686,75 @@ describe("Dock", () => {
       "dp-files",
       expect.objectContaining({ cwdSend: false }),
     );
+  });
+});
+
+describe("Dock restart wiring (ADR-0113)", () => {
+  const terminalPane = {
+    id: "dp-term",
+    view: { type: "TerminalView" as const },
+    x: 0,
+    y: 0,
+    w: 1,
+    h: 1,
+  };
+
+  beforeEach(() => {
+    useDockStore.setState(useDockStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set([terminalPane.id]) });
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+    capturedViewConfigs.length = 0;
+  });
+
+  const renderDock = () =>
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={["TerminalView"]}
+        panes={[terminalPane]}
+      />,
+    );
+
+  it("routes Restart View through the store with the pane's id", () => {
+    renderDock();
+    fireEvent.click(screen.getByTestId("pane-control-restart"));
+
+    expect(useTerminalRestartStore.getState().requests["dp-term"]).toMatchObject({
+      epoch: 1,
+      fresh: true,
+    });
+  });
+
+  it("passes a request made outside the component down to the view", () => {
+    renderDock();
+    act(() => {
+      useTerminalRestartStore.getState().requestRestart("dp-term", "/tmp/dock");
+    });
+
+    const view = screen.getByTestId("view-terminal");
+    expect(view).toHaveAttribute("data-restart-epoch", "1");
+    expect(view).toHaveAttribute("data-restart-cwd", "/tmp/dock");
+    expect(view).toHaveAttribute("data-restart-fresh", "true");
+  });
+
+  // The consume callback used to close over a locally-held value; passing the
+  // wrong pane id here would silently leave the request fresh forever.
+  it("consumes the request for its own pane", () => {
+    renderDock();
+    act(() => {
+      useTerminalRestartStore.getState().requestRestart("dp-term");
+      useTerminalRestartStore.getState().requestRestart("other-pane");
+    });
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("view-terminal"));
+    });
+
+    expect(useTerminalRestartStore.getState().requests["dp-term"].fresh).toBe(false);
+    expect(useTerminalRestartStore.getState().requests["other-pane"].fresh).toBe(true);
   });
 });

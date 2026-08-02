@@ -2,7 +2,7 @@ import { setSleepInhibit } from "@/lib/tauri-api";
 import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 
 /**
- * The one place that talks to the OS sleep inhibitor (ADR-0113).
+ * The one place that talks to the OS sleep inhibitor (ADR-0114).
  *
  * Module scope, not component scope. The state being tracked here — what the
  * backend last confirmed, what is in flight — belongs to the *process*, not to
@@ -27,6 +27,12 @@ let confirmed: boolean | null = null;
 /** A value the backend would not deliver; held back until `desired` moves. */
 let refused: boolean | null = null;
 let inFlight = false;
+/**
+ * Bumped every time `desired` is set. A request that started under an older
+ * generation may not record a hold-back: the caller has moved on, and holding a
+ * value back on the strength of a stale failure would block it for good.
+ */
+let intent = 0;
 /** A release that must be attempted whatever the dedupe would say. */
 let releasePending = false;
 let releaseAttemptsLeft = 0;
@@ -45,15 +51,20 @@ function report(active: boolean, satisfied: boolean): void {
 
 function send(want: boolean, forced: boolean): void {
   inFlight = true;
+  // Whether this result still speaks for what the caller wants by the time it
+  // lands. `confirmed` is a fact about the OS either way; the hold-back is an
+  // intent-scoped judgement and must not outlive the intent it was made under.
+  const startedAt = intent;
   void setSleepInhibit(want)
     .then((active) => {
       confirmed = active;
       const satisfied = active === want;
+      const current = startedAt === intent;
       // A backend that answers with something other than what was asked for
       // will answer the same way again — hold the value back like a refusal
       // instead of spinning, and let the UI show that it did not take.
       if (!satisfied) {
-        refused = want;
+        if (current) refused = want;
       } else if (refused === want) {
         refused = null;
       }
@@ -64,8 +75,9 @@ function send(want: boolean, forced: boolean): void {
       // What the OS is doing is now unknown. Nothing may be skipped as a
       // duplicate on the strength of a failed attempt — least of all a release.
       confirmed = null;
-      // A forced release must not be called off by its own failure.
-      if (!forced) refused = want;
+      // A forced release must not be called off by its own failure, and a
+      // failure from a superseded intent must not hold anything back.
+      if (!forced && startedAt === intent) refused = want;
       useSleepInhibitStore.getState().reportFailure();
       console.warn("[sleep-prevention] failed to update inhibitor", error);
     })
@@ -109,7 +121,11 @@ export function requestSleepInhibit(next: boolean): void {
   // repeat of the *same* request, and without this a value refused once could
   // never be asked for again.
   if (refused !== null && refused !== next) refused = null;
+  // Somebody wants something again, so the departing caller's last-chance
+  // release is moot — a remount must not be undone by the unmount before it.
+  releasePending = false;
   desired = next;
+  intent += 1;
   pump();
 }
 
@@ -124,6 +140,22 @@ export function releaseSleepInhibit(): void {
   refused = null;
   releasePending = true;
   releaseAttemptsLeft = RELEASE_ATTEMPTS;
+  intent += 1;
+  pump();
+}
+
+/**
+ * Record a state the backend reached on its own — its watchdog re-acquiring an
+ * inhibitor, or losing one.
+ *
+ * Nothing was requested, so this only corrects what is believed and shown. If
+ * the result disagrees with what is wanted, the ordinary path picks it up from
+ * here, which is exactly the retry that a watchdog-observed loss deserves.
+ */
+export function observeSleepInhibitState(active: boolean, satisfied: boolean): void {
+  confirmed = active;
+  if (satisfied && refused !== null && refused === active) refused = null;
+  useSleepInhibitStore.getState().reportResult(active, satisfied);
   pump();
 }
 
@@ -135,4 +167,5 @@ export function resetSleepInhibitCoordinator(): void {
   inFlight = false;
   releasePending = false;
   releaseAttemptsLeft = 0;
+  intent = 0;
 }

@@ -57,7 +57,7 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 
 `GridEditToolbar` 와 `StatusLine` 은 dock 격자 바깥에 있는 **위젯 슬롯 영역**이다([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). StatusLine 은 격자 다음 형제로 렌더되므로 BottomDock 보다 아래에 창 전체 폭으로 놓이며, dock 의 분할·포커스·리사이즈 계약을 상속하지 않는다. 표시 여부는 `widgets.statusLine.enabled` 가 정한다.
 
-`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0113](../adr/0113-sleep-prevention-mode.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다.
+`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0114](../adr/0114-sleep-prevention-mode.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다.
 
 두 표면의 위젯은 `widgets.fontFamily`·`fontSize`를 공용으로 적용한다. 사용량 위젯의 막대 너비는 배치 인스턴스의 `options.barWidth`가 소유하며, 실제 track과 슬롯 접힘용 요구 폭이 같은 값에서 계산된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)).
 
@@ -121,6 +121,15 @@ Workspace (Independent)
 | Create from layout | Layout으로 새 Workspace 생성. 이후 연결 끊김 |
 | Export as new layout | 현재 Workspace의 pane 구조를 새 Layout으로 저장 |
 | Export to existing layout | 현재 Workspace의 pane 구조로 기존 Layout을 덮어쓰기 |
+
+### 4.1.1 워크스페이스 클리어
+
+`Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 지우개 버튼, `POST /api/v1/workspaces/{id}/clear` 는 모두 같은 동작으로 들어간다 — 그 워크스페이스 격자의 `TerminalView` pane 을 한 번에 클리어한다. Dock 은 대상이 아니다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+
+- **무엇을 칠지**는 pane 의 activity handler 가 정한다. shell 은 `settings.workspaceClear.shellCommand`(기본 `clear`), Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop 등)에는 아무것도 쓰지 않는다.
+- **작업 중인 pane** 은 `settings.workspaceClear.busyPolicy` 가 정한다: `skip`(기본) · `interrupt`(Ctrl+C 후 클리어) · `restart`(view 재시작 — 스크롤백이 사라진다).
+- 계획(`planWorkspaceClear`)과 실행(`runWorkspaceClear`)은 `ui/src/lib/workspace-clear.ts` 에서 분리돼 있고, 제출은 사람 입력과 같은 `write_terminal_input(submit: true)` 경로를 쓴다.
+- 재시작 요청 상태(epoch/cwd/fresh)는 `stores/terminal-restart-store.ts` 가 소유하며 `PaneGrid`·`Dock` 이 함께 읽는다. pane 이 사라지면 `forgetRestart` 로 정리한다.
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 

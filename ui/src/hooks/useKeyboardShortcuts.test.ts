@@ -16,10 +16,13 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
   clipboardWriteText: vi.fn().mockResolvedValue(undefined),
+  writeTerminalInput: vi.fn().mockResolvedValue(undefined),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));
 
-import { clipboardWriteText, propagateCwdOnce } from "@/lib/tauri-api";
+import { clipboardWriteText, propagateCwdOnce, writeTerminalInput } from "@/lib/tauri-api";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import type { ViewInstanceConfig } from "@/stores/types";
 
 function fireKey(
@@ -1993,6 +1996,66 @@ describe("useKeyboardShortcuts", () => {
 
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-default");
       expect(useUiStore.getState().settingsModalOpen).toBe(false);
+    });
+  });
+
+  // --- Ctrl+Alt+L: workspace clear (issue #726) ---
+  describe("workspace.clearTerminals", () => {
+    function activeWorkspaceWithTerminals() {
+      const active = useWorkspaceStore.getState().getActiveWorkspace()!;
+      useWorkspaceStore.setState({
+        workspaces: [
+          {
+            ...active,
+            panes: [
+              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "pane-m", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+            ],
+          },
+        ],
+      });
+      useTerminalStore.getState().registerInstance({
+        id: "terminal-pane-a",
+        profile: "PowerShell",
+        syncGroup: active.id,
+        workspaceId: active.id,
+      });
+      useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", { sessionReady: true });
+    }
+
+    beforeEach(() => {
+      useTerminalStore.setState(useTerminalStore.getInitialState());
+      vi.mocked(writeTerminalInput).mockClear();
+    });
+
+    it("Ctrl+Alt+L clears the active workspace's terminal panes only", async () => {
+      activeWorkspaceWithTerminals();
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { ctrlKey: true, altKey: true });
+
+      await vi.waitFor(() => {
+        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith(
+          "terminal-pane-a",
+          "clear",
+          true,
+        );
+      });
+      expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves a busy pane alone under the default policy", async () => {
+      activeWorkspaceWithTerminals();
+      useTerminalStore.getState().updateInstanceInfo("terminal-pane-a", {
+        activity: { type: "running" },
+      });
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { ctrlKey: true, altKey: true });
+
+      // Nothing to await on a no-op, so let the promise chain settle first.
+      await Promise.resolve();
+      expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
     });
   });
 });

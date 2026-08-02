@@ -636,6 +636,22 @@ export function onUsageSnapshotChanged(
   });
 }
 
+/**
+ * Listen for sleep inhibitor changes nobody asked for (ADR-0114).
+ *
+ * The watchdog can acquire or lose one on its own. The frontend only sends
+ * *changes*, so without this the UI would keep showing whatever the last
+ * request returned — lit over a machine that is no longer protected, or failed
+ * over one that has since recovered.
+ */
+export function onSleepInhibitChanged(
+  callback: (state: { active: boolean; satisfied: boolean }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ active: boolean; satisfied: boolean }>("sleep-inhibit-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 export async function saveTerminalOutputCache(paneId: string, data: string): Promise<void> {
   return invoke("save_terminal_output_cache", { paneId, data });
 }
@@ -700,6 +716,20 @@ export interface ExitSettings {
   /** How many Ctrl+C presses to send per terminal. Clamped 1..=10. Default: 3. */
   interruptRounds: number;
   /** Delay (ms) after the last Ctrl+C so agents can print their session id. Clamped 0..=10000. Default: 700. */
+  settleMs: number;
+}
+
+/** What the workspace clear does with a pane that is mid-task (ADR-0113). */
+export type WorkspaceClearBusyPolicyValue = "skip" | "interrupt" | "restart";
+
+export interface WorkspaceClearSettings {
+  /** Command submitted to a plain shell (`clear`, `cls`, …). Empty → `clear`. */
+  shellCommand: string;
+  /** Mid-task pane handling. Default: "skip". */
+  busyPolicy: WorkspaceClearBusyPolicyValue;
+  /** Ctrl+C presses before clearing under "interrupt". Clamped 1..=10. Default: 2. */
+  interruptRounds: number;
+  /** Delay (ms) after the last Ctrl+C. Clamped 0..=10000. Default: 400. */
   settleMs: number;
 }
 
@@ -899,6 +929,7 @@ export interface Settings {
   claude: ClaudeSettings;
   codex?: CodexSettings;
   exit?: ExitSettings;
+  workspaceClear?: WorkspaceClearSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
@@ -1487,7 +1518,7 @@ export async function getTerminalSummaries(
 }
 
 /**
- * Hold or release the OS sleep inhibitor (ADR-0113). Idempotent — the backend
+ * Hold or release the OS sleep inhibitor (ADR-0114). Idempotent — the backend
  * only touches the OS when the state actually changes. Resolves to the state
  * in effect afterwards.
  */

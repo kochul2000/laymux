@@ -130,6 +130,7 @@ vi.mock("@/lib/tauri-api", () => {
     listDirectory: vi.fn().mockResolvedValue([]),
     clipboardWriteText: vi.fn().mockResolvedValue(undefined),
     setSleepInhibit: vi.fn().mockResolvedValue(false),
+    onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
   };
 });
 

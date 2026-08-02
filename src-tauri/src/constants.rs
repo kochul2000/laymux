@@ -18,6 +18,9 @@ pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 /// A Claude usage probe published a new snapshot (ADR-0102).
 pub const EVENT_USAGE_SNAPSHOT_CHANGED: &str = "usage-snapshot-changed";
+/// Emitted when the OS sleep inhibitor state changes without a request having
+/// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
+pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
 /// viewed over a remote session. The UI uses it to auto-open the Remote Access
@@ -108,7 +111,7 @@ pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
-/// When laymux keeps the OS awake (ADR-0113). `whenBusy` follows the same
+/// When laymux keeps the OS awake (ADR-0114). `whenBusy` follows the same
 /// "busy" definition the pane hourglass uses.
 pub const SLEEP_PREVENTION_MODES: &[&str] = &["off", "always", "whenBusy"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];

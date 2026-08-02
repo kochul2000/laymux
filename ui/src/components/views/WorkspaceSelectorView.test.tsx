@@ -8,7 +8,12 @@ import { useTerminalStore } from "@/stores/terminal-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useGridStore } from "@/stores/grid-store";
 import { useDockStore } from "@/stores/dock-store";
-import { getListeningPorts, getTerminalSummaries, markNotificationsRead } from "@/lib/tauri-api";
+import {
+  getListeningPorts,
+  getTerminalSummaries,
+  markNotificationsRead,
+  writeTerminalInput,
+} from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
@@ -40,6 +45,7 @@ vi.mock("@/lib/tauri-api", () => ({
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
   getTerminalSummaries: vi.fn().mockResolvedValue([]),
   markNotificationsRead: vi.fn().mockResolvedValue(0),
+  writeTerminalInput: vi.fn().mockResolvedValue(undefined),
 }));
 
 /**
@@ -1307,7 +1313,7 @@ describe("WorkspaceSelectorView", () => {
   });
 
   it("shows the hourglass for a shell streaming output before any command was captured", async () => {
-    // Sleep prevention counts this terminal as busy (ADR-0113). If the row
+    // Sleep prevention counts this terminal as busy (ADR-0114). If the row
     // stayed blank the UI would say idle while the machine is kept awake.
     useWorkspaceStore.setState({
       workspaces: [
@@ -2266,6 +2272,77 @@ describe("WorkspaceSelectorView", () => {
 
       const afterSrc = useWorkspaceStore.getState().workspaces.find((w) => w.id === srcId)!;
       expect(afterSrc.panes).toHaveLength(2);
+    });
+  });
+
+  describe("workspace clear button (issue #726)", () => {
+    /** Two terminal panes plus a memo-only workspace, with live PTY sessions. */
+    const setup = () => {
+      useWorkspaceStore.setState({
+        activeWorkspaceId: "ws-term",
+        workspaces: [
+          {
+            id: "ws-term",
+            name: "Terminals",
+            panes: [
+              { id: "pane-a", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+              { id: "pane-b", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            ],
+          },
+          {
+            id: "ws-memo",
+            name: "Notes",
+            panes: [{ id: "pane-m", x: 0, y: 0, w: 1, h: 1, view: { type: "MemoView" } }],
+          },
+        ],
+      });
+      for (const paneId of ["pane-a", "pane-b"]) {
+        useTerminalStore.getState().registerInstance({
+          id: `terminal-${paneId}`,
+          profile: "PowerShell",
+          syncGroup: "ws-term",
+          workspaceId: "ws-term",
+        });
+        useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+          sessionReady: true,
+        });
+      }
+    };
+
+    it("clears every terminal pane of the hovered workspace", async () => {
+      setup();
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
+      fireEvent.click(screen.getByTestId("workspace-clear-ws-term"));
+
+      await waitFor(() => {
+        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith(
+          "terminal-pane-a",
+          "clear",
+          true,
+        );
+      });
+      expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-b", "clear", true);
+    });
+
+    it("submits the configured shell command instead of the default", async () => {
+      setup();
+      useSettingsStore.getState().setWorkspaceClear({ shellCommand: "cls" });
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
+      fireEvent.click(screen.getByTestId("workspace-clear-ws-term"));
+
+      await waitFor(() => {
+        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "cls", true);
+      });
+    });
+
+    // The button would be a no-op there, and an inert control reads as broken.
+    it("is not offered for a workspace without terminal panes", () => {
+      setup();
+      render(<WorkspaceSelectorView />);
+      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-memo"));
+      expect(screen.queryByTestId("workspace-clear-ws-memo")).not.toBeInTheDocument();
     });
   });
 });

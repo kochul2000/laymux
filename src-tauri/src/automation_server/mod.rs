@@ -160,6 +160,7 @@ pub fn build_router(
         .route("/api/v1/workspaces/active", post(workspaces_switch_active))
         .route("/api/v1/workspaces/reorder", post(workspaces_reorder))
         .route("/api/v1/workspaces/{id}", put(workspaces_rename))
+        .route("/api/v1/workspaces/{id}/clear", post(workspaces_clear))
         .route("/api/v1/workspaces/{id}", delete(workspaces_delete))
         .route("/api/v1/layouts/export", post(layouts_export))
         .route("/api/v1/grid", get(grid_get_state))

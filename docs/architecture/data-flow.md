@@ -1235,6 +1235,8 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
 
 Pane control bar의 **Restart View**는 이 앱 시작 복원 흐름의 명시적 예외다. 현재 runtime terminal store의 CWD(아직 보고되지 않았으면 저장된 `lastCwd`)로 기존 PTY를 종료한 뒤 새 PTY를 생성한다. 이때만 `restoreCwd` 설정과 무관하게 그 CWD를 전달하며, 출력 캐시와 Claude `--resume` 복원은 건너뛴다. 재시작 요청은 첫 새 세션 생성이 끝나면 소비되므로, 이후 프로필 변경 등 일반 재생성은 원래의 복원 정책을 다시 따른다.
 
+재시작 요청 상태(`epoch`/`cwd`/`fresh`)의 SoT 는 `stores/terminal-restart-store.ts` 다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)). `PaneGrid` 와 single-pane `Dock` 이 각자 자기 pane 의 항목만 구독하고, 워크스페이스 클리어의 `restart` 정책처럼 컴포넌트 밖에서도 요청할 수 있다. pane 이 제거되면 `forgetRestart`, 세션 복원처럼 pane 배열이 통째로 갈리는 경로는 기동 시 `gcStale` 이 정리한다.
+
 출력 캐시는 과거 로그와 scrollback을 복원하기 위한 데이터이므로 normal buffer만 저장한다. 종료 시점에 Claude Code·vim 같은 TUI가 alternate buffer를 사용 중이어도 그 일시적인 전체 화면과 mouse/bracketed-paste 같은 live terminal mode는 새 PTY 세션으로 넘기지 않는다. 이전 버전이 alternate buffer 활성 상태에서 저장한 캐시는 normal buffer 직렬화 뒤에 `DECSET 1049` suffix가 붙어 있으므로, 복원 시 `normalBufferOnly`가 해당 suffix를 제거한다. 이를 제거하지 않으면 새 xterm이 alternate buffer에 고정되어 `baseY=0`으로 남고 scrollback과 scrollbar가 사라진다.
 
 시작 조정 상태의 SoT는 frontend `terminal-startup-store`다. 후보 수집과 슬롯 전이는 `lib/terminal-startup-coordinator.ts`의 순수 함수가 담당하고, `PaneGrid`·single-pane `Dock`·terminal-backed `FileViewer`는 같은 reveal 집합을 소비하며, `TerminalView`는 PTY 준비와 첫 render 신호를 결합해 완료를 보고한다. 이미 reveal된 terminal은 후보에 존재하는 동안 다시 숨기지 않으며, 현재 슬롯은 우선순위 변경으로 선점하지 않는다([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)).

@@ -176,9 +176,24 @@ pub fn run() {
             }
 
             // Watch for a sleep inhibitor that dies behind our back, or one that
-            // was never acquired because the first attempt failed (ADR-0113).
+            // was never acquired because the first attempt failed (ADR-0114).
             // Started here rather than on first use; `set_sleep_inhibit` retries
             // it, so a spawn failure now is not permanent.
+            {
+                let power_app = app.handle().clone();
+                if let Err(error) = app_state.sleep_inhibitor.set_sink(Arc::new(
+                    move |held: bool, satisfied: bool| {
+                        if let Err(error) = power_app.emit(
+                            constants::EVENT_SLEEP_INHIBIT_CHANGED,
+                            serde_json::json!({ "active": held, "satisfied": satisfied }),
+                        ) {
+                            tracing::warn!(%error, "failed to emit sleep inhibitor state");
+                        }
+                    },
+                )) {
+                    tracing::warn!(%error, "failed to install the sleep inhibitor sink");
+                }
+            }
             if !app_state.sleep_inhibitor.ensure_watchdog() {
                 tracing::warn!("sleep inhibitor watchdog unavailable; will retry on next request");
             }

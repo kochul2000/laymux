@@ -1,4 +1,4 @@
-//! OS sleep prevention (ADR-0113).
+//! OS sleep prevention (ADR-0114).
 //!
 //! The frontend owns *when* sleep should be inhibited — it derives one boolean
 //! from the user's mode setting and the busy state of the terminals. This
@@ -84,9 +84,18 @@ impl Inner {
 ///
 /// The mutex protects only this struct. Nothing acquires it while holding
 /// another `AppState` lock, so it joins no lock ordering (api-contracts §14.3).
+/// Notified whenever the state actually in effect changes, with
+/// `(held, satisfied)` — `satisfied` is false when the last attempt did not
+/// deliver what was asked for.
+pub type SleepInhibitorSink = Arc<dyn Fn(bool, bool) + Send + Sync>;
+
 pub struct SleepInhibitor {
     inner: Mutex<Inner>,
     watchdog_started: AtomicBool,
+    /// Installed once at startup. Without it the watchdog could acquire or lose
+    /// an inhibitor and the UI would never hear: the frontend only reports
+    /// *changes*, so its own dedupe means no request comes to carry the news.
+    sink: Mutex<Option<SleepInhibitorSink>>,
 }
 
 impl SleepInhibitor {
@@ -102,6 +111,28 @@ impl SleepInhibitor {
                 backend,
             }),
             watchdog_started: AtomicBool::new(false),
+            sink: Mutex::new(None),
+        }
+    }
+
+    /// Install the state-change notifier. Replaces any previous one.
+    pub fn set_sink(&self, sink: SleepInhibitorSink) -> Result<(), AppError> {
+        self.sink.lock_or_err()?.replace(sink);
+        Ok(())
+    }
+
+    /// Notify outside the state lock: a sink emits a Tauri event, and holding
+    /// the inhibitor mutex across that would invite a stall.
+    fn notify(&self, held: bool, satisfied: bool) {
+        let sink = match self.sink.lock_or_err() {
+            Ok(guard) => guard.clone(),
+            Err(error) => {
+                tracing::warn!(%error, "failed to read the sleep inhibitor sink");
+                return;
+            }
+        };
+        if let Some(sink) = sink {
+            sink(held, satisfied);
         }
     }
 
@@ -111,14 +142,27 @@ impl SleepInhibitor {
     /// acquired because the first attempt failed. A no-op when nothing is
     /// wanted and nothing is held.
     pub fn revalidate(&self) -> Result<(), AppError> {
-        let mut guard = self.inner.lock_or_err()?;
-        let inner = &mut *guard;
-        let before = inner.held;
-        inner.reconcile()?;
-        if inner.held && !before {
-            tracing::warn!("sleep inhibitor was missing and has been acquired again");
+        let (before, outcome, held) = {
+            let mut guard = self.inner.lock_or_err()?;
+            let inner = &mut *guard;
+            let before = inner.held;
+            let outcome = inner.reconcile();
+            (before, outcome, inner.held)
+        };
+        if held != before {
+            if held {
+                tracing::warn!("sleep inhibitor was missing and has been acquired again");
+            } else {
+                tracing::warn!("sleep inhibitor is no longer held");
+            }
         }
-        Ok(())
+        // The watchdog is the only thing that sees these transitions — the
+        // frontend reports changes, so its own dedupe means no request comes
+        // along to carry the news. The UI hears it here or not at all.
+        if held != before || outcome.is_err() {
+            self.notify(held, outcome.is_ok());
+        }
+        outcome
     }
 
     /// Start the background reconcile loop, at most once per inhibitor.
@@ -205,332 +249,18 @@ impl Drop for SleepInhibitor {
     }
 }
 
+/// Platform backends. Split out because the module runs past the 500-line
+/// guideline once all three are inlined (api-contracts §14.1); the split is by
+/// target, so exactly one is ever compiled.
 #[cfg(windows)]
-mod platform {
-    use std::sync::mpsc::{self, Sender};
-
-    use windows_sys::Win32::System::Power::{
-        SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
-    };
-
-    use super::InhibitBackend;
-    use crate::error::AppError;
-
-    /// `SetThreadExecutionState` attaches the request to the *calling thread*
-    /// and the request dies with that thread. A Tauri command runs on whatever
-    /// worker the runtime picks, so the inhibitor lives on a thread this module
-    /// owns and keeps alive instead.
-    struct Request {
-        enabled: bool,
-        ack: Sender<Result<(), String>>,
-    }
-
-    pub struct PlatformBackend {
-        tx: Option<Sender<Request>>,
-    }
-
-    impl PlatformBackend {
-        pub fn new() -> Self {
-            Self { tx: None }
-        }
-
-        fn worker(&mut self) -> Result<&Sender<Request>, AppError> {
-            if self.tx.is_none() {
-                let (tx, rx) = mpsc::channel::<Request>();
-                std::thread::Builder::new()
-                    .name("sleep-inhibitor".into())
-                    .spawn(move || {
-                        while let Ok(request) = rx.recv() {
-                            let flags = if request.enabled {
-                                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
-                            } else {
-                                ES_CONTINUOUS
-                            };
-                            // Returns the previous state, or 0 on failure.
-                            let previous = unsafe { SetThreadExecutionState(flags) };
-                            let result = if previous == 0 {
-                                Err("SetThreadExecutionState failed".to_string())
-                            } else {
-                                Ok(())
-                            };
-                            let _ = request.ack.send(result);
-                        }
-                        // The channel is only dropped when the process is going
-                        // away, but clear the request anyway so the thread never
-                        // exits still holding one.
-                        unsafe { SetThreadExecutionState(ES_CONTINUOUS) };
-                    })
-                    .map_err(AppError::Io)?;
-                self.tx = Some(tx);
-            }
-            self.tx
-                .as_ref()
-                .ok_or_else(|| AppError::Other("sleep inhibitor thread missing".into()))
-        }
-    }
-
-    impl InhibitBackend for PlatformBackend {
-        fn apply(&mut self, enabled: bool) -> Result<(), AppError> {
-            // Nothing to release before the thread has ever run.
-            if !enabled && self.tx.is_none() {
-                return Ok(());
-            }
-            let (ack_tx, ack_rx) = mpsc::channel();
-            self.worker()?
-                .send(Request {
-                    enabled,
-                    ack: ack_tx,
-                })
-                .map_err(|_| AppError::Other("sleep inhibitor thread stopped".into()))?;
-            ack_rx
-                .recv()
-                .map_err(|_| AppError::Other("sleep inhibitor thread stopped".into()))?
-                .map_err(AppError::Other)
-        }
-    }
-}
-
+#[path = "windows.rs"]
+mod platform;
 #[cfg(target_os = "linux")]
-mod platform {
-    use std::io::Read;
-    use std::process::{Child, ChildStderr, Stdio};
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
-
-    use super::InhibitBackend;
-    use crate::error::AppError;
-    use crate::process::headless_command;
-
-    /// How long a freshly spawned `systemd-inhibit` is watched before its lock
-    /// is believed.
-    ///
-    /// `systemd-inhibit` execs fine and *then* exits non-zero when the inhibit
-    /// call itself fails — no D-Bus session, no seat, a container, a polkit
-    /// denial. Without this window that failure is indistinguishable from
-    /// success, and the UI would claim the machine is being kept awake while it
-    /// sleeps through the user's build.
-    const SPAWN_GRACE: Duration = Duration::from_millis(300);
-    const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
-    /// How long the child is given to notice EOF on its stdin before it is killed.
-    const RELEASE_GRACE: Duration = Duration::from_millis(300);
-    /// Cap on captured stderr. Enough for a diagnostic, bounded so a chatty
-    /// child cannot grow this without limit.
-    const STDERR_CAPTURE_LIMIT: usize = 4096;
-
-    struct Inhibitor {
-        child: Child,
-        /// Filled by a reader thread. The pipe is drained continuously: leaving
-        /// it unread would let a long-lived child block on a full pipe, and
-        /// reading it only on failure would block this thread — inside the
-        /// inhibitor mutex — until the writer closed it.
-        stderr: Arc<Mutex<String>>,
-    }
-
-    impl Inhibitor {
-        fn stderr_text(&self) -> String {
-            self.stderr
-                .lock()
-                .map(|captured| captured.trim().to_string())
-                .unwrap_or_default()
-        }
-    }
-
-    /// Consume the child's stderr on its own thread, keeping the first
-    /// [`STDERR_CAPTURE_LIMIT`] bytes and discarding the rest.
-    fn drain_stderr(mut pipe: ChildStderr) -> Arc<Mutex<String>> {
-        let captured = Arc::new(Mutex::new(String::new()));
-        let sink = captured.clone();
-        let spawned = std::thread::Builder::new()
-            .name("systemd-inhibit-stderr".into())
-            .spawn(move || {
-                let mut chunk = [0u8; 512];
-                loop {
-                    match pipe.read(&mut chunk) {
-                        Ok(0) | Err(_) => return,
-                        Ok(read) => {
-                            if let Ok(mut sink) = sink.lock() {
-                                let room = STDERR_CAPTURE_LIMIT.saturating_sub(sink.len());
-                                if room > 0 {
-                                    let text = String::from_utf8_lossy(&chunk[..read.min(room)]);
-                                    sink.push_str(&text);
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        if let Err(error) = spawned {
-            // Without a reader the pipe could fill; the diagnostic is worth
-            // less than the child staying unblocked.
-            tracing::warn!(%error, "failed to capture systemd-inhibit stderr");
-        }
-        captured
-    }
-
-    pub struct PlatformBackend {
-        inhibitor: Option<Inhibitor>,
-    }
-
-    impl PlatformBackend {
-        pub fn new() -> Self {
-            Self { inhibitor: None }
-        }
-    }
-
-    impl InhibitBackend for PlatformBackend {
-        fn apply(&mut self, enabled: bool) -> Result<(), AppError> {
-            if enabled {
-                if self.inhibitor.is_some() {
-                    return Ok(());
-                }
-                // `cat` blocks on a pipe laymux holds the write end of, so the
-                // lock outlives nothing: if this process dies for any reason,
-                // the kernel closes the pipe, `cat` sees EOF, and systemd-inhibit
-                // releases the lock. A detached `sleep infinity` would survive a
-                // SIGKILL and keep the machine awake forever.
-                //
-                // stderr stays piped rather than nulled so a failure can be
-                // reported verbatim; a reader thread keeps it drained.
-                let mut child = headless_command("systemd-inhibit")
-                    .arg("--what=idle:sleep")
-                    .arg("--who=Laymux")
-                    .arg("--why=Terminal work in progress")
-                    .arg("--mode=block")
-                    .arg("cat")
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .spawn()
-                    .map_err(|e| {
-                        AppError::Other(format!("failed to start systemd-inhibit: {e}"))
-                    })?;
-
-                let stderr = match child.stderr.take() {
-                    Some(pipe) => drain_stderr(pipe),
-                    None => Arc::new(Mutex::new(String::new())),
-                };
-                let mut inhibitor = Inhibitor { child, stderr };
-
-                let deadline = Instant::now() + SPAWN_GRACE;
-                loop {
-                    match inhibitor.child.try_wait() {
-                        Ok(Some(status)) => {
-                            let detail = inhibitor.stderr_text();
-                            return Err(AppError::Other(if detail.is_empty() {
-                                format!("systemd-inhibit exited immediately ({status})")
-                            } else {
-                                format!("systemd-inhibit failed ({status}): {detail}")
-                            }));
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            let _ = inhibitor.child.kill();
-                            let _ = inhibitor.child.wait();
-                            return Err(AppError::Other(format!(
-                                "failed to check systemd-inhibit: {error}"
-                            )));
-                        }
-                    }
-                    if Instant::now() >= deadline {
-                        break;
-                    }
-                    std::thread::sleep(SPAWN_POLL_INTERVAL);
-                }
-
-                self.inhibitor = Some(inhibitor);
-                return Ok(());
-            }
-
-            let Some(mut inhibitor) = self.inhibitor.take() else {
-                return Ok(());
-            };
-            // Closing the pipe is what releases the lock: `cat` sees EOF and
-            // both processes exit.
-            drop(inhibitor.child.stdin.take());
-
-            let deadline = Instant::now() + RELEASE_GRACE;
-            let exited = loop {
-                match inhibitor.child.try_wait() {
-                    Ok(Some(_)) => break true,
-                    Ok(None) => {}
-                    Err(error) => {
-                        // Whether the lock is gone is unknown; keep the handle so
-                        // a later attempt can try again rather than leaking it.
-                        self.inhibitor = Some(inhibitor);
-                        return Err(AppError::Other(format!(
-                            "failed to check systemd-inhibit during release: {error}"
-                        )));
-                    }
-                }
-                if Instant::now() >= deadline {
-                    break false;
-                }
-                std::thread::sleep(SPAWN_POLL_INTERVAL);
-            };
-
-            if !exited {
-                // It ignored EOF. Killing it drops the lock just as well, but a
-                // failure here means the lock may still be held — say so.
-                if let Err(error) = inhibitor.child.kill() {
-                    self.inhibitor = Some(inhibitor);
-                    return Err(AppError::Other(format!(
-                        "failed to kill systemd-inhibit: {error}"
-                    )));
-                }
-            }
-            inhibitor.child.wait().map_err(|error| {
-                AppError::Other(format!("failed to reap systemd-inhibit: {error}"))
-            })?;
-            Ok(())
-        }
-
-        fn needs_reapply(&mut self) -> bool {
-            let Some(inhibitor) = self.inhibitor.as_mut() else {
-                return true;
-            };
-            match inhibitor.child.try_wait() {
-                Ok(Some(status)) => {
-                    let detail = inhibitor.stderr_text();
-                    tracing::warn!(
-                        %status,
-                        detail = %detail,
-                        "systemd-inhibit exited while the lock was held"
-                    );
-                    self.inhibitor = None;
-                    true
-                }
-                // Still running, or the check itself failed — in the latter case
-                // respawning would leak the child we already have.
-                _ => false,
-            }
-        }
-    }
-}
-
+#[path = "linux.rs"]
+mod platform;
 #[cfg(not(any(windows, target_os = "linux")))]
-mod platform {
-    use super::InhibitBackend;
-    use crate::error::AppError;
-
-    pub struct PlatformBackend;
-
-    impl PlatformBackend {
-        pub fn new() -> Self {
-            Self
-        }
-    }
-
-    impl InhibitBackend for PlatformBackend {
-        fn apply(&mut self, enabled: bool) -> Result<(), AppError> {
-            if enabled {
-                return Err(AppError::Other(
-                    "sleep prevention is not supported on this platform".into(),
-                ));
-            }
-            Ok(())
-        }
-    }
-}
+#[path = "unsupported.rs"]
+mod platform;
 
 #[cfg(test)]
 mod tests {

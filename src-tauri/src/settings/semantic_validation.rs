@@ -78,6 +78,7 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     validate_profiles(settings, &mut issues);
     validate_terminal(settings, &mut issues);
     validate_exit(settings, &mut issues);
+    validate_workspace_clear(settings, &mut issues);
     validate_remote(settings, &mut issues);
     validate_view_settings(settings, &mut issues);
     validate_widgets(settings, &mut issues);
@@ -354,6 +355,27 @@ fn validate_exit(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         10,
     );
     range_u64(issues, "/exit/settleMs", settings.exit.settle_ms, 0, 10_000);
+}
+
+/// Same two ranges as `validate_exit` — the clear's interrupt reuses that
+/// contract (ADR-0113). `busyPolicy` needs no `enum_value` check: it
+/// deserializes into `WorkspaceClearBusyPolicy`, so an unknown value is a parse
+/// error long before it reaches here.
+fn validate_workspace_clear(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    range_u64(
+        issues,
+        "/workspaceClear/interruptRounds",
+        u64::from(settings.workspace_clear.interrupt_rounds),
+        1,
+        10,
+    );
+    range_u64(
+        issues,
+        "/workspaceClear/settleMs",
+        settings.workspace_clear.settle_ms,
+        0,
+        10_000,
+    );
 }
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {

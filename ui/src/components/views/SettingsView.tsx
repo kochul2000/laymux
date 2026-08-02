@@ -1514,6 +1514,18 @@ function TerminalSection() {
   const updateExit = (partial: Partial<typeof exit>) =>
     setDraftExit((prev) => ({ ...prev, ...partial }));
 
+  // Workspace clear (issue #726) is also a top-level key edited here: it writes
+  // into terminals, and this is the section a user looks in for that.
+  const storeWorkspaceClear = useSettingsStore((s) => s.workspaceClear);
+  const setWorkspaceClear = useSettingsStore((s) => s.setWorkspaceClear);
+  const [workspaceClear, setDraftWorkspaceClear] = useDraft(
+    "workspaceClear",
+    storeWorkspaceClear,
+    (v) => setWorkspaceClear(v),
+  );
+  const updateWorkspaceClear = (partial: Partial<typeof workspaceClear>) =>
+    setDraftWorkspaceClear((prev) => ({ ...prev, ...partial }));
+
   // Default input mode is a desktop-surface UI preference (localStorage), not part
   // of the Rust-backed settings.json — so it stays outside the terminal draft.
   const [defaultInputMode, setDefaultInputMode] = useState<InputMode>(() =>
@@ -1709,6 +1721,90 @@ function TerminalSection() {
                 value={exit.settleMs}
                 onChange={(e) =>
                   updateExit({
+                    settleMs: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                  })
+                }
+              />
+            </SettingRow>
+          </>
+        )}
+      </SubGroup>
+
+      <SubGroup title={t("terminal.clearGroup")}>
+        <p className="mb-3 text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+          {t("terminal.clearGroupDesc")}
+        </p>
+
+        <SettingRow
+          label={t("terminal.clearShellCommand")}
+          desc={t("terminal.clearShellCommandDesc")}
+        >
+          <FocusInput
+            data-testid="workspace-clear-shell-command-input"
+            type="text"
+            className={inputCls}
+            style={{ width: 140 }}
+            value={workspaceClear.shellCommand}
+            onChange={(e) => updateWorkspaceClear({ shellCommand: e.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow label={t("terminal.clearBusyPolicy")} desc={t("terminal.clearBusyPolicyDesc")}>
+          <select
+            data-testid="workspace-clear-busy-policy-select"
+            value={workspaceClear.busyPolicy}
+            onChange={(e) =>
+              updateWorkspaceClear({
+                busyPolicy: e.target.value as typeof workspaceClear.busyPolicy,
+              })
+            }
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="skip">{t("terminal.clearBusyPolicySkip")}</option>
+            <option value="interrupt">{t("terminal.clearBusyPolicyInterrupt")}</option>
+            <option value="restart">{t("terminal.clearBusyPolicyRestart")}</option>
+          </select>
+        </SettingRow>
+
+        {workspaceClear.busyPolicy === "interrupt" && (
+          <>
+            <SettingRow
+              label={t("terminal.clearInterruptRounds")}
+              desc={t("terminal.clearInterruptRoundsDesc")}
+            >
+              <FocusInput
+                data-testid="workspace-clear-rounds-input"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={workspaceClear.interruptRounds}
+                onChange={(e) =>
+                  updateWorkspaceClear({
+                    interruptRounds: Math.min(
+                      10,
+                      Math.max(1, Math.round(Number(e.target.value) || 1)),
+                    ),
+                  })
+                }
+              />
+            </SettingRow>
+
+            <SettingRow label={t("terminal.clearSettle")} desc={t("terminal.clearSettleDesc")}>
+              <FocusInput
+                data-testid="workspace-clear-settle-input"
+                type="number"
+                min={0}
+                max={10000}
+                step={100}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={workspaceClear.settleMs}
+                onChange={(e) =>
+                  updateWorkspaceClear({
                     settleMs: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))),
                   })
                 }

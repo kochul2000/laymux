@@ -11,7 +11,7 @@ const TITLES: Record<string, string> = {
 };
 
 /**
- * Top-bar tri-state toggle for sleep prevention (issue #727, ADR-0113).
+ * Top-bar tri-state toggle for sleep prevention (issue #727, ADR-0114).
  *
  * The icon carries two facts, not one: which mode is selected, and whether
  * sleep is being inhibited *right now*. In `whenBusy` those differ whenever the

@@ -20,7 +20,7 @@ export const CLAUDE_INPUT_PENDING_MARKER = "__claude_input_pending__";
  *
  * Named because it is not only drawn: sleep prevention treats "the status a
  * handler computed is this icon" as the definition of a busy terminal
- * (ADR-0113), so the same value has to come from one place. It lives in this
+ * (ADR-0114), so the same value has to come from one place. It lives in this
  * leaf for the same load-order reason as the markers above — the handlers are
  * loaded *by* `activity-handler.ts` and cannot import values back out of it.
  */

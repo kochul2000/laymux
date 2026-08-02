@@ -4,6 +4,7 @@ import { persistSession } from "@/lib/persist-session";
 import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
+import { useTerminalRestartStore } from "./terminal-restart-store";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 
 /** Convert a workspace pane to a layout pane (preserving view config). */
@@ -230,6 +231,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         // 워크스페이스 삭제도 다중 pane 제거 경로이므로 1회성 CWD 전파 요청
         // 버스를 정리한다(issue #296 P3). removePane/removeDockPane 와 동일 계약.
         cwdPropagate.clear(p.id);
+        // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
+        useTerminalRestartStore.getState().forgetRestart(p.id);
       }
     }
   },
@@ -318,6 +321,8 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       // 1회성 CWD 전파 요청 버스 정리(issue #296 P3-a): 제거된 페인의 요청 카운터가
       // 누적되지 않도록 비운다.
       useCwdPropagateStore.getState().clear(removedPaneId);
+      // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
+      useTerminalRestartStore.getState().forgetRestart(removedPaneId);
     }
   },
 
@@ -428,7 +433,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     // View 타입이 바뀌면 view 인스턴스 오버라이드는 의미가 없어지므로 비운다.
     // Pane 인스턴스 오버라이드(controlBar 모드 등)는 슬롯 속성이라 유지.
-    if (viewTypeChanged) useOverridesStore.getState().clearViewOverride(prev.id);
+    if (viewTypeChanged) {
+      useOverridesStore.getState().clearViewOverride(prev.id);
+      // 미소비 재시작 요청도 같이 버린다(ADR-0113). pane id 는 살아 있으므로
+      // 기동 시 gcStale 이 잡지 못하고, 나중에 다시 TerminalView 로 바꾸면
+      // 옛 cwd 로 fresh 재시작이 걸려 세션 복원을 건너뛴다.
+      if (prev.view.type === "TerminalView") {
+        useTerminalRestartStore.getState().forgetRestart(prev.id);
+      }
+    }
   },
 
   // Layout actions per docs/architecture/overview.md §4.1

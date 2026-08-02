@@ -19,14 +19,18 @@ const UI_ROOT = process.cwd();
  * unless someone opens a C++ file. This constant guards the thing that is
  * actually paid for on every launch.
  *
- * Raised from 500_000 when the top-bar sleep prevention toggle (ADR-0113)
- * landed: the entry chunk measured 497,270 B before it and 500,571 B after, so
- * the next 3 kB of always-visible chrome — of any kind — would have tripped the
- * old round number. The new one is deliberately only a little above what was
- * measured: this is a ratchet, and the next few kB should have to argue for
- * themselves too rather than move the number again.
+ * Raising it is a deliberate act, not a way to make a red run green: state what
+ * grew and why in the commit. The 500 kB value left 2.7 kB of headroom by the
+ * time the workspace-clear feature landed (issue #726), which is below the size
+ * of any real feature — a startup module plus one Settings group's strings.
+ *
+ * 510 kB kept roughly that same small margin. Sleep prevention (ADR-0114) then
+ * added ~2.6 kB of always-visible chrome — a top-bar toggle, its coordinator,
+ * and one Settings group — taking the entry to 512,576 B. 515 kB restores the
+ * same small margin rather than banking room for several more features: the
+ * point of the guard is to make the next increase a conscious decision too.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 505_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 515_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

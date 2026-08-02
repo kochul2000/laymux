@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { TerminalInstance } from "@/stores/terminal-store";
 import { CLAUDE_INPUT_PENDING_MARKER, CODEX_INPUT_PENDING_MARKER } from "./activity-markers";
 import { computeCommandStatus } from "./workspace-summary";
-import { hasBusyTerminal, isTerminalBusy } from "./terminal-busy";
+import { hasWorkingTerminal, isTerminalWorking } from "./terminal-working";
 
 function terminal(overrides: Partial<TerminalInstance> = {}): TerminalInstance {
   return {
@@ -17,28 +17,30 @@ function terminal(overrides: Partial<TerminalInstance> = {}): TerminalInstance {
   };
 }
 
-describe("isTerminalBusy", () => {
+describe("isTerminalWorking", () => {
   it("is false for an idle terminal", () => {
-    expect(isTerminalBusy(terminal())).toBe(false);
+    expect(isTerminalWorking(terminal())).toBe(false);
   });
 
   it("is true while a command runs", () => {
-    expect(isTerminalBusy(terminal({ activity: { type: "running" } }))).toBe(true);
+    expect(isTerminalWorking(terminal({ activity: { type: "running" } }))).toBe(true);
   });
 
   it("is true while output is still flowing", () => {
-    expect(isTerminalBusy(terminal({ outputActive: true }))).toBe(true);
+    expect(isTerminalWorking(terminal({ outputActive: true }))).toBe(true);
   });
 
   it("is false for a finished command", () => {
-    expect(isTerminalBusy(terminal({ activity: { type: "shell" }, lastExitCode: 0 }))).toBe(false);
+    expect(isTerminalWorking(terminal({ activity: { type: "shell" }, lastExitCode: 0 }))).toBe(
+      false,
+    );
   });
 
   it("is true for Claude's local-agent path, where outputActive stays false (#225)", () => {
     // The regression the whole helper exists for: the pane shows the hourglass
     // from the spinner title alone, and a raw-field check would call it idle.
     expect(
-      isTerminalBusy(
+      isTerminalWorking(
         terminal({
           activity: { type: "interactiveApp", name: "Claude" },
           // ✳ is Claude's idle prefix — waiting for the user, not working.
@@ -50,7 +52,7 @@ describe("isTerminalBusy", () => {
     ).toBe(false);
 
     expect(
-      isTerminalBusy(
+      isTerminalWorking(
         terminal({
           activity: { type: "interactiveApp", name: "Claude" },
           title: "⠂ Refactoring the parser",
@@ -63,7 +65,7 @@ describe("isTerminalBusy", () => {
 
   it("is true for a Codex Braille spinner with no output", () => {
     expect(
-      isTerminalBusy(
+      isTerminalWorking(
         terminal({
           activity: { type: "interactiveApp", name: "Codex" },
           title: "⠂ Working",
@@ -76,7 +78,7 @@ describe("isTerminalBusy", () => {
   it("is false while an agent waits on the user, however busy it looks", () => {
     // A permission prompt is the user's turn — the machine may sleep.
     expect(
-      isTerminalBusy(
+      isTerminalWorking(
         terminal({
           activity: { type: "interactiveApp", name: "Claude" },
           title: "⠂ Editing main.rs",
@@ -87,7 +89,7 @@ describe("isTerminalBusy", () => {
     ).toBe(false);
 
     expect(
-      isTerminalBusy(
+      isTerminalWorking(
         terminal({
           activity: { type: "interactiveApp", name: "Codex" },
           title: "⠂ Working",
@@ -99,7 +101,7 @@ describe("isTerminalBusy", () => {
   });
 });
 
-describe("isTerminalBusy agrees with the pane hourglass", () => {
+describe("isTerminalWorking agrees with the pane hourglass", () => {
   // The invariant the helper's doc comment promises. Each row states the icon
   // it expects outright, so the table is a fact about behavior rather than a
   // restatement of the implementation, and then asserts that busy tracks it. If
@@ -169,16 +171,16 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
       instance.title,
     );
     expect(status.icon).toBe(expectedIcon);
-    expect(isTerminalBusy(instance)).toBe(expectedIcon === "⏳");
+    expect(isTerminalWorking(instance)).toBe(expectedIcon === "⏳");
   });
 });
 
-describe("hasBusyTerminal", () => {
+describe("hasWorkingTerminal", () => {
   it("is false for an empty list", () => {
-    expect(hasBusyTerminal([])).toBe(false);
+    expect(hasWorkingTerminal([])).toBe(false);
   });
 
   it("is true when any terminal is busy", () => {
-    expect(hasBusyTerminal([terminal(), terminal({ id: "t2", outputActive: true })])).toBe(true);
+    expect(hasWorkingTerminal([terminal(), terminal({ id: "t2", outputActive: true })])).toBe(true);
   });
 });

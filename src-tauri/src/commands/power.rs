@@ -5,7 +5,7 @@ use tauri::State;
 use crate::error::AppError;
 use crate::state::AppState;
 
-/// Hold or release the OS sleep inhibitor (ADR-0113).
+/// Hold or release the OS sleep inhibitor (ADR-0114).
 ///
 /// The frontend decides *whether* to inhibit — it folds the user's mode setting
 /// and the terminals' busy state into one boolean — and calls this on every

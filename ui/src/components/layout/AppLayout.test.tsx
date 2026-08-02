@@ -42,6 +42,7 @@ vi.mock("@/lib/tauri-api", () => ({
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
   markNotificationsRead: vi.fn().mockResolvedValue(undefined),
   setSleepInhibit: vi.fn().mockResolvedValue(false),
+  onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@/components/views/TerminalView", () => ({

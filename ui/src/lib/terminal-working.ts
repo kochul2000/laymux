@@ -10,13 +10,13 @@ import { getHandler, STATUS_ICON_WORKING } from "./activity-handler";
  * local-agent path (issue #225) and Codex's Braille spinner both keep the
  * hourglass up with `outputActive === false` and an `interactiveApp` activity,
  * and only their handlers know that. Asking the same handler that draws the
- * icon is what keeps sleep prevention (ADR-0113) from letting the machine doze
+ * icon is what keeps sleep prevention (ADR-0114) from letting the machine doze
  * off while a pane still says work is in progress.
  *
  * `WorkspaceSelectorView` renders the same status from the same live store
  * state, so the two agree by construction rather than by convention.
  */
-export function isTerminalBusy(instance: TerminalInstance): boolean {
+export function isTerminalWorking(instance: TerminalInstance): boolean {
   const status = getHandler(instance.activity).computeStatus({
     exitCode: instance.lastExitCode,
     outputActive: instance.outputActive ?? false,
@@ -29,6 +29,6 @@ export function isTerminalBusy(instance: TerminalInstance): boolean {
 }
 
 /** Whether any terminal in the list is busy. */
-export function hasBusyTerminal(instances: readonly TerminalInstance[]): boolean {
-  return instances.some(isTerminalBusy);
+export function hasWorkingTerminal(instances: readonly TerminalInstance[]): boolean {
+  return instances.some(isTerminalWorking);
 }

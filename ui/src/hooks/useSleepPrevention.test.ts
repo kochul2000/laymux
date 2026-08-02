@@ -5,6 +5,7 @@ const setSleepInhibit = vi.fn<(enabled: boolean) => Promise<boolean>>();
 
 vi.mock("@/lib/tauri-api", () => ({
   setSleepInhibit: (enabled: boolean) => setSleepInhibit(enabled),
+  onSleepInhibitChanged: () => Promise.resolve(() => {}),
 }));
 
 import { useSleepPrevention } from "./useSleepPrevention";

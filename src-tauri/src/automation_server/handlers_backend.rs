@@ -74,6 +74,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "description": "Delete a workspace. Cannot delete the last one."
             },
             {
+                "method": "POST", "path": "/api/v1/workspaces/{id}/clear",
+                "description": "Clear every TerminalView pane of a workspace: the configured shell command in a shell, '/clear' in Claude Code and Codex. Interactive apps without a dedicated handler are never written to. Busy panes follow settings.workspaceClear.busyPolicy (skip | interrupt | restart). The interrupt wait is capped to fit this request's budget; 'waitCapped' says whether the configured settle was shortened, and 'interruptRounds'/'settleMs' report what actually ran.",
+                "response": "{ workspaceId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
+            },
+            {
                 "method": "POST", "path": "/api/v1/layouts/export",
                 "description": "Export active workspace pane structure as a layout.",
                 "body": { "name": "string (optional) — create new layout with this name", "layoutId": "string (optional) — overwrite existing layout" }

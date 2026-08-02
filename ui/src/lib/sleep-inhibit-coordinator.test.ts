@@ -7,6 +7,7 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 import {
+  observeSleepInhibitState,
   releaseSleepInhibit,
   requestSleepInhibit,
   resetSleepInhibitCoordinator,
@@ -140,6 +141,55 @@ describe("sleep inhibit coordinator", () => {
     // Bounded, not unbounded: a machine that cannot release must not spin.
     expect(setSleepInhibit).toHaveBeenCalledTimes(3);
     expect(sent()).toEqual([false, false, false]);
+  });
+
+  it("shows a recovery the backend made on its own", async () => {
+    // The watchdog re-acquired after a failure. No request carries that news,
+    // so without the observation the button stays red over a protected machine.
+    setSleepInhibit.mockRejectedValueOnce(new Error("transient"));
+    requestSleepInhibit(true);
+    await flush();
+    expect(useSleepInhibitStore.getState()).toMatchObject({ active: false, failed: true });
+
+    observeSleepInhibitState(true, true);
+    await flush();
+
+    expect(useSleepInhibitStore.getState()).toMatchObject({ active: true, failed: false });
+    // Already where it should be, so nothing more is sent.
+    expect(sent()).toEqual([true]);
+  });
+
+  it("re-requests after the backend reports it lost the inhibitor", async () => {
+    requestSleepInhibit(true);
+    await flush();
+    setSleepInhibit.mockClear();
+
+    // The watchdog saw the child die and could not get it back.
+    observeSleepInhibitState(false, false);
+    await flush();
+
+    expect(useSleepInhibitStore.getState().active).toBe(true);
+    expect(sent()).toEqual([true]);
+  });
+
+  it("a remount is not blocked by the failure of the request it replaced", async () => {
+    // enable in flight → unmount → remount asks for it again → the original
+    // enable rejects. That rejection belongs to an intent nobody holds any
+    // more; recording it as refused would silently disable `always` until the
+    // user changed the mode.
+    const enable = deferred<boolean>();
+    setSleepInhibit.mockReturnValueOnce(enable.promise);
+    requestSleepInhibit(true);
+    expect(sent()).toEqual([true]);
+
+    releaseSleepInhibit();
+    requestSleepInhibit(true);
+
+    enable.reject(new Error("transient"));
+    await flush();
+
+    expect(sent()).toEqual([true, true]);
+    expect(useSleepInhibitStore.getState().active).toBe(true);
   });
 
   it("survives a caller going away and a new one arriving", async () => {

@@ -1,5 +1,5 @@
 /**
- * Sleep prevention mode and its single derivation (ADR-0113).
+ * Sleep prevention mode and its single derivation (ADR-0114).
  *
  * The mode is a raw user setting; "a terminal is busy" is raw runtime state.
  * Neither is the answer on its own — `shouldInhibitSleep` is the one place the
@@ -15,12 +15,15 @@ export const SLEEP_PREVENTION_MODES: readonly SleepPreventionMode[] = ["off", "a
 export const DEFAULT_SLEEP_PREVENTION_MODE: SleepPreventionMode = "off";
 
 /** Whether the OS should be kept awake right now. */
-export function shouldInhibitSleep(mode: SleepPreventionMode, hasBusyTerminal: boolean): boolean {
+export function shouldInhibitSleep(
+  mode: SleepPreventionMode,
+  hasWorkingTerminal: boolean,
+): boolean {
   switch (mode) {
     case "always":
       return true;
     case "whenBusy":
-      return hasBusyTerminal;
+      return hasWorkingTerminal;
     default:
       return false;
   }

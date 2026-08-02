@@ -331,3 +331,36 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(useSettingsStore.getState().power.sleepPrevention).toBe("off");
   });
 });
+
+// A leg missing on either side (collect or apply) would still pass the Rust
+// serde round trip and the SettingsView draft tests, and only show up as
+// "my settings reverted after a restart" (ADR-0113).
+describe("workspaceClear settings survive a snapshot round trip", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  it("carries every non-default field back into the store", async () => {
+    const configured = {
+      shellCommand: "cls",
+      busyPolicy: "restart" as const,
+      interruptRounds: 7,
+      settleMs: 1_500,
+    };
+    useSettingsStore.getState().setWorkspaceClear(configured);
+
+    const snapshot = await collectSettingsSnapshot();
+    expect(snapshot.workspaceClear).toEqual(configured);
+
+    // Wipe the store the way a fresh launch does, then hydrate from the snapshot.
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    expect(useSettingsStore.getState().workspaceClear.shellCommand).toBe("clear");
+
+    applySettingsSnapshot(snapshot, { includeStructural: false });
+
+    expect(useSettingsStore.getState().workspaceClear).toEqual(configured);
+  });
+});

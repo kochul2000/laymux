@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { isTerminalBusy } from "@/lib/terminal-busy";
+import { isTerminalWorking } from "@/lib/terminal-working";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
@@ -16,7 +16,7 @@ export function TerminalActivityWidget({ instance, dragRegion }: WidgetComponent
     scope === "all"
       ? instances
       : instances.filter((terminal) => terminal.workspaceId === activeWorkspaceId);
-  const busy = counted.filter(isTerminalBusy).length;
+  const busy = counted.filter(isTerminalWorking).length;
 
   return (
     <WidgetChrome
