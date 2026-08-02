@@ -488,12 +488,13 @@ export async function clearPane(
   settings?: Partial<WorkspaceClearSettings>,
   options: ClearWorkspaceOptions = {},
 ): Promise<WorkspaceClearResult> {
-  const view = findTerminalPaneView(paneId);
-  if (!view) throw new Error(`Pane '${paneId}' is not a terminal pane`);
+  if (!findTerminalPaneView(paneId)) throw new Error(`Pane '${paneId}' is not a terminal pane`);
   const config = resolveWorkspaceClear(settings, options);
   const deadlineAt =
     options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
   const actions = planWorkspaceClear([paneId], useTerminalStore.getState().instances, config);
 
-  return executeClear(actions, config, deadlineAt, () => view);
+  // Looked up again at restart time, not captured here: `interrupt` can spend
+  // seconds between the two, and the workspace clear reads the pane live too.
+  return executeClear(actions, config, deadlineAt, (id) => findTerminalPaneView(id) ?? undefined);
 }

@@ -2110,6 +2110,41 @@ describe("useKeyboardShortcuts", () => {
       expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledTimes(1);
     });
 
+    // Dock focus wins over the grid, and a dock pane is a legitimate target
+    // here even though the workspace clear never touches one (ADR-0121).
+    it("Alt+L clears the focused dock pane, not the grid pane behind it", async () => {
+      workspaceWithTwoTerminals();
+      useDockStore.setState({
+        docks: [
+          {
+            position: "left",
+            activeView: "TerminalView",
+            views: ["TerminalView"],
+            visible: true,
+            size: 300,
+            panes: [{ id: "dp-1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          },
+        ],
+      });
+      useTerminalStore.getState().registerInstance({
+        id: "terminal-dp-1",
+        profile: "PowerShell",
+        syncGroup: "dock",
+        workspaceId: useWorkspaceStore.getState().getActiveWorkspace()!.id,
+      });
+      useTerminalStore.getState().updateInstanceInfo("terminal-dp-1", { sessionReady: true });
+      useGridStore.setState({ focusedPaneIndex: 1 });
+      useDockStore.getState().setFocusedDock("left", "dp-1");
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { altKey: true });
+
+      await vi.waitFor(() => {
+        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-dp-1", "clear", true);
+      });
+      expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledTimes(1);
+    });
+
     it("is a no-op when the focused pane is not a terminal", async () => {
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       useWorkspaceStore.setState({
