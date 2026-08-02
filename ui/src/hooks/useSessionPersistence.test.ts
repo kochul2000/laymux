@@ -612,13 +612,14 @@ describe("useSessionPersistence", () => {
     vi.mocked(loadSettingsValidated).mockResolvedValueOnce({
       status: "recovered",
       settingsPath: "C:\\config\\settings.json",
-      warnings: [
+      dropped: [
         {
           path: "terminal.parserAdmission.hiddenShare",
           message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다",
           repaired: true,
         },
       ],
+      warnings: [{ path: "docks[0].size", message: "독 크기를 기본값으로 수정", repaired: true }],
       settings: {
         defaultProfile: "WSL",
         profiles: [
@@ -659,9 +660,11 @@ describe("useSessionPersistence", () => {
     // The rest of the file survived recovery and must reach the stores.
     expect(useWorkspaceStore.getState().workspaces[0]?.name).toBe("Survivor");
     expect(useSettingsStore.getState().defaultProfile).toBe("WSL");
-    // The dropped path is surfaced so the modal can list it.
-    expect(result.current.loadStatus.warnings).toHaveLength(1);
-    expect(result.current.loadStatus.warnings[0].path).toBe("terminal.parserAdmission.hiddenShare");
+    // Dropped paths lead, structural repairs follow — the modal lists both.
+    expect(result.current.loadStatus.warnings.map((w) => w.path)).toEqual([
+      "terminal.parserAdmission.hiddenShare",
+      "docks[0].size",
+    ]);
   });
 
   it("does not block settings writes on a clean load", async () => {

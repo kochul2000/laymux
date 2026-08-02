@@ -444,10 +444,14 @@ export type SettingsLoadResult =
    * Type-error paths were dropped in favour of their defaults (ADR-0116).
    * User-authored values were lost, so settings writes stay blocked until the
    * user acknowledges the listed paths.
+   *
+   * `dropped` are values the user wrote and lost; `warnings` are structures the
+   * loader fixed up. They stay apart so "N items removed" counts only losses.
    */
   | {
       status: "recovered";
       settings: Settings;
+      dropped: ValidationWarning[];
       warnings: ValidationWarning[];
       settingsPath: string;
     }

@@ -12,8 +12,12 @@ vi.mock("@/lib/persist-session", () => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  // Render the key itself so assertions pin the branch, not the copy.
-  useTranslation: () => ({ t: (key: string) => key }),
+  // Render the key (and any interpolated numbers) so assertions pin the branch
+  // and the counts, not the copy.
+  useTranslation: () => ({
+    t: (key: string, vars?: Record<string, unknown>) =>
+      vars ? `${key}(${JSON.stringify(vars)})` : key,
+  }),
 }));
 
 import { SettingsRecoveryModal } from "./SettingsRecoveryModal";
@@ -23,7 +27,7 @@ const RECOVERED: SettingsLoadResult = {
   status: "recovered",
   settings: {} as never,
   settingsPath: "C:\\config\\settings.json",
-  warnings: [
+  dropped: [
     {
       path: "terminal.parserAdmission.hiddenShare",
       message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다",
@@ -34,6 +38,11 @@ const RECOVERED: SettingsLoadResult = {
       message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다",
       repaired: true,
     },
+  ],
+  // A structural repair rides along: it must be listed but never counted as a
+  // dropped value.
+  warnings: [
+    { path: "docks[0].size", message: "독 크기를 기본값으로 수정했습니다.", repaired: true },
   ],
 };
 
@@ -52,6 +61,18 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0116)", ()
     // A count alone would not tell the user which values are gone.
     expect(screen.getByText("terminal.parserAdmission.hiddenShare")).toBeInTheDocument();
     expect(screen.getByText("workspaces[3].panes[1]")).toBeInTheDocument();
+    // Structural repairs are listed too, but under their own label.
+    expect(screen.getByText("docks[0].size")).toBeInTheDocument();
+  });
+
+  it("counts only dropped values as removed, not structural repairs", () => {
+    render(<SettingsRecoveryModal loadResult={RECOVERED} onDismiss={vi.fn()} onReset={vi.fn()} />);
+
+    // 2 dropped + 1 structural repair. "Removed" must read 2, not 3 — the
+    // repair is reported under its own count.
+    const summary = screen.getByText(/recovery\.droppedCount/);
+    expect(summary.textContent).toContain('recovery.droppedCount({"num":2})');
+    expect(summary.textContent).toContain('recovery.repairedCount({"num":1})');
   });
 
   it("labels the dismiss button as an acknowledgement, not a plain OK", () => {
@@ -74,7 +95,9 @@ describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0116)", ()
 
   it("hands the acknowledgement back to the caller, which releases the write block", async () => {
     const onDismiss = vi.fn();
-    render(<SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />);
+    render(
+      <SettingsRecoveryModal loadResult={RECOVERED} onDismiss={onDismiss} onReset={vi.fn()} />,
+    );
 
     await userEvent.click(screen.getByTestId("settings-recovery-dismiss"));
 

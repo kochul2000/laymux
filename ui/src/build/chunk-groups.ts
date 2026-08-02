@@ -47,12 +47,6 @@ const FILE_PREVIEW_SUFFIXES = [
   // size budget, and a feature that grows should grow its own chunk.
   "/src/components/ui/FileViewer.tsx",
 ];
-/**
- * The settings recovery modal (ADR-0116). It only renders when settings.json
- * failed to load cleanly, so its bytes should not sit in the entry chunk that
- * every healthy launch pays for.
- */
-const SETTINGS_RECOVERY_SUFFIX = "/src/components/views/SettingsRecoveryModal.tsx";
 const TERMINAL_OUTPUT_V3_FAILURE_SUFFIX = "/src/lib/terminal-output-v3-failure-coordinator.ts";
 const TERMINAL_INPUT_DELIVERY_METRICS_SUFFIX = "/src/lib/terminal-input-delivery-metrics.ts";
 const NODE_MODULES_SEGMENT = "/node_modules/";
@@ -81,7 +75,6 @@ export function resolveChunkGroup(id: string): string | undefined {
   ) {
     return "file-preview";
   }
-  if (normalizedId.endsWith(SETTINGS_RECOVERY_SUFFIX)) return "settings-recovery";
   if (normalizedId.endsWith(TERMINAL_OUTPUT_V3_FAILURE_SUFFIX)) {
     return "terminal-output-v3-failure";
   }

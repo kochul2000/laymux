@@ -36,7 +36,13 @@ export function useSessionPersistence() {
       .then((loadResult) => {
         setLoadStatus({
           result: loadResult,
-          warnings: loadResult.status === "parse_error" ? [] : loadResult.warnings,
+          warnings:
+            loadResult.status === "parse_error"
+              ? []
+              : loadResult.status === "recovered"
+                ? // Dropped values first, then the structural repairs.
+                  [...loadResult.dropped, ...loadResult.warnings]
+                : loadResult.warnings,
         });
 
         // When settings.json couldn't be parsed, don't hydrate stores with defaults —

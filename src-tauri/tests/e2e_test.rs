@@ -2373,15 +2373,23 @@ fn settings_load_result_round_trip_recovered() {
     // the frontend keys settings-write blocking off it.
     let result = SettingsLoadResult::Recovered {
         settings: Settings::default(),
-        warnings: vec![ValidationWarning {
+        dropped: vec![ValidationWarning {
             path: "terminal.parserAdmission.hiddenShare".into(),
             message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다".into(),
+            repaired: true,
+        }],
+        warnings: vec![ValidationWarning {
+            path: "docks[0].size".into(),
+            message: "독 크기가 음수여서 기본값(240)으로 수정했습니다.".into(),
             repaired: true,
         }],
         settings_path: "C:\\Users\\test\\settings.json".into(),
     };
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"status\":\"recovered\""));
+    // Lost values and structural repairs travel as separate lists so the modal
+    // does not count a repair as a loss.
+    assert!(json.contains("\"dropped\""));
     assert!(json.contains("\"settingsPath\""));
     let parsed: SettingsLoadResult = serde_json::from_str(&json).unwrap();
     assert_eq!(result, parsed);

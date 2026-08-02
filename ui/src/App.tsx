@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSyncEvents } from "@/hooks/useSyncEvents";
@@ -12,7 +12,16 @@ import { useWindowGeometry, captureWindowGeometry } from "@/hooks/useWindowGeome
 import { useAppFocus } from "@/hooks/useAppFocus";
 import { useLanguageSync } from "@/hooks/useLanguageSync";
 import { useTerminalParserAdmissionSettings } from "@/hooks/useTerminalParserAdmissionSettings";
-import { SettingsRecoveryModal } from "@/components/views/SettingsRecoveryModal";
+/**
+ * Loaded only when settings.json failed to load cleanly. A static import would
+ * put it in the startup payload of every healthy launch; splitting the chunk
+ * alone would not, since the entry would still import it eagerly.
+ */
+const SettingsRecoveryModal = lazy(() =>
+  import("@/components/views/SettingsRecoveryModal").then((m) => ({
+    default: m.SettingsRecoveryModal,
+  })),
+);
 import { closeTerminalSession } from "@/lib/tauri-api";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { RemoteControlOverlay } from "@/components/layout/RemoteControlOverlay";
@@ -115,20 +124,22 @@ export function App() {
     <div className="h-screen" data-testid="app-root">
       <AppLayout />
       {showRecovery && loadStatus.result && (
-        <SettingsRecoveryModal
-          loadResult={loadStatus.result}
-          onDismiss={() => {
-            // Recovery held settings writes back until the user saw the dropped
-            // paths. Acknowledging the modal releases them (ADR-0116).
-            if (recoveryStatus === "recovered") setBlockPersist(false);
-            setRecoveryDismissed(true);
-          }}
-          onReset={() => {
-            setRecoveryDismissed(true);
-            // Reload to apply fresh defaults
-            window.location.reload();
-          }}
-        />
+        <Suspense fallback={null}>
+          <SettingsRecoveryModal
+            loadResult={loadStatus.result}
+            onDismiss={() => {
+              // Recovery held settings writes back until the user saw the dropped
+              // paths. Acknowledging the modal releases them (ADR-0116).
+              if (recoveryStatus === "recovered") setBlockPersist(false);
+              setRecoveryDismissed(true);
+            }}
+            onReset={() => {
+              setRecoveryDismissed(true);
+              // Reload to apply fresh defaults
+              window.location.reload();
+            }}
+          />
+        </Suspense>
       )}
       <LocalMobileModeOverlay />
       {!localMobileModeActive && <RemoteControlOverlay />}

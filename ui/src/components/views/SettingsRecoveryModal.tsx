@@ -29,7 +29,11 @@ export function SettingsRecoveryModal({
 
   const isParseError = loadResult.status === "parse_error";
   const isRecovered = loadResult.status === "recovered";
-  const warnings: ValidationWarning[] = isParseError ? [] : loadResult.warnings;
+  /** Values the user wrote and lost. Only these count as "removed". */
+  const dropped: ValidationWarning[] = isRecovered ? loadResult.dropped : [];
+  /** Structures the loader fixed up — reported, but not a loss. */
+  const repairs: ValidationWarning[] = isParseError ? [] : loadResult.warnings;
+  const warnings: ValidationWarning[] = [...dropped, ...repairs];
   const parseError = isParseError ? loadResult.error : null;
   const settingsPathFromResult = isParseError || isRecovered ? loadResult.settingsPath : null;
 
@@ -125,13 +129,13 @@ export function SettingsRecoveryModal({
         {warnings.length > 0 && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              {isRecovered
-                ? t("recovery.droppedCount", { num: warnings.filter((w) => w.repaired).length })
-                : t("recovery.repairedCount", {
-                    num: warnings.filter((w) => w.repaired).length,
-                  })}
-              {warnings.filter((w) => !w.repaired).length > 0 &&
-                t("recovery.manualCount", { num: warnings.filter((w) => !w.repaired).length })}
+              {isRecovered && t("recovery.droppedCount", { num: dropped.length })}
+              {repairs.filter((w) => w.repaired).length > 0 &&
+                t("recovery.repairedCount", {
+                  num: repairs.filter((w) => w.repaired).length,
+                })}
+              {repairs.filter((w) => !w.repaired).length > 0 &&
+                t("recovery.manualCount", { num: repairs.filter((w) => !w.repaired).length })}
             </div>
             <div
               className="overflow-auto rounded p-3 text-xs"

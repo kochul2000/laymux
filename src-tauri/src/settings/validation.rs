@@ -41,9 +41,14 @@ pub enum SettingsLoadResult {
     /// favour of their defaults (ADR-0116). User-authored values were lost, so
     /// the frontend must block settings writes until the user acknowledges the
     /// listed paths — the original file is left untouched until then.
+    ///
+    /// `dropped` and `warnings` stay separate lists: a dropped path is a value
+    /// the user wrote and lost, a warning is a structure the loader fixed up.
+    /// Merging them would make "N items removed" count repairs as losses.
     #[serde(rename = "recovered")]
     Recovered {
         settings: Settings,
+        dropped: Vec<ValidationWarning>,
         warnings: Vec<ValidationWarning>,
         settings_path: String,
     },

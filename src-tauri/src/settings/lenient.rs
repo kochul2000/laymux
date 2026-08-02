@@ -17,11 +17,22 @@ use super::models::Settings;
 use super::validation::ValidationWarning;
 
 /// Upper bound on paths a single load may drop before the file is declared
-/// unrecoverable. Each drop shrinks the value tree, so this only guards against
-/// pathological inputs.
-const MAX_DROPPED_PATHS: usize = 64;
+/// unrecoverable.
+///
+/// This is **not** what makes the loop terminate — every drop removes a node, so
+/// the tree strictly shrinks and the loop always ends. The bound exists because
+/// each retry re-deserializes the whole tree, making a badly broken file cost
+/// O(drops × size); it caps that work.
+///
+/// Hitting it means giving up on partial recovery entirely (there is no
+/// `Settings` to return until the tree parses), which is the outcome #701 exists
+/// to prevent — so it is set far above any plausible hand-edit. A 130-workspace
+/// file has a few hundred coordinates in total; a user who mistypes thousands of
+/// them has a generated file, not an edited one.
+const MAX_DROPPED_PATHS: usize = 2_000;
 
 /// Settings recovered from a value tree, plus the paths that had to be dropped.
+#[derive(Debug)]
 pub(crate) struct LenientSettings {
     pub settings: Settings,
     /// One warning per dropped path. Empty when the file deserialized cleanly.
@@ -52,7 +63,7 @@ pub(crate) fn deserialize_lenient(raw: &str) -> Result<LenientSettings, String> 
 
         if dropped.len() >= MAX_DROPPED_PATHS {
             return Err(format!(
-                "타입 오류가 {MAX_DROPPED_PATHS}개를 넘어 복구를 중단했습니다: {err}"
+                "타입 오류가 {MAX_DROPPED_PATHS}개에 도달해 복구를 중단했습니다: {err}"
             ));
         }
 
@@ -310,6 +321,31 @@ mod tests {
     }
 
     #[test]
+    fn mistyped_pane_coordinate_costs_only_that_field() {
+        // x/y carry a serde default like w/h, so a bad coordinate must not take
+        // the pane — and must not burn two drops widening to the parent.
+        let raw = r#"{
+          "workspaces": [
+            {
+              "id": "ws-1",
+              "name": "Keep me",
+              "panes": [
+                { "id": "p1", "x": "0", "y": 0.25, "w": 1.0, "h": 1.0,
+                  "view": { "type": "TerminalView" } }
+              ]
+            }
+          ]
+        }"#;
+        let recovered = deserialize_lenient(raw).unwrap();
+        let pane = &recovered.settings.workspaces[0].panes[0];
+        assert_eq!(pane.id, "p1");
+        assert_eq!(pane.x, 0.0);
+        assert_eq!(pane.y, 0.25);
+        assert_eq!(recovered.dropped.len(), 1);
+        assert_eq!(recovered.dropped[0].path, "workspaces[0].panes[0].x");
+    }
+
+    #[test]
     fn json_syntax_error_is_not_recoverable() {
         assert!(deserialize_lenient("{ not json").is_err());
     }
@@ -326,14 +362,32 @@ mod tests {
     }
 
     #[test]
-    fn drop_count_is_bounded() {
-        // Every entry in a large object is mistyped; recovery must terminate.
+    fn damage_far_beyond_a_hand_edit_still_recovers() {
+        // 500 mistyped fields — well past anything a person types by hand, and
+        // far past the old 64 cap that turned heavy damage into total loss.
+        // Every one must be dropped individually, not escalated to ParseError.
+        const BAD: usize = 500;
+        let bad_profiles: Vec<String> = (0..BAD)
+            .map(|i| format!(r#"{{ "name": "p{i}", "commandLine": {i} }}"#))
+            .collect();
+        let raw = format!(r#"{{ "profiles": [{}] }}"#, bad_profiles.join(","));
+
+        let recovered = deserialize_lenient(&raw).expect("heavy damage must still recover");
+        assert_eq!(recovered.settings.profiles.len(), BAD);
+        assert_eq!(recovered.settings.profiles[0].name, "p0");
+        assert_eq!(recovered.dropped.len(), BAD);
+    }
+
+    #[test]
+    fn damage_past_the_bound_reports_the_file_as_unrecoverable() {
+        // Past the bound there is no partial result to hand back — the tree
+        // still does not parse — so the load must fail rather than loop.
         let bad_profiles: Vec<String> = (0..MAX_DROPPED_PATHS + 10)
             .map(|i| format!(r#"{{ "name": "p{i}", "commandLine": {i} }}"#))
             .collect();
         let raw = format!(r#"{{ "profiles": [{}] }}"#, bad_profiles.join(","));
-        // Either it recovers within the bound or it reports the file as
-        // unrecoverable — it must not loop.
-        let _ = deserialize_lenient(&raw);
+
+        let err = deserialize_lenient(&raw).expect_err("must stop at the bound");
+        assert!(err.contains("도달해"), "err: {err}");
     }
 }

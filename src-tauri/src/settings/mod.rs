@@ -107,11 +107,10 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
             path = %path_str,
             "Settings 타입 오류 항목을 제거하고 기본값으로 복구"
         );
-        let mut all_warnings = dropped;
-        all_warnings.extend(warnings);
         return SettingsLoadResult::Recovered {
             settings,
-            warnings: all_warnings,
+            dropped,
+            warnings,
             settings_path: path_str,
         };
     }
@@ -308,6 +307,7 @@ mod tests {
         let result = load_settings_validated_from(&path);
         let SettingsLoadResult::Recovered {
             settings,
+            dropped,
             warnings,
             settings_path,
         } = result
@@ -324,9 +324,15 @@ mod tests {
             Settings::default().terminal.parser_admission.hidden_share
         );
         assert_eq!(settings_path, path.display().to_string());
-        assert!(warnings
-            .iter()
-            .any(|w| w.path == "terminal.parserAdmission.hiddenShare" && w.repaired));
+
+        // Exactly one value was lost. Structural repairs (this file has no
+        // workspaces, so the loader synthesizes one) stay out of that count.
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].path, "terminal.parserAdmission.hiddenShare");
+        assert!(
+            !warnings.iter().any(|w| w.path.starts_with("terminal.")),
+            "repair warnings must not restate dropped paths: {warnings:?}"
+        );
     }
 
     #[test]
