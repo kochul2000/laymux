@@ -17,6 +17,17 @@ function registerBusyTerminal(id: string) {
   store.updateInstanceInfo(id, { outputActive: true });
 }
 
+/** A deferred promise, so a call can be left in flight on purpose. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("useSleepPrevention", () => {
   beforeEach(() => {
     setSleepInhibit.mockReset();
@@ -74,6 +85,25 @@ describe("useSleepPrevention", () => {
     expect(setSleepInhibit).not.toHaveBeenCalled();
   });
 
+  it("does not re-render its host when the busy state flips", () => {
+    // The whole reason this subscribes instead of selecting: nothing renders
+    // from the busy flag, so an agent toggling it every few seconds must not
+    // reconcile the tree that mounted the hook.
+    let renders = 0;
+    renderHook(() => {
+      renders += 1;
+      useSleepPrevention();
+    });
+    useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" });
+    const baseline = renders;
+
+    act(() => registerBusyTerminal("t1"));
+    act(() => useTerminalStore.getState().updateInstanceInfo("t1", { outputActive: false }));
+
+    expect(setSleepInhibit).toHaveBeenLastCalledWith(false);
+    expect(renders).toBe(baseline);
+  });
+
   it("retries on the next change after a failed call", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     renderHook(() => useSleepPrevention());
@@ -97,6 +127,32 @@ describe("useSleepPrevention", () => {
     warn.mockRestore();
   });
 
+  it("a failure does not undo a newer request that superseded it", async () => {
+    // The enable is still in flight when the user turns the mode off. When the
+    // enable finally rejects it must not forget that "off" was already sent, or
+    // the next flip back to off would be dropped as a duplicate.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const enable = deferred<boolean>();
+    renderHook(() => useSleepPrevention());
+    setSleepInhibit.mockClear();
+    setSleepInhibit.mockReturnValueOnce(enable.promise);
+
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "off" }));
+    expect(setSleepInhibit.mock.calls.map(([enabled]) => enabled)).toEqual([true, false]);
+
+    await act(async () => {
+      enable.reject(new Error("too late"));
+      await Promise.resolve();
+    });
+
+    setSleepInhibit.mockClear();
+    // "off" is still the last known state, so re-deriving it sends nothing.
+    act(() => registerBusyTerminal("t1"));
+    expect(setSleepInhibit).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("releases the inhibitor on unmount", () => {
     const { unmount } = renderHook(() => useSleepPrevention());
     act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
@@ -111,6 +167,15 @@ describe("useSleepPrevention", () => {
     setSleepInhibit.mockClear();
 
     unmount();
+    expect(setSleepInhibit).not.toHaveBeenCalled();
+  });
+
+  it("stops following the stores after unmount", () => {
+    const { unmount } = renderHook(() => useSleepPrevention());
+    unmount();
+    setSleepInhibit.mockClear();
+
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
     expect(setSleepInhibit).not.toHaveBeenCalled();
   });
 });

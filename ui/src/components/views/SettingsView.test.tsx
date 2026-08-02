@@ -185,6 +185,24 @@ describe("SettingsView", () => {
     );
   });
 
+  describe("Interface section — sleep prevention", () => {
+    it("shows the mode the top-bar toggle wrote and saves a change back to it", async () => {
+      // Button and select are two views of one field; if they ever stop sharing
+      // it, one of them starts lying about whether the machine will sleep.
+      const user = userEvent.setup();
+      useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      expect(screen.getByTestId("sleep-prevention-select")).toHaveValue("always");
+
+      await user.selectOptions(screen.getByTestId("sleep-prevention-select"), "whenBusy");
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().power.sleepPrevention).toBe("whenBusy");
+    });
+  });
+
   describe("GitHub section", () => {
     it("shows defaults and saves edits to the store", async () => {
       const user = userEvent.setup();

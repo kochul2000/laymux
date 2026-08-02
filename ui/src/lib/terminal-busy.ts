@@ -1,15 +1,28 @@
 import type { TerminalInstance } from "@/stores/terminal-store";
+import { getHandler, STATUS_ICON_WORKING } from "./activity-handler";
 
 /**
- * Whether a terminal is doing work right now — the same condition the pane
- * shows an hourglass for.
+ * Whether a terminal is doing work right now — literally the condition under
+ * which its pane shows the hourglass.
  *
- * This is deliberately the only definition of "busy" in the app. The activity
- * widget's count and sleep prevention (ADR-0113) both read it, so the machine
- * can never fall asleep while a pane still shows the hourglass.
+ * This does not re-derive "busy" from raw fields. `outputActive` and
+ * `activity.type === "running"` are only two of the signals: Claude's
+ * local-agent path (issue #225) and Codex's Braille spinner both keep the
+ * hourglass up with `outputActive === false` and an `interactiveApp` activity,
+ * and only their handlers know that. Asking the same handler that draws the
+ * icon is what keeps sleep prevention (ADR-0113) from letting the machine doze
+ * off while a pane still says work is in progress.
  */
 export function isTerminalBusy(instance: TerminalInstance): boolean {
-  return instance.activity?.type === "running" || instance.outputActive === true;
+  const status = getHandler(instance.activity).computeStatus({
+    exitCode: instance.lastExitCode,
+    outputActive: instance.outputActive ?? false,
+    lastCommand: instance.lastCommand,
+    activityMessage: instance.activityMessage,
+    activity: instance.activity,
+    title: instance.title,
+  });
+  return status.icon === STATUS_ICON_WORKING;
 }
 
 /** Whether any terminal in the list is busy. */

@@ -19,13 +19,14 @@ const UI_ROOT = process.cwd();
  * unless someone opens a C++ file. This constant guards the thing that is
  * actually paid for on every launch.
  *
- * Raised from 500 kB when the top-bar sleep prevention toggle (ADR-0113) landed:
- * the entry chunk was already at ~497 kB, so the next 3 kB of always-visible
- * chrome — of any kind — would have tripped it. The bump buys headroom, not
- * permission; a change that adds tens of kB to startup still has to answer for
- * it rather than move this number again.
+ * Raised from 500_000 when the top-bar sleep prevention toggle (ADR-0113)
+ * landed: the entry chunk measured 497,270 B before it and 500,571 B after, so
+ * the next 3 kB of always-visible chrome — of any kind — would have tripped the
+ * old round number. The new one is deliberately only a little above what was
+ * measured: this is a ratchet, and the next few kB should have to argue for
+ * themselves too rather than move the number again.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 520_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 505_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

@@ -15,11 +15,23 @@ use crate::lock_ext::MutexExt;
 
 /// Platform-specific half of the inhibitor.
 ///
-/// `apply` is called only when the desired state actually changes, so an
-/// implementation never has to deduplicate; it may assume `enabled` differs
-/// from what it last applied.
+/// `apply` is called when the desired state changes, and again with `true` when
+/// `needs_reapply` reports that a held inhibitor died. Those are the only two
+/// cases, so an implementation does not have to deduplicate a steady state.
 pub trait InhibitBackend: Send {
     fn apply(&mut self, enabled: bool) -> Result<(), AppError>;
+
+    /// Whether an inhibitor this backend reported as held has since died and
+    /// must be acquired again.
+    ///
+    /// A backend that owns an OS resource which can disappear behind its back
+    /// (a child process) overrides this; one whose resource lives as long as
+    /// the process does not. Consulted only while the inhibitor is believed
+    /// active, so a `true` here turns the next redundant-looking enable into a
+    /// real one instead of a silent no-op.
+    fn needs_reapply(&mut self) -> bool {
+        false
+    }
 }
 
 struct Inner {
@@ -55,7 +67,7 @@ impl SleepInhibitor {
     pub fn set(&self, enabled: bool) -> Result<bool, AppError> {
         let mut guard = self.inner.lock_or_err()?;
         let inner = &mut *guard;
-        if inner.active == enabled {
+        if inner.active == enabled && !(enabled && inner.backend.needs_reapply()) {
             return Ok(inner.active);
         }
         inner.backend.apply(enabled)?;
@@ -177,11 +189,24 @@ mod platform {
 
 #[cfg(target_os = "linux")]
 mod platform {
+    use std::io::Read;
     use std::process::{Child, Stdio};
+    use std::time::{Duration, Instant};
 
     use super::InhibitBackend;
     use crate::error::AppError;
     use crate::process::headless_command;
+
+    /// How long a freshly spawned `systemd-inhibit` is watched before its lock
+    /// is believed.
+    ///
+    /// `systemd-inhibit` execs fine and *then* exits non-zero when the inhibit
+    /// call itself fails — no D-Bus session, no seat, a container, a polkit
+    /// denial. Without this window that failure is indistinguishable from
+    /// success, and the UI would claim the machine is being kept awake while it
+    /// sleeps through the user's build.
+    const SPAWN_GRACE: Duration = Duration::from_millis(300);
+    const SPAWN_POLL_INTERVAL: Duration = Duration::from_millis(10);
 
     pub struct PlatformBackend {
         child: Option<Child>,
@@ -190,6 +215,21 @@ mod platform {
     impl PlatformBackend {
         pub fn new() -> Self {
             Self { child: None }
+        }
+
+        /// Drain whatever the child managed to say before dying. Best effort:
+        /// a missing pipe or a read error must not mask the exit itself.
+        fn failure_detail(child: &mut Child, status: std::process::ExitStatus) -> String {
+            let mut stderr = String::new();
+            if let Some(mut pipe) = child.stderr.take() {
+                let _ = pipe.read_to_string(&mut stderr);
+            }
+            let stderr = stderr.trim();
+            if stderr.is_empty() {
+                format!("systemd-inhibit exited immediately ({status})")
+            } else {
+                format!("systemd-inhibit failed ({status}): {stderr}")
+            }
         }
     }
 
@@ -204,7 +244,11 @@ mod platform {
                 // the kernel closes the pipe, `cat` sees EOF, and systemd-inhibit
                 // releases the lock. A detached `sleep infinity` would survive a
                 // SIGKILL and keep the machine awake forever.
-                let child = headless_command("systemd-inhibit")
+                //
+                // stderr stays piped rather than nulled so a failure can be
+                // reported verbatim. Neither systemd-inhibit nor cat writes to
+                // it while the lock is held, so an undrained pipe cannot fill.
+                let mut child = headless_command("systemd-inhibit")
                     .arg("--what=idle:sleep")
                     .arg("--who=Laymux")
                     .arg("--why=Terminal work in progress")
@@ -212,11 +256,33 @@ mod platform {
                     .arg("cat")
                     .stdin(Stdio::piped())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
+                    .stderr(Stdio::piped())
                     .spawn()
                     .map_err(|e| {
                         AppError::Other(format!("failed to start systemd-inhibit: {e}"))
                     })?;
+
+                let deadline = Instant::now() + SPAWN_GRACE;
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => {
+                            return Err(AppError::Other(Self::failure_detail(&mut child, status)));
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err(AppError::Other(format!(
+                                "failed to check systemd-inhibit: {error}"
+                            )));
+                        }
+                    }
+                    if Instant::now() >= deadline {
+                        break;
+                    }
+                    std::thread::sleep(SPAWN_POLL_INTERVAL);
+                }
+
                 self.child = Some(child);
                 return Ok(());
             }
@@ -229,6 +295,22 @@ mod platform {
                 let _ = child.wait();
             }
             Ok(())
+        }
+
+        fn needs_reapply(&mut self) -> bool {
+            let Some(child) = self.child.as_mut() else {
+                return true;
+            };
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    tracing::warn!(%status, "systemd-inhibit exited while the lock was held");
+                    self.child = None;
+                    true
+                }
+                // Still running, or the check itself failed — in the latter case
+                // respawning would leak the child we already have.
+                _ => false,
+            }
         }
     }
 }
@@ -260,7 +342,7 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
 
     use super::*;
@@ -268,6 +350,7 @@ mod tests {
     struct RecordingBackend {
         calls: Arc<Mutex<Vec<bool>>>,
         fail_next: Arc<AtomicUsize>,
+        died: Arc<AtomicBool>,
     }
 
     impl InhibitBackend for RecordingBackend {
@@ -282,74 +365,123 @@ mod tests {
                 .push(enabled);
             Ok(())
         }
+
+        fn needs_reapply(&mut self) -> bool {
+            // Report once, like a real backend that reaps the dead child.
+            self.died.swap(false, Ordering::SeqCst)
+        }
     }
 
-    fn recording() -> (SleepInhibitor, Arc<Mutex<Vec<bool>>>, Arc<AtomicUsize>) {
+    struct Harness {
+        inhibitor: SleepInhibitor,
+        calls: Arc<Mutex<Vec<bool>>>,
+        fail_next: Arc<AtomicUsize>,
+        died: Arc<AtomicBool>,
+    }
+
+    impl Harness {
+        fn applied(&self) -> Vec<bool> {
+            self.calls.lock().expect("recording backend lock").clone()
+        }
+    }
+
+    fn recording() -> Harness {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let fail_next = Arc::new(AtomicUsize::new(0));
+        let died = Arc::new(AtomicBool::new(false));
         let inhibitor = SleepInhibitor::with_backend(Box::new(RecordingBackend {
             calls: calls.clone(),
             fail_next: fail_next.clone(),
+            died: died.clone(),
         }));
-        (inhibitor, calls, fail_next)
+        Harness {
+            inhibitor,
+            calls,
+            fail_next,
+            died,
+        }
     }
 
     #[test]
     fn starts_inactive() {
-        let (inhibitor, calls, _) = recording();
-        assert!(!inhibitor.is_active().unwrap());
-        assert!(calls.lock().unwrap().is_empty());
+        let harness = recording();
+        assert!(!harness.inhibitor.is_active().unwrap());
+        assert!(harness.applied().is_empty());
     }
 
     #[test]
     fn repeated_enable_touches_the_backend_once() {
-        let (inhibitor, calls, _) = recording();
-        assert!(inhibitor.set(true).unwrap());
-        assert!(inhibitor.set(true).unwrap());
-        assert!(inhibitor.set(true).unwrap());
-        assert_eq!(*calls.lock().unwrap(), vec![true]);
-        assert!(inhibitor.is_active().unwrap());
+        let harness = recording();
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert_eq!(harness.applied(), vec![true]);
+        assert!(harness.inhibitor.is_active().unwrap());
     }
 
     #[test]
     fn disable_while_inactive_is_a_no_op() {
-        let (inhibitor, calls, _) = recording();
-        assert!(!inhibitor.set(false).unwrap());
-        assert!(calls.lock().unwrap().is_empty());
+        let harness = recording();
+        assert!(!harness.inhibitor.set(false).unwrap());
+        assert!(harness.applied().is_empty());
     }
 
     #[test]
     fn toggling_applies_each_transition() {
-        let (inhibitor, calls, _) = recording();
-        inhibitor.set(true).unwrap();
-        inhibitor.set(false).unwrap();
-        inhibitor.set(true).unwrap();
-        assert_eq!(*calls.lock().unwrap(), vec![true, false, true]);
+        let harness = recording();
+        harness.inhibitor.set(true).unwrap();
+        harness.inhibitor.set(false).unwrap();
+        harness.inhibitor.set(true).unwrap();
+        assert_eq!(harness.applied(), vec![true, false, true]);
     }
 
     #[test]
     fn a_failed_apply_leaves_the_state_unchanged() {
         // Otherwise the process would believe it holds an inhibitor it never
         // acquired, and would then skip the next enable as a duplicate.
-        let (inhibitor, calls, fail_next) = recording();
-        fail_next.store(1, Ordering::SeqCst);
-        assert!(inhibitor.set(true).is_err());
-        assert!(!inhibitor.is_active().unwrap());
+        let harness = recording();
+        harness.fail_next.store(1, Ordering::SeqCst);
+        assert!(harness.inhibitor.set(true).is_err());
+        assert!(!harness.inhibitor.is_active().unwrap());
 
-        assert!(inhibitor.set(true).unwrap());
-        assert_eq!(*calls.lock().unwrap(), vec![true]);
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert_eq!(harness.applied(), vec![true]);
+    }
+
+    #[test]
+    fn an_inhibitor_that_died_behind_our_back_is_acquired_again() {
+        // A `systemd-inhibit` child can be killed from outside. Without this the
+        // dedupe would treat every later enable as already satisfied and the
+        // machine would sleep while the UI insists it is awake.
+        let harness = recording();
+        harness.inhibitor.set(true).unwrap();
+        assert_eq!(harness.applied(), vec![true]);
+
+        harness.died.store(true, Ordering::SeqCst);
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert_eq!(harness.applied(), vec![true, true]);
+
+        // And the revived inhibitor is deduped normally again.
+        assert!(harness.inhibitor.set(true).unwrap());
+        assert_eq!(harness.applied(), vec![true, true]);
+    }
+
+    #[test]
+    fn a_dead_inhibitor_is_not_consulted_while_sleep_is_allowed() {
+        // `needs_reapply` answers "does the held lock still exist"; with nothing
+        // held there is nothing to revive, and a disable must stay a no-op.
+        let harness = recording();
+        harness.died.store(true, Ordering::SeqCst);
+        assert!(!harness.inhibitor.set(false).unwrap());
+        assert!(harness.applied().is_empty());
     }
 
     #[test]
     fn drop_releases_an_active_inhibitor() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        {
-            let inhibitor = SleepInhibitor::with_backend(Box::new(RecordingBackend {
-                calls: calls.clone(),
-                fail_next: Arc::new(AtomicUsize::new(0)),
-            }));
-            inhibitor.set(true).unwrap();
-        }
+        let harness = recording();
+        harness.inhibitor.set(true).unwrap();
+        let calls = harness.calls.clone();
+        drop(harness);
         assert_eq!(*calls.lock().unwrap(), vec![true, false]);
     }
 }

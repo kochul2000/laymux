@@ -63,6 +63,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { viewerInstanceId } from "@/lib/file-viewer";
+import { setSleepInhibit } from "@/lib/tauri-api";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -74,6 +75,19 @@ describe("AppLayout", () => {
     useGridStore.setState(useGridStore.getInitialState());
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
+  });
+
+  it("drives sleep prevention from the app root", () => {
+    // The hook has no rendered output, so nothing else would notice if the
+    // mount were dropped — and sleep prevention would silently stop working.
+    render(<AppLayout />);
+    expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(false);
+
+    vi.mocked(setSleepInhibit).mockClear();
+    act(() => {
+      useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+    });
+    expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(true);
   });
 
   it("renders left dock and workspace area by default", () => {

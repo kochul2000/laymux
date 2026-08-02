@@ -1,7 +1,11 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
+import { STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 import { CodexActivityHandler } from "./codex-activity-handler";
+
+/** Re-exported so status consumers can reach it from the handler entry point. */
+export { STATUS_ICON_WORKING };
 
 export interface StatusResult {
   icon: string;

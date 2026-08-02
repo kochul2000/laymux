@@ -1,5 +1,5 @@
 import type { RawTerminalState, StatusResult } from "./activity-handler";
-import { CLAUDE_INPUT_PENDING_MARKER } from "./activity-markers";
+import { CLAUDE_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 /**
@@ -96,7 +96,7 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
       return { icon: "✓", color: "var(--green)" };
     }
 
-    if (raw.outputActive) return { icon: "⏳", color: "var(--yellow)" };
+    if (raw.outputActive) return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
 
     // Working spinner title (star or Braille) means Claude is actively
     // processing — e.g. the local-agent / sub-agent path where the title
@@ -106,7 +106,7 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
     // previous synthetic completion and display ✓ even though work is in
     // progress. See issue #225.
     if (isClaudeWorkingTitle(raw.title)) {
-      return { icon: "⏳", color: "var(--yellow)" };
+      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }
 
     // Claude keeps its process alive after finishing a task and switches its
