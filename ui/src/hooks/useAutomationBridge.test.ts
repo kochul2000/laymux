@@ -6,8 +6,11 @@ import {
   handleAutomationRequest,
   handleAsyncAutomationRequest,
   BRIDGE_REQUEST_BUDGET_MS,
+  AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+  AUTOMATION_CLEAR_DEADLINE_MS,
   WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
 } from "./useAutomationBridge";
+import { clearWaitBudgetMs, resolveWorkspaceClear } from "@/lib/workspace-clear";
 import html2canvas from "html2canvas";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useGridStore } from "@/stores/grid-store";
@@ -23,6 +26,7 @@ import {
   automationResponse,
   readFileForViewer,
   reportFrontendHealth,
+  writeTerminalInput,
   type AutomationRequest,
 } from "@/lib/tauri-api";
 import { frontendBridgeCounters, resetFrontendHealthForTest } from "@/lib/frontend-health-reporter";
@@ -46,6 +50,8 @@ vi.mock("@/lib/tauri-api", () => ({
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   readFileForViewer: vi.fn(),
   reportFrontendHealth: vi.fn().mockResolvedValue(undefined),
+  writeTerminalInput: vi.fn().mockResolvedValue(undefined),
+  writeToTerminal: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("html2canvas", () => ({
   default: vi.fn(),
@@ -131,6 +137,33 @@ describe("bridge timing budget", () => {
     expect(WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS + 1_000).toBeLessThanOrEqual(
       BRIDGE_REQUEST_BUDGET_MS,
     );
+  });
+
+  // The clear's wait is user-configurable (settleMs up to 10s), so the cap is
+  // what keeps it inside the budget. It must also stay at or under the landing
+  // wait, which is what `helpers.rs` mirrors as LONGEST_HANDLER_WAIT.
+  it("keeps the automation clear wait under the longest mirrored handler wait", () => {
+    expect(AUTOMATION_CLEAR_WAIT_BUDGET_MS).toBeLessThanOrEqual(
+      WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
+    );
+    expect(AUTOMATION_CLEAR_WAIT_BUDGET_MS + 1_000).toBeLessThanOrEqual(BRIDGE_REQUEST_BUDGET_MS);
+  });
+
+  // The hard stop has to leave room for a chain that slept exactly its trimmed
+  // budget, and still fire before the bridge answers 504.
+  it("orders the sleep budget, the hard deadline and the bridge budget", () => {
+    expect(AUTOMATION_CLEAR_WAIT_BUDGET_MS).toBeLessThan(AUTOMATION_CLEAR_DEADLINE_MS);
+    expect(AUTOMATION_CLEAR_DEADLINE_MS).toBeLessThan(BRIDGE_REQUEST_BUDGET_MS);
+  });
+
+  it("trims a settle that would overrun the automation budget", () => {
+    const config = resolveWorkspaceClear(
+      { busyPolicy: "interrupt", interruptRounds: 4, settleMs: 10_000 },
+      { maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS },
+    );
+    expect(clearWaitBudgetMs(config)).toBeLessThanOrEqual(AUTOMATION_CLEAR_WAIT_BUDGET_MS);
+    // Every Ctrl+C press survives; only the tail wait is shortened.
+    expect(config.interruptRounds).toBe(4);
   });
 });
 
@@ -3392,5 +3425,133 @@ describe("grid.getState focus resolution", () => {
   it("reports no focused terminal when nothing holds focus", () => {
     useGridStore.getState().setFocusedPane(null);
     expect(gridState().focusedTerminalId).toBeNull();
+  });
+});
+
+describe("workspaces.clear over the async bridge (issue #726)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  function seedWorkspace() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-clear",
+          name: "Clear",
+          panes: [
+            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "busy", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-clear",
+      workspaceDisplayOrder: [],
+    });
+    for (const paneId of ["idle", "busy"]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${paneId}`,
+        profile: "WSL",
+        syncGroup: "ws-clear",
+        workspaceId: "ws-clear",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, {
+        sessionReady: true,
+      });
+    }
+    useTerminalStore.getState().updateInstanceInfo("terminal-busy", {
+      activity: { type: "running" },
+    });
+  }
+
+  function clearRequest(id: string): AutomationRequest {
+    return {
+      requestId: "clear-1",
+      category: "action",
+      target: "workspaces",
+      method: "clear",
+      params: { id },
+    };
+  }
+
+  // The default policy is silent about busy panes, so the response is the only
+  // way a caller learns one was left running (ADR-0113).
+  it("reports what was cleared and what was skipped", async () => {
+    seedWorkspace();
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-clear"));
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({
+      workspaceId: "ws-clear",
+      cleared: ["terminal-idle"],
+      interrupted: [],
+      restarted: [],
+      skipped: [{ terminalId: "terminal-busy", reason: "busy" }],
+      failed: [],
+      waitCapped: false,
+      interruptRounds: 2,
+      settleMs: 400,
+    });
+    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-idle",
+      "clear",
+      true,
+    );
+  });
+
+  // A settle beyond the bridge budget would finish the clear and still answer
+  // 504 with the report lost, so the automation path caps it — and says so.
+  it("caps an over-budget settle and reports the config it actually ran", async () => {
+    seedWorkspace();
+    useSettingsStore.getState().setWorkspaceClear({
+      busyPolicy: "interrupt",
+      interruptRounds: 2,
+      settleMs: 9_000,
+    });
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-clear"));
+
+    expect(result.data).toMatchObject({
+      waitCapped: true,
+      interruptRounds: 2,
+      settleMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS - 120,
+      cleared: ["terminal-idle", "terminal-busy"],
+    });
+  });
+
+  it("does not claim a cap when the configured wait already fits", async () => {
+    seedWorkspace();
+    useSettingsStore.getState().setWorkspaceClear({ busyPolicy: "interrupt", settleMs: 0 });
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-clear"));
+
+    expect(result.data).toMatchObject({ waitCapped: false, settleMs: 0 });
+  });
+
+  it("reports a write the remote lease refused", async () => {
+    seedWorkspace();
+    vi.mocked(writeTerminalInput).mockRejectedValue(
+      new Error("terminal is controlled by a remote client"),
+    );
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-clear"));
+
+    expect(result.data).toMatchObject({
+      cleared: [],
+      failed: [{ terminalId: "terminal-idle", error: "terminal is controlled by a remote client" }],
+    });
+  });
+
+  it("rejects an unknown workspace instead of clearing the active one", async () => {
+    seedWorkspace();
+
+    const result = await handleAsyncAutomationRequest(clearRequest("ws-missing"));
+
+    expect(result.success).toBe(false);
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 });

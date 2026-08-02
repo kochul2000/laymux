@@ -3,6 +3,7 @@ import type { DockPosition, DockPane, ViewType, ViewInstanceConfig } from "./typ
 import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
+import { useTerminalRestartStore } from "./terminal-restart-store";
 
 export const DOCK_MIN_SIZE = 100;
 export const DOCK_MAX_SIZE = 600;
@@ -270,6 +271,8 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
       useOverridesStore.getState().clearAll(paneId);
       // 1회성 CWD 전파 요청 버스 정리(issue #296 P3-a).
       useCwdPropagateStore.getState().clear(paneId);
+      // 재시작 요청도 pane 수명에 묶인다(ADR-0113).
+      useTerminalRestartStore.getState().forgetRestart(paneId);
     }
   },
 
@@ -293,6 +296,10 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
     }));
     if (prevType && prevType !== view.type) {
       useOverridesStore.getState().clearViewOverride(paneId);
+      // 미소비 재시작 요청도 같이 버린다(ADR-0113) — workspace-store.setPaneView 와 동일 계약.
+      if (prevType === "TerminalView") {
+        useTerminalRestartStore.getState().forgetRestart(paneId);
+      }
     }
   },
 

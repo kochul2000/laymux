@@ -60,6 +60,22 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
     return true;
   }
 
+  /** Claude Code drops its conversation context with the `/clear` slash command. */
+  clearInput(): string {
+    return "/clear";
+  }
+
+  /**
+   * Busy whenever the shell rule says so, while the working spinner title is
+   * animating, or while a permission / response modal is open — in the modal
+   * case `/clear` would be typed as the answer to the prompt.
+   */
+  isBusy(raw: RawTerminalState): boolean {
+    if (super.isBusy(raw)) return true;
+    if (isInputPending(raw.activityMessage)) return true;
+    return isClaudeWorkingTitle(raw.title);
+  }
+
   /**
    * Keep the `interactiveApp: Claude` activity even when the incoming
    * `terminal-title-changed` event carries `interactiveApp: null`.

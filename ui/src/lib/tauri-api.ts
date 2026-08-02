@@ -703,6 +703,20 @@ export interface ExitSettings {
   settleMs: number;
 }
 
+/** What the workspace clear does with a pane that is mid-task (ADR-0113). */
+export type WorkspaceClearBusyPolicyValue = "skip" | "interrupt" | "restart";
+
+export interface WorkspaceClearSettings {
+  /** Command submitted to a plain shell (`clear`, `cls`, …). Empty → `clear`. */
+  shellCommand: string;
+  /** Mid-task pane handling. Default: "skip". */
+  busyPolicy: WorkspaceClearBusyPolicyValue;
+  /** Ctrl+C presses before clearing under "interrupt". Clamped 1..=10. Default: 2. */
+  interruptRounds: number;
+  /** Delay (ms) after the last Ctrl+C. Clamped 0..=10000. Default: 400. */
+  settleMs: number;
+}
+
 export interface IssueReporterSettings {
   shell: string;
   paddingTop: number;
@@ -898,6 +912,7 @@ export interface Settings {
   claude: ClaudeSettings;
   codex?: CodexSettings;
   exit?: ExitSettings;
+  workspaceClear?: WorkspaceClearSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;

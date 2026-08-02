@@ -18,8 +18,17 @@ const UI_ROOT = process.cwd();
  * a network — the desktop app ships its assets locally — and is never parsed
  * unless someone opens a C++ file. This constant guards the thing that is
  * actually paid for on every launch.
+ *
+ * Raising it is a deliberate act, not a way to make a red run green: state what
+ * grew and why in the commit. The 500 kB value left 2.7 kB of headroom by the
+ * time the workspace-clear feature landed (issue #726), which is below the size
+ * of any real feature — a startup module plus one Settings group's strings.
+ *
+ * 510 kB keeps roughly that same small margin over the current entry rather
+ * than banking room for several more features: the point of the guard is to
+ * make the next increase a conscious decision too.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 500_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 510_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

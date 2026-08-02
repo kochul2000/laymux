@@ -102,6 +102,29 @@ pub async fn workspaces_create(
     }
 }
 
+/// Clear every TerminalView pane of a workspace (issue #726, ADR-0113).
+///
+/// The frontend owns the decision of what "clear" means per pane; this route
+/// only forwards the workspace id and returns the per-terminal outcome so a
+/// caller can see which panes were skipped.
+pub async fn workspaces_clear(
+    AxumState(state): AxumState<ServerState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "workspaces",
+        "clear",
+        serde_json::json!({ "id": id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn workspaces_rename(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,

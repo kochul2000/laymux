@@ -3,7 +3,7 @@ use laymux_lib::settings::contract::{
     select_settings_paths, sensitive_settings_paths, settings_revision, READ_ONLY_SETTINGS_PATHS,
     REDACTED_SETTING_VALUE,
 };
-use laymux_lib::settings::Settings;
+use laymux_lib::settings::{Settings, WorkspaceClearBusyPolicy};
 use serde_json::json;
 
 #[test]
@@ -298,6 +298,89 @@ fn exit_out_of_range_values_are_rejected() {
         .errors
         .iter()
         .any(|issue| issue.path == "/exit/settleMs"));
+}
+
+#[test]
+fn workspace_clear_accepts_a_valid_patch() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({
+            "workspaceClear": {
+                "shellCommand": "cls",
+                "busyPolicy": "interrupt",
+                "interruptRounds": 4,
+                "settleMs": 900
+            }
+        }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    assert_eq!(candidate.workspace_clear.shell_command, "cls");
+    assert_eq!(
+        candidate.workspace_clear.busy_policy,
+        WorkspaceClearBusyPolicy::Interrupt
+    );
+    assert_eq!(candidate.workspace_clear.interrupt_rounds, 4);
+    assert_eq!(candidate.workspace_clear.settle_ms, 900);
+}
+
+/// Same ranges as `/exit`, which is the contract this reuses (ADR-0113). Before
+/// `validate_workspace_clear` existed these patches were reported as valid and
+/// the frontend quietly clamped them.
+#[test]
+fn workspace_clear_out_of_range_values_are_rejected() {
+    let too_many_rounds = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "workspaceClear": { "interruptRounds": 999 } }),
+    );
+    assert!(!too_many_rounds.valid);
+    assert!(too_many_rounds
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/workspaceClear/interruptRounds"));
+
+    let settle_too_large = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "workspaceClear": { "settleMs": 999999 } }),
+    );
+    assert!(!settle_too_large.valid);
+    assert!(settle_too_large
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/workspaceClear/settleMs"));
+}
+
+/// `busyPolicy` is an enum, so an unknown value fails at deserialization rather
+/// than reaching the semantic pass — and the schema advertises the three names.
+#[test]
+fn workspace_clear_rejects_an_unknown_busy_policy() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "workspaceClear": { "busyPolicy": "nuke" } }),
+    );
+    assert!(!prepared.valid, "an unknown policy must not be accepted");
+
+    let description = describe_settings(&["/workspaceClear".into()]).expect("known path");
+    let schema = description.to_string();
+    for policy in ["skip", "interrupt", "restart"] {
+        assert!(
+            schema.contains(policy),
+            "schema must advertise '{policy}': {schema}"
+        );
+    }
+}
+
+#[test]
+fn workspace_clear_metadata_is_live_applied() {
+    let description = describe_settings(&["/workspaceClear".into()]).expect("known path");
+    assert_eq!(
+        description["metadata"]["/workspaceClear"]["applyMode"],
+        json!("live")
+    );
+    assert_eq!(
+        description["metadata"]["/workspaceClear"]["writable"],
+        json!(true)
+    );
 }
 
 #[test]

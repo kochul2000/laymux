@@ -3,8 +3,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock TerminalView to avoid Tauri IPC dependency
 vi.mock("@/components/views/TerminalView", () => ({
-  TerminalView: (props: { instanceId: string }) => (
-    <div data-testid={`mock-terminal-${props.instanceId}`}>MockTerminal</div>
+  // The restart props are surfaced as data attributes so the store → ViewRenderer
+  // → TerminalView wiring is assertable (ADR-0113); everything else ignores them.
+  TerminalView: (props: {
+    instanceId: string;
+    restartCwd?: string;
+    isUserRestart?: boolean;
+    onUserRestartConsumed?: () => void;
+  }) => (
+    <div
+      data-testid={`mock-terminal-${props.instanceId}`}
+      data-restart-cwd={props.restartCwd ?? ""}
+      data-user-restart={props.isUserRestart ? "true" : "false"}
+      onClick={() => props.onUserRestartConsumed?.()}
+    >
+      MockTerminal
+    </div>
   ),
 }));
 
@@ -29,6 +43,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useCwdPropagateStore } from "@/stores/cwd-propagate-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 
 const makePanes = (count: number): GridPane[] =>
   Array.from({ length: count }, (_, i) => ({
@@ -528,5 +543,73 @@ describe("PaneGrid global terminal startup", () => {
     expect(document.querySelector('[data-testid="pane-loading-placeholder-7"]')).not.toBeNull();
 
     act(() => release());
+  });
+});
+
+describe("PaneGrid restart wiring (ADR-0113)", () => {
+  const panes: GridPane[] = [
+    { id: "pane-0", view: { type: "TerminalView" }, x: 0, y: 0, w: 0.5, h: 1 },
+    { id: "pane-1", view: { type: "TerminalView" }, x: 0.5, y: 0, w: 0.5, h: 1 },
+  ];
+  const props = {
+    panes,
+    testIdFn: (_p: GridPane, i: number) => `test-pane-${i}`,
+    isFocused: () => false,
+    onPaneFocus: vi.fn(),
+    workspaceId: "ws-1",
+    workspaceName: "Test-WS",
+  };
+
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useUiStore.setState(useUiStore.getInitialState());
+    usePaneRevealStore.setState(usePaneRevealStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+    // Both terminals mounted at once: startup is normally serialized (ADR-0043)
+    // but this suite is about the restart wiring, not the startup queue.
+    useTerminalStartupStore.setState({ revealedPaneIds: new Set(panes.map((p) => p.id)) });
+    useSettingsStore.setState((s) => ({ controlBar: { ...s.controlBar, defaultMode: "pinned" } }));
+  });
+
+  const terminal = (paneId: string) => screen.getByTestId(`mock-terminal-terminal-${paneId}`);
+
+  it("routes the control bar's Restart View through the store", () => {
+    render(<PaneGrid {...props} />);
+    fireEvent.click(within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-restart"));
+
+    expect(useTerminalRestartStore.getState().requests["pane-0"]).toMatchObject({
+      epoch: 1,
+      fresh: true,
+    });
+  });
+
+  // A workspace clear requests the restart from outside the component; the
+  // whole point of moving the epoch into a store is that this reaches the view.
+  it("marks a pane fresh when the request comes from outside the component", () => {
+    render(<PaneGrid {...props} />);
+    expect(terminal("pane-0")).toHaveAttribute("data-user-restart", "false");
+
+    act(() => {
+      useTerminalRestartStore.getState().requestRestart("pane-0", "/tmp/from-clear");
+    });
+
+    expect(terminal("pane-0")).toHaveAttribute("data-user-restart", "true");
+    expect(terminal("pane-0")).toHaveAttribute("data-restart-cwd", "/tmp/from-clear");
+    // Sibling panes are untouched.
+    expect(terminal("pane-1")).toHaveAttribute("data-user-restart", "false");
+  });
+
+  it("clears the fresh flag once the view consumes the request", () => {
+    render(<PaneGrid {...props} />);
+    act(() => {
+      useTerminalRestartStore.getState().requestRestart("pane-0");
+    });
+
+    act(() => {
+      fireEvent.click(terminal("pane-0"));
+    });
+
+    expect(useTerminalRestartStore.getState().requests["pane-0"].fresh).toBe(false);
+    expect(terminal("pane-0")).toHaveAttribute("data-user-restart", "false");
   });
 });
