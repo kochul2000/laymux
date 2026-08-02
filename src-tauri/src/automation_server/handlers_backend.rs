@@ -122,6 +122,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "body": { "dw": "(optional) number — width delta", "dh": "(optional) number — height delta; at least one of dw/dh is required" }
             },
             {
+                "method": "POST", "path": "/api/v1/panes/{paneId}/clear",
+                "description": "Clear one terminal pane — grid or dock — with the same per-activity decision as the workspace clear: the configured shell command in a shell, '/clear' in Claude Code and Codex, nothing in an interactive app without a dedicated handler. Takes a pane id, not a grid index, because dock panes have no index. Busy panes follow settings.workspaceClear.busyPolicy (skip | interrupt | restart), and the interrupt wait is capped the same way the workspace clear caps it. Fails when the pane is not a live terminal pane.",
+                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/docks",
                 "description": "List all 4 dock areas (top/bottom/left/right) with their active views."
             },

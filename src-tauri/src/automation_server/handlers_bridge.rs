@@ -125,6 +125,29 @@ pub async fn workspaces_clear(
     }
 }
 
+/// Clear one pane, grid or dock (issue #741, ADR-0121).
+///
+/// Takes a pane id rather than a grid index: the same shortcut works on dock
+/// panes, which have no index in the grid. The frontend rejects a pane that is
+/// not a live terminal.
+pub async fn panes_clear(
+    AxumState(state): AxumState<ServerState>,
+    Path(pane_id): Path<String>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "panes",
+        "clear",
+        serde_json::json!({ "paneId": pane_id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn workspaces_rename(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,

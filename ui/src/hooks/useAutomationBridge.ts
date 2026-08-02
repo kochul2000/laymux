@@ -22,7 +22,7 @@ import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import { planPaneResize } from "@/hooks/usePaneResize";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
-import type { Settings } from "@/lib/tauri-api";
+import type { Settings, WorkspaceClearSettings } from "@/lib/tauri-api";
 import type {
   DockPosition,
   ViewInstanceConfig,
@@ -44,7 +44,13 @@ import {
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
-import { clearWaitBudgetMs, clearWorkspace, resolveWorkspaceClear } from "@/lib/workspace-clear";
+import {
+  clearPane,
+  clearWaitBudgetMs,
+  clearWorkspace,
+  resolveWorkspaceClear,
+  type WorkspaceClearResult,
+} from "@/lib/workspace-clear";
 
 interface HandlerResult {
   success: boolean;
@@ -130,6 +136,46 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
     return err(`Workspace '${workspaceId}' not found`);
   }
   return null;
+}
+
+/**
+ * Run a clear (workspace or single pane) under the Automation budget.
+ *
+ * The bridge stops waiting at `BRIDGE_REQUEST_BUDGET_MS`, so an `interrupt`
+ * policy configured with a long settle would finish the clear and still answer
+ * 504 with the per-pane result lost. Cap the wait instead and tell the caller
+ * which config it actually ran under. Awaited so the response carries the
+ * per-terminal outcome — with the default `busyPolicy: "skip"` a caller has no
+ * other way to learn that a busy pane was deliberately left alone.
+ */
+async function runCappedClear(
+  scope: string,
+  target: Record<string, string>,
+  run: (
+    settings: WorkspaceClearSettings,
+    options: { maxWaitMs: number; hardDeadlineMs: number },
+  ) => Promise<WorkspaceClearResult>,
+): Promise<HandlerResult> {
+  const settings = useSettingsStore.getState().workspaceClear;
+  const configured = resolveWorkspaceClear(settings);
+  const effective = resolveWorkspaceClear(settings, {
+    maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+  });
+  try {
+    const result = await run(settings, {
+      maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+      hardDeadlineMs: AUTOMATION_CLEAR_DEADLINE_MS,
+    });
+    return ok({
+      ...target,
+      ...result,
+      waitCapped: clearWaitBudgetMs(effective) < clearWaitBudgetMs(configured),
+      interruptRounds: effective.interruptRounds,
+      settleMs: effective.settleMs,
+    });
+  } catch (e) {
+    return err(`${scope} error: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Find a terminal instance by id. */
@@ -1283,30 +1329,18 @@ export async function handleAsyncAutomationRequest(
     const id = request.params.id as string;
     const wsErr = checkWorkspaceExists(id);
     if (wsErr) return wsErr;
-    const settings = useSettingsStore.getState().workspaceClear;
-    // The bridge stops waiting at BRIDGE_REQUEST_BUDGET_MS, so an
-    // `interrupt` policy configured with a long settle would finish the clear
-    // and still answer 504 with the per-pane result lost. Cap the wait instead
-    // and tell the caller which config it actually ran under.
-    const configured = resolveWorkspaceClear(settings);
-    const effective = resolveWorkspaceClear(settings, {
-      maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
-    });
-    try {
-      const result = await clearWorkspace(id, settings, {
-        maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
-        hardDeadlineMs: AUTOMATION_CLEAR_DEADLINE_MS,
-      });
-      return ok({
-        workspaceId: id,
-        ...result,
-        waitCapped: clearWaitBudgetMs(effective) < clearWaitBudgetMs(configured),
-        interruptRounds: effective.interruptRounds,
-        settleMs: effective.settleMs,
-      });
-    } catch (e) {
-      return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    return runCappedClear("Workspace clear", { workspaceId: id }, (settings, options) =>
+      clearWorkspace(id, settings, options),
+    );
+  }
+  // Single-pane counterpart (ADR-0121). Keyed by pane id so a dock pane is
+  // reachable; `clearPane` throws for anything that is not a live terminal pane,
+  // which surfaces here as an error rather than an empty result.
+  if (request.target === "panes" && request.method === "clear") {
+    const paneId = request.params.paneId as string;
+    return runCappedClear("Pane clear", { paneId }, (settings, options) =>
+      clearPane(paneId, settings, options),
+    );
   }
   if (request.target === "terminals" && request.method === "setFocus") {
     const result = handleAutomationRequest(request);

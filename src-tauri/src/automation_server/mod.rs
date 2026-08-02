@@ -171,6 +171,9 @@ pub fn build_router(
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
+        // Keyed by pane id, not by the grid index the routes above take: a dock
+        // pane has no grid index, and the single-pane clear accepts one (ADR-0121).
+        .route("/api/v1/panes/{paneId}/clear", post(panes_clear))
         .route("/api/v1/docks", get(docks_list))
         .route(
             "/api/v1/docks/layout-mode/toggle",
@@ -327,5 +330,52 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["port"], DEV_PORT);
+    }
+
+    /// The pane routes mix two key spaces: `{index}` is a grid index and
+    /// `{paneId}` is a pane id (ADR-0121). axum's matcher rejects two different
+    /// parameter names at the same position, and a rejected route is a panic at
+    /// startup — not a test failure — so pin the shape here.
+    #[test]
+    fn pane_routes_with_mixed_param_names_build_and_match() {
+        async fn stub(axum::extract::Path(value): axum::extract::Path<String>) -> String {
+            value
+        }
+        let router: Router = Router::new()
+            .route("/api/v1/panes/{index}", delete(stub))
+            .route("/api/v1/panes/{index}/resize", post(stub))
+            .route("/api/v1/panes/{index}/view", put(stub))
+            .route("/api/v1/panes/{paneId}/clear", post(stub));
+
+        // Building is half the contract; the other half is that the id-keyed
+        // route still receives the raw id and not some index coercion.
+        let response = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                use tower::ServiceExt;
+                router
+                    .oneshot(
+                        axum::http::Request::builder()
+                            .method("POST")
+                            .uri("/api/v1/panes/dp-7/clear")
+                            .body(axum::body::Body::empty())
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap()
+            });
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+            });
+        assert_eq!(&body[..], b"dp-7");
     }
 }

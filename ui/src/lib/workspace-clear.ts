@@ -3,10 +3,12 @@ import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
 import { toPaneId, toTerminalId } from "./pane-ids";
 import { getTerminalRestartCwd } from "./terminal-restart";
 import { writeTerminalInput, writeToTerminal } from "./tauri-api";
+import { useDockStore } from "@/stores/dock-store";
 import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import type { WorkspaceClearSettings } from "./tauri-api";
+import type { ViewInstanceConfig } from "@/stores/types";
 
 /**
  * Workspace-wide clear (issue #726, ADR-0113).
@@ -389,6 +391,61 @@ export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
 }
 
 /**
+ * A pane id → its `TerminalView` config, searched across every workspace grid
+ * and every dock. `null` for an unknown pane and for any other view type.
+ *
+ * Single-pane clear needs this because it accepts a pane the workspace clear
+ * never sees: pane ids are globally unique, but a dock pane lives in
+ * `dockStore`, not in `workspace.panes`. One lookup here keeps the "is this
+ * clearable, and where do I restart it" answer in the module that acts on it,
+ * instead of every caller threading a view through.
+ */
+export function findTerminalPaneView(paneId: string): ViewInstanceConfig | null {
+  const inGrid = useWorkspaceStore
+    .getState()
+    .workspaces.flatMap((ws) => ws.panes)
+    .find((pane) => pane.id === paneId);
+  const pane =
+    inGrid ??
+    useDockStore
+      .getState()
+      .docks.flatMap((dock) => dock.panes)
+      .find((dockPane) => dockPane.id === paneId);
+  if (!pane || pane.view.type !== "TerminalView") return null;
+  return pane.view;
+}
+
+/**
+ * Wire the planned actions to the live Tauri commands. Shared by the workspace
+ * and the single-pane entry points so both submit, interrupt and restart the
+ * exact same way; only the set of actions and the restart view differ.
+ */
+function executeClear(
+  actions: ClearAction[],
+  config: ResolvedWorkspaceClear,
+  deadlineAt: number | undefined,
+  viewFor: (paneId: string) => ViewInstanceConfig | undefined,
+): Promise<WorkspaceClearResult> {
+  return runWorkspaceClear({
+    actions,
+    config,
+    submit: (terminalId, text) => writeTerminalInput(terminalId, text, true),
+    // ETX must reach the PTY as a raw byte: the structured input path wraps its
+    // body in bracketed paste when the app enabled it, and `\x1b[200~\x03\x1b[201~`
+    // is pasted text, not an interrupt. `write_to_terminal` is the same command
+    // a real Ctrl+C keypress uses, and carries the same human-control gate.
+    interrupt: (terminalId) => writeToTerminal(terminalId, CTRL_C),
+    restart: (paneId) => {
+      const view = viewFor(paneId);
+      const cwd = view ? getTerminalRestartCwd(paneId, view) : undefined;
+      useTerminalRestartStore.getState().requestRestart(paneId, cwd);
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    deadlineAt,
+  });
+}
+
+/**
  * Production entry point: read live terminals and run the clear.
  *
  * `settings` comes from the caller (`useSettingsStore.getState().workspaceClear`)
@@ -407,21 +464,37 @@ export async function clearWorkspace(
   const actions = planWorkspaceClear(paneIds, useTerminalStore.getState().instances, config);
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
 
-  return runWorkspaceClear({
+  return executeClear(
     actions,
     config,
-    submit: (terminalId, text) => writeTerminalInput(terminalId, text, true),
-    // ETX must reach the PTY as a raw byte: the structured input path wraps its
-    // body in bracketed paste when the app enabled it, and `\x1b[200~\x03\x1b[201~`
-    // is pasted text, not an interrupt. `write_to_terminal` is the same command
-    // a real Ctrl+C keypress uses, and carries the same human-control gate.
-    interrupt: (terminalId) => writeToTerminal(terminalId, CTRL_C),
-    restart: (paneId) => {
-      const view = workspace?.panes.find((pane) => pane.id === paneId)?.view;
-      const cwd = view ? getTerminalRestartCwd(paneId, view) : undefined;
-      useTerminalRestartStore.getState().requestRestart(paneId, cwd);
-    },
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     deadlineAt,
-  });
+    (paneId) => workspace?.panes.find((pane) => pane.id === paneId)?.view,
+  );
+}
+
+/**
+ * Single-pane clear: the same decision and execution path as the workspace
+ * clear, applied to one pane (`pane.clearTerminal`, default Alt+L).
+ *
+ * Unlike the workspace clear, a dock pane is a legitimate target — the user
+ * pointed at this pane, so "is it part of this workspace" never comes up.
+ *
+ * Throws for a pane that is not a live `TerminalView`. A no-op result would be
+ * indistinguishable from "the pane was busy and the policy is skip", and both
+ * callers (shortcut, Automation) need to tell those apart.
+ */
+export async function clearPane(
+  paneId: string,
+  settings?: Partial<WorkspaceClearSettings>,
+  options: ClearWorkspaceOptions = {},
+): Promise<WorkspaceClearResult> {
+  if (!findTerminalPaneView(paneId)) throw new Error(`Pane '${paneId}' is not a terminal pane`);
+  const config = resolveWorkspaceClear(settings, options);
+  const deadlineAt =
+    options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
+  const actions = planWorkspaceClear([paneId], useTerminalStore.getState().instances, config);
+
+  // Looked up again at restart time, not captured here: `interrupt` can spend
+  // seconds between the two, and the workspace clear reads the pane live too.
+  return executeClear(actions, config, deadlineAt, (id) => findTerminalPaneView(id) ?? undefined);
 }

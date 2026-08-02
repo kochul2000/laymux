@@ -418,9 +418,9 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 조율은 **프론트엔드 종료 흐름**이 담당한다([ADR-0048](../adr/0048-kill-terminals-on-exit.md)). `saveBeforeClose()` 는 스크롤백을 직렬화하기 **전에** `interruptTerminalsOnExit()`(`ui/src/lib/interrupt-terminals-on-exit.ts`)를 먼저 await 하므로, 세션 ID 가 캐시에 담긴다. 인터럽트는 종료 전용 커맨드 `interrupt_terminal_on_exit` 로 `0x03` 을 PTY FIFO 에 바로 써서 ConPTY/line discipline 이 포그라운드 앱에 실제 Ctrl+C 를 전달한다. 일반 `write_to_terminal`(`HumanControlOrigin::Local`) 경로는 원격 제어 lease/claim 활성 시 거부되므로, 종료 인터럽트는 owner 게이트를 우회하는 이 전용 경로(ETX 전용)를 쓴다. 특정 앱을 감지하지 않고 열린 모든 터미널에 보내며(유휴 셸에는 무해), 개별 write 실패는 나머지 인터럽트를 막지 않는다. Ctrl+C 사이 간격은 설정이 아니라 상수(120ms)다. Rust 는 `settings.exit` 스키마·기본값·범위 검증(applyMode `live`)만 소유하고 실제 인터럽트 실행에는 관여하지 않는다.
 
-### 워크스페이스 클리어 설정
+### 터미널 클리어 설정
 
-한 워크스페이스의 `TerminalView` pane 을 한 번에 클리어하는 동작을 제어한다(issue #726, [ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+한 워크스페이스의 `TerminalView` pane 을 한 번에 클리어하는 동작(issue #726, [ADR-0113](../adr/0113-workspace-clear-activity-owned.md))과, 같은 판정을 pane 하나에 적용하는 단일 pane 클리어(issue #741, [ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md))를 함께 제어한다. 설정 키는 `workspaceClear` 하나뿐이고 두 갈래가 공유한다.
 
 ```jsonc
 {
@@ -445,7 +445,7 @@ Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)
 
 deadline 이 필요한 이유는 개별 PTY write 가 제어 큐에서 `PTY_CONTROL_JOB_TIMEOUT_MS`(15s)까지 대기할 수 있고 JS 에서 취소할 방법이 없기 때문이다. 프론트가 보장할 수 있는 것은 "예산이 지난 뒤에는 더 치지 않는다"까지다. 이 게이트가 없으면 504 를 받은 호출자가 재시도하는 동안 원래 체인이 뒤늦게 `/clear` 를 한 번 더 넣는다. deadline 에 걸린 pane 은 이미 들어간 Ctrl+C 를 `interrupted` 에 남긴 채 `failed` 에도 사유와 함께 기록된다. 이미 진행 중인 write 하나는 응답 이후에도 도착할 수 있다 — 취소 가능한 PTY write 는 이 이슈의 범위를 넘는 별도 결정이다.
 
-Dock pane 은 대상이 아니다.
+범위는 두 갈래가 다르다. 워크스페이스 클리어(`POST /api/v1/workspaces/{id}/clear`)에서 dock pane 은 대상이 아니다. 단일 pane 클리어(`POST /api/v1/panes/{paneId}/clear`)는 dock pane 을 포함하며, 격자 인덱스가 아니라 pane id 로 받는다 — dock pane 에는 인덱스가 없다. 터미널 pane 이 아닌 id 는 빈 결과가 아니라 에러로 답한다. 대기 캡·deadline·응답 필드는 위와 같고, `workspaceId` 자리에 `paneId` 가 온다.
 
 ### CWD 동기화 기본값
 

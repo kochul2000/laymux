@@ -122,13 +122,21 @@ Workspace (Independent)
 | Export as new layout | 현재 Workspace의 pane 구조를 새 Layout으로 저장 |
 | Export to existing layout | 현재 Workspace의 pane 구조로 기존 Layout을 덮어쓰기 |
 
-### 4.1.1 워크스페이스 클리어
+### 4.1.1 터미널 클리어
 
-`Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 지우개 버튼, `POST /api/v1/workspaces/{id}/clear` 는 모두 같은 동작으로 들어간다 — 그 워크스페이스 격자의 `TerminalView` pane 을 한 번에 클리어한다. Dock 은 대상이 아니다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+두 갈래가 있고, **판정과 실행은 같고 범위만 다르다**.
+
+| 동작 | 진입점 | 범위 |
+| --- | --- | --- |
+| 워크스페이스 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)) |
+| 단일 pane 클리어 | `Alt+L`(`pane.clearTerminal`), `POST /api/v1/panes/{paneId}/clear` | 가리킨 pane **하나**. 격자·dock 구분 없음 ([ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md)) |
+
+표면 범위가 다른 이유는 이름이 아니라 근거다. 워크스페이스 클리어의 범위는 "워크스페이스의 격자"라서 dock 이 빠지고, 단일 pane 클리어의 범위는 "사용자가 가리킨 pane"이라서 그 제한이 성립하지 않는다. 단축키 경로는 터미널이 아닌 view 에 포커스가 있으면 no-op 이고, Automation 경로는 터미널 pane 이 아닌 id 를 에러로 답한다(빈 결과는 busy skip 과 구분되지 않는다).
 
 - **무엇을 칠지**는 pane 의 activity handler 가 정한다. shell 은 `settings.workspaceClear.shellCommand`(기본 `clear`), Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop 등)에는 아무것도 쓰지 않는다.
-- **작업 중인 pane** 은 `settings.workspaceClear.busyPolicy` 가 정한다: `skip`(기본) · `interrupt`(Ctrl+C 후 클리어) · `restart`(view 재시작 — 스크롤백이 사라진다).
-- 계획(`planWorkspaceClear`)과 실행(`runWorkspaceClear`)은 `ui/src/lib/workspace-clear.ts` 에서 분리돼 있고, 제출은 사람 입력과 같은 `write_terminal_input(submit: true)` 경로를 쓴다.
+- **작업 중인 pane** 은 `settings.workspaceClear.busyPolicy` 가 정한다: `skip`(기본) · `interrupt`(Ctrl+C 후 클리어) · `restart`(view 재시작 — 스크롤백이 사라진다). 두 갈래가 같은 설정 하나를 쓴다.
+- 계획(`planWorkspaceClear`)과 실행(`runWorkspaceClear`)은 `ui/src/lib/workspace-clear.ts` 에서 분리돼 있고, 제출은 사람 입력과 같은 `write_terminal_input(submit: true)` 경로를 쓴다. `clearWorkspace`·`clearPane` 둘 다 같은 `executeClear()` 배선을 지난다.
+- pane id → 클리어 대상 여부·재시작용 view 조회는 `findTerminalPaneView()` 한 곳이 소유한다. 모든 워크스페이스 격자와 모든 dock 을 훑으며, pane id 가 전역 유일하다는 사실에 기댄다.
 - 재시작 요청 상태(epoch/cwd/fresh)는 `stores/terminal-restart-store.ts` 가 소유하며 `PaneGrid`·`Dock` 이 함께 읽는다. pane 이 사라지면 `forgetRestart` 로 정리한다.
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)

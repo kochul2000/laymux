@@ -20,7 +20,7 @@ import {
 } from "@/lib/workspace-transition";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
-import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
+import { runPaneClearFromUi, runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -102,6 +102,27 @@ function copyFocusedPaneIdentifier(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The focused pane's id, when it is a TerminalView — dock focus wins over the
+ * grid, mirroring where the keystroke would have gone.
+ *
+ * Returns null for any other view (Memo, Empty, …) so the shortcut stays a
+ * no-op there instead of writing `clear` into something that is not a shell.
+ */
+function focusedTerminalPaneId(): string | null {
+  const { focusedDock, focusedDockPaneId, getDock } = useDockStore.getState();
+  const pane =
+    focusedDock !== null
+      ? getDock(focusedDock)?.panes.find((p) => p.id === focusedDockPaneId)
+      : (() => {
+          const ws = useWorkspaceStore.getState().getActiveWorkspace();
+          const { focusedPaneIndex } = useGridStore.getState();
+          return ws && focusedPaneIndex !== null ? ws.panes[focusedPaneIndex] : undefined;
+        })();
+  if (!pane || pane.view.type !== "TerminalView") return null;
+  return pane.id;
 }
 
 /** Check if the currently focused element is a text-editable field (input, textarea, contentEditable). */
@@ -244,6 +265,16 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     if (copyFocusedPaneIdentifier()) {
       e.preventDefault();
     }
+  },
+
+  // pane.clearTerminal (default Alt+L): clear the focused pane only — the same
+  // per-activity decision as the workspace clear, one pane wide (ADR-0113).
+  // Non-terminal focus falls through so the key keeps its normal meaning.
+  "pane.clearTerminal": (e) => {
+    const paneId = focusedTerminalPaneId();
+    if (!paneId) return;
+    e.preventDefault();
+    void runPaneClearFromUi(paneId);
   },
 
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)

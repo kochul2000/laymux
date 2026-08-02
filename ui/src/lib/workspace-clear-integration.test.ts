@@ -6,8 +6,9 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 import { writeTerminalInput, writeToTerminal } from "@/lib/tauri-api";
-import { clearWorkspace } from "./workspace-clear";
+import { clearPane, clearWorkspace } from "./workspace-clear";
 import { runWorkspaceClearFromUi } from "./workspace-clear-action";
+import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { useTerminalStore } from "@/stores/terminal-store";
@@ -56,6 +57,33 @@ function seedWorkspace() {
     });
     useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
   }
+}
+
+/**
+ * A terminal pane inside the left dock. Dock panes live in `dockStore` only —
+ * `workspace.panes` never contains them, which is exactly why the single-pane
+ * clear needs its own lookup.
+ */
+function seedDockTerminal(paneId: string) {
+  useDockStore.setState({
+    docks: [
+      {
+        position: "left",
+        activeView: "TerminalView",
+        views: ["TerminalView"],
+        visible: true,
+        size: 300,
+        panes: [{ id: paneId, x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+      },
+    ],
+  });
+  useTerminalStore.getState().registerInstance({
+    id: `terminal-${paneId}`,
+    profile: "PowerShell",
+    syncGroup: "dock",
+    workspaceId: "ws-clear",
+  });
+  useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
 }
 
 /** Mark a pane busy the way a running Claude task looks. */
@@ -155,6 +183,68 @@ describe("clearWorkspace (real stores)", () => {
     seedWorkspace();
     const result = await clearWorkspace("ws-missing");
     expect(result.cleared).toEqual([]);
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The single-pane clear reuses the workspace planner and executor, so what only
+ * this suite can catch is the SCOPE: one pane and no other, and a dock pane —
+ * which `workspace.panes` does not contain — reached at all (ADR-0121).
+ */
+describe("clearPane (real stores)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+  });
+
+  it("clears the named grid pane and leaves its neighbor alone", async () => {
+    seedWorkspace();
+
+    const result = await clearPane("pane-b");
+
+    expect(vi.mocked(writeTerminalInput).mock.calls).toEqual([["terminal-pane-b", "clear", true]]);
+    expect(result.cleared).toEqual(["terminal-pane-b"]);
+  });
+
+  it("clears a dock pane — the surface the workspace clear never touches", async () => {
+    seedDockTerminal("dock-pane-1");
+
+    const result = await clearPane("dock-pane-1");
+
+    expect(vi.mocked(writeTerminalInput).mock.calls).toEqual([
+      ["terminal-dock-pane-1", "clear", true],
+    ]);
+    expect(result.cleared).toEqual(["terminal-dock-pane-1"]);
+  });
+
+  it("restarts a busy dock pane with its live cwd", async () => {
+    seedDockTerminal("dock-pane-1");
+    makeBusy("dock-pane-1");
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("terminal-dock-pane-1", { cwd: "/dock/live/cwd" });
+
+    const result = await clearPane("dock-pane-1", { busyPolicy: "restart" });
+
+    expect(useTerminalRestartStore.getState().requests["dock-pane-1"]).toEqual({
+      epoch: 1,
+      cwd: "/dock/live/cwd",
+      fresh: true,
+    });
+    expect(result.restarted).toEqual(["terminal-dock-pane-1"]);
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+  });
+
+  it("throws for a non-terminal pane instead of answering an empty run", async () => {
+    seedWorkspace();
+
+    await expect(clearPane("pane-m")).rejects.toThrow("not a terminal pane");
+    await expect(clearPane("pane-nope")).rejects.toThrow("not a terminal pane");
     expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 });

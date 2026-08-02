@@ -357,20 +357,19 @@ function WorkspaceItem({
                     }}
                     title={t("item.clearTerminals")}
                   >
-                    {/* Eraser: the workspace's terminals get wiped, the panes stay. */}
+                    {/* Broom: the workspace's terminals get swept, the panes stay. */}
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                      {/* Upright, not angled: a diagonal handle plus a triangular
+                          head reads as a checkmark at this size. The handle
+                          overlaps the head so the two never separate. */}
                       <path
-                        d="M2 9.5h7.5"
+                        d="M5.5 1.3V5.6"
                         stroke="currentColor"
-                        strokeWidth="1"
+                        strokeWidth="1.3"
                         strokeLinecap="round"
                       />
-                      <path
-                        d="M2.2 6.6l4.2-4.2a1 1 0 011.4 0l1.4 1.4a1 1 0 010 1.4L5.6 9.1H3.6L2.2 7.7a.8.8 0 010-1.1z"
-                        stroke="currentColor"
-                        strokeWidth="1"
-                        strokeLinejoin="round"
-                      />
+                      {/* Filled flared head — a 1px outline blurs into a blob at 11px. */}
+                      <path d="M4.1 5.1H6.9L8.7 9.6H2.3z" fill="currentColor" />
                     </svg>
                   </button>
                 )}
