@@ -100,18 +100,21 @@ describe("isTerminalBusy", () => {
 });
 
 describe("isTerminalBusy agrees with the pane hourglass", () => {
-  // The invariant the helper's doc comment promises. If a handler ever grows a
-  // new working state, this table is what fails instead of the machine quietly
-  // sleeping through it.
-  const cases: Array<[string, Partial<TerminalInstance>]> = [
-    ["idle shell", {}],
-    ["finished ok", { activity: { type: "shell" }, lastExitCode: 0 }],
-    ["finished with error", { activity: { type: "shell" }, lastExitCode: 1 }],
-    ["running command", { activity: { type: "running" } }],
-    ["output flowing", { outputActive: true }],
+  // The invariant the helper's doc comment promises. Each row states the icon
+  // it expects outright, so the table is a fact about behavior rather than a
+  // restatement of the implementation, and then asserts that busy tracks it. If
+  // a handler grows a new working state, this is what fails instead of the
+  // machine quietly sleeping through it.
+  const cases: Array<[string, Partial<TerminalInstance>, string]> = [
+    ["idle shell", {}, "—"],
+    ["finished ok", { activity: { type: "shell" }, lastExitCode: 0 }, "✓"],
+    ["finished with error", { activity: { type: "shell" }, lastExitCode: 1 }, "✗"],
+    ["running command", { activity: { type: "running" } }, "⏳"],
+    ["output flowing", { outputActive: true }, "⏳"],
     [
       "claude idle title",
       { activity: { type: "interactiveApp", name: "Claude" }, title: "✳ Ready" },
+      "✓",
     ],
     [
       "claude working title",
@@ -120,6 +123,7 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
         title: "⠂ Working",
         lastExitCode: 0,
       },
+      "⏳",
     ],
     [
       "claude input pending",
@@ -128,8 +132,13 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
         title: "⠂ Working",
         activityMessage: CLAUDE_INPUT_PENDING_MARKER,
       },
+      "✓",
     ],
-    ["codex spinner", { activity: { type: "interactiveApp", name: "Codex" }, title: "⠂ Working" }],
+    [
+      "codex spinner",
+      { activity: { type: "interactiveApp", name: "Codex" }, title: "⠂ Working" },
+      "⏳",
+    ],
     [
       "codex input pending",
       {
@@ -137,6 +146,7 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
         title: "⠂ Working",
         activityMessage: CODEX_INPUT_PENDING_MARKER,
       },
+      "✓",
     ],
     [
       "codex spinner with output",
@@ -145,10 +155,11 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
         title: "⠂ Working",
         outputActive: true,
       },
+      "⏳",
     ],
   ];
 
-  it.each(cases)("%s", (_name, overrides) => {
+  it.each(cases)("%s", (_name, overrides, expectedIcon) => {
     const instance = terminal(overrides);
     const status = computeCommandStatus(
       instance.lastExitCode,
@@ -157,7 +168,8 @@ describe("isTerminalBusy agrees with the pane hourglass", () => {
       instance.activity,
       instance.title,
     );
-    expect(isTerminalBusy(instance)).toBe(status.icon === "⏳");
+    expect(status.icon).toBe(expectedIcon);
+    expect(isTerminalBusy(instance)).toBe(expectedIcon === "⏳");
   });
 });
 

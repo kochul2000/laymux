@@ -14,34 +14,55 @@ import { useTerminalStore } from "@/stores/terminal-store";
  * flag that flips every few seconds would otherwise reconcile the whole app
  * tree for a value nobody displays.
  *
- * The backend call is idempotent, but the last sent value is tracked here too
- * so a terminal streaming output does not produce one IPC round-trip per
- * activity update.
+ * Requests are strictly serialized. The command is async on the Rust side, so
+ * two overlapping calls could otherwise be applied out of order and leave the
+ * OS in the state the *earlier* one asked for.
  */
 export function useSleepPrevention(): void {
-  const lastSent = useRef<boolean | null>(null);
+  /** What the OS should be in. */
+  const desired = useRef<boolean | null>(null);
+  /** What was last handed to the backend, successfully or not. */
+  const applied = useRef<boolean | null>(null);
+  const inFlight = useRef(false);
 
   useEffect(() => {
+    /** Drive `applied` towards `desired`, one call at a time. */
+    const pump = () => {
+      if (inFlight.current) return;
+      const want = desired.current;
+      if (want === null || want === applied.current) return;
+
+      inFlight.current = true;
+      applied.current = want;
+      void setSleepInhibit(want)
+        .catch((error: unknown) => {
+          // The mode is the user's choice and stays as configured — a machine
+          // that cannot inhibit sleep (no systemd-inhibit, unsupported
+          // platform) should not silently rewrite their settings.
+          //
+          // The attempt still counts as applied. Clearing it here would make
+          // the pump below immediately re-send the same value, and a backend
+          // that always fails would spin. The next *different* value is sent
+          // normally, which is the only retry that can succeed anyway.
+          console.warn("[sleep-prevention] failed to update inhibitor", error);
+        })
+        .finally(() => {
+          inFlight.current = false;
+          // Intermediate values that arrived mid-flight are collapsed: only the
+          // latest `desired` is worth another round trip.
+          pump();
+        });
+    };
+
     const sync = () => {
       const mode = useSettingsStore.getState().power.sleepPrevention;
       // "off" needs no answer from the terminals, which is the common case —
       // don't walk them on every store update to reach a foregone conclusion.
-      const desired =
+      desired.current =
         mode === "off"
           ? false
           : shouldInhibitSleep(mode, hasBusyTerminal(useTerminalStore.getState().instances));
-
-      if (lastSent.current === desired) return;
-      lastSent.current = desired;
-      void setSleepInhibit(desired).catch((error: unknown) => {
-        // The mode is the user's choice and stays as configured — a machine
-        // that cannot inhibit sleep (no systemd-inhibit, unsupported platform)
-        // should not silently rewrite their settings. Forget what was sent so
-        // the next change retries, unless a newer request already superseded
-        // this one.
-        if (lastSent.current === desired) lastSent.current = null;
-        console.warn("[sleep-prevention] failed to update inhibitor", error);
-      });
+      pump();
     };
 
     // A reloaded WebView cannot know what the backend still holds, so the first
@@ -53,10 +74,11 @@ export function useSleepPrevention(): void {
     return () => {
       unsubscribeSettings();
       unsubscribeTerminals();
-      // Release on unmount so a reloaded WebView never leaves it held.
-      if (lastSent.current !== true) return;
-      lastSent.current = null;
-      void setSleepInhibit(false).catch(() => {});
+      // Release on unmount so a reloaded WebView never leaves it held. This
+      // goes through the same queue, so it cannot overtake a call still in
+      // flight.
+      desired.current = false;
+      pump();
     };
   }, []);
 }

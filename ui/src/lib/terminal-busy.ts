@@ -2,8 +2,8 @@ import type { TerminalInstance } from "@/stores/terminal-store";
 import { getHandler, STATUS_ICON_WORKING } from "./activity-handler";
 
 /**
- * Whether a terminal is doing work right now — literally the condition under
- * which its pane shows the hourglass.
+ * Whether a terminal is doing work right now — the hourglass condition, run
+ * over the terminal store's live state.
  *
  * This does not re-derive "busy" from raw fields. `outputActive` and
  * `activity.type === "running"` are only two of the signals: Claude's
@@ -12,6 +12,13 @@ import { getHandler, STATUS_ICON_WORKING } from "./activity-handler";
  * and only their handlers know that. Asking the same handler that draws the
  * icon is what keeps sleep prevention (ADR-0113) from letting the machine doze
  * off while a pane still says work is in progress.
+ *
+ * The status *function* is shared with what the UI renders; the input is not
+ * always. `WorkspaceSelectorView` feeds it a backend snapshot whose
+ * `outputActive` is pinned to `false` (that flag is a frontend DEC-2026 signal,
+ * see `computeWorkspaceSummaryFromBackend`), so a bare shell streaming output
+ * counts as busy here while that row still shows the previous result. Erring
+ * towards awake is the right side of that gap.
  */
 export function isTerminalBusy(instance: TerminalInstance): boolean {
   const status = getHandler(instance.activity).computeStatus({

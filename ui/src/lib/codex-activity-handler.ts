@@ -1,6 +1,5 @@
 import type { RawTerminalState } from "./activity-handler";
-import { STATUS_ICON_WORKING } from "./activity-markers";
-import { CODEX_INPUT_PENDING_MARKER } from "./activity-detection";
+import { CODEX_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 const BRAILLE_SPINNER_RANGE_START = 0x2800;

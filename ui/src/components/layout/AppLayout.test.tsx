@@ -77,12 +77,16 @@ describe("AppLayout", () => {
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
   });
 
-  it("drives sleep prevention from the app root", () => {
+  it("drives sleep prevention from the app root", async () => {
     // The hook has no rendered output, so nothing else would notice if the
     // mount were dropped — and sleep prevention would silently stop working.
     render(<AppLayout />);
     expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(false);
 
+    // Requests are serialized, so the next one waits for the mount reconcile.
+    await act(async () => {
+      await Promise.resolve();
+    });
     vi.mocked(setSleepInhibit).mockClear();
     act(() => {
       useSettingsStore.getState().setPower({ sleepPrevention: "always" });

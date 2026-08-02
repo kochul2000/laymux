@@ -33,14 +33,16 @@ export function SleepPreventionToggle() {
   const color = mode === "off" || !inhibiting ? "var(--text-secondary)" : "var(--accent)";
   const opacity = mode === "off" ? 0.35 : inhibiting ? 1 : 0.65;
 
+  // Square corners and static styling in classes, per api-contracts §15.1 —
+  // only the two theme-dependent values are inline.
   return (
     <button
       data-testid="sleep-prevention-btn"
       data-mode={mode}
       data-inhibiting={inhibiting}
       onClick={handleClick}
-      className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
-      style={{ color, opacity, background: "transparent", border: "none" }}
+      className="flex h-6 w-6 cursor-pointer items-center justify-center border-0 bg-transparent"
+      style={{ color, opacity }}
       title={TITLES[mode] ?? TITLES.off}
       aria-label="Sleep prevention"
     >

@@ -8,10 +8,19 @@
 //! Only system sleep is inhibited. The display is left alone: the user asked
 //! not to be put to sleep mid-run, not to have the screen burn all night.
 
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
+
+/// How often a held inhibitor is checked for having died behind our back.
+///
+/// The frontend only calls in on a *change*, so without this a `systemd-inhibit`
+/// child killed from outside would stay unnoticed for as long as the user's
+/// mode and terminals hold still — which in `always` mode is forever.
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Platform-specific half of the inhibitor.
 ///
@@ -45,6 +54,7 @@ struct Inner {
 /// another `AppState` lock, so it joins no lock ordering (api-contracts §14.3).
 pub struct SleepInhibitor {
     inner: Mutex<Inner>,
+    watchdog_started: AtomicBool,
 }
 
 impl SleepInhibitor {
@@ -58,6 +68,49 @@ impl SleepInhibitor {
                 active: false,
                 backend,
             }),
+            watchdog_started: AtomicBool::new(false),
+        }
+    }
+
+    /// Re-acquire the inhibitor if the OS resource behind it died.
+    ///
+    /// A no-op unless one is currently believed to be held.
+    pub fn revalidate(&self) -> Result<(), AppError> {
+        let mut guard = self.inner.lock_or_err()?;
+        let inner = &mut *guard;
+        if !inner.active || !inner.backend.needs_reapply() {
+            return Ok(());
+        }
+        inner.backend.apply(true)?;
+        tracing::warn!("sleep inhibitor died and was acquired again");
+        Ok(())
+    }
+
+    /// Start the background re-acquire loop, at most once per inhibitor.
+    ///
+    /// Idle until something is actually held, so calling it on the first enable
+    /// costs nothing on a machine that never uses the feature.
+    pub fn ensure_watchdog(self: &Arc<Self>) {
+        if self.watchdog_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let weak = Arc::downgrade(self);
+        let spawned = std::thread::Builder::new()
+            .name("sleep-inhibitor-watchdog".into())
+            .spawn(move || loop {
+                std::thread::sleep(WATCHDOG_INTERVAL);
+                // The app is gone; so is any inhibitor it held.
+                let Some(inhibitor) = weak.upgrade() else {
+                    return;
+                };
+                if let Err(error) = inhibitor.revalidate() {
+                    tracing::warn!(%error, "failed to revalidate the sleep inhibitor");
+                }
+            });
+        if let Err(error) = spawned {
+            // Let a later enable try again rather than silently going unguarded.
+            self.watchdog_started.store(false, Ordering::SeqCst);
+            tracing::warn!(%error, "failed to start the sleep inhibitor watchdog");
         }
     }
 
@@ -464,6 +517,30 @@ mod tests {
         // And the revived inhibitor is deduped normally again.
         assert!(harness.inhibitor.set(true).unwrap());
         assert_eq!(harness.applied(), vec![true, true]);
+    }
+
+    #[test]
+    fn revalidate_reacquires_an_inhibitor_that_died() {
+        // What the watchdog calls. The frontend only reports *changes*, so in
+        // "always" mode nothing else would ever notice the loss.
+        let harness = recording();
+        harness.inhibitor.set(true).unwrap();
+
+        harness.died.store(true, Ordering::SeqCst);
+        harness.inhibitor.revalidate().unwrap();
+        assert_eq!(harness.applied(), vec![true, true]);
+        assert!(harness.inhibitor.is_active().unwrap());
+    }
+
+    #[test]
+    fn revalidate_does_nothing_while_the_inhibitor_is_alive_or_unheld() {
+        let harness = recording();
+        harness.inhibitor.revalidate().unwrap();
+        assert!(harness.applied().is_empty());
+
+        harness.inhibitor.set(true).unwrap();
+        harness.inhibitor.revalidate().unwrap();
+        assert_eq!(harness.applied(), vec![true]);
     }
 
     #[test]

@@ -344,10 +344,11 @@ OS 절전 진입을 막는 정책이다(issue #727, [ADR-0113](../adr/0113-sleep
 
 - **모드 소유권**: `settings.power.sleepPrevention` 이 단일 진실원이다. 상단 바 토글 버튼(`sleep-prevention-btn`)과 Settings ▸ Interface ▸ Power 의 select 가 같은 필드를 읽고 쓴다. 버튼은 `off → always → whenBusy → off` 로 순환하며 클릭 후 `persistSession()` 으로 즉시 저장한다. applyMode 는 `live`.
 - **파생**: `shouldInhibitSleep(mode, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 모드와 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). busy 판정 `isTerminalBusy()`(`ui/src/lib/terminal-busy.ts`)는 원시 필드를 다시 조합하지 않고 그 터미널의 `ActivityHandler.computeStatus()` 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다 — Claude local-agent 경로(#225)와 Codex 스피너는 `outputActive === false` 로도 모래시계를 띄우므로, 원시 필드 조합은 페인 표시와 어긋난다. `terminalActivity` 위젯도 같은 함수를 쓴다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
-- **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 두 스토어를 **구독**해(셀렉터가 아니다 — 호스트 컴포넌트가 이 값을 렌더하지 않으므로 busy 플래그 토글이 트리를 재조정하면 안 된다) 파생값이 바뀔 때만 `set_sleep_inhibit(enabled)` 커맨드를 호출한다. 마운트 시에는 백엔드 상태를 알 수 없으므로 1회 무조건 동기화하고, 언마운트 시 잡고 있던 억제를 푼다. 호출 실패는 경고 로그만 남기고 설정을 되돌리지 않는다.
+- **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 두 스토어를 **구독**해(셀렉터가 아니다 — 호스트 컴포넌트가 이 값을 렌더하지 않으므로 busy 플래그 토글이 트리를 재조정하면 안 된다) 파생값이 바뀔 때만 `set_sleep_inhibit(enabled)` 커맨드를 호출한다. 커맨드가 async 이므로 요청은 한 번에 하나만 in flight 로 두고 그 사이의 중간 값은 접는다(latest wins) — 겹치면 순서가 뒤집힐 수 있다. 마운트 시에는 백엔드 상태를 알 수 없으므로 1회 무조건 동기화하고, 언마운트 시 같은 큐로 억제를 푼다. 호출 실패는 경고 로그만 남기고 설정을 되돌리지 않으며, 같은 값을 즉시 재전송하지 않는다(항상 실패하는 머신에서 스핀).
 - **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. `set_sleep_inhibit` 는 async 커맨드로 `spawn_blocking` 에서 돈다 — Linux 획득이 짧게 블로킹하기 때문이다.
   - **Windows**: 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.
   - **Linux**: `systemd-inhibit --what=idle:sleep --mode=block ... cat` 자식 + laymux 가 쥔 stdin 파이프(프로세스가 죽으면 EOF 로 자동 해제). `systemd-inhibit` 은 inhibit 호출이 실패해도 exec 자체는 성공하고 곧바로 종료하므로, spawn 후 300ms 동안 `try_wait()` 로 지켜본 뒤에야 lock 을 믿고 조기 종료면 stderr 를 담아 에러를 반환한다. 잡고 있던 자식이 나중에 죽으면 `needs_reapply()` 가 다음 요청에서 그것을 감지해 다시 획득한다.
+  - **watchdog**: 프론트는 변화만 보고하므로 `always` 모드에서는 재확인 기회가 없다. 첫 획득 때 30초 주기 스레드가 뜨고, 잡고 있는 동안 `needs_reapply()` 로 죽은 억제를 감지해 다시 잡는다(`SleepInhibitor::revalidate`). `Weak` 참조라 앱이 사라지면 스스로 끝난다.
   - 그 외 플랫폼은 `enabled=true` 요청에 에러를 반환한다.
 
 ### 종료 시 동작(kill-on-exit) 설정

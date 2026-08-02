@@ -155,7 +155,7 @@ pub struct AppState {
     /// The process's only OS sleep inhibitor (ADR-0113). Owns its own mutex and
     /// participates in no ordering above: nothing acquires it while holding
     /// another AppState lock.
-    pub sleep_inhibitor: crate::power::SleepInhibitor,
+    pub sleep_inhibitor: Arc<crate::power::SleepInhibitor>,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -325,7 +325,7 @@ impl AppState {
             settings_update_lock: tokio::sync::Mutex::new(()),
             frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
             usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
-            sleep_inhibitor: crate::power::SleepInhibitor::new(),
+            sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
         }
     }
 }
