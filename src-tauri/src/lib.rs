@@ -175,10 +175,13 @@ pub fn run() {
                 }
             }
 
-            // Watch for a sleep inhibitor that dies behind our back (ADR-0113).
-            // Started here, not on the first acquire: the frontend only calls in
-            // on a change, so a spawn that failed then would never be retried.
-            app_state.sleep_inhibitor.ensure_watchdog();
+            // Watch for a sleep inhibitor that dies behind our back, or one that
+            // was never acquired because the first attempt failed (ADR-0113).
+            // Started here rather than on first use; `set_sleep_inhibit` retries
+            // it, so a spawn failure now is not permanent.
+            if !app_state.sleep_inhibitor.ensure_watchdog() {
+                tracing::warn!("sleep inhibitor watchdog unavailable; will retry on next request");
+            }
 
             app.manage(app_state);
             Ok(())

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
@@ -51,40 +51,46 @@ describe("SleepPreventionToggle", () => {
     expect(screen.getByTestId("sleep-prevention-btn")).toHaveAttribute("data-inhibiting", "false");
   });
 
-  it("lights up once an inhibitor is actually held", () => {
-    useSettingsStore.getState().setPower({ sleepPrevention: "always" });
-    useSleepInhibitStore.getState().reportSuccess(true);
+  it("follows the backend without being re-rendered by its parent", () => {
+    // No forced rerender: a broken subscription has to show up here.
+    useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" });
     render(<SleepPreventionToggle />);
 
     const button = screen.getByTestId("sleep-prevention-btn");
-    expect(button).toHaveAttribute("data-inhibiting", "true");
-    expect(button).toHaveAttribute("data-failed", "false");
-  });
-
-  it("in whenBusy, separates the selected mode from what is happening now", () => {
-    useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" });
-    const { rerender } = render(<SleepPreventionToggle />);
-
-    const button = screen.getByTestId("sleep-prevention-btn");
     expect(button).toHaveAttribute("data-mode", "whenBusy");
-    expect(button).toHaveAttribute("data-inhibiting", "false");
+    expect(button.style.color).toBe("var(--text-secondary)");
 
-    useSleepInhibitStore.getState().reportSuccess(true);
-    rerender(<SleepPreventionToggle />);
+    act(() => useSleepInhibitStore.getState().reportResult(true, true));
 
-    expect(screen.getByTestId("sleep-prevention-btn")).toHaveAttribute("data-inhibiting", "true");
+    expect(button).toHaveAttribute("data-inhibiting", "true");
+    expect(button.style.color).toBe("var(--accent)");
+    expect(button.style.opacity).toBe("1");
   });
 
   it("flags a request the machine refused instead of claiming success", () => {
     // Without this the user is told they are protected while the machine sleeps
     // through their build.
     useSettingsStore.getState().setPower({ sleepPrevention: "always" });
-    useSleepInhibitStore.getState().reportFailure();
     render(<SleepPreventionToggle />);
+
+    act(() => useSleepInhibitStore.getState().reportFailure());
 
     const button = screen.getByTestId("sleep-prevention-btn");
     expect(button).toHaveAttribute("data-failed", "true");
     expect(button).toHaveAttribute("data-inhibiting", "false");
+    expect(button.style.color).toBe("var(--claude)");
     expect(button.getAttribute("title")).toContain("failed");
+  });
+
+  it("flags a request the backend answered with a different state", () => {
+    useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+    render(<SleepPreventionToggle />);
+
+    // Asked to inhibit; the backend reports it is not inhibiting.
+    act(() => useSleepInhibitStore.getState().reportResult(false, false));
+
+    const button = screen.getByTestId("sleep-prevention-btn");
+    expect(button).toHaveAttribute("data-failed", "true");
+    expect(button).toHaveAttribute("data-inhibiting", "false");
   });
 });

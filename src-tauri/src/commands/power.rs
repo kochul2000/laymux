@@ -27,5 +27,9 @@ pub async fn set_sleep_inhibit(
 }
 
 pub fn set_sleep_inhibit_inner(enabled: bool, state: &AppState) -> Result<bool, AppError> {
+    // Idempotent, and the retry path if the watchdog failed to start at setup:
+    // it is the only thing that re-acquires an inhibitor the frontend will not
+    // ask for twice.
+    state.sleep_inhibitor.ensure_watchdog();
     state.sleep_inhibitor.set(enabled)
 }

@@ -5,24 +5,25 @@ import { create } from "zustand";
  * backend (ADR-0113).
  *
  * Separate from `settings.power.sleepPrevention`, which is what the user asked
- * for. The two differ whenever a request fails — no `systemd-inhibit`, an
- * unsupported platform — and the top-bar toggle has to show the difference
- * rather than claim the machine is being kept awake when it is not.
+ * for. The two differ whenever a request does not take — no `systemd-inhibit`,
+ * an unsupported platform, a backend that answers with a different state — and
+ * the top-bar toggle has to show the difference rather than claim the machine
+ * is being kept awake when it is not.
  */
 interface SleepInhibitState {
   /** Backend-confirmed: an inhibitor is held right now. */
   active: boolean;
-  /** The last request did not go through; `active` is the state before it. */
+  /** The last request did not deliver what was asked for. */
   failed: boolean;
-  reportSuccess: (active: boolean) => void;
+  /** A request completed: `active` is the state in effect, `satisfied` whether it is the one asked for. */
+  reportResult: (active: boolean, satisfied: boolean) => void;
+  /** A request threw: the state in effect is unknown, so the last one stands. */
   reportFailure: () => void;
 }
 
 export const useSleepInhibitStore = create<SleepInhibitState>((set) => ({
   active: false,
   failed: false,
-  reportSuccess: (active) => set({ active, failed: false }),
-  // The requested state is unknown after a failure, so the last confirmed
-  // `active` stands and the flag says not to trust it.
+  reportResult: (active, satisfied) => set({ active, failed: !satisfied }),
   reportFailure: () => set({ failed: true }),
 }));
