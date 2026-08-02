@@ -186,20 +186,37 @@ describe("SettingsView", () => {
   });
 
   describe("Interface section — sleep prevention", () => {
-    it("shows the mode the top-bar toggle wrote and saves a change back to it", async () => {
-      // Button and select are two views of one field; if they ever stop sharing
-      // it, one of them starts lying about whether the machine will sleep.
+    it("shows the manual switch the top-bar toggle wrote and saves a change back to it", async () => {
+      // Button and checkbox are two views of one field; if they ever stop
+      // sharing it, one starts lying about whether the machine will sleep.
       const user = userEvent.setup();
-      useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+      useSettingsStore.getState().setPower({ keepAwake: true });
       render(<SettingsView />);
 
       await user.click(screen.getByTestId("nav-interface"));
-      expect(screen.getByTestId("sleep-prevention-select")).toHaveValue("always");
+      expect(screen.getByTestId("keep-awake-toggle")).toBeChecked();
 
-      await user.selectOptions(screen.getByTestId("sleep-prevention-select"), "whenBusy");
+      await user.click(screen.getByTestId("keep-awake-toggle"));
       await user.click(screen.getByTestId("save-settings-btn"));
 
-      expect(useSettingsStore.getState().power.sleepPrevention).toBe("whenBusy");
+      expect(useSettingsStore.getState().power.keepAwake).toBe(false);
+    });
+
+    it("saves the standing policy without touching the manual switch", async () => {
+      // The two axes are independent (ADR-0116) — editing one here must not
+      // silently rewrite the other.
+      const user = userEvent.setup();
+      useSettingsStore.getState().setPower({ keepAwake: true });
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      await user.click(screen.getByTestId("keep-awake-when-busy-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().power).toEqual({
+        keepAwake: true,
+        keepAwakeWhenBusy: true,
+      });
     });
   });
 

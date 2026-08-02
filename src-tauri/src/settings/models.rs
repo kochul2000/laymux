@@ -1177,26 +1177,17 @@ impl Default for NotificationSettings {
     }
 }
 
-/// OS power behavior (ADR-0114).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+/// OS power behavior (ADR-0116). Two independent axes, not one mode: the
+/// top-bar button owns `keep_awake`, Settings owns `keep_awake_when_busy`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PowerSettings {
-    /// When to keep the machine awake:
-    /// "off" (default) | "always" | "whenBusy" (a terminal is running).
-    #[serde(default = "default_sleep_prevention")]
-    pub sleep_prevention: String,
-}
-
-fn default_sleep_prevention() -> String {
-    "off".to_string()
-}
-
-impl Default for PowerSettings {
-    fn default() -> Self {
-        Self {
-            sleep_prevention: default_sleep_prevention(),
-        }
-    }
+    /// Manual switch: keep the machine awake no matter what the terminals do.
+    #[serde(default)]
+    pub keep_awake: bool,
+    /// Standing policy: keep the machine awake while a terminal is running.
+    #[serde(default)]
+    pub keep_awake_when_busy: bool,
 }
 
 /// Which elements to display in WorkspaceSelectorView pane rows.

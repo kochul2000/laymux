@@ -1,48 +1,58 @@
 import { describe, it, expect } from "vitest";
-import {
-  cycleSleepPreventionMode,
-  normalizeSleepPreventionMode,
-  shouldInhibitSleep,
-  type SleepPreventionMode,
-} from "./sleep-prevention";
+import { normalizeSleepPreventionAxes, shouldInhibitSleep } from "./sleep-prevention";
 
 describe("shouldInhibitSleep", () => {
-  it("never inhibits when off, busy or not", () => {
-    expect(shouldInhibitSleep("off", false)).toBe(false);
-    expect(shouldInhibitSleep("off", true)).toBe(false);
+  it("lets the machine sleep when neither axis asks otherwise", () => {
+    expect(shouldInhibitSleep({ keepAwake: false, keepAwakeWhenBusy: false }, false)).toBe(false);
+    expect(shouldInhibitSleep({ keepAwake: false, keepAwakeWhenBusy: false }, true)).toBe(false);
   });
 
-  it("always inhibits when always, even with every terminal idle", () => {
-    expect(shouldInhibitSleep("always", false)).toBe(true);
-    expect(shouldInhibitSleep("always", true)).toBe(true);
+  it("honors the manual switch regardless of what the terminals are doing", () => {
+    expect(shouldInhibitSleep({ keepAwake: true, keepAwakeWhenBusy: false }, false)).toBe(true);
+    expect(shouldInhibitSleep({ keepAwake: true, keepAwakeWhenBusy: false }, true)).toBe(true);
   });
 
-  it("follows the busy state when whenBusy", () => {
-    expect(shouldInhibitSleep("whenBusy", false)).toBe(false);
-    expect(shouldInhibitSleep("whenBusy", true)).toBe(true);
-  });
-});
-
-describe("cycleSleepPreventionMode", () => {
-  it("walks off → always → whenBusy → off", () => {
-    expect(cycleSleepPreventionMode("off")).toBe("always");
-    expect(cycleSleepPreventionMode("always")).toBe("whenBusy");
-    expect(cycleSleepPreventionMode("whenBusy")).toBe("off");
+  it("follows the terminals when only the policy is on", () => {
+    expect(shouldInhibitSleep({ keepAwake: false, keepAwakeWhenBusy: true }, false)).toBe(false);
+    expect(shouldInhibitSleep({ keepAwake: false, keepAwakeWhenBusy: true }, true)).toBe(true);
   });
 
-  it("restarts the cycle from an unknown mode instead of getting stuck", () => {
-    expect(cycleSleepPreventionMode("nonsense" as SleepPreventionMode)).toBe("off");
+  it("keeps the manual switch effective while the policy is idle", () => {
+    // The axes are independent: the policy going quiet must not undo a manual
+    // "keep awake" the user turned on for this session (ADR-0116).
+    expect(shouldInhibitSleep({ keepAwake: true, keepAwakeWhenBusy: true }, false)).toBe(true);
   });
 });
 
-describe("normalizeSleepPreventionMode", () => {
-  it("keeps known modes", () => {
-    expect(normalizeSleepPreventionMode("whenBusy")).toBe("whenBusy");
+describe("normalizeSleepPreventionAxes", () => {
+  it("keeps booleans", () => {
+    expect(normalizeSleepPreventionAxes({ keepAwake: true, keepAwakeWhenBusy: false })).toEqual({
+      keepAwake: true,
+      keepAwakeWhenBusy: false,
+    });
   });
 
-  it("falls back to off for anything else", () => {
-    expect(normalizeSleepPreventionMode("Always")).toBe("off");
-    expect(normalizeSleepPreventionMode(undefined)).toBe("off");
-    expect(normalizeSleepPreventionMode(7)).toBe("off");
+  it("treats a hand-edited non-boolean as off rather than truthy", () => {
+    // A settings.json holding "true" or 1 must not reach the OS call as an
+    // acquire the user never asked for.
+    expect(normalizeSleepPreventionAxes({ keepAwake: "true", keepAwakeWhenBusy: 1 })).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: false,
+    });
+  });
+
+  it("fills in missing and non-object input with the defaults", () => {
+    expect(normalizeSleepPreventionAxes({})).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: false,
+    });
+    expect(normalizeSleepPreventionAxes(undefined)).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: false,
+    });
+    expect(normalizeSleepPreventionAxes("whenBusy")).toEqual({
+      keepAwake: false,
+      keepAwakeWhenBusy: false,
+    });
   });
 });

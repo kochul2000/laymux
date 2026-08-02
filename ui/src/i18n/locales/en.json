@@ -340,11 +340,10 @@
       "dismissPaneFocus": "Auto-dismiss on pane focus",
       "dismissManual": "Dismiss only by clicking the notification",
       "groupPower": "Power",
-      "sleepPrevention": "Sleep Prevention",
-      "sleepPreventionDesc": "Keep the machine from sleeping. The display still turns off as usual.",
-      "sleepPreventionOff": "Off (let the OS sleep)",
-      "sleepPreventionAlways": "Always keep awake",
-      "sleepPreventionWhenBusy": "Keep awake while a terminal is busy"
+      "keepAwake": "Always keep awake",
+      "keepAwakeDesc": "Keep the machine from sleeping. Same switch as the top-bar button. The display still turns off as usual.",
+      "keepAwakeWhenBusy": "Keep awake while busy",
+      "keepAwakeWhenBusyDesc": "Keep the machine from sleeping while any terminal is running. It sleeps as usual once they all finish."
     },
     "remote": {
       "title": "Remote",

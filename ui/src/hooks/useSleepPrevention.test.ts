@@ -58,7 +58,7 @@ describe("useSleepPrevention", () => {
     expect(setSleepInhibit).toHaveBeenCalledExactlyOnceWith(false);
   });
 
-  it("stays off while the mode is off, however busy the terminals get", async () => {
+  it("stays off while both axes are off, however busy the terminals get", async () => {
     await mounted();
 
     act(() => registerBusyTerminal("t1"));
@@ -66,17 +66,17 @@ describe("useSleepPrevention", () => {
     expect(setSleepInhibit).not.toHaveBeenCalled();
   });
 
-  it("inhibits as soon as the mode becomes always, with no terminals at all", async () => {
+  it("inhibits as soon as the manual switch goes on, with no terminals at all", async () => {
     await mounted();
 
-    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
+    act(() => useSettingsStore.getState().setPower({ keepAwake: true }));
     expect(setSleepInhibit).toHaveBeenCalledExactlyOnceWith(true);
   });
 
-  it("in whenBusy, follows the terminals rather than the mode alone", async () => {
+  it("with only the policy on, follows the terminals", async () => {
     await mounted();
 
-    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" }));
+    act(() => useSettingsStore.getState().setPower({ keepAwakeWhenBusy: true }));
     await flush();
     expect(setSleepInhibit).not.toHaveBeenCalled();
 
@@ -89,9 +89,21 @@ describe("useSleepPrevention", () => {
     expect(setSleepInhibit).toHaveBeenLastCalledWith(false);
   });
 
+  it("keeps inhibiting when the terminals go idle but the manual switch is on", async () => {
+    // The axes are independent: the policy falling quiet must not undo the
+    // switch the user flipped for this session (ADR-0116).
+    useSettingsStore.getState().setPower({ keepAwake: true, keepAwakeWhenBusy: true });
+    act(() => registerBusyTerminal("t1"));
+    await mounted();
+
+    act(() => useTerminalStore.getState().updateInstanceInfo("t1", { outputActive: false }));
+    await flush();
+    expect(setSleepInhibit).not.toHaveBeenCalled();
+  });
+
   it("sends one call per change, not per activity update", async () => {
     await mounted();
-    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" }));
+    act(() => useSettingsStore.getState().setPower({ keepAwakeWhenBusy: true }));
     act(() => registerBusyTerminal("t1"));
     await flush();
     setSleepInhibit.mockClear();
@@ -112,7 +124,7 @@ describe("useSleepPrevention", () => {
       renders += 1;
       useSleepPrevention();
     });
-    useSettingsStore.getState().setPower({ sleepPrevention: "whenBusy" });
+    useSettingsStore.getState().setPower({ keepAwakeWhenBusy: true });
     await flush();
     const baseline = renders;
 
@@ -128,7 +140,7 @@ describe("useSleepPrevention", () => {
   it("releases on unmount, and a remount picks it back up in order", async () => {
     // The state machine lives outside the component, so the old mount's release
     // and the new mount's request share one queue instead of racing.
-    useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+    useSettingsStore.getState().setPower({ keepAwake: true });
     const { unmount } = renderHook(() => useSleepPrevention());
     await flush();
     setSleepInhibit.mockClear();
@@ -155,7 +167,7 @@ describe("useSleepPrevention", () => {
     await flush();
     setSleepInhibit.mockClear();
 
-    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
+    act(() => useSettingsStore.getState().setPower({ keepAwake: true }));
     await flush();
     expect(setSleepInhibit).not.toHaveBeenCalled();
   });

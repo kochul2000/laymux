@@ -29,9 +29,9 @@ import {
   type ComposerHistoryScope,
 } from "../lib/terminal-input-composer-state";
 import {
-  DEFAULT_SLEEP_PREVENTION_MODE,
-  normalizeSleepPreventionMode,
-  type SleepPreventionMode,
+  DEFAULT_SLEEP_PREVENTION_AXES,
+  normalizeSleepPreventionAxes,
+  type SleepPreventionAxes,
 } from "../lib/sleep-prevention";
 import type { LanguageSetting } from "../i18n/resolve-language";
 
@@ -256,11 +256,11 @@ export interface NotificationSettings {
   dismiss: NotificationDismissMode;
 }
 
-/** OS power behavior (ADR-0114). */
-export interface PowerSettings {
-  /** When to keep the machine awake. */
-  sleepPrevention: SleepPreventionMode;
-}
+/**
+ * OS power behavior (ADR-0116). Two independent axes, not one mode: the
+ * top-bar button owns `keepAwake`, Settings owns `keepAwakeWhenBusy`.
+ */
+export type PowerSettings = SleepPreventionAxes;
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
 export interface WorkspaceDisplaySettings {
@@ -788,9 +788,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   dismiss: "workspace",
 };
 
-export const DEFAULT_POWER: PowerSettings = {
-  sleepPrevention: DEFAULT_SLEEP_PREVENTION_MODE,
-};
+export const DEFAULT_POWER: PowerSettings = { ...DEFAULT_SLEEP_PREVENTION_AXES };
 
 /** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
 export const DEFAULT_EXIT: ExitSettings = {
@@ -1529,12 +1527,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
       : undefined;
-    // A hand-edited mode must not reach the OS call unvalidated: an unknown
-    // value falls back to "off" rather than behaving like one of the real
-    // modes (ADR-0114).
-    const power = data.power
-      ? { sleepPrevention: normalizeSleepPreventionMode(data.power.sleepPrevention) }
-      : undefined;
+    // A hand-edited value must not reach the OS call unvalidated: anything that
+    // is not literally `true` stays off rather than acquiring an inhibitor
+    // nobody asked for (ADR-0116).
+    const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
     const workspaceSelector = data.workspaceSelector

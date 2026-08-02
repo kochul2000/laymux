@@ -3,6 +3,7 @@
 - Status: Proposed
 - Date: 2026-08-02
 - Source: issue #727, [ADR-0005](0005-display-state-raw-separation-compute.md), architecture/api-contracts.md §10
+- Amended by: [ADR-0116](0116-sleep-prevention-two-axes.md) — 3값 모드와 상단 바 순환 버튼 부분만 정정된다. 억제 계층·watchdog·desired/held·플랫폼 전략은 유효하다.
 
 ## Context
 

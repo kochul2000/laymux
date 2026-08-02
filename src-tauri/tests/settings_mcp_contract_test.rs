@@ -159,12 +159,12 @@ fn semantic_enum_and_range_errors_are_rejected() {
 }
 
 #[test]
-fn unknown_sleep_prevention_mode_is_rejected() {
-    // A typo must not silently degrade to "off" — the user would believe the
-    // machine is being kept awake while it sleeps through their build.
+fn the_old_sleep_prevention_mode_is_no_longer_a_setting() {
+    // The tri-state mode became two booleans (ADR-0116). An agent still sending
+    // the old key must be told, not silently ignored.
     let prepared = prepare_settings_update(
         &Settings::default(),
-        &json!({ "power": { "sleepPrevention": "sometimes" } }),
+        &json!({ "power": { "sleepPrevention": "whenBusy" } }),
     );
 
     assert!(!prepared.valid);
@@ -175,19 +175,37 @@ fn unknown_sleep_prevention_mode_is_rejected() {
 }
 
 #[test]
-fn sleep_prevention_mode_is_a_live_change() {
+fn a_non_boolean_sleep_prevention_axis_is_rejected() {
+    // "true" must not degrade to false: the user would believe the machine is
+    // being kept awake while it sleeps through their build.
     let prepared = prepare_settings_update(
         &Settings::default(),
-        &json!({ "power": { "sleepPrevention": "whenBusy" } }),
+        &json!({ "power": { "keepAwake": "true" } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.code == "type_error"));
+}
+
+#[test]
+fn both_sleep_prevention_axes_are_live_changes() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "power": { "keepAwake": true, "keepAwakeWhenBusy": true } }),
     );
 
     assert!(prepared.valid, "errors: {:?}", prepared.errors);
-    let change = prepared
-        .changes
-        .iter()
-        .find(|change| change.path == "/power/sleepPrevention")
-        .expect("sleepPrevention change");
-    assert_eq!(change.apply_mode, ApplyMode::Live);
+    for path in ["/power/keepAwake", "/power/keepAwakeWhenBusy"] {
+        let change = prepared
+            .changes
+            .iter()
+            .find(|change| change.path == path)
+            .unwrap_or_else(|| panic!("{path} change"));
+        assert_eq!(change.apply_mode, ApplyMode::Live);
+    }
     assert!(!prepared.restart_required);
     assert!(!prepared.next_use_required);
 }
