@@ -329,6 +329,34 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 **`! cd` 형식**: Claude Code는 프롬프트에서 `! <shell_command>` 구문으로 인라인 셸 실행을 지원. `command` 모드에서는 이 형식으로 cd를 전달하며, `LX_PROPAGATED` 래핑이 불필요하다.
 
+### 절전 방지(sleep prevention) 설정
+
+OS 절전 진입을 막는 정책이다(issue #727, [ADR-0114](../adr/0114-sleep-prevention-mode.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
+
+```jsonc
+{
+  "power": {
+    // "off"(기본) | "always" | "whenBusy"
+    "sleepPrevention": "off"
+  }
+}
+```
+
+- **모드 소유권**: `settings.power.sleepPrevention` 이 단일 진실원이다. 상단 바 토글 버튼(`sleep-prevention-btn`)과 Settings ▸ Interface ▸ Power 의 select 가 같은 필드를 읽고 쓴다. 버튼은 `off → always → whenBusy → off` 로 순환하며 클릭 후 `persistSession()` 으로 즉시 저장한다. applyMode 는 `live`.
+- **파생**: `shouldInhibitSleep(mode, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 모드와 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). busy 판정 `isTerminalBusy()`(`ui/src/lib/terminal-busy.ts`)는 원시 필드를 다시 조합하지 않고 그 터미널의 `ActivityHandler.computeStatus()` 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다 — Claude local-agent 경로(#225)와 Codex 스피너는 `outputActive === false` 로도 모래시계를 띄우므로, 원시 필드 조합은 페인 표시와 어긋난다. `terminalActivity` 위젯도 같은 함수를 쓴다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
+- **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 두 스토어를 **구독**해(셀렉터가 아니다 — 호스트 컴포넌트가 이 값을 렌더하지 않으므로 busy 플래그 토글이 트리를 재조정하면 안 된다) 파생값을 `requestSleepInhibit()` 로 넘긴다. 훅은 파생만 하고, 백엔드와의 대화는 전부 `lib/sleep-inhibit-coordinator.ts` 가 소유한다.
+- **커맨드 대화는 모듈 단일 coordinator 다.** in-flight 여부·확정 상태·보류 값은 *프로세스*의 상태이지 마운트된 React 트리의 상태가 아니다. hook ref 에 두면 재마운트가 두 번째 큐를 만들어 옛 release 와 새 request 가 서로 다른 큐에서 겹친다. 규칙: 동시에 하나만 in flight(커맨드가 async 라 겹치면 순서가 뒤집힌다), 그 사이 오간 중간 값은 접는다(latest wins), 거절된 값은 원하는 값이 바뀔 때까지 보류(항상 실패하는 머신에서 스핀 방지).
+- **실패는 "모름"이지 "완료"가 아니다.** 실패한 요청을 적용된 것으로 확정하면, 해제에 실패한 뒤 마지막 release 까지 중복으로 보고 건너뛰어 OS 세션 내내 억제가 남는다. 실패하면 확정 상태를 `null` 로 둔다. 커맨드가 요청과 다른 상태를 돌려줘도 같은 규칙으로 보류하고 UI 에 실패로 표시한다.
+- **release 는 dedupe 를 무시하는 별도 경로다**(`releaseSleepInhibit()`). 마지막으로 놓을 기회이므로 보류를 무시하고, 자기 자신의 실패로 취소되지 않으며, 같은 큐를 통과해 in-flight 요청을 추월하지 않는다. 다만 재시도는 유한하다(3회) — 놓지 못하는 머신에서 무한 루프가 되면 안 된다. 백엔드가 이미 해제를 확정한 상태면 아무것도 보내지 않는다.
+- **표시 상태는 백엔드 응답이 소유한다.** `useSleepInhibitStore`(`active`/`failed`)에 커맨드 결과를 기록하고 상단 바 버튼이 그것을 읽는다. 모드에서 파생하면 억제 실패 후에도 "지금 재우지 않는 중"이라고 표시하게 된다.
+- **백엔드가 스스로 바꾼 상태는 이벤트로 되돌아온다.** watchdog 이 재획득하거나 잃는 전이는 요청이 없으므로 프론트의 dedupe 로는 영영 알 수 없다. `SleepInhibitor` 의 sink 가 `sleep-inhibit-changed`(`{active, satisfied}`)를 발행하고, 훅이 그것을 `observeSleepInhibitState()` 로 coordinator·표시 상태에 반영한다. 관측 결과가 원하는 값과 다르면 일반 경로가 그대로 재요청한다.
+- **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. `set_sleep_inhibit` 는 async 커맨드로 `spawn_blocking` 에서 돈다 — Linux 획득이 짧게 블로킹하기 때문이다.
+  - **Windows**: 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.
+  - **Linux**: `systemd-inhibit --what=idle:sleep --mode=block ... cat` 자식 + laymux 가 쥔 stdin 파이프(프로세스가 죽으면 EOF 로 자동 해제). `systemd-inhibit` 은 inhibit 호출이 실패해도 exec 자체는 성공하고 곧바로 종료하므로, spawn 후 300ms 동안 `try_wait()` 로 지켜본 뒤에야 lock 을 믿는다. stderr 는 전용 리더 스레드가 상한(4KiB)까지 계속 비운다 — 안 비우면 오래 사는 자식이 파이프 포화로 막히고, 실패 시점에 읽으면 억제 mutex 안에서 블로킹된다. 해제는 stdin 을 닫고 300ms 안에 정상 종료를 확인한 뒤, 안 죽으면 kill 한다. kill·wait 실패는 삼키지 않고 전파해 `held` 를 유지한다 — 자식이 살아 있는데 해제됐다고 기록하면 아무도 다시 알아차리지 못한다. 잡고 있던 자식이 나중에 죽으면 `needs_reapply()` 가 감지한다.
+  - **desired 와 held 는 별개다.** `set` 은 요청을 `desired` 에 기록하고 `reconcile()` 로 실제 상태를 맞춘다. `held` 는 성공한 `apply` 에서만 바뀌므로, 획득 실패는 "안 잡힘"으로 남아 UI 가 거짓말하지 않고 watchdog 이 재시도할 거리가 된다. 해제 실패도 "아직 잡힘"으로 남는다. 커맨드는 요청값이 아니라 `held` 를 돌려준다.
+  - **watchdog**: 프론트는 변화만 보고하므로 `always` 모드에서는 재확인 기회가 없다. 30초 주기 스레드가 `reconcile()` 을 돌려 죽은 억제와 **한 번도 성공하지 못한 획득**을 모두 다시 시도한다(`SleepInhibitor::revalidate`). 앱 setup 에서 기동하고 `set_sleep_inhibit` 도 매번 `ensure_watchdog()` 을 호출한다(멱등) — 한쪽에만 묶으면 spawn 실패가 세션 내내 복구되지 않는다. 아무것도 원하지 않고 잡은 것도 없으면 no-op 이며, `Weak` 참조라 앱이 사라지면 스스로 끝난다.
+  - 그 외 플랫폼은 `enabled=true` 요청에 에러를 반환한다.
+
 ### 종료 시 동작(kill-on-exit) 설정
 
 앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 세션 ID 는 종료 시 캐시되는 스크롤백에 담겨 다음 실행에서 복원된다.
@@ -1287,7 +1315,7 @@ state.terminals.lock_or_err()?;
 | recoverable diagnostic | 범용 helper 없음 | 제어 경로와 분리된 소유 타입의 typed snapshot이 poison/degraded를 함께 표시하는 경우만 별도 근거로 허용 | recovered guard나 clone을 권한·sequence·credit·activity 판정에 사용 |
 | discard-only cleanup | `lock_or_recover_for_discard(context)` / owner `Drop`의 `get_mut_or_recover_for_discard(context)` / Condvar의 `recover_poison_for_discard(error, context)` | explicit close·creation rollback·generation retirement에서 entry 제거, clear/overwrite, waiter wake, 추출한 OS resource terminate/drop | 새 작업 승인, 정상 registry/lease 재개, poison 해제 |
 
-discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit 또는 fatal generation terminal catalog/PTY handle close와 `AppState::drop`의 남은 PTY drain뿐이다. fatal PTY callback은 poisoned Condvar 안에서 close를 기다리지 않고 generation-local atomic request를 claim한 뒤 reader에 `Stop`을 반환하며, cleanup coordinator가 discard-only retirement를 수행하고 독립 reaper가 handle을 종료한다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)). `exec_locks` cleanup은 다른 AppState 락과 겹치지 않으며 entry generation이 retired generation과 같을 때만 제거한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
+discard helper는 좁은 allowlist다. 현재 호출자는 terminal-output session registry/protocol/runtime/desktop-flow retirement, compatibility projection 제거, explicit 또는 fatal generation terminal catalog/PTY handle close, `AppState::drop`의 남은 PTY drain, 그리고 `SleepInhibitor::drop`의 OS 절전 억제 해제([ADR-0114](../adr/0114-sleep-prevention-mode.md))뿐이다. 마지막 항목은 owner `Drop`에서 보유 중인 OS 자원 하나를 해제하고 끝나며, 회수한 state 로 어떤 작업도 재개하지 않는다. fatal PTY callback은 poisoned Condvar 안에서 close를 기다리지 않고 generation-local atomic request를 claim한 뒤 reader에 `Stop`을 반환하며, cleanup coordinator가 discard-only retirement를 수행하고 독립 reaper가 handle을 종료한다([ADR-0088](../adr/0088-pty-output-fatal-generation-teardown.md)). `exec_locks` cleanup은 다른 AppState 락과 겹치지 않으며 entry generation이 retired generation과 같을 때만 제거한다. 회수 뒤에도 mutex poison은 유지되어 후속 `lock_or_err()`가 계속 실패해야 하며, 모든 회수는 정적 `context`와 `tracing::warn!`을 남긴다. sequenced output ring, MCP `exec_locks`, memo serialization gate, frontend health를 포함한 일반 읽기·쓰기는 fail-closed한다.
 
 activity bulk snapshot은 `terminals → output_buffers → per-ring → known app/grace/exit caches → pty_handles` 순서로 읽고 오류를 `Result`로 반환한다. strict control detector는 표시용 detector 전후에 이 건강성을 검증해 registry/ring/activity cache/PTY poison을 빈 states, `Shell`, 전체 sync-CWD target 또는 MCP `null`/빈 capture로 합성하지 않는다. MCP의 PTY 존재 확인도 poison을 not-found로 바꾸지 않으며, 입력 side effect 뒤의 관찰 실패는 side-effect metadata를 가진 tool error로 구분한다.
 

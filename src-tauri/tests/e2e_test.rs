@@ -4,10 +4,10 @@ use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
     FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
-    MemoSettings, OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
-    SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, WidgetInstance,
-    WidgetSlots, WidgetsSettings, Workspace, WorkspaceClearBusyPolicy, WorkspaceClearSettings,
-    WorkspacePane, WorkspacePaneView,
+    MemoSettings, OutputActivityBurstSettings, PowerSettings, Profile, ProfileDefaults,
+    RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets, TerminalSettings,
+    ValidationWarning, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace,
+    WorkspaceClearBusyPolicy, WorkspaceClearSettings, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -203,6 +203,9 @@ fn settings_round_trip_with_full_config() {
         },
         dock: Default::default(),
         notifications: Default::default(),
+        power: PowerSettings {
+            sleep_prevention: "whenBusy".into(),
+        },
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),
@@ -259,6 +262,9 @@ fn settings_round_trip_with_full_config() {
     let loaded: Settings = serde_json::from_str(&content).unwrap();
 
     assert_eq!(settings, loaded);
+    // Spot-check a non-default value: a section left at its default would round
+    // trip even if it never reached the file at all.
+    assert_eq!(loaded.power.sleep_prevention, "whenBusy");
 }
 
 #[test]

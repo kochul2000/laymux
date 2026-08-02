@@ -1,5 +1,5 @@
 import type { RawTerminalState } from "./activity-handler";
-import { CODEX_INPUT_PENDING_MARKER } from "./activity-detection";
+import { CODEX_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 const BRAILLE_SPINNER_RANGE_START = 0x2800;
@@ -56,7 +56,7 @@ export class CodexActivityHandler extends ShellActivityHandler {
       return { icon: "✓", color: "var(--green)" };
     }
     if (!raw.outputActive && startsWithBrailleSpinner(raw.title)) {
-      return { icon: "⏳", color: "var(--yellow)" };
+      return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }
     return super.computeStatus(raw);
   }

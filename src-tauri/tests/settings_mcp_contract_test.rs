@@ -1,7 +1,7 @@
 use laymux_lib::settings::contract::{
     describe_settings, metadata_for_path, prepare_settings_update, redact_settings,
-    select_settings_paths, sensitive_settings_paths, settings_revision, READ_ONLY_SETTINGS_PATHS,
-    REDACTED_SETTING_VALUE,
+    select_settings_paths, sensitive_settings_paths, settings_revision, ApplyMode,
+    READ_ONLY_SETTINGS_PATHS, REDACTED_SETTING_VALUE,
 };
 use laymux_lib::settings::{Settings, WorkspaceClearBusyPolicy};
 use serde_json::json;
@@ -156,6 +156,40 @@ fn semantic_enum_and_range_errors_are_rejected() {
             "{path}"
         );
     }
+}
+
+#[test]
+fn unknown_sleep_prevention_mode_is_rejected() {
+    // A typo must not silently degrade to "off" — the user would believe the
+    // machine is being kept awake while it sleeps through their build.
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "power": { "sleepPrevention": "sometimes" } }),
+    );
+
+    assert!(!prepared.valid);
+    assert!(prepared
+        .errors
+        .iter()
+        .any(|issue| issue.path == "/power/sleepPrevention"));
+}
+
+#[test]
+fn sleep_prevention_mode_is_a_live_change() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "power": { "sleepPrevention": "whenBusy" } }),
+    );
+
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let change = prepared
+        .changes
+        .iter()
+        .find(|change| change.path == "/power/sleepPrevention")
+        .expect("sleepPrevention change");
+    assert_eq!(change.apply_mode, ApplyMode::Live);
+    assert!(!prepared.restart_required);
+    assert!(!prepared.next_use_required);
 }
 
 #[test]

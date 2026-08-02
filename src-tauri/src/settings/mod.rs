@@ -452,6 +452,26 @@ mod tests {
     }
 
     #[test]
+    fn sleep_prevention_defaults_to_off() {
+        // The app must not change the machine's power behavior until asked.
+        let settings = Settings::default();
+        assert_eq!(settings.power.sleep_prevention, "off");
+    }
+
+    #[test]
+    fn sleep_prevention_round_trip() {
+        let json = r#"{ "power": { "sleepPrevention": "whenBusy" } }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.power.sleep_prevention, "whenBusy");
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"sleepPrevention\":\"whenBusy\""));
+
+        let reparsed: Settings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(reparsed.power.sleep_prevention, "whenBusy");
+    }
+
+    #[test]
     fn workspace_selector_hidden_auto_close_default_is_disabled() {
         // Default must be 0 (disabled) so existing users see no behavior change.
         let settings = Settings::default();

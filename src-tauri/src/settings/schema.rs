@@ -148,6 +148,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/power",
+        description: "OS 절전 방지 설정입니다. sleepPrevention 은 off(기본), always(항상 재우지 않음), whenBusy(실행 중인 터미널이 있을 때만 재우지 않음) 중 하나입니다. 시스템 절전만 막고 화면 절전은 막지 않습니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/workspaceSelector",
         description: "workspace selector 표시·정렬·숨김 터미널 정리 설정입니다.",
         sensitive: false,

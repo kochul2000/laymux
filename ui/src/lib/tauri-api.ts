@@ -636,6 +636,22 @@ export function onUsageSnapshotChanged(
   });
 }
 
+/**
+ * Listen for sleep inhibitor changes nobody asked for (ADR-0114).
+ *
+ * The watchdog can acquire or lose one on its own. The frontend only sends
+ * *changes*, so without this the UI would keep showing whatever the last
+ * request returned — lit over a machine that is no longer protected, or failed
+ * over one that has since recovered.
+ */
+export function onSleepInhibitChanged(
+  callback: (state: { active: boolean; satisfied: boolean }) => void,
+): Promise<UnlistenFn> {
+  return listen<{ active: boolean; satisfied: boolean }>("sleep-inhibit-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 export async function saveTerminalOutputCache(paneId: string, data: string): Promise<void> {
   return invoke("save_terminal_output_cache", { paneId, data });
 }
@@ -908,6 +924,7 @@ export interface Settings {
   widgets: import("@/lib/widget-placement").WidgetsSettings;
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
+  power?: import("@/stores/settings-store").PowerSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
@@ -1498,6 +1515,15 @@ export async function getTerminalSummaries(
   terminalIds: string[],
 ): Promise<TerminalSummaryResponse[]> {
   return invoke("get_terminal_summaries", { terminalIds });
+}
+
+/**
+ * Hold or release the OS sleep inhibitor (ADR-0114). Idempotent — the backend
+ * only touches the OS when the state actually changes. Resolves to the state
+ * in effect afterwards.
+ */
+export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
+  return invoke("set_sleep_inhibit", { enabled });
 }
 
 /** Mark notifications as read for the given terminal IDs. Returns count of marked. */

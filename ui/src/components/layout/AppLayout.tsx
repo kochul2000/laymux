@@ -21,6 +21,7 @@ import { useAppTheme } from "@/hooks/useAppTheme";
 import { useHiddenTerminalAutoClose } from "@/hooks/useHiddenTerminalAutoClose";
 import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
 import { useTerminalStartupCoordinator } from "@/hooks/useTerminalStartupCoordinator";
+import { useSleepPrevention } from "@/hooks/useSleepPrevention";
 import { focusDockPane } from "@/lib/workspace-transition";
 
 function ModalOverlay({
@@ -163,6 +164,7 @@ export function AppLayout() {
   useHiddenItemsCoordinator();
   useHiddenTerminalAutoClose();
   useTerminalStartupCoordinator();
+  useSleepPrevention();
   const docks = useDockStore((s) => s.docks);
   const layoutMode = useDockStore((s) => s.layoutMode);
   const focusedDock = useDockStore((s) => s.focusedDock);

@@ -28,6 +28,11 @@ import {
   DEFAULT_COMPOSER_HISTORY_SCOPE,
   type ComposerHistoryScope,
 } from "../lib/terminal-input-composer-state";
+import {
+  DEFAULT_SLEEP_PREVENTION_MODE,
+  normalizeSleepPreventionMode,
+  type SleepPreventionMode,
+} from "../lib/sleep-prevention";
 import type { LanguageSetting } from "../i18n/resolve-language";
 
 /** Re-export so settings consumers can import the language type from one place. */
@@ -249,6 +254,12 @@ export interface DockSettings {
 export interface NotificationSettings {
   /** When to auto-dismiss notifications as read. */
   dismiss: NotificationDismissMode;
+}
+
+/** OS power behavior (ADR-0114). */
+export interface PowerSettings {
+  /** When to keep the machine awake. */
+  sleepPrevention: SleepPreventionMode;
 }
 
 /** Which elements to display in WorkspaceSelectorView pane rows. */
@@ -475,6 +486,7 @@ interface SettingsState {
   widgets: WidgetsSettings;
   dock: DockSettings;
   notifications: NotificationSettings;
+  power: PowerSettings;
   workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
@@ -496,6 +508,7 @@ interface SettingsState {
   setControlBar: (data: Partial<ControlBarSettings>) => void;
   setDock: (data: Partial<DockSettings>) => void;
   setNotifications: (data: Partial<NotificationSettings>) => void;
+  setPower: (data: Partial<PowerSettings>) => void;
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
@@ -560,6 +573,7 @@ interface SettingsState {
         | "widgets"
         | "dock"
         | "notifications"
+        | "power"
         | "workspaceSelector"
         | "claude"
         | "codex"
@@ -772,6 +786,10 @@ export const DEFAULT_DOCK: DockSettings = {
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   dismiss: "workspace",
+};
+
+export const DEFAULT_POWER: PowerSettings = {
+  sleepPrevention: DEFAULT_SLEEP_PREVENTION_MODE,
 };
 
 /** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
@@ -1172,6 +1190,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   widgets: defaultWidgets(),
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
+  power: { ...DEFAULT_POWER },
   workspaceSelector: {
     ...DEFAULT_WORKSPACE_SELECTOR,
     display: { ...DEFAULT_WORKSPACE_SELECTOR.display },
@@ -1227,6 +1246,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setNotifications: (data) =>
     set((state) => ({
       notifications: { ...state.notifications, ...data },
+    })),
+
+  setPower: (data) =>
+    set((state) => ({
+      power: { ...state.power, ...data },
     })),
 
   setWorkspaceSelector: (data) =>
@@ -1505,6 +1529,12 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const notifications = data.notifications
       ? { ...DEFAULT_NOTIFICATIONS, ...data.notifications }
       : undefined;
+    // A hand-edited mode must not reach the OS call unvalidated: an unknown
+    // value falls back to "off" rather than behaving like one of the real
+    // modes (ADR-0114).
+    const power = data.power
+      ? { sleepPrevention: normalizeSleepPreventionMode(data.power.sleepPrevention) }
+      : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
     const workspaceSelector = data.workspaceSelector
@@ -1597,6 +1627,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       widgets: _rawWidgets,
       dock: _rawDock,
       notifications: _rawNotifications,
+      power: _rawPower,
       workspaceSelector: _rawWorkspaceSelector,
       remote: _rawRemote,
       language: _rawLanguage,
@@ -1624,6 +1655,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(widgets ? { widgets } : {}),
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
+      ...(power ? { power } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),

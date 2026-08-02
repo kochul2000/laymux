@@ -489,8 +489,13 @@ function WorkspaceItem({
                       claudeSettings,
                       codexSettings,
                     );
+                    // `outputActive` belongs in the gate, not just the input: a
+                    // shell streaming output before any command was captured is
+                    // working, and sleep prevention already counts it as busy
+                    // (ADR-0114). Dropping it here would leave the row showing
+                    // the previous result while the machine stays awake for it.
                     const tCmdStatus =
-                      ts.lastCommand || ts.activity?.type === "interactiveApp"
+                      ts.lastCommand || ts.outputActive || ts.activity?.type === "interactiveApp"
                         ? computeCommandStatus(
                             ts.lastExitCode,
                             ts.outputActive,

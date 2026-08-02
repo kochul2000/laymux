@@ -90,6 +90,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.widgets ? { widgets: rawSettings.widgets } : {}),
     ...(rawSettings.dock ? { dock: rawSettings.dock } : {}),
     ...(rawSettings.notifications ? { notifications: rawSettings.notifications } : {}),
+    ...(rawSettings.power ? { power: rawSettings.power } : {}),
     ...(rawSettings.workspaceSelector ? { workspaceSelector: rawSettings.workspaceSelector } : {}),
     ...(rawSettings.claude ? { claude: rawSettings.claude } : {}),
     ...(rawSettings.codex ? { codex: rawSettings.codex } : {}),

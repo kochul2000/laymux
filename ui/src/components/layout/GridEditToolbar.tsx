@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useRemoteAccessStore } from "@/stores/remote-access-store";
 import type { DockPosition } from "@/stores/types";
 import { WidgetSlot } from "@/components/widgets/WidgetSlot";
+import { SleepPreventionToggle } from "./SleepPreventionToggle";
 import logoSvg from "@/assets/logo.svg";
 
 /**
@@ -247,6 +248,8 @@ export function GridEditToolbar() {
         >
           {"\uE8A5"}
         </button>
+
+        <SleepPreventionToggle />
 
         <button
           data-testid="remote-access-btn"

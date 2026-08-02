@@ -55,6 +55,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// `commands::github_repo` owns its per-repository snapshot registry on the same
 /// terms: its locks are taken only on `spawn_blocking` workers that touch no
 /// `AppState` state, so they join no ordering above (ADR-0106).
+/// `sleep_inhibitor` likewise owns a mutex that guards only itself and is taken
+/// from the `set_sleep_inhibit` command alone, never under another lock (ADR-0114).
 ///
 /// ## Poison policy
 ///
@@ -150,6 +152,10 @@ pub struct AppState {
     /// Claude usage probes. Owns headless `claude` PTYs that are deliberately
     /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0102).
     pub usage_probe: Arc<crate::usage_probe::UsageProbe>,
+    /// The process's only OS sleep inhibitor (ADR-0114). Owns its own mutex and
+    /// participates in no ordering above: nothing acquires it while holding
+    /// another AppState lock.
+    pub sleep_inhibitor: Arc<crate::power::SleepInhibitor>,
 }
 
 /// Process-global per-terminal write/exec serialization table. See
@@ -319,6 +325,7 @@ impl AppState {
             settings_update_lock: tokio::sync::Mutex::new(()),
             frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
             usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
+            sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
         }
     }
 }

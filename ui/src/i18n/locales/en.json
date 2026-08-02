@@ -338,7 +338,13 @@
       "notificationDismissDesc": "When notifications are marked as read",
       "dismissWorkspace": "Auto-dismiss on workspace select",
       "dismissPaneFocus": "Auto-dismiss on pane focus",
-      "dismissManual": "Dismiss only by clicking the notification"
+      "dismissManual": "Dismiss only by clicking the notification",
+      "groupPower": "Power",
+      "sleepPrevention": "Sleep Prevention",
+      "sleepPreventionDesc": "Keep the machine from sleeping. The display still turns off as usual.",
+      "sleepPreventionOff": "Off (let the OS sleep)",
+      "sleepPreventionAlways": "Always keep awake",
+      "sleepPreventionWhenBusy": "Keep awake while a terminal is busy"
     },
     "remote": {
       "title": "Remote",

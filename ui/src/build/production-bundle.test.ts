@@ -24,11 +24,13 @@ const UI_ROOT = process.cwd();
  * time the workspace-clear feature landed (issue #726), which is below the size
  * of any real feature — a startup module plus one Settings group's strings.
  *
- * 510 kB keeps roughly that same small margin over the current entry rather
- * than banking room for several more features: the point of the guard is to
- * make the next increase a conscious decision too.
+ * 510 kB kept roughly that same small margin. Sleep prevention (ADR-0114) then
+ * added ~2.6 kB of always-visible chrome — a top-bar toggle, its coordinator,
+ * and one Settings group — taking the entry to 512,576 B. 515 kB restores the
+ * same small margin rather than banking room for several more features: the
+ * point of the guard is to make the next increase a conscious decision too.
  */
-const STARTUP_CHUNK_BUDGET_BYTES = 510_000;
+const STARTUP_CHUNK_BUDGET_BYTES = 515_000;
 
 /**
  * Ceiling for a lazily-imported **syntax grammar**. Generous because a

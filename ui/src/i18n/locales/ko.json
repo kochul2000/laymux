@@ -338,7 +338,13 @@
       "notificationDismissDesc": "알림을 읽음 처리하는 시점",
       "dismissWorkspace": "워크스페이스 선택 시 자동 해제",
       "dismissPaneFocus": "Pane 포커스 시 자동 해제",
-      "dismissManual": "알림 클릭으로만 해제"
+      "dismissManual": "알림 클릭으로만 해제",
+      "groupPower": "전원",
+      "sleepPrevention": "절전 방지",
+      "sleepPreventionDesc": "시스템이 절전 모드로 들어가지 않게 합니다. 화면 절전은 평소대로 동작합니다.",
+      "sleepPreventionOff": "끔 (OS 절전 허용)",
+      "sleepPreventionAlways": "항상 재우지 않기",
+      "sleepPreventionWhenBusy": "실행 중인 터미널이 있을 때만 재우지 않기"
     },
     "remote": {
       "title": "원격",

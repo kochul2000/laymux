@@ -41,6 +41,8 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   propagateCwdOnce: vi.fn().mockResolvedValue(undefined),
   markNotificationsRead: vi.fn().mockResolvedValue(undefined),
+  setSleepInhibit: vi.fn().mockResolvedValue(false),
+  onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@/components/views/TerminalView", () => ({
@@ -62,6 +64,7 @@ import { useGridStore } from "@/stores/grid-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { viewerInstanceId } from "@/lib/file-viewer";
+import { setSleepInhibit } from "@/lib/tauri-api";
 
 describe("AppLayout", () => {
   beforeEach(() => {
@@ -73,6 +76,23 @@ describe("AppLayout", () => {
     useGridStore.setState(useGridStore.getInitialState());
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     useFileViewerStore.setState(useFileViewerStore.getInitialState());
+  });
+
+  it("drives sleep prevention from the app root", async () => {
+    // The hook has no rendered output, so nothing else would notice if the
+    // mount were dropped — and sleep prevention would silently stop working.
+    render(<AppLayout />);
+    expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(false);
+
+    // Requests are serialized, so the next one waits for the mount reconcile.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    vi.mocked(setSleepInhibit).mockClear();
+    act(() => {
+      useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+    });
+    expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(true);
   });
 
   it("renders left dock and workspace area by default", () => {
