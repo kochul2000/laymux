@@ -310,7 +310,7 @@
       "clearBusyPolicySkip": "Leave it alone",
       "clearBusyPolicyInterrupt": "Interrupt, then clear",
       "clearBusyPolicyRestart": "Restart the view",
-      "clearBusyPolicyDesc": "What to do with a pane that is running a command or a task. Restarting starts a fresh terminal session and discards the scrollback, unlike clearing.",
+      "clearBusyPolicyDesc": "What to do with a pane that is running a command or a task. Restarting starts a fresh terminal session and discards the scrollback, unlike clearing. Interrupting sends Ctrl+C first, which a full-screen app laymux does not recognise (vim, a pager) will survive — the clear command is then typed into it.",
       "clearInterruptRounds": "Ctrl+C presses",
       "clearInterruptRoundsDesc": "How many times to send Ctrl+C before clearing (1–10). Claude / Codex usually need at least 2.",
       "clearSettle": "Settle delay (ms)",

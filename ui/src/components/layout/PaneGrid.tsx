@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import type { ViewInstanceConfig } from "@/stores/types";
 import type { TerminalLocation } from "@/stores/settings-store";
 import { ViewRenderer } from "@/components/views/ViewRenderer";
@@ -14,7 +15,10 @@ import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import { PANE_DND_MIME, setPaneDragData } from "@/lib/pane-dnd";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
-import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
+import {
+  useTerminalRestartStore,
+  type TerminalRestartRequest,
+} from "@/stores/terminal-restart-store";
 import { getTerminalRestartCwd } from "@/lib/terminal-restart";
 
 export interface GridPane {
@@ -137,8 +141,20 @@ export function PaneGrid({
   const dragSrcRef = useRef<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   // Restart requests live in a store, not local state, so the workspace-wide
-  // clear can request one from outside this component (ADR-0113).
-  const terminalRestarts = useTerminalRestartStore((s) => s.requests);
+  // clear can request one from outside this component (ADR-0113). The store is
+  // app-wide but a grid only cares about its own panes — subscribing to the
+  // whole record would re-render every mounted workspace and dock on any
+  // restart, which the previous per-component state never did.
+  const terminalRestarts = useTerminalRestartStore(
+    useShallow((s) => {
+      const mine: Record<string, TerminalRestartRequest> = {};
+      for (const pane of panes) {
+        const request = s.requests[pane.id];
+        if (request) mine[pane.id] = request;
+      }
+      return mine;
+    }),
+  );
   const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   const restartTerminalView = useCallback((pane: GridPane) => {

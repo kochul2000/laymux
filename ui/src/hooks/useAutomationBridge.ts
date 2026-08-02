@@ -44,7 +44,7 @@ import {
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
-import { clearWorkspace } from "@/lib/workspace-clear";
+import { clearWaitBudgetMs, clearWorkspace, resolveWorkspaceClear } from "@/lib/workspace-clear";
 
 interface HandlerResult {
   success: boolean;
@@ -65,6 +65,15 @@ const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
  * fail when either side moves without the other.
  */
 export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
+/**
+ * Ceiling on the interrupt→settle wait `workspaces.clear` may perform inside
+ * one bridge request (ADR-0113). Sits under the 3.5 s `LONGEST_HANDLER_WAIT`
+ * that `helpers.rs` mirrors, so the clear never becomes the longest handler
+ * wait and the existing slack assertion keeps holding. A user-configured
+ * `settleMs` above this still applies to the keyboard and button paths, which
+ * nobody is timing out.
+ */
+export const AUTOMATION_CLEAR_WAIT_BUDGET_MS = 3_000;
 // Together with TerminalRenderCheckpointModel's 3-second catch-up timeout,
 // provider discovery stays at 3.5 seconds inside the backend bridge's 5-second
 // request budget, leaving time for serialization and IPC delivery.
@@ -1262,9 +1271,26 @@ export async function handleAsyncAutomationRequest(
     const id = request.params.id as string;
     const wsErr = checkWorkspaceExists(id);
     if (wsErr) return wsErr;
+    const settings = useSettingsStore.getState().workspaceClear;
+    // The bridge stops waiting at BRIDGE_REQUEST_BUDGET_MS, so an
+    // `interrupt` policy configured with a long settle would finish the clear
+    // and still answer 504 with the per-pane result lost. Cap the wait instead
+    // and tell the caller which config it actually ran under.
+    const configured = resolveWorkspaceClear(settings);
+    const effective = resolveWorkspaceClear(settings, {
+      maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+    });
     try {
-      const result = await clearWorkspace(id, useSettingsStore.getState().workspaceClear);
-      return ok({ workspaceId: id, ...result });
+      const result = await clearWorkspace(id, settings, {
+        maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+      });
+      return ok({
+        workspaceId: id,
+        ...result,
+        waitCapped: clearWaitBudgetMs(effective) < clearWaitBudgetMs(configured),
+        interruptRounds: effective.interruptRounds,
+        settleMs: effective.settleMs,
+      });
     } catch (e) {
       return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
     }

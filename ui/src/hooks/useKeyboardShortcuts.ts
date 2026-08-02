@@ -20,7 +20,7 @@ import {
 } from "@/lib/workspace-transition";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
-import { clearWorkspace } from "@/lib/workspace-clear";
+import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
   ArrowLeft: "left",
@@ -331,9 +331,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   "workspace.clearTerminals": (e) => {
     e.preventDefault();
     const { activeWorkspaceId } = useWorkspaceStore.getState();
-    void clearWorkspace(activeWorkspaceId, useSettingsStore.getState().workspaceClear).catch(
-      (err) => console.warn("[workspace.clearTerminals] failed:", err),
-    );
+    void runWorkspaceClearFromUi(activeWorkspaceId);
   },
 
   // notifications.unread: jump to most recent unread notification workspace

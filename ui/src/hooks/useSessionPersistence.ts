@@ -10,6 +10,7 @@ import { applySettingsSnapshot } from "@/lib/settings-snapshot";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 
 /** Settings load status exposed to App for recovery UI. */
 export interface SettingsLoadStatus {
@@ -77,6 +78,7 @@ export function useSessionPersistence() {
           for (const p of d.panes ?? []) alivePaneIds.add(p.id);
         }
         useOverridesStore.getState().gcStale(alivePaneIds);
+        useTerminalRestartStore.getState().gcStale(alivePaneIds);
 
         setLoaded(true);
       })

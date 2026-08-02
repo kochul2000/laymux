@@ -34,7 +34,7 @@ import { computePaneNumbers } from "@/lib/pane-numbers";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
 import { switchActiveWorkspace } from "@/lib/workspace-transition";
-import { clearWorkspace } from "@/lib/workspace-clear";
+import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
 
@@ -1446,9 +1446,7 @@ export function WorkspaceSelectorView() {
               }}
               onHideWorkspace={() => handleHideWorkspace(ws.id)}
               onClearTerminals={() => {
-                void clearWorkspace(ws.id, useSettingsStore.getState().workspaceClear).catch(
-                  (err) => console.warn("[workspace clear] failed:", err),
-                );
+                void runWorkspaceClearFromUi(ws.id);
               }}
             />
           );

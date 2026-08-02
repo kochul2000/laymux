@@ -5,7 +5,14 @@ import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
 import type { WidgetComponentProps } from "./types";
 import { readTerminalActivityScope } from "./widget-options";
 
-/** A terminal counts as busy while a command runs or output is still flowing. */
+/**
+ * A terminal counts as busy while a command runs or output is still flowing.
+ *
+ * Deliberately not `ActivityHandler.isBusy` (ADR-0113) even though the shell
+ * rule is identical: that predicate answers "would typing land somewhere other
+ * than an empty prompt", so it counts an open permission modal as busy. Here
+ * the modal is the opposite — the terminal is waiting on the user, not working.
+ */
 function isBusy(instance: TerminalInstance): boolean {
   return instance.activity?.type === "running" || instance.outputActive === true;
 }

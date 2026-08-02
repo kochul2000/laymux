@@ -6,8 +6,8 @@ use laymux_lib::settings::{
     FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
     MemoSettings, OutputActivityBurstSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
     SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, WidgetInstance,
-    WidgetSlots, WidgetsSettings, Workspace, WorkspaceClearSettings, WorkspacePane,
-    WorkspacePaneView,
+    WidgetSlots, WidgetsSettings, Workspace, WorkspaceClearBusyPolicy, WorkspaceClearSettings,
+    WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -210,7 +210,7 @@ fn settings_round_trip_with_full_config() {
         // Non-default on every field for the same reason as `github` below.
         workspace_clear: WorkspaceClearSettings {
             shell_command: "cls".into(),
-            busy_policy: "interrupt".into(),
+            busy_policy: WorkspaceClearBusyPolicy::Interrupt,
             interrupt_rounds: 5,
             settle_ms: 900,
         },
@@ -351,7 +351,10 @@ fn hand_edited_workspace_clear_section_loads_and_an_omitted_one_falls_back_to_de
     )
     .unwrap();
     assert_eq!(configured.workspace_clear.shell_command, "cls");
-    assert_eq!(configured.workspace_clear.busy_policy, "restart");
+    assert_eq!(
+        configured.workspace_clear.busy_policy,
+        WorkspaceClearBusyPolicy::Restart
+    );
     assert_eq!(configured.workspace_clear.interrupt_rounds, 4);
     assert_eq!(configured.workspace_clear.settle_ms, 1200);
 
@@ -362,7 +365,10 @@ fn hand_edited_workspace_clear_section_loads_and_an_omitted_one_falls_back_to_de
     let bare: Settings = serde_json::from_str(r#"{ "workspaceClear": {} }"#).unwrap();
     assert_eq!(bare.workspace_clear, WorkspaceClearSettings::default());
     assert_eq!(bare.workspace_clear.shell_command, "clear");
-    assert_eq!(bare.workspace_clear.busy_policy, "skip");
+    assert_eq!(
+        bare.workspace_clear.busy_policy,
+        WorkspaceClearBusyPolicy::Skip
+    );
     assert_eq!(bare.workspace_clear.interrupt_rounds, 2);
     assert_eq!(bare.workspace_clear.settle_ms, 400);
 

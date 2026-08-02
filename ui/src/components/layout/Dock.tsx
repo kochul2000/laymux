@@ -65,7 +65,12 @@ export function Dock({
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
   // Restart requests live in a store, not local state (ADR-0113) — see PaneGrid.
-  const restartRequests = useTerminalRestartStore((s) => s.requests);
+  // Narrowed to this dock's single pane so another surface's restart does not
+  // re-render it. `panes[0]` is read before the split-pane branch returns, so
+  // the hook order stays fixed.
+  const terminalRestart = useTerminalRestartStore((s) =>
+    panes[0] ? s.requests[panes[0].id] : undefined,
+  );
   const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   // Split panes rendering — delegates to shared PaneGrid
@@ -87,7 +92,6 @@ export function Dock({
   // Single-pane rendering (original behavior + split button on hover)
   const singlePaneId = panes[0]?.id;
   const singleView = panes[0]?.view;
-  const terminalRestart = singlePaneId ? restartRequests[singlePaneId] : undefined;
   // The pane config is the coordinator's source of truth. Use the same type for
   // both gating and rendering even if a restored activeView is briefly stale.
   const renderedViewType = singleView?.type ?? activeView;

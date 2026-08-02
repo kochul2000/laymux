@@ -1,5 +1,5 @@
 import { getHandler, isRegisteredInteractiveApp, type RawTerminalState } from "./activity-handler";
-import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./interrupt-terminals-on-exit";
+import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "./terminal-interrupt";
 import { toPaneId, toTerminalId } from "./pane-ids";
 import { getTerminalRestartCwd } from "./terminal-restart";
 import { writeTerminalInput, writeToTerminal } from "./tauri-api";
@@ -88,16 +88,36 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /**
+ * Longest a single terminal's interrupt→clear chain can take, in ms. Every
+ * terminal runs its chain concurrently, so this is also the whole run's wait.
+ */
+export function clearWaitBudgetMs(config: ResolvedWorkspaceClear): number {
+  if (config.busyPolicy !== "interrupt") return 0;
+  return (config.interruptRounds - 1) * INTERRUPT_ROUND_INTERVAL_MS + config.settleMs;
+}
+
+export interface ResolveWorkspaceClearOptions {
+  /**
+   * Ceiling for `clearWaitBudgetMs`. `settleMs` (and then `interruptRounds`) is
+   * trimmed to fit. Used by the Automation path, whose caller stops waiting at
+   * the bridge's fixed per-request budget: a settle longer than that turns a
+   * successful clear into a `504` with the per-pane result lost.
+   */
+  maxWaitMs?: number;
+}
+
+/**
  * Read + clamp the clear config from a raw (possibly hand-edited) value.
  * An empty `shellCommand` falls back to the default rather than submitting a
  * bare Enter into every shell.
  */
 export function resolveWorkspaceClear(
   settings?: Partial<WorkspaceClearSettings>,
+  options: ResolveWorkspaceClearOptions = {},
 ): ResolvedWorkspaceClear {
   const policy = settings?.busyPolicy;
   const shellCommand = settings?.shellCommand?.trim();
-  return {
+  const resolved: ResolvedWorkspaceClear = {
     shellCommand: shellCommand || DEFAULT_SHELL_CLEAR_COMMAND,
     busyPolicy:
       policy && BUSY_POLICIES.includes(policy as WorkspaceClearBusyPolicy)
@@ -110,6 +130,22 @@ export function resolveWorkspaceClear(
     ),
     settleMs: clamp(settings?.settleMs ?? DEFAULT_CLEAR_SETTLE_MS, MIN_SETTLE_MS, MAX_SETTLE_MS),
   };
+
+  const maxWaitMs = options.maxWaitMs;
+  if (maxWaitMs === undefined) return resolved;
+
+  // Trim the settle first — it is one wait at the end, so shortening it costs
+  // the app repaint time but keeps every Ctrl+C. Only when the rounds alone
+  // overrun does the round count come down, and never below one press.
+  const roundsWait = () => (resolved.interruptRounds - 1) * INTERRUPT_ROUND_INTERVAL_MS;
+  resolved.settleMs = Math.max(
+    MIN_SETTLE_MS,
+    Math.min(resolved.settleMs, maxWaitMs - roundsWait()),
+  );
+  while (resolved.interruptRounds > MIN_ROUNDS && roundsWait() > maxWaitMs) {
+    resolved.interruptRounds -= 1;
+  }
+  return resolved;
 }
 
 function toRawState(instance: TerminalInstance): RawTerminalState {
@@ -183,6 +219,32 @@ export interface WorkspaceClearResult {
   interrupted: string[];
   restarted: string[];
   skipped: { terminalId: string; reason: WorkspaceClearSkipReason }[];
+  /**
+   * Terminals whose write was rejected. A remote client holding the control
+   * lease and a PTY that died between planning and writing both land here —
+   * without this array they would leave every list empty, which reads exactly
+   * like "this workspace has no terminal panes".
+   */
+  failed: { terminalId: string; error: string }[];
+}
+
+/** True when the clear touched nothing at all — worth telling the user about. */
+export function isNoOpClearResult(result: WorkspaceClearResult): boolean {
+  return (
+    result.cleared.length === 0 && result.interrupted.length === 0 && result.restarted.length === 0
+  );
+}
+
+/** One-line summary for a log or a toast. */
+export function summarizeClearResult(result: WorkspaceClearResult): string {
+  const parts = [`cleared ${result.cleared.length}`];
+  if (result.restarted.length > 0) parts.push(`restarted ${result.restarted.length}`);
+  if (result.skipped.length > 0) {
+    const reasons = new Set(result.skipped.map((entry) => entry.reason));
+    parts.push(`skipped ${result.skipped.length} (${[...reasons].join(", ")})`);
+  }
+  if (result.failed.length > 0) parts.push(`failed ${result.failed.length}`);
+  return parts.join(", ");
 }
 
 export interface RunWorkspaceClearDeps {
@@ -212,39 +274,50 @@ export async function runWorkspaceClear(
     interrupted: [],
     restarted: [],
     skipped: [],
+    failed: [],
   };
 
   const chains = deps.actions.map(async (action) => {
-    switch (action.kind) {
-      case "skip":
-        result.skipped.push({
-          terminalId: action.terminalId,
-          reason: action.reason ?? "busy",
-        });
-        return;
-      case "restart":
-        deps.restart(action.paneId);
-        result.restarted.push(action.terminalId);
-        return;
-      case "interruptThenSubmit": {
-        for (let round = 0; round < deps.config.interruptRounds; round++) {
-          await deps.interrupt(action.terminalId);
-          if (round < deps.config.interruptRounds - 1) {
-            await deps.sleep(INTERRUPT_ROUND_INTERVAL_MS);
+    try {
+      switch (action.kind) {
+        case "skip":
+          result.skipped.push({
+            terminalId: action.terminalId,
+            reason: action.reason ?? "busy",
+          });
+          return;
+        case "restart":
+          deps.restart(action.paneId);
+          result.restarted.push(action.terminalId);
+          return;
+        case "interruptThenSubmit": {
+          for (let round = 0; round < deps.config.interruptRounds; round++) {
+            await deps.interrupt(action.terminalId);
+            if (round < deps.config.interruptRounds - 1) {
+              await deps.sleep(INTERRUPT_ROUND_INTERVAL_MS);
+            }
           }
+          result.interrupted.push(action.terminalId);
+          // Let the agent/shell finish tearing the task down and repaint its
+          // prompt; typing into a half-torn-down TUI lands in the old frame.
+          if (deps.config.settleMs > 0) await deps.sleep(deps.config.settleMs);
+          await deps.submit(action.terminalId, action.input!);
+          result.cleared.push(action.terminalId);
+          return;
         }
-        result.interrupted.push(action.terminalId);
-        // Let the agent/shell finish tearing the task down and repaint its
-        // prompt; typing into a half-torn-down TUI lands in the old frame.
-        if (deps.config.settleMs > 0) await deps.sleep(deps.config.settleMs);
-        await deps.submit(action.terminalId, action.input!);
-        result.cleared.push(action.terminalId);
-        return;
+        case "submit":
+          await deps.submit(action.terminalId, action.input!);
+          result.cleared.push(action.terminalId);
+          return;
       }
-      case "submit":
-        await deps.submit(action.terminalId, action.input!);
-        result.cleared.push(action.terminalId);
-        return;
+    } catch (error) {
+      // A rejected write must be reported, not dropped: it is the difference
+      // between "nothing needed clearing" and "the remote holds the lease".
+      // A partially-interrupted terminal stays in `interrupted` AND lands here.
+      result.failed.push({
+        terminalId: action.terminalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
@@ -269,8 +342,9 @@ export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
 export async function clearWorkspace(
   workspaceId: string,
   settings?: Partial<WorkspaceClearSettings>,
+  options: ResolveWorkspaceClearOptions = {},
 ): Promise<WorkspaceClearResult> {
-  const config = resolveWorkspaceClear(settings);
+  const config = resolveWorkspaceClear(settings, options);
   const paneIds = terminalPaneIdsForWorkspace(workspaceId);
   const actions = planWorkspaceClear(paneIds, useTerminalStore.getState().instances, config);
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);

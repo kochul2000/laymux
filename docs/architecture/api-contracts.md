@@ -362,7 +362,13 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 무엇을 칠지는 pane 의 activity handler 가 소유한다 — shell 은 `shellCommand`, Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop·less 등)은 `unsupportedApp` 으로 건너뛴다. 제출은 사람 입력과 동일한 `write_terminal_input(submit: true)` 이므로 bracketed paste 처리와 human-control 게이트가 그대로 적용되고, `interrupt` 정책의 Ctrl+C 만 raw `write_to_terminal` 로 보낸다(ETX 를 bracketed paste 로 감싸면 인터럽트가 아니라 붙여넣기가 된다). 종료 시 인터럽트([위](#종료-시-동작kill-on-exit-설정))와 달리 owner 게이트를 우회하는 전용 경로는 쓰지 않는다.
 
-Rust 는 `settings.workspaceClear` 스키마·기본값(applyMode `live`)만 소유하고 clamp 는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다. Dock pane 은 대상이 아니다.
+쓰기가 거부된 pane(원격이 제어 lease 를 쥐고 있거나 PTY 가 이미 죽은 경우)은 결과의 `failed` 에 담긴다 — 조용히 버리면 "터미널 pane 이 없는 워크스페이스"와 구분되지 않는다. `interruptThenSubmit` 이 중간에 실패하면 이미 들어간 Ctrl+C 때문에 `interrupted` 와 `failed` 양쪽에 남는다.
+
+`busyPolicy` 는 enum 이라 알 수 없는 값은 파싱 단계에서 거부되고 `describe_settings` 가 허용값 3개를 그대로 내보낸다. 범위 검증(`interruptRounds` 1~10, `settleMs` 0~10000)은 `/exit` 와 같은 계약으로 `semantic_validation.rs` 가 소유하며, 그 외 정규화(빈 `shellCommand` → `clear`, 손으로 편집한 값 clamp)는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다.
+
+Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)로 캡한다. 캡이 없으면 `settleMs: 5000` 같은 정상 설정에서 클리어는 성공했는데 bridge 가 먼저 5초에 끊겨 504 를 돌려주고 pane 별 결과가 유실된다. 캡은 `settleMs` 부터 줄이고 Ctrl+C 횟수는 마지막에야 줄인다. 응답의 `waitCapped`·`interruptRounds`·`settleMs` 가 실제로 적용된 값이다. 키보드·버튼 경로는 기다리는 쪽이 없으므로 설정값 그대로 쓴다.
+
+Dock pane 은 대상이 아니다.
 
 ### CWD 동기화 기본값
 
@@ -587,7 +593,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
-| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 TerminalView pane 클리어. 응답에 pane 별 결과(`cleared`/`interrupted`/`restarted`/`skipped`) |
+| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 TerminalView pane 클리어. 응답에 pane 별 결과(`cleared`/`interrupted`/`restarted`/`skipped`/`failed`)와 실제 적용된 대기 설정(`waitCapped`/`interruptRounds`/`settleMs`) |
 | POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
 | GET | `/api/v1/grid` | 그리드 상태 |
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |

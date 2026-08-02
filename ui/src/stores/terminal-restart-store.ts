@@ -18,6 +18,8 @@ interface TerminalRestartStoreState {
   requestRestart: (paneId: string, cwd?: string) => void;
   consumeRestart: (paneId: string) => void;
   forgetRestart: (paneId: string) => void;
+  /** Drop every request whose pane no longer exists. */
+  gcStale: (alivePaneIds: Set<string>) => void;
 }
 
 /**
@@ -51,5 +53,16 @@ export const useTerminalRestartStore = create<TerminalRestartStoreState>()((set)
       if (!(paneId in state.requests)) return state;
       const { [paneId]: _removed, ...rest } = state.requests;
       return { requests: rest };
+    }),
+
+  // `forgetRestart` covers the explicit removal paths, but a pane can also
+  // disappear without one — a restored session replaces the whole workspace
+  // array, and `setPaneView` can turn a TerminalView into something else. Same
+  // startup sweep the override store gets (`overrides-store.gcStale`).
+  gcStale: (alivePaneIds) =>
+    set((state) => {
+      const kept = Object.entries(state.requests).filter(([paneId]) => alivePaneIds.has(paneId));
+      if (kept.length === Object.keys(state.requests).length) return state;
+      return { requests: Object.fromEntries(kept) };
     }),
 }));

@@ -39,9 +39,13 @@
 
 ## Consequences
 
-- 기본값(`busyPolicy: "skip"`)에서는 돌고 있는 pane 이 조용히 남는다. 사용자가 "클리어했는데 안 됐다"고 느낄 수 있으므로 실행 결과에 skip 사유를 담아 Automation 응답으로 돌려준다.
-- `ActivityHandler` 인터페이스가 2개 멤버 늘었다. 새 provider handler 를 추가할 때 클리어 계약도 함께 정해야 한다 — `ShellActivityHandler` 상속으로 기본값은 얻는다.
-- 재시작 epoch 가 store 로 이동했으므로 `PaneGrid`/`Dock` 의 로컬 state 는 사라진다. 두 컴포넌트가 같은 pane id 공간을 공유하지만 pane id 는 전역 유일하므로 충돌하지 않는다.
+- 기본값(`busyPolicy: "skip"`)에서는 돌고 있는 pane 이 조용히 남는다. 실행 결과가 pane 별 사유를 담아 Automation 응답으로 나가고, UI 두 경로는 `runWorkspaceClearFromUi` 가 요약을 `console.warn` 으로 남긴다 — 아무것도 안 한 실행과 고장난 단축키가 구분되지 않는 상태를 막는 최소선이다. 앱에는 undo 가 없는 동작을 알릴 토스트 표면이 아직 없어서 화면 알림은 두지 않았다. 알림 표면이 생기면 여기부터 붙인다.
+- 쓰기가 거부된 pane 은 `failed` 로 보고한다. 원격이 제어 lease 를 쥐면 모든 write 가 거부되는데, 이를 버리면 결과가 전부 빈 배열이 되어 "터미널 pane 이 없는 워크스페이스"와 같아진다. `interrupt` 도중 실패한 pane 은 Ctrl+C 가 이미 들어갔으므로 `interrupted` 와 `failed` 양쪽에 남는다.
+- `ActivityHandler` 인터페이스가 2개 멤버 늘었다. 새 provider handler 를 추가할 때 클리어 계약도 함께 정해야 한다 — `ShellActivityHandler` 상속으로 기본값은 얻는다. `TerminalActivityWidget` 의 동명 술어는 통합하지 않았다: 그쪽은 "작업 중인가"라서 입력 대기 모달을 busy 로 세면 안 된다.
+- 재시작 epoch 가 store 로 이동했으므로 `PaneGrid`/`Dock` 의 로컬 state 는 사라진다. 두 컴포넌트가 같은 pane id 공간을 공유하지만 pane id 는 전역 유일하므로 충돌하지 않는다. 대신 store 는 앱 전역이므로 각 surface 는 자기 pane 의 항목만 구독해야 한다 — 레코드 전체를 구독하면 한 번의 재시작이 마운트된 모든 워크스페이스와 dock 을 리렌더한다.
 - `restart` 정책은 PTY 를 새로 만든다 — 스크롤백과 셸 히스토리 세션이 사라진다. `clear` 와 의미가 다르다는 것을 설정 설명에 남긴다.
 - Automation `POST /api/v1/workspaces/{id}/clear` 가 생겨 자율 검증 루프에서 이 기능을 트리거할 수 있다. 반대로 이 엔드포인트는 원격에서 워크스페이스 전체에 쓰기를 유발하므로 human-control 게이트를 우회하지 않는다는 점이 계약의 일부다.
+- `interrupt` 대기는 사용자가 정하는 값(최대 10초)인데 bridge 요청 예산은 5초 고정이다. Automation 경로만 대기를 3초로 캡하고 실제 적용값을 응답에 실어 보낸다. 캡 없이 예산을 늘리는 선택은 모든 핸들러가 공유하는 천장을 한 기능 때문에 올리는 것이라 기각했다.
+- 탐지되지 않은 TUI(activity 가 `running` 으로만 보이는 포그라운드 앱)에 `interrupt` 정책을 쓰면 Ctrl+C 가 들어가고 이어서 shell 클리어 명령이 쳐진다. vim 은 Ctrl+C 로 죽지 않으므로 버퍼에 글자가 남는다. 기본값 `skip` 이 이 경로를 막고 있으며, 정책을 켜는 것은 사용자의 선택이다.
+- Claude·Codex 입력창에 사용자가 쓰다 만 초안이 있으면 `/clear` 가 그 뒤에 붙어 프롬프트로 전송된다. 입력창 내용은 관측할 수 있는 신호가 아니라서 이번 결정으로는 막지 못한다.
 - 재검토 조건: 전용 handler 가 없는 TUI 를 클리어해 달라는 요구가 반복되면 "등록되지 않은 앱 = skip" 규칙을, 워크스페이스마다 다른 busy 정책 요구가 나오면 전역 전용 결정을 각각 다시 정한다.

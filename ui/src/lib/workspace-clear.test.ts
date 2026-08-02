@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   DEFAULT_WORKSPACE_CLEAR,
+  clearWaitBudgetMs,
+  isNoOpClearResult,
   planTerminalClear,
   planWorkspaceClear,
   resolveWorkspaceClear,
   runWorkspaceClear,
+  summarizeClearResult,
   type ClearAction,
   type ResolvedWorkspaceClear,
 } from "./workspace-clear";
@@ -330,5 +333,122 @@ describe("runWorkspaceClear", () => {
 
     expect(d.submit).toHaveBeenCalledTimes(2);
     expect(result.cleared).toEqual(["terminal-pane-b"]);
+  });
+
+  // Dropping the rejection would make "the remote holds the control lease"
+  // indistinguishable from "this workspace has no terminal panes".
+  it("reports a rejected write instead of dropping it", async () => {
+    const d = deps([
+      { paneId: "pane-a", terminalId: "terminal-pane-a", kind: "submit", input: "clear" },
+    ]);
+    d.submit.mockRejectedValue(new Error("terminal is controlled by a remote client"));
+
+    const result = await d.run();
+
+    expect(result.failed).toEqual([
+      { terminalId: "terminal-pane-a", error: "terminal is controlled by a remote client" },
+    ]);
+    expect(result.cleared).toEqual([]);
+    expect(isNoOpClearResult(result)).toBe(true);
+  });
+
+  // The presses already landed; the pane is in a different state than an
+  // untouched one and the report has to say so.
+  it("keeps a partially interrupted terminal in both interrupted and failed", async () => {
+    const d = deps([
+      {
+        paneId: "pane-a",
+        terminalId: "terminal-pane-a",
+        kind: "interruptThenSubmit",
+        input: "/clear",
+      },
+    ]);
+    d.submit.mockRejectedValue(new Error("Session 'terminal-pane-a' not found"));
+
+    const result = await d.run();
+
+    expect(result.interrupted).toEqual(["terminal-pane-a"]);
+    expect(result.cleared).toEqual([]);
+    expect(result.failed).toHaveLength(1);
+  });
+
+  it("does not call it a no-op when something was restarted", async () => {
+    const d = deps([{ paneId: "pane-a", terminalId: "terminal-pane-a", kind: "restart" }]);
+    expect(isNoOpClearResult(await d.run())).toBe(false);
+  });
+});
+
+describe("summarizeClearResult", () => {
+  it("names the distinct skip reasons and the failure count", () => {
+    expect(
+      summarizeClearResult({
+        cleared: ["a"],
+        interrupted: [],
+        restarted: ["b"],
+        skipped: [
+          { terminalId: "c", reason: "busy" },
+          { terminalId: "d", reason: "busy" },
+          { terminalId: "e", reason: "unsupportedApp" },
+        ],
+        failed: [{ terminalId: "f", error: "boom" }],
+      }),
+    ).toBe("cleared 1, restarted 1, skipped 3 (busy, unsupportedApp), failed 1");
+  });
+
+  it("stays short when everything worked", () => {
+    expect(
+      summarizeClearResult({
+        cleared: ["a", "b"],
+        interrupted: [],
+        restarted: [],
+        skipped: [],
+        failed: [],
+      }),
+    ).toBe("cleared 2");
+  });
+});
+
+describe("clearWaitBudgetMs", () => {
+  it("is zero unless the policy actually interrupts", () => {
+    expect(clearWaitBudgetMs(config)).toBe(0);
+    expect(clearWaitBudgetMs({ ...config, busyPolicy: "restart" })).toBe(0);
+  });
+
+  it("counts the inter-round gaps plus the settle", () => {
+    expect(
+      clearWaitBudgetMs({
+        ...config,
+        busyPolicy: "interrupt",
+        interruptRounds: 3,
+        settleMs: 400,
+      }),
+    ).toBe(2 * 120 + 400);
+  });
+
+  // The Automation caller stops waiting at a fixed bridge budget: a settle
+  // beyond it turns a successful clear into a 504 with the report lost.
+  it("trims the settle to fit a maxWaitMs, keeping every Ctrl+C", () => {
+    const capped = resolveWorkspaceClear(
+      { busyPolicy: "interrupt", interruptRounds: 5, settleMs: 10_000 },
+      { maxWaitMs: 1_000 },
+    );
+    expect(capped.interruptRounds).toBe(5);
+    expect(capped.settleMs).toBe(1_000 - 4 * 120);
+    expect(clearWaitBudgetMs(capped)).toBe(1_000);
+  });
+
+  it("drops rounds only when the presses alone overrun, never below one", () => {
+    const capped = resolveWorkspaceClear(
+      { busyPolicy: "interrupt", interruptRounds: 10, settleMs: 5_000 },
+      { maxWaitMs: 100 },
+    );
+    expect(capped.settleMs).toBe(0);
+    expect(capped.interruptRounds).toBe(1);
+    expect(clearWaitBudgetMs(capped)).toBe(0);
+  });
+
+  it("leaves a config that already fits untouched", () => {
+    const raw = { busyPolicy: "interrupt" as const, interruptRounds: 2, settleMs: 400 };
+    expect(resolveWorkspaceClear(raw, { maxWaitMs: 3_000 })).toEqual(resolveWorkspaceClear(raw));
   });
 });

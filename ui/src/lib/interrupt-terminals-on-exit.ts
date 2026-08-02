@@ -1,4 +1,5 @@
 import { interruptTerminalOnExit as invokeInterruptTerminalOnExit } from "@/lib/tauri-api";
+import { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS } from "@/lib/terminal-interrupt";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 import type { ExitSettings } from "@/lib/tauri-api";
@@ -16,12 +17,9 @@ import type { ExitSettings } from "@/lib/tauri-api";
  * ConPTY / the line discipline delivers a real Ctrl+C to the foreground app.
  */
 
-/** ETX — the byte a terminal sends when the user presses Ctrl+C. */
-export const CTRL_C = "\x03";
-
-/** Fixed spacing between consecutive Ctrl+C presses. Agents need a beat between
- *  the "interrupt" press and the "confirm exit" press; not worth a setting. */
-export const INTERRUPT_ROUND_INTERVAL_MS = 120;
+// Re-exported so existing call sites keep their import path. The canonical
+// source is `terminal-interrupt`, a leaf module — see the doc comment there.
+export { CTRL_C, INTERRUPT_ROUND_INTERVAL_MS };
 
 const MIN_ROUNDS = 1;
 const MAX_ROUNDS = 10;
