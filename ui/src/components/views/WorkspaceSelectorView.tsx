@@ -359,14 +359,17 @@ function WorkspaceItem({
                   >
                     {/* Broom: the workspace's terminals get swept, the panes stay. */}
                     <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                      {/* Upright, not angled: a diagonal handle plus a triangular
+                          head reads as a checkmark at this size. The handle
+                          overlaps the head so the two never separate. */}
                       <path
-                        d="M9.8 1.2L6.4 4.6"
+                        d="M5.5 1.3V5.6"
                         stroke="currentColor"
-                        strokeWidth="1.2"
+                        strokeWidth="1.3"
                         strokeLinecap="round"
                       />
-                      {/* Filled head — a 1px outline blurs into a blob at 11px. */}
-                      <path d="M6.2 4.8L5.6 8.8L2.2 5.4z" fill="currentColor" />
+                      {/* Filled flared head — a 1px outline blurs into a blob at 11px. */}
+                      <path d="M4.1 5.1H6.9L8.7 9.6H2.3z" fill="currentColor" />
                     </svg>
                   </button>
                 )}
