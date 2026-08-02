@@ -1430,20 +1430,22 @@ export async function isCodexTerminal(id: string): Promise<boolean> {
 }
 
 /** Resolve Claude Code session IDs for all known Claude terminals.
- *  Returns a map of terminal_id → Claude session ID.
+ *  Returns a map of terminal_id → Claude session ID, or null when the pane is
+ *  known to be running Claude but exact session attribution failed closed.
  *  @param sessionMaxAgeHours - Max session age in hours. 0 disables the filter. */
 export async function getClaudeSessionIds(
   sessionMaxAgeHours?: number,
-): Promise<Record<string, string>> {
+): Promise<Record<string, string | null>> {
   return invoke("get_claude_session_ids", {
     sessionMaxAgeHours: sessionMaxAgeHours ?? null,
   });
 }
 
-/** Resolve Codex CLI session IDs for all known Codex terminals. */
+/** Resolve Codex CLI session IDs for all known Codex terminals.
+ *  A null value means Codex is active but exact attribution failed closed. */
 export async function getCodexSessionIds(
   sessionMaxAgeHours?: number,
-): Promise<Record<string, string>> {
+): Promise<Record<string, string | null>> {
   return invoke("get_codex_session_ids", {
     sessionMaxAgeHours: sessionMaxAgeHours ?? null,
   });

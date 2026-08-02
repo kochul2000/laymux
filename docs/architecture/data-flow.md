@@ -1189,16 +1189,19 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │  App.tsx onCloseRequested 핸들러
     ▼
 [saveBeforeClose()]
-    ├─ 0. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
-    ├─ 1. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
-    │     → cache/terminal-output/{paneId}.dat 저장
-    ├─ 2. persistSession()
+    ├─ 0. collectSettingsSnapshot()을 완료해 interrupt 전 agent 귀속을 보존
     │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
-    │     │     → 알려진 interactive terminal의 현재 CWD와 agent 세션 파일을 합성
-    │     │     → Codex는 CODEX_HOME/sessions/**/rollout-*.jsonl의 첫 session_meta만 읽고
-    │     │       subagent·비대화형 exec를 제외한 동일 CWD 최신 ID를 lastCodexSession에 기록
-    │     └─ settings.json (lastCwd·lastClaudeSession·lastCodexSession 포함)
-    └─ 3. cleanTerminalOutputCache(activePaneIds)
+    │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
+    │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
+    │     └─ state DB/rollout header로 top-level interactive thread 검증
+    │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
+    │        → null 귀속은 해당 pane의 양쪽 stale session ID를 제거
+    ├─ 1. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
+    ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
+    │     → cache/terminal-output/{paneId}.dat 저장
+    ├─ 3. 사전 수집한 snapshot을 settings.json에 저장
+    │     → lastCwd·lastClaudeSession·lastCodexSession 포함
+    └─ 4. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
     ▼
 [appWindow.destroy()]
@@ -1225,6 +1228,7 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
           → PTY가 마지막 CWD에서 시작
           → Claude restoreSession이면 `claude --resume <id>`, Codex restoreSession이면
             `codex resume <id>`만 허용해 실행
+          → 두 provider ID가 동시에 있으면 어느 것도 실행하지 않고 새 shell로 시작
           → attach_terminal_output(state + sequenced snapshot + nextEnvelopeId)
           → xterm reset
           → normal-buffer cache

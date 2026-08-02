@@ -5523,13 +5523,16 @@ export function TerminalView({
           lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession)
             ? lastCodexSession
             : undefined;
+        const hasAgentSessionConflict = Boolean(safeSessionId && safeCodexSessionId);
         const startupOverride = startupCommandOverride
           ? startupCommandOverride
-          : shouldRestoreClaudeSession && safeSessionId
-            ? `claude --resume ${safeSessionId}`
-            : shouldRestoreCodexSession && safeCodexSessionId
-              ? `codex resume ${safeCodexSessionId}`
-              : undefined;
+          : hasAgentSessionConflict
+            ? undefined
+            : shouldRestoreClaudeSession && safeSessionId
+              ? `claude --resume ${safeSessionId}`
+              : shouldRestoreCodexSession && safeCodexSessionId
+                ? `codex resume ${safeCodexSessionId}`
+                : undefined;
 
         cacheRestorePromise =
           !isFreshRestart && shouldRestoreOutput && paneId
