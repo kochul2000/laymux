@@ -104,7 +104,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { loadSettingsValidated, type SettingsLoadResult } from "@/lib/tauri-api";
-import { persistSession } from "@/lib/persist-session";
+import { persistSession, setBlockPersist } from "@/lib/persist-session";
 
 /** Wrap raw settings into a SettingsLoadResult with status "ok" for test mocks. */
 function wrapOk(settings: any): SettingsLoadResult {
@@ -603,5 +603,73 @@ describe("useSessionPersistence", () => {
     expect(overrides.getViewOverride("pane-alive")?.fontSize).toBe(20);
     expect(overrides.getPaneOverride("pane-dead")).toBeUndefined();
     expect(overrides.getViewOverride("pane-dead")).toBeUndefined();
+  });
+
+  // issue #701 / ADR-0116: a dropped type-error path means the in-memory
+  // settings no longer match the file, so writes stay blocked until the user
+  // acknowledges the recovery modal — but the surviving settings still hydrate.
+  it("blocks settings writes but still hydrates stores when status is recovered", async () => {
+    vi.mocked(loadSettingsValidated).mockResolvedValueOnce({
+      status: "recovered",
+      settingsPath: "C:\\config\\settings.json",
+      warnings: [
+        {
+          path: "terminal.parserAdmission.hiddenShare",
+          message: "값의 타입이 올바르지 않아 항목을 제거하고 기본값을 사용합니다",
+          repaired: true,
+        },
+      ],
+      settings: {
+        defaultProfile: "WSL",
+        profiles: [
+          {
+            name: "WSL",
+            commandLine: "wsl.exe",
+            colorScheme: "",
+            startingDirectory: "",
+            hidden: false,
+          },
+        ],
+        colorSchemes: [],
+        keybindings: [],
+        layouts: [
+          {
+            id: "layout-1",
+            name: "L",
+            panes: [{ x: 0, y: 0, w: 1, h: 1, viewType: "TerminalView" }],
+          },
+        ],
+        workspaces: [
+          {
+            id: "ws-survivor",
+            name: "Survivor",
+            panes: [{ id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+          },
+        ],
+        docks: [],
+      },
+    } as any);
+
+    const { result } = renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(setBlockPersist).toHaveBeenCalledWith(true);
+    // The rest of the file survived recovery and must reach the stores.
+    expect(useWorkspaceStore.getState().workspaces[0]?.name).toBe("Survivor");
+    expect(useSettingsStore.getState().defaultProfile).toBe("WSL");
+    // The dropped path is surfaced so the modal can list it.
+    expect(result.current.loadStatus.warnings).toHaveLength(1);
+    expect(result.current.loadStatus.warnings[0].path).toBe("terminal.parserAdmission.hiddenShare");
+  });
+
+  it("does not block settings writes on a clean load", async () => {
+    renderHook(() => useSessionPersistence());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    expect(setBlockPersist).not.toHaveBeenCalledWith(true);
   });
 });

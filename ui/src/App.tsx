@@ -4,7 +4,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSyncEvents } from "@/hooks/useSyncEvents";
 import { useSessionPersistence } from "@/hooks/useSessionPersistence";
 import { useAutomationBridge } from "@/hooks/useAutomationBridge";
-import { saveBeforeClose } from "@/lib/persist-session";
+import { saveBeforeClose, setBlockPersist } from "@/lib/persist-session";
 import { createCloseHandler } from "@/lib/window-close-handler";
 import { exitInterruptBudgetMs } from "@/lib/interrupt-terminals-on-exit";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -103,11 +103,13 @@ export function App() {
   }
 
   // Show recovery modal when settings had issues
+  const recoveryStatus = loadStatus.result?.status;
   const showRecovery =
     !recoveryDismissed &&
     loaded &&
-    loadStatus.result != null &&
-    (loadStatus.result.status === "parse_error" || loadStatus.result.status === "repaired");
+    (recoveryStatus === "parse_error" ||
+      recoveryStatus === "repaired" ||
+      recoveryStatus === "recovered");
 
   return (
     <div className="h-screen" data-testid="app-root">
@@ -115,7 +117,12 @@ export function App() {
       {showRecovery && loadStatus.result && (
         <SettingsRecoveryModal
           loadResult={loadStatus.result}
-          onDismiss={() => setRecoveryDismissed(true)}
+          onDismiss={() => {
+            // Recovery held settings writes back until the user saw the dropped
+            // paths. Acknowledging the modal releases them (ADR-0116).
+            if (recoveryStatus === "recovered") setBlockPersist(false);
+            setRecoveryDismissed(true);
+          }}
           onReset={() => {
             setRecoveryDismissed(true);
             // Reload to apply fresh defaults

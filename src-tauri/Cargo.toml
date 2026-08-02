@@ -40,6 +40,7 @@ vt100 = "0.16"
 zip = { version = "8.6.0", default-features = false }
 tar = "0.4.46"
 flate2 = "1.1.9"
+serde_path_to_error = "0.1.20"
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

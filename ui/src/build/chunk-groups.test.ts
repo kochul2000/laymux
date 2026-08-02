@@ -23,6 +23,16 @@ describe("resolveChunkGroup", () => {
     expect(resolveChunkGroup("/repo/ui/src/components/views/GitHubView.test.tsx")).toBeUndefined();
   });
 
+  it("isolates the settings recovery modal from the near-limit entry chunk", () => {
+    // ADR-0116: the modal only renders when settings.json failed to load.
+    expect(resolveChunkGroup("/repo/ui/src/components/views/SettingsRecoveryModal.tsx")).toBe(
+      "settings-recovery",
+    );
+    expect(
+      resolveChunkGroup("/repo/ui/src/components/views/SettingsRecoveryModal.test.tsx"),
+    ).toBeUndefined();
+  });
+
   it("isolates the static v3 failure coordinator from the near-limit entry chunk", () => {
     expect(resolveChunkGroup("/repo/ui/src/lib/terminal-output-v3-failure-coordinator.ts")).toBe(
       "terminal-output-v3-failure",

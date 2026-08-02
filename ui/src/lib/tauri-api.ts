@@ -440,6 +440,17 @@ export interface ValidationWarning {
 export type SettingsLoadResult =
   | { status: "ok"; settings: Settings; warnings: ValidationWarning[] }
   | { status: "repaired"; settings: Settings; warnings: ValidationWarning[] }
+  /**
+   * Type-error paths were dropped in favour of their defaults (ADR-0116).
+   * User-authored values were lost, so settings writes stay blocked until the
+   * user acknowledges the listed paths.
+   */
+  | {
+      status: "recovered";
+      settings: Settings;
+      warnings: ValidationWarning[];
+      settingsPath: string;
+    }
   | { status: "parse_error"; settings: Settings; error: string; settingsPath: string };
 
 export async function loadSettingsValidated(): Promise<SettingsLoadResult> {

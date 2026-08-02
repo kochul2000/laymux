@@ -1,4 +1,5 @@
 pub mod contract;
+mod lenient;
 pub mod models;
 mod schema;
 mod semantic_validation;
@@ -50,6 +51,7 @@ pub fn load_settings() -> Settings {
     match result {
         SettingsLoadResult::Ok { settings, .. } => settings,
         SettingsLoadResult::Repaired { settings, .. } => settings,
+        SettingsLoadResult::Recovered { settings, .. } => settings,
         SettingsLoadResult::ParseError { settings, .. } => settings,
     }
 }
@@ -57,10 +59,14 @@ pub fn load_settings() -> Settings {
 /// Load settings from disk with full validation result.
 /// Returns a `SettingsLoadResult` that the frontend can use to show recovery UI.
 pub fn load_settings_validated() -> SettingsLoadResult {
-    let path = settings_path();
+    load_settings_validated_from(&settings_path())
+}
+
+/// Path-injectable core of [`load_settings_validated`].
+fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
     let path_str = path.display().to_string();
 
-    let raw_content = match fs::read_to_string(&path) {
+    let raw_content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(_) => {
             // File doesn't exist — return default (no error, no warnings)
@@ -71,14 +77,16 @@ pub fn load_settings_validated() -> SettingsLoadResult {
         }
     };
 
-    // Try to parse JSON
-    let mut settings: Settings = match serde_json::from_str(&raw_content) {
-        Ok(s) => s,
+    // Parse JSON, dropping individual type-error paths so one bad value does
+    // not cost the whole file (ADR-0116). Only an unsalvageable document —
+    // syntax error or root-level type error — falls through to ParseError.
+    let (mut settings, dropped) = match lenient::deserialize_lenient(&raw_content) {
+        Ok(recovered) => (recovered.settings, recovered.dropped),
         Err(e) => {
             tracing::warn!(error = %e, path = %path_str, "Settings JSON 파싱 실패, 기본 설정 사용");
             return SettingsLoadResult::ParseError {
                 settings: Settings::default(),
-                error: e.to_string(),
+                error: e,
                 settings_path: path_str,
             };
         }
@@ -89,6 +97,24 @@ pub fn load_settings_validated() -> SettingsLoadResult {
 
     // Validate and repair
     let warnings = validation::validate_and_repair(&mut settings);
+
+    // Dropped paths mean user-authored values are gone. That is a stronger
+    // signal than a structural repair: the frontend must block writes until the
+    // user has seen which paths were lost, so the original file stays intact.
+    if !dropped.is_empty() {
+        tracing::warn!(
+            dropped_count = dropped.len(),
+            path = %path_str,
+            "Settings 타입 오류 항목을 제거하고 기본값으로 복구"
+        );
+        let mut all_warnings = dropped;
+        all_warnings.extend(warnings);
+        return SettingsLoadResult::Recovered {
+            settings,
+            warnings: all_warnings,
+            settings_path: path_str,
+        };
+    }
 
     if warnings.is_empty() {
         SettingsLoadResult::Ok {
@@ -261,6 +287,90 @@ mod tests {
         .is_err());
 
         assert!(lock_memo_gate(&gate).is_err());
+    }
+
+    // ── 타입 오류 부분 복구 (issue #701, ADR-0116) ──
+
+    #[test]
+    fn type_error_recovers_instead_of_resetting_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+              "language": "en",
+              "defaultProfile": "WSL",
+              "terminal": { "parserAdmission": { "hiddenShare": "2" } }
+            }"#,
+        )
+        .unwrap();
+
+        let result = load_settings_validated_from(&path);
+        let SettingsLoadResult::Recovered {
+            settings,
+            warnings,
+            settings_path,
+        } = result
+        else {
+            panic!("expected Recovered, got {result:?}");
+        };
+
+        // The rest of the file survived — this is the whole point of #701.
+        assert_eq!(settings.language, "en");
+        assert_eq!(settings.default_profile, "WSL");
+        // The mistyped knob fell back to its own default.
+        assert_eq!(
+            settings.terminal.parser_admission.hidden_share,
+            Settings::default().terminal.parser_admission.hidden_share
+        );
+        assert_eq!(settings_path, path.display().to_string());
+        assert!(warnings
+            .iter()
+            .any(|w| w.path == "terminal.parserAdmission.hiddenShare" && w.repaired));
+    }
+
+    #[test]
+    fn recovery_does_not_rewrite_the_file() {
+        // The loader must never heal the file on disk — the user has to see the
+        // dropped paths first (ADR-0116 손실 정책).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let original = r#"{ "language": 42, "defaultProfile": "WSL" }"#;
+        fs::write(&path, original).unwrap();
+
+        let _ = load_settings_validated_from(&path);
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[test]
+    fn syntax_error_still_reports_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(&path, "{ \"language\": \"en\"").unwrap();
+
+        let result = load_settings_validated_from(&path);
+        assert!(
+            matches!(result, SettingsLoadResult::ParseError { .. }),
+            "got {result:?}"
+        );
+    }
+
+    #[test]
+    fn clean_file_reports_ok_without_warnings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&Settings::default()).unwrap(),
+        )
+        .unwrap();
+
+        let result = load_settings_validated_from(&path);
+        assert!(
+            matches!(result, SettingsLoadResult::Ok { .. }),
+            "got {result:?}"
+        );
     }
 
     #[test]

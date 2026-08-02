@@ -15,8 +15,15 @@ pub struct ValidationWarning {
 }
 
 /// Result of loading and validating settings.
+///
+/// `rename_all_fields` is what makes `settings_path` reach the frontend as
+/// `settingsPath`; on an enum, plain `rename_all` renames variants only.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum SettingsLoadResult {
     /// Settings loaded and validated successfully (possibly with auto-repaired warnings).
     #[serde(rename = "ok")]
@@ -29,6 +36,16 @@ pub enum SettingsLoadResult {
     Repaired {
         settings: Settings,
         warnings: Vec<ValidationWarning>,
+    },
+    /// JSON parsed, but individual paths had type errors and were dropped in
+    /// favour of their defaults (ADR-0116). User-authored values were lost, so
+    /// the frontend must block settings writes until the user acknowledges the
+    /// listed paths — the original file is left untouched until then.
+    #[serde(rename = "recovered")]
+    Recovered {
+        settings: Settings,
+        warnings: Vec<ValidationWarning>,
+        settings_path: String,
     },
     /// JSON could not be parsed at all. Default settings are provided.
     #[serde(rename = "parse_error")]

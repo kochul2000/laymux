@@ -28,13 +28,14 @@ export function SettingsRecoveryModal({
   const [resetting, setResetting] = useState(false);
 
   const isParseError = loadResult.status === "parse_error";
-  const warnings: ValidationWarning[] = loadResult.status === "repaired" ? loadResult.warnings : [];
+  const isRecovered = loadResult.status === "recovered";
+  const warnings: ValidationWarning[] = isParseError ? [] : loadResult.warnings;
   const parseError = isParseError ? loadResult.error : null;
-  const parseErrorPath = isParseError ? loadResult.settingsPath : null;
+  const settingsPathFromResult = isParseError || isRecovered ? loadResult.settingsPath : null;
 
   const handleShowPath = async () => {
     try {
-      const path = parseErrorPath || (await getSettingsPath());
+      const path = settingsPathFromResult || (await getSettingsPath());
       setSettingsPath(path);
     } catch {
       setSettingsPath(t("recovery.pathUnavailable"));
@@ -80,12 +81,24 @@ export function SettingsRecoveryModal({
           <span
             style={{ color: isParseError ? "var(--error, #f38ba8)" : "var(--warning, #f9e2af)" }}
           >
-            {isParseError ? "\u26A0" : "\u2139"}
+            {isParseError || isRecovered ? "\u26A0" : "\u2139"}
           </span>
           <span>
-            {isParseError ? t("recovery.parseErrorTitle") : t("recovery.validationTitle")}
+            {isParseError
+              ? t("recovery.parseErrorTitle")
+              : isRecovered
+                ? t("recovery.recoveredTitle")
+                : t("recovery.validationTitle")}
           </span>
         </div>
+
+        {/* Recovered: values were dropped and writes are held back until confirm */}
+        {isRecovered && (
+          <div className="flex flex-col gap-1" style={{ color: "var(--text-secondary, #a6adc8)" }}>
+            <div>{t("recovery.recoveredDescription")}</div>
+            <div>{t("recovery.recoveredWriteBlocked")}</div>
+          </div>
+        )}
 
         {/* Parse error details */}
         {isParseError && parseError && (
@@ -112,7 +125,11 @@ export function SettingsRecoveryModal({
         {warnings.length > 0 && (
           <div className="flex flex-col gap-2">
             <div style={{ color: "var(--text-secondary, #a6adc8)" }}>
-              {t("recovery.repairedCount", { num: warnings.filter((w) => w.repaired).length })}
+              {isRecovered
+                ? t("recovery.droppedCount", { num: warnings.filter((w) => w.repaired).length })
+                : t("recovery.repairedCount", {
+                    num: warnings.filter((w) => w.repaired).length,
+                  })}
               {warnings.filter((w) => !w.repaired).length > 0 &&
                 t("recovery.manualCount", { num: warnings.filter((w) => !w.repaired).length })}
             </div>
@@ -201,7 +218,11 @@ export function SettingsRecoveryModal({
             }}
             data-testid="settings-recovery-dismiss"
           >
-            {isParseError ? t("recovery.continueWithDefaults") : t("recovery.confirm")}
+            {isParseError
+              ? t("recovery.continueWithDefaults")
+              : isRecovered
+                ? t("recovery.recoveredConfirm")
+                : t("recovery.confirm")}
           </button>
         </div>
       </div>

@@ -36,10 +36,7 @@ export function useSessionPersistence() {
       .then((loadResult) => {
         setLoadStatus({
           result: loadResult,
-          warnings:
-            loadResult.status === "repaired" || loadResult.status === "ok"
-              ? loadResult.warnings
-              : [],
+          warnings: loadResult.status === "parse_error" ? [] : loadResult.warnings,
         });
 
         // When settings.json couldn't be parsed, don't hydrate stores with defaults —
@@ -48,6 +45,14 @@ export function useSessionPersistence() {
           setBlockPersist(true);
           setLoaded(true);
           return;
+        }
+
+        // Type-error paths were dropped, so the in-memory settings no longer match
+        // the file. Hydrate normally but hold back every write until the user has
+        // seen which paths were lost — the recovery modal releases the block
+        // (ADR-0116).
+        if (loadResult.status === "recovered") {
+          setBlockPersist(true);
         }
 
         const rawSettings = loadResult.settings;
