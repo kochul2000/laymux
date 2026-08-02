@@ -4,7 +4,7 @@ export const TERMINAL_OUTPUT_PULL_WATCHDOG_PERIOD_MS = 1_000;
 /** A tick this late may have been queued behind the same stalled event edge. */
 const TERMINAL_OUTPUT_PULL_WATCHDOG_MIN_DEFER_LAG_MS = 500;
 
-/** Preserve two seconds of margin inside the backend's five-second receipt deadline. */
+/** Keep recovery polling bounded inside the backend's full serialized recovery budget. */
 const TERMINAL_OUTPUT_PULL_WATCHDOG_MAX_POLL_INTERVAL_MS = 3_000;
 
 export class TerminalOutputPullWatchdogCadence {

@@ -1,6 +1,66 @@
 use super::*;
 
 #[test]
+fn production_delivery_timeouts_separate_server_recovery_from_worker_liveness() {
+    let delivery = DesktopOutputDelivery::new("production-expiry-budget".into(), 1);
+
+    // ADR-0122: one 5 s WebView stall, the pull watchdog's bounded 3 s
+    // recovery poll, a 5 s repair invoke, the worst-case hold -> close ->
+    // receipt FIFO (3 * 5 s), and 2 s of scheduling margin must all fit before
+    // the backend destroys the frozen envelope/grant.
+    let server_expiry = Duration::from_secs(30);
+    let worker_timeout = Duration::from_secs(5);
+    assert_eq!(delivery.inner.receipt_timeout, server_expiry);
+    assert_eq!(delivery.inner.continuation_timeout, server_expiry);
+    assert_eq!(delivery.inner.emitter_call_timeout, worker_timeout);
+    assert_eq!(delivery.shutdown_timeout_for_test(), worker_timeout);
+}
+
+#[test]
+fn exact_repair_preserves_the_envelope_creation_deadline() {
+    let delivery = DesktopOutputDelivery::with_test_timeouts(
+        "absolute-receipt-expiry".into(),
+        1,
+        Duration::from_millis(200),
+    );
+    install(&delivery, 0);
+    let (tx, rx) = std_mpsc::channel();
+    delivery
+        .start(
+            Arc::new(move |_, envelope| {
+                tx.send(envelope.clone()).unwrap();
+                Ok(())
+            }),
+            Arc::new(|_| {}),
+        )
+        .unwrap();
+    delivery.enqueue(delta(0, 1)).unwrap();
+    let envelope = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    let original_deadline = {
+        let mut state = delivery.inner.state.lock().unwrap();
+        let in_flight = state.in_flight.as_mut().unwrap();
+        in_flight.repair_not_before = Instant::now();
+        in_flight.expires_at
+    };
+
+    let repaired = delivery
+        .repair_envelope(&identity(&envelope), envelope.seq_start)
+        .unwrap();
+
+    assert_eq!(repaired.status, TerminalOutputEnvelopeRepairStatus::Exact);
+    let state = delivery.inner.state.lock().unwrap();
+    let in_flight = state.in_flight.as_ref().unwrap();
+    assert_eq!(in_flight.expires_at, original_deadline);
+    assert_eq!(in_flight.repair_attempts, 1);
+    drop(state);
+    delivery
+        .acknowledge_receipt(&identity(&envelope), envelope.seq_end)
+        .unwrap();
+    delivery.close(TerminalOutputDeliveryCloseReason::Retired);
+    delivery.join().unwrap();
+}
+
+#[test]
 fn receipted_envelope_cannot_rearm_a_synchronous_emitter_call() {
     let delivery = DesktopOutputDelivery::new("receipt-before-arm".into(), 1);
     install(&delivery, 0);
