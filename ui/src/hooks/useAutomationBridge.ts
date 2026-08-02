@@ -74,6 +74,18 @@ export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
  * nobody is timing out.
  */
 export const AUTOMATION_CLEAR_WAIT_BUDGET_MS = 3_000;
+/**
+ * Wall-clock allowance for the whole clear run before it stops issuing writes.
+ *
+ * Larger than the sleep budget on purpose: a chain that slept exactly
+ * `AUTOMATION_CLEAR_WAIT_BUDGET_MS` is on schedule and must still get to type
+ * its clear. The gap is what a healthy round of PTY writes costs. Under the
+ * bridge budget so the stop happens before the 504, not after it — a single
+ * in-flight write can still outlast this (PTY_CONTROL_JOB_TIMEOUT_MS is 15 s
+ * and JS cannot cancel it); what this prevents is the chain typing MORE once
+ * the caller has given up and possibly retried.
+ */
+export const AUTOMATION_CLEAR_DEADLINE_MS = 4_000;
 // Together with TerminalRenderCheckpointModel's 3-second catch-up timeout,
 // provider discovery stays at 3.5 seconds inside the backend bridge's 5-second
 // request budget, leaving time for serialization and IPC delivery.
@@ -1283,6 +1295,7 @@ export async function handleAsyncAutomationRequest(
     try {
       const result = await clearWorkspace(id, settings, {
         maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+        hardDeadlineMs: AUTOMATION_CLEAR_DEADLINE_MS,
       });
       return ok({
         workspaceId: id,

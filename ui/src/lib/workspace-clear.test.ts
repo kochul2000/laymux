@@ -204,7 +204,11 @@ describe("planWorkspaceClear", () => {
   });
 });
 
-function deps(actions: ClearAction[], overrides: Partial<ResolvedWorkspaceClear> = {}) {
+function deps(
+  actions: ClearAction[],
+  overrides: Partial<ResolvedWorkspaceClear> = {},
+  clock: { now?: () => number; deadlineAt?: number } = {},
+) {
   const submit = vi.fn().mockResolvedValue(undefined);
   const interrupt = vi.fn().mockResolvedValue(undefined);
   const restart = vi.fn();
@@ -222,6 +226,7 @@ function deps(actions: ClearAction[], overrides: Partial<ResolvedWorkspaceClear>
         interrupt,
         restart,
         sleep,
+        ...clock,
       }),
   };
 }
@@ -376,6 +381,110 @@ describe("runWorkspaceClear", () => {
     const d = deps([{ paneId: "pane-a", terminalId: "terminal-pane-a", kind: "restart" }]);
     expect(isNoOpClearResult(await d.run())).toBe(false);
   });
+
+  // Recording the interrupt only after the loop lost the fact that a Ctrl+C
+  // had already reached the pane, which is a different state from untouched.
+  it("still reports the interrupt when a later Ctrl+C round fails", async () => {
+    const d = deps(
+      [
+        {
+          paneId: "pane-a",
+          terminalId: "terminal-pane-a",
+          kind: "interruptThenSubmit",
+          input: "/clear",
+        },
+      ],
+      { interruptRounds: 3 },
+    );
+    let calls = 0;
+    d.interrupt.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 2) throw new Error("terminal is controlled by a remote client");
+    });
+
+    const result = await d.run();
+
+    expect(result.interrupted).toEqual(["terminal-pane-a"]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.cleared).toEqual([]);
+    expect(d.submit).not.toHaveBeenCalled();
+  });
+
+  // Concurrency must not decide the report's order — a caller diffing two runs
+  // of the same workspace should not see the lists shuffle.
+  it("reports in the plan's pane order regardless of which chain settles first", async () => {
+    const d = deps([
+      { paneId: "pane-a", terminalId: "terminal-pane-a", kind: "submit", input: "clear" },
+      { paneId: "pane-b", terminalId: "terminal-pane-b", kind: "submit", input: "clear" },
+      { paneId: "pane-c", terminalId: "terminal-pane-c", kind: "submit", input: "clear" },
+    ]);
+    // pane-a resolves last.
+    d.submit.mockImplementation(
+      (id: string) =>
+        new Promise<void>((resolve) => setTimeout(resolve, id === "terminal-pane-a" ? 5 : 0)),
+    );
+
+    const result = await d.run();
+
+    expect(result.cleared).toEqual(["terminal-pane-a", "terminal-pane-b", "terminal-pane-c"]);
+  });
+
+  describe("deadlineAt", () => {
+    // A PTY write can outlast the caller's patience on its own, so the only
+    // thing the frontend can promise is that it stops typing MORE.
+    it("refuses to issue a write once the budget has elapsed", async () => {
+      const d = deps(
+        [{ paneId: "pane-a", terminalId: "terminal-pane-a", kind: "submit", input: "clear" }],
+        {},
+        { now: () => 1_000, deadlineAt: 1_000 },
+      );
+
+      const result = await d.run();
+
+      expect(d.submit).not.toHaveBeenCalled();
+      expect(result.failed).toEqual([
+        { terminalId: "terminal-pane-a", error: "clear budget elapsed before the clear input" },
+      ]);
+    });
+
+    it("stops between Ctrl+C rounds instead of finishing the chain", async () => {
+      let clock = 0;
+      const d = deps(
+        [
+          {
+            paneId: "pane-a",
+            terminalId: "terminal-pane-a",
+            kind: "interruptThenSubmit",
+            input: "/clear",
+          },
+        ],
+        { interruptRounds: 4, settleMs: 0 },
+        { now: () => clock, deadlineAt: 500 },
+      );
+      // The first press is slow enough to burn the whole budget.
+      d.interrupt.mockImplementation(async () => {
+        clock += 400;
+      });
+
+      const result = await d.run();
+
+      expect(d.interrupt).toHaveBeenCalledTimes(2);
+      expect(d.submit).not.toHaveBeenCalled();
+      // The presses that did land are still reported.
+      expect(result.interrupted).toEqual(["terminal-pane-a"]);
+      expect(result.failed[0].error).toContain("before this Ctrl+C");
+    });
+
+    it("does nothing special while there is budget left", async () => {
+      const d = deps(
+        [{ paneId: "pane-a", terminalId: "terminal-pane-a", kind: "submit", input: "clear" }],
+        {},
+        { now: () => 0, deadlineAt: 5_000 },
+      );
+
+      expect((await d.run()).cleared).toEqual(["terminal-pane-a"]);
+    });
+  });
 });
 
 describe("summarizeClearResult", () => {
@@ -442,9 +551,29 @@ describe("clearWaitBudgetMs", () => {
       { busyPolicy: "interrupt", interruptRounds: 10, settleMs: 5_000 },
       { maxWaitMs: 100 },
     );
-    expect(capped.settleMs).toBe(0);
+    expect(capped.settleMs).toBe(100);
     expect(capped.interruptRounds).toBe(1);
-    expect(clearWaitBudgetMs(capped)).toBe(0);
+    expect(clearWaitBudgetMs(capped)).toBe(100);
+  });
+
+  // Dropping a round frees 120 ms; leaving the settle at 0 would spend less
+  // than the budget allows and submit into a prompt that has not repainted.
+  it("hands time freed by a dropped round back to the settle", () => {
+    const capped = resolveWorkspaceClear(
+      { busyPolicy: "interrupt", interruptRounds: 10, settleMs: 400 },
+      { maxWaitMs: 1_000 },
+    );
+    expect(capped.interruptRounds).toBe(9);
+    expect(capped.settleMs).toBe(1_000 - 8 * 120); // 40 ms, not 0
+    expect(clearWaitBudgetMs(capped)).toBe(1_000);
+  });
+
+  it("never inflates a settle the user asked to be short", () => {
+    const capped = resolveWorkspaceClear(
+      { busyPolicy: "interrupt", interruptRounds: 2, settleMs: 50 },
+      { maxWaitMs: 5_000 },
+    );
+    expect(capped.settleMs).toBe(50);
   });
 
   it("leaves a config that already fits untouched", () => {

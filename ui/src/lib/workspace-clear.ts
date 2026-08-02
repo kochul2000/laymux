@@ -106,6 +106,18 @@ export interface ResolveWorkspaceClearOptions {
   maxWaitMs?: number;
 }
 
+export interface ClearWorkspaceOptions extends ResolveWorkspaceClearOptions {
+  /**
+   * Wall-clock allowance for the whole run, after which no NEW write is issued.
+   *
+   * Distinct from `maxWaitMs`, which only trims the sleeps this module controls.
+   * A chain that slept exactly its trimmed budget must still be allowed to type
+   * the clear, so this has to be the LARGER of the two — it exists to stop a
+   * chain whose PTY writes are dragging, not one that is on schedule.
+   */
+  hardDeadlineMs?: number;
+}
+
 /**
  * Read + clamp the clear config from a raw (possibly hand-edited) value.
  * An empty `shellCommand` falls back to the default rather than submitting a
@@ -136,15 +148,18 @@ export function resolveWorkspaceClear(
 
   // Trim the settle first — it is one wait at the end, so shortening it costs
   // the app repaint time but keeps every Ctrl+C. Only when the rounds alone
-  // overrun does the round count come down, and never below one press.
+  // overrun does the round count come down, and never below one press. The
+  // settle is recomputed afterwards so a round that was dropped hands its time
+  // back instead of leaving the budget unspent.
+  const requestedSettleMs = resolved.settleMs;
   const roundsWait = () => (resolved.interruptRounds - 1) * INTERRUPT_ROUND_INTERVAL_MS;
-  resolved.settleMs = Math.max(
-    MIN_SETTLE_MS,
-    Math.min(resolved.settleMs, maxWaitMs - roundsWait()),
-  );
   while (resolved.interruptRounds > MIN_ROUNDS && roundsWait() > maxWaitMs) {
     resolved.interruptRounds -= 1;
   }
+  resolved.settleMs = Math.max(
+    MIN_SETTLE_MS,
+    Math.min(requestedSettleMs, maxWaitMs - roundsWait()),
+  );
   return resolved;
 }
 
@@ -256,6 +271,28 @@ export interface RunWorkspaceClearDeps {
   interrupt: (terminalId: string) => Promise<void>;
   restart: (paneId: string) => void;
   sleep: (ms: number) => Promise<void>;
+  now?: () => number;
+  /**
+   * Absolute time after which no NEW write is issued; remaining terminals are
+   * reported as failed instead.
+   *
+   * The per-write wait is not ours to bound — a single `write_to_terminal` can
+   * sit in the PTY control queue for `PTY_CONTROL_JOB_TIMEOUT_MS` (15s) and JS
+   * cannot cancel it. What this does prevent is the chain typing MORE text
+   * after its caller has already given up: without it, an Automation request
+   * that 504s at the bridge budget would keep going and land a `/clear` in a
+   * pane whose caller has moved on — and a retry would then double it.
+   */
+  deadlineAt?: number;
+}
+
+/** What one action did. Merged into the result in plan order by the caller. */
+interface ActionOutcome {
+  cleared?: string;
+  interrupted?: string;
+  restarted?: string;
+  skipped?: { terminalId: string; reason: WorkspaceClearSkipReason };
+  failed?: { terminalId: string; error: string };
 }
 
 /**
@@ -265,10 +302,68 @@ export interface RunWorkspaceClearDeps {
  * Terminals run concurrently — each one's interrupt→settle→submit chain is
  * independent, and serialising them would make a 6-pane workspace wait
  * `6 × settleMs`. A failing terminal never aborts the others.
+ *
+ * Each chain returns its own outcome rather than pushing into shared arrays, so
+ * the report follows the workspace's pane order instead of whichever await
+ * happened to resolve first.
  */
 export async function runWorkspaceClear(
   deps: RunWorkspaceClearDeps,
 ): Promise<WorkspaceClearResult> {
+  const now = deps.now ?? (() => Date.now());
+  const outOfTime = () => deps.deadlineAt !== undefined && now() >= deps.deadlineAt;
+
+  const runAction = async (action: ClearAction): Promise<ActionOutcome> => {
+    // `interrupted` is recorded as soon as the first Ctrl+C lands, not after
+    // the whole loop: a later round failing must not erase the fact that the
+    // pane already took an interrupt.
+    const outcome: ActionOutcome = {};
+    try {
+      switch (action.kind) {
+        case "skip":
+          outcome.skipped = { terminalId: action.terminalId, reason: action.reason ?? "busy" };
+          return outcome;
+        case "restart":
+          deps.restart(action.paneId);
+          outcome.restarted = action.terminalId;
+          return outcome;
+        case "interruptThenSubmit": {
+          for (let round = 0; round < deps.config.interruptRounds; round++) {
+            if (outOfTime()) throw new Error("clear budget elapsed before this Ctrl+C");
+            await deps.interrupt(action.terminalId);
+            outcome.interrupted = action.terminalId;
+            if (round < deps.config.interruptRounds - 1) {
+              await deps.sleep(INTERRUPT_ROUND_INTERVAL_MS);
+            }
+          }
+          // Let the agent/shell finish tearing the task down and repaint its
+          // prompt; typing into a half-torn-down TUI lands in the old frame.
+          if (deps.config.settleMs > 0) await deps.sleep(deps.config.settleMs);
+          if (outOfTime()) throw new Error("clear budget elapsed before the clear input");
+          await deps.submit(action.terminalId, action.input!);
+          outcome.cleared = action.terminalId;
+          return outcome;
+        }
+        case "submit":
+          if (outOfTime()) throw new Error("clear budget elapsed before the clear input");
+          await deps.submit(action.terminalId, action.input!);
+          outcome.cleared = action.terminalId;
+          return outcome;
+      }
+    } catch (error) {
+      // A rejected write must be reported, not dropped: it is the difference
+      // between "nothing needed clearing" and "the remote holds the lease".
+      // Anything already achieved (an interrupt that landed) stays in `outcome`.
+      outcome.failed = {
+        terminalId: action.terminalId,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      return outcome;
+    }
+  };
+
+  const outcomes = await Promise.all(deps.actions.map(runAction));
+
   const result: WorkspaceClearResult = {
     cleared: [],
     interrupted: [],
@@ -276,52 +371,13 @@ export async function runWorkspaceClear(
     skipped: [],
     failed: [],
   };
-
-  const chains = deps.actions.map(async (action) => {
-    try {
-      switch (action.kind) {
-        case "skip":
-          result.skipped.push({
-            terminalId: action.terminalId,
-            reason: action.reason ?? "busy",
-          });
-          return;
-        case "restart":
-          deps.restart(action.paneId);
-          result.restarted.push(action.terminalId);
-          return;
-        case "interruptThenSubmit": {
-          for (let round = 0; round < deps.config.interruptRounds; round++) {
-            await deps.interrupt(action.terminalId);
-            if (round < deps.config.interruptRounds - 1) {
-              await deps.sleep(INTERRUPT_ROUND_INTERVAL_MS);
-            }
-          }
-          result.interrupted.push(action.terminalId);
-          // Let the agent/shell finish tearing the task down and repaint its
-          // prompt; typing into a half-torn-down TUI lands in the old frame.
-          if (deps.config.settleMs > 0) await deps.sleep(deps.config.settleMs);
-          await deps.submit(action.terminalId, action.input!);
-          result.cleared.push(action.terminalId);
-          return;
-        }
-        case "submit":
-          await deps.submit(action.terminalId, action.input!);
-          result.cleared.push(action.terminalId);
-          return;
-      }
-    } catch (error) {
-      // A rejected write must be reported, not dropped: it is the difference
-      // between "nothing needed clearing" and "the remote holds the lease".
-      // A partially-interrupted terminal stays in `interrupted` AND lands here.
-      result.failed.push({
-        terminalId: action.terminalId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  await Promise.allSettled(chains);
+  for (const outcome of outcomes) {
+    if (outcome.cleared) result.cleared.push(outcome.cleared);
+    if (outcome.interrupted) result.interrupted.push(outcome.interrupted);
+    if (outcome.restarted) result.restarted.push(outcome.restarted);
+    if (outcome.skipped) result.skipped.push(outcome.skipped);
+    if (outcome.failed) result.failed.push(outcome.failed);
+  }
   return result;
 }
 
@@ -342,9 +398,11 @@ export function terminalPaneIdsForWorkspace(workspaceId: string): string[] {
 export async function clearWorkspace(
   workspaceId: string,
   settings?: Partial<WorkspaceClearSettings>,
-  options: ResolveWorkspaceClearOptions = {},
+  options: ClearWorkspaceOptions = {},
 ): Promise<WorkspaceClearResult> {
   const config = resolveWorkspaceClear(settings, options);
+  const deadlineAt =
+    options.hardDeadlineMs === undefined ? undefined : Date.now() + options.hardDeadlineMs;
   const paneIds = terminalPaneIdsForWorkspace(workspaceId);
   const actions = planWorkspaceClear(paneIds, useTerminalStore.getState().instances, config);
   const workspace = useWorkspaceStore.getState().workspaces.find((ws) => ws.id === workspaceId);
@@ -364,5 +422,6 @@ export async function clearWorkspace(
       useTerminalRestartStore.getState().requestRestart(paneId, cwd);
     },
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    deadlineAt,
   });
 }

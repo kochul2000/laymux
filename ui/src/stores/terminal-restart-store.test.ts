@@ -135,3 +135,44 @@ describe("terminal-restart-store pane lifecycle", () => {
     expect(useTerminalRestartStore.getState().requests).toBe(before);
   });
 });
+
+// A pane that stops being a TerminalView keeps its id, so `gcStale` cannot see
+// the request is dead. Left behind, it would re-apply an old cwd with
+// `fresh: true` the next time the slot becomes a terminal again (ADR-0113).
+describe("terminal-restart-store view type changes", () => {
+  beforeEach(() => {
+    useTerminalRestartStore.setState({ requests: {} });
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+  });
+
+  it("drops the request when a workspace pane leaves TerminalView", () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useTerminalRestartStore.getState().requestRestart(paneId, "/old/cwd");
+
+    useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
+
+    expect(useTerminalRestartStore.getState().requests[paneId]).toBeUndefined();
+  });
+
+  it("keeps the request when the view config changes but the type does not", () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const paneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useTerminalRestartStore.getState().requestRestart(paneId, "/old/cwd");
+
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+    expect(useTerminalRestartStore.getState().requests[paneId]).toMatchObject({ fresh: true });
+  });
+
+  it("drops the request when a dock pane leaves TerminalView", () => {
+    const paneId = useDockStore.getState().getDock("right")!.panes[0].id;
+    useDockStore.getState().setDockPaneView("right", paneId, { type: "TerminalView" });
+    useTerminalRestartStore.getState().requestRestart(paneId, "/old/cwd");
+
+    useDockStore.getState().setDockPaneView("right", paneId, { type: "MemoView" });
+
+    expect(useTerminalRestartStore.getState().requests[paneId]).toBeUndefined();
+  });
+});

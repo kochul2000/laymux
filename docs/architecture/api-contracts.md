@@ -366,7 +366,11 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 `busyPolicy` 는 enum 이라 알 수 없는 값은 파싱 단계에서 거부되고 `describe_settings` 가 허용값 3개를 그대로 내보낸다. 범위 검증(`interruptRounds` 1~10, `settleMs` 0~10000)은 `/exit` 와 같은 계약으로 `semantic_validation.rs` 가 소유하며, 그 외 정규화(빈 `shellCommand` → `clear`, 손으로 편집한 값 clamp)는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다.
 
-Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)로 캡한다. 캡이 없으면 `settleMs: 5000` 같은 정상 설정에서 클리어는 성공했는데 bridge 가 먼저 5초에 끊겨 504 를 돌려주고 pane 별 결과가 유실된다. 캡은 `settleMs` 부터 줄이고 Ctrl+C 횟수는 마지막에야 줄인다. 응답의 `waitCapped`·`interruptRounds`·`settleMs` 가 실제로 적용된 값이다. 키보드·버튼 경로는 기다리는 쪽이 없으므로 설정값 그대로 쓴다.
+Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)로 캡한다. 캡이 없으면 `settleMs: 5000` 같은 정상 설정에서 클리어는 성공했는데 bridge 가 먼저 5초에 끊겨 504 를 돌려주고 pane 별 결과가 유실된다. 캡은 Ctrl+C 횟수를 먼저 지키고 `settleMs` 를 줄이며, 횟수만으로 예산을 넘길 때만 횟수를 낮춘다(그때 남는 시간은 다시 settle 로 돌려준다). 응답의 `waitCapped`·`interruptRounds`·`settleMs` 가 실제로 적용된 값이다. 키보드·버튼 경로는 기다리는 쪽이 없으므로 설정값 그대로 쓴다.
+
+여기에 **새 write 를 더 내보내지 않는 절대 deadline**(`AUTOMATION_CLEAR_DEADLINE_MS`, 4s)이 따로 붙는다. 두 값은 다르다 — sleep 예산(3s)은 우리가 만드는 대기만 줄이고, deadline 은 예정대로 잔 체인이 마지막 클리어를 치는 것까지는 허용해야 하므로 그보다 커야 한다. 순서는 항상 `sleep 예산 < deadline < bridge 예산` 이고 테스트가 이 순서를 고정한다.
+
+deadline 이 필요한 이유는 개별 PTY write 가 제어 큐에서 `PTY_CONTROL_JOB_TIMEOUT_MS`(15s)까지 대기할 수 있고 JS 에서 취소할 방법이 없기 때문이다. 프론트가 보장할 수 있는 것은 "예산이 지난 뒤에는 더 치지 않는다"까지다. 이 게이트가 없으면 504 를 받은 호출자가 재시도하는 동안 원래 체인이 뒤늦게 `/clear` 를 한 번 더 넣는다. deadline 에 걸린 pane 은 이미 들어간 Ctrl+C 를 `interrupted` 에 남긴 채 `failed` 에도 사유와 함께 기록된다. 이미 진행 중인 write 하나는 응답 이후에도 도착할 수 있다 — 취소 가능한 PTY write 는 이 이슈의 범위를 넘는 별도 결정이다.
 
 Dock pane 은 대상이 아니다.
 
@@ -1506,7 +1510,7 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 ### 15.6 앱 전용 편의 코드 격리
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
+각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다. 표시뿐 아니라 **그 앱을 어떻게 클리어하는가**도 핸들러가 소유한다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
 
 #### ActivityHandler 인터페이스
 
@@ -1515,8 +1519,15 @@ interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
   computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
   computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
+  clearInput(shellClearCommand: string): string;             // 워크스페이스 클리어가 제출할 텍스트
+  isBusy(raw: RawTerminalState): boolean;                    // 지금 쳐도 빈 프롬프트에 닿는가
 }
 ```
+
+`clearInput`·`isBusy` 는 필수다. `ShellActivityHandler` 가 기본 구현(설정된 shell 명령 / `outputActive || activity==="running"`)을 주므로 새 핸들러는 그것을 상속하고 다른 점만 덮어쓴다 — Claude·Codex 는 `/clear` 와 자신의 working spinner·input-pending 신호를 더한다.
+
+- `isBusy` 는 표시용 아이콘과 다른 개념이다. input-pending 모달은 `computeStatus` 가 ✓ 를 주지만 그때 클리어를 치면 모달의 답으로 들어가므로 busy 다. 반대로 "작업 중 터미널 수" 위젯은 모달을 세면 안 되므로 이 술어를 쓰지 않는다.
+- **쓰는 동작은 등록 여부로 게이트한다.** `getHandler()` 는 표시가 계속 동작하도록 미등록 interactive app 에 shell 핸들러를 폴백으로 주지만, 그 폴백은 쓰기에서는 틀렸다(`nvim` 버퍼에 `clear` 가 박힌다). 클리어처럼 PTY 에 쓰는 호출부는 `isRegisteredInteractiveApp()` 으로 먼저 걸러야 한다.
 
 #### 핸들러 등록
 

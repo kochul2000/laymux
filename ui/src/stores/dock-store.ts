@@ -296,6 +296,10 @@ export const useDockStore = create<DockStoreState>()((set, get) => ({
     }));
     if (prevType && prevType !== view.type) {
       useOverridesStore.getState().clearViewOverride(paneId);
+      // 미소비 재시작 요청도 같이 버린다(ADR-0113) — workspace-store.setPaneView 와 동일 계약.
+      if (prevType === "TerminalView") {
+        useTerminalRestartStore.getState().forgetRestart(paneId);
+      }
     }
   },
 

@@ -219,3 +219,60 @@ describe("runWorkspaceClearFromUi", () => {
     warn.mockRestore();
   });
 });
+
+describe("clearWorkspace deadline (ADR-0113)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // `clearAllMocks` keeps implementations, and an earlier suite leaves the
+    // write rejecting — restore the happy path explicitly.
+    vi.mocked(writeTerminalInput).mockResolvedValue(undefined);
+    vi.mocked(writeToTerminal).mockResolvedValue(undefined);
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useTerminalRestartStore.setState({ requests: {} });
+  });
+
+  // A PTY write can sit in the control queue for 15s and JS cannot cancel it.
+  // What must not happen is the chain typing MORE after the caller gave up —
+  // the caller's retry would then double the input. `maxWaitMs` has to reach
+  // the executor as a deadline, not only as a sleep trim.
+  it("stops mid-chain once maxWaitMs has elapsed, and never submits the clear", async () => {
+    seedWorkspace();
+    makeBusy("pane-a");
+    makeBusy("pane-b");
+    // Every Ctrl+C is slower than the whole budget.
+    vi.mocked(writeToTerminal).mockImplementation(
+      () => new Promise<void>((resolve) => setTimeout(resolve, 40)),
+    );
+
+    const result = await clearWorkspace(
+      "ws-clear",
+      { busyPolicy: "interrupt", interruptRounds: 4, settleMs: 0 },
+      { maxWaitMs: 20, hardDeadlineMs: 20 },
+    );
+
+    // One press per pane landed, then the budget stopped the chain.
+    expect(vi.mocked(writeToTerminal)).toHaveBeenCalledTimes(2);
+    expect(result.interrupted).toEqual(["terminal-pane-a", "terminal-pane-b"]);
+    expect(result.cleared).toEqual([]);
+    // The clear text is never typed after the caller has given up.
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+    expect(result.failed.map((entry) => entry.terminalId)).toEqual([
+      "terminal-pane-a",
+      "terminal-pane-b",
+    ]);
+  });
+
+  it("leaves every pane alone when nothing is over budget", async () => {
+    seedWorkspace();
+
+    const result = await clearWorkspace("ws-clear", undefined, {
+      maxWaitMs: 5_000,
+      hardDeadlineMs: 5_000,
+    });
+
+    expect(result.failed).toEqual([]);
+    expect(result.cleared).toEqual(["terminal-pane-a", "terminal-pane-b"]);
+  });
+});

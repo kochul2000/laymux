@@ -433,7 +433,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
     // View 타입이 바뀌면 view 인스턴스 오버라이드는 의미가 없어지므로 비운다.
     // Pane 인스턴스 오버라이드(controlBar 모드 등)는 슬롯 속성이라 유지.
-    if (viewTypeChanged) useOverridesStore.getState().clearViewOverride(prev.id);
+    if (viewTypeChanged) {
+      useOverridesStore.getState().clearViewOverride(prev.id);
+      // 미소비 재시작 요청도 같이 버린다(ADR-0113). pane id 는 살아 있으므로
+      // 기동 시 gcStale 이 잡지 못하고, 나중에 다시 TerminalView 로 바꾸면
+      // 옛 cwd 로 fresh 재시작이 걸려 세션 복원을 건너뛴다.
+      if (prev.view.type === "TerminalView") {
+        useTerminalRestartStore.getState().forgetRestart(prev.id);
+      }
+    }
   },
 
   // Layout actions per docs/architecture/overview.md §4.1

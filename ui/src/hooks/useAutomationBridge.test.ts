@@ -7,6 +7,7 @@ import {
   handleAsyncAutomationRequest,
   BRIDGE_REQUEST_BUDGET_MS,
   AUTOMATION_CLEAR_WAIT_BUDGET_MS,
+  AUTOMATION_CLEAR_DEADLINE_MS,
   WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
 } from "./useAutomationBridge";
 import { clearWaitBudgetMs, resolveWorkspaceClear } from "@/lib/workspace-clear";
@@ -146,6 +147,13 @@ describe("bridge timing budget", () => {
       WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
     );
     expect(AUTOMATION_CLEAR_WAIT_BUDGET_MS + 1_000).toBeLessThanOrEqual(BRIDGE_REQUEST_BUDGET_MS);
+  });
+
+  // The hard stop has to leave room for a chain that slept exactly its trimmed
+  // budget, and still fire before the bridge answers 504.
+  it("orders the sleep budget, the hard deadline and the bridge budget", () => {
+    expect(AUTOMATION_CLEAR_WAIT_BUDGET_MS).toBeLessThan(AUTOMATION_CLEAR_DEADLINE_MS);
+    expect(AUTOMATION_CLEAR_DEADLINE_MS).toBeLessThan(BRIDGE_REQUEST_BUDGET_MS);
   });
 
   it("trims a settle that would overrun the automation budget", () => {
@@ -3534,9 +3542,7 @@ describe("workspaces.clear over the async bridge (issue #726)", () => {
 
     expect(result.data).toMatchObject({
       cleared: [],
-      failed: [
-        { terminalId: "terminal-idle", error: "terminal is controlled by a remote client" },
-      ],
+      failed: [{ terminalId: "terminal-idle", error: "terminal is controlled by a remote client" }],
     });
   });
 
