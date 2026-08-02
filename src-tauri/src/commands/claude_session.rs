@@ -5,6 +5,8 @@ use tauri::State;
 use crate::lock_ext::MutexExt;
 use crate::state::AppState;
 
+use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, WslAgentProvider};
+
 /// Resolve Claude Code session IDs for known Claude terminals.
 ///
 /// The PTY descendant PID must match `~/.claude/sessions/<pid>.json`.
@@ -18,10 +20,6 @@ pub fn get_claude_session_ids(
         let k = state.known_claude_terminals.lock_or_err()?;
         k.iter().cloned().collect()
     };
-
-    if known.is_empty() {
-        return Ok(HashMap::new());
-    }
 
     // Read session files from ~/.claude/sessions/
     let sessions_dir = resolve_claude_sessions_dir();
@@ -39,24 +37,47 @@ pub fn get_claude_session_ids(
             .collect()
     };
     let snapshot = crate::process_tree::snapshot_processes();
-    if snapshot.is_empty() {
-        return Ok(crate::process_tree::complete_agent_session_attributions(
-            &known,
-            HashMap::new(),
-        ));
-    }
-    let candidates = terminal_roots
-        .into_iter()
-        .filter_map(|(terminal_id, root_pid)| {
-            let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
-            find_session_by_pids(&session_files, &descendants)
-                .map(|session_id| (terminal_id, session_id))
-        })
-        .collect();
-    Ok(crate::process_tree::complete_agent_session_attributions(
+    let candidates = if snapshot.is_empty() {
+        Vec::new()
+    } else {
+        terminal_roots
+            .into_iter()
+            .filter_map(|(terminal_id, root_pid)| {
+                let descendants = crate::process_tree::descendant_pids(&snapshot, root_pid);
+                find_session_by_pids(&session_files, &descendants)
+                    .map(|session_id| (terminal_id, session_id))
+            })
+            .collect()
+    };
+    let mut result = crate::process_tree::complete_agent_session_attributions(
         &known,
         remove_duplicate_attributions(candidates),
+    );
+    match resolve_wsl_agent_processes(&state, WslAgentProvider::Claude) {
+        Ok(attributions) => {
+            for (terminal_id, process) in attributions {
+                result.insert(
+                    terminal_id,
+                    process.and_then(|process| {
+                        find_wsl_claude_session(&process, session_max_age_hours)
+                    }),
+                );
+            }
+        }
+        Err(error) => tracing::warn!(%error, "WSL Claude attribution failed"),
+    }
+    Ok(crate::process_tree::reject_duplicate_session_attributions(
+        result, "Claude",
     ))
+}
+
+fn find_wsl_claude_session(
+    process: &WslAgentProcess,
+    session_max_age_hours: Option<u64>,
+) -> Option<String> {
+    let sessions =
+        read_claude_session_files(&process.claude_sessions_dir()?, session_max_age_hours);
+    find_session_by_pids(&sessions, &HashSet::from([process.pid]))
 }
 
 /// A parsed Claude session file entry.

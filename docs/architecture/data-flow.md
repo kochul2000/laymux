@@ -1193,6 +1193,8 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
     │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
     │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
+    │     ├─ Windows/WSL: distro 별 /proc probe에서 LX_TERMINAL_ID → Linux provider PID
+    │     │    → Claude PID 세션 파일 또는 Codex PID가 연 rollout FD를 직접 읽음
     │     └─ state DB/rollout header로 top-level interactive thread 검증
     │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
     │        → null 귀속은 해당 pane의 양쪽 stale session ID를 제거
@@ -1206,6 +1208,8 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     ▼
 [appWindow.destroy()]
 ```
+
+Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 `<HOME>/.claude/sessions/<pid>.json`을 `\\wsl.localhost\<distro>` 경로로 읽는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md)).
 
 ### 13.5 시작 시퀀스
 

@@ -7,18 +7,19 @@ use std::sync::Arc;
 use tauri::State;
 
 use super::claude_session::is_valid_session_id;
+use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 use crate::constants::{ENV_CODEX_HOME, ENV_CODEX_SQLITE_HOME};
 use crate::lock_ext::MutexExt;
 use crate::process_tree::{match_interactive_app_process, snapshot_processes};
 use crate::state::AppState;
 
-use self::store::CodexSessionStore;
+use self::store::{find_session_from_rollout_paths, CodexSessionStore};
 
 /// Resolve Codex CLI session IDs only when the owning pane can be proven.
 ///
-/// The PTY child tree identifies the exact Codex process. Codex's read-only
-/// diagnostics database then attributes that process to its top-level thread.
-/// CWD is deliberately not a fallback: multiple panes commonly share it.
+/// Native terminals use the PTY child tree and Codex diagnostics DB. Windows
+/// WSL terminals use the inherited pane marker and rollout FDs of the exact
+/// Linux process. CWD is deliberately not a fallback: panes commonly share it.
 #[tauri::command]
 pub fn get_codex_session_ids(
     session_max_age_hours: Option<u64>,
@@ -37,10 +38,6 @@ fn get_codex_session_ids_impl(
         .iter()
         .cloned()
         .collect();
-    if known.is_empty() {
-        return Ok(HashMap::new());
-    }
-
     let terminal_roots: Vec<(String, u32)> = {
         let ptys = state.pty_handles.lock_or_err()?;
         known
@@ -52,27 +49,18 @@ fn get_codex_session_ids_impl(
             })
             .collect()
     };
-    if terminal_roots.is_empty() {
-        return Ok(crate::process_tree::complete_agent_session_attributions(
-            &known,
-            HashMap::new(),
-        ));
-    }
-
     let snapshot = snapshot_processes();
-    if snapshot.is_empty() {
-        return Ok(crate::process_tree::complete_agent_session_attributions(
-            &known,
-            HashMap::new(),
-        ));
-    }
-    let terminal_codex_pids: Vec<(String, u32)> = terminal_roots
-        .into_iter()
-        .filter_map(|(terminal_id, root_pid)| {
-            let (pid, app) = match_interactive_app_process(&snapshot, root_pid)?;
-            (app == "Codex").then_some((terminal_id, pid))
-        })
-        .collect();
+    let terminal_codex_pids: Vec<(String, u32)> = if snapshot.is_empty() {
+        Vec::new()
+    } else {
+        terminal_roots
+            .into_iter()
+            .filter_map(|(terminal_id, root_pid)| {
+                let (pid, app) = match_interactive_app_process(&snapshot, root_pid)?;
+                (app == "Codex").then_some((terminal_id, pid))
+            })
+            .collect()
+    };
 
     let store = CodexSessionStore::resolve();
     let exact = assign_exact_sessions(&terminal_codex_pids, |pid| {
@@ -85,8 +73,23 @@ fn get_codex_session_ids_impl(
         }
         session_id
     });
-    Ok(crate::process_tree::complete_agent_session_attributions(
-        &known, exact,
+    let mut result = crate::process_tree::complete_agent_session_attributions(&known, exact);
+    match resolve_wsl_agent_processes(state, WslAgentProvider::Codex) {
+        Ok(attributions) => {
+            for (terminal_id, process) in attributions {
+                let session_id = process.and_then(|process| {
+                    find_session_from_rollout_paths(
+                        &process.codex_rollout_paths(),
+                        session_max_age_hours,
+                    )
+                });
+                result.insert(terminal_id, session_id);
+            }
+        }
+        Err(error) => tracing::warn!(%error, "WSL Codex attribution failed"),
+    }
+    Ok(crate::process_tree::reject_duplicate_session_attributions(
+        result, "Codex",
     ))
 }
 

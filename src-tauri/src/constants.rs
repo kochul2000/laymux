@@ -72,6 +72,8 @@ pub const CODEX_SQLITE_LOG_PREFIX: &str = "logs_";
 pub const CODEX_SQLITE_STATE_PREFIX: &str = "state_";
 /// Do not wait through shutdown when Codex has an SQLite writer lock.
 pub const CODEX_SQLITE_BUSY_TIMEOUT: u64 = 100;
+/// Upper bound for each Windows→WSL metadata probe used during session save.
+pub const WSL_AGENT_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
