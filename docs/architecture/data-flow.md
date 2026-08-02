@@ -258,7 +258,7 @@ Remote control 복귀 fit은 `onResize`가 만드는 일반 backend 전송을 �
 
 `FileViewer`는 두 축으로 렌더러를 고른다([ADR-0109](../adr/0109-file-viewer-typed-preview-renderers.md)). Rust `read_file_for_viewer`가 바이트에서 정한 `kind`(`text | image | pdf | archive | binary`)와, 프론트엔드가 경로 확장자에서 정한 preview 종류다. preview 종류는 다시 두 계열로 갈린다 — document(`html`/`markdown`)는 sanitizer+CSP+sandbox iframe 을 타고, structured(`json`/`jsonl`/`diff`/`csv`/`log`/`code`)는 `ui/src/lib/preview/`의 순수 파서가 만든 값을 `ui/src/components/ui/preview/`의 컴포넌트가 React DOM 으로 그린다. structured 경로는 HTML 문자열을 만들지 않으므로 sanitizer 가 없다. 아래 확장자 외부 뷰어 매핑은 두 축 모두보다 우선한다.
 
-`FileViewer`의 확장자 외부 뷰어는 `ExtensionViewer { extensions, command, profile }` 매핑에서 실행 프로필을 명시적으로 선택한다([ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). 프론트엔드는 shell 문자열을 조립하지 않고 `{ command, path }` 구조화 요청과 선택된 profile 이름을 `create_terminal_session`에 전달한다. Rust는 확장자·command·profile이 현재 settings 매핑과 정확히 일치하고 profile이 존재하는지 검증한 뒤, `profile.commandLine`으로 WSL/PowerShell 환경을 판별한다. Windows drive ↔ `/mnt/<drive>` 및 Linux path ↔ `\\wsl.localhost\<distro>` 변환은 `path_utils`에서 수행하고, 대상 shell 규칙으로 path 인자 하나를 quote한 뒤 startup command를 만든다. explicit WSL pure-Linux UNC를 WSL profile의 로컬 경로로 축약할 때는 `commandLine`의 unquoted distro 선택과 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 오류로 거부한다. `/mnt/<drive>`는 distro 공용이므로 이 검증에서 제외하고 Windows profile에는 explicit UNC distro를 보존한다. profile 누락·삭제 또는 startup 주입을 지원하지 않는 shell은 추론 없이 오류로 종료하며, 일반 문자열 `startupCommandOverride`는 Claude `--resume` 전용이다.
+`FileViewer`의 확장자 외부 뷰어는 `ExtensionViewer { extensions, command, profile }` 매핑에서 실행 프로필을 명시적으로 선택한다([ADR-0031](../adr/0031-extension-viewer-profile-path-conversion.md)). 프론트엔드는 shell 문자열을 조립하지 않고 `{ command, path }` 구조화 요청과 선택된 profile 이름을 `create_terminal_session`에 전달한다. Rust는 확장자·command·profile이 현재 settings 매핑과 정확히 일치하고 profile이 존재하는지 검증한 뒤, `profile.commandLine`으로 WSL/PowerShell 환경을 판별한다. Windows drive ↔ `/mnt/<drive>` 및 Linux path ↔ `\\wsl.localhost\<distro>` 변환은 `path_utils`에서 수행하고, 대상 shell 규칙으로 path 인자 하나를 quote한 뒤 startup command를 만든다. explicit WSL pure-Linux UNC를 WSL profile의 로컬 경로로 축약할 때는 `commandLine`의 unquoted distro 선택과 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 오류로 거부한다. `/mnt/<drive>`는 distro 공용이므로 이 검증에서 제외하고 Windows profile에는 explicit UNC distro를 보존한다. profile 누락·삭제 또는 startup 주입을 지원하지 않는 shell은 추론 없이 오류로 종료하며, 일반 문자열 `startupCommandOverride`는 `claude --resume <id>`와 `codex resume <id>` 두 정확한 세션 복원 형식만 허용한다([ADR-0117](../adr/0117-codex-session-restore.md)).
 
 Remote FileViewer는 데스크톱 overlay를 복제하거나 외부 프로세스를 실행하지 않는다([ADR-0042](../adr/0042-remote-file-viewer-secret-capability.md), [ADR-0044](../adr/0044-remote-file-viewer-explicit-host-path.md), [ADR-0045](../adr/0045-remote-path-link-reuses-desktop-parser.md)). 연결·heartbeat는 FileViewer status를 자동 조회하지 않는다. 사용자가 명시적으로 `From host`를 누를 때만 active lease와 claim 성공 때 발급된 `fileViewerToken`으로 `fileViewer.status`를 조회해 `useFileViewerStore`의 현재 path를 host file path 입력에 반영한다. 요청 시작 때 입력 revision을 스냅샷하고 응답 시점에 다시 비교하므로, 조회 중 사용자가 입력을 편집했다면 늦은 host path를 적용하지 않는다. 사용자가 `Open viewer` action을 실행하면 클릭 시점의 trim된 경로를 스냅샷으로 고정하고, child bootstrap에 메모리상의 token/lease/fileViewerToken과 `source="path"`를 same-origin `postMessage`로 전달한다. child의 `/remote/v1/file-viewer/render` 요청은 Rust가 lease-bound capability를 확인한 뒤 frontend async bridge `fileViewer.render`로 이어지며, bridge 완료 뒤 응답 직전에 같은 lease/capability를 다시 확인한다. owner transition이나 새 claim으로 capability가 폐기·회전되면 이미 계산한 payload도 버리고 `403`으로 fail closed하며 bridge 이후 응답은 `Cache-Control: no-store`를 사용한다. bridge는 `readFileForViewer(path, 8 MiB)`를 호출하고 HTML/Markdown이면 기존 `file-preview.ts` sanitizer로 완성된 preview document를 만든다. Markdown은 데스크톱과 Remote 모두 같은 `marked` 동기 GFM 렌더러와 내장된 `github-markdown-css`를 사용한다. Preview 응답은 원문 `content`를 중복하지 않으며, 새 탭은 일반 text를 `textContent`, image를 제한된 data URL, preview document를 sandbox iframe `srcdoc`으로만 렌더하고 잘린 preview에는 경고를 함께 표시한다. 문서 제목은 host path를 포함하지 않는 일반 이름으로 유지하고, 직접 경로 입력은 모바일 자동 대문자화를 끈다. Remote 표면은 `extensionViewers` 매핑을 의도적으로 무시한다. 호스트 터미널에서 실행되는 외부 viewer는 독립 브라우저 탭으로 투영할 수 없고, remote 파일 읽기가 새 호스트 프로세스 실행 권한으로 확장되어서는 안 되기 때문이다.
 
@@ -1189,10 +1189,15 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │  App.tsx onCloseRequested 핸들러
     ▼
 [saveBeforeClose()]
+    ├─ 0. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
     ├─ 1. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장
     ├─ 2. persistSession()
-    │     → settings.json (lastCwd 포함)
+    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
+    │     │     → 알려진 interactive terminal의 현재 CWD와 agent 세션 파일을 합성
+    │     │     → Codex는 CODEX_HOME/sessions/**/rollout-*.jsonl의 첫 session_meta만 읽고
+    │     │       subagent를 제외한 동일 CWD 최신 ID를 lastCodexSession에 기록
+    │     └─ settings.json (lastCwd·lastClaudeSession·lastCodexSession 포함)
     └─ 3. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
     ▼
@@ -1216,8 +1221,10 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     │  terminal-output-v3 listener 선등록
     ├─ loadTerminalOutputCache(paneId)
     │     → legacy cache의 SerializeAddon alternate-buffer suffix 제거
-    └─ createTerminalSession(cwd: lastCwd)
+    └─ createTerminalSession(cwd: lastCwd, startupCommandOverride)
           → PTY가 마지막 CWD에서 시작
+          → Claude restoreSession이면 `claude --resume <id>`, Codex restoreSession이면
+            `codex resume <id>`만 허용해 실행
           → attach_terminal_output(state + sequenced snapshot + nextEnvelopeId)
           → xterm reset
           → normal-buffer cache
@@ -1233,7 +1240,7 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
           → 생성 실패는 즉시 완료, 신호 누락은 10초 watchdog 후 진행
 ```
 
-Pane control bar의 **Restart View**는 이 앱 시작 복원 흐름의 명시적 예외다. 현재 runtime terminal store의 CWD(아직 보고되지 않았으면 저장된 `lastCwd`)로 기존 PTY를 종료한 뒤 새 PTY를 생성한다. 이때만 `restoreCwd` 설정과 무관하게 그 CWD를 전달하며, 출력 캐시와 Claude `--resume` 복원은 건너뛴다. 재시작 요청은 첫 새 세션 생성이 끝나면 소비되므로, 이후 프로필 변경 등 일반 재생성은 원래의 복원 정책을 다시 따른다.
+Pane control bar의 **Restart View**는 이 앱 시작 복원 흐름의 명시적 예외다. 현재 runtime terminal store의 CWD(아직 보고되지 않았으면 저장된 `lastCwd`)로 기존 PTY를 종료한 뒤 새 PTY를 생성한다. 이때만 `restoreCwd` 설정과 무관하게 그 CWD를 전달하며, 출력 캐시와 Claude/Codex resume 복원은 건너뛴다. 재시작 요청은 첫 새 세션 생성이 끝나면 소비되므로, 이후 프로필 변경 등 일반 재생성은 원래의 복원 정책을 다시 따른다.
 
 재시작 요청 상태(`epoch`/`cwd`/`fresh`)의 SoT 는 `stores/terminal-restart-store.ts` 다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)). `PaneGrid` 와 single-pane `Dock` 이 각자 자기 pane 의 항목만 구독하고, 워크스페이스 클리어의 `restart` 정책처럼 컴포넌트 밖에서도 요청할 수 있다. pane 이 제거되면 `forgetRestart`, 세션 복원처럼 pane 배열이 통째로 갈리는 경로는 기동 시 `gcStale` 이 정리한다.
 

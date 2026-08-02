@@ -58,6 +58,13 @@ pub const ENV_WSLENV: &str = "WSLENV";
 /// Claude Code's config directory override. Set on a usage probe PTY so one
 /// probe can monitor a non-default profile.
 pub const ENV_CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
+/// Codex CLI's state directory override. Session rollout discovery follows it.
+pub const ENV_CODEX_HOME: &str = "CODEX_HOME";
+
+/// Maximum bytes read from one Codex rollout `session_meta` JSONL header.
+pub const CODEX_SESSION_META_MAX_BYTES: usize = 256 * 1024;
+/// Codex stores rollout files below `sessions/YYYY/MM/DD`.
+pub const CODEX_SESSION_DIRECTORY_DEPTH: u8 = 3;
 
 pub const TERM_PROGRAM_LAYMUX: &str = "laymux";
 pub const COLORTERM_TRUECOLOR: &str = "truecolor";
@@ -475,6 +482,7 @@ mod tests {
             ENV_LX_GROUP_ID,
             ENV_LX_AUTOMATION_PORT,
             ENV_LX_PROPAGATED,
+            ENV_CODEX_HOME,
         ];
         for name in envs {
             assert!(

@@ -535,6 +535,8 @@ describe("settings-store", () => {
 
   it("has default codex settings", () => {
     const { codex } = useSettingsStore.getState();
+    expect(codex.restoreSession).toBe(true);
+    expect(codex.sessionMaxAgeHours).toBe(24);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });
@@ -558,6 +560,8 @@ describe("settings-store", () => {
       codex: {} as any,
     });
     const { codex } = useSettingsStore.getState();
+    expect(codex.restoreSession).toBe(true);
+    expect(codex.sessionMaxAgeHours).toBe(24);
     expect(codex.statusMessageMode).toBe("bullet-title");
     expect(codex.statusMessageDelimiter).toBe(" · ");
   });

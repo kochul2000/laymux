@@ -1,5 +1,6 @@
 mod archive_listing;
 mod claude_session;
+mod codex_session;
 mod codex_usage;
 mod file_ops;
 mod file_viewer;
@@ -19,6 +20,7 @@ mod viewer_startup;
 pub use crate::cloud::commands::*;
 pub use archive_listing::*;
 pub use claude_session::*;
+pub use codex_session::*;
 pub use codex_usage::*;
 pub use file_ops::*;
 pub use file_viewer::*;

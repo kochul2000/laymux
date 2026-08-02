@@ -1453,7 +1453,31 @@ describe("SettingsView", () => {
 
     await user.click(screen.getByTestId("nav-codex"));
     expect(screen.getAllByText("Codex").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Status Message")).toBeInTheDocument();
     expect(screen.getByTestId("codex-status-message-mode-select")).toBeInTheDocument();
+  });
+
+  it("saves Codex session restoration settings", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const restoreToggle = screen.getByTestId("codex-restore-session-toggle") as HTMLInputElement;
+    expect(restoreToggle.checked).toBe(true);
+    expect((screen.getByTestId("codex-session-max-age-input") as HTMLInputElement).value).toBe(
+      "24",
+    );
+
+    await user.click(restoreToggle);
+    fireEvent.change(screen.getByTestId("codex-session-max-age-input"), {
+      target: { value: "72" },
+    });
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().codex).toMatchObject({
+      restoreSession: false,
+      sessionMaxAgeHours: 72,
+    });
   });
 
   it("changing codex status message mode updates store after Save", async () => {

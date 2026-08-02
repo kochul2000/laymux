@@ -1,5 +1,11 @@
 import { toTerminalId } from "@/lib/pane-ids";
-import { getClaudeSessionIds, getTerminalCwds, saveSettings, type Settings } from "@/lib/tauri-api";
+import {
+  getClaudeSessionIds,
+  getCodexSessionIds,
+  getTerminalCwds,
+  saveSettings,
+  type Settings,
+} from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -29,12 +35,14 @@ export async function collectSettingsSnapshot(
   const workspaceState = useWorkspaceStore.getState();
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
-  const [backendCwds, claudeSessionIds] =
+  const codexMaxAge = settingsState.codex?.sessionMaxAgeHours;
+  const [backendCwds, claudeSessionIds, codexSessionIds] =
     options.includeRuntimeStructuralState === false
-      ? [{}, {}]
+      ? [{}, {}, {}]
       : await Promise.all([
           getTerminalCwds().catch(() => ({}) as Record<string, string>),
           getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string>),
+          getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string>),
         ]);
 
   return {
@@ -121,7 +129,14 @@ export async function collectSettingsSnapshot(
           const cwd = backendCwds[terminalId];
           if (cwd) viewExtra.lastCwd = cwd;
           const claudeSession = claudeSessionIds[terminalId];
-          if (claudeSession) viewExtra.lastClaudeSession = claudeSession;
+          const codexSession = codexSessionIds[terminalId];
+          if (claudeSession) {
+            viewExtra.lastClaudeSession = claudeSession;
+            viewExtra.lastCodexSession = undefined;
+          } else if (codexSession) {
+            viewExtra.lastCodexSession = codexSession;
+            viewExtra.lastClaudeSession = undefined;
+          }
         }
         return {
           id: pane.id,
@@ -171,7 +186,14 @@ export async function collectSettingsSnapshot(
           const cwd = backendCwds[terminalId];
           if (cwd) viewExtra.lastCwd = cwd;
           const claudeSession = claudeSessionIds[terminalId];
-          if (claudeSession) viewExtra.lastClaudeSession = claudeSession;
+          const codexSession = codexSessionIds[terminalId];
+          if (claudeSession) {
+            viewExtra.lastClaudeSession = claudeSession;
+            viewExtra.lastCodexSession = undefined;
+          } else if (codexSession) {
+            viewExtra.lastCodexSession = codexSession;
+            viewExtra.lastClaudeSession = undefined;
+          }
         }
         return {
           id: pane.id,

@@ -2918,7 +2918,71 @@ function CodexSection() {
     <div>
       <SectionTitle>{t("codex.title")}</SectionTitle>
 
-      <div style={cardStyle} className="p-4">
+      <SubGroup title={t("codex.groupSessionRestore")}>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("codex.restoreSession")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("codex.restoreSessionDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1 pt-1">
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                data-testid="codex-restore-session-toggle"
+                type="checkbox"
+                checked={codex.restoreSession}
+                onChange={(e) => updateCodex({ restoreSession: e.target.checked })}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {codex.restoreSession ? t("common.enabled") : t("common.disabled")}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("codex.sessionMaxAge")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("codex.sessionMaxAgeDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <FocusInput
+                data-testid="codex-session-max-age-input"
+                className={inputCls}
+                type="number"
+                min={0}
+                style={{ width: 80 }}
+                value={codex.sessionMaxAgeHours}
+                onChange={(e) => {
+                  const parsed = parseInt(e.target.value, 10);
+                  updateCodex({
+                    sessionMaxAgeHours: Number.isNaN(parsed) ? 24 : Math.max(0, parsed),
+                  });
+                }}
+              />
+              <span className="text-[13px]" style={{ color: "var(--text-secondary)" }}>
+                {t("common.hours")}
+              </span>
+            </div>
+          </div>
+        </div>
+      </SubGroup>
+
+      <SubGroup title={t("codex.groupStatusMessage")}>
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
@@ -2996,7 +3060,7 @@ function CodexSection() {
             </div>
           </div>
         )}
-      </div>
+      </SubGroup>
     </div>
   );
 }

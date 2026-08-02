@@ -442,6 +442,12 @@
     },
     "codex": {
       "title": "Codex",
+      "groupSessionRestore": "세션 복원",
+      "groupStatusMessage": "상태 메시지",
+      "restoreSession": "세션 복원",
+      "restoreSessionDesc": "앱 재시작 시 Codex 세션을 자동 복원",
+      "sessionMaxAge": "세션 유효 기간",
+      "sessionMaxAgeDesc": "이 시간보다 오래된 rollout은 무시 (0 = 무제한)",
       "statusMessageMode": "상태 메시지 모드",
       "statusMessageModeDesc": "워크스페이스 목록에서 Codex 상태 텍스트 표시 방식",
       "modeTitle": "Title만 (기본)",
