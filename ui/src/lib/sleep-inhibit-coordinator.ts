@@ -28,9 +28,15 @@ let confirmed: boolean | null = null;
 let refused: boolean | null = null;
 let inFlight = false;
 /**
- * Bumped every time `desired` is set. A request that started under an older
- * generation may not record a hold-back: the caller has moved on, and holding a
- * value back on the strength of a stale failure would block it for good.
+ * Bumped when `desired` actually moves, or when a caller goes away. A request
+ * that started under an older generation may not record a hold-back: the caller
+ * has moved on, and holding a value back on the strength of a stale failure
+ * would block it for good.
+ *
+ * Only on a real change. `whenBusy` re-derives the same value on every output
+ * event, so bumping per call would make every rejection look superseded — the
+ * hold-back would never be recorded and `pump()` would re-send the same doomed
+ * request for as long as the terminals keep talking.
  */
 let intent = 0;
 /** A release that must be attempted whatever the dedupe would say. */
@@ -124,8 +130,11 @@ export function requestSleepInhibit(next: boolean): void {
   // Somebody wants something again, so the departing caller's last-chance
   // release is moot — a remount must not be undone by the unmount before it.
   releasePending = false;
-  desired = next;
-  intent += 1;
+  // A repeat of the value already wanted is not a new intent — see `intent`.
+  if (desired !== next) {
+    desired = next;
+    intent += 1;
+  }
   pump();
 }
 

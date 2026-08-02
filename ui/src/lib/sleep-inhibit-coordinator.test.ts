@@ -75,6 +75,26 @@ describe("sleep inhibit coordinator", () => {
     expect(useSleepInhibitStore.getState().failed).toBe(true);
   });
 
+  it("does not spin when the same value is re-requested while a call is failing", async () => {
+    // `whenBusy` re-derives the same `true` on every output event. Counting each
+    // repeat as a new intent made the eventual rejection look superseded, so
+    // nothing was held back and the queue re-sent the same doomed request — one
+    // `systemd-inhibit` spawn and one warning per output event.
+    const enable = deferred<boolean>();
+    setSleepInhibit.mockReturnValueOnce(enable.promise);
+    setSleepInhibit.mockRejectedValue(new Error("no systemd-inhibit"));
+
+    requestSleepInhibit(true);
+    for (let i = 0; i < 5; i += 1) requestSleepInhibit(true);
+    expect(sent()).toEqual([true]);
+
+    enable.reject(new Error("no systemd-inhibit"));
+    for (let i = 0; i < 10; i += 1) await flush();
+
+    expect(sent()).toEqual([true]);
+    expect(useSleepInhibitStore.getState().failed).toBe(true);
+  });
+
   it("stops holding a refused value back once something else is wanted", async () => {
     // The hold-back is per-value. Leaving it set after the answer moved on
     // would block that value for the rest of the session.
