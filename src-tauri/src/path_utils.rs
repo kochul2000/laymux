@@ -318,10 +318,13 @@ pub fn find_wsl_distro(state: &AppState, source_id: &str) -> Option<String> {
 /// Detect the default WSL distro name (cached per-call; fast because wsl.exe is local).
 #[cfg(windows)]
 pub fn get_default_wsl_distro() -> Option<String> {
-    let output = crate::process::headless_command("wsl.exe")
-        .args(["--list", "--quiet"])
-        .output()
-        .ok()?;
+    let mut command = crate::process::headless_command("wsl.exe");
+    command.args(["--list", "--quiet"]);
+    let output = crate::process::output_with_timeout(
+        &mut command,
+        crate::constants::WSL_AGENT_PROBE_TIMEOUT,
+    )
+    .ok()?;
     // wsl.exe outputs UTF-16LE — decode it properly
     let text = if output.stdout.len() >= 2 && output.stdout[0] == 0xFF && output.stdout[1] == 0xFE {
         // UTF-16LE with BOM

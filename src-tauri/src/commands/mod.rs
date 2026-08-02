@@ -16,6 +16,7 @@ mod terminal_output_surface;
 mod terminal_teardown;
 mod usage;
 mod viewer_startup;
+mod wsl_agent_session;
 
 pub use crate::cloud::commands::*;
 pub use archive_listing::*;

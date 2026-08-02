@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -180,6 +181,20 @@ fn find_rollout_by_session_id(dir: &Path, session_id: &str, cutoff: Option<u128>
         .any(|path| parse_rollout_header(&path, cutoff, session_id))
 }
 
+pub(super) fn find_session_from_rollout_paths(
+    paths: &[PathBuf],
+    max_age_hours: Option<u64>,
+) -> Option<String> {
+    let cutoff = age_cutoff(max_age_hours);
+    let sessions: HashSet<String> = paths
+        .iter()
+        .filter_map(|path| parse_rollout_session_id(path, cutoff))
+        .collect();
+    (sessions.len() == 1)
+        .then(|| sessions.into_iter().next())
+        .flatten()
+}
+
 fn collect_rollout_paths(dir: &Path, depth: u8, session_id: &str, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -207,36 +222,35 @@ fn collect_rollout_paths(dir: &Path, depth: u8, session_id: &str, paths: &mut Ve
 }
 
 fn parse_rollout_header(path: &Path, cutoff: Option<u128>, expected_id: &str) -> bool {
-    let Some(modified_at) = std::fs::metadata(path)
+    parse_rollout_session_id(path, cutoff).as_deref() == Some(expected_id)
+}
+
+fn parse_rollout_session_id(path: &Path, cutoff: Option<u128>) -> Option<String> {
+    let modified_at = std::fs::metadata(path)
         .ok()
         .and_then(|metadata| metadata.modified().ok())
         .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_nanos())
-    else {
-        return false;
-    };
+        .map(|duration| duration.as_nanos())?;
     if cutoff.is_some_and(|minimum| modified_at < minimum) {
-        return false;
+        return None;
     }
 
     let Ok(file) = std::fs::File::open(path) else {
-        return false;
+        return None;
     };
     let mut header = String::new();
     let mut limited = std::io::BufReader::new(file).take((CODEX_SESSION_META_MAX_BYTES + 1) as u64);
     if limited.read_line(&mut header).is_err() || header.len() > CODEX_SESSION_META_MAX_BYTES {
-        return false;
+        return None;
     }
 
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&header) else {
-        return false;
+        return None;
     };
     if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
-        return false;
+        return None;
     }
-    let Some(payload) = value.get("payload") else {
-        return false;
-    };
+    let payload = value.get("payload")?;
     let is_subagent = payload
         .get("parent_thread_id")
         .is_some_and(|parent| !parent.is_null())
@@ -254,10 +268,9 @@ fn parse_rollout_header(path: &Path, cutoff: Option<u128>, expected_id: &str) ->
         .get("cwd")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|cwd| !cwd.is_empty());
-    payload.get("id").and_then(serde_json::Value::as_str) == Some(expected_id)
-        && has_cwd
-        && !is_subagent
-        && !is_non_interactive_exec
+    let session_id = payload.get("id").and_then(serde_json::Value::as_str)?;
+    (is_valid_session_id(session_id) && has_cwd && !is_subagent && !is_non_interactive_exec)
+        .then(|| session_id.to_string())
 }
 
 #[cfg(test)]
@@ -357,6 +370,32 @@ mod tests {
         assert_eq!(
             store.find_session_for_pid(105, None).as_deref(),
             Some(SESSION_A)
+        );
+    }
+
+    #[test]
+    fn open_rollout_paths_select_the_unique_top_level_thread() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+        let subagent = write_rollout(
+            temp.path(),
+            SESSION_B,
+            &format!(",\"parent_thread_id\":\"{SESSION_A}\",\"thread_source\":\"subagent\""),
+        );
+        assert_eq!(
+            find_session_from_rollout_paths(&[subagent, parent], None).as_deref(),
+            Some(SESSION_A)
+        );
+    }
+
+    #[test]
+    fn multiple_open_top_level_rollouts_fail_closed() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = write_rollout(temp.path(), SESSION_A, ",\"source\":\"cli\"");
+        let second = write_rollout(temp.path(), SESSION_B, ",\"source\":\"cli\"");
+        assert_eq!(
+            find_session_from_rollout_paths(&[first, second], None),
+            None
         );
     }
 
