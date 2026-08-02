@@ -167,9 +167,21 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/codex",
-        description: "Codex 상태 메시지 표시 설정입니다.",
+        description: "Codex 세션 복원과 상태 메시지 표시 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/codex/restoreSession",
+        description: "앱 시작 시 저장된 Codex 세션 ID를 codex resume로 복원할지 정합니다. 다음 터미널 생성부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/codex/sessionMaxAgeHours",
+        description: "Codex 세션 복원 후보 rollout의 최대 수정 경과 시간입니다. 0은 나이 필터를 끕니다. 다음 세션 수집부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
         path: "/exit",

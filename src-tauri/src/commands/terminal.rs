@@ -172,9 +172,11 @@ pub fn create_terminal_session(
         String::new()
     };
 
-    // The unstructured override is reserved for Claude session restoration.
-    let validated_override =
-        startup_command_override.filter(|cmd| super::is_valid_startup_command_override(cmd));
+    // The unstructured override is reserved for exact Claude/Codex resume commands.
+    let validated_override = startup_command_override.filter(|cmd| {
+        super::is_valid_claude_startup_command_override(cmd)
+            || super::is_valid_codex_startup_command_override(cmd)
+    });
     let startup_command = if !viewer_startup.is_empty() {
         viewer_startup
     } else {

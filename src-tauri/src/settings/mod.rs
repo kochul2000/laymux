@@ -404,6 +404,8 @@ mod tests {
     fn codex_settings_round_trip() {
         let json = r#"{
           "codex": {
+            "restoreSession": false,
+            "sessionMaxAgeHours": 72,
             "statusMessageMode": "title-bullet",
             "statusMessageDelimiter": " | "
           }
@@ -413,11 +415,38 @@ mod tests {
             settings.codex.status_message_mode,
             CodexStatusMessageMode::TitleBullet
         );
+        assert!(!settings.codex.restore_session);
+        assert_eq!(settings.codex.session_max_age_hours, 72);
         assert_eq!(settings.codex.status_message_delimiter, " | ");
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"codex\""));
+        assert!(serialized.contains("\"restoreSession\":false"));
+        assert!(serialized.contains("\"sessionMaxAgeHours\":72"));
         assert!(serialized.contains("\"statusMessageMode\":\"title-bullet\""));
+    }
+
+    #[test]
+    fn codex_session_restore_defaults_for_existing_settings() {
+        let settings: Settings = serde_json::from_str(r#"{ "codex": {} }"#).unwrap();
+        assert!(settings.codex.restore_session);
+        assert_eq!(settings.codex.session_max_age_hours, 24);
+    }
+
+    #[test]
+    fn codex_metadata_distinguishes_live_display_from_next_use_restore() {
+        assert_eq!(
+            contract::metadata_for_path("/codex/statusMessageMode").apply_mode,
+            contract::ApplyMode::Live
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/restoreSession").apply_mode,
+            contract::ApplyMode::NextUse
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/sessionMaxAgeHours").apply_mode,
+            contract::ApplyMode::NextUse
+        );
     }
 
     #[test]

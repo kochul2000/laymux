@@ -70,6 +70,7 @@ function TerminalViewWithSyncCwd({
   const instanceId = getInstanceId("TerminalView", paneId || fallbackId);
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
   const lastClaudeSession = (viewConfig?.lastClaudeSession as string) ?? undefined;
+  const lastCodexSession = (viewConfig?.lastCodexSession as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
   const profileSyncCwd = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
@@ -98,6 +99,7 @@ function TerminalViewWithSyncCwd({
       onKeyboardActivity={onKeyboardActivity}
       lastCwd={lastCwd}
       lastClaudeSession={lastClaudeSession}
+      lastCodexSession={lastCodexSession}
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}

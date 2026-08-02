@@ -84,16 +84,15 @@ struct ClaudeSessionFile {
 ///
 /// The only allowed form is `claude --resume <valid_session_id>`. External
 /// viewers use a structured IPC argument and are validated separately.
-pub(crate) fn is_valid_startup_command_override(cmd: &str) -> bool {
+pub(crate) fn is_valid_claude_startup_command_override(cmd: &str) -> bool {
     cmd.strip_prefix("claude --resume ")
         .is_some_and(is_valid_session_id)
 }
 
-/// Validate that a Claude session ID contains only safe characters
-/// (alphanumeric, hyphens, underscores). Prevents command injection when
-/// the ID is interpolated into `claude --resume <id>`.
-fn is_valid_session_id(id: &str) -> bool {
-    !id.is_empty()
+/// Validate that an agent session ID starts with an alphanumeric character and
+/// contains only alphanumerics, hyphens, or underscores. Shared with Codex.
+pub(crate) fn is_valid_session_id(id: &str) -> bool {
+    id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -329,46 +328,53 @@ mod tests {
         assert!(!is_valid_session_id("id`whoami`"));
         assert!(!is_valid_session_id("hello world"));
         assert!(!is_valid_session_id("id\nnewline"));
+        assert!(!is_valid_session_id("--last"));
     }
 
     // -- Startup command override validation tests --
 
     #[test]
     fn startup_command_override_accepts_valid_resume() {
-        assert!(is_valid_startup_command_override("claude --resume abc-123"));
-        assert!(is_valid_startup_command_override(
+        assert!(is_valid_claude_startup_command_override(
+            "claude --resume abc-123"
+        ));
+        assert!(is_valid_claude_startup_command_override(
             "claude --resume session_v2"
         ));
-        assert!(is_valid_startup_command_override("claude --resume A1B2"));
+        assert!(is_valid_claude_startup_command_override(
+            "claude --resume A1B2"
+        ));
     }
 
     #[test]
     fn startup_command_override_rejects_arbitrary_commands() {
-        assert!(!is_valid_startup_command_override("rm -rf /"));
-        assert!(!is_valid_startup_command_override("echo pwned"));
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override("rm -rf /"));
+        assert!(!is_valid_claude_startup_command_override("echo pwned"));
+        assert!(!is_valid_claude_startup_command_override(
             "claude --resume bad; rm -rf /"
         ));
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override(
             "claude --resume $(whoami)"
         ));
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override(
             "claude --resume id && echo x"
         ));
-        assert!(!is_valid_startup_command_override(""));
-        assert!(!is_valid_startup_command_override("claude --resume "));
-        assert!(!is_valid_startup_command_override("claude --resume"));
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override(""));
+        assert!(!is_valid_claude_startup_command_override(
+            "claude --resume "
+        ));
+        assert!(!is_valid_claude_startup_command_override("claude --resume"));
+        assert!(!is_valid_claude_startup_command_override(
             "not-claude --resume abc"
         ));
     }
 
     #[test]
     fn startup_command_override_rejects_raw_viewer_commands() {
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override(
             "vi '/home/user/file.txt'"
         ));
-        assert!(!is_valid_startup_command_override(
+        assert!(!is_valid_claude_startup_command_override(
             "notepad 'C:\\Users\\me\\README.md'"
         ));
     }

@@ -9160,6 +9160,66 @@ describe("TerminalView", () => {
       });
     });
 
+    it("passes codex resume when lastCodexSession is set", async () => {
+      render(
+        <TerminalView
+          instanceId="t-codex-restore"
+          paneId="pane-codex"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+          lastCodexSession="019fc0d8-a862-7241-a0f5-b6a66ef4ef6f"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-codex-restore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          "/home/user/project",
+          "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+        );
+      });
+    });
+
+    it("does not restore a Codex session when the setting is disabled", async () => {
+      useSettingsStore.setState({
+        codex: {
+          ...useSettingsStore.getState().codex,
+          restoreSession: false,
+        },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-codex-no-restore"
+          paneId="pane-codex-no"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCodexSession="019fc0d8-a862-7241-a0f5-b6a66ef4ef6f"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-codex-no-restore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
     it("passes a structured external viewer request to session creation", async () => {
       const viewerStartup = { command: "vi", path: "C:\\Users\\me\\README.md" };
       render(

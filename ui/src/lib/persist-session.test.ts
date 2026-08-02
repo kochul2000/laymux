@@ -21,6 +21,7 @@ vi.mock("@/lib/tauri-api", () => ({
   cleanTerminalOutputCache: vi.fn().mockResolvedValue(0),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
+  getCodexSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/terminal-serialize-registry", () => ({
@@ -41,6 +42,7 @@ import {
   cleanTerminalOutputCache,
   getTerminalCwds,
   getClaudeSessionIds,
+  getCodexSessionIds,
 } from "@/lib/tauri-api";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -434,6 +436,7 @@ describe("persistSession", () => {
     dockState.setDockPaneView("left", dockPaneId, {
       type: "TerminalView",
       profile: "WSL",
+      lastCodexSession: "stale-codex-session",
     });
 
     vi.mocked(getClaudeSessionIds).mockResolvedValue({
@@ -445,6 +448,79 @@ describe("persistSession", () => {
     const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
     const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
     expect(leftDock.panes[0].view.lastClaudeSession).toBe("dock-session-xyz");
+    expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("injects lastCodexSession into workspace TerminalView panes from backend", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, { type: "TerminalView", profile: "WSL" });
+
+    vi.mocked(getCodexSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+    });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(savedArg.workspaces[0].panes[0].view.lastCodexSession).toBe(
+      "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+    );
+    expect(getCodexSessionIds).toHaveBeenCalledWith(24);
+  });
+
+  it("removes a stale Claude session when a pane is now running Codex", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    vi.mocked(getCodexSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastCodexSession).toBe("019fc0d8-a862-7241-a0f5-b6a66ef4ef6f");
+    expect(savedView.lastClaudeSession).toBeUndefined();
+  });
+
+  it("removes a stale Codex session when a pane is now running Claude", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "current-claude-session",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("current-claude-session");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("skips Codex session collection and clears stored IDs when restore is disabled", async () => {
+    const wsState = useWorkspaceStore.getState();
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    useSettingsStore.getState().setCodex({ restoreSession: false });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(getCodexSessionIds).not.toHaveBeenCalled();
+    expect(savedView).not.toHaveProperty("lastCodexSession");
   });
 
   it("does not inject lastClaudeSession for non-TerminalView panes", async () => {

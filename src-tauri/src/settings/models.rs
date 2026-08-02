@@ -478,6 +478,13 @@ pub enum CodexStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
+    /// Whether to restore Codex CLI sessions on app restart (default: true).
+    #[serde(default = "default_restore_session")]
+    pub restore_session: bool,
+    /// Maximum age (in hours) for Codex rollout files to be considered valid.
+    /// Set to 0 to disable the age filter.
+    #[serde(default = "default_session_max_age_hours")]
+    pub session_max_age_hours: u64,
     /// Status message display mode (default: "bullet-title").
     #[serde(default)]
     pub status_message_mode: CodexStatusMessageMode,
@@ -489,6 +496,8 @@ pub struct CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
+            restore_session: true,
+            session_max_age_hours: 24,
             status_message_mode: CodexStatusMessageMode::default(),
             status_message_delimiter: default_codex_status_message_delimiter(),
         }
