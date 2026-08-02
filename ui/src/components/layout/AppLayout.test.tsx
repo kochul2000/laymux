@@ -90,7 +90,7 @@ describe("AppLayout", () => {
     });
     vi.mocked(setSleepInhibit).mockClear();
     act(() => {
-      useSettingsStore.getState().setPower({ sleepPrevention: "always" });
+      useSettingsStore.getState().setPower({ keepAwake: true });
     });
     expect(vi.mocked(setSleepInhibit)).toHaveBeenCalledWith(true);
   });

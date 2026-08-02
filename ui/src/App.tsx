@@ -129,7 +129,7 @@ export function App() {
             loadResult={loadStatus.result}
             onDismiss={() => {
               // Recovery held settings writes back until the user saw the dropped
-              // paths. Acknowledging the modal releases them (ADR-0116).
+              // paths. Acknowledging the modal releases them (ADR-0117).
               if (recoveryStatus === "recovered") setBlockPersist(false);
               setRecoveryDismissed(true);
             }}

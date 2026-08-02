@@ -441,7 +441,7 @@ export type SettingsLoadResult =
   | { status: "ok"; settings: Settings; warnings: ValidationWarning[] }
   | { status: "repaired"; settings: Settings; warnings: ValidationWarning[] }
   /**
-   * Type-error paths were dropped in favour of their defaults (ADR-0116).
+   * Type-error paths were dropped in favour of their defaults (ADR-0117).
    * User-authored values were lost, so settings writes stay blocked until the
    * user acknowledges the listed paths.
    *

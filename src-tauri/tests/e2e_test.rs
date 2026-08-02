@@ -204,7 +204,8 @@ fn settings_round_trip_with_full_config() {
         dock: Default::default(),
         notifications: Default::default(),
         power: PowerSettings {
-            sleep_prevention: "whenBusy".into(),
+            keep_awake: false,
+            keep_awake_when_busy: true,
         },
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
@@ -264,7 +265,7 @@ fn settings_round_trip_with_full_config() {
     assert_eq!(settings, loaded);
     // Spot-check a non-default value: a section left at its default would round
     // trip even if it never reached the file at all.
-    assert_eq!(loaded.power.sleep_prevention, "whenBusy");
+    assert!(loaded.power.keep_awake_when_busy);
 }
 
 #[test]
@@ -2369,7 +2370,7 @@ fn settings_load_result_round_trip_repaired() {
 
 #[test]
 fn settings_load_result_round_trip_recovered() {
-    // issue #701 / ADR-0116: the recovered status is its own contract entry —
+    // issue #701 / ADR-0117: the recovered status is its own contract entry —
     // the frontend keys settings-write blocking off it.
     let result = SettingsLoadResult::Recovered {
         settings: Settings::default(),

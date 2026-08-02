@@ -605,7 +605,7 @@ describe("useSessionPersistence", () => {
     expect(overrides.getViewOverride("pane-dead")).toBeUndefined();
   });
 
-  // issue #701 / ADR-0116: a dropped type-error path means the in-memory
+  // issue #701 / ADR-0117: a dropped type-error path means the in-memory
   // settings no longer match the file, so writes stay blocked until the user
   // acknowledges the recovery modal — but the surviving settings still hydrate.
   it("blocks settings writes but still hydrates stores when status is recovered", async () => {

@@ -1,4 +1,4 @@
-# 0116. settings.json 타입 오류는 경로 단위로 드롭해 부분 복구한다
+# 0117. settings.json 타입 오류는 경로 단위로 드롭해 부분 복구한다
 
 - Status: Proposed
 - Date: 2026-08-02

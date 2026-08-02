@@ -340,11 +340,10 @@
       "dismissPaneFocus": "Pane 포커스 시 자동 해제",
       "dismissManual": "알림 클릭으로만 해제",
       "groupPower": "전원",
-      "sleepPrevention": "절전 방지",
-      "sleepPreventionDesc": "시스템이 절전 모드로 들어가지 않게 합니다. 화면 절전은 평소대로 동작합니다.",
-      "sleepPreventionOff": "끔 (OS 절전 허용)",
-      "sleepPreventionAlways": "항상 재우지 않기",
-      "sleepPreventionWhenBusy": "실행 중인 터미널이 있을 때만 재우지 않기"
+      "keepAwake": "항상 재우지 않기",
+      "keepAwakeDesc": "시스템이 절전 모드로 들어가지 않게 합니다. 상단 바 버튼과 같은 스위치입니다. 화면 절전은 평소대로 동작합니다.",
+      "keepAwakeWhenBusy": "실행 중일 때 재우지 않기",
+      "keepAwakeWhenBusyDesc": "실행 중인 터미널이 하나라도 있으면 시스템 절전을 막습니다. 모두 끝나면 다시 평소대로 잠듭니다."
     },
     "remote": {
       "title": "원격",

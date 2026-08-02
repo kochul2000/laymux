@@ -31,7 +31,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 
 ### 로딩 실패와 부분 복구
 
-`load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0116](../adr/0116-settings-type-error-partial-recovery.md)).
+`load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0117](../adr/0117-settings-type-error-partial-recovery.md)).
 
 | status | 언제 | settings 값 | 프론트 동작 |
 | --- | --- | --- | --- |
@@ -87,7 +87,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 **Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
 
-값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0116](../adr/0116-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
+값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0117](../adr/0117-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
 
 극단 비율을 넣어도 한 클래스가 무한정 밀리지 않는다. pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) turn 안에 반드시 한 turn 을 받는다. 기본값에서는 몫이 만드는 간격(hidden 최대 5 turn)이 늘 먼저 도달하므로 이 floor 는 극단 설정과 클래스 drain/재진입에서만 작동한다.
 
@@ -346,30 +346,33 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 ### 절전 방지(sleep prevention) 설정
 
-OS 절전 진입을 막는 정책이다(issue #727, [ADR-0114](../adr/0114-sleep-prevention-mode.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
+OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114-sleep-prevention-mode.md), [ADR-0116](../adr/0116-sleep-prevention-two-axes.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
 
 ```jsonc
 {
   "power": {
-    // "off"(기본) | "always" | "whenBusy"
-    "sleepPrevention": "off"
+    // 수동 스위치: 터미널 상태와 무관하게 재우지 않는다
+    "keepAwake": false,
+    // 정책: 실행 중인 터미널이 있을 때만 재우지 않는다
+    "keepAwakeWhenBusy": false
   }
 }
 ```
 
-- **모드 소유권**: `settings.power.sleepPrevention` 이 단일 진실원이다. 상단 바 토글 버튼(`sleep-prevention-btn`)과 Settings ▸ Interface ▸ Power 의 select 가 같은 필드를 읽고 쓴다. 버튼은 `off → always → whenBusy → off` 로 순환하며 클릭 후 `persistSession()` 으로 즉시 저장한다. applyMode 는 `live`.
-- **파생**: `shouldInhibitSleep(mode, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 모드와 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). busy 판정 `isTerminalWorking()`(`ui/src/lib/terminal-working.ts`)는 원시 필드를 다시 조합하지 않고 그 터미널의 `ActivityHandler.computeStatus()` 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다 — Claude local-agent 경로(#225)와 Codex 스피너는 `outputActive === false` 로도 모래시계를 띄우므로, 원시 필드 조합은 페인 표시와 어긋난다. `terminalActivity` 위젯도 같은 함수를 쓴다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
+- **두 축은 독립이다**(ADR-0116). `keepAwake` 는 세션 동안 뒤집는 수동 override 이고 `keepAwakeWhenBusy` 는 한 번 정하고 잊는 정책이다. 수명이 다르므로 컨트롤도 나눈다 — 상단 바 버튼(`sleep-prevention-btn`)은 `keepAwake` 만 토글하고 `keepAwake` 만 그린다. `keepAwakeWhenBusy` 는 Settings ▸ Interface ▸ Power 에만 있다(`keep-awake-when-busy-toggle`). 버튼 클릭은 `persistSession()` 으로 즉시 저장하며 두 필드 모두 applyMode 는 `live`.
+- **버튼은 백엔드의 `held` 를 그리지 않는다.** 자동 정책이 잡아 놓은 억제까지 그리면 사용자가 누르지 않은 상태가 보이고, 눌러도 그림이 안 바뀌는 순간이 생긴다. 아이콘은 달(off)/사선 그은 달(on) 두 상태뿐이며, 표시 축과 조작 축이 같다.
+- **파생**: `shouldInhibitSleep(axes, hasBusyTerminal)`(`ui/src/lib/sleep-prevention.ts`)이 두 축과 busy 상태를 하나의 boolean 으로 접는 유일한 지점이다(ADR-0005). 두 축이 독립이므로 판정은 `keepAwake || (keepAwakeWhenBusy && hasBusyTerminal)` OR 이다. busy 판정 `isTerminalWorking()`(`ui/src/lib/terminal-working.ts`)는 원시 필드를 다시 조합하지 않고 그 터미널의 `ActivityHandler.computeStatus()` 아이콘이 `STATUS_ICON_WORKING`(⏳)인지만 본다 — Claude local-agent 경로(#225)와 Codex 스피너는 `outputActive === false` 로도 모래시계를 띄우므로, 원시 필드 조합은 페인 표시와 어긋난다. `terminalActivity` 위젯도 같은 함수를 쓴다. 집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.
 - **적용**: `useSleepPrevention()`(AppLayout 에서 1회 마운트)이 두 스토어를 **구독**해(셀렉터가 아니다 — 호스트 컴포넌트가 이 값을 렌더하지 않으므로 busy 플래그 토글이 트리를 재조정하면 안 된다) 파생값을 `requestSleepInhibit()` 로 넘긴다. 훅은 파생만 하고, 백엔드와의 대화는 전부 `lib/sleep-inhibit-coordinator.ts` 가 소유한다.
 - **커맨드 대화는 모듈 단일 coordinator 다.** in-flight 여부·확정 상태·보류 값은 *프로세스*의 상태이지 마운트된 React 트리의 상태가 아니다. hook ref 에 두면 재마운트가 두 번째 큐를 만들어 옛 release 와 새 request 가 서로 다른 큐에서 겹친다. 규칙: 동시에 하나만 in flight(커맨드가 async 라 겹치면 순서가 뒤집힌다), 그 사이 오간 중간 값은 접는다(latest wins), 거절된 값은 원하는 값이 바뀔 때까지 보류(항상 실패하는 머신에서 스핀 방지). 보류 판정을 무효화하는 "세대"(intent)는 **희망값이 실제로 바뀌거나 호출자가 떠날 때만** 올린다 — `whenBusy` 는 출력 이벤트마다 같은 값을 다시 넘기므로, 호출마다 올리면 모든 거절이 superseded 로 보여 보류가 기록되지 않고 같은 요청이 무한 재전송된다.
 - **실패는 "모름"이지 "완료"가 아니다.** 실패한 요청을 적용된 것으로 확정하면, 해제에 실패한 뒤 마지막 release 까지 중복으로 보고 건너뛰어 OS 세션 내내 억제가 남는다. 실패하면 확정 상태를 `null` 로 둔다. 커맨드가 요청과 다른 상태를 돌려줘도 같은 규칙으로 보류하고 UI 에 실패로 표시한다.
 - **release 는 dedupe 를 무시하는 별도 경로다**(`releaseSleepInhibit()`). 마지막으로 놓을 기회이므로 보류를 무시하고, 자기 자신의 실패로 취소되지 않으며, 같은 큐를 통과해 in-flight 요청을 추월하지 않는다. 다만 재시도는 유한하다(3회) — 놓지 못하는 머신에서 무한 루프가 되면 안 된다. 백엔드가 이미 해제를 확정한 상태면 아무것도 보내지 않는다.
-- **표시 상태는 백엔드 응답이 소유한다.** `useSleepInhibitStore`(`active`/`failed`)에 커맨드 결과를 기록하고 상단 바 버튼이 그것을 읽는다. 모드에서 파생하면 억제 실패 후에도 "지금 재우지 않는 중"이라고 표시하게 된다.
+- **실패는 축이 아니라 고장이다.** 커맨드 결과는 `useSleepInhibitStore`(`active`/`failed`)에 기록한다. 버튼은 그중 `failed` 만 읽어, 원인이 수동이든 정책이든 경고색(`--claude`)과 tooltip 사유를 올린다 — 감추면 `systemd-inhibit` 이 없는 머신에서 정책이 세션 내내 조용히 실패한다. `active` 는 coordinator 의 상태 조정용이며 UI 는 읽지 않는다(ADR-0116).
 - **백엔드가 스스로 바꾼 상태는 이벤트로 되돌아온다.** watchdog 이 재획득하거나 잃는 전이는 요청이 없으므로 프론트의 dedupe 로는 영영 알 수 없다. `SleepInhibitor` 의 sink 가 `sleep-inhibit-changed`(`{active, satisfied}`)를 발행하고, 훅이 그것을 `observeSleepInhibitState()` 로 coordinator·표시 상태에 반영한다. 관측 결과가 원하는 값과 다르면 일반 경로가 그대로 재요청한다.
 - **백엔드**: `AppState::sleep_inhibitor`(`src-tauri/src/power/mod.rs`, 플랫폼 구현은 `power/{windows,linux,unsupported}.rs`)가 프로세스 전체에서 유일한 억제 소유자다. 멱등이며 상태가 실제로 바뀔 때만 OS 를 건드린다. `set_sleep_inhibit` 는 async 커맨드로 `spawn_blocking` 에서 돈다 — Linux 획득이 짧게 블로킹하기 때문이다.
   - **Windows**: 전용 스레드에서 `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`.
   - **Linux**: `systemd-inhibit --what=idle:sleep --mode=block ... cat` 자식 + laymux 가 쥔 stdin 파이프(프로세스가 죽으면 EOF 로 자동 해제). `systemd-inhibit` 은 inhibit 호출이 실패해도 exec 자체는 성공하고 곧바로 종료하므로, spawn 후 300ms 동안 `try_wait()` 로 지켜본 뒤에야 lock 을 믿는다. stderr 는 전용 리더 스레드가 상한(4KiB)까지 계속 비운다 — 안 비우면 오래 사는 자식이 파이프 포화로 막히고, 실패 시점에 읽으면 억제 mutex 안에서 블로킹된다. 해제는 stdin 을 닫고 300ms 안에 정상 종료를 확인한 뒤, 안 죽으면 kill 한다. kill·wait 실패는 삼키지 않고 전파해 `held` 를 유지한다 — 자식이 살아 있는데 해제됐다고 기록하면 아무도 다시 알아차리지 못한다. 잡고 있던 자식이 나중에 죽으면 `needs_reapply()` 가 감지한다. 위 시간·크기 값은 §14.4 에 따라 `constants.rs` 의 `SLEEP_INHIBIT_SPAWN_GRACE`·`SLEEP_INHIBIT_POLL_INTERVAL`·`SLEEP_INHIBIT_RELEASE_GRACE`·`SLEEP_INHIBIT_STDERR_CAPTURE_LIMIT` 에 있다.
   - **desired 와 held 는 별개다.** `set` 은 요청을 `desired` 에 기록하고 `reconcile()` 로 실제 상태를 맞춘다. `held` 는 성공한 `apply` 에서만 바뀌므로, 획득 실패는 "안 잡힘"으로 남아 UI 가 거짓말하지 않고 watchdog 이 재시도할 거리가 된다. 해제 실패도 "아직 잡힘"으로 남는다. 커맨드는 요청값이 아니라 `held` 를 돌려준다.
-  - **watchdog**: 프론트는 변화만 보고하므로 `always` 모드에서는 재확인 기회가 없다. 30초(`constants.rs` 의 `SLEEP_INHIBIT_WATCHDOG_INTERVAL`) 주기 스레드가 `reconcile()` 을 돌려 죽은 억제와 **한 번도 성공하지 못한 획득**을 모두 다시 시도한다(`SleepInhibitor::revalidate`). 앱 setup 에서 기동하고 `set_sleep_inhibit` 도 매번 `ensure_watchdog()` 을 호출한다(멱등) — 한쪽에만 묶으면 spawn 실패가 세션 내내 복구되지 않는다. 아무것도 원하지 않고 잡은 것도 없으면 no-op 이며, `Weak` 참조라 앱이 사라지면 스스로 끝난다.
+  - **watchdog**: 프론트는 변화만 보고하므로 `keepAwake` 를 켠 채 두면 재확인 기회가 없다. 30초(`constants.rs` 의 `SLEEP_INHIBIT_WATCHDOG_INTERVAL`) 주기 스레드가 `reconcile()` 을 돌려 죽은 억제와 **한 번도 성공하지 못한 획득**을 모두 다시 시도한다(`SleepInhibitor::revalidate`). 앱 setup 에서 기동하고 `set_sleep_inhibit` 도 매번 `ensure_watchdog()` 을 호출한다(멱등) — 한쪽에만 묶으면 spawn 실패가 세션 내내 복구되지 않는다. 아무것도 원하지 않고 잡은 것도 없으면 no-op 이며, `Weak` 참조라 앱이 사라지면 스스로 끝난다.
   - 그 외 플랫폼은 `enabled=true` 요청에 에러를 반환한다.
 
 ### 종료 시 동작(kill-on-exit) 설정

@@ -56,7 +56,7 @@ export function useSessionPersistence() {
         // Type-error paths were dropped, so the in-memory settings no longer match
         // the file. Hydrate normally but hold back every write until the user has
         // seen which paths were lost — the recovery modal releases the block
-        // (ADR-0116).
+        // (ADR-0117).
         if (loadResult.status === "recovered") {
           setBlockPersist(true);
         }
