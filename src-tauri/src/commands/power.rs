@@ -27,12 +27,5 @@ pub async fn set_sleep_inhibit(
 }
 
 pub fn set_sleep_inhibit_inner(enabled: bool, state: &AppState) -> Result<bool, AppError> {
-    let active = state.sleep_inhibitor.set(enabled)?;
-    if active {
-        // Nothing else calls in until the derived value changes, which in
-        // "always" mode is never — the watchdog is what notices an inhibitor
-        // that died in between.
-        state.sleep_inhibitor.ensure_watchdog();
-    }
-    Ok(active)
+    state.sleep_inhibitor.set(enabled)
 }

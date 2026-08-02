@@ -28,7 +28,8 @@
 - **집계 범위는 활성 워크스페이스가 아니라 전체 터미널이다.** 백그라운드 워크스페이스에서 도는 빌드야말로 절전으로 끊기면 안 되는 작업이다.
 - **파생은 순수 함수 `shouldInhibitSleep(mode, hasBusyTerminal)` 이 담당한다.** 프론트는 이 결과가 바뀔 때만 `set_sleep_inhibit(enabled)` 를 호출한다. 명령은 멱등이며 값이 같으면 OS 호출을 하지 않는다.
 - **요청은 직렬화한다.** 커맨드가 async 이므로 겹친 두 호출은 순서가 뒤집혀 OS 를 먼저 보낸 쪽 상태로 남길 수 있다. 프론트는 한 번에 하나만 in flight 로 두고, 그 사이 오간 중간 값은 접어 마지막 desired 만 이어서 보낸다.
-- **억제 생존은 백엔드가 스스로 확인한다.** 프론트는 *변화*만 보고하므로 `always` 모드에서는 다시 호출할 일이 영영 없다. `SleepInhibitor` 가 30초 주기 watchdog 으로 `needs_reapply()` 를 물어 죽은 억제를 다시 잡는다. watchdog 은 첫 획득 시에만 뜨고 `Weak` 로 앱 수명에 묶인다.
+- **억제 생존은 백엔드가 스스로 확인한다.** 프론트는 *변화*만 보고하므로 `always` 모드에서는 다시 호출할 일이 영영 없다. `SleepInhibitor` 가 30초 주기 watchdog 으로 `needs_reapply()` 를 물어 죽은 억제를 다시 잡는다. watchdog 은 앱 setup 에서 1회 기동하고(획득에 묶으면 spawn 실패를 재시도할 계기가 없다) `Weak` 로 앱 수명에 묶인다.
+- **표시하는 "지금 억제 중"은 백엔드 응답이지 사용자 의도가 아니다.** 실패한 요청도 성공처럼 보이면 UI 가 지켜준다고 말하는 동안 머신이 잠든다. 커맨드 결과를 별도 런타임 스토어(`useSleepInhibitStore`)에 기록하고 버튼은 그것만 읽는다. 실패는 "억제 안 됨"이 아니라 "모름"으로 취급해 다음 해제 시도를 중복으로 건너뛰지 않는다.
 - **Rust `power::SleepInhibitor` 가 프로세스 전체에서 유일한 억제 소유자다.** `AppState` 가 소유하고, 내부 뮤텍스는 자기 자신만 보호한다 — 다른 `AppState` 락을 잡은 채 취하지 않으므로 §14.3 락 순서에 참여하지 않는다.
 - **Windows**: 전용 워커 스레드가 `SetThreadExecutionState` 를 호출한다. 이 API 는 호출한 *스레드*에 상태를 매달고 그 스레드가 끝나면 상태도 사라지므로, Tauri 커맨드가 어느 워커 스레드에서 실행되는지에 억제 수명을 맡기지 않는다. 플래그는 `ES_CONTINUOUS | ES_SYSTEM_REQUIRED` 만 쓴다 — 시스템 절전만 막고 화면은 정상적으로 꺼지게 둔다.
 - **Linux**: `systemd-inhibit --what=idle:sleep --mode=block ... cat` 을 자식으로 띄우고 그 stdin 파이프의 쓰기 끝을 laymux 가 쥔다. 해제는 파이프를 닫고 자식을 kill 한다. laymux 가 강제 종료돼도 커널이 파이프를 닫아 `cat` 이 EOF 로 끝나고 inhibitor lock 이 자동 해제된다 — 크래시가 억제를 남기지 않는 것은 이 구조의 핵심이다.

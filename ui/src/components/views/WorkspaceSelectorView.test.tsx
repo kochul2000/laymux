@@ -1306,6 +1306,37 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
+  it("shows the hourglass for a shell streaming output before any command was captured", async () => {
+    // Sleep prevention counts this terminal as busy (ADR-0113). If the row
+    // stayed blank the UI would say idle while the machine is kept awake.
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            { id: "p1", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView", profile: "WSL" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+      label: "WSL",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", { outputActive: true });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("⏳");
+    });
+  });
+
   it("shows notification border on idle icon for command with no exit code and notification", async () => {
     useWorkspaceStore.setState({
       workspaces: [

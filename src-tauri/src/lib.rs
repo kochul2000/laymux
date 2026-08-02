@@ -175,6 +175,11 @@ pub fn run() {
                 }
             }
 
+            // Watch for a sleep inhibitor that dies behind our back (ADR-0113).
+            // Started here, not on the first acquire: the frontend only calls in
+            // on a change, so a spawn that failed then would never be retried.
+            app_state.sleep_inhibitor.ensure_watchdog();
+
             app.manage(app_state);
             Ok(())
         })

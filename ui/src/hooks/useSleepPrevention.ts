@@ -3,6 +3,7 @@ import { shouldInhibitSleep } from "@/lib/sleep-prevention";
 import { setSleepInhibit } from "@/lib/tauri-api";
 import { hasBusyTerminal } from "@/lib/terminal-busy";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
 /**
@@ -21,35 +22,49 @@ import { useTerminalStore } from "@/stores/terminal-store";
 export function useSleepPrevention(): void {
   /** What the OS should be in. */
   const desired = useRef<boolean | null>(null);
-  /** What was last handed to the backend, successfully or not. */
-  const applied = useRef<boolean | null>(null);
+  /** What the backend confirmed. `null` means unknown — assume nothing. */
+  const confirmed = useRef<boolean | null>(null);
+  /**
+   * A value the backend just refused. Re-sending it immediately would spin on a
+   * machine that always refuses, so it is held back until the answer changes.
+   */
+  const refused = useRef<boolean | null>(null);
   const inFlight = useRef(false);
 
   useEffect(() => {
-    /** Drive `applied` towards `desired`, one call at a time. */
+    const report = useSleepInhibitStore.getState();
+
+    /** Drive the backend towards `desired`, one call at a time. */
     const pump = () => {
       if (inFlight.current) return;
       const want = desired.current;
-      if (want === null || want === applied.current) return;
+      if (want === null || want === confirmed.current || want === refused.current) return;
 
       inFlight.current = true;
-      applied.current = want;
       void setSleepInhibit(want)
+        .then((active) => {
+          confirmed.current = active;
+          report.reportSuccess(active);
+          // The backend answers with the state actually in effect. If that is
+          // not what was asked for, asking again would just get the same answer
+          // — hold the value back like a refusal instead of spinning on it.
+          refused.current = active === want ? null : want;
+        })
         .catch((error: unknown) => {
           // The mode is the user's choice and stays as configured — a machine
-          // that cannot inhibit sleep (no systemd-inhibit, unsupported
-          // platform) should not silently rewrite their settings.
-          //
-          // The attempt still counts as applied. Clearing it here would make
-          // the pump below immediately re-send the same value, and a backend
-          // that always fails would spin. The next *different* value is sent
-          // normally, which is the only retry that can succeed anyway.
+          // that cannot inhibit sleep should not silently rewrite their
+          // settings. What the OS is doing is now unknown, so nothing may be
+          // skipped as a duplicate later; in particular the release on unmount
+          // must still be attempted.
+          confirmed.current = null;
+          refused.current = want;
+          report.reportFailure();
           console.warn("[sleep-prevention] failed to update inhibitor", error);
         })
         .finally(() => {
           inFlight.current = false;
-          // Intermediate values that arrived mid-flight are collapsed: only the
-          // latest `desired` is worth another round trip.
+          // Values that came and went mid-flight are collapsed: only where the
+          // user ended up is worth another round trip.
           pump();
         });
     };
@@ -74,10 +89,12 @@ export function useSleepPrevention(): void {
     return () => {
       unsubscribeSettings();
       unsubscribeTerminals();
-      // Release on unmount so a reloaded WebView never leaves it held. This
-      // goes through the same queue, so it cannot overtake a call still in
-      // flight.
+      // Release on unmount so a reloaded WebView never leaves it held. The
+      // refusal hold-back is dropped here: this is the last chance to let go,
+      // and it goes through the same queue so it cannot overtake a call still
+      // in flight.
       desired.current = false;
+      refused.current = null;
       pump();
     };
   }, []);

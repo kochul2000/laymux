@@ -9,6 +9,7 @@ vi.mock("@/lib/tauri-api", () => ({
 
 import { useSleepPrevention } from "./useSleepPrevention";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useSleepInhibitStore } from "@/stores/sleep-inhibit-store";
 import { useTerminalStore } from "@/stores/terminal-store";
 
 function registerBusyTerminal(id: string) {
@@ -50,9 +51,11 @@ async function mounted() {
 describe("useSleepPrevention", () => {
   beforeEach(() => {
     setSleepInhibit.mockReset();
-    setSleepInhibit.mockResolvedValue(true);
+    // The real command answers with the state actually in effect.
+    setSleepInhibit.mockImplementation((enabled) => Promise.resolve(enabled));
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useTerminalStore.setState(useTerminalStore.getInitialState());
+    useSleepInhibitStore.setState(useSleepInhibitStore.getInitialState());
   });
 
   it("reconciles the backend on mount", () => {
@@ -219,6 +222,43 @@ describe("useSleepPrevention", () => {
     act(() => registerBusyTerminal("t1"));
     await flush();
     expect(setSleepInhibit).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("still tries to release on unmount after a failed disable", async () => {
+    // The disable failed, so the backend may well still be holding. Treating
+    // the failed attempt as "already off" would strand the machine awake for
+    // the rest of the OS session.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { unmount } = await mounted();
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
+    await flush();
+
+    setSleepInhibit.mockRejectedValueOnce(new Error("busy"));
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "off" }));
+    await flush();
+    setSleepInhibit.mockClear();
+
+    unmount();
+    await flush();
+    expect(setSleepInhibit).toHaveBeenCalledExactlyOnceWith(false);
+    warn.mockRestore();
+  });
+
+  it("publishes what the backend confirmed, and flags what it refused", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await mounted();
+
+    setSleepInhibit.mockResolvedValueOnce(true);
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "always" }));
+    await flush();
+    expect(useSleepInhibitStore.getState()).toMatchObject({ active: true, failed: false });
+
+    setSleepInhibit.mockRejectedValueOnce(new Error("no systemd-inhibit"));
+    act(() => useSettingsStore.getState().setPower({ sleepPrevention: "off" }));
+    await flush();
+    // Still reported as held: the release failed, so nothing says it let go.
+    expect(useSleepInhibitStore.getState()).toMatchObject({ active: true, failed: true });
     warn.mockRestore();
   });
 

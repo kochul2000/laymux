@@ -88,8 +88,11 @@ impl SleepInhibitor {
 
     /// Start the background re-acquire loop, at most once per inhibitor.
     ///
-    /// Idle until something is actually held, so calling it on the first enable
-    /// costs nothing on a machine that never uses the feature.
+    /// Called once at startup rather than on the first acquire. Tying it to an
+    /// acquire would mean a failed spawn is never retried — in `always` mode
+    /// nothing calls in again — and would leave a held inhibitor unguarded for
+    /// the rest of the session. The loop is a no-op whenever nothing is held,
+    /// so a machine that never uses the feature pays one parked thread.
     pub fn ensure_watchdog(self: &Arc<Self>) {
         if self.watchdog_started.swap(true, Ordering::SeqCst) {
             return;
@@ -108,7 +111,6 @@ impl SleepInhibitor {
                 }
             });
         if let Err(error) = spawned {
-            // Let a later enable try again rather than silently going unguarded.
             self.watchdog_started.store(false, Ordering::SeqCst);
             tracing::warn!(%error, "failed to start the sleep inhibitor watchdog");
         }
