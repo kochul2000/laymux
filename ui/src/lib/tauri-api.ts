@@ -441,7 +441,7 @@ export type SettingsLoadResult =
   | { status: "ok"; settings: Settings; warnings: ValidationWarning[] }
   | { status: "repaired"; settings: Settings; warnings: ValidationWarning[] }
   /**
-   * Type-error paths were dropped in favour of their defaults (ADR-0117).
+   * Type-error paths were dropped in favour of their defaults (ADR-0118).
    * User-authored values were lost, so settings writes stay blocked until the
    * user acknowledges the listed paths.
    *
@@ -718,7 +718,11 @@ export interface ClaudeSettings {
 }
 
 export interface CodexSettings {
-  /** Status message display mode (default: "title"). */
+  /** Whether to restore Codex CLI sessions on app restart (default: true). */
+  restoreSession: boolean;
+  /** Maximum age (hours) for Codex rollout files. 0 = no limit. Default: 24. */
+  sessionMaxAgeHours: number;
+  /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
   statusMessageDelimiter: string;
@@ -1447,6 +1451,15 @@ export async function getClaudeSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string>> {
   return invoke("get_claude_session_ids", {
+    sessionMaxAgeHours: sessionMaxAgeHours ?? null,
+  });
+}
+
+/** Resolve Codex CLI session IDs for all known Codex terminals. */
+export async function getCodexSessionIds(
+  sessionMaxAgeHours?: number,
+): Promise<Record<string, string>> {
+  return invoke("get_codex_session_ids", {
     sessionMaxAgeHours: sessionMaxAgeHours ?? null,
   });
 }

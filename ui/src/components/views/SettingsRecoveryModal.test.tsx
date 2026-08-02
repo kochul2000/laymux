@@ -46,7 +46,7 @@ const RECOVERED: SettingsLoadResult = {
   ],
 };
 
-describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0117)", () => {
+describe("SettingsRecoveryModal — recovered status (issue #701, ADR-0118)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

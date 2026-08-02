@@ -1204,6 +1204,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     sessionLimitResumeMessage: "go on",
   },
   codex: {
+    restoreSession: true,
+    sessionMaxAgeHours: 24,
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
@@ -1559,6 +1561,8 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     const codex = data.codex
       ? {
+          restoreSession: true,
+          sessionMaxAgeHours: 24,
           statusMessageMode: "bullet-title" as const,
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),

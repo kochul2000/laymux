@@ -38,7 +38,7 @@ pub enum SettingsLoadResult {
         warnings: Vec<ValidationWarning>,
     },
     /// JSON parsed, but individual paths had type errors and were dropped in
-    /// favour of their defaults (ADR-0117). User-authored values were lost, so
+    /// favour of their defaults (ADR-0118). User-authored values were lost, so
     /// the frontend must block settings writes until the user acknowledges the
     /// listed paths — the original file is left untouched until then.
     ///

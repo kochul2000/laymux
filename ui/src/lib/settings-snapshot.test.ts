@@ -4,9 +4,15 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
+  getCodexSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
-import { getClaudeSessionIds, getTerminalCwds, saveSettings } from "@/lib/tauri-api";
+import {
+  getClaudeSessionIds,
+  getCodexSessionIds,
+  getTerminalCwds,
+  saveSettings,
+} from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
@@ -159,6 +165,7 @@ describe("settings snapshot", () => {
 
     expect(getTerminalCwds).not.toHaveBeenCalled();
     expect(getClaudeSessionIds).not.toHaveBeenCalled();
+    expect(getCodexSessionIds).not.toHaveBeenCalled();
     expect(saveSettings).toHaveBeenCalledTimes(1);
   });
 

@@ -78,7 +78,7 @@ fn load_settings_validated_from(path: &std::path::Path) -> SettingsLoadResult {
     };
 
     // Parse JSON, dropping individual type-error paths so one bad value does
-    // not cost the whole file (ADR-0117). Only an unsalvageable document —
+    // not cost the whole file (ADR-0118). Only an unsalvageable document —
     // syntax error or root-level type error — falls through to ParseError.
     let (mut settings, dropped) = match lenient::deserialize_lenient(&raw_content) {
         Ok(recovered) => (recovered.settings, recovered.dropped),
@@ -288,7 +288,7 @@ mod tests {
         assert!(lock_memo_gate(&gate).is_err());
     }
 
-    // ── 타입 오류 부분 복구 (issue #701, ADR-0117) ──
+    // ── 타입 오류 부분 복구 (issue #701, ADR-0118) ──
 
     #[test]
     fn type_error_recovers_instead_of_resetting_everything() {
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn recovery_does_not_rewrite_the_file() {
         // The loader must never heal the file on disk — the user has to see the
-        // dropped paths first (ADR-0117 손실 정책).
+        // dropped paths first (ADR-0118 손실 정책).
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let original = r#"{ "language": 42, "defaultProfile": "WSL" }"#;
@@ -520,6 +520,8 @@ mod tests {
     fn codex_settings_round_trip() {
         let json = r#"{
           "codex": {
+            "restoreSession": false,
+            "sessionMaxAgeHours": 72,
             "statusMessageMode": "title-bullet",
             "statusMessageDelimiter": " | "
           }
@@ -529,11 +531,38 @@ mod tests {
             settings.codex.status_message_mode,
             CodexStatusMessageMode::TitleBullet
         );
+        assert!(!settings.codex.restore_session);
+        assert_eq!(settings.codex.session_max_age_hours, 72);
         assert_eq!(settings.codex.status_message_delimiter, " | ");
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"codex\""));
+        assert!(serialized.contains("\"restoreSession\":false"));
+        assert!(serialized.contains("\"sessionMaxAgeHours\":72"));
         assert!(serialized.contains("\"statusMessageMode\":\"title-bullet\""));
+    }
+
+    #[test]
+    fn codex_session_restore_defaults_for_existing_settings() {
+        let settings: Settings = serde_json::from_str(r#"{ "codex": {} }"#).unwrap();
+        assert!(settings.codex.restore_session);
+        assert_eq!(settings.codex.session_max_age_hours, 24);
+    }
+
+    #[test]
+    fn codex_metadata_distinguishes_live_display_from_next_use_restore() {
+        assert_eq!(
+            contract::metadata_for_path("/codex/statusMessageMode").apply_mode,
+            contract::ApplyMode::Live
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/restoreSession").apply_mode,
+            contract::ApplyMode::NextUse
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/sessionMaxAgeHours").apply_mode,
+            contract::ApplyMode::NextUse
+        );
     }
 
     #[test]
@@ -580,7 +609,7 @@ mod tests {
         let json = r#"{ "power": { "keepAwakeWhenBusy": true } }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.power.keep_awake_when_busy);
-        // The policy must not drag the manual switch along with it (ADR-0117).
+        // The policy must not drag the manual switch along with it (ADR-0118).
         assert!(!settings.power.keep_awake);
 
         let serialized = serde_json::to_string(&settings).unwrap();

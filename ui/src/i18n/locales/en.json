@@ -442,6 +442,12 @@
     },
     "codex": {
       "title": "Codex",
+      "groupSessionRestore": "Session Restore",
+      "groupStatusMessage": "Status Message",
+      "restoreSession": "Restore Session",
+      "restoreSessionDesc": "Automatically restore Codex sessions on app restart",
+      "sessionMaxAge": "Session Max Age",
+      "sessionMaxAgeDesc": "Ignore rollouts older than this (0 = unlimited)",
       "statusMessageMode": "Status Message Mode",
       "statusMessageModeDesc": "How Codex status text is shown in the workspace list",
       "modeTitle": "Title only (default)",

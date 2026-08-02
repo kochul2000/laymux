@@ -31,7 +31,7 @@ UI 다국어는 **react-i18next** 로 구현한다(이슈 #350).
 
 ### 로딩 실패와 부분 복구
 
-`load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0117](../adr/0117-settings-type-error-partial-recovery.md)).
+`load_settings_validated`(`settings/mod.rs`)는 파일을 4가지 상태 중 하나로 판정해 프론트엔드에 넘긴다([ADR-0118](../adr/0118-settings-type-error-partial-recovery.md)).
 
 | status | 언제 | settings 값 | 프론트 동작 |
 | --- | --- | --- | --- |
@@ -87,7 +87,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 **Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. 각 값의 유효 범위는 `1..=1000`이고 `validate_settings`가 범위를 벗어난 값을 `/terminal/parserAdmission/<field>` 경로로 보고한다. `0`은 그 클래스의 parser 를 멈추는 뜻이 되므로 허용하지 않으며, Rust `ParserAdmissionSettings::sanitized()`와 프론트엔드 `sanitizeTerminalWriteClassShare()`가 같은 범위로 clamp 한다. 기본값·범위 상수는 Rust `constants.rs`(`PARSER_ADMISSION_*`)와 `terminal-write-fair-scheduler.ts`(`TERMINAL_WRITE_DEFAULT_CLASS_SHARE`, `TERMINAL_WRITE_MIN_CLASS_SHARE`, `TERMINAL_WRITE_MAX_CLASS_SHARE`)에 각각 한 곳씩 있다.
 
-값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0117](../adr/0117-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
+값 오류는 종류별로 처리가 다르다. **누락**은 `#[serde(default)]`와 프론트 기본값으로 채운다. **범위 밖 수치**는 양쪽에서 clamp 한다. **타입 오류**(`"2"`, `null`, 소수)는 이 필드만 드롭되어 기본값으로 대체되고 나머지 설정은 그대로 살아남는다 — 이 필드 전용 규칙이 아니라 `Settings` 전체에 균일하게 적용되는 로딩 정책이다(위 [로딩 실패와 부분 복구](#로딩-실패와-부분-복구), [ADR-0118](../adr/0118-settings-type-error-partial-recovery.md)). 프론트엔드 sanitizer 는 이미 로드된 snapshot 에 비수치 값이 들어 있을 때 그 항목만 기본값으로 되돌린다.
 
 극단 비율을 넣어도 한 클래스가 무한정 밀리지 않는다. pending 클래스는 몫과 무관하게 `TERMINAL_WRITE_CLASS_MAX_SKIPPED_TURNS`(32) turn 안에 반드시 한 turn 을 받는다. 기본값에서는 몫이 만드는 간격(hidden 최대 5 turn)이 늘 먼저 도달하므로 이 floor 는 극단 설정과 클래스 drain/재진입에서만 작동한다.
 
@@ -344,6 +344,29 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 
 **`! cd` 형식**: Claude Code는 프롬프트에서 `! <shell_command>` 구문으로 인라인 셸 실행을 지원. `command` 모드에서는 이 형식으로 cd를 전달하며, `LX_PROPAGATED` 래핑이 불필요하다.
 
+### Codex 설정
+
+Codex 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다.
+
+```jsonc
+{
+  "codex": {
+    "restoreSession": true,              // 앱 재시작 시 pane을 `codex resume <id>`로 재개 (기본 true)
+    "sessionMaxAgeHours": 24,            // 이보다 오래된 rollout은 복원 제외 (0 = 나이 필터 해제, 기본 24)
+    "statusMessageMode": "bullet-title", // "bullet" | "title" | "title-bullet" | "bullet-title"
+    "statusMessageDelimiter": " · "      // bullet·title 병기 시 구분자
+  }
+}
+```
+
+`restoreSession`/`sessionMaxAgeHours`는 세션 영속([data-flow.md §13](./data-flow.md))에서 Codex rollout의 첫 `session_meta`를 조회해 시작 명령을 `codex resume <id>`로 대체하는 경로를 제어한다([ADR-0118](../adr/0117-codex-session-restore.md)). rollout은 laymux host process의 `CODEX_HOME`(기본 host OS 사용자 홈의 `.codex`) 아래 `sessions/YYYY/MM/DD/rollout-*.jsonl`에서 찾는다. subagent와 비대화형 `codex exec` rollout은 제외하고, terminal CWD와 같은 최상위 interactive rollout 중 nanosecond 수정 시각이 가장 최신인 안전한 ID를 선택한다. 최대 나이를 설정하면 cutoff 이전 날짜 디렉터리는 파일 열거 전에 제외한다. 수정 시각이 같으면 session ID 사전순으로 결정해 파일시스템 열거 순서에 의존하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `claude --resume <id>`와 `codex resume <id>` 두 형태만 허용한다. `restoreSession`을 끄면 rollout 수집을 생략하고 저장된 Codex ID를 제거한다. native Windows/Linux host rollout은 지원하지만 Windows host에서 WSL 내부 `~/.codex` 또는 shell profile 전용 `CODEX_HOME`은 자동 탐색하지 않는다. WSL-isolated rollout은 distro/profile별 세션 루트 계약이 필요한 후속 범위다.
+
+한 TerminalView의 `lastClaudeSession`과 `lastCodexSession`은 상호배타적으로 영속한다. 저장 시 새 Codex ID를 얻으면 stale Claude ID를 제거하고, 새 Claude ID를 얻으면 stale Codex ID를 제거한다. 사용자가 누른 Restart View는 두 agent 복원을 모두 건너뛴다.
+
+metadata apply mode는 `/codex/statusMessageMode`와 `/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/codex/restoreSession`과 `/codex/sessionMaxAgeHours`는 `nextUse`다. 복원 설정은 다음 세션 ID 수집·terminal 생성부터 적용된다.
+
+Claude의 `syncCwd: "command"`는 Claude Code가 제공하는 `! cd` 부모 세션 변경 계약에 의존한다. Codex shell mode는 부모 TUI CWD 변경 계약이 아니므로 Codex 설정에 같은 옵션을 두지 않고, 실행 중인 Codex pane은 다른 일반 interactive app처럼 CWD 수신에서 제외한다. `sessionLimit*`도 현재 Claude 고유 배너 파서 계약이므로 Codex에 복제하지 않는다.
+
 ### 절전 방지(sleep prevention) 설정
 
 OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114-sleep-prevention-mode.md), [ADR-0116](../adr/0116-sleep-prevention-two-axes.md)). 시스템 절전만 막고 화면 절전은 막지 않는다.
@@ -377,7 +400,7 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 ### 종료 시 동작(kill-on-exit) 설정
 
-앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 세션 ID 는 종료 시 캐시되는 스크롤백에 담겨 다음 실행에서 복원된다.
+앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 힌트는 사용자 가시 기록으로 스크롤백 캐시에 남는다. 자동 복원에 쓰는 식별자는 이 텍스트를 파싱하지 않고 같은 저장 시점에 Claude session metadata 또는 Codex rollout metadata에서 별도로 조회한다(위 agent 설정, [data-flow.md §13](./data-flow.md#13-session-persistence--cache)).
 
 ```jsonc
 {
@@ -831,7 +854,7 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 
 이하 document 계열 세부:
 
-`.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. explicit `\\wsl.localhost\<distro>` pure-Linux 경로를 WSL profile에 전달할 때는 unquoted `-d`/`--distribution` 선택 distro와 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 거부한다(`/mnt/<drive>`는 distro 공용 예외). 일반 `startupCommandOverride`는 `claude --resume <session-id>`만 허용하며 raw viewer 문자열은 거부한다. 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용한다. Markdown은 `marked`의 동기 GFM 모드로 HTML을 만들고 `github-markdown-css`의 `markdown-body` 스타일을 iframe 문서에 내장한 뒤, HTML preview와 동일한 sanitizer/CSP 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
+`.html`/`.htm`과 `.md`/`.markdown`은 기본 `preview` 모드로 열리지만, `settings.fileExplorer.extensionViewers`에 해당 확장자 매핑이 있으면 외부 터미널 뷰어가 우선한다. 이때 프론트엔드는 `create_terminal_session`에 profile과 구조화된 `viewer: { command, path }`를 전달하고, Rust가 현재 settings의 확장자·command·profile 조합 및 profile 존재를 다시 검증한다. Rust는 `profile.commandLine`의 대상 환경에 맞춰 `path_utils`로 경로를 변환하고 path 인자를 WSL/POSIX 또는 PowerShell 규칙으로 quote한다. explicit `\\wsl.localhost\<distro>` pure-Linux 경로를 WSL profile에 전달할 때는 unquoted `-d`/`--distribution` 선택 distro와 source distro가 일치해야 하며, mismatch·bare WSL·quoted distro는 거부한다(`/mnt/<drive>`는 distro 공용 예외). 일반 `startupCommandOverride`는 `claude --resume <session-id>`와 `codex resume <session-id>` 두 정확한 세션 복원 형식만 허용하며 raw viewer 문자열은 거부한다([ADR-0118](../adr/0117-codex-session-restore.md)). 내장 preview의 `source` 토글은 Rust `read_file_for_viewer`가 반환한 기존 raw text를 그대로 표시한다. HTML preview는 `srcdoc` iframe + `sandbox="allow-same-origin"` + 제한 CSP를 사용한다. Markdown은 `marked`의 동기 GFM 모드로 HTML을 만들고 `github-markdown-css`의 `markdown-body` 스타일을 iframe 문서에 내장한 뒤, HTML preview와 동일한 sanitizer/CSP 경로를 탄다. 스크립트, 이벤트 핸들러, 폼, iframe/object/embed, 위험 URL은 제거하며, 링크 클릭은 부모가 `openExternal`로 처리한다. 상대 이미지/CSS 등 로컬 상대 리소스는 이번 설계에서 지원하지 않고 차단한다. 임의 파일 노출을 피하기 위한 보수적 기본값이며, 상대 리소스가 필요해지면 별도 allowlist/custom endpoint/custom protocol 설계와 경계 테스트를 추가한다.
 
 **메모 (2)** — `cache/memo.json` 파일 시스템 기반, 읽기 전용:
 

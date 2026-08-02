@@ -2370,7 +2370,7 @@ fn settings_load_result_round_trip_repaired() {
 
 #[test]
 fn settings_load_result_round_trip_recovered() {
-    // issue #701 / ADR-0117: the recovered status is its own contract entry —
+    // issue #701 / ADR-0118: the recovered status is its own contract entry —
     // the frontend keys settings-write blocking off it.
     let result = SettingsLoadResult::Recovered {
         settings: Settings::default(),

@@ -668,7 +668,9 @@ interface TerminalViewProps {
   onUserRestartConsumed?: () => void;
   /** Claude Code session ID from previous session, used for --resume on startup. */
   lastClaudeSession?: string;
-  /** Override the startup command (takes precedence over Claude session restore). */
+  /** Codex CLI session ID from previous session, used for `codex resume` on startup. */
+  lastCodexSession?: string;
+  /** Override the startup command (takes precedence over agent session restore). */
   startupCommandOverride?: string;
   /** Structured external viewer command. Rust validates and quotes the path. */
   viewerStartup?: ViewerStartupRequest;
@@ -694,6 +696,7 @@ export function TerminalView({
   isUserRestart = false,
   onUserRestartConsumed,
   lastClaudeSession,
+  lastCodexSession,
   startupCommandOverride,
   viewerStartup,
 }: TerminalViewProps) {
@@ -5505,20 +5508,28 @@ export function TerminalView({
         const shouldRestoreOutput =
           profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
 
-        // Determine startup command override for Claude session restore.
+        // Determine startup command override for Claude/Codex session restore.
         // Validate session ID format to prevent command injection.
-        const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+        const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
         const shouldRestoreClaudeSession =
           !isFreshRestart && settingsState.claude?.restoreSession !== false;
         const safeSessionId =
           lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
             ? lastClaudeSession
             : undefined;
+        const shouldRestoreCodexSession =
+          !isFreshRestart && settingsState.codex?.restoreSession !== false;
+        const safeCodexSessionId =
+          lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession)
+            ? lastCodexSession
+            : undefined;
         const startupOverride = startupCommandOverride
           ? startupCommandOverride
           : shouldRestoreClaudeSession && safeSessionId
             ? `claude --resume ${safeSessionId}`
-            : undefined;
+            : shouldRestoreCodexSession && safeCodexSessionId
+              ? `codex resume ${safeCodexSessionId}`
+              : undefined;
 
         cacheRestorePromise =
           !isFreshRestart && shouldRestoreOutput && paneId
