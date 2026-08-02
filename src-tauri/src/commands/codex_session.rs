@@ -88,7 +88,9 @@ fn get_codex_session_ids_impl(
         }
         Err(error) => tracing::warn!(%error, "WSL Codex attribution failed"),
     }
-    Ok(result)
+    Ok(crate::process_tree::reject_duplicate_session_attributions(
+        result, "Codex",
+    ))
 }
 
 /// Build a one-to-one terminal/session assignment and reject any collision.

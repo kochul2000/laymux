@@ -71,6 +71,24 @@ fn equal_depth_provider_processes_are_explicitly_ambiguous() {
 }
 
 #[test]
+fn nested_providers_select_only_the_global_top_level_agent() {
+    let entries = vec![
+        process(10, 1, "bash"),
+        process(20, 10, "claude"),
+        process(30, 20, "codex"),
+    ];
+
+    let claude = select_top_level_agent(&entries, WslAgentProvider::Claude)
+        .expect("Claude should be the active provider")
+        .expect("Claude attribution should be exact");
+    assert_eq!(claude.pid, 20);
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Codex),
+        None
+    );
+}
+
+#[test]
 fn parses_only_unquoted_consistent_wsl_distribution_flags() {
     assert_eq!(
         explicit_wsl_distro_from_command_line("wsl.exe -d Ubuntu-22.04").unwrap(),
@@ -82,6 +100,36 @@ fn parses_only_unquoted_consistent_wsl_distribution_flags() {
     );
     assert!(explicit_wsl_distro_from_command_line("wsl -d Ubuntu -d Debian").is_err());
     assert!(explicit_wsl_distro_from_command_line("wsl -d \"Ubuntu\"").is_err());
+}
+
+#[test]
+fn only_bare_wsl_requests_default_distro_lookup() {
+    assert_eq!(
+        terminal_distro_target(None, "wsl.exe").unwrap(),
+        (None, true)
+    );
+    assert_eq!(
+        terminal_distro_target(None, "wsl.exe -d Debian").unwrap(),
+        (Some("Debian".into()), false)
+    );
+    assert!(terminal_distro_target(None, "wsl.exe -d").is_err());
+    assert!(terminal_distro_target(Some("bad/name"), "wsl.exe").is_err());
+}
+
+#[test]
+fn resolution_budget_uses_one_injected_deadline() {
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(3);
+
+    assert_eq!(
+        remaining_timeout_at(deadline, start + Duration::from_secs(1)),
+        Some(Duration::from_secs(2))
+    );
+    assert_eq!(remaining_timeout_at(deadline, deadline), None);
+    assert_eq!(
+        remaining_timeout_at(deadline, deadline + Duration::from_millis(1)),
+        None
+    );
 }
 
 #[test]

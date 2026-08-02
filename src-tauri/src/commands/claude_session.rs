@@ -66,7 +66,9 @@ pub fn get_claude_session_ids(
         }
         Err(error) => tracing::warn!(%error, "WSL Claude attribution failed"),
     }
-    Ok(result)
+    Ok(crate::process_tree::reject_duplicate_session_attributions(
+        result, "Claude",
+    ))
 }
 
 fn find_wsl_claude_session(

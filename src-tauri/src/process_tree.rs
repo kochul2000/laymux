@@ -58,6 +58,38 @@ pub(crate) fn complete_agent_session_attributions(
     result
 }
 
+/// Reject a session ID attributed to more than one terminal after every host
+/// adapter has contributed its result. A collision is evidence that no pane
+/// owns the session uniquely, including native-to-WSL and WSL-to-WSL pairs.
+pub(crate) fn reject_duplicate_session_attributions(
+    mut attributions: HashMap<String, Option<String>>,
+    provider: &str,
+) -> HashMap<String, Option<String>> {
+    let mut seen = HashSet::new();
+    let mut duplicates = HashSet::new();
+    for session_id in attributions.values().flatten() {
+        if !seen.insert(session_id.clone()) {
+            duplicates.insert(session_id.clone());
+        }
+    }
+    if !duplicates.is_empty() {
+        tracing::warn!(
+            provider,
+            ?duplicates,
+            "agent session attribution collision; skipping restore"
+        );
+        for session_id in attributions.values_mut() {
+            if session_id
+                .as_ref()
+                .is_some_and(|session_id| duplicates.contains(session_id))
+            {
+                *session_id = None;
+            }
+        }
+    }
+    attributions
+}
+
 /// Map an executable file name to the interactive app it represents, or `None`.
 /// Case-insensitive; a trailing `.exe` (Windows) is ignored.
 fn name_to_app(name: &str) -> Option<&'static str> {
@@ -384,6 +416,26 @@ mod tests {
             Some("session-a")
         );
         assert_eq!(result.get("terminal-b"), Some(&None));
+    }
+
+    #[test]
+    fn duplicate_sessions_are_rejected_after_host_results_are_merged() {
+        let attributions = HashMap::from([
+            ("native".to_string(), Some("shared".to_string())),
+            ("wsl".to_string(), Some("shared".to_string())),
+            ("unique".to_string(), Some("only-here".to_string())),
+            ("unresolved".to_string(), None),
+        ]);
+
+        let result = reject_duplicate_session_attributions(attributions, "Codex");
+
+        assert_eq!(result.get("native"), Some(&None));
+        assert_eq!(result.get("wsl"), Some(&None));
+        assert_eq!(
+            result.get("unique").and_then(|value| value.as_deref()),
+            Some("only-here")
+        );
+        assert_eq!(result.get("unresolved"), Some(&None));
     }
 
     // ── name_to_app ──

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::constants::WSL_AGENT_PROBE_TIMEOUT;
 use crate::error::AppError;
@@ -115,7 +116,11 @@ pub(super) fn resolve_wsl_agent_processes(
 
     #[cfg(windows)]
     {
-        let targets = wsl_terminal_targets(state)?;
+        // One deadline covers default-distro discovery and every distro probe.
+        // The close handler gives session persistence five seconds, so this
+        // adapter must not multiply its timeout by the number of distros.
+        let deadline = Instant::now() + WSL_AGENT_PROBE_TIMEOUT;
+        let targets = wsl_terminal_targets(state, deadline)?;
         let mut result = HashMap::new();
         let mut by_distro: HashMap<String, Vec<String>> = HashMap::new();
         for (terminal_id, distro) in targets {
@@ -127,8 +132,13 @@ pub(super) fn resolve_wsl_agent_processes(
             }
         }
 
-        for (distro, terminal_ids) in by_distro {
-            let entries = match probe_distro(&distro) {
+        let mut distro_targets: Vec<_> = by_distro.into_iter().collect();
+        distro_targets.sort_by(|left, right| left.0.cmp(&right.0));
+        for (distro, terminal_ids) in distro_targets {
+            let entries = match remaining_timeout(deadline)
+                .ok_or_else(|| "WSL agent resolution deadline expired".to_string())
+                .and_then(|timeout| probe_distro(&distro, timeout))
+            {
                 Ok(entries) => entries,
                 Err(error) => {
                     tracing::warn!(%distro, %error, "WSL agent process probe failed closed");
@@ -163,7 +173,10 @@ pub(super) fn resolve_wsl_agent_processes(
 }
 
 #[cfg(windows)]
-fn wsl_terminal_targets(state: &AppState) -> Result<Vec<(String, Option<String>)>, AppError> {
+fn wsl_terminal_targets(
+    state: &AppState,
+    deadline: Instant,
+) -> Result<Vec<(String, Option<String>)>, AppError> {
     let terminals = state.terminals.lock_or_err()?;
     let mut unresolved_default = Vec::new();
     let mut targets = Vec::new();
@@ -171,14 +184,21 @@ fn wsl_terminal_targets(state: &AppState) -> Result<Vec<(String, Option<String>)
         if session.initial_execution_host != InitialExecutionHost::Wsl {
             continue;
         }
-        let distro = match session.wsl_distro.as_deref() {
-            Some(distro) if is_safe_distro_name(distro) => Some(distro.to_string()),
-            Some(_) => None,
-            None => explicit_wsl_distro_from_command_line(&session.config.command_line)
-                .ok()
-                .flatten(),
+        let (distro, needs_default) = match terminal_distro_target(
+            session.wsl_distro.as_deref(),
+            &session.config.command_line,
+        ) {
+            Ok(target) => target,
+            Err(error) => {
+                tracing::warn!(
+                    terminal_id,
+                    %error,
+                    "invalid explicit WSL distro failed closed"
+                );
+                (None, false)
+            }
         };
-        if distro.is_none() {
+        if needs_default {
             unresolved_default.push(targets.len());
         }
         targets.push((terminal_id.clone(), distro));
@@ -186,7 +206,8 @@ fn wsl_terminal_targets(state: &AppState) -> Result<Vec<(String, Option<String>)
     drop(terminals);
 
     if !unresolved_default.is_empty() {
-        let default = crate::path_utils::get_default_wsl_distro()
+        let default = remaining_timeout(deadline)
+            .and_then(crate::path_utils::get_default_wsl_distro_with_timeout)
             .filter(|distro| is_safe_distro_name(distro));
         for index in unresolved_default {
             targets[index].1.clone_from(&default);
@@ -196,7 +217,7 @@ fn wsl_terminal_targets(state: &AppState) -> Result<Vec<(String, Option<String>)
 }
 
 #[cfg(windows)]
-fn probe_distro(distro: &str) -> Result<Vec<WslProcessEntry>, String> {
+fn probe_distro(distro: &str, timeout: Duration) -> Result<Vec<WslProcessEntry>, String> {
     if !is_safe_distro_name(distro) {
         return Err("unsafe WSL distribution name".into());
     }
@@ -210,12 +231,37 @@ fn probe_distro(distro: &str) -> Result<Vec<WslProcessEntry>, String> {
         WSL_PROCESS_PROBE,
         "laymux-wsl-agent-probe",
     ]);
-    let output = output_with_timeout(&mut command, WSL_AGENT_PROBE_TIMEOUT)
-        .map_err(|error| error.to_string())?;
+    let output = output_with_timeout(&mut command, timeout).map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(format!("wsl.exe exited with {}", output.status));
     }
     parse_probe_output(&output.stdout)
+}
+
+fn remaining_timeout(deadline: Instant) -> Option<Duration> {
+    remaining_timeout_at(deadline, Instant::now())
+}
+
+fn remaining_timeout_at(deadline: Instant, now: Instant) -> Option<Duration> {
+    deadline
+        .checked_duration_since(now)
+        .filter(|remaining| !remaining.is_zero())
+}
+
+/// Returns `(resolved distro, needs default lookup)`. Invalid stored or
+/// explicit values are errors and must never be reinterpreted as bare WSL.
+fn terminal_distro_target(
+    stored_distro: Option<&str>,
+    command_line: &str,
+) -> Result<(Option<String>, bool), String> {
+    match stored_distro {
+        Some(distro) if is_safe_distro_name(distro) => Ok((Some(distro.to_string()), false)),
+        Some(_) => Err("stored WSL distribution value is unsupported".into()),
+        None => match explicit_wsl_distro_from_command_line(command_line)? {
+            Some(distro) => Ok((Some(distro), false)),
+            None => Ok((None, true)),
+        },
+    }
 }
 
 fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
@@ -303,32 +349,50 @@ fn select_top_level_agent(
         .map(|entry| (entry.pid, entry.ppid))
         .collect();
     let mut candidates = Vec::new();
-    for entry in entries
-        .iter()
-        .filter(|entry| process_matches_provider(&entry.name, provider))
-    {
-        let Some(depth) = process_depth(entry.pid, &by_pid) else {
-            return Some(None);
+    for entry in entries {
+        let Some(entry_provider) = process_provider(&entry.name) else {
+            continue;
         };
-        candidates.push((depth, entry));
+        let Some(depth) = process_depth(entry.pid, &by_pid) else {
+            return entries
+                .iter()
+                .any(|entry| process_matches_provider(&entry.name, provider))
+                .then_some(None);
+        };
+        candidates.push((depth, entry_provider, entry));
     }
-    let minimum = candidates.iter().map(|(depth, _)| *depth).min()?;
-    let shallowest: Vec<&WslProcessEntry> = candidates
+    let minimum = candidates.iter().map(|(depth, _, _)| *depth).min()?;
+    let shallowest: Vec<(WslAgentProvider, &WslProcessEntry)> = candidates
         .into_iter()
-        .filter_map(|(depth, entry)| (depth == minimum).then_some(entry))
+        .filter_map(|(depth, entry_provider, entry)| {
+            (depth == minimum).then_some((entry_provider, entry))
+        })
         .collect();
     match shallowest.as_slice() {
-        [entry] => Some(Some((*entry).clone())),
-        _ => Some(None),
+        [(entry_provider, entry)] if *entry_provider == provider => Some(Some((*entry).clone())),
+        [(_entry_provider, _entry)] => None,
+        entries
+            if entries
+                .iter()
+                .any(|(entry_provider, _)| *entry_provider == provider) =>
+        {
+            Some(None)
+        }
+        _ => None,
     }
 }
 
 fn process_matches_provider(name: &str, provider: WslAgentProvider) -> bool {
+    process_provider(name) == Some(provider)
+}
+
+fn process_provider(name: &str) -> Option<WslAgentProvider> {
     let lowercase = name.to_ascii_lowercase();
     let stem = lowercase.strip_suffix(".exe").unwrap_or(&lowercase);
-    stem == match provider {
-        WslAgentProvider::Claude => "claude",
-        WslAgentProvider::Codex => "codex",
+    match stem {
+        "claude" => Some(WslAgentProvider::Claude),
+        "codex" => Some(WslAgentProvider::Codex),
+        _ => None,
     }
 }
 

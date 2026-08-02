@@ -19,11 +19,12 @@ laymux는 WSL bash rcfile에 pane별 `LX_TERMINAL_ID`를 이미 주입하며 age
 
 Windows host의 WSL agent session 귀속 SoT는 **정확한 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID와 그 PID가 가리키는 provider 저장소**다.
 
-- WSL terminal의 distro는 해당 `TerminalSession.wsl_distro`, profile command line의 `-d`/`--distribution`, bare WSL의 default distro 순서로 해당 pane에서만 결정한다. 다른 pane의 distro를 빌리지 않는다.
-- Rust는 `crate::process::headless_command()`와 bounded timeout으로 `wsl.exe -d <distro> --exec sh` read-only probe를 실행한다. terminal ID나 distro를 shell 문자열에 보간하지 않고 argv로 전달한다.
-- probe는 `/proc`에서 `LX_TERMINAL_ID`가 있는 process의 PID·PPID·실행 이름·`HOME`·`CODEX_HOME`과 open rollout FD symlink만 반환한다. provider 이름과 ancestry로 하나의 top-level Claude/Codex PID를 증명하며 같은 깊이의 후보가 여럿이면 fail-closed한다.
+- WSL terminal의 distro는 해당 `TerminalSession.wsl_distro`, profile command line의 `-d`/`--distribution`, bare WSL의 default distro 순서로 해당 pane에서만 결정한다. 명시 값이 잘못됐으면 bare WSL로 재해석하지 않고 fail-closed하며, 다른 pane의 distro를 빌리지 않는다.
+- Rust는 `crate::process::headless_command()`와 bounded timeout으로 `wsl.exe -d <distro> --exec sh` read-only probe를 실행한다. terminal ID나 distro를 shell 문자열에 보간하지 않고 argv로 전달한다. default-distro 조회와 모든 distro probe는 하나의 3초 deadline을 공유해 종료 저장의 5초 기본 예산 안에 끝낸다.
+- probe는 `/proc`에서 `LX_TERMINAL_ID`가 있는 process의 PID·PPID·실행 이름·`HOME`·`CODEX_HOME`과 open rollout FD symlink만 반환한다. provider 이름과 ancestry로 전체 Claude/Codex 후보 중 하나의 top-level agent PID를 증명하며, provider별로 각각 최상위를 고르지 않는다. 같은 깊이의 후보가 여럿이면 fail-closed한다.
 - Claude는 WSL PID와 `<HOME>/.claude/sessions/<pid>.json`을 직접 연결한다. Codex는 선택된 PID의 FD 중 해당 process `CODEX_HOME/sessions` 아래 rollout만 Windows-accessible 경로로 변환한다. rollout header의 ID·CWD·source를 검증하고 subagent·exec를 제외한 top-level ID가 하나일 때만 귀속한다.
 - provider process는 확인됐지만 distro, session 파일 또는 rollout 검증이 실패하면 해당 terminal을 `null` 귀속으로 반환해 stale session ID를 제거한다. CWD·최신 파일·다른 distro fallback은 사용하지 않는다.
+- native와 WSL 결과를 모두 합친 뒤 동일 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 바꾼다. host 경계를 넘어서도 session 하나는 pane 하나에만 귀속된다.
 - native Windows/Linux 귀속 경로와 startup resume 명령 계약은 바꾸지 않는다. WSL에서도 저장된 명령은 기존 rcfile startup 경계 안에서 `claude --resume <id>` 또는 `codex resume <id>`로 실행한다.
 
 ## Alternatives Considered
