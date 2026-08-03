@@ -174,7 +174,10 @@ async function installRemoteMocks(page: Page, harness: Harness) {
       // The regression only shows when the strip lands *after* the attach fit
       // recorded the strip-less host height, which is the production ordering:
       // the poll starts at connect and the bridge answers over the network.
-      while (harness.stripEnabled && harness.resizeCalls.length === 0) {
+      // Bounded: a never-arriving attach resize must surface as the assertion
+      // that follows, not as a route handler that hangs until the test timeout.
+      for (let waited = 0; waited < 5000; waited += 20) {
+        if (!harness.stripEnabled || harness.resizeCalls.length > 0) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       await route.fulfill({ json: harness.stripEnabled ? widgets : emptyWidgets });
