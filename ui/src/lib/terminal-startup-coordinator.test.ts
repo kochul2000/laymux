@@ -60,6 +60,23 @@ describe("terminal startup coordinator", () => {
     expect(members(pruned.revealedPaneIds)).toEqual(["next"]);
   });
 
+  it("releases an unready slot owner when a workspace switch makes it ineligible", () => {
+    const first = syncTerminalStartupCandidates(createTerminalStartupState(), {
+      knownPaneIds: ["workspace-a", "workspace-b"],
+      eligiblePaneIds: ["workspace-a"],
+    });
+    expect(first.activePaneId).toBe("workspace-a");
+
+    const switched = syncTerminalStartupCandidates(first, {
+      knownPaneIds: ["workspace-a", "workspace-b"],
+      eligiblePaneIds: ["workspace-b"],
+    });
+
+    expect(switched.activePaneId).toBe("workspace-b");
+    expect(members(switched.revealedPaneIds)).toEqual(["workspace-a", "workspace-b"]);
+    expect(settleTerminalStartup(switched, "workspace-a")).toBe(switched);
+  });
+
   it("adopts already-ready terminals without consuming the startup slot", () => {
     const state = syncTerminalStartupCandidates(createTerminalStartupState(), {
       knownPaneIds: ["ready-1", "ready-2", "pending"],

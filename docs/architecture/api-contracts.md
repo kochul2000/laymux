@@ -244,6 +244,8 @@ remote 의 실효 활성화 상태는 `settings.remote.enabled || runtimeRemoteA
 
 Remote Access 모달은 런타임 성격의 조작만 담당한다: 이번 실행 동안 허용, URL/token 복사, 데스크톱 앱 내부 모바일 모드 열기, remote controller reclaim. 시작 시 자동 허용, IP allowlist, 자동 모바일 폭, 수동 호스트 목록, 기본 호스트 같은 영속 설정은 Settings → Remote 섹션에서 편집하며 기존 settings store → `persistSession()` → `save_settings` 경로로 `settings.json` 에 저장된다. 데스크톱 앱 내부의 모바일 모드는 기존 `/remote/` Direct Remote UI를 `localApp=1&autoConnect=1` iframe으로 여는 로컬 전용 표시 모드이며, 외부 브라우저 지원을 새로 의미하지 않는다. 해당 iframe은 remote lease를 잡을 수 있으므로 PC WebView의 remote-control overlay는 로컬 모바일 모드가 활성인 동안 숨긴다.
 
+desktop WebView의 controller owner snapshot은 `lib/remote-control-status.ts` 전역 coordinator가 소유한다([ADR-0128](../adr/0128-app-global-remote-control-status-coordinator.md)). listener 설치 뒤 initial `get_remote_control_status`를 한 번 호출하고, Remote active 동안에만 이전 조회 완료 후 3초 fallback poll 하나를 예약한다. `TerminalView` 수와 무관하게 listener·조회는 window당 하나이며, 각 surface는 `useSyncExternalStore` snapshot만 구독한다. listener 또는 initial snapshot이 준비되지 않은 `null` 상태는 Local human input·resize를 fail-closed한다. event revision은 늦은 snapshot이 최신 owner event를 덮지 못하게 하고, Remote→Local `releaseRevision`은 React batch 안의 짧은 owner 전환도 terminal 복귀 reflow에 전달한다.
+
 Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tauri IPC command가 반환하는 감지 후보와 `settings.remote.customHosts` 를 프론트엔드가 병합해 만든다([ADR-0021](../adr/0021-remote-host-candidate-discovery.md)). 감지 후보는 항상 loopback `127.0.0.1` 을 포함하고, 사용 가능하면 Tailscale IPv4/IPv6 주소와 LAN interface 주소를 추가한다. `settings.remote.preferredHost` 가 후보 목록에 있으면 URL host select 의 초기값으로 쓰고, 빈 문자열이면 첫 후보를 자동 선택한다. IPv6 host 는 복사 URL에서 `http://[addr]:port/...` 형태로 bracket 처리한다. 이 후보 목록은 URL 작성 편의용일 뿐이며 실제 접속 허용 여부는 계속 `settings.remote.allowedIps`, bearer token, Origin 정책이 결정한다.
 
 ```jsonc

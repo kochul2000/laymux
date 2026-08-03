@@ -1,6 +1,6 @@
 # 0043. 터미널 시작은 앱 전역 준비 완료 슬롯으로 직렬화한다
 
-- Status: Accepted
+- Status: Superseded by [0127](0127-terminal-startup-slot-follows-eligibility.md)
 - Date: 2026-07-20
 - Source: 사용자 재발 보고(여러 pane 동시 시작 시 흰 화면); PR #453; [architecture/overview.md §3.2](../architecture/overview.md); [architecture/data-flow.md §13.5](../architecture/data-flow.md)
 
