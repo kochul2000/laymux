@@ -5010,7 +5010,9 @@
           setConnected(Boolean(leaseId));
           if (activeTerminalId) {
             terminalMetaEl.textContent = terminalLabel(nextTerminal);
-            if (options.openOutput !== false) openOutput(activeTerminalId);
+            if (options.openOutput !== false) {
+              openOutput(activeTerminalId, { focusInput: options.focusInput !== false });
+            }
           } else {
             terminalMetaEl.textContent = "No open terminal sessions.";
             setStatus("No open terminal sessions.", true);
@@ -5229,6 +5231,10 @@
           ensureRemoteFont(terminalInfo && terminalInfo.appearance);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
           const reconnecting = options.reconnect === true;
+          // Transport recovery restores bytes and geometry only. It must not
+          // turn a dismissed mobile keyboard back into an active input surface.
+          // Initial/user-directed attaches opt in; automatic reconnects do not.
+          const focusInputOnOpen = !reconnecting && options.focusInput !== false;
           const outputLeaseId = leaseId;
           if (!outputLeaseId) {
             setStatus("Remote control is not active.", true);
@@ -5267,7 +5273,7 @@
               outputAttachGeometryGeneration = null;
               if (err.status === 404) {
                 setStatus("Terminal session ended. Refreshing navigation...", true);
-                loadNavigation(null).catch((loadError) =>
+                loadNavigation(null, { focusInput: false }).catch((loadError) =>
                   setStatus(`Refresh failed: ${loadError.message}`, true)
                 );
               } else {
@@ -5531,7 +5537,6 @@
                 composerReady = true;
                 updateComposerControls();
                 scheduleTerminalFit(true);
-                focusCurrentInputSurface();
               });
               return;
             }
@@ -5553,7 +5558,7 @@
                 `Connected to ${terminalId}`;
               clearTransientConnectionNotice("output", attachTitle);
               if (!reconnecting) setStatus(attachTitle);
-              focusCurrentInputSurface();
+              if (focusInputOnOpen) focusCurrentInputSurface();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
           };
@@ -5599,7 +5604,9 @@
               composerReady = false;
               updateComposerControls();
               if (outputTerminalMissing) {
-                loadNavigation(null).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
+                loadNavigation(null, { focusInput: false }).catch((err) =>
+                  setStatus(`Refresh failed: ${err.message}`, true)
+                );
                 return;
               }
               scheduleOutputReconnect(terminalId, outputLeaseId);
@@ -5781,7 +5788,7 @@
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
-            await loadNavigation();
+            await loadNavigation(null, { focusInput: !auto });
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;
