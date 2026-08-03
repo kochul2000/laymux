@@ -796,6 +796,13 @@ pub fn create_terminal_session(
         pty::PtyOutputControl::Continue
     })?;
     session.initial_execution_host = spawned_pty.initial_execution_host;
+    // Seed the CWD from the directory the PTY was actually started in. OSC 7 is
+    // only accepted while the terminal is a plain shell (issue #215), so a pane
+    // restored straight into `claude --resume` / `codex resume` is classified as
+    // an interactive app from its first byte and would otherwise never register
+    // a CWD at all — leaving every follower (sync-group `cd`, `GitHubView`,
+    // MCP summaries) without a directory for the whole session.
+    session.cwd = spawned_pty.resolved_cwd;
     let pty_handle = spawned_pty.handle;
 
     // Startup output can fail before the spawned handle is published. The
@@ -854,6 +861,10 @@ pub fn create_terminal_session(
         },
     );
     result.initial_execution_host = session.initial_execution_host;
+    // The frontend store learns a CWD from `terminal-cwd-changed`, which only
+    // fires on a *change*; the spawn seed has no event, so it rides back on the
+    // create reply instead.
+    result.cwd = session.cwd.clone();
 
     // Publish every id-keyed table and commit the output generation while the
     // terminal catalog lock excludes close/create for this id. In particular,

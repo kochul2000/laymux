@@ -5605,6 +5605,12 @@ export function TerminalView({
               if (cancelled) return;
               useTerminalStore.getState().updateInstanceInfo(instanceId, {
                 sessionReady: true,
+                // The backend seeds the session CWD from the PTY's actual start
+                // directory, and that seed produces no `terminal-cwd-changed`
+                // event. A pane restored into `claude --resume` / `codex resume`
+                // never emits an accepted OSC 7, so this reply is the only CWD
+                // its sync group — and any GitHubView following it — will see.
+                ...(createdSession.cwd ? { cwd: createdSession.cwd } : {}),
               });
               settleStartupIfReady();
               outputListenerReady

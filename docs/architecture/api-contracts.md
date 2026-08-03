@@ -494,6 +494,10 @@ per-pane `cwdSend`/`cwdReceive` 오버라이드는 cascade 결과보다 우선�
 
 OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재렌더될 때마다 재발행한다. 이 경우 interactive TUI 앱(OpenAI Codex, Claude Code, vim 등)이 활성 상태에서도 OSC 7이 흘러나올 수 있다. 또한 비대화형 명령이 실행 중일 때(`Running`)도 명령 자체가 OSC 7을 발행할 수 있다. 두 경우 모두 사용자가 직접 실행한 `cd`의 결과가 아니므로 그룹 터미널로 전파하지 않는다.
 
+**가드는 OSC 유래 CWD 에만 적용된다.** `session.cwd` 를 채우는 경로는 둘이다: ① PTY 스폰 시점 시딩(아래), ② 가드를 통과한 OSC 7 / OSC 9;9. 가드는 "이 OSC 가 사용자 의도의 `cd` 인가" 를 판정하므로, 우리가 방금 지정한 스폰 시작 디렉터리에는 적용되지 않는다.
+
+**스폰 시점 CWD 시딩 ([ADR-0130](../adr/0130-spawn-time-cwd-seed.md)).** `spawn_pty_for_generation` 은 시작 디렉터리를 한 번 계획(`plan_start_dir`)해 명령에 적용하고, **실제로 적용된** 디렉터리를 `SpawnedPty.resolved_cwd` 로 돌려준다(`wsl --cd <dir>` 의 인자 또는 자식 프로세스 OS 작업 디렉터리, 정규형은 `normalize_wsl_path`). `create_terminal_session` 이 이 값을 `session.cwd` 에 시딩하고 create 응답의 `cwd` 필드로도 실어 보내므로, 프론트 스토어는 이벤트 없이 같은 값을 받는다(`TerminalView` → `updateInstanceInfo({cwd})`). 시작 디렉터리가 없거나 존재하지 않아 적용을 건너뛴 경우에는 시딩하지 않는다 — 자식은 상속된 CWD 에서 시작하므로 요청값은 거짓이 된다. 이 시딩이 없으면 세션 복원으로 곧바로 `claude --resume` / `codex resume` 을 실행한 pane 은 첫 바이트부터 `InteractiveApp` 이라 수용되는 OSC 7 을 영구히 발행하지 못하고, `GitHubView`·`propagate_cwd_once`·MCP 요약이 모두 디렉터리를 모른 상태로 남는다.
+
 `do_sync_cwd`는 다음 순서로 가드를 통과해야만 전파를 진행한다:
 
 1. `is_propagated` — 최근 전파된 터미널(에코 루프)인지
@@ -531,7 +535,7 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
 
 **대상이 file explorer일 때의 추종(프론트 경로).** file explorer의 CWD 추종은 백엔드 `cd` 주입이 아니라 순수 프론트 경로다. `FileExplorerView`는 이벤트 리스너를 항상 등록하되 두 이벤트 모두 자신의 `cwdReceive` 게이트 뒤에서 처리한다: ① `terminal-cwd-changed`(일반 OSC 변경)는 `cwdReceive on` + 소스 `cwdSend !== false`일 때만 추종, ② `sync-cwd` 페이로드의 `force === true`이고 `groupId`가 자신의 syncGroup과 같으면 추종하되 **`cwdReceive`가 off면 force라도 무시**한다(백엔드 `filter_targets_cwd_receive`와 동일한 정책 — issue #375). `do_sync_cwd`는 `EVENT_SYNC_CWD` 페이로드에 `force`를 실어 보낸다.
 
-`propagate_cwd_once`는 소스 터미널의 `session.cwd`가 비어 있으면(OSC 7 미발행) no-op으로 `Ok`를 돌려준다. 세션 자체가 없으면(`file-explorer-${paneId}`) `resolve_propagate_source`가 `Err`를 반환하므로, file explorer 소스는 위 프론트 경로로만 전파한다.
+`propagate_cwd_once`는 소스 터미널의 `session.cwd`가 비어 있으면(스폰 시딩도 OSC 7도 없음) no-op으로 `Ok`를 돌려준다. 세션 자체가 없으면(`file-explorer-${paneId}`) `resolve_propagate_source`가 `Err`를 반환하므로, file explorer 소스는 위 프론트 경로로만 전파한다.
 
 **상태 갱신·이벤트 대상 = `arrived` = `written ∪ already_at_cwd` (3차 리뷰 P1, issue #296).** `do_sync_cwd`가 backend `session.cwd`를 갱신하고 `EVENT_SYNC_CWD.targets`에 싣는 집합은 "실제로 목적 CWD에 도착이 보장된 대상(`arrived`)"이다:
 

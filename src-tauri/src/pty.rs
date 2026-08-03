@@ -75,6 +75,57 @@ fn is_wsl_command(cmd_path: &str) -> bool {
     executable.eq_ignore_ascii_case("wsl") || executable.eq_ignore_ascii_case("wsl.exe")
 }
 
+/// How a configured starting directory reaches the spawned command.
+///
+/// The plan is computed once so the directory the child really starts in is
+/// known to the caller as well: [`SpawnedPty::resolved_cwd`] seeds
+/// `TerminalSession::cwd`, which otherwise stays `None` until an accepted
+/// OSC 7 arrives.
+#[derive(Debug, PartialEq, Eq)]
+enum StartDirPlan {
+    /// WSL command with a Unix path: passed as `wsl --cd <dir>`.
+    WslCd(String),
+    /// Everything else: the child process's OS working directory.
+    ChildCwd(String),
+    /// Nothing configured, or the resolved directory does not exist.
+    None,
+}
+
+/// Resolve `starting_directory` against the command that will run it.
+fn plan_start_dir(starting_directory: &str, cmd_path: &str) -> StartDirPlan {
+    if starting_directory.is_empty() {
+        return StartDirPlan::None;
+    }
+    let dir = expand_env_in_path(starting_directory);
+    if is_unix_path(&dir) && is_wsl_command(cmd_path) {
+        return StartDirPlan::WslCd(dir);
+    }
+    // For non-WSL commands, convert /mnt/X/... back to Windows path
+    let effective_dir = if is_unix_path(&dir) {
+        crate::path_utils::mnt_path_to_windows(&dir).unwrap_or(dir)
+    } else {
+        dir
+    };
+    if std::path::Path::new(&effective_dir).is_dir() {
+        StartDirPlan::ChildCwd(effective_dir)
+    } else {
+        StartDirPlan::None
+    }
+}
+
+impl StartDirPlan {
+    /// The canonical CWD the child starts in, in the same form OSC 7 CWDs are
+    /// stored in, so `filter_targets_needing_cd` can compare the two.
+    fn resolved_cwd(&self) -> Option<String> {
+        match self {
+            StartDirPlan::WslCd(dir) | StartDirPlan::ChildCwd(dir) => {
+                Some(crate::path_utils::normalize_wsl_path(dir))
+            }
+            StartDirPlan::None => None,
+        }
+    }
+}
+
 /// Write `data` in [`PTY_WRITE_CHUNK_SIZE`]-byte chunks, flushing after each.
 ///
 /// ConPTY on Windows can silently truncate a single oversized `write_all()`
@@ -469,6 +520,9 @@ fn wait_for_child_with_master_close_retry(
 pub struct SpawnedPty {
     pub handle: PtyHandle,
     pub initial_execution_host: InitialExecutionHost,
+    /// The directory the child was actually started in, canonicalized like an
+    /// OSC 7 CWD, or `None` when no starting directory could be applied.
+    pub resolved_cwd: Option<String>,
 }
 
 pub fn spawn_pty<F>(session: &TerminalSession, on_output: F) -> Result<PtyHandle, String>
@@ -550,29 +604,20 @@ where
     env_plan.apply_to_command(&mut cmd);
 
     // Set starting directory if configured
-    if !session.config.starting_directory.is_empty() {
-        let dir = expand_env_in_path(&session.config.starting_directory);
-        if is_unix_path(&dir) && is_wsl_command(&cmd_path) {
+    let start_dir = plan_start_dir(&session.config.starting_directory, &cmd_path);
+    match &start_dir {
+        StartDirPlan::WslCd(dir) => {
             // WSL terminal with Unix path: inject --cd flag before existing args
             cmd = CommandBuilder::new(&cmd_path);
             cmd.arg("--cd");
-            cmd.arg(&dir);
+            cmd.arg(dir);
             for arg in &args {
                 cmd.arg(arg);
             }
             env_plan.apply_to_command(&mut cmd);
-        } else {
-            // For non-WSL commands, convert /mnt/X/... back to Windows path
-            let effective_dir = if is_unix_path(&dir) {
-                crate::path_utils::mnt_path_to_windows(&dir).unwrap_or(dir)
-            } else {
-                dir
-            };
-            let path = std::path::Path::new(&effective_dir);
-            if path.is_dir() {
-                cmd.cwd(path);
-            }
         }
+        StartDirPlan::ChildCwd(dir) => cmd.cwd(std::path::Path::new(dir)),
+        StartDirPlan::None => {}
     }
 
     let child = pair
@@ -636,6 +681,7 @@ where
     Ok(SpawnedPty {
         handle,
         initial_execution_host,
+        resolved_cwd: start_dir.resolved_cwd(),
     })
 }
 
@@ -1536,6 +1582,48 @@ mod tests {
         assert!(!is_unix_path("C:\\Users\\test"));
         assert!(!is_unix_path(""));
         assert!(!is_unix_path("relative/path"));
+    }
+
+    #[test]
+    fn plan_start_dir_has_no_plan_without_a_starting_directory() {
+        let plan = plan_start_dir("", "powershell.exe");
+        assert_eq!(plan, StartDirPlan::None);
+        assert_eq!(plan.resolved_cwd(), None);
+    }
+
+    #[test]
+    fn plan_start_dir_keeps_a_unix_path_for_wsl() {
+        let plan = plan_start_dir("/home/user/project", "wsl.exe");
+        assert_eq!(plan, StartDirPlan::WslCd("/home/user/project".into()));
+        assert_eq!(plan.resolved_cwd().as_deref(), Some("/home/user/project"));
+    }
+
+    #[test]
+    fn plan_start_dir_resolves_an_existing_directory_to_the_canonical_cwd() {
+        let temp = std::env::temp_dir();
+        let plan = plan_start_dir(&temp.to_string_lossy(), "powershell.exe");
+        let StartDirPlan::ChildCwd(dir) = &plan else {
+            panic!("an existing directory should become the child CWD, got {plan:?}");
+        };
+        assert_eq!(std::path::Path::new(dir), temp.as_path());
+        // The seed must be shaped like an OSC 7 CWD, or `filter_targets_needing_cd`
+        // cannot compare the two.
+        assert_eq!(
+            plan.resolved_cwd(),
+            Some(crate::path_utils::normalize_wsl_path(
+                &temp.to_string_lossy()
+            ))
+        );
+    }
+
+    #[test]
+    fn plan_start_dir_has_no_plan_for_a_missing_directory() {
+        let missing = std::env::temp_dir().join("laymux-no-such-start-dir-9c1f");
+        let plan = plan_start_dir(&missing.to_string_lossy(), "powershell.exe");
+        // The PTY starts in the inherited CWD here, so seeding the requested one
+        // would claim a directory the child is not in.
+        assert_eq!(plan, StartDirPlan::None);
+        assert_eq!(plan.resolved_cwd(), None);
     }
 
     #[test]

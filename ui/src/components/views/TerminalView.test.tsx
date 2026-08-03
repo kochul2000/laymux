@@ -9060,6 +9060,63 @@ describe("TerminalView", () => {
       });
     });
 
+    it("seeds the store CWD from the create reply", async () => {
+      // A pane restored into `codex resume` never emits an accepted OSC 7, so
+      // the create reply is the only CWD its sync group ever sees.
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        id: "t-restore-seed",
+        title: "Terminal",
+        initialExecutionHost: "unknown",
+        cwd: "/mnt/d/PycharmProjects/laymux",
+        config: {
+          profile: "PowerShell",
+          cols: 80,
+          rows: 24,
+          sync_group: "default",
+          env: [],
+          advertise_true_color: true,
+        },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-restore-seed"
+          paneId="pane-seed"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/mnt/d/PycharmProjects/laymux"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        const instance = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === "t-restore-seed");
+        expect(instance?.cwd).toBe("/mnt/d/PycharmProjects/laymux");
+      });
+    });
+
+    it("leaves the store CWD unset when the create reply carries none", async () => {
+      render(
+        <TerminalView
+          instanceId="t-restore-noseed"
+          paneId="pane-noseed"
+          profile="PowerShell"
+          syncGroup="default"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        const instance = useTerminalStore
+          .getState()
+          .instances.find((i) => i.id === "t-restore-noseed");
+        expect(instance?.sessionReady).toBe(true);
+      });
+      expect(
+        useTerminalStore.getState().instances.find((i) => i.id === "t-restore-noseed")?.cwd,
+      ).toBeUndefined();
+    });
+
     it("does not pass lastCwd when restoreCwd is false in profile", async () => {
       useSettingsStore.getState().updateProfile(0, { restoreCwd: false });
 
