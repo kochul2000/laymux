@@ -4951,6 +4951,14 @@ export function TerminalView({
         if (attachOutcome.kind === "rejected") throw attachOutcome.error;
         outputAttachTimeoutStreak = 0;
         const rawAttachment = attachOutcome.value;
+        // An answer that is not an object at all cannot be told apart from a
+        // fail-stop by the `kind` probe below — `in` throws on it — and the
+        // TypeError would surface as an unexplained attach failure instead of
+        // the fail-stop path that knows how to recover.
+        if (rawAttachment === null || typeof rawAttachment !== "object") {
+          failStopOutputV3("malformed_attach_fail_stop", false);
+          return;
+        }
         if ("kind" in rawAttachment) {
           const backendFailureReason = outputV3FailureCoordinator.bindFailedAttach(rawAttachment);
           failStopOutputV3(backendFailureReason ?? "malformed_attach_fail_stop", false);

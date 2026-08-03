@@ -95,12 +95,32 @@
       .app {
         display: grid;
         /* header · widget strip · main · key bar · footer. The strip row is
-           `auto`, so an empty (hidden) strip costs no height at all. */
+           `auto`, so an empty (hidden) strip costs no height at all.
+
+           Every child is placed explicitly. Auto-placement would fill the
+           tracks in DOM order among the children that are *rendered*, so a
+           hidden strip pulled `main` up into an `auto` row and the terminal
+           collapsed to zero height. */
         grid-template-rows: auto auto minmax(0, 1fr) auto auto;
         width: 100%;
         min-width: 0;
         max-width: 100%;
         height: var(--remote-viewport-height, 100%);
+      }
+      .app > header {
+        grid-row: 1;
+      }
+      .app > .widget-strip {
+        grid-row: 2;
+      }
+      .app > main {
+        grid-row: 3;
+      }
+      .app > .key-bar {
+        grid-row: 4;
+      }
+      .app > footer {
+        grid-row: 5;
       }
       header, footer {
         display: flex;
@@ -6206,7 +6226,10 @@
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
-            await loadNavigation(null, { focusInput: !auto });
+            // `undefined`, not `null`: the parameter's default is the remembered
+            // pane hint, and an explicit `null` opts out of it — a reconnect then
+            // lands on the focused pane instead of the one this tab was on.
+            await loadNavigation(undefined, { focusInput: !auto });
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;

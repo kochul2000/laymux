@@ -264,9 +264,29 @@ async function installLeaseMocks(
   }
 }
 
+/**
+ * Take control, however this document gets there.
+ *
+ * A page that still holds the reconnect intent claims by itself when it comes
+ * back (ADR-0063), so Connect is already disabled by the time a test could click
+ * it. Clicking only when the button is actionable keeps both paths in one helper
+ * without asserting which one ran — what the tests are about is the claim the
+ * server saw, not the gesture that caused it.
+ */
 async function connectRemote(page: Page, expectedStatus = "Main · Pane 1") {
-  await page.locator("#connect").click();
-  await expect(page.locator("#status")).toHaveText(expectedStatus);
+  const connect = page.locator("#connect");
+  const status = page.locator("#status");
+  // Wait for one of the two to become true before deciding: the automatic claim
+  // has already landed, or the button is ours to press. Reading `isEnabled` on
+  // its own races both ways — the button is briefly disabled while a claim is in
+  // flight and briefly enabled while a disconnect settles.
+  await expect
+    .poll(
+      async () => (await status.textContent()) === expectedStatus || (await connect.isEnabled()),
+    )
+    .toBe(true);
+  if (await connect.isEnabled()) await connect.click();
+  await expect(status).toHaveText(expectedStatus);
 }
 
 async function stashedResumeToken(page: Page) {
@@ -328,7 +348,8 @@ test("a duplicated tab cannot present the capability and the original keeps cont
   }, clonedStorage);
   await duplicate.goto("http://remote.test/remote/#token=test-token");
 
-  await duplicate.locator("#connect").click();
+  // The clone inherited the reconnect intent along with the storage, so it
+  // claims on its own — and that claim is the one that must be refused.
   await expect(duplicate.locator("#status")).toContainText("409");
 
   expect(remote.claimRequests).toHaveLength(2);
@@ -346,7 +367,11 @@ test("a server-confirmed lease loss clears the capability before the next claim"
   await page.goto("http://remote.test/remote/#token=test-token");
   await connectRemote(page);
 
-  remote.heartbeatStatus = 409;
+  // `403` is what a *server-confirmed* loss looks like on the heartbeat. A `409`
+  // only says "your lease is not active", which an expiry while we were away
+  // answers the same way a takeover does — so it keeps the intent armed and
+  // reconnects instead (issue #561, api-contracts §13.4).
+  remote.heartbeatStatus = 403;
   await expect(page.locator(".connection-hint")).toContainText("Host has control", {
     timeout: 10_000,
   });
@@ -390,7 +415,8 @@ test("a lease-loss reconnect restores the last selected visible dock pane", asyn
   await page.locator(".dock-terminal-row", { hasText: "C:\\dock" }).click();
   await expect.poll(() => remote.outputTerminalIds.at(-1)).toBe("dock-terminal-1");
 
-  remote.heartbeatStatus = 409;
+  // Server-confirmed loss (see the note in the test above): `403`, not `409`.
+  remote.heartbeatStatus = 403;
   await expect(page.locator(".connection-hint")).toContainText("Host has control", {
     timeout: 10_000,
   });

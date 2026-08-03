@@ -71,9 +71,7 @@ export async function saveBeforeClose(): Promise<void> {
 
   // Agent process/title tracking can disappear as soon as Ctrl+C returns to
   // the shell. Fully capture the pane/session attribution before interrupting.
-  const settingsSnapshot = isSettingsWriteBlocked()
-    ? undefined
-    : await collectSettingsSnapshot();
+  const settingsSnapshot = isSettingsWriteBlocked() ? undefined : await collectSettingsSnapshot();
 
   // Kill-on-exit (issue #451): before serializing scrollback, send Ctrl+C to
   // running terminals so cron/agents wind down and Claude/Codex print their
