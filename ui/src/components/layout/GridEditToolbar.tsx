@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -23,7 +22,6 @@ async function getWindow() {
 }
 
 export function GridEditToolbar() {
-  const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const toggleRemoteAccessModal = useUiStore((s) => s.toggleRemoteAccessModal);
   const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
@@ -36,7 +34,6 @@ export function GridEditToolbar() {
   const toggleLayoutMode = useDockStore((s) => s.toggleLayoutMode);
 
   const [maximized, setMaximized] = useState(false);
-  const [showSaved, setShowSaved] = useState(false);
   const remoteEnabled = remoteAccessStatus?.effectiveEnabled ?? remote.enabled;
   const remoteTokenConfigured =
     remoteAccessStatus?.authTokenConfigured ?? remote.authToken.trim().length > 0;
@@ -50,11 +47,6 @@ export function GridEditToolbar() {
       ? "Remote Access"
       : "Remote Access (token missing)"
     : "Remote Access (disabled)";
-
-  const flashSaved = useCallback(() => {
-    setShowSaved(true);
-    setTimeout(() => setShowSaved(false), 1500);
-  }, []);
 
   useEffect(() => {
     getWindow()
@@ -108,19 +100,6 @@ export function GridEditToolbar() {
     ),
   };
 
-  const btnBase =
-    "cursor-pointer rounded px-2 text-[11px] font-medium transition-colors duration-100";
-
-  const btnH = { height: "var(--btn-h)" };
-
-  const btnStyle: React.CSSProperties = {
-    ...btnH,
-    border: "1px solid var(--separator-bg)",
-    color: "var(--text-secondary)",
-    background: "transparent",
-    borderRadius: "var(--radius-sm)",
-  };
-
   return (
     <div
       data-testid="grid-edit-toolbar"
@@ -138,32 +117,6 @@ export function GridEditToolbar() {
           style={{ height: 16, width: 16, marginLeft: 4, marginRight: 4 }}
           draggable={false}
         />
-
-        <div className="ui-sep" />
-
-        <button
-          data-testid="export-new-btn"
-          onClick={() => {
-            const name = window.prompt("New layout name:");
-            if (name?.trim()) {
-              exportAsNewLayout(name.trim());
-              flashSaved();
-            }
-          }}
-          className={`${btnBase} hover-bg`}
-          style={btnStyle}
-        >
-          Export New
-        </button>
-        {showSaved && (
-          <span
-            data-testid="layout-saved-indicator"
-            className="text-[11px] font-medium"
-            style={{ color: "var(--accent, #4ec9b0)" }}
-          >
-            Saved!
-          </span>
-        )}
       </div>
 
       {/* Left widget slot — shrinks before the drag region does */}

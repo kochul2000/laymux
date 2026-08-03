@@ -103,22 +103,13 @@ test.describe("View Switcher", () => {
 });
 
 test.describe("Layout Export", () => {
-  test("grid edit toolbar has export button", async ({ appPage: page }) => {
+  test("grid edit toolbar no longer carries the export button", async ({ appPage: page }) => {
+    // Export New lives in the workspace selector, next to the layout cards it
+    // writes — see workspace-selector.spec.ts.
     await expect(page.getByTestId("grid-edit-toolbar")).toBeVisible();
-    await expect(page.getByTestId("export-new-btn")).toBeVisible();
-  });
-
-  test("export-new prompts for layout name", async ({ appPage: page }) => {
-    // Set up dialog handler before clicking
-    page.on("dialog", async (dialog) => {
-      expect(dialog.type()).toBe("prompt");
-      await dialog.accept("My Custom Layout");
-    });
-
-    await page.getByTestId("export-new-btn").click();
-
-    // Page should still be stable
-    await expect(page.getByTestId("grid-edit-toolbar")).toBeVisible();
+    await expect(page.getByTestId("grid-edit-toolbar").getByTestId("export-new-btn")).toHaveCount(
+      0,
+    );
   });
 });
 
