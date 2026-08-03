@@ -49,6 +49,17 @@ export interface GitHubViewProps {
 
 type Tab = "issues" | "pulls";
 
+/** The two per-row copy buttons: the item's URL, and a PR's source branch. */
+type CopyKind = "link" | "branch";
+
+function isCopied(
+  copied: { number: number; kind: CopyKind } | null,
+  number: number,
+  kind: CopyKind,
+): boolean {
+  return copied?.number === number && copied.kind === kind;
+}
+
 interface MenuAction {
   action: GithubItemAction;
   label: string;
@@ -152,7 +163,9 @@ export function GitHubView({
   const [confirming, setConfirming] = useState<{ number: number; action: MenuAction } | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<number | null>(null);
+  // Which row's copy button just fired, and which of the two it was — the two
+  // buttons sit side by side, so a bare row number would flash both check marks.
+  const [copied, setCopied] = useState<{ number: number; kind: CopyKind } | null>(null);
   // Which way the open menu points. Decided from the anchor's position inside
   // the scrolling list at the moment it opens.
   const [menuUp, setMenuUp] = useState(false);
@@ -220,9 +233,9 @@ export function GitHubView({
     };
   }, [openMenu, closeMenus]);
 
-  const copyLink = useCallback((item: GithubItem) => {
-    clipboardWriteText(item.url).catch(() => {});
-    setCopied(item.number);
+  const copyValue = useCallback((item: GithubItem, kind: CopyKind, text: string) => {
+    clipboardWriteText(text).catch(() => {});
+    setCopied({ number: item.number, kind });
     if (copyTimer.current) clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => setCopied(null), 1_200);
   }, []);
@@ -399,22 +412,50 @@ export function GitHubView({
                 {relativeTime(item.updatedAt, nowMs)}
               </span>
             )}
+            {/* Copy branch sits beside copy link and only on rows that have a
+                branch — issues never do, and a PR from a deleted head reports
+                an empty one. */}
+            {item.headRefName !== "" && (
+              <button
+                data-testid={`github-copy-branch-${item.number}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  copyValue(item, "branch", item.headRefName);
+                }}
+                title={
+                  isCopied(copied, item.number, "branch")
+                    ? "Copied"
+                    : `Copy branch (${item.headRefName})`
+                }
+                style={{
+                  ...ROW_BTN,
+                  color: isCopied(copied, item.number, "branch")
+                    ? "var(--green)"
+                    : "var(--text-secondary)",
+                }}
+                className="hover-bg shrink-0"
+              >
+                {isCopied(copied, item.number, "branch") ? "✓" : "⎇"}
+              </button>
+            )}
             {/* Copy link stays visible at all times (issue #708) — it is the
                 one action that is safe to hit by accident. */}
             <button
               data-testid={`github-copy-${item.number}`}
               onClick={(e) => {
                 e.stopPropagation();
-                copyLink(item);
+                copyValue(item, "link", item.url);
               }}
-              title={copied === item.number ? "Copied" : "Copy link"}
+              title={isCopied(copied, item.number, "link") ? "Copied" : "Copy link"}
               style={{
                 ...ROW_BTN,
-                color: copied === item.number ? "var(--green)" : "var(--text-secondary)",
+                color: isCopied(copied, item.number, "link")
+                  ? "var(--green)"
+                  : "var(--text-secondary)",
               }}
               className="hover-bg shrink-0"
             >
-              {copied === item.number ? "✓" : "⧉"}
+              {isCopied(copied, item.number, "link") ? "✓" : "⧉"}
             </button>
             <div className="relative shrink-0">
               <button

@@ -38,6 +38,7 @@ function snapshot(overrides: Partial<GithubRepoSnapshot> = {}): GithubRepoSnapsh
         updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
         labels: ["enhancement"],
         isDraft: false,
+        headRefName: "",
       },
     ],
     pulls: [
@@ -49,6 +50,7 @@ function snapshot(overrides: Partial<GithubRepoSnapshot> = {}): GithubRepoSnapsh
         updatedAt: new Date(Date.now() - 60_000).toISOString(),
         labels: [],
         isDraft: true,
+        headRefName: "feat/wip-branch",
       },
     ],
     fetchedAtMs: Date.now(),
@@ -244,6 +246,29 @@ describe("GitHubView", () => {
 
     expect(clipboardWriteText).toHaveBeenCalledWith("https://github.com/owner/repo/issues/708");
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("copies a pull request's branch from the button beside copy link", () => {
+    renderView();
+    fireEvent.click(screen.getByTestId("github-tab-pulls"));
+
+    const branchButton = screen.getByTestId("github-copy-branch-12");
+    expect(branchButton).toHaveAttribute("title", "Copy branch (feat/wip-branch)");
+
+    fireEvent.click(branchButton);
+
+    expect(clipboardWriteText).toHaveBeenCalledWith("feat/wip-branch");
+    expect(openExternal).not.toHaveBeenCalled();
+    // Only the branch button acknowledges; copy link keeps its own icon.
+    expect(branchButton).toHaveTextContent("✓");
+    expect(screen.getByTestId("github-copy-12")).toHaveTextContent("⧉");
+  });
+
+  it("offers no branch button on rows without a branch", () => {
+    renderView();
+
+    expect(screen.getByTestId("github-copy-708")).toBeInTheDocument();
+    expect(screen.queryByTestId("github-copy-branch-708")).not.toBeInTheDocument();
   });
 
   it("closes an issue as not planned only after the click is confirmed", async () => {

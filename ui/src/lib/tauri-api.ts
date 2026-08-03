@@ -601,6 +601,8 @@ export interface GithubItem {
   updatedAt: string;
   labels: string[];
   isDraft: boolean;
+  /** Source branch of a PR. Empty for issues, which have no branch. */
+  headRefName: string;
 }
 
 export interface GithubRepoSnapshot {
