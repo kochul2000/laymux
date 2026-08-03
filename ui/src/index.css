@@ -178,6 +178,17 @@
     background: var(--hover-bg-strong);
   }
 
+  /* "Save current layout as new" row in the workspace selector. The icon and
+     label light up together on hover, so the accent lives on the button and
+     both children inherit it. */
+  .export-new-layout-btn {
+    color: var(--text-secondary);
+    transition: color 0.12s ease;
+  }
+  .export-new-layout-btn:hover {
+    color: var(--accent);
+  }
+
   .hidden-item-action-btn {
     display: inline-flex;
     width: var(--hidden-action-size);

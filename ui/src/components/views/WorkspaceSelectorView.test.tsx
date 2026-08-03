@@ -156,6 +156,39 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.getByTestId("layout-card-default-layout")).toBeInTheDocument();
   });
 
+  it("offers export-new next to the layout cards", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("My Layout");
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+
+    render(<WorkspaceSelectorView />);
+    const panel = screen.getByTestId("new-workspace-panel");
+    const exportBtn = screen.getByTestId("export-new-btn");
+    expect(panel).toContainElement(exportBtn);
+
+    await user.click(exportBtn);
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
+    expect(useWorkspaceStore.getState().layouts[1].name).toBe("My Layout");
+    expect(
+      screen.getByTestId("layout-card-" + useWorkspaceStore.getState().layouts[1].id),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
+    promptSpy.mockRestore();
+  });
+
+  it("keeps layouts untouched when the export prompt is cancelled", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+
+    render(<WorkspaceSelectorView />);
+    await user.click(screen.getByTestId("export-new-btn"));
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(1);
+    expect(screen.queryByTestId("layout-saved-indicator")).not.toBeInTheDocument();
+    promptSpy.mockRestore();
+  });
+
   it("highlights active workspace", () => {
     render(<WorkspaceSelectorView />);
     const activeWs = screen.getByTestId("workspace-item-ws-default");
@@ -2072,6 +2105,20 @@ describe("WorkspaceSelectorView", () => {
       fireEvent.click(screen.getByTestId("hidden-workspace-primary-ws-2"));
       expect(useUiStore.getState().hiddenWorkspaceIds.has("ws-2")).toBe(false);
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+    });
+
+    it("closes the shelf after restoring and opening while other workspaces remain hidden", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setWorkspaceHidden("ws-3", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
+
+      fireEvent.click(screen.getByTestId("hidden-workspace-primary-ws-2"));
+
+      expect(useUiStore.getState().hiddenWorkspaceIds).toEqual(new Set(["ws-3"]));
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+      expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+      expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
     });
 
     it("provides distinct tooltips for primary and show-only restore actions", () => {

@@ -790,6 +790,8 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 ```
 ┌───────────────────────────────┐
 │  + New Workspace              │
+│  ▤ Default            [default]│  ← 레이아웃 카드(클릭 시 그 레이아웃으로 생성)
+│  + 현재 레이아웃을 새로 저장  │  ← 현재 워크스페이스 pane 배치 → 새 레이아웃
 ├───────────────────────────────┤
 │ WORKSPACES     [Hidden 2] [≡] │  ← 섹션 헤더: 유효 hidden workspace chip + 정렬 토글
 │  (chip 클릭 시 바로 아래에    │
@@ -805,6 +807,11 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 └───────────────────────────────┘
 ```
 
+### 레이아웃 저장(Export New)
+
+- 현재 워크스페이스의 pane 배치를 새 레이아웃 템플릿으로 저장하는 액션(`exportAsNewLayout`)은 상단 바가 아니라 **selector 의 "New Workspace" 패널 안, 레이아웃 카드 목록 바로 아래**에 있다. 쓰는 곳과 읽는 곳이 같은 표면이라 저장 직후 새 카드가 그 자리에서 보인다. 기존 레이아웃 덮어쓰기(`exportToLayout`)는 각 카드의 ⋯ 메뉴가 계속 소유한다.
+- `GridEditToolbar` 는 창/도크 제어와 위젯 슬롯만 담당하며 레이아웃 액션을 갖지 않는다.
+
 ### 숨김 상태 파생과 복원
 
 - `uiStore.hiddenWorkspaceIds`와 `hiddenPaneIds`는 localStorage에 저장하는 독립 raw state다. UI는 이 set을 직접 세어 표시하지 않고 `lib/hidden-items.ts`의 `deriveHiddenItems`가 현재 workspace 구조와 함께 계산한 visible 목록, 유효 숨김 개수, stale ID, shelf grouping을 사용한다([ADR-0005](../adr/0005-display-state-raw-separation-compute.md), [ADR-0033](../adr/0033-hidden-items-shelf-set-contract.md)).
@@ -812,7 +819,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - workspace 행의 quick-hide 버튼은 항상 DOM에 존재하고 hover 또는 `:focus-within`에서 시각화된다. 숨김은 즉시 반영하며 최근 action은 5초 Undo snackbar로 되돌릴 수 있다.
 - active workspace를 숨길 때의 visible fallback은 일반 workspace 전환과 같은 `workspace-transition.ts`의 `switchActiveWorkspace` 착지 경로를 사용한다. 따라서 이전 dock focus를 지우고 전역 `focusedPaneIndex`를 fallback workspace의 유효 pane으로 다시 계산한 뒤 숨김 raw state를 적용한다(issue #578, [ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)). Selector 클릭·생성·복제, 키보드, Automation/Remote, 외부 상태 주입을 수선하는 coordinator도 각자 store를 조립하지 않고 같은 전환 소유자를 사용한다.
 - **Pane 숨김은 workspace grid 의 각 pane 컨트롤바 eye 토글로만 제어한다**(숨김·복원 모두). selector 의 pane 요약 행에는 숨김 버튼이 없고, 숨겨진 pane 행은 목록에서 필터된다. dock pane 은 selector 에 나오지 않으므로 토글을 노출하지 않는다.
-- 보관함의 기본 복원(행 클릭)은 workspace 를 다시 표시하고 활성화하며, eye 버튼은 표시만 한다. "모두 표시"는 hidden workspace set 만 비우고 개별 숨김 pane flag 는 유지한다.
+- 보관함의 기본 복원(행 클릭)은 workspace 를 다시 표시하고 활성화한 뒤 보관함을 닫으며, eye 버튼은 표시만 하고 다른 hidden workspace가 남아 있으면 보관함을 유지한다. "모두 표시"는 hidden workspace set 만 비우고 개별 숨김 pane flag 는 유지한다.
 - workspace 를 복원해도 그 아래 pane 의 raw hidden flag 는 유지된다(복원은 pane 토글 소관).
 - active workspace를 숨길 때는 현재 정렬 순서에서 다음 visible workspace를 먼저 활성화한다. 마지막 visible workspace는 숨길 수 없다. `useHiddenItemsCoordinator`는 Automation·세션 교체·구조 삭제처럼 selector 밖에서 raw state가 바뀌는 경우에도 이 불변식과 stale ID 정리를 즉시 적용한다.
 - 명시적 `setPaneHidden`/`setWorkspaceHidden` 복원은 같은 store 전환에서 관련 `evictedPaneIds`를 지운다. 유효 hidden workspace 가 0 이 되면(hidden pane 존재 여부와 무관하게) 보관함도 닫힌다.

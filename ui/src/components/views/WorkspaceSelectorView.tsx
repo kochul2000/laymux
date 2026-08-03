@@ -1011,6 +1011,69 @@ function LayoutCard({
   );
 }
 
+/**
+ * Saves the current workspace's pane arrangement as a new layout template.
+ * It lives with the layout cards it creates, not in the window top bar: the
+ * layouts it writes are read right below it, so the action and its result
+ * share one surface.
+ */
+function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) {
+  const { t } = useTranslation("workspace");
+  const [showSaved, setShowSaved] = useState(false);
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
+
+  return (
+    <div
+      className="flex items-center gap-2 px-1 py-1.5"
+      style={{
+        borderTop: "1px dashed var(--border)",
+      }}
+    >
+      <button
+        data-testid="export-new-btn"
+        onClick={() => {
+          const name = window.prompt(t("layout.exportNewPrompt"));
+          if (!name?.trim()) return;
+          onExport(name.trim());
+          if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+          setShowSaved(true);
+          savedTimerRef.current = setTimeout(() => setShowSaved(false), 1500);
+        }}
+        className="export-new-layout-btn flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+        style={{ background: "transparent", border: "none", padding: 0 }}
+        title={t("layout.exportNewTitle")}
+      >
+        <span className="ml-0.5 flex shrink-0 items-center justify-center" style={{ width: 24 }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path
+              d="M6 1.5v9M1.5 6h9"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+          </svg>
+        </span>
+        <span className="truncate text-[11px] font-medium">{t("layout.exportNew")}</span>
+      </button>
+      {showSaved && (
+        <span
+          data-testid="layout-saved-indicator"
+          className="shrink-0 pr-1 text-[10px] font-medium"
+          style={{ color: "var(--accent)" }}
+        >
+          {t("layout.saved")}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function WorkspaceSelectorView() {
   const { t } = useTranslation("workspace");
   const [showNotifPanel, setShowNotifPanel] = useState(false);
@@ -1037,6 +1100,7 @@ export function WorkspaceSelectorView() {
   const duplicateLayout = useWorkspaceStore((s) => s.duplicateLayout);
   const setDefaultLayout = useWorkspaceStore((s) => s.setDefaultLayout);
   const exportToLayout = useWorkspaceStore((s) => s.exportToLayout);
+  const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
 
   const notifications = useNotificationStore((s) => s.notifications);
   const totalUnread = notifications.filter((n) => n.readAt === null).length;
@@ -1251,6 +1315,7 @@ export function WorkspaceSelectorView() {
               onOverwrite={() => exportToLayout(layout.id)}
             />
           ))}
+          <ExportNewLayoutRow onExport={(name) => exportAsNewLayout(name)} />
         </div>
       </div>
 
@@ -1346,7 +1411,13 @@ export function WorkspaceSelectorView() {
               false,
               item.workspace.panes.map((pane) => pane.id),
             );
-            if (open) handleSelectWorkspace(item.workspace.id);
+            if (open) {
+              setHiddenShelfOpen(false);
+              if (hiddenItems.hiddenWorkspaces.length > 1) {
+                hiddenChipRef.current?.focus();
+              }
+              handleSelectWorkspace(item.workspace.id);
+            }
           }}
         />
       )}
