@@ -6,6 +6,7 @@
  */
 
 import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
+import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
 import type { CodexUsageLimit, UsageSnapshot } from "@/lib/tauri-api";
 import type { CodexUsageVisibleRow, UsageVisibleRow } from "@/stores/settings-store";
 
@@ -137,4 +138,64 @@ export function buildCodexUsageRows(
         },
       };
     });
+}
+
+/**
+ * The text a one-line surface prints for a row.
+ *
+ * Lives beside the row builders, not in the React body, because the remote
+ * client draws the same rows from a payload rather than from these objects
+ * (ADR-0123). Two implementations of "what this row says" would let the same
+ * limit read differently on the desktop and in a browser.
+ */
+export function usageRowPercentText(percent: number | null): string {
+  return percent == null ? USAGE_UNAVAILABLE_TEXT : `${percent}%`;
+}
+
+export function usageRowStatuslineText(row: UsageDisplayRow): string {
+  const percent = usageRowPercentText(row.percent);
+  return row.statuslineLabel == null ? percent : `${row.statuslineLabel} ${percent}`;
+}
+
+/**
+ * The hover text a one-line usage surface carries.
+ *
+ * Both numbers per row, because two stacked bars are too small to read a gap
+ * between consumption and elapsed time off the pixels alone, and the capture
+ * time, because a one-line surface has no room to say how old it is.
+ */
+export function usageWidgetTooltip({
+  label,
+  configDir,
+  message,
+  rows,
+  capturedAtMs,
+}: {
+  label: string;
+  configDir?: string;
+  /** Non-null whenever the numbers are not usable. */
+  message: string | null;
+  rows: readonly UsageDisplayRow[];
+  capturedAtMs: number | null;
+}): string {
+  const capturedLabel =
+    capturedAtMs == null
+      ? "never"
+      : new Date(capturedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+  return [
+    configDir ? `${label} (${configDir})` : label,
+    message ??
+      rows
+        .map(
+          (row) =>
+            `${row.label}: ${usageRowPercentText(row.percent)}` +
+            (row.elapsed == null ? "" : ` · ${row.elapsed}% elapsed`),
+        )
+        .join("\n"),
+    ...rows.filter((row) => row.reset).map((row) => `${row.label} resets ${row.reset}`),
+    `Updated ${capturedLabel}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

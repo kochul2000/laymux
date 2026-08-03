@@ -2295,6 +2295,14 @@ function RemoteSection() {
           checked={remote.serveTerminalFont}
           onChange={(value) => update({ serveTerminalFont: value })}
         />
+
+        <ToggleRow
+          label={t("remote.widgets")}
+          desc={t("remote.widgetsDesc")}
+          testid="remote-settings-widgets-toggle"
+          checked={remote.widgets}
+          onChange={(value) => update({ widgets: value })}
+        />
       </SubGroup>
 
       <SubGroup title={t("remote.groupHosts")}>

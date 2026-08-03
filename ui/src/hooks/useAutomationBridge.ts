@@ -1395,6 +1395,21 @@ export async function handleAsyncAutomationRequest(
     }
     return result;
   }
+  // What the remote widget strip draws (ADR-0123). Async because the Claude
+  // rows come from the backend's last probe capture — read here, never started,
+  // so a remote viewer creates no probe demand of its own. Imported on demand:
+  // the desktop draws its widgets from the components, never from this builder,
+  // so nothing but a connected remote client should pay for it at startup.
+  if (request.target === "widgets" && request.method === "snapshot") {
+    try {
+      const { buildRemoteWidgetSnapshot } = await import("@/lib/widget-snapshot");
+      return ok(await buildRemoteWidgetSnapshot());
+    } catch (error) {
+      return err(
+        `Widget snapshot error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   if (request.target === "screenshot" && request.method === "capture") {
     try {
       const paneIndex =

@@ -191,6 +191,8 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 편집 UI 는 Settings → **Interface → 위젯** 한 곳이다. 위젯은 pane 에 놓는 view 가 아니라 앱 크롬이므로 Views 가 아닌 Interface 그룹에 둔다. 상단 바에는 배치 조작 버튼을 두지 않는다.
 
+원격 클라이언트는 이 배치를 **미러**만 한다([ADR-0123](../adr/0123-remote-widget-strip-mirrors-desktop.md)). 원격 전용 배치·옵션은 없고, 데스크톱이 그리고 있는 위젯만 원격 스트립에 나타난다 — `statusLine.enabled` 가 꺼져 있으면 그 슬롯의 위젯은 원격에도 없다. 네 슬롯은 원격에서 좌(`topBar.left`+`statusLine.left`)·우(`topBar.right`+`statusLine.right`) 두 묶음으로만 접히고, 폭이 모자라면 접지 않고 가로 스크롤한다. 계약과 전송 형식은 §13.5 를 참고한다.
+
 ### GitHub 이슈/PR 목록 (GitHubView)
 
 `GitHubView` 는 pane 이 sync group 에서 **받은 CWD** 로 대상 리포를 정한다. CWD → `owner/repo` 변환은 `git_watcher::resolve_github_base_from_working_dir` 단일 구현을 쓰며, GitHub `origin` 이 없으면 오류가 아니라 `notAGithubRepo` 표시 상태다. 이 뷰는 CWD 를 받기만 하므로 컨트롤 바에 receive 토글만 노출된다 — send/1회 전파 노출 여부는 `lib/view-cwd-capability.ts` 의 `supportsCwdSend`/`supportsCwdReceive` 가 결정한다.
@@ -262,7 +264,8 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "cloudTunnelUrl": null,             // pairing complete 응답의 WSS tunnel URL. PR3 터널에서 사용
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
     "cloudAutoReconnect": true,         // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
-    "serveTerminalFont": false          // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
+    "serveTerminalFont": false,         // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
+    "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0123). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다
   }
 }
 ```
@@ -1243,6 +1246,22 @@ Remote composer도 데스크톱과 동일하게 두 가지 과거 입력 recall 
 터미널 종료는 control worker를 먼저 닫고 graceful window 동안 PTY master close를 bounded 재시도한다. resize 같은 control 작업이 master mutex를 잠시 보유해 첫 `try_lock`이 실패해도 이후 close로 EOF/HUP를 전달할 기회를 유지하며, window 안에 child가 종료되지 않을 때만 process-tree 강제 종료로 진행한다.
 
 Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취급한다. Heartbeat가 `401`/`403`/`409`처럼 권한·lease 상실을 명시하면 즉시 local control로 돌려주지만, 일시적 fetch 실패는 `heartbeatTimeoutSeconds`가 지날 때까지 재시도한다. Heartbeat는 최대 5초마다 보내고 실패 시 1초 뒤 빠르게 재시도하며, 개별 request는 최대 4초에 abort하므로 pending request 하나가 lease 유예 전체를 소진하지 않는다. Output WebSocket close/error는 곧바로 lease를 반납하지 않고, heartbeat가 active lease를 유지하는 동안 같은 terminal output stream을 지수 backoff로 다시 연다. 두 경로의 일시 오류 표시는 2초간 보류해 그 안에 복구되면 기존 연결 문구와 terminal surface를 그대로 유지한다. Output 재접속 중에도 기존 surface를 보존하고, 서버가 보내는 첫 V1 snapshot header/binary pair를 검증한 뒤 적용 직전에만 reset하여 tail 중복을 막는다. 헤더/바이너리 길이·phase·state 범위·sequence가 어긋나면 stream 전체를 버리고 재attach한다. 서버가 기존 lease 상실을 확정한 뒤에는 새 lease를 자동 claim하지 않는다 — 단 **문서가 보이는 순간**은 예외다([ADR-0027](../adr/0027-remote-connection-graceful-recovery.md), [ADR-0063](../adr/0063-remote-foreground-auto-reclaim.md)). 페이지는 떠날 때 lease를 반납하고(ADR-0037) 긴 백그라운드는 어차피 만료시키므로, 복귀는 항상 끊긴 상태로 시작한다. Connect 성공이 "이 탭이 제어권을 갖겠다"는 의사를 `laymux.remote.autoConnect`(**sessionStorage** — 의도는 탭 범위다. localStorage면 다른 탭이 상속해, 살아 있는 옛 탭이 lease를 계속 재확보하고 새 진입이 `409`를 맞는다)에 남기고 Release가 철회한다. 자동 경로는 claim 전에 `session/status`를 조회해 다른 클라이언트가 제어권을 가지고 있으면(`active`) 물러나며, 예외는 이 탭이 소유했던 lease만 대체할 수 있는 resume capability를 보유한 경우다. 이 조회는 자문이므로 실패해도 claim을 막지 않으며 `401`/`403`만 의사를 해제한다. `pagehide` release는 로컬 `leaseId`도 비운다 — bfcache 복원이 문서 변수를 되살리므로 남은 `leaseId`가 복귀를 건너뛰게 만든다. 의사가 남아 있으면 `visibilitychange`(보임)·`pageshow`(bfcache 복귀)·`online` 세 신호에서 자동으로 claim을 시도하며, 배경 탭에서는 어떤 경로로도 시도하지 않는다. `401`/`403`/`409`는 확정적 거절이므로 의사를 해제하고 사용자 조작을 기다리고, 일시 오류만 1초→최대 15초 지수 backoff로 보이는 동안 재시도한다. heartbeat의 `409`("lease is not active")는 **누가 제어권을 가졌는지 말하지 않으므로** 확정으로 취급하지 않는다 — 자리를 비운 사이의 만료와 호스트 탈취가 같은 응답을 낸다. heartbeat 단계의 확정은 `401`(토큰)·`403`(원격 비활성)뿐이고, 소유권은 재claim의 응답이 판정한다. claim의 `409`는 소유권 handoff drain 중(`transitioning: true`)이면 backoff 후 재시도하고, 그 외(다른 controller 보유, PC reclaim lockout)는 의사를 해제한다. 이를 위해 conflict 본문의 `active`/`transitioning`을 클라이언트 오류 객체로 올린다. 되찾는 경로에서는 만료를 오류로 표시하지 않고 `Reconnecting...`만 보여주며(가시성과 무관하게 — 배경에서 빨간 문구·네비게이션 열기를 해두면 복귀 시 깜빡임으로만 드러난다), 만료된 lease를 반납하지 않는다 — 반납은 서버를 `transitioning` drain으로 만들어 자신의 재claim이 `409`를 받게 하고 의사가 해제된다. resume capability도 이 경로에서만 유지한다(자기 lease 대체 한정, ADR-0037).
+
+### 13.5 Widget Strip
+
+원격 클라이언트는 데스크톱에 배치된 위젯을 header 아래 한 줄 스트립에 미러한다([ADR-0123](../adr/0123-remote-widget-strip-mirrors-desktop.md)). 배치·옵션의 SoT 는 `settings.widgets` 하나이며(§10 상태 위젯 배치) 원격 전용 배치 설정은 없다.
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/widgets` | GET | 데스크톱이 그리고 있는 위젯의 표시 모델 |
+
+`/remote/v1/navigation` 과 같이 bearer token·IP/Origin gate 만 요구하고 **lease 는 요구하지 않는다** — 스트립은 호스트를 조작하지 않으므로 열람만 하는 접속에서도 지표가 보인다. `settings.remote.widgets` 가 `false` 면 frontend bridge 를 거치지 않고 `{"enabled": false, "items": []}` 를 돌려준다.
+
+응답은 `{ enabled, fontFamily, fontSize, items[] }` 다. `fontFamily`/`fontSize` 는 `widgets.fontFamily`/`widgets.fontSize` 를 그대로 미러하며(빈 `fontFamily` = 인터페이스 글꼴 상속), 각 item 은 `{ id, type, align, title, kind, ... }` 형태다. `align` 은 `"left"|"right"` 뿐이고 데스크톱의 두 표면은 여기서 사라진다 — 원격 좌측은 `topBar.left`+`statusLine.left`, 우측은 `topBar.right`+`statusLine.right` 를 각 슬롯 배열 순서대로 이어 붙인 것이다. `statusLine.enabled` 가 꺼져 있거나 `type` 이 미등록이면 데스크톱이 그리지 않으므로 item 도 만들어지지 않는다.
+
+`kind` 는 원격이 분기하는 그리기 단위이며 `type` 보다 의도적으로 성기다 — 기존 `kind` 로 사상되는 새 위젯은 원격 코드를 바꾸지 않는다. `kind: "usage"` 는 `{ label, display, unavailable, rows[{key,text,percent,elapsed}], colors{used,pace,track}, barWidth, barHeight, elapsedHeight }`, `"activity"` 는 `{ busy, total }`, `"notifications"` 는 `{ unread }`, `"text"` 는 `{ text, copyText }` 를 갖는다. **행 선택·퍼센트 문자열·색·실패 문구·툴팁(`title`)은 모두 데스크톱이 계산해 보낸다** — 원격은 계산하지 않는다. `unavailable` 이 non-null 이면 숫자를 마지막 성공값으로 대체하지 않고 그대로 사용 불가로 표시한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)).
+
+값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하는 고정 5초이며 `usage.*.refreshSeconds` 와 무관하고, 문서가 숨겨진 동안에는 폴하지 않는다. 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
 
 ---
 

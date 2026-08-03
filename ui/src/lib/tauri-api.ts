@@ -921,6 +921,8 @@ export interface RemoteSettings {
   cloudAutoReconnect: boolean;
   /** Send the desktop terminal font file to remote browsers (ADR-0077). */
   serveTerminalFont: boolean;
+  /** Mirror the desktop's placed widgets onto the remote strip (ADR-0123). */
+  widgets: boolean;
 }
 
 export interface Settings {

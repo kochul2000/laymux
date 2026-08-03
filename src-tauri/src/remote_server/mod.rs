@@ -15,6 +15,7 @@ mod routes;
 mod terminal_info;
 mod viewer_page;
 mod viewer_routes;
+mod widget_routes;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

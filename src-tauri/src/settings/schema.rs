@@ -244,6 +244,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/remote/widgets",
+        description: "데스크톱에 배치한 위젯을 원격 클라이언트 상단 스트립에도 보여줄지 여부입니다. 배치·옵션은 settings.widgets 하나가 소유하며 이 값은 원격 표면의 표시 여부만 정합니다. 끄더라도 배치는 보존됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/remote/authToken",
         description: "Direct Remote browser가 사용하는 bearer token입니다. 응답에는 원문을 노출하지 않으며 ***REDACTED***를 다시 보내면 기존 값을 유지합니다.",
         sensitive: true,

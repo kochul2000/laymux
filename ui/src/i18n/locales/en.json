@@ -363,6 +363,8 @@
       "snapshotMaxKibDesc": "Scrollback budget (KiB) for the screen checkpoint restored on remote attach or terminal switch. The current screen and terminal state may exceed this value.",
       "serveTerminalFont": "Send Terminal Font",
       "serveTerminalFontDesc": "Send the desktop terminal font file to remote browsers so they render the same glyphs and cell widths. Serving a font binary over the network is redistribution, so enable it only for fonts you may redistribute (OS-bundled fonts such as Consolas are not). The font is downloaded once per browser.",
+      "widgets": "Show Widgets",
+      "widgetsDesc": "Mirror the widgets you placed on the desktop onto a single row at the top of the remote client. Placement and options stay in Interface → Widgets; turning this off only drops the remote row and keeps your placement.",
       "customHosts": "Custom Hosts",
       "customHostsDesc": "Host names or IPs to offer in the Remote Access copy URL selector.",
       "customHostPlaceholder": "devbox.tailnet.ts.net",
