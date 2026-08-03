@@ -664,6 +664,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudServerBaseUrl: null,
   cloudAutoReconnect: true,
   serveTerminalFont: false,
+  widgets: true,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };

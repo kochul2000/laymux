@@ -1606,6 +1606,12 @@ pub struct RemoteSettings {
     /// Consolas are not redistributable.
     #[serde(default)]
     pub serve_terminal_font: bool,
+    /// Mirror the desktop's placed widgets onto the remote client (ADR-0124).
+    /// On by default — with no widget placed the remote strip has zero height,
+    /// so the cost of the default is nothing. Turning it off drops the surface
+    /// on a device where a screen row matters more, and never touches placement.
+    #[serde(default = "default_remote_widgets")]
+    pub widgets: bool,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1629,6 +1635,10 @@ fn default_remote_snapshot_max_kib() -> u32 {
 }
 
 fn default_cloud_auto_reconnect() -> bool {
+    true
+}
+
+fn default_remote_widgets() -> bool {
     true
 }
 
@@ -1675,6 +1685,7 @@ impl Default for RemoteSettings {
             cloud_server_base_url: None,
             cloud_auto_reconnect: default_cloud_auto_reconnect(),
             serve_terminal_font: false,
+            widgets: default_remote_widgets(),
         }
     }
 }

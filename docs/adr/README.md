@@ -141,6 +141,7 @@ ADR 이 필요한 대표 기준:
 | [0121](0121-single-pane-clear-user-pointed-scope.md) | 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다 | Proposed |
 | [0122](0122-terminal-output-server-delivery-expiry.md) | backend receipt·continuation grant expiry는 최장 직렬 복구 경로를 덮는 30초다 | Accepted |
 | [0123](0123-top-bar-window-controls-outrank-everything.md) | 상단 바에서 창 버튼(최소화·최대화·닫기)은 다른 모든 점유자보다 우선한다 | Accepted |
+| [0124](0124-remote-widget-strip-mirrors-desktop.md) | 원격 위젯은 데스크톱 배치의 미러이며 표면은 한 줄 스트립 하나다 (0105 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

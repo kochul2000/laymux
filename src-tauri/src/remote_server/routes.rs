@@ -47,6 +47,7 @@ use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
 use super::viewer_routes::{
     remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
 };
+use super::widget_routes::remote_widgets;
 use super::{internal_error, json_error};
 
 pub(super) const REMOTE_LEASE_HEADER: &str = "x-laymux-remote-lease";
@@ -120,6 +121,8 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
+        // Lease-free like `navigation`: the strip only reads (ADR-0124).
+        .route("/remote/v1/widgets", get(remote_widgets))
         .route(
             "/remote/v1/navigation/spatial",
             post(remote_navigation_spatial_step),

@@ -9,7 +9,7 @@
 
 import { Fragment } from "react";
 
-import type { UsageDisplayRow } from "@/lib/usage-rows";
+import { usageRowStatuslineText, usageWidgetTooltip, type UsageDisplayRow } from "@/lib/usage-rows";
 import type { UsageColorSettings } from "@/stores/settings-store";
 import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
 import { WidgetChrome, WidgetLabel } from "./WidgetChrome";
@@ -130,28 +130,9 @@ export function UsageWidgetBody({
   barWidth: number;
 }) {
   const usable = message === null;
-  const capturedLabel =
-    capturedAtMs == null
-      ? "never"
-      : new Date(capturedAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-
-  const title = [
-    configDir ? `${label} (${configDir})` : label,
-    // Both numbers, because the two stacked bars are too small to read a gap
-    // between consumption and elapsed time off the pixels alone.
-    message ??
-      rows
-        .map(
-          (row) =>
-            `${row.label}: ${percentText(row.percent)}` +
-            (row.elapsed == null ? "" : ` · ${row.elapsed}% elapsed`),
-        )
-        .join("\n"),
-    ...rows.filter((row) => row.reset).map((row) => `${row.label} resets ${row.reset}`),
-    `Updated ${capturedLabel}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  // Shared with the remote strip, which draws these same rows from a payload
+  // (ADR-0124).
+  const title = usageWidgetTooltip({ label, configDir, message, rows, capturedAtMs });
 
   return (
     <WidgetChrome testId={testId} title={title} dragRegion={dragRegion}>
@@ -176,7 +157,9 @@ export function UsageWidgetBody({
             )}
             <span className="flex items-center gap-1">
               {display !== "bar" && (
-                <span data-testid={`${testId}-number-${row.key}`}>{statuslineText(row)}</span>
+                <span data-testid={`${testId}-number-${row.key}`}>
+                  {usageRowStatuslineText(row)}
+                </span>
               )}
               {display !== "number" && (
                 <Bar
@@ -198,13 +181,4 @@ export function UsageWidgetBody({
       )}
     </WidgetChrome>
   );
-}
-
-function percentText(percent: number | null): string {
-  return percent == null ? USAGE_UNAVAILABLE_TEXT : `${percent}%`;
-}
-
-function statuslineText(row: UsageDisplayRow): string {
-  const percent = percentText(row.percent);
-  return row.statuslineLabel == null ? percent : `${row.statuslineLabel} ${percent}`;
 }
