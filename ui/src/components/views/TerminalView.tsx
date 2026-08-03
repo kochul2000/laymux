@@ -71,10 +71,9 @@ import {
   handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
-  getRemoteControlStatus,
-  onRemoteControlChanged,
   type TerminalOutputSurfaceFailStoppedPayload,
 } from "@/lib/tauri-api";
+import { useRemoteControlStatusSnapshot } from "@/lib/remote-control-status";
 import {
   DEFAULT_CLAUDE_COMMAND,
   DEFAULT_CODEX_COMMAND,
@@ -322,7 +321,6 @@ const RESIZE_OUTPUT_QUIET_MS = 120;
 /** Upper bound for waiting on a continuous ConPTY output stream before resize. */
 const RESIZE_OUTPUT_MAX_WAIT_MS = 500;
 
-const REMOTE_CONTROL_STATUS_POLL_MS = 3000;
 const REMOTE_RETURN_RESIZE_TIMEOUT_MS = 1000;
 const REMOTE_RETURN_RESIZE_RETRY_MS = 100;
 
@@ -731,11 +729,14 @@ export function TerminalView({
   // container — which would propagate cols/rows=0 through a PTY resize and
   // leave inactive workspaces with garbled glyphs on next show.
   const isContainerHiddenRef = useRef(false);
+  const remoteControlSnapshot = useRemoteControlStatusSnapshot();
+  const remoteControlStatus = remoteControlSnapshot.status;
+  const remoteControlReleaseRevisionRef = useRef(remoteControlSnapshot.releaseRevision);
   const remoteControlActiveRef = useRef(false);
   // Until the initial lease status is known, do not let this local surface
   // write or resize the shared PTY. A remote controller may already own it.
   const remoteControlStatusKnownRef = useRef(false);
-  const [localControlAvailable, setLocalControlAvailable] = useState(false);
+  const localControlAvailable = remoteControlStatus?.active === false;
   const localControlAvailableRef = useRef(false);
   const outputProtocolReadyRef = useRef(false);
   // Input mode and the composer draft live in a module-level runtime store so a
@@ -1283,9 +1284,10 @@ export function TerminalView({
       // 데코레이션은 xterm 의 proposed API 라 이 옵션이 없으면 throw 한다.
       allowProposedApi: true,
       // xterm's CoreService still emits parser-generated replies when stdin is
-      // disabled, but blocks keyboard/IME/mouse/focus user input. Start closed
-      // until the remote-control owner snapshot is known.
-      disableStdin: true,
+      // disabled, but blocks keyboard/IME/mouse/focus user input. The layout
+      // effect mirrors the current owner snapshot before this passive creation
+      // effect, including when the snapshot was already known before mount.
+      disableStdin: !localControlAvailableRef.current,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
       cursorInactiveStyle: inputModeRef.current === "composer" ? "none" : "outline",
@@ -5962,7 +5964,7 @@ export function TerminalView({
   // back-to-back) compounds with TUI exit bursts (e.g. Codex's `ESC[?1049l`,
   // scrollback re-emit) and is what makes the WebGL atlas race manifest as
   // glyph corruption in adjacent panes.
-  const runTerminalRendererReflow = (_term: Terminal, syncBackendResize = false) => {
+  const runTerminalRendererReflow = useCallback((_term: Terminal, syncBackendResize = false) => {
     const pending = pendingRendererFitRequestRef.current;
     pendingRendererFitRequestRef.current = {
       rebuildAtlas: true,
@@ -5982,139 +5984,36 @@ export function TerminalView({
         if (request.syncBackendResize) remoteReturnResizeDirtyRef.current = true;
       }
     });
-  };
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    let pollTimer: ReturnType<typeof setInterval> | undefined;
-    let statusRetryTimer: ReturnType<typeof setTimeout> | undefined;
-    let listenerRetryTimer: ReturnType<typeof setTimeout> | undefined;
-    let statusEventRevision = 0;
-    let statusQueryEpoch = 0;
-
-    // A listener must be installed before the initial snapshot can authorize
-    // Local control. Until that barrier succeeds, keep the surface fail-closed.
-    // The rendered flag needs no reset here: this effect only runs on mount and
-    // `localControlAvailable` already starts `false`.
-    remoteControlStatusKnownRef.current = false;
-    localControlAvailableRef.current = false;
-
-    const stopPolling = () => {
-      if (pollTimer !== undefined) {
-        clearInterval(pollTimer);
-        pollTimer = undefined;
-      }
-    };
-
-    const stopStatusRetry = () => {
-      if (statusRetryTimer !== undefined) {
-        clearTimeout(statusRetryTimer);
-        statusRetryTimer = undefined;
-      }
-    };
-
-    const applyRemoteControlStatus = (status: { active: boolean }) => {
-      stopStatusRetry();
-      const wasActive = remoteControlActiveRef.current;
-      remoteControlStatusKnownRef.current = true;
-      remoteControlActiveRef.current = status.active;
-      localControlAvailableRef.current = !status.active;
-      setLocalControlAvailable(!status.active);
-      const term = terminalRef.current;
-      if (term) term.options.disableStdin = status.active;
-      if (status.active) {
-        if (pollTimer === undefined) {
-          pollTimer = setInterval(() => {
-            void refreshRemoteControlStatus();
-          }, REMOTE_CONTROL_STATUS_POLL_MS);
-        }
-        return;
-      }
-      stopPolling();
-      if (!wasActive) return;
-      if (!term || !openedRef.current) return;
-      if (isContainerHiddenRef.current) {
-        reflowDirtyRef.current = true;
-        remoteReturnResizeDirtyRef.current = true;
-        return;
-      }
-      runTerminalRendererReflow(term, true);
-    };
-
-    const scheduleStatusRetry = () => {
-      if (cancelled || statusRetryTimer !== undefined) return;
-      statusRetryTimer = setTimeout(() => {
-        statusRetryTimer = undefined;
-        void refreshRemoteControlStatus();
-      }, REMOTE_CONTROL_STATUS_POLL_MS);
-    };
-
-    async function refreshRemoteControlStatus(): Promise<void> {
-      const queryEpoch = ++statusQueryEpoch;
-      const eventRevision = statusEventRevision;
-      try {
-        const status = await getRemoteControlStatus();
-        if (cancelled || queryEpoch !== statusQueryEpoch || eventRevision !== statusEventRevision) {
-          return;
-        }
-        applyRemoteControlStatus(status);
-      } catch {
-        if (cancelled || queryEpoch !== statusQueryEpoch || eventRevision !== statusEventRevision) {
-          return;
-        }
-        // Never turn an unknown owner into Local on an IPC failure. Active
-        // status keeps its regular polling; the initial unknown state retries.
-        if (!remoteControlStatusKnownRef.current) scheduleStatusRetry();
-      }
-    }
-
-    const handleRemoteControlChanged = (status: { active: boolean }) => {
-      if (cancelled) return;
-      statusEventRevision += 1;
-      statusQueryEpoch += 1;
-      applyRemoteControlStatus(status);
-    };
-
-    const scheduleListenerRetry = () => {
-      if (cancelled || listenerRetryTimer !== undefined) return;
-      listenerRetryTimer = setTimeout(() => {
-        listenerRetryTimer = undefined;
-        installRemoteControlListener();
-      }, REMOTE_CONTROL_STATUS_POLL_MS);
-    };
-
-    function installRemoteControlListener(): void {
-      onRemoteControlChanged(handleRemoteControlChanged)
-        .then((cleanup) => {
-          if (cancelled) {
-            cleanup();
-            return;
-          }
-          unlisten = cleanup;
-          void refreshRemoteControlStatus();
-        })
-        .catch(() => {
-          if (cancelled) return;
-          remoteControlStatusKnownRef.current = false;
-          localControlAvailableRef.current = false;
-          setLocalControlAvailable(false);
-          const term = terminalRef.current;
-          if (term) term.options.disableStdin = true;
-          scheduleListenerRetry();
-        });
-    }
-
-    installRemoteControlListener();
-
-    return () => {
-      cancelled = true;
-      statusQueryEpoch += 1;
-      stopPolling();
-      stopStatusRetry();
-      if (listenerRetryTimer !== undefined) clearTimeout(listenerRetryTimer);
-      unlisten?.();
-    };
   }, []);
+  useLayoutEffect(() => {
+    const wasActive = remoteControlActiveRef.current;
+    const remoteWasReleased =
+      remoteControlReleaseRevisionRef.current !== remoteControlSnapshot.releaseRevision;
+    remoteControlReleaseRevisionRef.current = remoteControlSnapshot.releaseRevision;
+    const statusKnown = remoteControlStatus !== null;
+    const remoteActive = remoteControlStatus?.active ?? false;
+    remoteControlStatusKnownRef.current = statusKnown;
+    remoteControlActiveRef.current = remoteActive;
+    localControlAvailableRef.current = statusKnown && !remoteActive;
+
+    const term = terminalRef.current;
+    if (term) term.options.disableStdin = !statusKnown || remoteActive;
+    if (
+      !statusKnown ||
+      remoteActive ||
+      (!wasActive && !remoteWasReleased) ||
+      !term ||
+      !openedRef.current
+    ) {
+      return;
+    }
+    if (isContainerHiddenRef.current) {
+      reflowDirtyRef.current = true;
+      remoteReturnResizeDirtyRef.current = true;
+      return;
+    }
+    runTerminalRendererReflow(term, true);
+  }, [remoteControlSnapshot.releaseRevision, remoteControlStatus, runTerminalRendererReflow]);
   useEffect(() => {
     overlayCaretUpdaterRef.current?.();
   }, [activity, isFocused, font, cursorShape, stabilizeInteractiveCursor]);
@@ -6224,7 +6123,7 @@ export function TerminalView({
       return;
     }
     runTerminalRendererReflow(term);
-  }, [font]);
+  }, [font, runTerminalRendererReflow]);
 
   // Browser zoom / monitor DPR changes invalidate the WebGL texture atlas:
   // the renderer rasterises glyphs at a resolution tied to the current
@@ -6269,7 +6168,7 @@ export function TerminalView({
       cancelled = true;
       mql?.removeEventListener?.("change", onChange);
     };
-  }, []);
+  }, [runTerminalRendererReflow]);
 
   // Reactively update xterm overviewRuler width when scrollbarStyle changes
   const scrollbarStyleForEffect = useSettingsStore((s) => s.terminal.scrollbarStyle ?? "overlay");

@@ -4,8 +4,8 @@
  * A terminal is revealed when it receives the single startup slot. The slot is
  * held until TerminalView reports both a ready PTY session and its first xterm
  * render. Already revealed terminals stay mounted while their pane still
- * exists; changing focus only affects the order of terminals that have not
- * started yet.
+ * exists. Priority-only changes do not preempt startup, but a still-unready
+ * owner releases the slot when its surface is no longer eligible to start.
  */
 
 export const TERMINAL_STARTUP_SLOT_TIMEOUT_MS = 10_000;
@@ -93,7 +93,7 @@ export function createTerminalStartupState(): TerminalStartupState {
   };
 }
 
-/** Reconcile pane membership and grant at most one unstarted eligible pane. */
+/** Reconcile membership/eligibility and grant at most one unstarted eligible pane. */
 export function syncTerminalStartupCandidates(
   state: TerminalStartupState,
   input: TerminalStartupSyncInput,
@@ -109,9 +109,11 @@ export function syncTerminalStartupCandidates(
   }
   for (const id of readyPaneIds) revealedPaneIds.add(id);
 
+  const eligiblePaneSet = new Set(eligiblePaneIds);
   const activePaneId =
     state.activePaneId &&
     knownPaneSet.has(state.activePaneId) &&
+    eligiblePaneSet.has(state.activePaneId) &&
     !readyPaneIds.has(state.activePaneId)
       ? state.activePaneId
       : null;

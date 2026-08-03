@@ -4263,6 +4263,20 @@ describe("TerminalView", () => {
       expect(mockWriteToTerminal).not.toHaveBeenCalled();
       expect(mockWriteTerminalProtocolReply).toHaveBeenCalledTimes(1);
     });
+
+    it("enables human stdin for a terminal mounted after Local control is already known", async () => {
+      render(<TerminalView instanceId="t-owner-seed" profile="PowerShell" syncGroup="" />);
+      await waitForLocalTerminalControl();
+      await vi.waitFor(() => expect(createdTerminals).toHaveLength(1));
+      expect(createdTerminals[0].options.disableStdin).toBe(false);
+      expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1);
+
+      render(<TerminalView instanceId="t-owner-late-mount" profile="PowerShell" syncGroup="" />);
+      await vi.waitFor(() => expect(createdTerminals).toHaveLength(2));
+
+      expect(mockGetRemoteControlStatus).toHaveBeenCalledTimes(1);
+      expect(createdTerminals[1].options.disableStdin).toBe(false);
+    });
   });
 
   describe("synchronized-output cursor transactions", () => {

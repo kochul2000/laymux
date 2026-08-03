@@ -132,6 +132,26 @@ describe("AppLayout", () => {
     expect(useTerminalStartupStore.getState().activePaneId).toBe(dockPaneId);
   });
 
+  it("moves the startup slot when its unready owner becomes a hidden workspace", () => {
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const firstWorkspaceId = useWorkspaceStore.getState().activeWorkspaceId;
+    const firstPaneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useWorkspaceStore.getState().addWorkspace("next", "default-layout");
+    const secondWorkspaceId = useWorkspaceStore.getState().workspaces.at(-1)!.id;
+    useWorkspaceStore.getState().setActiveWorkspace(secondWorkspaceId);
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    const secondPaneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useWorkspaceStore.getState().setActiveWorkspace(firstWorkspaceId);
+
+    render(<AppLayout />);
+    expect(useTerminalStartupStore.getState().activePaneId).toBe(firstPaneId);
+
+    act(() => useWorkspaceStore.getState().setActiveWorkspace(secondWorkspaceId));
+
+    expect(useTerminalStartupStore.getState().activePaneId).toBe(secondPaneId);
+    expect(screen.getAllByTestId("mock-terminal")).toHaveLength(2);
+  });
+
   it("serializes a terminal-backed file viewer with workspace startup", () => {
     const path = "/home/user/review.txt";
     const fileViewerTerminalId = viewerInstanceId(path);

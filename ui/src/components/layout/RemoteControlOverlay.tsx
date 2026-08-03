@@ -1,69 +1,18 @@
 import { useEffect, useState } from "react";
-import {
-  getRemoteControlStatus,
-  onRemoteControlChanged,
-  reclaimRemoteControl,
-  type RemoteControlStatus,
-} from "@/lib/tauri-api";
+import { reclaimRemoteControl, type RemoteControlStatus } from "@/lib/tauri-api";
+import { publishRemoteControlStatus, useRemoteControlStatus } from "@/lib/remote-control-status";
 import { useTranslation } from "react-i18next";
 
-const STATUS_POLL_MS = 3000;
+interface ReclaimError {
+  status: RemoteControlStatus;
+  message: string;
+}
 
 export function RemoteControlOverlay() {
   const { t } = useTranslation("common");
-  const [status, setStatus] = useState<RemoteControlStatus | null>(null);
+  const status = useRemoteControlStatus();
   const [reclaiming, setReclaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | undefined;
-
-    const refresh = () => {
-      getRemoteControlStatus()
-        .then((next) => {
-          if (!cancelled) setStatus(next);
-        })
-        .catch(() => {
-          if (!cancelled) setStatus(null);
-        });
-    };
-
-    refresh();
-    onRemoteControlChanged((next) => {
-      setStatus(next);
-      setError(null);
-    }).then((cleanup) => {
-      if (cancelled) cleanup();
-      else unlisten = cleanup;
-    });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!status?.active) return;
-
-    let cancelled = false;
-    const refresh = () => {
-      getRemoteControlStatus()
-        .then((next) => {
-          if (!cancelled) setStatus(next);
-        })
-        .catch(() => {
-          if (!cancelled) setStatus(null);
-        });
-    };
-
-    const timer = window.setInterval(refresh, STATUS_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [status?.active]);
+  const [error, setError] = useState<ReclaimError | null>(null);
 
   useEffect(() => {
     if (!status?.active) return;
@@ -91,9 +40,9 @@ export function RemoteControlOverlay() {
     setReclaiming(true);
     setError(null);
     try {
-      setStatus(await reclaimRemoteControl());
+      publishRemoteControlStatus(await reclaimRemoteControl());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError({ status, message: err instanceof Error ? err.message : String(err) });
     } finally {
       setReclaiming(false);
     }
@@ -101,6 +50,7 @@ export function RemoteControlOverlay() {
 
   const controller =
     status.clientName || status.remoteAddr || t("remoteControl.fallbackController");
+  const visibleError = error?.status === status ? error.message : null;
 
   return (
     <div
@@ -125,7 +75,7 @@ export function RemoteControlOverlay() {
         >
           {reclaiming ? t("remoteControl.reclaiming") : t("remoteControl.reclaim")}
         </button>
-        {error && <div className="remote-control-error">{error}</div>}
+        {visibleError && <div className="remote-control-error">{visibleError}</div>}
       </div>
     </div>
   );
