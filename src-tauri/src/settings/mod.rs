@@ -1,3 +1,4 @@
+pub mod agent_command;
 pub mod contract;
 mod lenient;
 pub mod models;
@@ -561,6 +562,42 @@ mod tests {
         );
         assert_eq!(
             contract::metadata_for_path("/codex/sessionMaxAgeHours").apply_mode,
+            contract::ApplyMode::NextUse
+        );
+    }
+
+    #[test]
+    fn agent_launch_commands_default_and_round_trip() {
+        let existing: Settings = serde_json::from_str(r#"{ "claude": {}, "codex": {} }"#).unwrap();
+        assert_eq!(existing.claude.command, "claude");
+        assert_eq!(existing.codex.command, "codex");
+
+        let configured: Settings = serde_json::from_str(
+            r#"{
+              "claude": { "command": "claude --dangerously-skip-permissions" },
+              "codex": { "command": "codex --yolo" }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(
+            configured.claude.command,
+            "claude --dangerously-skip-permissions"
+        );
+        assert_eq!(configured.codex.command, "codex --yolo");
+
+        let serialized = serde_json::to_string(&configured).unwrap();
+        assert!(serialized.contains("\"command\":\"claude --dangerously-skip-permissions\""));
+        assert!(serialized.contains("\"command\":\"codex --yolo\""));
+    }
+
+    #[test]
+    fn agent_launch_command_metadata_applies_on_next_use() {
+        assert_eq!(
+            contract::metadata_for_path("/claude/command").apply_mode,
+            contract::ApplyMode::NextUse
+        );
+        assert_eq!(
+            contract::metadata_for_path("/codex/command").apply_mode,
             contract::ApplyMode::NextUse
         );
     }

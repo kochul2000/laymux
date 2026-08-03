@@ -172,10 +172,12 @@ pub fn create_terminal_session(
         String::new()
     };
 
-    // The unstructured override is reserved for exact Claude/Codex resume commands.
+    // The unstructured override is reserved for exact Claude/Codex resume
+    // commands. The launch command prefix is re-derived from settings here, so a
+    // caller cannot smuggle flags the user did not configure.
     let validated_override = startup_command_override.filter(|cmd| {
-        super::is_valid_claude_startup_command_override(cmd)
-            || super::is_valid_codex_startup_command_override(cmd)
+        super::is_valid_claude_startup_command_override(cmd, &settings.claude.command)
+            || super::is_valid_codex_startup_command_override(cmd, &settings.codex.command)
     });
     let startup_command = if !viewer_startup.is_empty() {
         viewer_startup

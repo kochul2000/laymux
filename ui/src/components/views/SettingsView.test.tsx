@@ -1442,6 +1442,68 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().claude.sessionLimitAutoResume).toBe(false);
   });
 
+  it("saves a flagged claude launch command and previews the resume line", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    const input = screen.getByTestId("claude-command-input") as HTMLInputElement;
+    expect(input.value).toBe("claude");
+
+    fireEvent.change(input, { target: { value: "claude --dangerously-skip-permissions" } });
+    expect(screen.getByTestId("claude-command-preview").textContent).toBe(
+      "claude --dangerously-skip-permissions --resume <session-id>",
+    );
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().claude.command).toBe(
+      "claude --dangerously-skip-permissions",
+    );
+  });
+
+  it("warns instead of previewing when the claude launch command is unsafe", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    fireEvent.change(screen.getByTestId("claude-command-input"), {
+      target: { value: "claude; rm -rf /" },
+    });
+
+    expect(screen.queryByTestId("claude-command-preview")).toBeNull();
+    expect(screen.getByTestId("claude-command-warning")).toBeInTheDocument();
+  });
+
+  it("resets the claude launch command to the default", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-claude"));
+    fireEvent.change(screen.getByTestId("claude-command-input"), {
+      target: { value: "claude --yolo" },
+    });
+    await user.click(screen.getByTestId("claude-command-reset"));
+
+    expect((screen.getByTestId("claude-command-input") as HTMLInputElement).value).toBe("claude");
+  });
+
+  it("saves a flagged codex launch command", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-codex"));
+    const input = screen.getByTestId("codex-command-input") as HTMLInputElement;
+    expect(input.value).toBe("codex");
+
+    fireEvent.change(input, { target: { value: "codex --yolo" } });
+    expect(screen.getByTestId("codex-command-preview").textContent).toBe(
+      "codex --yolo resume <session-id>",
+    );
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().codex.command).toBe("codex --yolo");
+  });
+
   it("shows Codex nav button", () => {
     render(<SettingsView />);
     expect(screen.getByTestId("nav-codex")).toBeInTheDocument();

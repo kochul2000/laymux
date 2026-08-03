@@ -35,6 +35,7 @@ import {
 } from "../lib/sleep-prevention";
 import type { LanguageSetting } from "../i18n/resolve-language";
 import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "../lib/agent-session-constants";
+import { DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND } from "../lib/agent-command";
 
 /** Re-export so settings consumers can import the language type from one place. */
 export type { LanguageSetting };
@@ -1197,6 +1198,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   claude: {
     syncCwd: "skip" as ClaudeSyncCwdMode,
+    command: DEFAULT_CLAUDE_COMMAND,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
     statusMessageMode: "bullet-title" as const,
@@ -1206,6 +1208,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     sessionLimitResumeMessage: "go on",
   },
   codex: {
+    command: DEFAULT_CODEX_COMMAND,
     restoreSession: true,
     sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
     statusMessageMode: "bullet-title" as const,
@@ -1551,6 +1554,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const claude = data.claude
       ? {
           syncCwd: "skip" as ClaudeSyncCwdMode,
+          command: DEFAULT_CLAUDE_COMMAND,
           restoreSession: true,
           sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
           statusMessageMode: "bullet-title" as const,
@@ -1563,6 +1567,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       : undefined;
     const codex = data.codex
       ? {
+          command: DEFAULT_CODEX_COMMAND,
           restoreSession: true,
           sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
           statusMessageMode: "bullet-title" as const,

@@ -166,10 +166,22 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/claude/command",
+        description: "Claude Code 를 실행할 명령입니다(기본 \"claude\"). 플래그를 함께 적을 수 있고(예: \"claude --dangerously-skip-permissions\") 세션 복원은 여기에 `--resume <id>` 를 덧붙입니다. 실행 파일 이름/경로와 플래그만 허용하며 셸 메타문자가 있으면 무시되고 기본 명령이 쓰입니다. 다음 터미널 생성부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/codex",
         description: "Codex 세션 복원과 상태 메시지 표시 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/codex/command",
+        description: "Codex CLI 를 실행할 명령입니다(기본 \"codex\"). 플래그를 함께 적을 수 있고(예: \"codex --yolo\") 세션 복원은 여기에 `resume <id>` 를 덧붙입니다. 실행 파일 이름/경로와 플래그만 허용하며 셸 메타문자가 있으면 무시되고 기본 명령이 쓰입니다. 다음 터미널 생성부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
         path: "/codex/restoreSession",
