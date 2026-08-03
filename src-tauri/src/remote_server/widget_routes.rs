@@ -26,16 +26,26 @@ const DEFAULT_WIDGET_FONT_SIZE: u32 = 9;
 /// `remote_guard` layer (token, IP, Origin) still applies.
 pub(super) async fn remote_widgets(State(server): State<ServerState>) -> Response {
     let settings = crate::settings::load_settings();
-    // The gate is judged here rather than in the page: a client that ignored it
-    // would otherwise keep polling the frontend bridge for a surface the user
-    // turned off.
-    if !settings.remote.widgets {
-        return Json(disabled_payload()).into_response();
+    if let Some(payload) = gated_payload(settings.remote.widgets) {
+        return Json(payload).into_response();
     }
 
     match frontend_bridge_json(&server, "query", "widgets", "snapshot", json!({})).await {
         Ok(snapshot) => Json(enabled_payload(snapshot)).into_response(),
         Err(response) => response,
+    }
+}
+
+/// The answer that needs no frontend round trip, or `None` to go ask.
+///
+/// The gate is judged on the host rather than in the page: a client that ignored
+/// it would otherwise keep polling the frontend bridge for a surface the user
+/// turned off.
+fn gated_payload(widgets_enabled: bool) -> Option<Value> {
+    if widgets_enabled {
+        None
+    } else {
+        Some(disabled_payload())
     }
 }
 
@@ -67,6 +77,15 @@ fn enabled_payload(snapshot: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gate_answers_a_disabled_surface_without_asking_the_frontend() {
+        // `None` is what sends the request on to the bridge, so a flipped
+        // condition here would poll the frontend for a surface the user turned
+        // off — or hide a surface they turned on.
+        assert_eq!(gated_payload(false), Some(disabled_payload()));
+        assert_eq!(gated_payload(true), None);
+    }
 
     #[test]
     fn disabled_payload_is_a_well_formed_empty_strip() {

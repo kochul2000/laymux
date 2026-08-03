@@ -257,6 +257,9 @@ describe("buildRemoteWidgetSnapshot", () => {
    * silently missing indicator, so registering a type has to fail here until it
    * is mapped onto a `kind` (ADR-0123).
    */
+  // `codexUsage` reads the real subscription module, which answers its pending
+  // snapshot when no poller has run — the same thing it hands the desktop
+  // widget before the first capture, so no mock is needed to exercise the path.
   it("produces an item for every registered widget type", async () => {
     placeWidgets({
       topBar: {

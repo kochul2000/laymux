@@ -1261,7 +1261,7 @@ Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취�
 
 `kind` 는 원격이 분기하는 그리기 단위이며 `type` 보다 의도적으로 성기다 — 기존 `kind` 로 사상되는 새 위젯은 원격 코드를 바꾸지 않는다. `kind: "usage"` 는 `{ label, display, unavailable, rows[{key,text,percent,elapsed}], colors{used,pace,track}, barWidth, barHeight, elapsedHeight }`, `"activity"` 는 `{ busy, total }`, `"notifications"` 는 `{ unread }`, `"text"` 는 `{ text, copyText }` 를 갖는다. **행 선택·퍼센트 문자열·색·실패 문구·툴팁(`title`)은 모두 데스크톱이 계산해 보낸다** — 원격은 계산하지 않는다. `unavailable` 이 non-null 이면 숫자를 마지막 성공값으로 대체하지 않고 그대로 사용 불가로 표시한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)).
 
-값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하는 고정 5초이며 `usage.*.refreshSeconds` 와 무관하고, 문서가 숨겨진 동안에는 폴하지 않는다. 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
+값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하며 `usage.*.refreshSeconds` 와 무관하다 — 그릴 항목이 있으면 5초, 없으면 30초로 늦추되 멈추지 않는다(배치는 데스크톱에서 언제든 늘어난다). 문서가 숨겨진 동안에는 요청을 보내지 않고, `401`/`403` 을 받으면 폴을 중단한다. 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
 
 ---
 
