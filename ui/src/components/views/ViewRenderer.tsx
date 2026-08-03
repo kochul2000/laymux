@@ -34,6 +34,8 @@ export interface ViewRendererProps {
   terminalRestartFresh?: boolean;
   /** 재시작 요청을 첫 세션 생성 뒤 소비한다. */
   onTerminalRestartConsumed?: () => void;
+  /** Route the fail-stop alert action through the pane owner's restart flow. */
+  onTerminalRestart?: () => void;
 }
 
 /** Wrapper that subscribes to sync-cwd settings only for TerminalView instances. */
@@ -48,6 +50,7 @@ function TerminalViewWithSyncCwd({
   terminalRestartCwd,
   terminalRestartFresh,
   onTerminalRestartConsumed,
+  onTerminalRestart,
 }: {
   viewConfig?: ViewInstanceConfig;
   workspaceId?: string;
@@ -59,6 +62,7 @@ function TerminalViewWithSyncCwd({
   terminalRestartCwd?: string;
   terminalRestartFresh?: boolean;
   onTerminalRestartConsumed?: () => void;
+  onTerminalRestart?: () => void;
 }) {
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const profileDefaultsSyncCwd = useSettingsStore((s) => s.profileDefaults.syncCwd);
@@ -103,6 +107,7 @@ function TerminalViewWithSyncCwd({
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}
+      onRestart={onTerminalRestart}
     />
   );
 }
@@ -266,6 +271,7 @@ export function ViewRenderer({
   terminalRestartCwd,
   terminalRestartFresh,
   onTerminalRestartConsumed,
+  onTerminalRestart,
 }: ViewRendererProps) {
   const fallbackId = useId();
   switch (viewType) {
@@ -295,6 +301,7 @@ export function ViewRenderer({
             terminalRestartCwd={terminalRestartCwd}
             terminalRestartFresh={terminalRestartFresh}
             onTerminalRestartConsumed={onTerminalRestartConsumed}
+            onTerminalRestart={onTerminalRestart}
           />
         </div>
       );

@@ -33,6 +33,7 @@ const terminalViewProps: {
   instanceId?: string;
   restartCwd?: string;
   isUserRestart?: boolean;
+  onRestart?: () => void;
 }[] = [];
 vi.mock("./TerminalView", () => ({
   TerminalView: (props: {
@@ -41,6 +42,7 @@ vi.mock("./TerminalView", () => ({
     syncGroup: string;
     restartCwd?: string;
     isUserRestart?: boolean;
+    onRestart?: () => void;
   }) => {
     terminalViewProps.push({
       syncGroup: props.syncGroup,
@@ -48,6 +50,7 @@ vi.mock("./TerminalView", () => ({
       instanceId: props.instanceId,
       restartCwd: props.restartCwd,
       isUserRestart: props.isUserRestart,
+      onRestart: props.onRestart,
     });
     return (
       <div
@@ -326,14 +329,18 @@ describe("ViewRenderer", () => {
   });
 
   it("restarts a TerminalView as a fresh shell at the supplied CWD", () => {
+    const restart = vi.fn();
     const { rerender } = render(
       <ViewRenderer
         viewType="TerminalView"
         viewConfig={{ type: "TerminalView" }}
         paneId="pane-42"
+        onTerminalRestart={restart}
       />,
     );
     expect(terminalViewProps.at(-1)?.isUserRestart).toBe(false);
+    terminalViewProps.at(-1)?.onRestart?.();
+    expect(restart).toHaveBeenCalledOnce();
 
     rerender(
       <ViewRenderer

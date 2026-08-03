@@ -46,6 +46,7 @@ function harness(
   options?: {
     current?: { value: boolean };
     controlTimeoutMs?: number;
+    repairTimeoutMs?: number;
     pendingVisibleParsers?: Array<() => void>;
     onRepairEventPending?: () => void;
   },
@@ -63,6 +64,7 @@ function harness(
     initialSeq: 0,
     initialEnvelopeId: 1,
     controlTimeoutMs: options?.controlTimeoutMs ?? 100,
+    repairTimeoutMs: options?.repairTimeoutMs ?? 100,
     scope: registry.mount("term-1"),
     isCurrent: () => current.value,
     getLifecycleFacts: () => ({
@@ -371,17 +373,20 @@ describe("TerminalOutputV3Runtime exact repair", () => {
     expect(h.failStops).toEqual(["repair:winner_conflict"]);
   });
 
-  it("bounds a permanently pending repair and does not start a second pull", async () => {
+  it("uses the independent repair timeout and does not start a second pull", async () => {
     vi.useFakeTimers();
     try {
       const repair = vi.fn(() => new Promise<TerminalOutputV3RepairResponse>(() => {}));
-      const h = harness(repair);
+      const h = harness(repair, { controlTimeoutMs: 100, repairTimeoutMs: 300 });
       const first = h.runtime.pollExactRepair(1);
       const second = h.runtime.pollExactRepair(2);
       await Promise.resolve();
       expect(repair).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(100);
+      expect(h.failStops).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(200);
 
       await expect(first).resolves.toEqual({ kind: "fail-stop", reason: "repair:timeout" });
       await expect(second).resolves.toEqual({ kind: "fail-stop", reason: "repair:timeout" });

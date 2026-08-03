@@ -189,6 +189,7 @@ import {
 } from "@/lib/terminal-execution-host";
 import { DeferredParsedCallbackQueue } from "@/lib/deferred-parsed-callback-queue";
 import { TerminalInputComposer } from "@/components/ui/TerminalInputComposer";
+import { TerminalOutputStoppedBar } from "@/components/ui/TerminalOutputStoppedBar";
 import {
   beginComposerSubmission,
   composerHistoryScopeKey,
@@ -339,7 +340,7 @@ const TERMINAL_WRITE_RETRY_MS = 16;
  * rather than slow, and the screen-losing reattach is the better outcome than a
  * pane that never prints again (issue #607).
  */
-const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 5000;
+const TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS = 15_000;
 
 /** Local attach/ACK bridge calls should settle far below this on a live WebView. */
 const TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS = 5000;
@@ -671,6 +672,8 @@ interface TerminalViewProps {
   isUserRestart?: boolean;
   /** Called after the first restart session creation settles, so future remounts are normal starts. */
   onUserRestartConsumed?: () => void;
+  /** Recreate this pane as a fresh terminal after a typed output fail-stop. */
+  onRestart?: () => void;
   /** Claude Code session ID from previous session, used for --resume on startup. */
   lastClaudeSession?: string;
   /** Codex CLI session ID from previous session, used for `codex resume` on startup. */
@@ -700,6 +703,7 @@ export function TerminalView({
   restartCwd,
   isUserRestart = false,
   onUserRestartConsumed,
+  onRestart,
   lastClaudeSession,
   lastCodexSession,
   startupCommandOverride,
@@ -4413,6 +4417,7 @@ export function TerminalView({
         initialSeq,
         initialEnvelopeId,
         controlTimeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+        repairTimeoutMs: TERMINAL_OUTPUT_REPAIR_TIMEOUT_MS,
         scope: outputControlOperations,
         isCurrent,
         applyCheckpoint: (delta) => renderCheckpointModel.apply(delta),
@@ -6434,19 +6439,14 @@ export function TerminalView({
           <div className="terminal-loading-spinner" />
         </div>
         {outputFailStopReason && (
-          <div
-            role="status"
-            aria-live="assertive"
-            data-testid={`terminal-output-stopped-${instanceId}`}
-            className="pointer-events-none absolute inset-x-3 top-3 z-20 rounded px-3 py-2 text-xs"
-            style={{
-              color: "var(--text-primary)",
-              background: "var(--bg-primary)",
-              border: "1px solid var(--border-color)",
-            }}
-          >
-            Terminal output stopped ({outputFailStopReason}). Close and recreate this pane.
-          </div>
+          <TerminalOutputStoppedBar
+            terminalId={instanceId}
+            reason={outputFailStopReason}
+            title={t("terminal.outputStoppedTitle")}
+            description={t("terminal.outputStoppedDescription")}
+            restartLabel={t("terminal.restart")}
+            onRestart={onRestart}
+          />
         )}
         {showScrollToBottom && showScrollToBottomButtonSetting && (
           <button

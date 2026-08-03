@@ -222,6 +222,17 @@ export function Dock({
               onTerminalRestartConsumed={() => {
                 if (singlePaneId) consumeTerminalRestart(singlePaneId);
               }}
+              onTerminalRestart={
+                singleView?.type === "TerminalView" && singlePaneId
+                  ? () =>
+                      useTerminalRestartStore
+                        .getState()
+                        .requestRestart(
+                          singlePaneId,
+                          getTerminalRestartCwd(singlePaneId, singleView),
+                        )
+                  : undefined
+              }
             />
           ) : (
             <PaneLoadingPlaceholder data-testid={`dock-pane-loading-${singlePaneId}`} />
