@@ -116,7 +116,8 @@ class RemoteControlStatusCoordinator {
   }
 
   private schedulePoll(generation: number): void {
-    if (!this.isCurrent(generation) || this.pollTimer !== undefined) return;
+    if (!this.isCurrent(generation) || this.pollTimer !== undefined || this.inFlightQuery !== null)
+      return;
     this.pollTimer = setTimeout(() => {
       this.pollTimer = undefined;
       void this.refresh(generation);
@@ -164,11 +165,13 @@ class RemoteControlStatusCoordinator {
       }
       this.apply(status, generation);
     } catch {
-      if (!this.isCurrent(generation) || this.inFlightQuery !== queryEpoch) return;
-      if (this.snapshot.status === null || this.snapshot.status.active)
-        this.schedulePoll(generation);
+      // Keep the last observed status; the sequential fallback is restored below.
     } finally {
-      if (this.inFlightQuery === queryEpoch) this.inFlightQuery = null;
+      if (this.inFlightQuery === queryEpoch) {
+        this.inFlightQuery = null;
+        if (this.snapshot.status === null || this.snapshot.status.active)
+          this.schedulePoll(generation);
+      }
     }
   }
 }

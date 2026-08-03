@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { reclaimRemoteControl } from "@/lib/tauri-api";
+import { reclaimRemoteControl, type RemoteControlStatus } from "@/lib/tauri-api";
 import { publishRemoteControlStatus, useRemoteControlStatus } from "@/lib/remote-control-status";
 import { useTranslation } from "react-i18next";
+
+interface ReclaimError {
+  status: RemoteControlStatus;
+  message: string;
+}
 
 export function RemoteControlOverlay() {
   const { t } = useTranslation("common");
   const status = useRemoteControlStatus();
   const [reclaiming, setReclaiming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ReclaimError | null>(null);
 
   useEffect(() => {
     if (!status?.active) return;
@@ -37,7 +42,7 @@ export function RemoteControlOverlay() {
     try {
       publishRemoteControlStatus(await reclaimRemoteControl());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError({ status, message: err instanceof Error ? err.message : String(err) });
     } finally {
       setReclaiming(false);
     }
@@ -45,6 +50,7 @@ export function RemoteControlOverlay() {
 
   const controller =
     status.clientName || status.remoteAddr || t("remoteControl.fallbackController");
+  const visibleError = error?.status === status ? error.message : null;
 
   return (
     <div
@@ -69,7 +75,7 @@ export function RemoteControlOverlay() {
         >
           {reclaiming ? t("remoteControl.reclaiming") : t("remoteControl.reclaim")}
         </button>
-        {error && <div className="remote-control-error">{error}</div>}
+        {visibleError && <div className="remote-control-error">{visibleError}</div>}
       </div>
     </div>
   );

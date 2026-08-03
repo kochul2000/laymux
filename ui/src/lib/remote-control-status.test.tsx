@@ -94,6 +94,60 @@ describe("remote control status coordinator", () => {
     expect(result.current).toEqual(activeStatus);
   });
 
+  it("reschedules a skipped poll after the pending snapshot finishes", async () => {
+    vi.useFakeTimers();
+    let eventHandler!: (status: typeof activeStatus) => void;
+    let resolveInitialStatus!: (status: typeof inactiveStatus) => void;
+    api.onRemoteControlChanged.mockImplementation(async (callback) => {
+      eventHandler = callback;
+      return vi.fn();
+    });
+    api.getRemoteControlStatus
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveInitialStatus = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(inactiveStatus);
+
+    const { result } = renderHook(() => useRemoteControlStatus());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.getRemoteControlStatus).toHaveBeenCalledTimes(1);
+
+    act(() => eventHandler(activeStatus));
+    expect(result.current).toEqual(activeStatus);
+
+    await act(async () => {
+      vi.advanceTimersByTime(3_000);
+      await Promise.resolve();
+    });
+    expect(api.getRemoteControlStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveInitialStatus(inactiveStatus);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(result.current).toEqual(activeStatus);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_999);
+      await Promise.resolve();
+    });
+    expect(api.getRemoteControlStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.getRemoteControlStatus).toHaveBeenCalledTimes(2);
+    expect(result.current).toEqual(inactiveStatus);
+  });
+
   it("records a Remote to Local transition even when React batches both events", async () => {
     let eventHandler!: (status: typeof activeStatus) => void;
     api.onRemoteControlChanged.mockImplementation(async (callback) => {
