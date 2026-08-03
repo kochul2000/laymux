@@ -1119,6 +1119,11 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
 ## 11. 전체 데이터 흐름 요약
 
 ```
+[create_terminal_session]
+    │  plan_start_dir() → PTY 에 적용된 시작 디렉터리
+    │  session.cwd 시딩 (단일 진실 소스의 초기값, ADR-0130)
+    │  create 응답 cwd 필드 → 프론트 스토어 (이벤트 없음)
+    ▼
 [Shell: cd /foo]
     │  chpwd hook → printf '\e]7;file://localhost/foo\a'
     ▼
@@ -1239,6 +1244,8 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
     │     → legacy cache의 SerializeAddon alternate-buffer suffix 제거
     └─ createTerminalSession(cwd: lastCwd, startupCommandOverride)
           → PTY가 마지막 CWD에서 시작
+          → 응답 cwd = 실제 적용된 시작 디렉터리 → session.cwd + 스토어 시딩
+            (resume pane 은 accepted OSC 7 을 못 내므로 이 값이 유일한 CWD)
           → Claude restoreSession이면 `claude --resume <id>`, Codex restoreSession이면
             `codex resume <id>`만 허용해 실행
           → 두 provider ID가 동시에 있으면 어느 것도 실행하지 않고 새 shell로 시작

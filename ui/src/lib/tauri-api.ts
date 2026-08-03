@@ -16,6 +16,8 @@ export interface TerminalSessionResult {
   id: string;
   title: string;
   initialExecutionHost: InitialExecutionHost;
+  /** Directory the PTY was started in; absent when none could be applied. */
+  cwd?: string;
   config: {
     profile: string;
     cols: number;
