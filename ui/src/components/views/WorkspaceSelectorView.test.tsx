@@ -156,6 +156,39 @@ describe("WorkspaceSelectorView", () => {
     expect(screen.getByTestId("layout-card-default-layout")).toBeInTheDocument();
   });
 
+  it("offers export-new next to the layout cards", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("My Layout");
+    useWorkspaceStore.getState().splitPane(0, "horizontal");
+
+    render(<WorkspaceSelectorView />);
+    const panel = screen.getByTestId("new-workspace-panel");
+    const exportBtn = screen.getByTestId("export-new-btn");
+    expect(panel).toContainElement(exportBtn);
+
+    await user.click(exportBtn);
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
+    expect(useWorkspaceStore.getState().layouts[1].name).toBe("My Layout");
+    expect(
+      screen.getByTestId("layout-card-" + useWorkspaceStore.getState().layouts[1].id),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
+    promptSpy.mockRestore();
+  });
+
+  it("keeps layouts untouched when the export prompt is cancelled", async () => {
+    const user = userEvent.setup();
+    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+
+    render(<WorkspaceSelectorView />);
+    await user.click(screen.getByTestId("export-new-btn"));
+
+    expect(useWorkspaceStore.getState().layouts).toHaveLength(1);
+    expect(screen.queryByTestId("layout-saved-indicator")).not.toBeInTheDocument();
+    promptSpy.mockRestore();
+  });
+
   it("highlights active workspace", () => {
     render(<WorkspaceSelectorView />);
     const activeWs = screen.getByTestId("workspace-item-ws-default");

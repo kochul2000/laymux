@@ -23,22 +23,12 @@ describe("GridEditToolbar", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
-  it("always shows export action buttons", () => {
+  it("leaves layout export to the workspace selector view", () => {
+    // Export New moved next to the layout cards it creates (WorkspaceSelectorView);
+    // the top bar owns window/dock controls only.
     render(<GridEditToolbar />);
-    expect(screen.getByTestId("export-new-btn")).toBeInTheDocument();
-  });
-
-  it("export-new button creates new layout with prompted name", async () => {
-    const user = userEvent.setup();
-    const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("My Layout");
-    useWorkspaceStore.getState().splitPane(0, "horizontal");
-
-    render(<GridEditToolbar />);
-    await user.click(screen.getByTestId("export-new-btn"));
-
-    expect(useWorkspaceStore.getState().layouts).toHaveLength(2);
-    expect(useWorkspaceStore.getState().layouts[1].name).toBe("My Layout");
-    promptSpy.mockRestore();
+    expect(screen.queryByTestId("export-new-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("layout-saved-indicator")).not.toBeInTheDocument();
   });
 
   it("renders dock toggle buttons for all 4 positions", () => {
@@ -93,15 +83,6 @@ describe("GridEditToolbar", () => {
     expect(useFileViewerStore.getState().path).toBe("");
   });
 
-  it("shows Saved! after export-new", async () => {
-    const user = userEvent.setup();
-    vi.spyOn(window, "prompt").mockReturnValue("Test Layout");
-    render(<GridEditToolbar />);
-
-    await user.click(screen.getByTestId("export-new-btn"));
-
-    expect(screen.getByTestId("layout-saved-indicator")).toHaveTextContent("Saved!");
-  });
   it("keeps a window drag region no matter how full the widget slots are", () => {
     // Without a floor, a crowded top bar would leave nothing to grab the window
     // by — placement must cost widgets, never the ability to move the window.
