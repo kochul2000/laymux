@@ -4903,11 +4903,13 @@
 
         function renderWidgetStrip(data) {
           const items = data && Array.isArray(data.items) ? data.items : [];
+          const wasVisible = widgetStripVisible;
           widgetStripLeftEl.replaceChildren();
           widgetStripRightEl.replaceChildren();
           if (!data || data.enabled === false || items.length === 0) {
             widgetStripVisible = false;
             widgetStripEl.hidden = true;
+            if (wasVisible) rebaseTerminalFit();
             return;
           }
           widgetStripEl.style.fontFamily = typeof data.fontFamily === "string" ? data.fontFamily : "";
@@ -4919,6 +4921,7 @@
           }
           widgetStripVisible = true;
           widgetStripEl.hidden = false;
+          if (!wasVisible) rebaseTerminalFit();
         }
 
         /**
@@ -7272,6 +7275,16 @@
           }
           updateSelectionHandles(terminal);
           scheduleTerminalRefresh();
+        }
+
+        // A chrome row appearing or disappearing is a permanent layout change,
+        // not the transient height shrink the crop exists for: drop the fitted
+        // baseline so the next fit adopts the real host instead of cropping to
+        // a stale height (and so later refits are not suppressed by it).
+        function rebaseTerminalFit() {
+          fittedHostHeight = 0;
+          cropActive = false;
+          scheduleTerminalFit(Boolean(activeTerminalId));
         }
 
         function scheduleTerminalFit(sendResize = true) {
