@@ -128,10 +128,10 @@ Workspace (Independent)
 
 두 갈래가 있고, **판정과 실행은 같고 범위만 다르다**.
 
-| 동작 | 진입점 | 범위 |
-| --- | --- | --- |
+| 동작                | 진입점                                                                                                                 | 범위                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | 워크스페이스 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)) |
-| 단일 pane 클리어 | `Alt+L`(`pane.clearTerminal`), `POST /api/v1/panes/{paneId}/clear` | 가리킨 pane **하나**. 격자·dock 구분 없음 ([ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md)) |
+| 단일 pane 클리어    | `Alt+L`(`pane.clearTerminal`), pane 컨트롤바의 빗자루 버튼, `POST /api/v1/panes/{paneId}/clear`                        | 가리킨 pane **하나**. 격자·dock 구분 없음 ([ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md))                   |
 
 표면 범위가 다른 이유는 이름이 아니라 근거다. 워크스페이스 클리어의 범위는 "워크스페이스의 격자"라서 dock 이 빠지고, 단일 pane 클리어의 범위는 "사용자가 가리킨 pane"이라서 그 제한이 성립하지 않는다. 단축키 경로는 터미널이 아닌 view 에 포커스가 있으면 no-op 이고, Automation 경로는 터미널 pane 이 아닌 id 를 에러로 답한다(빈 결과는 busy skip 과 구분되지 않는다).
 

@@ -20,6 +20,7 @@ import {
   type TerminalRestartRequest,
 } from "@/stores/terminal-restart-store";
 import { getTerminalRestartCwd } from "@/lib/terminal-restart";
+import { runPaneClearFromUi } from "@/lib/workspace-clear-action";
 
 export interface GridPane {
   id: string;
@@ -277,6 +278,12 @@ export function PaneGrid({
                 onClear: onSetPaneView
                   ? () => onSetPaneView(pane.id, { type: "EmptyView" })
                   : undefined,
+                onClearTerminal:
+                  pane.view.type === "TerminalView"
+                    ? () => {
+                        void runPaneClearFromUi(pane.id);
+                      }
+                    : undefined,
                 onRestart:
                   pane.view.type === "TerminalView" ? () => restartTerminalView(pane) : undefined,
                 onDelete:
