@@ -5,6 +5,10 @@ use crate::terminal_env::TerminalEnvPlan;
 
 mod initial_execution_host;
 pub use initial_execution_host::InitialExecutionHost;
+mod startup_probe;
+pub(crate) use startup_probe::{
+    NativeWindowsCodexColorProbeGuard, OSC_10_REPLY_BIT, OSC_11_REPLY_BIT,
+};
 
 /// Detected activity state of a terminal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

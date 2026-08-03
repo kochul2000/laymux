@@ -88,8 +88,12 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
-export async function writeTerminalProtocolReply(id: string, data: string): Promise<void> {
-  return invoke("write_terminal_protocol_reply", { id, data });
+export async function writeTerminalProtocolReply(
+  id: string,
+  generation: number,
+  data: string,
+): Promise<void> {
+  return invoke("write_terminal_protocol_reply", { id, generation, data });
 }
 
 /**

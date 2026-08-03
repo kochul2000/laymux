@@ -178,7 +178,19 @@ describe("TerminalWriteBatchQueue", () => {
     queue.enqueue(
       request([4], {
         batchKey: "live:7:run-4",
-        metadata: { source: "live", attachEpoch: 8 },
+        metadata: { source: "live", attachEpoch: 8, generation: 3 },
+      }),
+    );
+    queue.enqueue(
+      request([5], {
+        batchKey: "live:7:run-5",
+        metadata: { source: "live", attachEpoch: 7, generation: 3 },
+      }),
+    );
+    queue.enqueue(
+      request([6], {
+        batchKey: "live:7:run-5",
+        metadata: { source: "live", attachEpoch: 7, generation: 4 },
       }),
     );
 
@@ -187,6 +199,8 @@ describe("TerminalWriteBatchQueue", () => {
     expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([1, 2]);
     expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([3]);
     expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([4]);
+    expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([5]);
+    expect(queue.dequeue()?.entries.map(({ id }) => id)).toEqual([6]);
   });
 
   it("coalesces explicitly compatible callbacks while retaining every entry", () => {

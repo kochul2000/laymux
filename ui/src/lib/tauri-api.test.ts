@@ -169,9 +169,10 @@ describe("tauri-api", () => {
   describe("writeTerminalProtocolReply", () => {
     it("invokes the owner-independent terminal protocol reply command", async () => {
       mockInvoke.mockResolvedValue(undefined);
-      await writeTerminalProtocolReply("t1", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
+      await writeTerminalProtocolReply("t1", 7, "\x1b]10;rgb:ffff/ffff/ffff\x1b\\");
       expect(mockInvoke).toHaveBeenCalledWith("write_terminal_protocol_reply", {
         id: "t1",
+        generation: 7,
         data: "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
       });
     });

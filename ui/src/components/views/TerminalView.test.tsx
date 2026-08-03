@@ -4177,7 +4177,7 @@ describe("TerminalView", () => {
 
       emitLive(terminalId, "LIVE_QUERY");
 
-      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, 1, reply);
       expect(mockWriteToTerminal).not.toHaveBeenCalled();
       expect(terminalInputDeliveryCounters(terminalId)).toEqual({
         attempts: 0,
@@ -4236,7 +4236,7 @@ describe("TerminalView", () => {
 
       emitLive(terminalId, "LIVE_QUERY");
 
-      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, 1, reply);
     });
 
     it("toggles xterm human stdin with the remote owner snapshot", async () => {
@@ -4258,7 +4258,7 @@ describe("TerminalView", () => {
         callback?.();
       });
       emitLive(terminalId, "LIVE_QUERY_WHILE_REMOTE");
-      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, reply);
+      expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith(terminalId, 1, reply);
       terminal.emitCoreData("blocked-human", true);
       expect(mockWriteToTerminal).not.toHaveBeenCalled();
       expect(mockWriteTerminalProtocolReply).toHaveBeenCalledTimes(1);
@@ -7206,7 +7206,7 @@ describe("TerminalView", () => {
 
     expect(capturedKeyHandler?.(new KeyboardEvent("keydown", { key: "x" }))).toBe(false);
     expect(capturedKeyHandler?.(new KeyboardEvent("keypress", { key: "x" }))).toBe(false);
-    expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith("t-remote-owned", reply);
+    expect(mockWriteTerminalProtocolReply).toHaveBeenCalledWith("t-remote-owned", 1, reply);
     expect(mockWriteToTerminal).not.toHaveBeenCalled();
     expect(mockResizeTerminal).not.toHaveBeenCalled();
   });
@@ -7244,11 +7244,13 @@ describe("TerminalView", () => {
     expect(mockWriteTerminalProtocolReply).toHaveBeenNthCalledWith(
       1,
       "t-protocol-pending",
+      1,
       "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
     );
     expect(mockWriteTerminalProtocolReply).toHaveBeenNthCalledWith(
       2,
       "t-protocol-pending",
+      1,
       "\x1b]11;rgb:0000/0000/0000\x1b\\",
     );
     expect(mockWriteToTerminal).not.toHaveBeenCalled();

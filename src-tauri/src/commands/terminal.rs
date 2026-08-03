@@ -18,7 +18,7 @@ use crate::pty_geometry::{self, TerminalGeometryCapabilities};
 use crate::pty_trace;
 use crate::remote_server::{begin_human_control_operation, HumanControlOrigin, HumanControlPermit};
 use crate::state::AppState;
-use crate::terminal::{TerminalConfig, TerminalSession};
+use crate::terminal::{InitialExecutionHost, TerminalConfig, TerminalSession};
 use crate::terminal_output;
 use crate::terminal_protocol::encode_terminal_input;
 
@@ -116,6 +116,72 @@ fn apply_claude_title_state(
     message_changed
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum ValidatedStartupOverride {
+    Claude(String),
+    Codex(String),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct TerminalStartupPlan {
+    command: String,
+    arm_native_windows_codex_color_probe: bool,
+}
+
+fn plan_terminal_startup(
+    viewer_startup: String,
+    validated_override: Option<ValidatedStartupOverride>,
+    profile_startup: String,
+    initial_execution_host: InitialExecutionHost,
+    windows: bool,
+) -> TerminalStartupPlan {
+    if !viewer_startup.is_empty() {
+        return TerminalStartupPlan {
+            command: viewer_startup,
+            arm_native_windows_codex_color_probe: false,
+        };
+    }
+
+    match validated_override {
+        Some(ValidatedStartupOverride::Codex(command)) => {
+            let codex_launcher_host = InitialExecutionHost::classify_spawn_target(
+                command.split_whitespace().next(),
+                windows,
+            );
+            TerminalStartupPlan {
+                command,
+                arm_native_windows_codex_color_probe: initial_execution_host
+                    == InitialExecutionHost::NativeWindows
+                    && codex_launcher_host == InitialExecutionHost::NativeWindows,
+            }
+        }
+        Some(ValidatedStartupOverride::Claude(command)) => TerminalStartupPlan {
+            command,
+            arm_native_windows_codex_color_probe: false,
+        },
+        None => TerminalStartupPlan {
+            command: profile_startup,
+            arm_native_windows_codex_color_probe: false,
+        },
+    }
+}
+
+fn initial_execution_host_for_terminal(
+    command_line: &str,
+    profile: &str,
+    windows: bool,
+) -> InitialExecutionHost {
+    let effective_command_line = if command_line.is_empty() {
+        TerminalSession::profile_command_line(profile)
+    } else {
+        command_line
+    };
+    InitialExecutionHost::classify_spawn_target(
+        effective_command_line.split_whitespace().next(),
+        windows,
+    )
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn create_terminal_session(
@@ -175,19 +241,31 @@ pub fn create_terminal_session(
     // The unstructured override is reserved for exact Claude/Codex resume
     // commands. The launch command prefix is re-derived from settings here, so a
     // caller cannot smuggle flags the user did not configure.
-    let validated_override = startup_command_override.filter(|cmd| {
-        super::is_valid_claude_startup_command_override(cmd, &settings.claude.command)
-            || super::is_valid_codex_startup_command_override(cmd, &settings.codex.command)
+    let validated_override = startup_command_override.and_then(|command| {
+        if super::is_valid_claude_startup_command_override(&command, &settings.claude.command) {
+            Some(ValidatedStartupOverride::Claude(command))
+        } else if super::is_valid_codex_startup_command_override(&command, &settings.codex.command)
+        {
+            Some(ValidatedStartupOverride::Codex(command))
+        } else {
+            None
+        }
     });
-    let startup_command = if !viewer_startup.is_empty() {
-        viewer_startup
-    } else {
-        validated_override.unwrap_or_else(|| {
-            matched_profile
-                .map(|p| p.startup_command.clone())
-                .unwrap_or_default()
-        })
-    };
+    let profile_startup = matched_profile
+        .map(|p| p.startup_command.clone())
+        .unwrap_or_default();
+    // Match the same effective executable that the PTY spawn path classifies.
+    // Only a validated native Windows Codex restore arms the one-shot stale
+    // OSC 10/11 reply guard; launch timing remains unchanged on every host.
+    let initial_execution_host =
+        initial_execution_host_for_terminal(&command_line, &profile, cfg!(windows));
+    let startup_plan = plan_terminal_startup(
+        viewer_startup,
+        validated_override,
+        profile_startup,
+        initial_execution_host,
+        cfg!(windows),
+    );
     let starting_directory = cwd.filter(|c| !c.is_empty()).unwrap_or_else(|| {
         matched_profile
             .map(|p| p.starting_directory.clone())
@@ -197,7 +275,7 @@ pub fn create_terminal_session(
     let config = TerminalConfig {
         profile,
         command_line,
-        startup_command,
+        startup_command: startup_plan.command,
         starting_directory,
         cols,
         rows,
@@ -206,6 +284,9 @@ pub fn create_terminal_session(
         advertise_true_color: settings.terminal.advertise_true_color,
     };
 
+    let codex_startup_color_probe = startup_plan
+        .arm_native_windows_codex_color_probe
+        .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
     let mut session = TerminalSession::new(id.clone(), config);
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
@@ -268,6 +349,7 @@ pub fn create_terminal_session(
     ));
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
+    let callback_codex_startup_color_probe = codex_startup_color_probe.clone();
     // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
@@ -289,6 +371,21 @@ pub fn create_terminal_session(
                 preview = %pty_trace::summarize_terminal_bytes(&data),
                 "PTY chunk"
             );
+        }
+
+        // This observation must precede publication to the desktop delivery
+        // worker. Otherwise xterm can parse the query and race its response
+        // back to the PTY before the startup guard knows which reply is stale.
+        if let Some(guard) = callback_codex_startup_color_probe.as_ref() {
+            if let Err(error) = guard.observe_output(&data) {
+                if guard.should_report_observation_failure() {
+                    tracing::error!(
+                        terminal_id = %terminal_id,
+                        %error,
+                        "native Windows Codex startup color probe observation failed"
+                    );
+                }
+            }
         }
 
         // The protocol gate and output ring are intentionally nested in the
@@ -803,7 +900,9 @@ pub fn create_terminal_session(
     // a CWD at all — leaving every follower (sync-group `cd`, `GitHubView`,
     // MCP summaries) without a directory for the whole session.
     session.cwd = spawned_pty.resolved_cwd;
-    let pty_handle = spawned_pty.handle;
+    let pty_handle = spawned_pty
+        .handle
+        .with_codex_startup_color_probe(codex_startup_color_probe);
 
     // Startup output can fail before the spawned handle is published. The
     // callback has already stopped its reader and marked this exact generation;
@@ -1075,17 +1174,55 @@ pub fn write_to_terminal(
 #[tauri::command]
 pub fn write_terminal_protocol_reply(
     id: String,
+    generation: u64,
     data: String,
     state: State<Arc<AppState>>,
 ) -> Result<(), String> {
-    write_terminal_protocol_reply_inner(&state, &id, data.as_bytes())
+    write_terminal_protocol_reply_inner(&state, &id, generation, data.as_bytes())
 }
 
 pub fn write_terminal_protocol_reply_inner(
     state: &AppState,
     id: &str,
+    generation: u64,
     data: &[u8],
 ) -> Result<(), String> {
+    // Resolve the exact generation-bound writer once. A late xterm callback
+    // from a retired surface must neither write into nor consume one-shot state
+    // from a replacement session that reused the same terminal id.
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    let active_generation = handle.terminal_generation();
+    if generation != active_generation {
+        return Err(format!(
+            "stale terminal protocol reply for '{id}': generation {generation}, active {active_generation}"
+        ));
+    }
+
+    let filtered_reply = match handle.codex_startup_color_probe() {
+        Some(guard) => guard.filter_protocol_reply(data)?,
+        None => None,
+    };
+    let data = if let Some(filtered) = filtered_reply.as_ref() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui-protocol-suppressed",
+            osc_10 = filtered.suppressed_mask & crate::terminal::OSC_10_REPLY_BIT != 0,
+            osc_11 = filtered.suppressed_mask & crate::terminal::OSC_11_REPLY_BIT != 0,
+            "suppressed late native Windows Codex startup color reply"
+        );
+        filtered.bytes.as_slice()
+    } else {
+        data
+    };
+    if data.is_empty() {
+        return Ok(());
+    }
+
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
@@ -1096,12 +1233,6 @@ pub fn write_terminal_protocol_reply_inner(
             "terminal protocol reply"
         );
     }
-    let handle = state
-        .pty_handles
-        .lock_or_err()?
-        .get(id)
-        .cloned()
-        .ok_or_else(|| format!("Session '{id}' not found"))?;
     handle.write(data)
 }
 
@@ -1798,6 +1929,89 @@ mod tests {
     }
 
     #[test]
+    fn only_native_windows_codex_restore_arms_the_color_probe_guard() {
+        let codex = "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f";
+        let native_codex = plan_terminal_startup(
+            String::new(),
+            Some(ValidatedStartupOverride::Codex(codex.into())),
+            "profile-startup".into(),
+            InitialExecutionHost::NativeWindows,
+            true,
+        );
+        assert_eq!(native_codex.command, codex);
+        assert!(native_codex.arm_native_windows_codex_color_probe);
+
+        let wsl_codex = plan_terminal_startup(
+            String::new(),
+            Some(ValidatedStartupOverride::Codex(codex.into())),
+            "profile-startup".into(),
+            InitialExecutionHost::Wsl,
+            true,
+        );
+        assert_eq!(wsl_codex.command, codex);
+        assert!(!wsl_codex.arm_native_windows_codex_color_probe);
+
+        let native_claude = plan_terminal_startup(
+            String::new(),
+            Some(ValidatedStartupOverride::Claude(
+                "claude --resume session-1".into(),
+            )),
+            "profile-startup".into(),
+            InitialExecutionHost::NativeWindows,
+            true,
+        );
+        assert_eq!(native_claude.command, "claude --resume session-1");
+        assert!(!native_claude.arm_native_windows_codex_color_probe);
+
+        let profile = plan_terminal_startup(
+            String::new(),
+            None,
+            "profile-startup".into(),
+            InitialExecutionHost::NativeWindows,
+            true,
+        );
+        assert_eq!(profile.command, "profile-startup");
+        assert!(!profile.arm_native_windows_codex_color_probe);
+
+        let wsl_launcher_from_native_shell = plan_terminal_startup(
+            String::new(),
+            Some(ValidatedStartupOverride::Codex(format!(
+                "wsl.exe -d Ubuntu codex resume {}",
+                codex.rsplit_once(' ').unwrap().1
+            ))),
+            String::new(),
+            InitialExecutionHost::NativeWindows,
+            true,
+        );
+        assert!(!wsl_launcher_from_native_shell.arm_native_windows_codex_color_probe);
+
+        let ssh_launcher_from_native_shell = plan_terminal_startup(
+            String::new(),
+            Some(ValidatedStartupOverride::Codex(format!(
+                "ssh.exe host codex resume {}",
+                codex.rsplit_once(' ').unwrap().1
+            ))),
+            String::new(),
+            InitialExecutionHost::NativeWindows,
+            true,
+        );
+        assert!(!ssh_launcher_from_native_shell.arm_native_windows_codex_color_probe);
+
+        assert_eq!(
+            initial_execution_host_for_terminal("powershell.exe -NoLogo", "ignored", true),
+            InitialExecutionHost::NativeWindows
+        );
+        assert_eq!(
+            initial_execution_host_for_terminal("wsl.exe -d Ubuntu", "ignored", true),
+            InitialExecutionHost::Wsl
+        );
+        assert_eq!(
+            initial_execution_host_for_terminal("powershell.exe", "ignored", false),
+            InitialExecutionHost::NonWindows
+        );
+    }
+
+    #[test]
     fn human_raw_structured_and_resize_paths_share_the_same_owner_gate() {
         let state = AppState::new();
         enable_test_remote_access(&state);
@@ -1888,7 +2102,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_protocol_reply_bypasses_human_owner_without_becoming_human_input() {
+    fn terminal_protocol_reply_bypasses_human_owner_and_terminal_catalog() {
         let state = AppState::new();
         enable_test_remote_access(&state);
         set_test_remote_lease(&state, "lease-1");
@@ -1902,12 +2116,62 @@ mod tests {
             write_to_terminal_inner(&state, "t1", b"blocked-human", HumanControlOrigin::Local,)
                 .is_err()
         );
-        write_terminal_protocol_reply_inner(&state, "t1", b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _terminals = state.terminals.lock().unwrap();
+            panic!("poison unrelated terminal catalog");
+        }))
+        .is_err());
+        write_terminal_protocol_reply_inner(&state, "t1", 0, b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
             .unwrap();
 
         assert_eq!(
             written.lock().unwrap().as_slice(),
             b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
+        );
+    }
+
+    #[test]
+    fn native_windows_codex_startup_color_replies_are_generation_bound_and_suppressed_once() {
+        let state = AppState::new();
+        let guard = Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed());
+        guard
+            .observe_output(b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\")
+            .unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let handle = pty::PtyHandle::from_test_writer_for_generation(
+            Box::new(SharedTestWriter(Arc::clone(&written))),
+            2,
+        )
+        .with_codex_startup_color_probe(Some(Arc::clone(&guard)));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle);
+
+        assert!(write_terminal_protocol_reply_inner(
+            &state,
+            "t1",
+            1,
+            b"\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\",
+        )
+        .is_err());
+        assert!(written.lock().unwrap().is_empty());
+
+        write_terminal_protocol_reply_inner(
+            &state,
+            "t1",
+            2,
+            b"\x1b[I\x1b]10;rgb:f0f0/f0f0/f0f0\x1b\\\x1b]11;rgb:0c0c/0c0c/0c0c\x1b\\tail",
+        )
+        .unwrap();
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[Itail");
+
+        write_terminal_protocol_reply_inner(&state, "t1", 2, b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
+            .unwrap();
+        assert_eq!(
+            written.lock().unwrap().as_slice(),
+            b"\x1b[Itail\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
         );
     }
 
