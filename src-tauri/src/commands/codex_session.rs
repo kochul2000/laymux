@@ -125,10 +125,19 @@ fn assign_exact_sessions(
         .collect()
 }
 
-/// Accept only the exact `codex resume <safe-id>` form.
-pub(crate) fn is_valid_codex_startup_command_override(command: &str) -> bool {
+/// Accept only the exact `<configured codex command> resume <safe-id>` form.
+/// The command prefix comes from settings on disk (`codex.command`, normalized),
+/// never from the caller.
+pub(crate) fn is_valid_codex_startup_command_override(
+    command: &str,
+    configured_command: &str,
+) -> bool {
+    let agent = crate::settings::agent_command::resolve_agent_command(
+        configured_command,
+        crate::settings::agent_command::DEFAULT_CODEX_COMMAND,
+    );
     command
-        .strip_prefix("codex resume ")
+        .strip_prefix(&format!("{agent} resume "))
         .is_some_and(is_valid_session_id)
 }
 
@@ -187,7 +196,8 @@ mod tests {
     #[test]
     fn startup_override_accepts_only_exact_safe_resume_form() {
         assert!(is_valid_codex_startup_command_override(
-            "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f"
+            "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+            "codex"
         ));
         for invalid in [
             "codex resume --last",
@@ -197,8 +207,30 @@ mod tests {
             "claude --resume abc",
             "",
         ] {
-            assert!(!is_valid_codex_startup_command_override(invalid));
+            assert!(!is_valid_codex_startup_command_override(invalid, "codex"));
         }
+    }
+
+    #[test]
+    fn startup_override_follows_the_configured_launch_command() {
+        assert!(is_valid_codex_startup_command_override(
+            "codex --yolo resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+            "codex --yolo"
+        ));
+        // Flags the user did not configure are not accepted from the caller.
+        assert!(!is_valid_codex_startup_command_override(
+            "codex --yolo resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+            "codex"
+        ));
+        // An unsafe setting falls back to the bare default.
+        assert!(is_valid_codex_startup_command_override(
+            "codex resume 019fc0d8",
+            "codex && echo pwned"
+        ));
+        assert!(!is_valid_codex_startup_command_override(
+            "codex && echo pwned resume 019fc0d8",
+            "codex && echo pwned"
+        ));
     }
 
     #[test]

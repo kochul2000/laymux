@@ -397,6 +397,12 @@ pub enum ClaudeStatusMessageMode {
 pub struct ClaudeSettings {
     #[serde(default)]
     pub sync_cwd: ClaudeSyncCwdMode,
+    /// Command that launches Claude Code (default: "claude").
+    ///
+    /// Flags belong here — `claude --dangerously-skip-permissions` makes session
+    /// restore resume with that flag. Unsafe values fall back to the default.
+    #[serde(default = "default_claude_command")]
+    pub command: String,
     /// Whether to restore Claude Code sessions on app restart (default: true).
     #[serde(default = "default_restore_session")]
     pub restore_session: bool,
@@ -428,6 +434,7 @@ impl Default for ClaudeSettings {
     fn default() -> Self {
         Self {
             sync_cwd: ClaudeSyncCwdMode::default(),
+            command: default_claude_command(),
             restore_session: true,
             session_max_age_hours: 24,
             status_message_mode: ClaudeStatusMessageMode::default(),
@@ -437,6 +444,14 @@ impl Default for ClaudeSettings {
             session_limit_resume_message: default_session_limit_resume_message(),
         }
     }
+}
+
+fn default_claude_command() -> String {
+    super::agent_command::DEFAULT_CLAUDE_COMMAND.to_string()
+}
+
+fn default_codex_command() -> String {
+    super::agent_command::DEFAULT_CODEX_COMMAND.to_string()
 }
 
 fn default_session_limit_auto_resume() -> bool {
@@ -483,6 +498,12 @@ pub enum CodexStatusMessageMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexSettings {
+    /// Command that launches the Codex CLI (default: "codex").
+    ///
+    /// Flags belong here — `codex --yolo` makes session restore resume with that
+    /// flag. Unsafe values fall back to the default.
+    #[serde(default = "default_codex_command")]
+    pub command: String,
     /// Whether to restore Codex CLI sessions on app restart (default: true).
     #[serde(default = "default_restore_session")]
     pub restore_session: bool,
@@ -501,6 +522,7 @@ pub struct CodexSettings {
 impl Default for CodexSettings {
     fn default() -> Self {
         Self {
+            command: default_codex_command(),
             restore_session: true,
             session_max_age_hours: 24,
             status_message_mode: CodexStatusMessageMode::default(),

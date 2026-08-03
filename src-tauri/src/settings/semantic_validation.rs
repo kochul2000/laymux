@@ -72,6 +72,7 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     validate_profiles(settings, &mut issues);
     validate_terminal(settings, &mut issues);
     validate_exit(settings, &mut issues);
+    validate_agent_commands(settings, &mut issues);
     validate_workspace_clear(settings, &mut issues);
     validate_remote(settings, &mut issues);
     validate_view_settings(settings, &mut issues);
@@ -355,6 +356,27 @@ fn validate_exit(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
 /// contract (ADR-0113). `busyPolicy` needs no `enum_value` check: it
 /// deserializes into `WorkspaceClearBusyPolicy`, so an unknown value is a parse
 /// error long before it reaches here.
+/// The agent launch commands are typed into a shell, so a value carrying shell
+/// metacharacters is reported instead of being executed — the running app falls
+/// back to the bare `claude`/`codex` default.
+fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    for (path, value) in [
+        ("/claude/command", &settings.claude.command),
+        ("/codex/command", &settings.codex.command),
+    ] {
+        if !super::agent_command::is_safe_agent_command(value) {
+            issue(
+                issues,
+                "invalid_value",
+                path,
+                format!(
+                    "'{value}'은(는) 실행 명령으로 쓸 수 없습니다. 실행 파일 이름/경로와 플래그만 허용하며 셸 메타문자(; & | $ ` \" ' < >)와 줄바꿈은 쓸 수 없습니다. 이 값은 무시되고 기본 명령이 쓰입니다."
+                ),
+            );
+        }
+    }
+}
+
 fn validate_workspace_clear(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     range_u64(
         issues,
@@ -724,5 +746,30 @@ fn validate_workspace_profile_references(settings: &Settings, issues: &mut Vec<S
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_agent_launch_commands_produce_no_issue() {
+        let mut settings = Settings::default();
+        settings.claude.command = "claude --dangerously-skip-permissions".into();
+        settings.codex.command = "codex --yolo".into();
+        let issues = validate_settings(&settings);
+        assert!(!issues.iter().any(|issue| issue.path.ends_with("/command")));
+    }
+
+    #[test]
+    fn unsafe_agent_launch_commands_are_reported_per_agent() {
+        let mut settings = Settings::default();
+        settings.claude.command = "claude; rm -rf /".into();
+        settings.codex.command = "".into();
+        let issues = validate_settings(&settings);
+        let paths: Vec<&str> = issues.iter().map(|issue| issue.path.as_str()).collect();
+        assert!(paths.contains(&"/claude/command"));
+        assert!(paths.contains(&"/codex/command"));
     }
 }

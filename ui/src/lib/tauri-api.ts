@@ -703,6 +703,11 @@ export type CodexStatusMessageMode = ClaudeStatusMessageMode;
 
 export interface ClaudeSettings {
   syncCwd: ClaudeSyncCwdMode;
+  /**
+   * Command that launches Claude Code (default: "claude"). Flags belong here —
+   * session restore appends `--resume <id>` to it.
+   */
+  command: string;
   /** Whether to restore Claude Code sessions on app restart (default: true). */
   restoreSession: boolean;
   /** Maximum age (hours) for Claude session files. 0 = no limit. Default: 24. */
@@ -720,6 +725,11 @@ export interface ClaudeSettings {
 }
 
 export interface CodexSettings {
+  /**
+   * Command that launches the Codex CLI (default: "codex"). Flags belong here —
+   * session restore appends `resume <id>` to it.
+   */
+  command: string;
   /** Whether to restore Codex CLI sessions on app restart (default: true). */
   restoreSession: boolean;
   /** Maximum age (hours) for Codex rollout files. 0 = no limit. Default: 24. */

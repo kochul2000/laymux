@@ -90,10 +90,19 @@ struct ClaudeSessionFile {
 
 /// Validate that a startup command override is safe to execute.
 ///
-/// The only allowed form is `claude --resume <valid_session_id>`. External
-/// viewers use a structured IPC argument and are validated separately.
-pub(crate) fn is_valid_claude_startup_command_override(cmd: &str) -> bool {
-    cmd.strip_prefix("claude --resume ")
+/// The only allowed form is `<configured claude command> --resume
+/// <valid_session_id>`, where the command prefix is re-derived from settings on
+/// disk (`claude.command`, normalized) instead of trusted from the caller.
+/// External viewers use a structured IPC argument and are validated separately.
+pub(crate) fn is_valid_claude_startup_command_override(
+    cmd: &str,
+    configured_command: &str,
+) -> bool {
+    let agent = crate::settings::agent_command::resolve_agent_command(
+        configured_command,
+        crate::settings::agent_command::DEFAULT_CLAUDE_COMMAND,
+    );
+    cmd.strip_prefix(&format!("{agent} --resume "))
         .is_some_and(is_valid_session_id)
 }
 
@@ -303,46 +312,91 @@ mod tests {
     #[test]
     fn startup_command_override_accepts_valid_resume() {
         assert!(is_valid_claude_startup_command_override(
-            "claude --resume abc-123"
+            "claude --resume abc-123",
+            "claude"
         ));
         assert!(is_valid_claude_startup_command_override(
-            "claude --resume session_v2"
+            "claude --resume session_v2",
+            "claude"
         ));
         assert!(is_valid_claude_startup_command_override(
-            "claude --resume A1B2"
+            "claude --resume A1B2",
+            "claude"
         ));
     }
 
     #[test]
     fn startup_command_override_rejects_arbitrary_commands() {
-        assert!(!is_valid_claude_startup_command_override("rm -rf /"));
-        assert!(!is_valid_claude_startup_command_override("echo pwned"));
         assert!(!is_valid_claude_startup_command_override(
-            "claude --resume bad; rm -rf /"
+            "rm -rf /", "claude"
         ));
         assert!(!is_valid_claude_startup_command_override(
-            "claude --resume $(whoami)"
+            "echo pwned",
+            "claude"
         ));
         assert!(!is_valid_claude_startup_command_override(
-            "claude --resume id && echo x"
+            "claude --resume bad; rm -rf /",
+            "claude"
         ));
-        assert!(!is_valid_claude_startup_command_override(""));
         assert!(!is_valid_claude_startup_command_override(
-            "claude --resume "
+            "claude --resume $(whoami)",
+            "claude"
         ));
-        assert!(!is_valid_claude_startup_command_override("claude --resume"));
         assert!(!is_valid_claude_startup_command_override(
-            "not-claude --resume abc"
+            "claude --resume id && echo x",
+            "claude"
+        ));
+        assert!(!is_valid_claude_startup_command_override("", "claude"));
+        assert!(!is_valid_claude_startup_command_override(
+            "claude --resume ",
+            "claude"
+        ));
+        assert!(!is_valid_claude_startup_command_override(
+            "claude --resume",
+            "claude"
+        ));
+        assert!(!is_valid_claude_startup_command_override(
+            "not-claude --resume abc",
+            "claude"
+        ));
+    }
+
+    #[test]
+    fn startup_command_override_follows_the_configured_launch_command() {
+        assert!(is_valid_claude_startup_command_override(
+            "claude --dangerously-skip-permissions --resume abc-123",
+            "claude --dangerously-skip-permissions"
+        ));
+        // Whitespace in the setting is normalized before comparison.
+        assert!(is_valid_claude_startup_command_override(
+            "claude --yolo --resume abc-123",
+            "  claude   --yolo  "
+        ));
+        // A caller cannot add flags the user did not configure.
+        assert!(!is_valid_claude_startup_command_override(
+            "claude --dangerously-skip-permissions --resume abc-123",
+            "claude"
+        ));
+        // An unsafe setting falls back to the bare default, not to itself.
+        assert!(!is_valid_claude_startup_command_override(
+            "claude; rm -rf / --resume abc-123",
+            "claude; rm -rf /"
+        ));
+        assert!(is_valid_claude_startup_command_override(
+            "claude --resume abc-123",
+            "claude; rm -rf /"
         ));
     }
 
     #[test]
     fn startup_command_override_rejects_raw_viewer_commands() {
         assert!(!is_valid_claude_startup_command_override(
-            "vi '/home/user/file.txt'"
+            "vi '/home/user/file.txt'",
+            "claude"
         ));
         assert!(!is_valid_claude_startup_command_override(
-            "notepad 'C:\\Users\\me\\README.md'"
+            "notepad 'C:\\Users\\me\\README.md'",
+            "claude"
         ));
     }
 

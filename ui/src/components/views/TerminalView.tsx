@@ -75,6 +75,11 @@ import {
   onRemoteControlChanged,
   type TerminalOutputSurfaceFailStoppedPayload,
 } from "@/lib/tauri-api";
+import {
+  DEFAULT_CLAUDE_COMMAND,
+  DEFAULT_CODEX_COMMAND,
+  resolveAgentCommand,
+} from "@/lib/agent-command";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
 import { transformPasteContent, prepareSelectionForCopy, formatPastePaths } from "@/lib/smart-text";
 import { isLxShortcut } from "@/lib/lx-shortcuts";
@@ -5532,14 +5537,25 @@ export function TerminalView({
             ? lastCodexSession
             : undefined;
         const hasAgentSessionConflict = Boolean(safeSessionId && safeCodexSessionId);
+        // The launch command is configurable so a user can carry flags such as
+        // `--dangerously-skip-permissions` / `--yolo` into the restored session.
+        // Rust re-derives the same string from settings and rejects the rest.
+        const claudeCommand = resolveAgentCommand(
+          settingsState.claude?.command,
+          DEFAULT_CLAUDE_COMMAND,
+        );
+        const codexCommand = resolveAgentCommand(
+          settingsState.codex?.command,
+          DEFAULT_CODEX_COMMAND,
+        );
         const startupOverride = startupCommandOverride
           ? startupCommandOverride
           : hasAgentSessionConflict
             ? undefined
             : shouldRestoreClaudeSession && safeSessionId
-              ? `claude --resume ${safeSessionId}`
+              ? `${claudeCommand} --resume ${safeSessionId}`
               : shouldRestoreCodexSession && safeCodexSessionId
-                ? `codex resume ${safeCodexSessionId}`
+                ? `${codexCommand} resume ${safeCodexSessionId}`
                 : undefined;
 
         cacheRestorePromise =

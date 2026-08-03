@@ -9130,6 +9130,69 @@ describe("TerminalView", () => {
       });
     });
 
+    it("restores with the configured claude command and its flags", async () => {
+      useSettingsStore.setState({
+        claude: {
+          ...useSettingsStore.getState().claude,
+          command: "claude --dangerously-skip-permissions",
+        },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-claude-flagged"
+          paneId="pane-claude-flagged"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="abc123-session-id"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-claude-flagged",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          "claude --dangerously-skip-permissions --resume abc123-session-id",
+        );
+      });
+    });
+
+    it("falls back to the default command when the configured one is unsafe", async () => {
+      useSettingsStore.setState({
+        claude: { ...useSettingsStore.getState().claude, command: "claude; rm -rf /" },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-claude-unsafe"
+          paneId="pane-claude-unsafe"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="abc123-session-id"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-claude-unsafe",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          "claude --resume abc123-session-id",
+        );
+      });
+    });
+
     it("does not pass startupCommandOverride when restoreSession is false", async () => {
       useSettingsStore.setState({
         claude: { syncCwd: "skip", restoreSession: false },
@@ -9183,6 +9246,36 @@ describe("TerminalView", () => {
           true,
           "/home/user/project",
           "codex resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
+        );
+      });
+    });
+
+    it("restores with the configured codex command and its flags", async () => {
+      useSettingsStore.setState({
+        codex: { ...useSettingsStore.getState().codex, command: "codex --yolo" },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-codex-flagged"
+          paneId="pane-codex-flagged"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCodexSession="019fc0d8-a862-7241-a0f5-b6a66ef4ef6f"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-codex-flagged",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          "codex --yolo resume 019fc0d8-a862-7241-a0f5-b6a66ef4ef6f",
         );
       });
     });

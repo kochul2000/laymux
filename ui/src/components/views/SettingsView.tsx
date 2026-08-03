@@ -76,6 +76,12 @@ import {
 import type { PastePathSeparator } from "@/lib/smart-text";
 import { MONOSPACED_FONTS, getSystemMonospaceFonts } from "@/lib/system-fonts";
 import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "@/lib/agent-session-constants";
+import {
+  DEFAULT_CLAUDE_COMMAND,
+  DEFAULT_CODEX_COMMAND,
+  isSafeAgentCommand,
+  resolveAgentCommand,
+} from "@/lib/agent-command";
 import { FocusInput, FocusSelect } from "@/components/ui/FormControls";
 import { inputCls, inputStyle } from "@/components/ui/form-control-styles";
 import { ToggleSwitch } from "@/components/ui/ToggleSwitch";
@@ -2668,6 +2674,61 @@ function ClaudeSection() {
       </SubGroup>
 
       <SubGroup title={t("claude.groupSessionRestore")}>
+        {/* Launch command (flags land here, e.g. --dangerously-skip-permissions) */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("claude.command")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("claude.commandDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <FocusInput
+                data-testid="claude-command-input"
+                className={inputCls}
+                type="text"
+                style={{ width: 320 }}
+                placeholder={DEFAULT_CLAUDE_COMMAND}
+                value={claude.command}
+                onChange={(e) => updateClaude({ command: e.target.value })}
+              />
+              {claude.command !== DEFAULT_CLAUDE_COMMAND && (
+                <button
+                  data-testid="claude-command-reset"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                  onClick={() => updateClaude({ command: DEFAULT_CLAUDE_COMMAND })}
+                >
+                  {t("common.default")}
+                </button>
+              )}
+            </div>
+            {isSafeAgentCommand(claude.command) ? (
+              <p
+                data-testid="claude-command-preview"
+                className="mt-1 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
+                {`${resolveAgentCommand(claude.command, DEFAULT_CLAUDE_COMMAND)} --resume <session-id>`}
+              </p>
+            ) : (
+              <p
+                data-testid="claude-command-warning"
+                className="mt-1 text-[11px] leading-tight"
+                style={{ color: "var(--claude)" }}
+              >
+                {t("claude.commandInvalid", { command: DEFAULT_CLAUDE_COMMAND })}
+              </p>
+            )}
+          </div>
+        </div>
+
         {/* Restore Session */}
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
@@ -2930,6 +2991,61 @@ function CodexSection() {
       <SectionTitle>{t("codex.title")}</SectionTitle>
 
       <SubGroup title={t("codex.groupSessionRestore")}>
+        {/* Launch command (flags land here, e.g. --yolo) */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("codex.command")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("codex.commandDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <FocusInput
+                data-testid="codex-command-input"
+                className={inputCls}
+                type="text"
+                style={{ width: 320 }}
+                placeholder={DEFAULT_CODEX_COMMAND}
+                value={codex.command}
+                onChange={(e) => updateCodex({ command: e.target.value })}
+              />
+              {codex.command !== DEFAULT_CODEX_COMMAND && (
+                <button
+                  data-testid="codex-command-reset"
+                  className="hover-bg px-1.5 py-0.5 rounded text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                  onClick={() => updateCodex({ command: DEFAULT_CODEX_COMMAND })}
+                >
+                  {t("common.default")}
+                </button>
+              )}
+            </div>
+            {isSafeAgentCommand(codex.command) ? (
+              <p
+                data-testid="codex-command-preview"
+                className="mt-1 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
+                {`${resolveAgentCommand(codex.command, DEFAULT_CODEX_COMMAND)} resume <session-id>`}
+              </p>
+            ) : (
+              <p
+                data-testid="codex-command-warning"
+                className="mt-1 text-[11px] leading-tight"
+                style={{ color: "var(--claude)" }}
+              >
+                {t("codex.commandInvalid", { command: DEFAULT_CODEX_COMMAND })}
+              </p>
+            )}
+          </div>
+        </div>
+
         <div className="flex items-start gap-3 py-1.5">
           <div className="w-36 shrink-0 pt-1">
             <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
