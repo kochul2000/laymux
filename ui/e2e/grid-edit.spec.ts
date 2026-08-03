@@ -114,16 +114,20 @@ test.describe("Layout Export", () => {
 });
 
 test.describe("Boundary Handles", () => {
+  // Docks draw their own boundary handles, so both assertions scope to the
+  // workspace grid — an unscoped selector counts the right dock's handle and
+  // reports a split that never happened.
+  const workspaceHandles = (page: import("@playwright/test").Page) =>
+    page.getByTestId("workspace-area").locator("[data-testid^='boundary-handle-']");
+
   test("boundary handles appear between panes after split", async ({ appPage: page }) => {
     await hoverPane(page, 0);
     await page.getByTestId("pane-control-split-v").click();
 
-    const handles = page.locator("[data-testid^='boundary-handle-']");
-    await expect(handles.first()).toBeVisible();
+    await expect(workspaceHandles(page).first()).toBeVisible();
   });
 
   test("no boundary handles with single pane", async ({ appPage: page }) => {
-    const handles = page.locator("[data-testid^='boundary-handle-']");
-    await expect(handles).toHaveCount(0);
+    await expect(workspaceHandles(page)).toHaveCount(0);
   });
 });

@@ -599,6 +599,11 @@ test.describe("remote mobile layout", () => {
 
     const escOrderChip = page.locator('.key-order-chip[data-order-key="esc"]');
     const tabOrderChip = page.locator('.key-order-chip[data-order-key="tab"]');
+    // The order section sits at the end of the popover's scroll area, so on a
+    // short viewport the chips start outside it. Raw mouse coordinates do not
+    // scroll the way `click()` does — without this the drag lands on nothing.
+    await escOrderChip.scrollIntoViewIfNeeded();
+    await tabOrderChip.scrollIntoViewIfNeeded();
     const escBox = await escOrderChip.boundingBox();
     const tabBox = await tabOrderChip.boundingBox();
     expect(escBox).not.toBeNull();

@@ -44,7 +44,9 @@ export function estimateUsageWidgetWidth(
         : barWidth + scaleWidgetWidth(USAGE_NUMBER_WIDTH + 4, fontSize);
   const separatorWidth =
     Math.max(0, rowCount - 1) * scaleWidgetWidth(USAGE_ROW_SEPARATOR_WIDTH, fontSize);
-  return scaleWidgetWidth(LABEL_WIDTH, fontSize) + Math.max(1, rowCount) * rowWidth + separatorWidth;
+  return (
+    scaleWidgetWidth(LABEL_WIDTH, fontSize) + Math.max(1, rowCount) * rowWidth + separatorWidth
+  );
 }
 
 export function readDisplay(options: Record<string, unknown>): UsageWidgetDisplay {
