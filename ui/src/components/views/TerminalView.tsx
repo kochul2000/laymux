@@ -1284,9 +1284,10 @@ export function TerminalView({
       // 데코레이션은 xterm 의 proposed API 라 이 옵션이 없으면 throw 한다.
       allowProposedApi: true,
       // xterm's CoreService still emits parser-generated replies when stdin is
-      // disabled, but blocks keyboard/IME/mouse/focus user input. Start closed
-      // until the remote-control owner snapshot is known.
-      disableStdin: true,
+      // disabled, but blocks keyboard/IME/mouse/focus user input. The layout
+      // effect mirrors the current owner snapshot before this passive creation
+      // effect, including when the snapshot was already known before mount.
+      disableStdin: !localControlAvailableRef.current,
       cursorBlink: resolvedCursorBlink,
       cursorStyle: cursorOptions.cursorStyle,
       cursorInactiveStyle: inputModeRef.current === "composer" ? "none" : "outline",
