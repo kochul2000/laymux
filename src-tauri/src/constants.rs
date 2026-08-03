@@ -235,11 +235,11 @@ pub const TERMINAL_OUTPUT_ENVELOPE_QUIET_MS: u64 = 4;
 pub const TERMINAL_OUTPUT_ENVELOPE_MAX_DELAY_MS: u64 = 16;
 /// Server-side bound for a lost envelope receipt or continuation control.
 ///
-/// This is deliberately longer than the frontend's 5 s command watchdog. It
+/// This is deliberately longer than the frontend's 5 s control watchdog. It
 /// covers one bounded 5 s WebView stall, the pull watchdog's 3 s recovery
-/// interval, one 5 s repair invoke, the worst-case hold -> close -> receipt
-/// FIFO (3 * 5 s), and 2 s of scheduling margin (ADR-0122).
-pub const TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS: u64 = 30_000;
+/// interval, one 15 s repair invoke, the worst-case hold -> close -> receipt
+/// FIFO (3 * 5 s), and 2 s of scheduling margin (ADR-0126).
+pub const TERMINAL_OUTPUT_SERVER_DELIVERY_EXPIRY_MS: u64 = 40_000;
 /// Bound for one synchronous desktop event-emitter call.
 pub const TERMINAL_OUTPUT_ENVELOPE_EMITTER_CALL_TIMEOUT_MS: u64 = 5_000;
 /// Bound for joining the desktop delivery workers after close/retirement.

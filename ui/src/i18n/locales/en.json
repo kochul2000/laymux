@@ -17,7 +17,10 @@
       "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
       "composerResize": "Resize input area (drag the top edge)",
       "composerHistory": "Recent inputs",
-      "composerAutocomplete": "Input suggestions"
+      "composerAutocomplete": "Input suggestions",
+      "outputStoppedTitle": "Terminal output stopped",
+      "outputStoppedDescription": "Close and recreate this pane to continue.",
+      "restart": "Restart terminal"
     },
     "remoteControl": {
       "title": "Remote control active",

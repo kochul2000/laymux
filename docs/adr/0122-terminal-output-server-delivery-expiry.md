@@ -1,6 +1,6 @@
 # 0122. terminal output server delivery expiry는 frontend watchdog보다 길게 둔다
 
-- Status: Accepted
+- Status: Superseded by [0126](0126-terminal-output-repair-timeout-budget.md)
 - Date: 2026-08-02
 - Source: 사용자 실기 보고(`ai-inference` background workspace의 `backend receipt timeout`) · dev 8-pane flood 측정(active screenshot 5,078 ms, background parser service gap 5,016–5,266 ms) · [issue #700](https://github.com/kochul2000/laymux/issues/700) · [PR #743](https://github.com/kochul2000/laymux/pull/743) 서브에이전트 리뷰 · [ADR-0095](0095-terminal-output-bounded-envelope-and-frame-continuation.md) · [ADR-0098](0098-terminal-parser-weighted-starvation-free-admission.md) · [ADR-0101](0101-active-workspace-weighted-parser-admission.md)
 - Amends: ADR-0095 Decision의 active surface receipt/grant server expiry 5초, ADR-0098 Decision 9·10의 inherited receipt 5초 제약, ADR-0101 Context의 inherited receipt 5초 제약을 30초로 정정한다. frontend command watchdog 5초, emitter 호출·worker shutdown 5초, parsed-progress expiry 5초, bounded repair/identity/fail-stop 계약은 유지한다.

@@ -17,7 +17,10 @@
       "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
       "composerResize": "입력 영역 크기 조절 (위 경계 드래그)",
       "composerHistory": "최근 입력",
-      "composerAutocomplete": "입력 추천"
+      "composerAutocomplete": "입력 추천",
+      "outputStoppedTitle": "터미널 출력이 중지되었습니다",
+      "outputStoppedDescription": "계속하려면 이 pane을 닫고 다시 생성하세요.",
+      "restart": "터미널 재시작"
     },
     "remoteControl": {
       "title": "원격 제어 중",

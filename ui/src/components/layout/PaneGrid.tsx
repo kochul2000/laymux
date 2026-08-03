@@ -331,6 +331,9 @@ export function PaneGrid({
                   terminalRestartCwd={terminalRestarts[pane.id]?.cwd}
                   terminalRestartFresh={terminalRestarts[pane.id]?.fresh}
                   onTerminalRestartConsumed={() => consumeTerminalRestart(pane.id)}
+                  onTerminalRestart={
+                    pane.view.type === "TerminalView" ? () => restartTerminalView(pane) : undefined
+                  }
                 />
               ) : (
                 <PaneLoadingPlaceholder data-testid={`pane-loading-placeholder-${i}`} />

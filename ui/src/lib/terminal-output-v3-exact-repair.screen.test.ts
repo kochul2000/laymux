@@ -66,6 +66,7 @@ describe("v3 exact envelope repair on a real xterm", () => {
       initialSeq: 0,
       initialEnvelopeId: 1,
       controlTimeoutMs: 100,
+      repairTimeoutMs: 100,
       scope: registry.mount("screen-terminal"),
       isCurrent: () => true,
       getLifecycleFacts: () => ({

@@ -4,11 +4,11 @@ use super::*;
 fn production_delivery_timeouts_separate_server_recovery_from_worker_liveness() {
     let delivery = DesktopOutputDelivery::new("production-expiry-budget".into(), 1);
 
-    // ADR-0122: one 5 s WebView stall, the pull watchdog's bounded 3 s
-    // recovery poll, a 5 s repair invoke, the worst-case hold -> close ->
+    // ADR-0126: one 5 s WebView stall, the pull watchdog's bounded 3 s
+    // recovery poll, a 15 s repair invoke, the worst-case hold -> close ->
     // receipt FIFO (3 * 5 s), and 2 s of scheduling margin must all fit before
     // the backend destroys the frozen envelope/grant.
-    let server_expiry = Duration::from_secs(30);
+    let server_expiry = Duration::from_secs(40);
     let worker_timeout = Duration::from_secs(5);
     assert_eq!(delivery.inner.receipt_timeout, server_expiry);
     assert_eq!(delivery.inner.continuation_timeout, server_expiry);

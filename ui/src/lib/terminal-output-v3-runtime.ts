@@ -47,6 +47,7 @@ export interface TerminalOutputV3RuntimeOptions {
   initialSeq: number;
   initialEnvelopeId: number;
   controlTimeoutMs: number;
+  repairTimeoutMs: number;
   scope: TerminalOutputControlMountScope;
   isCurrent(): boolean;
   getLifecycleFacts(): Pick<
@@ -92,7 +93,7 @@ export class TerminalOutputV3Runtime {
   constructor(options: TerminalOutputV3RuntimeOptions) {
     this.options = options;
     this.repairTransport = new TerminalOutputV3RepairTransport(
-      options.controlTimeoutMs,
+      options.repairTimeoutMs,
       options.repairEnvelope,
     );
     this.ingress = new TerminalOutputEnvelopeIngress({

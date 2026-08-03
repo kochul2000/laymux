@@ -10692,11 +10692,19 @@ describe("TerminalView desktop input composer", () => {
 
   it("fail-stops a rejected v3 receipt without reset, repair, or replacement attach", async () => {
     const terminalId = "t-output-v3-fail-stop";
+    const restart = vi.fn();
     mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(9));
     mockAcknowledgeTerminalOutputEnvelope.mockResolvedValueOnce(false);
     mockFailStopTerminalOutputSurface.mockRejectedValueOnce(new Error("diagnostics bridge down"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const view = render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    const view = render(
+      <TerminalView
+        instanceId={terminalId}
+        profile="PowerShell"
+        syncGroup=""
+        onRestart={restart}
+      />,
+    );
     await waitForTerminalInputReady();
     const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
       payload: unknown,
@@ -10715,6 +10723,8 @@ describe("TerminalView desktop input composer", () => {
     expect(screen.getByTestId(`terminal-output-stopped-${terminalId}`)).toHaveTextContent(
       "Close and recreate this pane",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Restart terminal" }));
+    expect(restart).toHaveBeenCalledOnce();
     expect(allTerminalOutputV3Diagnostics()[terminalId]).toMatchObject({
       state: "fail-stopped",
       generation: 7,
@@ -13184,7 +13194,7 @@ describe("TerminalView desktop input composer", () => {
       expect(mockResumeTerminalOutput).toHaveBeenCalledWith(terminalId, 1, 5);
       // Inside the watchdog window the pane still waits for the exact range.
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(4000);
+        await vi.advanceTimersByTimeAsync(14_000);
       });
       expect(mockAttachTerminalOutput.mock.calls.length).toBe(attachCallsBeforeGap);
 
