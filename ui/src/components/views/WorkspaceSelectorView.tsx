@@ -1346,7 +1346,13 @@ export function WorkspaceSelectorView() {
               false,
               item.workspace.panes.map((pane) => pane.id),
             );
-            if (open) handleSelectWorkspace(item.workspace.id);
+            if (open) {
+              setHiddenShelfOpen(false);
+              if (hiddenItems.hiddenWorkspaces.length > 1) {
+                hiddenChipRef.current?.focus();
+              }
+              handleSelectWorkspace(item.workspace.id);
+            }
           }}
         />
       )}

@@ -2074,6 +2074,20 @@ describe("WorkspaceSelectorView", () => {
       expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
     });
 
+    it("closes the shelf after restoring and opening while other workspaces remain hidden", () => {
+      useUiStore.getState().setWorkspaceHidden("ws-2", true);
+      useUiStore.getState().setWorkspaceHidden("ws-3", true);
+      useUiStore.getState().setHiddenShelfOpen(true);
+      render(<WorkspaceSelectorView />);
+
+      fireEvent.click(screen.getByTestId("hidden-workspace-primary-ws-2"));
+
+      expect(useUiStore.getState().hiddenWorkspaceIds).toEqual(new Set(["ws-3"]));
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-2");
+      expect(useUiStore.getState().hiddenShelfOpen).toBe(false);
+      expect(screen.queryByTestId("hidden-items-shelf")).not.toBeInTheDocument();
+    });
+
     it("provides distinct tooltips for primary and show-only restore actions", () => {
       useUiStore.getState().setWorkspaceHidden("ws-2", true);
       useUiStore.getState().setHiddenShelfOpen(true);
