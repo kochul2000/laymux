@@ -144,6 +144,7 @@ ADR 이 필요한 대표 기준:
 | [0124](0124-remote-widget-strip-mirrors-desktop.md) | 원격 위젯은 데스크톱 배치의 미러이며 표면은 한 줄 스트립 하나다 (0105 확장) | Accepted |
 | [0125](0125-configurable-agent-launch-command.md) | 에이전트 실행 명령은 설정이 소유하고, 복원 override 는 그 설정에서 재도출한다 (0117 확장) | Accepted |
 | [0126](0126-terminal-output-repair-timeout-budget.md) | repair watchdog은 15초, backend delivery expiry는 40초로 독립시킨다 | Accepted |
+| [0129](0129-remote-chrome-row-rebases-fit-baseline.md) | 원격 chrome 행의 등장·소멸은 crop 이 아니라 fit 기준선 재설정이다 (0038 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
