@@ -1019,7 +1019,6 @@ function LayoutCard({
  */
 function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) {
   const { t } = useTranslation("workspace");
-  const [hovered, setHovered] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1032,8 +1031,6 @@ function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) 
   return (
     <div
       className="flex items-center gap-2 px-1 py-1.5"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       style={{
         borderTop: "1px dashed var(--border)",
       }}
@@ -1048,7 +1045,7 @@ function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) 
           setShowSaved(true);
           savedTimerRef.current = setTimeout(() => setShowSaved(false), 1500);
         }}
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
+        className="export-new-layout-btn flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left"
         style={{ background: "transparent", border: "none", padding: 0 }}
         title={t("layout.exportNewTitle")}
       >
@@ -1059,16 +1056,10 @@ function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) 
               stroke="currentColor"
               strokeWidth="1.4"
               strokeLinecap="round"
-              style={{ color: hovered ? "var(--accent)" : "var(--text-secondary)" }}
             />
           </svg>
         </span>
-        <span
-          className="truncate text-[11px] font-medium"
-          style={{ color: hovered ? "var(--accent)" : "var(--text-secondary)" }}
-        >
-          {t("layout.exportNew")}
-        </span>
+        <span className="truncate text-[11px] font-medium">{t("layout.exportNew")}</span>
       </button>
       {showSaved && (
         <span
