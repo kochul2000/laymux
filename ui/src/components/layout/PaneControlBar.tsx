@@ -28,6 +28,7 @@ export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
   onRestart?: () => void;
+  onClearTerminal?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
   onChangeView?: (config: ViewInstanceConfig) => void;
@@ -212,6 +213,23 @@ function PropagateCwdOnceBtn({ onClick }: { onClick: () => void }) {
           strokeWidth="1.2"
           strokeLinecap="round"
         />
+      </svg>
+    </BarBtn>
+  );
+}
+
+function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
+  const keys = useResolvedKeybinding("pane.clearTerminal");
+  return (
+    <BarBtn
+      testId="pane-control-clear-terminal"
+      onClick={onClick}
+      title={`Clear terminal${keys ? ` (${keys})` : ""}`}
+    >
+      {/* Same upright broom silhouette as workspace clear, scaled for the pane bar. */}
+      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+        <path d="M6.5 1.5v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="M4.8 5.8h3.4l2.1 5.3H2.7z" fill="currentColor" />
       </svg>
     </BarBtn>
   );
@@ -545,6 +563,9 @@ function BarContent({
                 </svg>
               )}
             </BarBtn>
+          )}
+          {currentView.type === "TerminalView" && actions.onClearTerminal && (
+            <ClearTerminalBtn onClick={actions.onClearTerminal} />
           )}
           {currentView.type === "TerminalView" && actions.onRestart && (
             <BarBtn
