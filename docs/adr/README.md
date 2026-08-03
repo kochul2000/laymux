@@ -147,7 +147,7 @@ ADR 이 필요한 대표 기준:
 | [0127](0127-terminal-startup-slot-follows-eligibility.md) | 준비 전 terminal startup slot은 현재 eligibility를 따라가며 숨은 owner를 고착하지 않는다 | Accepted |
 | [0128](0128-app-global-remote-control-status-coordinator.md) | Remote control listener·snapshot·polling은 desktop window 전역 coordinator 하나가 소유한다 | Accepted |
 | [0129](0129-remote-chrome-row-rebases-fit-baseline.md) | 원격 chrome 행의 등장·소멸은 crop 이 아니라 fit 기준선 재설정이다 (0038 정정) | Accepted |
-| [0130](0130-spawn-time-cwd-seed.md) | 세션 CWD 는 스폰 시점 시작 디렉터리로 시딩한다 (0003 확장) | Proposed |
+| [0130](0130-spawn-time-cwd-seed.md) | 세션 CWD 는 스폰 시점 시작 디렉터리로 시딩한다 (0003 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

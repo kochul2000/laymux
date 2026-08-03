@@ -1,6 +1,6 @@
 # 0130. 세션 CWD 는 스폰 시점 시작 디렉터리로 시딩한다 (0003 확장)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Source: 사용자 보고(세션 복원으로 시작한 pane 옆 GitHubView 가 리포를 인지 못함), [ADR-0003](0003-cwd-single-source-syncgroup.md), [api-contracts.md §CWD 전파 가드](../architecture/api-contracts.md)
 
