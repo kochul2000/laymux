@@ -1,6 +1,6 @@
 # 0125. 에이전트 실행 명령은 설정이 소유하고, 복원 override 는 그 설정에서 재도출한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Source: 사용자 요구(설정 UI 에 Claude/Codex 세션 복원 명령 노출, `--dangerously-skip-permissions`·`--yolo` 같은 플래그 지정), [ADR-0117](0117-codex-session-restore.md), [ADR-0118](0118-codex-session-pid-attribution.md), [api-contracts.md §5·§13](../architecture/api-contracts.md)
 
