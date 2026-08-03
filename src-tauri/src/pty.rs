@@ -98,6 +98,11 @@ fn plan_start_dir(starting_directory: &str, cmd_path: &str) -> StartDirPlan {
     }
     let dir = expand_env_in_path(starting_directory);
     if is_unix_path(&dir) && is_wsl_command(cmd_path) {
+        // Not existence-checked: the path lives inside the distro and the distro
+        // is not resolved here. It needs no guard either — `wsl --cd <missing>`
+        // fails the launch outright (`Wsl/ERROR_FILE_NOT_FOUND`) instead of
+        // starting the shell somewhere else, so a seed can never disagree with
+        // where a running child actually is.
         return StartDirPlan::WslCd(dir);
     }
     // For non-WSL commands, convert /mnt/X/... back to Windows path
