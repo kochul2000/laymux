@@ -57,7 +57,7 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 
 `GridEditToolbar` 와 `StatusLine` 은 dock 격자 바깥에 있는 **위젯 슬롯 영역**이다([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). StatusLine 은 격자 다음 형제로 렌더되므로 BottomDock 보다 아래에 창 전체 폭으로 놓이며, dock 의 분할·포커스·리사이즈 계약을 상속하지 않는다. 표시 여부는 `widgets.statusLine.enabled` 가 정한다.
 
-`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0114](../adr/0114-sleep-prevention-mode.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다.
+`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0114](../adr/0114-sleep-prevention-mode.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다. 그 오른쪽 끝의 창 버튼(최소화·최대화·닫기)은 상단 바의 다른 모든 점유자보다 우선하며 어떤 창 폭에서도 온전히 남는다 — 좌·우 크롬 클러스터가 화면 가장자리에서 먼 쪽부터 잘려 자리를 내준다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)).
 
 두 표면의 위젯은 `widgets.fontFamily`·`fontSize`를 공용으로 적용한다. 사용량 위젯의 막대 너비는 배치 인스턴스의 `options.barWidth`가 소유하며, 실제 track과 슬롯 접힘용 요구 폭이 같은 값에서 계산된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)).
 

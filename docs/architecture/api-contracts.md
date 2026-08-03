@@ -187,7 +187,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barWidth`·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 너비(`barWidth` 기본 26, 8~200px)와 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 크기가 맞지 않는다. `barWidth`는 consumed·elapsed 두 track과 슬롯 요구 폭 계산에 함께 적용된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
 
-폭이 모자라면 위젯을 자르지 않는다. 상단 바에서는 창 드래그 영역의 최소 폭이 먼저 확보되고, 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
+폭이 모자라면 위젯을 자르지 않는다. 상단 바의 우선순위는 **창 버튼 > 창 드래그 영역 최소 폭 > 앱 크롬 버튼·위젯** 이다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)). 창 버튼(최소화·최대화·닫기)은 어떤 폭에서도 46px 를 유지한 채 오른쪽 끝에 남고, 그 다음 드래그 최소 폭이 확보된다. 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
 
 편집 UI 는 Settings → **Interface → 위젯** 한 곳이다. 위젯은 pane 에 놓는 view 가 아니라 앱 크롬이므로 Views 가 아닌 Interface 그룹에 둔다. 상단 바에는 배치 조작 버튼을 두지 않는다.
 

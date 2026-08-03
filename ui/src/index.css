@@ -518,6 +518,7 @@
   /* Separator */
   .ui-sep {
     width: 1px;
+    flex-shrink: 0;
     height: 14px;
     margin: 0 4px;
     background: var(--separator-bg);
