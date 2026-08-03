@@ -95,11 +95,13 @@ const navigation = {
 type RemoteMockOptions = {
   heartbeatTimeoutSeconds?: number;
   heartbeatFailures?: number;
+  heartbeatFailureStatus?: number;
   reconnectPayloadDelayMs?: number;
 };
 
 async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   const state = {
+    claimRequests: 0,
     heartbeatRequests: 0,
     heartbeatFailuresRemaining: options.heartbeatFailures ?? 0,
     sockets: [] as WebSocketRoute[],
@@ -132,6 +134,7 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
+      state.claimRequests += 1;
       await route.fulfill({
         json: {
           active: true,
@@ -145,6 +148,13 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
       state.heartbeatRequests += 1;
       if (state.heartbeatFailuresRemaining > 0) {
         state.heartbeatFailuresRemaining -= 1;
+        if (options.heartbeatFailureStatus) {
+          await route.fulfill({
+            status: options.heartbeatFailureStatus,
+            json: { message: "lease expired" },
+          });
+          return;
+        }
         await route.abort("connectionfailed");
         return;
       }
@@ -165,9 +175,32 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     const connectionNumber = state.sockets.length;
     const delay = connectionNumber > 1 ? (options.reconnectPayloadDelayMs ?? 0) : 0;
     setTimeout(() => {
-      socket.send(
-        Buffer.from(connectionNumber === 1 ? "initial output\r\n" : "restored output\r\n"),
+      const payload = Buffer.from(
+        connectionNumber === 1 ? "initial output\r\n" : "restored output\r\n",
       );
+      socket.send(
+        JSON.stringify({
+          type: "terminal.output",
+          version: 1,
+          phase: "snapshot",
+          seqStart: 0,
+          seqEnd: payload.byteLength,
+          byteLength: payload.byteLength,
+          state: {
+            version: 1,
+            generation: connectionNumber,
+            snapshotStartSeq: 0,
+            snapshotSeq: payload.byteLength,
+            sourceStartSeq: 0,
+            sourceSeq: payload.byteLength,
+            snapshotKind: "screen",
+            protocolRevision: 0,
+            modes: { bracketedPaste: false },
+            geometry: { revision: 0, cols: 80, rows: 24 },
+          },
+        }),
+      );
+      socket.send(payload);
     }, delay);
   });
 
@@ -229,6 +262,57 @@ test("a short output drop reconnects without status noise or an early terminal r
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => resetCount(page)).toBe(2);
   expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting...");
+});
+
+for (const inputMode of ["direct", "composer"] as const) {
+  test(`an output reconnect does not reopen dismissed ${inputMode} input`, async ({ page }) => {
+    await page.addInitScript((mode) => {
+      localStorage.setItem("laymux.remote.inputMode", mode);
+    }, inputMode);
+    const remote = await installRemoteMocks(page);
+    await instrumentRemotePage(page);
+
+    await page.locator("#connect").click();
+    await expect.poll(() => resetCount(page)).toBe(1);
+
+    const inputSurface =
+      inputMode === "direct"
+        ? page.locator(".xterm-helper-textarea")
+        : page.locator("#composerInput");
+    await expect(inputSurface).toBeFocused();
+    await inputSurface.evaluate((element: HTMLElement) => element.blur());
+    await expect(inputSurface).not.toBeFocused();
+
+    await remote.sockets[0].close();
+    await expect.poll(() => remote.sockets.length).toBe(2);
+    await expect.poll(() => resetCount(page)).toBe(2);
+
+    await expect(inputSurface).not.toBeFocused();
+  });
+}
+
+test("an automatic lease reclaim does not reopen dismissed composer input", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.inputMode", "composer");
+  });
+  const remote = await installRemoteMocks(page, {
+    heartbeatTimeoutSeconds: 5,
+    heartbeatFailures: 1,
+    heartbeatFailureStatus: 409,
+  });
+  await instrumentRemotePage(page);
+
+  await page.locator("#connect").click();
+  await expect.poll(() => resetCount(page)).toBe(1);
+
+  const composerInput = page.locator("#composerInput");
+  await expect(composerInput).toBeFocused();
+  await composerInput.evaluate((element: HTMLElement) => element.blur());
+  await expect(composerInput).not.toBeFocused();
+
+  await expect.poll(() => remote.claimRequests, { timeout: 5000 }).toBe(2);
+  await expect.poll(() => resetCount(page)).toBe(2);
+  await expect(composerInput).not.toBeFocused();
 });
 
 test("one failed heartbeat is retried before the delayed interruption notice", async ({ page }) => {
