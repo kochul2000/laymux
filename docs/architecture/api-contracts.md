@@ -187,11 +187,11 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barWidth`·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 너비(`barWidth` 기본 26, 8~200px)와 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 크기가 맞지 않는다. `barWidth`는 consumed·elapsed 두 track과 슬롯 요구 폭 계산에 함께 적용된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
 
-폭이 모자라면 위젯을 자르지 않는다. 상단 바에서는 창 드래그 영역의 최소 폭이 먼저 확보되고, 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
+폭이 모자라면 위젯을 자르지 않는다. 상단 바의 우선순위는 **창 버튼 > 창 드래그 영역 최소 폭 > 앱 크롬 버튼·위젯** 이다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)). 창 버튼(최소화·최대화·닫기)은 어떤 폭에서도 46px 를 유지한 채 오른쪽 끝에 남고, 그 다음 드래그 최소 폭이 확보된다. 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
 
 편집 UI 는 Settings → **Interface → 위젯** 한 곳이다. 위젯은 pane 에 놓는 view 가 아니라 앱 크롬이므로 Views 가 아닌 Interface 그룹에 둔다. 상단 바에는 배치 조작 버튼을 두지 않는다.
 
-원격 클라이언트는 이 배치를 **미러**만 한다([ADR-0123](../adr/0123-remote-widget-strip-mirrors-desktop.md)). 원격 전용 배치·옵션은 없고, 데스크톱이 그리고 있는 위젯만 원격 스트립에 나타난다 — `statusLine.enabled` 가 꺼져 있으면 그 슬롯의 위젯은 원격에도 없다. 네 슬롯은 원격에서 좌(`topBar.left`+`statusLine.left`)·우(`topBar.right`+`statusLine.right`) 두 묶음으로만 접히고, 폭이 모자라면 접지 않고 가로 스크롤한다. 계약과 전송 형식은 §13.5 를 참고한다.
+원격 클라이언트는 이 배치를 **미러**만 한다([ADR-0124](../adr/0124-remote-widget-strip-mirrors-desktop.md)). 원격 전용 배치·옵션은 없고, 데스크톱이 그리고 있는 위젯만 원격 스트립에 나타난다 — `statusLine.enabled` 가 꺼져 있으면 그 슬롯의 위젯은 원격에도 없다. 네 슬롯은 원격에서 좌(`topBar.left`+`statusLine.left`)·우(`topBar.right`+`statusLine.right`) 두 묶음으로만 접히고, 폭이 모자라면 접지 않고 가로 스크롤한다. 계약과 전송 형식은 §13.5 를 참고한다.
 
 ### GitHub 이슈/PR 목록 (GitHubView)
 
@@ -265,7 +265,7 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
     "cloudAutoReconnect": true,         // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
     "serveTerminalFont": false,         // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
-    "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0123). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다
+    "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0124). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다
   }
 }
 ```
@@ -1223,7 +1223,7 @@ Direct WebSocket output은 첫 frame부터 공통 pair 계약을 쓴다. `Termin
 
 screen checkpoint의 직렬화 길이는 원본 PTY sequence에 없으므로 V1 wire sequence에는 그 길이만큼 offset을 둔다. snapshot header의 `seqEnd - seqStart`와 binary 길이는 계속 같고 후속 delta도 같은 offset을 적용한다. 원본 PTY 경계는 `sourceStartSeq`/`sourceSeq`가 따로 나타낸다. `snapshotMaxKib`는 scrollback 보존량을 고르는 소프트 예산이며 현재 viewport·alternate buffer·복원 mode를 담은 최소 checkpoint는 이를 넘을 수 있다. 모든 checkpoint에는 1 MiB 절대 상한을 적용한다. slow consumer queue overflow·generation retire·sequence gap이면 socket을 닫는다. Cloud host도 같은 checkpoint/subscription 경로와 wire offset을 쓰고 공통 계약을 relay에 전달한다. 일시적인 checkpoint bridge/race/gap은 retryable `terminal_output_gap`, terminal 소멸은 `terminal_not_found`, malformed/절대 상한 위반은 `terminal_output_unavailable`로 전달한다. Remote page는 재접속이나 workspace 전환 시작에 기존 xterm을 먼저 비우지 않고, 새 snapshot header/binary pair를 완전히 검증한 직후 reset하고 적용한다. 확장 metadata가 없는 과거 raw V1 snapshot은 pre-attach resize geometry에서만 legacy 호환으로 재생하고, `snapshotKind:"screen"`은 generation/source/geometry 전체를 필수 검증한다.
 
-Remote 입력 UI의 명시적 선호는 `laymux.remote.inputMode`에만 저장한다. 저장값이 없으면 coarse pointer는 composer, fine pointer는 direct가 기본이다. terminal별 현재 모드와 draft/revision/in-flight token은 페이지 runtime Map에만 있고 reload 시 사라진다. V1 snapshot state와 synthetic 최종 mode 적용이 끝나기 전에는 composer action과 Direct clipboard paste를 fail-closed한다. PC WebView도 동일한 입력 상태 전이 계약을 사용하되 선호 키는 `laymux.desktop.inputMode`, 최초 기본값은 direct이며 Tauri `write_terminal_input`과 아래 desktop output v3 계약을 사용한다.
+Remote 입력 UI의 명시적 선호는 `laymux.remote.inputMode`에만 저장한다. 저장값이 없으면 coarse pointer는 composer, fine pointer는 direct가 기본이다. terminal별 현재 모드와 draft/revision/in-flight token은 페이지 runtime Map에만 있고 reload 시 사라진다. V1 snapshot state와 synthetic 최종 mode 적용이 끝나기 전에는 composer action과 Direct clipboard paste를 fail-closed한다. 입력 포커스는 Connect·terminal 선택·Keyboard 버튼처럼 사용자가 시작한 진입만 변경한다. Output WebSocket 재접속, snapshot replay 완료, heartbeat 만료 뒤 visible-document 자동 reclaim 같은 복구 경로는 bytes·geometry·lease만 복원하고 입력 surface를 `focus()`하지 않는다. 따라서 사용자가 시스템 키보드나 브라우저 동작으로 내린 키보드는 transport 복구 때문에 다시 열리지 않는다. PC WebView도 동일한 입력 상태 전이 계약을 사용하되 선호 키는 `laymux.desktop.inputMode`, 최초 기본값은 direct이며 Tauri `write_terminal_input`과 아래 desktop output v3 계약을 사용한다.
 
 PC WebView는 `terminal-output-v3-{id}` listener를 `attach_terminal_output(id)`보다 먼저 등록한다. attach 응답은 raw state/snapshot과 `flowControl:{token:string,windowBytes:number,nextEnvelopeId:number}`를 함께 반환한다. token은 generation-local desktop lease의 불투명 문자열이고, `nextEnvelopeId`는 선등록 listener에 도착한 event 중 attach snapshot 다음에 소비할 첫 envelope를 지정한다. generation당 활성 desktop lease는 하나다. envelope는 `{version:3,generation,leaseToken,envelopeId,grantId,seqStart,seqEnd,data,deltaEnds,geometryRuns}` 형태이며 `data` 최대 64 KiB, `deltaEnds` 최대 8,192개, JSON wire payload 1 MiB 미만을 모두 만족해야 한다. frontend는 envelope 전체를 검증하고 backing과 descriptor를 bounded ingress/physical queue에 넘긴 뒤 `acknowledge_terminal_output_envelope(id,generation,token,envelopeId,grantId,seqEnd)`로 receipt를 보낸다. opener/closing transition을 실은 envelope는 hold/close command가 먼저 수락되어야 receipt로 다음 slot을 연다. receipt는 ownership 인수일 뿐 parsed ACK가 아니다.
 
@@ -1249,7 +1249,7 @@ Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취�
 
 ### 13.5 Widget Strip
 
-원격 클라이언트는 데스크톱에 배치된 위젯을 header 아래 한 줄 스트립에 미러한다([ADR-0123](../adr/0123-remote-widget-strip-mirrors-desktop.md)). 배치·옵션의 SoT 는 `settings.widgets` 하나이며(§10 상태 위젯 배치) 원격 전용 배치 설정은 없다.
+원격 클라이언트는 데스크톱에 배치된 위젯을 header 아래 한 줄 스트립에 미러한다([ADR-0124](../adr/0124-remote-widget-strip-mirrors-desktop.md)). 배치·옵션의 SoT 는 `settings.widgets` 하나이며(§10 상태 위젯 배치) 원격 전용 배치 설정은 없다.
 
 | Endpoint | Method | 용도 |
 |---|---|---|

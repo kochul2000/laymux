@@ -1395,7 +1395,7 @@ export async function handleAsyncAutomationRequest(
     }
     return result;
   }
-  // What the remote widget strip draws (ADR-0123). Async because the Claude
+  // What the remote widget strip draws (ADR-0124). Async because the Claude
   // rows come from the backend's last probe capture — read here, never started,
   // so a remote viewer creates no probe demand of its own. Imported on demand:
   // the desktop draws its widgets from the components, never from this builder,

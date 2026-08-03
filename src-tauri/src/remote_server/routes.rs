@@ -121,7 +121,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
-        // Lease-free like `navigation`: the strip only reads (ADR-0123).
+        // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
         .route(
             "/remote/v1/navigation/spatial",

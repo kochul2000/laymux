@@ -48,7 +48,7 @@ export function SleepPreventionToggle() {
       data-keep-awake={keepAwake}
       data-failed={failed}
       onClick={handleClick}
-      className="flex h-6 w-6 cursor-pointer items-center justify-center border-0 bg-transparent"
+      className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center border-0 bg-transparent"
       style={{ color, opacity }}
       title={title}
       aria-label="Sleep prevention"

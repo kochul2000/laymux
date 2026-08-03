@@ -713,7 +713,11 @@
       "setDefaultTitle": "새 워크스페이스 생성 시 이 레이아웃 사용",
       "deleteTitle": "이 레이아웃 영구 삭제",
       "deleteConfirm": "레이아웃 \"{{name}}\"을(를) 삭제할까요?",
-      "renamePrompt": "레이아웃 이름 변경:"
+      "renamePrompt": "레이아웃 이름 변경:",
+      "exportNew": "현재 레이아웃을 새로 저장",
+      "exportNewTitle": "현재 워크스페이스 pane 배치를 새 템플릿으로 저장",
+      "exportNewPrompt": "새 레이아웃 이름:",
+      "saved": "저장됨!"
     },
     "item": {
       "clearTerminals": "이 워크스페이스의 터미널 클리어 (Ctrl+Alt+L)",

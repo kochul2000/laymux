@@ -131,7 +131,7 @@ export function UsageWidgetBody({
 }) {
   const usable = message === null;
   // Shared with the remote strip, which draws these same rows from a payload
-  // (ADR-0123).
+  // (ADR-0124).
   const title = usageWidgetTooltip({ label, configDir, message, rows, capturedAtMs });
 
   return (

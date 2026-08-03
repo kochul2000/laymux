@@ -184,7 +184,7 @@
         min-width: 0;
         min-height: 0;
       }
-      /* Widget strip (ADR-0123). One line mirroring what the desktop draws:
+      /* Widget strip (ADR-0124). One line mirroring what the desktop draws:
          the two desktop surfaces fold into this row and only left/right
          survives. It scrolls sideways instead of collapsing — unlike the
          desktop top bar it competes with no drag region, and an overflow
@@ -1659,7 +1659,7 @@
         </button>
         <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
       </header>
-      <!-- Mirrors the widgets the desktop is drawing (ADR-0123). Placement,
+      <!-- Mirrors the widgets the desktop is drawing (ADR-0124). Placement,
            options and every value are owned there; this row only draws. -->
       <!-- Not a live region: the row rewrites itself every poll, and announcing
            an unchanged usage bar every few seconds is noise, not information. -->
@@ -4687,7 +4687,7 @@
           scheduleTerminalFit(Boolean(activeTerminalId));
         }
 
-        // ── Widget strip (ADR-0123) ─────────────────────────────────────
+        // ── Widget strip (ADR-0124) ─────────────────────────────────────
         // The desktop owns placement and every displayed value; this client
         // only draws what `/remote/v1/widgets` hands it. Nothing here computes
         // a percentage, picks a row or words a failure — two implementations of
@@ -4819,7 +4819,7 @@
         function buildNotificationsWidget(item) {
           const unread = Number(item.unread) || 0;
           // Interactive, and it acts on *this* client: the drawer's own
-          // notification panel, never the host's UI (ADR-0123).
+          // notification panel, never the host's UI (ADR-0124).
           const node = document.createElement("button");
           node.type = "button";
           node.className = "widget-item";
@@ -5425,7 +5425,9 @@
           setConnected(Boolean(leaseId));
           if (activeTerminalId) {
             terminalMetaEl.textContent = terminalLabel(nextTerminal);
-            if (options.openOutput !== false) openOutput(activeTerminalId);
+            if (options.openOutput !== false) {
+              openOutput(activeTerminalId, { focusInput: options.focusInput !== false });
+            }
           } else {
             terminalMetaEl.textContent = "No open terminal sessions.";
             setStatus("No open terminal sessions.", true);
@@ -5644,6 +5646,10 @@
           ensureRemoteFont(terminalInfo && terminalInfo.appearance);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
           const reconnecting = options.reconnect === true;
+          // Transport recovery restores bytes and geometry only. It must not
+          // turn a dismissed mobile keyboard back into an active input surface.
+          // Initial/user-directed attaches opt in; automatic reconnects do not.
+          const focusInputOnOpen = !reconnecting && options.focusInput !== false;
           const outputLeaseId = leaseId;
           if (!outputLeaseId) {
             setStatus("Remote control is not active.", true);
@@ -5682,7 +5688,7 @@
               outputAttachGeometryGeneration = null;
               if (err.status === 404) {
                 setStatus("Terminal session ended. Refreshing navigation...", true);
-                loadNavigation(null).catch((loadError) =>
+                loadNavigation(null, { focusInput: false }).catch((loadError) =>
                   setStatus(`Refresh failed: ${loadError.message}`, true)
                 );
               } else {
@@ -5946,7 +5952,6 @@
                 composerReady = true;
                 updateComposerControls();
                 scheduleTerminalFit(true);
-                focusCurrentInputSurface();
               });
               return;
             }
@@ -5968,7 +5973,7 @@
                 `Connected to ${terminalId}`;
               clearTransientConnectionNotice("output", attachTitle);
               if (!reconnecting) setStatus(attachTitle);
-              focusCurrentInputSurface();
+              if (focusInputOnOpen) focusCurrentInputSurface();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
           };
@@ -6014,7 +6019,9 @@
               composerReady = false;
               updateComposerControls();
               if (outputTerminalMissing) {
-                loadNavigation(null).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
+                loadNavigation(null, { focusInput: false }).catch((err) =>
+                  setStatus(`Refresh failed: ${err.message}`, true)
+                );
                 return;
               }
               scheduleOutputReconnect(terminalId, outputLeaseId);
@@ -6196,10 +6203,10 @@
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
-            // Widgets need the token, not the lease (ADR-0123): losing control
+            // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
-            await loadNavigation();
+            await loadNavigation(null, { focusInput: !auto });
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;

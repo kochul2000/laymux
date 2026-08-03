@@ -134,6 +134,12 @@ export const TAURI_MOCK_SCRIPT = `
         case 'list_directory':
           return Promise.resolve([]);
 
+        // A narrow viewport auto-opens the remote access panel, which maps over
+        // the candidate list. The default null takes the whole app down before
+        // any narrow-width assertion can run.
+        case 'get_remote_host_candidates':
+          return Promise.resolve([]);
+
         case 'handle_ide_message':
           return Promise.resolve({ success: true, data: null, error: null });
 

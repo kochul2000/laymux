@@ -713,7 +713,11 @@
       "setDefaultTitle": "Use this layout when creating new workspaces",
       "deleteTitle": "Permanently delete this layout",
       "deleteConfirm": "Delete layout \"{{name}}\"?",
-      "renamePrompt": "Rename layout:"
+      "renamePrompt": "Rename layout:",
+      "exportNew": "Save current layout as new",
+      "exportNewTitle": "Save the current workspace pane layout as a new template",
+      "exportNewPrompt": "New layout name:",
+      "saved": "Saved!"
     },
     "item": {
       "clearTerminals": "Clear this workspace's terminals (Ctrl+Alt+L)",

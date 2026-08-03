@@ -1,5 +1,5 @@
 /**
- * The display models the remote client draws its widget strip from (ADR-0123).
+ * The display models the remote client draws its widget strip from (ADR-0124).
  *
  * The remote page shares no code with the desktop widgets — it is vanilla JS in
  * `remote_server/page.html` — so anything it had to compute for itself would be

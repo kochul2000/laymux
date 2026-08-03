@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useDockStore } from "@/stores/dock-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -23,7 +22,6 @@ async function getWindow() {
 }
 
 export function GridEditToolbar() {
-  const exportAsNewLayout = useWorkspaceStore((s) => s.exportAsNewLayout);
   const toggleSettingsModal = useUiStore((s) => s.toggleSettingsModal);
   const toggleRemoteAccessModal = useUiStore((s) => s.toggleRemoteAccessModal);
   const openEmptyFileViewer = useFileViewerStore((s) => s.openEmptyFileViewer);
@@ -36,7 +34,6 @@ export function GridEditToolbar() {
   const toggleLayoutMode = useDockStore((s) => s.toggleLayoutMode);
 
   const [maximized, setMaximized] = useState(false);
-  const [showSaved, setShowSaved] = useState(false);
   const remoteEnabled = remoteAccessStatus?.effectiveEnabled ?? remote.enabled;
   const remoteTokenConfigured =
     remoteAccessStatus?.authTokenConfigured ?? remote.authToken.trim().length > 0;
@@ -50,11 +47,6 @@ export function GridEditToolbar() {
       ? "Remote Access"
       : "Remote Access (token missing)"
     : "Remote Access (disabled)";
-
-  const flashSaved = useCallback(() => {
-    setShowSaved(true);
-    setTimeout(() => setShowSaved(false), 1500);
-  }, []);
 
   useEffect(() => {
     getWindow()
@@ -108,19 +100,6 @@ export function GridEditToolbar() {
     ),
   };
 
-  const btnBase =
-    "cursor-pointer rounded px-2 text-[11px] font-medium transition-colors duration-100";
-
-  const btnH = { height: "var(--btn-h)" };
-
-  const btnStyle: React.CSSProperties = {
-    ...btnH,
-    border: "1px solid var(--separator-bg)",
-    color: "var(--text-secondary)",
-    background: "transparent",
-    borderRadius: "var(--radius-sm)",
-  };
-
   return (
     <div
       data-testid="grid-edit-toolbar"
@@ -130,40 +109,16 @@ export function GridEditToolbar() {
         borderBottom: "1px solid var(--border)",
       }}
     >
-      {/* Left: App controls (non-draggable) */}
-      <div className="flex shrink-0 items-center gap-1.5 px-2">
+      {/* Left: App controls (non-draggable). Clips from its far end rather than
+          pushing the window controls off the bar (ADR-0123). */}
+      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden px-2">
         <img
           src={logoSvg}
           alt="Laymux"
+          className="shrink-0"
           style={{ height: 16, width: 16, marginLeft: 4, marginRight: 4 }}
           draggable={false}
         />
-
-        <div className="ui-sep" />
-
-        <button
-          data-testid="export-new-btn"
-          onClick={() => {
-            const name = window.prompt("New layout name:");
-            if (name?.trim()) {
-              exportAsNewLayout(name.trim());
-              flashSaved();
-            }
-          }}
-          className={`${btnBase} hover-bg`}
-          style={btnStyle}
-        >
-          Export New
-        </button>
-        {showSaved && (
-          <span
-            data-testid="layout-saved-indicator"
-            className="text-[11px] font-medium"
-            style={{ color: "var(--accent, #4ec9b0)" }}
-          >
-            Saved!
-          </span>
-        )}
       </div>
 
       {/* Left widget slot — shrinks before the drag region does */}
@@ -184,10 +139,12 @@ export function GridEditToolbar() {
           the buttons beyond act. */}
       <WidgetSlot slot={{ surface: "topBar", side: "right" }} instances={widgets.topBar.right} />
 
-      {/* Right: Dock toggles + settings + window controls */}
-      <div className="flex shrink-0 items-center gap-1 px-1">
+      {/* Right: Dock toggles + settings. Right-aligned inside a clipping box, so
+          a narrow bar sheds the dock cross first and keeps the controls nearest
+          the window buttons — never the window buttons themselves (ADR-0123). */}
+      <div className="flex min-w-0 items-center justify-end gap-1 overflow-hidden px-1">
         {/* Dock toggles as a compact cross: ◀ [▲▼] ▶ */}
-        <div className="flex items-center">
+        <div className="flex shrink-0 items-center">
           {(["left", "top", "bottom", "right"] as DockPosition[]).map((pos) => {
             const dock = docks.find((d) => d.position === pos);
             const isVisible = dock?.visible ?? true;
@@ -216,7 +173,7 @@ export function GridEditToolbar() {
         <button
           data-testid="dock-layout-mode-toggle"
           onClick={toggleLayoutMode}
-          className="flex h-5 cursor-pointer items-center justify-center rounded px-1.5 text-[10px] font-medium"
+          className="flex h-5 shrink-0 cursor-pointer items-center justify-center rounded px-1.5 text-[10px] font-medium"
           style={{
             color: "var(--text-secondary)",
             background: "transparent",
@@ -236,7 +193,7 @@ export function GridEditToolbar() {
         <button
           data-testid="file-viewer-btn"
           onClick={() => openEmptyFileViewer()}
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
+          className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded"
           style={{
             color: "var(--text-secondary)",
             background: "transparent",
@@ -254,7 +211,7 @@ export function GridEditToolbar() {
         <button
           data-testid="remote-access-btn"
           onClick={toggleRemoteAccessModal}
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded"
+          className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded"
           style={{
             color: remoteButtonColor,
             background: "transparent",
@@ -272,7 +229,7 @@ export function GridEditToolbar() {
         <button
           data-testid="settings-gear-btn"
           onClick={toggleSettingsModal}
-          className="flex h-6 w-6 cursor-pointer items-center justify-center rounded text-xs"
+          className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded text-xs"
           style={{
             color: "var(--text-secondary)",
             background: "transparent",

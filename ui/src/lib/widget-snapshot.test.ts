@@ -255,7 +255,7 @@ describe("buildRemoteWidgetSnapshot", () => {
   /**
    * A widget the desktop can draw but the remote cannot model would be a
    * silently missing indicator, so registering a type has to fail here until it
-   * is mapped onto a `kind` (ADR-0123).
+   * is mapped onto a `kind` (ADR-0124).
    */
   // `codexUsage` reads the real subscription module, which answers its pending
   // snapshot when no poller has run — the same thing it hands the desktop

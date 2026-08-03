@@ -1606,7 +1606,7 @@ pub struct RemoteSettings {
     /// Consolas are not redistributable.
     #[serde(default)]
     pub serve_terminal_font: bool,
-    /// Mirror the desktop's placed widgets onto the remote client (ADR-0123).
+    /// Mirror the desktop's placed widgets onto the remote client (ADR-0124).
     /// On by default — with no widget placed the remote strip has zero height,
     /// so the cost of the default is nothing. Turning it off drops the surface
     /// on a device where a screen row matters more, and never touches placement.

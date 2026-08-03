@@ -1,4 +1,4 @@
-//! Read-only widget mirror for the remote client (ADR-0123).
+//! Read-only widget mirror for the remote client (ADR-0124).
 //!
 //! The desktop owns placement, options and every displayed value, so this route
 //! is deliberately thin: it decides whether the surface exists at all and hands

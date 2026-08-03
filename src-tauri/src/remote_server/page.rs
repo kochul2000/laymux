@@ -153,6 +153,9 @@ mod tests {
             "const drainInProgress = err && err.status === 409 && err.transitioning === true;"
         ));
         assert!(html.contains("if (isFatalRemoteControlError(err) && !drainInProgress) {"));
+        // A background/online reclaim restores control and output, not a soft
+        // keyboard the user had already dismissed before the interruption.
+        assert!(html.contains("await loadNavigation(null, { focusInput: !auto });"));
         assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
         assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
@@ -1021,9 +1024,17 @@ mod tests {
         assert!(html.contains("if (outputAttachGeometryGeneration !== null) return;"));
         assert!(output_stream.contains("if (err.status === 404)"));
         assert!(output_stream.contains("terminalOutputGeneration"));
+        assert!(output_stream
+            .contains("const focusInputOnOpen = !reconnecting && options.focusInput !== false;"));
+        assert!(output_stream.contains("if (focusInputOnOpen) focusCurrentInputSurface();"));
+        assert_eq!(
+            output_stream.matches("focusCurrentInputSurface();").count(),
+            1,
+            "snapshot completion must not refocus a dismissed input surface"
+        );
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
-        assert!(output_stream.contains("loadNavigation(null).catch"));
+        assert!(output_stream.contains("loadNavigation(null, { focusInput: false }).catch"));
         assert!(
             !output_stream.contains("loseRemoteControl("),
             "output WebSocket close is recoverable while heartbeat keeps the lease alive"

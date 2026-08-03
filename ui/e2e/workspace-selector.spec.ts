@@ -17,6 +17,27 @@ test.describe("WorkspaceSelectorView - Basic", () => {
     await expect(page.getByTestId("layout-card-default-layout")).toBeVisible();
   });
 
+  test("export-new sits in the new workspace panel", async ({ appPage: page }) => {
+    await expect(
+      page.getByTestId("new-workspace-panel").getByTestId("export-new-btn"),
+    ).toBeVisible();
+  });
+
+  test("export-new prompts for a layout name and adds the card", async ({ appPage: page }) => {
+    // Set up dialog handler before clicking
+    page.on("dialog", async (dialog) => {
+      expect(dialog.type()).toBe("prompt");
+      await dialog.accept("My Custom Layout");
+    });
+
+    const cards = page.locator("[data-testid^='layout-card-']");
+    const before = await cards.count();
+    await page.getByTestId("export-new-btn").click();
+
+    await expect(cards).toHaveCount(before + 1);
+    await expect(page.getByTestId("layout-saved-indicator")).toBeVisible();
+  });
+
   test("notification panel toggle button exists", async ({ appPage: page }) => {
     await expect(page.getByTestId("toggle-notification-panel")).toBeVisible();
     await expect(page.getByTestId("toggle-notification-panel")).toContainText("Notifications");

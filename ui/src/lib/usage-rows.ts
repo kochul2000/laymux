@@ -145,7 +145,7 @@ export function buildCodexUsageRows(
  *
  * Lives beside the row builders, not in the React body, because the remote
  * client draws the same rows from a payload rather than from these objects
- * (ADR-0123). Two implementations of "what this row says" would let the same
+ * (ADR-0124). Two implementations of "what this row says" would let the same
  * limit read differently on the desktop and in a browser.
  */
 export function usageRowPercentText(percent: number | null): string {
