@@ -208,7 +208,8 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 - **만료는 캐시 미스가 아니다 — stale-while-revalidate.** 갱신 주기를 넘긴 읽기는 기억된 스냅샷을 그대로(만료 표시 없이, 저장 당시 `fetchedAtMs` 로) 즉시 반환하고 `gh` 재조회는 응답 뒤 백그라운드에서 돈다. 기억된 스냅샷이 없을 때만 인라인으로 기다린다. `force`(사용자 새로고침)는 stale 을 받지 않고 인라인 조회한다. 오랜만에 워크스페이스에 들어온 pane 이 빈 목록을 보지 않게 하는 정책이다([ADR-0110](../adr/0110-github-snapshot-stale-while-revalidate.md)).
 - **토큰은 `try_lock` 으로만 잡는다 — 대기열이 없다.** 진행 중인 조회가 있으면 다른 호출자는 기다리지 않고 캐시된 스냅샷을, 캐시가 없으면 `pending` 상태를 즉시 받는다. `pending` 은 "아직 답이 없다"는 뜻이고 빈 목록이 아니다 — 프론트는 이를 표시하지 않고 1초 뒤 재조회한다(`GITHUB_PENDING_RETRY_MS`).
 - **`gh` 는 마감을 넘기면 죽는다.** 목록 15초, 변경 조작 60초(`process::output_with_timeout`). 초과하면 `failed{message}` 로 내려온다.
-- **조회는 항상 `gh {issue|pr} list --repo owner/repo --state open --limit 50 --json …`** 이다. CWD 상속으로 실행하지 않으므로 레지스트리 키와 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스(예: WSL)에서도 그대로 동작한다.
+- **행의 복사 버튼은 두 개다.** 링크 복사(`⧉`)는 모든 행에 상시 노출하고, 브랜치 복사(`⎇`)는 `headRefName` 이 있는 행 — 즉 PR — 에만 그 왼쪽에 붙는다. 이슈는 브랜치가 없어 필드가 빈 문자열이고 버튼도 그리지 않는다. 눌린 버튼만 1.2초 동안 `✓` 로 바뀐다(행 번호 + 버튼 종류로 구분).
+- **조회는 항상 `gh {issue|pr} list --repo owner/repo --state open --limit 50 --json …`** 이며, PR 목록만 `isDraft`·`headRefName` 을 추가로 요청한다(둘 다 PR 전용 필드라 이슈 목록에 넣으면 `gh` 가 호출 전체를 거부한다). CWD 상속으로 실행하지 않으므로 레지스트리 키와 질의 대상이 어긋날 수 없고, `issueReporter.shell` 프리픽스(예: WSL)에서도 그대로 동작한다.
 - **`action` 은 `issue.close`, `issue.closeNotPlanned`, `pr.merge`, `pr.squash`, `pr.rebase`, `pr.close` 만 허용**하며, 파싱 실패는 프로세스 기동 전에 거부된다. 머지 방식은 액션이 정하며 각각 `--merge`/`--squash`/`--rebase` 로 고정 전달한다(`gh pr merge` 는 방식 없이는 대화형이다).
 - **성공한 조작은 해당 리포 캐시를 무효화**해 다음 폴링이 즉시 재조회한다. 프론트는 `⋯` 메뉴에서 조작을 장전한 뒤 별도 Confirm 클릭에서만 command 를 호출한다.
 - `gh` 미설치·미인증은 각각 `ghMissing`/`unauthorized` 상태로 내려오며, 그 외 실패는 `failed{message}` 로 `gh` stderr 를 그대로 전달한다.

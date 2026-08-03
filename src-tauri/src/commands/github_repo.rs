@@ -85,6 +85,8 @@ pub struct GithubItem {
     pub labels: Vec<String>,
     /// Always false for issues; a PR opened as a draft reports true.
     pub is_draft: bool,
+    /// Source branch of a PR. Empty for issues, which have no branch.
+    pub head_ref_name: String,
 }
 
 // -- `gh --json` wire shapes -------------------------------------------------
@@ -105,6 +107,8 @@ struct RawItem {
     labels: Vec<RawLabel>,
     #[serde(default)]
     is_draft: bool,
+    #[serde(default)]
+    head_ref_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -129,6 +133,7 @@ impl From<RawItem> for GithubItem {
             updated_at: raw.updated_at,
             labels: raw.labels.into_iter().map(|l| l.name).collect(),
             is_draft: raw.is_draft,
+            head_ref_name: raw.head_ref_name,
         }
     }
 }
@@ -206,7 +211,9 @@ impl ItemKind {
 fn build_list_args(kind: ItemKind, repo: &str) -> Vec<String> {
     let mut fields = "number,title,author,url,updatedAt,labels".to_string();
     if kind == ItemKind::Pull {
-        fields.push_str(",isDraft");
+        // `headRefName` is a PR-only field; asking for it on `gh issue list`
+        // makes gh reject the whole call.
+        fields.push_str(",isDraft,headRefName");
     }
     vec![
         kind.gh_noun().to_string(),
@@ -669,11 +676,23 @@ mod tests {
     fn parses_a_pull_list_with_draft_state_and_a_missing_author() {
         let json = r#"[
             {"number":12,"title":"wip","author":null,"url":"https://github.com/o/r/pull/12",
-             "updatedAt":"2026-08-01T00:00:00Z","labels":[],"isDraft":true}
+             "updatedAt":"2026-08-01T00:00:00Z","labels":[],"isDraft":true,
+             "headRefName":"feat/wip-branch"}
         ]"#;
         let items = parse_item_list(json).unwrap();
         assert!(items[0].is_draft);
         assert_eq!(items[0].author, "");
+        assert_eq!(items[0].head_ref_name, "feat/wip-branch");
+    }
+
+    #[test]
+    fn an_item_without_a_head_branch_reports_an_empty_one() {
+        let json = r#"[
+            {"number":708,"title":"issue","author":null,"url":"https://github.com/o/r/issues/708",
+             "updatedAt":"2026-08-01T00:00:00Z","labels":[]}
+        ]"#;
+        let items = parse_item_list(json).unwrap();
+        assert_eq!(items[0].head_ref_name, "");
     }
 
     #[test]
@@ -688,13 +707,16 @@ mod tests {
         let repo_at = args.iter().position(|a| a == "--repo").unwrap();
         assert_eq!(args[repo_at + 1], "owner/repo");
         assert!(!args.iter().any(|a| a.contains("isDraft")));
+        // headRefName is a PR-only field; gh rejects it on an issue list.
+        assert!(!args.iter().any(|a| a.contains("headRefName")));
     }
 
     #[test]
-    fn pull_list_args_request_the_draft_field() {
+    fn pull_list_args_request_the_draft_and_branch_fields() {
         let args = build_list_args(ItemKind::Pull, "owner/repo");
         assert_eq!(args[0], "pr");
         assert!(args.last().unwrap().contains("isDraft"));
+        assert!(args.last().unwrap().contains("headRefName"));
     }
 
     #[test]
