@@ -12,7 +12,7 @@ use crate::lock_ext::MutexExt;
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
-use crate::terminal::{InitialExecutionHost, TerminalSession};
+use crate::terminal::{InitialExecutionHost, NativeWindowsCodexColorProbeGuard, TerminalSession};
 use crate::terminal_env::TerminalEnvPlan;
 
 /// One maximum native reader Data event. Desktop output credit may exceed its
@@ -188,6 +188,10 @@ pub struct PtyHandle {
     /// Generation-bound reader wake and teardown completion. This is separate
     /// from the master so a blocking cloned output pipe can be interrupted.
     reader_lifecycle: Arc<PtyReaderLifecycle>,
+    /// Generation-local filter for the native Windows Codex startup probe.
+    /// It lives on the exact writer handle so a stale frontend reply can never
+    /// consume a replacement session's one-shot state.
+    codex_startup_color_probe: Option<Arc<NativeWindowsCodexColorProbeGuard>>,
 }
 
 impl PtyHandle {
@@ -199,6 +203,14 @@ impl PtyHandle {
 
     #[cfg(test)]
     pub(crate) fn from_test_writer(writer: Box<dyn Write + Send>) -> Self {
+        Self::from_test_writer_for_generation(writer, 0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_test_writer_for_generation(
+        writer: Box<dyn Write + Send>,
+        terminal_generation: u64,
+    ) -> Self {
         let master = Arc::new(Mutex::new(None));
         Self {
             control: PtyControlWorker::spawn(writer, Arc::clone(&master))
@@ -208,8 +220,25 @@ impl PtyHandle {
             child_pid: None,
             child_exited: Arc::new(AtomicBool::new(true)),
             input_faulted: Arc::new(AtomicBool::new(false)),
-            reader_lifecycle: PtyReaderLifecycle::completed_for_test(),
+            reader_lifecycle: PtyReaderLifecycle::completed_for_test(terminal_generation),
+            codex_startup_color_probe: None,
         }
+    }
+
+    pub(crate) fn with_codex_startup_color_probe(
+        mut self,
+        guard: Option<Arc<NativeWindowsCodexColorProbeGuard>>,
+    ) -> Self {
+        self.codex_startup_color_probe = guard;
+        self
+    }
+
+    pub(crate) fn terminal_generation(&self) -> u64 {
+        self.reader_lifecycle.terminal_generation()
+    }
+
+    pub(crate) fn codex_startup_color_probe(&self) -> Option<&NativeWindowsCodexColorProbeGuard> {
+        self.codex_startup_color_probe.as_deref()
     }
 
     #[cfg(test)]
@@ -676,6 +705,7 @@ where
         child_exited,
         input_faulted: Arc::new(AtomicBool::new(false)),
         reader_lifecycle: Arc::clone(&reader_lifecycle),
+        codex_startup_color_probe: None,
     };
 
     // Spawn reader thread

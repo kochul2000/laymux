@@ -38,11 +38,13 @@ impl PtyReaderLifecycle {
     }
 
     #[cfg(test)]
-    pub(crate) fn completed_for_test() -> Arc<Self> {
-        struct TerminalControl;
+    pub(crate) fn completed_for_test(terminal_generation: u64) -> Arc<Self> {
+        struct TerminalControl {
+            terminal_generation: u64,
+        }
         impl InterruptiblePtyReaderControl for TerminalControl {
             fn terminal_generation(&self) -> u64 {
-                0
+                self.terminal_generation
             }
 
             fn wake(
@@ -55,12 +57,18 @@ impl PtyReaderLifecycle {
             }
         }
         Arc::new(Self {
-            terminal_generation: 0,
-            control: Arc::new(TerminalControl),
+            terminal_generation,
+            control: Arc::new(TerminalControl {
+                terminal_generation,
+            }),
             stop_requested: AtomicBool::new(true),
             exited: Mutex::new(true),
             exited_changed: Condvar::new(),
         })
+    }
+
+    pub(crate) fn terminal_generation(&self) -> u64 {
+        self.terminal_generation
     }
 
     pub(crate) fn request_stop(&self, timeout: Duration) -> Result<(), String> {

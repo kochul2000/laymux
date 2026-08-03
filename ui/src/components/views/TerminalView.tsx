@@ -1192,6 +1192,7 @@ export function TerminalView({
     let currentParsingParkDeadline: number | undefined;
     let currentParsingFrameEndCursorAuthoritative = false;
     let currentParsingAttachEpoch: number | undefined;
+    let currentParsingGeneration: number | undefined;
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
     let humanInputFailureNotified = false;
@@ -3119,7 +3120,11 @@ export function TerminalView({
         );
         return;
       }
-      writeTerminalProtocolReply(instanceId, data).catch(() => {});
+      // The backend binds protocol replies to the exact PTY generation. If a
+      // retired xterm callback resolves after the pane id has been reused, its
+      // reply must not enter or consume one-shot state from the replacement.
+      if (currentParsingGeneration === undefined) return;
+      writeTerminalProtocolReply(instanceId, currentParsingGeneration, data).catch(() => {});
     });
 
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
@@ -3262,6 +3267,7 @@ export function TerminalView({
     let outputAttachParserBusy = false;
     type TerminalWriteMetadata = {
       source: TerminalWriteSource;
+      generation?: number;
       parkDeadline?: number;
       frameEndCursorAuthoritative?: boolean;
       stabilized?: boolean;
@@ -3556,6 +3562,7 @@ export function TerminalView({
       currentParsingParkDeadline = undefined;
       currentParsingFrameEndCursorAuthoritative = false;
       currentParsingAttachEpoch = undefined;
+      currentParsingGeneration = undefined;
     };
     const tryTerminalWrite = (batch: PreparedTerminalWriteBatch<TerminalWriteMetadata>) => {
       const submittedAt = monotonicNow();
@@ -3565,6 +3572,7 @@ export function TerminalView({
       currentParsingFrameEndCursorAuthoritative =
         batch.metadata.frameEndCursorAuthoritative === true;
       currentParsingAttachEpoch = batch.metadata.attachEpoch;
+      currentParsingGeneration = batch.metadata.generation;
       const onWriteParsed = () => {
         pendingTerminalWrites = 0;
         clearCurrentParsingWrite();
@@ -4265,6 +4273,7 @@ export function TerminalView({
             parkDeadline: emission.parkDeadline,
             frameEndCursorAuthoritative: emission.frameEndCursorAuthoritative,
             attachEpoch: outputAttachEpoch,
+            generation: outputGeneration,
             geometryRevision,
           },
           // One logical parsed-credit range may fan out into several physical
@@ -4296,6 +4305,7 @@ export function TerminalView({
             {
               source: "live",
               attachEpoch: outputAttachEpoch,
+              generation: outputGeneration,
               geometryRevision,
             },
             onDiscard,

@@ -31,6 +31,7 @@ export function terminalWriteFairSlices(data: Uint8Array): readonly Uint8Array[]
 export interface TerminalWriteBatchMetadata {
   source: TerminalWriteSource;
   attachEpoch?: number;
+  generation?: number;
   stabilized?: boolean;
   parkDeadline?: number;
   frameEndCursorAuthoritative?: boolean;
@@ -124,7 +125,8 @@ function canJoin<TMetadata extends TerminalWriteBatchMetadata>(
     isIndividuallyCoalescible(candidate) &&
     first.batchKey === candidate.batchKey &&
     first.metadata.source === candidate.metadata.source &&
-    first.metadata.attachEpoch === candidate.metadata.attachEpoch
+    first.metadata.attachEpoch === candidate.metadata.attachEpoch &&
+    first.metadata.generation === candidate.metadata.generation
   );
 }
 
