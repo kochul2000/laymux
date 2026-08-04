@@ -3153,6 +3153,67 @@
         const remoteFontFamilyState = new Map();
         const remoteFontAttempts = new Map();
 
+        // Every PTY geometry change is a window-size event the TUI redraws from,
+        // and a frame-repainting TUI (Claude/Ink) erases only as many rows as it
+        // believes its previous frame used — rows counted at the *previous*
+        // width. So a width change that arrives after the frame is on screen
+        // leaves the wrapped remainder of the old frame stranded above the new
+        // one, and the next keypress repaints only the new copy. Attach used to
+        // produce two or three such changes: it fitted against whatever font was
+        // measurable at that instant, then the remote font landed (cell width
+        // changes → cols) and the widget strip appeared (a chrome row → rows).
+        // So attach waits for both of those to settle and sends one geometry.
+        // Bounded: a font that never arrives must not hold the terminal
+        // hostage, and past the deadline one extra reflow is the better trade
+        // (ADR-0133).
+        const REMOTE_ATTACH_CHROME_SETTLE_MS = 900;
+        let widgetStripSettled = false;
+        const attachChromeSettleWaiters = [];
+        // Raised while an attach waits for that settle. The surface still fits
+        // locally during the wait — layout has to stay right — but nothing
+        // publishes geometry, because the attach is about to publish the one
+        // that counts. Without this the strip's own refit would land first and
+        // become the extra SIGWINCH this whole gate exists to remove.
+        let attachGeometryHolds = 0;
+
+        /**
+         * Whether the two late-arriving surfaces that move attach geometry have
+         * both answered. "Answered" is not "present": a font that gave up and a
+         * strip that came back empty are settled — they will not move the grid
+         * again on their own.
+         */
+        function attachChromeIsSettled(appearance) {
+          const assets = normalizeFontAssets(appearance && appearance.fontAssets);
+          const fontPending = Boolean(assets) && remoteFontFamilyState.get(assets.key) === "loading";
+          const stripPending = widgetPollActive && !widgetStripSettled;
+          return !fontPending && !stripPending;
+        }
+
+        function notifyAttachChromeSettled() {
+          const waiters = attachChromeSettleWaiters.splice(0, attachChromeSettleWaiters.length);
+          waiters.forEach((waiter) => waiter());
+        }
+
+        function awaitAttachChromeSettled(appearance) {
+          if (attachChromeIsSettled(appearance)) return Promise.resolve();
+          return new Promise((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(deadline);
+              resolve();
+            };
+            const deadline = setTimeout(finish, REMOTE_ATTACH_CHROME_SETTLE_MS);
+            const waiter = () => {
+              if (settled) return;
+              if (attachChromeIsSettled(appearance)) finish();
+              else attachChromeSettleWaiters.push(waiter);
+            };
+            attachChromeSettleWaiters.push(waiter);
+          });
+        }
+
         // Server-controlled strings end up inside a CSS rule, so accept only the
         // exact shapes this contract defines.
         function normalizeFontAssets(assets) {
@@ -3191,6 +3252,7 @@
           remoteFontFamilyState.set(assets.key, "loading");
           loadRemoteFont(assets).catch(() => {
             remoteFontFamilyState.delete(assets.key);
+            notifyAttachChromeSettled();
           });
         }
 
@@ -3223,16 +3285,22 @@
           if (loaded.length === 0 || !document.fonts.check(`16px "${assets.family}"`)) {
             // Drop the state so the next refresh can retry, up to the attempt cap.
             remoteFontFamilyState.delete(assets.key);
+            notifyAttachChromeSettled();
             return;
           }
           remoteFontFamilyState.set(assets.key, "ready");
           remoteFontAttempts.delete(assets.key);
           // Cell metrics just changed under the terminal: re-apply the (now
           // different) family string to force a re-measure, then re-fit so the
-          // PTY gets the column count this font actually produces.
+          // PTY gets the column count this font actually produces. An attach
+          // waiting on this font measures with it instead (ADR-0133).
           const info = activeTerminalId ? terminalInfoById.get(activeTerminalId) : null;
-          if (!info || !info.appearance) return;
+          if (!info || !info.appearance) {
+            notifyAttachChromeSettled();
+            return;
+          }
           applyTerminalAppearance(info.appearance);
+          notifyAttachChromeSettled();
           scheduleTerminalFit();
         }
 
@@ -4975,6 +5043,10 @@
         function renderWidgetStrip(data) {
           const items = data && Array.isArray(data.items) ? data.items : [];
           const wasVisible = widgetStripVisible;
+          // The row's own answer has arrived, so an attach no longer has to wait
+          // for it to decide the grid (ADR-0133). "Absent" counts as an answer.
+          widgetStripSettled = true;
+          notifyAttachChromeSettled();
           widgetStripLeftEl.replaceChildren();
           widgetStripRightEl.replaceChildren();
           if (!data || data.enabled === false || items.length === 0) {
@@ -5004,6 +5076,10 @@
          * one that never appeared has nothing to contradict.
          */
         function renderWidgetStripFailure(message) {
+          // A failed poll is still an answer about the row's height: it keeps
+          // whatever it had, so an attach can stop waiting for it (ADR-0133).
+          widgetStripSettled = true;
+          notifyAttachChromeSettled();
           if (!widgetStripVisible) return;
           widgetStripLeftEl.replaceChildren();
           widgetStripRightEl.replaceChildren();
@@ -5091,6 +5167,10 @@
         function applyWidgetPolling() {
           if (widgetPollRequested && widgetStripAllowed) {
             if (widgetPollActive) return;
+            // A fresh chain has not answered yet, whatever the last one did:
+            // an attach must wait for this run's answer, not a stale one from
+            // before a disconnect (ADR-0133).
+            widgetStripSettled = false;
             widgetPollActive = true;
             refreshWidgetsNow();
             return;
@@ -5765,6 +5845,20 @@
           const terminalInfo = terminalInfoById.get(terminalId);
           ensureRemoteFont(terminalInfo && terminalInfo.appearance);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
+          // One PTY geometry per attach: wait (bounded) for the font and the
+          // widget strip before the fit below measures, so a late cell width or
+          // a late chrome row does not turn into a second SIGWINCH the TUI has
+          // to redraw from (ADR-0133). Ahead of `stopSocket` on purpose — the
+          // previous pane keeps streaming while this resolves.
+          const settleLeaseId = leaseId;
+          attachGeometryHolds += 1;
+          stopResizeFlush();
+          try {
+            await awaitAttachChromeSettled(terminalInfo && terminalInfo.appearance);
+          } finally {
+            attachGeometryHolds -= 1;
+          }
+          if (leaseId !== settleLeaseId || activeTerminalId !== terminalId) return;
           const reconnecting = options.reconnect === true;
           // Transport recovery restores bytes and geometry only. It must not
           // turn a dismissed mobile keyboard back into an active input surface.
@@ -5792,7 +5886,7 @@
           // physical resize, so a geometry-only reflow or the resulting TUI
           // redraw is sequenced ahead of the snapshot target in both Direct
           // and Cloud paths.
-          fitTerminal(false);
+          fitTerminalForAttach();
           stopResizeFlush();
           const attachCols = term.cols;
           const attachRows = term.rows;
@@ -7374,6 +7468,23 @@
           scheduleTerminalRefresh();
         }
 
+        // xterm measures the cell once when the surface opens and then only when
+        // it resizes. A surface opened before its font resolved therefore holds a
+        // stale cell size, and the first fit proposes a grid from it — the fit's
+        // own `resize()` is what re-measures, so the corrected grid only shows up
+        // in the *next* fit, as a second PTY geometry right after attach. Fitting
+        // until the proposal stops moving converges before attach publishes
+        // anything (ADR-0133). Bounded: two passes is convergence, a third is a
+        // fight between measurement and layout that one more pass will not win.
+        function fitTerminalForAttach() {
+          for (let pass = 0; pass < 3; pass += 1) {
+            const cols = terminal.cols;
+            const rows = terminal.rows;
+            fitTerminal(false);
+            if (terminal.cols === cols && terminal.rows === rows) return;
+          }
+        }
+
         // A chrome row appearing or disappearing is a permanent layout change,
         // not the transient height shrink the crop exists for: drop the fitted
         // baseline so the next fit adopts the real host instead of cropping to
@@ -7404,7 +7515,7 @@
         }
 
         function queueResize(cols, rows) {
-          if (outputAttachGeometryGeneration !== null) return;
+          if (outputAttachGeometryGeneration !== null || attachGeometryHolds > 0) return;
           if (!leaseId || !activeTerminalId || !Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
           const resizeTerminalId = activeTerminalId;
           const resizeLeaseId = leaseId;
@@ -7416,6 +7527,8 @@
             if (resizeTerminalId !== activeTerminalId || resizeLeaseId !== leaseId) {
               return;
             }
+            // A hold that began after this was queued still owns the geometry.
+            if (outputAttachGeometryGeneration !== null || attachGeometryHolds > 0) return;
             lastResizeKey = resizeKey;
             resizeTerminal(resizeTerminalId, resizeLeaseId, cols, rows).catch((err) => setStatus(`Resize failed: ${err.message}`, true));
           }, 120);

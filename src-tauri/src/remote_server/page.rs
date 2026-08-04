@@ -191,13 +191,45 @@ mod tests {
         assert!(html.contains(
             "if (loaded.length === 0 || !document.fonts.check(`16px \"${assets.family}\"`)) {"
         ));
-        // No active terminal must not turn into applyTerminalAppearance(null).
-        assert!(html.contains("if (!info || !info.appearance) return;"));
+        // No active terminal must not turn into applyTerminalAppearance(null) —
+        // and either way an attach waiting on this font stops waiting (ADR-0133).
+        assert!(html.contains("if (!info || !info.appearance) {"));
+        assert!(html.contains("notifyAttachChromeSettled();"));
         // The alias is prepended only once loaded, so the fontFamily string
         // really changes and xterm re-measures the cell (ADR-0077).
         assert!(html.contains("fontFamily: remoteFontIsReady(fontAssets)"));
         assert!(html.contains("applyTerminalAppearance(info.appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
+    }
+
+    /// ADR-0133: every PTY geometry change is a window-size event a
+    /// frame-repainting TUI redraws from, and its erase is counted at the
+    /// previous width — so attach publishes exactly one geometry.
+    #[test]
+    fn remote_page_html_publishes_one_attach_geometry() {
+        let html = remote_page_html();
+        // Bounded wait: a font that never arrives must not hold the terminal.
+        assert!(html.contains("const REMOTE_ATTACH_CHROME_SETTLE_MS = 900;"));
+        assert!(html
+            .contains("await awaitAttachChromeSettled(terminalInfo && terminalInfo.appearance);"));
+        // Both late chrome causes count, and "gave up"/"empty" count as settled.
+        assert!(html.contains(
+            "const fontPending = Boolean(assets) && remoteFontFamilyState.get(assets.key) === \"loading\";"
+        ));
+        assert!(html.contains("const stripPending = widgetPollActive && !widgetStripSettled;"));
+        assert!(html.contains("widgetStripSettled = true;"));
+        // The surface still fits during the wait; only publication is held, and a
+        // resize queued before the hold must not fire out from under it.
+        assert!(html.contains("attachGeometryHolds += 1;"));
+        assert!(html.contains("attachGeometryHolds -= 1;"));
+        assert!(html.contains(
+            "if (outputAttachGeometryGeneration !== null || attachGeometryHolds > 0) return;"
+        ));
+        // xterm re-measures the cell only on resize, so the first fit can propose
+        // a grid from a stale measurement: fit until the proposal stops moving.
+        assert!(html.contains("function fitTerminalForAttach() {"));
+        assert!(html.contains("if (terminal.cols === cols && terminal.rows === rows) return;"));
+        assert!(html.contains("fitTerminalForAttach();"));
     }
 
     /// Issue #654: on a phone the address bar eats a row of terminal, and the

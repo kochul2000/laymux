@@ -1104,6 +1104,15 @@ pub fn resize_terminal_inner(
         let session = terminals
             .get_mut(id)
             .ok_or_else(|| format!("Session '{id}' not found"))?;
+        // A same-size resize still costs a window-size event: ConPTY re-signals
+        // the attached app and TUIs redraw their frame from it. The PTY size is
+        // the state this call owns, so a request that cannot change it stops
+        // here — after the owner gate, so permission answers are unchanged
+        // (ADR-0133).
+        if session.config.cols == cols && session.config.rows == rows {
+            drop(terminals);
+            return permit.finish();
+        }
         session.config.cols = cols;
         session.config.rows = rows;
     }
@@ -2090,6 +2099,67 @@ mod tests {
         assert_eq!(
             &*written.lock().unwrap(),
             b"local-rawlocal-input\rremote-rawremote-input\r"
+        );
+    }
+
+    #[test]
+    fn a_same_size_resize_stops_after_the_owner_gate_instead_of_touching_the_pty() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        state
+            .terminals
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), test_session());
+        terminal_output::register_terminal_output_session(
+            &state.terminal_protocol_states,
+            &state.output_buffers,
+            "t1",
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
+        // A test handle carries no master, so any request that reaches the
+        // physical path fails. That failure is what separates "skipped" from
+        // "sent" here.
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer(Box::new(SharedTestWriter(Arc::new(Mutex::new(
+                Vec::new(),
+            ))))),
+        );
+        let (cols, rows) = {
+            let terminals = state.terminals.lock_or_err().unwrap();
+            let session = terminals.get("t1").unwrap();
+            (session.config.cols, session.config.rows)
+        };
+
+        // Ownership is still decided before the size comparison: a non-owner
+        // gets the same refusal it always did, size match or not.
+        set_test_remote_lease(&state, "lease-1");
+        assert!(
+            resize_terminal_inner(&state, "t1", cols, rows, HumanControlOrigin::Local).is_err()
+        );
+
+        // Same size: nothing to change, so the closed master is never asked.
+        resize_terminal_inner(&state, "t1", cols, rows, remote_origin("lease-1")).unwrap();
+        assert_eq!(
+            terminal_output::terminal_render_checkpoint_target(
+                &state.terminal_protocol_states,
+                "t1"
+            )
+            .unwrap()
+            .geometry,
+            terminal_output::TerminalGeometry {
+                revision: 0,
+                cols,
+                rows,
+            }
+        );
+
+        // A real change still goes all the way down and surfaces the failure.
+        assert!(
+            resize_terminal_inner(&state, "t1", cols + 1, rows, remote_origin("lease-1")).is_err()
         );
     }
 
