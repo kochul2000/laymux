@@ -79,8 +79,7 @@ pub fn wsl_terminal_targets(
 /// spawn a doomed `wsl.exe` every cycle.
 #[cfg(windows)]
 fn default_distro_cached(timeout: Duration) -> Option<String> {
-    static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> =
-        std::sync::Mutex::new(None);
+    static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> = std::sync::Mutex::new(None);
 
     if let Ok(guard) = CACHE.lock_or_err() {
         if let Some((resolved_at, value)) = guard.as_ref() {

@@ -280,20 +280,32 @@ pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> PtyA
 }
 
 fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppLiveness {
-    let (child_pid, wsl_backed) = match state.pty_handles.lock_or_err() {
+    let (child_pid, wsl_target) = match state.pty_handles.lock_or_err() {
         Ok(handles) => match handles.get(terminal_id) {
-            Some(handle) => (handle.child_pid(), handle.is_wsl_backed()),
-            None => (None, false),
+            Some(handle) => (
+                handle.child_pid(),
+                handle.is_wsl_backed().then(|| handle.terminal_generation()),
+            ),
+            None => (None, None),
         },
-        Err(_) => (None, false),
+        Err(_) => (None, None),
     };
     // A WSL pane's agent is a Linux process inside the guest, which no Windows
     // snapshot enumerates — the local tree would only ever find `wsl.exe` and
     // report the authoritative negative `NoneAlive`, silently suppressing the
     // title/buffer detectors for every WSL pane. Hand the verdict to the guest
     // probe, which answers `Unknown` when it has nothing to say (ADR-0134).
-    if wsl_backed {
-        return crate::wsl_liveness::liveness(terminal_id);
+    //
+    // `force_fresh` marks an exit decision. The guest cannot be reached from
+    // this thread, so the probe declines to answer rather than suppress a real
+    // exit from a cached positive.
+    if let Some(generation) = wsl_target {
+        let purpose = if force_fresh {
+            crate::wsl_liveness::Purpose::ExitDecision
+        } else {
+            crate::wsl_liveness::Purpose::Display
+        };
+        return crate::wsl_liveness::liveness(terminal_id, generation, purpose);
     }
     // No PID → no tree to walk; skip enumeration entirely.
     if child_pid.is_none() {

@@ -998,7 +998,10 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 
 - **도메인 분기**: `PtyHandle.wsl_backed`(spawn 시점 `is_wsl_command` 결과)가 참이면 `app_in_pty` 는 호스트 스냅샷을 열지 않고 `wsl_liveness::liveness()` 의 판정을 그대로 반환한다.
 - **게스트 프로브**: `wsl_liveness` 의 백그라운드 refresher 가 distribution 당 1회 `wsl.exe --exec` 로 `/proc` 을 훑어, `comm` 이 `claude`/`codex` 인 프로세스를 상속된 `LX_TERMINAL_ID` 로 pane 에 귀속시킨다. pane 안에서는 조상 깊이가 가장 얕은 프로세스가 이긴다. 감지 경로는 발행된 스냅샷만 읽는다 — PTY 콜백 스레드는 절대 게스트를 호출하지 않는다.
-- **freshness 비대칭**: 신선하면 양방향 권위. 낡으면 `Running` 만 유지되고 부정은 `Unknown` 으로 강등된다. 프로브 실패·distribution 미해결·같은 depth 경합은 `covered` 에서 빠져 `Unknown` — 모든 실패의 종착지가 타이틀/버퍼 휴리스틱이다.
+- **freshness 비대칭**: 신선하면 양방향 권위. 낡으면 `Running` 만 유지되고 부정은 `Unknown` 으로 강등된다. 프로브 실패·distribution 미해결·같은 depth 경합·귀속 불가 에이전트(`U` 행) 존재는 스냅샷에서 빠져 `Unknown` — 모든 실패의 종착지가 타이틀/버퍼 휴리스틱이다.
+- **종료 판정(`Purpose::ExitDecision`)에는 양성을 안 준다**: `suppresses_false_exit` 는 일회성이라 캐시된 `Running` 으로 억제하면 이미 죽은 pane 이 고정된다. 따라서 WSL pane 에는 false-exit 억제가 없다(이 변경 이전과 동일).
+- **판정은 `(terminal_id, PTY generation)` 키**: Restart View 등으로 같은 id 에 새 PTY 가 붙으면 이전 세대 판정은 `Unknown`. 세션 종료 시 `wsl_liveness::forget()` 으로 항목을 지워 in-flight 패스가 되살리지 못하게 한다.
+- **distribution 별 독립 타임아웃 + 시작 순서 회전**: 공유 deadline 이면 앞 distribution 하나의 장애가 뒤 distribution 을 영구 누락시킨다.
 - **관측 게이팅**: 감지가 최근 WSL pane 을 물어본 경우에만 프로브한다. 아무도 보지 않으면 `wsl.exe` 호출은 0.
 - distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다.
 

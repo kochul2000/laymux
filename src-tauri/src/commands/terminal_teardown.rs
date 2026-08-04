@@ -179,6 +179,10 @@ fn detach_terminal_output_generation_with_post_unlock(
             }
             activity::clear_interactive_app_grace_window(state, terminal_id);
             activity::clear_interactive_app_exit_marker(state, terminal_id);
+            // A guest verdict describes a specific PTY generation. Drop it here
+            // too so a probe pass still in flight cannot resurrect it for the
+            // replacement PTY that reuses this id (ADR-0134).
+            crate::wsl_liveness::forget(terminal_id);
             if let Ok(mut notifications) = state.notifications.lock_or_err() {
                 notifications.retain(|notification| notification.terminal_id != terminal_id);
             }
