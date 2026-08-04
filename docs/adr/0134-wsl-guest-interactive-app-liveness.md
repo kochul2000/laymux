@@ -1,6 +1,6 @@
 # 0134. WSL pane 의 인터랙티브 앱 liveness — 게스트 프로브가 권위
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Source: issue #766, ADR-0009 (확장·정정), architecture/data-flow.md §8 · §9, PR #768 코드 리뷰(codex)
 
@@ -69,5 +69,5 @@ WSL pane 에서 이 전제가 깨진다. PTY 자식은 `wsl.exe` 이고 `claude`
 - 다른 게스트 사용자로 에이전트를 돌리면서 그 조상 체인 어디에도 laymux 마커가 없는 경우(예: 전체가 root 소유인 pane) 그 distribution 은 매 패스 부정을 포기하므로, 같은 distribution 의 다른 pane 들도 게스트 권위 없이 휴리스틱으로만 판정된다. 안전한 방향의 열화다.
 - distribution 별 타임아웃으로 한 패스의 최대 소요는 distribution 수에 비례한다. refresher 는 배경 스레드이므로 다음 패스가 늦어질 뿐이고, 감지 경로 지연에는 영향이 없다.
 - `wsl_probe` 추출로 세션 귀속 프로브와 liveness 프로브가 distribution 검증을 공유한다. 한쪽만 고쳐서 갈라지는 부채가 사라진다.
-- 게스트가 `comm` 을 `claude`/`codex` 로 노출하지 않는 설치 형태(래퍼 스크립트, `node` 로 뜨는 배포)는 잡히지 않는다. 그런 pane 은 `covered` 에 남되 앱이 없으므로 `NoneAlive` 로 보고되어 **휴리스틱까지 함께 막힌다** — 현재 알려진 배포는 모두 `claude`/`codex` 네이티브 런처이므로 수용하되, 다른 형태가 보고되면 `comm` 매칭 목록 확장 또는 `covered` 판정 완화로 재검토한다.
+- 게스트가 `comm` 을 `claude`/`codex` 로 노출하지 않는 설치 형태(래퍼 스크립트, `node` 로 뜨는 배포)는 아예 후보로 잡히지 않는다. 프로브 입장에서는 에이전트가 없는 것과 구별되지 않으므로 그 pane 은 부정 판정을 받아 **휴리스틱까지 함께 막힌다** — 현재 알려진 배포는 모두 `claude`/`codex` 네이티브 런처이므로 수용하되, 다른 형태가 보고되면 `comm` 매칭 목록을 확장한다.
 - 후속: 프론트엔드에는 판정 누락을 되돌릴 reconcile 경로가 없다(issue #767). 백엔드가 옳게 판정해도 이미 `shell` 로 굳은 인스턴스는 다음 타이틀 이벤트까지 갱신되지 않는다.
