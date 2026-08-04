@@ -61,14 +61,40 @@ pub fn wsl_terminal_targets(
     drop(terminals);
 
     if !unresolved_default.is_empty() {
-        let default = remaining_timeout(deadline)
-            .and_then(crate::path_utils::get_default_wsl_distro_with_timeout)
-            .filter(|distro| is_safe_distro_name(distro));
+        let default = remaining_timeout(deadline).and_then(default_distro_cached);
         for index in unresolved_default {
             targets[index].1.clone_from(&default);
         }
     }
     Ok(targets)
+}
+
+/// The default distribution, cached for `WSL_DEFAULT_DISTRO_CACHE_TTL`.
+///
+/// `wsl.exe --list --quiet` is a second process spawn on top of the probe
+/// itself, and the liveness refresher would pay it on every pass for any pane
+/// whose profile does not name a distribution. The default only changes when
+/// the user runs `wsl --set-default`, so a short cache is safe. Negative
+/// results are cached too, otherwise a machine with no WSL installed would
+/// spawn a doomed `wsl.exe` every cycle.
+#[cfg(windows)]
+fn default_distro_cached(timeout: Duration) -> Option<String> {
+    static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> =
+        std::sync::Mutex::new(None);
+
+    if let Ok(guard) = CACHE.lock_or_err() {
+        if let Some((resolved_at, value)) = guard.as_ref() {
+            if resolved_at.elapsed() <= crate::constants::WSL_DEFAULT_DISTRO_CACHE_TTL {
+                return value.clone();
+            }
+        }
+    }
+    let fresh = crate::path_utils::get_default_wsl_distro_with_timeout(timeout)
+        .filter(|distro| is_safe_distro_name(distro));
+    if let Ok(mut guard) = CACHE.lock_or_err() {
+        *guard = Some((Instant::now(), fresh.clone()));
+    }
+    fresh
 }
 
 /// Run `script` inside `distro` under a bounded timeout and return its stdout.

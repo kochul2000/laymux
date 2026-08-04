@@ -420,6 +420,10 @@ pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
 /// this window, so an unobserved app costs no `wsl.exe` invocations at all.
 pub const WSL_LIVENESS_DEMAND_WINDOW: Duration = Duration::from_secs(30);
 
+/// How long the resolved default WSL distribution is reused. Resolving it is a
+/// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
+pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
+
 // ── Sleep prevention (ADR-0114) ────────────────────────────────────
 
 /// How often a held inhibitor is checked for having died behind our back.
