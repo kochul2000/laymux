@@ -155,7 +155,10 @@ mod tests {
         assert!(html.contains("if (isFatalRemoteControlError(err) && !drainInProgress) {"));
         // A background/online reclaim restores control and output, not a soft
         // keyboard the user had already dismissed before the interruption.
-        assert!(html.contains("await loadNavigation(null, { focusInput: !auto });"));
+        // `undefined`, not `null`: the pane hint parameter defaults to the
+        // remembered pane, and an explicit `null` opts out of it — a reconnect
+        // would then land on the focused pane instead of this tab's own.
+        assert!(html.contains("await loadNavigation(undefined, { focusInput: !auto });"));
         assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
         assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
