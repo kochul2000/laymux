@@ -1,6 +1,6 @@
 # 0132. 원격 위젯 스트립의 표시는 호스트 게이트와 기기-로컬 토글의 논리곱이다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Source: 사용자 요구("리모트에서 위젯바에 대한 토글이 메뉴 안에 있으면 좋겠다"); [ADR-0124](0124-remote-widget-strip-mirrors-desktop.md), [ADR-0004](0004-settings-vs-ui-state-separation.md), [ADR-0129](0129-remote-chrome-row-rebases-fit-baseline.md); `docs/architecture/api-contracts.md` §13 Remote UI API
 - Extends: [ADR-0124](0124-remote-widget-strip-mirrors-desktop.md) — "원격 표시 자체의 on/off 는 `settings.remote.widgets` 하나가 갖는다"는 문장을 **표면 존재 게이트를 두 개로** 정정한다. 배치 SoT 가 데스크톱이라는 결정은 그대로다.
