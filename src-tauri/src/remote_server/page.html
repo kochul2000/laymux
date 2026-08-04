@@ -670,6 +670,40 @@
         opacity: 0.72;
         text-transform: uppercase;
       }
+      /* Device-local display switches in the drawer (ADR-0132). Same shape as
+         the popover's .key-set-row, but named for where it lives — the two
+         surfaces are free to drift. */
+      .nav-toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 8px 8px;
+        padding: 5px 4px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+      }
+      .nav-toggle-row:hover {
+        background: var(--hover-bg);
+      }
+      .nav-toggle-row input {
+        flex: 0 0 auto;
+      }
+      .nav-toggle-name {
+        flex: 1 1 auto;
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+      }
+      .nav-toggle-desc {
+        flex: 0 0 auto;
+        max-width: 52%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        opacity: 0.8;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .install-panel {
         display: flex;
         flex-direction: column;
@@ -1753,6 +1787,16 @@
                 <div id="dockList" class="nav-list"></div>
               </div>
             </section>
+            <!-- Device-local display choices (ADR-0132). Not `locked`: what
+                 this browser spends its chrome rows on is nobody's lease. -->
+            <section id="displaySection" class="nav-section" aria-label="Display">
+              <h2 class="nav-section-title">Display</h2>
+              <label class="nav-toggle-row" for="widgetStripToggle">
+                <input id="widgetStripToggle" type="checkbox" checked />
+                <span class="nav-toggle-name">Widget bar</span>
+                <span class="nav-toggle-desc">Row under the header</span>
+              </label>
+            </section>
             <!-- Installing drops the address bar (ADR-0091), but every browser
                  buries that path in its own menu. The offer lives here, not over
                  the terminal, and only appears while it can be acted on
@@ -1903,6 +1947,11 @@
         // Which terminals share one recall bucket (ADR-0055). Only the scope
         // choice is stored here; the recalled text stays in memory.
         const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
+        // The device half of the widget strip gate (ADR-0132). The host's
+        // `settings.remote.widgets` still decides whether values are sent at
+        // all; this only says whether *this* browser spends a chrome row on
+        // them. Defaults on, so only an explicit "0" hides the strip.
+        const widgetStripKey = "laymux.remote.widgetStrip";
         const spatialExcludedPaneIdsKey = "laymux.remote.spatialExcludedPaneIds";
         const spatialExcludedWorkspaceIdsKey = "laymux.remote.spatialExcludedWorkspaceIds";
         // Secret resume capability issued by a successful claim. It lives in
@@ -4716,6 +4765,7 @@
         const widgetStripEl = $("widgetStrip");
         const widgetStripLeftEl = $("widgetStripLeft");
         const widgetStripRightEl = $("widgetStripRight");
+        const widgetStripToggle = $("widgetStripToggle");
         // Fixed and client-owned: the strip is a viewer, not probe demand, so it
         // has no business following `usage.*.refreshSeconds`. Fast enough for
         // the activity and notification counts, which are the parts that move.
@@ -4730,6 +4780,27 @@
         let widgetPollInFlight = false;
         let widgetPollActive = false;
         let widgetStripVisible = false;
+        // Two independent inputs decide whether the chain runs (ADR-0132):
+        // whether the session wants widgets at all (set at connect, cleared on
+        // release/disconnect) and whether this device allows the row. Keeping
+        // them apart is what lets the toggle work mid-session without inventing
+        // a second notion of "connected".
+        let widgetPollRequested = false;
+        let widgetStripAllowed = loadWidgetStripAllowed();
+
+        function loadWidgetStripAllowed() {
+          try {
+            return localStorage.getItem(widgetStripKey) !== "0";
+          } catch (_) {
+            return true;
+          }
+        }
+
+        function saveWidgetStripAllowed(allowed) {
+          try {
+            localStorage.setItem(widgetStripKey, allowed ? "1" : "0");
+          } catch (_) {}
+        }
 
         function clampWidgetNumber(value, min, max, fallback) {
           const number = Number(value);
@@ -4999,18 +5070,44 @@
         }
 
         function startWidgetPolling() {
-          if (widgetPollActive) return;
-          widgetPollActive = true;
-          refreshWidgetsNow();
+          widgetPollRequested = true;
+          applyWidgetPolling();
         }
 
         function stopWidgetPolling() {
+          widgetPollRequested = false;
+          applyWidgetPolling();
+        }
+
+        /**
+         * Bring the poll chain in line with the two gates.
+         *
+         * The device gate can flip at any time, so this is the single place
+         * that decides whether the chain runs — a toggle that started its own
+         * poll would leave two ways to be "polling" and only one way to stop.
+         * A device that turned the row off asks for nothing at all (ADR-0132):
+         * there is no placement change left for it to notice.
+         */
+        function applyWidgetPolling() {
+          if (widgetPollRequested && widgetStripAllowed) {
+            if (widgetPollActive) return;
+            widgetPollActive = true;
+            refreshWidgetsNow();
+            return;
+          }
           widgetPollActive = false;
           if (widgetPollTimer) {
             clearTimeout(widgetPollTimer);
             widgetPollTimer = null;
           }
           renderWidgetStrip(null);
+        }
+
+        function setWidgetStripAllowed(allowed) {
+          widgetStripAllowed = allowed;
+          saveWidgetStripAllowed(allowed);
+          if (widgetStripToggle.checked !== allowed) widgetStripToggle.checked = allowed;
+          applyWidgetPolling();
         }
 
         function renderNavigation(data) {
@@ -7469,7 +7566,14 @@
         renderInputSurface();
         renderKeyRow();
         setKeyBarVisible(keyBarConfig.visible, false);
+        // The markup ships checked; the stored choice is what actually holds
+        // (ADR-0132). Applied before the first connect so a device that turned
+        // the row off never flashes it.
+        widgetStripToggle.checked = widgetStripAllowed;
 
+        widgetStripToggle.addEventListener("change", () => {
+          setWidgetStripAllowed(widgetStripToggle.checked);
+        });
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);

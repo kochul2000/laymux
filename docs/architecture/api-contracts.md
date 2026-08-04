@@ -268,7 +268,7 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
     "cloudAutoReconnect": true,         // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
     "serveTerminalFont": false,         // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
-    "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0124). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다
+    "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0124). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다. 전역 게이트이고, 기기별 on/off 는 브라우저 localStorage 가 따로 갖는다(§13.5, ADR-0132)
   }
 }
 ```
@@ -1272,11 +1272,13 @@ Remote page는 heartbeat와 output WebSocket을 별도 failure domain으로 취�
 
 `/remote/v1/navigation` 과 같이 bearer token·IP/Origin gate 만 요구하고 **lease 는 요구하지 않는다** — 스트립은 호스트를 조작하지 않으므로 열람만 하는 접속에서도 지표가 보인다. `settings.remote.widgets` 가 `false` 면 frontend bridge 를 거치지 않고 `{"enabled": false, "items": []}` 를 돌려준다.
 
+스트립이 실제로 보이는 조건은 **호스트 게이트 AND 기기-로컬 게이트**의 논리곱이다([ADR-0132](../adr/0132-remote-widget-strip-device-local-toggle.md)). 기기 게이트는 drawer 의 `Display` 섹션 토글(`#widgetStripToggle`)이며 브라우저별 `localStorage["laymux.remote.widgetStrip"]`(`"0"` 만 끔, 기본 켬)에 산다 — 호스트로 전송되지 않고 다른 클라이언트에 영향을 주지 않으며, 연결 전에도 조작할 수 있다. 끄면 표시뿐 아니라 **폴 자체가 멈추고**(끈 기기는 `/remote/v1/widgets` 요청을 전혀 만들지 않는다) 다시 켜면 재개한다. 반대 방향은 없다 — 호스트 게이트가 꺼져 있으면 기기 토글로 되살릴 수 없다.
+
 응답은 `{ enabled, fontFamily, fontSize, items[] }` 다. `fontFamily`/`fontSize` 는 `widgets.fontFamily`/`widgets.fontSize` 를 그대로 미러하며(빈 `fontFamily` = 인터페이스 글꼴 상속), 각 item 은 `{ id, type, align, title, kind, ... }` 형태다. `align` 은 `"left"|"right"` 뿐이고 데스크톱의 두 표면은 여기서 사라진다 — 원격 좌측은 `topBar.left`+`statusLine.left`, 우측은 `topBar.right`+`statusLine.right` 를 각 슬롯 배열 순서대로 이어 붙인 것이다. `statusLine.enabled` 가 꺼져 있거나 `type` 이 미등록이면 데스크톱이 그리지 않으므로 item 도 만들어지지 않는다.
 
 `kind` 는 원격이 분기하는 그리기 단위이며 `type` 보다 의도적으로 성기다 — 기존 `kind` 로 사상되는 새 위젯은 원격 코드를 바꾸지 않는다. `kind: "usage"` 는 `{ label, display, unavailable, rows[{key,text,percent,elapsed}], colors{used,pace,track}, barWidth, barHeight, elapsedHeight }`, `"activity"` 는 `{ busy, total }`, `"notifications"` 는 `{ unread }`, `"text"` 는 `{ text, copyText }` 를 갖는다. **행 선택·퍼센트 문자열·색·실패 문구·툴팁(`title`)은 모두 데스크톱이 계산해 보낸다** — 원격은 계산하지 않는다. `unavailable` 이 non-null 이면 숫자를 마지막 성공값으로 대체하지 않고 그대로 사용 불가로 표시한다([ADR-0102](../adr/0102-claude-usage-probe-headless-pty.md)).
 
-값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하며 `usage.*.refreshSeconds` 와 무관하다 — 그릴 항목이 있으면 5초, 없으면 30초로 늦추되 멈추지 않는다(배치는 데스크톱에서 언제든 늘어난다). 문서가 숨겨진 동안에는 요청을 보내지 않고, `401`/`403` 을 받으면 폴을 중단한다. 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
+값은 데스크톱 프론트 bridge(`query`/`widgets`/`snapshot`)에서 오며 **원격 폴은 probe 수요를 만들지 않는다**. Claude 스냅샷은 backend 가 마지막으로 캡처한 값을 읽을 뿐 probe 를 띄우지 않고, Codex 는 데스크톱의 계정별 단일 폴러가 가진 스냅샷을 공유한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). 폴 주기는 원격 클라이언트가 소유하며 `usage.*.refreshSeconds` 와 무관하다 — 그릴 항목이 있으면 5초, 없으면 30초로 늦추되 멈추지 않는다(배치는 데스크톱에서 언제든 늘어난다). 폴이 멈추는 경우는 셋뿐이다 — 기기 토글을 끈 경우, 연결을 해제한 경우, `401`/`403` 을 받은 경우. 문서가 숨겨진 동안에는 요청을 보내지 않는다(체인은 살아 있다). 폭이 모자라면 접지 않고 가로 스크롤한다 — `widgets.overflow` 의 `collapse` 는 데스크톱 표면 정책이다. 상호작용은 원격 자신의 표면에서 끝난다: 알림 위젯은 원격 drawer 의 알림 패널을 열고, CWD 위젯은 브라우저 클립보드에 복사한다.
 
 ---
 
