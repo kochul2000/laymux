@@ -155,7 +155,10 @@ mod tests {
         assert!(html.contains("if (isFatalRemoteControlError(err) && !drainInProgress) {"));
         // A background/online reclaim restores control and output, not a soft
         // keyboard the user had already dismissed before the interruption.
-        assert!(html.contains("await loadNavigation(null, { focusInput: !auto });"));
+        // `undefined`, not `null`: the pane hint parameter defaults to the
+        // remembered pane, and an explicit `null` opts out of it — a reconnect
+        // would then land on the focused pane instead of this tab's own.
+        assert!(html.contains("await loadNavigation(undefined, { focusInput: !auto });"));
         assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
         assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
@@ -246,6 +249,29 @@ mod tests {
         );
         // Hidden until something makes it actionable.
         assert!(html.contains("<section id=\"installSection\" class=\"nav-section\" aria-label=\"Install this app\" hidden>"));
+    }
+
+    /// ADR-0132: the device half of the widget-strip gate lives in the drawer.
+    /// The key bar's popover is the other candidate and it is rejected here —
+    /// the switch that brings a chrome row back must not sit behind another
+    /// piece of chrome being visible.
+    #[test]
+    fn remote_page_html_offers_the_widget_bar_toggle_from_the_drawer() {
+        let html = remote_page_html();
+        let drawer = html
+            .split("<aside id=\"navigationPanel\"")
+            .nth(1)
+            .expect("the navigation drawer is present");
+        let drawer = drawer.split("</aside>").next().unwrap();
+        assert!(
+            drawer.contains("id=\"widgetStripToggle\""),
+            "the widget bar toggle must sit inside the drawer"
+        );
+        // Not `locked`: what this browser spends its rows on needs no lease, and
+        // it has to be settable before the first connect.
+        assert!(html.contains(
+            "<section id=\"displaySection\" class=\"nav-section\" aria-label=\"Display\">"
+        ));
     }
 
     /// A button that cannot install anything is worse than no button, so every
