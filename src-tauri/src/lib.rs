@@ -42,6 +42,8 @@ mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
 pub mod usage_probe;
+pub mod wsl_liveness;
+pub mod wsl_probe;
 
 use std::sync::Arc;
 use tauri::image::Image;
@@ -128,6 +130,12 @@ pub fn run() {
                     Err(e) => tracing::warn!(error = %e, "Automation server failed to start"),
                 }
             });
+
+            // Interactive-app liveness for WSL panes: the Windows process tree
+            // cannot see inside the guest, so a background refresher owns every
+            // boundary crossing and detection only reads its snapshot
+            // (ADR-0134). Idles until activity detection asks about a WSL pane.
+            wsl_liveness::start_refresher(app_state.clone());
 
             let cloud_state = app_state.clone();
             let cloud_app = app.handle().clone();

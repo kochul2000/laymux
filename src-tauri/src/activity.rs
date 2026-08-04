@@ -1212,6 +1212,41 @@ mod tests {
         assert_eq!(detect_interactive_app_from_title("codex"), None);
     }
 
+    /// Regression: every WSL pane running Claude reported `shell`. The Windows
+    /// process tree cannot see the guest process, and its `NoneAlive` verdict
+    /// short-circuited the buffer scan before the `Claude Code` banner was ever
+    /// read. See ADR-0134.
+    #[test]
+    fn wsl_pane_detects_claude_from_the_banner_despite_an_empty_windows_tree() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t-wsl".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                .with_wsl_backed(true)
+                .with_child_pid(Some(std::process::id())),
+        );
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07");
+        assert_eq!(
+            detect_terminal_state(&state, "t-wsl", Some(&buf)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Claude".to_string()
+            }
+        );
+
+        // And the spinner-only title that follows keeps resolving to Claude via
+        // the cache the banner just seeded — the steady state of a working pane.
+        let mut spinner = TerminalOutputBuffer::default();
+        spinner.push("\x1b]0;\u{2736} Exploring code\x07".as_bytes());
+        assert_eq!(
+            detect_terminal_state(&state, "t-wsl", Some(&spinner)).activity,
+            TerminalActivity::InteractiveApp {
+                name: "Claude".to_string()
+            }
+        );
+    }
+
     #[test]
     fn codex_spinner_title_preserved_after_explicit_detection() {
         let state = AppState::new();
