@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 pub mod activity;
+pub mod activity_reconcile;
 pub mod automation_server;
 #[cfg(test)]
 mod build_metadata;
@@ -131,11 +132,12 @@ pub fn run() {
                 }
             });
 
-            // Interactive-app liveness for WSL panes: the Windows process tree
-            // cannot see inside the guest, so a background refresher owns every
-            // boundary crossing and detection only reads its snapshot
-            // (ADR-0134). Idles until activity detection asks about a WSL pane.
-            wsl_liveness::start_refresher(app_state.clone());
+            // Re-derive every terminal's activity on a timer and push the panes
+            // that changed, so a classification the event path missed — an
+            // interactive app parked at its prompt emits no further titles — does
+            // not stay wrong until the user types (ADR-0135). This worker also
+            // owns the WSL guest probe (ADR-0134).
+            activity_reconcile::start(app_state.clone(), app.handle().clone());
 
             let cloud_state = app_state.clone();
             let cloud_app = app.handle().clone();

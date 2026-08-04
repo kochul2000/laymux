@@ -397,28 +397,41 @@ pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
 /// follow-up to issue #237.
 pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 
-// ── WSL interactive-app liveness (ADR-0134) ────────────────────────
+// ── Activity reconcile (ADR-0135) ──────────────────────────────────
 
-/// How often the background refresher crosses the WSL boundary while panes are
-/// being observed. The PTY callback never probes, so this is the only cost.
-pub const WSL_LIVENESS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+/// Event carrying the panes whose authoritative activity no longer matches what
+/// the backend last published. Payload: `[{ terminalId, activity }]`.
+pub const EVENT_TERMINAL_ACTIVITY_RECONCILED: &str = "terminal-activity-reconciled";
+
+/// Cadence right after a reconcile pass published something. A pane that just
+/// changed tends to change again (agent working → idle → working).
+pub const ACTIVITY_RECONCILE_MIN_INTERVAL: Duration = Duration::from_secs(3);
+
+/// Ceiling the cadence backs off to while nothing changes. Bounds the
+/// steady-state cost of the detection sweep and of the WSL guest probe, which
+/// this worker owns — so it must stay within
+/// `WSL_LIVENESS_POSITIVE_MAX_AGE`, or an idle guest verdict would expire
+/// between passes.
+pub const ACTIVITY_RECONCILE_MAX_INTERVAL: Duration = Duration::from_secs(15);
+
+/// How often the worker forgets what it published and re-publishes everything.
+/// The diff only sees backend-side changes, so frontend drift with no backend
+/// change behind it would otherwise never be corrected.
+pub const ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL: Duration = Duration::from_secs(60);
+
+// ── WSL interactive-app liveness (ADR-0134) ────────────────────────
 
 /// Upper bound for one `wsl.exe --exec` liveness probe.
 pub const WSL_LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// How long a published snapshot may assert that **nothing** is running in a
-/// pane. Must exceed one refresh interval plus a full probe timeout, otherwise
-/// steady-state passes would keep sliding into the degraded tier.
+/// pane.
 pub const WSL_LIVENESS_AUTHORITATIVE_MAX_AGE: Duration = Duration::from_secs(8);
 
 /// How long a published snapshot may keep asserting that an app **is** running.
 /// Longer than the negative window on purpose: a stale positive only delays
 /// noticing an exit, while a stale negative would suppress live detection.
 pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
-
-/// The refresher idles unless activity detection asked about a WSL pane within
-/// this window, so an unobserved app costs no `wsl.exe` invocations at all.
-pub const WSL_LIVENESS_DEMAND_WINDOW: Duration = Duration::from_secs(30);
 
 /// How long the resolved default WSL distribution is reused. Resolving it is a
 /// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.

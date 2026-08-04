@@ -997,13 +997,22 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 위 오라클은 호스트 프로세스 열거가 PTY 자손을 전부 본다는 전제 위에 선다. WSL pane 에서는 PTY 자식이 `wsl.exe` 이고 에이전트는 게스트 VM 안의 리눅스 프로세스라 Windows 스냅샷에 없다 — 호스트 트리는 이 pane 을 판정할 자격이 없다.
 
 - **도메인 분기**: `PtyHandle.wsl_backed`(spawn 시점 `is_wsl_command` 결과)가 참이면 `app_in_pty` 는 호스트 스냅샷을 열지 않고 `wsl_liveness::liveness()` 의 판정을 그대로 반환한다.
-- **게스트 프로브**: `wsl_liveness` 의 백그라운드 refresher 가 distribution 당 1회 `wsl.exe --exec` 로 `/proc` 을 훑어, `comm` 이 `claude`/`codex` 인 프로세스를 상속된 `LX_TERMINAL_ID` 로 pane 에 귀속시킨다. pane 안에서는 조상 깊이가 가장 얕은 프로세스가 이긴다. 감지 경로는 발행된 스냅샷만 읽는다 — PTY 콜백 스레드는 절대 게스트를 호출하지 않는다.
+- **게스트 프로브**: `wsl_liveness::refresh()` 가 distribution 당 1회 `wsl.exe --exec` 로 `/proc` 을 훑어, `comm` 이 `claude`/`codex` 인 프로세스를 상속된 `LX_TERMINAL_ID` 로 pane 에 귀속시킨다. 호출 주체는 activity reconcile 워커 하나다(아래). pane 안에서는 조상 깊이가 가장 얕은 프로세스가 이긴다. 감지 경로는 발행된 스냅샷만 읽는다 — PTY 콜백 스레드는 절대 게스트를 호출하지 않는다.
 - **freshness 비대칭**: 신선하면 양방향 권위. 낡으면 `Running` 만 유지되고 부정은 `Unknown` 으로 강등된다. 프로브 실패·distribution 미해결·같은 depth 경합·귀속 불가 에이전트(`U` 행) 존재는 스냅샷에서 빠져 `Unknown` — 모든 실패의 종착지가 타이틀/버퍼 휴리스틱이다.
-- **종료 판정(`Purpose::ExitDecision`)에는 양성을 안 준다**: `suppresses_false_exit` 는 일회성이라 캐시된 `Running` 으로 억제하면 이미 죽은 pane 이 고정된다. 따라서 WSL pane 에는 false-exit 억제가 없다(이 변경 이전과 동일).
+- **종료 판정도 같은 판정을 읽는다**: WSL pane 의 종료는 게스트 프로브가 소유하고, 억제가 틀렸으면 reconcile 워커가 정정한다([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md) 4-2, ADR-0134 3-1 대체). 억제가 없으면 살아있는 에이전트에 대한 타이틀 유래 종료가 프론트를 `shell` 로 하드 오버라이드하고, 백엔드는 계속 `Claude` 여서 diff 가 침묵한다.
 - **판정은 `(terminal_id, PTY generation)` 키**: Restart View 등으로 같은 id 에 새 PTY 가 붙으면 이전 세대 판정은 `Unknown`. 세션 종료 시 `wsl_liveness::forget()` 으로 항목을 지워 in-flight 패스가 되살리지 못하게 한다.
 - **distribution 별 독립 타임아웃 + 시작 순서 회전**: 공유 deadline 이면 앞 distribution 하나의 장애가 뒤 distribution 을 영구 누락시킨다.
-- **관측 게이팅**: 감지가 최근 WSL pane 을 물어본 경우에만 프로브한다. 아무도 보지 않으면 `wsl.exe` 호출은 0.
 - distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다.
+
+#### 주기 재판정 — 변경분만 push ([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md))
+
+이벤트 경로는 타이틀이 올 때만 말할 수 있고, 프롬프트에 멈춘 인터랙티브 앱은 타이틀을 내지 않는다. 그래서 놓친 분류를 되돌릴 주체가 필요하다 — 마운트 1회 동기화(위 ADR-0009 항목)는 `activity` 미설정 인스턴스만 채우므로 그 역할을 못 한다.
+
+- **`activity_reconcile` 워커**가 타이머마다 `wsl_liveness::refresh()` → `detect_all_terminal_states()` → 직전 발행 값과 diff → 변경된 pane 만 `terminal-activity-reconciled` 이벤트로 발행한다.
+- **cadence 는 적응적**: 발행이 있으면 `ACTIVITY_RECONCILE_MIN_INTERVAL`(3초), 조용하면 2배씩 늘려 `ACTIVITY_RECONCILE_MAX_INTERVAL`(15초)까지. 상한은 `WSL_LIVENESS_POSITIVE_MAX_AGE` 이내로 고정(테스트) — 넘으면 조용한 구간에서 게스트 양성이 만료된다.
+- **프론트(`useSyncEvents`)는 양방향으로 적용**한다. `interactiveApp → shell` 강등도 반영하고, 스토어에 없는 terminal_id 는 무시한다(제거된 pane 복원 금지).
+- **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다.
+- **실패한 패스는 발행하지 않는다**: 감지 에러는 "전부 shell" 이 아니라 패스 폐기. emit 실패는 발행 기록에서 되돌려 다음 패스가 재시도한다.
 
 ### 알림 레벨별 색상
 
