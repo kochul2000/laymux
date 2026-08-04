@@ -1,6 +1,6 @@
 # 0133. Remote attach 는 PTY geometry 를 한 번만 게시한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Source: 사용자 보고(리모트로 Claude 선택지 화면 pane 에 진입하면 화면이 위로 밀리고 숫자 입력이 반영되지 않은 것처럼 보인다) · [ADR-0069](0069-remote-render-checkpoint-attach.md) · [ADR-0077](0077-remote-terminal-font-serving.md) · [ADR-0124](0124-remote-widget-strip-mirrors-desktop.md) · [ADR-0129](0129-remote-chrome-row-rebases-fit-baseline.md) · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Relation: [ADR-0129](0129-remote-chrome-row-rebases-fit-baseline.md) 가 "스트립 등장 시 PTY resize 1회 전파"를 수용값으로 남긴 것을 **정정**하고, 그 ADR 이 기각한 "attach 를 첫 위젯 응답 뒤로 미룬다"를 **bounded 대기**로 좁혀 채택한다. [ADR-0038](0038-remote-height-shrink-surface-crop.md) 의 crop 정책과 [ADR-0069](0069-remote-render-checkpoint-attach.md) 의 checkpoint 계약은 그대로 둔다.
