@@ -192,6 +192,11 @@ pub struct PtyHandle {
     /// It lives on the exact writer handle so a stale frontend reply can never
     /// consume a replacement session's one-shot state.
     codex_startup_color_probe: Option<Arc<NativeWindowsCodexColorProbeGuard>>,
+    /// True when the spawned command is `wsl.exe`, so `child_pid` anchors a
+    /// Windows relay process and every interesting descendant lives inside the
+    /// guest. The liveness oracle needs this to know that a Windows process
+    /// snapshot has no standing over this pane at all (ADR-0134).
+    wsl_backed: bool,
 }
 
 impl PtyHandle {
@@ -222,7 +227,20 @@ impl PtyHandle {
             input_faulted: Arc::new(AtomicBool::new(false)),
             reader_lifecycle: PtyReaderLifecycle::completed_for_test(terminal_generation),
             codex_startup_color_probe: None,
+            wsl_backed: false,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_wsl_backed(mut self, wsl_backed: bool) -> Self {
+        self.wsl_backed = wsl_backed;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_child_pid(mut self, child_pid: Option<u32>) -> Self {
+        self.child_pid = child_pid;
+        self
     }
 
     pub(crate) fn with_codex_startup_color_probe(
@@ -339,6 +357,11 @@ impl PtyHandle {
     /// Get the child process ID.
     pub fn child_pid(&self) -> Option<u32> {
         self.child_pid
+    }
+
+    /// True when the PTY child is `wsl.exe`. See [`PtyHandle::wsl_backed`].
+    pub fn is_wsl_backed(&self) -> bool {
+        self.wsl_backed
     }
 
     /// Resize the PTY.
@@ -706,6 +729,7 @@ where
         input_faulted: Arc::new(AtomicBool::new(false)),
         reader_lifecycle: Arc::clone(&reader_lifecycle),
         codex_startup_color_probe: None,
+        wsl_backed: is_wsl,
     };
 
     // Spawn reader thread

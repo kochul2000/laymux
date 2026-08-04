@@ -397,6 +397,33 @@ pub const NOTIFY_GATE_FALLBACK_MS: u64 = 3000;
 /// follow-up to issue #237.
 pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 
+// ── WSL interactive-app liveness (ADR-0134) ────────────────────────
+
+/// How often the background refresher crosses the WSL boundary while panes are
+/// being observed. The PTY callback never probes, so this is the only cost.
+pub const WSL_LIVENESS_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
+
+/// Upper bound for one `wsl.exe --exec` liveness probe.
+pub const WSL_LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How long a published snapshot may assert that **nothing** is running in a
+/// pane. Must exceed one refresh interval plus a full probe timeout, otherwise
+/// steady-state passes would keep sliding into the degraded tier.
+pub const WSL_LIVENESS_AUTHORITATIVE_MAX_AGE: Duration = Duration::from_secs(8);
+
+/// How long a published snapshot may keep asserting that an app **is** running.
+/// Longer than the negative window on purpose: a stale positive only delays
+/// noticing an exit, while a stale negative would suppress live detection.
+pub const WSL_LIVENESS_POSITIVE_MAX_AGE: Duration = Duration::from_secs(20);
+
+/// The refresher idles unless activity detection asked about a WSL pane within
+/// this window, so an unobserved app costs no `wsl.exe` invocations at all.
+pub const WSL_LIVENESS_DEMAND_WINDOW: Duration = Duration::from_secs(30);
+
+/// How long the resolved default WSL distribution is reused. Resolving it is a
+/// second `wsl.exe` spawn, and it only changes on `wsl --set-default`.
+pub const WSL_DEFAULT_DISTRO_CACHE_TTL: Duration = Duration::from_secs(60);
+
 // ── Sleep prevention (ADR-0114) ────────────────────────────────────
 
 /// How often a held inhibitor is checked for having died behind our back.

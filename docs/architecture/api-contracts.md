@@ -1311,6 +1311,8 @@ src-tauri/src/
 ├── codex_activity.rs         # Codex 앱 전용 활동 분기
 ├── claude_bullet.rs          # Claude Code 상태 메시지 추출 + ANSI 스트리핑
 ├── process_tree.rs           # PTY 자식 프로세스 트리 liveness (ADR-0009)
+├── wsl_liveness.rs           # WSL pane 게스트 프로브 liveness (ADR-0134)
+├── wsl_probe.rs              # WSL distribution 해석/검증 + wsl.exe --exec 실행
 ├── pty_trace.rs              # PTY/커서 트레이스 (LAYMUX_PTY_TRACE / LAYMUX_CURSOR_TRACE)
 ├── crash_reporter.rs         # 크래시 리포트
 ├── state.rs                  # AppState — 전역 상태

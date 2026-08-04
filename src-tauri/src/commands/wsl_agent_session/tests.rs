@@ -89,50 +89,6 @@ fn nested_providers_select_only_the_global_top_level_agent() {
 }
 
 #[test]
-fn parses_only_unquoted_consistent_wsl_distribution_flags() {
-    assert_eq!(
-        explicit_wsl_distro_from_command_line("wsl.exe -d Ubuntu-22.04").unwrap(),
-        Some("Ubuntu-22.04".into())
-    );
-    assert_eq!(
-        explicit_wsl_distro_from_command_line("wsl --distribution=Debian").unwrap(),
-        Some("Debian".into())
-    );
-    assert!(explicit_wsl_distro_from_command_line("wsl -d Ubuntu -d Debian").is_err());
-    assert!(explicit_wsl_distro_from_command_line("wsl -d \"Ubuntu\"").is_err());
-}
-
-#[test]
-fn only_bare_wsl_requests_default_distro_lookup() {
-    assert_eq!(
-        terminal_distro_target(None, "wsl.exe").unwrap(),
-        (None, true)
-    );
-    assert_eq!(
-        terminal_distro_target(None, "wsl.exe -d Debian").unwrap(),
-        (Some("Debian".into()), false)
-    );
-    assert!(terminal_distro_target(None, "wsl.exe -d").is_err());
-    assert!(terminal_distro_target(Some("bad/name"), "wsl.exe").is_err());
-}
-
-#[test]
-fn resolution_budget_uses_one_injected_deadline() {
-    let start = Instant::now();
-    let deadline = start + Duration::from_secs(3);
-
-    assert_eq!(
-        remaining_timeout_at(deadline, start + Duration::from_secs(1)),
-        Some(Duration::from_secs(2))
-    );
-    assert_eq!(remaining_timeout_at(deadline, deadline), None);
-    assert_eq!(
-        remaining_timeout_at(deadline, deadline + Duration::from_millis(1)),
-        None
-    );
-}
-
-#[test]
 fn groups_processes_by_their_exact_terminal_marker() {
     let mut other = process(40, 1, "claude");
     other.terminal_id = "terminal-pane-b".into();

@@ -280,10 +280,33 @@ pub fn interactive_app_in_pty_fresh(state: &AppState, terminal_id: &str) -> PtyA
 }
 
 fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppLiveness {
-    let child_pid = match state.pty_handles.lock_or_err() {
-        Ok(handles) => handles.get(terminal_id).and_then(|h| h.child_pid()),
-        Err(_) => None,
+    let (child_pid, wsl_target) = match state.pty_handles.lock_or_err() {
+        Ok(handles) => match handles.get(terminal_id) {
+            Some(handle) => (
+                handle.child_pid(),
+                handle.is_wsl_backed().then(|| handle.terminal_generation()),
+            ),
+            None => (None, None),
+        },
+        Err(_) => (None, None),
     };
+    // A WSL pane's agent is a Linux process inside the guest, which no Windows
+    // snapshot enumerates — the local tree would only ever find `wsl.exe` and
+    // report the authoritative negative `NoneAlive`, silently suppressing the
+    // title/buffer detectors for every WSL pane. Hand the verdict to the guest
+    // probe, which answers `Unknown` when it has nothing to say (ADR-0134).
+    //
+    // `force_fresh` marks an exit decision. The guest cannot be reached from
+    // this thread, so the probe declines to answer rather than suppress a real
+    // exit from a cached positive.
+    if let Some(generation) = wsl_target {
+        let purpose = if force_fresh {
+            crate::wsl_liveness::Purpose::ExitDecision
+        } else {
+            crate::wsl_liveness::Purpose::Display
+        };
+        return crate::wsl_liveness::liveness(terminal_id, generation, purpose);
+    }
     // No PID → no tree to walk; skip enumeration entirely.
     if child_pid.is_none() {
         return PtyAppLiveness::Unknown;
@@ -402,6 +425,46 @@ mod tests {
             ppid,
             name: name.to_string(),
         }
+    }
+
+    /// A WSL pane's agent lives in the guest, so the Windows snapshot always
+    /// looks empty under `wsl.exe`. Taking that as `NoneAlive` is what
+    /// suppressed the title/buffer detectors for every WSL pane; the guest
+    /// oracle owns the verdict instead and says `Unknown` until it has one.
+    #[test]
+    fn wsl_backed_pane_never_takes_the_windows_snapshot_verdict() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t-wsl".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                .with_wsl_backed(true)
+                // A PID the local snapshot can enumerate but find nothing under:
+                // the native path would answer NoneAlive here.
+                .with_child_pid(Some(std::process::id())),
+        );
+
+        assert_eq!(
+            interactive_app_in_pty(&state, "t-wsl"),
+            PtyAppLiveness::Unknown
+        );
+    }
+
+    /// Control for the test above: a native pane with the same empty tree keeps
+    /// the authoritative negative, so the WSL branch is a domain carve-out and
+    /// not a blanket weakening of the oracle.
+    #[test]
+    fn native_pane_still_reports_the_authoritative_negative() {
+        let state = AppState::new();
+        state.pty_handles.lock().unwrap().insert(
+            "t-native".into(),
+            crate::pty::PtyHandle::from_test_writer(Box::new(std::io::sink()))
+                .with_child_pid(Some(std::process::id())),
+        );
+
+        assert_eq!(
+            interactive_app_in_pty(&state, "t-native"),
+            PtyAppLiveness::NoneAlive
+        );
     }
 
     #[test]

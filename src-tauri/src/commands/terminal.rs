@@ -1457,6 +1457,9 @@ pub fn close_terminal_session(
     // reusing this ID does not start under a stale Claude/Codex exit
     // suppression.
     activity::clear_interactive_app_exit_marker(&state, &id);
+    // Same reason for the guest liveness verdict, which is bound to the PTY
+    // generation that produced it (ADR-0134).
+    crate::wsl_liveness::forget(&id);
 
     // Clean up notifications for this terminal
     if let Ok(mut notifs) = state.notifications.lock_or_err() {
