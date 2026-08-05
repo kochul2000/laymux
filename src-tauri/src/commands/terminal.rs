@@ -347,12 +347,11 @@ pub fn create_terminal_session(
         burst.threshold,
         burst.throttle_ms,
     ));
-    // Published so an exit noticed outside this callback — the reconcile worker,
-    // for an app that never emitted an exit title — can clear the same detection
-    // flags the callback would have (ADR-0135 §4-2). Removed on close.
-    if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
-        callback_states.insert(id.clone(), Arc::clone(&pty_cb_state));
-    }
+    // Published below, once the id-keyed tables are installed — see the
+    // `terminals.insert` block. Registering here instead would leak the entry on
+    // every spawn failure, because nothing has committed yet and no close will
+    // run for this id.
+    let registered_callback_state = Arc::clone(&pty_cb_state);
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
     let callback_codex_startup_color_probe = codex_startup_color_probe.clone();
@@ -555,8 +554,11 @@ pub fn create_terminal_session(
                     // A fresh entry invalidates any pending exit marker from
                     // a previous session in the same pane — otherwise the
                     // buffer-scan strong-signal suppression would mis-block
-                    // an immediate Claude relaunch.
+                    // an immediate Claude relaunch. It also invalidates any
+                    // exit verdict already in flight about the session this
+                    // one replaces, which the epoch carries (ADR-0136 §5).
                     activity::clear_interactive_app_exit_marker(&state_for_pty, &terminal_id);
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
                     let _ = app_clone.emit(EVENT_CLAUDE_TERMINAL_DETECTED, &terminal_id);
                 }
 
@@ -612,7 +614,12 @@ pub fn create_terminal_session(
                     // same state behind (ADR-0135 §4-2). Each lock inside is
                     // taken and released on its own, so this keeps the
                     // callback's no-overlapping-holds layout.
-                    activity::apply_interactive_app_exit(&state_for_pty, &terminal_id, "Claude");
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Claude",
+                        None,
+                    );
                     // Tell the frontend's title-changed handler to drop the
                     // interactive-app pin even though
                     // `ClaudeActivityHandler.shouldPreserveActivityOnTitleReset`
@@ -716,13 +723,21 @@ pub fn create_terminal_session(
                     // also clears the recently-exited marker as part of
                     // its confirmed-detection contract.
                     activity::sync_known_caches(&state_for_pty, &terminal_id, "Codex");
+                    // Mirror of the Claude entry: invalidate any exit verdict
+                    // in flight about the session this one replaces.
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
                 }
 
                 if cr_codex.exited {
                     // Mirror of the Claude exit above, through the same shared
                     // helper — the Codex banner is likewise still resident in
                     // the 16KB window that `recent_buffer_contains` scans.
-                    activity::apply_interactive_app_exit(&state_for_pty, &terminal_id, "Codex");
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Codex",
+                        None,
+                    );
                     // Mirror of the Claude exit flag: tell the frontend to
                     // unpin the interactive-app activity even though Codex's
                     // handler also preserves across title resets.
@@ -994,6 +1009,14 @@ pub fn create_terminal_session(
     };
     terminals.insert(id.clone(), session);
     ptys.insert(id.clone(), pty_handle);
+    // Published with the other id-keyed tables so an exit noticed outside the
+    // PTY callback — the reconcile worker, for an app that never emitted an exit
+    // title — can reach the same detection flags (ADR-0135 §4-2, ADR-0136 §6).
+    // From here on close and fatal teardown own its removal; before here, no
+    // cleanup path knows this id.
+    if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
+        callback_states.insert(id.clone(), registered_callback_state);
+    }
     if !sync_group.is_empty() {
         groups
             .entry(sync_group.clone())
@@ -1012,6 +1035,9 @@ pub fn create_terminal_session(
             .ok()
             .and_then(|mut ptys| ptys.remove(&id));
         terminals.remove(&id);
+        if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
+            callback_states.remove(&id);
+        }
         if !sync_group.is_empty() {
             if let Ok(mut groups) = state.sync_groups.lock_or_err() {
                 if let Some(group) = groups.get_mut(&sync_group) {

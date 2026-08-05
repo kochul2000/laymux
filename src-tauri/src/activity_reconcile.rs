@@ -26,7 +26,7 @@
 //! detection then falls back to heuristics that an exited agent's still-resident
 //! banner can fool.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,10 @@ fn run_pass(
     crate::wsl_liveness::refresh(state);
 
     let generations_at_snapshot = pty_generations(state);
+    // Read with the generations so an exit verdict can be refused if the pane
+    // started a *new session of the same app* before the cleanup runs — the one
+    // successor `(terminal, app)` scoping cannot see (ADR-0136 §5).
+    let epochs_at_snapshot = crate::activity::detection_epochs(state);
     // Stamped before deriving, so a title resolved while this pass runs is
     // ordered after it — see the module docs of `activity_order`.
     let activity_sequence = crate::activity_order::next_activity_sequence();
@@ -160,7 +164,22 @@ fn run_pass(
             return;
         }
     };
+
+    // Everything from the final generation read to the emit runs under the
+    // terminal catalog lock. Create takes it for its duplicate check and
+    // generation reservation, close holds it across every id-keyed cleanup — so
+    // holding it here makes "is this still the PTY I derived from?", the exit
+    // cleanup and the publish one step that a restart cannot slip into. Without
+    // that, a close starting just after the check would race the cleanup into
+    // state it had already torn down (ADR-0136 §2).
+    //
+    // Each helper below takes only higher-numbered locks, so the ordering holds.
+    let Ok(mut terminals) = state.terminals.lock_or_err() else {
+        tracing::debug!("activity reconcile pass skipped: terminal catalog unavailable");
+        return;
+    };
     let generations_now = pty_generations(state);
+    let superseded = superseded_terminals(&generations_at_snapshot, &generations_now);
 
     // An app that this worker sees disappear may never have produced a title the
     // PTY state machine could read as an exit — that is the whole reason the
@@ -168,12 +187,16 @@ fn run_pass(
     //
     // A pane whose PTY was replaced mid-pass is skipped: the "exit" there is the
     // old session's teardown, which already cleans up after itself, and running
-    // the transition would clear the replacement's state instead.
+    // the transition would clear the replacement's state instead. A pane with no
+    // detection epoch is mid-lifecycle for the same reason.
     for (terminal_id, app_name) in exited_apps(published, &current) {
-        if generations_at_snapshot.get(&terminal_id) != generations_now.get(&terminal_id) {
+        if superseded.contains(&terminal_id) {
             continue;
         }
-        apply_exit_transition(state, app, &terminal_id, &app_name);
+        let Some(epoch) = epochs_at_snapshot.get(&terminal_id).copied() else {
+            continue;
+        };
+        apply_exit_transition(&mut terminals, state, app, &terminal_id, &app_name, epoch);
     }
 
     let changed = diff(published, &current, publish_all, activity_sequence);
@@ -182,11 +205,12 @@ fn run_pass(
     // against a verdict about the previous session.
     *published = current;
 
-    let (fresh, superseded) = drop_superseded(changed, &generations_at_snapshot, &generations_now);
+    // Every replaced pane loses its baseline, not just the ones that happened to
+    // differ this pass. A restart into the *same* app produces an identical
+    // verdict, so it would never enter the diff — and the fresh frontend
+    // instance, whose activity starts empty, would then wait out the full resync
+    // interval for a value the backend already knows.
     for terminal_id in &superseded {
-        // This verdict describes a PTY that no longer exists. Forget it so the
-        // next pass publishes the replacement's activity instead of comparing it
-        // against the previous session's.
         published.remove(terminal_id);
     }
     if !superseded.is_empty() {
@@ -195,6 +219,10 @@ fn run_pass(
             "activity reconcile dropped verdicts about replaced PTYs"
         );
     }
+    let fresh: Vec<ReconciledActivity> = changed
+        .into_iter()
+        .filter(|entry| !superseded.contains(&entry.terminal_id))
+        .collect();
     if fresh.is_empty() {
         return;
     }
@@ -206,6 +234,7 @@ fn run_pass(
             published.remove(&entry.terminal_id);
         }
     }
+    drop(terminals);
 }
 
 /// The PTY generation backing each terminal right now. A pane with no handle
@@ -226,29 +255,27 @@ fn pty_generations(state: &AppState) -> HashMap<String, u64> {
     }
 }
 
-/// Split a pass's verdicts into the ones still describing the PTY they were
-/// derived from and the ids of the ones that do not.
+/// Panes whose PTY is not the one this pass derived from.
 ///
 /// A pane can be torn down and respawned under the same terminal id (Restart
-/// View, profile change) while a pass is walking every terminal. The verdict was
-/// taken from the old session and says nothing about the new one; applying it
-/// would show the replacement whatever the previous session was running, with
-/// no live event to correct it until the new session emits a title.
-pub fn drop_superseded(
-    changed: Vec<ReconciledActivity>,
+/// View, profile change) while a pass is walking every terminal. Anything the
+/// pass concluded about it describes the session that is gone: publishing it
+/// would show the replacement whatever the previous session was running, and
+/// keeping it as the diff baseline would compare the next pass against a verdict
+/// about a different process.
+///
+/// Computed over both reads, not over the pass's findings — a restart into the
+/// same app is invisible to the diff and still has to invalidate the baseline.
+pub fn superseded_terminals(
     at_snapshot: &HashMap<String, u64>,
     now: &HashMap<String, u64>,
-) -> (Vec<ReconciledActivity>, Vec<String>) {
-    let (fresh, superseded): (Vec<_>, Vec<_>) = changed
-        .into_iter()
-        .partition(|entry| at_snapshot.get(&entry.terminal_id) == now.get(&entry.terminal_id));
-    (
-        fresh,
-        superseded
-            .into_iter()
-            .map(|entry| entry.terminal_id)
-            .collect(),
-    )
+) -> HashSet<String> {
+    at_snapshot
+        .keys()
+        .chain(now.keys())
+        .filter(|terminal_id| at_snapshot.get(*terminal_id) != now.get(*terminal_id))
+        .cloned()
+        .collect()
 }
 
 /// Panes that were running an interactive app and are not running it any more,
@@ -287,20 +314,38 @@ pub fn exited_apps(
 /// is already running and has already written its own state. Clearing by
 /// terminal alone would take the new session's working flag, status message and
 /// grace entry with it, and emit a null message event on top.
-fn apply_exit_transition(state: &AppState, app: &AppHandle, terminal_id: &str, app_name: &str) {
+///
+/// `epoch` is the pane's detection epoch as read with the verdict; a relaunch of
+/// the *same* app since then makes this cleanup belong to a session that is no
+/// longer there, and the whole transition is skipped.
+///
+/// Takes the catalog the caller already holds — the pass keeps it across the
+/// generation check, these transitions and the emit so a restart cannot land in
+/// the middle.
+fn apply_exit_transition(
+    terminals: &mut HashMap<String, crate::terminal::TerminalSession>,
+    state: &AppState,
+    app: &AppHandle,
+    terminal_id: &str,
+    app_name: &str,
+    epoch: u64,
+) {
+    // The shared cleanup owns the epoch check, so it runs first: if it refuses,
+    // the session these fields describe is the successor's, not the exited
+    // app's.
+    if !crate::activity::apply_interactive_app_exit(state, terminal_id, app_name, Some(epoch)) {
+        return;
+    }
     let mut message_cleared = false;
     // `claude_*` is Claude's alone; on a Codex exit these fields either belong
     // to a Claude session that took the pane over or hold nothing at all.
     if app_name == "Claude" {
-        if let Ok(mut terminals) = state.terminals.lock_or_err() {
-            if let Some(session) = terminals.get_mut(terminal_id) {
-                session.claude_was_working = false;
-                session.claude_last_working_title = None;
-                message_cleared = session.claude_message.take().is_some();
-            }
+        if let Some(session) = terminals.get_mut(terminal_id) {
+            session.claude_was_working = false;
+            session.claude_last_working_title = None;
+            message_cleared = session.claude_message.take().is_some();
         }
     }
-    crate::activity::apply_interactive_app_exit(state, terminal_id, app_name);
 
     if message_cleared {
         let _ = app.emit(
@@ -326,14 +371,6 @@ mod tests {
             .iter()
             .map(|(id, generation)| ((*id).to_string(), *generation))
             .collect()
-    }
-
-    fn entry(terminal_id: &str) -> ReconciledActivity {
-        ReconciledActivity {
-            terminal_id: terminal_id.into(),
-            activity: claude(),
-            activity_sequence: SEQ,
-        }
     }
 
     fn shell() -> TerminalActivity {
@@ -427,40 +464,51 @@ mod tests {
     /// A pane torn down and respawned mid-pass gets a new PTY generation, and
     /// the verdict in flight describes the session that is gone.
     #[test]
-    fn a_verdict_about_a_replaced_pty_is_dropped() {
-        let (fresh, superseded) = drop_superseded(
-            vec![entry("t-same"), entry("t-restarted")],
+    fn a_replaced_pty_is_superseded() {
+        let superseded = superseded_terminals(
             &generations(&[("t-same", 1), ("t-restarted", 1)]),
             &generations(&[("t-same", 1), ("t-restarted", 2)]),
         );
-        assert_eq!(
-            fresh.iter().map(|e| &e.terminal_id).collect::<Vec<_>>(),
-            vec!["t-same"]
-        );
-        assert_eq!(superseded, vec!["t-restarted".to_string()]);
+        assert_eq!(superseded, HashSet::from(["t-restarted".to_string()]));
     }
 
     /// A pane that lost its handle while the pass ran is being torn down; its
-    /// verdict is about a PTY that no longer exists either.
+    /// verdict is about a PTY that no longer exists either. A pane that gained
+    /// one is a session this pass never looked at.
     #[test]
-    fn a_verdict_about_a_pane_whose_pty_vanished_is_dropped() {
-        let (fresh, superseded) = drop_superseded(
-            vec![entry("t")],
-            &generations(&[("t", 1)]),
-            &generations(&[]),
+    fn a_pane_whose_pty_appeared_or_vanished_is_superseded() {
+        assert_eq!(
+            superseded_terminals(&generations(&[("t", 1)]), &generations(&[])),
+            HashSet::from(["t".to_string()])
         );
-        assert!(fresh.is_empty());
-        assert_eq!(superseded, vec!["t".to_string()]);
+        assert_eq!(
+            superseded_terminals(&generations(&[]), &generations(&[("t", 1)])),
+            HashSet::from(["t".to_string()])
+        );
+    }
+
+    /// Restarting into the *same* app produces the same verdict, so the diff
+    /// never sees it — but the new frontend instance starts with no activity at
+    /// all. Computing this from the pass's findings would leave that pane blank
+    /// until the next full resync; computing it from the generations does not.
+    #[test]
+    fn a_restart_into_the_same_app_is_superseded_even_though_the_diff_is_silent() {
+        let published = map(&[("t", claude())]);
+        let current = map(&[("t", claude())]);
+        assert!(diff(&published, &current, false, SEQ).is_empty());
+        assert!(
+            superseded_terminals(&generations(&[("t", 1)]), &generations(&[("t", 2)]))
+                .contains("t")
+        );
     }
 
     /// Without generations to compare — a poisoned handle table — nothing can be
     /// proven stale, so nothing is dropped.
     #[test]
-    fn unknown_generations_drop_nothing() {
-        let (fresh, superseded) =
-            drop_superseded(vec![entry("t")], &generations(&[]), &generations(&[]));
-        assert_eq!(fresh.len(), 1);
-        assert!(superseded.is_empty());
+    fn unknown_generations_supersede_nothing() {
+        assert!(superseded_terminals(&generations(&[]), &generations(&[])).is_empty());
+        let unchanged = generations(&[("t", 1)]);
+        assert!(superseded_terminals(&unchanged, &unchanged).is_empty());
     }
 
     /// This worker refreshes the guest snapshot, so its cadence decides how

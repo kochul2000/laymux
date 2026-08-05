@@ -247,7 +247,11 @@ export function useSyncEvents() {
           ) {
             updates.activity = { type: "shell" };
           }
-          if (updates.activity !== undefined && data.activitySequence !== undefined) {
+          // The watermark advances on every accepted verdict, not only on the
+          // ones that changed something. A newer verdict that agrees with the
+          // current value still rules out everything derived before it — drop
+          // it and a delayed older event walks the pane back.
+          if (data.activitySequence !== undefined) {
             updates.activitySequence = data.activitySequence;
           }
         }
@@ -434,6 +438,12 @@ export function useSyncEvents() {
             instance.activity?.type === activity.type &&
             instance.activity?.name === activity.name
           ) {
+            // Same value, newer derivation: the watermark still has to advance,
+            // or an older verdict delivered after this one would be accepted
+            // and change the pane.
+            if (instance.activitySequence !== activitySequence) {
+              updateInstanceInfo(terminalId, { activitySequence });
+            }
             continue;
           }
           updateInstanceInfo(terminalId, { activity, activitySequence });

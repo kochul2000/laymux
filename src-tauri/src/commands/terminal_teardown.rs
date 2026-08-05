@@ -177,6 +177,12 @@ fn detach_terminal_output_generation_with_post_unlock(
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
                 known.remove(terminal_id);
             }
+            // The PTY callback that owned these flags is gone with the handle;
+            // leaving the entry would pin dead state and let a reconcile pass
+            // read a detection epoch for a pane that no longer exists.
+            if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
+                callback_states.remove(terminal_id);
+            }
             activity::clear_interactive_app_grace_window(state, terminal_id);
             activity::clear_interactive_app_exit_marker(state, terminal_id);
             // A guest verdict describes a specific PTY generation. Drop it here

@@ -4,7 +4,8 @@
 //! or running an interactive application (Claude Code, vim, etc.).
 //! Also contains `BurstDetector` for DEC 2026 sustained TUI activity detection.
 
-use std::sync::atomic::AtomicBool;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::time::Instant;
 
 use crate::claude_activity;
@@ -565,13 +566,41 @@ pub fn record_interactive_app_exit(state: &AppState, terminal_id: &str, app_name
 /// successor already recorded in the same maps, and clearing by terminal alone
 /// would take the new session's state with it.
 ///
+/// `expected_epoch` guards against a successor the app *name* cannot
+/// distinguish: Claude exits and Claude starts again in the same pane, so
+/// `(terminal, app)` names both sessions. A caller that derived its verdict
+/// earlier — the reconcile worker, from a snapshot — passes the detection epoch
+/// it read alongside that verdict, and the cleanup is skipped entirely if the
+/// epoch has moved since. A pane that had no callback state when the verdict was
+/// taken has no epoch to pass and no cleanup to do here: it is mid-lifecycle,
+/// and create/close own its state. The PTY callback passes `None`: its own exit
+/// decision was made on this thread from the title that caused it, so there is
+/// no gap for a successor to appear in.
+///
+/// Returns whether the cleanup was applied — `false` only when the epoch guard
+/// refused it, so a caller with more state to clear can stop too.
+///
 /// Each lock is taken and released on its own, so this composes with any
 /// caller's lock order.
-pub fn apply_interactive_app_exit(state: &AppState, terminal_id: &str, app_name: &str) {
+pub fn apply_interactive_app_exit(
+    state: &AppState,
+    terminal_id: &str,
+    app_name: &str,
+    expected_epoch: Option<u64>,
+) -> bool {
     use std::sync::atomic::Ordering;
 
     if let Ok(states) = state.pty_callback_states.lock_or_err() {
-        if let Some(callback_state) = states.get(terminal_id) {
+        let callback_state = states.get(terminal_id);
+        if let Some(expected) = expected_epoch {
+            // A pane whose callback state is gone (closed mid-pass) also fails
+            // this check, which is right: its teardown owns the cleanup.
+            let current = callback_state.map(|s| s.detection_epoch.load(Ordering::Relaxed));
+            if current != Some(expected) {
+                return false;
+            }
+        }
+        if let Some(callback_state) = callback_state {
             match app_name {
                 "Claude" => callback_state
                     .claude_detected
@@ -582,6 +611,9 @@ pub fn apply_interactive_app_exit(state: &AppState, terminal_id: &str, app_name:
                 _ => {}
             }
         }
+    } else if expected_epoch.is_some() {
+        // Unverifiable is not verified.
+        return false;
     }
     match app_name {
         "Claude" => {
@@ -602,6 +634,44 @@ pub fn apply_interactive_app_exit(state: &AppState, terminal_id: &str, app_name:
     // window cannot re-pin the cache on the next title.
     clear_interactive_app_grace_window_for(state, terminal_id, app_name);
     record_interactive_app_exit(state, terminal_id, app_name);
+    true
+}
+
+/// Mark that an agent just entered `terminal_id`, invalidating any in-flight
+/// exit verdict about the session it replaces. Called from the title state
+/// machine's entry branches — the only place a new agent session is confirmed.
+pub fn record_interactive_app_entry(state: &AppState, terminal_id: &str) {
+    use std::sync::atomic::Ordering;
+
+    if let Ok(states) = state.pty_callback_states.lock_or_err() {
+        if let Some(callback_state) = states.get(terminal_id) {
+            callback_state
+                .detection_epoch
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// The detection epoch of every pane that currently has one, read as a batch so
+/// a caller can pair it with a verdict snapshot.
+///
+/// A pane missing from the result has no callback state to speak for it — it is
+/// being created or torn down, and that lifecycle owns its cleanup.
+pub fn detection_epochs(state: &AppState) -> HashMap<String, u64> {
+    use std::sync::atomic::Ordering;
+
+    match state.pty_callback_states.lock_or_err() {
+        Ok(states) => states
+            .iter()
+            .map(|(terminal_id, callback_state)| {
+                (
+                    terminal_id.clone(),
+                    callback_state.detection_epoch.load(Ordering::Relaxed),
+                )
+            })
+            .collect(),
+        Err(_) => HashMap::new(),
+    }
 }
 
 /// Forget the recently-exited marker for `terminal_id`. Called when a fresh
@@ -1079,6 +1149,18 @@ pub struct PtyCallbackState {
     /// path in `codex_activity::process_codex_title` cannot fire — there
     /// is no other persistent signal in the PTY callback closure.
     pub codex_detected: AtomicBool,
+    /// Bumped every time the title state machine confirms an agent *entered*
+    /// this pane.
+    ///
+    /// The flags above say "an agent is running here"; they cannot say *which
+    /// run*. A pane can exit Claude and start Claude again with no shell in
+    /// between and no lifecycle event — same PTY, same terminal id, same app
+    /// name — so an exit observed elsewhere (the reconcile worker, which
+    /// derives from a snapshot and applies later) has no way to tell whether
+    /// the session it is cleaning up is still the current one. The epoch is
+    /// that discriminator: read it with the verdict, and refuse the cleanup if
+    /// it moved (ADR-0136 §5).
+    pub detection_epoch: AtomicU64,
     pub burst_detector: BurstDetector,
     /// Boundary-aware DEC 2026 marker scanner. Mutex because `scan` mutates
     /// the internal tail, while the enclosing `PtyCallbackState` is shared
@@ -1091,6 +1173,7 @@ impl PtyCallbackState {
         Self {
             claude_detected: AtomicBool::new(false),
             codex_detected: AtomicBool::new(false),
+            detection_epoch: AtomicU64::new(0),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
             dec_sync_scanner: std::sync::Mutex::new(MarkerTailScanner::new(
                 crate::constants::DEC_SYNC_OUTPUT_SET,
@@ -2360,7 +2443,7 @@ mod tests {
             .unwrap()
             .insert(tid.to_string());
 
-        apply_interactive_app_exit(&state, tid, "Codex");
+        apply_interactive_app_exit(&state, tid, "Codex", None);
 
         assert_eq!(
             lookup_interactive_app_within_grace_window(&state, tid),
@@ -2385,7 +2468,7 @@ mod tests {
             .unwrap()
             .insert(tid.to_string());
 
-        apply_interactive_app_exit(&state, tid, "Claude");
+        apply_interactive_app_exit(&state, tid, "Claude", None);
 
         assert_eq!(
             lookup_interactive_app_within_grace_window(&state, tid),
@@ -2419,7 +2502,7 @@ mod tests {
             .unwrap()
             .insert(tid.to_string(), std::sync::Arc::clone(&callback_state));
 
-        apply_interactive_app_exit(&state, tid, "Claude");
+        apply_interactive_app_exit(&state, tid, "Claude", None);
 
         assert!(!callback_state.claude_detected.load(Ordering::Relaxed));
         assert!(
@@ -2431,8 +2514,100 @@ mod tests {
     #[test]
     fn an_exit_for_a_pane_with_no_callback_state_is_a_no_op() {
         let state = AppState::new();
-        apply_interactive_app_exit(&state, "t-never-spawned", "Claude");
+        apply_interactive_app_exit(&state, "t-never-spawned", "Claude", None);
         assert!(is_recently_exited(&state, "t-never-spawned", "Claude"));
+    }
+
+    fn state_with_callback(tid: &str) -> (AppState, std::sync::Arc<PtyCallbackState>) {
+        let state = AppState::new();
+        let callback_state = std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000));
+        state
+            .pty_callback_states
+            .lock()
+            .unwrap()
+            .insert(tid.to_string(), std::sync::Arc::clone(&callback_state));
+        (state, callback_state)
+    }
+
+    /// `(terminal, app)` scoping tells Codex from Claude but cannot tell one
+    /// Claude run from the next one in the same pane. A verdict derived before a
+    /// relaunch would otherwise turn off the successor's detection flag and
+    /// clear its grace entry.
+    #[test]
+    fn an_exit_verdict_older_than_a_relaunch_is_refused() {
+        use std::sync::atomic::Ordering;
+
+        let tid = "t-claude-relaunch";
+        let (state, callback_state) = state_with_callback(tid);
+        let epoch_when_the_verdict_was_taken =
+            callback_state.detection_epoch.load(Ordering::Relaxed);
+
+        // The pane exits Claude and starts Claude again before the verdict is
+        // applied.
+        record_interactive_app_entry(&state, tid);
+        callback_state
+            .claude_detected
+            .store(true, Ordering::Relaxed);
+        record_interactive_app_detection(&state, tid, "Claude");
+
+        assert!(!apply_interactive_app_exit(
+            &state,
+            tid,
+            "Claude",
+            Some(epoch_when_the_verdict_was_taken)
+        ));
+        assert!(callback_state.claude_detected.load(Ordering::Relaxed));
+        assert_eq!(
+            lookup_interactive_app_within_grace_window(&state, tid),
+            Some("Claude".to_string()),
+        );
+        assert!(!is_recently_exited(&state, tid, "Claude"));
+    }
+
+    #[test]
+    fn an_exit_verdict_from_the_current_session_is_applied() {
+        use std::sync::atomic::Ordering;
+
+        let tid = "t-claude-still-current";
+        let (state, callback_state) = state_with_callback(tid);
+        record_interactive_app_entry(&state, tid);
+        callback_state
+            .claude_detected
+            .store(true, Ordering::Relaxed);
+        let epoch = callback_state.detection_epoch.load(Ordering::Relaxed);
+
+        assert!(apply_interactive_app_exit(
+            &state,
+            tid,
+            "Claude",
+            Some(epoch)
+        ));
+        assert!(!callback_state.claude_detected.load(Ordering::Relaxed));
+        assert!(is_recently_exited(&state, tid, "Claude"));
+    }
+
+    /// A pane whose callback state disappeared mid-pass was torn down, and
+    /// teardown owns that cleanup — writing here would only re-create state for
+    /// a terminal that is gone.
+    #[test]
+    fn an_exit_verdict_for_a_pane_that_went_away_is_refused() {
+        let tid = "t-closed-mid-pass";
+        let (state, _callback_state) = state_with_callback(tid);
+        state.pty_callback_states.lock().unwrap().remove(tid);
+
+        assert!(!apply_interactive_app_exit(&state, tid, "Claude", Some(0)));
+        assert!(!is_recently_exited(&state, tid, "Claude"));
+    }
+
+    #[test]
+    fn detection_epochs_reports_every_pane_that_has_one() {
+        let (state, _callback_state) = state_with_callback("t-a");
+        record_interactive_app_entry(&state, "t-a");
+        record_interactive_app_entry(&state, "t-a");
+
+        let epochs = detection_epochs(&state);
+        assert_eq!(epochs.get("t-a"), Some(&2));
+        assert_eq!(epochs.get("t-never-spawned"), None);
     }
 
     #[test]
