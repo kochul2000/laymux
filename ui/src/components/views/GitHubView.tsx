@@ -271,11 +271,14 @@ export function GitHubView({
                   ? snapshot.pulls.filter((item) => !item.isDraft).length
                   : snapshot.pulls.length;
             return (
+              // The pane control bar appears on hover and takes width from this
+              // row, so the tabs must not shrink: without nowrap the label and
+              // its count split onto two lines inside a fixed-height bar.
               <button
                 key={key}
                 data-testid={`github-tab-${key}`}
                 onClick={() => selectTab(key)}
-                className="cursor-pointer rounded px-1.5"
+                className="shrink-0 cursor-pointer whitespace-nowrap rounded px-1.5"
                 style={{
                   height: "var(--btn-h)",
                   fontSize: "var(--fs-sm)",
