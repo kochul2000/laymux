@@ -6420,6 +6420,7 @@
           "c-k": { label: "^K", seq: "\x0b" },
           "c-l": { label: "^L", seq: "\x0c" },
           "c-r": { label: "^R", seq: "\x12" },
+          "c-t": { label: "^T", seq: "\x14" },
           "c-u": { label: "^U", seq: "\x15" },
           "c-w": { label: "^W", seq: "\x17" },
           "c-z": { label: "^Z", seq: "\x1a" },
@@ -6441,14 +6442,14 @@
           "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
-          "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z",
+          "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_SETS = [
           { id: "step", name: "Pane/Alert nav", desc: "Flick pad · P↑P↓ pane · N←N→ alerts", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
           { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
-          { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-u", "c-w", "c-z"] },
+          { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         const DEFAULT_KEYBAR = {
