@@ -1,6 +1,6 @@
 # 0136. Activity 는 파생 시점 stamp 로 순서화하고, 종료 정리는 종료한 앱에만 적용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
 - Source: PR #769 리뷰(pullrequestreview-4861206487), [ADR-0135](0135-activity-reconcile-backend-diff-push.md) (Decision 4·4-1·4-2 정정), [ADR-0134](0134-wsl-guest-interactive-app-liveness.md)
 
