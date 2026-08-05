@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 pub mod activity;
+pub mod activity_order;
 pub mod activity_reconcile;
 pub mod automation_server;
 #[cfg(test)]

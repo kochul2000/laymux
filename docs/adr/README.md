@@ -153,6 +153,7 @@ ADR 이 필요한 대표 기준:
 | [0133](0133-remote-attach-publishes-one-pty-geometry.md) | Remote attach 는 PTY geometry 를 한 번만 게시한다 (0129 정정) | Accepted |
 | [0134](0134-wsl-guest-interactive-app-liveness.md) | WSL pane 의 인터랙티브 앱 liveness 는 게스트 프로브가 권위 (0009 확장·정정) | Accepted |
 | [0135](0135-activity-reconcile-backend-diff-push.md) | Activity 는 백엔드가 주기적으로 재판정해 변경분만 push (0009 확장, 0134 관측 게이팅 정정) | Accepted |
+| [0136](0136-activity-derivation-stamp-and-scoped-exit.md) | Activity 는 파생 시점 stamp 로 순서화하고 종료 정리는 종료한 앱에만 적용 (0135 4·4-1·4-2 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -353,6 +353,163 @@ describe("useSyncEvents", () => {
     expect(instance?.activity).toEqual({ type: "shell" });
   });
 
+  it("ignores a reconciled verdict derived before the title already applied", () => {
+    // The pass snapshotted the pane, then walked every terminal; a title
+    // resolved during that walk carries a higher stamp and reaches the store
+    // first. Applying the pass's verdict on top would show the older
+    // classification until the next pass.
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+    const titleCallback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      titleCallback({
+        terminalId: "t1",
+        title: "Claude Code",
+        interactiveApp: "Claude",
+        notifyGateArmed: false,
+        activitySequence: 20,
+      });
+    });
+
+    const reconcileCallback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      reconcileCallback([{ terminalId: "t1", activity: { type: "shell" }, activitySequence: 10 }]);
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("ignores a title verdict derived before the reconciled one already applied", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+
+    renderHook(() => useSyncEvents());
+    const reconcileCallback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      reconcileCallback([
+        {
+          terminalId: "t1",
+          activity: { type: "interactiveApp", name: "Claude" },
+          activitySequence: 20,
+        },
+      ]);
+    });
+
+    const titleCallback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      titleCallback({
+        terminalId: "t1",
+        title: "PS C:\\Users\\me",
+        interactiveApp: null,
+        notifyGateArmed: false,
+        interactiveAppExited: true,
+        activitySequence: 10,
+      });
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+    // The title itself describes this event alone and is never ordered away.
+    expect(instance?.title).toBe("PS C:\\Users\\me");
+  });
+
+  it("advances the watermark on a title verdict that changed nothing", () => {
+    // The pane is already shell; a newer title agreeing with that still rules
+    // out everything derived before it. Without the watermark advancing, the
+    // delayed reconcile below walks the pane back to Claude.
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo("t1", { activity: { type: "shell" }, activitySequence: 5 });
+
+    renderHook(() => useSyncEvents());
+    const titleCallback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      titleCallback({
+        terminalId: "t1",
+        title: "PS C:\\Users\\me",
+        interactiveApp: null,
+        notifyGateArmed: false,
+        activitySequence: 20,
+      });
+    });
+
+    const reconcileCallback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      reconcileCallback([
+        {
+          terminalId: "t1",
+          activity: { type: "interactiveApp", name: "Claude" },
+          activitySequence: 10,
+        },
+      ]);
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "shell" });
+    expect(instance?.activitySequence).toBe(20);
+  });
+
+  it("advances the watermark on a reconciled verdict that changed nothing", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+      activitySequence: 5,
+    });
+
+    renderHook(() => useSyncEvents());
+    const reconcileCallback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      reconcileCallback([
+        {
+          terminalId: "t1",
+          activity: { type: "interactiveApp", name: "Claude" },
+          activitySequence: 20,
+        },
+      ]);
+    });
+
+    expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.activitySequence).toBe(
+      20,
+    );
+
+    const titleCallback = mockOnTerminalTitleChanged.mock.calls[0][0];
+    act(() => {
+      titleCallback({
+        terminalId: "t1",
+        title: "PS C:\\Users\\me",
+        interactiveApp: null,
+        notifyGateArmed: false,
+        interactiveAppExited: true,
+        activitySequence: 10,
+      });
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
   it("ignores reconciled entries for terminals the frontend does not have", () => {
     renderHook(() => useSyncEvents());
     const callback = mockOnTerminalActivityReconciled.mock.calls[0][0];

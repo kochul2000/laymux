@@ -27,6 +27,7 @@ import {
   detectCodexStatusMessageFromOutput,
 } from "@/lib/activity-detection";
 import { getHandler, type RawTerminalState } from "@/lib/activity-handler";
+import { isStaleActivity } from "@/lib/activity-order";
 import { extractCodexTitleMessage } from "@/lib/codex-activity-handler";
 import { resolveWorkspaceId } from "@/lib/workspace-utils";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
@@ -225,21 +226,34 @@ export function useSyncEvents() {
         };
 
         const updates: Record<string, unknown> = { title: data.title };
-        if (detectedActivity) {
-          updates.activity = detectedActivity;
-        } else if (data.interactiveAppExited && currentActivity?.type === "interactiveApp") {
-          // Backend's title-state machine just confirmed Claude/Codex
-          // exit. Override the per-handler preservation guard (issue
-          // #234) so the user-visible activity reflects the exit
-          // immediately — otherwise the pane stays pinned as
-          // InteractiveApp{Claude} after `/exit` because the following
-          // shell-prompt title still passes the preservation heuristic.
-          updates.activity = { type: "shell" };
-        } else if (
-          currentActivity?.type === "interactiveApp" &&
-          !handler.shouldPreserveActivityOnTitleReset?.(raw)
-        ) {
-          updates.activity = { type: "shell" };
+        // Only the activity is ordered against the reconcile worker's verdicts
+        // (ADR-0135). The title, the Codex status message and the active-title
+        // signal below all describe this event alone and stay valid even when a
+        // newer verdict has already classified the pane.
+        if (!isStaleActivity(instance?.activitySequence, data.activitySequence)) {
+          if (detectedActivity) {
+            updates.activity = detectedActivity;
+          } else if (data.interactiveAppExited && currentActivity?.type === "interactiveApp") {
+            // Backend's title-state machine just confirmed Claude/Codex
+            // exit. Override the per-handler preservation guard (issue
+            // #234) so the user-visible activity reflects the exit
+            // immediately — otherwise the pane stays pinned as
+            // InteractiveApp{Claude} after `/exit` because the following
+            // shell-prompt title still passes the preservation heuristic.
+            updates.activity = { type: "shell" };
+          } else if (
+            currentActivity?.type === "interactiveApp" &&
+            !handler.shouldPreserveActivityOnTitleReset?.(raw)
+          ) {
+            updates.activity = { type: "shell" };
+          }
+          // The watermark advances on every accepted verdict, not only on the
+          // ones that changed something. A newer verdict that agrees with the
+          // current value still rules out everything derived before it — drop
+          // it and a delayed older event walks the pane back.
+          if (data.activitySequence !== undefined) {
+            updates.activitySequence = data.activitySequence;
+          }
         }
 
         const resolvedActivity = detectedActivity ?? currentActivity;
@@ -410,19 +424,29 @@ export function useSyncEvents() {
       onTerminalActivityReconciled((entries) => {
         if (cancelled) return;
         const { updateInstanceInfo, instances } = useTerminalStore.getState();
-        for (const { terminalId, activity } of entries) {
+        for (const { terminalId, activity, activitySequence } of entries) {
           const instance = instances.find((i) => i.id === terminalId);
           // An instance the frontend does not have is a pane it never
           // registered (or has already removed) — recreating one from a
           // reconcile entry would resurrect a dead pane.
           if (!instance) continue;
+          // The pass derived this before a title event that has already been
+          // applied, and emitted it after. Applying it now would put the pane
+          // back on the older verdict until the next pass.
+          if (isStaleActivity(instance.activitySequence, activitySequence)) continue;
           if (
             instance.activity?.type === activity.type &&
             instance.activity?.name === activity.name
           ) {
+            // Same value, newer derivation: the watermark still has to advance,
+            // or an older verdict delivered after this one would be accepted
+            // and change the pane.
+            if (instance.activitySequence !== activitySequence) {
+              updateInstanceInfo(terminalId, { activitySequence });
+            }
             continue;
           }
-          updateInstanceInfo(terminalId, { activity });
+          updateInstanceInfo(terminalId, { activity, activitySequence });
         }
       }),
     );
