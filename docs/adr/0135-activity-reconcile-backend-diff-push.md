@@ -67,4 +67,4 @@ activity 표시는 전부 이벤트 구동이다. PTY 콜백이 OSC 0/2 타이�
 - 새 외부 계약: `terminal-activity-reconciled` 이벤트(`[{terminalId, activity}]`). Remote/Automation surface 는 아직 이 이벤트를 구독하지 않는다 — 필요해지면 별도로 다룬다.
 - WSL pane 은 ADR-0134 가 포기했던 false-exit 억제를 되찾는다(4-2). 대신 진짜 종료의 인지가 최대 reconcile cadence 만큼 늦어질 수 있다. 표시가 틀린 채 고정되는 것보다 늦게 맞는 쪽이 낫다는 판단이다.
 - 전량 재발행(4-1)은 원인을 모르는 drift 까지 덮는 안전망이지만, 원인을 감추기도 한다. 특정 pane 이 매 60초마다 되돌아가는 패턴이 보이면 그건 프론트 쪽 별도 결함의 신호로 읽어야 한다.
-- 재검토 조건: sweep 비용이 문제가 되면(pane 수 증가) 변경 가능성이 있는 pane 만 좁혀 재판정하거나 backoff 상한을 늘린다. 후자는 5번의 `WSL_LIVENESS_POSITIVE_MAX_AGE` 제약과 함께 움직여야 한다.
+- 재검토 조건: sweep 비용이 문제가 되면(pane 수 증가) 변경 가능성이 있는 pane 만 좁혀 재판정한다. cadence 를 늘리는 쪽은 4번의 freshness 불변식과 함께 움직여야 하므로 단독으로는 못 건드린다.
