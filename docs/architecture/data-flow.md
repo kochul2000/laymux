@@ -1009,7 +1009,8 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 이벤트 경로는 타이틀이 올 때만 말할 수 있고, 프롬프트에 멈춘 인터랙티브 앱은 타이틀을 내지 않는다. 그래서 놓친 분류를 되돌릴 주체가 필요하다 — 마운트 1회 동기화(위 ADR-0009 항목)는 `activity` 미설정 인스턴스만 채우므로 그 역할을 못 한다.
 
 - **`activity_reconcile` 워커**가 타이머마다 `wsl_liveness::refresh()` → `detect_all_terminal_states()` → 직전 발행 값과 diff → 변경된 pane 만 `terminal-activity-reconciled` 이벤트로 발행한다.
-- **cadence 는 적응적**: 발행이 있으면 `ACTIVITY_RECONCILE_MIN_INTERVAL`(3초), 조용하면 2배씩 늘려 `ACTIVITY_RECONCILE_MAX_INTERVAL`(15초)까지. 상한은 `WSL_LIVENESS_POSITIVE_MAX_AGE` 이내로 고정(테스트) — 넘으면 조용한 구간에서 게스트 양성이 만료된다.
+- **cadence 는 고정 `ACTIVITY_RECONCILE_INTERVAL`(3초)**: 이 워커가 게스트 스냅샷을 갱신하므로 `cadence + WSL_LIVENESS_PROBE_TIMEOUT ≤ WSL_LIVENESS_AUTHORITATIVE_MAX_AGE` 를 테스트로 고정한다. 넘기면 패스 사이에 게스트 부정이 강등돼 stale 배너가 종료된 앱을 다시 pin 한다.
+- **종료 전이 전체를 소유**: `InteractiveApp{app}` → 그 앱 아님 으로 바뀐 pane 마다 `claude_was_working`/`claude_last_working_title`/`claude_message` 정리 + exit marker 기록 + grace window 제거 + 메시지 소거 이벤트 발행. 앱 간 handover 도 첫 앱의 종료로 취급하고, 사라진 pane 은 제외(teardown 이 처리).
 - **프론트(`useSyncEvents`)는 양방향으로 적용**한다. `interactiveApp → shell` 강등도 반영하고, 스토어에 없는 terminal_id 는 무시한다(제거된 pane 복원 금지).
 - **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다.
 - **실패한 패스는 발행하지 않는다**: 감지 에러는 "전부 shell" 이 아니라 패스 폐기. emit 실패는 발행 기록에서 되돌려 다음 패스가 재시도한다.

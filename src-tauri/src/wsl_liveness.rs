@@ -410,7 +410,7 @@ pub fn resolve_rows(rows: Vec<WslAgentRow>) -> (HashMap<String, &'static str>, H
 mod tests {
     use super::*;
     use crate::constants::{
-        ACTIVITY_RECONCILE_MIN_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE,
+        ACTIVITY_RECONCILE_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE,
         WSL_LIVENESS_POSITIVE_MAX_AGE,
     };
 
@@ -434,7 +434,7 @@ mod tests {
         // While activity is changing, the reconcile worker probes at its fast
         // cadence; a negative must stay authoritative across that gap instead of
         // flapping to Unknown in normal operation.
-        assert!(ACTIVITY_RECONCILE_MIN_INTERVAL < WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
+        assert!(ACTIVITY_RECONCILE_INTERVAL < WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
         assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
     }
 

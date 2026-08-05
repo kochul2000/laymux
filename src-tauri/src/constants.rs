@@ -403,16 +403,16 @@ pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 /// the backend last published. Payload: `[{ terminalId, activity }]`.
 pub const EVENT_TERMINAL_ACTIVITY_RECONCILED: &str = "terminal-activity-reconciled";
 
-/// Cadence right after a reconcile pass published something. A pane that just
-/// changed tends to change again (agent working → idle → working).
-pub const ACTIVITY_RECONCILE_MIN_INTERVAL: Duration = Duration::from_secs(3);
-
-/// Ceiling the cadence backs off to while nothing changes. Bounds the
-/// steady-state cost of the detection sweep and of the WSL guest probe, which
-/// this worker owns — so it must stay within
-/// `WSL_LIVENESS_POSITIVE_MAX_AGE`, or an idle guest verdict would expire
-/// between passes.
-pub const ACTIVITY_RECONCILE_MAX_INTERVAL: Duration = Duration::from_secs(15);
+/// How often the worker re-derives activity. Fixed, not adaptive: this worker
+/// also refreshes the WSL guest snapshot, and a guest **negative** stays
+/// authoritative only for `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`. Backing the
+/// cadence off past that would let an exited agent's stale banner re-pin the
+/// pane through the heuristics between passes, so the ceiling the cadence could
+/// back off to is barely above this value anyway (ADR-0135).
+///
+/// Invariant, asserted in `activity_reconcile`:
+/// `ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PROBE_TIMEOUT <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`.
+pub const ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How often the worker forgets what it published and re-publishes everything.
 /// The diff only sees backend-side changes, so frontend drift with no backend

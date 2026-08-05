@@ -33,7 +33,7 @@ activity 표시는 전부 이벤트 구동이다. PTY 콜백이 OSC 0/2 타이�
 
 3. **적용은 양방향이다.** reconcile 은 `interactiveApp → shell` 강등도 그대로 적용한다. 그것이 #767 의 핵심이다 — 이벤트 경로가 남긴 stale 분류를 고칠 수 있어야 한다. 대신 프론트가 모르는 terminal_id 는 무시한다(이미 제거된 pane 을 되살리지 않는다).
 
-4. **cadence 는 적응적이다.** 발행이 있었으면 최소 간격(3초)으로, 조용하면 2배씩 늘려 상한(15초)까지. 에이전트는 working↔idle 을 자주 오가므로 변화가 있는 동안은 촘촘하고, 전부 멈춰 있으면 느슨해진다. 누락 교정 지연의 상한이 곧 backoff 상한이다.
+4. **cadence 는 고정 3초다.** 적응형 backoff 를 검토했지만 성립하지 않는다 — 이 워커가 게스트 스냅샷을 갱신하고, 게스트 **부정**은 `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`(8초) 동안만 권위를 갖는다. cadence 가 그 창을 넘기면 패스 사이에 부정이 `Unknown` 으로 강등되고, 판정이 타이틀/버퍼 휴리스틱으로 되돌아가 16KB 창에 남은 배너가 종료된 앱을 다시 pin 할 수 있다(PR #292 가 막은 회귀). 프로브 자체가 타임아웃(3초)까지 쓸 수 있으므로 예산에 포함해 `cadence + probe timeout ≤ 음성 창` 을 불변식으로 고정한다. 결과적으로 backoff 상한이 3~5초 근방으로 눌리므로 적응형의 이득이 없다.
 
 4-1. **주기적으로 전체를 다시 발행한다.** diff 는 **백엔드 쪽** 변화만 본다. 프론트가 자기 경로로 값을 되돌리면(예: 타이틀 상태머신의 `interactiveAppExited` 는 핸들러 보존 가드를 하드 오버라이드해 `shell` 로 만든다) 그 뒤로 백엔드 변화가 없으므로 diff 는 영구히 침묵한다. 그래서 `ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 발행 기록을 비우고 전량 재발행해, 원인이 무엇이든 drift 가 그 창 안에 수렴하게 한다. 프론트가 동일한 값은 건너뛰므로 일치 상태의 재발행은 스토어를 건드리지 않는다.
 
@@ -43,6 +43,8 @@ activity 표시는 전부 이벤트 구동이다. PTY 콜백이 OSC 0/2 타이�
    - 억제가 틀렸다면(정말 종료한 경우) 다음 프로브가 부재를 확인하고 reconcile 이 `shell` 을 발행한다. 지연 상한은 reconcile cadence.
 
    즉 표시·종료 판정이 같은 게스트 판정을 읽고, 타이틀 상태머신은 WSL pane 의 종료를 단정하지 않는다.
+
+   **소유한다는 것은 전이 전체를 실행한다는 뜻이다.** activity 만 바꾸고 끝내면 PTY 콜백의 종료 분기가 하던 나머지가 남는다 — 마지막 상태 메시지가 pane 에 그대로 붙어 있고, grace window 엔트리가 살아 있어 감지가 여전히 그 앱을 부를 수 있으며, exit marker 가 없어 16KB 창의 배너가 다음 타이틀 한 번에 앱을 다시 pin 한다. 그래서 reconcile 은 `InteractiveApp{app}` → 그 앱이 아닌 상태로 바뀐 pane 마다 `claude_was_working`·`claude_last_working_title`·`claude_message` 를 정리하고, exit marker 를 기록하고, grace window 를 지우고, 메시지가 있었다면 그 소거를 프론트에 발행한다. 에이전트 간 handover(Claude→Codex)도 첫 앱의 종료로 취급한다. pane 자체가 사라진 경우는 제외한다 — 세션 teardown 이 같은 정리를 이미 한다.
 
 5. **이 워커가 WSL 게스트 프로브의 유일한 주체다** — [ADR-0134](0134-wsl-guest-interactive-app-liveness.md) 의 "관측되지 않는 동안에는 경계를 넘지 않는다"(Decision 5)를 **정정한다**. reconcile 은 관측 여부와 무관하게 돌아야 하므로 관측 게이팅은 성립하지 않는다. 대신 별도 refresher 스레드를 없애고 reconcile 패스가 매번 `wsl_liveness::refresh()` 를 호출한다 — 프로브 주기 = reconcile 주기, 조율 지점 하나. 그래서 **backoff 상한은 `WSL_LIVENESS_POSITIVE_MAX_AGE` 이내여야 한다**(테스트로 고정): 그렇지 않으면 조용한 구간에서 게스트 양성 판정이 만료돼 idle WSL 에이전트가 휴리스틱으로 되돌아간다.
 
