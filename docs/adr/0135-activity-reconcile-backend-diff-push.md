@@ -1,6 +1,6 @@
 # 0135. Activity 는 백엔드가 주기적으로 재판정해 변경분만 push 한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Source: issue #767, ADR-0009 (확장), ADR-0134 (관측 게이팅 조항 정정), architecture/data-flow.md §8 · §9
 
@@ -46,7 +46,7 @@ activity 표시는 전부 이벤트 구동이다. PTY 콜백이 OSC 0/2 타이�
 
    **소유한다는 것은 전이 전체를 실행한다는 뜻이다.** activity 만 바꾸고 끝내면 PTY 콜백의 종료 분기가 하던 나머지가 남는다 — 마지막 상태 메시지가 pane 에 그대로 붙어 있고, grace window 엔트리가 살아 있어 감지가 여전히 그 앱을 부를 수 있으며, exit marker 가 없어 16KB 창의 배너가 다음 타이틀 한 번에 앱을 다시 pin 한다. 그래서 reconcile 은 `InteractiveApp{app}` → 그 앱이 아닌 상태로 바뀐 pane 마다 `claude_was_working`·`claude_last_working_title`·`claude_message` 를 정리하고, exit marker 를 기록하고, grace window 를 지우고, 메시지가 있었다면 그 소거를 프론트에 발행한다. 에이전트 간 handover(Claude→Codex)도 첫 앱의 종료로 취급한다. pane 자체가 사라진 경우는 제외한다 — 세션 teardown 이 같은 정리를 이미 한다.
 
-5. **이 워커가 WSL 게스트 프로브의 유일한 주체다** — [ADR-0134](0134-wsl-guest-interactive-app-liveness.md) 의 "관측되지 않는 동안에는 경계를 넘지 않는다"(Decision 5)를 **정정한다**. reconcile 은 관측 여부와 무관하게 돌아야 하므로 관측 게이팅은 성립하지 않는다. 대신 별도 refresher 스레드를 없애고 reconcile 패스가 매번 `wsl_liveness::refresh()` 를 호출한다 — 프로브 주기 = reconcile 주기, 조율 지점 하나. 그래서 **backoff 상한은 `WSL_LIVENESS_POSITIVE_MAX_AGE` 이내여야 한다**(테스트로 고정): 그렇지 않으면 조용한 구간에서 게스트 양성 판정이 만료돼 idle WSL 에이전트가 휴리스틱으로 되돌아간다.
+5. **이 워커가 WSL 게스트 프로브의 유일한 주체다** — [ADR-0134](0134-wsl-guest-interactive-app-liveness.md) 의 "관측되지 않는 동안에는 경계를 넘지 않는다"(Decision 5)를 **정정한다**. reconcile 은 관측 여부와 무관하게 돌아야 하므로 관측 게이팅은 성립하지 않는다. 대신 별도 refresher 스레드를 없애고 reconcile 패스가 매번 `wsl_liveness::refresh()` 를 호출한다 — 프로브 주기 = reconcile 주기, 조율 지점 하나. cadence 가 게스트 freshness 창에 묶이는 이유가 여기에 있다(4번).
 
 6. **실패한 패스는 아무것도 발행하지 않는다.** 감지가 에러(poisoned ring/registry)면 그 패스를 버리고 직전 발행 뷰를 유지한다 — 오류를 "전부 shell" 로 번역하지 않는다. emit 실패도 마찬가지로 발행 기록에서 되돌려, 다음 패스가 다시 시도한다.
 
@@ -60,8 +60,8 @@ activity 표시는 전부 이벤트 구동이다. PTY 콜백이 OSC 0/2 타이�
 
 ## Consequences
 
-- 이벤트 경로가 놓친 분류가 최대 backoff 상한(15초) 안에 교정된다. idle Claude/Codex pane 이 `shell` 로 굳는 #767 증상이 사라진다.
-- 비용: 조용할 때 15초마다 sweep 1회(터미널당 16KB 스캔) + WSL 있으면 게스트 왕복 1회. 변화가 있는 동안은 3초 간격. ADR-0134 의 "아무도 안 보면 0회" 성질은 잃는다 — WSL pane 이 열려 있으면 15초에 1회는 항상 돈다.
+- 이벤트 경로가 놓친 분류가 한 cadence(3초) 안에 교정된다. idle Claude/Codex pane 이 `shell` 로 굳는 #767 증상이 사라진다. 원인 불명의 프론트 drift 는 전량 재발행 주기(60초)가 상한이다.
+- 비용: 3초마다 sweep 1회(터미널당 16KB 스캔) + WSL pane 이 있으면 게스트 왕복 1회(~300ms, 호스트 CPU ~9ms). ADR-0134 의 "아무도 안 보면 0회" 성질은 잃는다 — 앱이 떠 있는 동안은 항상 돈다. 고정 cadence 를 늦추려면 음성 freshness 창을 함께 늘려야 하는데, 그러면 갓 시작한 에이전트가 stale 부정에 막히는 시간이 늘어난다(4번).
 - 프론트의 낙관적 분류(사용자가 `claude` 를 입력한 시점의 `detectActivityFromCommand`)와 백엔드가 잠깐 어긋나면 reconcile 이 백엔드 쪽으로 되돌린다. 백엔드는 `mark_claude_terminal` 시드로 같은 창을 커버하므로 실제 어긋남은 앱 기동 구간에 한정된다. 실기에서 flapping 이 관측되면 "직전 로컬 변경 후 N ms 는 강등 보류" 가드를 추가한다.
 - 마운트 스냅샷(ADR-0009)은 그대로 남는다. 리로드 직후 첫 reconcile 패스를 기다리지 않고 즉시 복원하는 역할이며, 덮어쓰지 않는 조건도 유지한다 — 덮어쓰기는 이제 push 경로가 담당한다.
 - 새 외부 계약: `terminal-activity-reconciled` 이벤트(`[{terminalId, activity}]`). Remote/Automation surface 는 아직 이 이벤트를 구독하지 않는다 — 필요해지면 별도로 다룬다.
