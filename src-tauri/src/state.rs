@@ -36,6 +36,8 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// 16. `cloud`
 /// 17. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
 ///     never across `.await` and never while holding another `AppState` lock)
+/// 18. `pty_callback_states` (table mutex; held only to get/insert/remove one
+///     terminal's `Arc`, never while holding another `AppState` lock)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
 /// Inside one terminal-output session, nested locks have their own fixed order:
@@ -92,6 +94,21 @@ pub struct AppState {
     /// Populated proactively by the PTY output callback and frontend command detection.
     /// Removed when the terminal session closes.
     pub known_codex_terminals: Arc<Mutex<HashSet<String>>>,
+    /// The `Arc<PtyCallbackState>` each PTY output callback owns, published here
+    /// so an exit observed *outside* that callback can clear its detection
+    /// flags.
+    ///
+    /// `claude_detected` / `codex_detected` are the callback's own memory of
+    /// whether the pane is in an agent session, and `resolve_claude_detected`
+    /// ORs the flag with `known_claude_terminals` — so clearing the shared set
+    /// alone leaves the callback believing the session is still open. It then
+    /// reports the *next* app launch as a continuation instead of an entry, and
+    /// the entry-only cleanup (dropping the recently-exited marker) never runs.
+    /// The reconcile worker owns exits that produced no title (ADR-0135 §4-2),
+    /// so it needs the same reach into these flags that the callback has.
+    ///
+    /// Entries are inserted when the PTY spawns and removed when it closes.
+    pub pty_callback_states: Mutex<HashMap<String, Arc<crate::activity::PtyCallbackState>>>,
     /// Per-terminal grace-window cache of the last successfully detected
     /// interactive app name and the `Instant` of that detection.
     ///
@@ -310,6 +327,7 @@ impl AppState {
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),
+            pty_callback_states: Mutex::new(HashMap::new()),
             last_detected_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             notifications: Arc::new(Mutex::new(Vec::new())),

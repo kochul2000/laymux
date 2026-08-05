@@ -400,18 +400,24 @@ pub const INTERACTIVE_APP_GRACE_WINDOW: Duration = Duration::from_secs(5);
 // ── Activity reconcile (ADR-0135) ──────────────────────────────────
 
 /// Event carrying the panes whose authoritative activity no longer matches what
-/// the backend last published. Payload: `[{ terminalId, activity }]`.
+/// the backend last published. Payload:
+/// `[{ terminalId, activity, activitySequence }]`.
 pub const EVENT_TERMINAL_ACTIVITY_RECONCILED: &str = "terminal-activity-reconciled";
 
-/// How often the worker re-derives activity. Fixed, not adaptive: this worker
-/// also refreshes the WSL guest snapshot, and a guest **negative** stays
+/// How often the worker starts a pass. Fixed, not adaptive: this worker also
+/// refreshes the WSL guest snapshot, and a guest **negative** stays
 /// authoritative only for `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`. Backing the
 /// cadence off past that would let an exited agent's stale banner re-pin the
 /// pane through the heuristics between passes, so the ceiling the cadence could
 /// back off to is barely above this value anyway (ADR-0135).
 ///
+/// Measured pass-start to pass-start, not as a sleep between passes: the pass
+/// itself costs up to `WSL_LIVENESS_PASS_BUDGET`, and counting that on top of a
+/// fixed sleep would push the snapshot past the window the invariant below
+/// protects.
+///
 /// Invariant, asserted in `activity_reconcile`:
-/// `ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PROBE_TIMEOUT <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`.
+/// `ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`.
 pub const ACTIVITY_RECONCILE_INTERVAL: Duration = Duration::from_secs(3);
 
 /// How often the worker forgets what it published and re-publishes everything.
@@ -423,6 +429,19 @@ pub const ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL: Duration = Duration::from_sec
 
 /// Upper bound for one `wsl.exe --exec` liveness probe.
 pub const WSL_LIVENESS_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Upper bound for a whole `wsl_liveness::refresh` pass — default-distribution
+/// resolution plus every distribution's probe, together.
+///
+/// A per-probe timeout alone does not bound the pass: resolution can burn one
+/// timeout before the first probe starts, and each distribution costs another,
+/// so the pass grows with the number of distributions. Since the pass is what
+/// separates two published snapshots, an unbounded pass is an unbounded verdict
+/// age, and a negative that outlives `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE`
+/// degrades to `Unknown` — handing an exited agent's still-resident banner back
+/// to the heuristics. Work that does not fit the budget is skipped, which costs
+/// those panes a verdict for one pass instead of the freshness of every pane.
+pub const WSL_LIVENESS_PASS_BUDGET: Duration = Duration::from_secs(4);
 
 /// How long a published snapshot may assert that **nothing** is running in a
 /// pane.

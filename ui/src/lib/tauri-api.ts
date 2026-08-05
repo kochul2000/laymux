@@ -1439,6 +1439,13 @@ export function onTerminalOutputActivity(
 export interface ReconciledActivity {
   terminalId: string;
   activity: TerminalActivityInfo;
+  /**
+   * When the backend derived this verdict, on the same counter the live title
+   * path stamps. Taken at snapshot time, so a title resolved while the pass was
+   * still walking terminals carries a higher stamp and wins even though this
+   * event may arrive after it.
+   */
+  activitySequence: number;
 }
 
 /**
@@ -1546,6 +1553,12 @@ export interface TerminalTitleChangedData {
    * that re-introduces a real exit signal).
    */
   interactiveAppExited?: boolean;
+  /**
+   * When the backend derived the `interactiveApp` / `interactiveAppExited`
+   * fields above, on the same counter the reconcile worker stamps. Only the
+   * activity is ordered by it — the title itself is always the current one.
+   */
+  activitySequence?: number;
 }
 
 export function onTerminalTitleChanged(

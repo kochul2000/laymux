@@ -1001,7 +1001,7 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 - **freshness 비대칭**: 신선하면 양방향 권위. 낡으면 `Running` 만 유지되고 부정은 `Unknown` 으로 강등된다. 프로브 실패·distribution 미해결·같은 depth 경합·귀속 불가 에이전트(`U` 행) 존재는 스냅샷에서 빠져 `Unknown` — 모든 실패의 종착지가 타이틀/버퍼 휴리스틱이다.
 - **종료 판정도 같은 판정을 읽는다**: WSL pane 의 종료는 게스트 프로브가 소유하고, 억제가 틀렸으면 reconcile 워커가 정정한다([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md) 4-2, ADR-0134 3-1 대체). 억제가 없으면 살아있는 에이전트에 대한 타이틀 유래 종료가 프론트를 `shell` 로 하드 오버라이드하고, 백엔드는 계속 `Claude` 여서 diff 가 침묵한다.
 - **판정은 `(terminal_id, PTY generation)` 키**: Restart View 등으로 같은 id 에 새 PTY 가 붙으면 이전 세대 판정은 `Unknown`. 세션 종료 시 `wsl_liveness::forget()` 으로 항목을 지워 in-flight 패스가 되살리지 못하게 한다.
-- **distribution 별 독립 타임아웃 + 시작 순서 회전**: 공유 deadline 이면 앞 distribution 하나의 장애가 뒤 distribution 을 영구 누락시킨다.
+- **패스 전체 예산 + distribution 별 독립 타임아웃 + 시작 순서 회전**: 패스는 `WSL_LIVENESS_PASS_BUDGET`(4초) 안에 끝난다 — 기본 distro 해석과 모든 distribution 프로브가 이 예산을 나눠 쓰고, 개별 프로브는 자기 타임아웃과 남은 예산 중 작은 쪽을 받는다. 예산이 바닥나면 남은 distribution 은 판정 없이 건너뛰고 그 수를 로그로 남긴다(늦게 발행하면 모든 pane 의 판정이 함께 늙는다). 개별 타임아웃이 있어야 앞 distribution 하나의 장애가 뒤를 굶기지 않고, 회전이 있어야 밀리는 distribution 이 고정되지 않는다([ADR-0136](../adr/0136-activity-derivation-stamp-and-scoped-exit.md) 3).
 - distribution 해석·검증(`is_safe_distro_name`)·실행 plumbing 은 `wsl_probe` 가 소유하고 세션 귀속 프로브(`commands/wsl_agent_session`)와 공유한다.
 
 #### 주기 재판정 — 변경분만 push ([ADR-0135](../adr/0135-activity-reconcile-backend-diff-push.md))
@@ -1009,10 +1009,12 @@ Claude Code·Codex 가 실행 중인지의 **권위는 PTY 자식 프로세스 �
 이벤트 경로는 타이틀이 올 때만 말할 수 있고, 프롬프트에 멈춘 인터랙티브 앱은 타이틀을 내지 않는다. 그래서 놓친 분류를 되돌릴 주체가 필요하다 — 마운트 1회 동기화(위 ADR-0009 항목)는 `activity` 미설정 인스턴스만 채우므로 그 역할을 못 한다.
 
 - **`activity_reconcile` 워커**가 타이머마다 `wsl_liveness::refresh()` → `detect_all_terminal_states()` → 직전 발행 값과 diff → 변경된 pane 만 `terminal-activity-reconciled` 이벤트로 발행한다.
-- **cadence 는 고정 `ACTIVITY_RECONCILE_INTERVAL`(3초)**: 이 워커가 게스트 스냅샷을 갱신하므로 `cadence + WSL_LIVENESS_PROBE_TIMEOUT ≤ WSL_LIVENESS_AUTHORITATIVE_MAX_AGE` 를 테스트로 고정한다. 넘기면 패스 사이에 게스트 부정이 강등돼 stale 배너가 종료된 앱을 다시 pin 한다.
-- **종료 전이 전체를 소유**: `InteractiveApp{app}` → 그 앱 아님 으로 바뀐 pane 마다 `claude_was_working`/`claude_last_working_title`/`claude_message` 정리 + exit marker 기록 + grace window 제거 + 메시지 소거 이벤트 발행. 앱 간 handover 도 첫 앱의 종료로 취급하고, 사라진 pane 은 제외(teardown 이 처리).
+- **cadence 는 고정 `ACTIVITY_RECONCILE_INTERVAL`(3초), 패스 시작 기준**: 패스 소요를 뺀 만큼만 잠들므로 두 발행 사이는 `cadence + 패스` 를 넘지 않는다. 이 워커가 게스트 스냅샷을 갱신하므로 `cadence + WSL_LIVENESS_PASS_BUDGET ≤ WSL_LIVENESS_AUTHORITATIVE_MAX_AGE` 를 테스트로 고정한다. 넘기면 패스 사이에 게스트 부정이 강등돼 stale 배너가 종료된 앱을 다시 pin 한다.
+- **두 생산자의 판정은 파생 시점 stamp 로 순서화**한다([ADR-0136](../adr/0136-activity-derivation-stamp-and-scoped-exit.md)). PTY 콜백은 타이틀 판정 직전에, 워커는 스냅샷 직전에 `activity_order::next_activity_sequence()` 를 읽어 `activitySequence` 로 싣는다. 프론트는 pane 마다 적용한 stamp 를 기억하고 그보다 오래된 **activity** 만 무시한다 — 같은 이벤트의 title·메시지·출력 신호는 항상 적용된다.
+- **PTY 세대가 교체된 pane 의 판정은 백엔드에서 폐기**: 워커가 스냅샷 전후로 세대를 읽어 달라진 pane 은 발행에서 빼고 발행 기록에서도 지운다(다음 패스가 새 세션 값을 발행). 같은 pane 의 종료 전이도 건너뛴다 — teardown 이 이미 정리한다.
+- **종료 전이 전체를 소유하되 `(terminal, app)` 단위**: `InteractiveApp{app}` → 그 앱 아님 으로 바뀐 pane 마다 exit marker 기록 + 그 앱을 가리키는 grace window 제거 + 그 앱의 known 캐시·PTY 콜백 감지 플래그 해제, Claude 가 종료했을 때만 `claude_was_working`/`claude_last_working_title`/`claude_message` 정리 + 메시지 소거 이벤트 발행. 앱 간 handover 도 첫 앱의 종료로 취급하지만 후임 세션의 상태는 건드리지 않는다. 사라진 pane 은 제외(teardown 이 처리). 두 종료 경로(PTY 콜백 / 워커)는 `activity::apply_interactive_app_exit` 하나를 공유한다.
 - **프론트(`useSyncEvents`)는 양방향으로 적용**한다. `interactiveApp → shell` 강등도 반영하고, 스토어에 없는 terminal_id 는 무시한다(제거된 pane 복원 금지).
-- **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다.
+- **`ACTIVITY_RECONCILE_FULL_RESYNC_INTERVAL`(60초)마다 전량 재발행**: diff 는 백엔드 변화만 보므로, 프론트가 자기 경로로 되돌린 drift 는 이 재발행으로만 수렴한다. 재발행은 발행량만 바꾸고 발행 기록은 유지한다 — 그 기록이 종료 판정의 유일한 직전 상태다.
 - **실패한 패스는 발행하지 않는다**: 감지 에러는 "전부 shell" 이 아니라 패스 폐기. emit 실패는 발행 기록에서 되돌려 다음 패스가 재시도한다.
 
 ### 알림 레벨별 색상

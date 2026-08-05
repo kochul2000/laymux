@@ -347,6 +347,12 @@ pub fn create_terminal_session(
         burst.threshold,
         burst.throttle_ms,
     ));
+    // Published so an exit noticed outside this callback — the reconcile worker,
+    // for an app that never emitted an exit title — can clear the same detection
+    // flags the callback would have (ADR-0135 §4-2). Removed on close.
+    if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
+        callback_states.insert(id.clone(), Arc::clone(&pty_cb_state));
+    }
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
     let callback_codex_startup_color_probe = codex_startup_color_probe.clone();
@@ -600,25 +606,13 @@ pub fn create_terminal_session(
                 }
 
                 if cr.exited {
-                    pty_cb_state
-                        .claude_detected
-                        .store(false, std::sync::atomic::Ordering::Relaxed);
-                    // known_claude_terminals lock (#3) — separate from terminals (#1)
-                    if let Ok(mut known) = state_for_pty.known_claude_terminals.lock_or_err() {
-                        known.remove(&terminal_id);
-                    }
-                    // Also drop the grace-window entry so the shell fallback
-                    // kicks in immediately instead of pinning "Claude" for
-                    // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit (#237).
-                    activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
-                    // Record the exit so the next OSC 0/2 title (typically a
-                    // shell prompt) cannot re-pin the cache via the stale
-                    // `Claude Code` banner still resident in the 16KB recent
-                    // window. Without this marker `is_claude_terminal_from_buffer`
-                    // fires its strong-signal branch and the frontend keeps
-                    // showing InteractiveApp{Claude} until the banner scrolls
-                    // out — sometimes for many minutes on an idle shell.
-                    activity::record_interactive_app_exit(&state_for_pty, &terminal_id, "Claude");
+                    // Detection flag, known-terminal set, grace window and
+                    // exit marker, all scoped to Claude. Shared with the
+                    // reconcile worker so an exit it notices first leaves the
+                    // same state behind (ADR-0135 §4-2). Each lock inside is
+                    // taken and released on its own, so this keeps the
+                    // callback's no-overlapping-holds layout.
+                    activity::apply_interactive_app_exit(&state_for_pty, &terminal_id, "Claude");
                     // Tell the frontend's title-changed handler to drop the
                     // interactive-app pin even though
                     // `ClaudeActivityHandler.shouldPreserveActivityOnTitleReset`
@@ -725,21 +719,10 @@ pub fn create_terminal_session(
                 }
 
                 if cr_codex.exited {
-                    pty_cb_state.codex_detected.store(false, Ordering::Relaxed);
-                    if let Ok(mut known) = state_for_pty.known_codex_terminals.lock_or_err() {
-                        known.remove(&terminal_id);
-                    }
-                    // Drop the grace-window entry so the shell fallback
-                    // engages immediately instead of pinning "Codex" for
-                    // up to `INTERACTIVE_APP_GRACE_WINDOW` after exit
-                    // (#237 mirror for Codex).
-                    activity::clear_interactive_app_grace_window(&state_for_pty, &terminal_id);
-                    // Mirror of the Claude exit-marker recording above: the
-                    // 16KB recent window still carries the `OpenAI Codex`
-                    // banner (in OSC titles AND in the body banner that
-                    // `recent_buffer_contains` scans), and without the
-                    // marker the next shell-prompt title re-pins Codex.
-                    activity::record_interactive_app_exit(&state_for_pty, &terminal_id, "Codex");
+                    // Mirror of the Claude exit above, through the same shared
+                    // helper — the Codex banner is likewise still resident in
+                    // the 16KB window that `recent_buffer_contains` scans.
+                    activity::apply_interactive_app_exit(&state_for_pty, &terminal_id, "Codex");
                     // Mirror of the Claude exit flag: tell the frontend to
                     // unpin the interactive-app activity even though Codex's
                     // handler also preserves across title resets.
@@ -755,6 +738,12 @@ pub fn create_terminal_session(
             // callback therefore only needs to call it once and emit the
             // result.
             if event.code == 0 || event.code == 2 {
+                // Taken before the activity is derived, not before it is
+                // emitted: the reconcile worker derives from a snapshot and
+                // emits much later, so only a derivation-time stamp tells the
+                // frontend which of the two verdicts is actually newer
+                // (`activity_order`).
+                let activity_sequence = crate::activity_order::next_activity_sequence();
                 let interactive_app =
                     if let Ok(buffers) = state_for_pty.output_buffers.lock_or_err() {
                         activity::detect_interactive_app_from_live_title(
@@ -791,6 +780,10 @@ pub fn create_terminal_session(
                         // following PowerShell-prompt title still passes
                         // the heuristic guard from issue #234).
                         "interactiveAppExited": interactive_app_exited,
+                        // Orders this verdict against the reconcile worker's.
+                        // Only the activity fields are ordered by it — the
+                        // title itself is always current.
+                        "activitySequence": activity_sequence,
                     }),
                 );
             }
@@ -1441,6 +1434,13 @@ pub fn close_terminal_session(
     // Clean up Codex terminal tracking
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
         known.remove(&id);
+    }
+
+    // Drop the PTY callback's detection flags. The callback closure is gone with
+    // the PTY, so keeping the entry would only pin dead state and grow the table
+    // over a long session.
+    if let Ok(mut callback_states) = state.pty_callback_states.lock_or_err() {
+        callback_states.remove(&id);
     }
 
     // Clean up the per-terminal write/exec lock (#427). The table is now

@@ -207,21 +207,46 @@ fn publish(snapshot: WslLivenessSnapshot) {
     }
 }
 
+/// The timeout to give the next probe, or `None` when the pass is out of
+/// budget and the remaining distributions must be skipped.
+///
+/// A probe never gets more than its own timeout, and never more than what is
+/// left of the pass. A sliver too short to complete a `wsl.exe` round trip is
+/// not worth the spawn, so the tail of the budget skips instead.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn probe_timeout(remaining: Duration) -> Option<Duration> {
+    /// Shorter than this and the probe would be killed before the guest shell
+    /// even started, so it can only burn spawn cost.
+    const MIN_PROBE_SLICE: Duration = Duration::from_millis(500);
+
+    if remaining < MIN_PROBE_SLICE {
+        return None;
+    }
+    Some(remaining.min(crate::constants::WSL_LIVENESS_PROBE_TIMEOUT))
+}
+
 /// Probe every distribution that hosts a WSL pane and publish one snapshot.
 ///
 /// Called once per activity reconcile pass, never from the PTY callback thread.
 ///
-/// Each distribution gets its own timeout rather than sharing one pass-wide
-/// deadline: a single hanging distribution would otherwise consume the budget
-/// and, because the iteration order is stable, starve every distribution behind
-/// it on every pass. The starting index also rotates per pass so no
-/// distribution is permanently first in line.
+/// The whole pass shares `WSL_LIVENESS_PASS_BUDGET`, because the pass — not the
+/// individual probe — is what separates two published snapshots, and a verdict
+/// older than `WSL_LIVENESS_AUTHORITATIVE_MAX_AGE` stops being authoritative.
+/// Each probe still gets its own timeout within that budget, so one hanging
+/// distribution cannot eat the whole pass, and the starting index rotates per
+/// pass so the distributions dropped when the budget runs out are not the same
+/// ones every time.
 #[cfg(windows)]
 pub fn refresh(state: &AppState) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static PASS: AtomicUsize = AtomicUsize::new(0);
 
-    let target_deadline = Instant::now() + crate::constants::WSL_LIVENESS_PROBE_TIMEOUT;
+    let pass_deadline = Instant::now() + crate::constants::WSL_LIVENESS_PASS_BUDGET;
+    // Resolution is a `wsl.exe` spawn of its own and is charged to the same
+    // budget: on a cache miss it would otherwise add a full probe timeout on
+    // top of every probe below.
+    let target_deadline =
+        pass_deadline.min(Instant::now() + crate::constants::WSL_LIVENESS_PROBE_TIMEOUT);
     let targets = match crate::wsl_probe::wsl_terminal_targets(state, target_deadline) {
         Ok(targets) => targets,
         Err(error) => {
@@ -263,12 +288,21 @@ pub fn refresh(state: &AppState) {
     }
 
     let mut snapshot = WslLivenessSnapshot::default();
+    let mut out_of_budget = 0usize;
     for (distro, terminal_ids) in distros {
+        let Some(timeout) = probe_timeout(pass_deadline.saturating_duration_since(Instant::now()))
+        else {
+            // Leaving these panes without a verdict is the safe half: the
+            // heuristics keep owning them for a pass. Publishing late would
+            // instead age the whole snapshot out of its authoritative window.
+            out_of_budget += 1;
+            continue;
+        };
         let reading = match crate::wsl_probe::run_probe_script(
             &distro,
             WSL_LIVENESS_PROBE,
             "laymux-wsl-liveness-probe",
-            crate::constants::WSL_LIVENESS_PROBE_TIMEOUT,
+            timeout,
         )
         .and_then(|stdout| parse_probe_output(&stdout))
         {
@@ -300,6 +334,12 @@ pub fn refresh(state: &AppState) {
             let app = apps.get(&terminal_id).copied();
             snapshot.verdicts.insert(terminal_id, (generation, app));
         }
+    }
+    if out_of_budget > 0 {
+        tracing::warn!(
+            out_of_budget,
+            "WSL liveness pass ran out of budget; distributions left without a verdict"
+        );
     }
     publish(snapshot);
 }
@@ -410,8 +450,8 @@ pub fn resolve_rows(rows: Vec<WslAgentRow>) -> (HashMap<String, &'static str>, H
 mod tests {
     use super::*;
     use crate::constants::{
-        ACTIVITY_RECONCILE_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE,
-        WSL_LIVENESS_POSITIVE_MAX_AGE,
+        ACTIVITY_RECONCILE_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_PASS_BUDGET,
+        WSL_LIVENESS_POSITIVE_MAX_AGE, WSL_LIVENESS_PROBE_TIMEOUT,
     };
 
     const GEN: u64 = 7;
@@ -431,11 +471,44 @@ mod tests {
 
     #[test]
     fn steady_state_refresh_keeps_snapshots_inside_the_authoritative_window() {
-        // While activity is changing, the reconcile worker probes at its fast
-        // cadence; a negative must stay authoritative across that gap instead of
-        // flapping to Unknown in normal operation.
-        assert!(ACTIVITY_RECONCILE_INTERVAL < WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
+        // Two publishes are separated by one cadence plus one whole pass, and
+        // the pass — resolution plus every distribution's probe — is bounded by
+        // the pass budget rather than by a single probe timeout. A negative must
+        // stay authoritative across that worst case instead of flapping to
+        // Unknown in normal operation.
+        assert!(
+            ACTIVITY_RECONCILE_INTERVAL + WSL_LIVENESS_PASS_BUDGET
+                <= WSL_LIVENESS_AUTHORITATIVE_MAX_AGE
+        );
         assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
+    }
+
+    /// The budget has to cover more than one probe: resolution spends from it
+    /// first, and every distribution spends from what is left.
+    #[test]
+    fn the_pass_budget_leaves_room_for_more_than_one_probe() {
+        assert!(WSL_LIVENESS_PASS_BUDGET > WSL_LIVENESS_PROBE_TIMEOUT);
+    }
+
+    #[test]
+    fn a_probe_never_outlives_its_own_timeout_or_the_pass() {
+        assert_eq!(
+            probe_timeout(WSL_LIVENESS_PASS_BUDGET),
+            Some(WSL_LIVENESS_PROBE_TIMEOUT)
+        );
+        assert_eq!(
+            probe_timeout(Duration::from_secs(1)),
+            Some(Duration::from_secs(1))
+        );
+    }
+
+    /// Once the budget is gone the remaining distributions are skipped: a probe
+    /// that cannot finish would only delay the publish and age every other
+    /// pane's verdict out of its window.
+    #[test]
+    fn an_exhausted_budget_skips_the_probe_instead_of_shortening_it() {
+        assert_eq!(probe_timeout(Duration::ZERO), None);
+        assert_eq!(probe_timeout(Duration::from_millis(100)), None);
     }
 
     #[test]

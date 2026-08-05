@@ -25,6 +25,16 @@ export interface TerminalInstance {
   lastCommandAt?: number;
   /** Detected terminal activity state. */
   activity?: TerminalActivityInfo;
+  /**
+   * Backend stamp of the activity above, taken when the backend *derived* it.
+   *
+   * Two producers write activity — the PTY callback per title, and the periodic
+   * reconcile worker — and they do not arrive in derivation order: a reconcile
+   * pass snapshots state, walks every pane, then emits, so a title resolved in
+   * that window is newer but lands first. Keeping the winning stamp lets the
+   * later-arriving older verdict be ignored (ADR-0135).
+   */
+  activitySequence?: number;
   /** True if terminal is actively producing output. */
   outputActive?: boolean;
   /** Latest provider-specific activity status message. */
@@ -56,6 +66,7 @@ interface TerminalStoreState {
         | "lastExitCode"
         | "lastCommandAt"
         | "activity"
+        | "activitySequence"
         | "outputActive"
         | "syncGroup"
         | "activityMessage"

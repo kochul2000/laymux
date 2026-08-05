@@ -511,6 +511,26 @@ pub fn clear_interactive_app_grace_window(state: &AppState, terminal_id: &str) {
     }
 }
 
+/// Forget the grace-window entry for `terminal_id`, but only if it names
+/// `app_name`.
+///
+/// An exit is an exit *of one app*. A pane can hand over from Codex to Claude
+/// with no shell in between, and by the time that exit is noticed the entry
+/// already belongs to the app that took over — removing it there would drop the
+/// new session's detection and let the pane fall back to Shell until its next
+/// title. Session teardown still uses the unconditional
+/// [`clear_interactive_app_grace_window`]: there is no successor to protect.
+pub fn clear_interactive_app_grace_window_for(state: &AppState, terminal_id: &str, app_name: &str) {
+    if let Ok(mut guard) = state.last_detected_interactive_app.lock_or_err() {
+        if guard
+            .get(terminal_id)
+            .is_some_and(|(name, _)| name == app_name)
+        {
+            guard.remove(terminal_id);
+        }
+    }
+}
+
 /// Record that `app_name` was explicitly seen to exit on `terminal_id` at
 /// `Instant::now()`. The PTY callback calls this in the `cr.exited` /
 /// `cr_codex.exited` branches.
@@ -528,6 +548,60 @@ pub fn record_interactive_app_exit(state: &AppState, terminal_id: &str, app_name
             (app_name.to_string(), Instant::now()),
         );
     }
+}
+
+/// Everything an interactive-app exit must clear in shared state, whichever
+/// producer noticed the exit.
+///
+/// The PTY callback's title state machine and the reconcile worker (ADR-0135
+/// §4-2) both observe exits — the callback when a non-agent title arrives, the
+/// worker when an app that emitted no exit title is simply gone. They must leave
+/// the same state behind, or the pane's next session inherits half of the
+/// previous one: a detection flag still set makes the relaunch read as a
+/// continuation rather than an entry, which skips the entry-only cleanup that
+/// drops the recently-exited marker.
+///
+/// Everything here is scoped to the app that exited. A handover leaves the
+/// successor already recorded in the same maps, and clearing by terminal alone
+/// would take the new session's state with it.
+///
+/// Each lock is taken and released on its own, so this composes with any
+/// caller's lock order.
+pub fn apply_interactive_app_exit(state: &AppState, terminal_id: &str, app_name: &str) {
+    use std::sync::atomic::Ordering;
+
+    if let Ok(states) = state.pty_callback_states.lock_or_err() {
+        if let Some(callback_state) = states.get(terminal_id) {
+            match app_name {
+                "Claude" => callback_state
+                    .claude_detected
+                    .store(false, Ordering::Relaxed),
+                "Codex" => callback_state
+                    .codex_detected
+                    .store(false, Ordering::Relaxed),
+                _ => {}
+            }
+        }
+    }
+    match app_name {
+        "Claude" => {
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        "Codex" => {
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        _ => {}
+    }
+    // Drop the grace-window entry so the shell fallback engages immediately
+    // instead of pinning the exited app for up to `INTERACTIVE_APP_GRACE_WINDOW`
+    // (#237), and record the exit so the banner still sitting in the 16KB recent
+    // window cannot re-pin the cache on the next title.
+    clear_interactive_app_grace_window_for(state, terminal_id, app_name);
+    record_interactive_app_exit(state, terminal_id, app_name);
 }
 
 /// Forget the recently-exited marker for `terminal_id`. Called when a fresh
@@ -2268,6 +2342,97 @@ mod tests {
             !state.known_codex_terminals.lock().unwrap().contains(tid),
             "exit-trailing shell title must not re-register Codex in the cache",
         );
+    }
+
+    /// An exit clears the exiting app's state and nothing else. A pane can hand
+    /// over from Codex straight to Claude, and by the time the reconcile worker
+    /// notices Codex is gone (ADR-0135 §4-2) the grace entry and the known-set
+    /// membership already belong to the Claude session that took over.
+    #[test]
+    fn an_exit_leaves_the_successors_detection_alone() {
+        let state = AppState::new();
+        let tid = "t-codex-handover-to-claude";
+
+        record_interactive_app_detection(&state, tid, "Claude");
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        apply_interactive_app_exit(&state, tid, "Codex");
+
+        assert_eq!(
+            lookup_interactive_app_within_grace_window(&state, tid),
+            Some("Claude".to_string()),
+            "the successor's grace entry must survive the previous app's exit",
+        );
+        assert!(
+            state.known_claude_terminals.lock().unwrap().contains(tid),
+            "a Codex exit must not evict the pane from the Claude cache",
+        );
+    }
+
+    #[test]
+    fn an_exit_clears_the_exiting_apps_own_detection() {
+        let state = AppState::new();
+        let tid = "t-claude-exit";
+
+        record_interactive_app_detection(&state, tid, "Claude");
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        apply_interactive_app_exit(&state, tid, "Claude");
+
+        assert_eq!(
+            lookup_interactive_app_within_grace_window(&state, tid),
+            None
+        );
+        assert!(!state.known_claude_terminals.lock().unwrap().contains(tid));
+        assert!(
+            is_recently_exited(&state, tid, "Claude"),
+            "the exit marker is what stops the still-resident banner from re-pinning the pane",
+        );
+    }
+
+    /// The PTY callback's own memory of the session lives in these flags, and
+    /// `resolve_claude_detected` ORs them with the shared set — so an exit
+    /// noticed elsewhere has to clear them too, or the next launch reads as a
+    /// continuation and never runs the entry-only cleanup.
+    #[test]
+    fn an_exit_clears_the_pty_callbacks_detection_flag() {
+        use std::sync::atomic::Ordering;
+
+        let state = AppState::new();
+        let tid = "t-callback-flag";
+        let callback_state = std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000));
+        callback_state
+            .claude_detected
+            .store(true, Ordering::Relaxed);
+        callback_state.codex_detected.store(true, Ordering::Relaxed);
+        state
+            .pty_callback_states
+            .lock()
+            .unwrap()
+            .insert(tid.to_string(), std::sync::Arc::clone(&callback_state));
+
+        apply_interactive_app_exit(&state, tid, "Claude");
+
+        assert!(!callback_state.claude_detected.load(Ordering::Relaxed));
+        assert!(
+            callback_state.codex_detected.load(Ordering::Relaxed),
+            "a Claude exit says nothing about a Codex session in the same pane",
+        );
+    }
+
+    #[test]
+    fn an_exit_for_a_pane_with_no_callback_state_is_a_no_op() {
+        let state = AppState::new();
+        apply_interactive_app_exit(&state, "t-never-spawned", "Claude");
+        assert!(is_recently_exited(&state, "t-never-spawned", "Claude"));
     }
 
     #[test]

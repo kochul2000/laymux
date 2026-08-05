@@ -1311,6 +1311,7 @@ src-tauri/src/
 ├── codex_activity.rs         # Codex 앱 전용 활동 분기
 ├── claude_bullet.rs          # Claude Code 상태 메시지 추출 + ANSI 스트리핑
 ├── activity_reconcile.rs     # 주기 재판정 + 변경분 push 워커 (ADR-0135)
+├── activity_order.rs         # activity 생산자 간 파생 시점 stamp (ADR-0136)
 ├── process_tree.rs           # PTY 자식 프로세스 트리 liveness (ADR-0009)
 ├── wsl_liveness.rs           # WSL pane 게스트 프로브 liveness (ADR-0134)
 ├── wsl_probe.rs              # WSL distribution 해석/검증 + wsl.exe --exec 실행
