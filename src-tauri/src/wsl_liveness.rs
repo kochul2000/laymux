@@ -8,8 +8,11 @@
 //!
 //! The probe cannot run on the PTY callback thread — OSC 0/2 spinner titles
 //! arrive several times per second and `wsl.exe --exec` costs tens of
-//! milliseconds. A background refresher owns every guest crossing and
-//! publishes a snapshot; detection only ever reads that snapshot.
+//! milliseconds. Every guest crossing therefore happens on the activity
+//! reconcile worker ([`crate::activity_reconcile`]), which calls [`refresh`]
+//! once per pass; detection only ever reads the snapshot it published, so the
+//! reconcile cadence is also the probe cadence (ADR-0135, correcting ADR-0134's
+//! observation gating).
 //!
 //! Freshness is deliberately asymmetric:
 //!
@@ -18,9 +21,11 @@
 //!   `Unknown` so a just-started agent is picked up by the title/buffer
 //!   heuristics immediately instead of waiting out the staleness window.
 //! - No snapshot / no verdict for this pane in the last pass — `Unknown`.
-//! - Exit decisions ([`Purpose::ExitDecision`]) get no positive at all: that
-//!   call is one-shot, so a cached `Running` could pin a pane that really did
-//!   exit, with nothing to undo it.
+//!
+//! Exit decisions read the same verdict as display: for a WSL pane the guest
+//! probe owns the exit, and the reconcile worker publishes the correction if a
+//! suppression turns out to be wrong (ADR-0135, superseding ADR-0134's
+//! withhold-on-exit rule).
 //!
 //! Verdicts are keyed by PTY generation, because a pane can be torn down and
 //! respawned under the same terminal id.
@@ -33,8 +38,6 @@ use crate::process_tree::PtyAppLiveness;
 
 #[cfg(windows)]
 use crate::state::AppState;
-#[cfg(windows)]
-use std::sync::Arc;
 
 /// Guest-side scan. Only `claude` / `codex` processes are inspected further, so
 /// the cost is one `comm` read per process plus a short ancestor walk for the
@@ -134,26 +137,15 @@ struct CacheEntry {
 
 static CACHE: std::sync::Mutex<Option<CacheEntry>> = std::sync::Mutex::new(None);
 
-/// Last time detection asked about a WSL pane. The refresher stops crossing the
-/// boundary once nobody is looking, so an idle window costs nothing.
-static LAST_DEMAND: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
-
-/// Why liveness is being asked, which decides how much staleness is tolerable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Purpose {
-    /// Classify what is running in the pane right now. A slightly stale
-    /// positive only delays noticing an exit and the next pass corrects it.
-    Display,
-    /// Decide whether a title-derived exit is false (ADR-0009 suppression).
-    /// This decision is **one-shot** — nothing re-fires it — so a cached
-    /// positive must never suppress a real exit here.
-    ExitDecision,
-}
-
 /// The liveness verdict for a WSL-backed pane. Cheap: one mutex and a map
 /// lookup, no process enumeration and no guest crossing.
-pub fn liveness(terminal_id: &str, generation: u64, purpose: Purpose) -> PtyAppLiveness {
-    note_demand();
+///
+/// The same verdict serves display and exit decisions. ADR-0134 withheld
+/// positives from exit decisions because a wrong suppression would pin a dead
+/// pane with nothing to undo it; the reconcile worker (ADR-0135) is now that
+/// undo, so the guest probe owns WSL exits outright — a title-derived exit for a
+/// live agent is the failure that actually reaches users.
+pub fn liveness(terminal_id: &str, generation: u64) -> PtyAppLiveness {
     let Ok(guard) = CACHE.lock_or_err() else {
         return PtyAppLiveness::Unknown;
     };
@@ -165,7 +157,6 @@ pub fn liveness(terminal_id: &str, generation: u64, purpose: Purpose) -> PtyAppL
         entry.taken_at.elapsed(),
         terminal_id,
         generation,
-        purpose,
     )
 }
 
@@ -175,7 +166,6 @@ pub fn decide(
     age: Duration,
     terminal_id: &str,
     generation: u64,
-    purpose: Purpose,
 ) -> PtyAppLiveness {
     let Some((verdict_generation, app)) = snapshot.verdicts.get(terminal_id) else {
         return PtyAppLiveness::Unknown;
@@ -186,12 +176,6 @@ pub fn decide(
         return PtyAppLiveness::Unknown;
     }
     match app {
-        // Suppressing an exit needs proof the app is alive *now*, and the guest
-        // cannot be reached from this thread. Declining to answer keeps the
-        // title-derived exit flowing, which is what WSL panes did before this
-        // module existed — a wrong suppression here would pin a dead pane until
-        // some later title event, with no reconcile path to undo it (#767).
-        Some(_) if purpose == Purpose::ExitDecision => PtyAppLiveness::Unknown,
         Some(app) if age <= crate::constants::WSL_LIVENESS_POSITIVE_MAX_AGE => {
             PtyAppLiveness::Running(app)
         }
@@ -214,20 +198,6 @@ pub fn forget(terminal_id: &str) {
     }
 }
 
-fn note_demand() {
-    if let Ok(mut guard) = LAST_DEMAND.lock_or_err() {
-        *guard = Some(Instant::now());
-    }
-}
-
-#[cfg(windows)]
-fn demanded_recently() -> bool {
-    let Ok(guard) = LAST_DEMAND.lock_or_err() else {
-        return false;
-    };
-    guard.is_some_and(|at| at.elapsed() <= crate::constants::WSL_LIVENESS_DEMAND_WINDOW)
-}
-
 fn publish(snapshot: WslLivenessSnapshot) {
     if let Ok(mut guard) = CACHE.lock_or_err() {
         *guard = Some(CacheEntry {
@@ -237,23 +207,9 @@ fn publish(snapshot: WslLivenessSnapshot) {
     }
 }
 
-/// Start the background refresher. One thread for the whole app: the probe is
-/// per distribution, not per pane, so terminal count does not multiply cost.
-#[cfg(windows)]
-pub fn start_refresher(state: Arc<AppState>) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(crate::constants::WSL_LIVENESS_REFRESH_INTERVAL);
-        if !demanded_recently() {
-            continue;
-        }
-        refresh(&state);
-    });
-}
-
-#[cfg(not(windows))]
-pub fn start_refresher(_state: std::sync::Arc<crate::state::AppState>) {}
-
 /// Probe every distribution that hosts a WSL pane and publish one snapshot.
+///
+/// Called once per activity reconcile pass, never from the PTY callback thread.
 ///
 /// Each distribution gets its own timeout rather than sharing one pass-wide
 /// deadline: a single hanging distribution would otherwise consume the budget
@@ -454,8 +410,8 @@ pub fn resolve_rows(rows: Vec<WslAgentRow>) -> (HashMap<String, &'static str>, H
 mod tests {
     use super::*;
     use crate::constants::{
-        WSL_LIVENESS_AUTHORITATIVE_MAX_AGE, WSL_LIVENESS_POSITIVE_MAX_AGE,
-        WSL_LIVENESS_REFRESH_INTERVAL,
+        ACTIVITY_RECONCILE_INTERVAL, WSL_LIVENESS_AUTHORITATIVE_MAX_AGE,
+        WSL_LIVENESS_POSITIVE_MAX_AGE,
     };
 
     const GEN: u64 = 7;
@@ -475,9 +431,10 @@ mod tests {
 
     #[test]
     fn steady_state_refresh_keeps_snapshots_inside_the_authoritative_window() {
-        // Otherwise every pass would spend part of its cycle in the degraded
-        // tier and negatives would flap to Unknown in normal operation.
-        assert!(WSL_LIVENESS_REFRESH_INTERVAL < WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
+        // While activity is changing, the reconcile worker probes at its fast
+        // cadence; a negative must stay authoritative across that gap instead of
+        // flapping to Unknown in normal operation.
+        assert!(ACTIVITY_RECONCILE_INTERVAL < WSL_LIVENESS_AUTHORITATIVE_MAX_AGE);
         assert!(WSL_LIVENESS_AUTHORITATIVE_MAX_AGE <= WSL_LIVENESS_POSITIVE_MAX_AGE);
     }
 
@@ -485,23 +442,11 @@ mod tests {
     fn fresh_snapshot_answers_both_ways() {
         let snap = fresh();
         assert_eq!(
-            decide(
-                &snap,
-                Duration::from_millis(10),
-                "t-claude",
-                GEN,
-                Purpose::Display
-            ),
+            decide(&snap, Duration::from_millis(10), "t-claude", GEN),
             PtyAppLiveness::Running("Claude")
         );
         assert_eq!(
-            decide(
-                &snap,
-                Duration::from_millis(10),
-                "t-empty",
-                GEN,
-                Purpose::Display
-            ),
+            decide(&snap, Duration::from_millis(10), "t-empty", GEN),
             PtyAppLiveness::NoneAlive
         );
     }
@@ -510,13 +455,7 @@ mod tests {
     fn pane_without_a_verdict_never_gets_one() {
         let snap = fresh();
         assert_eq!(
-            decide(
-                &snap,
-                Duration::from_millis(10),
-                "t-other",
-                GEN,
-                Purpose::Display
-            ),
+            decide(&snap, Duration::from_millis(10), "t-other", GEN),
             PtyAppLiveness::Unknown
         );
         assert_eq!(
@@ -524,8 +463,7 @@ mod tests {
                 &WslLivenessSnapshot::default(),
                 Duration::ZERO,
                 "t-claude",
-                GEN,
-                Purpose::Display
+                GEN
             ),
             PtyAppLiveness::Unknown
         );
@@ -539,47 +477,12 @@ mod tests {
     fn verdict_from_a_previous_pty_generation_is_ignored() {
         let snap = fresh();
         assert_eq!(
-            decide(
-                &snap,
-                Duration::from_millis(10),
-                "t-claude",
-                GEN + 1,
-                Purpose::Display
-            ),
+            decide(&snap, Duration::from_millis(10), "t-claude", GEN + 1),
             PtyAppLiveness::Unknown
         );
         assert_eq!(
-            decide(
-                &snap,
-                Duration::from_millis(10),
-                "t-empty",
-                GEN + 1,
-                Purpose::Display
-            ),
+            decide(&snap, Duration::from_millis(10), "t-empty", GEN + 1),
             PtyAppLiveness::Unknown
-        );
-    }
-
-    /// Exit suppression is one-shot: nothing re-runs it. A cached positive would
-    /// therefore pin a pane that really did exit until some later title event,
-    /// and there is no reconcile path to undo that (#767).
-    #[test]
-    fn exit_decisions_never_suppress_from_a_cached_positive() {
-        let snap = fresh();
-        assert_eq!(
-            decide(
-                &snap,
-                Duration::ZERO,
-                "t-claude",
-                GEN,
-                Purpose::ExitDecision
-            ),
-            PtyAppLiveness::Unknown
-        );
-        // The negative is unchanged: it suppresses nothing either way.
-        assert_eq!(
-            decide(&snap, Duration::ZERO, "t-empty", GEN, Purpose::ExitDecision),
-            PtyAppLiveness::NoneAlive
         );
     }
 
@@ -590,11 +493,11 @@ mod tests {
         let snap = fresh();
         let stale = WSL_LIVENESS_AUTHORITATIVE_MAX_AGE + Duration::from_secs(1);
         assert_eq!(
-            decide(&snap, stale, "t-empty", GEN, Purpose::Display),
+            decide(&snap, stale, "t-empty", GEN),
             PtyAppLiveness::Unknown
         );
         assert_eq!(
-            decide(&snap, stale, "t-claude", GEN, Purpose::Display),
+            decide(&snap, stale, "t-claude", GEN),
             PtyAppLiveness::Running("Claude")
         );
     }
@@ -607,8 +510,7 @@ mod tests {
                 &snap,
                 WSL_LIVENESS_POSITIVE_MAX_AGE + Duration::from_secs(1),
                 "t-claude",
-                GEN,
-                Purpose::Display
+                GEN
             ),
             PtyAppLiveness::Unknown
         );

@@ -296,16 +296,12 @@ fn app_in_pty(state: &AppState, terminal_id: &str, force_fresh: bool) -> PtyAppL
     // title/buffer detectors for every WSL pane. Hand the verdict to the guest
     // probe, which answers `Unknown` when it has nothing to say (ADR-0134).
     //
-    // `force_fresh` marks an exit decision. The guest cannot be reached from
-    // this thread, so the probe declines to answer rather than suppress a real
-    // exit from a cached positive.
+    // `force_fresh` cannot mean anything here: the guest is unreachable from
+    // this thread, so exit decisions read the same published verdict as display.
+    // The guest probe owns WSL exits and the reconcile worker publishes the
+    // correction when a suppression turns out to be wrong (ADR-0135).
     if let Some(generation) = wsl_target {
-        let purpose = if force_fresh {
-            crate::wsl_liveness::Purpose::ExitDecision
-        } else {
-            crate::wsl_liveness::Purpose::Display
-        };
-        return crate::wsl_liveness::liveness(terminal_id, generation, purpose);
+        return crate::wsl_liveness::liveness(terminal_id, generation);
     }
     // No PID → no tree to walk; skip enumeration entirely.
     if child_pid.is_none() {

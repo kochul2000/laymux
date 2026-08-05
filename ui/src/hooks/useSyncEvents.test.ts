@@ -21,6 +21,7 @@ const mockOnClaudeMessageChanged = vi.fn();
 const mockOnTerminalCwdChanged = vi.fn();
 const mockOnTerminalTitleChanged = vi.fn();
 const mockOnTerminalOutputActivity = vi.fn();
+const mockOnTerminalActivityReconciled = vi.fn();
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 
 const mockSendDesktopNotification = vi.fn().mockResolvedValue(undefined);
@@ -38,6 +39,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalCwdChanged: (...args: unknown[]) => mockOnTerminalCwdChanged(...args),
   onTerminalTitleChanged: (...args: unknown[]) => mockOnTerminalTitleChanged(...args),
   onTerminalOutputActivity: (...args: unknown[]) => mockOnTerminalOutputActivity(...args),
+  onTerminalActivityReconciled: (...args: unknown[]) => mockOnTerminalActivityReconciled(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
   getTerminalStates: (...args: unknown[]) => mockGetTerminalStates(...args),
   sendOsNotification: vi.fn().mockResolvedValue(undefined),
@@ -69,6 +71,7 @@ describe("useSyncEvents", () => {
     mockOnTerminalCwdChanged.mockResolvedValue(unlisten);
     mockOnTerminalTitleChanged.mockResolvedValue(unlisten);
     mockOnTerminalOutputActivity.mockResolvedValue(unlisten);
+    mockOnTerminalActivityReconciled.mockResolvedValue(unlisten);
     mockGetTerminalSerializeMap.mockReturnValue(new Map());
   });
 
@@ -303,6 +306,61 @@ describe("useSyncEvents", () => {
   it("registers claude-message-changed listener on mount", () => {
     renderHook(() => useSyncEvents());
     expect(mockOnClaudeMessageChanged).toHaveBeenCalledWith(expect.any(Function));
+  });
+
+  // ── Periodic reconcile (ADR-0135) ──
+
+  it("applies reconciled activity over a value the event path already set", () => {
+    // The whole point of #767: an event-path classification that went stale must
+    // be correctable. The mount sync deliberately refuses to overwrite, so this
+    // has to.
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", { activity: { type: "shell" } });
+
+    renderHook(() => useSyncEvents());
+    const callback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      callback([{ terminalId: "t1", activity: { type: "interactiveApp", name: "Claude" } }]);
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "interactiveApp", name: "Claude" });
+  });
+
+  it("applies a reconciled downgrade after an interactive app exits", () => {
+    useTerminalStore.getState().registerInstance({
+      id: "t1",
+      profile: "WSL",
+      syncGroup: "g1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("t1", {
+      activity: { type: "interactiveApp", name: "Claude" },
+    });
+
+    renderHook(() => useSyncEvents());
+    const callback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      callback([{ terminalId: "t1", activity: { type: "shell" } }]);
+    });
+
+    const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+    expect(instance?.activity).toEqual({ type: "shell" });
+  });
+
+  it("ignores reconciled entries for terminals the frontend does not have", () => {
+    renderHook(() => useSyncEvents());
+    const callback = mockOnTerminalActivityReconciled.mock.calls[0][0];
+    act(() => {
+      callback([{ terminalId: "t-gone", activity: { type: "shell" } }]);
+    });
+
+    expect(useTerminalStore.getState().instances).toHaveLength(0);
   });
 
   // ── Initial state sync on mount (ADR-0009 / option 2) ──

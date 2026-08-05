@@ -13,6 +13,7 @@ import {
   onTerminalCwdChanged,
   onTerminalTitleChanged,
   onTerminalOutputActivity,
+  onTerminalActivityReconciled,
   markClaudeTerminal,
   getTerminalStates,
 } from "@/lib/tauri-api";
@@ -396,6 +397,33 @@ export function useSyncEvents() {
             activity?: { type: import("@/stores/terminal-store").TerminalActivityType };
           },
         );
+      }),
+    );
+
+    // Periodic reconcile (ADR-0135). The event path can only report a change
+    // when a title arrives, and an interactive app parked at its prompt emits
+    // none — so a classification it missed would otherwise stay wrong until the
+    // user typed. The backend re-derives activity on a timer and pushes just the
+    // panes that changed; these are as fresh as any live event and are applied
+    // the same way, in both directions.
+    trackListener(
+      onTerminalActivityReconciled((entries) => {
+        if (cancelled) return;
+        const { updateInstanceInfo, instances } = useTerminalStore.getState();
+        for (const { terminalId, activity } of entries) {
+          const instance = instances.find((i) => i.id === terminalId);
+          // An instance the frontend does not have is a pane it never
+          // registered (or has already removed) — recreating one from a
+          // reconcile entry would resurrect a dead pane.
+          if (!instance) continue;
+          if (
+            instance.activity?.type === activity.type &&
+            instance.activity?.name === activity.name
+          ) {
+            continue;
+          }
+          updateInstanceInfo(terminalId, { activity });
+        }
       }),
     );
 

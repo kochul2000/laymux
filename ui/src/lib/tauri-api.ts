@@ -1435,6 +1435,29 @@ export function onTerminalOutputActivity(
   });
 }
 
+/** One pane whose authoritative activity no longer matches what was published. */
+export interface ReconciledActivity {
+  terminalId: string;
+  activity: TerminalActivityInfo;
+}
+
+/**
+ * Listen for the backend's periodic activity reconcile (ADR-0135).
+ *
+ * Only panes whose activity changed since the last publish are included. The
+ * backend derives these from the authoritative output rings and process/guest
+ * liveness, so they are as fresh as the live event path and may be applied the
+ * same way — including downgrading a pane the event path left classified as an
+ * interactive app after it exited.
+ */
+export function onTerminalActivityReconciled(
+  callback: (entries: ReconciledActivity[]) => void,
+): Promise<UnlistenFn> {
+  return listen<ReconciledActivity[]>("terminal-activity-reconciled", (event) => {
+    callback(event.payload);
+  });
+}
+
 /** Listen for Claude Code white-● message changes from the backend. */
 export function onClaudeMessageChanged(
   callback: (data: { terminalId: string; message: string }) => void,

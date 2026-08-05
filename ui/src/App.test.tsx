@@ -102,6 +102,7 @@ vi.mock("@/lib/tauri-api", () => {
     onTerminalTitleChanged: vi.fn().mockResolvedValue(unlisten),
     markClaudeTerminal: vi.fn().mockResolvedValue(true),
     onTerminalOutputActivity: vi.fn().mockResolvedValue(unlisten),
+    onTerminalActivityReconciled: vi.fn().mockResolvedValue(unlisten),
     getRemoteControlStatus: vi.fn().mockResolvedValue({
       active: false,
       leaseId: null,
