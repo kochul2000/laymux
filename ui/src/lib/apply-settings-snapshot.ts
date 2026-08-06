@@ -95,7 +95,6 @@ export function applySettingsSnapshot(
     ...(rawSettings.claude ? { claude: rawSettings.claude } : {}),
     ...(rawSettings.codex ? { codex: rawSettings.codex } : {}),
     ...(rawSettings.exit ? { exit: rawSettings.exit } : {}),
-    ...(rawSettings.workspaceClear ? { workspaceClear: rawSettings.workspaceClear } : {}),
     ...(rawSettings.issueReporter ? { issueReporter: rawSettings.issueReporter } : {}),
     ...(rawSettings.fileExplorer ? { fileExplorer: rawSettings.fileExplorer } : {}),
     ...(rawSettings.viewer ? { viewer: rawSettings.viewer } : {}),

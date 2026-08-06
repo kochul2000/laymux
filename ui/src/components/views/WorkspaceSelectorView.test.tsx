@@ -12,7 +12,7 @@ import {
   getListeningPorts,
   getTerminalSummaries,
   markNotificationsRead,
-  writeTerminalInput,
+  writeToTerminal,
 } from "@/lib/tauri-api";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
 import { useUiStore } from "@/stores/ui-store";
@@ -2356,32 +2356,16 @@ describe("WorkspaceSelectorView", () => {
       }
     };
 
-    it("clears every terminal pane of the hovered workspace", async () => {
+    it("broadcasts Ctrl+L to every terminal pane of the hovered workspace", async () => {
       setup();
       render(<WorkspaceSelectorView />);
       fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
       fireEvent.click(screen.getByTestId("workspace-clear-ws-term"));
 
       await waitFor(() => {
-        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith(
-          "terminal-pane-a",
-          "clear",
-          true,
-        );
+        expect(vi.mocked(writeToTerminal)).toHaveBeenCalledWith("terminal-pane-a", "\x0c");
       });
-      expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-b", "clear", true);
-    });
-
-    it("submits the configured shell command instead of the default", async () => {
-      setup();
-      useSettingsStore.getState().setWorkspaceClear({ shellCommand: "cls" });
-      render(<WorkspaceSelectorView />);
-      fireEvent.mouseEnter(screen.getByTestId("workspace-item-ws-term"));
-      fireEvent.click(screen.getByTestId("workspace-clear-ws-term"));
-
-      await waitFor(() => {
-        expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledWith("terminal-pane-a", "cls", true);
-      });
+      expect(vi.mocked(writeToTerminal)).toHaveBeenCalledWith("terminal-pane-b", "\x0c");
     });
 
     // The button would be a no-op there, and an inert control reads as broken.

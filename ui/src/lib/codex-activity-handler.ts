@@ -35,22 +35,6 @@ export class CodexActivityHandler extends ShellActivityHandler {
     return startsWithBrailleSpinner(title);
   }
 
-  /** Codex drops its conversation context with the `/clear` slash command. */
-  clearInput(): string {
-    return "/clear";
-  }
-
-  /**
-   * Busy whenever the shell rule says so, while the Braille spinner title is
-   * animating, or while a confirmation prompt is open — in the prompt case
-   * `/clear` would be typed as the answer.
-   */
-  isBusy(raw: RawTerminalState): boolean {
-    if (super.isBusy(raw)) return true;
-    if (isInputPending(raw.activityMessage)) return true;
-    return startsWithBrailleSpinner(raw.title);
-  }
-
   computeStatus(raw: RawTerminalState) {
     if (isInputPending(raw.activityMessage)) {
       return { icon: "✓", color: "var(--green)" };

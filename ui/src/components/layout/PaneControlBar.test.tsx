@@ -290,39 +290,6 @@ describe("PaneControlBar", () => {
     expect(defaultActions.onClear).toHaveBeenCalled();
   });
 
-  it("터미널 클리어 아이콘은 Alt+L 설명을 표시하고 클릭 시 전용 동작을 호출한다", async () => {
-    const onClearTerminal = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <PaneControlBar
-        currentView={defaultView}
-        actions={{ ...defaultActions, onClearTerminal }}
-        hovered={true}
-      >
-        <div>content</div>
-      </PaneControlBar>,
-    );
-
-    const button = screen.getByTestId("pane-control-clear-terminal");
-    expect(button).toHaveAttribute("title", "Clear terminal (Alt+L)");
-    await user.click(button);
-    expect(onClearTerminal).toHaveBeenCalledTimes(1);
-  });
-
-  it("터미널이 아닌 view에는 터미널 클리어 아이콘을 표시하지 않는다", () => {
-    render(
-      <PaneControlBar
-        currentView={{ type: "MemoView" }}
-        actions={{ ...defaultActions, onClearTerminal: vi.fn() }}
-        hovered={true}
-      >
-        <div>content</div>
-      </PaneControlBar>,
-    );
-
-    expect(screen.queryByTestId("pane-control-clear-terminal")).not.toBeInTheDocument();
-  });
-
   it("Restart View는 terminal에서만 빨간 위험 버튼으로 표시하고 동작한다", async () => {
     const onRestart = vi.fn();
     const user = userEvent.setup();

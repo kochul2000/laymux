@@ -130,7 +130,7 @@ ADR 이 필요한 대표 기준:
 | [0110](0110-github-snapshot-stale-while-revalidate.md) | GitHub 스냅샷은 만료돼도 마지막으로 알던 목록을 먼저 내려준다 (0106 확장) | Proposed |
 | [0111](0111-github-view-display-settings.md) | GitHubView 행 표시는 전역 `settings.github` 이 소유하고, 색은 이름으로만 받는다 (0107 적용) | Proposed |
 | [0112](0112-hex-color-code-authoring.md) | 손으로 적는 색상은 hex 색상 코드(`#rrggbb`/`#rrggbbaa`)로만 표기한다 | Accepted |
-| [0113](0113-workspace-clear-activity-owned.md) | 워크스페이스 클리어는 activity handler 가 클리어 방법을 소유하고, 모르는 앱은 건드리지 않는다 | Proposed |
+| [0113](0113-workspace-clear-activity-owned.md) | 워크스페이스 클리어는 activity handler 가 클리어 방법을 소유하고, 모르는 앱은 건드리지 않는다 | Superseded by 0137 |
 | [0114](0114-sleep-prevention-mode.md) | 절전 방지는 설정이 모드를 소유하고 OS 억제는 Rust 단일 지점이 건다 (0116 이 모드 부분 정정) | Proposed |
 | [0115](0115-github-view-tab-per-pane-state.md) | GitHubView 의 Issues/PRs 탭은 pane 인스턴스 UI 상태이고 `defaultTab` 은 씨앗일 뿐이다 (0111 후속) | Proposed |
 | [0116](0116-sleep-prevention-two-axes.md) | 절전 방지는 수동 스위치와 자동 정책 두 축이고 상단 바 버튼은 수동 축만 표시한다 (0114 정정) | Proposed |
@@ -138,7 +138,7 @@ ADR 이 필요한 대표 기준:
 | [0118](0118-codex-session-pid-attribution.md) | Codex 세션은 PTY 자식 PID와 Codex 진단 DB가 함께 증명한 thread로만 복원 | Accepted |
 | [0119](0119-settings-type-error-partial-recovery.md) | settings.json 타입 오류는 경로 단위로 드롭해 부분 복구하고, 확인 전까지 파일에 쓰지 않는다 | Proposed |
 | [0120](0120-wsl-agent-session-attribution.md) | WSL agent 세션은 distro 내부 terminal 환경 marker와 Linux PID로만 정확히 귀속 | Accepted |
-| [0121](0121-single-pane-clear-user-pointed-scope.md) | 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다 | Proposed |
+| [0121](0121-single-pane-clear-user-pointed-scope.md) | 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다 | Superseded by 0137 |
 | [0122](0122-terminal-output-server-delivery-expiry.md) | backend receipt·continuation grant expiry는 최장 직렬 복구 경로를 덮는 30초다 | Superseded by ADR-0126 |
 | [0123](0123-top-bar-window-controls-outrank-everything.md) | 상단 바에서 창 버튼(최소화·최대화·닫기)은 다른 모든 점유자보다 우선한다 | Accepted |
 | [0124](0124-remote-widget-strip-mirrors-desktop.md) | 원격 위젯은 데스크톱 배치의 미러이며 표면은 한 줄 스트립 하나다 (0105 확장) | Accepted |
@@ -154,6 +154,7 @@ ADR 이 필요한 대표 기준:
 | [0134](0134-wsl-guest-interactive-app-liveness.md) | WSL pane 의 인터랙티브 앱 liveness 는 게스트 프로브가 권위 (0009 확장·정정) | Accepted |
 | [0135](0135-activity-reconcile-backend-diff-push.md) | Activity 는 백엔드가 주기적으로 재판정해 변경분만 push (0009 확장, 0134 관측 게이팅 정정) | Accepted |
 | [0136](0136-activity-derivation-stamp-and-scoped-exit.md) | Activity 는 파생 시점 stamp 로 순서화하고 종료 정리는 종료한 앱에만 적용 (0135 4·4-1·4-2 정정) | Accepted |
+| [0137](0137-workspace-clear-ctrl-l-broadcast.md) | 워크스페이스 클리어는 activity 판정 없이 Ctrl+L 브로드캐스트로 단순화하고, 단일 pane 클리어는 폐지한다 (0113/0121 대체) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

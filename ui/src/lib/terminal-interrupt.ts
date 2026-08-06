@@ -1,10 +1,10 @@
 /**
  * Ctrl+C constants shared by every path that interrupts a terminal.
  *
- * Deliberately a leaf module with no imports. Both consumers —
- * `interrupt-terminals-on-exit` (kill-on-exit, issue #451) and
- * `workspace-clear` (ADR-0113) — are reachable from `settings-store`, so
- * hanging these values off either one puts a cycle through the store.
+ * Deliberately a leaf module with no imports. Its current consumer is
+ * `interrupt-terminals-on-exit` (kill-on-exit, issue #451); kept leaf so a
+ * future consumer reachable from `settings-store` can import it without
+ * routing a cycle through the store.
  */
 
 /** ETX — the byte a terminal sends when the user presses Ctrl+C. */

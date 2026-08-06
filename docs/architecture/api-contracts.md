@@ -455,34 +455,13 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 조율은 **프론트엔드 종료 흐름**이 담당한다([ADR-0048](../adr/0048-kill-terminals-on-exit.md)). `saveBeforeClose()` 는 스크롤백을 직렬화하기 **전에** `interruptTerminalsOnExit()`(`ui/src/lib/interrupt-terminals-on-exit.ts`)를 먼저 await 하므로, 세션 ID 가 캐시에 담긴다. 인터럽트는 종료 전용 커맨드 `interrupt_terminal_on_exit` 로 `0x03` 을 PTY FIFO 에 바로 써서 ConPTY/line discipline 이 포그라운드 앱에 실제 Ctrl+C 를 전달한다. 일반 `write_to_terminal`(`HumanControlOrigin::Local`) 경로는 원격 제어 lease/claim 활성 시 거부되므로, 종료 인터럽트는 owner 게이트를 우회하는 이 전용 경로(ETX 전용)를 쓴다. 특정 앱을 감지하지 않고 열린 모든 터미널에 보내며(유휴 셸에는 무해), 개별 write 실패는 나머지 인터럽트를 막지 않는다. Ctrl+C 사이 간격은 설정이 아니라 상수(120ms)다. Rust 는 `settings.exit` 스키마·기본값·범위 검증(applyMode `live`)만 소유하고 실제 인터럽트 실행에는 관여하지 않는다.
 
-### 터미널 클리어 설정
+### 워크스페이스 터미널 클리어
 
-한 워크스페이스의 `TerminalView` pane 을 한 번에 클리어하는 동작(issue #726, [ADR-0113](../adr/0113-workspace-clear-activity-owned.md))과, 같은 판정을 pane 하나에 적용하는 단일 pane 클리어(issue #741, [ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md))를 함께 제어한다. 설정 키는 `workspaceClear` 하나뿐이고 두 갈래가 공유한다.
+Ctrl+Alt+L(및 워크스페이스 행의 지우개 버튼, `POST /api/v1/workspaces/{id}/clear`)은 한 워크스페이스의 `TerminalView` pane 전부에 Ctrl+L 키 입력 하나를 그대로 뿌린다(issue #726, [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) — pane 마다 손으로 Ctrl+L 을 누르는 것과 동일하고, 설정 항목은 없다.
 
-```jsonc
-{
-  "workspaceClear": {
-    "shellCommand": "clear",   // 일반 shell 에 제출할 명령. cmd.exe 는 "cls". 빈 값이면 "clear"
-    "busyPolicy": "skip",      // 작업 중인 pane: "skip"(기본) | "interrupt" | "restart"
-    "interruptRounds": 2,      // interrupt 정책의 Ctrl+C 전송 횟수. 1~10 으로 clamp
-    "settleMs": 400            // 마지막 Ctrl+C 이후 클리어 입력까지 대기(ms). 0~10000 으로 clamp
-  }
-}
-```
+이전에는 pane 의 activity handler 가 `clear`/`cls`/`/clear` 중 무엇을 칠지 정하고, 작업 중인 pane 을 skip/interrupt/restart 중 하나로 처리했다(`workspaceClear` 설정). 그 판정과 설정, 그리고 판정을 pane 하나에 적용하던 단일 pane 클리어(issue #741, Alt+L, [ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md))는 모두 제거됐다 — Ctrl+L 은 어떤 앱에 보내도 안전해서 activity 별 분기가 필요 없었다.
 
-무엇을 칠지는 pane 의 activity handler 가 소유한다 — shell 은 `shellCommand`, Claude Code·Codex 는 `/clear`. 전용 handler 가 없는 `interactiveApp`(vim·htop·less 등)은 `unsupportedApp` 으로 건너뛴다. 제출은 사람 입력과 동일한 `write_terminal_input(submit: true)` 이므로 bracketed paste 처리와 human-control 게이트가 그대로 적용되고, `interrupt` 정책의 Ctrl+C 만 raw `write_to_terminal` 로 보낸다(ETX 를 bracketed paste 로 감싸면 인터럽트가 아니라 붙여넣기가 된다). 종료 시 인터럽트([위](#종료-시-동작kill-on-exit-설정))와 달리 owner 게이트를 우회하는 전용 경로는 쓰지 않는다.
-
-쓰기가 거부된 pane(원격이 제어 lease 를 쥐고 있거나 PTY 가 이미 죽은 경우)은 결과의 `failed` 에 담긴다 — 조용히 버리면 "터미널 pane 이 없는 워크스페이스"와 구분되지 않는다. `interruptThenSubmit` 이 중간에 실패하면 이미 들어간 Ctrl+C 때문에 `interrupted` 와 `failed` 양쪽에 남는다.
-
-`busyPolicy` 는 enum 이라 알 수 없는 값은 파싱 단계에서 거부되고 `describe_settings` 가 허용값 3개를 그대로 내보낸다. 범위 검증(`interruptRounds` 1~10, `settleMs` 0~10000)은 `/exit` 와 같은 계약으로 `semantic_validation.rs` 가 소유하며, 그 외 정규화(빈 `shellCommand` → `clear`, 손으로 편집한 값 clamp)는 프론트의 `resolveWorkspaceClear()`(`ui/src/lib/workspace-clear.ts`) 한 지점이 담당한다.
-
-Automation 경로만 `interrupt` 대기를 `AUTOMATION_CLEAR_WAIT_BUDGET_MS`(3s)로 캡한다. 캡이 없으면 `settleMs: 5000` 같은 정상 설정에서 클리어는 성공했는데 bridge 가 먼저 5초에 끊겨 504 를 돌려주고 pane 별 결과가 유실된다. 캡은 Ctrl+C 횟수를 먼저 지키고 `settleMs` 를 줄이며, 횟수만으로 예산을 넘길 때만 횟수를 낮춘다(그때 남는 시간은 다시 settle 로 돌려준다). 응답의 `waitCapped`·`interruptRounds`·`settleMs` 가 실제로 적용된 값이다. 키보드·버튼 경로는 기다리는 쪽이 없으므로 설정값 그대로 쓴다.
-
-여기에 **새 write 를 더 내보내지 않는 절대 deadline**(`AUTOMATION_CLEAR_DEADLINE_MS`, 4s)이 따로 붙는다. 두 값은 다르다 — sleep 예산(3s)은 우리가 만드는 대기만 줄이고, deadline 은 예정대로 잔 체인이 마지막 클리어를 치는 것까지는 허용해야 하므로 그보다 커야 한다. 순서는 항상 `sleep 예산 < deadline < bridge 예산` 이고 테스트가 이 순서를 고정한다.
-
-deadline 이 필요한 이유는 개별 PTY write 가 제어 큐에서 `PTY_CONTROL_JOB_TIMEOUT_MS`(15s)까지 대기할 수 있고 JS 에서 취소할 방법이 없기 때문이다. 프론트가 보장할 수 있는 것은 "예산이 지난 뒤에는 더 치지 않는다"까지다. 이 게이트가 없으면 504 를 받은 호출자가 재시도하는 동안 원래 체인이 뒤늦게 `/clear` 를 한 번 더 넣는다. deadline 에 걸린 pane 은 이미 들어간 Ctrl+C 를 `interrupted` 에 남긴 채 `failed` 에도 사유와 함께 기록된다. 이미 진행 중인 write 하나는 응답 이후에도 도착할 수 있다 — 취소 가능한 PTY write 는 이 이슈의 범위를 넘는 별도 결정이다.
-
-범위는 두 갈래가 다르다. 워크스페이스 클리어(`POST /api/v1/workspaces/{id}/clear`)에서 dock pane 은 대상이 아니다. 단일 pane 클리어(`POST /api/v1/panes/{paneId}/clear`)는 dock pane 을 포함하며, 격자 인덱스가 아니라 pane id 로 받는다 — dock pane 에는 인덱스가 없다. 터미널 pane 이 아닌 id 는 빈 결과가 아니라 에러로 답한다. 대기 캡·deadline·응답 필드는 위와 같고, `workspaceId` 자리에 `paneId` 가 온다.
+세션이 아직 없는 pane(`notReady`)은 건너뛴다. 쓰기가 거부된 pane(원격이 제어 lease 를 쥐고 있거나 PTY 가 이미 죽은 경우)은 결과의 `failed` 에 담긴다 — 조용히 버리면 "터미널 pane 이 없는 워크스페이스"와 구분되지 않는다. dock pane 은 대상이 아니다: 워크스페이스 전환에도 살아남는 고정 surface 라 "이 워크스페이스"의 일부가 아니다.
 
 ### CWD 동기화 기본값
 
@@ -711,7 +690,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
-| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 TerminalView pane 클리어. 응답에 pane 별 결과(`cleared`/`interrupted`/`restarted`/`skipped`/`failed`)와 실제 적용된 대기 설정(`waitCapped`/`interruptRounds`/`settleMs`) |
+| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 모든 TerminalView pane 에 Ctrl+L 브로드캐스트. 응답은 pane 별 결과(`cleared`/`skipped`/`failed`) |
 | POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
 | GET | `/api/v1/grid` | 그리드 상태 |
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
@@ -1648,7 +1627,9 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 ### 15.6 앱 전용 편의 코드 격리
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다. 표시뿐 아니라 **그 앱을 어떻게 클리어하는가**도 핸들러가 소유한다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)).
+각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
+
+(과거에는 워크스페이스 클리어가 이 핸들러에게 "무엇을 칠지"·"지금 busy 한지"도 물었다 — [ADR-0113](../adr/0113-workspace-clear-activity-owned.md). [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md) 이후 클리어는 activity 판정 없이 Ctrl+L 만 보내므로 `clearInput`/`isBusy` 는 인터페이스에서 제거됐다.)
 
 #### ActivityHandler 인터페이스
 
@@ -1657,15 +1638,8 @@ interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
   computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
   computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
-  clearInput(shellClearCommand: string): string;             // 워크스페이스 클리어가 제출할 텍스트
-  isBusy(raw: RawTerminalState): boolean;                    // 지금 쳐도 빈 프롬프트에 닿는가
 }
 ```
-
-`clearInput`·`isBusy` 는 필수다. `ShellActivityHandler` 가 기본 구현(설정된 shell 명령 / `outputActive || activity==="running"`)을 주므로 새 핸들러는 그것을 상속하고 다른 점만 덮어쓴다 — Claude·Codex 는 `/clear` 와 자신의 working spinner·input-pending 신호를 더한다.
-
-- `isBusy` 는 표시용 아이콘과 다른 개념이다. input-pending 모달은 `computeStatus` 가 ✓ 를 주지만 그때 클리어를 치면 모달의 답으로 들어가므로 busy 다. 반대로 "작업 중 터미널 수" 위젯은 모달을 세면 안 되므로 이 술어를 쓰지 않는다.
-- **쓰는 동작은 등록 여부로 게이트한다.** `getHandler()` 는 표시가 계속 동작하도록 미등록 interactive app 에 shell 핸들러를 폴백으로 주지만, 그 폴백은 쓰기에서는 틀렸다(`nvim` 버퍼에 `clear` 가 박힌다). 클리어처럼 PTY 에 쓰는 호출부는 `isRegisteredInteractiveApp()` 으로 먼저 걸러야 한다.
 
 #### 핸들러 등록
 

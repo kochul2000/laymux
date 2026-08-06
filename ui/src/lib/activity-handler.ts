@@ -34,20 +34,6 @@ export interface ActivityHandler {
   shouldPreserveActivityOnTitleReset?(raw: RawTerminalState): boolean;
   shouldPreserveActivityOnExitCode?(raw: RawTerminalState): boolean;
   isActiveTitle?(title: string | undefined): boolean;
-  /**
-   * Text the workspace-clear action types into this terminal, submitted as one
-   * line. `shellClearCommand` is the user-configured shell command
-   * (`settings.workspaceClear.shellCommand`); agent handlers ignore it and
-   * return their own slash command. See ADR-0113.
-   */
-  clearInput(shellClearCommand: string): string;
-  /**
-   * True when typing `clearInput()` right now would land somewhere other than
-   * an empty prompt — a running command, a streaming task, or an open modal.
-   * Distinct from `computeStatus()`: an input-pending modal shows ✓ but must
-   * still count as busy, because the clear text would answer the modal.
-   */
-  isBusy(raw: RawTerminalState): boolean;
 }
 
 type InteractiveAppRegistration = {
@@ -91,19 +77,6 @@ export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {
     return interactiveApps.get(activity.name)?.handler ?? defaultHandler;
   }
   return defaultHandler;
-}
-
-/**
- * True when `activity` names an interactive app with a dedicated handler.
- *
- * `getHandler()` deliberately falls back to the shell handler for unregistered
- * apps so status display keeps working, but that fallback is wrong for actions
- * that WRITE: typing the shell clear command into `nvim` or `less` corrupts
- * their buffer. Callers that write must gate on this instead (ADR-0113).
- */
-export function isRegisteredInteractiveApp(activity?: TerminalActivityInfo): boolean {
-  if (activity?.type !== "interactiveApp" || !activity.name) return false;
-  return interactiveApps.has(activity.name);
 }
 
 function escapeRegExp(value: string): string {

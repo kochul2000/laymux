@@ -1294,7 +1294,7 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
 
 Pane control bar의 **Restart View**는 이 앱 시작 복원 흐름의 명시적 예외다. 현재 runtime terminal store의 CWD(아직 보고되지 않았으면 저장된 `lastCwd`)로 기존 PTY를 종료한 뒤 새 PTY를 생성한다. 이때만 `restoreCwd` 설정과 무관하게 그 CWD를 전달하며, 출력 캐시와 Claude/Codex resume 복원은 건너뛴다. 재시작 요청은 첫 새 세션 생성이 끝나면 소비되므로, 이후 프로필 변경 등 일반 재생성은 원래의 복원 정책을 다시 따른다.
 
-재시작 요청 상태(`epoch`/`cwd`/`fresh`)의 SoT 는 `stores/terminal-restart-store.ts` 다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)). `PaneGrid` 와 single-pane `Dock` 이 각자 자기 pane 의 항목만 구독하고, 워크스페이스 클리어의 `restart` 정책처럼 컴포넌트 밖에서도 요청할 수 있다. pane 이 제거되면 `forgetRestart`, 세션 복원처럼 pane 배열이 통째로 갈리는 경로는 기동 시 `gcStale` 이 정리한다.
+재시작 요청 상태(`epoch`/`cwd`/`fresh`)의 SoT 는 `stores/terminal-restart-store.ts` 다([ADR-0113](../adr/0113-workspace-clear-activity-owned.md)). `PaneGrid` 와 single-pane `Dock` 이 각자 자기 pane 의 항목만 구독한다 — 로컬 state 가 아니라 store 를 SoT 로 둔 이유는 재시작 요청을 컴포넌트 밖에서도 넣을 수 있게 하려는 것이다(지금은 각 컴포넌트의 Restart View 버튼만 이 경로를 쓴다). pane 이 제거되면 `forgetRestart`, 세션 복원처럼 pane 배열이 통째로 갈리는 경로는 기동 시 `gcStale` 이 정리한다.
 
 출력 캐시는 과거 로그와 scrollback을 복원하기 위한 데이터이므로 normal buffer만 저장한다. 종료 시점에 Claude Code·vim 같은 TUI가 alternate buffer를 사용 중이어도 그 일시적인 전체 화면과 mouse/bracketed-paste 같은 live terminal mode는 새 PTY 세션으로 넘기지 않는다. 이전 버전이 alternate buffer 활성 상태에서 저장한 캐시는 normal buffer 직렬화 뒤에 `DECSET 1049` suffix가 붙어 있으므로, 복원 시 `normalBufferOnly`가 해당 suffix를 제거한다. 이를 제거하지 않으면 새 xterm이 alternate buffer에 고정되어 `baseY=0`으로 남고 scrollback과 scrollbar가 사라진다.
 

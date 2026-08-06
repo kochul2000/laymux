@@ -27,7 +27,6 @@ vi.mock("@/components/views/TerminalView", () => ({
 // 단, 이벤트 리스너(onSyncCwd/onTerminalCwdChanged)는 실제 Tauri `listen` 을 호출해
 // jsdom 에서 throw 하므로 no-op 으로 stub 한다.
 const propagateCwdOnceMock = vi.fn().mockResolvedValue(undefined);
-const paneClearFromUiMock = vi.fn().mockResolvedValue(null);
 vi.mock("@/lib/tauri-api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tauri-api")>();
   return {
@@ -37,9 +36,6 @@ vi.mock("@/lib/tauri-api", async (importOriginal) => {
     onTerminalCwdChanged: vi.fn().mockResolvedValue(vi.fn()),
   };
 });
-vi.mock("@/lib/workspace-clear-action", () => ({
-  runPaneClearFromUi: (paneId: string) => paneClearFromUiMock(paneId),
-}));
 
 import { PaneGrid, type GridPane } from "./PaneGrid";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -69,7 +65,6 @@ describe("PaneGrid", () => {
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
     }));
-    paneClearFromUiMock.mockClear();
   });
 
   const defaultProps = {
@@ -92,17 +87,6 @@ describe("PaneGrid", () => {
     render(<PaneGrid {...defaultProps} onPaneFocus={onPaneFocus} />);
     fireEvent.mouseDown(screen.getByTestId("test-pane-0"));
     expect(onPaneFocus).toHaveBeenCalledWith("pane-0");
-  });
-
-  it("터미널 pane의 클리어 아이콘은 해당 pane 하나를 클리어한다", () => {
-    render(<PaneGrid {...defaultProps} />);
-
-    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
-    fireEvent.click(
-      within(screen.getByTestId("test-pane-0")).getByTestId("pane-control-clear-terminal"),
-    );
-
-    expect(paneClearFromUiMock).toHaveBeenCalledWith("pane-0");
   });
 
   it("renders FocusIndicator for focused pane", () => {

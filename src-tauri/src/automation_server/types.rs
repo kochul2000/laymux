@@ -201,7 +201,6 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/api/v1/panes/{index}"),
     ("POST", "/api/v1/panes/{index}/resize"),
     ("PUT", "/api/v1/panes/{index}/view"),
-    ("POST", "/api/v1/panes/{paneId}/clear"),
     ("GET", "/api/v1/docks"),
     ("POST", "/api/v1/docks/layout-mode/toggle"),
     ("PUT", "/api/v1/docks/{position}/active-view"),

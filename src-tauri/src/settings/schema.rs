@@ -202,12 +202,6 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
-        path: "/workspaceClear",
-        description: "워크스페이스 전체 클리어 설정입니다. shell 에 보낼 클리어 명령과, 작업 중인 pane 을 그냥 둘지(skip)·멈추고 클리어할지(interrupt)·view 를 재시작할지(restart) 정합니다.",
-        sensitive: false,
-        apply_mode: ApplyMode::Live,
-    },
-    MetadataEntry {
         path: "/memo",
         description: "MemoView 폰트·여백·문단 복사 동작 설정입니다.",
         sensitive: false,

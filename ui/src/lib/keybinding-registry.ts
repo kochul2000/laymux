@@ -145,7 +145,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Workspace",
     passThroughTerminal: true,
   },
-  // 워크스페이스의 모든 TerminalView pane 을 한 번에 클리어한다 (ADR-0113).
+  // 워크스페이스의 모든 TerminalView pane 을 한 번에 클리어한다 (ADR-0137).
   // pane 컨트롤 바의 "Clear view"(pane 을 EmptyView 로 되돌림)와 다른 동작이다.
   {
     id: "workspace.clearTerminals",
@@ -182,15 +182,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     id: "pane.copyIdentifier",
     label: "포커스 Pane 식별자 복사",
     defaultKeys: "Ctrl+Alt+C",
-    group: "Pane",
-    passThroughTerminal: true,
-  },
-  // 포커스된 pane 하나만 클리어한다 — 워크스페이스 전체는 workspace.clearTerminals.
-  // dock pane 도 대상이다: 사용자가 그 pane 을 직접 가리켰기 때문이다 (ADR-0113).
-  {
-    id: "pane.clearTerminal",
-    label: "포커스 Pane 터미널 클리어",
-    defaultKeys: "Alt+L",
     group: "Pane",
     passThroughTerminal: true,
   },

@@ -1,6 +1,6 @@
 # 0121. 단일 pane 클리어는 사용자가 가리킨 pane 하나를 범위로 삼고, dock 을 포함한다
 
-- Status: Proposed
+- Status: Superseded by [0137](0137-workspace-clear-ctrl-l-broadcast.md)
 - Date: 2026-08-02
 - Source: 사용자 요구(issue #741 "클리어 기능 고도화"), [ADR-0113](0113-workspace-clear-activity-owned.md)(워크스페이스 클리어 — activity handler 가 클리어 방법을 소유)의 범위 확장
 
