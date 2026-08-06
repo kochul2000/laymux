@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
 import { fileExtension, resolveViewer } from "@/lib/file-viewer";
 import { htmlToSafePreviewDocument, markdownToSafePreviewDocument } from "@/lib/file-preview";
@@ -164,6 +164,29 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     [path],
   );
 
+  // Scope Ctrl+A to this viewer's own content instead of the browser default
+  // (select the whole laymux document). Only the "web" render path below owns
+  // this — a terminal-backed viewer (xterm) already handles its own Ctrl+A.
+  const contentRootRef = useRef<HTMLDivElement>(null);
+  const handleSelectAllKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.key.toLowerCase() !== "a") return;
+    const el = contentRootRef.current;
+    const selection = window.getSelection();
+    if (!el || !selection) return;
+    e.preventDefault();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+  // The host blurs its address bar once a file loads so the keyboard passes
+  // to the viewer (see FileViewerOverlay's submitPath) — claim it here so
+  // Ctrl+A (and other keys) land on this container instead of <body>.
+  useEffect(() => {
+    if (isFocused && content) contentRootRef.current?.focus();
+  }, [isFocused, content]);
+
   if (resolution.viewerType === "terminal") {
     if (!profiles.some((candidate) => candidate.name === resolution.profile)) {
       return (
@@ -235,117 +258,134 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     );
   }
 
-  if (content.kind === "image") {
-    // SVG is the one image a developer also reads as markup, so it gets the
-    // same Preview/Source toggle the text previews have.
-    if (isSvgPath(path)) {
+  return (
+    <div
+      ref={contentRootRef}
+      tabIndex={-1}
+      className="flex h-full min-h-0 w-full flex-1 flex-col outline-none"
+      onKeyDown={handleSelectAllKeyDown}
+      data-testid="file-viewer-content-root"
+    >
+      {renderLoadedContent(content)}
+    </div>
+  );
+
+  function renderLoadedContent(content: FileViewerContent): React.ReactNode {
+    if (content.kind === "image") {
+      // SVG is the one image a developer also reads as markup, so it gets the
+      // same Preview/Source toggle the text previews have.
+      if (isSvgPath(path)) {
+        return (
+          <PreviewToggleShell
+            renderMode={renderMode}
+            setRenderMode={setRenderMode}
+            onWheel={renderMode === "source" ? handleFontWheel : handleImageWheel}
+            rightControls={
+              renderMode === "source" ? (
+                <FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />
+              ) : (
+                <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
+              )
+            }
+          >
+            <SvgPreview
+              dataUrl={content.dataUrl}
+              path={path}
+              showSource={renderMode === "source"}
+              bodyStyle={effectiveBodyStyle}
+              zoom={renderMode === "preview" ? imageZoom : undefined}
+            />
+          </PreviewToggleShell>
+        );
+      }
       return (
-        <PreviewToggleShell
-          renderMode={renderMode}
-          setRenderMode={setRenderMode}
-          onWheel={renderMode === "source" ? handleFontWheel : handleImageWheel}
-          rightControls={
-            renderMode === "source" ? (
-              <FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />
-            ) : (
-              <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
-            )
-          }
+        <div
+          className="flex h-full min-h-0 flex-1 flex-col"
+          style={{ background: "var(--bg-surface)" }}
         >
-          <SvgPreview
-            dataUrl={content.dataUrl}
-            path={path}
-            showSource={renderMode === "source"}
-            bodyStyle={effectiveBodyStyle}
-            zoom={renderMode === "preview" ? imageZoom : undefined}
-          />
-        </PreviewToggleShell>
+          <ToolbarBar>
+            <div className="ml-auto flex items-center gap-1">
+              <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
+            </div>
+          </ToolbarBar>
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center overflow-auto"
+            style={bodyStyle}
+            onWheel={handleImageWheel}
+          >
+            <img
+              src={content.dataUrl}
+              alt={path}
+              style={{
+                maxWidth: "100%",
+                maxHeight: "100%",
+                objectFit: "contain",
+                transform: `scale(${imageZoom / 100})`,
+                transformOrigin: "center",
+              }}
+              data-testid="file-viewer-image"
+            />
+          </div>
+        </div>
       );
     }
-    return (
-      <div className="flex h-full min-h-0 flex-1 flex-col" style={{ background: "var(--bg-surface)" }}>
-        <ToolbarBar>
-          <div className="ml-auto flex items-center gap-1">
-            <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
-          </div>
-        </ToolbarBar>
+
+    if (content.kind === "pdf") {
+      return <PdfPreview dataUrl={content.dataUrl} path={path} />;
+    }
+
+    if (content.kind === "archive") {
+      return (
+        <ArchivePreview
+          format={content.format}
+          entries={content.entries}
+          totalEntries={content.totalEntries}
+          totalBytes={content.totalBytes}
+          truncated={content.truncated}
+          bodyStyle={effectiveBodyStyle}
+        />
+      );
+    }
+
+    if (content.kind === "binary") {
+      return (
         <div
-          className="flex min-h-0 flex-1 items-center justify-center overflow-auto"
-          style={bodyStyle}
-          onWheel={handleImageWheel}
+          className="flex flex-col items-center justify-center h-full gap-2"
+          style={{ color: "var(--text-secondary)", ...effectiveBodyStyle }}
+          data-testid="file-viewer-binary"
         >
-          <img
-            src={content.dataUrl}
-            alt={path}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              objectFit: "contain",
-              transform: `scale(${imageZoom / 100})`,
-              transformOrigin: "center",
-            }}
-            data-testid="file-viewer-image"
-          />
+          <div>Binary file ({(content.size / 1024).toFixed(1)} KB)</div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  if (content.kind === "pdf") {
-    return <PdfPreview dataUrl={content.dataUrl} path={path} />;
-  }
+    if (previewKind) {
+      return (
+        <PreviewableTextFile
+          path={path}
+          content={content}
+          previewKind={previewKind}
+          renderMode={renderMode}
+          setRenderMode={setRenderMode}
+          bodyStyle={effectiveBodyStyle}
+          onWheel={handleFontWheel}
+          rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
+        />
+      );
+    }
 
-  if (content.kind === "archive") {
     return (
-      <ArchivePreview
-        format={content.format}
-        entries={content.entries}
-        totalEntries={content.totalEntries}
-        totalBytes={content.totalBytes}
-        truncated={content.truncated}
-        bodyStyle={effectiveBodyStyle}
-      />
-    );
-  }
-
-  if (content.kind === "binary") {
-    return (
-      <div
-        className="flex flex-col items-center justify-center h-full gap-2"
-        style={{ color: "var(--text-secondary)", ...effectiveBodyStyle }}
-        data-testid="file-viewer-binary"
-      >
-        <div>Binary file ({(content.size / 1024).toFixed(1)} KB)</div>
-      </div>
-    );
-  }
-
-  if (previewKind) {
-    return (
-      <PreviewableTextFile
-        path={path}
-        content={content}
-        previewKind={previewKind}
-        renderMode={renderMode}
-        setRenderMode={setRenderMode}
-        bodyStyle={effectiveBodyStyle}
+      <PreviewToggleShell
+        renderMode="source"
+        setRenderMode={() => {}}
+        showModeToggle={false}
         onWheel={handleFontWheel}
         rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
-      />
+      >
+        <SourceText content={content} bodyStyle={effectiveBodyStyle} />
+      </PreviewToggleShell>
     );
   }
-
-  return (
-    <PreviewToggleShell
-      renderMode="source"
-      setRenderMode={() => {}}
-      showModeToggle={false}
-      onWheel={handleFontWheel}
-      rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
-    >
-      <SourceText content={content} bodyStyle={effectiveBodyStyle} />
-    </PreviewToggleShell>
-  );
 }
 
 interface PreviewableTextFileProps {
@@ -609,13 +649,7 @@ function FontZoomControls({
 }
 
 /** Zoom in/out for image content — mirrors the Ctrl+Wheel gesture over the same view. */
-function ImageZoomControls({
-  zoom,
-  onZoom,
-}: {
-  zoom: number;
-  onZoom: (delta: number) => void;
-}) {
+function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: number) => void }) {
   return (
     <>
       <button

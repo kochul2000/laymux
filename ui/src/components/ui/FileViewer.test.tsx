@@ -177,6 +177,26 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-image")).toBeInTheDocument();
   });
 
+  it("scopes Ctrl+A to the viewer's own content instead of the whole page", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "hello world",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
+    });
+
+    const root = screen.getByTestId("file-viewer-content-root");
+    const event = fireEvent.keyDown(root, { key: "a", ctrlKey: true, bubbles: true });
+    // fireEvent returns false when preventDefault() was called.
+    expect(event).toBe(false);
+
+    const selection = window.getSelection();
+    expect(selection?.rangeCount).toBeGreaterThan(0);
+    expect(selection?.getRangeAt(0).commonAncestorContainer.contains(root)).toBe(true);
+  });
+
   it("zooms an image in/out via the toolbar buttons and Ctrl+Wheel", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "image",
