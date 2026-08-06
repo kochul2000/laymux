@@ -20,19 +20,39 @@ export const PANE_OVERRIDES_KEY = "laymux-pane-overrides";
 export const VIEW_OVERRIDES_KEY = "laymux-view-overrides";
 
 /**
+ * FileViewer 인스턴스 id 접두사 — `lib/file-viewer.ts`의 `viewerInstanceId()`가
+ * 경로에서 파생시켜 부여한다. 이 id 는 workspace/dock pane id 가 아니라서
+ * `gcStale`의 `aliveIds`(현재 pane 집합)에는 절대 나타나지 않는다 — 파일은
+ * 열려 있을 때만 pane 을 갖고, 뷰어를 닫으면 pane 자체가 없어진다. 그래도
+ * 사용자가 조정한 폰트/이미지 줌은 "재시작 간 보존"돼야 하므로(ADR-0004),
+ * 이 접두사를 가진 viewOverrides 항목은 pane 생존 여부와 무관하게 gc 대상에서
+ * 제외한다.
+ */
+export const FILE_VIEWER_OVERRIDE_ID_PREFIX = "global-file-viewer:";
+
+/**
  * 폰트 줌(Ctrl +,-,0 / Ctrl+Wheel) 클램프 범위 — 단일 출처.
  * `fontSize` 오버라이드를 소비하는 모든 뷰(TerminalView·MemoView)가 공유한다.
  */
 export const FONT_ZOOM_MIN = 6;
 export const FONT_ZOOM_MAX = 72;
 
+/**
+ * 이미지 줌(FileViewer, Ctrl+Wheel / 버튼) 클램프·스텝 — 단일 출처.
+ */
+export const IMAGE_ZOOM_MIN = 25;
+export const IMAGE_ZOOM_MAX = 400;
+export const IMAGE_ZOOM_STEP = 25;
+
 export interface PaneOverrides {
   controlBarMode?: ControlBarMode;
 }
 
 export interface ViewOverrides {
-  /** TerminalView·MemoView: Ctrl+Wheel / Ctrl +,-,0 으로 조정된 폰트 크기. */
+  /** TerminalView·MemoView·FileViewer: Ctrl+Wheel / Ctrl +,-,0 으로 조정된 폰트 크기. */
   fontSize?: number;
+  /** FileViewer: Ctrl+Wheel / 버튼으로 조정된 이미지 확대율(%). 없으면 100. */
+  imageZoom?: number;
   /**
    * UsageView: pane 종횡비에서 도출되는 배치를 고정한다. 없으면 `auto`
    * (박스에서 매번 재계산). ADR-0102.
@@ -154,7 +174,7 @@ export const useOverridesStore = create<OverridesState>()((set, get) => ({
         else paneChanged = true;
       }
       for (const [id, v] of Object.entries(state.viewOverrides)) {
-        if (aliveIds.has(id)) nextView[id] = v;
+        if (aliveIds.has(id) || id.startsWith(FILE_VIEWER_OVERRIDE_ID_PREFIX)) nextView[id] = v;
         else viewChanged = true;
       }
       if (!paneChanged && !viewChanged) return state;

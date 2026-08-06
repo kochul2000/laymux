@@ -826,6 +826,18 @@ export interface FileExplorerSettings {
   extensionViewers: ExtensionViewer[];
 }
 
+/** FileViewer body settings — independent of FileExplorerSettings (the directory listing). */
+export interface ViewerSettings {
+  paddingTop: number;
+  paddingRight: number;
+  paddingBottom: number;
+  paddingLeft: number;
+  /** Font family. Empty string = inherit the app base font. */
+  fontFamily: string;
+  /** Font size. 0 = inherit the app base font size. */
+  fontSize: number;
+}
+
 /** Palette tokens offered for the `#123` emphasis. Names, so themes still own the hue. */
 export type GithubNumberColor =
   | "yellow"
@@ -974,6 +986,7 @@ export interface Settings {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
+  viewer?: ViewerSettings;
   remote?: RemoteSettings;
 }
 

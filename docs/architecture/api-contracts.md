@@ -308,6 +308,29 @@ Tailscale 직접 접속을 허용하려면 `allowedIps`에 Tailnet 범위(예: I
 }
 ```
 
+### File Viewer 폰트·여백 설정
+
+`settings.viewer`(`ViewerSettings`)는 **열린 파일 내용**(FileViewer 본문)의 `fontFamily`/`fontSize`/padding 기본값을 소유한다. `settings.fileExplorer`의 `fontFamily`/`fontSize`는 디렉터리 **목록**(트리) 전용이라 서로 다른 필드다 — 하나가 다른 하나에 안 붙어 있다. 둘 다 비어 있으면 `appearance.font`(앱 기본 폰트)를 상속한다.
+
+```jsonc
+{
+  "viewer": {
+    "fontFamily": "",   // 빈 문자열 = appearance.font.face 상속
+    "fontSize": 13,
+    "paddingTop": 8,
+    "paddingRight": 8,
+    "paddingBottom": 8,
+    "paddingLeft": 8
+  }
+}
+```
+
+FileViewer 안에서 Ctrl+Wheel 또는 툴바 A−/A+ 버튼으로 조정하는 폰트 줌은 이 설정값 자체가 아니라 `viewOverrides[viewerInstanceId].fontSize`(ADR-0004의 View 인스턴스 오버라이드 레이어, [overview.md](overview.md) §4.2)에 얹힌다 — TerminalView·MemoView와 같은 `settings → override` 해석 체인이다. `viewerInstanceId`는 워크스페이스/dock pane id가 아니라 파일 경로에서 파생된 값(`global-file-viewer:` 접두사, `lib/file-viewer.ts`)이라 앱 재시작 시 `gcStale`의 살아있는 pane 집합에 걸리지 않는다 — 이 접두사를 가진 `viewOverrides` 항목은 pane 생존 여부와 무관하게 gc 대상에서 예외 처리한다(`stores/overrides-store.ts`). 이미지(SVG preview 모드 포함)의 확대율(`imageZoom`, 25~400%)도 같은 맵의 같은 키에 저장되지만 대응하는 설정값은 없다 — 사진마다 "기본 줌"이라는 개념이 없기 때문이다.
+
+html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상속하지 않으므로, 이 폰트는 `buildPreviewDocument`가 매번 iframe 자신의 `<style>`에 구워 넣는다(`lib/file-preview.ts`). 같은 이유로 iframe 안에서 발생한 Ctrl+Wheel도 부모로 버블링되지 않아 `PreviewFrame`이 `contentDocument`에 직접 `wheel` 리스너를 붙여 부모의 폰트 줌 핸들러로 전달한다.
+
+이미지 확대는 CSS `transform: scale()`이 아니라 실측 자연 크기(`naturalWidth`/`naturalHeight`) 기반 실제 `width`/`height`로 구현한다(`components/ui/preview/ZoomableImage.tsx`) — transform은 레이아웃 박스를 키우지 않고 그리기만 키워서, 가운데 정렬된 flex 컨테이너의 위·왼쪽 오버플로가 `overflow: auto`로 스크롤 불가능한 음수 영역이 된다. 100%를 넘겨 확대하면 스크롤 컨테이너 정렬도 가운데에서 좌상단(`flex-start`)으로 전환해(`lib/image-zoom.ts`) 오버플로가 항상 한쪽 방향으로만 생기게 한다.
+
 ### Claude Code 설정
 
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.

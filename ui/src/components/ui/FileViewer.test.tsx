@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
 import { openExternal, readFileForViewer } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
@@ -40,6 +41,7 @@ describe("FileViewer", () => {
       truncated: false,
     });
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     useTerminalStartupStore.getState().syncCandidates({
       knownPaneIds: [baseProps.viewerInstanceId],
@@ -98,6 +100,35 @@ describe("FileViewer", () => {
       .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     expect(openExternal).toHaveBeenCalledWith("https://example.com/docs");
+  });
+
+  it("bakes the viewer font into the html preview iframe and forwards Ctrl+Wheel zoom to it", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "<h1>Report</h1>",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/report.html" />);
+    });
+
+    const iframe = screen.getByTestId("file-viewer-preview") as HTMLIFrameElement;
+    const initialSize = useSettingsStore.getState().viewer.fontSize;
+    expect(iframe.getAttribute("srcdoc")).toContain(`font-size:${initialSize}px !important`);
+
+    // The iframe is a separate document — a wheel fired inside it never
+    // bubbles to FileViewer's own onWheel, so PreviewFrame forwards it itself.
+    // No manual fireEvent.load here: jsdom already auto-fires `load` once the
+    // srcdoc assignment during render lands (verified — firing it again would
+    // attach a second listener and double the delta).
+    const doc = iframe.contentDocument!;
+    doc.dispatchEvent(
+      new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, cancelable: true, bubbles: true }),
+    );
+
+    expect(
+      useOverridesStore.getState().viewOverrides[baseProps.viewerInstanceId]?.fontSize,
+    ).toBe(initialSize + 1);
   });
 
   it("renders markdown files in preview mode by default", async () => {
@@ -173,6 +204,91 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/home/user/photo.png" />);
     });
     expect(screen.getByTestId("file-viewer-image")).toBeInTheDocument();
+  });
+
+  it("scopes Ctrl+A to the viewer's own content instead of the whole page", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "hello world",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
+    });
+
+    const root = screen.getByTestId("file-viewer-content-root");
+    const event = fireEvent.keyDown(root, { key: "a", ctrlKey: true, bubbles: true });
+    // fireEvent returns false when preventDefault() was called.
+    expect(event).toBe(false);
+
+    const selection = window.getSelection();
+    expect(selection?.rangeCount).toBeGreaterThan(0);
+    expect(selection?.getRangeAt(0).commonAncestorContainer.contains(root)).toBe(true);
+  });
+
+  it("zooms an image in/out via the toolbar buttons and Ctrl+Wheel", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "image",
+      dataUrl: "data:image/png;base64,abc123",
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/photo.png" />);
+    });
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("100%");
+
+    // Stub the decoded natural size the real onLoad event would report, so the
+    // zoomed style branch (real width/height, not a paint-only transform) engages.
+    const img = screen.getByTestId("file-viewer-image");
+    Object.defineProperty(img, "naturalWidth", { value: 200, configurable: true });
+    Object.defineProperty(img, "naturalHeight", { value: 100, configurable: true });
+    fireEvent.load(img);
+
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-in"));
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("125%");
+    // Real box growth (width/height), not `transform: scale()` — see ZoomableImage
+    // for why a transform's paint-only overflow can't be scrolled into on all sides.
+    expect(img).toHaveStyle({ width: "250px", height: "125px" });
+    expect(img).not.toHaveStyle({ transform: "scale(1.25)" });
+    // Past 100%, the scroll container must stop centering (flex-start) so the
+    // overflow it creates stays reachable by scroll.
+    expect(img.parentElement).toHaveStyle({ alignItems: "flex-start" });
+
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-out"));
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-out"));
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("75%");
+
+    fireEvent.wheel(img.parentElement!, { deltaY: -100, ctrlKey: true });
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("100%");
+    expect(img.parentElement).toHaveStyle({ alignItems: "center" });
+  });
+
+  it("zooms text font size via the toolbar buttons and Ctrl+Wheel", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "hello world",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
+    });
+    const initialSize = useSettingsStore.getState().viewer.fontSize;
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({ fontSize: `${initialSize}px` });
+
+    fireEvent.click(screen.getByTestId("file-viewer-font-increase"));
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 1}px`,
+    });
+
+    fireEvent.wheel(screen.getByTestId("file-viewer-text"), { deltaY: -100, ctrlKey: true });
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 2}px`,
+    });
+
+    // A plain (non-Ctrl) wheel must not touch the font size — it's ordinary scroll.
+    fireEvent.wheel(screen.getByTestId("file-viewer-text"), { deltaY: -100, ctrlKey: false });
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 2}px`,
+    });
   });
 
   it("renders a binary placeholder for binary content", async () => {

@@ -3445,6 +3445,97 @@ function FileExplorerSection() {
   );
 }
 
+// -- Section: File Viewer (opened-file body, distinct from the Explorer listing) --
+
+function ViewerSection() {
+  const { t } = useTranslation("settings");
+  const storeViewer = useSettingsStore((s) => s.viewer);
+  const setViewer = useSettingsStore((s) => s.setViewer);
+  const [viewer, setDraftViewer] = useDraft("viewer", storeViewer, (v) => setViewer(v));
+  const updateViewer = (partial: Partial<typeof viewer>) =>
+    setDraftViewer((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>{t("viewer.title")}</SectionTitle>
+
+      <SubGroup title={t("viewer.groupAppearance")}>
+        <SettingRow label={t("viewer.fontFamily")} desc={t("viewer.fontFamilyDesc")}>
+          <FocusInput
+            data-testid="viewer-font-family"
+            className={inputCls}
+            placeholder={t("viewer.fontFamilyPlaceholder")}
+            value={viewer.fontFamily}
+            onChange={(e) => updateViewer({ fontFamily: e.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow label={t("viewer.fontSize")} desc={t("viewer.fontSizeDesc")}>
+          <input
+            data-testid="viewer-font-size"
+            type="number"
+            min={8}
+            max={32}
+            className={inputCls}
+            style={{ width: 60 }}
+            value={viewer.fontSize}
+            onChange={(e) =>
+              updateViewer({ fontSize: Math.max(8, Math.min(32, Number(e.target.value) || 13)) })
+            }
+          />
+        </SettingRow>
+
+        {/* Padding */}
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("viewer.padding")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("viewer.paddingDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              {(["Top", "Right", "Bottom", "Left"] as const).map((dir) => {
+                const key = `padding${dir}` as
+                  | "paddingTop"
+                  | "paddingRight"
+                  | "paddingBottom"
+                  | "paddingLeft";
+                return (
+                  <label key={dir} className="flex items-center gap-1.5">
+                    <span className="w-12 text-[11px]" style={{ color: "var(--text-secondary)" }}>
+                      {t(`appearance.${dir.toLowerCase()}`)}
+                    </span>
+                    <input
+                      data-testid={`viewer-padding-${dir.toLowerCase()}`}
+                      type="number"
+                      min={0}
+                      max={64}
+                      className={inputCls}
+                      style={{ width: 60 }}
+                      value={viewer[key]}
+                      onChange={(e) =>
+                        updateViewer({
+                          [key]: Math.max(0, Math.min(64, Number(e.target.value) || 0)),
+                        })
+                      }
+                    />
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </SubGroup>
+    </div>
+  );
+}
+
 function IssueReporterSection() {
   const { t } = useTranslation("settings");
   const storeIssueReporter = useSettingsStore((s) => s.issueReporter);
@@ -5121,6 +5212,16 @@ export function SettingsView() {
             {t("nav.fileExplorer")}
           </button>
           <button
+            data-testid="nav-viewer"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("viewer")}
+            onClick={() => setActiveNav("viewer")}
+            onMouseEnter={() => setNavHover("viewer")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.viewer")}
+          </button>
+          <button
             data-testid="nav-issueReporter"
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("issueReporter")}
@@ -5247,6 +5348,7 @@ export function SettingsView() {
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
+            {activeNav === "viewer" && <ViewerSection />}
             {activeNav === "usage" && <UsageSection />}
             {activeNav === "widgets" && <WidgetsSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}

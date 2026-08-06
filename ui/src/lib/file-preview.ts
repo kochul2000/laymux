@@ -128,12 +128,20 @@ export function documentPreviewKind(path: string): DocumentPreviewKind | null {
   return null;
 }
 
-export function htmlToSafePreviewDocument(html: string): string {
-  return buildPreviewDocument(sanitizePreviewHtml(html));
+/** FileViewer's Ctrl+Wheel/toolbar font zoom (`viewer` settings + override) — the
+ *  iframe is a separate document, so it never inherits the host page's font;
+ *  it has to be baked into the generated `<style>` instead. */
+export interface PreviewFont {
+  family: string;
+  size: number;
 }
 
-export function markdownToSafePreviewDocument(markdown: string): string {
-  return buildPreviewDocument(markdownToSafeHtml(markdown), "markdown");
+export function htmlToSafePreviewDocument(html: string, font?: PreviewFont): string {
+  return buildPreviewDocument(sanitizePreviewHtml(html), "html", font);
+}
+
+export function markdownToSafePreviewDocument(markdown: string, font?: PreviewFont): string {
+  return buildPreviewDocument(markdownToSafeHtml(markdown), "markdown", font);
 }
 
 export function markdownToSafeHtml(markdown: string): string {
@@ -156,6 +164,7 @@ export function sanitizePreviewHtml(html: string): string {
 export function buildPreviewDocument(
   safeHtml: string,
   previewKind: DocumentPreviewKind = "html",
+  font?: PreviewFont,
 ): string {
   // Switch rather than a boolean so a future document kind has to state its own
   // stylesheet instead of silently inheriting the raw-HTML one.
@@ -172,17 +181,41 @@ export function buildPreviewDocument(
       break;
   }
 
+  // Appended last so it wins over both base stylesheets' own font rules
+  // (github-markdown-css's `.markdown-body` included) without editing them.
+  const fontOverrideCss = font
+    ? `html,body{font-size:${font.size}px !important;}` +
+      (font.family ? `html,body{font-family:${cssStringLiteral(font.family)} !important;}` : "")
+    : "";
+
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
     "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'; frame-src 'none';\">",
     "<style>",
     stylesheet,
+    fontOverrideCss,
     "</style>",
     "</head><body>",
     body,
     "</body></html>",
   ].join("");
+}
+
+/**
+ * Quote a font-family value for embedding inside a `<style>` block.
+ *
+ * The value comes from user settings (not remote/untrusted content), but the
+ * `<style>` element's content is still parsed by the HTML tokenizer before CSS
+ * even sees it — a literal `</style>` in the value would close the tag early
+ * regardless of CSS escaping, so `<`/`>` are escaped too, not just quotes.
+ */
+function cssStringLiteral(value: string): string {
+  return `"${value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/</g, "\\3c ")
+    .replace(/>/g, "\\3e ")}"`;
 }
 
 function cleanChildren(parent: Node): void {
