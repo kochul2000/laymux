@@ -158,7 +158,9 @@ mod tests {
         // `undefined`, not `null`: the pane hint parameter defaults to the
         // remembered pane, and an explicit `null` opts out of it — a reconnect
         // would then land on the focused pane instead of this tab's own.
-        assert!(html.contains("await loadNavigation(undefined, { focusInput: !auto });"));
+        assert!(html.contains("await loadNavigation(undefined, {"));
+        assert!(html.contains("focusInput: !auto,"));
+        assert!(html.contains("preserveViewport: auto,"));
         assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
         assert!(html.contains("const AUTO_CONNECT_RETRY_MAX_MS = 15000;"));
@@ -540,6 +542,8 @@ mod tests {
         ));
         assert!(html.contains("aria-label=\"Scroll to bottom\""));
         assert!(html.contains("function isTerminalScrolledUp(term)"));
+        assert!(html.contains("function terminalViewportDistanceFromBottom(term)"));
+        assert!(html.contains("function restoreTerminalViewport(term, distanceFromBottom)"));
         assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
         assert!(html.contains("scrollToBottomButton.addEventListener(\"click\", () => {"));
         assert!(html.contains("terminal.scrollToBottom();"));
@@ -1085,6 +1089,8 @@ mod tests {
         assert!(output_stream
             .contains("const focusInputOnOpen = !reconnecting && options.focusInput !== false;"));
         assert!(output_stream.contains("if (focusInputOnOpen) focusCurrentInputSurface();"));
+        assert!(output_stream.contains("renderedTerminalId === terminalId"));
+        assert!(output_stream.contains("restoreTerminalViewport(term, preservedViewportDistance);"));
         assert_eq!(
             output_stream.matches("focusCurrentInputSurface();").count(),
             1,

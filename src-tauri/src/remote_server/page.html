@@ -2037,6 +2037,10 @@
         let pathLinkMarker = null;
         let pathLinkPress = null;
         let terminal = null;
+        // The xterm instance is reused across disconnects and pane switches.
+        // Keep the id whose snapshot currently occupies it so a recovery can
+        // preserve surface-local viewport state only for that same terminal.
+        let renderedTerminalId = null;
         let fitAddon = null;
         let resizeObserver = null;
         // Last host geometry adopted by fitTerminal. Height-only shrinks below
@@ -3503,6 +3507,23 @@
           const baseY = activeBuffer.baseY ?? 0;
           const viewportY = activeBuffer.viewportY ?? baseY;
           return viewportY < baseY;
+        }
+
+        function terminalViewportDistanceFromBottom(term) {
+          const activeBuffer = term?.buffer?.active;
+          if (!activeBuffer) return 0;
+          const baseY = activeBuffer.baseY ?? 0;
+          const viewportY = activeBuffer.viewportY ?? baseY;
+          return Math.max(0, baseY - viewportY);
+        }
+
+        function restoreTerminalViewport(term, distanceFromBottom) {
+          // Snapshot replay and its geometry fit can leave xterm at an arbitrary
+          // viewport. Establish a deterministic baseline, then restore a recovery
+          // attach's surface-local scroll offset in the same synchronous task so
+          // the intermediate tail position is never painted.
+          term.scrollToBottom();
+          if (distanceFromBottom > 0) term.scrollLines(-distanceFromBottom);
         }
 
         function updateScrollToBottomButton(term = terminal) {
@@ -5626,7 +5647,10 @@
           if (activeTerminalId) {
             terminalMetaEl.textContent = terminalLabel(nextTerminal);
             if (options.openOutput !== false) {
-              openOutput(activeTerminalId, { focusInput: options.focusInput !== false });
+              openOutput(activeTerminalId, {
+                focusInput: options.focusInput !== false,
+                preserveViewport: options.preserveViewport === true,
+              });
             }
           } else {
             terminalMetaEl.textContent = "No open terminal sessions.";
@@ -5864,6 +5888,7 @@
           // turn a dismissed mobile keyboard back into an active input surface.
           // Initial/user-directed attaches opt in; automatic reconnects do not.
           const focusInputOnOpen = !reconnecting && options.focusInput !== false;
+          const preserveViewportOnOpen = reconnecting || options.preserveViewport === true;
           const outputLeaseId = leaseId;
           if (!outputLeaseId) {
             setStatus("Remote control is not active.", true);
@@ -6019,11 +6044,29 @@
           // reconnect remains graceful, but never mark structured input ready:
           // paste and Composer stay fail-closed without authoritative state.
           const acceptLegacyOutput = (payload) => {
-            if (resetOnNextPayload) {
+            const landingLegacySnapshot = resetOnNextPayload;
+            const preservedViewportDistance =
+              landingLegacySnapshot &&
+              preserveViewportOnOpen &&
+              renderedTerminalId === terminalId
+                ? terminalViewportDistanceFromBottom(term)
+                : 0;
+            if (landingLegacySnapshot) {
               queueTerminalReset();
               resetOnNextPayload = false;
             }
             queueTerminalWrite(payload).then(() => {
+              if (
+                landingLegacySnapshot &&
+                outputGeneration === terminalOutputGeneration &&
+                socket === outputSocket &&
+                leaseId === outputLeaseId &&
+                activeTerminalId === terminalId
+              ) {
+                renderedTerminalId = terminalId;
+                restoreTerminalViewport(term, preservedViewportDistance);
+                updateScrollToBottomButton(term);
+              }
               if (outputAttachGeometryGeneration === outputGeneration) {
                 outputAttachGeometryGeneration = null;
                 scheduleTerminalFit(true);
@@ -6131,6 +6174,13 @@
             }
 
             if (header.phase === "snapshot") {
+              // The old surface intentionally remains interactive while the
+              // replacement checkpoint is in flight. Capture its latest scroll
+              // offset only now, immediately before reset/replay destroys it.
+              const preservedViewportDistance =
+                preserveViewportOnOpen && renderedTerminalId === terminalId
+                  ? terminalViewportDistanceFromBottom(term)
+                  : 0;
               outputPhase = "attached";
               expectedOutputSeq = header.seqEnd;
               // SerializeAddon output is geometry-sensitive: replay it only at
@@ -6156,9 +6206,11 @@
                 ) {
                   return;
                 }
-                // A replayed snapshot must land at the live tail, not wherever
-                // the fit/reflow race left the viewport.
-                term.scrollToBottom();
+                renderedTerminalId = terminalId;
+                // User-directed attaches land at the live tail. Same-terminal
+                // transport/lease recovery restores the surface-local distance
+                // from that tail instead of discarding a scrolled-up viewport.
+                restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
                 if (outputAttachGeometryGeneration === outputGeneration) {
                   outputAttachGeometryGeneration = null;
@@ -6423,7 +6475,10 @@
             // `undefined`, not `null`: the parameter's default is the remembered
             // pane hint, and an explicit `null` opts out of it — a reconnect then
             // lands on the focused pane instead of the one this tab was on.
-            await loadNavigation(undefined, { focusInput: !auto });
+            await loadNavigation(undefined, {
+              focusInput: !auto,
+              preserveViewport: auto,
+            });
             setNavigationOpen(false);
           } catch (err) {
             if (attemptRevision !== claimAttemptRevision) return;
