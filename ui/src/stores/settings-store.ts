@@ -10,10 +10,8 @@ import type {
   MemoSettings,
   RemoteSettings,
   ViewerSettings,
-  WorkspaceClearSettings,
 } from "../lib/tauri-api";
 import { GITHUB_FONT_SIZE_DEFAULT, GITHUB_LABEL_MAX_WIDTH_DEFAULT } from "../lib/github-display";
-import { DEFAULT_WORKSPACE_CLEAR } from "../lib/workspace-clear";
 import {
   resolveSyncCwd,
   DEFAULT_SYNC_CWD_DEFAULTS,
@@ -292,12 +290,7 @@ export interface WorkspaceSelectorSettings {
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
 
-export type {
-  ExitSettings,
-  IssueReporterSettings,
-  MemoSettings,
-  WorkspaceClearSettings,
-} from "../lib/tauri-api";
+export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
   SyncCwdConfig,
   SyncCwdPair,
@@ -494,7 +487,6 @@ interface SettingsState {
   claude: ClaudeSettings;
   codex: CodexSettings;
   exit: ExitSettings;
-  workspaceClear: WorkspaceClearSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
@@ -517,7 +509,6 @@ interface SettingsState {
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
   setExit: (data: Partial<ExitSettings>) => void;
-  setWorkspaceClear: (data: Partial<WorkspaceClearSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   /** Patch one monitored agent's usage settings. */
@@ -583,7 +574,6 @@ interface SettingsState {
         | "claude"
         | "codex"
         | "exit"
-        | "workspaceClear"
         | "memo"
         | "issueReporter"
         | "fileExplorer"
@@ -1228,7 +1218,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageDelimiter: " · ",
   },
   exit: { ...DEFAULT_EXIT },
-  workspaceClear: { ...DEFAULT_WORKSPACE_CLEAR },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
@@ -1290,11 +1279,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setExit: (data) =>
     set((state) => ({
       exit: { ...state.exit, ...data },
-    })),
-
-  setWorkspaceClear: (data) =>
-    set((state) => ({
-      workspaceClear: { ...state.workspaceClear, ...data },
     })),
 
   setMemo: (data) =>
@@ -1598,9 +1582,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const exit = data.exit
       ? { ...DEFAULT_EXIT, ...(data.exit as Partial<ExitSettings>) }
       : undefined;
-    const workspaceClear = data.workspaceClear
-      ? { ...DEFAULT_WORKSPACE_CLEAR, ...(data.workspaceClear as Partial<WorkspaceClearSettings>) }
-      : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
       ? { ...DEFAULT_ISSUE_REPORTER, ...(data.issueReporter as Partial<IssueReporterSettings>) }
@@ -1690,7 +1671,6 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),
       ...(exit ? { exit } : {}),
-      ...(workspaceClear ? { workspaceClear } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),

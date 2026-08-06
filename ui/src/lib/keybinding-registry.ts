@@ -185,15 +185,6 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Pane",
     passThroughTerminal: true,
   },
-  // 포커스된 pane 하나만 클리어한다 — 워크스페이스 전체는 workspace.clearTerminals.
-  // dock pane 도 대상이다: 사용자가 그 pane 을 직접 가리켰기 때문이다 (ADR-0113).
-  {
-    id: "pane.clearTerminal",
-    label: "포커스 Pane 터미널 클리어",
-    defaultKeys: "Alt+L",
-    group: "Pane",
-    passThroughTerminal: true,
-  },
   // -- UI --
   {
     id: "sidebar.toggle",

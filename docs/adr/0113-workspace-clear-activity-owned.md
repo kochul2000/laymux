@@ -1,6 +1,6 @@
 # 0113. 워크스페이스 클리어는 activity handler 가 클리어 방법을 소유하고, 모르는 앱은 건드리지 않는다
 
-- Status: Proposed
+- Status: Superseded by [0137](0137-workspace-clear-ctrl-l-broadcast.md)
 - Date: 2026-08-02
 - Source: 사용자 요구(issue #726 "액티비티에 따라, 전체 워크스페이스를 클리어하는 편의 기능"), [ADR-0005](0005-display-state-raw-separation-compute.md)(원시 상태 분리 → 단일 계산 함수), [ADR-0004](0004-settings-vs-ui-state-separation.md)(설정 vs UI 상태)
 

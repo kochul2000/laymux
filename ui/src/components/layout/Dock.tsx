@@ -13,7 +13,6 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 import { getTerminalRestartCwd } from "@/lib/terminal-restart";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
-import { runPaneClearFromUi } from "@/lib/workspace-clear-action";
 
 interface DockProps {
   position: DockPosition;
@@ -166,12 +165,6 @@ export function Dock({
                   : onSwitchView
                     ? () => onSwitchView("EmptyView")
                     : undefined
-                : undefined,
-            onClearTerminal:
-              singleView?.type === "TerminalView" && singlePaneId
-                ? () => {
-                    void runPaneClearFromUi(singlePaneId);
-                  }
                 : undefined,
             onRestart:
               singleView?.type === "TerminalView" && singlePaneId

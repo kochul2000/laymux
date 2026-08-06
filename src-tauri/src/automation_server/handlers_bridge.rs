@@ -102,11 +102,11 @@ pub async fn workspaces_create(
     }
 }
 
-/// Clear every TerminalView pane of a workspace (issue #726, ADR-0113).
+/// Broadcast Ctrl+L to every TerminalView pane of a workspace (issue #726, ADR-0113/0137).
 ///
-/// The frontend owns the decision of what "clear" means per pane; this route
-/// only forwards the workspace id and returns the per-terminal outcome so a
-/// caller can see which panes were skipped.
+/// The frontend owns the write; this route only forwards the workspace id and
+/// returns the per-terminal outcome so a caller can see which panes were
+/// skipped.
 pub async fn workspaces_clear(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,
@@ -117,29 +117,6 @@ pub async fn workspaces_clear(
         "workspaces",
         "clear",
         serde_json::json!({ "id": id }),
-    )
-    .await
-    {
-        Ok(data) => (StatusCode::OK, Json(data)),
-        Err(e) => e,
-    }
-}
-
-/// Clear one pane, grid or dock (issue #741, ADR-0121).
-///
-/// Takes a pane id rather than a grid index: the same shortcut works on dock
-/// panes, which have no index in the grid. The frontend rejects a pane that is
-/// not a live terminal.
-pub async fn panes_clear(
-    AxumState(state): AxumState<ServerState>,
-    Path(pane_id): Path<String>,
-) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "panes",
-        "clear",
-        serde_json::json!({ "paneId": pane_id }),
     )
     .await
     {

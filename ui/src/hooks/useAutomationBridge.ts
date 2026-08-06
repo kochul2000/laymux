@@ -22,7 +22,7 @@ import { toPaneId, toTerminalId } from "@/lib/pane-ids";
 import { computePaneNumbers, GRID_EPS } from "@/lib/pane-numbers";
 import { planPaneResize } from "@/hooks/usePaneResize";
 import { collectSettingsSnapshot, saveAndApplySettingsSnapshot } from "@/lib/settings-snapshot";
-import type { Settings, WorkspaceClearSettings } from "@/lib/tauri-api";
+import type { Settings } from "@/lib/tauri-api";
 import type {
   DockPosition,
   ViewInstanceConfig,
@@ -44,13 +44,7 @@ import {
 import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
-import {
-  clearPane,
-  clearWaitBudgetMs,
-  clearWorkspace,
-  resolveWorkspaceClear,
-  type WorkspaceClearResult,
-} from "@/lib/workspace-clear";
+import { clearWorkspace } from "@/lib/workspace-clear";
 
 interface HandlerResult {
   success: boolean;
@@ -71,27 +65,6 @@ const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
  * fail when either side moves without the other.
  */
 export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
-/**
- * Ceiling on the interrupt→settle wait `workspaces.clear` may perform inside
- * one bridge request (ADR-0113). Sits under the 3.5 s `LONGEST_HANDLER_WAIT`
- * that `helpers.rs` mirrors, so the clear never becomes the longest handler
- * wait and the existing slack assertion keeps holding. A user-configured
- * `settleMs` above this still applies to the keyboard and button paths, which
- * nobody is timing out.
- */
-export const AUTOMATION_CLEAR_WAIT_BUDGET_MS = 3_000;
-/**
- * Wall-clock allowance for the whole clear run before it stops issuing writes.
- *
- * Larger than the sleep budget on purpose: a chain that slept exactly
- * `AUTOMATION_CLEAR_WAIT_BUDGET_MS` is on schedule and must still get to type
- * its clear. The gap is what a healthy round of PTY writes costs. Under the
- * bridge budget so the stop happens before the 504, not after it — a single
- * in-flight write can still outlast this (PTY_CONTROL_JOB_TIMEOUT_MS is 15 s
- * and JS cannot cancel it); what this prevents is the chain typing MORE once
- * the caller has given up and possibly retried.
- */
-export const AUTOMATION_CLEAR_DEADLINE_MS = 4_000;
 // Together with TerminalRenderCheckpointModel's 3-second catch-up timeout,
 // provider discovery stays at 3.5 seconds inside the backend bridge's 5-second
 // request budget, leaving time for serialization and IPC delivery.
@@ -136,46 +109,6 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
     return err(`Workspace '${workspaceId}' not found`);
   }
   return null;
-}
-
-/**
- * Run a clear (workspace or single pane) under the Automation budget.
- *
- * The bridge stops waiting at `BRIDGE_REQUEST_BUDGET_MS`, so an `interrupt`
- * policy configured with a long settle would finish the clear and still answer
- * 504 with the per-pane result lost. Cap the wait instead and tell the caller
- * which config it actually ran under. Awaited so the response carries the
- * per-terminal outcome — with the default `busyPolicy: "skip"` a caller has no
- * other way to learn that a busy pane was deliberately left alone.
- */
-async function runCappedClear(
-  scope: string,
-  target: Record<string, string>,
-  run: (
-    settings: WorkspaceClearSettings,
-    options: { maxWaitMs: number; hardDeadlineMs: number },
-  ) => Promise<WorkspaceClearResult>,
-): Promise<HandlerResult> {
-  const settings = useSettingsStore.getState().workspaceClear;
-  const configured = resolveWorkspaceClear(settings);
-  const effective = resolveWorkspaceClear(settings, {
-    maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
-  });
-  try {
-    const result = await run(settings, {
-      maxWaitMs: AUTOMATION_CLEAR_WAIT_BUDGET_MS,
-      hardDeadlineMs: AUTOMATION_CLEAR_DEADLINE_MS,
-    });
-    return ok({
-      ...target,
-      ...result,
-      waitCapped: clearWaitBudgetMs(effective) < clearWaitBudgetMs(configured),
-      interruptRounds: effective.interruptRounds,
-      settleMs: effective.settleMs,
-    });
-  } catch (e) {
-    return err(`${scope} error: ${e instanceof Error ? e.message : String(e)}`);
-  }
 }
 
 /** Find a terminal instance by id. */
@@ -1321,26 +1254,18 @@ export async function handleAsyncAutomationRequest(
   if (request.target === "terminals" && request.method === "prepareForAutomation") {
     return prepareTerminalForAutomation(request.params.id as string);
   }
-  // Clear every TerminalView pane of a workspace (ADR-0113). Awaited so the
-  // response carries the per-terminal outcome — with the default
-  // `busyPolicy: "skip"` a caller has no other way to learn that a busy pane
-  // was deliberately left alone.
+  // Broadcast Ctrl+L to every TerminalView pane of a workspace (ADR-0113).
+  // Awaited so the response carries the per-terminal outcome.
   if (request.target === "workspaces" && request.method === "clear") {
     const id = request.params.id as string;
     const wsErr = checkWorkspaceExists(id);
     if (wsErr) return wsErr;
-    return runCappedClear("Workspace clear", { workspaceId: id }, (settings, options) =>
-      clearWorkspace(id, settings, options),
-    );
-  }
-  // Single-pane counterpart (ADR-0121). Keyed by pane id so a dock pane is
-  // reachable; `clearPane` throws for anything that is not a live terminal pane,
-  // which surfaces here as an error rather than an empty result.
-  if (request.target === "panes" && request.method === "clear") {
-    const paneId = request.params.paneId as string;
-    return runCappedClear("Pane clear", { paneId }, (settings, options) =>
-      clearPane(paneId, settings, options),
-    );
+    try {
+      const result = await clearWorkspace(id);
+      return ok({ workspaceId: id, ...result });
+    } catch (e) {
+      return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   if (request.target === "terminals" && request.method === "setFocus") {
     const result = handleAutomationRequest(request);

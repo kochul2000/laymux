@@ -305,20 +305,7 @@
       "interruptRounds": "Ctrl+C presses",
       "interruptRoundsDesc": "How many times to send Ctrl+C to each terminal (1–10). Claude / Codex usually need at least 2.",
       "interruptSettle": "Settle delay (ms)",
-      "interruptSettleDesc": "How long to wait after the last Ctrl+C before closing the window, so the session id can print into the scrollback (0–10000).",
-      "clearGroup": "Workspace Clear",
-      "clearGroupDesc": "Ctrl+Alt+L, or the eraser button on a workspace row, clears every terminal pane of that workspace at once: the command below in a shell, /clear in Claude Code and Codex. Interactive apps without a dedicated handler (vim, htop, …) are never written to.",
-      "clearShellCommand": "Shell clear command",
-      "clearShellCommandDesc": "Submitted to a plain shell. Use cls for cmd.exe.",
-      "clearBusyPolicy": "While a pane is busy",
-      "clearBusyPolicySkip": "Leave it alone",
-      "clearBusyPolicyInterrupt": "Interrupt, then clear",
-      "clearBusyPolicyRestart": "Restart the view",
-      "clearBusyPolicyDesc": "What to do with a pane that is running a command or a task. Restarting starts a fresh terminal session and discards the scrollback, unlike clearing. Interrupting sends Ctrl+C first, which a full-screen app laymux does not recognise (vim, a pager) will survive — the clear command is then typed into it.",
-      "clearInterruptRounds": "Ctrl+C presses",
-      "clearInterruptRoundsDesc": "How many times to send Ctrl+C before clearing (1–10). Claude / Codex usually need at least 2.",
-      "clearSettle": "Settle delay (ms)",
-      "clearSettleDesc": "How long to wait after the last Ctrl+C before typing the clear command, so the app can repaint its prompt (0–10000)."
+      "interruptSettleDesc": "How long to wait after the last Ctrl+C before closing the window, so the session id can print into the scrollback (0–10000)."
     },
     "interface": {
       "title": "Interface",

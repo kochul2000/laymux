@@ -14,11 +14,6 @@ vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
-const paneClearFromUiMock = vi.fn().mockResolvedValue(null);
-vi.mock("@/lib/workspace-clear-action", () => ({
-  runPaneClearFromUi: (paneId: string) => paneClearFromUiMock(paneId),
-}));
-
 // Capture viewConfig passed to ViewRenderer
 const capturedViewConfigs: (Record<string, unknown> | undefined)[] = [];
 vi.mock("@/components/views/ViewRenderer", () => ({
@@ -63,23 +58,6 @@ describe("Dock", () => {
       controlBar: { ...s.controlBar, defaultMode: "hover" },
     }));
     capturedViewConfigs.length = 0;
-    paneClearFromUiMock.mockClear();
-  });
-
-  it("단일 dock 터미널의 클리어 아이콘은 dock pane을 클리어한다", () => {
-    render(
-      <Dock
-        position="left"
-        activeView="TerminalView"
-        views={["TerminalView"]}
-        panes={[{ id: "dock-terminal", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
-      />,
-    );
-
-    fireEvent.mouseEnter(screen.getByTestId("dock-left"));
-    fireEvent.click(screen.getByTestId("pane-control-clear-terminal"));
-
-    expect(paneClearFromUiMock).toHaveBeenCalledWith("dock-terminal");
   });
 
   it("renders with correct test id", () => {

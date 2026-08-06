@@ -75,8 +75,8 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/workspaces/{id}/clear",
-                "description": "Clear every TerminalView pane of a workspace: the configured shell command in a shell, '/clear' in Claude Code and Codex. Interactive apps without a dedicated handler are never written to. Busy panes follow settings.workspaceClear.busyPolicy (skip | interrupt | restart). The interrupt wait is capped to fit this request's budget; 'waitCapped' says whether the configured settle was shortened, and 'interruptRounds'/'settleMs' report what actually ran.",
-                "response": "{ workspaceId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
+                "description": "Broadcast a Ctrl+L keypress to every TerminalView pane of a workspace — the same as pressing Ctrl+L in each pane by hand. Panes with no PTY session yet are skipped.",
+                "response": "{ workspaceId: string, cleared: string[], skipped: { terminalId: string, reason: 'notReady' }[], failed: { terminalId: string, error: string }[] }"
             },
             {
                 "method": "POST", "path": "/api/v1/layouts/export",
@@ -120,11 +120,6 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "POST", "path": "/api/v1/panes/{index}/resize",
                 "description": "Micro-resize a pane against its neighbor by a delta in normalized (0-1) units. Used for reflow/layout verification.",
                 "body": { "dw": "(optional) number — width delta", "dh": "(optional) number — height delta; at least one of dw/dh is required" }
-            },
-            {
-                "method": "POST", "path": "/api/v1/panes/{paneId}/clear",
-                "description": "Clear one terminal pane — grid or dock — with the same per-activity decision as the workspace clear: the configured shell command in a shell, '/clear' in Claude Code and Codex, nothing in an interactive app without a dedicated handler. Takes a pane id, not a grid index, because dock panes have no index. Busy panes follow settings.workspaceClear.busyPolicy (skip | interrupt | restart), and the interrupt wait is capped the same way the workspace clear caps it. Fails when the pane is not a live terminal pane.",
-                "response": "{ paneId: string, cleared: string[], interrupted: string[], restarted: string[], skipped: { terminalId: string, reason: 'busy' | 'unsupportedApp' | 'notReady' }[], failed: { terminalId: string, error: string }[], waitCapped: boolean, interruptRounds: number, settleMs: number }"
             },
             {
                 "method": "GET", "path": "/api/v1/docks",
