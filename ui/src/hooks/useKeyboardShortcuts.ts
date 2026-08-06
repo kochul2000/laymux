@@ -325,7 +325,7 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
   },
 
   // workspace.clearTerminals: broadcast Ctrl+L to every TerminalView pane of
-  // the active workspace (ADR-0113). Fire-and-forget: the writes are
+  // the active workspace (ADR-0137). Fire-and-forget: the writes are
   // per-terminal and a failing one must not hold the key handler.
   "workspace.clearTerminals": (e) => {
     e.preventDefault();

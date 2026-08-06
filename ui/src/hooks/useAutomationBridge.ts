@@ -1254,7 +1254,7 @@ export async function handleAsyncAutomationRequest(
   if (request.target === "terminals" && request.method === "prepareForAutomation") {
     return prepareTerminalForAutomation(request.params.id as string);
   }
-  // Broadcast Ctrl+L to every TerminalView pane of a workspace (ADR-0113).
+  // Broadcast Ctrl+L to every TerminalView pane of a workspace (ADR-0137).
   // Awaited so the response carries the per-terminal outcome.
   if (request.target === "workspaces" && request.method === "clear") {
     const id = request.params.id as string;

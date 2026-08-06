@@ -145,7 +145,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
     group: "Workspace",
     passThroughTerminal: true,
   },
-  // 워크스페이스의 모든 TerminalView pane 을 한 번에 클리어한다 (ADR-0113).
+  // 워크스페이스의 모든 TerminalView pane 을 한 번에 클리어한다 (ADR-0137).
   // pane 컨트롤 바의 "Clear view"(pane 을 EmptyView 로 되돌림)와 다른 동작이다.
   {
     id: "workspace.clearTerminals",

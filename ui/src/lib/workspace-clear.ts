@@ -4,7 +4,7 @@ import { useTerminalStore, type TerminalInstance } from "@/stores/terminal-store
 import { useWorkspaceStore } from "@/stores/workspace-store";
 
 /**
- * Workspace-wide clear (issue #726, ADR-0113).
+ * Workspace-wide clear (issue #726, ADR-0137 — supersedes ADR-0113).
  *
  * Ctrl+Alt+L broadcasts one Ctrl+L keypress to every TerminalView pane of the
  * active workspace — exactly what pressing Ctrl+L in each pane by hand would
@@ -23,6 +23,12 @@ export type WorkspaceClearSkipReason =
   "notReady";
 
 export interface WorkspaceClearResult {
+  /**
+   * Terminals the Ctrl+L byte was successfully written to — not a guarantee
+   * that the target interpreted it as "clear the screen". A program reading
+   * its own stdin as data (rather than leaving line editing to the terminal)
+   * receives it as a literal `\x0c`, same as a real keypress would.
+   */
   cleared: string[];
   skipped: { terminalId: string; reason: WorkspaceClearSkipReason }[];
   /**

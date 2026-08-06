@@ -575,8 +575,6 @@ fn default_exit_settle_ms() -> u64 {
     700
 }
 
-/// Workspace-wide clear settings (issue #726, ADR-0113).
-///
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]

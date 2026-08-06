@@ -31,10 +31,6 @@ async fn wait_for_frontend_response_until<T>(
 /// — and asserted against the budget below — because the numbers live in
 /// different languages with nothing else tying them together.
 /// `BRIDGE_REQUEST_BUDGET_MS` mirrors this budget on that side.
-///
-/// `workspaces.clear` (ADR-0113) has a user-configurable interrupt→settle wait,
-/// so it caps itself at `AUTOMATION_CLEAR_WAIT_BUDGET_MS` (3s) rather than
-/// widening this number; the frontend asserts that cap against both constants.
 #[cfg(test)]
 const LONGEST_HANDLER_WAIT: Duration = Duration::from_millis(3_500);
 
