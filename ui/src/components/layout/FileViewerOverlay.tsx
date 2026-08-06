@@ -21,7 +21,7 @@ export function FileViewerOverlay() {
   const toggleMaximized = useFileViewerStore((s) => s.toggleMaximized);
   const openFileViewer = useFileViewerStore((s) => s.openFileViewer);
 
-  const feSettings = useSettingsStore((s) => s.fileExplorer);
+  const viewerSettings = useSettingsStore((s) => s.viewer);
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
 
   // Persistent address bar (#327 / #326): the path input at the top is always
@@ -101,13 +101,14 @@ export function FileViewerOverlay() {
 
   if (!open) return null;
 
+  // Font family/size come from `viewer` settings but are resolved inside
+  // FileViewer itself (it layers the per-instance Ctrl+Wheel zoom override on
+  // top) — this bodyStyle only carries padding.
   const bodyStyle: React.CSSProperties = {
-    paddingTop: feSettings.paddingTop,
-    paddingRight: feSettings.paddingRight,
-    paddingBottom: feSettings.paddingBottom,
-    paddingLeft: feSettings.paddingLeft,
-    fontFamily: feSettings.fontFamily || "inherit",
-    fontSize: feSettings.fontSize,
+    paddingTop: viewerSettings.paddingTop,
+    paddingRight: viewerSettings.paddingRight,
+    paddingBottom: viewerSettings.paddingBottom,
+    paddingLeft: viewerSettings.paddingLeft,
   };
 
   const panelSize = maximized ? "w-screen h-screen rounded-none" : "w-[90vw] h-[90vh]";

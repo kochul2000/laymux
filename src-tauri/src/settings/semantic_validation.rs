@@ -506,6 +506,13 @@ fn validate_view_settings(settings: &Settings, issues: &mut Vec<SettingsIssue>) 
         8,
         32,
     );
+    range_u64(
+        issues,
+        "/viewer/fontSize",
+        u64::from(settings.viewer.font_size),
+        8,
+        32,
+    );
 }
 
 fn optional_font_size(issues: &mut Vec<SettingsIssue>, path: &str, value: u16, min: u64, max: u64) {

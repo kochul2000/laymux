@@ -20,6 +20,14 @@ import { PdfPreview } from "@/components/ui/preview/PdfPreview";
 import { PreviewNotice } from "@/components/ui/preview/PreviewNotice";
 import { SvgPreview } from "@/components/ui/preview/SvgPreview";
 import { useSettingsStore } from "@/stores/settings-store";
+import {
+  useOverridesStore,
+  FONT_ZOOM_MIN,
+  FONT_ZOOM_MAX,
+  IMAGE_ZOOM_MIN,
+  IMAGE_ZOOM_MAX,
+  IMAGE_ZOOM_STEP,
+} from "@/stores/overrides-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { TerminalView } from "@/components/views/TerminalView";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
@@ -47,9 +55,70 @@ export interface FileViewerProps {
 export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: FileViewerProps) {
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
   const profiles = useSettingsStore((s) => s.profiles);
+  const viewerSettings = useSettingsStore((s) => s.viewer);
+  const appFont = useSettingsStore((s) => s.appearance.font);
   const terminalStartupRevealed = useTerminalStartupStore((state) =>
     state.revealedPaneIds.has(viewerInstanceId),
   );
+
+  // Per-instance font zoom (Ctrl+Wheel / toolbar buttons), layered over the
+  // `viewer` settings default — mirrors TerminalView/MemoView's overrides-store
+  // pattern so a transient zoom never pollutes settings.json.
+  const baseFontSize = viewerSettings.fontSize || appFont.size;
+  const overrideFontSize = useOverridesStore((s) => s.viewOverrides[viewerInstanceId]?.fontSize);
+  const effectiveFontSize = overrideFontSize ?? baseFontSize;
+  const effectiveFontFamily = viewerSettings.fontFamily || appFont.face;
+
+  // Per-instance image zoom (Ctrl+Wheel / toolbar buttons). Purely transient
+  // display state — there is no "default zoom" setting for a picture.
+  const overrideImageZoom = useOverridesStore((s) => s.viewOverrides[viewerInstanceId]?.imageZoom);
+  const imageZoom = overrideImageZoom ?? 100;
+
+  const adjustFontZoom = useCallback(
+    (delta: number) => {
+      const overrides = useOverridesStore.getState();
+      const current = overrides.viewOverrides[viewerInstanceId]?.fontSize ?? baseFontSize;
+      const next = Math.max(FONT_ZOOM_MIN, Math.min(FONT_ZOOM_MAX, current + delta));
+      if (next !== current) overrides.setViewOverride(viewerInstanceId, { fontSize: next });
+    },
+    [viewerInstanceId, baseFontSize],
+  );
+
+  const adjustImageZoom = useCallback(
+    (delta: number) => {
+      const overrides = useOverridesStore.getState();
+      const current = overrides.viewOverrides[viewerInstanceId]?.imageZoom ?? 100;
+      const next = Math.max(IMAGE_ZOOM_MIN, Math.min(IMAGE_ZOOM_MAX, current + delta));
+      if (next !== current) overrides.setViewOverride(viewerInstanceId, { imageZoom: next });
+    },
+    [viewerInstanceId],
+  );
+
+  // Ctrl+Wheel zooms font size for text content; browsers otherwise treat
+  // Ctrl+Wheel as page zoom, so this must preventDefault when it fires.
+  const handleFontWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      adjustFontZoom(e.deltaY < 0 ? 1 : -1);
+    },
+    [adjustFontZoom],
+  );
+
+  const handleImageWheel = useCallback(
+    (e: React.WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      adjustImageZoom(e.deltaY < 0 ? IMAGE_ZOOM_STEP : -IMAGE_ZOOM_STEP);
+    },
+    [adjustImageZoom],
+  );
+
+  const effectiveBodyStyle: React.CSSProperties = {
+    ...bodyStyle,
+    fontFamily: effectiveFontFamily || "inherit",
+    fontSize: effectiveFontSize,
+  };
 
   const resolution = resolveViewer(path, extensionViewers);
   const previewKind = filePreviewKind(path);
@@ -146,7 +215,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     return (
       <pre
         className="whitespace-pre-wrap break-words"
-        style={{ color: "var(--text-primary)", margin: 0, ...bodyStyle }}
+        style={{ color: "var(--text-primary)", margin: 0, ...effectiveBodyStyle }}
         data-testid="file-viewer-text"
       >
         {error}
@@ -171,24 +240,53 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     // same Preview/Source toggle the text previews have.
     if (isSvgPath(path)) {
       return (
-        <PreviewToggleShell renderMode={renderMode} setRenderMode={setRenderMode}>
+        <PreviewToggleShell
+          renderMode={renderMode}
+          setRenderMode={setRenderMode}
+          onWheel={renderMode === "source" ? handleFontWheel : handleImageWheel}
+          rightControls={
+            renderMode === "source" ? (
+              <FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />
+            ) : (
+              <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
+            )
+          }
+        >
           <SvgPreview
             dataUrl={content.dataUrl}
             path={path}
             showSource={renderMode === "source"}
-            bodyStyle={bodyStyle}
+            bodyStyle={effectiveBodyStyle}
+            zoom={renderMode === "preview" ? imageZoom : undefined}
           />
         </PreviewToggleShell>
       );
     }
     return (
-      <div className="flex items-center justify-center h-full" style={bodyStyle}>
-        <img
-          src={content.dataUrl}
-          alt={path}
-          style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
-          data-testid="file-viewer-image"
-        />
+      <div className="flex h-full min-h-0 flex-1 flex-col" style={{ background: "var(--bg-surface)" }}>
+        <ToolbarBar>
+          <div className="ml-auto flex items-center gap-1">
+            <ImageZoomControls zoom={imageZoom} onZoom={adjustImageZoom} />
+          </div>
+        </ToolbarBar>
+        <div
+          className="flex min-h-0 flex-1 items-center justify-center overflow-auto"
+          style={bodyStyle}
+          onWheel={handleImageWheel}
+        >
+          <img
+            src={content.dataUrl}
+            alt={path}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              objectFit: "contain",
+              transform: `scale(${imageZoom / 100})`,
+              transformOrigin: "center",
+            }}
+            data-testid="file-viewer-image"
+          />
+        </div>
       </div>
     );
   }
@@ -205,7 +303,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         totalEntries={content.totalEntries}
         totalBytes={content.totalBytes}
         truncated={content.truncated}
-        bodyStyle={bodyStyle}
+        bodyStyle={effectiveBodyStyle}
       />
     );
   }
@@ -214,7 +312,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     return (
       <div
         className="flex flex-col items-center justify-center h-full gap-2"
-        style={{ color: "var(--text-secondary)", ...bodyStyle }}
+        style={{ color: "var(--text-secondary)", ...effectiveBodyStyle }}
         data-testid="file-viewer-binary"
       >
         <div>Binary file ({(content.size / 1024).toFixed(1)} KB)</div>
@@ -230,12 +328,24 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
         previewKind={previewKind}
         renderMode={renderMode}
         setRenderMode={setRenderMode}
-        bodyStyle={bodyStyle}
+        bodyStyle={effectiveBodyStyle}
+        onWheel={handleFontWheel}
+        rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
       />
     );
   }
 
-  return <SourceText content={content} bodyStyle={bodyStyle} />;
+  return (
+    <PreviewToggleShell
+      renderMode="source"
+      setRenderMode={() => {}}
+      showModeToggle={false}
+      onWheel={handleFontWheel}
+      rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
+    >
+      <SourceText content={content} bodyStyle={effectiveBodyStyle} />
+    </PreviewToggleShell>
+  );
 }
 
 interface PreviewableTextFileProps {
@@ -245,6 +355,8 @@ interface PreviewableTextFileProps {
   renderMode: "preview" | "source";
   setRenderMode: (mode: "preview" | "source") => void;
   bodyStyle?: React.CSSProperties;
+  onWheel?: (e: React.WheelEvent) => void;
+  rightControls?: React.ReactNode;
 }
 
 function PreviewableTextFile({
@@ -254,9 +366,16 @@ function PreviewableTextFile({
   renderMode,
   setRenderMode,
   bodyStyle,
+  onWheel,
+  rightControls,
 }: PreviewableTextFileProps) {
   return (
-    <PreviewToggleShell renderMode={renderMode} setRenderMode={setRenderMode}>
+    <PreviewToggleShell
+      renderMode={renderMode}
+      setRenderMode={setRenderMode}
+      onWheel={onWheel}
+      rightControls={rightControls}
+    >
       {renderMode === "preview" ? (
         <TypedPreview
           path={path}
@@ -364,64 +483,171 @@ function StructuredPreview({
   }
 }
 
-/** The Preview/Source header shared by every toggleable viewer. */
+/** The header row shared by every viewer toolbar (mode toggle, zoom controls). */
+function ToolbarBar({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="flex items-center gap-1 px-2 py-1"
+      style={{
+        background: "var(--bg-surface)",
+        borderBottom: "1px solid var(--border)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The Preview/Source header (+ optional zoom controls) shared by every toggleable viewer. */
 function PreviewToggleShell({
   renderMode,
   setRenderMode,
   children,
+  showModeToggle = true,
+  rightControls,
+  onWheel,
 }: {
   renderMode: "preview" | "source";
   setRenderMode: (mode: "preview" | "source") => void;
   children: React.ReactNode;
+  /** Hide the Preview/Source buttons for content with only one render mode. */
+  showModeToggle?: boolean;
+  rightControls?: React.ReactNode;
+  onWheel?: (e: React.WheelEvent) => void;
 }) {
   return (
     <div
       className="flex h-full min-h-0 flex-1 flex-col"
       style={{ background: "var(--bg-surface)" }}
     >
-      <div
-        className="flex items-center gap-1 px-2 py-1"
-        style={{
-          background: "var(--bg-surface)",
-          borderBottom: "1px solid var(--border)",
-        }}
-      >
-        <button
-          type="button"
-          className="hover-bg-strong rounded px-2 py-1 text-xs"
-          style={{
-            background: renderMode === "preview" ? "var(--accent-20)" : "transparent",
-            color: renderMode === "preview" ? "var(--text-primary)" : "var(--text-secondary)",
-            border: "1px solid var(--border)",
-            cursor: "pointer",
-          }}
-          onClick={() => setRenderMode("preview")}
-          data-testid="file-viewer-preview-mode"
-        >
-          Preview
-        </button>
-        <button
-          type="button"
-          className="hover-bg-strong rounded px-2 py-1 text-xs"
-          style={{
-            background: renderMode === "source" ? "var(--accent-20)" : "transparent",
-            color: renderMode === "source" ? "var(--text-primary)" : "var(--text-secondary)",
-            border: "1px solid var(--border)",
-            cursor: "pointer",
-          }}
-          onClick={() => setRenderMode("source")}
-          data-testid="file-viewer-source-mode"
-        >
-          Source
-        </button>
-      </div>
+      <ToolbarBar>
+        {showModeToggle && (
+          <>
+            <button
+              type="button"
+              className="hover-bg-strong rounded px-2 py-1 text-xs"
+              style={{
+                background: renderMode === "preview" ? "var(--accent-20)" : "transparent",
+                color: renderMode === "preview" ? "var(--text-primary)" : "var(--text-secondary)",
+                border: "1px solid var(--border)",
+                cursor: "pointer",
+              }}
+              onClick={() => setRenderMode("preview")}
+              data-testid="file-viewer-preview-mode"
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              className="hover-bg-strong rounded px-2 py-1 text-xs"
+              style={{
+                background: renderMode === "source" ? "var(--accent-20)" : "transparent",
+                color: renderMode === "source" ? "var(--text-primary)" : "var(--text-secondary)",
+                border: "1px solid var(--border)",
+                cursor: "pointer",
+              }}
+              onClick={() => setRenderMode("source")}
+              data-testid="file-viewer-source-mode"
+            >
+              Source
+            </button>
+          </>
+        )}
+        {rightControls && <div className="ml-auto flex items-center gap-1">{rightControls}</div>}
+      </ToolbarBar>
       <div
         className="flex min-h-0 flex-1 overflow-auto"
         style={{ background: "var(--bg-surface)" }}
+        onWheel={onWheel}
       >
         {children}
       </div>
     </div>
+  );
+}
+
+const zoomButtonStyle: React.CSSProperties = {
+  color: "var(--text-secondary)",
+  border: "1px solid var(--border)",
+  cursor: "pointer",
+};
+
+/** Font size +/- for text content — mirrors the Ctrl+Wheel gesture over the same view. */
+function FontZoomControls({
+  onZoom,
+  fontSize,
+}: {
+  onZoom: (delta: number) => void;
+  fontSize: number;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onZoom(-1)}
+        disabled={fontSize <= FONT_ZOOM_MIN}
+        title="Decrease font size (Ctrl+Scroll)"
+        data-testid="file-viewer-font-decrease"
+        className="hover-bg-strong rounded px-1.5 py-1 text-xs"
+        style={zoomButtonStyle}
+      >
+        A−
+      </button>
+      <button
+        type="button"
+        onClick={() => onZoom(1)}
+        disabled={fontSize >= FONT_ZOOM_MAX}
+        title="Increase font size (Ctrl+Scroll)"
+        data-testid="file-viewer-font-increase"
+        className="hover-bg-strong rounded px-1.5 py-1 text-xs"
+        style={zoomButtonStyle}
+      >
+        A+
+      </button>
+    </>
+  );
+}
+
+/** Zoom in/out for image content — mirrors the Ctrl+Wheel gesture over the same view. */
+function ImageZoomControls({
+  zoom,
+  onZoom,
+}: {
+  zoom: number;
+  onZoom: (delta: number) => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onZoom(-IMAGE_ZOOM_STEP)}
+        disabled={zoom <= IMAGE_ZOOM_MIN}
+        title="Zoom out (Ctrl+Scroll)"
+        data-testid="file-viewer-zoom-out"
+        className="hover-bg-strong rounded px-1.5 py-1 text-xs"
+        style={zoomButtonStyle}
+      >
+        −
+      </button>
+      <span
+        className="px-1 text-xs"
+        style={{ color: "var(--text-secondary)" }}
+        data-testid="file-viewer-zoom-level"
+      >
+        {zoom}%
+      </span>
+      <button
+        type="button"
+        onClick={() => onZoom(IMAGE_ZOOM_STEP)}
+        disabled={zoom >= IMAGE_ZOOM_MAX}
+        title="Zoom in (Ctrl+Scroll)"
+        data-testid="file-viewer-zoom-in"
+        className="hover-bg-strong rounded px-1.5 py-1 text-xs"
+        style={zoomButtonStyle}
+      >
+        +
+      </button>
+    </>
   );
 }
 

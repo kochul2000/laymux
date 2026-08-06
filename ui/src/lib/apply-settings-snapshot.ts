@@ -98,6 +98,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.workspaceClear ? { workspaceClear: rawSettings.workspaceClear } : {}),
     ...(rawSettings.issueReporter ? { issueReporter: rawSettings.issueReporter } : {}),
     ...(rawSettings.fileExplorer ? { fileExplorer: rawSettings.fileExplorer } : {}),
+    ...(rawSettings.viewer ? { viewer: rawSettings.viewer } : {}),
     ...(rawSettings.remote ? { remote: rawSettings.remote } : {}),
     ...(rawSettings.memo ? { memo: rawSettings.memo } : {}),
     ...(rawSettings.syncCwdDefaults ? { syncCwdDefaults: rawSettings.syncCwdDefaults } : {}),

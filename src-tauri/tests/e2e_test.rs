@@ -6,7 +6,7 @@ use laymux_lib::settings::{
     FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
     MemoSettings, OutputActivityBurstSettings, PowerSettings, Profile, ProfileDefaults,
     RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets, TerminalSettings,
-    ValidationWarning, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace,
+    ValidationWarning, ViewerSettings, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace,
     WorkspaceClearBusyPolicy, WorkspaceClearSettings, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
@@ -221,6 +221,7 @@ fn settings_round_trip_with_full_config() {
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
+        viewer: ViewerSettings::default(),
         // Non-default on every field: this test compares the whole struct after
         // a round trip, so a field left at its default would still pass even if
         // it never reached the file.

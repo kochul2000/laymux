@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
 import { openExternal, readFileForViewer } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useOverridesStore } from "@/stores/overrides-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
@@ -40,6 +41,7 @@ describe("FileViewer", () => {
       truncated: false,
     });
     useSettingsStore.setState(useSettingsStore.getInitialState());
+    useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
     useTerminalStartupStore.getState().syncCandidates({
       knownPaneIds: [baseProps.viewerInstanceId],
@@ -173,6 +175,60 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/home/user/photo.png" />);
     });
     expect(screen.getByTestId("file-viewer-image")).toBeInTheDocument();
+  });
+
+  it("zooms an image in/out via the toolbar buttons and Ctrl+Wheel", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "image",
+      dataUrl: "data:image/png;base64,abc123",
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/photo.png" />);
+    });
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("100%");
+
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-in"));
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("125%");
+    expect(screen.getByTestId("file-viewer-image")).toHaveStyle({ transform: "scale(1.25)" });
+
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-out"));
+    fireEvent.click(screen.getByTestId("file-viewer-zoom-out"));
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("75%");
+
+    fireEvent.wheel(screen.getByTestId("file-viewer-image").parentElement!, {
+      deltaY: -100,
+      ctrlKey: true,
+    });
+    expect(screen.getByTestId("file-viewer-zoom-level")).toHaveTextContent("100%");
+  });
+
+  it("zooms text font size via the toolbar buttons and Ctrl+Wheel", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "hello world",
+      truncated: false,
+    });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
+    });
+    const initialSize = useSettingsStore.getState().viewer.fontSize;
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({ fontSize: `${initialSize}px` });
+
+    fireEvent.click(screen.getByTestId("file-viewer-font-increase"));
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 1}px`,
+    });
+
+    fireEvent.wheel(screen.getByTestId("file-viewer-text"), { deltaY: -100, ctrlKey: true });
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 2}px`,
+    });
+
+    // A plain (non-Ctrl) wheel must not touch the font size — it's ordinary scroll.
+    fireEvent.wheel(screen.getByTestId("file-viewer-text"), { deltaY: -100, ctrlKey: false });
+    expect(screen.getByTestId("file-viewer-text")).toHaveStyle({
+      fontSize: `${initialSize + 2}px`,
+    });
   });
 
   it("renders a binary placeholder for binary content", async () => {

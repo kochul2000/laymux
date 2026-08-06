@@ -185,6 +185,20 @@ describe("SettingsView", () => {
     );
   });
 
+  it("has a File Viewer section separate from File Explorer, with its own font settings", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-viewer"));
+    expect(screen.queryByTestId("fe-font-size")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("viewer-font-size"), { target: { value: "18" } });
+    await user.click(screen.getByTestId("save-settings-btn"));
+
+    expect(useSettingsStore.getState().viewer.fontSize).toBe(18);
+    expect(useSettingsStore.getState().fileExplorer.fontSize).toBe(13);
+  });
+
   describe("Interface section — sleep prevention", () => {
     it("shows the manual switch the top-bar toggle wrote and saves a change back to it", async () => {
       // Button and checkbox are two views of one field; if they ever stop

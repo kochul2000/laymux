@@ -82,6 +82,7 @@
       "codex": "Codex",
       "memo": "Memo",
       "fileExplorer": "File Explorer",
+      "viewer": "File Viewer",
       "issueReporter": "Issue Reporter",
       "github": "GitHub",
       "keybindings": "Keybindings",
@@ -491,6 +492,17 @@
       "viewerProfileRequired": "Select a terminal profile.",
       "viewerProfileMissing": "Selected terminal profile does not exist.",
       "addViewer": "+ Add Viewer"
+    },
+    "viewer": {
+      "title": "File Viewer",
+      "groupAppearance": "Appearance",
+      "fontFamily": "Font Family",
+      "fontFamilyDesc": "Font for opened file content. Inherits the default font if empty.",
+      "fontFamilyPlaceholder": "e.g. Consolas, monospace",
+      "fontSize": "Font Size",
+      "fontSizeDesc": "Font size for opened file content (px). Default: 13. Also adjustable with Ctrl+Scroll inside the viewer.",
+      "padding": "Padding",
+      "paddingDesc": "Inner padding of the opened file content area (px)"
     },
     "issueReporter": {
       "title": "Issue Reporter",

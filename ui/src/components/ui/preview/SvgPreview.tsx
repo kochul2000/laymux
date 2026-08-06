@@ -16,11 +16,14 @@ export function SvgPreview({
   path,
   showSource,
   bodyStyle,
+  zoom,
 }: {
   dataUrl: string;
   path: string;
   showSource: boolean;
   bodyStyle?: React.CSSProperties;
+  /** Display scale in percent (100 = fit, via Ctrl+Wheel / toolbar zoom controls). */
+  zoom?: number;
 }) {
   const source = useMemo(
     () => (showSource ? decodeDataUrlText(dataUrl) : null),
@@ -46,7 +49,13 @@ export function SvgPreview({
       <img
         src={dataUrl}
         alt={path}
-        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+        style={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          transform: zoom !== undefined ? `scale(${zoom / 100})` : undefined,
+          transformOrigin: "center",
+        }}
         data-testid="svg-preview-image"
       />
     </div>

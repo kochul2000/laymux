@@ -9,6 +9,7 @@ import type {
   IssueReporterSettings,
   MemoSettings,
   RemoteSettings,
+  ViewerSettings,
   WorkspaceClearSettings,
 } from "../lib/tauri-api";
 import { GITHUB_FONT_SIZE_DEFAULT, GITHUB_LABEL_MAX_WIDTH_DEFAULT } from "../lib/github-display";
@@ -497,6 +498,7 @@ interface SettingsState {
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
+  viewer: ViewerSettings;
   github: GithubSettings;
   remote: RemoteSettings;
   syncCwdDefaults: SyncCwdDefaults;
@@ -532,6 +534,7 @@ interface SettingsState {
    */
   setWidgets: (widgets: WidgetsSettings) => void;
   setFileExplorer: (data: Partial<FileExplorerSettings>) => void;
+  setViewer: (data: Partial<ViewerSettings>) => void;
   setGithub: (data: Partial<GithubSettings>) => void;
   setRemote: (data: Partial<RemoteSettings>) => void;
   setProfileDefaults: (data: Partial<ProfileDefaults>) => void;
@@ -584,6 +587,7 @@ interface SettingsState {
         | "memo"
         | "issueReporter"
         | "fileExplorer"
+        | "viewer"
         | "github"
         | "remote"
         | "syncCwdDefaults"
@@ -619,6 +623,15 @@ const DEFAULT_ISSUE_REPORTER: IssueReporterSettings = {
   fontWeight: "",
   // Default to the laymux repo so issues land in the right place out of the box.
   repositories: ["kochul2000/laymux"],
+};
+
+const DEFAULT_VIEWER: ViewerSettings = {
+  paddingTop: 8,
+  paddingRight: 8,
+  paddingBottom: 8,
+  paddingLeft: 8,
+  fontFamily: "",
+  fontSize: 13,
 };
 
 const DEFAULT_FILE_EXPLORER: FileExplorerSettings = {
@@ -1219,6 +1232,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
+  viewer: { ...DEFAULT_VIEWER },
   github: { ...DEFAULT_GITHUB },
   remote: { ...DEFAULT_REMOTE },
   syncCwdDefaults: { ...DEFAULT_SYNC_CWD_DEFAULTS },
@@ -1334,6 +1348,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setFileExplorer: (data) =>
     set((state) => ({
       fileExplorer: { ...state.fileExplorer, ...data },
+    })),
+
+  setViewer: (data) =>
+    set((state) => ({
+      viewer: { ...state.viewer, ...data },
     })),
 
   setGithub: (data) =>
@@ -1602,6 +1621,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const fileExplorer = data.fileExplorer
       ? { ...DEFAULT_FILE_EXPLORER, ...(data.fileExplorer as Partial<FileExplorerSettings>) }
       : undefined;
+    // Ensure viewer settings have all fields (backwards compat)
+    const viewer = data.viewer
+      ? { ...DEFAULT_VIEWER, ...(data.viewer as Partial<ViewerSettings>) }
+      : undefined;
     const remote = data.remote
       ? { ...DEFAULT_REMOTE, ...(data.remote as Partial<RemoteSettings>) }
       : undefined;
@@ -1671,6 +1694,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),
+      ...(viewer ? { viewer } : {}),
       ...(github ? { github } : {}),
       ...(remote ? { remote } : {}),
       ...(syncCwdDefaults ? { syncCwdDefaults } : {}),

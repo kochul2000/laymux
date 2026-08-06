@@ -26,13 +26,22 @@ export const VIEW_OVERRIDES_KEY = "laymux-view-overrides";
 export const FONT_ZOOM_MIN = 6;
 export const FONT_ZOOM_MAX = 72;
 
+/**
+ * 이미지 줌(FileViewer, Ctrl+Wheel / 버튼) 클램프·스텝 — 단일 출처.
+ */
+export const IMAGE_ZOOM_MIN = 25;
+export const IMAGE_ZOOM_MAX = 400;
+export const IMAGE_ZOOM_STEP = 25;
+
 export interface PaneOverrides {
   controlBarMode?: ControlBarMode;
 }
 
 export interface ViewOverrides {
-  /** TerminalView·MemoView: Ctrl+Wheel / Ctrl +,-,0 으로 조정된 폰트 크기. */
+  /** TerminalView·MemoView·FileViewer: Ctrl+Wheel / Ctrl +,-,0 으로 조정된 폰트 크기. */
   fontSize?: number;
+  /** FileViewer: Ctrl+Wheel / 버튼으로 조정된 이미지 확대율(%). 없으면 100. */
+  imageZoom?: number;
   /**
    * UsageView: pane 종횡비에서 도출되는 배치를 고정한다. 없으면 `auto`
    * (박스에서 매번 재계산). ADR-0102.

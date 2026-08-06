@@ -1569,6 +1569,39 @@ impl Default for FileExplorerSettings {
     }
 }
 
+/// FileViewer body settings — independent of `FileExplorerSettings` (which
+/// styles the directory listing, not the opened file's content).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ViewerSettings {
+    #[serde(default = "default_view_padding")]
+    pub padding_top: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_right: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_bottom: u32,
+    #[serde(default = "default_view_padding")]
+    pub padding_left: u32,
+    /// Font family. Empty string = inherit the app base font.
+    #[serde(default)]
+    pub font_family: String,
+    #[serde(default = "default_view_font_size")]
+    pub font_size: u16,
+}
+
+impl Default for ViewerSettings {
+    fn default() -> Self {
+        Self {
+            padding_top: 8,
+            padding_right: 8,
+            padding_bottom: 8,
+            padding_left: 8,
+            font_family: String::new(),
+            font_size: 13,
+        }
+    }
+}
+
 /// Direct Remote Mode server settings.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1825,6 +1858,8 @@ pub struct Settings {
     #[serde(default)]
     pub file_explorer: FileExplorerSettings,
     #[serde(default)]
+    pub viewer: ViewerSettings,
+    #[serde(default)]
     pub github: GithubSettings,
     #[serde(default)]
     pub remote: RemoteSettings,
@@ -1922,6 +1957,7 @@ impl Default for Settings {
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),
+            viewer: ViewerSettings::default(),
             github: GithubSettings::default(),
             remote: RemoteSettings::default(),
             sync_cwd_defaults: None,
