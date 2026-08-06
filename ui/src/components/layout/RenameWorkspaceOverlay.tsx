@@ -39,7 +39,18 @@ export function RenameWorkspaceOverlay() {
     restoreFocusRef.current = document.activeElement as HTMLElement | null;
     inputRef.current?.focus();
     inputRef.current?.select();
+    // WebView2 occasionally drops this immediate focus() when the caller was a
+    // terminal's xterm helper textarea (stale TSF context, same class of issue
+    // as ADR-0057/ADR-0108) — the input never visibly gains focus until the
+    // user clicks it. Re-assert once next frame as a cheap, safe fallback.
+    const raf = requestAnimationFrame(() => {
+      if (document.activeElement !== inputRef.current) {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    });
     return () => {
+      cancelAnimationFrame(raf);
       restoreFocusRef.current?.focus?.();
       restoreFocusRef.current = null;
     };
