@@ -176,7 +176,8 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | 필드 | 타입 | 적용 view | 설명 |
 |---|---|---|---|
 | `githubTab` | `"issues" \| "pulls"` | `GitHubView` | 헤더에서 마지막으로 고른 목록 탭. 없을 때만 `settings.github.defaultTab` 이 씨앗값으로 읽히며, 한 번 고른 pane 은 이후 `defaultTab` 변경에 따라 움직이지 않는다. `paneId` 없이 렌더된 인스턴스는 보존하지 않는다 ([ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)). |
-| `fontSize` | `number` | `TerminalView` · `MemoView` | 줌 키바인딩으로 조정되는 폰트 크기. TerminalView 는 `terminal.zoomIn/zoomOut/zoomReset`, MemoView 는 `memo.zoomIn/zoomOut/zoomReset` (둘 다 기본 `Ctrl+=` / `Ctrl+-` / `Ctrl+0`, 포커스된 view 타입에 따라 분기). `zoomReset` 은 override 를 제거해 기본값 체인으로 복귀 — TerminalView 는 `profile → profileDefaults` 폰트의 `size` 만 덮어쓰고(face/weight 유지), MemoView 는 `settings.memo.fontSize → appearance.font.size` 체인 위에 덮어쓴다. 범위 6–72. |
+| `fontSize` | `number` | `TerminalView` · `MemoView` · `FileViewer` | TerminalView·MemoView는 줌 키바인딩(`terminal.zoomIn/zoomOut/zoomReset`, `memo.zoomIn/zoomOut/zoomReset`, 둘 다 기본 `Ctrl+=` / `Ctrl+-` / `Ctrl+0`)으로 조정하고, FileViewer는 뷰어 안 Ctrl+Wheel 또는 툴바 A−/A+ 버튼으로 조정한다(리셋 바인딩 없음 — 재조정으로 되돌린다). 기본값 체인: TerminalView 는 `profile → profileDefaults` 폰트의 `size` 만 덮어쓰고(face/weight 유지), MemoView 는 `settings.memo.fontSize → appearance.font.size`, FileViewer 는 `settings.viewer.fontSize → appearance.font.size` 위에 덮어쓴다. 범위 6–72 (FileViewer 는 `FONT_ZOOM_MIN/MAX` 공유). |
+| `imageZoom` | `number` (%) | `FileViewer` | 이미지(SVG preview 모드 포함)를 뷰어 안 Ctrl+Wheel 또는 툴바 −/+ 버튼으로 확대·축소한 값. 대응하는 설정 기본값은 없다 — 사진마다 "기본 줌" 개념이 없어 항상 100 이 시작값이다. 범위 25–400, 스텝 25(`IMAGE_ZOOM_MIN/MAX/STEP`). |
 
 #### 생명주기
 
@@ -186,6 +187,7 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
   새 view.type ≠ 이전 view.type이면 `overridesStore.clearViewOverride(paneId)`. pane 오버라이드는 유지.
 - **앱 기동 시** (`useSessionPersistence`):
   워크스페이스/독 복원 완료 후 살아있는 paneId 집합을 만들어 `overridesStore.gcStale(aliveSet)` — 과거 세션의 stale 엔트리 제거.
+  - **예외 — FileViewer**: `viewOverrides`의 키가 워크스페이스/dock pane id 가 아니라 파일 경로에서 파생된 `viewerInstanceId`(`global-file-viewer:` 접두사, `lib/file-viewer.ts`)인 항목은 이 GC에서 제외한다. 파일 뷰어는 열려 있을 때만 존재해 애초에 `aliveSet`에 나타날 수 없으므로, 예외가 없으면 재시작마다 사용자가 조정한 폰트/이미지 줌이 전부 삭제된다.
 
 #### 새 필드 추가 가이드
 

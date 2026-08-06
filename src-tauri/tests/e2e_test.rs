@@ -221,7 +221,15 @@ fn settings_round_trip_with_full_config() {
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
-        viewer: ViewerSettings::default(),
+        // Non-default on every field for the same reason as `github` below.
+        viewer: ViewerSettings {
+            padding_top: 12,
+            padding_right: 10,
+            padding_bottom: 14,
+            padding_left: 6,
+            font_family: "Fira Code".into(),
+            font_size: 18,
+        },
         // Non-default on every field: this test compares the whole struct after
         // a round trip, so a field left at its default would still pass even if
         // it never reached the file.

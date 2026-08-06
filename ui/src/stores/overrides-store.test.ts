@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useOverridesStore, PANE_OVERRIDES_KEY, VIEW_OVERRIDES_KEY } from "./overrides-store";
+import {
+  useOverridesStore,
+  PANE_OVERRIDES_KEY,
+  VIEW_OVERRIDES_KEY,
+  FILE_VIEWER_OVERRIDE_ID_PREFIX,
+} from "./overrides-store";
 
 describe("overrides-store", () => {
   beforeEach(() => {
@@ -94,6 +99,18 @@ describe("overrides-store", () => {
     });
     expect(useOverridesStore.getState().getViewOverride("pane-alive")).toEqual({ fontSize: 17 });
     expect(useOverridesStore.getState().getPaneOverride("pane-dead")).toBeUndefined();
+    expect(useOverridesStore.getState().getViewOverride("pane-dead")).toBeUndefined();
+  });
+
+  it("gcStale never prunes FileViewer view overrides — they have no pane to be alive", () => {
+    const fileViewerId = `${FILE_VIEWER_OVERRIDE_ID_PREFIX}home_user_a_txt:1a2b3c`;
+    useOverridesStore.getState().setViewOverride(fileViewerId, { fontSize: 20 });
+    useOverridesStore.getState().setViewOverride("pane-dead", { fontSize: 20 });
+
+    // Empty aliveSet: a restart where no workspace/dock pane matches either id.
+    useOverridesStore.getState().gcStale(new Set());
+
+    expect(useOverridesStore.getState().getViewOverride(fileViewerId)).toEqual({ fontSize: 20 });
     expect(useOverridesStore.getState().getViewOverride("pane-dead")).toBeUndefined();
   });
 

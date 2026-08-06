@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { decodeDataUrlText } from "@/lib/preview/base64";
+import { ZoomableImage } from "@/components/ui/preview/ZoomableImage";
+import { imageZoomAlignment } from "@/lib/image-zoom";
 
 /**
  * SVG shown as a picture, with its markup available behind the Source toggle.
@@ -42,22 +44,19 @@ export function SvgPreview({
     );
   }
 
+  const effectiveZoom = zoom ?? 100;
   return (
     // `flex-1` matters: the toggle shell lays its child out as a flex row, so
     // without it the centering box shrinks to the image and hugs the left edge.
-    <div className="flex h-full min-w-0 flex-1 items-center justify-center" style={bodyStyle}>
-      <img
-        src={dataUrl}
-        alt={path}
-        style={{
-          maxWidth: "100%",
-          maxHeight: "100%",
-          objectFit: "contain",
-          transform: zoom !== undefined ? `scale(${zoom / 100})` : undefined,
-          transformOrigin: "center",
-        }}
-        data-testid="svg-preview-image"
-      />
+    <div
+      className="flex h-full min-w-0 flex-1 overflow-auto"
+      style={{
+        ...bodyStyle,
+        alignItems: imageZoomAlignment(effectiveZoom),
+        justifyContent: imageZoomAlignment(effectiveZoom),
+      }}
+    >
+      <ZoomableImage src={dataUrl} alt={path} zoom={effectiveZoom} testId="svg-preview-image" />
     </div>
   );
 }

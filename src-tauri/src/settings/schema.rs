@@ -226,6 +226,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/viewer",
+        description: "File Viewer(열린 파일 내용) 폰트와 여백 기본값입니다. File Explorer 목록 폰트와는 별개입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/github",
         description: "GitHub 뷰의 기본 탭·폴링 간격·draft PR 표시 설정입니다.",
         sensitive: false,

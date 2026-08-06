@@ -1,4 +1,5 @@
 import type { ExtensionViewer } from "@/lib/tauri-api";
+import { FILE_VIEWER_OVERRIDE_ID_PREFIX } from "@/stores/overrides-store";
 
 /**
  * Pure logic shared by every file-viewer entry point (File Explorer, the global
@@ -63,7 +64,7 @@ export function viewerInstanceId(path: string): string {
     h ^= path.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return `global-file-viewer:${safe}:${(h >>> 0).toString(16)}`;
+  return `${FILE_VIEWER_OVERRIDE_ID_PREFIX}${safe}:${(h >>> 0).toString(16)}`;
 }
 
 /** Extract the lowercased extension (with leading dot) from a path, or "". */

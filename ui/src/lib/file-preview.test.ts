@@ -138,4 +138,25 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain(".markdown-body");
     expect(doc).not.toContain("color-mix(");
   });
+
+  it("bakes the viewer's font into the document — the iframe never inherits the host's", () => {
+    const doc = buildPreviewDocument("<h1>Safe</h1>", "html", {
+      family: "Fira Code",
+      size: 18,
+    });
+
+    expect(doc).toContain("font-size:18px !important");
+    expect(doc).toContain('font-family:"Fira Code" !important');
+  });
+
+  it("escapes a font family that tries to close the style tag early", () => {
+    const doc = buildPreviewDocument("<h1>Safe</h1>", "html", {
+      family: 'evil";}</style><script>x',
+      size: 13,
+    });
+
+    expect(doc).not.toContain("</style><script>");
+    // `<`/`>` survive only as CSS hex escapes, never as literal HTML-breaking characters.
+    expect(doc).toContain('\\3c /style\\3e \\3c script\\3e x');
+  });
 });

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { openExternal, readFileForViewer, type FileViewerContent } from "@/lib/tauri-api";
 import { fileExtension, resolveViewer } from "@/lib/file-viewer";
-import { htmlToSafePreviewDocument, markdownToSafePreviewDocument } from "@/lib/file-preview";
+import {
+  htmlToSafePreviewDocument,
+  markdownToSafePreviewDocument,
+  type PreviewFont,
+} from "@/lib/file-preview";
 import {
   filePreviewKind,
   isDocumentPreviewKind,
@@ -19,6 +23,8 @@ import { LogPreview } from "@/components/ui/preview/LogPreview";
 import { PdfPreview } from "@/components/ui/preview/PdfPreview";
 import { PreviewNotice } from "@/components/ui/preview/PreviewNotice";
 import { SvgPreview } from "@/components/ui/preview/SvgPreview";
+import { ZoomableImage } from "@/components/ui/preview/ZoomableImage";
+import { imageZoomAlignment } from "@/lib/image-zoom";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
   useOverridesStore,
@@ -309,21 +315,19 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
             </div>
           </ToolbarBar>
           <div
-            className="flex min-h-0 flex-1 items-center justify-center overflow-auto"
-            style={bodyStyle}
+            className="flex min-h-0 flex-1 overflow-auto"
+            style={{
+              ...bodyStyle,
+              alignItems: imageZoomAlignment(imageZoom),
+              justifyContent: imageZoomAlignment(imageZoom),
+            }}
             onWheel={handleImageWheel}
           >
-            <img
+            <ZoomableImage
               src={content.dataUrl}
               alt={path}
-              style={{
-                maxWidth: "100%",
-                maxHeight: "100%",
-                objectFit: "contain",
-                transform: `scale(${imageZoom / 100})`,
-                transformOrigin: "center",
-              }}
-              data-testid="file-viewer-image"
+              zoom={imageZoom}
+              testId="file-viewer-image"
             />
           </div>
         </div>
@@ -370,6 +374,8 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
           bodyStyle={effectiveBodyStyle}
           onWheel={handleFontWheel}
           rightControls={<FontZoomControls onZoom={adjustFontZoom} fontSize={effectiveFontSize} />}
+          font={{ family: effectiveFontFamily, size: effectiveFontSize }}
+          onFontZoom={adjustFontZoom}
         />
       );
     }
@@ -397,6 +403,12 @@ interface PreviewableTextFileProps {
   bodyStyle?: React.CSSProperties;
   onWheel?: (e: React.WheelEvent) => void;
   rightControls?: React.ReactNode;
+  /** Baked into the html/markdown preview iframe's own `<style>` — it is a
+   *  separate document and never inherits `bodyStyle`'s font. */
+  font: PreviewFont;
+  /** Ctrl+Wheel inside the preview iframe (a separate document — it never
+   *  bubbles to this component's own onWheel) forwards here. */
+  onFontZoom?: (delta: number) => void;
 }
 
 function PreviewableTextFile({
@@ -408,6 +420,8 @@ function PreviewableTextFile({
   bodyStyle,
   onWheel,
   rightControls,
+  font,
+  onFontZoom,
 }: PreviewableTextFileProps) {
   return (
     <PreviewToggleShell
@@ -422,6 +436,8 @@ function PreviewableTextFile({
           content={content}
           previewKind={previewKind}
           bodyStyle={bodyStyle}
+          font={font}
+          onFontZoom={onFontZoom}
         />
       ) : (
         <SourceText content={content} bodyStyle={bodyStyle} />
@@ -443,20 +459,30 @@ function TypedPreview({
   content,
   previewKind,
   bodyStyle,
+  font,
+  onFontZoom,
 }: {
   path: string;
   content: Extract<FileViewerContent, { kind: "text" }>;
   previewKind: FilePreviewKind;
   bodyStyle?: React.CSSProperties;
+  font: PreviewFont;
+  onFontZoom?: (delta: number) => void;
 }) {
   const documentHtml = useMemo(() => {
-    if (previewKind === "markdown") return markdownToSafePreviewDocument(content.content);
-    if (previewKind === "html") return htmlToSafePreviewDocument(content.content);
+    if (previewKind === "markdown") return markdownToSafePreviewDocument(content.content, font);
+    if (previewKind === "html") return htmlToSafePreviewDocument(content.content, font);
     return null;
-  }, [content.content, previewKind]);
+  }, [content.content, previewKind, font]);
 
   if (isDocumentPreviewKind(previewKind)) {
-    return <PreviewFrame documentHtml={documentHtml ?? ""} bodyStyle={bodyStyle} />;
+    return (
+      <PreviewFrame
+        documentHtml={documentHtml ?? ""}
+        bodyStyle={bodyStyle}
+        onFontZoom={onFontZoom}
+      />
+    );
   }
 
   // A structured renderer that is handed a truncated file parses a fragment and
@@ -688,9 +714,13 @@ function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: num
 function PreviewFrame({
   documentHtml,
   bodyStyle,
+  onFontZoom,
 }: {
   documentHtml: string;
   bodyStyle?: React.CSSProperties;
+  /** Ctrl+Wheel over the iframe's own document — it never bubbles to the
+   *  parent's onWheel, so it must be forwarded from inside `doc` directly. */
+  onFontZoom?: (delta: number) => void;
 }) {
   const handleLoad = (event: React.SyntheticEvent<HTMLIFrameElement>) => {
     const doc = event.currentTarget.contentDocument;
@@ -707,6 +737,15 @@ function PreviewFrame({
       clickEvent.preventDefault();
       void openExternal(link.href || href);
     });
+    doc.addEventListener(
+      "wheel",
+      (wheelEvent) => {
+        if (!wheelEvent.ctrlKey || !onFontZoom) return;
+        wheelEvent.preventDefault();
+        onFontZoom(wheelEvent.deltaY < 0 ? 1 : -1);
+      },
+      { passive: false },
+    );
   };
 
   return (
