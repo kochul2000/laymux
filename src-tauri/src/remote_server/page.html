@@ -5872,10 +5872,12 @@
 
         // Ask the desktop to open a pane it has not started yet, then wait for
         // the session to exist. Focus *is* the request: it activates the pane's
-        // workspace and hands the pane the startup slot on the host. The focus
-        // response is deliberately not the verdict — a cold start can outlast
-        // the host bridge's request budget, so navigation is polled until the
-        // session shows up (issue #779).
+        // workspace and makes the pane focused, which mounts it and lets its
+        // terminal start through the host's startup slot. The focus response is
+        // deliberately not the verdict — the host answers as soon as focus is
+        // applied, without waiting for a session, so a success there says
+        // nothing about whether a PTY exists yet. Navigation is polled until
+        // the session shows up (issue #779).
         async function openTerminalOnHost(terminalId, selectionRevision) {
           focusTerminalOnHost(terminalId).catch(() => {});
           const deadline = Date.now() + TERMINAL_OPEN_TIMEOUT_MS;
