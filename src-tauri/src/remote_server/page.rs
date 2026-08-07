@@ -1194,7 +1194,7 @@ mod tests {
         );
         assert!(
             main_output_selection
-                .contains("(dock.panes || []).some((pane) => pane.terminalId === terminalId && pane.terminalLive)"),
+                .contains("(dock.panes || []).some((pane) => pane.terminalId === terminalId)"),
             "hidden dock preferred ids must not bypass pane visibility checks"
         );
         assert!(preferred_terminal.contains(
@@ -1202,6 +1202,33 @@ mod tests {
         ));
         assert!(
             !preferred_terminal.contains("if (preferredTerminalId) {\n            const existing")
+        );
+    }
+
+    /// Issue #779: a pane the desktop has not opened yet owns no PTY, so its
+    /// summary carries `terminalLive: false`. Selection must key off pane
+    /// identity and let the attach path open the pane on the host, otherwise
+    /// those panes are unreachable and a workspace full of them dead-ends.
+    #[test]
+    fn remote_page_enters_panes_the_desktop_has_not_opened_yet() {
+        let html = remote_page_html();
+
+        assert!(html.contains(
+            "function isTerminalPane(pane) {\n          return Boolean(pane && pane.terminalId);\n        }"
+        ));
+        assert!(
+            html.contains("const isTerminal = isTerminalPane(pane);"),
+            "workspace and dock rows must treat every terminal pane as enterable"
+        );
+        assert!(!html.contains("Boolean(pane.terminalId && pane.terminalLive)"));
+        assert!(html.contains("async function openTerminalOnHost(terminalId, selectionRevision)"));
+        assert!(
+            html.contains("if (terminalSessionLive(terminalId)) {\n            openOutput(terminalId, options);"),
+            "a live session must attach without waiting on a host open request"
+        );
+        assert!(
+            !html.contains("No open terminal sessions."),
+            "a queued pane is opened on entry, so it is never reported as missing"
         );
     }
 
