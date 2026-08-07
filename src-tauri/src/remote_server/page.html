@@ -5259,7 +5259,7 @@
         }
 
         function renderDockTerminalRow(dock, pane) {
-          const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
+          const isTerminal = isTerminalPane(pane);
           const isActive = Boolean(isTerminal && (pane.terminalId === activeTerminalId || pane.isFocused));
           const canSelectTerminal = Boolean(leaseId && isTerminal);
           const row = document.createElement(canSelectTerminal ? "button" : "div");
@@ -5459,7 +5459,7 @@
         }
 
         function renderPaneRow(pane, panes, paneIndex, workspaceActive) {
-          const isTerminal = Boolean(pane.terminalId && pane.terminalLive);
+          const isTerminal = isTerminalPane(pane);
           const isActive = Boolean(isTerminal && pane.terminalId === activeTerminalId);
           const canSelectTerminal = Boolean(workspaceActive && leaseId && isTerminal && !pane.collapsed);
           const row = document.createElement(canSelectTerminal ? "button" : "div");
@@ -5593,36 +5593,78 @@
           return (data.docks || []).filter((dock) => dock.visible !== false);
         }
 
-        function terminalById(terminals, terminalId) {
-          return terminals.find((terminalInfo) => terminalInfo.id === terminalId) || null;
+        // A pane is enterable because the desktop layout owns it as a terminal
+        // pane, not because a PTY happens to exist right now. `terminalLive`
+        // only reports the latter, and panes the desktop has not opened yet own
+        // no session at all: workspaces mount lazily and terminal startup is
+        // serialized behind one global slot. Gating selection on liveness made
+        // those panes unreachable from Remote and dead-ended the page on "no
+        // open terminal sessions" (issue #779) — the same trap ADR-0039 already
+        // avoids for step navigation.
+        function isTerminalPane(pane) {
+          return Boolean(pane && pane.terminalId);
         }
 
         function isMainOutputTerminal(data, terminalId) {
           if (!terminalId) return false;
           const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
-          if (activePanes.some((pane) => pane.terminalId === terminalId && pane.terminalLive)) {
+          if (activePanes.some((pane) => pane.terminalId === terminalId)) {
             return true;
           }
           return visibleDockItems(data).some((dock) =>
-            (dock.panes || []).some((pane) => pane.terminalId === terminalId && pane.terminalLive)
+            (dock.panes || []).some((pane) => pane.terminalId === terminalId)
           );
         }
 
-        function preferredTerminal(data, terminals, preferredTerminalId) {
+        // Returns a terminal id, not a terminal info object: a queued pane has
+        // no entry in `data.terminals` yet and must still be selectable.
+        // Liveness stays a tie-breaker at every step — attaching to a running
+        // session is instant, while a queued pane has to be opened first.
+        function preferredTerminal(data, preferredTerminalId, options = {}) {
           if (preferredTerminalId && isMainOutputTerminal(data, preferredTerminalId)) {
-            const existing = terminalById(terminals, preferredTerminalId);
-            if (existing) return existing;
+            // A *remembered* selection resumes only onto a live session: after a
+            // reconnect, a terminal that ended must fall back to a running pane
+            // rather than be restarted behind the user's back. A pane the user
+            // is entering right now is pinned instead, so the poll that waits
+            // for it to open cannot drift onto another pane.
+            const hintPane = paneByTerminalId(data, preferredTerminalId);
+            if (options.pinned || (hintPane && hintPane.terminalLive)) return preferredTerminalId;
           }
           const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
           const focusedNumber = data.activeWorkspace && data.activeWorkspace.focusedPaneNumber;
-          const focusedPane = activePanes.find((pane) => pane.paneNumber === focusedNumber && pane.terminalId && pane.terminalLive);
-          const activePane = focusedPane || activePanes.find((pane) => pane.terminalId && pane.terminalLive);
-          if (activePane) return terminalById(terminals, activePane.terminalId);
+          const focusedPane = activePanes.find((pane) => pane.paneNumber === focusedNumber && isTerminalPane(pane));
+          const activePane =
+            focusedPane ||
+            activePanes.find((pane) => isTerminalPane(pane) && pane.terminalLive) ||
+            activePanes.find((pane) => isTerminalPane(pane));
+          if (activePane) return activePane.terminalId;
           for (const dock of visibleDockItems(data)) {
-            const dockPane = (dock.panes || []).find((pane) => pane.terminalId && pane.terminalLive);
-            if (dockPane) return terminalById(terminals, dockPane.terminalId);
+            const dockPanes = dock.panes || [];
+            const dockPane =
+              dockPanes.find((pane) => isTerminalPane(pane) && pane.terminalLive) ||
+              dockPanes.find((pane) => isTerminalPane(pane));
+            if (dockPane) return dockPane.terminalId;
           }
           return null;
+        }
+
+        function paneByTerminalId(data, terminalId) {
+          if (!data || !terminalId) return null;
+          const activePanes = (data.activeWorkspace && data.activeWorkspace.panes) || [];
+          const activePane = activePanes.find((pane) => pane.terminalId === terminalId);
+          if (activePane) return activePane;
+          for (const dock of visibleDockItems(data)) {
+            const dockPane = (dock.panes || []).find((pane) => pane.terminalId === terminalId);
+            if (dockPane) return dockPane;
+          }
+          return null;
+        }
+
+        // Pane summaries carry the same title/profile/cwd fields as terminal
+        // infos, so a queued pane still gets a real header instead of a raw id.
+        function terminalMetaLabel(data, terminalId) {
+          const source = terminalInfoById.get(terminalId) || paneByTerminalId(data, terminalId);
+          return source ? terminalLabel(source) : terminalId;
         }
 
         async function loadNavigation(
@@ -5640,21 +5682,26 @@
           // Start font downloads before the user attaches, so the terminal is
           // usually created with the desktop font already measurable.
           terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
-          const nextTerminal = preferredTerminal(data, terminals, preferredTerminalId);
-          setActiveTerminal(nextTerminal ? nextTerminal.id : null);
+          const nextTerminalId = preferredTerminal(data, preferredTerminalId, {
+            pinned: options.pinTerminal === true,
+          });
+          setActiveTerminal(nextTerminalId);
           renderNavigation(data);
           setConnected(Boolean(leaseId));
           if (activeTerminalId) {
-            terminalMetaEl.textContent = terminalLabel(nextTerminal);
+            terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
             if (options.openOutput !== false) {
-              openOutput(activeTerminalId, {
+              attachTerminal(activeTerminalId, {
                 focusInput: options.focusInput !== false,
                 preserveViewport: options.preserveViewport === true,
               });
             }
           } else {
-            terminalMetaEl.textContent = "No open terminal sessions.";
-            setStatus("No open terminal sessions.", true);
+            // Only reachable when the active workspace and every visible dock
+            // own no terminal pane at all — a queued pane is opened on entry
+            // instead of being reported as missing (issue #779).
+            terminalMetaEl.textContent = "No terminal panes to open.";
+            setStatus("No terminal panes to open.", true);
             stopSocket();
           }
         }
@@ -5811,20 +5858,79 @@
           });
         }
 
+        const TERMINAL_OPEN_POLL_MS = 400;
+        // Mirrors the desktop's terminal readiness ceiling: a queued pane can
+        // sit behind one 10-second startup-slot watchdog before its own start
+        // even begins.
+        const TERMINAL_OPEN_TIMEOUT_MS = 20000;
+
+        // `data.terminals` is the host's list of live PTY sessions, so its keys
+        // are exactly the terminal ids that can be attached right now.
+        function terminalSessionLive(terminalId) {
+          return Boolean(terminalId && terminalInfoById.has(terminalId));
+        }
+
+        // Ask the desktop to open a pane it has not started yet, then wait for
+        // the session to exist. Focus *is* the request: it activates the pane's
+        // workspace and makes the pane focused, which mounts it and lets its
+        // terminal start through the host's startup slot. The focus response is
+        // deliberately not the verdict — the host answers as soon as focus is
+        // applied, without waiting for a session, so a success there says
+        // nothing about whether a PTY exists yet. Navigation is polled until
+        // the session shows up (issue #779).
+        async function openTerminalOnHost(terminalId, selectionRevision) {
+          focusTerminalOnHost(terminalId).catch(() => {});
+          const deadline = Date.now() + TERMINAL_OPEN_TIMEOUT_MS;
+          while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, TERMINAL_OPEN_POLL_MS));
+            if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
+            await loadNavigation(terminalId, {
+              openOutput: false,
+              selectionRevision,
+              pinTerminal: true,
+            }).catch(() => {});
+            if (terminalSessionLive(terminalId)) return true;
+          }
+          return false;
+        }
+
+        // Single entry point for putting a terminal on the main output surface.
+        // A live session attaches straight away; a queued pane is opened first,
+        // because attaching to a terminal that has no PTY only yields a 404.
+        async function attachTerminal(terminalId, options = {}) {
+          if (!terminalId) return false;
+          if (terminalSessionLive(terminalId)) {
+            openOutput(terminalId, options);
+            return true;
+          }
+          const selectionRevision = terminalSelectionRevision;
+          setStatus("Opening the pane on the desktop...");
+          const opened = await openTerminalOnHost(terminalId, selectionRevision);
+          if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
+          if (!opened) {
+            setStatus("The desktop has not opened this pane yet.", true);
+            return false;
+          }
+          openOutput(terminalId, options);
+          return true;
+        }
+
         async function selectTerminal(terminalId, options = {}) {
           if (!terminalId) return;
           const selectionRevision = ++terminalSelectionRevision;
           const selectedLeaseId = leaseId;
           setActiveTerminal(terminalId);
-          const terminalInfo = terminalInfoById.get(terminalId);
-          terminalMetaEl.textContent = terminalInfo ? terminalLabel(terminalInfo) : terminalId;
+          terminalMetaEl.textContent = terminalMetaLabel(navigationState, terminalId);
           setConnected(Boolean(leaseId));
           // Output attach begins immediately; host focus/navigation refreshes
           // are independent and must not leave the old socket active meanwhile.
-          openOutput(terminalId);
+          const live = terminalSessionLive(terminalId);
+          attachTerminal(terminalId);
           setNavigationOpen(false);
+          // A queued pane is focused by the attach path itself — that is how it
+          // gets opened — so focusing here too would only duplicate the request.
           const canFocusHost =
-            options.focusHost !== false && (options.focusDockHost === true || !isDockTerminalId(terminalId));
+            live && options.focusHost !== false && (options.focusDockHost === true || !isDockTerminalId(terminalId));
           if (canFocusHost) {
             await focusTerminalOnHost(terminalId).catch((err) => setStatus(`Focus failed: ${err.message}`, true));
           }
@@ -5833,9 +5939,11 @@
             activeTerminalId !== terminalId ||
             leaseId !== selectedLeaseId
           ) return;
-          if (options.refreshNavigation) {
+          // The attach path already re-reads navigation while it waits for a
+          // queued pane, so only a live selection needs its own refresh.
+          if (live && options.refreshNavigation) {
             await loadNavigation(terminalId, { openOutput: false, selectionRevision }).catch((err) => setStatus(`Refresh failed: ${err.message}`, true));
-          } else if (navigationState) {
+          } else if (live && navigationState) {
             renderNavigation(navigationState);
           }
         }
