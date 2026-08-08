@@ -243,6 +243,7 @@ fn settings_round_trip_with_full_config() {
             enabled: true,
             allowed_origins: vec!["http://100.64.0.2:19281".into()],
             allowed_ips: vec!["100.64.0.0/10".into(), "fd7a:115c:a1e0::/48".into()],
+            tailscale_only: true,
             auth_token: "test-remote-token".into(),
             preferred_host: "100.64.0.2".into(),
             custom_hosts: vec!["devbox.tailnet.ts.net".into(), "192.168.0.44".into()],

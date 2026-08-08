@@ -1,9 +1,15 @@
 use std::collections::HashSet;
+use std::io::Read;
 use std::net::IpAddr;
+use std::process::Stdio;
+use std::thread;
+use std::time::{Duration, Instant};
 
 const HOST_KIND_LOOPBACK: &str = "loopback";
 const HOST_KIND_TAILSCALE: &str = "tailscale";
 const HOST_KIND_LAN: &str = "lan";
+const TAILSCALE_COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+const TAILSCALE_COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,18 +70,50 @@ fn detect_tailscale_host_candidates() -> Vec<HostCandidate> {
     ["-4", "-6"]
         .into_iter()
         .filter_map(|family| {
-            let output = crate::process::headless_command("tailscale")
-                .args(["ip", family])
-                .output()
-                .ok()?;
-            if !output.status.success() {
-                return None;
-            }
-            parse_first_tailscale_ip(&output.stdout)
+            tailscale_ip_output(family)
+                .as_deref()
+                .and_then(parse_first_tailscale_ip)
                 .and_then(|host| host.parse::<IpAddr>().ok())
                 .map(|ip| host_candidate_for_ip(HOST_KIND_TAILSCALE, ip))
         })
         .collect()
+}
+
+fn tailscale_ip_output(family: &str) -> Option<Vec<u8>> {
+    let mut child = crate::process::headless_command("tailscale")
+        .args(["ip", family])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + TAILSCALE_COMMAND_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let mut stdout = Vec::new();
+                child.stdout.take()?.read_to_end(&mut stdout).ok()?;
+                return Some(stdout);
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(TAILSCALE_COMMAND_POLL_INTERVAL);
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                tracing::debug!(family, "tailscale address probe timed out");
+                return None;
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                tracing::debug!(family, %error, "tailscale address probe failed");
+                return None;
+            }
+        }
+    }
 }
 
 fn parse_first_tailscale_ip(stdout: &[u8]) -> Option<String> {

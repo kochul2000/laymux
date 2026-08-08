@@ -655,6 +655,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   bindAddress: "0.0.0.0",
   allowedOrigins: [],
   allowedIps: ["127.0.0.1/32", "::1/128"],
+  tailscaleOnly: false,
   authToken: "",
   heartbeatTimeoutSeconds: 45,
   autoMobileModeMinWidth: 720,

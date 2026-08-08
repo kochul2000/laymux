@@ -244,6 +244,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Restart,
     },
     MetadataEntry {
+        path: "/remote/tailscaleOnly",
+        description: "Direct Remote 요청의 관측 source IP가 Tailscale IPv4(100.64.0.0/10) 또는 IPv6(fd7a:115c:a1e0::/48) 대역이 아니면 거절합니다. 기존 allowedIps 및 bearer token 검사는 함께 유지되고 cloud tunnel 요청에는 적용하지 않습니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/remote/snapshotMaxKib",
         description: "원격 접속·터미널 전환 시 만드는 화면 체크포인트의 스크롤백 소프트 예산(KiB, 1~1024)입니다. 현재 화면·터미널 상태는 예산보다 클 수 있으며 다음 attach부터 적용됩니다.",
         sensitive: false,

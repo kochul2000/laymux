@@ -399,6 +399,7 @@ mod tests {
         let legacy: Settings = serde_json::from_str("{}").unwrap();
         assert!(!legacy.remote.enabled);
         assert_eq!(legacy.remote.allowed_ips, vec!["127.0.0.1/32", "::1/128"]);
+        assert!(!legacy.remote.tailscale_only);
         assert_eq!(legacy.remote.heartbeat_timeout_seconds, 45);
         assert_eq!(legacy.remote.auto_mobile_mode_min_width, 720);
         assert!(!legacy.remote.cloud_enabled);
@@ -415,6 +416,7 @@ mod tests {
           "remote": {
             "enabled": true,
             "allowedIps": ["100.64.0.0/10"],
+            "tailscaleOnly": true,
             "authToken": "secret",
             "heartbeatTimeoutSeconds": 30,
             "autoMobileModeMinWidth": 640,
@@ -429,6 +431,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert!(settings.remote.enabled);
         assert_eq!(settings.remote.allowed_ips, vec!["100.64.0.0/10"]);
+        assert!(settings.remote.tailscale_only);
         assert_eq!(settings.remote.auth_token, "secret");
         assert_eq!(settings.remote.heartbeat_timeout_seconds, 30);
         assert_eq!(settings.remote.auto_mobile_mode_min_width, 640);
@@ -451,6 +454,7 @@ mod tests {
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"remote\""));
         assert!(serialized.contains("\"allowedIps\":[\"100.64.0.0/10\"]"));
+        assert!(serialized.contains("\"tailscaleOnly\":true"));
         assert!(serialized.contains("\"authToken\":\"secret\""));
         assert!(serialized.contains("\"autoMobileModeMinWidth\":640"));
         assert!(serialized.contains("\"cloudEnabled\":true"));

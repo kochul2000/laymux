@@ -2148,6 +2148,23 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
     });
 
+    it("enables Tailscale-only access and adds the required Tailnet ranges", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-tailscale-only-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.tailscaleOnly).toBe(true);
+      expect(useSettingsStore.getState().remote.allowedIps).toEqual([
+        "127.0.0.1/32",
+        "::1/128",
+        "100.64.0.0/10",
+        "fd7a:115c:a1e0::/48",
+      ]);
+    });
+
     it("adds custom hosts and saves the preferred host", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);

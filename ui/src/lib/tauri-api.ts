@@ -923,6 +923,7 @@ export interface RemoteSettings {
   bindAddress: string;
   allowedOrigins: string[];
   allowedIps: string[];
+  tailscaleOnly: boolean;
   authToken: string;
   heartbeatTimeoutSeconds: number;
   autoMobileModeMinWidth: number;
