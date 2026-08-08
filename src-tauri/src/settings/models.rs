@@ -1554,6 +1554,11 @@ pub struct RemoteSettings {
     /// IP/CIDR allowlist for remote clients. Add Tailscale IPv4/IPv6 CIDRs when needed.
     #[serde(default = "default_remote_allowed_ips")]
     pub allowed_ips: Vec<String>,
+    /// Reject direct remote clients whose observed source IP is outside the
+    /// Tailscale CGNAT/ULA ranges. Cloud tunnel requests are transport-authenticated
+    /// separately and do not pass through this direct-peer gate.
+    #[serde(default)]
+    pub tailscale_only: bool,
     /// Bearer token for remote browser clients. Required when remote is enabled.
     #[serde(default)]
     pub auth_token: String,
@@ -1662,6 +1667,7 @@ impl Default for RemoteSettings {
             bind_address: default_remote_bind_address(),
             allowed_origins: Vec::new(),
             allowed_ips: default_remote_allowed_ips(),
+            tailscale_only: false,
             auth_token: String::new(),
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),

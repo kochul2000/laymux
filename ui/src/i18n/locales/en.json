@@ -343,6 +343,8 @@
       "groupCloud": "Cloud Connection",
       "enabled": "Enable on Startup",
       "enabledDesc": "Open Direct Remote Mode automatically on the next app start. A token is generated when this is enabled without one.",
+      "tailscaleOnly": "Tailscale Only",
+      "tailscaleOnlyDesc": "Allow Direct Remote requests only from Tailscale address ranges. Cloud tunnel requests are unaffected, and the existing IP allowlist and token checks still apply.",
       "allowedIps": "Allowed IPs",
       "allowedIpsDesc": "IP/CIDR allowlist for browser remote clients.",
       "allowedIpsPlaceholder": "127.0.0.1/32\n::1/128\n100.64.0.0/10",

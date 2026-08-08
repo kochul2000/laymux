@@ -2105,6 +2105,21 @@ function RemoteSection() {
           onChange={handleToggleEnabled}
         />
 
+        <ToggleRow
+          label={t("remote.tailscaleOnly")}
+          desc={t("remote.tailscaleOnlyDesc")}
+          testid="remote-settings-tailscale-only-toggle"
+          checked={remote.tailscaleOnly}
+          onChange={(checked) =>
+            update({
+              tailscaleOnly: checked,
+              allowedIpsText: checked
+                ? appendAllowedIps(remote.allowedIpsText, TAILSCALE_ALLOWED_IPS)
+                : remote.allowedIpsText,
+            })
+          }
+        />
+
         <SettingRow label={t("remote.allowedIps")} desc={t("remote.allowedIpsDesc")}>
           <div className="flex min-w-0 flex-col gap-2">
             <textarea

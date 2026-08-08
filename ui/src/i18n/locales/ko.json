@@ -343,6 +343,8 @@
       "groupCloud": "클라우드 연결",
       "enabled": "시작 시 자동 허용",
       "enabledDesc": "다음 앱 시작부터 Direct Remote Mode를 자동으로 엽니다. 토큰이 없으면 켤 때 생성합니다.",
+      "tailscaleOnly": "Tailscale 전용",
+      "tailscaleOnlyDesc": "Direct Remote 요청은 Tailscale IP 대역에서 온 경우에만 허용합니다. 클라우드 터널에는 적용되지 않으며 기존 허용 IP와 토큰 검사도 유지됩니다.",
       "allowedIps": "허용 IP",
       "allowedIpsDesc": "브라우저 원격 클라이언트에 허용할 IP/CIDR 목록입니다.",
       "allowedIpsPlaceholder": "127.0.0.1/32\n::1/128\n100.64.0.0/10",

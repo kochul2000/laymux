@@ -27,7 +27,8 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tower::ServiceExt;
 
 use super::{keyring_store, CloudStatus};
-use crate::automation_server::ServerState;
+use crate::automation_server::{automation_port, ServerState};
+use crate::commands::{get_remote_host_candidates, HostCandidate};
 use crate::constants::{
     DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS,
 };
@@ -564,6 +565,31 @@ async fn connect_once(
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<TunnelFrame>(OUTBOUND_QUEUE_SIZE);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<ResponseCompletion>();
     let mut writer_shutdown = shutdown.clone();
+    let (presence_tx, mut presence_rx) = watch::channel(json!({}));
+    let mut presence_shutdown = shutdown.clone();
+    let presence_join = tokio::spawn(async move {
+        let mut refresh = interval(HEARTBEAT_INTERVAL);
+        loop {
+            tokio::select! {
+                _ = refresh.tick() => {
+                    let next = tunnel_presence_payload().await;
+                    presence_tx.send_if_modified(|current| {
+                        if *current == next {
+                            false
+                        } else {
+                            *current = next;
+                            true
+                        }
+                    });
+                }
+                changed = presence_shutdown.changed() => {
+                    if changed.is_err() || *presence_shutdown.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 
     let writer_join = tokio::spawn(async move {
         let mut heartbeat = interval(HEARTBEAT_INTERVAL);
@@ -581,7 +607,27 @@ async fn connect_once(
                     }
                 }
                 _ = heartbeat.tick() => {
-                    let frame = TunnelFrame::empty(CONTROL_STREAM_ID, FRAME_HEARTBEAT);
+                    let frame = TunnelFrame::new(
+                        CONTROL_STREAM_ID,
+                        FRAME_HEARTBEAT,
+                        presence_rx.borrow().clone(),
+                    );
+                    let Ok(text) = serde_json::to_string(&frame) else {
+                        continue;
+                    };
+                    if writer.send(WsMessage::Text(text.into())).await.is_err() {
+                        break;
+                    }
+                }
+                changed = presence_rx.changed() => {
+                    if changed.is_err() {
+                        break;
+                    }
+                    let frame = TunnelFrame::new(
+                        CONTROL_STREAM_ID,
+                        FRAME_HEARTBEAT,
+                        presence_rx.borrow().clone(),
+                    );
                     let Ok(text) = serde_json::to_string(&frame) else {
                         continue;
                     };
@@ -668,6 +714,7 @@ async fn connect_once(
         close_active_stream(stream);
     }
     writer_join.abort();
+    presence_join.abort();
     if let Some(error) = terminal_error {
         return Err(error);
     }
@@ -896,6 +943,34 @@ fn set_cloud_status(
     };
     *cloud = next.clone();
     Ok(next)
+}
+
+async fn tunnel_presence_payload() -> Value {
+    let tailscale_url = get_remote_host_candidates()
+        .await
+        .ok()
+        .and_then(|candidates| tailscale_direct_url_from_candidates(&candidates, automation_port()));
+    match tailscale_url {
+        Some(url) => json!({ "tailscaleUrl": url }),
+        None => json!({}),
+    }
+}
+
+fn tailscale_direct_url_from_candidates(
+    candidates: &[HostCandidate],
+    port: u16,
+) -> Option<String> {
+    let host = candidates
+        .iter()
+        .find(|candidate| candidate.kind == "tailscale")?
+        .host
+        .as_str();
+    let authority = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    };
+    Some(format!("http://{authority}:{port}/remote/"))
 }
 
 async fn handle_stream_open(
@@ -2303,6 +2378,29 @@ mod tests {
         assert!(status.connected);
         assert_eq!(status.instance_id.as_deref(), Some("instance-1"));
         assert_eq!(*state.cloud.lock_or_err().unwrap(), status);
+    }
+
+    #[test]
+    fn tailscale_presence_url_uses_detected_host_and_brackets_ipv6() {
+        let ipv4 = HostCandidate {
+            kind: "tailscale".into(),
+            host: "100.64.0.2".into(),
+            label: "Tailscale 100.64.0.2".into(),
+        };
+        let ipv6 = HostCandidate {
+            kind: "tailscale".into(),
+            host: "fd7a:115c:a1e0::7".into(),
+            label: "Tailscale fd7a:115c:a1e0::7".into(),
+        };
+
+        assert_eq!(
+            tailscale_direct_url_from_candidates(&[ipv4], 19281).as_deref(),
+            Some("http://100.64.0.2:19281/remote/")
+        );
+        assert_eq!(
+            tailscale_direct_url_from_candidates(&[ipv6], 19280).as_deref(),
+            Some("http://[fd7a:115c:a1e0::7]:19280/remote/")
+        );
     }
 
     #[tokio::test]

@@ -102,6 +102,24 @@ pub(crate) fn check_remote_base_access(
         ));
     }
     let remote_ip = normalize_ip(addr.ip());
+    if settings.tailscale_only && !is_tailscale_ip(&remote_ip) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            "non-Tailscale remote client denied by tailscale-only policy"
+        );
+        return Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": format!("remote client IP is not a Tailscale address: {remote_ip}"),
+                    "remoteIp": remote_ip.to_string(),
+                    "tailscaleOnly": true,
+                })),
+            )
+                .into_response(),
+        );
+    }
     if !is_remote_ip_allowed(&remote_ip, &settings.allowed_ips) {
         tracing::warn!(
             remote_addr = %addr,
@@ -302,6 +320,17 @@ pub(crate) fn is_remote_ip_allowed(ip: &IpAddr, allowed_ips: &[String]) -> bool 
         .any(|entry| ip_matches_allowlist_entry(ip, entry.trim()))
 }
 
+pub(crate) fn is_tailscale_ip(ip: &IpAddr) -> bool {
+    match normalize_ip(*ip) {
+        IpAddr::V4(addr) => ipv4_in_cidr(addr, Ipv4Addr::new(100, 64, 0, 0), 10),
+        IpAddr::V6(addr) => ipv6_in_cidr(
+            addr,
+            Ipv6Addr::new(0xfd7a, 0x115c, 0xa1e0, 0, 0, 0, 0, 0),
+            48,
+        ),
+    }
+}
+
 fn ip_matches_allowlist_entry(ip: &IpAddr, entry: &str) -> bool {
     if entry.is_empty() {
         return false;
@@ -409,6 +438,36 @@ mod tests {
     }
 
     #[test]
+    fn tailscale_only_recognizes_only_tailscale_address_ranges() {
+        assert!(is_tailscale_ip(&"100.100.10.20".parse().unwrap()));
+        assert!(is_tailscale_ip(
+            &"fd7a:115c:a1e0::5e37:230".parse().unwrap()
+        ));
+        assert!(!is_tailscale_ip(&"192.168.1.10".parse().unwrap()));
+        assert!(!is_tailscale_ip(&"fd7b:115c:a1e0::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn tailscale_only_rejects_non_tailscale_before_general_allowlist() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: "secret".into(),
+            allowed_ips: vec!["*".into()],
+            tailscale_only: true,
+            ..RemoteSettings::default()
+        };
+
+        let response =
+            check_remote_base_access(&settings, "192.168.1.10:1".parse().unwrap()).unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(check_remote_base_access(
+            &settings,
+            "100.100.10.20:1".parse().unwrap()
+        )
+        .is_none());
+    }
+
+    #[test]
     fn remote_base_access_rejects_missing_token() {
         let settings = RemoteSettings {
             enabled: true,
@@ -483,6 +542,7 @@ mod tests {
             auth_token: String::new(),
             allowed_ips: vec!["198.51.100.1/32".into()],
             allowed_origins: vec!["https://remote.example".into()],
+            tailscale_only: true,
             ..RemoteSettings::default()
         };
         let tunnel_request = guard_request(true);
