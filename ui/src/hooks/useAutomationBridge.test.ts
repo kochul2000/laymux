@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
   useAutomationBridge,
@@ -21,6 +21,7 @@ import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { PANE_MIN_RATIO } from "@/hooks/usePaneResize";
 import {
   automationResponse,
+  onAutomationRequest,
   readFileForViewer,
   reportFrontendHealth,
   writeToTerminal,
@@ -1367,6 +1368,14 @@ describe("useAutomationBridge hook", () => {
     vi.mocked(reportFrontendHealth).mockResolvedValue(undefined);
   });
 
+  // `vi.clearAllMocks()` keeps implementations, so a test that swapped
+  // `onAutomationRequest` must hand the default back rather than leak its
+  // registration capture into the next one.
+  afterEach(() => {
+    vi.mocked(onAutomationRequest).mockReset();
+    vi.mocked(onAutomationRequest).mockResolvedValue(vi.fn());
+  });
+
   it("registers event listener on mount", async () => {
     const { onAutomationRequest } = await import("@/lib/tauri-api");
     renderHook(() => useAutomationBridge());
@@ -1597,6 +1606,93 @@ describe("useAutomationBridge hook", () => {
       responsesSent: 1,
       responsesFailed: 0,
     });
+  });
+
+  /**
+   * Issue #771. The bridge listener must not outlive the handler generation it
+   * dispatches to.
+   *
+   * `useAutomationBridge.ts` exports plain functions alongside the hook, so it is
+   * not a React Fast Refresh boundary: a dev edit propagates up to `App.tsx`,
+   * which *re-renders* with the replaced module instead of remounting. An effect
+   * keyed on `[]` never re-runs across that, so the listener registered by the
+   * first module instance keeps answering — reading the store singletons of a
+   * module graph the rest of the app has already replaced. The observed symptom
+   * was `GET /api/v1/terminals` reporting `activity: shell` for a pane the
+   * desktop store and the backend both saw as `interactiveApp`.
+   *
+   * These two tests replay that render shape: same component, new dispatcher.
+   */
+  function captureBridgeRegistrations() {
+    const registrations: {
+      callback: (data: AutomationRequest) => Promise<void>;
+      unlisten: ReturnType<typeof vi.fn>;
+    }[] = [];
+    vi.mocked(onAutomationRequest).mockReset();
+    vi.mocked(onAutomationRequest).mockImplementation((cb) => {
+      const unlisten = vi.fn();
+      registrations.push({ callback: cb as (data: AutomationRequest) => Promise<void>, unlisten });
+      return Promise.resolve(unlisten);
+    });
+    return registrations;
+  }
+
+  const bridgeProbeRequest = (requestId: string): AutomationRequest => ({
+    requestId,
+    category: "query",
+    target: "workspaces",
+    method: "list",
+    params: {},
+    emittedAtMs: Date.now(),
+    deadlineMs: Date.now() + 5_000,
+  });
+
+  it("re-subscribes to the replaced handler generation instead of answering from the old one", async () => {
+    const registrations = captureBridgeRegistrations();
+    const firstGeneration = vi.fn().mockResolvedValue({ success: true, data: { generation: 1 } });
+    const secondGeneration = vi.fn().mockResolvedValue({ success: true, data: { generation: 2 } });
+
+    const view = renderHook(({ dispatch }) => useAutomationBridge(dispatch), {
+      initialProps: { dispatch: firstGeneration },
+    });
+    await Promise.resolve();
+    expect(registrations).toHaveLength(1);
+
+    view.rerender({ dispatch: secondGeneration });
+    await Promise.resolve();
+
+    expect(registrations).toHaveLength(2);
+    expect(registrations[0].unlisten).toHaveBeenCalledTimes(1);
+
+    await registrations[1].callback(bridgeProbeRequest("after-refresh"));
+    expect(secondGeneration).toHaveBeenCalledTimes(1);
+    expect(firstGeneration).not.toHaveBeenCalled();
+    expect(automationResponse).toHaveBeenCalledWith(
+      "after-refresh",
+      true,
+      { generation: 2 },
+      undefined,
+    );
+
+    view.unmount();
+  });
+
+  it("keeps a single subscription while the handler generation stays the same", async () => {
+    const registrations = captureBridgeRegistrations();
+    const dispatch = vi.fn().mockResolvedValue({ success: true, data: {} });
+
+    const view = renderHook(({ dispatch: d }) => useAutomationBridge(d), {
+      initialProps: { dispatch },
+    });
+    await Promise.resolve();
+
+    view.rerender({ dispatch });
+    await Promise.resolve();
+
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0].unlisten).not.toHaveBeenCalled();
+
+    view.unmount();
   });
 });
 

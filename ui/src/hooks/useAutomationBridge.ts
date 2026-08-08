@@ -46,11 +46,20 @@ import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
 
-interface HandlerResult {
+export interface HandlerResult {
   success: boolean;
   data?: unknown;
   error?: string;
 }
+
+/**
+ * What the bridge listener dispatches an `automation-request` to.
+ *
+ * A named type because the hook takes it as a parameter — see
+ * `useAutomationBridge` for why the listener's lifetime is tied to this
+ * function's identity.
+ */
+export type AutomationRequestDispatch = (request: AutomationRequest) => Promise<HandlerResult>;
 
 type Handler = (params: Record<string, unknown>) => HandlerResult;
 type HandlerMap = Record<string, Record<string, Handler>>;
@@ -1388,8 +1397,30 @@ async function sendMeasuredAutomationResponse(
   }
 }
 
-/** Hook that bridges automation HTTP requests to Zustand stores. */
-export function useAutomationBridge() {
+/**
+ * Hook that bridges automation HTTP requests to Zustand stores.
+ *
+ * The listener is registered for exactly as long as `dispatch` keeps its
+ * identity, and `dispatch` defaults to this module's own handler entry point —
+ * so in a production bundle, where the module is evaluated once, this is a
+ * single registration for the lifetime of the app.
+ *
+ * The dependency is load-bearing under Vite dev, though (issue #771). This
+ * module exports plain functions next to the hook, so it is not a React Fast
+ * Refresh boundary: editing it — or anything it imports, stores included —
+ * propagates up to `App.tsx`, which *re-renders* with the replaced module
+ * graph instead of remounting. An effect keyed on `[]` would never re-run
+ * across that, leaving the listener registered by the first module instance to
+ * answer every request from the store singletons of a module graph the rest of
+ * the app has already thrown away. That is silent, not loud: the HTTP call
+ * still returns `200` (`bridge_request` has no backend fallback — a missing
+ * frontend is `503`, a slow one `504`), so an agent reads a stale `activity`
+ * and mistakes a TUI pane for a shell. Keying the effect on the handler
+ * identity makes the subscription follow the generation it dispatches to.
+ */
+export function useAutomationBridge(
+  dispatch: AutomationRequestDispatch = handleAsyncAutomationRequest,
+) {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
@@ -1429,7 +1460,7 @@ export function useAutomationBridge() {
         );
         return;
       }
-      const result = await handleAsyncAutomationRequest(request);
+      const result = await dispatch(request);
       if (cancelled) {
         // Respond with result anyway — backend is waiting on the oneshot channel
         await sendMeasuredAutomationResponse(
@@ -1446,19 +1477,27 @@ export function useAutomationBridge() {
         result.data,
         result.error,
       );
-    }).then((fn) => {
-      if (cancelled) {
-        // Effect was already cleaned up before promise resolved (StrictMode race)
-        fn();
-      } else {
-        unlisten = fn;
-      }
-    });
+    })
+      .then((fn) => {
+        if (cancelled) {
+          // Effect was already cleaned up before promise resolved (StrictMode race)
+          fn();
+        } else {
+          unlisten = fn;
+        }
+      })
+      // A rejected registration leaves the bridge with no listener at all, and
+      // every automation call then burns the full Rust budget before answering
+      // `504`. Nothing here can retry it, but an unhandled rejection would hide
+      // the one moment that explains the silence.
+      .catch((error) => {
+        console.error("[AutomationBridge] Failed to register automation-request listener:", error);
+      });
 
     return () => {
       cancelled = true;
       stopHealthReporter();
       unlisten?.();
     };
-  }, []);
+  }, [dispatch]);
 }
