@@ -577,6 +577,8 @@ OSC 7은 일부 셸(예: PowerShell의 `prompt` 함수)이 프롬프트가 재�
     [oneshot channel → HTTP response]
 ```
 
+**브리지 리스너는 핸들러 세대에 묶인다.** `useAutomationBridge` 의 effect 는 dispatch 함수(`handleAsyncAutomationRequest`) identity 를 의존성으로 갖는다. 프로덕션 번들에서는 모듈이 한 번만 평가되므로 앱 수명 동안 등록 1회다. Vite dev 에서는 이 hook 모듈이 hook 외 함수도 export 해 React Fast Refresh 경계가 아니므로, 이 모듈이나 그 import(스토어 포함)를 고치면 교체가 `App.tsx` 까지 전파되고 App 은 **remount 없이 re-render** 된다. 의존성이 `[]` 이면 effect 가 다시 돌지 않아 최초 모듈 인스턴스의 리스너가 계속 응답하고, 앱이 이미 버린 모듈 그래프의 store singleton 을 읽는다 — HTTP 는 `200` 을 내므로 조용히 stale 한 값(예: `activity`)이 에이전트에게 전달된다(issue #771). dispatch identity 를 의존성으로 두면 구독이 항상 최신 세대를 따라간다.
+
 **브리지 마감은 요청에 실려 간다.** `bridge_request`는 event emit 직전에 monotonic absolute deadline과 wall-clock `deadlineMs`를 같은 5초(`FRONTEND_RESPONSE_TIMEOUT`) 예산으로 잡고, emit 뒤 새 timeout을 시작하지 않고 그 absolute deadline까지만 기다린다. 초과 시 `504 Frontend response timeout`을 낸다. 같은 시각을 프론트도 알아야 하므로 `automation-request` payload에 `emittedAtMs`·`deadlineMs`를 함께 싣는다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
 
 - 마감을 넘긴 **query** 는 계산하지 않고 `Frontend request expired` 로 즉시 거절한다 — 답이 닿을 상대가 없으므로 계산은 이미 밀린 메인 스레드의 시간만 빼앗고, 클라이언트 재시도가 같은 큐 뒤에 죽은 일감을 더 쌓는다.
