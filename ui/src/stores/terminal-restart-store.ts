@@ -23,7 +23,14 @@ interface TerminalRestartStoreState {
 }
 
 /**
- * Single owner of "this pane was asked to restart its terminal" (ADR-0113).
+ * Single owner of "this pane's next terminal session must start fresh, in this
+ * CWD" (ADR-0113, ADR-0140).
+ *
+ * Two producers share it because the payload and the lifetime are identical:
+ * the user-requested restart of a running terminal, and the CWD seed a freshly
+ * split pane inherits from the pane it was split off. A split pane
+ * is born as an `EmptyView`, so its request simply waits until the user picks a
+ * terminal — the same consume-on-first-session rule then retires it.
  *
  * `PaneGrid` and `Dock` each used to hold this in local component state, which
  * made the restart unreachable from anywhere else — the workspace-clear action

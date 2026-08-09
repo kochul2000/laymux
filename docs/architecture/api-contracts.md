@@ -832,7 +832,7 @@ MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. rel
 |------|-----------|------|
 | `get_grid_state` | bridge_request | 그리드 상태 조회 (`editMode`, `focusedPane`, `activeWorkspaceId`) |
 | `focus_pane` | bridge_request | 인덱스 기반 팬 포커스 |
-| `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시) |
+| `split_pane` | bridge_request | 팬 분할 (`ready` 필드로 렌더 완료 여부 표시). `cwd` 생략 시 분할 대상 팬의 CWD 를 상속하고, 주면 그 값이 이긴다 ([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)) |
 | `remove_pane` | bridge_request | 팬 제거 |
 | `resize_pane` | bridge_request | 팬 크기 조정 — 공유 경계를 이웃과 함께 이동 (`dw`/`dh` 상대 delta, 해당 축에 경계가 없으면 오류. [ADR-0071](../adr/0071-pane-resize-single-boundary-owner.md)) |
 | `swap_panes` | bridge_request | 두 팬 위치 교환 (atomic 단일 상태 업데이트) |

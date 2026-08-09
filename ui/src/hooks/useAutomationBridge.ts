@@ -10,6 +10,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
 import { computeWorkspaceSummary } from "@/lib/workspace-summary";
 import {
@@ -585,6 +586,12 @@ const handlers: HandlerMap = {
         if (p.profile) viewConfig.profile = p.profile as string;
         if (p.cwd) viewConfig.lastCwd = p.cwd as string;
         useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig);
+        // 호출자가 준 cwd 는 분할 상속 시드(ADR-0140)를 덮어쓴다. 시드가 남아 있으면
+        // 세션 생성 때 그쪽이 이겨서 요청한 디렉터리가 조용히 무시된다. 이 경로는
+        // 프로파일의 restoreCwd 설정과도 무관하게 요청값을 적용한다.
+        if (p.cwd) {
+          useTerminalRestartStore.getState().requestRestart(newPaneBefore.id, p.cwd as string);
+        }
       }
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
       const newPane = ws?.panes[newPaneIndex];

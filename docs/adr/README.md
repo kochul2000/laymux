@@ -157,6 +157,7 @@ ADR 이 필요한 대표 기준:
 | [0137](0137-workspace-clear-ctrl-l-broadcast.md) | 워크스페이스 클리어는 activity 판정 없이 Ctrl+L 브로드캐스트로 단순화하고, 단일 pane 클리어는 폐지한다 (0113/0121 대체) | Accepted |
 | [0138](0138-remote-opens-queued-panes-on-entry.md) | Remote 진입은 아직 열리지 않은 pane 을 focus 로 직접 열고 세션이 생기면 attach 한다 (0039 원칙 확장) | Accepted |
 | [0139](0139-cloud-tunnel-tailscale-route-advertisement-and-direct-gate.md) | 클라우드 터널은 Tailscale 직접 경로를 광고하고 Direct Remote는 Tailscale 전용 게이트를 제공한다 (0013·0021·0024 확장) | Accepted |
+| [0140](0140-split-pane-inherits-source-cwd.md) | 분할로 생긴 pane 은 분할한 그 pane 의 CWD 에서 첫 세션을 시작한다 (0003·0130 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

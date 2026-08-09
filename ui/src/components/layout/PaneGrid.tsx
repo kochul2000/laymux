@@ -19,7 +19,7 @@ import {
   useTerminalRestartStore,
   type TerminalRestartRequest,
 } from "@/stores/terminal-restart-store";
-import { getTerminalRestartCwd } from "@/lib/terminal-restart";
+import { resolvePaneCwd } from "@/lib/pane-cwd";
 
 export interface GridPane {
   id: string;
@@ -158,9 +158,7 @@ export function PaneGrid({
   const consumeTerminalRestart = useTerminalRestartStore((s) => s.consumeRestart);
 
   const restartTerminalView = useCallback((pane: GridPane) => {
-    useTerminalRestartStore
-      .getState()
-      .requestRestart(pane.id, getTerminalRestartCwd(pane.id, pane.view));
+    useTerminalRestartStore.getState().requestRestart(pane.id, resolvePaneCwd(pane));
   }, []);
 
   const handleDragStart = (e: React.DragEvent, paneId: string) => {

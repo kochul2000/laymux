@@ -11,7 +11,7 @@ import { PaneControlBar } from "./PaneControlBar";
 import { PaneGrid } from "./PaneGrid";
 import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
-import { getTerminalRestartCwd } from "@/lib/terminal-restart";
+import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 
 interface DockProps {
@@ -171,7 +171,10 @@ export function Dock({
                 ? () =>
                     useTerminalRestartStore
                       .getState()
-                      .requestRestart(singlePaneId, getTerminalRestartCwd(singlePaneId, singleView))
+                      .requestRestart(
+                        singlePaneId,
+                        resolvePaneCwd({ id: singlePaneId, view: singleView }),
+                      )
                 : undefined,
             onToggleCwdSend:
               singlePaneId && onSetPaneView && singleCanSendCwd && singleCwdDefaults
@@ -222,7 +225,7 @@ export function Dock({
                         .getState()
                         .requestRestart(
                           singlePaneId,
-                          getTerminalRestartCwd(singlePaneId, singleView),
+                          resolvePaneCwd({ id: singlePaneId, view: singleView }),
                         )
                   : undefined
               }
