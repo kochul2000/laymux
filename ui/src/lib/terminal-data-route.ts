@@ -3,6 +3,17 @@ export type XtermDataRoute = "human" | "protocol" | "suppress";
 
 export type Disposable = { dispose(): void };
 
+const XTERM_PRIMARY_DEVICE_ATTRIBUTES_REPLY = "\x1b[?1;2c";
+
+/**
+ * The pinned xterm response to ConPTY's startup Primary DA query. Generic
+ * replay data stays suppressed; the backend still requires a recent matching
+ * query in the exact PTY generation before this one response can be written.
+ */
+export function isBootstrapPrimaryDeviceAttributesReply(data: string): boolean {
+  return data === XTERM_PRIMARY_DEVICE_ATTRIBUTES_REPLY;
+}
+
 type XtermCoreUserInputSource = {
   _core?: {
     coreService?: {

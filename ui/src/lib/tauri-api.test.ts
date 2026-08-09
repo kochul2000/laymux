@@ -19,6 +19,7 @@ import {
   acknowledgeTerminalOutput,
   writeTerminalInput,
   writeToTerminal,
+  writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
   getTerminalGeometryCapabilities,
   resizeTerminal,
@@ -174,6 +175,18 @@ describe("tauri-api", () => {
         id: "t1",
         generation: 7,
         data: "\x1b]10;rgb:ffff/ffff/ffff\x1b\\",
+      });
+    });
+  });
+
+  describe("writeTerminalBootstrapProtocolReply", () => {
+    it("invokes the generation-bound guarded bootstrap reply command", async () => {
+      mockInvoke.mockResolvedValue(false);
+      await writeTerminalBootstrapProtocolReply("t1", 7, "\x1b[?1;2c");
+      expect(mockInvoke).toHaveBeenCalledWith("write_terminal_bootstrap_protocol_reply", {
+        id: "t1",
+        generation: 7,
+        data: "\x1b[?1;2c",
       });
     });
   });

@@ -287,6 +287,8 @@ pub fn create_terminal_session(
     let codex_startup_color_probe = startup_plan
         .arm_native_windows_codex_color_probe
         .then(|| Arc::new(crate::terminal::NativeWindowsCodexColorProbeGuard::armed()));
+    let bootstrap_da_reply =
+        cfg!(windows).then(|| Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed()));
     let mut session = TerminalSession::new(id.clone(), config);
     session.cwd_send = cwd_send.unwrap_or(true);
     session.cwd_receive = cwd_receive.unwrap_or(true);
@@ -355,6 +357,7 @@ pub fn create_terminal_session(
     let presets = osc_hooks::default_presets();
     let pty_output_session = Arc::clone(&output_session);
     let callback_codex_startup_color_probe = codex_startup_color_probe.clone();
+    let callback_bootstrap_da_reply = bootstrap_da_reply.clone();
     // Owned by the callback (no `Arc`): the closure is the only reader.
     let output_record_failures = AtomicU64::new(0);
     let terminal_generation = output_session.generation();
@@ -388,6 +391,17 @@ pub fn create_terminal_session(
                         terminal_id = %terminal_id,
                         %error,
                         "native Windows Codex startup color probe observation failed"
+                    );
+                }
+            }
+        }
+        if let Some(guard) = callback_bootstrap_da_reply.as_ref() {
+            if let Err(error) = guard.observe_output(&data) {
+                if guard.should_report_observation_failure() {
+                    tracing::error!(
+                        terminal_id = %terminal_id,
+                        %error,
+                        "terminal bootstrap Primary DA query observation failed"
                     );
                 }
             }
@@ -910,7 +924,8 @@ pub fn create_terminal_session(
     session.cwd = spawned_pty.resolved_cwd;
     let pty_handle = spawned_pty
         .handle
-        .with_codex_startup_color_probe(codex_startup_color_probe);
+        .with_codex_startup_color_probe(codex_startup_color_probe)
+        .with_bootstrap_da_reply(bootstrap_da_reply);
 
     // Startup output can fail before the spawned handle is published. The
     // callback has already stopped its reader and marked this exact generation;
@@ -1251,6 +1266,17 @@ pub fn write_terminal_protocol_reply_inner(
         return Ok(());
     }
 
+    if let Some(guard) = handle.bootstrap_da_reply() {
+        if guard.should_suppress_live_reply(data)? {
+            tracing::info!(
+                terminal_id = %id,
+                direction = "ui-protocol-suppressed",
+                "suppressed live Primary DA reply already claimed by bootstrap replay"
+            );
+            return Ok(());
+        }
+    }
+
     if pty_trace::is_pty_trace_enabled() {
         tracing::info!(
             terminal_id = %id,
@@ -1262,6 +1288,59 @@ pub fn write_terminal_protocol_reply_inner(
         );
     }
     handle.write(data)
+}
+
+/// Offer xterm's Primary Device Attributes response generated while parsing an
+/// attach replay. The exact generation-bound backend guard writes it only when
+/// the current PTY recently emitted the matching ConPTY bootstrap query.
+#[tauri::command]
+pub fn write_terminal_bootstrap_protocol_reply(
+    id: String,
+    generation: u64,
+    data: String,
+    state: State<Arc<AppState>>,
+) -> Result<bool, String> {
+    write_terminal_bootstrap_protocol_reply_inner(&state, &id, generation, data.as_bytes())
+}
+
+pub fn write_terminal_bootstrap_protocol_reply_inner(
+    state: &AppState,
+    id: &str,
+    generation: u64,
+    data: &[u8],
+) -> Result<bool, String> {
+    let handle = state
+        .pty_handles
+        .lock_or_err()?
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("Session '{id}' not found"))?;
+    let active_generation = handle.terminal_generation();
+    if generation != active_generation {
+        return Err(format!(
+            "stale terminal bootstrap protocol reply for '{id}': generation {generation}, active {active_generation}"
+        ));
+    }
+
+    let Some(guard) = handle.bootstrap_da_reply() else {
+        return Ok(false);
+    };
+    if !guard.authorize_reply(data)? {
+        return Ok(false);
+    }
+
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui-bootstrap-protocol->pty",
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data),
+            preview = %pty_trace::summarize_terminal_bytes(data),
+            "terminal bootstrap protocol reply"
+        );
+    }
+    handle.write(data)?;
+    Ok(true)
 }
 
 /// Shutdown-only Ctrl+C (issue #451). Writes ETX (0x03) straight onto the PTY
@@ -2272,6 +2351,88 @@ mod tests {
             written.lock().unwrap().as_slice(),
             b"\x1b[Itail\x1b]10;rgb:ffff/ffff/ffff\x1b\\"
         );
+    }
+
+    #[test]
+    fn bootstrap_da_reply_is_generation_bound_query_proven_and_one_shot() {
+        let state = AppState::new();
+        let guard = Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed());
+        guard.observe_output(b"\x1b[c").unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let handle = pty::PtyHandle::from_test_writer_for_generation(
+            Box::new(SharedTestWriter(Arc::clone(&written))),
+            4,
+        )
+        .with_bootstrap_da_reply(Some(Arc::clone(&guard)));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle);
+
+        assert!(
+            write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 3, b"\x1b[?1;2c",).is_err()
+        );
+        assert!(
+            !write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[O",).unwrap()
+        );
+        assert!(
+            write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",).unwrap()
+        );
+        assert!(
+            !write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",)
+                .unwrap()
+        );
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+    }
+
+    #[test]
+    fn live_da_reply_disarms_the_bootstrap_fallback() {
+        let state = AppState::new();
+        let guard = Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed());
+        guard.observe_output(b"\x1b[c").unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let handle = pty::PtyHandle::from_test_writer_for_generation(
+            Box::new(SharedTestWriter(Arc::clone(&written))),
+            4,
+        )
+        .with_bootstrap_da_reply(Some(guard));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle);
+
+        write_terminal_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c").unwrap();
+        assert!(
+            !write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",)
+                .unwrap()
+        );
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+    }
+
+    #[test]
+    fn bootstrap_da_reply_suppresses_a_racing_live_duplicate() {
+        let state = AppState::new();
+        let guard = Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed());
+        guard.observe_output(b"\x1b[c").unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let handle = pty::PtyHandle::from_test_writer_for_generation(
+            Box::new(SharedTestWriter(Arc::clone(&written))),
+            4,
+        )
+        .with_bootstrap_da_reply(Some(guard));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle);
+
+        assert!(
+            write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",).unwrap()
+        );
+        write_terminal_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c").unwrap();
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?1;2c");
     }
 
     #[test]

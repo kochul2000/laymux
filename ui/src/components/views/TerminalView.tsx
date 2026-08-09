@@ -48,6 +48,7 @@ import {
   createTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
+  writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
   writeTerminalInput,
   resizeTerminal,
@@ -178,6 +179,7 @@ import {
 } from "@/lib/native-windows-output-stabilizer";
 import { WslInFrameCursorParkRecognizer } from "@/lib/wsl-in-frame-cursor-park-recognizer";
 import {
+  isBootstrapPrimaryDeviceAttributesReply,
   routeXtermData,
   subscribeXtermUserInputOrigin,
   type TerminalWriteSource,
@@ -3102,7 +3104,18 @@ export function TerminalView({
         humanEventActive: coreUserInputActive || humanDataEmissionDepth > 0,
         userInputOriginReliable,
       });
-      if (route === "suppress") return;
+      if (route === "suppress") {
+        if (
+          currentParsingWriteSource === "replay" &&
+          currentParsingGeneration !== undefined &&
+          isBootstrapPrimaryDeviceAttributesReply(data)
+        ) {
+          writeTerminalBootstrapProtocolReply(instanceId, currentParsingGeneration, data).catch(
+            () => {},
+          );
+        }
+        return;
+      }
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
         const byteLength = textEncoder.encode(data).length;
@@ -5136,8 +5149,11 @@ export function TerminalView({
                   attachment.snapshot.length,
                 );
                 await new Promise<void>((resolve, reject) =>
-                  processTerminalOutput(attachment.snapshot, resolve, { source: "replay" }, () =>
-                    reject(new Error("visible xterm discarded terminal output snapshot")),
+                  processTerminalOutput(
+                    attachment.snapshot,
+                    resolve,
+                    { source: "replay", generation: attachment.state.generation },
+                    () => reject(new Error("visible xterm discarded terminal output snapshot")),
                   ),
                 );
                 if (!isCurrentAttach()) return;

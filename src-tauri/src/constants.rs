@@ -183,6 +183,10 @@ pub const PTY_WRITE_CHUNK_SIZE: usize = 1024;
 
 /// Maximum queued PTY input/resize jobs per terminal.
 pub const PTY_CONTROL_QUEUE_CAPACITY: usize = 64;
+/// Maximum age of the generation-local ConPTY bootstrap Primary DA exchange.
+/// A later replay reply could land in the shell's input editor after ConPTY has
+/// already abandoned its startup query, so the backend drops it fail-closed.
+pub const TERMINAL_BOOTSTRAP_DA_REPLY_MAX_AGE_MS: u64 = 2_500;
 /// End-to-end deadline for a human PTY input or resize job.
 pub const PTY_CONTROL_JOB_TIMEOUT_MS: u64 = 15_000;
 /// Poll cadence used while waiting for owner cancellation or worker completion.

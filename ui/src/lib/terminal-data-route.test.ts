@@ -1,6 +1,10 @@
 import { Terminal } from "@xterm/xterm";
 import { describe, expect, it, vi } from "vitest";
-import { routeXtermData, subscribeXtermUserInputOrigin } from "./terminal-data-route";
+import {
+  isBootstrapPrimaryDeviceAttributesReply,
+  routeXtermData,
+  subscribeXtermUserInputOrigin,
+} from "./terminal-data-route";
 
 describe("routeXtermData", () => {
   it("routes live-parser replies through the protocol path", () => {
@@ -21,6 +25,12 @@ describe("routeXtermData", () => {
         userInputOriginReliable: true,
       }),
     ).toBe("suppress");
+  });
+
+  it("recognizes only xterm's pinned primary device-attributes reply for bootstrap recovery", () => {
+    expect(isBootstrapPrimaryDeviceAttributesReply("\x1b[?1;2c")).toBe(true);
+    expect(isBootstrapPrimaryDeviceAttributesReply("\x1b[O")).toBe(false);
+    expect(isBootstrapPrimaryDeviceAttributesReply("\x1b]10;rgb:ffff/ffff/ffff\x1b\\")).toBe(false);
   });
 
   it("keeps human events on the owner-gated path even while a write is being parsed", () => {

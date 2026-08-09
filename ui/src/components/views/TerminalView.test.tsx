@@ -465,6 +465,7 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalBootstrapProtocolReply = vi.fn().mockResolvedValue(false);
 const mockWriteTerminalProtocolReply = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
 const mockResizeTerminal = vi.fn().mockResolvedValue(undefined);
@@ -537,6 +538,8 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalBootstrapProtocolReply: (...args: unknown[]) =>
+    mockWriteTerminalBootstrapProtocolReply(...args),
   writeTerminalProtocolReply: (...args: unknown[]) => mockWriteTerminalProtocolReply(...args),
   writeTerminalInput: (...args: unknown[]) => mockWriteTerminalInput(...args),
   resizeTerminal: (...args: unknown[]) => mockResizeTerminal(...args),
@@ -4217,6 +4220,47 @@ describe("TerminalView", () => {
       render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
       await waitForTerminalInputReady();
 
+      expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
+      expect(mockWriteToTerminal).not.toHaveBeenCalledWith(terminalId, reply);
+    });
+
+    it("offers the initial snapshot's primary device-attributes reply to the guarded bootstrap path", async () => {
+      const terminalId = "t-bootstrap-da-reply";
+      const snapshot = new TextEncoder().encode("\x1b[c");
+      mockAttachTerminalOutput.mockResolvedValueOnce({
+        state: {
+          version: 1,
+          generation: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: snapshot.length,
+          sourceStartSeq: 0,
+          sourceSeq: snapshot.length,
+          snapshotKind: "raw",
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+          geometry: { revision: 0, cols: 80, rows: 24 },
+        },
+        snapshot: Array.from(snapshot),
+        flowControl: { token: "lease-bootstrap-da", windowBytes: 524288 },
+      });
+      const reply = "\x1b[?1;2c";
+      let replyEmitted = false;
+      mockWrite.mockImplementation((data: string | Uint8Array, callback?: () => void) => {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        if (!replyEmitted && text === "\x1b[c") {
+          replyEmitted = true;
+          createdTerminals.at(-1)?.emitCoreData(reply);
+        }
+        callback?.();
+      });
+
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+
+      await vi.waitFor(() => expect(replyEmitted).toBe(true), { timeout: 3500 });
+      await vi.waitFor(() =>
+        expect(mockWriteTerminalBootstrapProtocolReply).toHaveBeenCalledWith(terminalId, 1, reply),
+      );
       expect(mockWriteTerminalProtocolReply).not.toHaveBeenCalled();
       expect(mockWriteToTerminal).not.toHaveBeenCalledWith(terminalId, reply);
     });

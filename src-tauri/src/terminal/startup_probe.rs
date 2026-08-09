@@ -1,15 +1,152 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 
 const OSC_10_QUERY: &[u8] = b"\x1b]10;?\x1b\\";
 const OSC_11_QUERY: &[u8] = b"\x1b]11;?\x1b\\";
+const PRIMARY_DA_QUERY: &[u8] = b"\x1b[c";
+const XTERM_PRIMARY_DA_REPLY: &[u8] = b"\x1b[?1;2c";
 
 pub(crate) const OSC_10_REPLY_BIT: u8 = 1 << 0;
 pub(crate) const OSC_11_REPLY_BIT: u8 = 1 << 1;
 const BOTH_COLOR_REPLY_BITS: u8 = OSC_10_REPLY_BIT | OSC_11_REPLY_BIT;
+
+/// Generation-local, bounded authorization for xterm's reply to ConPTY's
+/// startup Primary Device Attributes query.
+///
+/// The query commonly reaches the first desktop attach snapshot before the
+/// visible xterm is attached. Generic replay replies remain suppressed, but
+/// this guard proves that the current PTY generation actually emitted the
+/// exact query recently before one exact pinned-xterm response may be written.
+#[derive(Debug)]
+pub(crate) struct TerminalBootstrapDaReplyGuard {
+    active: AtomicBool,
+    observation_failure_reported: AtomicBool,
+    armed_at: Instant,
+    state: Mutex<BootstrapDaProbeState>,
+}
+
+#[derive(Debug, Default)]
+struct BootstrapDaProbeState {
+    query_match: usize,
+    observed_queries: u64,
+    claimed_replies: u64,
+    last_query_observed_at: Option<Instant>,
+    bootstrap_claimed: bool,
+}
+
+impl TerminalBootstrapDaReplyGuard {
+    pub(crate) fn armed() -> Self {
+        Self::armed_at(Instant::now())
+    }
+
+    fn armed_at(armed_at: Instant) -> Self {
+        Self {
+            active: AtomicBool::new(true),
+            observation_failure_reported: AtomicBool::new(false),
+            armed_at,
+            state: Mutex::new(BootstrapDaProbeState::default()),
+        }
+    }
+
+    pub(crate) fn observe_output(&self, data: &[u8]) -> Result<(), AppError> {
+        self.observe_output_at(data, Instant::now())
+    }
+
+    fn observe_output_at(&self, data: &[u8], now: Instant) -> Result<(), AppError> {
+        if !self.active.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if is_bootstrap_da_expired(self.armed_at, now) {
+            self.active.store(false, Ordering::Release);
+            return Ok(());
+        }
+
+        let mut state = self.state.lock_or_err()?;
+        if !self.active.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        for &byte in data {
+            if advance_pattern(PRIMARY_DA_QUERY, &mut state.query_match, byte) {
+                state.observed_queries = state.observed_queries.saturating_add(1);
+                state.last_query_observed_at = Some(now);
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn authorize_reply(&self, data: &[u8]) -> Result<bool, AppError> {
+        self.authorize_reply_at(data, Instant::now())
+    }
+
+    fn authorize_reply_at(&self, data: &[u8], now: Instant) -> Result<bool, AppError> {
+        if data != XTERM_PRIMARY_DA_REPLY || !self.active.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+
+        let mut state = self.state.lock_or_err()?;
+        if !self.active.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        let Some(query_observed_at) = state.last_query_observed_at else {
+            return Ok(false);
+        };
+        let current = !is_bootstrap_da_expired(self.armed_at, now)
+            && !is_bootstrap_da_expired(query_observed_at, now);
+        if !current {
+            self.active.store(false, Ordering::Release);
+            return Ok(false);
+        }
+        if state.bootstrap_claimed || state.claimed_replies >= state.observed_queries {
+            return Ok(false);
+        }
+        state.bootstrap_claimed = true;
+        state.claimed_replies = state.claimed_replies.saturating_add(1);
+        Ok(true)
+    }
+
+    /// Arbitrate an exact live reply against the bounded bootstrap exchange.
+    /// The first reply candidate claims each observed query. Once replay has
+    /// claimed the bootstrap query, live candidates without a newer query are
+    /// duplicates and must not enter the PTY input stream.
+    pub(crate) fn should_suppress_live_reply(&self, data: &[u8]) -> Result<bool, AppError> {
+        self.should_suppress_live_reply_at(data, Instant::now())
+    }
+
+    fn should_suppress_live_reply_at(&self, data: &[u8], now: Instant) -> Result<bool, AppError> {
+        if data != XTERM_PRIMARY_DA_REPLY || !self.active.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        let mut state = self.state.lock_or_err()?;
+        if !self.active.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        if is_bootstrap_da_expired(self.armed_at, now) {
+            self.active.store(false, Ordering::Release);
+            return Ok(false);
+        }
+        if state.claimed_replies < state.observed_queries {
+            state.claimed_replies = state.claimed_replies.saturating_add(1);
+            return Ok(false);
+        }
+        Ok(state.bootstrap_claimed)
+    }
+
+    pub(crate) fn should_report_observation_failure(&self) -> bool {
+        !self
+            .observation_failure_reported
+            .swap(true, Ordering::Relaxed)
+    }
+}
+
+fn is_bootstrap_da_expired(started: Instant, now: Instant) -> bool {
+    now.checked_duration_since(started).is_none_or(|age| {
+        age > Duration::from_millis(crate::constants::TERMINAL_BOOTSTRAP_DA_REPLY_MAX_AGE_MS)
+    })
+}
 
 /// One-shot guard for the native Windows Codex startup color probe.
 ///
@@ -204,6 +341,7 @@ fn valid_rgb_payload(payload: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::time::{Duration, Instant};
 
     use super::*;
 
@@ -288,5 +426,97 @@ mod tests {
         assert!(guard
             .filter_protocol_reply(b"\x1b]10;rgb:ffff/ffff/ffff\x1b\\")
             .is_err());
+    }
+
+    #[test]
+    fn bootstrap_da_reply_requires_a_current_split_query_and_is_one_shot() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard
+            .observe_output_at(b"prefix\x1b[", started + Duration::from_millis(10))
+            .unwrap();
+        guard
+            .observe_output_at(b"csuffix", started + Duration::from_millis(20))
+            .unwrap();
+
+        assert!(guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(30),)
+            .unwrap());
+        assert!(!guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(40),)
+            .unwrap());
+    }
+
+    #[test]
+    fn bootstrap_da_reply_rejects_unobserved_wrong_and_expired_data() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        assert!(!guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(10),)
+            .unwrap());
+
+        guard
+            .observe_output_at(b"\x1b[c", started + Duration::from_millis(20))
+            .unwrap();
+        assert!(!guard
+            .authorize_reply_at(b"\x1b[O", started + Duration::from_millis(30))
+            .unwrap());
+        assert!(!guard
+            .authorize_reply_at(
+                b"\x1b[?1;2c",
+                started
+                    + Duration::from_millis(
+                        crate::constants::TERMINAL_BOOTSTRAP_DA_REPLY_MAX_AGE_MS + 21,
+                    ),
+            )
+            .unwrap());
+    }
+
+    #[test]
+    fn live_da_reply_claim_prevents_a_replay_duplicate() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard.observe_output_at(b"\x1b[c", started).unwrap();
+
+        assert!(!guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started)
+            .unwrap());
+        assert!(!guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+    }
+
+    #[test]
+    fn bootstrap_da_reply_claim_suppresses_a_late_live_duplicate() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard.observe_output_at(b"\x1b[c", started).unwrap();
+
+        assert!(guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+        assert!(guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(2),)
+            .unwrap());
+    }
+
+    #[test]
+    fn a_new_observed_query_keeps_its_live_reply_after_bootstrap_claimed_the_first() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard.observe_output_at(b"\x1b[c", started).unwrap();
+        assert!(guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+
+        guard
+            .observe_output_at(b"\x1b[c", started + Duration::from_millis(2))
+            .unwrap();
+        assert!(!guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(3),)
+            .unwrap());
+        assert!(guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(4),)
+            .unwrap());
     }
 }

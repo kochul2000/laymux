@@ -96,6 +96,14 @@ export async function writeTerminalProtocolReply(
   return invoke("write_terminal_protocol_reply", { id, generation, data });
 }
 
+export async function writeTerminalBootstrapProtocolReply(
+  id: string,
+  generation: number,
+  data: string,
+): Promise<boolean> {
+  return invoke("write_terminal_bootstrap_protocol_reply", { id, generation, data });
+}
+
 /**
  * Shutdown-only Ctrl+C (issue #451). Sends ETX bypassing the human-control
  * owner gate so kill-on-exit still fires while a remote client holds the

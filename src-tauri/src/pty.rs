@@ -12,7 +12,10 @@ use crate::lock_ext::MutexExt;
 use crate::process::headless_command;
 use crate::pty_control::{PendingControlJob, PtyControlCompletion, PtyControlWorker};
 use crate::pty_reader::{run_interruptible_reader_loop, PtyReaderLifecycle};
-use crate::terminal::{InitialExecutionHost, NativeWindowsCodexColorProbeGuard, TerminalSession};
+use crate::terminal::{
+    InitialExecutionHost, NativeWindowsCodexColorProbeGuard, TerminalBootstrapDaReplyGuard,
+    TerminalSession,
+};
 use crate::terminal_env::TerminalEnvPlan;
 
 /// One maximum native reader Data event. Desktop output credit may exceed its
@@ -192,6 +195,9 @@ pub struct PtyHandle {
     /// It lives on the exact writer handle so a stale frontend reply can never
     /// consume a replacement session's one-shot state.
     codex_startup_color_probe: Option<Arc<NativeWindowsCodexColorProbeGuard>>,
+    /// Current-generation authorization for the one ConPTY bootstrap Primary
+    /// DA reply that may be regenerated from the first attach snapshot.
+    bootstrap_da_reply: Option<Arc<TerminalBootstrapDaReplyGuard>>,
     /// True when the spawned command is `wsl.exe`, so `child_pid` anchors a
     /// Windows relay process and every interesting descendant lives inside the
     /// guest. The liveness oracle needs this to know that a Windows process
@@ -227,6 +233,7 @@ impl PtyHandle {
             input_faulted: Arc::new(AtomicBool::new(false)),
             reader_lifecycle: PtyReaderLifecycle::completed_for_test(terminal_generation),
             codex_startup_color_probe: None,
+            bootstrap_da_reply: None,
             wsl_backed: false,
         }
     }
@@ -251,12 +258,24 @@ impl PtyHandle {
         self
     }
 
+    pub(crate) fn with_bootstrap_da_reply(
+        mut self,
+        guard: Option<Arc<TerminalBootstrapDaReplyGuard>>,
+    ) -> Self {
+        self.bootstrap_da_reply = guard;
+        self
+    }
+
     pub(crate) fn terminal_generation(&self) -> u64 {
         self.reader_lifecycle.terminal_generation()
     }
 
     pub(crate) fn codex_startup_color_probe(&self) -> Option<&NativeWindowsCodexColorProbeGuard> {
         self.codex_startup_color_probe.as_deref()
+    }
+
+    pub(crate) fn bootstrap_da_reply(&self) -> Option<&TerminalBootstrapDaReplyGuard> {
+        self.bootstrap_da_reply.as_deref()
     }
 
     #[cfg(test)]
@@ -729,6 +748,7 @@ where
         input_faulted: Arc::new(AtomicBool::new(false)),
         reader_lifecycle: Arc::clone(&reader_lifecycle),
         codex_startup_color_probe: None,
+        bootstrap_da_reply: None,
         wsl_backed: is_wsl,
     };
 
