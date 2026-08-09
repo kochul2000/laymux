@@ -32,7 +32,10 @@ pub(crate) struct TerminalBootstrapDaReplyGuard {
 #[derive(Debug, Default)]
 struct BootstrapDaProbeState {
     query_match: usize,
-    query_observed_at: Option<Instant>,
+    observed_queries: u64,
+    claimed_replies: u64,
+    last_query_observed_at: Option<Instant>,
+    bootstrap_claimed: bool,
 }
 
 impl TerminalBootstrapDaReplyGuard {
@@ -63,13 +66,13 @@ impl TerminalBootstrapDaReplyGuard {
         }
 
         let mut state = self.state.lock_or_err()?;
-        if !self.active.load(Ordering::Relaxed) || state.query_observed_at.is_some() {
+        if !self.active.load(Ordering::Relaxed) {
             return Ok(());
         }
         for &byte in data {
             if advance_pattern(PRIMARY_DA_QUERY, &mut state.query_match, byte) {
-                state.query_observed_at = Some(now);
-                break;
+                state.observed_queries = state.observed_queries.saturating_add(1);
+                state.last_query_observed_at = Some(now);
             }
         }
         Ok(())
@@ -84,27 +87,52 @@ impl TerminalBootstrapDaReplyGuard {
             return Ok(false);
         }
 
-        let state = self.state.lock_or_err()?;
+        let mut state = self.state.lock_or_err()?;
         if !self.active.load(Ordering::Relaxed) {
             return Ok(false);
         }
-        let Some(query_observed_at) = state.query_observed_at else {
+        let Some(query_observed_at) = state.last_query_observed_at else {
             return Ok(false);
         };
         let current = !is_bootstrap_da_expired(self.armed_at, now)
             && !is_bootstrap_da_expired(query_observed_at, now);
-        self.active.store(false, Ordering::Release);
-        Ok(current)
+        if !current {
+            self.active.store(false, Ordering::Release);
+            return Ok(false);
+        }
+        if state.bootstrap_claimed || state.claimed_replies >= state.observed_queries {
+            return Ok(false);
+        }
+        state.bootstrap_claimed = true;
+        state.claimed_replies = state.claimed_replies.saturating_add(1);
+        Ok(true)
     }
 
-    /// A normal live parse is already the authoritative reply path. Claim the
-    /// one-shot before its PTY write so a concurrent replay cannot duplicate it.
-    pub(crate) fn claim_live_reply(&self, data: &[u8]) -> Result<bool, AppError> {
+    /// Arbitrate an exact live reply against the bounded bootstrap exchange.
+    /// The first reply candidate claims each observed query. Once replay has
+    /// claimed the bootstrap query, live candidates without a newer query are
+    /// duplicates and must not enter the PTY input stream.
+    pub(crate) fn should_suppress_live_reply(&self, data: &[u8]) -> Result<bool, AppError> {
+        self.should_suppress_live_reply_at(data, Instant::now())
+    }
+
+    fn should_suppress_live_reply_at(&self, data: &[u8], now: Instant) -> Result<bool, AppError> {
         if data != XTERM_PRIMARY_DA_REPLY || !self.active.load(Ordering::Acquire) {
             return Ok(false);
         }
-        let _state = self.state.lock_or_err()?;
-        Ok(self.active.swap(false, Ordering::AcqRel))
+        let mut state = self.state.lock_or_err()?;
+        if !self.active.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        if is_bootstrap_da_expired(self.armed_at, now) {
+            self.active.store(false, Ordering::Release);
+            return Ok(false);
+        }
+        if state.claimed_replies < state.observed_queries {
+            state.claimed_replies = state.claimed_replies.saturating_add(1);
+            return Ok(false);
+        }
+        Ok(state.bootstrap_claimed)
     }
 
     pub(crate) fn should_report_observation_failure(&self) -> bool {
@@ -450,9 +478,45 @@ mod tests {
         let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
         guard.observe_output_at(b"\x1b[c", started).unwrap();
 
-        assert!(guard.claim_live_reply(b"\x1b[?1;2c").unwrap());
+        assert!(!guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started)
+            .unwrap());
         assert!(!guard
             .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+    }
+
+    #[test]
+    fn bootstrap_da_reply_claim_suppresses_a_late_live_duplicate() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard.observe_output_at(b"\x1b[c", started).unwrap();
+
+        assert!(guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+        assert!(guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(2),)
+            .unwrap());
+    }
+
+    #[test]
+    fn a_new_observed_query_keeps_its_live_reply_after_bootstrap_claimed_the_first() {
+        let started = Instant::now();
+        let guard = TerminalBootstrapDaReplyGuard::armed_at(started);
+        guard.observe_output_at(b"\x1b[c", started).unwrap();
+        assert!(guard
+            .authorize_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(1))
+            .unwrap());
+
+        guard
+            .observe_output_at(b"\x1b[c", started + Duration::from_millis(2))
+            .unwrap();
+        assert!(!guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(3),)
+            .unwrap());
+        assert!(guard
+            .should_suppress_live_reply_at(b"\x1b[?1;2c", started + Duration::from_millis(4),)
             .unwrap());
     }
 }

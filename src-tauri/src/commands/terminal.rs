@@ -1267,7 +1267,14 @@ pub fn write_terminal_protocol_reply_inner(
     }
 
     if let Some(guard) = handle.bootstrap_da_reply() {
-        guard.claim_live_reply(data)?;
+        if guard.should_suppress_live_reply(data)? {
+            tracing::info!(
+                terminal_id = %id,
+                direction = "ui-protocol-suppressed",
+                "suppressed live Primary DA reply already claimed by bootstrap replay"
+            );
+            return Ok(());
+        }
     }
 
     if pty_trace::is_pty_trace_enabled() {
@@ -2401,6 +2408,30 @@ mod tests {
             !write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",)
                 .unwrap()
         );
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?1;2c");
+    }
+
+    #[test]
+    fn bootstrap_da_reply_suppresses_a_racing_live_duplicate() {
+        let state = AppState::new();
+        let guard = Arc::new(crate::terminal::TerminalBootstrapDaReplyGuard::armed());
+        guard.observe_output(b"\x1b[c").unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let handle = pty::PtyHandle::from_test_writer_for_generation(
+            Box::new(SharedTestWriter(Arc::clone(&written))),
+            4,
+        )
+        .with_bootstrap_da_reply(Some(guard));
+        state
+            .pty_handles
+            .lock_or_err()
+            .unwrap()
+            .insert("t1".into(), handle);
+
+        assert!(
+            write_terminal_bootstrap_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c",).unwrap()
+        );
+        write_terminal_protocol_reply_inner(&state, "t1", 4, b"\x1b[?1;2c").unwrap();
         assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?1;2c");
     }
 

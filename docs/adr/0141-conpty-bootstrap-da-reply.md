@@ -1,6 +1,6 @@
 # 0141. ConPTY 초기 DA 응답은 질의가 증명된 replay 예외로 전달한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-09
 - Source: 사용자 재현 요청 및 dev 실측; [architecture/data-flow.md §8.8](../architecture/data-flow.md); [ADR-0054](0054-xterm-human-and-protocol-data-origin.md); [ADR-0068](0068-remote-terminal-query-single-responder.md)
 - Relation: ADR-0054의 일반 replay 응답 폐기 원칙과 ADR-0068의 PC xterm 단일 responder 원칙을 유지하면서, Windows PTY 생성 직후의 Primary Device Attributes 교환에만 generation-local 예외를 추가한다. 기존 ADR을 대체하지 않는다.
@@ -22,7 +22,7 @@ PTY 생성 직후 ConPTY가 보낸 `ESC[c` Primary Device Attributes 질의는 d
 - Windows에서 새 `PtyHandle`을 만들 때 generation-local bootstrap DA guard를 arm한다. output callback은 desktop publish보다 먼저 raw PTY byte stream에서 exact `ESC[c`를 chunk 경계에 걸쳐 관측한다. catalog의 id-only 상태나 화면 문자열로 질의를 추정하지 않는다.
 - visible xterm의 일반 `replay` protocol reply suppression은 유지한다. 다만 replay parse context가 current attach generation을 갖고 있고 응답 전체가 고정 xterm의 exact `ESC[?1;2c`일 때만 전용 `write_terminal_bootstrap_protocol_reply(id, generation, data)` Tauri command에 제안한다. cache·snapshot의 다른 reply는 계속 폐기한다.
 - backend가 최종 증명 경계다. command는 current `PtyHandle`의 generation 일치, exact query 관측, exact response, arm 또는 query 관측 뒤 2.5초 이내, one-shot 미소비를 모두 만족할 때만 PTY FIFO에 쓴다. 틀린 byte, 미관측·만료·중복·stale generation, Windows가 아닌 handle은 쓰지 않고 fail-closed한다.
-- 같은 query가 최초 attach 전에 이미 live delta로 파싱되면 기존 `write_terminal_protocol_reply`가 authoritative responder다. exact live DA reply는 bootstrap one-shot을 PTY write 전에 claim해, 빠른 재attach와 경합해도 같은 generation에 중복 응답하지 않는다.
+- 같은 query가 최초 attach 전에 이미 live delta로 파싱되면 기존 `write_terminal_protocol_reply`가 authoritative responder다. guard는 관측한 exact query 수와 이미 claim한 reply 수를 결속한다. live가 먼저 claim하면 뒤의 bootstrap 제안을 거절하고, bootstrap이 먼저 claim하면 새 query 없이 뒤늦게 도착한 exact live reply를 폐기한다. 어느 IPC 순서에서도 query당 응답은 하나다.
 - guard의 mutex 실패는 오류로 처리하고 output 관측 오류는 generation당 한 번 기록한다. reply write가 실패해도 one-shot을 다시 열거나 재전송하지 않는다. IPC 실패가 PTY 미수락을 증명하지 못하기 때문이다.
 - Rust는 응답을 합성하거나 xterm 상태를 복제하지 않는다. exact response 값은 고정 xterm 버전의 계약 테스트가 고정하고, xterm 업그레이드 때 함께 재검토한다. Automation·Remote HTTP/MCP 계약은 추가하지 않는다.
 
