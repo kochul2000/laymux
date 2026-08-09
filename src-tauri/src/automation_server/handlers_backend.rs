@@ -104,8 +104,13 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "POST", "path": "/api/v1/panes/split",
-                "description": "Split a pane horizontally or vertically.",
-                "body": { "paneIndex": "number", "direction": "\"horizontal\" | \"vertical\"" }
+                "description": "Split a pane horizontally or vertically. The new pane starts in the last-focused pane's CWD unless cwd is given.",
+                "body": {
+                    "paneIndex": "number",
+                    "direction": "\"horizontal\" | \"vertical\"",
+                    "profile": "(optional) string",
+                    "cwd": "(optional) string"
+                }
             },
             {
                 "method": "DELETE", "path": "/api/v1/panes/{index}",

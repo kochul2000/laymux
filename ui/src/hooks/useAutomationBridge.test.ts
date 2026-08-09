@@ -18,6 +18,7 @@ import { useUiStore } from "@/stores/ui-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
+import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { PANE_MIN_RATIO } from "@/hooks/usePaneResize";
 import {
   automationResponse,
@@ -2621,6 +2622,65 @@ describe("identify_caller and enriched responses", () => {
     expect(newPane.view.type).toBe("TerminalView");
     expect(newPane.view.profile).toBe("WSL");
     expect(newPane.view.lastCwd).toBe("/home/user");
+  });
+
+  // ADR-0140: 분할은 분할 대상 pane 의 CWD 를 시드로 싣는다. 호출자가 cwd 를
+  // 명시하면 그 값이 시드를 덮어써야 한다 — 아니면 세션 생성에서 시드가 이겨
+  // 요청한 디렉터리가 조용히 무시된다.
+  it("split_pane lets an explicit cwd override the inherited seed", () => {
+    const sourcePaneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${sourcePaneId}`,
+      profile: "PowerShell",
+      syncGroup: "ws-1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo(`terminal-${sourcePaneId}`, { cwd: "/home/user/inherited" });
+
+    const result = handleAutomationRequest({
+      requestId: "sp-cwd-override",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical", cwd: "/home/user/explicit" },
+    });
+    expect(result.success).toBe(true);
+
+    const newPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[1];
+    expect(useTerminalRestartStore.getState().requests[newPane.id]?.cwd).toBe(
+      "/home/user/explicit",
+    );
+  });
+
+  it("split_pane seeds the new pane with the split source pane's cwd", () => {
+    const sourcePaneId = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0].id;
+    useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+    useTerminalStore.getState().registerInstance({
+      id: `terminal-${sourcePaneId}`,
+      profile: "PowerShell",
+      syncGroup: "ws-1",
+      workspaceId: "ws-1",
+    });
+    useTerminalStore
+      .getState()
+      .updateInstanceInfo(`terminal-${sourcePaneId}`, { cwd: "/home/user/inherited" });
+
+    const result = handleAutomationRequest({
+      requestId: "sp-cwd-seed",
+      category: "action",
+      target: "panes",
+      method: "split",
+      params: { paneIndex: 0, direction: "vertical" },
+    });
+    expect(result.success).toBe(true);
+
+    const newPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[1];
+    expect(useTerminalRestartStore.getState().requests[newPane.id]?.cwd).toBe(
+      "/home/user/inherited",
+    );
   });
 
   it("split_pane rejects out-of-range pane_index", () => {

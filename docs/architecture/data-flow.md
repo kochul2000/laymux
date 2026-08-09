@@ -24,6 +24,12 @@
 | 툴바 버튼          | 현재 포커스 Pane을 가로/세로 분할 |
 | settings.json      | 직접 비율 정의                    |
 
+**새 Pane 은 분할한 그 Pane 의 CWD 에서 첫 터미널 세션을 시작한다**([ADR-0140](../adr/0140-split-pane-inherits-source-cwd.md)).
+
+- 시드 CWD 는 `lib/pane-cwd.ts` 의 `resolvePaneCwd(pane)` 로 **분할 대상 Pane 하나에서만** 뽑는다 — 살아 있는 세션이 보고한 값이 먼저이고 `view.lastCwd` 는 차선이다(`Restart View` 도 같은 함수를 쓴다). 분할한 Pane 에 CWD 가 없으면(Memo 등) 시드 없이 프로파일 기본 디렉터리이고, 다른 Pane 이나 포커스 상태로 우회하지 않는다.
+- 시드는 `terminal-restart-store` 의 요청으로 실린다("다음 세션을 이 CWD 로 새로 시작하라"). 새 Pane 은 `EmptyView` 로 태어나므로 사용자가 터미널을 고를 때까지 기다렸다가 첫 세션 생성에서 소비되고, Pane 이 사라지면 `forgetRestart`/`gcStale` 이 정리한다. 이 경로는 프로파일의 `restoreCwd` 설정과 무관하게 적용된다 — 상속은 복원이 아니다.
+- Automation `split_pane` 은 `cwd` 를 주면 그 값으로 시드를 덮어쓰고(명시값 우선), 주지 않으면 UI 분할과 같은 상속을 받는다. Dock 분할은 상속 대상이 아니다.
+
 ### 크기 조절
 
 - 경계선 드래그 (자유 비율, 0.0~1.0 백분율로 저장)

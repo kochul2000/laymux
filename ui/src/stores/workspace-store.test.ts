@@ -7,7 +7,20 @@ vi.mock("@/lib/persist-session", () => ({
 import { useWorkspaceStore } from "./workspace-store";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
+import { useTerminalRestartStore } from "./terminal-restart-store";
+import { useTerminalStore } from "./terminal-store";
 import { persistSession } from "@/lib/persist-session";
+
+/** pane 에 살아 있는 터미널 세션과 그 CWD 가 있는 상태를 만든다. */
+function registerTerminalCwd(paneId: string, cwd: string) {
+  useTerminalStore.getState().registerInstance({
+    id: `terminal-${paneId}`,
+    profile: "PowerShell",
+    syncGroup: "ws-1",
+    workspaceId: "ws-1",
+  });
+  useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { cwd });
+}
 
 describe("WorkspaceStore", () => {
   beforeEach(() => {
@@ -26,6 +39,8 @@ describe("WorkspaceStore", () => {
     });
     useOverridesStore.setState({ paneOverrides: {}, viewOverrides: {} });
     useCwdPropagateStore.setState({ requests: {} });
+    useTerminalRestartStore.setState({ requests: {} });
+    useTerminalStore.setState(useTerminalStore.getInitialState());
     localStorage.clear();
     vi.clearAllMocks();
   });
@@ -160,6 +175,44 @@ describe("WorkspaceStore", () => {
       useWorkspaceStore.getState().splitPane(5, "horizontal");
       const active = useWorkspaceStore.getState().getActiveWorkspace()!;
       expect(active.panes).toHaveLength(1);
+    });
+
+    // ADR-0140: 새 pane 은 분할한 그 pane 의 CWD 에서 첫 세션을 시작한다.
+    it("seeds the new pane with the split source pane's CWD", () => {
+      const sourcePane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      registerTerminalCwd(sourcePane.id, "/home/user/project");
+
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+
+      const newPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[1];
+      expect(useTerminalRestartStore.getState().requests[newPane.id]).toEqual({
+        epoch: 1,
+        cwd: "/home/user/project",
+        fresh: true,
+      });
+    });
+
+    it("ignores other panes' CWD — only the split source counts", () => {
+      // pane 0 = 터미널(/home/user/other), pane 1 = Memo(분할 대상).
+      const terminalPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[0];
+      useWorkspaceStore.getState().setPaneView(0, { type: "TerminalView" });
+      registerTerminalCwd(terminalPane.id, "/home/user/other");
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+      useWorkspaceStore.getState().setPaneView(1, { type: "MemoView" });
+      useTerminalRestartStore.setState({ requests: {} });
+
+      useWorkspaceStore.getState().splitPane(1, "vertical");
+
+      const newPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[2];
+      expect(useTerminalRestartStore.getState().requests[newPane.id]).toBeUndefined();
+    });
+
+    it("leaves the new pane unseeded when the source has no CWD", () => {
+      useWorkspaceStore.getState().splitPane(0, "vertical");
+
+      const newPane = useWorkspaceStore.getState().getActiveWorkspace()!.panes[1];
+      expect(useTerminalRestartStore.getState().requests[newPane.id]).toBeUndefined();
     });
   });
 

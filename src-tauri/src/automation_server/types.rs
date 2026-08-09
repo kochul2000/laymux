@@ -94,6 +94,11 @@ pub struct SplitPaneBody {
     #[serde(rename = "paneIndex")]
     pub pane_index: usize,
     pub direction: String,
+    /// 새 pane 의 터미널 프로파일. 생략하면 기본 프로파일.
+    pub profile: Option<String>,
+    /// 새 pane 의 시작 디렉터리. 생략하면 직전 포커스/분할 대상 pane 의 CWD 를
+    /// 상속한다(ADR-0140). MCP `split_pane` 과 같은 계약.
+    pub cwd: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -325,6 +330,17 @@ mod tests {
         let body: SplitPaneBody = serde_json::from_str(json).unwrap();
         assert_eq!(body.pane_index, 0);
         assert_eq!(body.direction, "vertical");
+        // 생략하면 프론트가 CWD 를 상속한다(ADR-0140).
+        assert_eq!(body.profile, None);
+        assert_eq!(body.cwd, None);
+    }
+
+    #[test]
+    fn split_pane_body_carries_profile_and_cwd() {
+        let json = r#"{"paneIndex":1,"direction":"horizontal","profile":"WSL","cwd":"/home/user"}"#;
+        let body: SplitPaneBody = serde_json::from_str(json).unwrap();
+        assert_eq!(body.profile.as_deref(), Some("WSL"));
+        assert_eq!(body.cwd.as_deref(), Some("/home/user"));
     }
 
     #[test]

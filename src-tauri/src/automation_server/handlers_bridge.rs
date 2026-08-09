@@ -301,15 +301,16 @@ pub async fn panes_split(
     AxumState(state): AxumState<ServerState>,
     Json(body): Json<SplitPaneBody>,
 ) -> impl IntoResponse {
-    match bridge_request(
-        &state,
-        "action",
-        "panes",
-        "split",
-        serde_json::json!({ "paneIndex": body.pane_index, "direction": body.direction }),
-    )
-    .await
-    {
+    let mut params =
+        serde_json::json!({ "paneIndex": body.pane_index, "direction": body.direction });
+    if let Some(profile) = body.profile {
+        params["profile"] = serde_json::Value::String(profile);
+    }
+    if let Some(cwd) = body.cwd {
+        params["cwd"] = serde_json::Value::String(cwd);
+    }
+
+    match bridge_request(&state, "action", "panes", "split", params).await {
         Ok(data) => (StatusCode::OK, Json(data)),
         Err(e) => e,
     }

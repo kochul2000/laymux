@@ -5,6 +5,7 @@ import { removePaneAndRedistribute } from "./pane-removal";
 import { useOverridesStore } from "./overrides-store";
 import { useCwdPropagateStore } from "./cwd-propagate-store";
 import { useTerminalRestartStore } from "./terminal-restart-store";
+import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { clearComposerHistoryForWorkspace } from "@/lib/terminal-input-composer-state";
 
 /** Convert a workspace pane to a layout pane (preserving view config). */
@@ -302,6 +303,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     set((state) => ({
       workspaces: state.workspaces.map((w) => (w.id === ws.id ? { ...w, panes: newPanes } : w)),
     }));
+
+    // 새 pane 의 첫 터미널 세션은 **분할한 그 pane** 의 CWD 에서 시작한다(ADR-0140).
+    // 시드는 재시작 요청 버스에 실린다 — "이 pane 의 다음 세션을 이 CWD 로 새로
+    // 시작하라"는 payload·수명이 재시작과 같기 때문이다. 새 pane 은 EmptyView 로
+    // 태어나므로 시드는 사용자가 터미널을 고를 때까지 기다렸다가 소비된다.
+    const seedCwd = resolvePaneCwd(pane);
+    if (seedCwd) {
+      useTerminalRestartStore.getState().requestRestart(newPane.id, seedCwd);
+    }
   },
 
   removePane: (paneIndex) => {
