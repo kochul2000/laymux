@@ -581,14 +581,17 @@ const handlers: HandlerMap = {
       // Auto-convert EmptyView to TerminalView so MCP splits create usable terminals
       const wsBeforeConvert = useWorkspaceStore.getState().getActiveWorkspace();
       const newPaneBefore = wsBeforeConvert?.panes[newPaneIndex];
-      if (newPaneBefore && newPaneBefore.view.type !== "TerminalView") {
-        const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
-        if (p.profile) viewConfig.profile = p.profile as string;
-        if (p.cwd) viewConfig.lastCwd = p.cwd as string;
-        useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig);
+      if (newPaneBefore) {
+        if (newPaneBefore.view.type !== "TerminalView") {
+          const viewConfig: ViewInstanceConfig = { type: "TerminalView" };
+          if (p.profile) viewConfig.profile = p.profile as string;
+          if (p.cwd) viewConfig.lastCwd = p.cwd as string;
+          useWorkspaceStore.getState().setPaneView(newPaneIndex, viewConfig);
+        }
         // 호출자가 준 cwd 는 분할 상속 시드(ADR-0140)를 덮어쓴다. 시드가 남아 있으면
         // 세션 생성 때 그쪽이 이겨서 요청한 디렉터리가 조용히 무시된다. 이 경로는
-        // 프로파일의 restoreCwd 설정과도 무관하게 요청값을 적용한다.
+        // 프로파일의 restoreCwd 설정과도 무관하게 요청값을 적용하며, 새 pane 이 이미
+        // TerminalView 인 경우(뷰 변환을 건너뛰는 경로)에도 요청값이 살아남아야 한다.
         if (p.cwd) {
           useTerminalRestartStore.getState().requestRestart(newPaneBefore.id, p.cwd as string);
         }
