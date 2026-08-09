@@ -219,6 +219,7 @@ pub fn run() {
             commands::resize_terminal,
             commands::write_to_terminal,
             commands::write_terminal_protocol_reply,
+            commands::write_terminal_bootstrap_protocol_reply,
             commands::interrupt_terminal_on_exit,
             commands::write_terminal_input,
             commands::attach_terminal_output,
