@@ -5091,10 +5091,25 @@ export function TerminalView({
               );
             },
             timeoutMs: TERMINAL_OUTPUT_CONTROL_TIMEOUT_MS,
+            // v3 owns one irreplaceable lease, so a timed-out parsed ACK is
+            // retried in place (same or later coalesced prefix) instead of
+            // replacing the epoch. Each orphan stays charged in the registry;
+            // `onAdmissionBlocked` above fail-stops at the orphan hard cap
+            // (ADR-0095 control liveness).
+            retryOnTimeout: supportsV3,
             onTimeout: () => {
               if (!isCurrentAttach()) return;
               if (outputTransportMode === "v3") {
-                failStopOutputV3("parsed_ack_timeout");
+                outputAckTimeoutStreak += 1;
+                console.warn(
+                  "[TerminalView] terminal output parsed ACK timed out; retrying same prefix",
+                  {
+                    epoch,
+                    timeoutStreak: outputAckTimeoutStreak,
+                    outstanding: outputControlOperations.outstanding("ack"),
+                  },
+                  recordTerminalOutputRecovery(instanceId, "ackTimeout"),
+                );
                 return;
               }
               outputAckTimeoutStreak += 1;

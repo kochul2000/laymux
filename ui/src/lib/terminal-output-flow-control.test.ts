@@ -300,6 +300,199 @@ describe("TerminalOutputFlowAcknowledger", () => {
     }
   });
 
+  it("retries the same prefix in place after a timeout and absorbs the late completion", async () => {
+    vi.useFakeTimers();
+    try {
+      const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
+      const first = deferred<boolean>();
+      const send = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(true);
+      const onTimeout = vi.fn();
+      const onConfirmed = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+        onTimeout,
+        onConfirmed,
+        tryStartOperation: () => scope.tryStart("ack"),
+      });
+
+      acknowledger.complete(0, 4);
+      expect(send).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(onTimeout).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenNthCalledWith(2, 4);
+      expect(scope.localTimedOut("ack")).toBe(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onConfirmed).toHaveBeenCalledWith(4);
+
+      first.resolve(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(scope.outstanding("ack")).toBe(0);
+      expect(scope.localTimedOut("ack")).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(onTimeout).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("folds progress parsed during a timed-out ACK into its in-place retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<boolean>();
+      const send = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(true);
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+      });
+
+      acknowledger.complete(0, 4);
+      acknowledger.complete(4, 12);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenLastCalledWith(4);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenLastCalledWith(12);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("settles a v3 waiter with the late acceptance of a timed-out ACK", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<boolean>();
+      const second = deferred<boolean>();
+      const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+      });
+      const settled = vi.fn();
+
+      void acknowledger.completeAndWait(0, 4).then(settled);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(settled).not.toHaveBeenCalled();
+
+      first.resolve(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toHaveBeenCalledWith(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the rejection retry owned by the current send when a stale ACK rejects late", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<boolean>();
+      const second = deferred<boolean>();
+      const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const onError = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryMs: 25,
+        retryOnTimeout: true,
+        onError,
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+
+      first.reject(new Error("late bridge failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onError).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(send).toHaveBeenCalledTimes(2);
+
+      second.resolve(true);
+      await Promise.resolve();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retires the sender when a timed-out ACK later reports a lost lease", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<boolean>();
+      const second = deferred<boolean>();
+      const send = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const onLeaseLost = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+        onLeaseLost,
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+
+      first.resolve(false);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(onLeaseLost).toHaveBeenCalledOnce();
+
+      acknowledger.complete(4, 8);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands orphan-cap fail-stop to admission when in-place retries exhaust the budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const scope = new TerminalOutputControlOperationRegistry(2, 2).mount("terminal-1");
+      const send = vi.fn(() => deferred<boolean>().promise);
+      const onOrphanCap = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+        tryStartOperation: () => scope.tryStart("ack"),
+        onAdmissionBlocked: (resume) => {
+          if (scope.orphanCapacityExhausted("ack")) {
+            onOrphanCap();
+            acknowledger.dispose();
+            return;
+          }
+          return scope.waitForCapacityOrTimeout("ack", resume);
+        },
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(onOrphanCap).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(onOrphanCap).toHaveBeenCalledOnce();
+      expect(scope.globalTimedOut("ack")).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("blocks ACK bridge creation when real timed-out orphans fill the budget", async () => {
     const scope = new TerminalOutputControlOperationRegistry(6).mount("terminal-1");
     for (let index = 0; index < 6; index += 1) expect(scope.tryStart("ack")).toBeDefined();
