@@ -8986,6 +8986,72 @@ describe("TerminalView", () => {
     });
   });
 
+  // -- Wheel scroll sensitivity --
+
+  it("creates xterm with the configured wheel sensitivities", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      terminal: {
+        ...useSettingsStore.getState().terminal,
+        scrollSensitivity: 3.5,
+        fastScrollSensitivity: 12,
+      },
+    });
+
+    render(<TerminalView instanceId="t-wheel1" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(0);
+    });
+    const term = createdTerminals[createdTerminals.length - 1];
+    expect(term.options.scrollSensitivity).toBe(3.5);
+    expect(term.options.fastScrollSensitivity).toBe(12);
+  });
+
+  it("clamps an out-of-band wheel sensitivity instead of handing it to xterm", async () => {
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      terminal: {
+        ...useSettingsStore.getState().terminal,
+        scrollSensitivity: 0,
+        fastScrollSensitivity: 1000,
+      },
+    });
+
+    render(<TerminalView instanceId="t-wheel2" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(0);
+    });
+    const term = createdTerminals[createdTerminals.length - 1];
+    // 0 falls back to the default (xterm throws on a non-positive value).
+    expect(term.options.scrollSensitivity).toBe(1);
+    expect(term.options.fastScrollSensitivity).toBe(20);
+  });
+
+  it("applies a wheel sensitivity change to the running terminal", async () => {
+    render(<TerminalView instanceId="t-wheel3" profile="PowerShell" syncGroup="" />);
+
+    await vi.waitFor(() => {
+      expect(createdTerminals.length).toBeGreaterThan(0);
+    });
+    const term = createdTerminals[createdTerminals.length - 1];
+
+    useSettingsStore.setState({
+      ...useSettingsStore.getState(),
+      terminal: {
+        ...useSettingsStore.getState().terminal,
+        scrollSensitivity: 5,
+        fastScrollSensitivity: 8,
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(term.options.scrollSensitivity).toBe(5);
+      expect(term.options.fastScrollSensitivity).toBe(8);
+    });
+  });
+
   // -- URL link click (issue #29) --
 
   describe("URL link click", () => {

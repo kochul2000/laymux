@@ -93,6 +93,30 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 적용 시점은 저장 직후 다음 admission turn 이다. 프론트엔드는 `useTerminalParserAdmissionSettings`가 store 변경을 구독해 scheduler 에 넣으며, 진행 중인 physical write 를 선점하거나 xterm 을 재생성하지 않는다. 클래스 몫이 바뀌면 이전 몫으로 계산된 balance 는 폐기해 새 비율로 다음 cycle 을 시작한다.
 
+### 휠 스크롤 민감도
+
+```jsonc
+{
+  "terminal": {
+    "scrollSensitivity": 1, // 데스크톱 터미널 휠 배율. 기본 1(xterm 기본값)
+    "fastScrollSensitivity": 5 // Alt 를 누른 채 굴릴 때의 배율. 기본 5
+  },
+  "remote": {
+    "scrollSensitivity": 1, // 원격 브라우저 터미널 휠 배율
+    "fastScrollSensitivity": 5,
+    "touchScrollSensitivity": 1 // 손가락 드래그 스크롤백 배율. 1 = 1:1 물리 스크롤
+  }
+}
+```
+
+두 쌍은 **표면별로 따로 소유**한다([ADR-0142](../adr/0142-wheel-scroll-sensitivity-per-surface.md)) — `terminal.*` 는 데스크톱 xterm 만, `remote.*` 는 Remote 브라우저 xterm 만 정하며 서로 상속·동기화하지 않는다. 편집 UI 는 각각 Settings → **Terminal** 과 Settings → **Remote** 다.
+
+유효 범위는 `0.1..=20`, 상수는 Rust `constants.rs`(`MIN/MAX/DEFAULT_SCROLL_SENSITIVITY`, `DEFAULT_FAST_SCROLL_SENSITIVITY`)와 프론트 `lib/scroll-sensitivity.ts` 에 각각 한 곳씩 있다. **비양수·비수치는 clamp 대상이 아니라 기본값 fallback 대상**이다 — xterm 이 비양수 sensitivity 에 throw 하기 때문이며, 양수인데 범위를 벗어난 값만 경계로 clamp 한다. `validate_settings` 는 범위 밖 값을 `/terminal/scrollSensitivity`·`/remote/fastScrollSensitivity` 등 경로로 `out_of_range` 보고하고, 실행 경로는 그와 별개로 항상 정규화한다(parserAdmission 과 같은 "보고 + clamp" 정책).
+
+적용 시점은 다르다. 데스크톱은 **live** — 저장 즉시 실행 중인 xterm 옵션에 반영하며 fit·레이아웃을 건드리지 않는다. Remote 는 **nextUse** 로, 값이 per-terminal `appearance` payload(§Remote terminals)에 실려 다음 attach 의 `terminalOptionsForAppearance`/`applyTerminalAppearance` 에서 적용된다. 원격 클라이언트는 필드가 없거나(구버전 데스크톱) 비정상이면 자기 기본값(1/5/1)으로 떨어진다.
+
+`remote.touchScrollSensitivity`(기본 1)는 **xterm 옵션이 아니다**. Remote 페이지가 소유한 손가락 드래그 스크롤백의 픽셀→행 환산에서 입력 델타에 한 번 곱하며(`scrollTouchTerminal`), 하위 셀 나머지(`scrollRemainderPx`)에는 다시 곱하지 않는다. 옵션 번들 대신 페이지 지역 상태(`adoptTouchScrollSensitivity`)가 들고 있으며 appearance 가 적용되는 두 지점(터미널 생성·appearance 갱신)에서 갱신된다 — xterm 은 모르는 옵션 키를 거부한다. 한 손가락·두 손가락 드래그 모두 같은 값을 쓰고, **마우스 트래킹을 켠 전체화면 TUI 에서는 드래그가 합성 wheel 이벤트로 앱에 전달되므로 `remote.scrollSensitivity` 가 적용된다**(두 배율을 겹쳐 곱하지 않는다).
+
 ### 경로 링크의 호스트 OS 열기
 
 ```jsonc
@@ -269,6 +293,9 @@ Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tau
     "cloudServerBaseUrl": null,         // pairing complete 응답의 canonical server base URL
     "cloudAutoReconnect": true,         // 원격 제어가 켜져 있고 토큰이 있으면 시작 시 WSS tunnel 자동 재연결
     "serveTerminalFont": false,         // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
+    "scrollSensitivity": 1,             // 원격 브라우저 터미널의 휠 배율. 0.1~20, 기본 1(ADR-0142). 데스크톱 terminal.scrollSensitivity 와 별개
+    "fastScrollSensitivity": 5,         // 원격에서 Alt 를 누른 채 굴릴 때의 배율. 0.1~20 으로 clamp, 기본 5
+    "touchScrollSensitivity": 1,        // 손가락 드래그 스크롤백 배율. 0.1~20, 기본 1(=1:1 물리 스크롤). xterm 옵션이 아니라 Remote 페이지의 픽셀→행 환산에 곱한다
     "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0124). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다. 전역 게이트이고, 기기별 on/off 는 브라우저 localStorage 가 따로 갖는다(§13.5, ADR-0132)
   }
 }

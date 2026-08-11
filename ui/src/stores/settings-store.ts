@@ -35,6 +35,10 @@ import {
 import type { LanguageSetting } from "../i18n/resolve-language";
 import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "../lib/agent-session-constants";
 import { DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND } from "../lib/agent-command";
+import {
+  DEFAULT_FAST_SCROLL_SENSITIVITY,
+  DEFAULT_SCROLL_SENSITIVITY,
+} from "../lib/scroll-sensitivity";
 
 /** Re-export so settings consumers can import the language type from one place. */
 export type { LanguageSetting };
@@ -155,6 +159,14 @@ export interface TerminalSettings {
   pathLinkOsOpenConfirm: boolean;
   /** Show the floating jump-to-bottom button while scrolled up into scrollback (issue #361). */
   showScrollToBottomButton: boolean;
+  /**
+   * Mouse wheel scroll multiplier for this desktop terminal (xterm
+   * `scrollSensitivity`). The Remote surface carries its own value in
+   * `remote.scrollSensitivity`.
+   */
+  scrollSensitivity: number;
+  /** Wheel multiplier while the fast-scroll modifier (Alt) is held. */
+  fastScrollSensitivity: number;
   /**
    * Composer: which terminals share one past-input history bucket — `global`
    * (whole app), `workspace`, or `pane` (ADR-0055).
@@ -670,6 +682,9 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAutoReconnect: true,
   serveTerminalFont: false,
   widgets: true,
+  scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
+  fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
+  touchScrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
@@ -712,6 +727,8 @@ export const DEFAULT_TERMINAL: TerminalSettings = {
   pathLinkOsOpenEnabled: true,
   pathLinkOsOpenConfirm: true,
   showScrollToBottomButton: true,
+  scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
+  fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
   composerHistoryScope: DEFAULT_COMPOSER_HISTORY_SCOPE,
   composerHistoryPopup: true,
   composerAutocomplete: true,
