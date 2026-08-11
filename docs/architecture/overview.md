@@ -10,7 +10,9 @@
 ## 1. 개요
 
 Tauri(Rust + WebView) 기반의 자유 레이아웃 IDE.
-Windows 및 Linux를 지원하며, 터미널 중심의 작업 환경을 제공한다.
+Windows 및 Linux 데스크톱을 지원하며, 터미널 중심의 작업 환경을 제공한다. Android는
+데스크톱 backend를 이식하지 않고 원격 E2E 연결을 위한 독립 하이브리드 클라이언트를
+같은 리포의 `apps/android`에서 개발한다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md)).
 
 ---
 
@@ -19,7 +21,8 @@ Windows 및 Linux를 지원하며, 터미널 중심의 작업 환경을 제공�
 | 영역 | 기술 |
 |---|---|
 | 프레임워크 | Tauri v2 (Rust + WebView2 / WebKitGTK) |
-| 플랫폼 | Windows, Linux |
+| 데스크톱 플랫폼 | Windows, Linux |
+| Android 원격 클라이언트 | Kotlin 네이티브 셸 + APK 내장 WebView 자산 (`apps/android`) |
 | 네이티브 대화상자 | `rfd 0.15.4`; Windows native backend / Linux GTK3 backend |
 | UI | React + TypeScript |
 | 스타일 | Tailwind CSS |
@@ -33,6 +36,18 @@ Linux의 `rfd`는 default feature를 끄고 `gtk3` backend만 target dependency�
 crash reporter의 `MessageDialog`이며, headless test에서는 대화상자를 열지 않는다.
 GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prerequisite를 그대로
 재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
+
+Android 앱은 Cargo/Tauri workspace 구성원이 아니다. QR·Keystore·향후 암호화 transport는
+Kotlin 계층이 소유하고, 표시 UI는 `WebViewAssetLoader`의 로컬 HTTPS origin에서 APK 내장
+자산만 실행한다. 서버가 제공하는 `/remote/` 문서나 외부 script를 WebView에 적재하지 않는다.
+pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
+끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
+읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
+데스크톱 Remote Access 모달은 cloud identity에 결합된 seed를 Rust에서 만들고 OS keyring에
+보관한 뒤 QR SVG만 표시한다. 새 발급은 기존 seed를 회전하고 명시적 폐기와 cloud disconnect는
+record를 삭제한다. 현재 들어 있는 표면은 양 endpoint의 pairing 상태와 키 저장 기반까지이며
+Android 셸은 terminal data plane에 아직 연결되지 않았다. 기존 브라우저 Remote UI API도
+별도로 평문 payload를 사용하므로 E2E 완료 상태가 아니다.
 
 ---
 

@@ -2,6 +2,7 @@
 pub mod activity;
 pub mod activity_order;
 pub mod activity_reconcile;
+pub mod android_pairing;
 pub mod automation_server;
 #[cfg(test)]
 mod build_metadata;
@@ -289,6 +290,9 @@ pub fn run() {
             commands::get_remote_control_status,
             commands::get_remote_session_active,
             commands::get_remote_host_candidates,
+            commands::get_android_pairing_status,
+            commands::create_android_pairing_qr,
+            commands::revoke_android_pairing,
             commands::reclaim_remote_control,
             commands::get_cloud_status,
             commands::cloud_connect_start,

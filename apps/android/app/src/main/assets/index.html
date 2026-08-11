@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    />
+    <title>Laymux</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <section class="brand" aria-labelledby="title">
+        <div class="mark" aria-hidden="true">Lx</div>
+        <div>
+          <h1 id="title">Laymux</h1>
+          <p>안전한 원격 연결</p>
+        </div>
+      </section>
+
+      <section class="card" aria-live="polite">
+        <div id="stateBadge" class="badge">확인 중</div>
+        <h2 id="stateTitle">페어링 상태를 확인하고 있습니다</h2>
+        <p id="stateDescription">
+          앱에 포함된 클라이언트만 실행하며 서버에서 화면 코드를 내려받지
+          않습니다.
+        </p>
+        <dl id="pairingDetails" hidden>
+          <div>
+            <dt>기기</dt>
+            <dd id="deviceLabel"></dd>
+          </div>
+          <div>
+            <dt>인스턴스</dt>
+            <dd id="instanceId"></dd>
+          </div>
+          <div>
+            <dt>Relay</dt>
+            <dd id="endpoint"></dd>
+          </div>
+        </dl>
+        <section class="protection" aria-labelledby="protectionTitle">
+          <label class="protection-row" for="biometricToggle">
+            <span>
+              <strong id="protectionTitle">생체 인증으로 키 보호</strong>
+              <small>키를 저장하거나 사용할 때마다 인증합니다.</small>
+            </span>
+            <input id="biometricToggle" type="checkbox" role="switch" checked />
+          </label>
+          <p id="biometricHint" class="hint"></p>
+        </section>
+        <p id="errorMessage" class="error" hidden></p>
+        <p id="noticeMessage" class="notice" hidden></p>
+        <button id="scanButton" class="primary" type="button">
+          QR로 페어링
+        </button>
+        <button id="verifyButton" class="secondary" type="button" hidden>
+          생체 인증 확인
+        </button>
+        <button id="forgetButton" class="secondary" type="button" hidden>
+          페어링 해제
+        </button>
+      </section>
+
+      <p class="footnote">
+        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 현재 빌드는 QR 키
+        저장 기반만 제공하며 터미널 트래픽의 E2E 암호화는 후속 단계입니다.
+      </p>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

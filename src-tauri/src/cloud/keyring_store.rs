@@ -1,8 +1,7 @@
+use crate::constants::{KEYRING_SERVICE, KEYRING_SERVICE_DEV};
 use crate::error::AppError;
 
 const DEVICE_TOKEN_ACCOUNT: &str = "device-token";
-const KEYRING_SERVICE: &str = "laymux";
-const KEYRING_SERVICE_DEV: &str = "laymux-dev";
 
 fn service_name() -> &'static str {
     if cfg!(debug_assertions) {

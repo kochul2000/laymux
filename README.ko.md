@@ -129,6 +129,16 @@ cargo tauri build
 
 플랫폼별 인스톨러가 `src-tauri/target/release/bundle/`에 생성됩니다.
 
+Android 원격 클라이언트는 독립 Gradle 프로젝트입니다(JDK 17, Android SDK 36 필요).
+
+```powershell
+cd apps/android
+.\gradlew.bat :app:assembleDebug
+```
+
+현재 Android 앱과 데스크톱 Remote Access 모달은 QR 발급·Keystore/keyring 보관 기반을 제공하지만 기존 원격 트래픽을 아직 E2E 암호화하지 않습니다. Android의 강한 생체 인증은 기본이며 경고를 확인하고 명시적으로 끌 수 있습니다.
+자세한 범위는 [`apps/android/README.md`](./apps/android/README.md)를 참조하세요.
+
 ### 테스트
 
 ```bash
@@ -176,6 +186,7 @@ Streamable-HTTP MCP 엔드포인트(`/mcp`)가 33개 툴(터미널, 워크스페
 
 ```
 laymux/
+├── apps/android/              # QR·Keystore·생체 인증 기반 Android 하이브리드 원격 클라이언트
 ├── src-tauri/                # Rust 백엔드
 │   ├── src/
 │   │   ├── lib.rs            # Tauri 앱 설정

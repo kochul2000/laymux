@@ -361,8 +361,31 @@ export interface CloudStatus {
   lastError?: string | null;
 }
 
+export interface AndroidPairingStatus {
+  paired: boolean;
+  endpoint?: string | null;
+  instanceId?: string | null;
+}
+
+export interface AndroidPairingQr {
+  status: AndroidPairingStatus;
+  qrSvg: string;
+}
+
 export async function getRemoteAccessStatus(): Promise<RemoteAccessStatus> {
   return invoke("get_remote_access_status");
+}
+
+export async function getAndroidPairingStatus(): Promise<AndroidPairingStatus> {
+  return invoke("get_android_pairing_status");
+}
+
+export async function createAndroidPairingQr(): Promise<AndroidPairingQr> {
+  return invoke("create_android_pairing_qr");
+}
+
+export async function revokeAndroidPairing(): Promise<AndroidPairingStatus> {
+  return invoke("revoke_android_pairing");
 }
 
 export async function setRemoteRuntimeAccess(

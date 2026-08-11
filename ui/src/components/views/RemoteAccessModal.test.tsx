@@ -25,6 +25,10 @@ function setRemote(remote: Partial<ReturnType<typeof useSettingsStore.getState>[
     autoMobileModeMinWidth: 720,
     preferredHost: "",
     customHosts: [],
+    cloudEnabled: false,
+    cloudInstanceId: null,
+    cloudTunnelUrl: null,
+    cloudServerBaseUrl: null,
     ...remote,
   });
 }
@@ -60,6 +64,9 @@ describe("RemoteAccessModal", () => {
       if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
       if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
       if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
+      if (cmd === "get_android_pairing_status") {
+        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+      }
       if (cmd === "set_remote_runtime_access") return Promise.resolve(accessStatus(false));
       if (cmd === "get_remote_control_status") {
         return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
@@ -395,5 +402,136 @@ describe("RemoteAccessModal", () => {
       });
       expect(toggle.checked).toBe(false);
     });
+  });
+
+  it("requires a cloud identity before generating an Android pairing QR", async () => {
+    render(<RemoteAccessModal />);
+
+    expect(await screen.findByTestId("android-pairing-section")).toBeInTheDocument();
+    expect(screen.getByTestId("android-pairing-generate")).toBeDisabled();
+    expect(screen.getByText("Connect Cloud Remote before creating a pairing QR.")).toBeVisible();
+  });
+
+  it("creates an Android QR without exposing the seed or payload in the DOM", async () => {
+    setRemote({
+      cloudEnabled: true,
+      cloudInstanceId: "instance-1",
+      cloudServerBaseUrl: "https://relay.example.test",
+    });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
+      if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
+      if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
+      if (cmd === "get_android_pairing_status") {
+        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+      }
+      if (cmd === "create_android_pairing_qr") {
+        return Promise.resolve({
+          status: {
+            paired: true,
+            endpoint: "https://relay.example.test/",
+            instanceId: "instance-1",
+          },
+          qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>',
+        });
+      }
+      if (cmd === "get_remote_control_status") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      return Promise.resolve(null);
+    });
+    const user = userEvent.setup();
+
+    render(<RemoteAccessModal />);
+    await user.click(await screen.findByTestId("android-pairing-generate"));
+
+    expect(mockInvoke).toHaveBeenCalledWith("create_android_pairing_qr");
+    const qr = await screen.findByRole("img", { name: "Android pairing QR code" });
+    expect(qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+    expect(screen.getByText("Pairing key stored in OS keyring")).toBeVisible();
+    expect(document.body.textContent).not.toContain("laymux://pair/v1");
+    expect(document.body.textContent).not.toContain("secret=");
+  });
+
+  it("does not let a delayed initial status overwrite a generated Android pairing", async () => {
+    setRemote({
+      cloudEnabled: true,
+      cloudInstanceId: "instance-1",
+      cloudServerBaseUrl: "https://relay.example.test",
+    });
+    let resolveStatus!: (status: { paired: boolean; endpoint: null; instanceId: null }) => void;
+    const delayedStatus = new Promise<{
+      paired: boolean;
+      endpoint: null;
+      instanceId: null;
+    }>((resolve) => {
+      resolveStatus = resolve;
+    });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
+      if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
+      if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
+      if (cmd === "get_android_pairing_status") return delayedStatus;
+      if (cmd === "create_android_pairing_qr") {
+        return Promise.resolve({
+          status: {
+            paired: true,
+            endpoint: "https://relay.example.test/",
+            instanceId: "instance-1",
+          },
+          qrSvg: '<svg xmlns="http://www.w3.org/2000/svg" />',
+        });
+      }
+      if (cmd === "get_remote_control_status") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      return Promise.resolve(null);
+    });
+    const user = userEvent.setup();
+
+    render(<RemoteAccessModal />);
+    const generate = await screen.findByTestId("android-pairing-generate");
+    await user.click(generate);
+    expect(await screen.findByRole("img", { name: "Android pairing QR code" })).toBeVisible();
+    expect(screen.getByTestId("android-pairing-revoke")).toBeVisible();
+
+    resolveStatus({ paired: false, endpoint: null, instanceId: null });
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_android_pairing_status"));
+    expect(screen.getByTestId("android-pairing-revoke")).toBeVisible();
+  });
+
+  it("revokes the stored Android pairing", async () => {
+    setRemote({
+      cloudEnabled: true,
+      cloudInstanceId: "instance-1",
+      cloudServerBaseUrl: "https://relay.example.test",
+    });
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_automation_info") return Promise.resolve({ port: 19281 });
+      if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
+      if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
+      if (cmd === "get_android_pairing_status") {
+        return Promise.resolve({
+          paired: true,
+          endpoint: "https://relay.example.test/",
+          instanceId: "instance-1",
+        });
+      }
+      if (cmd === "revoke_android_pairing") {
+        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+      }
+      if (cmd === "get_remote_control_status") {
+        return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });
+      }
+      return Promise.resolve(null);
+    });
+    const user = userEvent.setup();
+
+    render(<RemoteAccessModal />);
+    await user.click(await screen.findByTestId("android-pairing-revoke"));
+
+    expect(mockInvoke).toHaveBeenCalledWith("revoke_android_pairing");
+    await waitFor(() => expect(screen.queryByTestId("android-pairing-revoke")).toBeNull());
   });
 });
