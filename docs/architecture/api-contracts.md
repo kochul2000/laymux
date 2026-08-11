@@ -113,6 +113,8 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 유효 범위는 `0.1..=20`, 상수는 Rust `constants.rs`(`MIN/MAX/DEFAULT_SCROLL_SENSITIVITY`, `DEFAULT_FAST_SCROLL_SENSITIVITY`)와 프론트 `lib/scroll-sensitivity.ts` 에 각각 한 곳씩 있다. **비양수·비수치는 clamp 대상이 아니라 기본값 fallback 대상**이다 — xterm 이 비양수 sensitivity 에 throw 하기 때문이며, 양수인데 범위를 벗어난 값만 경계로 clamp 한다. `validate_settings` 는 범위 밖 값을 `/terminal/scrollSensitivity`·`/remote/fastScrollSensitivity` 등 경로로 `out_of_range` 보고하고, 실행 경로는 그와 별개로 항상 정규화한다(parserAdmission 과 같은 "보고 + clamp" 정책).
 
+일반 scrollback 은 xterm viewport 가 연속 휠 델타에 배율을 적용한다. 반면 alternate buffer의 커서키 fallback과 마우스 트래킹 TUI는 행 단위 입력만 받을 수 있으므로, 고정 xterm 6.0.0 번들은 `consumeWheelEvent`가 계산한 행 수를 버리지 않고 **그 수만큼 커서키/마우스 보고를 반복**한다. `0.1` 같은 소수 배율은 pane별 remainder에 누적해 합이 한 행에 도달했을 때 전송한다. 이 보정은 postinstall exact-pattern patch로 데스크톱 ESM·CommonJS 번들과 Remote 정적 CommonJS 번들에 함께 적용하며, 패턴이 달라지면 설치를 실패시킨다. 실제 번들의 alternate-buffer·mouse-reporting 동작은 `xterm-semantics.screen.test.ts`가 고정한다.
+
 적용 시점은 다르다. 데스크톱은 **live** — 저장 즉시 실행 중인 xterm 옵션에 반영하며 fit·레이아웃을 건드리지 않는다. Remote 는 **nextUse** 로, 값이 per-terminal `appearance` payload(§Remote terminals)에 실려 다음 attach 의 `terminalOptionsForAppearance`/`applyTerminalAppearance` 에서 적용된다. 원격 클라이언트는 필드가 없거나(구버전 데스크톱) 비정상이면 자기 기본값(1/5/1)으로 떨어진다.
 
 `remote.touchScrollSensitivity`(기본 1)는 **xterm 옵션이 아니다**. Remote 페이지가 소유한 손가락 드래그 스크롤백의 픽셀→행 환산에서 입력 델타에 한 번 곱하며(`scrollTouchTerminal`), 하위 셀 나머지(`scrollRemainderPx`)에는 다시 곱하지 않는다. 옵션 번들 대신 페이지 지역 상태(`adoptTouchScrollSensitivity`)가 들고 있으며 appearance 가 적용되는 두 지점(터미널 생성·appearance 갱신)에서 갱신된다 — xterm 은 모르는 옵션 키를 거부한다. 한 손가락·두 손가락 드래그 모두 같은 값을 쓰고, **마우스 트래킹을 켠 전체화면 TUI 에서는 드래그가 합성 wheel 이벤트로 앱에 전달되므로 `remote.scrollSensitivity` 가 적용된다**(두 배율을 겹쳐 곱하지 않는다).

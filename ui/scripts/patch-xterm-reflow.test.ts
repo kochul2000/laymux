@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 
 const moduleTarget = resolve(process.cwd(), "node_modules/@xterm/xterm/lib/xterm.mjs");
 const commonJsTarget = resolve(process.cwd(), "node_modules/@xterm/xterm/lib/xterm.js");
+const remoteCommonJsTarget = resolve(
+  process.cwd(),
+  "../src-tauri/src/remote_server/assets/xterm.js",
+);
 const stale = "m>0&&(o.push(l+h.length-m),o.push(m)),l+=h.length-1";
 const fixed =
   "m>0&&(h[c].isWrapped=!1,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
@@ -30,6 +34,14 @@ const moduleUnreconciledKeypressSend =
   "this._showCursor(),this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
 const commonJsUnreconciledKeypressSend =
   "this._showCursor(),this.coreService.triggerDataEvent(t,!0),this._keyPressHandled=!0";
+const moduleWheelAccumulator =
+  "this._wheelPartialScroll+=o,o=Math.floor(Math.abs(this._wheelPartialScroll))";
+const commonJsWheelAccumulator =
+  "this._wheelPartialScroll+=r,r=Math.floor(Math.abs(this._wheelPartialScroll))";
+const moduleMouseReportRepetition = "for(let c=0;c<p;c++)";
+const commonJsMouseReportRepetition = "for(let o=0;o<n;o++)";
+const moduleAltBufferRepetition = "c.repeat(Math.abs(h))";
+const commonJsAltBufferRepetition = "s.repeat(Math.abs(i))";
 
 describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
@@ -73,5 +85,23 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).not.toContain(staleSingleGenerationState);
     expect(moduleSource).not.toContain(moduleUnreconciledKeypressSend);
     expect(commonJsSource).not.toContain(commonJsUnreconciledKeypressSend);
+  });
+
+  it("emits every sensitivity-adjusted application wheel row in all shipped bundles", async () => {
+    const [moduleSource, commonJsSource, remoteCommonJsSource] = await Promise.all([
+      readFile(moduleTarget, "utf8"),
+      readFile(commonJsTarget, "utf8"),
+      readFile(remoteCommonJsTarget, "utf8"),
+    ]);
+
+    expect(moduleSource).toContain(moduleWheelAccumulator);
+    expect(moduleSource).toContain(moduleMouseReportRepetition);
+    expect(moduleSource).toContain(moduleAltBufferRepetition);
+    expect(commonJsSource).toContain(commonJsWheelAccumulator);
+    expect(commonJsSource).toContain(commonJsMouseReportRepetition);
+    expect(commonJsSource).toContain(commonJsAltBufferRepetition);
+    expect(remoteCommonJsSource).toContain(commonJsWheelAccumulator);
+    expect(remoteCommonJsSource).toContain(commonJsMouseReportRepetition);
+    expect(remoteCommonJsSource).toContain(commonJsAltBufferRepetition);
   });
 });

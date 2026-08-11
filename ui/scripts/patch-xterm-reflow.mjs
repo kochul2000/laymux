@@ -9,6 +9,9 @@ const moduleTarget = fileURLToPath(
 const commonJsTarget = fileURLToPath(
   new URL("../node_modules/@xterm/xterm/lib/xterm.js", import.meta.url),
 );
+const remoteCommonJsTarget = fileURLToPath(
+  new URL("../../src-tauri/src/remote_server/assets/xterm.js", import.meta.url),
+);
 const original = "m>0&&(o.push(l+h.length-m),o.push(m)),l+=h.length-1";
 const patched =
   "m>0&&(h[c].isWrapped=!1,u&&(u.isWrapped=!1),o.push(l+h.length-m),o.push(m)),l+=h.length-1";
@@ -108,6 +111,105 @@ const commonJsTerminalInputSendOriginal =
 const commonJsTerminalInputSendPatched =
   "const t=e.data;if(this._compositionHelper.input(t))return this.cancel(e),!0;if(this._keyPressHandled)return!1;return this._unprocessedDeadKey=!1,this.coreService.triggerDataEvent(t,!0),this.cancel(e),!0";
 
+// xterm 6.0.0 calculates the sensitivity-adjusted wheel row count for mouse
+// reporting and alternate-buffer cursor-key fallback, but then emits exactly
+// one report/sequence. Preserve fractional input in CoreMouseService and emit
+// the calculated number of discrete application inputs (ADR-0142).
+const moduleWheelAccumulatorOriginal =
+  "return e.deltaMode===WheelEvent.DOM_DELTA_PIXEL?(o/=n+0,Math.abs(e.deltaY)<50&&(o*=.3),this._wheelPartialScroll+=o,o=Math.floor(Math.abs(this._wheelPartialScroll))*(this._wheelPartialScroll>0?1:-1),this._wheelPartialScroll%=1):e.deltaMode===WheelEvent.DOM_DELTA_PAGE&&(o*=this._bufferService.rows),o";
+const moduleWheelAccumulatorPatched =
+  "return e.deltaMode===WheelEvent.DOM_DELTA_PIXEL?(o/=n+0,Math.abs(e.deltaY)<50&&(o*=.3)):e.deltaMode===WheelEvent.DOM_DELTA_PAGE&&(o*=this._bufferService.rows),this._wheelPartialScroll+=o,o=Math.floor(Math.abs(this._wheelPartialScroll))*(this._wheelPartialScroll>0?1:-1),this._wheelPartialScroll%=1,o";
+const commonJsWheelAccumulatorOriginal =
+  "return e.deltaMode===WheelEvent.DOM_DELTA_PIXEL?(r/=s+0,Math.abs(e.deltaY)<50&&(r*=.3),this._wheelPartialScroll+=r,r=Math.floor(Math.abs(this._wheelPartialScroll))*(this._wheelPartialScroll>0?1:-1),this._wheelPartialScroll%=1):e.deltaMode===WheelEvent.DOM_DELTA_PAGE&&(r*=this._bufferService.rows),r";
+const commonJsWheelAccumulatorPatched =
+  "return e.deltaMode===WheelEvent.DOM_DELTA_PIXEL?(r/=s+0,Math.abs(e.deltaY)<50&&(r*=.3)):e.deltaMode===WheelEvent.DOM_DELTA_PAGE&&(r*=this._bufferService.rows),this._wheelPartialScroll+=r,r=Math.floor(Math.abs(this._wheelPartialScroll))*(this._wheelPartialScroll>0?1:-1),this._wheelPartialScroll%=1,r";
+
+const moduleMouseReportCountOriginal = "let u,h;switch(l.overrideType||l.type)";
+const moduleMouseReportCountPatched = "let u,h,p=1;switch(l.overrideType||l.type)";
+const moduleMouseWheelOriginal =
+  "let c=l.deltaY;if(c===0||e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr)===0)return!1;h=c<0?0:1,u=4";
+const moduleMouseWheelPatched =
+  "let c=l.deltaY;if(c===0)return!1;let d=e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(d===0)return!1;p=Math.abs(d),h=c<0?0:1,u=4";
+const moduleMouseReportOriginal =
+  "return h===void 0||u===void 0||u>4?!1:e.coreMouseService.triggerMouseEvent({col:a.col,row:a.row,x:a.x,y:a.y,button:u,action:h,ctrl:l.ctrlKey,alt:l.altKey,shift:l.shiftKey})";
+const moduleMouseReportPatched =
+  "if(h===void 0||u===void 0||u>4)return!1;for(let c=0;c<p;c++)if(!e.coreMouseService.triggerMouseEvent({col:a.col,row:a.row,x:a.x,y:a.y,button:u,action:h,ctrl:l.ctrlKey,alt:l.altKey,shift:l.shiftKey}))return!1;return!0";
+const moduleAltBufferWheelOriginal =
+  'if(e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr)===0)return this.cancel(l,!0);let h=b.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(l.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(h,!0),this.cancel(l,!0)';
+const moduleAltBufferWheelPatched =
+  'let h=e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(h===0)return this.cancel(l,!0);let c=b.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(l.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(c.repeat(Math.abs(h)),!0),this.cancel(l,!0)';
+
+const commonJsMouseReportCountOriginal = "let s,r;switch(t.overrideType||t.type)";
+const commonJsMouseReportCountPatched = "let s,r,n=1;switch(t.overrideType||t.type)";
+const commonJsMouseWheelOriginal =
+  "const i=t.deltaY;if(0===i)return!1;if(0===e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr))return!1;r=i<0?0:1,s=4";
+const commonJsMouseWheelPatched =
+  "const i=t.deltaY;if(0===i)return!1;const o=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===o)return!1;n=Math.abs(o),r=i<0?0:1,s=4";
+const commonJsMouseReportOriginal =
+  "return!(void 0===r||void 0===s||s>4)&&e.coreMouseService.triggerMouseEvent({col:i.col,row:i.row,x:i.x,y:i.y,button:s,action:r,ctrl:t.ctrlKey,alt:t.altKey,shift:t.shiftKey})";
+const commonJsMouseReportPatched =
+  "if(void 0===r||void 0===s||s>4)return!1;for(let o=0;o<n;o++)if(!e.coreMouseService.triggerMouseEvent({col:i.col,row:i.row,x:i.x,y:i.y,button:s,action:r,ctrl:t.ctrlKey,alt:t.altKey,shift:t.shiftKey}))return!1;return!0";
+const commonJsAltBufferWheelOriginal =
+  'if(0===e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr))return this.cancel(t,!0);const i=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(i,!0),this.cancel(t,!0)';
+const commonJsAltBufferWheelPatched =
+  'const i=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===i)return this.cancel(t,!0);const s=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(s.repeat(Math.abs(i)),!0),this.cancel(t,!0)';
+
+const moduleWheelPatches = [
+  {
+    name: "wheel fractional accumulator",
+    originalText: moduleWheelAccumulatorOriginal,
+    patchedText: moduleWheelAccumulatorPatched,
+  },
+  {
+    name: "mouse report repeat count",
+    originalText: moduleMouseReportCountOriginal,
+    patchedText: moduleMouseReportCountPatched,
+  },
+  {
+    name: "mouse wheel line count",
+    originalText: moduleMouseWheelOriginal,
+    patchedText: moduleMouseWheelPatched,
+  },
+  {
+    name: "mouse report repetition",
+    originalText: moduleMouseReportOriginal,
+    patchedText: moduleMouseReportPatched,
+  },
+  {
+    name: "alternate-buffer wheel repetition",
+    originalText: moduleAltBufferWheelOriginal,
+    patchedText: moduleAltBufferWheelPatched,
+  },
+];
+
+const commonJsWheelPatches = [
+  {
+    name: "wheel fractional accumulator",
+    originalText: commonJsWheelAccumulatorOriginal,
+    patchedText: commonJsWheelAccumulatorPatched,
+  },
+  {
+    name: "mouse report repeat count",
+    originalText: commonJsMouseReportCountOriginal,
+    patchedText: commonJsMouseReportCountPatched,
+  },
+  {
+    name: "mouse wheel line count",
+    originalText: commonJsMouseWheelOriginal,
+    patchedText: commonJsMouseWheelPatched,
+  },
+  {
+    name: "mouse report repetition",
+    originalText: commonJsMouseReportOriginal,
+    patchedText: commonJsMouseReportPatched,
+  },
+  {
+    name: "alternate-buffer wheel repetition",
+    originalText: commonJsAltBufferWheelOriginal,
+    patchedText: commonJsAltBufferWheelPatched,
+  },
+];
+
 async function patchBundle(target, replacements) {
   const source = await readFile(target, "utf8");
   let next = source;
@@ -125,6 +227,7 @@ async function patchBundle(target, replacements) {
 }
 
 await patchBundle(moduleTarget, [
+  ...moduleWheelPatches,
   { name: "reflow", originalText: original, patchedText: patched },
   {
     name: "disableStdin",
@@ -193,6 +296,7 @@ await patchBundle(moduleTarget, [
   },
 ]);
 await patchBundle(commonJsTarget, [
+  ...commonJsWheelPatches,
   {
     name: "disableStdin",
     originalText: disableStdinOriginal,
@@ -260,3 +364,4 @@ await patchBundle(commonJsTarget, [
     patchedText: commonJsTerminalInputSendPatched,
   },
 ]);
+await patchBundle(remoteCommonJsTarget, commonJsWheelPatches);
