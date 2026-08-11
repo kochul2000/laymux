@@ -432,10 +432,12 @@ mod tests {
         assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
     }
 
-    /// xterm throws on a non-positive sensitivity, so a hand-edited settings.json
-    /// is clamped before it reaches the client rather than trusted.
+    /// A hand-edited settings.json is normalized before it reaches the client.
+    /// Positive out-of-band values are clamped; values xterm refuses outright
+    /// (non-positive, non-finite) fall back to the default instead of being
+    /// dragged up to the floor.
     #[test]
-    fn clamps_hand_edited_wheel_sensitivities() {
+    fn normalizes_hand_edited_wheel_sensitivities() {
         let mut settings = Settings::default();
         settings.remote.scroll_sensitivity = 0.0;
         settings.remote.fast_scroll_sensitivity = 1000.0;
@@ -445,16 +447,23 @@ mod tests {
 
         assert_eq!(
             appearance.scroll_sensitivity,
-            crate::constants::MIN_SCROLL_SENSITIVITY
+            crate::constants::DEFAULT_SCROLL_SENSITIVITY
         );
         assert_eq!(
             appearance.fast_scroll_sensitivity,
             crate::constants::MAX_SCROLL_SENSITIVITY
         );
-        // NaN is not clamped into the band — it falls back to the default.
         assert_eq!(
             appearance.touch_scroll_sensitivity,
             crate::constants::DEFAULT_SCROLL_SENSITIVITY
+        );
+
+        // A positive value below the floor is a scale the user asked for, so it
+        // is clamped rather than replaced.
+        settings.remote.scroll_sensitivity = 0.01;
+        assert_eq!(
+            resolve_remote_terminal_appearance("PowerShell", &settings).scroll_sensitivity,
+            crate::constants::MIN_SCROLL_SENSITIVITY
         );
     }
 

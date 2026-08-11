@@ -782,11 +782,15 @@ fn default_fast_scroll_sensitivity() -> f32 {
     crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY
 }
 
-/// Clamp a hand-edited wheel multiplier into the range xterm accepts. A
-/// non-finite value (`null`-ish JSON numbers, NaN through a patch) falls back
-/// to the default instead of poisoning the option.
+/// Normalize a hand-edited wheel multiplier into the range xterm accepts.
+///
+/// Only a positive, finite value is a scale the user asked for, so those are
+/// clamped to the band. A non-positive or non-finite value is not a slower
+/// scroll — it is a value xterm refuses — so it falls back to the default
+/// instead of being dragged up to the floor. The frontend mirror in
+/// `lib/scroll-sensitivity.ts` and the Remote page make the same split.
 pub fn clamp_scroll_sensitivity(value: f32, default: f32) -> f32 {
-    if !value.is_finite() {
+    if !value.is_finite() || value <= 0.0 {
         return default;
     }
     value.clamp(
