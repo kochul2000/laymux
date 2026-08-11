@@ -19,9 +19,136 @@
  * overlay caret is painted) stay with their own issues.
  */
 
-import { describe, expect, it } from "vitest";
+import { Terminal } from "@xterm/xterm";
+import { afterEach, describe, expect, it } from "vitest";
 import { computeCellMetrics, computeHelperAnchorStyle } from "@/lib/ime-anchor";
 import { createScreenTerminal } from "./xterm-screen";
+
+function stubMatchMedia() {
+  if (window.matchMedia) return;
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({
+      matches: false,
+      media: "",
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      onchange: null,
+      dispatchEvent: () => false,
+    }),
+  });
+}
+
+function writeTerminal(terminal: Terminal, data: string): Promise<void> {
+  return new Promise((resolve) => terminal.write(data, resolve));
+}
+
+const mountedWheelTerminals: Terminal[] = [];
+
+function mountWheelTerminal(options: { scrollSensitivity: number; fastScrollSensitivity: number }) {
+  stubMatchMedia();
+  const host = document.createElement("div");
+  Object.defineProperty(host, "clientWidth", { value: 800, configurable: true });
+  Object.defineProperty(host, "clientHeight", { value: 400, configurable: true });
+  document.body.appendChild(host);
+  const terminal = new Terminal({
+    allowProposedApi: true,
+    cols: 40,
+    rows: 6,
+    ...options,
+  });
+  terminal.open(host);
+  const screenElement = terminal.element!.querySelector<HTMLElement>(".xterm-screen")!;
+  screenElement.style.paddingLeft = "0px";
+  screenElement.style.paddingTop = "0px";
+  // jsdom has no font layout. Seed the same private measurement boundary the
+  // DOM renderer consumes so wheel coordinates and cell-height conversion are
+  // meaningful against the real xterm bundle.
+  const core = (
+    terminal as unknown as {
+      _core: {
+        _charSizeService: { width: number; height: number };
+        _renderService: { handleCharSizeChanged(): void };
+      };
+    }
+  )._core;
+  core._charSizeService.width = 10;
+  core._charSizeService.height = 20;
+  core._renderService.handleCharSizeChanged();
+  mountedWheelTerminals.push(terminal);
+  return terminal;
+}
+
+afterEach(() => {
+  while (mountedWheelTerminals.length) mountedWheelTerminals.pop()?.dispose();
+  document.body.replaceChildren();
+});
+
+describe("wheel sensitivity in application-owned terminal modes", () => {
+  it("repeats mouse reports by the Alt fast-scroll multiplier", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const reports: string[] = [];
+    terminal.onData((data) => reports.push(data));
+    await writeTerminal(terminal, "\x1b[?1000h\x1b[?1006h");
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+        clientX: 1,
+        clientY: 1,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 1,
+      }),
+    );
+
+    expect(reports).toHaveLength(5);
+    expect(reports).toEqual(Array(5).fill("\x1b[<73;1;1M"));
+  });
+
+  it("repeats fallback cursor keys by the Alt fast-scroll multiplier", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    await writeTerminal(terminal, "\x1b[?1049h");
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 1,
+      }),
+    );
+
+    expect(data.join("")).toBe("\x1b[B".repeat(5));
+  });
+
+  it("accumulates a fractional multiplier until it reaches one application row", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 0.5, fastScrollSensitivity: 5 });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    await writeTerminal(terminal, "\x1b[?1049h");
+    const wheel = () =>
+      terminal.element!.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+
+    wheel();
+    expect(data).toEqual([]);
+    wheel();
+    expect(data.join("")).toBe("\x1b[B");
+  });
+});
 
 describe("reset() semantics the mocked xterm does not model (issue #602)", () => {
   it("clears the buffer and collapses the scrollback", async () => {
