@@ -127,6 +127,51 @@ fn session_attach_and_controls_project_closing_envelope_to_the_opener_grant() {
 }
 
 #[test]
+fn late_lower_parsed_ack_is_absorbed_without_a_contract_fault() {
+    let (session, rx) = live_session();
+    session
+        .attach_desktop(
+            TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES,
+            TERMINAL_OUTPUT_DESKTOP_FLOW_WINDOW_BYTES,
+        )
+        .unwrap();
+
+    session.record_desktop_output(b"first").unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(session
+        .acknowledge_desktop_envelope(&identity(&first), first.seq_end)
+        .unwrap());
+    session.record_desktop_output(b"second").unwrap();
+    let second = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert!(session
+        .acknowledge_desktop_envelope(&identity(&second), second.seq_end)
+        .unwrap());
+
+    // The frontend's in-place ACK retry (ADR-0095 control liveness) can let a
+    // replacement ACK for a newer prefix land before the timed-out original.
+    assert!(session
+        .acknowledge_desktop_output(second.generation, &second.lease_token, second.seq_end)
+        .unwrap());
+    assert!(session
+        .acknowledge_desktop_output(first.generation, &first.lease_token, first.seq_end)
+        .unwrap());
+    // An exact duplicate of the current frontier stays idempotent as well.
+    assert!(session
+        .acknowledge_desktop_output(second.generation, &second.lease_token, second.seq_end)
+        .unwrap());
+
+    let diagnostics = session.desktop_output_diagnostics().unwrap();
+    assert_eq!(diagnostics.desktop_output_state, "healthy");
+    assert_eq!(diagnostics.parsed_ack, Some(second.seq_end));
+
+    // Delivery is still alive on the same generation and lease.
+    session.record_desktop_output(b"after").unwrap();
+    let after = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+    assert_eq!(after.lease_token, second.lease_token);
+    session.retire(false).unwrap();
+}
+
+#[test]
 fn timeout_abort_closes_from_last_receipt_while_old_grant_successor_is_in_flight() {
     let (session, rx) = live_session();
     let attached = session

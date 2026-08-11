@@ -417,8 +417,15 @@ impl DesktopOutputDelivery {
         {
             return Ok(false);
         }
-        if seq < state.parsed_seq || seq > state.observed_seq {
+        if seq > state.observed_seq {
             return Err("terminal output parsed sequence is outside the admitted range".into());
+        }
+        // The frontend's in-place ACK retry (ADR-0095 control liveness) can
+        // leave one timed-out duplicate racing its replacement, so a lower
+        // sequence on the active lease is a late duplicate, not a contract
+        // fault. The parsed frontier is monotonic; absorbing it loses nothing.
+        if seq < state.parsed_seq {
+            return Ok(true);
         }
         if seq > state.parsed_seq {
             state.parsed_seq = seq;

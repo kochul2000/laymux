@@ -222,6 +222,23 @@ fn lost_close_expires_the_grant_and_wakes_every_waiter() {
 }
 
 #[test]
+fn late_lower_ack_on_the_active_lease_is_a_stale_no_op() {
+    let (flow, token) = attached_flow(4, 8);
+    assert!(flow.acknowledge(&token, 3, 4).unwrap());
+
+    // The frontend's in-place ACK retry can deliver a timed-out duplicate
+    // after its replacement already advanced the frontier. It must neither
+    // regress the frontier nor trip the delivery contract.
+    assert!(flow.acknowledge(&token, 1, 4).unwrap());
+    let diagnostics = flow.diagnostics().unwrap();
+    assert_eq!(diagnostics.parsed_ack, Some(3));
+    assert_eq!(diagnostics.state, DesktopOutputState::Healthy);
+
+    assert!(flow.acknowledge(&token, 4, 4).unwrap());
+    assert_eq!(flow.diagnostics().unwrap().parsed_ack, Some(4));
+}
+
+#[test]
 fn parsed_progress_expiry_is_cancelled_and_rearmed_on_monotonic_ack() {
     let (flow, token) = attached_flow(4, 8);
     let (rx, worker) = waiter(&flow, 5);

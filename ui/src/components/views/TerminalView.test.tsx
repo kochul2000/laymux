@@ -10873,6 +10873,67 @@ describe("TerminalView desktop input composer", () => {
     }
   });
 
+  it("retries a timed-out v3 parsed ACK on the same lease without fail-stopping", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const terminalId = "t-output-v3-ack-timeout-retry";
+      mockAttachTerminalOutput.mockResolvedValueOnce(v3Attachment(5));
+      render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+      await waitForTerminalInputReady();
+      const emitV3 = mockOnTerminalOutputV3.mock.calls.find(([id]) => id === terminalId)?.[1] as (
+        payload: unknown,
+      ) => void;
+      const attachCount = mockAttachTerminalOutput.mock.calls.length;
+      const resetCount = mockReset.mock.calls.length;
+      let resolveStalledAck!: (accepted: boolean) => void;
+      const stalledAck = new Promise<boolean>((resolve) => {
+        resolveStalledAck = resolve;
+      });
+      mockAcknowledgeTerminalOutput.mockClear();
+      mockAcknowledgeTerminalOutput.mockReturnValueOnce(stalledAck).mockResolvedValue(true);
+
+      act(() => emitV3(v3Envelope(5, 0, "stalled")));
+      await vi.waitFor(() =>
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledWith(terminalId, 7, "lease-v3", 7),
+      );
+
+      // The exact 5s boundary is pinned by the flow-control unit tests;
+      // vi.waitFor advances fake timers, so only the retry outcome is
+      // asserted here.
+      await act(async () => vi.advanceTimersByTimeAsync(5_000));
+      await vi.waitFor(() => expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(2));
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenLastCalledWith(terminalId, 7, "lease-v3", 7);
+      expect(mockAttachTerminalOutput).toHaveBeenCalledTimes(attachCount);
+      expect(mockReset).toHaveBeenCalledTimes(resetCount);
+      expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+      expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+      expect(terminalOutputRecoveryCounters(terminalId)).toMatchObject({ ackTimeout: 1 });
+
+      resolveStalledAck(true);
+      await act(async () => {
+        await stalledAck;
+        await Promise.resolve();
+      });
+
+      act(() => emitV3(v3Envelope(6, 7, "resumed")));
+      await vi.waitFor(() =>
+        expect(mockAcknowledgeTerminalOutput).toHaveBeenLastCalledWith(
+          terminalId,
+          7,
+          "lease-v3",
+          14,
+        ),
+      );
+      expect(mockAcknowledgeTerminalOutput).toHaveBeenCalledTimes(3);
+      expect(mockFailStopTerminalOutputSurface).not.toHaveBeenCalled();
+      expect(screen.queryByTestId(`terminal-output-stopped-${terminalId}`)).toBeNull();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("fail-stops a rejected v3 receipt without reset, repair, or replacement attach", async () => {
     const terminalId = "t-output-v3-fail-stop";
     const restart = vi.fn();
