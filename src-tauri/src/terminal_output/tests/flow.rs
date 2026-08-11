@@ -295,9 +295,16 @@ fn desktop_ack_validates_generation_token_monotonicity_and_write_boundary() {
     assert!(session
         .acknowledge_desktop_output(session.generation(), token, 3)
         .unwrap());
+    // A lower sequence on the active lease is a late duplicate from the
+    // frontend's in-place ACK retry (ADR-0095 control liveness): absorbed as a
+    // stale no-op, never regressing the monotonic frontier.
     assert!(session
         .acknowledge_desktop_output(session.generation(), token, 2)
-        .is_err());
+        .unwrap());
+    assert_eq!(
+        session.desktop_output_diagnostics().unwrap().parsed_ack,
+        Some(3)
+    );
     assert!(session
         .acknowledge_desktop_output(session.generation(), token, 5)
         .is_err());

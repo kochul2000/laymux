@@ -429,6 +429,41 @@ describe("TerminalOutputFlowAcknowledger", () => {
     }
   });
 
+  it("keeps the replacement watchdog armed when a stale timed-out ACK settles", async () => {
+    vi.useFakeTimers();
+    try {
+      const first = deferred<boolean>();
+      const second = deferred<boolean>();
+      const send = vi
+        .fn<(_: number) => Promise<boolean>>()
+        .mockReturnValueOnce(first.promise)
+        .mockReturnValueOnce(second.promise)
+        .mockReturnValue(deferred<boolean>().promise);
+      const onTimeout = vi.fn();
+      const acknowledger = new TerminalOutputFlowAcknowledger(0, send, {
+        timeoutMs: 5_000,
+        retryOnTimeout: true,
+        onTimeout,
+      });
+
+      acknowledger.complete(0, 4);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(send).toHaveBeenCalledTimes(2);
+
+      // The stale settlement must not disarm the replacement's own watchdog.
+      first.reject(new Error("late bridge failure"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(onTimeout).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenCalledTimes(3);
+      expect(send).toHaveBeenNthCalledWith(3, 4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retires the sender when a timed-out ACK later reports a lost lease", async () => {
     vi.useFakeTimers();
     try {

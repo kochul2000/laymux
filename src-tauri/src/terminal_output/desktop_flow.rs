@@ -128,11 +128,12 @@ impl DesktopOutputFlow {
         if active.token.as_deref() != Some(token) {
             return Ok(false);
         }
+        // A late duplicate from the frontend's in-place ACK retry (ADR-0095
+        // control liveness) may land after its replacement advanced the
+        // frontier. The frontier is monotonic, so absorb it as a no-op instead
+        // of tripping the delivery contract.
         if seq < active.parsed_ack {
-            return Err(format!(
-                "terminal output ACK {seq} is behind acknowledged sequence {}",
-                active.parsed_ack
-            ));
+            return Ok(true);
         }
         if seq > active.parsed_ack {
             active.parsed_ack = seq;
