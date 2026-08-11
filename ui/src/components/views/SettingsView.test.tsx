@@ -1269,6 +1269,23 @@ describe("SettingsView", () => {
     expect(useSettingsStore.getState().terminal.scrollbarStyle).toBe("separate");
   });
 
+  // -- Terminal section: wheel scroll sensitivity --
+
+  it("wheel sensitivity inputs update the terminal settings on Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    const input = screen.getByTestId("scroll-sensitivity-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "3" } });
+    const fastInput = screen.getByTestId("fast-scroll-sensitivity-input") as HTMLInputElement;
+    fireEvent.change(fastInput, { target: { value: "9" } });
+
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().terminal.scrollSensitivity).toBe(3);
+    expect(useSettingsStore.getState().terminal.fastScrollSensitivity).toBe(9);
+  });
+
   // -- Hidden terminal auto-close (issue #269) --
 
   it("shows hidden auto-close input in workspaces section", async () => {
@@ -2146,6 +2163,34 @@ describe("SettingsView", () => {
         "fd7a:115c:a1e0::/48",
       ]);
       expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
+    });
+
+    it("saves the remote wheel sensitivities without touching the desktop ones", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const wheel = (await screen.findByTestId(
+        "remote-settings-scroll-sensitivity-input",
+      )) as HTMLInputElement;
+      fireEvent.change(wheel, { target: { value: "2.5" } });
+      const fastWheel = screen.getByTestId(
+        "remote-settings-fast-scroll-sensitivity-input",
+      ) as HTMLInputElement;
+      fireEvent.change(fastWheel, { target: { value: "50" } });
+      const touch = screen.getByTestId(
+        "remote-settings-touch-scroll-sensitivity-input",
+      ) as HTMLInputElement;
+      fireEvent.change(touch, { target: { value: "1.5" } });
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      const state = useSettingsStore.getState();
+      expect(state.remote.scrollSensitivity).toBe(2.5);
+      expect(state.remote.touchScrollSensitivity).toBe(1.5);
+      // Clamped to the band xterm accepts.
+      expect(state.remote.fastScrollSensitivity).toBe(20);
+      expect(state.terminal.scrollSensitivity).toBe(1);
     });
 
     it("enables Tailscale-only access and adds the required Tailnet ranges", async () => {

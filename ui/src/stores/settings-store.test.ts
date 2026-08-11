@@ -623,6 +623,48 @@ describe("settings-store", () => {
     expect(terminal.scrollbarStyle).toBe("separate");
   });
 
+  // -- Wheel scroll sensitivity --
+
+  it("defaults the wheel sensitivities to the xterm defaults", () => {
+    const { terminal, remote } = useSettingsStore.getState();
+    expect(terminal.scrollSensitivity).toBe(1);
+    expect(terminal.fastScrollSensitivity).toBe(5);
+    expect(remote.scrollSensitivity).toBe(1);
+    expect(remote.fastScrollSensitivity).toBe(5);
+    // Finger drag starts as 1:1 physical scroll.
+    expect(remote.touchScrollSensitivity).toBe(1);
+  });
+
+  it("setTerminal updates the wheel sensitivities", () => {
+    useSettingsStore.getState().setTerminal({ scrollSensitivity: 2.5, fastScrollSensitivity: 8 });
+    const { terminal } = useSettingsStore.getState();
+    expect(terminal.scrollSensitivity).toBe(2.5);
+    expect(terminal.fastScrollSensitivity).toBe(8);
+  });
+
+  it("loadFromSettings keeps the desktop and remote wheel sensitivities separate", () => {
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { scrollSensitivity: 4 } as any,
+      remote: { scrollSensitivity: 2 } as any,
+    });
+    const state = useSettingsStore.getState();
+    expect(state.terminal.scrollSensitivity).toBe(4);
+    expect(state.remote.scrollSensitivity).toBe(2);
+  });
+
+  it("loadFromSettings fills missing wheel sensitivities with the defaults", () => {
+    useSettingsStore.getState().loadFromSettings({
+      terminal: { copyOnSelect: false } as any,
+      remote: { enabled: false } as any,
+    });
+    const state = useSettingsStore.getState();
+    expect(state.terminal.scrollSensitivity).toBe(1);
+    expect(state.terminal.fastScrollSensitivity).toBe(5);
+    expect(state.remote.scrollSensitivity).toBe(1);
+    expect(state.remote.fastScrollSensitivity).toBe(5);
+    expect(state.remote.touchScrollSensitivity).toBe(1);
+  });
+
   // -- Jump-to-bottom button setting (issue #361) --
 
   it("has default showScrollToBottomButton as true", () => {

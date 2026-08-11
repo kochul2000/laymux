@@ -100,6 +100,14 @@ import {
   SNAPSHOT_MAX_KIB_MIN,
   TAILSCALE_ALLOWED_IPS,
 } from "@/lib/remote-hosts";
+import {
+  DEFAULT_FAST_SCROLL_SENSITIVITY,
+  DEFAULT_SCROLL_SENSITIVITY,
+  normalizeScrollSensitivity,
+  SCROLL_SENSITIVITY_MAX,
+  SCROLL_SENSITIVITY_MIN,
+  SCROLL_SENSITIVITY_STEP,
+} from "@/lib/scroll-sensitivity";
 import { useRemoteHostOptions } from "@/hooks/useRemoteHostOptions";
 
 const cardStyle: React.CSSProperties = {
@@ -1611,6 +1619,54 @@ function TerminalSection() {
           </FocusSelect>
         </SettingRow>
 
+        <SettingRow
+          label={t("terminal.scrollSensitivity")}
+          desc={t("terminal.scrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            style={{ width: 90 }}
+            value={terminal.scrollSensitivity}
+            onChange={(e) =>
+              update({
+                scrollSensitivity: normalizeScrollSensitivity(
+                  e.target.value,
+                  DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("terminal.fastScrollSensitivity")}
+          desc={t("terminal.fastScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="fast-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            style={{ width: 90 }}
+            value={terminal.fastScrollSensitivity}
+            onChange={(e) =>
+              update({
+                fastScrollSensitivity: normalizeScrollSensitivity(
+                  e.target.value,
+                  DEFAULT_FAST_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
         <ToggleRow
           label={t("terminal.scrollToBottomButton")}
           desc={t("terminal.scrollToBottomButtonDesc")}
@@ -1891,6 +1947,18 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
     allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
     autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
     snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
+    scrollSensitivity: normalizeScrollSensitivity(
+      remote.scrollSensitivity,
+      DEFAULT_SCROLL_SENSITIVITY,
+    ),
+    fastScrollSensitivity: normalizeScrollSensitivity(
+      remote.fastScrollSensitivity,
+      DEFAULT_FAST_SCROLL_SENSITIVITY,
+    ),
+    touchScrollSensitivity: normalizeScrollSensitivity(
+      remote.touchScrollSensitivity,
+      DEFAULT_SCROLL_SENSITIVITY,
+    ),
   };
 }
 
@@ -2211,6 +2279,75 @@ function RemoteSection() {
               KiB
             </span>
           </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.scrollSensitivity")} desc={t("remote.scrollSensitivityDesc")}>
+          <FocusInput
+            data-testid="remote-settings-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.scrollSensitivity}
+            onChange={(event) =>
+              update({
+                scrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.fastScrollSensitivity")}
+          desc={t("remote.fastScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="remote-settings-fast-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.fastScrollSensitivity}
+            onChange={(event) =>
+              update({
+                fastScrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_FAST_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.touchScrollSensitivity")}
+          desc={t("remote.touchScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="remote-settings-touch-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.touchScrollSensitivity}
+            onChange={(event) =>
+              update({
+                touchScrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
         </SettingRow>
 
         <ToggleRow

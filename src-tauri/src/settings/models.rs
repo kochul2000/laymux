@@ -727,6 +727,14 @@ pub struct TerminalSettings {
     /// Show the floating jump-to-bottom button while scrolled up.
     #[serde(default = "default_true")]
     pub show_scroll_to_bottom_button: bool,
+    /// Mouse wheel scroll multiplier for the desktop terminal (xterm
+    /// `scrollSensitivity`). The Remote surface has its own value.
+    #[serde(default = "default_scroll_sensitivity")]
+    pub scroll_sensitivity: f32,
+    /// Wheel multiplier while the fast-scroll modifier (Alt) is held
+    /// (xterm `fastScrollSensitivity`).
+    #[serde(default = "default_fast_scroll_sensitivity")]
+    pub fast_scroll_sensitivity: f32,
     /// Composer: which terminals share one past-input history bucket —
     /// "global" (default), "workspace", or "pane" (ADR-0055). The history text
     /// itself is never persisted; only this scope choice is.
@@ -753,6 +761,8 @@ impl Default for TerminalSettings {
             path_link_os_open_enabled: true,
             path_link_os_open_confirm: true,
             show_scroll_to_bottom_button: true,
+            scroll_sensitivity: default_scroll_sensitivity(),
+            fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
             composer_history_scope: default_composer_history_scope(),
             composer_history_popup: true,
             composer_autocomplete: true,
@@ -762,6 +772,27 @@ impl Default for TerminalSettings {
 
 fn default_path_link_max_length() -> u32 {
     256
+}
+
+fn default_scroll_sensitivity() -> f32 {
+    crate::constants::DEFAULT_SCROLL_SENSITIVITY
+}
+
+fn default_fast_scroll_sensitivity() -> f32 {
+    crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY
+}
+
+/// Clamp a hand-edited wheel multiplier into the range xterm accepts. A
+/// non-finite value (`null`-ish JSON numbers, NaN through a patch) falls back
+/// to the default instead of poisoning the option.
+pub fn clamp_scroll_sensitivity(value: f32, default: f32) -> f32 {
+    if !value.is_finite() {
+        return default;
+    }
+    value.clamp(
+        crate::constants::MIN_SCROLL_SENSITIVITY,
+        crate::constants::MAX_SCROLL_SENSITIVITY,
+    )
 }
 
 fn default_composer_history_scope() -> String {
@@ -1607,6 +1638,21 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
+    /// Wheel scroll multiplier for the Remote browser terminal (xterm
+    /// `scrollSensitivity`). Separate from `terminal.scrollSensitivity`: the
+    /// remote client is a different device with its own pointer.
+    #[serde(default = "default_scroll_sensitivity")]
+    pub scroll_sensitivity: f32,
+    /// Remote wheel multiplier while the fast-scroll modifier (Alt) is held
+    /// (xterm `fastScrollSensitivity`).
+    #[serde(default = "default_fast_scroll_sensitivity")]
+    pub fast_scroll_sensitivity: f32,
+    /// Multiplier for finger-drag scrollback on the Remote surface. 1 keeps the
+    /// 1:1 physical scroll the gesture starts out as; above 1 the content moves
+    /// further than the finger. Not an xterm option — the Remote page owns this
+    /// gesture and converts pixels to lines itself.
+    #[serde(default = "default_scroll_sensitivity")]
+    pub touch_scroll_sensitivity: f32,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1682,6 +1728,9 @@ impl Default for RemoteSettings {
             cloud_auto_reconnect: default_cloud_auto_reconnect(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
+            scroll_sensitivity: default_scroll_sensitivity(),
+            fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
+            touch_scroll_sensitivity: default_scroll_sensitivity(),
         }
     }
 }

@@ -948,6 +948,12 @@ export interface RemoteSettings {
   serveTerminalFont: boolean;
   /** Mirror the desktop's placed widgets onto the remote strip (ADR-0124). */
   widgets: boolean;
+  /** Wheel scroll multiplier for the remote browser terminal (xterm `scrollSensitivity`). */
+  scrollSensitivity: number;
+  /** Remote wheel multiplier while the fast-scroll modifier (Alt) is held. */
+  fastScrollSensitivity: number;
+  /** Finger-drag scrollback multiplier on the remote surface. 1 = 1:1 physical scroll. */
+  touchScrollSensitivity: number;
 }
 
 export interface Settings {

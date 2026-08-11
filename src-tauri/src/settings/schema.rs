@@ -94,6 +94,18 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/terminal/scrollSensitivity",
+        description: "데스크톱 터미널 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 값이 클수록 한 번 굴릴 때 더 많이 스크롤합니다. 리모트 화면은 remote.scrollSensitivity가 따로 정합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/terminal/fastScrollSensitivity",
+        description: "데스크톱 터미널에서 Alt를 누른 채 휠을 굴릴 때의 스크롤 배율(0.1~20, 기본 5)입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/terminal/pathLinkOsOpenEnabled",
         description: "밑줄 친 경로를 Ctrl+클릭하면 이 PC의 연결 프로그램으로, Ctrl+Shift+클릭하면 파일 관리자에서 열도록 허용합니다. 실행에는 항상 사용자의 로컬 클릭이 필요합니다.",
         sensitive: false,
@@ -252,6 +264,24 @@ const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
         path: "/remote/snapshotMaxKib",
         description: "원격 접속·터미널 전환 시 만드는 화면 체크포인트의 스크롤백 소프트 예산(KiB, 1~1024)입니다. 현재 화면·터미널 상태는 예산보다 클 수 있으며 다음 attach부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/scrollSensitivity",
+        description: "원격 브라우저 터미널의 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 다음 attach부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/fastScrollSensitivity",
+        description: "원격 브라우저 터미널에서 Alt를 누른 채 휠을 굴릴 때의 스크롤 배율(0.1~20, 기본 5)입니다. 다음 attach부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/remote/touchScrollSensitivity",
+        description: "원격 브라우저에서 손가락으로 끌어 스크롤할 때의 배율(0.1~20, 기본 1)입니다. 1이면 손가락과 내용이 1:1로 움직입니다. 다음 attach부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

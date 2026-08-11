@@ -17,6 +17,11 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createIndentedLinkProvider, readIndentedLine } from "@/lib/indented-link-provider";
 import type { IndentedLineInfo } from "@/lib/indented-link-provider";
 import { createPrLinkProvider } from "@/lib/pr-link-provider";
+import {
+  DEFAULT_FAST_SCROLL_SENSITIVITY,
+  DEFAULT_SCROLL_SENSITIVITY,
+  normalizeScrollSensitivity,
+} from "@/lib/scroll-sensitivity";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
 import {
   _reserveWebglInitDelay,
@@ -1302,6 +1307,14 @@ export function TerminalView({
       rescaleOverlappingGlyphs: true,
       overviewRuler: { width: overviewRulerWidth },
       scrollback: 10000,
+      scrollSensitivity: normalizeScrollSensitivity(
+        settingsState.terminal.scrollSensitivity,
+        DEFAULT_SCROLL_SENSITIVITY,
+      ),
+      fastScrollSensitivity: normalizeScrollSensitivity(
+        settingsState.terminal.fastScrollSensitivity,
+        DEFAULT_FAST_SCROLL_SENSITIVITY,
+      ),
       // ConPTY backend with buildNumber >= 21376 enables xterm's own buffer
       // reflow so scrollback re-wraps correctly on a width change. ConPTY also
       // repaints its old screen after a resize; the guarded output path below
@@ -6221,6 +6234,25 @@ export function TerminalView({
       /* xterm mock may not support options setter */
     }
   }, [scrollbarStyleForEffect]);
+
+  // Wheel sensitivity is a live xterm option: a settings change applies to the
+  // running terminal without a restart, and does not touch layout.
+  const scrollSensitivityForEffect = useSettingsStore((s) =>
+    normalizeScrollSensitivity(s.terminal.scrollSensitivity, DEFAULT_SCROLL_SENSITIVITY),
+  );
+  const fastScrollSensitivityForEffect = useSettingsStore((s) =>
+    normalizeScrollSensitivity(s.terminal.fastScrollSensitivity, DEFAULT_FAST_SCROLL_SENSITIVITY),
+  );
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term?.options) return;
+    try {
+      term.options.scrollSensitivity = scrollSensitivityForEffect;
+      term.options.fastScrollSensitivity = fastScrollSensitivityForEffect;
+    } catch {
+      /* xterm mock may not support options setter */
+    }
+  }, [scrollSensitivityForEffect, fastScrollSensitivityForEffect]);
 
   const currentScheme = currentSchemeName
     ? colorSchemes.find((cs) => cs.name === currentSchemeName)

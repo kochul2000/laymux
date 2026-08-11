@@ -1,6 +1,9 @@
 use serde::Serialize;
 
-use crate::settings::models::{ColorScheme, FontSettings, Profile, Settings};
+use crate::constants::{DEFAULT_FAST_SCROLL_SENSITIVITY, DEFAULT_SCROLL_SENSITIVITY};
+use crate::settings::models::{
+    clamp_scroll_sensitivity, ColorScheme, FontSettings, Profile, Settings,
+};
 
 use super::font_assets::{resolve_font_assets, RemoteFontAssets};
 
@@ -21,6 +24,15 @@ pub(super) struct RemoteTerminalAppearance {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_assets: Option<RemoteFontAssets>,
     pub theme: RemoteTerminalTheme,
+    /// Wheel multipliers handed straight to the remote xterm. They ride the
+    /// per-terminal option bundle because the client applies them at the same
+    /// place as the font and theme, but they come from `remote.*` — the remote
+    /// client is its own device and does not inherit the desktop's value.
+    pub scroll_sensitivity: f32,
+    pub fast_scroll_sensitivity: f32,
+    /// Finger-drag scrollback multiplier. Unlike the two above it is not an
+    /// xterm option — the page converts drag pixels to lines itself.
+    pub touch_scroll_sensitivity: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -97,6 +109,18 @@ pub(super) fn resolve_remote_terminal_appearance(
         cursor_width,
         font_assets: resolve_font_assets(face, settings),
         theme: resolve_terminal_theme(profile, settings),
+        scroll_sensitivity: clamp_scroll_sensitivity(
+            settings.remote.scroll_sensitivity,
+            DEFAULT_SCROLL_SENSITIVITY,
+        ),
+        fast_scroll_sensitivity: clamp_scroll_sensitivity(
+            settings.remote.fast_scroll_sensitivity,
+            DEFAULT_FAST_SCROLL_SENSITIVITY,
+        ),
+        touch_scroll_sensitivity: clamp_scroll_sensitivity(
+            settings.remote.touch_scroll_sensitivity,
+            DEFAULT_SCROLL_SENSITIVITY,
+        ),
     }
 }
 
@@ -383,6 +407,54 @@ mod tests {
         assert_eq!(
             appearance.font_family,
             "'Laymux No Such Font Face', 'Cascadia Mono', 'Consolas', monospace"
+        );
+    }
+
+    /// The remote client is its own device: its wheel multiplier comes from
+    /// `remote.*`, never from the desktop `terminal.*` value.
+    #[test]
+    fn carries_the_remote_wheel_sensitivities_not_the_desktop_ones() {
+        let mut settings = Settings::default();
+        settings.terminal.scroll_sensitivity = 7.0;
+        settings.terminal.fast_scroll_sensitivity = 9.0;
+        settings.remote.scroll_sensitivity = 2.5;
+        settings.remote.fast_scroll_sensitivity = 12.0;
+        settings.remote.touch_scroll_sensitivity = 1.8;
+        settings.profiles = vec![Profile {
+            name: "PowerShell".into(),
+            ..Profile::default()
+        }];
+
+        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
+
+        assert_eq!(appearance.scroll_sensitivity, 2.5);
+        assert_eq!(appearance.fast_scroll_sensitivity, 12.0);
+        assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
+    }
+
+    /// xterm throws on a non-positive sensitivity, so a hand-edited settings.json
+    /// is clamped before it reaches the client rather than trusted.
+    #[test]
+    fn clamps_hand_edited_wheel_sensitivities() {
+        let mut settings = Settings::default();
+        settings.remote.scroll_sensitivity = 0.0;
+        settings.remote.fast_scroll_sensitivity = 1000.0;
+        settings.remote.touch_scroll_sensitivity = f32::NAN;
+
+        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
+
+        assert_eq!(
+            appearance.scroll_sensitivity,
+            crate::constants::MIN_SCROLL_SENSITIVITY
+        );
+        assert_eq!(
+            appearance.fast_scroll_sensitivity,
+            crate::constants::MAX_SCROLL_SENSITIVITY
+        );
+        // NaN is not clamped into the band — it falls back to the default.
+        assert_eq!(
+            appearance.touch_scroll_sensitivity,
+            crate::constants::DEFAULT_SCROLL_SENSITIVITY
         );
     }
 

@@ -122,6 +122,15 @@ pub const PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT: u32 = 2;
 pub const PARSER_ADMISSION_SHARE_MIN: u32 = 1;
 /// Bounds the admission cycle a settings file can ask the scheduler to honour.
 pub const PARSER_ADMISSION_SHARE_MAX: u32 = 1000;
+/// Wheel scroll multipliers handed to xterm (`scrollSensitivity` /
+/// `fastScrollSensitivity`). Both surfaces — the desktop terminal and the
+/// Remote browser page — share these bounds and defaults, which are xterm's
+/// own defaults. xterm rejects a non-positive sensitivity, so the floor is a
+/// small positive value rather than 0.
+pub const DEFAULT_SCROLL_SENSITIVITY: f32 = 1.0;
+pub const DEFAULT_FAST_SCROLL_SENSITIVITY: f32 = 5.0;
+pub const MIN_SCROLL_SENSITIVITY: f32 = 0.1;
+pub const MAX_SCROLL_SENSITIVITY: f32 = 20.0;
 /// Composer past-input history sharing scope (ADR-0055).
 pub const COMPOSER_HISTORY_SCOPES: &[&str] = &["global", "workspace", "pane"];
 pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semicolon"];

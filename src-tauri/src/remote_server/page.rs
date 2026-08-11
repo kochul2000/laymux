@@ -204,6 +204,32 @@ mod tests {
         assert!(html.contains("scheduleTerminalFit();"));
     }
 
+    /// The wheel multipliers ride the per-terminal option bundle and are applied
+    /// wherever the font and theme are, both at creation and on a live update.
+    #[test]
+    fn remote_page_html_applies_the_served_wheel_sensitivities() {
+        let html = remote_page_html();
+        assert!(html.contains("scrollSensitivity: normalized.scrollSensitivity,"));
+        assert!(html.contains("fastScrollSensitivity: normalized.fastScrollSensitivity,"));
+        // An older desktop omits the field and a hand-edited value can be out of
+        // band; xterm throws on a non-positive sensitivity, so both are absorbed.
+        assert!(html.contains("function normalizeScrollSensitivity(value, fallback) {"));
+        assert!(html.contains("if (!Number.isFinite(parsed) || parsed <= 0) return fallback;"));
+    }
+
+    /// Finger-drag scrollback is this page's own pixel→line conversion, so its
+    /// multiplier is applied to the raw delta and never handed to xterm as an
+    /// option (xterm rejects unknown option keys).
+    #[test]
+    fn remote_page_html_scales_finger_drag_scrollback() {
+        let html = remote_page_html();
+        assert!(html.contains("gesture.scrollRemainderPx += -deltaY * touchScrollSensitivity;"));
+        assert!(html.contains("function adoptTouchScrollSensitivity(appearance = {}) {"));
+        // Both the first terminal and every later appearance update adopt it.
+        assert!(html.contains("adoptTouchScrollSensitivity(appearance);"));
+        assert!(!html.contains("touchScrollSensitivity: normalized.touchScrollSensitivity"));
+    }
+
     /// ADR-0133: every PTY geometry change is a window-size event a
     /// frame-repainting TUI redraws from, and its erase is counted at the
     /// previous width — so attach publishes exactly one geometry.

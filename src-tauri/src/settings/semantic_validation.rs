@@ -115,6 +115,27 @@ fn range_u64(issues: &mut Vec<SettingsIssue>, path: &str, value: u64, min: u64, 
     }
 }
 
+/// Wheel multipliers are floats, and xterm rejects a non-positive one, so a
+/// hand-edited value outside the supported band is reported rather than pushed
+/// into the terminal. The running app clamps the same range.
+fn range_scroll_sensitivity(issues: &mut Vec<SettingsIssue>, path: &str, value: f32) {
+    if !value.is_finite()
+        || !(crate::constants::MIN_SCROLL_SENSITIVITY..=crate::constants::MAX_SCROLL_SENSITIVITY)
+            .contains(&value)
+    {
+        issue(
+            issues,
+            "out_of_range",
+            path,
+            format!(
+                "{value}은(는) 허용 범위 {}..={} 밖입니다.",
+                crate::constants::MIN_SCROLL_SENSITIVITY,
+                crate::constants::MAX_SCROLL_SENSITIVITY
+            ),
+        );
+    }
+}
+
 fn validate_font(issues: &mut Vec<SettingsIssue>, path: &str, font: &FontSettings) {
     range_u64(issues, &format!("{path}/size"), u64::from(font.size), 6, 72);
     if font.face.trim().is_empty() {
@@ -288,6 +309,16 @@ fn validate_profile_enums(
 }
 
 fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    range_scroll_sensitivity(
+        issues,
+        "/terminal/scrollSensitivity",
+        settings.terminal.scroll_sensitivity,
+    );
+    range_scroll_sensitivity(
+        issues,
+        "/terminal/fastScrollSensitivity",
+        settings.terminal.fast_scroll_sensitivity,
+    );
     range_u64(
         issues,
         "/terminal/pathLinkMaxLength",
@@ -374,6 +405,21 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let remote = &settings.remote;
+    range_scroll_sensitivity(
+        issues,
+        "/remote/scrollSensitivity",
+        remote.scroll_sensitivity,
+    );
+    range_scroll_sensitivity(
+        issues,
+        "/remote/fastScrollSensitivity",
+        remote.fast_scroll_sensitivity,
+    );
+    range_scroll_sensitivity(
+        issues,
+        "/remote/touchScrollSensitivity",
+        remote.touch_scroll_sensitivity,
+    );
     if remote.enabled && remote.auth_token.trim().is_empty() {
         issue(
             issues,
@@ -745,6 +791,38 @@ mod tests {
         settings.codex.command = "codex --yolo".into();
         let issues = validate_settings(&settings);
         assert!(!issues.iter().any(|issue| issue.path.ends_with("/command")));
+    }
+
+    #[test]
+    fn default_scroll_sensitivities_produce_no_issue() {
+        let issues = validate_settings(&Settings::default());
+        assert!(!issues
+            .iter()
+            .any(|issue| issue.path.ends_with("ScrollSensitivity")
+                || issue.path.ends_with("/scrollSensitivity")));
+    }
+
+    #[test]
+    fn out_of_band_scroll_sensitivities_are_reported_on_both_surfaces() {
+        let mut settings = Settings::default();
+        settings.terminal.scroll_sensitivity = 0.0;
+        settings.terminal.fast_scroll_sensitivity = 50.0;
+        settings.remote.scroll_sensitivity = -1.0;
+        settings.remote.fast_scroll_sensitivity = f32::NAN;
+        settings.remote.touch_scroll_sensitivity = 0.0;
+
+        let issues = validate_settings(&settings);
+        let out_of_range: Vec<&str> = issues
+            .iter()
+            .filter(|issue| issue.code == "out_of_range")
+            .map(|issue| issue.path.as_str())
+            .collect();
+
+        assert!(out_of_range.contains(&"/terminal/scrollSensitivity"));
+        assert!(out_of_range.contains(&"/terminal/fastScrollSensitivity"));
+        assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
+        assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
+        assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
     }
 
     #[test]

@@ -2167,6 +2167,9 @@
           cursorStyle: "bar",
           cursorWidth: 1,
           scrollback: 10000,
+          scrollSensitivity: 1,
+          fastScrollSensitivity: 5,
+          touchScrollSensitivity: 1,
           theme: Object.freeze({
             background: "#0C0C0C",
             foreground: "#F0F0F0",
@@ -3324,8 +3327,41 @@
             cursorStyle,
             cursorWidth: Number.isFinite(cursorWidth) && cursorWidth > 0 ? Math.floor(cursorWidth) : undefined,
             scrollback: defaultAppearance.scrollback,
+            scrollSensitivity: normalizeScrollSensitivity(
+              appearance.scrollSensitivity,
+              defaultAppearance.scrollSensitivity
+            ),
+            fastScrollSensitivity: normalizeScrollSensitivity(
+              appearance.fastScrollSensitivity,
+              defaultAppearance.fastScrollSensitivity
+            ),
+            touchScrollSensitivity: normalizeScrollSensitivity(
+              appearance.touchScrollSensitivity,
+              defaultAppearance.touchScrollSensitivity
+            ),
             theme: { ...defaultAppearance.theme, ...(appearance.theme || {}) },
           };
+        }
+
+        // Finger-drag scrollback is converted from pixels to lines by this page,
+        // not by xterm, so its multiplier lives beside the gesture state instead
+        // of in the terminal options bundle.
+        let touchScrollSensitivity = defaultAppearance.touchScrollSensitivity;
+
+        function adoptTouchScrollSensitivity(appearance = {}) {
+          touchScrollSensitivity = normalizeAppearance(appearance).touchScrollSensitivity;
+        }
+
+        // xterm throws on a non-positive sensitivity, so an older desktop that
+        // does not send the field at all, or a hand-edited settings.json, falls
+        // back to the default instead of breaking the terminal.
+        const SCROLL_SENSITIVITY_MIN = 0.1;
+        const SCROLL_SENSITIVITY_MAX = 20;
+
+        function normalizeScrollSensitivity(value, fallback) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+          return Math.min(SCROLL_SENSITIVITY_MAX, Math.max(SCROLL_SENSITIVITY_MIN, parsed));
         }
 
         function openRemoteUrl(uri) {
@@ -3450,6 +3486,8 @@
             letterSpacing: 0,
             macOptionClickForcesSelection: true,
             scrollback: normalized.scrollback,
+            scrollSensitivity: normalized.scrollSensitivity,
+            fastScrollSensitivity: normalized.fastScrollSensitivity,
             convertEol: false,
             theme: normalized.theme,
             // OSC 8 URIs are terminal-controlled input. Keep xterm's own
@@ -3477,6 +3515,7 @@
         function applyTerminalAppearance(appearance = {}) {
           if (!terminal) return;
           applyTerminalSurfaceBackground(appearance);
+          adoptTouchScrollSensitivity(appearance);
           const options = terminalOptionsForAppearance(appearance);
           delete options.cols;
           delete options.rows;
@@ -3748,7 +3787,9 @@
           if (!gesture || typeof term.scrollLines !== "function") return;
           const metrics = terminalMetrics(term);
           if (!metrics) return;
-          gesture.scrollRemainderPx += -deltaY;
+          // The remainder carries the sub-cell leftover, so the multiplier is
+          // applied to the raw finger delta once and never re-applied to it.
+          gesture.scrollRemainderPx += -deltaY * touchScrollSensitivity;
           const exactLines = gesture.scrollRemainderPx / metrics.cellHeight;
           const wholeLines = exactLines < 0 ? Math.ceil(exactLines) : Math.floor(exactLines);
           if (wholeLines === 0) return;
@@ -4192,6 +4233,7 @@
             throw new Error("xterm assets failed to load");
           }
           applyTerminalSurfaceBackground(appearance);
+          adoptTouchScrollSensitivity(appearance);
           terminal = new TerminalCtor(terminalOptionsForAppearance(appearance));
           // Register the shared width provider before any write so no row is ever
           // laid out with xterm default Unicode 6 widths and then measured with
