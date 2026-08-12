@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { FileViewer } from "@/components/ui/FileViewer";
+import { FileExplorerView } from "@/components/views/FileExplorerView";
 import { FocusInput } from "@/components/ui/FormControls";
 import { resolveViewer, viewerInstanceId } from "@/lib/file-viewer";
+import { parentPath } from "@/lib/file-explorer-parse";
 
 /**
  * The single global floating file viewer (#277 / #279). It is rendered once at
@@ -23,6 +25,7 @@ export function FileViewerOverlay() {
 
   const viewerSettings = useSettingsStore((s) => s.viewer);
   const extensionViewers = useSettingsStore((s) => s.fileExplorer.extensionViewers);
+  const [explorerExpanded, setExplorerExpanded] = useState(true);
 
   // Persistent address bar (#327 / #326): the path input at the top is always
   // shown. With no file loaded yet ("open anywhere" mode, #283) it starts empty
@@ -84,6 +87,13 @@ export function FileViewerOverlay() {
   // FileViewer renders a live TerminalView. A stray backdrop click should still
   // not discard that session; Escape, however, is the viewer-wide close gesture.
   const isTerminalViewer = open && resolveViewer(path, extensionViewers).viewerType === "terminal";
+  const viewerDirectory = promptMode ? "" : parentPath(path);
+  const openFromExplorer = useCallback(
+    (nextPath: string) => {
+      openFileViewer(nextPath, { maximized });
+    },
+    [maximized, openFileViewer],
+  );
 
   // Esc closes the viewer globally while it is open.
   useEffect(() => {
@@ -166,9 +176,23 @@ export function FileViewerOverlay() {
               Open
             </button>
           </div>
+          {!promptMode && (
+            <button
+              type="button"
+              onClick={() => setExplorerExpanded((expanded) => !expanded)}
+              className="hover-bg-strong ml-2 flex h-6 items-center justify-center rounded px-2 text-xs"
+              style={{ color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
+              title={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
+              aria-label={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
+              aria-expanded={explorerExpanded}
+              data-testid="file-viewer-overlay-explorer-toggle"
+            >
+              Files
+            </button>
+          )}
           <button
             onClick={toggleMaximized}
-            className="hover-bg-strong ml-2 flex h-6 w-6 items-center justify-center rounded text-xs"
+            className="hover-bg-strong ml-1 flex h-6 w-6 items-center justify-center rounded text-xs"
             style={{ color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
             title={maximized ? "Restore" : "Maximize (fill window)"}
             data-testid="file-viewer-overlay-maximize"
@@ -186,7 +210,7 @@ export function FileViewerOverlay() {
           </button>
         </div>
         <div
-          className="flex min-h-0 flex-1 overflow-auto"
+          className="flex min-h-0 flex-1 overflow-hidden"
           style={{ background: "var(--bg-surface, #181825)" }}
         >
           {promptMode ? (
@@ -198,18 +222,40 @@ export function FileViewerOverlay() {
               Enter an absolute file path above and press Enter to open it here.
             </div>
           ) : (
-            <FileViewer
-              path={path}
-              // Key the viewer terminal by path so re-opening a different file
-              // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
-              // the TerminalView instead of reusing the previous file's session.
-              // The session-spawn effect keys off instanceId, so a fresh id tears
-              // down the old PTY and runs the new startup command. Web viewers
-              // ignore the id, so this is harmless for them.
-              viewerInstanceId={viewerInstanceId(path)}
-              isFocused
-              bodyStyle={bodyStyle}
-            />
+            <>
+              {explorerExpanded && (
+                <aside
+                  className="w-72 min-w-56 max-w-[40%] flex-none overflow-hidden"
+                  style={{ borderRight: "1px solid var(--border)" }}
+                  data-testid="file-viewer-overlay-explorer"
+                >
+                  <FileExplorerView
+                    key={`file-viewer-overlay-explorer:${viewerDirectory}`}
+                    instanceId="file-viewer-overlay-explorer"
+                    profile=""
+                    syncGroup=""
+                    cwdSend={false}
+                    cwdReceive={false}
+                    lastCwd={viewerDirectory}
+                    onOpenFile={openFromExplorer}
+                  />
+                </aside>
+              )}
+              <div className="flex min-w-0 flex-1 overflow-auto">
+                <FileViewer
+                  path={path}
+                  // Key the viewer terminal by path so re-opening a different file
+                  // (MCP/REST/Explorer can swap `path` without closing first) rebuilds
+                  // the TerminalView instead of reusing the previous file's session.
+                  // The session-spawn effect keys off instanceId, so a fresh id tears
+                  // down the old PTY and runs the new startup command. Web viewers
+                  // ignore the id, so this is harmless for them.
+                  viewerInstanceId={viewerInstanceId(path)}
+                  isFocused
+                  bodyStyle={bodyStyle}
+                />
+              </div>
+            </>
           )}
         </div>
       </div>

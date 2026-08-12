@@ -34,6 +34,8 @@ export interface FileExplorerViewProps {
   workspaceId?: string;
   isFocused?: boolean;
   lastCwd?: string;
+  /** Override file activation when the explorer is hosted inside another UI. */
+  onOpenFile?: (path: string) => unknown;
 }
 
 export function FileExplorerView({
@@ -44,11 +46,13 @@ export function FileExplorerView({
   cwdReceive = true,
   isFocused,
   lastCwd,
+  onOpenFile,
 }: FileExplorerViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const settings = useSettingsStore((s) => s.fileExplorer);
   const openFileViewer = useFileViewerStore((s) => s.openFileViewer);
+  const openFilePath = onOpenFile ?? openFileViewer;
 
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [currentCwd, setCurrentCwd] = useState<string>(lastCwd || "");
@@ -405,9 +409,9 @@ export function FileExplorerView({
   const openFile = useCallback(
     (entry: DirEntry) => {
       const filePath = joinPath(currentCwd, entry.name);
-      openFileViewer(filePath);
+      openFilePath(filePath);
     },
-    [currentCwd, openFileViewer],
+    [currentCwd, openFilePath],
   );
 
   // --- Handle item activation (double-click or Enter) ---
@@ -470,9 +474,9 @@ export function FileExplorerView({
     } else {
       // File: move into its directory AND open it in the shared viewer (#278).
       navigateTo(action.dir);
-      openFileViewer(action.file);
+      openFilePath(action.file);
     }
-  }, [addressValue, navigateTo, openFileViewer]);
+  }, [addressValue, navigateTo, openFilePath]);
 
   // --- Focus the input when entering edit mode ---
   useEffect(() => {

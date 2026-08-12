@@ -263,6 +263,19 @@ describe("FileExplorerView", () => {
     expect(s.path).toBe("/home/user/a.txt");
   });
 
+  it("delegates file opening to an optional host callback", async () => {
+    const onOpenFile = vi.fn();
+    render(<FileExplorerView {...defaultProps} onOpenFile={onOpenFile} />);
+    await act(async () => {
+      await vi.runAllTimersAsync();
+    });
+
+    fireEvent.doubleClick(screen.getByTestId("file-explorer-item-2"));
+
+    expect(onOpenFile).toHaveBeenCalledWith("/home/user/a.txt");
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
   it("Ctrl+C copies selected paths", async () => {
     render(<FileExplorerView {...defaultProps} />);
     await act(async () => {
