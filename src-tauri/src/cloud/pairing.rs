@@ -514,6 +514,16 @@ pub(crate) fn persist_pairing_result(
     relay_base_url: &str,
     complete: PairCompleteResponse,
 ) -> Result<CloudStatus, AppError> {
+    crate::android_pairing::with_lifecycle(|| {
+        persist_pairing_result_locked(state, relay_base_url, complete)
+    })
+}
+
+fn persist_pairing_result_locked(
+    state: &AppState,
+    relay_base_url: &str,
+    complete: PairCompleteResponse,
+) -> Result<CloudStatus, AppError> {
     let mut settings = load_settings();
     let cloud_identity_changed = !settings.remote.cloud_enabled
         || settings.remote.cloud_instance_id.as_deref() != Some(complete.instance_id.as_str())

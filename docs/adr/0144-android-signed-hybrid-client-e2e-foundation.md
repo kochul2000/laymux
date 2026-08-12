@@ -27,6 +27,7 @@ QR로 서버 밖에서 키를 전달하려면 카메라 접근, 키의 OS 보호
 - QR 스캔은 camera permission을 앱에 직접 주지 않는 Google Code Scanner UI를 사용하고 QR 형식만 허용한다. 지원 최소 버전은 Android API 23이다.
 - 데스크톱은 cloud pairing이 확정한 `cloudServerBaseUrl` HTTPS origin과 `cloudInstanceId`만 QR endpoint·instance로 사용한다. debug 빌드만 기존 QR 계약과 동일하게 loopback HTTP를 허용한다. UI가 전달한 임의 endpoint·instance로 QR을 만드는 IPC는 두지 않는다.
 - 데스크톱 Rust는 OS CSPRNG로 seed 32바이트를 만들고 OS keyring service `laymux`(debug는 `laymux-dev`), account `android-pairing-v1`에 version·endpoint·instance와 함께 저장한다. 새 QR 발급은 기존 record를 교체하고 명시적 폐기는 record를 삭제한다. QR 원문과 seed는 Tauri IPC로 반환하지 않고 Rust가 만든 SVG와 비밀이 아닌 상태 metadata만 반환한다. 모달을 닫으면 SVG는 frontend runtime에서 사라지며 자동으로 다시 표시하지 않는다.
+- QR 생성의 cloud identity 조회부터 keyring 저장까지, cloud identity 교체, cloud disconnect, 명시적 폐기는 하나의 desktop pairing lifecycle mutex로 직렬화한다. 락은 `AppState.remote_access`보다 먼저 획득하며, identity 폐기 뒤 진행 중이던 생성이 옛 seed를 다시 저장할 수 없다.
 - 스캔 완료 ACK가 아직 없으므로 QR을 스캔 직후 자동 폐기됐다고 주장하지 않는다. 현재의 보안 수명은 새 QR 발급·명시적 폐기·cloud identity 폐기로 끝나며, 일회성 교환과 만료는 authenticated handshake를 정할 후속 ADR에서 완성한다.
 - v1 QR seed는 후속 E2E 세션 키 파생의 입력일 뿐, 곧바로 Remote bearer token·cloud device token·controller lease를 대체하지 않는다. 방향별 key derivation, nonce/replay/rotation 정책, ciphertext relay envelope는 후속 ADR에서 함께 정한다.
 

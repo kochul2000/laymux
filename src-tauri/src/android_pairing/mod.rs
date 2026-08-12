@@ -1,16 +1,18 @@
 mod keyring_store;
 
-use std::sync::Arc;
+use std::net::{Ipv4Addr, Ipv6Addr};
+use std::sync::{Arc, Mutex};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
-use url::Url;
+use url::{Host, Url};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::error::AppError;
+use crate::lock_ext::MutexExt;
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 
@@ -18,6 +20,10 @@ const PAIRING_VERSION: u8 = 1;
 const PAIRING_SECRET_BYTES: usize = 32;
 const MAX_INSTANCE_ID_BYTES: usize = 128;
 const QR_MIN_DIMENSION: u32 = 320;
+
+/// Serializes the Android seed lifecycle with cloud identity replacement.
+/// The lock order is this mutex first, then `AppState.remote_access`.
+static PAIRING_LIFECYCLE: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,17 +71,22 @@ pub async fn get_status() -> Result<AndroidPairingStatus, AppError> {
 }
 
 pub async fn create(state: Arc<AppState>) -> Result<AndroidPairingQr, AppError> {
-    let settings =
-        crate::remote_server::effective_remote_settings(&state).map_err(AppError::Other)?;
-    tokio::task::spawn_blocking(move || create_for_settings(&settings))
+    tokio::task::spawn_blocking(move || create_inner(&state))
         .await
         .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
 }
 
 pub async fn revoke() -> Result<AndroidPairingStatus, AppError> {
-    tokio::task::spawn_blocking(revoke_inner)
+    tokio::task::spawn_blocking(|| with_lifecycle(revoke_inner))
         .await
         .map_err(|error| AppError::Other(format!("Android pairing revoke task failed: {error}")))?
+}
+
+pub(crate) fn with_lifecycle<T>(
+    operation: impl FnOnce() -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let _guard = PAIRING_LIFECYCLE.lock_or_err()?;
+    operation()
 }
 
 pub(crate) fn get_status_inner() -> Result<AndroidPairingStatus, AppError> {
@@ -90,6 +101,27 @@ pub(crate) fn get_status_inner() -> Result<AndroidPairingStatus, AppError> {
         paired: true,
         endpoint: Some(record.endpoint.clone()),
         instance_id: Some(record.instance_id.clone()),
+    })
+}
+
+fn create_inner(state: &AppState) -> Result<AndroidPairingQr, AppError> {
+    with_lifecycle(|| {
+        let settings =
+            crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
+        create_for_settings(&settings)
+    })
+}
+
+#[cfg(test)]
+fn create_inner_with_hook(
+    state: &AppState,
+    after_settings_loaded: impl FnOnce(),
+) -> Result<AndroidPairingQr, AppError> {
+    with_lifecycle(|| {
+        let settings =
+            crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
+        after_settings_loaded();
+        create_for_settings(&settings)
     })
 }
 
@@ -174,10 +206,14 @@ fn validate_endpoint(raw: &str, allow_loopback_http: bool) -> Result<String, App
     let parsed =
         Url::parse(raw).map_err(|_| AppError::Other("Cloud server origin is invalid".into()))?;
     let host = parsed
-        .host_str()
+        .host()
         .ok_or_else(|| AppError::Other("Cloud server origin has no host".into()))?;
-    let loopback_http =
-        allow_loopback_http && parsed.scheme() == "http" && matches!(host, "127.0.0.1" | "::1");
+    let loopback_host = match host {
+        Host::Ipv4(address) => address == Ipv4Addr::LOCALHOST,
+        Host::Ipv6(address) => address == Ipv6Addr::LOCALHOST,
+        Host::Domain(_) => false,
+    };
+    let loopback_http = allow_loopback_http && parsed.scheme() == "http" && loopback_host;
     if (parsed.scheme() != "https" && !loopback_http)
         || !parsed.username().is_empty()
         || parsed.password().is_some()
@@ -249,9 +285,50 @@ fn validate_stored_record(record: &StoredPairingRecord) -> Result<(), AppError> 
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::path::Path;
+    use std::sync::{mpsc, Barrier};
+    use std::thread;
+    use std::time::Duration;
+
     use serial_test::serial;
 
     use super::*;
+    use crate::cloud::pairing::{persist_pairing_result, PairCompleteResponse};
+    use crate::settings::{save_settings, Settings};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = env::var(key).ok();
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
+        EnvVarGuard::set_path("APPDATA", dir)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn isolate_settings_dir(dir: &Path) -> EnvVarGuard {
+        EnvVarGuard::set_path("HOME", dir)
+    }
 
     fn paired_settings() -> RemoteSettings {
         RemoteSettings {
@@ -260,6 +337,54 @@ mod tests {
             cloud_server_base_url: Some("https://relay.example.test".into()),
             ..RemoteSettings::default()
         }
+    }
+
+    fn assert_cloud_transition_waits_for_in_flight_create(
+        transition: impl FnOnce(Arc<AppState>) -> Result<(), AppError> + Send + 'static,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        keyring_store::reset_mock_store().unwrap();
+        let settings = Settings {
+            remote: paired_settings(),
+            ..Settings::default()
+        };
+        save_settings(&settings).unwrap();
+        let state = Arc::new(AppState::new());
+
+        let (snapshot_tx, snapshot_rx) = mpsc::channel();
+        let continue_create = Arc::new(Barrier::new(2));
+        let create_state = state.clone();
+        let create_barrier = continue_create.clone();
+        let create_thread = thread::spawn(move || {
+            create_inner_with_hook(&create_state, || {
+                snapshot_tx.send(()).unwrap();
+                create_barrier.wait();
+            })
+        });
+        snapshot_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let (transition_tx, transition_rx) = mpsc::channel();
+        let transition_state = state.clone();
+        thread::spawn(move || {
+            transition_tx.send(transition(transition_state)).unwrap();
+        });
+
+        let early_transition = transition_rx.recv_timeout(Duration::from_millis(100)).ok();
+        let transition_waited = early_transition.is_none();
+        continue_create.wait();
+        create_thread.join().unwrap().unwrap();
+        let transition_result = match early_transition {
+            Some(result) => result,
+            None => transition_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+        };
+        transition_result.unwrap();
+
+        assert!(
+            transition_waited,
+            "cloud identity transition must wait for the in-flight QR create"
+        );
+        assert!(!get_status_inner().unwrap().paired);
     }
 
     #[test]
@@ -297,7 +422,38 @@ mod tests {
             validate_endpoint("http://127.0.0.1:8000", true).unwrap(),
             "http://127.0.0.1:8000/"
         );
+        assert_eq!(
+            validate_endpoint("http://[::1]:8000", true).unwrap(),
+            "http://[::1]:8000/"
+        );
         assert!(validate_endpoint("http://192.168.0.2:8000", true).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn cloud_disconnect_cannot_be_overtaken_by_an_in_flight_qr_create() {
+        assert_cloud_transition_waits_for_in_flight_create(|state| {
+            crate::cloud::commands::cloud_disconnect_inner(&state).map(drop)
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn cloud_identity_replacement_cannot_be_overtaken_by_an_in_flight_qr_create() {
+        assert_cloud_transition_waits_for_in_flight_create(|state| {
+            persist_pairing_result(
+                &state,
+                "https://new.example.test",
+                PairCompleteResponse {
+                    instance_id: "desktop-8".into(),
+                    device_token: "device-token-8".into(),
+                    tunnel_url: "wss://new.example.test/tunnel/desktop-8".into(),
+                    server_base_url: "https://new.example.test".into(),
+                    device_token_expires_at: None,
+                },
+            )
+            .map(drop)
+        });
     }
 
     #[test]

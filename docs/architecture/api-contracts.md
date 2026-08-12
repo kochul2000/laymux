@@ -1142,7 +1142,7 @@ scheme=`laymux`, authority=`pair`, path=`/v1`이 정확해야 하며 필수 필�
 
 보호 정책의 저장값은 `biometric`(미설정 시 기본)과 명시적 opt-out인 `keystoreOnly`뿐이다. `biometric`은 alias `com.laymux.android.pairing-wrap.v2.biometric`의 auth-per-use AES key와 `BIOMETRIC_STRONG`만 허용하는 `BiometricPrompt.CryptoObject`를 사용한다. PIN·패턴 fallback은 없고 생체 hardware/등록이 없으면 QR 저장과 seed 사용을 막는다. `keystoreOnly`는 alias `com.laymux.android.pairing-wrap.v2.keystore-only`의 사용자 인증 없는 AES key를 사용한다. 정책을 바꾸면 기존 pairing과 두 alias를 삭제하고 재pairing을 요구한다. 생체 등록 집합 변경도 biometric alias를 무효화한다. 앱 시작·metadata 상태 조회에는 인증을 요구하지 않고 QR seed 저장, 키 보호 확인, 향후 실제 seed 사용에만 요구한다.
 
-데스크톱 Tauri IPC는 `get_android_pairing_status() -> { paired, endpoint, instanceId }`, `create_android_pairing_qr() -> { status, qrSvg }`, `revoke_android_pairing() -> AndroidPairingStatus` 세 개다. create command는 UI 인자를 받지 않고 현재 `cloudServerBaseUrl`과 `cloudInstanceId`만 사용한다. Rust가 OS CSPRNG로 32바이트 seed를 생성하고 QR SVG를 만든 뒤, version·endpoint·instance·secret record를 OS keyring service `laymux`(debug는 `laymux-dev`), account `android-pairing-v1`에 저장한다. 저장이 성공해야 SVG를 반환하며, 새 발급은 기존 record를 회전한다. IPC에는 QR URI나 seed 원문이 없고 status도 비밀이 아닌 metadata만 포함한다. Remote Access 모달은 cloud identity가 있을 때만 생성 버튼을 활성화하고, 모달을 닫으면 메모리의 QR SVG를 폐기한다. 명시적 revoke와 `cloud_disconnect`, 다른 instance 또는 server origin으로 cloud pairing이 성공한 경우는 기존 keyring record를 삭제한다.
+데스크톱 Tauri IPC는 `get_android_pairing_status() -> { paired, endpoint, instanceId }`, `create_android_pairing_qr() -> { status, qrSvg }`, `revoke_android_pairing() -> AndroidPairingStatus` 세 개다. create command는 UI 인자를 받지 않고 현재 `cloudServerBaseUrl`과 `cloudInstanceId`만 사용한다. Rust가 OS CSPRNG로 32바이트 seed를 생성하고 QR SVG를 만든 뒤, version·endpoint·instance·secret record를 OS keyring service `laymux`(debug는 `laymux-dev`), account `android-pairing-v1`에 저장한다. 저장이 성공해야 SVG를 반환하며, 새 발급은 기존 record를 회전한다. IPC에는 QR URI나 seed 원문이 없고 status도 비밀이 아닌 metadata만 포함한다. Remote Access 모달은 cloud identity가 있을 때만 생성 버튼을 활성화하고, 모달을 닫으면 메모리의 QR SVG를 폐기한다. 명시적 revoke와 `cloud_disconnect`, 다른 instance 또는 server origin으로 cloud pairing이 성공한 경우는 기존 keyring record를 삭제한다. QR 생성의 identity snapshot 조회부터 record 저장까지와 이 세 폐기 경로는 pairing lifecycle mutex로 직렬화한다. 이 mutex는 `AppState.remote_access`보다 먼저 잡아 폐기 완료 뒤 옛 identity의 생성 작업이 record를 되살리지 못하게 한다.
 
 현재 구현은 양 endpoint의 seed 보관 기반까지만 제공한다. 스캔 완료를 인증하는 ACK와 자동 만료가 없으므로 QR을 일회용이라고 부르지 않으며, 방향별 키 파생, nonce/replay/세션 회전, relay ciphertext frame도 아직 Remote API 계약이 아니다. 따라서 기존 `/remote/v1/*`와 cloud tunnel payload는 이 단계에서 E2E라고 간주하지 않는다.
 
@@ -1480,6 +1480,8 @@ activity bulk snapshot은 `terminals → output_buffers → per-ring → known a
 13. remote_access → 14. remote_control → 15. cloud_tunnel →
 16. cloud → 17. exec_locks(table mutex only)
 ```
+
+Android pairing lifecycle mutex는 `AppState` 밖에 있지만 QR 생성과 cloud identity 전환을 직렬화하면서 `remote_access`를 읽을 수 있다. 따라서 다른 `AppState` 락을 잡지 않은 상태에서 이 mutex를 먼저 획득하고, 그 안에서는 위 번호 순서를 그대로 따른다. `AppState` guard를 보유한 채 pairing lifecycle에 진입하는 역방향은 금지한다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md)).
 
 terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
 

@@ -46,29 +46,35 @@ fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
         errors.push(format!("tunnel stop failed: {error}"));
     }
 
-    if let Err(error) = crate::android_pairing::revoke_inner() {
-        errors.push(format!("Android pairing revoke failed: {error}"));
-    }
-
-    if let Err(error) = keyring_store::delete_device_token() {
-        errors.push(format!("keyring delete failed: {error}"));
-    }
-
-    let mut settings = crate::settings::load_settings();
-    settings.remote.cloud_enabled = false;
-    settings.remote.cloud_instance_id = None;
-    settings.remote.cloud_tunnel_url = None;
-    settings.remote.cloud_server_base_url = None;
-    match crate::settings::save_settings(&settings).map_err(AppError::Other) {
-        Ok(()) => {
-            if let Err(error) = crate::remote_server::update_persistent_cloud_settings_snapshot(
-                state,
-                &settings.remote,
-            ) {
-                errors.push(format!("remote settings snapshot update failed: {error}"));
-            }
+    let lifecycle_result = crate::android_pairing::with_lifecycle(|| {
+        if let Err(error) = crate::android_pairing::revoke_inner() {
+            errors.push(format!("Android pairing revoke failed: {error}"));
         }
-        Err(error) => errors.push(format!("settings save failed: {error}")),
+
+        if let Err(error) = keyring_store::delete_device_token() {
+            errors.push(format!("keyring delete failed: {error}"));
+        }
+
+        let mut settings = crate::settings::load_settings();
+        settings.remote.cloud_enabled = false;
+        settings.remote.cloud_instance_id = None;
+        settings.remote.cloud_tunnel_url = None;
+        settings.remote.cloud_server_base_url = None;
+        match crate::settings::save_settings(&settings).map_err(AppError::Other) {
+            Ok(()) => {
+                if let Err(error) = crate::remote_server::update_persistent_cloud_settings_snapshot(
+                    state,
+                    &settings.remote,
+                ) {
+                    errors.push(format!("remote settings snapshot update failed: {error}"));
+                }
+            }
+            Err(error) => errors.push(format!("settings save failed: {error}")),
+        }
+        Ok(())
+    });
+    if let Err(error) = lifecycle_result {
+        errors.push(format!("Android pairing lifecycle lock failed: {error}"));
     }
 
     let mut next_status = disconnected_status(&errors);
