@@ -1,6 +1,6 @@
 # 0150. Cloud Remote 접속 정책은 PC Laymux가 소유하고 터널 입구에서 강제한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-12
 - Source: 사용자 요구("세팅에서 앱을 통한 종단 암호화만 허용할지, 단순 등록도 허용할지 사용자가 정한다", "laymux-server cloud는 철저히 중계만") · [ADR-0024](0024-cloud-native-wss-tunnel.md) · [ADR-0139](0139-cloud-tunnel-tailscale-route-advertisement-and-direct-gate.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
 - Extends: [ADR-0024](0024-cloud-native-wss-tunnel.md), [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)

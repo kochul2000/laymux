@@ -167,7 +167,7 @@ ADR 이 필요한 대표 기준:
 | [0147](0147-output-volume-activity-and-app-declared-idle.md) | 출력 볼륨을 앱 협조 없는 활성 신호로 인정하고, 앱이 선언한 유휴는 추론된 활성을 이긴다 (0005 §outputActive 규칙 정정) | Accepted |
 | [0148](0148-bounded-multi-path-selection-links.md) | 선택 경로 링크는 bounded maximal-munch 복수 후보를 사용한다 (0045 확장) | Accepted |
 | [0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) | Android는 Cloud 계정 표면과 PC 소유 Remote UI를 분리하는 얇은 E2E wrapper다 (0144·0146 일부 대체) | Accepted |
-| [0150](0150-desktop-owned-cloud-remote-access-policy.md) | Cloud Remote 접속 정책은 PC Laymux가 소유하고 터널 입구에서 강제한다 (0024·0149 확장) | Proposed |
+| [0150](0150-desktop-owned-cloud-remote-access-policy.md) | Cloud Remote 접속 정책은 PC Laymux가 소유하고 터널 입구에서 강제한다 (0024·0149 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
