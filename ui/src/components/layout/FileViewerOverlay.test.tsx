@@ -207,7 +207,12 @@ describe("FileViewerOverlay", () => {
 
     expect(screen.getByTestId("mock-file-explorer")).toHaveAttribute("data-cwd", "/home/user");
     const toggle = screen.getByTestId("file-viewer-overlay-explorer-toggle");
+    expect(toggle).toHaveTextContent("Explorer");
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      toggle.compareDocumentPosition(screen.getByTestId("file-viewer-overlay-path-input")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     fireEvent.click(toggle);
     expect(screen.queryByTestId("mock-file-explorer")).not.toBeInTheDocument();

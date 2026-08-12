@@ -147,6 +147,20 @@ export function FileViewerOverlay() {
           className="flex items-center px-3 py-2"
           style={{ borderBottom: "1px solid var(--border)" }}
         >
+          {!promptMode && (
+            <button
+              type="button"
+              onClick={() => setExplorerExpanded((expanded) => !expanded)}
+              className="hover-bg-strong mr-2 flex h-6 items-center justify-center rounded px-2 text-xs"
+              style={{ color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
+              title={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
+              aria-label={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
+              aria-expanded={explorerExpanded}
+              data-testid="file-viewer-overlay-explorer-toggle"
+            >
+              Explorer
+            </button>
+          )}
           <div className="flex flex-1 items-center gap-2">
             <FocusInput
               // Keyed by path: an external swap (MCP/REST/Explorer) remounts the
@@ -176,20 +190,6 @@ export function FileViewerOverlay() {
               Open
             </button>
           </div>
-          {!promptMode && (
-            <button
-              type="button"
-              onClick={() => setExplorerExpanded((expanded) => !expanded)}
-              className="hover-bg-strong ml-2 flex h-6 items-center justify-center rounded px-2 text-xs"
-              style={{ color: "var(--text-secondary)", border: "none", cursor: "pointer" }}
-              title={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
-              aria-label={explorerExpanded ? "Hide file explorer" : "Show file explorer"}
-              aria-expanded={explorerExpanded}
-              data-testid="file-viewer-overlay-explorer-toggle"
-            >
-              Files
-            </button>
-          )}
           <button
             onClick={toggleMaximized}
             className="hover-bg-strong ml-1 flex h-6 w-6 items-center justify-center rounded text-xs"
