@@ -411,6 +411,10 @@ mod tests {
         assert_eq!(legacy.remote.cloud_tunnel_url, None);
         assert_eq!(legacy.remote.cloud_server_base_url, None);
         assert!(legacy.remote.cloud_auto_reconnect);
+        assert_eq!(
+            legacy.remote.cloud_access_mode,
+            models::CloudAccessMode::BrowserAndE2e
+        );
 
         let json = r#"{
           "remote": {
@@ -425,7 +429,8 @@ mod tests {
             "cloudInstanceId": "instance-123",
             "cloudTunnelUrl": "wss://relay.example.test/tunnel/instance-123",
             "cloudServerBaseUrl": "https://relay.example.test",
-            "cloudAutoReconnect": false
+            "cloudAutoReconnect": false,
+            "cloudAccessMode": "androidE2eOnly"
           }
         }"#;
         let settings: Settings = serde_json::from_str(json).unwrap();
@@ -450,6 +455,10 @@ mod tests {
             Some("https://relay.example.test")
         );
         assert!(!settings.remote.cloud_auto_reconnect);
+        assert_eq!(
+            settings.remote.cloud_access_mode,
+            models::CloudAccessMode::AndroidE2eOnly
+        );
 
         let serialized = serde_json::to_string(&settings).unwrap();
         assert!(serialized.contains("\"remote\""));
@@ -464,6 +473,7 @@ mod tests {
             .contains("\"cloudTunnelUrl\":\"wss://relay.example.test/tunnel/instance-123\""));
         assert!(serialized.contains("\"cloudServerBaseUrl\":\"https://relay.example.test\""));
         assert!(serialized.contains("\"cloudAutoReconnect\":false"));
+        assert!(serialized.contains("\"cloudAccessMode\":\"androidE2eOnly\""));
     }
 
     #[test]

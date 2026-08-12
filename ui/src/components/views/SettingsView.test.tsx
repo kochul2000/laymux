@@ -2299,6 +2299,41 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().remote.relayBaseUrl).toBe("https://relay.example.test");
     });
 
+    it("saves the PC-owned Cloud Remote access policy", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      const policy = (await screen.findByTestId(
+        "remote-settings-cloud-access-mode-select",
+      )) as HTMLSelectElement;
+      expect(policy.value).toBe("browserAndE2e");
+
+      await user.selectOptions(policy, "androidE2eOnly");
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.cloudAccessMode).toBe("androidE2eOnly");
+      expect(persistSession).toHaveBeenCalled();
+    });
+
+    it("commits an edited Cloud access policy before starting pairing", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.selectOptions(
+        await screen.findByTestId("remote-settings-cloud-access-mode-select"),
+        "androidE2eOnly",
+      );
+      await user.click(screen.getByTestId("remote-settings-cloud-connect"));
+
+      await waitFor(() => {
+        expect(mockInvoke).toHaveBeenCalledWith("cloud_connect_start");
+      });
+      expect(useSettingsStore.getState().remote.cloudAccessMode).toBe("androidE2eOnly");
+      expect(persistSession).toHaveBeenCalled();
+    });
+
     it("disconnects cloud status and mirrors persisted cloud fields in the store", async () => {
       mockCloudStatus = { connected: true, instanceId: "instance-1", lastError: null };
       useSettingsStore.getState().setRemote({

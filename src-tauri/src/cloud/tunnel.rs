@@ -35,7 +35,7 @@ use crate::constants::{
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::{self, TunnelAuthorized};
-use crate::settings::models::RemoteSettings;
+use crate::settings::models::{CloudAccessMode, RemoteSettings};
 use crate::state::AppState;
 use crate::terminal_output::{
     TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
@@ -142,6 +142,7 @@ struct TunnelConfig {
     tunnel_url: String,
     device_token: String,
     instance_id: Option<String>,
+    cloud_access_mode: CloudAccessMode,
 }
 
 #[derive(Debug)]
@@ -404,14 +405,45 @@ pub async fn start_auto_reconnect(
         .map(Some)
 }
 
-pub fn stop_tunnel(state: &AppState) -> Result<(), AppError> {
+fn stop_running_cloud_tunnel(state: &AppState) -> Result<bool, AppError> {
     {
         let mut tunnel = state.cloud_tunnel.lock_or_err()?;
         if let Some(control) = tunnel.take() {
             control.stop();
+            return Ok(true);
         }
     }
-    Ok(())
+    Ok(false)
+}
+
+pub fn stop_tunnel(state: &AppState) -> Result<(), AppError> {
+    stop_running_cloud_tunnel(state).map(|_| ())
+}
+
+/// A Cloud policy change is authoritative for already-open streams. Restart
+/// only an existing worker so the change closes its HTTP/WebSocket tasks and
+/// the replacement connection advertises the new mode immediately. Saving a
+/// setting must not create Cloud presence when no tunnel was running.
+pub(crate) fn restart_cloud_tunnel_for_policy_change(state: Arc<AppState>, app_handle: AppHandle) {
+    let was_running = match stop_running_cloud_tunnel(&state) {
+        Ok(was_running) => was_running,
+        Err(error) => {
+            tracing::warn!(error = %error, "failed to stop cloud tunnel for policy change");
+            return;
+        }
+    };
+    if !was_running {
+        return;
+    }
+    if let Err(error) = set_cloud_status(&state, false, None, None) {
+        tracing::warn!(error = %error, "failed to reset cloud status for policy change");
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = start_tunnel_from_settings(state.clone(), app_handle).await {
+            let _ = set_cloud_status(&state, false, None, Some(error.to_string()));
+            tracing::warn!(error = %error, "cloud tunnel policy restart failed");
+        }
+    });
 }
 
 /// Tear the cloud tunnel down and mark it offline. Called when remote control
@@ -477,6 +509,7 @@ async fn build_tunnel_config(settings: &RemoteSettings) -> Result<TunnelConfig, 
         tunnel_url,
         device_token,
         instance_id: settings.cloud_instance_id.clone(),
+        cloud_access_mode: settings.cloud_access_mode,
     })
 }
 
@@ -565,14 +598,18 @@ async fn connect_once(
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<TunnelFrame>(OUTBOUND_QUEUE_SIZE);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<ResponseCompletion>();
     let mut writer_shutdown = shutdown.clone();
-    let (presence_tx, mut presence_rx) = watch::channel(json!({}));
+    // The writer's interval ticks immediately, so seed the policy before the
+    // asynchronous Tailscale probe can race that first heartbeat. An E2E-only
+    // desktop must never emit a compatibility `{}` heartbeat first.
+    let initial_presence = tunnel_presence_payload_value(config.cloud_access_mode, None);
+    let (presence_tx, mut presence_rx) = watch::channel(initial_presence);
     let mut presence_shutdown = shutdown.clone();
     let presence_join = tokio::spawn(async move {
         let mut refresh = interval(HEARTBEAT_INTERVAL);
         loop {
             tokio::select! {
                 _ = refresh.tick() => {
-                    let next = tunnel_presence_payload().await;
+                    let next = tunnel_presence_payload(config.cloud_access_mode).await;
                     presence_tx.send_if_modified(|current| {
                         if *current == next {
                             false
@@ -945,15 +982,46 @@ fn set_cloud_status(
     Ok(next)
 }
 
-async fn tunnel_presence_payload() -> Value {
+async fn tunnel_presence_payload(cloud_access_mode: CloudAccessMode) -> Value {
     let tailscale_url = get_remote_host_candidates()
         .await
         .ok()
         .and_then(|candidates| tailscale_direct_url_from_candidates(&candidates, automation_port()));
+    tunnel_presence_payload_value(cloud_access_mode, tailscale_url)
+}
+
+fn tunnel_presence_payload_value(
+    cloud_access_mode: CloudAccessMode,
+    tailscale_url: Option<String>,
+) -> Value {
     match tailscale_url {
-        Some(url) => json!({ "tailscaleUrl": url }),
-        None => json!({}),
+        Some(url) => json!({
+            "cloudAccessMode": cloud_access_mode,
+            "tailscaleUrl": url,
+        }),
+        None => json!({ "cloudAccessMode": cloud_access_mode }),
     }
+}
+
+fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> bool {
+    if mode == CloudAccessMode::BrowserAndE2e {
+        return true;
+    }
+    if payload.kind != KIND_HTTP_REQUEST
+        || payload.method.as_deref() != Some("POST")
+        || !payload.query.as_deref().unwrap_or("").is_empty()
+    {
+        return false;
+    }
+    matches!(
+        payload.path.as_deref(),
+        Some(
+            "/remote/v1/e2e/pair/ack"
+                | "/remote/v1/e2e/session/challenge"
+                | "/remote/v1/e2e/session/establish"
+                | "/remote/v1/e2e/rpc"
+        )
+    )
 }
 
 fn tailscale_direct_url_from_candidates(
@@ -1012,6 +1080,23 @@ async fn handle_stream_open(
             return;
         }
     };
+
+    let allowed = remote_server::effective_remote_settings(state)
+        .map(|settings| cloud_stream_allowed(settings.cloud_access_mode, &payload))
+        .unwrap_or(false);
+    if !allowed {
+        let _ = send_stream_error(
+            outbound_tx,
+            &frame.stream_id,
+            StreamErrorPayload::new(
+                "cloud_remote_policy_denied",
+                "Cloud Remote policy permits Android E2E routes only",
+                false,
+            ),
+        )
+        .await;
+        return;
+    }
 
     match payload.kind.as_str() {
         KIND_HTTP_REQUEST => match IncomingHttpRequest::new(payload) {
@@ -1283,6 +1368,21 @@ async fn dispatch_http_stream(
     state: Arc<AppState>,
     app_handle: AppHandle,
 ) -> Result<(), AppError> {
+    let cloud_access_mode = remote_server::effective_remote_settings(&state)
+        .map_err(AppError::Other)?
+        .cloud_access_mode;
+    let policy_payload = StreamOpenPayload {
+        kind: KIND_HTTP_REQUEST.into(),
+        method: Some(request.method.clone()),
+        path: Some(request.path.clone()),
+        query: request.query.clone(),
+        headers: Vec::new(),
+    };
+    if !cloud_stream_allowed(cloud_access_mode, &policy_payload) {
+        return Err(AppError::Other(
+            "Cloud Remote policy changed before HTTP dispatch".into(),
+        ));
+    }
     let request = build_internal_remote_request(request)?;
     let server_state = ServerState {
         app_state: state,
@@ -2461,6 +2561,23 @@ mod tests {
         assert_eq!(status.last_error, None);
     }
 
+    #[tokio::test]
+    async fn stopping_a_running_tunnel_reports_it_for_policy_restart() {
+        let state = AppState::new();
+        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+        let join = tauri::async_runtime::spawn(async move {
+            let _ = shutdown_rx.changed().await;
+        });
+        *state.cloud_tunnel.lock_or_err().unwrap() = Some(TunnelControl {
+            shutdown: shutdown_tx,
+            join,
+        });
+
+        assert!(stop_running_cloud_tunnel(&state).unwrap());
+        assert!(state.cloud_tunnel.lock_or_err().unwrap().is_none());
+        assert!(!stop_running_cloud_tunnel(&state).unwrap());
+    }
+
     #[test]
     fn reconnect_backoff_is_exponential_and_capped() {
         assert_eq!(reconnect_backoff(0), Duration::from_secs(1));
@@ -2468,6 +2585,150 @@ mod tests {
         assert_eq!(reconnect_backoff(4), Duration::from_secs(16));
         assert_eq!(reconnect_backoff(5), Duration::from_secs(30));
         assert_eq!(reconnect_backoff(12), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn android_e2e_only_allows_only_exact_fixed_post_routes() {
+        for path in [
+            "/remote/v1/e2e/pair/ack",
+            "/remote/v1/e2e/session/challenge",
+            "/remote/v1/e2e/session/establish",
+            "/remote/v1/e2e/rpc",
+        ] {
+            let payload = StreamOpenPayload {
+                kind: KIND_HTTP_REQUEST.into(),
+                method: Some("POST".into()),
+                path: Some(path.into()),
+                query: None,
+                headers: Vec::new(),
+            };
+            assert!(cloud_stream_allowed(
+                CloudAccessMode::AndroidE2eOnly,
+                &payload
+            ));
+        }
+
+        for payload in [
+            StreamOpenPayload {
+                kind: KIND_HTTP_REQUEST.into(),
+                method: Some("GET".into()),
+                path: Some("/remote/v1/e2e/rpc".into()),
+                query: None,
+                headers: Vec::new(),
+            },
+            StreamOpenPayload {
+                kind: KIND_HTTP_REQUEST.into(),
+                method: Some("POST".into()),
+                path: Some("/remote/v1/e2e/rpc/".into()),
+                query: None,
+                headers: Vec::new(),
+            },
+            StreamOpenPayload {
+                kind: KIND_HTTP_REQUEST.into(),
+                method: Some("POST".into()),
+                path: Some("/remote/v1/e2e/rpc".into()),
+                query: Some("debug=1".into()),
+                headers: Vec::new(),
+            },
+            StreamOpenPayload {
+                kind: KIND_WEBSOCKET.into(),
+                method: None,
+                path: Some("/remote/v1/terminals/term-1/output".into()),
+                query: Some("leaseId=lease-1".into()),
+                headers: Vec::new(),
+            },
+        ] {
+            assert!(!cloud_stream_allowed(
+                CloudAccessMode::AndroidE2eOnly,
+                &payload
+            ));
+        }
+    }
+
+    #[test]
+    fn browser_and_e2e_keeps_existing_supported_streams() {
+        let http = StreamOpenPayload {
+            kind: KIND_HTTP_REQUEST.into(),
+            method: Some("GET".into()),
+            path: Some("/remote/".into()),
+            query: None,
+            headers: Vec::new(),
+        };
+        let websocket = StreamOpenPayload {
+            kind: KIND_WEBSOCKET.into(),
+            method: None,
+            path: Some("/remote/v1/terminals/term-1/output".into()),
+            query: Some("leaseId=lease-1".into()),
+            headers: Vec::new(),
+        };
+
+        assert!(cloud_stream_allowed(CloudAccessMode::BrowserAndE2e, &http));
+        assert!(cloud_stream_allowed(
+            CloudAccessMode::BrowserAndE2e,
+            &websocket
+        ));
+    }
+
+    #[test]
+    fn heartbeat_presence_always_advertises_cloud_access_mode() {
+        assert_eq!(
+            tunnel_presence_payload_value(CloudAccessMode::AndroidE2eOnly, None),
+            json!({ "cloudAccessMode": "androidE2eOnly" })
+        );
+        assert_eq!(
+            tunnel_presence_payload_value(
+                CloudAccessMode::BrowserAndE2e,
+                Some("http://100.64.0.2:19280/remote/".into())
+            ),
+            json!({
+                "cloudAccessMode": "browserAndE2e",
+                "tailscaleUrl": "http://100.64.0.2:19280/remote/",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_open_returns_non_retryable_policy_error_in_e2e_only_mode() {
+        let state = Arc::new(AppState::new());
+        remote_server::update_persistent_remote_settings_for_test(
+            &state,
+            RemoteSettings {
+                cloud_access_mode: CloudAccessMode::AndroidE2eOnly,
+                ..RemoteSettings::default()
+            },
+        )
+        .unwrap();
+        let frame = TunnelFrame::new(
+            "browser-page",
+            FRAME_STREAM_OPEN,
+            json!({
+                "kind": KIND_HTTP_REQUEST,
+                "method": "GET",
+                "path": "/remote/",
+            }),
+        );
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(4);
+        let mut active_streams = HashMap::new();
+        let mut pending_bytes = 0;
+
+        handle_stream_open(
+            frame,
+            &mut active_streams,
+            &mut pending_bytes,
+            &outbound_tx,
+            &state,
+            OutputCheckpointBridge,
+        )
+        .await;
+
+        let error = outbound_rx.recv().await.unwrap();
+        assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
+        assert_eq!(error_code(&error), Some("cloud_remote_policy_denied"));
+        assert_eq!(
+            error.payload.as_ref().and_then(|value| value.get("retryable")),
+            Some(&Value::Bool(false))
+        );
+        assert!(active_streams.is_empty());
     }
 
     #[test]

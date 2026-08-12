@@ -60,8 +60,10 @@ timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadl
 복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
 native HTTP/output bridge에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)). Cloud dashboard가
-선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. 기존 브라우저
-Remote UI는 호환을 위해 별도 평문 relay 경로를 계속 사용하므로 Android의 열린 native session만 E2E다.
+선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. PC별
+`settings.remote.cloudAccessMode`는 기존 평문 Cloud browser Remote와 Android E2E를 함께 허용하거나
+Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
+Local/Tailscale Direct Remote에는 적용하지 않는다([ADR-0150](../adr/0150-desktop-owned-cloud-remote-access-policy.md)).
 
 ---
 

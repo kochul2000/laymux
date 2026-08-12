@@ -687,6 +687,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudTunnelUrl: null,
   cloudServerBaseUrl: null,
   cloudAutoReconnect: true,
+  cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
