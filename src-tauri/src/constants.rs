@@ -312,6 +312,10 @@ pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 /// `terminal.pathLinkMaxLength` setting.
 pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
 
+/// Maximum non-overlapping path candidates validated for one desktop/Remote
+/// terminal selection. The frontend applies the same cap before this command.
+pub const MAX_PATH_LINK_CANDIDATES: usize = 16;
+
 /// Maximum Unicode scalar count accepted for the terminal id attached to a
 /// Remote path-link validation request. Runtime terminal ids are much shorter;
 /// this only prevents an authenticated client from forwarding an unbounded id

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createScreenTerminal, type ScreenTerminal } from "@/test/screen/xterm-screen";
-import { mapSelectionToPathRange } from "./path-link-detect";
+import { mapSelectionCandidateToPathRange, mapSelectionToPathRange } from "./path-link-detect";
 import { readLineCells } from "./terminal-cell-map";
 
 /**
@@ -74,6 +74,21 @@ describe("path-link 밑줄 범위 (실제 xterm 셀)", () => {
     const r = await underlineFor("메모 ui/src/a.ts", "ui/src/a.ts", 5);
     expect(r.startCol).toBe(6);
     expect(r.endCol).toBe(16);
+  });
+
+  it("넓은 선택 안의 후보도 앞선 한글 뒤 실제 셀 범위에 놓인다", async () => {
+    const s = screen();
+    await s.write("메모 diff ui/src/a.ts");
+    const line = s.terminal.buffer.active.getLine(0);
+    expect(line).toBeTruthy();
+    const cells = readLineCells(line!);
+    const range = mapSelectionCandidateToPathRange(
+      { start: { x: 0, y: 0 }, end: { x: 20, y: 0 } },
+      { text: "ui/src/a.ts", lineIndex: 0, startIndex: 8, endIndex: 19 },
+      cells,
+    );
+    expect(range.startCol).toBe(11); // 메모 4셀 + " diff " 6셀 뒤
+    expect(range.endCol).toBe(21);
   });
 
   it("CJK·전각 기호가 섞여도 셀 기준으로 끝난다", async () => {

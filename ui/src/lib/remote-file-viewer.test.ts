@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./tauri-api", () => ({
   readFileForViewer: vi.fn(),
-  statPath: vi.fn(),
+  statPaths: vi.fn(),
 }));
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { readFileForViewer, statPath } from "./tauri-api";
+import { readFileForViewer, statPaths } from "./tauri-api";
 import { handleRemoteFileViewerRequest } from "./remote-file-viewer";
 
 function registerTerminal(cwd?: string) {
@@ -31,35 +31,45 @@ describe("Remote FileViewer path-link bridge", () => {
 
   it("desktop parser로 선택을 정리하고 terminal CWD와 조합한 파일만 검증한다", async () => {
     registerTerminal("C:\\work");
-    vi.mocked(statPath).mockResolvedValue({ exists: true, isDirectory: false });
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
       selection: '("ui/src/main.ts:42:5")',
     });
 
-    expect(statPath).toHaveBeenCalledWith("C:\\work\\ui\\src\\main.ts");
+    expect(statPaths).toHaveBeenCalledWith(["C:\\work\\ui\\src\\main.ts"]);
     expect(result).toEqual({
       success: true,
       data: {
         valid: true,
-        token: "ui/src/main.ts",
-        path: "C:\\work\\ui\\src\\main.ts",
+        matches: [
+          {
+            token: "ui/src/main.ts",
+            path: "C:\\work\\ui\\src\\main.ts",
+            lineIndex: 0,
+            startIndex: 2,
+            endIndex: 16,
+          },
+        ],
       },
     });
   });
 
   it("desktop과 같은 MSYS CWD 정규화를 재사용한다", async () => {
     registerTerminal("/d/PycharmProjects/laymux");
-    vi.mocked(statPath).mockResolvedValue({ exists: true, isDirectory: false });
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
       selection: "src/main.rs",
     });
 
-    expect(statPath).toHaveBeenCalledWith("D:\\PycharmProjects\\laymux\\src\\main.rs");
-    expect(result).toMatchObject({ success: true, data: { valid: true, token: "src/main.rs" } });
+    expect(statPaths).toHaveBeenCalledWith(["D:\\PycharmProjects\\laymux\\src\\main.rs"]);
+    expect(result).toMatchObject({
+      success: true,
+      data: { valid: true, matches: [{ token: "src/main.rs" }] },
+    });
   });
 
   it.each([
@@ -67,7 +77,7 @@ describe("Remote FileViewer path-link bridge", () => {
     ["디렉터리", { exists: true, isDirectory: true }],
   ])("%s은 Remote viewer 링크로 활성화하지 않는다", async (_label, info) => {
     registerTerminal("/work");
-    vi.mocked(statPath).mockResolvedValue(info);
+    vi.mocked(statPaths).mockResolvedValue([info]);
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
@@ -94,7 +104,7 @@ describe("Remote FileViewer path-link bridge", () => {
 
     expect(disabled).toEqual({ success: true, data: { valid: false } });
     expect(tooLong).toEqual({ success: true, data: { valid: false } });
-    expect(statPath).not.toHaveBeenCalled();
+    expect(statPaths).not.toHaveBeenCalled();
   });
 
   it("URL·알 수 없는 terminal·CWD 없는 terminal은 stat 전에 거른다", async () => {
@@ -116,7 +126,90 @@ describe("Remote FileViewer path-link bridge", () => {
     expect(url).toEqual({ success: true, data: { valid: false } });
     expect(noTerminal).toEqual({ success: true, data: { valid: false } });
     expect(noCwd).toEqual({ success: true, data: { valid: false } });
-    expect(statPath).not.toHaveBeenCalled();
+    expect(statPaths).not.toHaveBeenCalled();
+  });
+
+  it("넓은 선택의 복수 파일을 maximal 범위 그대로 한 배치로 검증한다", async () => {
+    registerTerminal("C:\\work");
+    vi.mocked(statPaths).mockResolvedValue([
+      { exists: true, isDirectory: false },
+      { exists: true, isDirectory: false },
+    ]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      selection: "diff ui/src/App.tsx against ui/src/App.test.tsx",
+    });
+
+    expect(statPaths).toHaveBeenCalledWith([
+      "C:\\work\\ui\\src\\App.tsx",
+      "C:\\work\\ui\\src\\App.test.tsx",
+    ]);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          {
+            token: "ui/src/App.tsx",
+            path: "C:\\work\\ui\\src\\App.tsx",
+            lineIndex: 0,
+            startIndex: 5,
+            endIndex: 19,
+          },
+          {
+            token: "ui/src/App.test.tsx",
+            path: "C:\\work\\ui\\src\\App.test.tsx",
+            lineIndex: 0,
+            startIndex: 28,
+            endIndex: 47,
+          },
+        ],
+      },
+    });
+  });
+
+  it("디렉터리는 Remote 링크에서 제외하고 중복 절대경로는 한 번만 stat한다", async () => {
+    registerTerminal("/work");
+    vi.mocked(statPaths).mockResolvedValue([
+      { exists: true, isDirectory: false },
+      { exists: true, isDirectory: true },
+    ]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      selection: "src/a.ts src/a.ts src/dir/",
+    });
+
+    expect(statPaths).toHaveBeenCalledWith(["/work/src/a.ts", "/work/src/dir/"]);
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        valid: true,
+        matches: [{ token: "src/a.ts" }, { token: "src/a.ts" }],
+      },
+    });
+  });
+
+  it("stat 대기 중 terminal CWD가 바뀌면 이전 CWD의 결과를 폐기한다", async () => {
+    registerTerminal("/work/a");
+    let resolveStat!: (value: Array<{ exists: boolean; isDirectory: boolean }>) => void;
+    vi.mocked(statPaths).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStat = resolve;
+        }),
+    );
+
+    const pending = handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      selection: "src/main.rs",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-1", { cwd: "/work/b" });
+    resolveStat([{ exists: true, isDirectory: false }]);
+
+    await expect(pending).resolves.toEqual({ success: true, data: { valid: false } });
+    expect(statPaths).toHaveBeenCalledWith(["/work/a/src/main.rs"]);
   });
 });
 

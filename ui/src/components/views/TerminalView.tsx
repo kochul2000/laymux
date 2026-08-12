@@ -35,11 +35,12 @@ import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
 import { createPathLinkClickHandlers } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
 import {
-  trimSelectionToPath,
-  isWithinPathLengthLimit,
+  extractPathCandidatesFromSelection,
+  isPathLinkCwdCurrent,
   joinCwdPath,
   decidePathLinkAction,
-  mapSelectionToPathRange,
+  mapSelectionCandidateToPathRange,
+  pathSelectionLimits,
 } from "@/lib/path-link-detect";
 import { readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -73,7 +74,7 @@ import {
   openExternal,
   openInOs,
   resolveGitRemote,
-  statPath,
+  statPaths,
   handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
@@ -1449,6 +1450,7 @@ export function TerminalView({
     // 동시 호출/race 를 막기 위해 토큰으로 마지막 요청만 반영한다.
     let pathLinkSelectionSeq = 0;
     const evaluatePathLinkSelection = () => {
+      const seq = ++pathLinkSelectionSeq;
       const settings = useSettingsStore.getState().terminal;
       if (!settings.pathLinkEnabled) {
         clearPathLinkSelection();
@@ -1457,18 +1459,11 @@ export function TerminalView({
       const t = terminalRef.current;
       if (!t) return;
       const selection = t.getSelection();
-      // 비었거나 길이 초과 → 파싱 없이 기존 상태 비움.
-      if (!isWithinPathLengthLimit(selection, settings.pathLinkMaxLength)) {
-        clearPathLinkSelection();
-        return;
-      }
-      const token = trimSelectionToPath(selection);
-      if (!token) {
-        clearPathLinkSelection();
-        return;
-      }
-      const absPath = joinCwdPath(cwdRef.current, token);
-      if (!absPath) {
+      const candidates = extractPathCandidatesFromSelection(
+        selection,
+        pathSelectionLimits(settings.pathLinkMaxLength),
+      );
+      if (candidates.length === 0) {
         clearPathLinkSelection();
         return;
       }
@@ -1477,28 +1472,53 @@ export function TerminalView({
         clearPathLinkSelection();
         return;
       }
-      // 선택 좌표(0-based, end exclusive)를 1-based 절대 버퍼 좌표로 매핑한다.
-      // (getSelectionPosition 과 provideLinks/ILink.range 의 좌표계 불일치 보정 —
-      //  mapSelectionToPathRange 주석 참고. 여러 줄 선택은 첫 줄만 사용.)
-      const rawFirstLine = selection.split(/\r?\n/, 1)[0] ?? "";
-      // #691: 밑줄 폭은 문자 수가 아니라 **셀 수**다. 한글/CJK 는 한 글자가 두
-      // 셀, 이모지는 UTF-16 두 칸이 한 셀 쌍이라 문자열 길이로 계산하면 밑줄이
-      // 절반만 그어지거나 어긋난다. 선택 시작 줄의 실제 셀을 넘겨 보정한다.
-      const selectionLine = t.buffer.active.getLine(pos.start.y);
-      const lineCells = selectionLine ? readLineCells(selectionLine) : undefined;
-      const { bufferLine, startCol, endCol } = mapSelectionToPathRange(
-        pos,
-        rawFirstLine,
-        token,
-        lineCells,
-      );
+      const uniquePaths: string[] = [];
+      const pathIndexes = new Map<string, number>();
+      const requestedCwd = cwdRef.current;
+      const pending = candidates.flatMap((candidate) => {
+        const absPath = joinCwdPath(requestedCwd, candidate.text);
+        if (!absPath) return [];
+        let statIndex = pathIndexes.get(absPath);
+        if (statIndex === undefined) {
+          statIndex = uniquePaths.length;
+          pathIndexes.set(absPath, statIndex);
+          uniquePaths.push(absPath);
+        }
+        const line = t.buffer.active.getLine(pos.start.y + candidate.lineIndex);
+        const lineCells = line ? readLineCells(line) : undefined;
+        return [
+          {
+            absPath,
+            statIndex,
+            range: mapSelectionCandidateToPathRange(pos, candidate, lineCells),
+          },
+        ];
+      });
+      if (pending.length === 0) {
+        clearPathLinkSelection();
+        return;
+      }
 
-      const seq = ++pathLinkSelectionSeq;
-      statPath(absPath)
-        .then((info) => {
+      statPaths(uniquePaths)
+        .then((infos) => {
           if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
-          const action = decidePathLinkAction(info);
-          if (action === "none") {
+          if (!isPathLinkCwdCurrent(requestedCwd, cwdRef.current)) {
+            clearPathLinkSelection();
+            return;
+          }
+          const verified = pending.flatMap<VerifiedPathSelection>((item) => {
+            const info = infos[item.statIndex];
+            const action = info ? decidePathLinkAction(info) : "none";
+            if (action === "none") return [];
+            return [
+              {
+                ...item.range,
+                absPath: item.absPath,
+                isDirectory: action === "changeDir",
+              },
+            ];
+          });
+          if (verified.length === 0) {
             clearPathLinkSelection();
             return;
           }
@@ -1509,13 +1529,7 @@ export function TerminalView({
           // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
           // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
           setPathLinkCursor(true);
-          pathLink.setVerifiedSelection({
-            bufferLine,
-            startCol,
-            endCol,
-            absPath,
-            isDirectory: action === "changeDir",
-          });
+          pathLink.setVerifiedSelections(verified);
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
@@ -1523,6 +1537,16 @@ export function TerminalView({
         });
     };
     pathLinkEvaluateRef.current = evaluatePathLinkSelection;
+    let pathLinkEvaluationTimer: number | undefined;
+    const schedulePathLinkSelectionEvaluation = (delay = 120) => {
+      pathLinkSelectionSeq += 1;
+      clearPathLinkSelection();
+      if (pathLinkEvaluationTimer !== undefined) window.clearTimeout(pathLinkEvaluationTimer);
+      pathLinkEvaluationTimer = window.setTimeout(() => {
+        pathLinkEvaluationTimer = undefined;
+        evaluatePathLinkSelection();
+      }, delay);
+    };
 
     terminalRef.current = terminal;
 
@@ -2898,17 +2922,13 @@ export function TerminalView({
       // #363: 밑줄(검증된 경로) 영역 위에서만 포인터 커서. 벗어나면 원래 커서.
       // 사각형은 한 번만 읽어 hit-test 와 라벨 배치에 함께 쓴다(mousemove 마다
       // 같은 요소를 두 번 재는 강제 리플로우를 피한다).
-      const rect = pathLink.getRect();
-      const inside =
-        !!rect &&
-        e.clientX >= rect.left &&
-        e.clientX <= rect.right &&
-        e.clientY >= rect.top &&
-        e.clientY <= rect.bottom;
+      const hit = pathLink.getHit(e.clientX, e.clientY);
+      const rect = hit?.rect ?? null;
+      const inside = hit !== null;
       setPathLinkCursor(inside);
       // #687: 수정자 클릭은 발견성이 없으므로, 밑줄 위에 있을 때만 무엇을 할 수
       // 있는지 라벨로 알린다. 기능이 꺼져 있으면 알릴 것이 없다.
-      const sel = inside ? pathLink.getCurrent() : null;
+      const sel = hit?.selection ?? null;
       const hintKey = sel
         ? pathLinkHintKey(
             sel.isDirectory,
@@ -2938,8 +2958,7 @@ export function TerminalView({
     // 상태 기계는 path-link-click.ts 가 소유한다(단위 테스트 대상). 여기서는
     // 스토어·i18n·터미널 포커스만 주입해 배선한다.
     const pathLinkClick = createPathLinkClickHandlers<VerifiedPathSelection>({
-      getSelection: () => pathLink.getCurrent(),
-      hitTest: (x, y) => pathLink.hitTest(x, y),
+      getSelectionAt: (x, y) => pathLink.getHit(x, y)?.selection ?? null,
       getSettings: () => {
         const terminalSettings = useSettingsStore.getState().terminal;
         return {
@@ -2978,9 +2997,9 @@ export function TerminalView({
       if (useSettingsStore.getState().terminal.copyOnSelect) {
         runTerminalCopy(terminal);
       }
-      // Issue #363: 선택이 바뀔 때마다 path-link 검증(선택당 stat 1회)을 갱신한다.
+      // Issue #363/#ADR-0148: 드래그 중에는 stale 링크를 지우고 trailing debounce한다.
       // copyOnSelect 와 독립적으로 동작(off 여도 링크는 켜질 수 있음).
-      pathLinkEvaluateRef.current?.();
+      schedulePathLinkSelectionEvaluation();
     });
 
     // Issue #230: drag ending outside the terminal. xterm.js relies on
@@ -3004,7 +3023,11 @@ export function TerminalView({
       if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
       const onWindowPointerUp = () => {
         pointerUpWatcher = null;
-        // Issue #363: 드래그 종료 시 path-link 검증을 settle(선택당 stat 1회).
+        // Issue #363/#ADR-0148: 드래그 종료 시 bounded 후보 batch를 즉시 검증한다.
+        if (pathLinkEvaluationTimer !== undefined) {
+          window.clearTimeout(pathLinkEvaluationTimer);
+          pathLinkEvaluationTimer = undefined;
+        }
         pathLinkEvaluateRef.current?.();
         if (!useSettingsStore.getState().terminal.copyOnSelect) return;
         runTerminalCopy(terminal);
@@ -5803,6 +5826,7 @@ export function TerminalView({
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
       if (sessionLimitSubmitTimer !== undefined) clearTimeout(sessionLimitSubmitTimer);
+      if (pathLinkEvaluationTimer !== undefined) clearTimeout(pathLinkEvaluationTimer);
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;

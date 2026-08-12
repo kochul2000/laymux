@@ -1,12 +1,157 @@
 import { describe, it, expect } from "vitest";
 import {
+  extractPathCandidatesFromSelection,
+  isPathLinkCwdCurrent,
   joinCwdPath,
+  mapSelectionCandidateToPathRange,
   normalizeMsysCwd,
   trimSelectionToPath,
   isWithinPathLengthLimit,
   decidePathLinkAction,
   mapSelectionToPathRange,
 } from "./path-link-detect";
+
+describe("isPathLinkCwdCurrent", () => {
+  it("stat 대기 중 CWD가 바뀐 요청만 stale로 판정한다", () => {
+    expect(isPathLinkCwdCurrent("/work/a", "/work/a")).toBe(true);
+    expect(isPathLinkCwdCurrent("/work/a", "/work/b")).toBe(false);
+    expect(isPathLinkCwdCurrent(undefined, undefined)).toBe(true);
+  });
+});
+
+describe("extractPathCandidatesFromSelection", () => {
+  const options = {
+    maxSelectionLength: 1024,
+    maxLines: 8,
+    maxCandidates: 16,
+    maxPathLength: 256,
+  };
+
+  it("넓은 선택에서 서로 떨어진 복수 경로를 원문 범위와 함께 찾는다", () => {
+    expect(
+      extractPathCandidatesFromSelection(
+        "diff ui/src/App.tsx against ui/src/App.test.tsx",
+        options,
+      ),
+    ).toEqual([
+      { text: "ui/src/App.tsx", lineIndex: 0, startIndex: 5, endIndex: 19 },
+      { text: "ui/src/App.test.tsx", lineIndex: 0, startIndex: 28, endIndex: 47 },
+    ]);
+  });
+
+  it("최장 토큰을 소비하고 내부 suffix를 별도 후보로 재해석하지 않는다", () => {
+    expect(
+      extractPathCandidatesFromSelection(
+        "error src/components/views/TerminalView.tsx:1450",
+        options,
+      ),
+    ).toEqual([
+      {
+        text: "src/components/views/TerminalView.tsx",
+        lineIndex: 0,
+        startIndex: 6,
+        endIndex: 43,
+      },
+    ]);
+  });
+
+  it("최장 후보가 stat에 실패할 수 있어도 내부 경로 후보를 만들지 않는다", () => {
+    expect(extractPathCandidatesFromSelection("prefix:src/main.rs", options)).toEqual([
+      {
+        text: "prefix:src/main.rs",
+        lineIndex: 0,
+        startIndex: 0,
+        endIndex: 18,
+      },
+    ]);
+  });
+
+  it("넓은 선택에서는 강한 형태만 찾고 단일 토큰 선택은 맨이름도 유지한다", () => {
+    expect(extractPathCandidatesFromSelection("open laymux then Cargo.toml", options)).toEqual([
+      { text: "Cargo.toml", lineIndex: 0, startIndex: 17, endIndex: 27 },
+    ]);
+    expect(extractPathCandidatesFromSelection("laymux", options)).toEqual([
+      { text: "laymux", lineIndex: 0, startIndex: 0, endIndex: 6 },
+    ]);
+  });
+
+  it("URL 전체를 소비하고 그 안의 경로 모양 suffix를 재해석하지 않는다", () => {
+    expect(
+      extractPathCandidatesFromSelection(
+        "see https://example.com/src/main.rs and ui/src/App.tsx",
+        options,
+      ),
+    ).toEqual([{ text: "ui/src/App.tsx", lineIndex: 0, startIndex: 40, endIndex: 54 }]);
+  });
+
+  it("여러 줄의 후보를 순서대로 찾는다", () => {
+    expect(extractPathCandidatesFromSelection("first src/a.ts\nthen src/b.ts", options)).toEqual([
+      { text: "src/a.ts", lineIndex: 0, startIndex: 6, endIndex: 14 },
+      { text: "src/b.ts", lineIndex: 1, startIndex: 5, endIndex: 13 },
+    ]);
+  });
+
+  it("선택 길이·줄 수·후보 수 상한을 넘으면 전체 검사를 생략한다", () => {
+    expect(extractPathCandidatesFromSelection("x".repeat(1025), options)).toEqual([]);
+    expect(extractPathCandidatesFromSelection("a.ts\n".repeat(8) + "b.ts", options)).toEqual([]);
+    expect(
+      extractPathCandidatesFromSelection(
+        Array.from({ length: 17 }, (_, index) => `f${index}.ts`).join(" "),
+        options,
+      ),
+    ).toEqual([]);
+  });
+
+  it("개별 경로 길이 상한을 넘는 maximal token은 내부 fallback 없이 버린다", () => {
+    expect(
+      extractPathCandidatesFromSelection("before very/long/path.ts after ok.ts", {
+        ...options,
+        maxPathLength: 10,
+      }),
+    ).toEqual([{ text: "ok.ts", lineIndex: 0, startIndex: 31, endIndex: 36 }]);
+  });
+});
+
+describe("mapSelectionCandidateToPathRange", () => {
+  it("첫 줄과 다음 줄 후보의 선택 상대 좌표를 절대 버퍼 좌표로 바꾼다", () => {
+    const pos = { start: { x: 4, y: 10 }, end: { x: 12, y: 11 } };
+    expect(
+      mapSelectionCandidateToPathRange(pos, {
+        text: "src/a.ts",
+        lineIndex: 0,
+        startIndex: 6,
+        endIndex: 14,
+      }),
+    ).toEqual({ bufferLine: 11, startCol: 11, endCol: 18 });
+    expect(
+      mapSelectionCandidateToPathRange(pos, {
+        text: "src/b.ts",
+        lineIndex: 1,
+        startIndex: 5,
+        endIndex: 13,
+      }),
+    ).toEqual({ bufferLine: 12, startCol: 6, endCol: 13 });
+  });
+
+  it("셀 정보가 있으면 와이드 문자 앞의 실제 셀 컬럼을 사용한다", () => {
+    const ascii = (text: string) => [...text].map((chars) => ({ chars, width: 1 }));
+    const cells = [
+      { chars: "한", width: 2 },
+      { chars: "", width: 0 },
+      { chars: "글", width: 2 },
+      { chars: "", width: 0 },
+      ...ascii(" src/a.ts"),
+    ];
+    const pos = { start: { x: 0, y: 2 }, end: { x: 13, y: 2 } };
+    expect(
+      mapSelectionCandidateToPathRange(
+        pos,
+        { text: "src/a.ts", lineIndex: 0, startIndex: 3, endIndex: 11 },
+        cells,
+      ),
+    ).toEqual({ bufferLine: 3, startCol: 6, endCol: 13 });
+  });
+});
 
 describe("joinCwdPath", () => {
   it("절대 경로는 cwd 와 무관하게 그대로 반환한다", () => {

@@ -45,10 +45,8 @@ export interface PathLinkClickSettings {
 }
 
 export interface PathLinkClickDeps<T extends PathLinkClickTarget> {
-  /** 현재 검증된 선택(없으면 null). */
-  getSelection: () => T | null;
-  /** 뷰포트 좌표가 밑줄 사각형 안인지. */
-  hitTest: (clientX: number, clientY: number) => boolean;
+  /** 뷰포트 좌표 아래의 검증된 선택(없으면 null). */
+  getSelectionAt: (clientX: number, clientY: number) => T | null;
   /** 클릭 시점의 설정 스냅샷. */
   getSettings: () => PathLinkClickSettings;
   /** 확인 대화상자. 계속하면 true. */
@@ -83,8 +81,8 @@ export function createPathLinkClickHandlers<T extends PathLinkClickTarget>(
     onMouseDown: (e) => {
       press = null;
       if (e.button !== 0) return;
-      const target = deps.getSelection();
-      if (!target || !deps.hitTest(e.clientX, e.clientY)) return;
+      const target = deps.getSelectionAt(e.clientX, e.clientY);
+      if (!target) return;
 
       const action = decidePathLinkClickAction(
         e,

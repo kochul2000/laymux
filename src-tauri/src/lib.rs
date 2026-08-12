@@ -276,6 +276,7 @@ pub fn run() {
             commands::read_file_for_viewer,
             commands::list_directory,
             commands::stat_path,
+            commands::stat_paths,
             commands::get_home_directory,
             commands::get_automation_info,
             commands::load_settings_validated,

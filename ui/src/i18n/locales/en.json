@@ -305,7 +305,7 @@
       "pathLink": "Path Links on Selection",
       "pathLinkDesc": "Underline a selected file/folder path; click to open the file in the viewer or change the directory.",
       "pathLinkMaxLength": "Max Path Length",
-      "pathLinkMaxLengthDesc": "Selections longer than this (characters) are not treated as a path.",
+      "pathLinkMaxLengthDesc": "Candidates longer than this (characters) are not treated as paths.",
       "pathLinkOsOpen": "Ctrl+click opens in the OS",
       "pathLinkOsOpenDesc": "Ctrl+click an underlined path to open it on this PC (file association, or the file manager for folders); Ctrl+Shift+click shows it in the file manager. WSL paths open on this PC too.",
       "pathLinkOsOpenConfirm": "Always confirm before opening in the OS",

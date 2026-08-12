@@ -37,6 +37,56 @@ pub fn stat_path(path: String, wsl_distro: Option<String>) -> PathInfo {
     }
 }
 
+/// Validate a bounded path-link candidate batch while resolving the default
+/// WSL distribution at most once. Results preserve input order.
+pub fn stat_paths_inner(
+    paths: &[String],
+    wsl_distro: Option<&str>,
+) -> Result<Vec<PathInfo>, crate::error::AppError> {
+    if paths.len() > crate::constants::MAX_PATH_LINK_CANDIDATES {
+        return Err(crate::error::AppError::Other(format!(
+            "at most {} paths may be validated at once",
+            crate::constants::MAX_PATH_LINK_CANDIDATES
+        )));
+    }
+
+    #[cfg(windows)]
+    let inferred_distro = wsl_distro.map(str::to_owned).or_else(|| {
+        paths
+            .iter()
+            .any(|path| path.starts_with('/') && !path.starts_with("/mnt/"))
+            .then(crate::path_utils::get_default_wsl_distro)
+            .flatten()
+    });
+    #[cfg(not(windows))]
+    let inferred_distro = wsl_distro.map(str::to_owned);
+
+    Ok(paths
+        .iter()
+        .map(|path| {
+            let resolved = path_utils::resolve_address_path_following_symlinks(
+                path,
+                inferred_distro.as_deref(),
+            );
+            match std::fs::metadata(&resolved) {
+                Ok(meta) => PathInfo {
+                    exists: true,
+                    is_directory: meta.is_dir(),
+                },
+                Err(_) => PathInfo {
+                    exists: false,
+                    is_directory: false,
+                },
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn stat_paths(paths: Vec<String>, wsl_distro: Option<String>) -> Result<Vec<PathInfo>, String> {
+    stat_paths_inner(&paths, wsl_distro.as_deref()).map_err(Into::into)
+}
+
 /// Resolve the current user's home directory as a path string.
 ///
 /// Used by the File Explorer as a fallback CWD when no syncGroup CWD or
@@ -229,6 +279,32 @@ mod tests {
         let info = stat_path(missing.to_string_lossy().into_owned(), None);
         assert!(!info.exists, "missing path should report exists=false");
         assert!(!info.is_directory);
+    }
+
+    #[test]
+    fn stat_paths_preserves_order_for_file_directory_and_missing_path() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("file.txt");
+        std::fs::write(&file, b"hi").expect("write temp file");
+        let missing = dir.path().join("missing.txt");
+        let paths = vec![
+            file.to_string_lossy().into_owned(),
+            dir.path().to_string_lossy().into_owned(),
+            missing.to_string_lossy().into_owned(),
+        ];
+
+        let result = stat_paths_inner(&paths, None).expect("bounded batch");
+
+        assert_eq!(result.len(), 3);
+        assert!(result[0].exists && !result[0].is_directory);
+        assert!(result[1].exists && result[1].is_directory);
+        assert!(!result[2].exists && !result[2].is_directory);
+    }
+
+    #[test]
+    fn stat_paths_rejects_an_unbounded_batch() {
+        let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES + 1];
+        assert!(stat_paths_inner(&paths, None).is_err());
     }
 
     #[test]

@@ -17,6 +17,51 @@ import { reconstructLine, type CellInfo } from "./terminal-cell-map";
 /** 흔한 URL/프로토콜 스킴 — 이 스킴이 붙어 있으면 경로가 아니다(URL provider 담당). */
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 
+/** 넓은 선택에서 maximal token을 자르는 경계. 내부 substring은 다시 보지 않는다. */
+const SELECTION_TOKEN_RE = /[^\s"'`()<>[\]{}|]+/g;
+
+/** 넓은 선택에서 맨이름 오탐을 줄이는 파일 확장자 형태. */
+const FILE_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/;
+
+export const PATH_LINK_MAX_SELECTION_LENGTH = 1024;
+export const PATH_LINK_MAX_SELECTION_LINES = 8;
+export const PATH_LINK_MAX_CANDIDATES = 16;
+
+export interface PathSelectionCandidate {
+  /** 장식과 `:line:col`을 제거한 경로 원문. */
+  text: string;
+  /** 선택 문자열 안의 0-based 줄 번호. */
+  lineIndex: number;
+  /** 해당 선택 줄 안의 UTF-16 시작 offset(inclusive). */
+  startIndex: number;
+  /** 해당 선택 줄 안의 UTF-16 끝 offset(exclusive). */
+  endIndex: number;
+}
+
+export interface PathSelectionLimits {
+  maxSelectionLength: number;
+  maxLines: number;
+  maxCandidates: number;
+  maxPathLength: number;
+}
+
+/** 비동기 stat 요청이 시작된 뒤 pane CWD가 바뀌지 않았는지 확인한다. */
+export function isPathLinkCwdCurrent(
+  requestedCwd: string | undefined,
+  currentCwd: string | undefined,
+): boolean {
+  return requestedCwd === currentCwd;
+}
+
+export function pathSelectionLimits(maxPathLength: number): PathSelectionLimits {
+  return {
+    maxSelectionLength: PATH_LINK_MAX_SELECTION_LENGTH,
+    maxLines: PATH_LINK_MAX_SELECTION_LINES,
+    maxCandidates: PATH_LINK_MAX_CANDIDATES,
+    maxPathLength,
+  };
+}
+
 /** 절대 경로 판별: POSIX `/`, Windows 드라이브 `C:\`/`C:/`, UNC `\\`. */
 export function isAbsolutePath(path: string): boolean {
   if (path.startsWith("/")) return true;
@@ -146,6 +191,76 @@ export function trimSelectionToPath(selection: string): string | null {
   return text;
 }
 
+function looksLikeStrongPath(text: string): boolean {
+  return isAbsolutePath(text) || /[\\/]/.test(text) || FILE_EXTENSION_RE.test(text);
+}
+
+/**
+ * 선택 영역을 왼쪽부터 maximal-munch로 소비해 서로 겹치지 않는 경로 후보를 찾는다.
+ *
+ * 단일 maximal token 선택은 기존 선택 기반 계약을 유지해 `laymux` 같은 맨이름도
+ * 받는다. 넓은 선택에서는 일반 단어의 stat 폭증을 막기 위해 절대경로, 구분자,
+ * 확장자 중 하나가 있는 strong candidate만 받는다. 한 maximal token을 후보로
+ * 확정하거나 버린 뒤에는 그 내부 suffix를 다시 경로로 해석하지 않는다. 따라서
+ * 긴 후보의 stat이 실패해도 우연히 존재하는 basename으로 fallback하지 않는다.
+ *
+ * 상한을 넘긴 선택이나 후보가 너무 많은 선택은 부분 결과가 아니라 빈 목록을
+ * 반환한다. 그래야 잘린 결과 일부만 링크로 보이는 예측 불가능한 상태가 없다.
+ */
+export function extractPathCandidatesFromSelection(
+  selection: string,
+  limits: PathSelectionLimits,
+): PathSelectionCandidate[] {
+  if (
+    !selection ||
+    selection.length > limits.maxSelectionLength ||
+    limits.maxLines < 1 ||
+    limits.maxCandidates < 1 ||
+    limits.maxPathLength < 1
+  ) {
+    return [];
+  }
+
+  const lines = selection.split(/\r?\n/);
+  if (lines.length > limits.maxLines) return [];
+
+  const maximalTokens: Array<PathSelectionCandidate & { strong: boolean }> = [];
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
+    const matcher = new RegExp(SELECTION_TOKEN_RE.source, "g");
+    let match: RegExpExecArray | null;
+    while ((match = matcher.exec(line)) !== null) {
+      const raw = match[0];
+      const { text, leading } = trimPathToken(raw);
+      if (!text || SCHEME_RE.test(text)) continue;
+      const startIndex = match.index + leading;
+      maximalTokens.push({
+        text,
+        lineIndex,
+        startIndex,
+        endIndex: startIndex + text.length,
+        strong: looksLikeStrongPath(text),
+      });
+    }
+  }
+
+  const exactSingleToken =
+    maximalTokens.length === 1 && trimSelectionToPath(selection) === maximalTokens[0].text;
+  const candidates: PathSelectionCandidate[] = [];
+  for (const candidate of maximalTokens) {
+    if (candidate.text.length > limits.maxPathLength) continue;
+    if (!exactSingleToken && !candidate.strong) continue;
+    candidates.push({
+      text: candidate.text,
+      lineIndex: candidate.lineIndex,
+      startIndex: candidate.startIndex,
+      endIndex: candidate.endIndex,
+    });
+    if (candidates.length > limits.maxCandidates) return [];
+  }
+  return candidates;
+}
+
 /**
  * 길이 가드: 선택 문자열이 비었거나 `maxLength` 를 초과하면 false.
  * (파싱·stat 전에 호출부에서 싸게 거르는 용도. 순수 함수.)
@@ -220,6 +335,44 @@ export interface MappedPathRange {
   startCol: number;
   /** 1-based 끝 컬럼(inclusive). */
   endCol: number;
+}
+
+/**
+ * 선택 상대 후보 범위를 xterm의 1-based 절대 버퍼 셀 범위로 변환한다.
+ * 첫 줄만 `position.start.x`에서 시작하고 이후 줄은 셀 0에서 시작한다.
+ */
+export function mapSelectionCandidateToPathRange(
+  position: SelectionPos,
+  candidate: PathSelectionCandidate,
+  lineCells?: CellInfo[],
+): MappedPathRange {
+  const selectionBaseCol0 = candidate.lineIndex === 0 ? position.start.x : 0;
+  const fallbackStartCol = selectionBaseCol0 + candidate.startIndex + 1;
+  const fallbackEndCol = fallbackStartCol + candidate.text.length - 1;
+  const bufferLine = position.start.y + candidate.lineIndex + 1;
+
+  if (lineCells && lineCells.length > 0) {
+    const { text, columns, endColumns } = reconstructLine(lineCells);
+    const selectionStartCell = selectionBaseCol0 + 1;
+    const selectionStartOffset = endColumns.findIndex((column) => column >= selectionStartCell);
+    if (selectionStartOffset >= 0) {
+      const startOffset = selectionStartOffset + candidate.startIndex;
+      const endOffset = selectionStartOffset + candidate.endIndex - 1;
+      if (
+        text.slice(startOffset, endOffset + 1) === candidate.text &&
+        columns[startOffset] !== undefined &&
+        endColumns[endOffset] !== undefined
+      ) {
+        return {
+          bufferLine,
+          startCol: columns[startOffset],
+          endCol: endColumns[endOffset],
+        };
+      }
+    }
+  }
+
+  return { bufferLine, startCol: fallbackStartCol, endCol: fallbackEndCol };
 }
 
 /**

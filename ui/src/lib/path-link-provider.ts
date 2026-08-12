@@ -10,7 +10,7 @@
  * 하는데, linkifier 에 의존하면 "마우스를 나갔다 돌아와야" 동작하는 문제가
  * 생긴다(검증 시점과 hover 재질의 시점이 어긋남). 그래서 hover 모델에 기대지
  * 않고, 검증이 끝난 즉시 **데코레이션(IDecoration)** 으로 밑줄을 직접 그리고
- * 그 DOM 요소에 클릭 핸들러를 붙인다.
+ * `TerminalView`가 pointer 좌표로 정확한 데코레이션을 hit-test한다.
  */
 
 import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
@@ -46,16 +46,17 @@ export interface PathLinkControllerDeps {
 }
 
 export interface PathLinkController {
-  /** 검증된 선택 범위를 저장하고 밑줄 데코레이션을 그린다. */
-  setVerifiedSelection: (sel: VerifiedPathSelection) => void;
+  /** 검증된 선택 범위들을 저장하고 각각 밑줄 데코레이션을 그린다. */
+  setVerifiedSelections: (selections: VerifiedPathSelection[]) => void;
   /** 저장 상태와 데코레이션을 비운다(선택 해제/변경 시). */
   clear: () => void;
   /** 현재 검증 상태(테스트/디버그용). */
-  getCurrent: () => VerifiedPathSelection | null;
-  /** viewport 좌표가 현재 밑줄(데코레이션) 영역 안인지. 없으면 false. */
-  hitTest: (clientX: number, clientY: number) => boolean;
-  /** 현재 밑줄의 뷰포트 사각형(힌트 라벨 배치용). 없으면 null. */
-  getRect: () => DOMRect | null;
+  getCurrent: () => readonly VerifiedPathSelection[];
+  /** viewport 좌표 아래의 검증 경로와 사각형. 없으면 null. */
+  getHit: (
+    clientX: number,
+    clientY: number,
+  ) => { selection: VerifiedPathSelection; rect: DOMRect } | null;
   /**
    * 주어진 선택을 결정된 액션에 따라 라우팅. 액션 판정(수정자 해석·설정
    * 반영·확인 대화상자)은 호출부가 `path-link-os-open` 의 순수 함수로 한다.
@@ -72,15 +73,19 @@ export function createPathLinkController(
   terminal: Terminal,
   deps: PathLinkControllerDeps,
 ): PathLinkController {
-  let current: VerifiedPathSelection | null = null;
-  let decoration: IDecoration | undefined;
-  let marker: IMarker | undefined;
+  let current: VerifiedPathSelection[] = [];
+  let entries: Array<{
+    selection: VerifiedPathSelection;
+    decoration?: IDecoration;
+    marker?: IMarker;
+  }> = [];
 
-  const disposeDecoration = () => {
-    decoration?.dispose();
-    marker?.dispose();
-    decoration = undefined;
-    marker = undefined;
+  const disposeDecorations = () => {
+    for (const entry of entries) {
+      entry.decoration?.dispose();
+      entry.marker?.dispose();
+    }
+    entries = [];
   };
 
   const styleEl = (el: HTMLElement) => {
@@ -93,54 +98,61 @@ export function createPathLinkController(
   };
 
   return {
-    setVerifiedSelection: (sel: VerifiedPathSelection) => {
-      disposeDecoration();
-      current = sel;
+    setVerifiedSelections: (selections: VerifiedPathSelection[]) => {
+      disposeDecorations();
+      current = [...selections];
 
-      // 데코레이션 생성은 절대 호출부 체인을 깨지 않는다(밑줄 실패해도 커서·클릭
-      // 라우팅은 동작해야 한다). registerMarker 는 정수 오프셋만 받고 throw 할 수
-      // 있으므로 방어적으로 감싼다.
-      try {
-        // registerMarker(offset) 는 커서 절대 라인 기준 상대 오프셋에 마커를 단다.
-        const buffer = terminal.buffer.active;
-        const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0); // 0-based 절대 라인
-        const targetAbsY = sel.bufferLine - 1; // 0-based 절대 라인
-        const offset = Math.trunc(targetAbsY - cursorAbsY);
-        if (!Number.isFinite(offset)) return;
-        const m = terminal.registerMarker(offset);
-        if (!m) return; // 라인이 버퍼 밖이면 데코레이션 생략(밑줄만 없음).
-        marker = m;
+      for (const sel of selections) {
+        const entry: (typeof entries)[number] = { selection: sel };
+        entries.push(entry);
+        // 한 데코레이션 실패가 나머지 검증 경로의 밑줄·클릭을 막지 않는다.
+        try {
+          // registerMarker(offset) 는 커서 절대 라인 기준 상대 오프셋에 마커를 단다.
+          const buffer = terminal.buffer.active;
+          const cursorAbsY = (buffer.baseY ?? 0) + (buffer.cursorY ?? 0); // 0-based 절대 라인
+          const targetAbsY = sel.bufferLine - 1; // 0-based 절대 라인
+          const offset = Math.trunc(targetAbsY - cursorAbsY);
+          if (!Number.isFinite(offset)) continue;
+          const m = terminal.registerMarker(offset);
+          if (!m) continue; // 라인이 버퍼 밖이면 이 데코레이션만 생략.
+          entry.marker = m;
 
-        const width = Math.max(1, sel.endCol - sel.startCol + 1);
-        const dec = terminal.registerDecoration({
-          marker: m,
-          x: Math.max(0, sel.startCol - 1), // 0-based 셀
-          width,
-        });
-        if (!dec) return;
-        decoration = dec;
-        // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장.
-        if (dec.element) styleEl(dec.element);
-        dec.onRender((el) => styleEl(el));
-      } catch (err) {
-        console.warn("[pathLink] 밑줄 데코레이션 생성 실패:", err);
+          const width = Math.max(1, sel.endCol - sel.startCol + 1);
+          const dec = terminal.registerDecoration({
+            marker: m,
+            x: Math.max(0, sel.startCol - 1), // 0-based 셀
+            width,
+          });
+          if (!dec) continue;
+          entry.decoration = dec;
+          // 최초 렌더 + 이후 재렌더(스크롤/리사이즈)마다 스타일 보장.
+          if (dec.element) styleEl(dec.element);
+          dec.onRender((el) => styleEl(el));
+        } catch (err) {
+          console.warn("[pathLink] 밑줄 데코레이션 생성 실패:", err);
+        }
       }
     },
     clear: () => {
-      current = null;
-      disposeDecoration();
+      current = [];
+      disposeDecorations();
     },
     getCurrent: () => current,
-    hitTest: (clientX: number, clientY: number) => {
-      const el = decoration?.element;
-      if (!current || !el) return false;
-      const r = el.getBoundingClientRect();
-      return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
-    },
-    getRect: () => {
-      const el = decoration?.element;
-      if (!current || !el) return null;
-      return el.getBoundingClientRect();
+    getHit: (clientX: number, clientY: number) => {
+      for (const entry of entries) {
+        const element = entry.decoration?.element;
+        if (!element?.isConnected) continue;
+        const rect = element.getBoundingClientRect();
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          return { selection: entry.selection, rect };
+        }
+      }
+      return null;
     },
     activate: (sel: VerifiedPathSelection, action: PathLinkClickAction) => {
       switch (action) {
