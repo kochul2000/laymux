@@ -14,6 +14,10 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.laymux.android.pairing.BiometricAvailability
 import com.laymux.android.pairing.BiometricGate
+import com.laymux.android.pairing.PairingAckClient
+import com.laymux.android.pairing.PairingAckException
+import com.laymux.android.pairing.PairingAckSession
+import com.laymux.android.pairing.PairingHandshake
 import com.laymux.android.pairing.PairingKeyInvalidatedException
 import com.laymux.android.pairing.PairingPayload
 import com.laymux.android.pairing.PairingProtectionPolicy
@@ -21,6 +25,8 @@ import com.laymux.android.pairing.PairingVault
 import com.laymux.android.pairing.PendingPairingDecryption
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import javax.crypto.Cipher
 import org.json.JSONObject
 
@@ -30,9 +36,15 @@ class MainActivity : FragmentActivity() {
     private lateinit var bridge: NativeBridge
     private lateinit var scanner: GmsBarcodeScanner
     private lateinit var biometricGate: BiometricGate
+    private val pairingAckClient = PairingAckClient()
+    private val pairingExecutor = Executors.newSingleThreadExecutor()
     private var scanInFlight = false
+    private var pairingAckInFlight = false
+    private var activePairingAckSession: PairingAckSession? = null
     private var pendingPairing: PairingPayload? = null
+    private var pendingClientNonce: String? = null
     private var pendingDecryption: PendingPairingDecryption? = null
+    private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,13 +150,19 @@ class MainActivity : FragmentActivity() {
             payload.close()
             throw error
         }
+        val clientNonce = try {
+            PairingHandshake.newClientNonce()
+        } catch (error: Exception) {
+            payload.close()
+            throw error
+        }
         if (policy == PairingProtectionPolicy.KEYSTORE_ONLY) {
-            payload.use { vault.save(it, policy, cipher) }
-            notifyPairingChanged(notice = "페어링 키를 Android Keystore로 보호해 저장했습니다.")
+            payload.use { persistAndConfirm(it, clientNonce, policy, cipher) }
             return
         }
 
         pendingPairing = payload
+        pendingClientNonce = clientNonce
         try {
             biometricGate.authenticate(
                 cipher = cipher,
@@ -154,27 +172,134 @@ class MainActivity : FragmentActivity() {
                 onError = { message ->
                     pendingPairing?.close()
                     pendingPairing = null
+                    pendingClientNonce = null
                     notifyPairingChanged(error = message)
                 },
             )
         } catch (error: Exception) {
             pendingPairing?.close()
             pendingPairing = null
+            pendingClientNonce = null
             throw error
         }
     }
 
     private fun completeBiometricPairing(authorizedCipher: Cipher) {
         val payload = pendingPairing ?: return
+        val clientNonce = pendingClientNonce ?: run {
+            payload.close()
+            pendingPairing = null
+            return
+        }
         pendingPairing = null
+        pendingClientNonce = null
         try {
             payload.use {
-                vault.save(it, PairingProtectionPolicy.BIOMETRIC, authorizedCipher)
+                persistAndConfirm(
+                    it,
+                    clientNonce,
+                    PairingProtectionPolicy.BIOMETRIC,
+                    authorizedCipher,
+                )
             }
-            notifyPairingChanged(notice = "페어링 키를 생체 인증으로 보호해 저장했습니다.")
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
         }
+    }
+
+    private fun persistAndConfirm(
+        payload: PairingPayload,
+        clientNonce: String,
+        policy: PairingProtectionPolicy,
+        cipher: Cipher,
+    ) {
+        val session = PairingHandshake.createSession(payload, clientNonce)
+        try {
+            vault.save(payload, clientNonce, policy, cipher)
+        } catch (error: Exception) {
+            session.close()
+            throw error
+        }
+        startPairingAck(session)
+    }
+
+    private fun startPairingAck(session: PairingAckSession) {
+        val pairingId = session.request.pairingId
+        val clientNonce = session.request.clientNonce
+        if (session.isExpired()) {
+            session.close()
+            try {
+                vault.clearIfMatches(pairingId, clientNonce)
+            } catch (_: Exception) {
+                notifyPairingChanged(error = "만료된 페어링 정보를 삭제하지 못했습니다.")
+                return
+            }
+            notifyPairingChanged(error = "페어링 QR이 만료됐습니다. 새 QR을 스캔하세요.")
+            return
+        }
+        if (pairingAckInFlight) {
+            session.close()
+            notifyPairingChanged(error = "이미 데스크톱 확인을 진행하고 있습니다.")
+            return
+        }
+        pairingAckInFlight = true
+        activePairingAckSession = session
+        notifyPairingChanged(notice = "키를 안전하게 저장했습니다. 데스크톱에 확인 중입니다.")
+        try {
+            pairingExecutor.execute {
+                val result = runCatching {
+                    session.use { pairingAckClient.confirm(it) }
+                }
+                runOnUiThread {
+                    pairingAckInFlight = false
+                    if (activePairingAckSession === session) {
+                        activePairingAckSession = null
+                    }
+                    if (isDestroyed) return@runOnUiThread
+                    result.fold(
+                        onSuccess = { confirmation ->
+                            try {
+                                vault.markConfirmed(
+                                    pairingId,
+                                    clientNonce,
+                                    confirmation.confirmedAtEpochSeconds,
+                                )
+                                notifyPairingChanged(notice = "데스크톱과 페어링을 확인했습니다.")
+                            } catch (_: Exception) {
+                                notifyPairingChanged(error = "페어링 확인 상태를 저장하지 못했습니다.")
+                            }
+                        },
+                        onFailure = { error ->
+                            handlePairingAckFailure(error, pairingId, clientNonce)
+                        },
+                    )
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            session.close()
+            activePairingAckSession = null
+            pairingAckInFlight = false
+            notifyPairingChanged(error = "페어링 확인 작업을 시작하지 못했습니다.")
+        }
+    }
+
+    private fun handlePairingAckFailure(
+        error: Throwable,
+        pairingId: String,
+        clientNonce: String,
+    ) {
+        val ackError = error as? PairingAckException
+        if (ackError?.pairingInvalidated == true) {
+            try {
+                vault.clearIfMatches(pairingId, clientNonce)
+            } catch (_: Exception) {
+                notifyPairingChanged(error = "무효한 페어링 정보를 삭제하지 못했습니다.")
+                return
+            }
+        }
+        notifyPairingChanged(
+            error = ackError?.message ?: "데스크톱 페어링 확인에 실패했습니다.",
+        )
     }
 
     fun setBiometricRequired(required: Boolean) {
@@ -293,6 +418,7 @@ class MainActivity : FragmentActivity() {
         }
 
         pendingDecryption = pending
+        pendingDecryptionPurpose = DecryptionPurpose.VERIFY
         try {
             biometricGate.authenticate(
                 cipher = pending.cipher,
@@ -300,18 +426,113 @@ class MainActivity : FragmentActivity() {
                 subtitle = "저장된 Laymux 키의 보호 상태를 확인합니다.",
                 onSuccess = { cipher ->
                     val current = pendingDecryption
+                    val purpose = pendingDecryptionPurpose
                     pendingDecryption = null
-                    if (current != null) completeVerification(current, cipher)
+                    pendingDecryptionPurpose = null
+                    if (current != null && purpose == DecryptionPurpose.VERIFY) {
+                        completeVerification(current, cipher)
+                    }
                 },
                 onError = { message ->
                     pendingDecryption?.close()
                     pendingDecryption = null
+                    pendingDecryptionPurpose = null
                     notifyPairingChanged(error = message)
                 },
             )
         } catch (error: Exception) {
             pendingDecryption?.close()
             pendingDecryption = null
+            pendingDecryptionPurpose = null
+            notifyPairingChanged(error = pairingOperationError(error))
+        }
+    }
+
+    fun retryPairingConfirmation() {
+        if (scanInFlight || hasPendingCryptoOperation()) return
+        val metadata = try {
+            vault.loadMetadata()
+        } catch (error: Exception) {
+            notifyPairingChanged(error = pairingOperationError(error))
+            return
+        }
+        if (metadata == null) {
+            notifyPairingChanged(error = "먼저 페어링하세요.")
+            return
+        }
+        if (metadata.confirmedAtEpochSeconds != null) {
+            notifyPairingChanged(notice = "이미 데스크톱과 페어링을 확인했습니다.")
+            return
+        }
+        val policy = try {
+            vault.protectionPolicy()
+        } catch (error: Exception) {
+            notifyPairingChanged(error = pairingOperationError(error))
+            return
+        }
+        if (policy == PairingProtectionPolicy.BIOMETRIC) {
+            val availability = biometricAvailability()
+            if (availability != BiometricAvailability.AVAILABLE) {
+                notifyPairingChanged(error = requireNotNull(availability.userMessage))
+                return
+            }
+        }
+        val pending = try {
+            vault.prepareDecryption()
+        } catch (error: Exception) {
+            notifyPairingChanged(error = pairingOperationError(error))
+            return
+        } ?: run {
+            notifyPairingChanged(error = "먼저 페어링하세요.")
+            return
+        }
+        if (pending.policy == PairingProtectionPolicy.KEYSTORE_ONLY) {
+            completePairingConfirmation(pending, pending.cipher)
+            return
+        }
+
+        pendingDecryption = pending
+        pendingDecryptionPurpose = DecryptionPurpose.CONFIRM
+        try {
+            biometricGate.authenticate(
+                cipher = pending.cipher,
+                title = "데스크톱 페어링 확인",
+                subtitle = "저장된 Laymux 키로 데스크톱을 확인합니다.",
+                onSuccess = { cipher ->
+                    val current = pendingDecryption
+                    val purpose = pendingDecryptionPurpose
+                    pendingDecryption = null
+                    pendingDecryptionPurpose = null
+                    if (current != null && purpose == DecryptionPurpose.CONFIRM) {
+                        completePairingConfirmation(current, cipher)
+                    }
+                },
+                onError = { message ->
+                    pendingDecryption?.close()
+                    pendingDecryption = null
+                    pendingDecryptionPurpose = null
+                    notifyPairingChanged(error = message)
+                },
+            )
+        } catch (error: Exception) {
+            pendingDecryption?.close()
+            pendingDecryption = null
+            pendingDecryptionPurpose = null
+            notifyPairingChanged(error = pairingOperationError(error))
+        }
+    }
+
+    private fun completePairingConfirmation(
+        pending: PendingPairingDecryption,
+        authorizedCipher: Cipher,
+    ) {
+        try {
+            val session = vault.completeDecryption(pending, authorizedCipher).use { stored ->
+                PairingHandshake.createSession(stored)
+            }
+            startPairingAck(session)
+        } catch (error: Exception) {
+            pending.close()
             notifyPairingChanged(error = pairingOperationError(error))
         }
     }
@@ -345,7 +566,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun hasPendingCryptoOperation(): Boolean =
-        pendingPairing != null || pendingDecryption != null
+        pendingPairing != null || pendingDecryption != null || pairingAckInFlight
 
     private fun pairingOperationError(error: Exception): String = when (error) {
         is PairingKeyInvalidatedException ->
@@ -373,8 +594,13 @@ class MainActivity : FragmentActivity() {
         if (::biometricGate.isInitialized) biometricGate.cancel()
         pendingPairing?.close()
         pendingPairing = null
+        pendingClientNonce = null
         pendingDecryption?.close()
         pendingDecryption = null
+        pendingDecryptionPurpose = null
+        activePairingAckSession?.close()
+        activePairingAckSession = null
+        pairingExecutor.shutdownNow()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
             webView.stopLoading()
@@ -385,5 +611,10 @@ class MainActivity : FragmentActivity() {
 
     companion object {
         private const val NATIVE_BRIDGE_NAME = "LaymuxNative"
+    }
+
+    private enum class DecryptionPurpose {
+        VERIFY,
+        CONFIRM,
     }
 }

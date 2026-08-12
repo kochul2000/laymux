@@ -1121,30 +1121,36 @@ Remote UI API는 사람이 브라우저에서 laymux를 조작하기 위한 Dire
 
 현재 브라우저 entry는 Rust remote server가 self-hosted xterm.js 자산을 `/remote/vendor/*`에서 제공하는 중간 구현이다. CDN이나 Vite dev server에 의존하지 않으며, 출력 WebSocket의 PTY byte stream을 xterm에 그대로 기록하고 xterm 입력/resize 이벤트를 Remote UI API로 다시 보낸다. ADR-0013의 최종 목표인 같은 React bundle 기반 Full UI/Focused UI 전환과 `RemoteHttpWsClient` adapter 추출은 후속 리팩터링 대상이다.
 
-#### Android signed hybrid entry와 QR v1
+#### Android signed hybrid entry와 QR v2
 
-`apps/android`는 브라우저 entry를 감싼 WebView가 아니라 서버와 독립된 코드 신뢰 경계다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md)). main document·script·style은 APK의 `assets`에 포함하고 `WebViewAssetLoader`의 `https://appassets.androidplatform.net/assets/` 아래에서만 적재한다. WebView client는 이 prefix 밖의 main-frame navigation과 모든 network subresource를 `403`으로 막고, CSP도 `default-src 'none'`, `connect-src 'none'`을 사용한다. JavaScript bridge는 scan 요청·비밀이 아닌 pairing metadata 조회·생체 보호 설정·키 보호 확인·pairing 삭제만 제공하며 secret byte를 반환하지 않는다.
+`apps/android`는 브라우저 entry를 감싼 WebView가 아니라 서버와 독립된 코드 신뢰 경계다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md), [ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md)). main document·script·style은 APK의 `assets`에 포함하고 `WebViewAssetLoader`의 `https://appassets.androidplatform.net/assets/` 아래에서만 적재한다. WebView client는 이 prefix 밖의 main-frame navigation과 모든 network subresource를 `403`으로 막고, CSP도 `default-src 'none'`, `connect-src 'none'`을 사용한다. ACK 네트워크 요청은 JavaScript가 아니라 Kotlin native 계층만 수행한다. JavaScript bridge는 scan·ACK 재시도 요청, 비밀이 아닌 pairing metadata 조회, 생체 보호 설정, 키 보호 확인, pairing 삭제만 제공하며 secret byte를 반환하지 않는다.
 
 Android가 입력받는 초기 QR 계약은 다음 한 줄 URI다.
 
 ```text
-laymux://pair/v1?endpoint=<percent-encoded-origin>&instance=<id>&secret=<base64url-32-byte-seed>&label=<optional>
+laymux://pair/v2?endpoint=<percent-encoded-origin>&instance=<id>&pairing=<base64url-16-byte-id>&expires=<unix-seconds>&secret=<base64url-32-byte-seed>&label=<optional>
 ```
 
 | 필드 | 계약 |
 |---|---|
 | `endpoint` | userinfo/query/fragment/path가 없는 HTTPS origin. debug의 loopback `http://127.0.0.1[:port]`·`http://[::1][:port]`만 예외 |
 | `instance` | `[A-Za-z0-9][A-Za-z0-9._-]{0,127}` |
+| `pairing` | 정확히 16바이트를 padding 없이 인코딩한 22자 base64url 초대 식별자 |
+| `expires` | 발급 시각에서 300초 뒤인 양의 Unix epoch seconds. Android와 desktop 모두 `now >= expires`를 만료로 처리 |
 | `secret` | 정확히 32바이트를 padding 없이 인코딩한 43자 base64url |
 | `label` | 선택, 비어 있지 않은 제어문자 없는 80자 이하 표시 이름 |
 
-scheme=`laymux`, authority=`pair`, path=`/v1`이 정확해야 하며 필수 필드 누락, 중복 key, 알 수 없는 key, fragment, 잘못된 길이·문자는 전부 거부한다. QR seed는 Android private preferences에 AES-256-GCM ciphertext로만 저장하고 wrapping key는 Android Keystore 비추출 키가 소유한다. 표시용 endpoint·instance·label은 비밀이 아닌 metadata로 분리해 상태 조회가 seed decrypt를 유발하지 않으며 앱 backup은 비활성화한다.
+scheme=`laymux`, authority=`pair`, path=`/v2`가 정확해야 하며 필수 필드 누락, 중복 key, 알 수 없는 key, fragment, 잘못된 길이·문자·만료 시각은 전부 거부한다. QR seed는 Android private preferences에 AES-256-GCM ciphertext로만 저장하고 wrapping key는 Android Keystore 비추출 키가 소유한다. 표시용 endpoint·instance·pairing·expires·client nonce·confirmed-at·label은 비밀이 아닌 metadata로 분리해 상태 조회가 seed decrypt를 유발하지 않으며 앱 backup은 비활성화한다.
 
 보호 정책의 저장값은 `biometric`(미설정 시 기본)과 명시적 opt-out인 `keystoreOnly`뿐이다. `biometric`은 alias `com.laymux.android.pairing-wrap.v2.biometric`의 auth-per-use AES key와 `BIOMETRIC_STRONG`만 허용하는 `BiometricPrompt.CryptoObject`를 사용한다. PIN·패턴 fallback은 없고 생체 hardware/등록이 없으면 QR 저장과 seed 사용을 막는다. `keystoreOnly`는 alias `com.laymux.android.pairing-wrap.v2.keystore-only`의 사용자 인증 없는 AES key를 사용한다. 정책을 바꾸면 기존 pairing과 두 alias를 삭제하고 재pairing을 요구한다. 생체 등록 집합 변경도 biometric alias를 무효화한다. 앱 시작·metadata 상태 조회에는 인증을 요구하지 않고 QR seed 저장, 키 보호 확인, 향후 실제 seed 사용에만 요구한다.
 
-데스크톱 Tauri IPC는 `get_android_pairing_status() -> { paired, endpoint, instanceId }`, `create_android_pairing_qr() -> { status, qrSvg }`, `revoke_android_pairing() -> AndroidPairingStatus` 세 개다. create command는 UI 인자를 받지 않고 현재 `cloudServerBaseUrl`과 `cloudInstanceId`만 사용한다. Rust가 OS CSPRNG로 32바이트 seed를 생성하고 QR SVG를 만든 뒤, version·endpoint·instance·secret record를 OS keyring service `laymux`(debug는 `laymux-dev`), account `android-pairing-v1`에 저장한다. 저장이 성공해야 SVG를 반환하며, 새 발급은 기존 record를 회전한다. IPC에는 QR URI나 seed 원문이 없고 status도 비밀이 아닌 metadata만 포함한다. Remote Access 모달은 cloud identity가 있을 때만 생성 버튼을 활성화하고, 모달을 닫으면 메모리의 QR SVG를 폐기한다. 명시적 revoke와 `cloud_disconnect`, 다른 instance 또는 server origin으로 cloud pairing이 성공한 경우는 기존 keyring record를 삭제한다. QR 생성의 identity snapshot 조회부터 record 저장까지와 이 세 폐기 경로는 pairing lifecycle mutex로 직렬화한다. 이 mutex는 `AppState.remote_access`보다 먼저 잡아 폐기 완료 뒤 옛 identity의 생성 작업이 record를 되살리지 못하게 한다.
+데스크톱 Tauri IPC는 `get_android_pairing_status() -> { paired, phase, endpoint, instanceId, expiresAt, confirmedAt }`, `create_android_pairing_qr() -> { status, qrSvg }`, `revoke_android_pairing() -> AndroidPairingStatus` 세 개다. `phase`는 `none | pending | confirmed`이고 기존 `paired`는 record 존재 여부와 호환되는 필드라 pending에서도 `true`다. create command는 UI 인자를 받지 않고 현재 `cloudServerBaseUrl`과 `cloudInstanceId`만 사용한다. Rust가 OS CSPRNG로 32바이트 seed와 독립된 16바이트 pairing id를 생성하고 QR SVG를 만든 뒤, v2 pending record를 OS keyring service `laymux`(debug는 `laymux-dev`), account `android-pairing-v1`에 저장한다. 저장이 성공해야 SVG를 반환하며, 새 발급은 기존 record를 회전한다. IPC에는 QR URI나 seed 원문이 없고 status도 비밀이 아닌 metadata만 포함한다. Remote Access 모달은 cloud identity가 있을 때만 생성 버튼을 활성화하고, pending 동안 2초 간격으로 status를 갱신해 confirmed·expired에서 메모리의 QR SVG를 폐기한다. 모달을 닫을 때도 SVG를 폐기한다. 명시적 revoke와 `cloud_disconnect`, 다른 instance 또는 server origin으로 cloud pairing이 성공한 경우는 기존 keyring record를 삭제한다. QR 생성의 identity snapshot 조회부터 record 저장까지, ACK 확정, 상태 조회의 만료 삭제와 이 세 폐기 경로는 pairing lifecycle mutex로 직렬화한다. 이 mutex는 `AppState.remote_access`보다 먼저 잡아 폐기 완료 뒤 옛 identity의 생성 작업이 record를 되살리지 못하게 한다.
 
-현재 구현은 양 endpoint의 seed 보관 기반까지만 제공한다. 스캔 완료를 인증하는 ACK와 자동 만료가 없으므로 QR을 일회용이라고 부르지 않으며, 방향별 키 파생, nonce/replay/세션 회전, relay ciphertext frame도 아직 Remote API 계약이 아니다. 따라서 기존 `/remote/v1/*`와 cloud tunnel payload는 이 단계에서 E2E라고 간주하지 않는다.
+Android는 저장과 같은 작업에서 만든 16바이트 client nonce를 metadata에 보존하고 `POST <endpoint>/api/android/pair/ack`에 `{version:1,instanceId,pairingId,clientNonce,clientProof}`를 보낸다. `clientProof`는 seed를 key로 하고 `laymux.android-pair.request.v1` domain과 pairing id·instance id·client nonce를 length-prefix framing한 HMAC-SHA-256이다. 응답 `{version:1,instanceId,pairingId,clientNonce,confirmedAt,serverProof}`의 echo field와 `laymux.android-pair.response.v1` domain HMAC을 모두 검증한 뒤에만 Android metadata를 confirmed로 바꾼다. 네트워크 실패 시 같은 nonce를 유지하며, 재시도는 저장된 seed 사용이므로 기본 정책에서 다시 강한 생체 인증을 요구한다.
+
+cloud server의 `/api/android/pair/ack`는 browser session·relay cookie 없이 public origin에서만 받는 좁은 전달 route다. exact schema, 2 KiB request, 8 KiB response, IP·instance별 rate/concurrency limit를 적용하고 body의 `instanceId`로 온라인 tunnel만 찾은 뒤, caller가 바꿀 수 없는 `POST /remote/v1/e2e/pair/ack`·빈 query·고정 JSON header로 전달한다. relay는 seed를 받거나 proof를 검증·저장하지 않는다. desktop route는 기존 `remote_guard`와 enabled gate를 따르고 lifecycle mutex 안에서 HMAC·pairing id·instance·expiry를 검증한다. 첫 유효 nonce를 confirmed로 저장하고 같은 nonce 재시도는 같은 confirmed-at 응답을 재현하며, 다른 nonce는 `409`, 없는/불일치/잘못된 proof는 `401`, 일치하지만 만료된 pending 초대는 삭제 후 `410`이다.
+
+현재 구현은 만료되는 일회성 초대와 양 endpoint의 seed 소유 확인까지 제공한다. 방향별 data key 파생, terminal frame nonce/replay window와 세션 회전, relay ciphertext envelope는 아직 Remote API 계약이 아니다. 따라서 기존 `/remote/v1/*` terminal payload와 cloud tunnel payload는 이 단계에서도 E2E라고 간주하지 않는다.
 
 `/remote/vendor/*`도 `/remote/`와 같은 base access 조건(실효 enabled, 실효 token 존재, IP allowlist)을 통과해야 응답한다. Cloud tunnel 내부 요청은 token/IP/Origin 대신 `TunnelAuthorized` marker를 신뢰하지만, vendor route도 실효 enabled gate는 공유한다. 실제 controller 권한은 vendor asset이 아니라 `/remote/v1/*` API의 bearer token + lease 검사에서 결정된다.
 

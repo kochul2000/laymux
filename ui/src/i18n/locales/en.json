@@ -46,16 +46,18 @@
       "openingMobileMode": "Opening...",
       "missingTokenForMobileMode": "Remote token is required for mobile mode.",
       "androidPairingTitle": "Android App Pairing",
-      "androidPairingDescription": "Creating a new QR replaces the previous pairing key.",
+      "androidPairingDescription": "The QR expires in five minutes. Creating a new QR replaces the previous pairing key.",
       "androidPairingNeedsCloud": "Connect Cloud Remote before creating a pairing QR.",
       "androidPairingStored": "Pairing key stored in OS keyring",
+      "androidPairingPending": "QR issued · waiting for app confirmation (expires {{time}})",
+      "androidPairingConfirmed": "Android pairing mutually confirmed",
       "androidPairingCreate": "Create Pairing QR",
       "androidPairingCreating": "Creating...",
       "androidPairingRotate": "Replace with New QR",
       "androidPairingRevoke": "Revoke Key",
       "androidPairingRevoking": "Revoking...",
       "androidPairingQrAlt": "Android pairing QR code",
-      "androidPairingScanHint": "Scan this QR in the Laymux Android app. Closing the modal removes the QR from the screen."
+      "androidPairingScanHint": "Scan this QR in the Laymux Android app within five minutes. It disappears after confirmation or expiry."
     }
   },
   "settings": {
