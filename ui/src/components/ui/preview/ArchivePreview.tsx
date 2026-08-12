@@ -70,6 +70,7 @@ export function ArchivePreview({
         className="empty-view-scroll min-h-0 flex-1 overflow-auto"
         style={{ ...bodyStyle }}
         data-testid="archive-preview"
+        data-file-viewer-body
       >
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
           <thead>

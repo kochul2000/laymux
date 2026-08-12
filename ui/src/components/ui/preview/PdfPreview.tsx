@@ -74,6 +74,7 @@ export function PdfPreview({ dataUrl, path }: { dataUrl: string; path: string })
         ref={attachDocument}
         style={{ width: "100%", flex: "1 1 auto", minHeight: 0, border: "none" }}
         data-testid="pdf-preview-frame"
+        data-file-viewer-body
       />
     </div>
   );

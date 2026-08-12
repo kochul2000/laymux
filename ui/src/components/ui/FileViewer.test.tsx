@@ -208,24 +208,34 @@ describe("FileViewer", () => {
     expect(screen.getByTestId("file-viewer-image").parentElement).toHaveClass("empty-view-scroll");
   });
 
-  it("scopes Ctrl+A to the viewer's own content instead of the whole page", async () => {
+  it("scopes Ctrl+A to the viewer body without selecting its toolbar", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "text",
-      content: "hello world",
+      content: "name,size\na,1\n",
       truncated: false,
     });
     await act(async () => {
-      render(<FileViewer {...baseProps} path="/home/user/a.txt" />);
+      render(<FileViewer {...baseProps} path="/home/user/rows.csv" />);
     });
 
     const root = screen.getByTestId("file-viewer-content-root");
+    const body = screen.getByTestId("file-viewer-selectable-content");
+    expect(screen.getByTestId("file-viewer-preview-mode")).toHaveTextContent("Preview");
+    expect(screen.getByTestId("file-viewer-source-mode")).toHaveTextContent("Source");
+    expect(screen.getByTestId("file-viewer-font-decrease")).toHaveTextContent("A−");
+    expect(screen.getByTestId("file-viewer-font-increase")).toHaveTextContent("A+");
+
     const event = fireEvent.keyDown(root, { key: "a", ctrlKey: true, bubbles: true });
     // fireEvent returns false when preventDefault() was called.
     expect(event).toBe(false);
 
     const selection = window.getSelection();
-    expect(selection?.rangeCount).toBeGreaterThan(0);
-    expect(selection?.getRangeAt(0).commonAncestorContainer.contains(root)).toBe(true);
+    expect(selection?.rangeCount).toBe(1);
+    const range = selection!.getRangeAt(0);
+    expect(range.startContainer).toBe(body);
+    expect(range.startOffset).toBe(0);
+    expect(range.endContainer).toBe(body);
+    expect(range.endOffset).toBe(body.childNodes.length);
   });
 
   it("zooms an image in/out via the toolbar buttons and Ctrl+Wheel", async () => {
