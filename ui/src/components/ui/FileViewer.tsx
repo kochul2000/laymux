@@ -177,7 +177,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
   const handleSelectAllKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
     if (e.key.toLowerCase() !== "a") return;
-    const el = contentRootRef.current;
+    const el = contentRootRef.current?.querySelector<HTMLElement>("[data-file-viewer-body]");
     const selection = window.getSelection();
     if (!el || !selection) return;
     e.preventDefault();
@@ -322,6 +322,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
               justifyContent: imageZoomAlignment(imageZoom),
             }}
             onWheel={handleImageWheel}
+            data-file-viewer-body
           >
             <ZoomableImage
               src={content.dataUrl}
@@ -357,6 +358,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
           className="flex flex-col items-center justify-center h-full gap-2"
           style={{ color: "var(--text-secondary)", ...effectiveBodyStyle }}
           data-testid="file-viewer-binary"
+          data-file-viewer-body
         >
           <div>Binary file ({(content.size / 1024).toFixed(1)} KB)</div>
         </div>
@@ -625,6 +627,8 @@ function PreviewToggleShell({
         className="empty-view-scroll flex min-h-0 flex-1 overflow-auto"
         style={{ background: "var(--bg-surface)" }}
         onWheel={onWheel}
+        data-file-viewer-body
+        data-testid="file-viewer-selectable-content"
       >
         {children}
       </div>
