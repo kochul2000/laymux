@@ -11,7 +11,6 @@
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     />
     <title>Laymux</title>
-    <link rel="stylesheet" href="xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -28,8 +27,7 @@
         <div id="stateBadge" class="badge">확인 중</div>
         <h2 id="stateTitle">페어링 상태를 확인하고 있습니다</h2>
         <p id="stateDescription">
-          앱에 포함된 클라이언트만 실행하며 서버에서 화면 코드를 내려받지
-          않습니다.
+          이 페어링 화면과 키 처리는 앱에 포함된 네이티브 경계에서 실행됩니다.
         </p>
         <dl id="pairingDetails" hidden>
           <div>
@@ -69,6 +67,9 @@
         <button id="forgetButton" class="secondary" type="button" hidden>
           페어링 해제
         </button>
+        <button id="cloudButton" class="secondary" type="button">
+          내 PC 목록으로
+        </button>
       </section>
 
       <section id="remoteSection" class="card remote" hidden>
@@ -87,9 +88,6 @@
         <button id="connectButton" class="primary" type="button">
           보안 세션 열기
         </button>
-        <div id="terminalShell" hidden>
-          <div id="terminal" aria-label="종단 암호화 터미널"></div>
-        </div>
       </section>
 
       <p class="footnote">
@@ -97,8 +95,6 @@
         relay는 암호화된 terminal payload의 내용과 제어 lease를 볼 수 없습니다.
       </p>
     </main>
-    <script src="xterm.js"></script>
-    <script src="addon-fit.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

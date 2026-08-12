@@ -1,5 +1,12 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+val laymuxCloudBaseUrl = providers.gradleProperty("laymuxCloudBaseUrl")
+    .orElse(providers.environmentVariable("LAYMUX_CLOUD_BASE_URL"))
+    .orElse("https://app.laymux.com")
+val laymuxGoogleWebClientId = providers.gradleProperty("laymuxGoogleWebClientId")
+    .orElse(providers.environmentVariable("LAYMUX_GOOGLE_WEB_CLIENT_ID"))
+    .orElse("")
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,6 +23,9 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+
+        resValue("string", "laymux_cloud_base_url", laymuxCloudBaseUrl.get())
+        resValue("string", "laymux_google_web_client_id", laymuxGoogleWebClientId.get())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -41,14 +51,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            assets.srcDirs(
-                "src/main/assets",
-                "../../../src-tauri/src/remote_server/assets",
-            )
-        }
-    }
 }
 
 kotlin {
@@ -59,7 +61,11 @@ kotlin {
 
 dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
     implementation("androidx.webkit:webkit:1.14.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     testImplementation("junit:junit:4.13.2")

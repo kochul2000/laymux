@@ -4,10 +4,22 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.pm.ApplicationInfo
 import android.os.Bundle
+import android.view.View
+import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.FrameLayout
+import android.widget.Toast
+import androidx.credentials.CustomCredential
+import androidx.credentials.CredentialManager
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -30,20 +42,37 @@ import com.laymux.android.remote.E2eTransportException
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
-import com.laymux.android.web.RemoteOutputBridge
+import com.laymux.android.web.RemoteResourceResponse
+import com.laymux.android.web.CloudBridge
+import com.laymux.android.web.CloudBridgeInput
+import com.laymux.android.web.CloudAuthClient
+import com.laymux.android.web.CloudAuthException
+import com.laymux.android.web.CloudCookieInstaller
+import com.laymux.android.web.CloudNavigationPolicy
+import com.laymux.android.web.CloudWebViewClient
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
 import javax.crypto.Cipher
-import org.json.JSONArray
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 class MainActivity : FragmentActivity() {
     private lateinit var webView: WebView
+    private lateinit var cloudWebView: WebView
     private lateinit var vault: PairingVault
     private lateinit var bridge: NativeBridge
+    private lateinit var cloudBridge: CloudBridge
+    private lateinit var cloudNavigation: CloudNavigationPolicy
+    private lateinit var credentialManager: CredentialManager
+    private val cloudAuthClient = CloudAuthClient()
     private lateinit var scanner: GmsBarcodeScanner
     private lateinit var biometricGate: BiometricGate
     private val pairingAckClient = PairingAckClient()
@@ -58,17 +87,13 @@ class MainActivity : FragmentActivity() {
     private var pendingDecryption: PendingPairingDecryption? = null
     private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
+    private var selectedCloudInstanceId: String? = null
+    private var googleSignInInFlight = false
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
-    @Volatile private var remoteLeaseId: String? = null
-    @Volatile private var remoteTerminalId: String? = null
-    @Volatile private var remoteTerminalTitle: String? = null
-    @Volatile private var remoteGeneration: Long? = null
-    @Volatile private var remoteSourceSeq: Long? = null
-    private var remotePoll: ScheduledFuture<*>? = null
-    private var remoteHeartbeat: ScheduledFuture<*>? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
+    private val remoteOutputStreams = ConcurrentHashMap<String, RemoteOutputStream>()
     private val remoteConnectionGeneration = AtomicLong()
     @Volatile private var remoteLifecycleActive = false
 
@@ -77,6 +102,9 @@ class MainActivity : FragmentActivity() {
         vault = PairingVault(this)
         biometricGate = BiometricGate(this)
         bridge = NativeBridge(this, vault)
+        cloudBridge = CloudBridge(this)
+        cloudNavigation = CloudNavigationPolicy(getString(R.string.laymux_cloud_base_url))
+        credentialManager = CredentialManager.create(this)
         scanner = GmsBarcodeScanning.getClient(
             this,
             GmsBarcodeScannerOptions.Builder()
@@ -85,8 +113,27 @@ class MainActivity : FragmentActivity() {
                 .build(),
         )
         webView = createWebView()
-        setContentView(webView)
+        cloudWebView = createCloudWebView()
+        val root = FrameLayout(this).apply {
+            addView(
+                cloudWebView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                webView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+        setContentView(root)
+        webView.visibility = View.GONE
         webView.loadUrl(LocalContentWebViewClient.START_URL)
+        cloudWebView.loadUrl(cloudNavigation.startUrl)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -99,7 +146,7 @@ class MainActivity : FragmentActivity() {
             .build()
         return WebView(this).apply {
             settings.javaScriptEnabled = true
-            settings.domStorageEnabled = false
+            settings.domStorageEnabled = true
             settings.databaseEnabled = false
             settings.allowFileAccess = false
             settings.allowContentAccess = false
@@ -109,9 +156,129 @@ class MainActivity : FragmentActivity() {
             settings.mediaPlaybackRequiresUserGesture = true
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            webViewClient = LocalContentWebViewClient(assetLoader)
+            webViewClient = LocalContentWebViewClient(assetLoader, ::loadRemoteResource)
             addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
         }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createCloudWebView(): WebView = WebView(this).apply {
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.databaseEnabled = false
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.javaScriptCanOpenWindowsAutomatically = false
+        settings.setSupportMultipleWindows(false)
+        settings.setGeolocationEnabled(false)
+        settings.mediaPlaybackRequiresUserGesture = true
+        settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        webViewClient = CloudWebViewClient(cloudNavigation)
+        addJavascriptInterface(cloudBridge, CLOUD_BRIDGE_NAME)
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+    }
+
+    fun signInWithGoogle(nonce: String) {
+        if (googleSignInInFlight) return
+        val clientId = getString(R.string.laymux_google_web_client_id)
+        if (clientId.isBlank()) {
+            showCloudMessage("Google 로그인이 아직 이 빌드에 설정되지 않았습니다.")
+            return
+        }
+        googleSignInInFlight = true
+        lifecycleScope.launch {
+            try {
+                val googleOption = GetSignInWithGoogleOption.Builder(clientId)
+                    .setNonce(nonce)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleOption)
+                    .build()
+                val result = credentialManager.getCredential(this@MainActivity, request)
+                val credential = result.credential
+                if (credential !is CustomCredential ||
+                    credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+                ) {
+                    showCloudMessage("Google 로그인 응답을 확인할 수 없습니다.")
+                    return@launch
+                }
+                val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                val cookieManager = CookieManager.getInstance()
+                val cookieHeader = cookieManager.getCookie(cloudNavigation.originUrl)
+                    ?: throw CloudAuthException("Cloud login challenge is unavailable")
+                val authResult = withContext(Dispatchers.IO) {
+                    cloudAuthClient.authenticate(
+                        cloudNavigation.googleAuthUrl,
+                        cookieHeader,
+                        googleCredential.idToken,
+                    )
+                }
+                CloudCookieInstaller.install(
+                    cloudNavigation.originUrl,
+                    authResult.setCookies,
+                ) { url, cookie, onComplete ->
+                    cookieManager.setCookie(url, cookie, onComplete)
+                }
+                withContext(Dispatchers.IO) { cookieManager.flush() }
+                cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
+            } catch (_: GetCredentialCancellationException) {
+                showCloudMessage("Google 로그인이 취소되었습니다.")
+            } catch (_: GetCredentialException) {
+                showCloudMessage("Google 로그인을 완료하지 못했습니다.")
+            } catch (_: Exception) {
+                showCloudMessage("Google 로그인 응답을 처리하지 못했습니다.")
+            } finally {
+                googleSignInInFlight = false
+            }
+        }
+    }
+
+    fun selectCloudInstance(instanceId: String) {
+        selectedCloudInstanceId = instanceId
+        showPairingSurface()
+        val metadata = try {
+            vault.loadMetadata()
+        } catch (error: Exception) {
+            notifyPairingChanged(error = pairingOperationError(error))
+            return
+        }
+        when {
+            metadata?.instanceId == instanceId && metadata.confirmedAtEpochSeconds != null ->
+                connectRemote()
+            metadata?.instanceId == instanceId -> retryPairingConfirmation()
+            else -> {
+                notifyPairingChanged(notice = "선택한 PC에 표시된 E2E QR을 스캔하세요.")
+                startPairingScan()
+            }
+        }
+    }
+
+    fun showCloudDashboard() {
+        closeRemoteSession()
+        selectedCloudInstanceId = null
+        if (!::cloudWebView.isInitialized || isDestroyed) return
+        webView.visibility = View.GONE
+        cloudWebView.visibility = View.VISIBLE
+        cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
+    }
+
+    private fun showPairingSurface() {
+        if (!::webView.isInitialized || isDestroyed) return
+        cloudWebView.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+        webView.loadUrl(LocalContentWebViewClient.START_URL)
+    }
+
+    private fun showRemoteSurface() {
+        if (!::webView.isInitialized || isDestroyed) return
+        cloudWebView.visibility = View.GONE
+        webView.visibility = View.VISIBLE
+        webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
+    }
+
+    private fun showCloudMessage(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     fun biometricAvailability(): BiometricAvailability = biometricGate.availability()
@@ -121,8 +288,6 @@ class MainActivity : FragmentActivity() {
     fun remoteConnecting(): Boolean = remoteConnecting
 
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
-
-    fun remoteTerminalTitle(): String? = remoteTerminalTitle
 
     fun startPairingScan() {
         if (scanInFlight || hasPendingCryptoOperation()) return
@@ -151,10 +316,18 @@ class MainActivity : FragmentActivity() {
                 }
                 try {
                     val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-                    saveScannedPairing(
-                        PairingPayload.parse(raw, allowLoopbackHttp = debugBuild),
-                        policy,
-                    )
+                    val payload = PairingPayload.parse(raw, allowLoopbackHttp = debugBuild)
+                    val expectedInstanceId = selectedCloudInstanceId
+                    if (!CloudBridgeInput.matchesSelectedInstance(
+                            expectedInstanceId,
+                            payload.instanceId,
+                        )
+                    ) {
+                        payload.close()
+                        notifyPairingChanged(error = "선택한 PC가 아닌 QR입니다. 선택한 PC의 QR을 스캔하세요.")
+                        return@addOnSuccessListener
+                    }
+                    saveScannedPairing(payload, policy)
                 } catch (error: IllegalArgumentException) {
                     notifyPairingChanged(
                         error = error.message ?: "지원하지 않는 페어링 QR입니다.",
@@ -298,6 +471,9 @@ class MainActivity : FragmentActivity() {
                                     confirmation.confirmedAtEpochSeconds,
                                 )
                                 notifyPairingChanged(notice = "데스크톱과 페어링을 확인했습니다.")
+                                if (selectedCloudInstanceId == session.request.instanceId) {
+                                    connectRemote()
+                                }
                             } catch (_: Exception) {
                                 notifyPairingChanged(error = "페어링 확인 상태를 저장하지 못했습니다.")
                             }
@@ -573,6 +749,11 @@ class MainActivity : FragmentActivity() {
             notifyPairingChanged(error = "먼저 데스크톱과 페어링을 확인하세요.")
             return
         }
+        val expectedInstanceId = selectedCloudInstanceId
+        if (!CloudBridgeInput.matchesSelectedInstance(expectedInstanceId, metadata.instanceId)) {
+            notifyPairingChanged(error = "선택한 PC와 저장된 E2E 페어링이 다릅니다.")
+            return
+        }
         val policy = try {
             vault.protectionPolicy()
         } catch (error: Exception) {
@@ -668,25 +849,21 @@ class MainActivity : FragmentActivity() {
                         }
                         val session = e2eRemoteClient.open(material)
                         remoteOpeningSession = session
-                        try {
-                            if (remoteConnectionGeneration.get() != connectionGeneration ||
-                                !remoteLifecycleActive
-                            ) {
-                                throw RemoteConnectionCancelledException()
-                            }
-                            RemoteConnection(session, bootstrapRemoteSession(session))
-                        } catch (error: Throwable) {
+                        if (remoteConnectionGeneration.get() != connectionGeneration ||
+                            !remoteLifecycleActive
+                        ) {
                             if (remoteOpeningSession === session) remoteOpeningSession = null
                             session.close()
-                            throw error
+                            throw RemoteConnectionCancelledException()
                         }
+                        session
                     }
                 }
                 runOnUiThread {
                     val stale = remoteConnectionGeneration.get() != connectionGeneration ||
                         !remoteLifecycleActive || isDestroyed
                     if (stale) {
-                        result.getOrNull()?.session?.let { session ->
+                        result.getOrNull()?.let { session ->
                             if (remoteOpeningSession === session) remoteOpeningSession = null
                             session.close()
                         }
@@ -694,24 +871,12 @@ class MainActivity : FragmentActivity() {
                     }
                     remoteConnecting = false
                     result.fold(
-                        onSuccess = { connection ->
-                            val bootstrap = connection.bootstrap
-                            if (remoteOpeningSession === connection.session) {
+                        onSuccess = { session ->
+                            if (remoteOpeningSession === session) {
                                 remoteOpeningSession = null
                             }
-                            remoteSession = connection.session
-                            remoteLeaseId = bootstrap.leaseId
-                            remoteTerminalId = bootstrap.terminalId
-                            remoteTerminalTitle = bootstrap.terminalTitle
-                            remoteGeneration = bootstrap.generation
-                            remoteSourceSeq = bootstrap.sourceSeq
-                            emitRemoteOutput(
-                                bootstrap.output.optString("data"),
-                                reset = true,
-                                bootstrap.output,
-                            )
-                            startRemotePolling()
-                            notifyPairingChanged(notice = "터미널이 종단 암호화로 연결됐습니다.")
+                            remoteSession = session
+                            showRemoteSurface()
                         },
                         onFailure = { error ->
                             closeRemoteSession()
@@ -729,129 +894,237 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun bootstrapRemoteSession(session: RemoteSession): RemoteBootstrap {
-        return bootstrapRemoteSessionWithLease(session, claimRemoteLease(session))
-    }
-
-    private fun claimRemoteLease(session: RemoteSession): String {
-        val claim = remoteHttp(
-            session,
-            "POST",
-            "/remote/v1/session/claim",
-            JSONObject().put("clientName", "Laymux Android E2E"),
-        )
-        val leaseId = claim.getJSONObject("body").optString("leaseId")
-        if (leaseId.isEmpty()) throw E2eProtocolException("원격 제어 lease를 받지 못했습니다.")
-        return leaseId
-    }
-
-    private fun bootstrapRemoteSessionWithLease(
-        session: RemoteSession,
-        leaseId: String,
-    ): RemoteBootstrap {
-        val terminals = remoteHttp(
-            session,
-            "GET",
-            "/remote/v1/terminals",
-            null,
-        ).getJSONObject("body").optJSONArray("terminals") ?: JSONArray()
-        if (terminals.length() == 0) {
-            throw E2eProtocolException("연결할 수 있는 터미널이 없습니다.")
+    private fun loadRemoteResource(path: String): RemoteResourceResponse? {
+        if (path.length > MAX_REMOTE_PATH_LENGTH) return null
+        val session = remoteSession ?: return null
+        if (!remoteLifecycleActive || session.isExpired()) return null
+        val future = try {
+            remoteExecutor.submit<RemoteResourceResponse?> {
+                if (!remoteLifecycleActive || remoteSession !== session) return@submit null
+                val response = e2eRemoteClient.rpc(
+                    session,
+                    JSONObject().put("kind", "resource").put("path", path),
+                )
+                if (response.optString("kind") == "error") {
+                    val status = response.optInt("status", 500).coerceIn(400, 599)
+                    return@submit RemoteResourceResponse.error(
+                        status,
+                        response.optString("error", "Remote resource failed"),
+                    )
+                }
+                RemoteResourceResponse.parse(response)
+            }
+        } catch (_: RejectedExecutionException) {
+            return null
         }
-        val terminal = terminals.getJSONObject(0)
-        val terminalId = terminal.getString("id")
-        val terminalTitle = terminal.optString("title").takeIf(String::isNotEmpty) ?: terminalId
-        remoteHttp(
-            session,
-            "POST",
-            "/remote/v1/terminals/$terminalId/focus",
-            JSONObject().put("leaseId", leaseId),
-        )
-        val output = fetchRemoteOutput(session, terminalId, leaseId)
-        return RemoteBootstrap(
-            leaseId = leaseId,
-            terminalId = terminalId,
-            terminalTitle = terminalTitle,
-            generation = output.getLong("generation"),
-            sourceSeq = output.getLong("sourceSeq"),
-            output = output,
-        )
+        return try {
+            future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        } catch (error: ExecutionException) {
+            handleRemoteFailure(error.cause ?: error, session)
+            null
+        } catch (error: TimeoutException) {
+            future.cancel(true)
+            handleRemoteFailure(
+                E2eTransportException("Remote UI resource request timed out."),
+                session,
+            )
+            null
+        } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            null
+        }
     }
 
-    private fun remoteHttp(
-        session: RemoteSession,
+    fun requestRemoteHttp(
+        requestId: String,
         method: String,
         path: String,
-        body: JSONObject?,
-    ): JSONObject {
-        val response = e2eRemoteClient.rpc(
-            session,
-            JSONObject()
+        bodyJson: String?,
+    ) {
+        if (!validBridgeId(requestId) || path.length > MAX_REMOTE_PATH_LENGTH ||
+            (bodyJson?.length ?: 0) > MAX_REMOTE_HTTP_BODY_CHARS
+        ) {
+            emitHttpError(requestId, "Invalid Remote request.")
+            return
+        }
+        val body = try {
+            bodyJson?.takeIf(String::isNotEmpty)?.let(::JSONObject)
+        } catch (_: Exception) {
+            emitHttpError(requestId, "Remote request body must be a JSON object.")
+            return
+        }
+        val session = remoteSession
+        if (session == null || !remoteLifecycleActive) {
+            emitHttpError(requestId, "Secure session is unavailable.")
+            return
+        }
+        try {
+            remoteExecutor.execute {
+                if (remoteSession !== session || !remoteLifecycleActive) return@execute
+                try {
+                    val response = e2eRemoteClient.rpc(
+                        session,
+                        JSONObject()
+                            .put("kind", "http")
+                            .put("method", method.uppercase())
+                            .put("path", path)
+                            .put("body", body ?: JSONObject.NULL),
+                    )
+                    emitHttpResponse(requestId, normalizeHttpResponse(response))
+                } catch (_: E2eSessionSuspendedException) {
+                    // Foreground resume reloads the authenticated PC-owned page.
+                } catch (error: Throwable) {
+                    emitHttpError(requestId, remoteErrorMessage(error))
+                    handleRemoteFailure(error, session)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            emitHttpError(requestId, "Secure session is unavailable.")
+        }
+    }
+
+    private fun normalizeHttpResponse(response: JSONObject): JSONObject {
+        if (response.optString("kind") == "http") return response
+        if (response.optString("kind") == "error") {
+            return JSONObject()
                 .put("kind", "http")
-                .put("method", method)
-                .put("path", path)
-                .put("body", body ?: JSONObject.NULL),
-        )
-        if (response.optString("kind") != "http") {
-            throw E2eProtocolException("원격 HTTP 응답이 올바르지 않습니다.")
+                .put("status", response.optInt("status", 500))
+                .put(
+                    "body",
+                    JSONObject().put(
+                        "error",
+                        response.optString("error", "Remote request failed"),
+                    ),
+                )
         }
-        val status = response.optInt("status", 500)
-        if (status !in 200..299) {
-            throw RemoteOperationException(
-                status,
-                response.optJSONObject("body")?.optString("error")
-                    ?: response.optString("error", "원격 요청이 거부됐습니다."),
+        throw E2eProtocolException("Remote HTTP response is invalid.")
+    }
+
+    fun openRemoteOutput(streamId: String, terminalId: String, leaseId: String) {
+        if (!validBridgeId(streamId) || terminalId.length > MAX_REMOTE_IDENTIFIER_LENGTH ||
+            leaseId.length > MAX_REMOTE_IDENTIFIER_LENGTH
+        ) {
+            emitOutputClosed(streamId, "Invalid output stream identity.", true)
+            return
+        }
+        closeRemoteOutput(streamId)
+        val session = remoteSession
+        if (session == null || !remoteLifecycleActive) {
+            emitOutputClosed(streamId, "Secure session is unavailable.", true)
+            return
+        }
+        val stream = RemoteOutputStream(streamId, terminalId, leaseId, session)
+        remoteOutputStreams[streamId] = stream
+        try {
+            remoteExecutor.execute {
+                try {
+                    if (!streamIsCurrent(stream)) return@execute
+                    val response = e2eRemoteClient.rpc(
+                        session,
+                        JSONObject()
+                            .put("kind", "terminalOutputOpen")
+                            .put("terminalId", terminalId)
+                            .put("leaseId", leaseId),
+                    )
+                    requireTerminalOutput(response)
+                    if (response.optString("phase") != "snapshot") {
+                        throw E2eProtocolException("Remote output did not begin with a snapshot.")
+                    }
+                    updateOutputCursor(stream, response)
+                    emitOutputFrame(streamId, response)
+                    if (streamIsCurrent(stream)) {
+                        stream.poll = remoteExecutor.scheduleWithFixedDelay(
+                            { pollRemoteOutput(stream) },
+                            REMOTE_POLL_INTERVAL_MS,
+                            REMOTE_POLL_INTERVAL_MS,
+                            TimeUnit.MILLISECONDS,
+                        )
+                    }
+                } catch (_: E2eSessionSuspendedException) {
+                    // Foreground resume reloads the PC-owned page and opens a new stream.
+                } catch (error: RemoteOperationException) {
+                    finishOutputStream(stream, error.message ?: "Remote output closed.", true)
+                } catch (error: Throwable) {
+                    finishOutputStream(stream, remoteErrorMessage(error), true)
+                    handleRemoteFailure(error, session)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            finishOutputStream(stream, "Secure session is unavailable.", true)
+        }
+    }
+
+    fun closeRemoteOutput(streamId: String) {
+        remoteOutputStreams.remove(streamId)?.let { stream ->
+            stream.active = false
+            stream.poll?.cancel(false)
+            stream.poll = null
+        }
+    }
+
+    private fun pollRemoteOutput(stream: RemoteOutputStream) {
+        if (!streamIsCurrent(stream)) return
+        try {
+            val response = e2eRemoteClient.rpc(
+                stream.session,
+                JSONObject()
+                    .put("kind", "terminalOutputPoll")
+                    .put("terminalId", stream.terminalId)
+                    .put("leaseId", stream.leaseId)
+                    .put("generation", stream.generation)
+                    .put("sourceSeq", stream.sourceSeq)
+                    .put("wireSeqOffset", stream.wireSeqOffset),
             )
+            requireTerminalOutput(response)
+            if (!streamIsCurrent(stream)) return
+            when (response.optString("phase")) {
+                "delta", "idle" -> {
+                    updateOutputCursor(stream, response)
+                    emitOutputFrame(stream.streamId, response)
+                }
+                "reattach" -> finishOutputStream(stream, "Remote output requires reattach.", false)
+                else -> throw E2eProtocolException("Remote output response is invalid.")
+            }
+        } catch (_: E2eSessionSuspendedException) {
+            // Foreground resume reloads the PC-owned page and opens a new stream.
+        } catch (error: RemoteOperationException) {
+            finishOutputStream(stream, error.message ?: "Remote output closed.", true)
+        } catch (error: Throwable) {
+            finishOutputStream(stream, remoteErrorMessage(error), true)
+            handleRemoteFailure(error, stream.session)
         }
-        return response
     }
 
-    private fun fetchRemoteOutput(
-        session: RemoteSession,
-        terminalId: String,
-        leaseId: String,
-    ): JSONObject {
-        val response = e2eRemoteClient.rpc(
-            session,
-            JSONObject()
-                .put("kind", "terminalOutputOpen")
-                .put("terminalId", terminalId)
-                .put("leaseId", leaseId),
-        )
-        requireTerminalOutput(response)
-        return response
+    private fun updateOutputCursor(stream: RemoteOutputStream, response: JSONObject) {
+        stream.generation = response.getLong("generation")
+        stream.sourceSeq = response.getLong("sourceSeq")
+        stream.wireSeqOffset = response.getLong("wireSeqOffset")
     }
 
-    private fun startRemotePolling() {
-        if (!remoteLifecycleActive) return
-        remoteBackgroundExpiry?.cancel(false)
-        remoteBackgroundExpiry = null
-        remotePoll?.cancel(false)
-        remotePoll = remoteExecutor.scheduleWithFixedDelay(
-            ::pollRemoteOutput,
-            REMOTE_POLL_INTERVAL_MS,
-            REMOTE_POLL_INTERVAL_MS,
-            TimeUnit.MILLISECONDS,
-        )
-        remoteHeartbeat?.cancel(false)
-        remoteHeartbeat = remoteExecutor.scheduleWithFixedDelay(
-            ::heartbeatRemoteSession,
-            REMOTE_HEARTBEAT_INTERVAL_SECONDS,
-            REMOTE_HEARTBEAT_INTERVAL_SECONDS,
-            TimeUnit.SECONDS,
-        )
+    private fun streamIsCurrent(stream: RemoteOutputStream): Boolean =
+        stream.active && remoteLifecycleActive && remoteSession === stream.session &&
+            remoteOutputStreams[stream.streamId] === stream
+
+    private fun finishOutputStream(stream: RemoteOutputStream, reason: String, isError: Boolean) {
+        if (!remoteOutputStreams.remove(stream.streamId, stream)) return
+        stream.active = false
+        stream.poll?.cancel(false)
+        stream.poll = null
+        emitOutputClosed(stream.streamId, reason, isError)
     }
 
-    private fun cancelRemoteTraffic() {
-        remotePoll?.cancel(false)
-        remotePoll = null
-        remoteHeartbeat?.cancel(false)
-        remoteHeartbeat = null
+    private fun clearRemoteOutputStreams() {
+        remoteOutputStreams.values.toList().forEach { stream ->
+            remoteOutputStreams.remove(stream.streamId, stream)
+            stream.active = false
+            stream.poll?.cancel(false)
+            stream.poll = null
+        }
     }
 
     private fun suspendRemoteSessionForBackground() {
         remoteConnectionGeneration.incrementAndGet()
-        cancelRemoteTraffic()
+        clearRemoteOutputStreams()
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
         remoteOpeningSession?.close()
@@ -893,7 +1166,8 @@ class MainActivity : FragmentActivity() {
         remoteBackgroundExpiry = null
         if (!session.resumeFromBackground()) {
             closeRemoteSession()
-            notifyPairingChanged(notice = "15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
+            showCloudDashboard()
+            showCloudMessage("15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
             return
         }
         val connectionGeneration = remoteConnectionGeneration.incrementAndGet()
@@ -903,7 +1177,6 @@ class MainActivity : FragmentActivity() {
                 val result = runCatching {
                     e2eRemoteClient.resumePending(session)
                     ensureRemoteResumeCurrent(session, connectionGeneration)
-                    resumeRemoteBootstrap(session, connectionGeneration)
                 }
                 runOnUiThread {
                     val stale = remoteConnectionGeneration.get() != connectionGeneration ||
@@ -911,19 +1184,8 @@ class MainActivity : FragmentActivity() {
                     if (stale) return@runOnUiThread
                     remoteConnecting = false
                     result.fold(
-                        onSuccess = { bootstrap ->
-                            remoteLeaseId = bootstrap.leaseId
-                            remoteTerminalId = bootstrap.terminalId
-                            remoteTerminalTitle = bootstrap.terminalTitle
-                            remoteGeneration = bootstrap.generation
-                            remoteSourceSeq = bootstrap.sourceSeq
-                            emitRemoteOutput(
-                                bootstrap.output.optString("data"),
-                                reset = true,
-                                bootstrap.output,
-                            )
-                            startRemotePolling()
-                            notifyPairingChanged(notice = "보안 세션을 다시 연결했습니다.")
+                        onSuccess = {
+                            showRemoteSurface()
                         },
                         onFailure = { error ->
                             closeRemoteSession()
@@ -953,188 +1215,19 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun resumeRemoteBootstrap(
-        session: RemoteSession,
-        connectionGeneration: Long,
-    ): RemoteBootstrap {
-        val leaseId = remoteLeaseId
-        val terminalId = remoteTerminalId
-        val terminalTitle = remoteTerminalTitle ?: terminalId
-        if (leaseId != null && terminalId != null && terminalTitle != null) {
-            try {
-                remoteHttp(
-                    session,
-                    "POST",
-                    "/remote/v1/session/heartbeat",
-                    JSONObject().put("leaseId", leaseId),
-                )
-                ensureRemoteResumeCurrent(session, connectionGeneration)
-                val output = fetchRemoteOutput(session, terminalId, leaseId)
-                return RemoteBootstrap(
-                    leaseId,
-                    terminalId,
-                    terminalTitle,
-                    output.getLong("generation"),
-                    output.getLong("sourceSeq"),
-                    output,
-                )
-            } catch (error: RemoteOperationException) {
-                if (error.status != 409) throw error
-                try {
-                    remoteHttp(
-                        session,
-                        "POST",
-                        "/remote/v1/session/release",
-                        JSONObject().put("leaseId", leaseId),
-                    )
-                } catch (releaseError: RemoteOperationException) {
-                    if (releaseError.status != 409) throw releaseError
-                }
-            }
-        }
-
-        val resumeDeadline = session.expiresAtEpochSeconds
-        var claimedLeaseId: String? = null
-        while (claimedLeaseId == null) {
-            ensureRemoteResumeCurrent(session, connectionGeneration)
-            try {
-                claimedLeaseId = claimRemoteLease(session)
-            } catch (error: RemoteOperationException) {
-                val now = System.currentTimeMillis() / 1_000
-                if (error.status != 409 || now >= resumeDeadline) throw error
-                try {
-                    Thread.sleep(REMOTE_RESUME_RETRY_DELAY_MS)
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw RemoteConnectionCancelledException()
-                }
-            }
-        }
-        ensureRemoteResumeCurrent(session, connectionGeneration)
-        return bootstrapRemoteSessionWithLease(session, claimedLeaseId)
-    }
-
-    private fun heartbeatRemoteSession() {
-        val session = remoteSession ?: return
-        val leaseId = remoteLeaseId ?: return
-        try {
-            remoteHttp(
-                session,
-                "POST",
-                "/remote/v1/session/heartbeat",
-                JSONObject().put("leaseId", leaseId),
-            )
-        } catch (error: Throwable) {
-            handleRemoteFailure(error, session)
-        }
-    }
-
-    private fun pollRemoteOutput() {
-        val session = remoteSession ?: return
-        val terminalId = remoteTerminalId ?: return
-        val leaseId = remoteLeaseId ?: return
-        val generation = remoteGeneration ?: return
-        val sourceSeq = remoteSourceSeq ?: return
-        try {
-            val response = e2eRemoteClient.rpc(
-                session,
-                JSONObject()
-                    .put("kind", "terminalOutputPoll")
-                    .put("terminalId", terminalId)
-                    .put("leaseId", leaseId)
-                    .put("generation", generation)
-                    .put("sourceSeq", sourceSeq),
-            )
-            requireTerminalOutput(response)
-            if (remoteSession !== session) return
-            when (response.optString("phase")) {
-                "delta", "idle" -> {
-                    remoteGeneration = response.getLong("generation")
-                    remoteSourceSeq = response.getLong("sourceSeq")
-                    if (response.optString("phase") == "delta") {
-                        emitRemoteOutput(response.optString("data"), reset = false, response)
-                    }
-                }
-                "reattach" -> {
-                    val snapshot = fetchRemoteOutput(session, terminalId, leaseId)
-                    if (remoteSession !== session) return
-                    remoteGeneration = snapshot.getLong("generation")
-                    remoteSourceSeq = snapshot.getLong("sourceSeq")
-                    emitRemoteOutput(snapshot.optString("data"), reset = true, snapshot)
-                }
-                else -> throw E2eProtocolException("터미널 출력 응답이 올바르지 않습니다.")
-            }
-        } catch (error: Throwable) {
-            handleRemoteFailure(error, session)
-        }
-    }
-
-    fun sendRemoteInput(data: String) {
-        if (data.isEmpty() || data.toByteArray().size > MAX_REMOTE_INPUT_BYTES) return
-        executeRemoteAction { session, terminalId, leaseId ->
-            remoteHttp(
-                session,
-                "POST",
-                "/remote/v1/terminals/$terminalId/write",
-                JSONObject().put("data", data).put("leaseId", leaseId),
-            )
-        }
-    }
-
-    fun resizeRemoteTerminal(cols: Int, rows: Int) {
-        if (cols !in 1..1_000 || rows !in 1..1_000) return
-        executeRemoteAction { session, terminalId, leaseId ->
-            remoteHttp(
-                session,
-                "POST",
-                "/remote/v1/terminals/$terminalId/resize",
-                JSONObject()
-                    .put("cols", cols)
-                    .put("rows", rows)
-                    .put("leaseId", leaseId)
-                    .put("exact", false),
-            )
-        }
-    }
-
-    private fun executeRemoteAction(
-        action: (RemoteSession, String, String) -> Unit,
-    ) {
-        val session = remoteSession ?: return
-        val terminalId = remoteTerminalId ?: return
-        val leaseId = remoteLeaseId ?: return
-        try {
-            remoteExecutor.execute {
-                try {
-                    action(session, terminalId, leaseId)
-                } catch (error: Throwable) {
-                    handleRemoteFailure(error, session)
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            notifyPairingChanged(error = "원격 작업을 시작하지 못했습니다.")
-        }
-    }
-
     fun disconnectRemote() {
-        closeRemoteSession()
-        notifyPairingChanged(notice = "보안 세션을 닫았습니다.")
+        showCloudDashboard()
     }
 
     private fun closeRemoteSession() {
         remoteConnectionGeneration.incrementAndGet()
-        cancelRemoteTraffic()
+        clearRemoteOutputStreams()
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
         remoteOpeningSession?.close()
         remoteOpeningSession = null
         remoteSession?.close()
         remoteSession = null
-        remoteLeaseId = null
-        remoteTerminalId = null
-        remoteTerminalTitle = null
-        remoteGeneration = null
-        remoteSourceSeq = null
         remoteConnecting = false
     }
 
@@ -1146,7 +1239,9 @@ class MainActivity : FragmentActivity() {
             return
         }
         closeRemoteSession()
-        notifyPairingChanged(error = remoteErrorMessage(error))
+        runOnUiThread {
+            if (::webView.isInitialized && !isDestroyed) showCloudDashboard()
+        }
     }
 
     private fun remoteErrorMessage(error: Throwable): String = when (error) {
@@ -1168,22 +1263,36 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun emitRemoteOutput(data: String, reset: Boolean, response: JSONObject) {
-        val geometry = response.optJSONObject("geometry")
-        val cols = geometry?.optInt("cols", 80) ?: 80
-        val rows = geometry?.optInt("rows", 24) ?: 24
-        val modes = response.optJSONObject("modes")
-        val bracketedPaste = modes
-            ?.takeIf { it.has("bracketedPaste") && !it.isNull("bracketedPaste") }
-            ?.getBoolean("bracketedPaste")
+    private fun emitHttpResponse(requestId: String, response: JSONObject) {
+        emitWrapperCallback("onHttpResponse", requestId, response.toString())
+    }
+
+    private fun emitHttpError(requestId: String, message: String) {
+        emitWrapperCallback("onHttpError", requestId, message)
+    }
+
+    private fun emitOutputFrame(streamId: String, response: JSONObject) {
+        emitWrapperCallback("onOutputFrame", streamId, response.toString())
+    }
+
+    private fun emitOutputClosed(streamId: String, reason: String, isError: Boolean) {
+        emitWrapperCallback("onOutputClosed", streamId, reason, isError.toString())
+    }
+
+    private fun emitWrapperCallback(method: String, vararg arguments: String) {
+        val encodedArguments = arguments.joinToString(",") { JSONObject.quote(it) }
         runOnUiThread {
             if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
             webView.evaluateJavascript(
-                RemoteOutputBridge.script(data, reset, cols, rows, bracketedPaste),
+                "window.laymuxAndroidE2e?.$method($encodedArguments);",
                 null,
             )
         }
     }
+
+    private fun validBridgeId(value: String): Boolean =
+        value.isNotEmpty() && value.length <= MAX_BRIDGE_ID_LENGTH &&
+            value.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
     private fun completePairingConfirmation(
         pending: PendingPairingDecryption,
@@ -1256,7 +1365,17 @@ class MainActivity : FragmentActivity() {
         super.onStart()
         remoteLifecycleActive = true
         resumeRemoteSessionAfterBackground()
-        if (::webView.isInitialized) notifyPairingChanged()
+        if (::webView.isInitialized) {
+            if (remoteSession == null &&
+                webView.url?.startsWith(
+                    "https://${LocalContentWebViewClient.REMOTE_WRAPPER_HOST}/",
+                ) == true
+            ) {
+                showCloudDashboard()
+            } else {
+                notifyPairingChanged()
+            }
+        }
     }
 
     override fun onStop() {
@@ -1291,15 +1410,23 @@ class MainActivity : FragmentActivity() {
             webView.stopLoading()
             webView.destroy()
         }
+        if (::cloudWebView.isInitialized) {
+            cloudWebView.removeJavascriptInterface(CLOUD_BRIDGE_NAME)
+            cloudWebView.stopLoading()
+            cloudWebView.destroy()
+        }
         super.onDestroy()
     }
 
     companion object {
         private const val NATIVE_BRIDGE_NAME = "LaymuxNative"
+        private const val CLOUD_BRIDGE_NAME = "LaymuxCloud"
         private const val REMOTE_POLL_INTERVAL_MS = 120L
-        private const val REMOTE_HEARTBEAT_INTERVAL_SECONDS = 10L
-        private const val REMOTE_RESUME_RETRY_DELAY_MS = 1_000L
-        private const val MAX_REMOTE_INPUT_BYTES = 64 * 1024
+        private const val REMOTE_RESOURCE_TIMEOUT_SECONDS = 20L
+        private const val MAX_REMOTE_PATH_LENGTH = 2_048
+        private const val MAX_REMOTE_HTTP_BODY_CHARS = 256 * 1024
+        private const val MAX_REMOTE_IDENTIFIER_LENGTH = 512
+        private const val MAX_BRIDGE_ID_LENGTH = 64
     }
 
     private enum class DecryptionPurpose {
@@ -1308,18 +1435,16 @@ class MainActivity : FragmentActivity() {
         CONNECT,
     }
 
-    private data class RemoteBootstrap(
-        val leaseId: String,
+    private data class RemoteOutputStream(
+        val streamId: String,
         val terminalId: String,
-        val terminalTitle: String,
-        val generation: Long,
-        val sourceSeq: Long,
-        val output: JSONObject,
-    )
-
-    private data class RemoteConnection(
+        val leaseId: String,
         val session: RemoteSession,
-        val bootstrap: RemoteBootstrap,
+        @Volatile var generation: Long = 0,
+        @Volatile var sourceSeq: Long = 0,
+        @Volatile var wireSeqOffset: Long = 0,
+        @Volatile var active: Boolean = true,
+        @Volatile var poll: ScheduledFuture<*>? = null,
     )
 
     private class RemoteOperationException(

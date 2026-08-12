@@ -16,64 +16,14 @@
   const confirmButton = document.getElementById("confirmButton");
   const verifyButton = document.getElementById("verifyButton");
   const forgetButton = document.getElementById("forgetButton");
+  const cloudButton = document.getElementById("cloudButton");
   const remoteSection = document.getElementById("remoteSection");
   const remoteBadge = document.getElementById("remoteBadge");
   const remoteTitle = document.getElementById("remoteTitle");
   const remoteDescription = document.getElementById("remoteDescription");
   const connectButton = document.getElementById("connectButton");
   const disconnectButton = document.getElementById("disconnectButton");
-  const terminalShell = document.getElementById("terminalShell");
-  const terminalElement = document.getElementById("terminal");
-
   const nativeBridge = window.LaymuxNative;
-  const TerminalCtor = window.Terminal;
-  const FitAddonCtor = window.FitAddon && window.FitAddon.FitAddon;
-  let terminal = null;
-  let fitAddon = null;
-  let resizeTimer = null;
-
-  function ensureTerminal() {
-    if (terminal || !TerminalCtor || !FitAddonCtor) return terminal;
-    terminal = new TerminalCtor({
-      cursorBlink: true,
-      convertEol: false,
-      fontFamily: '"Cascadia Mono", "D2Coding", monospace',
-      fontSize: 13,
-      scrollback: 5000,
-      theme: {
-        background: "#11111b",
-        foreground: "#cdd6f4",
-        cursor: "#f5e0dc",
-        selectionBackground: "#585b70aa",
-      },
-    });
-    fitAddon = new FitAddonCtor();
-    terminal.loadAddon(fitAddon);
-    terminal.open(terminalElement);
-    terminal.onData((data) => nativeBridge.sendRemoteInput(data));
-    terminal.onResize(({ cols, rows }) => {
-      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => {
-        nativeBridge.resizeRemoteTerminal(cols, rows);
-      }, 80);
-    });
-    return terminal;
-  }
-
-  function fitTerminal() {
-    if (!fitAddon) return;
-    window.requestAnimationFrame(() => fitAddon.fit());
-  }
-
-  function decodeBase64Url(value) {
-    const padding = "=".repeat((4 - (value.length % 4)) % 4);
-    const binary = window.atob(value.replace(/-/g, "+").replace(/_/g, "/") + padding);
-    const output = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-      output[index] = binary.charCodeAt(index);
-    }
-    return output;
-  }
 
   function render(statusValue) {
     const status = statusValue || {};
@@ -149,22 +99,12 @@
     connectButton.disabled = remoteConnecting || (biometricRequired && !biometricAvailable);
     connectButton.textContent = remoteConnecting ? "보안 세션 여는 중…" : "보안 세션 열기";
     disconnectButton.hidden = !remoteConnected;
-    terminalShell.hidden = !remoteConnected;
     remoteBadge.textContent = remoteConnected ? "E2E 연결됨" : "E2E 잠김";
     remoteBadge.classList.toggle("connected", remoteConnected);
-    remoteTitle.textContent = remoteConnected
-      ? status.remoteTerminalTitle || "암호화 터미널"
-      : "암호화 터미널";
+    remoteTitle.textContent = remoteConnected ? "Laymux Remote" : "암호화 원격 연결";
     remoteDescription.textContent = remoteConnected
       ? "백그라운드에서는 통신을 멈추고 키를 최대 15분간 보존합니다. 돌아오면 자동으로 다시 연결합니다."
       : "생체 인증 후 세션을 엽니다. 사용 중에는 유지되고 15분 비활성 시 잠깁니다.";
-    if (remoteConnected) {
-      ensureTerminal();
-      fitTerminal();
-    } else if (terminal) {
-      terminal.reset();
-      terminal.clear();
-    }
   }
 
   function readInitialStatus() {
@@ -235,7 +175,9 @@
     nativeBridge.disconnectRemote();
   });
 
-  window.addEventListener("resize", fitTerminal);
+  cloudButton.addEventListener("click", () => {
+    nativeBridge.showCloudDashboard();
+  });
 
   window.laymuxNative = Object.freeze({
     onPairingChanged(statusJson) {
@@ -249,21 +191,6 @@
           error: "페어링 상태 응답이 올바르지 않습니다.",
         });
       }
-    },
-    onRemoteOutput(data, reset, cols, rows, bracketedPaste) {
-      const current = ensureTerminal();
-      if (!current) return;
-      terminalShell.hidden = false;
-      if (reset) current.reset();
-      if (Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0) {
-        current.resize(cols, rows);
-      }
-      current.write(decodeBase64Url(data), () => {
-        if (reset && typeof bracketedPaste === "boolean") {
-          current.write(bracketedPaste ? "\x1b[?2004h" : "\x1b[?2004l");
-        }
-        fitTerminal();
-      });
     },
   });
 
