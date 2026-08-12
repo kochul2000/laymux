@@ -347,6 +347,23 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         100,
         u64::MAX,
     );
+    range_u64(
+        issues,
+        "/terminal/outputActivityBurst/volumeWindowMs",
+        settings.terminal.output_activity_burst.volume_window_ms,
+        100,
+        u64::MAX,
+    );
+    range_u64(
+        issues,
+        "/terminal/outputActivityBurst/volumeThresholdBytes",
+        settings
+            .terminal
+            .output_activity_burst
+            .volume_threshold_bytes,
+        super::models::MIN_VOLUME_THRESHOLD_BYTES,
+        u64::MAX,
+    );
     for (path, share) in [
         (
             "/terminal/parserAdmission/focusedShare",

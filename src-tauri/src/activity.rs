@@ -1014,6 +1014,82 @@ impl BurstDetector {
     }
 }
 
+/// Sliding-window detector for sustained *output volume*, the one activity
+/// signal that needs no cooperation from the app in the pane ([ADR-0147]).
+///
+/// `BurstDetector` above counts DEC 2026 frames, so it only sees apps that
+/// draw synchronized frames fast enough to clear its threshold. This one sums
+/// raw PTY bytes instead: a pane emitting `threshold_bytes` within `window` is
+/// working no matter which app produced them or how it renders.
+///
+/// The threshold is what keeps this from becoming the forbidden "any output
+/// means active" rule. What it has to reject — prompt redraw, focus redraw,
+/// keystroke echo — is bounded per event (one frame each), so a threshold set
+/// far above human typing throughput excludes all three while still catching
+/// build logs, test output and streamed responses. Emission is throttled the
+/// same way as the frame path.
+///
+/// [ADR-0147]: ../../docs/adr/0147-output-volume-activity-and-app-declared-idle.md
+pub struct OutputVolumeDetector {
+    window: std::time::Duration,
+    threshold_bytes: u64,
+    throttle: std::time::Duration,
+    inner: std::sync::Mutex<OutputVolumeDetectorInner>,
+}
+
+struct OutputVolumeDetectorInner {
+    window_start: Instant,
+    window_bytes: u64,
+    last_emit: Instant,
+}
+
+impl OutputVolumeDetector {
+    pub fn new(window_ms: u64, threshold_bytes: u64, throttle_ms: u64) -> Self {
+        let now = Instant::now();
+        Self {
+            window: std::time::Duration::from_millis(window_ms),
+            threshold_bytes,
+            throttle: std::time::Duration::from_millis(throttle_ms),
+            inner: std::sync::Mutex::new(OutputVolumeDetectorInner {
+                window_start: now,
+                window_bytes: 0,
+                last_emit: now - std::time::Duration::from_millis(throttle_ms + 1),
+            }),
+        }
+    }
+
+    /// Record `len` bytes of PTY output. Returns `true` when an activity event
+    /// should be emitted (window volume reached the threshold + the throttle
+    /// interval has elapsed).
+    ///
+    /// Runs on the PTY callback's hot path, so the work here is a saturating
+    /// add and two `Instant` comparisons — the bytes themselves are never
+    /// re-scanned.
+    pub fn record_bytes(&self, len: usize) -> bool {
+        let Ok(mut inner) = self.inner.lock_or_err() else {
+            return false;
+        };
+        let now = Instant::now();
+        let len = len as u64;
+
+        if now.duration_since(inner.window_start) > self.window {
+            inner.window_start = now;
+            inner.window_bytes = len;
+        } else {
+            inner.window_bytes = inner.window_bytes.saturating_add(len);
+        }
+
+        if inner.window_bytes >= self.threshold_bytes
+            && now.duration_since(inner.last_emit) >= self.throttle
+        {
+            inner.last_emit = now;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 // ── Boundary-safe marker scanner ──
 
 /// Scans streamed byte chunks for a fixed-length marker, correctly detecting
@@ -1162,6 +1238,10 @@ pub struct PtyCallbackState {
     /// it moved (ADR-0136 §5).
     pub detection_epoch: AtomicU64,
     pub burst_detector: BurstDetector,
+    /// Volume-based activity detector — the app-agnostic signal that keeps the
+    /// working verdict alive when the frame and title paths both miss
+    /// (ADR-0147).
+    pub volume_detector: OutputVolumeDetector,
     /// Boundary-aware DEC 2026 marker scanner. Mutex because `scan` mutates
     /// the internal tail, while the enclosing `PtyCallbackState` is shared
     /// via `Arc` across the PTY callback closure.
@@ -1169,12 +1249,23 @@ pub struct PtyCallbackState {
 }
 
 impl PtyCallbackState {
-    pub fn new(burst_window_ms: u64, burst_threshold: u64, throttle_ms: u64) -> Self {
+    pub fn new(
+        burst_window_ms: u64,
+        burst_threshold: u64,
+        throttle_ms: u64,
+        volume_window_ms: u64,
+        volume_threshold_bytes: u64,
+    ) -> Self {
         Self {
             claude_detected: AtomicBool::new(false),
             codex_detected: AtomicBool::new(false),
             detection_epoch: AtomicU64::new(0),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
+            volume_detector: OutputVolumeDetector::new(
+                volume_window_ms,
+                volume_threshold_bytes,
+                throttle_ms,
+            ),
             dec_sync_scanner: std::sync::Mutex::new(MarkerTailScanner::new(
                 crate::constants::DEC_SYNC_OUTPUT_SET,
             )),
@@ -2211,6 +2302,78 @@ mod tests {
         assert!(detector.record_hit()); // still above threshold, 0ms throttle → emit again
     }
 
+    // ── OutputVolumeDetector tests (ADR-0147) ──
+    //
+    // The volume path exists because the frame path cannot see an app whose
+    // render cadence is slower than its threshold. Claude Code 2.1.228 animates
+    // its title every 960ms — ~2 frames per 2s window against a threshold of 6
+    // — so a long tool call produced no activity signal at all and the pane
+    // reported ✓ while it was busy.
+
+    const TEST_VOLUME_THRESHOLD: u64 = 64 * 1024;
+
+    #[test]
+    fn volume_below_threshold_does_not_emit() {
+        let detector = OutputVolumeDetector::new(2000, TEST_VOLUME_THRESHOLD, 1000);
+        // A prompt redraw and a few keystroke echoes: bounded per event, far
+        // under the threshold no matter how many arrive in one window.
+        for _ in 0..20 {
+            assert!(!detector.record_bytes(512));
+        }
+    }
+
+    #[test]
+    fn volume_at_threshold_emits() {
+        let detector = OutputVolumeDetector::new(2000, TEST_VOLUME_THRESHOLD, 1000);
+        assert!(!detector.record_bytes(32 * 1024));
+        assert!(detector.record_bytes(32 * 1024)); // cumulative 64 KiB → emit
+    }
+
+    #[test]
+    fn volume_single_large_chunk_emits() {
+        // Bulk output can arrive as one chunk; the window sum must not require
+        // several calls to reach the threshold.
+        let detector = OutputVolumeDetector::new(2000, TEST_VOLUME_THRESHOLD, 1000);
+        assert!(detector.record_bytes(128 * 1024));
+    }
+
+    #[test]
+    fn volume_throttle_prevents_rapid_emit() {
+        let detector = OutputVolumeDetector::new(2000, TEST_VOLUME_THRESHOLD, 1000);
+        assert!(detector.record_bytes(TEST_VOLUME_THRESHOLD as usize));
+        // Still inside the throttle interval even though the window sum keeps
+        // growing.
+        assert!(!detector.record_bytes(TEST_VOLUME_THRESHOLD as usize));
+        assert!(!detector.record_bytes(TEST_VOLUME_THRESHOLD as usize));
+    }
+
+    #[test]
+    fn volume_window_expired_resets_sum() {
+        // 0ms window → every call starts a fresh window, so bytes from earlier
+        // calls never accumulate. Guards against a sum that grows forever and
+        // pins the pane to ⏳ after one busy moment.
+        let detector = OutputVolumeDetector::new(0, TEST_VOLUME_THRESHOLD, 0);
+        for _ in 0..10 {
+            assert!(!detector.record_bytes(32 * 1024));
+        }
+    }
+
+    #[test]
+    fn volume_sustained_output_emits_after_throttle() {
+        let detector = OutputVolumeDetector::new(5000, TEST_VOLUME_THRESHOLD, 0);
+        assert!(detector.record_bytes(TEST_VOLUME_THRESHOLD as usize));
+        assert!(detector.record_bytes(1)); // window sum still over → emit again
+    }
+
+    #[test]
+    fn volume_saturates_instead_of_overflowing() {
+        let detector = OutputVolumeDetector::new(60_000, u64::MAX, 0);
+        // usize::MAX twice would overflow a plain add; saturation keeps the
+        // PTY callback from panicking on a pathological window.
+        detector.record_bytes(usize::MAX);
+        detector.record_bytes(usize::MAX);
+    }
+
     // ── MarkerTailScanner: boundary-split DEC 2026 detection ──
     //
     // Regression cover for #232: PTY chunks are not byte-aligned so
@@ -2327,7 +2490,7 @@ mod tests {
     fn pty_callback_state_scan_preserves_tail_across_calls() {
         // Integration-style test against `PtyCallbackState::scan_dec_sync_marker`
         // — the actual entry point invoked by the PTY callback.
-        let state = PtyCallbackState::new(2000, 3, 1000);
+        let state = PtyCallbackState::new(2000, 3, 1000, 2000, 64 * 1024);
         assert!(!state.scan_dec_sync_marker(b"noise\x1b[?20"));
         assert!(state.scan_dec_sync_marker(b"26h more"));
     }
@@ -2338,7 +2501,7 @@ mod tests {
         // callback, so `burst_detector.record_hit()` was called at most once.
         // The new scanner must keep that contract even when a boundary-split
         // marker AND an in-body marker both occur in the second chunk.
-        let state = PtyCallbackState::new(2000, 3, 1000);
+        let state = PtyCallbackState::new(2000, 3, 1000, 2000, 64 * 1024);
         assert!(!state.scan_dec_sync_marker(b"head\x1b[?"));
         // Chunk 2 completes the split marker AND contains another full marker.
         // Caller calls `record_hit()` once — treat as single hit.
@@ -2491,7 +2654,8 @@ mod tests {
 
         let state = AppState::new();
         let tid = "t-callback-flag";
-        let callback_state = std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000));
+        let callback_state =
+            std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000, 2000, 64 * 1024));
         callback_state
             .claude_detected
             .store(true, Ordering::Relaxed);
@@ -2520,7 +2684,8 @@ mod tests {
 
     fn state_with_callback(tid: &str) -> (AppState, std::sync::Arc<PtyCallbackState>) {
         let state = AppState::new();
-        let callback_state = std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000));
+        let callback_state =
+            std::sync::Arc::new(PtyCallbackState::new(2000, 3, 1000, 2000, 64 * 1024));
         state
             .pty_callback_states
             .lock()

@@ -49,10 +49,8 @@ describe("ClaudeActivityHandler", () => {
       });
     });
 
-    it("prefers active output over exitCode and idle title", () => {
-      expect(
-        handler.computeStatus(raw({ outputActive: true, exitCode: 0, title: "✳ Claude Code" })),
-      ).toEqual({
+    it("prefers active output over a stale exitCode", () => {
+      expect(handler.computeStatus(raw({ outputActive: true, exitCode: 0 }))).toEqual({
         icon: "⏳",
         color: "var(--yellow)",
       });
@@ -86,11 +84,39 @@ describe("ClaudeActivityHandler", () => {
       expect(handler.computeStatus(raw({ title: "✳ Fix the bug" })).icon).toBe("✓");
     });
 
-    it("idle title does not override active output (still running)", () => {
-      // Edge case: spinner title flips transiently while outputActive is true.
+    it("declared idle outranks active output (ADR-0147)", () => {
+      // ✳ is Claude saying "I am waiting for input"; outputActive is activity
+      // *inferred* from output volume / DEC 2026 frames. Ranked the other way,
+      // the trailing chunks of a finished response keep an idle pane at ⏳ for
+      // the full 2s of the frontend timer, and any TUI that redraws while idle
+      // stays pinned to ⏳ forever.
       expect(handler.computeStatus(raw({ outputActive: true, title: "✳ Claude Code" })).icon).toBe(
-        "⏳",
+        "✓",
       );
+    });
+
+    // ── half-circle spinner titles (Claude Code 2.1.228) ──
+    // 2.1.228 swapped the star/Braille title animation for `◐`/`◑` alternating
+    // every 960ms. The old spinner list matched neither, and at ~2 frames per
+    // 2s window the DEC 2026 burst threshold (6) was never reached either, so a
+    // long tool call showed ✓ for its whole duration.
+
+    it("returns ⏳ for half-circle spinner titles", () => {
+      for (const title of ["\u25D0 Honking\u2026", "\u25D1 Honking\u2026"]) {
+        expect(handler.computeStatus(raw({ title, outputActive: false, exitCode: 0 }))).toEqual({
+          icon: "⏳",
+          color: "var(--yellow)",
+        });
+      }
+    });
+
+    it("returns ⏳ from output volume when the title carries no spinner at all", () => {
+      // CLAUDE_CODE_DISABLE_TERMINAL_TITLE, a renamed title, or a spinner
+      // character laymux does not know yet. outputActive is the app-agnostic
+      // floor that keeps the verdict right regardless (ADR-0147).
+      expect(
+        handler.computeStatus(raw({ title: "Claude Code", outputActive: true, exitCode: 0 })).icon,
+      ).toBe("⏳");
     });
 
     it("falls back to shell idle status for non-idle unknown title", () => {

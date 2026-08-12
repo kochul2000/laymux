@@ -69,6 +69,28 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 `export`/`unset`을 사용한다. WSL rcfile은 `.bashrc` 전후에 계약을 적용하고 `WSLENV` 전체를
 버리지 않고 제거 대상 항목만 정리한다.
 
+### 출력 활동 감지 임계
+
+```jsonc
+{
+  "terminal": {
+    "outputActivityBurst": {
+      "windowMs": 2000, // DEC 2026h 프레임을 세는 슬라이딩 윈도
+      "threshold": 6, // 윈도 내 최소 프레임 수
+      "throttleMs": 1000, // 터미널당 이벤트 최소 간격 (두 검출기 공유)
+      "volumeWindowMs": 2000, // 원시 출력 바이트를 합산하는 슬라이딩 윈도
+      "volumeThresholdBytes": 65536, // 윈도 내 누적 바이트 임계 (기본 64KiB)
+    }
+  }
+}
+```
+
+한 블록에 **독립된 두 검출기**가 들어 있다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md)) — 협조하는 TUI 를 위한 DEC 2026 프레임 버스트와, 앱 협조가 전혀 필요 없는 원시 바이트 볼륨. 둘은 `throttleMs` 만 공유하고 서로의 판정에 개입하지 않는다. 판정 결과와 사각 커버리지는 [data-flow.md §outputActive 감지](./data-flow.md)에 있다.
+
+**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. `validate_settings` 가 범위 밖 값을 `/terminal/outputActivityBurst/<field>` 경로로 `out_of_range` 보고하고, 실행 경로는 그와 별개로 `sanitized()` 에서 항상 clamp 한다(parserAdmission 과 같은 "보고 + clamp" 정책). 하한은 `windowMs`·`throttleMs`·`volumeWindowMs` 100, `threshold` 2, `volumeThresholdBytes` **4096** 이다. 볼륨 하한이 1 이 아닌 이유는 계약이다 — 더 낮은 값은 "출력이 있으면 활성" 규칙이 되고 그것은 ADR-0147 이 계속 금지하므로, 설정으로 표현할 수 없게 막는다. 기본 64KiB(≈ 지속 32KiB/s)는 프롬프트 리드로·포커스 리드로·키 에코가 낼 수 있는 양보다 훨씬 위로 잡은 값이다. 타이핑 중 ⏳ 가 보이면 올리고, 명백히 바쁜 pane 이 유휴로 남으면 내린다.
+
+적용 시점은 **nextUse** 다. 두 검출기는 PTY spawn 시점에 터미널당 하나씩 만들어지므로, 저장 이후 새로 생성한 터미널부터 새 값이 적용되고 실행 중인 pane 의 검출기는 그대로 남는다.
+
 ### xterm parser admission 클래스 몫
 
 ```jsonc
@@ -398,9 +420,11 @@ Claude Code 실행 여부는 **터미널 타이틀(OSC 0/2)의 접두사**로 �
 |------|------------|------|
 | 초기 진입 | `"Claude Code"` 문자열 포함 | `Claude Code` |
 | 유휴 (idle) | `✳` (U+2733) 접두어 | `✳ Claude Code` |
-| 작업 중 | 스피너 문자 접두어 (`✶✻✽✢` 또는 Braille U+2800..U+28FF) | `✢ Working on task`, `⠐ Task description` |
+| 작업 중 | 스피너 문자 접두어 (`✶✻✽✢`, `◐◑`, 또는 Braille U+2800..U+28FF) | `✢ Working on task`, `⠐ Task description`, `◑ Honking…` |
 
-**종료 판단**: 타이틀에 `"Claude Code"` 문자열이 없고 **동시에** 스피너 접두사 문자(`✶✻✽✢✳` 또는 Braille 패턴 U+2800..U+28FF)로도 시작하지 않을 때만 Claude Code가 종료된 것으로 판단한다. Claude Code v2.1+는 Braille 문자(`⠂⠐⠋⠙` 등)를 애니메이션 스피너로 사용한다. 스피너 접두사만 있는 타이틀(예: `✢ Working`, `⠐ Task`)은 여전히 Claude Code 실행 중이다.
+**스피너 문자 집합은 빌드마다 다르다.** Claude Code v2.1 계열은 Braille(`⠂⠐⠋⠙` 등)을 썼고, 2.1.228 은 반원 두 개(`◐`/`◑`, U+25D0/25D1)를 960ms 주기로 교대한다. 정본 목록은 Rust `claude_activity.rs` 의 `WORKING_SPINNERS` 와 프론트 `claude-activity-handler.ts` 두 곳이며 **동기화 의무**가 있다. 이 목록은 편의이지 활성 판정의 근거가 아니다 — 목록이 낡거나 타이틀에 접두어가 없어도 출력 볼륨 경로가 판정을 받친다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md), [data-flow.md §outputActive 감지](./data-flow.md)).
+
+**종료 판단**: 타이틀에 `"Claude Code"` 문자열이 없고 **동시에** 스피너 접두사 문자(위 working 집합 + `✳`)로도 시작하지 않을 때만 Claude Code가 종료된 것으로 판단한다. 스피너 접두사만 있는 타이틀(예: `✢ Working`, `⠐ Task`, `◑ Honking…`)은 여전히 Claude Code 실행 중이다. 목록에 없는 스피너 문자는 여기서 **거짓 종료**를 만든다 — 타이틀 rename 으로 `"Claude Code"` 문자열까지 사라진 경우 activity 가 shell 로 리셋된다. 최종 생존 판정은 프로세스 트리가 소유하므로([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md)) 이 오판은 reconcile 이 정정하지만, 목록 갱신을 미룰 이유는 아니다.
 
 **`known_claude_terminals` 폴백**: 최초 `"Claude Code"` 타이틀 감지 시 `known_claude_terminals` 집합에 등록한다. 이후 스피너 타이틀이 오더라도 이 집합에 있으면 `interactiveApp: "Claude"`를 유지한다. 종료 판단 시에만 집합에서 제거한다.
 

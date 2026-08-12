@@ -348,6 +348,8 @@ pub fn create_terminal_session(
         burst.window_ms,
         burst.threshold,
         burst.throttle_ms,
+        burst.volume_window_ms,
+        burst.volume_threshold_bytes,
     ));
     // Published below, once the id-keyed tables are installed — see the
     // `terminals.insert` block. Registering here instead would leak the entry on
@@ -451,11 +453,25 @@ pub fn create_terminal_session(
             }
         }
 
-        // ── DEC 2026 burst detection: sustained TUI activity ──
-        // See activity::BurstDetector for sliding window + throttle logic.
-        // The scanner carries a 7-byte tail across calls so markers straddling
-        // PTY chunk boundaries are still detected (see #232).
-        if pty_cb_state.scan_dec_sync_marker(&data) && pty_cb_state.burst_detector.record_hit() {
+        // ── Output activity detection: two independent signals (ADR-0147) ──
+        // DEC 2026 frame burst — see activity::BurstDetector for sliding window
+        // + throttle logic. The scanner carries a 7-byte tail across calls so
+        // markers straddling PTY chunk boundaries are still detected (see #232).
+        //
+        // Output volume — the app-agnostic floor. The frame path only sees apps
+        // that draw fast enough to clear its threshold; Claude Code's 960ms
+        // title spinner produces ~2 frames per 2s window and misses it entirely,
+        // and no frame path exists for a plain shell spewing build logs. Both
+        // are the same "pane is working" verdict, so both emit the same event
+        // and either one alone keeps the frontend's 2s timer alive.
+        //
+        // Evaluate volume unconditionally (not in an `else`): a chunk can carry
+        // both a frame marker and bulk output, and `record_bytes` has to see
+        // every byte for its window sum to mean anything.
+        let frame_burst =
+            pty_cb_state.scan_dec_sync_marker(&data) && pty_cb_state.burst_detector.record_hit();
+        let volume_burst = pty_cb_state.volume_detector.record_bytes(data.len());
+        if frame_burst || volume_burst {
             let _ = app_clone.emit(
                 EVENT_TERMINAL_OUTPUT_ACTIVITY,
                 serde_json::json!({ "terminalId": terminal_id }),
