@@ -2113,6 +2113,7 @@
         let selectionHandles = null;
         let selectionHandleDrag = null;
         let lastCopiedSelection = "";
+        let suppressSelectionMouseupAfterInteraction = false;
 
         // UX contract: long press. This delay is only the local gesture threshold.
         const INTERNAL_TOUCH_LONG_PRESS_DELAY_MS = 500;
@@ -3834,7 +3835,38 @@
           touchGesture.mode = "selecting";
           touchGesture.forceSelection = shouldForceTouchSelection(term);
           touchGesture.scrollRemainderPx = 0;
-          dispatchTouchSelectionMouse(element, "mousedown", touchGesture.startPoint, touchGesture.forceSelection);
+          // A stationary long press should create a useful selection immediately.
+          // xterm uses click detail=2 for word mode (the same path as a desktop
+          // double-click). Finish that synthetic click immediately so later
+          // touch movement can extend the captured word by individual cells.
+          dispatchTouchSelectionMouse(
+            element,
+            "mousedown",
+            touchGesture.startPoint,
+            touchGesture.forceSelection,
+            2
+          );
+          suppressSelectionMouseupAfterInteraction = true;
+          try {
+            dispatchTouchSelectionMouse(
+              document,
+              "mouseup",
+              touchGesture.startPoint,
+              touchGesture.forceSelection,
+              2
+            );
+          } finally {
+            suppressSelectionMouseupAfterInteraction = false;
+          }
+          const selection = term.getSelectionPosition && term.getSelectionPosition();
+          touchGesture.selectionSeed = selection
+            ? {
+                start: { x: selection.start.x, y: selection.start.y },
+                end: { x: selection.end.x, y: selection.end.y },
+              }
+            : null;
+          updateTerminalControls();
+          updateSelectionHandles(term);
         }
 
         function triggerTouchTapSelection(term, element, point, detail) {
@@ -3896,6 +3928,29 @@
           }
           updateTerminalControls();
           updateSelectionHandles(term);
+        }
+
+        function extendTouchSelection(term, gesture, point) {
+          const seed = gesture && gesture.selectionSeed;
+          const focus = touchCellCoords(term, point);
+          if (!seed || !focus) return;
+          const offset = (position) => position.y * term.cols + position.x;
+          const focusOffset = offset(focus);
+          const startOffset = offset(seed.start);
+          const endOffset = offset(seed.end);
+
+          if (focusOffset < startOffset) {
+            applySelectionRange(term, seed.end, focus);
+          } else if (focusOffset > endOffset) {
+            applySelectionRange(term, seed.start, focus);
+          } else {
+            applySelectionRange(term, seed.start, seed.end);
+          }
+        }
+
+        function handleSelectionMouseupAfterInteraction() {
+          if (suppressSelectionMouseupAfterInteraction) return;
+          copySelectionAfterInteraction();
         }
 
         function updateSelectionHandles(term) {
@@ -4022,6 +4077,7 @@
               startPoint: point,
               lastY: point.clientY,
               forceSelection: false,
+              selectionSeed: null,
               longPressTimer: null,
               scrollRemainderPx: 0,
             };
@@ -4063,7 +4119,7 @@
               return;
             }
 
-            dispatchTouchSelectionMouse(document, "mousemove", point, touchGesture.forceSelection);
+            extendTouchSelection(term, touchGesture, point);
           }, pointerOptions);
 
           const finishTouchSelection = (event) => {
@@ -4087,9 +4143,6 @@
             clearTouchLongPressTimer();
             if (touchGesture.mode === "pending") {
               handleTouchTap(term, element, point);
-            }
-            if (touchGesture.mode === "selecting") {
-              dispatchTouchSelectionMouse(document, "mouseup", point, touchGesture.forceSelection);
             }
             resetTouchGesture(element);
             updateTerminalControls();
@@ -7950,7 +8003,7 @@
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
         // schedules the copy after every listener for this event has run.
-        document.addEventListener("mouseup", copySelectionAfterInteraction);
+        document.addEventListener("mouseup", handleSelectionMouseupAfterInteraction);
         keepInputSurfaceFocus(scrollToBottomButton);
         scrollToBottomButton.addEventListener("click", () => {
           if (!terminal) return;
