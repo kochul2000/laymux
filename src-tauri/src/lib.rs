@@ -2,6 +2,7 @@
 pub mod activity;
 pub mod activity_order;
 pub mod activity_reconcile;
+pub mod android_e2e;
 pub mod android_pairing;
 pub mod automation_server;
 #[cfg(test)]

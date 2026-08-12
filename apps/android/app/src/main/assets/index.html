@@ -11,6 +11,7 @@
       content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     />
     <title>Laymux</title>
+    <link rel="stylesheet" href="xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -70,12 +71,34 @@
         </button>
       </section>
 
+      <section id="remoteSection" class="card remote" hidden>
+        <div class="remote-heading">
+          <div>
+            <div id="remoteBadge" class="badge secure">E2E 잠김</div>
+            <h2 id="remoteTitle">암호화 터미널</h2>
+          </div>
+          <button id="disconnectButton" class="compact" type="button" hidden>
+            연결 해제
+          </button>
+        </div>
+        <p id="remoteDescription">
+          생체 인증 후 세션을 엽니다. 사용 중에는 유지되고 15분 비활성 시 잠깁니다.
+        </p>
+        <button id="connectButton" class="primary" type="button">
+          보안 세션 열기
+        </button>
+        <div id="terminalShell" hidden>
+          <div id="terminal" aria-label="종단 암호화 터미널"></div>
+        </div>
+      </section>
+
       <p class="footnote">
-        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 확인은
-        relay가 위조할 수 없는 상호 증명을 사용하지만, 터미널 트래픽의 E2E
-        암호화는 후속 단계입니다.
+        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 이후
+        relay는 암호화된 terminal payload의 내용과 제어 lease를 볼 수 없습니다.
       </p>
     </main>
+    <script src="xterm.js"></script>
+    <script src="addon-fit.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

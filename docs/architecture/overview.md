@@ -48,9 +48,13 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 고정 relay route로 보내고, relay는 이를 해당 instance의 기존 WSS tunnel과 고정 desktop route로만
 전달한다. desktop은 첫 client nonce 하나를 확정하고 상호 HMAC proof를 반환한다
 ([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md)). 새 발급은 기존 seed를
-회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 이 단계는 pairing confirmation까지며
-Android 셸은 terminal data plane에 아직 연결되지 않았다. 기존 브라우저 Remote UI API도
-별도로 평문 payload를 사용하므로 E2E 완료 상태가 아니다.
+회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 확인된 seed는 사용자가 생체 인증으로
+승인할 때만 메모리 전용 방향별 key로 파생된다. foreground의 성공한 암호화 RPC마다 15분 비활성
+timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
+복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
+AES-256-GCM ciphertext envelope만 보내고, APK 내장 xterm UI는 복호화된 terminal 목록·출력과 입력을
+표시·전달한다([ADR-0146](../adr/0146-android-e2e-session-and-encrypted-remote-rpc.md)). 기존 브라우저
+Remote UI는 호환을 위해 별도 평문 relay 경로를 계속 사용하므로 Android의 열린 native session만 E2E다.
 
 ---
 

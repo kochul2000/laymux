@@ -21,7 +21,7 @@ body {
 }
 
 main {
-  width: min(100%, 34rem);
+  width: min(100%, 56rem);
   min-height: 100vh;
   margin: 0 auto;
   padding: max(2rem, env(safe-area-inset-top)) 1.25rem
@@ -88,6 +88,17 @@ h1 {
 }
 
 .badge.paired {
+  background: #a6e3a11f;
+  color: #a6e3a1;
+}
+
+.badge.secure {
+  margin-bottom: 0.4rem;
+  background: #89b4fa1f;
+  color: #89b4fa;
+}
+
+.badge.secure.connected {
   background: #a6e3a11f;
   color: #a6e3a1;
 }
@@ -207,6 +218,37 @@ button:disabled {
   border: 1px solid #585b70;
   background: transparent;
   color: #cdd6f4;
+}
+
+.remote-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.compact {
+  width: auto;
+  min-height: 2.35rem;
+  padding: 0 0.85rem;
+  border: 1px solid #585b70;
+  background: transparent;
+  color: #cdd6f4;
+}
+
+#terminalShell {
+  height: min(58vh, 32rem);
+  margin-top: 1rem;
+  padding: 0.6rem;
+  overflow: hidden;
+  border: 1px solid #45475a;
+  border-radius: 0.7rem;
+  background: #11111b;
+}
+
+#terminal {
+  width: 100%;
+  height: 100%;
 }
 
 .footnote {
