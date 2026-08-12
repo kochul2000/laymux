@@ -131,6 +131,15 @@ describe("buildPreviewDocument", () => {
     expect(doc).toContain("<h1>Safe</h1>");
   });
 
+  it("uses the same slim overlay scrollbar as the rest of laymux", () => {
+    const doc = buildPreviewDocument("<div>Long preview</div>");
+
+    expect(doc).toContain("::-webkit-scrollbar{width:20px;height:20px;}");
+    expect(doc).toContain("background:#ffffff33");
+    expect(doc).toContain("background:#ffffff59");
+    expect(doc).toContain("border:6px solid transparent");
+  });
+
   it("wraps markdown in the GitHub markdown container and embeds its stylesheet", () => {
     const doc = buildPreviewDocument("<h1>GitHub style</h1>", "markdown");
 
@@ -157,6 +166,6 @@ describe("buildPreviewDocument", () => {
 
     expect(doc).not.toContain("</style><script>");
     // `<`/`>` survive only as CSS hex escapes, never as literal HTML-breaking characters.
-    expect(doc).toContain('\\3c /style\\3e \\3c script\\3e x');
+    expect(doc).toContain("\\3c /style\\3e \\3c script\\3e x");
   });
 });
