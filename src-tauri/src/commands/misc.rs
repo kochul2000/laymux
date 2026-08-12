@@ -156,17 +156,19 @@ pub fn reset_settings(
 ) -> Result<crate::settings::Settings, String> {
     let default_settings = crate::settings::Settings::default();
     crate::settings::save_settings(&default_settings)?;
-    let enabled_change = crate::remote_server::update_persistent_remote_settings(
+    let change = crate::remote_server::update_persistent_remote_settings(
         &state,
         &app,
         default_settings.remote.clone(),
     )?;
-    if let Some(enabled) = enabled_change {
+    if let Some(enabled) = change.effective_enabled {
         crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
             state.inner().clone(),
             app,
             enabled,
         );
+    } else if change.cloud_access_mode_changed {
+        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
     }
     Ok(default_settings)
 }
@@ -183,14 +185,16 @@ pub fn save_settings(
     app: AppHandle,
 ) -> Result<(), String> {
     crate::settings::save_settings(&settings)?;
-    let enabled_change =
+    let change =
         crate::remote_server::update_persistent_remote_settings(&state, &app, settings.remote)?;
-    if let Some(enabled) = enabled_change {
+    if let Some(enabled) = change.effective_enabled {
         crate::cloud::tunnel::reconcile_cloud_tunnel_for_access(
             state.inner().clone(),
             app,
             enabled,
         );
+    } else if change.cloud_access_mode_changed {
+        crate::cloud::tunnel::restart_cloud_tunnel_for_policy_change(state.inner().clone(), app);
     }
     Ok(())
 }

@@ -54,6 +54,12 @@ pub struct RemoteAccessStatus {
     pub effective_auth_token: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PersistentRemoteSettingsChange {
+    pub effective_enabled: Option<bool>,
+    pub cloud_access_mode_changed: bool,
+}
+
 pub fn get_remote_access_status(app_state: &AppState) -> Result<RemoteAccessStatus, String> {
     let runtime = app_state.remote_access.lock_or_err()?;
     Ok(status_from_settings(runtime.persistent(), &runtime))
@@ -116,16 +122,28 @@ pub(crate) fn update_persistent_remote_settings(
     app_state: &AppState,
     app_handle: &AppHandle,
     settings: RemoteSettings,
-) -> Result<Option<bool>, String> {
-    let (previous_enabled, status, remote_control_status, transition, timeout_seconds) = {
+) -> Result<PersistentRemoteSettingsChange, String> {
+    let (
+        previous_enabled,
+        previous_cloud_access_mode,
+        current_cloud_access_mode,
+        status,
+        remote_control_status,
+        transition,
+        timeout_seconds,
+    ) = {
         let mut runtime = app_state.remote_access.lock_or_err()?;
         let previous_enabled =
             status_from_settings(runtime.persistent(), &runtime).effective_enabled;
+        let previous_cloud_access_mode = runtime.persistent().cloud_access_mode;
         let mut control = app_state.remote_control.lock_or_err()?;
         let (status, remote_control_status, transition, timeout_seconds) =
             apply_persistent_access_change(&mut runtime, &mut control, settings);
+        let current_cloud_access_mode = runtime.persistent().cloud_access_mode;
         (
             previous_enabled,
+            previous_cloud_access_mode,
+            current_cloud_access_mode,
             status,
             remote_control_status,
             transition,
@@ -140,7 +158,11 @@ pub(crate) fn update_persistent_remote_settings(
         transition,
         timeout_seconds,
     )?;
-    Ok((previous_enabled != status.effective_enabled).then_some(status.effective_enabled))
+    Ok(PersistentRemoteSettingsChange {
+        effective_enabled: (previous_enabled != status.effective_enabled)
+            .then_some(status.effective_enabled),
+        cloud_access_mode_changed: previous_cloud_access_mode != current_cloud_access_mode,
+    })
 }
 
 /// Cloud pairing/disconnect only owns the persisted cloud fields. Keeping this
@@ -287,11 +309,18 @@ fn complete_access_change(
 pub(crate) fn update_persistent_remote_settings_for_test(
     app_state: &AppState,
     settings: RemoteSettings,
-) -> Result<(), String> {
+) -> Result<PersistentRemoteSettingsChange, String> {
     let mut runtime = app_state.remote_access.lock_or_err()?;
+    let previous_enabled = status_from_settings(runtime.persistent(), &runtime).effective_enabled;
+    let previous_cloud_access_mode = runtime.persistent().cloud_access_mode;
     let mut control = app_state.remote_control.lock_or_err()?;
-    apply_persistent_access_change(&mut runtime, &mut control, settings);
-    Ok(())
+    let (status, _, _, _) = apply_persistent_access_change(&mut runtime, &mut control, settings);
+    Ok(PersistentRemoteSettingsChange {
+        effective_enabled: (previous_enabled != status.effective_enabled)
+            .then_some(status.effective_enabled),
+        cloud_access_mode_changed: previous_cloud_access_mode
+            != runtime.persistent().cloud_access_mode,
+    })
 }
 
 #[cfg(test)]
@@ -474,5 +503,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(observed, (true, true));
+    }
+
+    #[test]
+    fn persistent_update_reports_cloud_access_mode_change_without_access_toggle() {
+        let state = AppState::new();
+        update_persistent_remote_settings_for_test(&state, RemoteSettings::default()).unwrap();
+        let next = RemoteSettings {
+            cloud_access_mode: crate::settings::models::CloudAccessMode::AndroidE2eOnly,
+            ..RemoteSettings::default()
+        };
+
+        let change = update_persistent_remote_settings_for_test(&state, next).unwrap();
+
+        assert_eq!(change.effective_enabled, None);
+        assert!(change.cloud_access_mode_changed);
     }
 }

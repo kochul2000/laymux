@@ -27,5 +27,6 @@
 - [ ] View 플러그인 시스템 (현재 built-in only)
 - [ ] activity 핸들러 확장 (neovim, htop 등 — [ADR-0005](./adr/0005-display-state-raw-separation-compute.md))
 - [x] Android↔desktop E2E thin wrapper — 별도 Cloud WebView의 기존 landing/dashboard + Credential Manager Google login + PC 선택, 생체 승인 후 사용 중 갱신되고 background에서도 현재 deadline까지 최대 15분 보존되는 session, 방향별 HKDF/AES-GCM key, strict sequence+직전 응답 재현, 고정 ciphertext relay route, PC Laymux 소유 Remote 문서·자산과 HTTP/V1 output native bridge. APK는 pairing/bootstrap만 내장하고 xterm·terminal 선택을 복제하지 않는다([ADR-0146](./adr/0146-android-e2e-session-and-encrypted-remote-rpc.md), [ADR-0149](./adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)); emulator/실기 Google account chooser·cookie redirect·QR·background suspend/resume·biometric·렌더 왕복은 장비 준비 시 수행
+- [x] PC별 Cloud Remote 접속 정책 — 기존 Cloud browser + Android E2E 허용(기본)과 Android E2E 전용을 Settings에서 선택하고, 후자는 desktop WSS tunnel의 exact E2E route allowlist가 권위 있게 강제한다. relay dashboard/connect/기존 credential도 live heartbeat mode를 재확인하며 Cloud 계정·presence·Android 선택/E2E relay·Local/Tailscale Direct는 유지한다([ADR-0150](./adr/0150-desktop-owned-cloud-remote-access-policy.md))
 
 > 새 마일스톤/이슈가 확정되면 이 표에 한 줄 추가하고, 출하 시 `[x]` 로 옮긴다.

@@ -2083,14 +2083,18 @@ function RemoteSection() {
     try {
       // The backend `cloud_connect_start` reads `relay_base_url` from
       // `load_settings()` (disk), NOT from this unsaved draft. If the relay was
-      // edited, run the same commit the Save button does for the remote section
-      // before pairing so it pairs against the URL the user typed:
+      // edited, or the PC-owned Cloud access policy changed, run the same
+      // commit the Save button does before pairing so the tunnel starts with
+      // the values visible in this form:
       //  - commit the FULL draft (not just relay) — a partial `setRemote` would
       //    trip useDraft's store-change sync (#51) and discard other unsaved edits,
       //  - persist to disk, and
       //  - reconcile Direct Remote runtime access if `enabled` changed
       //    (mirrors handleSave; no-ops when it did not change).
-      if (remote.relayBaseUrl.trim() !== storeRemote.relayBaseUrl) {
+      if (
+        remote.relayBaseUrl.trim() !== storeRemote.relayBaseUrl ||
+        remote.cloudAccessMode !== storeRemote.cloudAccessMode
+      ) {
         const previousEnabled = storeRemote.enabled;
         const committed = toRemoteSettings(remote);
         setRemote(committed);
@@ -2449,6 +2453,22 @@ function RemoteSection() {
       </SubGroup>
 
       <SubGroup title={t("remote.groupCloud")}>
+        <SettingRow label={t("remote.cloudAccessMode")} desc={t("remote.cloudAccessModeDesc")}>
+          <FocusSelect
+            data-testid="remote-settings-cloud-access-mode-select"
+            className={inputCls}
+            value={remote.cloudAccessMode}
+            onChange={(event) =>
+              update({
+                cloudAccessMode: event.target.value as RemoteSettings["cloudAccessMode"],
+              })
+            }
+          >
+            <option value="browserAndE2e">{t("remote.cloudAccessModeBrowserAndE2e")}</option>
+            <option value="androidE2eOnly">{t("remote.cloudAccessModeAndroidE2eOnly")}</option>
+          </FocusSelect>
+        </SettingRow>
+
         <SettingRow label={t("remote.cloudStatus")}>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span

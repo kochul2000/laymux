@@ -952,6 +952,8 @@ export interface ProfileDefaults {
   syncCwd?: SyncCwdConfig;
 }
 
+export type CloudAccessMode = "browserAndE2e" | "androidE2eOnly";
+
 export interface RemoteSettings {
   enabled: boolean;
   bindAddress: string;
@@ -970,6 +972,7 @@ export interface RemoteSettings {
   cloudTunnelUrl?: string | null;
   cloudServerBaseUrl?: string | null;
   cloudAutoReconnect: boolean;
+  cloudAccessMode: CloudAccessMode;
   /** Send the desktop terminal font file to remote browsers (ADR-0077). */
   serveTerminalFont: boolean;
   /** Mirror the desktop's placed widgets onto the remote strip (ADR-0124). */

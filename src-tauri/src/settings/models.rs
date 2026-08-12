@@ -1611,6 +1611,17 @@ impl Default for ViewerSettings {
 }
 
 /// Direct Remote Mode server settings.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum CloudAccessMode {
+    /// Preserve the existing signed-in Cloud browser path while also allowing
+    /// Android's encrypted routes.
+    #[default]
+    BrowserAndE2e,
+    /// Accept only Android's fixed encrypted relay routes on the Cloud tunnel.
+    AndroidE2eOnly,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSettings {
@@ -1668,6 +1679,10 @@ pub struct RemoteSettings {
     /// Reconnect to the cloud relay automatically on startup when credentials exist.
     #[serde(default = "default_cloud_auto_reconnect")]
     pub cloud_auto_reconnect: bool,
+    /// Which data-plane surfaces the Cloud WSS tunnel accepts. Local/Tailscale
+    /// Direct Remote is governed separately.
+    #[serde(default)]
+    pub cloud_access_mode: CloudAccessMode,
     /// Send the desktop terminal font file to remote browsers so they render the
     /// same glyphs and cell metrics (ADR-0077). Off by default: serving a font
     /// binary over the network is redistribution, and OS-bundled fonts such as
@@ -1768,6 +1783,7 @@ impl Default for RemoteSettings {
             cloud_tunnel_url: None,
             cloud_server_base_url: None,
             cloud_auto_reconnect: default_cloud_auto_reconnect(),
+            cloud_access_mode: CloudAccessMode::default(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
             scroll_sensitivity: default_scroll_sensitivity(),
