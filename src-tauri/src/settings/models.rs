@@ -612,6 +612,10 @@ fn default_volume_threshold_bytes() -> u64 {
 /// Lower bound for `volumeThresholdBytes` — one large TUI frame's worth. Keeps
 /// the setting from degenerating into "any output means active".
 pub(crate) const MIN_VOLUME_THRESHOLD_BYTES: u64 = 4 * 1024;
+/// Upper bound for `volumeWindowMs` (30 s). The volume window tumbles, so once
+/// a window is over the threshold it keeps the pane marked busy until the window
+/// turns over — an unbounded value would let one burst pin ⏳ indefinitely.
+pub(crate) const MAX_VOLUME_WINDOW_MS: u64 = 30_000;
 
 /// Output-activity detection parameters (ADR-0147). Two independent detectors
 /// share this block and the one `throttle_ms`: a DEC 2026 frame-count burst for
@@ -630,7 +634,9 @@ pub struct OutputActivityBurstSettings {
     /// Shared by the frame and volume detectors.
     #[serde(default = "default_burst_throttle_ms")]
     pub throttle_ms: u64,
-    /// Sliding window size (ms) for summing raw PTY output bytes.
+    /// Window size (ms) for summing raw PTY output bytes. The window tumbles
+    /// rather than slides, so the ceiling below matters: a very long window
+    /// keeps a single burst marking the pane busy until it turns over.
     #[serde(default = "default_volume_window_ms")]
     pub volume_window_ms: u64,
     /// Bytes within `volume_window_ms` that mark the pane as working. Set well
@@ -664,7 +670,7 @@ impl OutputActivityBurstSettings {
             window_ms: self.window_ms.max(100),
             threshold: self.threshold.max(2),
             throttle_ms: self.throttle_ms.max(100),
-            volume_window_ms: self.volume_window_ms.max(100),
+            volume_window_ms: self.volume_window_ms.clamp(100, MAX_VOLUME_WINDOW_MS),
             volume_threshold_bytes: self.volume_threshold_bytes.max(MIN_VOLUME_THRESHOLD_BYTES),
         }
     }

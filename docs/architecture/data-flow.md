@@ -989,7 +989,7 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 - **빈도 기반 감지 (Burst Detection)**: 단일 DEC 2026h 이벤트만으로는 활성으로 판정하지 않는다. 포커스 리드로(DEC 1004 → `\x1b[I]` → 앱이 1회 리드로)나 키 입력 에코(키스트로크 → 앱이 1회 리드로)는 모두 1회성이다. **`windowMs`(기본 2초) 내에 `threshold`(기본 6회) 이상의 DEC 2026h가 감지되어야** 이벤트를 발행한다. neovim 편집처럼 초당 수십 프레임을 그리는 작업은 임계값을 즉시 넘는다. 반대로 **프레임 주기가 느린 앱은 이 경로로 잡히지 않는다** — Claude Code 2.1.228 의 타이틀 스피너는 960ms 주기라 2초 창에 두 장뿐이다. 그 사각은 볼륨 경로가 덮는다.
 - **볼륨 기반 감지**: `volumeWindowMs`(기본 2초) 내 누적 PTY 출력 바이트가 `volumeThresholdBytes`(기본 64KiB, 즉 지속 ~32KiB/s)를 넘으면 발행한다. 하한은 4KiB 로 clamp 되어 유무 판정으로 퇴화할 수 없다. 검출은 PTY 콜백의 뜨거운 경로에 있으므로 청크당 누적 덧셈 + `Instant` 비교뿐이고 바이트를 다시 훑지 않는다.
 - **두 검출기는 독립적으로 평가한다**: 한 청크가 프레임 마커와 대량 출력을 함께 실을 수 있고, 볼륨 윈도 합은 모든 바이트를 봐야 의미가 있으므로 `else` 로 묶지 않는다. 둘 중 하나만 걸려도 같은 이벤트가 나가고, 프론트의 2초 타이머는 어느 쪽으로든 유지된다.
-- **Throttle**: 임계값 충족 후에도 이벤트는 터미널당 최대 `throttleMs`(기본 1초)로 throttle하여 이벤트 폭주를 방지한다. 두 검출기가 이 값을 공유한다.
+- **Throttle**: 임계값 충족 후에도 이벤트는 `throttleMs`(기본 1초)로 throttle하여 이벤트 폭주를 방지한다. 두 검출기는 이 **값**만 공유하고 throttle 카운터는 각자 가지므로, 터미널당 실제 상한은 `throttleMs` 당 2개(프레임 1 + 볼륨 1)다.
 - 이 파라미터는 모두 `settings.json`의 `terminal.outputActivityBurst` 섹션에서 조정한다.
 - **타이머 리셋**: 프론트엔드에서 이벤트 수신 시 `outputActive=true`로 설정하고, 2초간 새 이벤트가 없으면 `false`로 리셋한다.
 
@@ -1024,6 +1024,8 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 | neovim 화면 갱신                | 수십 회/초         | —               | ⏳ (프레임 임계 즉시 충족)        |
 | Claude 응답 생성                | 프레임 주기에 따라 | 수십~수백 KiB   | ⏳ (볼륨 임계 충족)               |
 | 빌드/테스트 로그 플러드         | 0회                | MiB 급          | ⏳ (볼륨 임계 충족)               |
+
+> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. Claude pane 은 `✳` 선언 유휴가 막아주지만 셸·기타 TUI pane 은 막히지 않는다 — 그러면 스크롤만 하는 동안 ⏳ 가 뜨고 절전 억제까지 걸린다. 이 표를 근거로 인용하기 전에 [dev-repro-methodology.md §4.6](../dev-repro-methodology.md) 절차로 리페인트 한 장의 실제 바이트를 재고 숫자를 채워라.
 
 ### 인터랙티브 앱 인식 — 프로세스 트리 liveness ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 

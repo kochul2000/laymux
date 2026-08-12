@@ -1014,8 +1014,8 @@ impl BurstDetector {
     }
 }
 
-/// Sliding-window detector for sustained *output volume*, the one activity
-/// signal that needs no cooperation from the app in the pane ([ADR-0147]).
+/// Windowed detector for sustained *output volume*, the one activity signal
+/// that needs no cooperation from the app in the pane ([ADR-0147]).
 ///
 /// `BurstDetector` above counts DEC 2026 frames, so it only sees apps that
 /// draw synchronized frames fast enough to clear its threshold. This one sums
@@ -1026,8 +1026,23 @@ impl BurstDetector {
 /// means active" rule. What it has to reject — prompt redraw, focus redraw,
 /// keystroke echo — is bounded per event (one frame each), so a threshold set
 /// far above human typing throughput excludes all three while still catching
-/// build logs, test output and streamed responses. Emission is throttled the
-/// same way as the frame path.
+/// build logs, test output and streamed responses. Emission is throttled by
+/// the same `throttle_ms` value the frame path uses, but with its own
+/// `last_emit` — the two detectors do not share an event budget.
+///
+/// The window **tumbles**, it does not slide: expiry restarts the sum from the
+/// current chunk rather than dropping only the bytes that aged out. Two
+/// consequences, both intentional in exchange for O(1) state (no per-chunk ring
+/// of timestamps on the PTY hot path):
+///
+///  - Output straddling a boundary can be split across two windows, so the
+///    effective rate needed to fire is between `threshold/window` and twice
+///    that. `volume_window_ms` is clamped to a ceiling so a hand-edited window
+///    cannot stretch this ambiguity indefinitely.
+///  - Once a window is over the threshold, every later chunk in that same
+///    window re-fires (subject to throttle). That is the desired behavior for
+///    an activity heartbeat — the frontend timer needs refreshing — but it does
+///    mean one burst keeps the pane ⏳ until the window turns over.
 ///
 /// [ADR-0147]: ../../docs/adr/0147-output-volume-activity-and-app-declared-idle.md
 pub struct OutputVolumeDetector {
@@ -2349,12 +2364,18 @@ mod tests {
 
     #[test]
     fn volume_window_expired_resets_sum() {
-        // 0ms window → every call starts a fresh window, so bytes from earlier
-        // calls never accumulate. Guards against a sum that grows forever and
-        // pins the pane to ⏳ after one busy moment.
-        let detector = OutputVolumeDetector::new(0, TEST_VOLUME_THRESHOLD, 0);
-        for _ in 0..10 {
-            assert!(!detector.record_bytes(32 * 1024));
+        // Guards against a sum that grows forever and pins the pane to ⏳ after
+        // one busy moment. Expiry is a strict `>`, so a real sleep past the
+        // window is required — driving this with `window_ms = 0` and no sleep
+        // would depend on two calls landing on different clock ticks, which a
+        // coarse-resolution platform does not guarantee.
+        let detector = OutputVolumeDetector::new(10, TEST_VOLUME_THRESHOLD, 0);
+        for _ in 0..4 {
+            assert!(
+                !detector.record_bytes(32 * 1024),
+                "half the threshold must never accumulate across expired windows"
+            );
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 

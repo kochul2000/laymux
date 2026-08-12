@@ -472,9 +472,15 @@ pub fn create_terminal_session(
             pty_cb_state.scan_dec_sync_marker(&data) && pty_cb_state.burst_detector.record_hit();
         let volume_burst = pty_cb_state.volume_detector.record_bytes(data.len());
         if frame_burst || volume_burst {
+            // `source` tells the frontend which signal armed this event. Both
+            // mean "the pane is producing output", but only the frame path
+            // means "the app redrew its own UI" — and Codex's completion
+            // notification is keyed on that stronger reading. See
+            // `markInteractiveAppSuccessOnIdle`.
+            let source = if frame_burst { "frame" } else { "volume" };
             let _ = app_clone.emit(
                 EVENT_TERMINAL_OUTPUT_ACTIVITY,
-                serde_json::json!({ "terminalId": terminal_id }),
+                serde_json::json!({ "terminalId": terminal_id, "source": source }),
             );
         }
 

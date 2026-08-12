@@ -65,8 +65,19 @@ const MARKERS: &[MarkerDef] = &[
 const COLOR_TOLERANCE: i16 = 50;
 
 /// Characters that terminate status message text scanning.
-/// Spinner chars (✶✻✽✢), both marker variants (● ·), separator (─), prompt (❯).
-const STOP_CHARS: &[char] = &['✶', '✻', '✽', '✢', '●', '·', '─', '❯'];
+/// Spinner chars (✶✻✽✢✳), both marker variants (● ·), separator (─), prompt (❯).
+///
+/// This is the **in-screen** spinner set, which is a different list from the
+/// **title** spinner set in `claude_activity.rs` — do not sync the two. Claude
+/// Code 2.1.228 animates the body with `· ✢ * ✶ ✻ ✽` (the `xterm-ghostty`
+/// variant substitutes `✳` for `*`) while the title alternates `◐`/`◑`. So:
+///
+///  - `◐◑` are deliberately absent: they never appear in the body, and listing
+///    them would cut a status message at an unrelated glyph.
+///  - `*` is deliberately absent for the opposite reason: it is an ordinary
+///    character in prose and code, so stopping on it would truncate real
+///    messages far more often than it would catch a spinner.
+const STOP_CHARS: &[char] = &['✶', '✻', '✽', '✢', '✳', '●', '·', '─', '❯'];
 
 /// Extract the last Claude Code status message from terminal output.
 ///

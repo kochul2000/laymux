@@ -16,6 +16,7 @@ import {
   onTerminalActivityReconciled,
   markClaudeTerminal,
   getTerminalStates,
+  type TerminalOutputActivitySource,
 } from "@/lib/tauri-api";
 import { persistSession } from "@/lib/persist-session";
 import { sendDesktopNotification } from "./useOsNotification";
@@ -76,6 +77,17 @@ export function useSyncEvents() {
         return;
       }
 
+      // Volume-armed activity is not evidence of a task boundary (ADR-0147).
+      // Codex spilling a large tool output (a diff, a log) trips the volume
+      // detector; if the model then thinks quietly for 2s the timer expires and
+      // this would fire "Codex task completed" plus a synthetic exitCode=0
+      // mid-task. The frame path is the one that means "the app redrew its own
+      // UI", which is what a working→idle transition is derived from. Claude is
+      // covered instead by its declared-idle ✳ title outranking outputActive.
+      if (instance.outputActiveSource === "volume") {
+        return;
+      }
+
       const message =
         instance.activityMessage === CODEX_INPUT_PENDING_MARKER
           ? "Codex is awaiting input"
@@ -111,7 +123,10 @@ export function useSyncEvents() {
         terminalId,
         setTimeout(() => {
           markInteractiveAppSuccessOnIdle(terminalId);
-          useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
+          useTerminalStore.getState().updateInstanceInfo(terminalId, {
+            outputActive: false,
+            outputActiveSource: undefined,
+          });
           outputActiveTimers.current.delete(terminalId);
         }, OUTPUT_ACTIVE_RESET_MS),
       );
@@ -122,7 +137,9 @@ export function useSyncEvents() {
   const clearOutputActive = useCallback(
     (terminalId: string) => {
       markInteractiveAppSuccessOnIdle(terminalId);
-      useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: false });
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo(terminalId, { outputActive: false, outputActiveSource: undefined });
       const timer = outputActiveTimers.current.get(terminalId);
       if (timer) {
         clearTimeout(timer);
@@ -133,8 +150,10 @@ export function useSyncEvents() {
   );
 
   const markOutputActive = useCallback(
-    (terminalId: string) => {
-      useTerminalStore.getState().updateInstanceInfo(terminalId, { outputActive: true });
+    (terminalId: string, source?: TerminalOutputActivitySource) => {
+      useTerminalStore
+        .getState()
+        .updateInstanceInfo(terminalId, { outputActive: true, outputActiveSource: source });
       resetOutputActiveSoon(terminalId);
     },
     [resetOutputActiveSoon],
@@ -202,7 +221,7 @@ export function useSyncEvents() {
           clearOutputActive(data.terminalId);
           return;
         }
-        markOutputActive(data.terminalId);
+        markOutputActive(data.terminalId, data.source);
       }),
     );
 

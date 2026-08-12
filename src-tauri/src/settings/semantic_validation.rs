@@ -352,7 +352,7 @@ fn validate_terminal(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         "/terminal/outputActivityBurst/volumeWindowMs",
         settings.terminal.output_activity_burst.volume_window_ms,
         100,
-        u64::MAX,
+        super::models::MAX_VOLUME_WINDOW_MS,
     );
     range_u64(
         issues,

@@ -88,6 +88,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/terminal/outputActivityBurst",
+        description: "출력 활동(⏳) 감지 임계입니다. 두 검출기는 PTY 생성 시점에 터미널당 하나씩 만들어지므로, 저장 후 새로 생성한 터미널부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/terminal/advertiseTrueColor",
         description: "새 PTY 자식에 truecolor 지원을 광고합니다. 저장 후 새로 생성하거나 재시작한 터미널부터 적용됩니다.",
         sensitive: false,

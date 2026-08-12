@@ -129,7 +129,14 @@ export interface PasteSettings {
 /** Terminal behavior & rendering. */
 export interface TerminalSettings {
   /** Rust-side DEC 2026 burst detection tuning. Omitted by older frontend snapshots. */
-  outputActivityBurst?: { windowMs: number; threshold: number; throttleMs: number };
+  /** ADR-0147: DEC 2026 frame burst + raw output volume thresholds. */
+  outputActivityBurst?: {
+    windowMs: number;
+    threshold: number;
+    throttleMs: number;
+    volumeWindowMs: number;
+    volumeThresholdBytes: number;
+  };
   /**
    * ADR-0101: how xterm parser admission turns are split between the focused
    * pane, the active workspace's other visible panes, and every hidden pane.
@@ -713,7 +720,13 @@ export const DEFAULT_PASTE: PasteSettings = {
 };
 
 export const DEFAULT_TERMINAL: TerminalSettings = {
-  outputActivityBurst: { windowMs: 2000, threshold: 6, throttleMs: 1000 },
+  outputActivityBurst: {
+    windowMs: 2000,
+    threshold: 6,
+    throttleMs: 1000,
+    volumeWindowMs: 2000,
+    volumeThresholdBytes: 64 * 1024,
+  },
   parserAdmission: {
     focusedShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.focused,
     visibleShare: TERMINAL_WRITE_DEFAULT_CLASS_SHARE.foreground,

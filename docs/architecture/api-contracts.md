@@ -75,19 +75,19 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 {
   "terminal": {
     "outputActivityBurst": {
-      "windowMs": 2000, // DEC 2026h 프레임을 세는 슬라이딩 윈도
+      "windowMs": 2000, // DEC 2026h 프레임을 세는 시간 윈도
       "threshold": 6, // 윈도 내 최소 프레임 수
-      "throttleMs": 1000, // 터미널당 이벤트 최소 간격 (두 검출기 공유)
-      "volumeWindowMs": 2000, // 원시 출력 바이트를 합산하는 슬라이딩 윈도
+      "throttleMs": 1000, // 검출기별 이벤트 최소 간격 (값만 공유, 카운터는 각자)
+      "volumeWindowMs": 2000, // 원시 출력 바이트를 합산하는 시간 윈도 (100..=30000)
       "volumeThresholdBytes": 65536, // 윈도 내 누적 바이트 임계 (기본 64KiB)
     }
   }
 }
 ```
 
-한 블록에 **독립된 두 검출기**가 들어 있다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md)) — 협조하는 TUI 를 위한 DEC 2026 프레임 버스트와, 앱 협조가 전혀 필요 없는 원시 바이트 볼륨. 둘은 `throttleMs` 만 공유하고 서로의 판정에 개입하지 않는다. 판정 결과와 사각 커버리지는 [data-flow.md §outputActive 감지](./data-flow.md)에 있다.
+한 블록에 **독립된 두 검출기**가 들어 있다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md)) — 협조하는 TUI 를 위한 DEC 2026 프레임 버스트와, 앱 협조가 전혀 필요 없는 원시 바이트 볼륨. 둘은 `throttleMs` **값**만 공유하고 서로의 판정에 개입하지 않는다 — throttle 카운터는 검출기마다 따로이므로 터미널당 실제 이벤트 상한은 `throttleMs` 당 2개(프레임 1 + 볼륨 1)다. 판정 결과와 사각 커버리지는 [data-flow.md §outputActive 감지](./data-flow.md)에 있다.
 
-**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. `validate_settings` 가 범위 밖 값을 `/terminal/outputActivityBurst/<field>` 경로로 `out_of_range` 보고하고, 실행 경로는 그와 별개로 `sanitized()` 에서 항상 clamp 한다(parserAdmission 과 같은 "보고 + clamp" 정책). 하한은 `windowMs`·`throttleMs`·`volumeWindowMs` 100, `threshold` 2, `volumeThresholdBytes` **4096** 이다. 볼륨 하한이 1 이 아닌 이유는 계약이다 — 더 낮은 값은 "출력이 있으면 활성" 규칙이 되고 그것은 ADR-0147 이 계속 금지하므로, 설정으로 표현할 수 없게 막는다. 기본 64KiB(≈ 지속 32KiB/s)는 프롬프트 리드로·포커스 리드로·키 에코가 낼 수 있는 양보다 훨씬 위로 잡은 값이다. 타이핑 중 ⏳ 가 보이면 올리고, 명백히 바쁜 pane 이 유휴로 남으면 내린다.
+**Settings UI 는 없다** — settings.json 직접 편집 전용 튜닝 값이다. `validate_settings` 가 범위 밖 값을 `/terminal/outputActivityBurst/<field>` 경로로 `out_of_range` 보고하고, 실행 경로는 그와 별개로 `sanitized()` 에서 항상 clamp 한다(parserAdmission 과 같은 "보고 + clamp" 정책). 하한은 `windowMs`·`throttleMs`·`volumeWindowMs` 100, `threshold` 2, `volumeThresholdBytes` **4096** 이고, `volumeWindowMs` 만 상한 **30000** 이 있다. 두 윈도는 tumbling 이라 임계를 넘긴 윈도 안에서는 이후 청크마다 재발행되므로, 상한이 없으면 한 번의 버스트가 그 윈도 내내 pane 을 ⏳ 로 고정한다. 볼륨 하한이 1 이 아닌 이유는 계약이다 — 더 낮은 값은 "출력이 있으면 활성" 규칙이 되고 그것은 ADR-0147 이 계속 금지하므로, 설정으로 표현할 수 없게 막는다. 기본 64KiB(≈ 지속 32KiB/s)는 프롬프트 리드로·포커스 리드로·키 에코가 낼 수 있는 양보다 훨씬 위로 잡은 값이다. 타이핑 중 ⏳ 가 보이면 올리고, 명백히 바쁜 pane 이 유휴로 남으면 내린다.
 
 적용 시점은 **nextUse** 다. 두 검출기는 PTY spawn 시점에 터미널당 하나씩 만들어지므로, 저장 이후 새로 생성한 터미널부터 새 값이 적용되고 실행 중인 pane 의 검출기는 그대로 남는다.
 
