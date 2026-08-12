@@ -94,9 +94,10 @@ export function RemoteAccessModal() {
   const canCreateAndroidPairing = Boolean(
     remote.cloudEnabled && remote.cloudInstanceId && remote.cloudServerBaseUrl,
   );
-  const androidQrSrc = androidQrSvg
-    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(androidQrSvg)}`
-    : null;
+  const androidQrSrc =
+    androidQrSvg && androidPairing?.phase === "pending"
+      ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(androidQrSvg)}`
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +112,25 @@ export function RemoteAccessModal() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (androidPairing?.phase !== "pending") return;
+    let cancelled = false;
+    const refresh = () => {
+      getAndroidPairingStatus()
+        .then((next) => {
+          if (cancelled) return;
+          setAndroidPairing(next);
+          if (next.phase !== "pending") setAndroidQrSvg(null);
+        })
+        .catch(() => {});
+    };
+    const timer = window.setInterval(refresh, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [androidPairing?.phase]);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,8 +393,19 @@ export function RemoteAccessModal() {
                 : t("remoteAccess.androidPairingNeedsCloud")}
             </div>
             {androidPairing?.paired && (
-              <div className="mt-1 text-[11px]" style={{ color: "var(--green)" }}>
-                {t("remoteAccess.androidPairingStored")}
+              <div
+                className="mt-1 text-[11px]"
+                style={{
+                  color: androidPairing.phase === "confirmed" ? "var(--green)" : "var(--yellow)",
+                }}
+              >
+                {androidPairing.phase === "confirmed"
+                  ? t("remoteAccess.androidPairingConfirmed")
+                  : t("remoteAccess.androidPairingPending", {
+                      time: androidPairing.expiresAt
+                        ? new Date(androidPairing.expiresAt * 1000).toLocaleTimeString()
+                        : "-",
+                    })}
               </div>
             )}
           </div>

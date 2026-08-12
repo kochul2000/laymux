@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::DefaultBodyLimit;
 use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware;
@@ -19,6 +20,7 @@ use crate::lock_ext::MutexExt;
 use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
+use super::android_pairing_routes::remote_android_pairing_ack;
 use super::assets::{
     remote_addon_fit_js, remote_font, remote_unicode_provider_js, remote_web_links_addon_js,
     remote_xterm_css, remote_xterm_js,
@@ -113,6 +115,10 @@ struct RemoteQuery {
 pub fn build_router(state: ServerState) -> Router<ServerState> {
     let api_routes = Router::new()
         .route("/remote/v1/health", get(remote_health))
+        .route(
+            "/remote/v1/e2e/pair/ack",
+            post(remote_android_pairing_ack).layer(DefaultBodyLimit::max(2 * 1024)),
+        )
         .route("/remote/v1/session/status", get(remote_session_status))
         .route("/remote/v1/session/claim", post(remote_session_claim))
         .route(

@@ -2,12 +2,15 @@ mod keyring_store;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use hmac::{Hmac, Mac};
 use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use url::{Host, Url};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -16,10 +19,17 @@ use crate::lock_ext::MutexExt;
 use crate::settings::models::RemoteSettings;
 use crate::state::AppState;
 
-const PAIRING_VERSION: u8 = 1;
+const PAIRING_VERSION: u8 = 2;
+const ACK_VERSION: u8 = 1;
 const PAIRING_SECRET_BYTES: usize = 32;
+const PAIRING_ID_BYTES: usize = 16;
+const CLIENT_NONCE_BYTES: usize = 16;
+const PROOF_BYTES: usize = 32;
+const PAIRING_TTL_SECONDS: u64 = 5 * 60;
 const MAX_INSTANCE_ID_BYTES: usize = 128;
 const QR_MIN_DIMENSION: u32 = 320;
+const REQUEST_PROOF_DOMAIN: &[u8] = b"laymux.android-pair.request.v1";
+const RESPONSE_PROOF_DOMAIN: &[u8] = b"laymux.android-pair.response.v1";
 
 /// Serializes the Android seed lifecycle with cloud identity replacement.
 /// The lock order is this mutex first, then `AppState.remote_access`.
@@ -29,8 +39,19 @@ static PAIRING_LIFECYCLE: Mutex<()> = Mutex::new(());
 #[serde(rename_all = "camelCase")]
 pub struct AndroidPairingStatus {
     pub paired: bool,
+    pub phase: AndroidPairingPhase,
     pub endpoint: Option<String>,
     pub instance_id: Option<String>,
+    pub expires_at: Option<u64>,
+    pub confirmed_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AndroidPairingPhase {
+    None,
+    Pending,
+    Confirmed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -46,7 +67,11 @@ struct StoredPairingRecordRef<'a> {
     version: u8,
     endpoint: &'a str,
     instance_id: &'a str,
+    pairing_id: &'a str,
+    expires_at: u64,
     secret: &'a str,
+    client_nonce: Option<&'a str>,
+    confirmed_at: Option<u64>,
 }
 
 #[derive(Deserialize, Zeroize)]
@@ -56,7 +81,40 @@ struct StoredPairingRecord {
     version: u8,
     endpoint: String,
     instance_id: String,
+    pairing_id: String,
+    expires_at: u64,
     secret: String,
+    client_nonce: Option<String>,
+    confirmed_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AndroidPairingAckRequest {
+    pub version: u8,
+    pub instance_id: String,
+    pub pairing_id: String,
+    pub client_nonce: String,
+    pub client_proof: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AndroidPairingAckResponse {
+    pub version: u8,
+    pub instance_id: String,
+    pub pairing_id: String,
+    pub client_nonce: String,
+    pub confirmed_at: u64,
+    pub server_proof: String,
+}
+
+#[derive(Debug)]
+pub(crate) enum AndroidPairingAckError {
+    Invalid,
+    Expired,
+    AlreadyConfirmed,
+    Internal(AppError),
 }
 
 struct PairingSource {
@@ -65,7 +123,7 @@ struct PairingSource {
 }
 
 pub async fn get_status() -> Result<AndroidPairingStatus, AppError> {
-    tokio::task::spawn_blocking(get_status_inner)
+    tokio::task::spawn_blocking(|| with_lifecycle(get_status_inner))
         .await
         .map_err(|error| AppError::Other(format!("Android pairing status task failed: {error}")))?
 }
@@ -82,6 +140,24 @@ pub async fn revoke() -> Result<AndroidPairingStatus, AppError> {
         .map_err(|error| AppError::Other(format!("Android pairing revoke task failed: {error}")))?
 }
 
+pub(crate) async fn confirm(
+    request: AndroidPairingAckRequest,
+) -> Result<AndroidPairingAckResponse, AndroidPairingAckError> {
+    tokio::task::spawn_blocking(move || {
+        let _guard = PAIRING_LIFECYCLE
+            .lock_or_err()
+            .map_err(AndroidPairingAckError::Internal)?;
+        let now = unix_time_now().map_err(AndroidPairingAckError::Internal)?;
+        confirm_inner_at(&request, now)
+    })
+    .await
+    .map_err(|error| {
+        AndroidPairingAckError::Internal(AppError::Other(format!(
+            "Android pairing ACK task failed: {error}"
+        )))
+    })?
+}
+
 pub(crate) fn with_lifecycle<T>(
     operation: impl FnOnce() -> Result<T, AppError>,
 ) -> Result<T, AppError> {
@@ -90,6 +166,10 @@ pub(crate) fn with_lifecycle<T>(
 }
 
 pub(crate) fn get_status_inner() -> Result<AndroidPairingStatus, AppError> {
+    get_status_inner_at(unix_time_now()?)
+}
+
+fn get_status_inner_at(now: u64) -> Result<AndroidPairingStatus, AppError> {
     let Some(encoded_record) = keyring_store::get_record()? else {
         return Ok(empty_status());
     };
@@ -97,11 +177,11 @@ pub(crate) fn get_status_inner() -> Result<AndroidPairingStatus, AppError> {
     let record: StoredPairingRecord = serde_json::from_str(&encoded_record)
         .map_err(|_| AppError::Other("Stored Android pairing is invalid".into()))?;
     validate_stored_record(&record)?;
-    Ok(AndroidPairingStatus {
-        paired: true,
-        endpoint: Some(record.endpoint.clone()),
-        instance_id: Some(record.instance_id.clone()),
-    })
+    if record.confirmed_at.is_none() && now >= record.expires_at {
+        keyring_store::delete_record()?;
+        return Ok(empty_status());
+    }
+    Ok(status_from_record(&record))
 }
 
 fn create_inner(state: &AppState) -> Result<AndroidPairingQr, AppError> {
@@ -127,34 +207,63 @@ fn create_inner_with_hook(
 
 fn create_for_settings(settings: &RemoteSettings) -> Result<AndroidPairingQr, AppError> {
     let mut seed = [0_u8; PAIRING_SECRET_BYTES];
-    getrandom::fill(&mut seed)
-        .map_err(|error| AppError::Other(format!("Secure random generation failed: {error}")))?;
-    let result = create_for_settings_with_seed(settings, &seed);
+    let mut pairing_id = [0_u8; PAIRING_ID_BYTES];
+    let result = (|| {
+        getrandom::fill(&mut seed).map_err(|error| {
+            AppError::Other(format!("Secure random generation failed: {error}"))
+        })?;
+        getrandom::fill(&mut pairing_id).map_err(|error| {
+            AppError::Other(format!("Secure random generation failed: {error}"))
+        })?;
+        create_for_settings_with_material(settings, &seed, &pairing_id, unix_time_now()?)
+    })();
     seed.zeroize();
+    pairing_id.zeroize();
     result
 }
 
+#[cfg(test)]
 fn create_for_settings_with_seed(
     settings: &RemoteSettings,
     seed: &[u8; PAIRING_SECRET_BYTES],
 ) -> Result<AndroidPairingQr, AppError> {
+    create_for_settings_with_material(settings, seed, &[42_u8; PAIRING_ID_BYTES], unix_time_now()?)
+}
+
+fn create_for_settings_with_material(
+    settings: &RemoteSettings,
+    seed: &[u8; PAIRING_SECRET_BYTES],
+    pairing_id_bytes: &[u8; PAIRING_ID_BYTES],
+    issued_at: u64,
+) -> Result<AndroidPairingQr, AppError> {
     let source = pairing_source(settings)?;
+    let expires_at = issued_at
+        .checked_add(PAIRING_TTL_SECONDS)
+        .ok_or_else(|| AppError::Other("Android pairing expiry overflowed".into()))?;
     let secret = Zeroizing::new(URL_SAFE_NO_PAD.encode(seed));
-    let payload = Zeroizing::new(build_payload(&source, &secret));
+    let pairing_id = URL_SAFE_NO_PAD.encode(pairing_id_bytes);
+    let payload = Zeroizing::new(build_payload(&source, &pairing_id, expires_at, &secret));
     let qr_svg = render_qr_svg(&payload)?;
     let record = Zeroizing::new(serde_json::to_string(&StoredPairingRecordRef {
         version: PAIRING_VERSION,
         endpoint: &source.endpoint,
         instance_id: &source.instance_id,
+        pairing_id: &pairing_id,
+        expires_at,
         secret: &secret,
+        client_nonce: None,
+        confirmed_at: None,
     })?);
 
     keyring_store::set_record(&record)?;
     Ok(AndroidPairingQr {
         status: AndroidPairingStatus {
             paired: true,
+            phase: AndroidPairingPhase::Pending,
             endpoint: Some(source.endpoint),
             instance_id: Some(source.instance_id),
+            expires_at: Some(expires_at),
+            confirmed_at: None,
         },
         qr_svg,
     })
@@ -175,8 +284,29 @@ pub(crate) fn seed_mock_pairing(settings: &RemoteSettings) -> Result<(), AppErro
 fn empty_status() -> AndroidPairingStatus {
     AndroidPairingStatus {
         paired: false,
+        phase: AndroidPairingPhase::None,
         endpoint: None,
         instance_id: None,
+        expires_at: None,
+        confirmed_at: None,
+    }
+}
+
+fn status_from_record(record: &StoredPairingRecord) -> AndroidPairingStatus {
+    let phase = if record.confirmed_at.is_some() {
+        AndroidPairingPhase::Confirmed
+    } else {
+        AndroidPairingPhase::Pending
+    };
+    AndroidPairingStatus {
+        // Backward-compatible presence bit; `phase` distinguishes pending
+        // from mutually confirmed.
+        paired: true,
+        phase,
+        endpoint: Some(record.endpoint.clone()),
+        instance_id: Some(record.instance_id.clone()),
+        expires_at: Some(record.expires_at),
+        confirmed_at: record.confirmed_at,
     }
 }
 
@@ -243,13 +373,20 @@ fn validate_instance_id(value: &str) -> Result<(), AppError> {
     }
 }
 
-fn build_payload(source: &PairingSource, secret: &str) -> String {
+fn build_payload(
+    source: &PairingSource,
+    pairing_id: &str,
+    expires_at: u64,
+    secret: &str,
+) -> String {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("endpoint", &source.endpoint)
         .append_pair("instance", &source.instance_id)
+        .append_pair("pairing", pairing_id)
+        .append_pair("expires", &expires_at.to_string())
         .append_pair("secret", secret)
         .finish();
-    format!("laymux://pair/v1?{query}")
+    format!("laymux://pair/v2?{query}")
 }
 
 fn render_qr_svg(payload: &str) -> Result<String, AppError> {
@@ -272,15 +409,207 @@ fn validate_stored_record(record: &StoredPairingRecord) -> Result<(), AppError> 
     }
     validate_endpoint(&record.endpoint, cfg!(debug_assertions))?;
     validate_instance_id(&record.instance_id)?;
-    let secret = Zeroizing::new(
-        URL_SAFE_NO_PAD
-            .decode(&record.secret)
-            .map_err(|_| AppError::Other("Stored Android pairing is invalid".into()))?,
-    );
-    if secret.len() != PAIRING_SECRET_BYTES {
+    decode_base64url_exact::<PAIRING_ID_BYTES>(&record.pairing_id)?;
+    decode_base64url_exact::<PAIRING_SECRET_BYTES>(&record.secret)?;
+    if record.expires_at == 0
+        || record.client_nonce.is_some() != record.confirmed_at.is_some()
+        || record
+            .confirmed_at
+            .is_some_and(|confirmed_at| confirmed_at == 0)
+    {
         return Err(AppError::Other("Stored Android pairing is invalid".into()));
     }
+    if let Some(client_nonce) = &record.client_nonce {
+        decode_base64url_exact::<CLIENT_NONCE_BYTES>(client_nonce)?;
+    }
     Ok(())
+}
+
+fn confirm_inner_at(
+    request: &AndroidPairingAckRequest,
+    now: u64,
+) -> Result<AndroidPairingAckResponse, AndroidPairingAckError> {
+    validate_ack_request(request)?;
+    let encoded_record = keyring_store::get_record()
+        .map_err(AndroidPairingAckError::Internal)?
+        .ok_or(AndroidPairingAckError::Invalid)?;
+    let encoded_record = Zeroizing::new(encoded_record);
+    let mut record: StoredPairingRecord = serde_json::from_str(&encoded_record).map_err(|_| {
+        AndroidPairingAckError::Internal(AppError::Other(
+            "Stored Android pairing is invalid".into(),
+        ))
+    })?;
+    validate_stored_record(&record).map_err(AndroidPairingAckError::Internal)?;
+    if request.instance_id != record.instance_id || request.pairing_id != record.pairing_id {
+        return Err(AndroidPairingAckError::Invalid);
+    }
+    if record.confirmed_at.is_none() && now >= record.expires_at {
+        keyring_store::delete_record().map_err(AndroidPairingAckError::Internal)?;
+        return Err(AndroidPairingAckError::Expired);
+    }
+
+    let seed = decode_base64url_exact::<PAIRING_SECRET_BYTES>(&record.secret)
+        .map_err(AndroidPairingAckError::Internal)?;
+    verify_request_proof(&seed, request)?;
+
+    if let (Some(stored_nonce), Some(confirmed_at)) =
+        (record.client_nonce.as_deref(), record.confirmed_at)
+    {
+        if stored_nonce != request.client_nonce {
+            return Err(AndroidPairingAckError::AlreadyConfirmed);
+        }
+        return build_ack_response(&seed, request, confirmed_at)
+            .map_err(AndroidPairingAckError::Internal);
+    }
+
+    record.client_nonce = Some(request.client_nonce.clone());
+    record.confirmed_at = Some(now);
+    let updated_record =
+        Zeroizing::new(serialize_stored_record(&record).map_err(AndroidPairingAckError::Internal)?);
+    keyring_store::set_record(&updated_record).map_err(AndroidPairingAckError::Internal)?;
+    build_ack_response(&seed, request, now).map_err(AndroidPairingAckError::Internal)
+}
+
+fn validate_ack_request(request: &AndroidPairingAckRequest) -> Result<(), AndroidPairingAckError> {
+    if request.version != ACK_VERSION {
+        return Err(AndroidPairingAckError::Invalid);
+    }
+    validate_instance_id(&request.instance_id).map_err(|_| AndroidPairingAckError::Invalid)?;
+    decode_base64url_exact::<PAIRING_ID_BYTES>(&request.pairing_id)
+        .map_err(|_| AndroidPairingAckError::Invalid)?;
+    decode_base64url_exact::<CLIENT_NONCE_BYTES>(&request.client_nonce)
+        .map_err(|_| AndroidPairingAckError::Invalid)?;
+    decode_base64url_exact::<PROOF_BYTES>(&request.client_proof)
+        .map_err(|_| AndroidPairingAckError::Invalid)?;
+    Ok(())
+}
+
+fn verify_request_proof(
+    seed: &[u8],
+    request: &AndroidPairingAckRequest,
+) -> Result<(), AndroidPairingAckError> {
+    let provided = decode_base64url_exact::<PROOF_BYTES>(&request.client_proof)
+        .map_err(|_| AndroidPairingAckError::Invalid)?;
+    let mac = proof_mac(
+        seed,
+        REQUEST_PROOF_DOMAIN,
+        [
+            &request.pairing_id,
+            &request.instance_id,
+            &request.client_nonce,
+        ],
+    )
+    .map_err(AndroidPairingAckError::Internal)?;
+    mac.verify_slice(&provided)
+        .map_err(|_| AndroidPairingAckError::Invalid)
+}
+
+fn build_ack_response(
+    seed: &[u8],
+    request: &AndroidPairingAckRequest,
+    confirmed_at: u64,
+) -> Result<AndroidPairingAckResponse, AppError> {
+    Ok(AndroidPairingAckResponse {
+        version: ACK_VERSION,
+        instance_id: request.instance_id.clone(),
+        pairing_id: request.pairing_id.clone(),
+        client_nonce: request.client_nonce.clone(),
+        confirmed_at,
+        server_proof: response_proof(
+            seed,
+            &request.pairing_id,
+            &request.instance_id,
+            &request.client_nonce,
+            confirmed_at,
+        )?,
+    })
+}
+
+#[cfg(test)]
+fn request_proof(
+    seed: &[u8],
+    pairing_id: &str,
+    instance_id: &str,
+    client_nonce: &str,
+) -> Result<String, AppError> {
+    Ok(URL_SAFE_NO_PAD.encode(
+        proof_mac(
+            seed,
+            REQUEST_PROOF_DOMAIN,
+            [pairing_id, instance_id, client_nonce],
+        )?
+        .finalize()
+        .into_bytes(),
+    ))
+}
+
+fn response_proof(
+    seed: &[u8],
+    pairing_id: &str,
+    instance_id: &str,
+    client_nonce: &str,
+    confirmed_at: u64,
+) -> Result<String, AppError> {
+    let confirmed_at = confirmed_at.to_string();
+    Ok(URL_SAFE_NO_PAD.encode(
+        proof_mac(
+            seed,
+            RESPONSE_PROOF_DOMAIN,
+            [pairing_id, instance_id, client_nonce, confirmed_at.as_str()],
+        )?
+        .finalize()
+        .into_bytes(),
+    ))
+}
+
+fn proof_mac<const N: usize>(
+    seed: &[u8],
+    domain: &[u8],
+    fields: [&str; N],
+) -> Result<Hmac<Sha256>, AppError> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(seed)
+        .map_err(|_| AppError::Other("Android pairing HMAC key is invalid".into()))?;
+    mac.update(domain);
+    for field in fields {
+        let bytes = field.as_bytes();
+        let length = u32::try_from(bytes.len())
+            .map_err(|_| AppError::Other("Android pairing HMAC field is too long".into()))?;
+        mac.update(&length.to_be_bytes());
+        mac.update(bytes);
+    }
+    Ok(mac)
+}
+
+fn decode_base64url_exact<const N: usize>(value: &str) -> Result<Zeroizing<Vec<u8>>, AppError> {
+    let decoded = Zeroizing::new(
+        URL_SAFE_NO_PAD
+            .decode(value)
+            .map_err(|_| AppError::Other("Stored Android pairing is invalid".into()))?,
+    );
+    if decoded.len() != N || URL_SAFE_NO_PAD.encode(decoded.as_slice()) != value {
+        return Err(AppError::Other("Stored Android pairing is invalid".into()));
+    }
+    Ok(decoded)
+}
+
+fn serialize_stored_record(record: &StoredPairingRecord) -> Result<String, AppError> {
+    Ok(serde_json::to_string(&StoredPairingRecordRef {
+        version: record.version,
+        endpoint: &record.endpoint,
+        instance_id: &record.instance_id,
+        pairing_id: &record.pairing_id,
+        expires_at: record.expires_at,
+        secret: &record.secret,
+        client_nonce: record.client_nonce.as_deref(),
+        confirmed_at: record.confirmed_at,
+    })?)
+}
+
+fn unix_time_now() -> Result<u64, AppError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| AppError::Other("System clock is before Unix epoch".into()))
 }
 
 #[cfg(test)]
@@ -388,21 +717,114 @@ mod tests {
     }
 
     #[test]
-    fn payload_matches_the_android_v1_contract() {
+    fn payload_matches_the_android_v2_contract_with_five_minute_expiry() {
         let source = PairingSource {
             endpoint: "https://relay.example.test/".into(),
             instance_id: "desktop-7".into(),
         };
         let secret = URL_SAFE_NO_PAD.encode([7_u8; PAIRING_SECRET_BYTES]);
+        let pairing_id = URL_SAFE_NO_PAD.encode([8_u8; PAIRING_ID_BYTES]);
 
-        let payload = build_payload(&source, &secret);
+        let payload = build_payload(&source, &pairing_id, 1_786_500_300, &secret);
 
         assert_eq!(
             payload,
             format!(
-                "laymux://pair/v1?endpoint=https%3A%2F%2Frelay.example.test%2F&instance=desktop-7&secret={secret}"
+                "laymux://pair/v2?endpoint=https%3A%2F%2Frelay.example.test%2F&instance=desktop-7&pairing={pairing_id}&expires=1786500300&secret={secret}"
             )
         );
+    }
+
+    #[test]
+    fn hmac_proofs_match_the_cross_platform_test_vector() {
+        let seed: Vec<u8> = (0_u8..32).collect();
+        let pairing_id = "EBESExQVFhcYGRobHB0eHw";
+        let client_nonce = "ICEiIyQlJicoKSorLC0uLw";
+
+        assert_eq!(
+            request_proof(&seed, pairing_id, "desktop-7", client_nonce).unwrap(),
+            "VCLjMKeN3kuPYo0PZv1B_5u-reuVTjOjVBW9AFmZbD0"
+        );
+        assert_eq!(
+            response_proof(&seed, pairing_id, "desktop-7", client_nonce, 1_786_500_000,).unwrap(),
+            "uPqJodeWKRiXPi08V_o8JQznMtxtHZF6ZQNEKB0oL_g"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn pending_invitation_expires_authoritatively_and_is_deleted() {
+        keyring_store::reset_mock_store().unwrap();
+        let seed = [5_u8; PAIRING_SECRET_BYTES];
+        let pairing_id_bytes = [6_u8; PAIRING_ID_BYTES];
+        let pairing_id = URL_SAFE_NO_PAD.encode(pairing_id_bytes);
+        create_for_settings_with_material(&paired_settings(), &seed, &pairing_id_bytes, 1_000)
+            .unwrap();
+        let client_nonce = URL_SAFE_NO_PAD.encode([7_u8; CLIENT_NONCE_BYTES]);
+        let request = AndroidPairingAckRequest {
+            version: ACK_VERSION,
+            instance_id: "desktop-7".into(),
+            pairing_id,
+            client_nonce: client_nonce.clone(),
+            client_proof: request_proof(
+                &seed,
+                &URL_SAFE_NO_PAD.encode(pairing_id_bytes),
+                "desktop-7",
+                &client_nonce,
+            )
+            .unwrap(),
+        };
+
+        assert!(matches!(
+            confirm_inner_at(&request, 1_300),
+            Err(AndroidPairingAckError::Expired)
+        ));
+        assert_eq!(get_status_inner_at(1_300).unwrap(), empty_status());
+        assert!(keyring_store::get_record().unwrap().is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn first_client_nonce_wins_and_same_nonce_retry_is_idempotent() {
+        keyring_store::reset_mock_store().unwrap();
+        let seed = [11_u8; PAIRING_SECRET_BYTES];
+        let pairing_id_bytes = [12_u8; PAIRING_ID_BYTES];
+        let pairing_id = URL_SAFE_NO_PAD.encode(pairing_id_bytes);
+        create_for_settings_with_material(&paired_settings(), &seed, &pairing_id_bytes, 1_000)
+            .unwrap();
+        let first_nonce = URL_SAFE_NO_PAD.encode([13_u8; CLIENT_NONCE_BYTES]);
+        let first = ack_request(&seed, &pairing_id, &first_nonce);
+
+        let confirmed = confirm_inner_at(&first, 1_100).unwrap();
+        let retried = confirm_inner_at(&first, 1_250).unwrap();
+
+        assert_eq!(confirmed, retried);
+        assert_eq!(confirmed.confirmed_at, 1_100);
+        assert_eq!(
+            get_status_inner_at(1_400).unwrap().phase,
+            AndroidPairingPhase::Confirmed
+        );
+
+        let second_nonce = URL_SAFE_NO_PAD.encode([14_u8; CLIENT_NONCE_BYTES]);
+        let second = ack_request(&seed, &pairing_id, &second_nonce);
+        assert!(matches!(
+            confirm_inner_at(&second, 1_200),
+            Err(AndroidPairingAckError::AlreadyConfirmed)
+        ));
+    }
+
+    fn ack_request(
+        seed: &[u8; PAIRING_SECRET_BYTES],
+        pairing_id: &str,
+        client_nonce: &str,
+    ) -> AndroidPairingAckRequest {
+        AndroidPairingAckRequest {
+            version: ACK_VERSION,
+            instance_id: "desktop-7".into(),
+            pairing_id: pairing_id.into(),
+            client_nonce: client_nonce.into(),
+            client_proof: request_proof(seed, pairing_id, "desktop-7", client_nonce).unwrap(),
+        }
     }
 
     #[test]

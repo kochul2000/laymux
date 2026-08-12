@@ -19,6 +19,10 @@ import org.json.JSONObject
 data class PairingMetadata(
     val endpoint: String,
     val instanceId: String,
+    val pairingId: String,
+    val expiresAtEpochSeconds: Long,
+    val clientNonce: String,
+    val confirmedAtEpochSeconds: Long?,
     val label: String?,
 )
 
@@ -60,6 +64,7 @@ class PairingVault(
     context: Context,
     private val preferenceName: String = PREFERENCE_NAME,
     private val keyAlias: String = KEY_ALIAS,
+    private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000 },
 ) {
     private val preferences = context.applicationContext.getSharedPreferences(
         preferenceName,
@@ -101,6 +106,7 @@ class PairingVault(
     @Synchronized
     fun save(
         payload: PairingPayload,
+        clientNonce: String,
         policy: PairingProtectionPolicy,
         cipher: Cipher,
     ) {
@@ -115,6 +121,10 @@ class PairingVault(
                 .put("protection", policy.storageValue)
                 .put("endpoint", payload.endpoint.toString())
                 .put("instanceId", payload.instanceId)
+                .put("pairingId", payload.pairingId)
+                .put("expiresAt", payload.expiresAtEpochSeconds)
+                .put("clientNonce", clientNonce)
+                .put("confirmedAt", JSONObject.NULL)
                 .put("label", payload.label ?: JSONObject.NULL)
                 .put("iv", encodeBase64(cipher.iv))
                 .put("ciphertext", encodeBase64(encrypted))
@@ -129,11 +139,39 @@ class PairingVault(
 
     /** Reads non-secret display metadata without initializing or using the wrapping key. */
     @Synchronized
-    fun loadMetadata(): PairingMetadata? = storedEnvelope()?.metadata
+    fun loadMetadata(): PairingMetadata? = activeEnvelope()?.metadata
+
+    @Synchronized
+    fun markConfirmed(
+        pairingId: String,
+        clientNonce: String,
+        confirmedAtEpochSeconds: Long,
+    ) {
+        if (confirmedAtEpochSeconds <= 0) {
+            throw IllegalArgumentException("페어링 확인 시각이 올바르지 않습니다")
+        }
+        val encodedEnvelope = preferences.getString(PAIRING_KEY, null)
+            ?: throw IllegalStateException("저장된 페어링이 없습니다")
+        val json = try {
+            JSONObject(encodedEnvelope)
+        } catch (_: Exception) {
+            throw corrupted()
+        }
+        val envelope = storedEnvelope() ?: throw IllegalStateException("저장된 페어링이 없습니다")
+        if (envelope.metadata.pairingId != pairingId ||
+            envelope.metadata.clientNonce != clientNonce
+        ) {
+            throw IllegalStateException("페어링 확인 대상이 변경됐습니다")
+        }
+        json.put("confirmedAt", confirmedAtEpochSeconds)
+        if (!preferences.edit().putString(PAIRING_KEY, json.toString()).commit()) {
+            throw IllegalStateException("페어링 확인 상태를 저장하지 못했습니다")
+        }
+    }
 
     @Synchronized
     fun prepareDecryption(): PendingPairingDecryption? {
-        val envelope = storedEnvelope() ?: return null
+        val envelope = activeEnvelope() ?: return null
         if (envelope.policy != protectionPolicy()) {
             throw IllegalStateException("저장된 페어링과 키 보호 설정이 일치하지 않습니다")
         }
@@ -188,6 +226,15 @@ class PairingVault(
         }
     }
 
+    /** A stale network result must not delete a newer scan of the same QR. */
+    @Synchronized
+    fun clearIfMatches(pairingId: String, clientNonce: String): Boolean {
+        val metadata = storedEnvelope()?.metadata ?: return false
+        if (metadata.pairingId != pairingId || metadata.clientNonce != clientNonce) return false
+        clear()
+        return true
+    }
+
     private fun storedEnvelope(): StoredEnvelope? {
         val encodedEnvelope = preferences.getString(PAIRING_KEY, null) ?: return null
         val json = try {
@@ -197,13 +244,22 @@ class PairingVault(
         }
         if (json.optInt("version", -1) != STORAGE_VERSION) throw corrupted()
         val policy = try {
-            PairingProtectionPolicy.fromStorage(json.optString("protection", null))
+            if (!json.has("protection") || json.isNull("protection")) throw corrupted()
+            PairingProtectionPolicy.fromStorage(json.getString("protection"))
         } catch (_: Exception) {
             throw corrupted()
         }
         val metadata = validateMetadata(
             endpoint = json.optString("endpoint"),
             instanceId = json.optString("instanceId"),
+            pairingId = json.optString("pairingId"),
+            expiresAtEpochSeconds = json.optLong("expiresAt", -1),
+            clientNonce = json.optString("clientNonce"),
+            confirmedAtEpochSeconds = if (json.isNull("confirmedAt")) {
+                null
+            } else {
+                json.optLong("confirmedAt", -1)
+            },
             label = if (json.isNull("label")) null else json.optString("label"),
         )
         val iv = decodeBase64(json.optString("iv"))
@@ -212,9 +268,24 @@ class PairingVault(
         return StoredEnvelope(policy, metadata, iv, ciphertext)
     }
 
+    private fun activeEnvelope(): StoredEnvelope? {
+        val envelope = storedEnvelope() ?: return null
+        if (envelope.metadata.confirmedAtEpochSeconds == null &&
+            nowEpochSeconds() >= envelope.metadata.expiresAtEpochSeconds
+        ) {
+            clear()
+            return null
+        }
+        return envelope
+    }
+
     private fun validateMetadata(
         endpoint: String,
         instanceId: String,
+        pairingId: String,
+        expiresAtEpochSeconds: Long,
+        clientNonce: String,
+        confirmedAtEpochSeconds: Long?,
         label: String?,
     ): PairingMetadata {
         val uri = try {
@@ -225,6 +296,14 @@ class PairingVault(
         val host = uri.host?.removePrefix("[")?.removeSuffix("]")?.lowercase()
         val allowedScheme = uri.scheme == "https" ||
             (uri.scheme == "http" && (host == "127.0.0.1" || host == "::1"))
+        val pairingIdBytes = Base64Url.decodeExact(pairingId, PairingPayload.PAIRING_ID_BYTES)
+        val clientNonceBytes = Base64Url.decodeExact(
+            clientNonce,
+            PairingHandshake.CLIENT_NONCE_BYTES,
+        )
+        val validIdentifiers = pairingIdBytes != null && clientNonceBytes != null
+        pairingIdBytes?.let { Arrays.fill(it, 0) }
+        clientNonceBytes?.let { Arrays.fill(it, 0) }
         if (!allowedScheme ||
             host.isNullOrEmpty() ||
             uri.rawUserInfo != null ||
@@ -233,12 +312,25 @@ class PairingVault(
             uri.rawPath != "/" ||
             endpoint.length > MAX_ENDPOINT_LENGTH ||
             !INSTANCE_PATTERN.matches(instanceId) ||
+            !PAIRING_ID_PATTERN.matches(pairingId) ||
+            !CLIENT_NONCE_PATTERN.matches(clientNonce) ||
+            !validIdentifiers ||
+            expiresAtEpochSeconds <= 0 ||
+            (confirmedAtEpochSeconds != null && confirmedAtEpochSeconds <= 0) ||
             (label != null &&
                 (label.isBlank() || label.length > MAX_LABEL_LENGTH || label.any(Char::isISOControl)))
         ) {
             throw corrupted()
         }
-        return PairingMetadata(endpoint, instanceId, label)
+        return PairingMetadata(
+            endpoint,
+            instanceId,
+            pairingId,
+            expiresAtEpochSeconds,
+            clientNonce,
+            confirmedAtEpochSeconds,
+            label,
+        )
     }
 
     private fun getOrCreateWrappingKey(policy: PairingProtectionPolicy): SecretKey {
@@ -307,12 +399,14 @@ class PairingVault(
         private const val KEY_ALIAS = "com.laymux.android.pairing-wrap.v2"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val STORAGE_VERSION = 2
+        private const val STORAGE_VERSION = 3
         private const val GCM_IV_BYTES = 12
         private const val GCM_TAG_BITS = 128
         private const val GCM_TAG_BYTES = GCM_TAG_BITS / Byte.SIZE_BITS
         private const val MAX_ENDPOINT_LENGTH = 2048
         private const val MAX_LABEL_LENGTH = 80
         private val INSTANCE_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+        private val PAIRING_ID_PATTERN = Regex("^[A-Za-z0-9_-]{22}$")
+        private val CLIENT_NONCE_PATTERN = Regex("^[A-Za-z0-9_-]{22}$")
     }
 }

@@ -31,6 +31,11 @@ class NativeBridge(
     }
 
     @JavascriptInterface
+    fun retryPairingConfirmation() {
+        activity.runOnUiThread(activity::retryPairingConfirmation)
+    }
+
+    @JavascriptInterface
     fun forgetPairing() {
         activity.runOnUiThread(activity::forgetPairing)
     }
@@ -57,9 +62,19 @@ class NativeBridge(
 
             val stored = vault.loadMetadata()
             result.put("paired", stored != null)
+            result.put("confirmed", stored?.confirmedAtEpochSeconds != null)
+            result.put(
+                "confirmationPending",
+                stored != null && stored.confirmedAtEpochSeconds == null,
+            )
             if (stored != null) {
                 result.put("endpoint", stored.endpoint)
                 result.put("instanceId", stored.instanceId)
+                result.put("expiresAt", stored.expiresAtEpochSeconds)
+                result.put(
+                    "confirmedAt",
+                    stored.confirmedAtEpochSeconds ?: JSONObject.NULL,
+                )
                 result.put("label", stored.label ?: JSONObject.NULL)
             }
         } catch (_: Exception) {

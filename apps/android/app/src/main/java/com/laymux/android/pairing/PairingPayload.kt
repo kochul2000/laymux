@@ -7,12 +7,14 @@ import java.nio.charset.StandardCharsets
 import java.util.Arrays
 
 /**
- * Validated v1 QR payload. The secret is deliberately absent from properties,
+ * Validated v2 QR payload. The secret is deliberately absent from properties,
  * [toString], and exception messages; callers can only take a defensive copy.
  */
 class PairingPayload private constructor(
     val endpoint: URI,
     val instanceId: String,
+    val pairingId: String,
+    val expiresAtEpochSeconds: Long,
     val label: String?,
     private val secret: ByteArray,
 ) : Closeable {
@@ -23,19 +25,27 @@ class PairingPayload private constructor(
     }
 
     override fun toString(): String =
-        "PairingPayload(endpoint=$endpoint, instanceId=$instanceId, label=$label, secret=<redacted>)"
+        "PairingPayload(endpoint=$endpoint, instanceId=$instanceId, " +
+            "pairingId=$pairingId, expiresAtEpochSeconds=$expiresAtEpochSeconds, " +
+            "label=$label, secret=<redacted>)"
 
     companion object {
         const val SECRET_BYTES = 32
+        const val PAIRING_ID_BYTES = 16
 
         private const val MAX_ENDPOINT_LENGTH = 2048
         private const val MAX_LABEL_LENGTH = 80
         private val INSTANCE_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+        private val PAIRING_ID_PATTERN = Regex("^[A-Za-z0-9_-]{22}$")
         private val SECRET_PATTERN = Regex("^[A-Za-z0-9_-]{43}$")
-        private val REQUIRED_FIELDS = setOf("endpoint", "instance", "secret")
+        private val REQUIRED_FIELDS = setOf("endpoint", "instance", "pairing", "expires", "secret")
         private val ALLOWED_FIELDS = REQUIRED_FIELDS + "label"
 
-        fun parse(raw: String, allowLoopbackHttp: Boolean = false): PairingPayload {
+        fun parse(
+            raw: String,
+            allowLoopbackHttp: Boolean = false,
+            nowEpochSeconds: Long = System.currentTimeMillis() / 1_000,
+        ): PairingPayload {
             val uri = try {
                 URI(raw)
             } catch (_: Exception) {
@@ -45,7 +55,7 @@ class PairingPayload private constructor(
                 !uri.host.equals("pair", ignoreCase = true) ||
                 uri.port != -1 ||
                 uri.userInfo != null ||
-                uri.path != "/v1" ||
+                uri.path != "/v2" ||
                 uri.fragment != null
             ) {
                 throw invalid("지원하지 않는 Laymux 페어링 QR입니다")
@@ -65,6 +75,16 @@ class PairingPayload private constructor(
             if (!INSTANCE_PATTERN.matches(instanceId)) {
                 throw invalid("인스턴스 식별자가 올바르지 않습니다")
             }
+            val pairingId = fields.getValue("pairing")
+            decodeFixedBase64Url(
+                encoded = pairingId,
+                pattern = PAIRING_ID_PATTERN,
+                expectedBytes = PAIRING_ID_BYTES,
+                errorMessage = "페어링 식별자가 올바르지 않습니다",
+            ).also { Arrays.fill(it, 0) }
+            val expiresAtEpochSeconds = fields.getValue("expires").toLongOrNull()
+                ?.takeIf { it > 0 && it > nowEpochSeconds }
+                ?: throw invalid("페어링 QR이 만료됐습니다")
             val label = fields["label"]?.also {
                 if (it.isBlank() ||
                     it.length > MAX_LABEL_LENGTH ||
@@ -75,7 +95,14 @@ class PairingPayload private constructor(
             }
             val secret = decodeSecret(fields.getValue("secret"))
 
-            return PairingPayload(endpoint, instanceId, label, secret)
+            return PairingPayload(
+                endpoint,
+                instanceId,
+                pairingId,
+                expiresAtEpochSeconds,
+                label,
+                secret,
+            )
         }
 
         private fun parseQuery(rawQuery: String?): Map<String, String> {
@@ -133,11 +160,21 @@ class PairingPayload private constructor(
             return URI(scheme, null, host, endpoint.port, "/", null, null)
         }
 
-        private fun decodeSecret(encoded: String): ByteArray {
-            if (!SECRET_PATTERN.matches(encoded)) {
-                throw invalid("페어링 키 형식이 올바르지 않습니다")
-            }
-            val decoded = ByteArray(SECRET_BYTES)
+        private fun decodeSecret(encoded: String): ByteArray = decodeFixedBase64Url(
+            encoded = encoded,
+            pattern = SECRET_PATTERN,
+            expectedBytes = SECRET_BYTES,
+            errorMessage = "페어링 키 형식이 올바르지 않습니다",
+        )
+
+        private fun decodeFixedBase64Url(
+            encoded: String,
+            pattern: Regex,
+            expectedBytes: Int,
+            errorMessage: String,
+        ): ByteArray {
+            if (!pattern.matches(encoded)) throw invalid(errorMessage)
+            val decoded = ByteArray(expectedBytes)
             var accumulator = 0
             var bits = 0
             var output = 0
@@ -148,22 +185,23 @@ class PairingPayload private constructor(
                     in '0'..'9' -> character.code - '0'.code + 52
                     '-' -> 62
                     '_' -> 63
-                    else -> throw invalid("페어링 키 형식이 올바르지 않습니다")
+                    else -> throw invalid(errorMessage)
                 }
                 accumulator = (accumulator shl 6) or value
                 bits += 6
                 if (bits >= 8) {
                     bits -= 8
                     if (output >= decoded.size) {
-                        throw invalid("페어링 키 길이가 올바르지 않습니다")
+                        Arrays.fill(decoded, 0)
+                        throw invalid(errorMessage)
                     }
                     decoded[output++] = (accumulator shr bits).toByte()
                     accumulator = if (bits == 0) 0 else accumulator and ((1 shl bits) - 1)
                 }
             }
-            if (output != SECRET_BYTES || accumulator != 0) {
+            if (output != expectedBytes || accumulator != 0) {
                 Arrays.fill(decoded, 0)
-                throw invalid("페어링 키 길이가 올바르지 않습니다")
+                throw invalid(errorMessage)
             }
             return decoded
         }

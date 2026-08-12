@@ -363,8 +363,11 @@ export interface CloudStatus {
 
 export interface AndroidPairingStatus {
   paired: boolean;
+  phase: "none" | "pending" | "confirmed";
   endpoint?: string | null;
   instanceId?: string | null;
+  expiresAt?: number | null;
+  confirmedAt?: number | null;
 }
 
 export interface AndroidPairingQr {

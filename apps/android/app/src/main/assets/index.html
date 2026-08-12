@@ -59,6 +59,9 @@
         <button id="scanButton" class="primary" type="button">
           QR로 페어링
         </button>
+        <button id="confirmButton" class="secondary" type="button" hidden>
+          데스크톱 확인 재시도
+        </button>
         <button id="verifyButton" class="secondary" type="button" hidden>
           생체 인증 확인
         </button>
@@ -68,8 +71,9 @@
       </section>
 
       <p class="footnote">
-        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 현재 빌드는 QR 키
-        저장 기반만 제공하며 터미널 트래픽의 E2E 암호화는 후속 단계입니다.
+        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 확인은
+        relay가 위조할 수 없는 상호 증명을 사용하지만, 터미널 트래픽의 E2E
+        암호화는 후속 단계입니다.
       </p>
     </main>
     <script src="app.js"></script>

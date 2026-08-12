@@ -65,7 +65,14 @@ describe("RemoteAccessModal", () => {
       if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
       if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
       if (cmd === "get_android_pairing_status") {
-        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+        return Promise.resolve({
+          paired: false,
+          phase: "none",
+          endpoint: null,
+          instanceId: null,
+          expiresAt: null,
+          confirmedAt: null,
+        });
       }
       if (cmd === "set_remote_runtime_access") return Promise.resolve(accessStatus(false));
       if (cmd === "get_remote_control_status") {
@@ -423,14 +430,24 @@ describe("RemoteAccessModal", () => {
       if (cmd === "get_remote_host_candidates") return Promise.resolve(hostCandidates);
       if (cmd === "get_remote_access_status") return Promise.resolve(accessStatus());
       if (cmd === "get_android_pairing_status") {
-        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+        return Promise.resolve({
+          paired: false,
+          phase: "none",
+          endpoint: null,
+          instanceId: null,
+          expiresAt: null,
+          confirmedAt: null,
+        });
       }
       if (cmd === "create_android_pairing_qr") {
         return Promise.resolve({
           status: {
             paired: true,
+            phase: "pending",
             endpoint: "https://relay.example.test/",
             instanceId: "instance-1",
+            expiresAt: 4_102_444_800,
+            confirmedAt: null,
           },
           qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>',
         });
@@ -448,8 +465,8 @@ describe("RemoteAccessModal", () => {
     expect(mockInvoke).toHaveBeenCalledWith("create_android_pairing_qr");
     const qr = await screen.findByRole("img", { name: "Android pairing QR code" });
     expect(qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
-    expect(screen.getByText("Pairing key stored in OS keyring")).toBeVisible();
-    expect(document.body.textContent).not.toContain("laymux://pair/v1");
+    expect(screen.getByText(/QR issued · waiting for app confirmation/)).toBeVisible();
+    expect(document.body.textContent).not.toContain("laymux://pair/v2");
     expect(document.body.textContent).not.toContain("secret=");
   });
 
@@ -459,9 +476,15 @@ describe("RemoteAccessModal", () => {
       cloudInstanceId: "instance-1",
       cloudServerBaseUrl: "https://relay.example.test",
     });
-    let resolveStatus!: (status: { paired: boolean; endpoint: null; instanceId: null }) => void;
+    let resolveStatus!: (status: {
+      paired: boolean;
+      phase: "none";
+      endpoint: null;
+      instanceId: null;
+    }) => void;
     const delayedStatus = new Promise<{
       paired: boolean;
+      phase: "none";
       endpoint: null;
       instanceId: null;
     }>((resolve) => {
@@ -476,8 +499,11 @@ describe("RemoteAccessModal", () => {
         return Promise.resolve({
           status: {
             paired: true,
+            phase: "pending",
             endpoint: "https://relay.example.test/",
             instanceId: "instance-1",
+            expiresAt: 4_102_444_800,
+            confirmedAt: null,
           },
           qrSvg: '<svg xmlns="http://www.w3.org/2000/svg" />',
         });
@@ -495,7 +521,7 @@ describe("RemoteAccessModal", () => {
     expect(await screen.findByRole("img", { name: "Android pairing QR code" })).toBeVisible();
     expect(screen.getByTestId("android-pairing-revoke")).toBeVisible();
 
-    resolveStatus({ paired: false, endpoint: null, instanceId: null });
+    resolveStatus({ paired: false, phase: "none", endpoint: null, instanceId: null });
 
     await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_android_pairing_status"));
     expect(screen.getByTestId("android-pairing-revoke")).toBeVisible();
@@ -514,12 +540,22 @@ describe("RemoteAccessModal", () => {
       if (cmd === "get_android_pairing_status") {
         return Promise.resolve({
           paired: true,
+          phase: "confirmed",
           endpoint: "https://relay.example.test/",
           instanceId: "instance-1",
+          expiresAt: 4_102_444_800,
+          confirmedAt: 1_786_500_000,
         });
       }
       if (cmd === "revoke_android_pairing") {
-        return Promise.resolve({ paired: false, endpoint: null, instanceId: null });
+        return Promise.resolve({
+          paired: false,
+          phase: "none",
+          endpoint: null,
+          instanceId: null,
+          expiresAt: null,
+          confirmedAt: null,
+        });
       }
       if (cmd === "get_remote_control_status") {
         return Promise.resolve({ active: false, heartbeatTimeoutSeconds: 15 });

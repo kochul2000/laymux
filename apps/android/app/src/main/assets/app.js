@@ -13,6 +13,7 @@
   const errorMessage = document.getElementById("errorMessage");
   const noticeMessage = document.getElementById("noticeMessage");
   const scanButton = document.getElementById("scanButton");
+  const confirmButton = document.getElementById("confirmButton");
   const verifyButton = document.getElementById("verifyButton");
   const forgetButton = document.getElementById("forgetButton");
 
@@ -21,20 +22,31 @@
   function render(statusValue) {
     const status = statusValue || {};
     const paired = status.paired === true;
+    const confirmed = status.confirmed === true;
+    const confirmationPending = status.confirmationPending === true;
     const biometricRequired = status.biometricRequired !== false;
     const biometricAvailable = status.biometricAvailable === true;
 
-    stateBadge.textContent = paired ? "페어링됨" : "페어링 필요";
-    stateBadge.classList.toggle("paired", paired);
-    stateTitle.textContent = paired
-      ? "페어링 키가 저장됐습니다"
+    stateBadge.textContent = confirmed
+      ? "페어링 확인됨"
+      : confirmationPending
+        ? "데스크톱 확인 대기"
+        : "페어링 필요";
+    stateBadge.classList.toggle("paired", confirmed);
+    stateTitle.textContent = confirmed
+      ? "데스크톱과 키를 서로 확인했습니다"
+      : confirmationPending
+        ? "키는 저장됐고 데스크톱 확인이 남았습니다"
       : "데스크톱 QR을 스캔하세요";
-    if (paired && biometricRequired) {
+    if (confirmed && biometricRequired) {
       stateDescription.textContent =
         "암호키는 Android Keystore와 강한 생체 인증으로 보호되며 웹 화면에는 노출되지 않습니다.";
-    } else if (paired) {
+    } else if (confirmed) {
       stateDescription.textContent =
         "암호키는 Android Keystore로 보호됩니다. 생체 인증은 명시적으로 꺼져 있습니다.";
+    } else if (confirmationPending) {
+      stateDescription.textContent =
+        "Relay 연결이 가능해지면 생체 인증 후 같은 키로 데스크톱 확인을 다시 시도할 수 있습니다.";
     } else {
       stateDescription.textContent =
         "Laymux 데스크톱이 표시하는 페어링 QR을 스캔합니다.";
@@ -42,6 +54,7 @@
 
     pairingDetails.hidden = !paired;
     forgetButton.hidden = !paired;
+    confirmButton.hidden = !confirmationPending;
     verifyButton.hidden = !paired || !biometricRequired;
     scanButton.textContent = paired ? "다른 기기 페어링" : "QR로 페어링";
     if (paired) {
@@ -71,6 +84,7 @@
     noticeMessage.textContent = status.notice || "";
     scanButton.disabled = biometricRequired && !biometricAvailable;
     verifyButton.disabled = biometricRequired && !biometricAvailable;
+    confirmButton.disabled = biometricRequired && !biometricAvailable;
   }
 
   function readInitialStatus() {
@@ -117,6 +131,13 @@
     errorMessage.hidden = true;
     noticeMessage.hidden = true;
     nativeBridge.verifyPairingProtection();
+  });
+
+  confirmButton.addEventListener("click", () => {
+    confirmButton.disabled = true;
+    errorMessage.hidden = true;
+    noticeMessage.hidden = true;
+    nativeBridge.retryPairingConfirmation();
   });
 
   forgetButton.addEventListener("click", () => {

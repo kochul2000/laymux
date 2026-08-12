@@ -44,8 +44,11 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
 읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
 데스크톱 Remote Access 모달은 cloud identity에 결합된 seed를 Rust에서 만들고 OS keyring에
-보관한 뒤 QR SVG만 표시한다. 새 발급은 기존 seed를 회전하고 명시적 폐기와 cloud disconnect는
-record를 삭제한다. 현재 들어 있는 표면은 양 endpoint의 pairing 상태와 키 저장 기반까지이며
+보관한 뒤 5분짜리 QR SVG만 표시한다. Android는 seed로 서명한 ACK를 cloud public origin의
+고정 relay route로 보내고, relay는 이를 해당 instance의 기존 WSS tunnel과 고정 desktop route로만
+전달한다. desktop은 첫 client nonce 하나를 확정하고 상호 HMAC proof를 반환한다
+([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md)). 새 발급은 기존 seed를
+회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 이 단계는 pairing confirmation까지며
 Android 셸은 terminal data plane에 아직 연결되지 않았다. 기존 브라우저 Remote UI API도
 별도로 평문 payload를 사용하므로 E2E 완료 상태가 아니다.
 

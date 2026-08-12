@@ -2,20 +2,23 @@
 
 서버가 내려주는 코드를 실행하지 않는 최소 하이브리드 원격 클라이언트다. APK에 포함된 로컬
 HTML/CSS/JavaScript를 WebView로 표시하고 Kotlin 계층이 QR 스캔과 Android Keystore 저장을
-담당한다. 설계 정본은 [ADR-0144](../../docs/adr/0144-android-signed-hybrid-client-e2e-foundation.md)와
+담당한다. 설계 정본은 [ADR-0144](../../docs/adr/0144-android-signed-hybrid-client-e2e-foundation.md),
+[ADR-0145](../../docs/adr/0145-android-pairing-authenticated-one-time-ack.md)와
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
 
-- `laymux://pair/v1` QR 검증
+- 5분 뒤 만료되는 `laymux://pair/v2` QR 검증
 - 32바이트 pairing seed의 AES-256-GCM wrapping 저장
 - 기본 auth-per-use 강한 생체 인증과 경고가 있는 명시적 Keystore-only opt-out
 - APK 로컬 자산만 허용하는 WebView와 비밀을 반환하지 않는 native bridge
-- pairing 상태 확인·교체·보호 검증·삭제 UI
+- relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
+- pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 
-데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 QR을 발급·회전·폐기한다. 다만
-scan ACK·자동 만료와 terminal data plane 암호화는 아직 구현하지 않았다. 이 앱을 빌드했다고
-기존 cloud/direct remote 연결이 E2E로 바뀌지는 않는다.
+데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 QR을 발급·회전·폐기하고, 첫 Android
+client nonce의 ACK를 확인한다. 이 확인은 양 endpoint가 같은 seed를 보유한다는 뜻일 뿐 terminal
+data plane 암호화는 아직 구현하지 않았다. 이 앱을 빌드했다고 기존 cloud/direct remote 연결이
+E2E로 바뀌지는 않는다.
 
 ## 빌드
 
