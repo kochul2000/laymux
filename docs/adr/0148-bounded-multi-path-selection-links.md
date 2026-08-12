@@ -36,5 +36,5 @@
 - 사용자는 로그 문장이나 여러 줄을 대략 선택해도 그 안의 복수 파일 경로를 각각 열 수 있다. 같은 긴 경로의 내부 basename이 별도 링크가 되는 일은 없다.
 - strong candidate 휴리스틱 때문에 넓은 문장 안의 확장자 없는 맨이름은 자동 링크되지 않는다. 그 이름만 단독 선택하면 기존처럼 존재 검증한다. 공백이 포함된 실제 경로도 따옴표 안의 공백을 하나의 token으로 추론하지 않으며 정확성과 bounded 비용을 우선한다.
 - Remote 응답 shape가 바뀌므로 구형 page와 신형 frontend bridge의 혼용은 링크를 표시하지 않는 fail-closed 결과가 된다. page는 desktop binary에 내장되어 함께 배포되므로 별도 schema migration은 없다.
-- 테스트는 maximal-munch 비중첩, 긴 후보 실패 시 내부 fallback 금지, 복수 줄/복수 후보, 모든 상한, 중복 stat 제거, desktop 복수 데코레이션 hit-test, Remote 목록 응답과 stale selection 검증, Rust batch 순서·상한을 다룬다.
+- 테스트는 maximal-munch 비중첩, 긴 후보 실패 시 내부 fallback 금지, 복수 줄/복수 후보, 모든 상한, 중복 stat 제거, desktop 복수 데코레이션 hit-test, CWD 변경 중 stale stat 폐기, Remote 목록 응답·stale selection·와이드 셀 좌표 계약, Rust batch 순서·상한을 다룬다.
 - 후보 휴리스틱이나 상한을 바꾸면 filesystem 조회량과 Remote 계약의 의미가 달라지므로 living doc과 이 ADR의 제약을 함께 검토한다.

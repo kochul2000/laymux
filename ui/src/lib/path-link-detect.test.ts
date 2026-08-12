@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   extractPathCandidatesFromSelection,
+  isPathLinkCwdCurrent,
   joinCwdPath,
   mapSelectionCandidateToPathRange,
   normalizeMsysCwd,
@@ -9,6 +10,14 @@ import {
   decidePathLinkAction,
   mapSelectionToPathRange,
 } from "./path-link-detect";
+
+describe("isPathLinkCwdCurrent", () => {
+  it("stat 대기 중 CWD가 바뀐 요청만 stale로 판정한다", () => {
+    expect(isPathLinkCwdCurrent("/work/a", "/work/a")).toBe(true);
+    expect(isPathLinkCwdCurrent("/work/a", "/work/b")).toBe(false);
+    expect(isPathLinkCwdCurrent(undefined, undefined)).toBe(true);
+  });
+});
 
 describe("extractPathCandidatesFromSelection", () => {
   const options = {

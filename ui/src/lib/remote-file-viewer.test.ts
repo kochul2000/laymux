@@ -190,6 +190,27 @@ describe("Remote FileViewer path-link bridge", () => {
       },
     });
   });
+
+  it("stat 대기 중 terminal CWD가 바뀌면 이전 CWD의 결과를 폐기한다", async () => {
+    registerTerminal("/work/a");
+    let resolveStat!: (value: Array<{ exists: boolean; isDirectory: boolean }>) => void;
+    vi.mocked(statPaths).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStat = resolve;
+        }),
+    );
+
+    const pending = handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      selection: "src/main.rs",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-1", { cwd: "/work/b" });
+    resolveStat([{ exists: true, isDirectory: false }]);
+
+    await expect(pending).resolves.toEqual({ success: true, data: { valid: false } });
+    expect(statPaths).toHaveBeenCalledWith(["/work/a/src/main.rs"]);
+  });
 });
 
 describe("Remote FileViewer render payload", () => {

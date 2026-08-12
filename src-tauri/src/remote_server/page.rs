@@ -560,6 +560,11 @@ mod tests {
         assert!(html.contains("data.valid !== true || !Array.isArray(data.matches)"));
         assert!(html.contains("data.matches.length === 0 || data.matches.length > 16"));
         assert!(html.contains("slice(match.startIndex, match.endIndex) === match.token"));
+        assert!(
+            html.contains("const { text, columns, endColumns } = reconstructRemoteLinkLine(line);")
+        );
+        assert!(html.contains("text.slice(startOffset, endOffset + 1) === match.token"));
+        assert!(html.contains("endCol: endColumns[endOffset]"));
         assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));

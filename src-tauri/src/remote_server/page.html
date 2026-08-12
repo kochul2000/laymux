@@ -2487,8 +2487,30 @@
 
         function mapRemotePathLinkRange(position, match) {
           const selectionBaseCol0 = match.lineIndex === 0 ? position.start.x : 0;
+          const bufferLine = position.start.y + match.lineIndex + 1;
+          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
+          if (line) {
+            const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
+            const selectionStartCell = selectionBaseCol0 + 1;
+            const selectionStartOffset = endColumns.findIndex((column) => column >= selectionStartCell);
+            if (selectionStartOffset >= 0) {
+              const startOffset = selectionStartOffset + match.startIndex;
+              const endOffset = selectionStartOffset + match.endIndex - 1;
+              if (
+                text.slice(startOffset, endOffset + 1) === match.token &&
+                columns[startOffset] !== undefined &&
+                endColumns[endOffset] !== undefined
+              ) {
+                return {
+                  bufferLine,
+                  startCol: columns[startOffset],
+                  endCol: endColumns[endOffset],
+                };
+              }
+            }
+          }
           return {
-            bufferLine: position.start.y + match.lineIndex + 1,
+            bufferLine,
             startCol: selectionBaseCol0 + match.startIndex + 1,
             endCol: selectionBaseCol0 + match.endIndex,
           };
@@ -3412,6 +3434,7 @@
         function reconstructRemoteLinkLine(line) {
           let text = "";
           const columns = [];
+          const endColumns = [];
           for (let x = 0; x < line.length; x += 1) {
             const cell = line.getCell(x);
             const width = cell?.getWidth?.() ?? 1;
@@ -3420,9 +3443,10 @@
             text += chars;
             for (let offset = 0; offset < chars.length; offset += 1) {
               columns.push(x + 1);
+              endColumns.push(x + width);
             }
           }
-          return { text, columns };
+          return { text, columns, endColumns };
         }
 
         function createRemotePrLinkProvider(term) {

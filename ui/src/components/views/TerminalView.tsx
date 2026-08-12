@@ -36,6 +36,7 @@ import { createPathLinkClickHandlers } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
 import {
   extractPathCandidatesFromSelection,
+  isPathLinkCwdCurrent,
   joinCwdPath,
   decidePathLinkAction,
   mapSelectionCandidateToPathRange,
@@ -1473,8 +1474,9 @@ export function TerminalView({
       }
       const uniquePaths: string[] = [];
       const pathIndexes = new Map<string, number>();
+      const requestedCwd = cwdRef.current;
       const pending = candidates.flatMap((candidate) => {
-        const absPath = joinCwdPath(cwdRef.current, candidate.text);
+        const absPath = joinCwdPath(requestedCwd, candidate.text);
         if (!absPath) return [];
         let statIndex = pathIndexes.get(absPath);
         if (statIndex === undefined) {
@@ -1500,6 +1502,10 @@ export function TerminalView({
       statPaths(uniquePaths)
         .then((infos) => {
           if (seq !== pathLinkSelectionSeq) return; // 더 최신 선택이 있으면 무시.
+          if (!isPathLinkCwdCurrent(requestedCwd, cwdRef.current)) {
+            clearPathLinkSelection();
+            return;
+          }
           const verified = pending.flatMap<VerifiedPathSelection>((item) => {
             const info = infos[item.statIndex];
             const action = info ? decidePathLinkAction(info) : "none";

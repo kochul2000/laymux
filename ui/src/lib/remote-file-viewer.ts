@@ -3,6 +3,7 @@ import { normalizeViewerPath } from "./file-viewer";
 import {
   decidePathLinkAction,
   extractPathCandidatesFromSelection,
+  isPathLinkCwdCurrent,
   joinCwdPath,
   pathSelectionLimits,
 } from "./path-link-detect";
@@ -66,6 +67,18 @@ export async function handleRemoteFileViewerRequest(
 
     try {
       const infos = await statPaths(uniquePaths);
+      const currentTerminal = useTerminalStore
+        .getState()
+        .instances.find((item) => item.id === terminalId);
+      const currentSettings = useSettingsStore.getState().terminal;
+      if (
+        !currentTerminal ||
+        !isPathLinkCwdCurrent(terminal.cwd, currentTerminal.cwd) ||
+        !currentSettings.pathLinkEnabled ||
+        currentSettings.pathLinkMaxLength !== settings.pathLinkMaxLength
+      ) {
+        return ok({ valid: false });
+      }
       const matches = pending.flatMap(({ candidate, path, statIndex }) => {
         const info = infos[statIndex];
         if (!info || decidePathLinkAction(info) !== "openFile") return [];

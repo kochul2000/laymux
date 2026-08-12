@@ -45,6 +45,14 @@ export interface PathSelectionLimits {
   maxPathLength: number;
 }
 
+/** 비동기 stat 요청이 시작된 뒤 pane CWD가 바뀌지 않았는지 확인한다. */
+export function isPathLinkCwdCurrent(
+  requestedCwd: string | undefined,
+  currentCwd: string | undefined,
+): boolean {
+  return requestedCwd === currentCwd;
+}
+
 export function pathSelectionLimits(maxPathLength: number): PathSelectionLimits {
   return {
     maxSelectionLength: PATH_LINK_MAX_SELECTION_LENGTH,
