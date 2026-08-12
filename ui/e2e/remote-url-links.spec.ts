@@ -79,6 +79,7 @@ const snapshotText = [
   "Issue: #123",
   "Ignored: abc#12 #fff v1.2#3",
   "Wide: 가 #45",
+  "Words: alpha bravo omega",
   "",
 ].join("\r\n");
 
@@ -185,7 +186,9 @@ type RemoteTerminalWindow = typeof window & {
     };
     cols: number;
     rows: number;
+    getSelection: () => string;
   };
+  __copiedSelections?: string[];
 };
 
 test("Remote xterm opens URL and GitHub issue/PR links in safe new tabs", async ({
@@ -341,5 +344,91 @@ test.describe("touch URL activation", () => {
     await tapCell("Ignored: abc".length, 5);
     await page.waitForTimeout(200);
     expect(context.pages()).toHaveLength(pageCount);
+  });
+
+  test("long press selects a word and drag extends it by cell", async ({ context, page }) => {
+    await installRemoteMocks(context);
+    await page.addInitScript(() => {
+      const target = window as RemoteTerminalWindow;
+      target.__copiedSelections = [];
+      document.execCommand = (command) => {
+        if (command !== "copy") return false;
+        const source = document.activeElement;
+        target.__copiedSelections?.push(source instanceof HTMLTextAreaElement ? source.value : "");
+        return true;
+      };
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
+      const { header, payload } = snapshotFrames(snapshotText);
+      socket.send(header);
+      socket.send(payload);
+    });
+
+    await page.goto("http://remote.test/remote/#token=remote-secret");
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const originalReset = target.Terminal.prototype.reset;
+      target.Terminal.prototype.reset = function resetCapturingInstance() {
+        target.__remoteTerm = this as never;
+        return originalReset.call(this);
+      };
+    });
+    await page.locator("#connect").click();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as RemoteTerminalWindow).__remoteTerm?.buffer.active
+              .getLine(7)
+              ?.translateToString() || "",
+        ),
+      )
+      .toContain("Words: alpha bravo omega");
+
+    await page.waitForTimeout(250);
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const geometry = await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm;
+      return { cols: term?.cols || 1, rows: term?.rows || 1 };
+    });
+    const cellWidth = screenBox!.width / geometry.cols;
+    const cellHeight = screenBox!.height / geometry.rows;
+    const x = screenBox!.x + ("Words: alpha ".length + 2.5) * cellWidth;
+    const y = screenBox!.y + 7.5 * cellHeight;
+    const cdp = await context.newCDPSession(page);
+
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x, y }],
+    });
+    await page.waitForTimeout(550);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo");
+    expect(await page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections)).toEqual(
+      [],
+    );
+
+    const dragX = screenBox!.x + 21.1 * cellWidth;
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: dragX, y }],
+    });
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as RemoteTerminalWindow).__remoteTerm?.getSelection() || ""),
+      )
+      .toBe("bravo om");
+
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect
+      .poll(() => page.evaluate(() => (window as RemoteTerminalWindow).__copiedSelections))
+      .toEqual(["bravo om"]);
   });
 });

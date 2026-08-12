@@ -433,6 +433,10 @@ mod tests {
         assert!(html.contains("function sendTerminalAppScroll(term, deltaY, point)"));
         assert!(html.contains("function handleTouchTap(term, element, point)"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
+        assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
+        assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
+        assert!(html.contains("touchGesture.forceSelection,\n            2"));
+        assert!(html.contains("touchGesture.selectionSeed = selection"));
         assert!(html.contains("if (!isTouchPointer(event)) return;"));
         assert!(!html.contains("activePointerId !== null || event.isPrimary === false"));
         assert!(html.contains("touchGesture.mode = \"scrolling\""));
@@ -446,9 +450,9 @@ mod tests {
         assert!(!html.contains("id=\"copySelection\""));
         assert!(html.contains("copySelectionToClipboard"));
         assert!(html.contains("terminal.onSelectionChange(() => {"));
-        assert!(
-            html.contains("document.addEventListener(\"mouseup\", copySelectionAfterInteraction);")
-        );
+        assert!(html.contains(
+            "document.addEventListener(\"mouseup\", handleSelectionMouseupAfterInteraction);"
+        ));
         assert!(!html.contains(
             "terminalHost.addEventListener(\"mouseup\", copySelectionAfterInteraction);"
         ));
