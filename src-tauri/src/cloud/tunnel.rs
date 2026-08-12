@@ -131,9 +131,10 @@ pub struct TunnelControl {
 }
 
 impl TunnelControl {
-    fn stop(self) {
+    fn stop(self) -> TauriJoinHandle<()> {
         let _ = self.shutdown.send(true);
         self.join.abort();
+        self.join
     }
 }
 
@@ -157,6 +158,28 @@ enum ActiveStream {
         shutdown: watch::Sender<bool>,
         join: TokioJoinHandle<()>,
     },
+}
+
+struct ConnectionResources {
+    active_streams: HashMap<String, ActiveStream>,
+    writer_join: TokioJoinHandle<()>,
+    presence_join: TokioJoinHandle<()>,
+}
+
+impl ConnectionResources {
+    fn cancel_all(&mut self) {
+        for (_, stream) in self.active_streams.drain() {
+            close_active_stream(stream);
+        }
+        self.writer_join.abort();
+        self.presence_join.abort();
+    }
+}
+
+impl Drop for ConnectionResources {
+    fn drop(&mut self) {
+        self.cancel_all();
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -342,7 +365,7 @@ pub async fn start_tunnel_from_settings(
     state: Arc<AppState>,
     app_handle: AppHandle,
 ) -> Result<CloudStatus, AppError> {
-    stop_tunnel(&state)?;
+    stop_running_cloud_tunnel_and_wait(&state).await?;
 
     // Effective remote settings (persistent `enabled` OR runtime "원격 제어 허용")
     // so the tunnel connection lifecycle shares the same control gate that
@@ -409,11 +432,23 @@ fn stop_running_cloud_tunnel(state: &AppState) -> Result<bool, AppError> {
     {
         let mut tunnel = state.cloud_tunnel.lock_or_err()?;
         if let Some(control) = tunnel.take() {
-            control.stop();
+            drop(control.stop());
             return Ok(true);
         }
     }
     Ok(false)
+}
+
+async fn stop_running_cloud_tunnel_and_wait(state: &AppState) -> Result<bool, AppError> {
+    let join = {
+        let mut tunnel = state.cloud_tunnel.lock_or_err()?;
+        tunnel.take().map(TunnelControl::stop)
+    };
+    let Some(join) = join else {
+        return Ok(false);
+    };
+    let _ = join.await;
+    Ok(true)
 }
 
 pub fn stop_tunnel(state: &AppState) -> Result<(), AppError> {
@@ -425,20 +460,24 @@ pub fn stop_tunnel(state: &AppState) -> Result<(), AppError> {
 /// the replacement connection advertises the new mode immediately. Saving a
 /// setting must not create Cloud presence when no tunnel was running.
 pub(crate) fn restart_cloud_tunnel_for_policy_change(state: Arc<AppState>, app_handle: AppHandle) {
-    let was_running = match stop_running_cloud_tunnel(&state) {
-        Ok(was_running) => was_running,
+    let stopped_worker = match state.cloud_tunnel.lock_or_err() {
+        Ok(mut tunnel) => tunnel.take().map(TunnelControl::stop),
         Err(error) => {
             tracing::warn!(error = %error, "failed to stop cloud tunnel for policy change");
             return;
         }
     };
-    if !was_running {
+    let Some(stopped_worker) = stopped_worker else {
         return;
-    }
+    };
     if let Err(error) = set_cloud_status(&state, false, None, None) {
         tracing::warn!(error = %error, "failed to reset cloud status for policy change");
     }
     tauri::async_runtime::spawn(async move {
+        // Cancellation completes only after `ConnectionResources::drop` has
+        // aborted every HTTP/WebSocket child and the old socket writers. Do
+        // not advertise or accept the replacement policy before that boundary.
+        let _ = stopped_worker.await;
         if let Err(error) = start_tunnel_from_settings(state.clone(), app_handle).await {
             let _ = set_cloud_status(&state, false, None, Some(error.to_string()));
             tracing::warn!(error = %error, "cloud tunnel policy restart failed");
@@ -682,7 +721,11 @@ async fn connect_once(
         }
     });
 
-    let mut active_streams: HashMap<String, ActiveStream> = HashMap::new();
+    let mut resources = ConnectionResources {
+        active_streams: HashMap::new(),
+        writer_join,
+        presence_join,
+    };
     let mut socket_pending_bytes = 0_usize;
     let mut next_response_id = 1_u64;
     let mut terminal_error: Option<TunnelConnectionError> = None;
@@ -697,7 +740,7 @@ async fn connect_once(
                         match parse_frame(text.as_ref()) {
                             Ok(frame) => {
                                 handle_frame(frame, FrameHandlerContext {
-                                    active_streams: &mut active_streams,
+                                    active_streams: &mut resources.active_streams,
                                     socket_pending_bytes: &mut socket_pending_bytes,
                                     next_response_id: &mut next_response_id,
                                     outbound_tx: &outbound_tx,
@@ -738,7 +781,7 @@ async fn connect_once(
             completed = completion_rx.recv() => {
                 if let Some(completion) = completed {
                     let _ = handle_response_completion(
-                        &mut active_streams,
+                        &mut resources.active_streams,
                         completion,
                         &mut socket_pending_bytes,
                     );
@@ -747,11 +790,7 @@ async fn connect_once(
         }
     }
 
-    for (_, stream) in active_streams.drain() {
-        close_active_stream(stream);
-    }
-    writer_join.abort();
-    presence_join.abort();
+    resources.cancel_all();
     if let Some(error) = terminal_error {
         return Err(error);
     }
@@ -2075,7 +2114,9 @@ pub(crate) fn reconnect_backoff(attempt: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use std::env;
+    use std::future::pending;
     use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     use axum::http::StatusCode;
@@ -2088,6 +2129,22 @@ mod tests {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
+    }
+
+    struct TaskDropProbe(Arc<AtomicBool>);
+
+    impl Drop for TaskDropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn pending_task(dropped: Arc<AtomicBool>) -> TokioJoinHandle<()> {
+        let probe = TaskDropProbe(dropped);
+        tokio::spawn(async move {
+            let _probe = probe;
+            pending::<()>().await;
+        })
     }
 
     impl EnvVarGuard {
@@ -2576,6 +2633,63 @@ mod tests {
         assert!(stop_running_cloud_tunnel(&state).unwrap());
         assert!(state.cloud_tunnel.lock_or_err().unwrap().is_none());
         assert!(!stop_running_cloud_tunnel(&state).unwrap());
+    }
+
+    #[tokio::test]
+    async fn connection_cleanup_cancels_pending_http_response_and_websocket_tasks() {
+        let mut pending_request = IncomingHttpRequest::new(StreamOpenPayload {
+            kind: KIND_HTTP_REQUEST.into(),
+            method: Some("POST".into()),
+            path: Some("/remote/v1/terminals/input".into()),
+            query: None,
+            headers: Vec::new(),
+        })
+        .unwrap();
+        pending_request.push_data(b"pending body").unwrap();
+
+        let responding_dropped = Arc::new(AtomicBool::new(false));
+        let websocket_dropped = Arc::new(AtomicBool::new(false));
+        let writer_dropped = Arc::new(AtomicBool::new(false));
+        let presence_dropped = Arc::new(AtomicBool::new(false));
+        let (websocket_shutdown, websocket_shutdown_rx) = watch::channel(false);
+        let active_streams = HashMap::from([
+            ("pending".into(), ActiveStream::Http(pending_request)),
+            (
+                "responding".into(),
+                ActiveStream::Responding {
+                    response_id: 1,
+                    pending_bytes: 12,
+                    join: pending_task(responding_dropped.clone()),
+                },
+            ),
+            (
+                "websocket".into(),
+                ActiveStream::WebSocket {
+                    shutdown: websocket_shutdown,
+                    join: pending_task(websocket_dropped.clone()),
+                },
+            ),
+        ]);
+        let resources = ConnectionResources {
+            active_streams,
+            writer_join: pending_task(writer_dropped.clone()),
+            presence_join: pending_task(presence_dropped.clone()),
+        };
+
+        drop(resources);
+
+        assert!(*websocket_shutdown_rx.borrow());
+        timeout(Duration::from_secs(1), async {
+            while !responding_dropped.load(Ordering::SeqCst)
+                || !websocket_dropped.load(Ordering::SeqCst)
+                || !writer_dropped.load(Ordering::SeqCst)
+                || !presence_dropped.load(Ordering::SeqCst)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("all connection child tasks should be cancelled");
     }
 
     #[test]
