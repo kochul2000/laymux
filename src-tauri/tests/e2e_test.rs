@@ -2165,6 +2165,7 @@ fn burst_settings_sanitize_clamps_zero_threshold() {
         window_ms: 2000,
         threshold: 0,
         throttle_ms: 1000,
+        ..Default::default()
     };
     let safe = bad.sanitized();
     assert!(
@@ -2179,6 +2180,7 @@ fn burst_settings_sanitize_clamps_zero_window() {
         window_ms: 0,
         threshold: 3,
         throttle_ms: 1000,
+        ..Default::default()
     };
     let safe = bad.sanitized();
     assert!(safe.window_ms >= 100, "window_ms must be ≥100");
@@ -2190,6 +2192,7 @@ fn burst_settings_sanitize_clamps_zero_throttle() {
         window_ms: 2000,
         threshold: 3,
         throttle_ms: 0,
+        ..Default::default()
     };
     let safe = bad.sanitized();
     assert!(safe.throttle_ms >= 100, "throttle_ms must be ≥100");
@@ -2201,11 +2204,62 @@ fn burst_settings_sanitize_preserves_valid_values() {
         window_ms: 5000,
         threshold: 5,
         throttle_ms: 2000,
+        volume_window_ms: 3000,
+        volume_threshold_bytes: 128 * 1024,
     };
     let safe = good.sanitized();
     assert_eq!(safe.window_ms, 5000);
     assert_eq!(safe.threshold, 5);
     assert_eq!(safe.throttle_ms, 2000);
+    assert_eq!(safe.volume_window_ms, 3000);
+    assert_eq!(safe.volume_threshold_bytes, 128 * 1024);
+}
+
+// -- volume detection thresholds (ADR-0147) --
+// The volume path is "this much output or more", never "any output". The floor
+// is a contract: below 4KiB a prompt redraw or keystroke echo would pass and
+// the path degenerates into the any-output rule ADR-0147 keeps forbidden, so
+// the setting must not be able to express it.
+
+#[test]
+fn burst_settings_sanitize_clamps_volume_threshold_to_the_forbidden_floor() {
+    for tiny in [0, 1, 512, 4 * 1024 - 1] {
+        let bad = OutputActivityBurstSettings {
+            volume_threshold_bytes: tiny,
+            ..Default::default()
+        };
+        assert!(
+            bad.sanitized().volume_threshold_bytes >= 4 * 1024,
+            "volumeThresholdBytes {tiny} must clamp to the 4KiB floor"
+        );
+    }
+}
+
+#[test]
+fn burst_settings_sanitize_clamps_zero_volume_window() {
+    let bad = OutputActivityBurstSettings {
+        volume_window_ms: 0,
+        ..Default::default()
+    };
+    assert!(bad.sanitized().volume_window_ms >= 100);
+}
+
+#[test]
+fn burst_settings_default_volume_threshold_is_above_human_typing() {
+    // A person typing cannot produce this within one window; a build log can.
+    let d = OutputActivityBurstSettings::default();
+    assert_eq!(d.volume_window_ms, 2000);
+    assert_eq!(d.volume_threshold_bytes, 64 * 1024);
+}
+
+#[test]
+fn burst_settings_volume_fields_default_when_absent() {
+    // Existing settings.json files predate the volume fields; they must load
+    // with the defaults rather than dropping the whole section.
+    let json = r#"{"windowMs": 2000, "threshold": 6, "throttleMs": 1000}"#;
+    let parsed: OutputActivityBurstSettings = serde_json::from_str(json).unwrap();
+    assert_eq!(parsed.volume_window_ms, 2000);
+    assert_eq!(parsed.volume_threshold_bytes, 64 * 1024);
 }
 
 #[test]

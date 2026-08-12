@@ -12,27 +12,37 @@
 /// so the two sets can be composed without duplication.
 const IDLE_PREFIX: char = '✳';
 
-/// Star-based working spinner prefixes (excludes IDLE_PREFIX).
-const WORKING_STAR_SPINNERS: &[char] = &['✶', '✻', '✽', '✢'];
+/// Working spinner prefixes (excludes IDLE_PREFIX), by the build that emits them:
+/// - `✶✻✽✢` — star-based titles from older Claude Code builds.
+/// - `◐◑` (U+25D0/25D1) — the current title animation, which alternates the two
+///   half-circles every 960ms (Claude Code 2.1.228).
+///
+/// Every set stays listed because laymux has to read whichever build the user
+/// runs, and because this list is a convenience — never the sole basis for the
+/// working verdict. Output volume covers the pane when the list is wrong or the
+/// title carries no prefix at all ([ADR-0147]).
+///
+/// [ADR-0147]: ../../docs/adr/0147-output-volume-activity-and-app-declared-idle.md
+const WORKING_SPINNERS: &[char] = &['✶', '✻', '✽', '✢', '◐', '◑'];
 
-/// All star-based spinner prefixes (working + idle).
-/// Used by `is_claude_title` and `strip_claude_spinner_prefix`.
-const CLAUDE_SPINNER_PREFIXES: &[char] = &[
-    WORKING_STAR_SPINNERS[0],
-    WORKING_STAR_SPINNERS[1],
-    WORKING_STAR_SPINNERS[2],
-    WORKING_STAR_SPINNERS[3],
-    IDLE_PREFIX,
-];
+/// Braille Patterns block — Claude Code's spinner animation in some builds.
+const BRAILLE_SPINNERS: std::ops::RangeInclusive<char> = '\u{2800}'..='\u{28FF}';
+
+/// Whether `c` is a spinner character that means "a task is in progress".
+fn is_working_spinner(c: char) -> bool {
+    WORKING_SPINNERS.contains(&c) || BRAILLE_SPINNERS.contains(&c)
+}
+
+/// Whether `c` is any Claude spinner prefix — working or the idle indicator.
+fn is_spinner_prefix(c: char) -> bool {
+    c == IDLE_PREFIX || is_working_spinner(c)
+}
 
 /// Check if a terminal title looks like a Claude Code title.
 /// Returns true if the title contains "Claude Code" or starts with a known
-/// Claude spinner prefix (star-based or Braille pattern U+2800..U+28FF).
+/// Claude spinner prefix (see `WORKING_SPINNERS` / `IDLE_PREFIX`).
 pub fn is_claude_title(title: &str) -> bool {
-    title.contains("Claude Code")
-        || title.starts_with(|c: char| {
-            CLAUDE_SPINNER_PREFIXES.contains(&c) || ('\u{2800}'..='\u{28FF}').contains(&c)
-        })
+    title.contains("Claude Code") || title.starts_with(is_spinner_prefix)
 }
 
 /// Check if a Claude Code title indicates idle state (✳ U+2733 prefix).
@@ -41,13 +51,13 @@ pub fn is_claude_idle_title(title: &str) -> bool {
     title.starts_with(IDLE_PREFIX)
 }
 
-/// Strip the spinner prefix character (star-based or Braille) from a Claude Code title.
+/// Strip the spinner prefix character from a Claude Code title.
 /// Returns the text after the spinner character, trimmed.
 /// If no spinner prefix is found, returns the full title trimmed.
 pub fn strip_claude_spinner_prefix(title: &str) -> &str {
     let mut chars = title.chars();
     if let Some(first) = chars.next() {
-        if CLAUDE_SPINNER_PREFIXES.contains(&first) || ('\u{2800}'..='\u{28FF}').contains(&first) {
+        if is_spinner_prefix(first) {
             return chars.as_str().trim();
         }
     }
@@ -55,12 +65,10 @@ pub fn strip_claude_spinner_prefix(title: &str) -> &str {
 }
 
 /// Check if a Claude Code title indicates active/working state.
-/// Working spinners: star-based (✶✻✽✢) or Braille patterns (U+2800..U+28FF).
+/// Working spinners: `WORKING_SPINNERS` or Braille patterns (U+2800..U+28FF).
 /// Excludes ✳ (IDLE_PREFIX) — that's the idle indicator, not a working spinner.
 pub fn is_claude_working_title(title: &str) -> bool {
-    title.starts_with(|c: char| {
-        WORKING_STAR_SPINNERS.contains(&c) || ('\u{2800}'..='\u{28FF}').contains(&c)
-    })
+    title.starts_with(is_working_spinner)
 }
 
 /// Result of processing a Claude Code title change in the PTY callback.
@@ -253,6 +261,53 @@ mod tests {
         assert!(is_claude_working_title("\u{2802} Processing"));
         assert!(is_claude_working_title("\u{2810} Task"));
         assert!(is_claude_working_title("\u{280B} Working"));
+    }
+
+    // ── half-circle spinners (regression guard, Claude Code 2.1.228) ──
+    // 2.1.228 replaced the star/Braille title animation with `["◐","◑"]`
+    // alternating every 960ms. Neither character was in the old working set,
+    // so `is_claude_working_title` returned false for the entire duration of a
+    // task and the pane reported ✓ while Claude was busy. `is_claude_title`
+    // missed them too, which turned any title without the literal
+    // "Claude Code" text (rename / agent-name titles) into a false exit.
+
+    #[test]
+    fn working_title_half_circle_spinners() {
+        assert!(is_claude_working_title("\u{25D0} Honking\u{2026}"));
+        assert!(is_claude_working_title("\u{25D1} Honking\u{2026}"));
+    }
+
+    #[test]
+    fn claude_title_half_circle_spinners() {
+        assert!(is_claude_title("\u{25D0} Claude Code"));
+        assert!(is_claude_title("\u{25D1} Fix login bug"));
+    }
+
+    #[test]
+    fn strip_half_circle_spinner() {
+        assert_eq!(
+            strip_claude_spinner_prefix("\u{25D1} Honking\u{2026}"),
+            "Honking\u{2026}"
+        );
+    }
+
+    #[test]
+    fn process_half_circle_spinner_tracks_working() {
+        // Full transition a 2.1.228 session goes through: working half-circle
+        // title, then the ✳ idle title on completion.
+        let r1 = process_claude_title("\u{25D1} Honking\u{2026}", true, false, None);
+        assert!(r1.now_working);
+        assert!(!r1.exited);
+        assert!(r1.in_claude_session);
+
+        let r2 = process_claude_title(
+            "\u{2733} Claude Code",
+            true,
+            r1.now_working,
+            Some("\u{25D1} Honking\u{2026}"),
+        );
+        assert!(r2.now_idle);
+        assert_eq!(r2.task_completed, Some("Honking\u{2026}".to_string()));
     }
 
     #[test]

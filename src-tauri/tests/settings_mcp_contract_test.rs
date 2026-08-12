@@ -376,6 +376,25 @@ fn truecolor_advertising_metadata_is_next_use() {
 }
 
 #[test]
+fn output_activity_burst_metadata_is_next_use() {
+    // The two detectors are built per terminal at PTY spawn, so a saved change
+    // cannot reach a running pane. Without its own entry this path inherits
+    // `/terminal` (Live) by longest-prefix match and the MCP response tells the
+    // caller "applied" while every open pane keeps the old thresholds.
+    let path = "/terminal/outputActivityBurst";
+    let description = describe_settings(&[path.into()]).expect("known path");
+    assert_eq!(description["metadata"][path]["applyMode"], json!("nextUse"));
+
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({ "terminal": { "outputActivityBurst": { "volumeThresholdBytes": 131072 } } }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    assert!(prepared.next_use_required);
+    assert!(!prepared.restart_required);
+}
+
+#[test]
 fn duplicate_profiles_and_bad_extension_viewer_reference_are_rejected() {
     let duplicate = prepare_settings_update(
         &Settings::default(),

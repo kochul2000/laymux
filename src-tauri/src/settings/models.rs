@@ -600,8 +600,27 @@ fn default_burst_threshold() -> u64 {
 fn default_burst_throttle_ms() -> u64 {
     1000
 }
+fn default_volume_window_ms() -> u64 {
+    2000
+}
+/// 64 KiB per 2 s window (~32 KiB/s sustained). Above this a pane is producing
+/// far more than a prompt redraw, a focus redraw or a person typing can account
+/// for; see ADR-0147 for how the figure was chosen and when to revisit it.
+fn default_volume_threshold_bytes() -> u64 {
+    64 * 1024
+}
+/// Lower bound for `volumeThresholdBytes` — one large TUI frame's worth. Keeps
+/// the setting from degenerating into "any output means active".
+pub(crate) const MIN_VOLUME_THRESHOLD_BYTES: u64 = 4 * 1024;
+/// Upper bound for `volumeWindowMs` (30 s). The volume window tumbles, so once
+/// a window is over the threshold it keeps the pane marked busy until the window
+/// turns over — an unbounded value would let one burst pin ⏳ indefinitely.
+pub(crate) const MAX_VOLUME_WINDOW_MS: u64 = 30_000;
 
-/// DEC 2026 burst detection parameters for TUI output activity.
+/// Output-activity detection parameters (ADR-0147). Two independent detectors
+/// share this block and the one `throttle_ms`: a DEC 2026 frame-count burst for
+/// cooperating TUI apps, and a raw-byte volume window that needs no cooperation
+/// at all.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputActivityBurstSettings {
@@ -612,8 +631,19 @@ pub struct OutputActivityBurstSettings {
     #[serde(default = "default_burst_threshold")]
     pub threshold: u64,
     /// Minimum interval (ms) between emitted activity events per terminal.
+    /// Shared by the frame and volume detectors.
     #[serde(default = "default_burst_throttle_ms")]
     pub throttle_ms: u64,
+    /// Window size (ms) for summing raw PTY output bytes. The window tumbles
+    /// rather than slides, so the ceiling below matters: a very long window
+    /// keeps a single burst marking the pane busy until it turns over.
+    #[serde(default = "default_volume_window_ms")]
+    pub volume_window_ms: u64,
+    /// Bytes within `volume_window_ms` that mark the pane as working. Set well
+    /// above what a prompt redraw or human typing can produce so the volume
+    /// path stays a sustained-output signal rather than an "any output" one.
+    #[serde(default = "default_volume_threshold_bytes")]
+    pub volume_threshold_bytes: u64,
 }
 
 impl Default for OutputActivityBurstSettings {
@@ -622,6 +652,8 @@ impl Default for OutputActivityBurstSettings {
             window_ms: default_burst_window_ms(),
             threshold: default_burst_threshold(),
             throttle_ms: default_burst_throttle_ms(),
+            volume_window_ms: default_volume_window_ms(),
+            volume_threshold_bytes: default_volume_threshold_bytes(),
         }
     }
 }
@@ -629,11 +661,17 @@ impl Default for OutputActivityBurstSettings {
 impl OutputActivityBurstSettings {
     /// Clamp values to safe ranges. Called at usage site to guard against
     /// invalid user input (e.g., threshold=0 or window_ms=0).
+    ///
+    /// The volume floor is 4 KiB, not 1 byte: a lower value would turn the
+    /// volume detector into the "any output means active" rule that ADR-0147
+    /// keeps forbidden, so the setting cannot express it.
     pub fn sanitized(&self) -> Self {
         Self {
             window_ms: self.window_ms.max(100),
             threshold: self.threshold.max(2),
             throttle_ms: self.throttle_ms.max(100),
+            volume_window_ms: self.volume_window_ms.clamp(100, MAX_VOLUME_WINDOW_MS),
+            volume_threshold_bytes: self.volume_threshold_bytes.max(MIN_VOLUME_THRESHOLD_BYTES),
         }
     }
 }

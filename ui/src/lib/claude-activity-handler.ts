@@ -3,11 +3,16 @@ import { CLAUDE_INPUT_PENDING_MARKER, STATUS_ICON_WORKING } from "./activity-mar
 import { ShellActivityHandler } from "./shell-activity-handler";
 
 /**
- * Star-based working spinner prefixes emitted by Claude Code while a task is
- * in progress. Mirrors `WORKING_STAR_SPINNERS` in
- * `src-tauri/src/claude_activity.rs` — keep both lists in sync.
+ * Working spinner prefixes emitted by Claude Code while a task is in progress:
+ * `✶✻✽✢` from older builds, `◐◑` (U+25D0/25D1) from the current one, which
+ * alternates the two half-circles every 960ms.
+ *
+ * Mirrors `WORKING_SPINNERS` in `src-tauri/src/claude_activity.rs` — keep both
+ * lists in sync. The list is a convenience, not the basis of the working
+ * verdict: output volume covers the pane when the list is out of date or the
+ * title carries no prefix at all (ADR-0147).
  */
-const WORKING_STAR_SPINNERS = ["\u2736", "\u273B", "\u273D", "\u2722"];
+const WORKING_SPINNERS = ["\u2736", "\u273B", "\u273D", "\u2722", "\u25D0", "\u25D1"];
 
 /**
  * Idle prefix (✳ U+2733). Claude Code switches to this exact character when
@@ -27,9 +32,9 @@ function isBraille(ch: string): boolean {
 }
 
 /**
- * Returns true when `title` starts with a Claude working spinner (star or
- * Braille). Excludes the idle prefix (✳) — that means "task finished, waiting
- * for input", not "working".
+ * Returns true when `title` starts with a Claude working spinner (see
+ * `WORKING_SPINNERS`, or a Braille pattern). Excludes the idle prefix (✳) —
+ * that means "task finished, waiting for input", not "working".
  *
  * Keep in sync with `is_claude_working_title()` in
  * `src-tauri/src/claude_activity.rs`. Both title sources (Rust-detected
@@ -39,7 +44,7 @@ function isBraille(ch: string): boolean {
 function isClaudeWorkingTitle(title: string | undefined): boolean {
   if (!title) return false;
   const first = title.charAt(0);
-  return WORKING_STAR_SPINNERS.includes(first) || isBraille(first);
+  return WORKING_SPINNERS.includes(first) || isBraille(first);
 }
 
 function extractTitleMessage(title: string | undefined): string | undefined {
@@ -96,15 +101,12 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
       return { icon: "✓", color: "var(--green)" };
     }
 
-    if (raw.outputActive) return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
-
-    // Working spinner title (star or Braille) means Claude is actively
-    // processing — e.g. the local-agent / sub-agent path where the title
-    // is "⠂ Task description" but no OSC 133;C burst fires and outputActive
-    // stays false. Without this branch, the status would fall through to
-    // ShellActivityHandler which inherits the stale `exitCode=0` from the
-    // previous synthetic completion and display ✓ even though work is in
-    // progress. See issue #225.
+    // Working spinner title means Claude is actively processing — e.g. the
+    // local-agent / sub-agent path where the title is "⠂ Task description" but
+    // no OSC 133;C burst fires and outputActive stays false. Without this
+    // branch, the status would fall through to ShellActivityHandler which
+    // inherits the stale `exitCode=0` from the previous synthetic completion
+    // and display ✓ even though work is in progress. See issue #225.
     if (isClaudeWorkingTitle(raw.title)) {
       return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     }
@@ -115,9 +117,25 @@ export class ClaudeActivityHandler extends ShellActivityHandler {
     // fresh task the workspace icon must still reflect the idle/completed
     // state instead of falling through to the gray dash. Treat idle title as
     // success.
+    //
+    // This outranks `outputActive` on purpose (ADR-0147): ✳ is Claude *telling*
+    // us it waits for input, while outputActive is activity inferred from bytes
+    // and DEC 2026 frames. Ranked the other way, the trailing chunks of a
+    // finished response — or any TUI that redraws while idle — would pin an
+    // idle pane to ⏳ for the 2s the frontend timer runs. Sleep prevention
+    // reads the same verdict via `isTerminalWorking` (ADR-0114), so an idle
+    // Claude pane also stops holding the display awake.
     if (raw.title?.startsWith(CLAUDE_IDLE_PREFIX)) {
       return { icon: "✓", color: "var(--green)" };
     }
+
+    // Sustained output with no spinner and no idle marker: Claude is working
+    // but the title says nothing useful — CLAUDE_CODE_DISABLE_TERMINAL_TITLE,
+    // a renamed title, or a spinner character laymux does not know yet. The
+    // volume/frame signal behind `outputActive` is what keeps the verdict right
+    // in those cases (ADR-0147).
+    if (raw.outputActive) return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
+
     return super.computeStatus(raw);
   }
 

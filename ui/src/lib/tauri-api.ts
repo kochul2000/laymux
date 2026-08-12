@@ -1463,13 +1463,34 @@ export function onClaudeTerminalDetected(
   });
 }
 
-/** Listen for DEC 2026 output activity events from the backend PTY callback.
- *  Emitted (throttled, max 1/sec per terminal) when a TUI app redraws its screen.
+/** Which backend detector armed a `terminal-output-activity` event (ADR-0147).
+ *
+ *  - `"frame"` — DEC 2026 synchronized-frame burst: the app redrew its own UI.
+ *  - `"volume"` — sustained raw PTY byte volume: the pane is producing output,
+ *    but nothing says the app redrew anything. Absent on `active: false` and on
+ *    the title-spinner path.
+ *
+ *  Both mean "busy". They differ where a consumer needs the stronger reading —
+ *  `markInteractiveAppSuccessOnIdle` treats a working→idle transition as a
+ *  finished task, which only follows from the app's own redraw cycle. */
+export type TerminalOutputActivitySource = "frame" | "volume";
+
+/** Listen for output activity events from the backend PTY callback.
+ *  Emitted (throttled, max 1/sec per terminal per detector) when a pane redraws
+ *  its screen or sustains enough raw output volume (ADR-0147).
  *  active=false is sent when a TUI app transitions from working→idle (e.g., task completion). */
 export function onTerminalOutputActivity(
-  callback: (data: { terminalId: string; active?: boolean }) => void,
+  callback: (data: {
+    terminalId: string;
+    active?: boolean;
+    source?: TerminalOutputActivitySource;
+  }) => void,
 ): Promise<UnlistenFn> {
-  return listen<{ terminalId: string; active?: boolean }>("terminal-output-activity", (event) => {
+  return listen<{
+    terminalId: string;
+    active?: boolean;
+    source?: TerminalOutputActivitySource;
+  }>("terminal-output-activity", (event) => {
     callback(event.payload);
   });
 }

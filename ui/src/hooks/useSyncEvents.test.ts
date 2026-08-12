@@ -1289,6 +1289,72 @@ describe("useSyncEvents", () => {
       expect(notifications[0].message).toBe("Codex task completed");
     });
 
+    it("does not mark Codex success when the activity was armed by output volume", () => {
+      // ADR-0147 regression guard. Codex spills a large tool output (diff, log)
+      // mid-task → the volume detector arms outputActive. The model then thinks
+      // quietly for 2s, the reset timer fires, and without the source guard
+      // this reports "Codex task completed" plus a synthetic exitCode=0 while
+      // the task is still running.
+      vi.useFakeTimers();
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", source: "volume" });
+      expect(useTerminalStore.getState().instances.find((i) => i.id === "t1")?.outputActive).toBe(
+        true,
+      );
+
+      act(() => {
+        vi.advanceTimersByTime(2100);
+      });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.outputActive).toBe(false);
+      expect(instance?.lastExitCode).toBeUndefined();
+      expect(useNotificationStore.getState().notifications).toHaveLength(0);
+      vi.useRealTimers();
+    });
+
+    it("still marks Codex success when the activity came from a frame burst", () => {
+      // Counter-test: the guard must not suppress the real completion path.
+      vi.useFakeTimers();
+      useTerminalStore.getState().registerInstance({
+        id: "t1",
+        profile: "PowerShell",
+        syncGroup: "g1",
+        workspaceId: "ws-1",
+      });
+      useTerminalStore.getState().updateInstanceInfo("t1", {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+
+      renderHook(() => useSyncEvents());
+
+      const activityCb = mockOnTerminalOutputActivity.mock.calls[0][0];
+      activityCb({ terminalId: "t1", source: "frame" });
+
+      act(() => {
+        vi.advanceTimersByTime(2100);
+      });
+
+      const instance = useTerminalStore.getState().instances.find((i) => i.id === "t1");
+      expect(instance?.lastExitCode).toBe(0);
+      expect(useNotificationStore.getState().notifications[0]?.message).toBe(
+        "Codex task completed",
+      );
+      vi.useRealTimers();
+    });
+
     it("reparses the Codex screen snapshot when success is detected", () => {
       useTerminalStore.getState().registerInstance({
         id: "t1",

@@ -907,9 +907,26 @@ WorkspaceSelectorView에서 각 Pane(쉘) 요약 행의 왼쪽에 소형 레이�
 | 우선순위 | 조건                           | 아이콘 | 색상 |
 | -------- | ------------------------------ | ------ | ---- |
 | 1        | `outputActive === true`        | ⏳     | 노랑 |
-| 2        | `exitCode === 0`               | ✓      | 초록 |
-| 3        | `exitCode !== undefined` (≠ 0) | ✗      | 빨강 |
-| 4        | 나머지 (유휴/대기)             | —      | 회색 |
+| 2        | `activity.type === "running"`  | ⏳     | 노랑 |
+| 3        | `exitCode === 0`               | ✓      | 초록 |
+| 4        | `exitCode !== undefined` (≠ 0) | ✗      | 빨강 |
+| 5        | 나머지 (유휴/대기)             | —      | 회색 |
+
+2번이 있는 이유: OSC 133 C 로 시작만 알려진 명령(`sleep`, `ssh`, 출력이 드문 스크립트)은 `outputActive` 를 못 켜므로, 그대로 두면 **직전** 명령의 exitCode 를 물려받아 ✓/✗ 로 보인다.
+
+#### Claude (activity = Claude, [ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md))
+
+| 우선순위 | 조건                           | 아이콘 | 근거                                                     |
+| -------- | ------------------------------ | ------ | -------------------------------------------------------- |
+| 1        | input-pending 마커             | ✓      | 권한 모달 = 사용자가 행동할 상태. 뒤의 스피너보다 강하다 |
+| 2        | 타이틀이 working 스피너로 시작 | ⏳     | 앱이 "작업 중" 이라고 선언                               |
+| 3        | 타이틀이 `✳`(U+2733)로 시작    | ✓      | 앱이 "입력 대기" 라고 **선언**                           |
+| 4        | `outputActive === true`        | ⏳     | 출력에서 **추론**한 활성                                 |
+| 5        | 나머지                         | —      | 셸 핸들러로 폴백                                         |
+
+**3번이 4번보다 위인 것이 이 표의 핵심이다.** 앱이 명시적으로 선언한 유휴는 출력에서 추론한 활성을 이긴다. 반대 순서면 응답 flush 직후의 잔여 청크가 유휴 pane 을 프론트 타이머 2초 동안 ⏳ 로 되돌리고, 유휴 상태로도 리렌더하는 TUI 는 영구히 ⏳ 로 굳는다. `isTerminalWorking`(절전 억제, [ADR-0114](../adr/0114-sleep-prevention-mode.md))이 같은 계산 함수를 읽으므로 이 역전은 절전에도 그대로 적용된다.
+
+working 스피너 문자 목록(`✶✻✽✢` + `◐◑`(U+25D0/25D1) + Braille U+2800..U+28FF)은 Rust `claude_activity.rs` 의 `WORKING_SPINNERS` 와 프론트 `claude-activity-handler.ts` 두 곳에 있고 **동기화 의무**가 있다. 목록은 편의이며 판정의 근거가 아니다 — 목록이 낡거나(2.1.228 이 별표류를 `◐◑` 로 교체했을 때 그랬다) 타이틀에 접두어가 아예 없을 때(`CLAUDE_CODE_DISABLE_TERMINAL_TITLE`·타이틀 rename) 4번이 판정을 받친다.
 
 #### Activity-Aware 분기 원칙
 
@@ -943,51 +960,72 @@ Claude Code 가 세션 리미트에 걸리면 스크롤백에 `⎿  You've hit y
 
 ### outputActive 감지 (워크스페이스 상태 관리 원칙)
 
-`outputActive`는 ⏳ 아이콘(우선순위 1)을 결정하는 프론트엔드 전용 상태다. **두 가지 독립된 감지 경로**가 있으며, 백엔드에서 직접 `outputActive`를 계산하지 않는다.
+`outputActive`는 ⏳ 아이콘을 결정하는 프론트엔드 전용 상태다. **네 가지 독립된 감지 경로**가 있으며, 백엔드에서 직접 `outputActive`를 계산하지 않는다.
 
-| 감지 경로     | 대상                                                                | 신호                             | 동작                                                                     |
-| ------------- | ------------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------ |
-| OSC 133 C/D   | 셸 명령 (pytest, apt 등)                                            | preexec → precmd lifecycle       | `commandRunning` → `outputActive`                                        |
-| DEC 2026h     | TUI 앱 (Claude Code, neovim 등)                                     | `\x1b[?2026h` (동기화 렌더 시작) | Rust PTY 콜백에서 감지 → `terminal-output-activity` 이벤트               |
-| 타이틀 스피너 | TUI 앱 thinking 단계 ([api-contracts.md](./api-contracts.md) §15.6) | OSC 0/2 타이틀 스피너 회전       | Rust PTY 콜백에서 `now_working` 감지 → `terminal-output-activity` 이벤트 |
+| 감지 경로     | 대상                                                                | 신호                              | 동작                                                                     |
+| ------------- | ------------------------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------ |
+| OSC 133 C/D   | 셸 명령 (pytest, apt 등)                                            | preexec → precmd lifecycle        | `commandRunning` → `outputActive`                                        |
+| DEC 2026h     | 동기화 프레임을 빠르게 그리는 TUI (neovim 등)                       | `\x1b[?2026h` (동기화 렌더 시작)  | Rust PTY 콜백에서 감지 → `terminal-output-activity` 이벤트               |
+| 타이틀 스피너 | TUI 앱 thinking 단계 ([api-contracts.md](./api-contracts.md) §15.6) | OSC 0/2 타이틀 스피너 회전        | Rust PTY 콜백에서 `now_working` 감지 → `terminal-output-activity` 이벤트 |
+| **출력 볼륨** | 앱 종류 무관 — 위 셋이 전부 못 볼 때의 바닥                         | 윈도 내 누적 PTY 바이트 임계 초과 | Rust PTY 콜백에서 감지 → `terminal-output-activity` 이벤트               |
+
+**네 경로는 서로의 사각을 덮는다**([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md)). 어느 하나도 단독 권위가 아니다.
+
+| 상황                                     | OSC 133 | DEC 2026           | 타이틀 | 볼륨          |
+| ---------------------------------------- | ------- | ------------------ | ------ | ------------- |
+| lx 통합 셸에서 도는 명령                 | ✅      | —                  | —      | 출력량에 따라 |
+| neovim 편집 (초당 수십 프레임)           | —       | ✅                 | —      | —             |
+| Claude 응답 스트리밍                     | —       | 프레임 주기에 따라 | ✅     | ✅            |
+| Claude 조용한 툴 대기 (네트워크·`sleep`) | —       | ❌                 | ✅     | ❌            |
+| 타이틀 접두어 없는 TUI 가 대량 출력      | —       | ❌                 | ❌     | ✅            |
+| lx 통합 없는 셸의 빌드 로그              | ❌      | ❌                 | ❌     | ✅            |
 
 #### 설계 원칙
 
 - **프론트엔드가 단일 소스**: `outputActive`는 Zustand store(`terminal-store`)에서만 관리한다. 백엔드 `TerminalSummaryResponse`에 `outputActive`를 포함하지 않는다.
 - **DEC 2026은 TUI 전용 신호**: 일반 셸 명령(`ls`, `pytest` 등)은 DEC 2026h를 사용하지 않으므로 이 경로로 감지되지 않는다. 셸 명령의 running 상태는 OSC 133 C/D가 담당한다.
-- **ANY PTY 출력 기반 판단 금지**: `output_buffer.last_output_at` 같은 "PTY에 뭐라도 출력되면 active" 방식은 셸 프롬프트 리드로에도 false positive를 유발하므로 사용하지 않는다.
-- **빈도 기반 감지 (Burst Detection)**: 단일 DEC 2026h 이벤트만으로는 활성으로 판정하지 않는다. 포커스 리드로(DEC 1004 → `\x1b[I]` → 앱이 1회 리드로)나 키 입력 에코(키스트로크 → 앱이 1회 리드로)는 모두 1회성이다. **`windowMs`(기본 2초) 내에 `threshold`(기본 6회) 이상의 DEC 2026h가 감지되어야** 이벤트를 발행한다. 실제 TUI 작업(Claude 응답 생성, neovim 편집)은 초당 수십 회 프레임을 보내므로 임계값을 즉시 넘는다. 이 파라미터는 `settings.json`의 `terminal.outputActivityBurst` 섹션에서 조정할 수 있다.
-- **Throttle**: 임계값 충족 후에도 이벤트는 터미널당 최대 `throttleMs`(기본 1초)로 throttle하여 이벤트 폭주를 방지한다.
+- **출력의 "유무" 기반 판단 금지 — "양" 기반은 허용**([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) 로 경계 정정): `output_buffer.last_output_at` 같은 "PTY에 뭐라도 출력되면 active" 방식은 셸 프롬프트 리드로에 false positive 를 내므로 여전히 금지다. 배제해야 하는 대상(프롬프트 리드로·포커스 리드로·키 에코)은 이벤트당 상한이 있는 양이므로, **사람의 타이핑이 도달할 수 없는 높이의 누적 바이트 임계**는 셋 다 걸러내면서 빌드 로그·테스트 출력·스트리밍 응답을 잡는다. 임계 없는 유무 판정과 임계 있는 볼륨 판정을 같은 것으로 취급하지 않는다.
+- **볼륨은 앱 협조가 필요 없는 유일한 신호**: 나머지 셋은 앱이 OSC 133 을 내거나, 프레임을 빠르게 그리거나, 약속된 스피너 문자를 타이틀에 붙여야 성립한다. 외부 앱의 렌더링 세부가 바뀌어도 판정이 남아야 하므로 볼륨 경로를 제거하거나 임계를 무력화하지 않는다.
+- **빈도 기반 감지 (Burst Detection)**: 단일 DEC 2026h 이벤트만으로는 활성으로 판정하지 않는다. 포커스 리드로(DEC 1004 → `\x1b[I]` → 앱이 1회 리드로)나 키 입력 에코(키스트로크 → 앱이 1회 리드로)는 모두 1회성이다. **`windowMs`(기본 2초) 내에 `threshold`(기본 6회) 이상의 DEC 2026h가 감지되어야** 이벤트를 발행한다. neovim 편집처럼 초당 수십 프레임을 그리는 작업은 임계값을 즉시 넘는다. 반대로 **프레임 주기가 느린 앱은 이 경로로 잡히지 않는다** — Claude Code 2.1.228 의 타이틀 스피너는 960ms 주기라 2초 창에 두 장뿐이다. 그 사각은 볼륨 경로가 덮는다.
+- **볼륨 기반 감지**: `volumeWindowMs`(기본 2초) 내 누적 PTY 출력 바이트가 `volumeThresholdBytes`(기본 64KiB, 즉 지속 ~32KiB/s)를 넘으면 발행한다. 하한은 4KiB 로 clamp 되어 유무 판정으로 퇴화할 수 없다. 검출은 PTY 콜백의 뜨거운 경로에 있으므로 청크당 누적 덧셈 + `Instant` 비교뿐이고 바이트를 다시 훑지 않는다.
+- **두 검출기는 독립적으로 평가한다**: 한 청크가 프레임 마커와 대량 출력을 함께 실을 수 있고, 볼륨 윈도 합은 모든 바이트를 봐야 의미가 있으므로 `else` 로 묶지 않는다. 둘 중 하나만 걸려도 같은 이벤트가 나가고, 프론트의 2초 타이머는 어느 쪽으로든 유지된다.
+- **Throttle**: 임계값 충족 후에도 이벤트는 `throttleMs`(기본 1초)로 throttle하여 이벤트 폭주를 방지한다. 두 검출기는 이 **값**만 공유하고 throttle 카운터는 각자 가지므로, 터미널당 실제 상한은 `throttleMs` 당 2개(프레임 1 + 볼륨 1)다.
+- 이 파라미터는 모두 `settings.json`의 `terminal.outputActivityBurst` 섹션에서 조정한다.
 - **타이머 리셋**: 프론트엔드에서 이벤트 수신 시 `outputActive=true`로 설정하고, 2초간 새 이벤트가 없으면 `false`로 리셋한다.
 
-#### 데이터 흐름 (DEC 2026 경로)
+#### 데이터 흐름 (PTY 콜백의 두 검출기)
 
 ```
-[TUI 앱: Claude Code / neovim]
-  │  매 프레임: \x1b[?2026h → 콘텐츠 → \x1b[?2026l
+[앱: Claude Code / neovim / 셸 명령]
+  │  프레임: \x1b[?2026h → 콘텐츠 → \x1b[?2026l   (내는 앱만)
+  │  그리고/또는 그냥 대량 바이트
   ▼
-[Rust PTY 콜백]
-  │  data.windows()로 \x1b[?2026h 스캔
-  │  burst_count++ (2초 윈도우 내 카운터)
-  │  count ≥ threshold (기본 6)?
-  │    → Yes: AtomicU64 throttle (throttleMs/터미널) 후 app.emit("terminal-output-activity")
-  │    → No:  무시 (포커스 리드로 / 키 에코)
+[Rust PTY 콜백 — 한 청크에 둘 다 평가]
+  │  ① MarkerTailScanner 로 \x1b[?2026h 스캔 (경계 분할 대응)
+  │     → burst_count++ (windowMs 윈도우) → count ≥ threshold(6)?
+  │  ② volume_detector.record_bytes(data.len())
+  │     → window_bytes += len (volumeWindowMs) → ≥ volumeThresholdBytes(64KiB)?
+  │  ①∥② 참 + throttleMs 경과 → app.emit("terminal-output-activity")
   ▼
 [Frontend: useSyncEvents]
   │  outputActive=true + 2초 타이머 리셋
   ▼
 [computeCommandStatus]
-  │  outputActive=true → ⏳ (priority 1)
+  │  outputActive=true → ⏳ (셸 1순위 / Claude 4순위)
 ```
 
 #### False Positive 방지
 
-| 상황                            | DEC 2026h 횟수  | 결과                                        |
-| ------------------------------- | --------------- | ------------------------------------------- |
-| 포커스 전환 (DEC 1004 → 리드로) | 1회             | 무시 (임계값 미달)                          |
-| 키 입력 에코 (타이핑)           | 키당 1회        | 무시 (일반 타이핑 속도로는 2초 내 6회 미달) |
-| Claude Code 응답 생성           | 수십~수백 회/초 | ⏳ 활성 (즉시 임계값 충족)                  |
-| neovim 화면 갱신                | 수십 회/초      | ⏳ 활성 (즉시 임계값 충족)                  |
+| 상황                            | DEC 2026h 횟수     | 윈도 바이트     | 결과                              |
+| ------------------------------- | ------------------ | --------------- | --------------------------------- |
+| 포커스 전환 (DEC 1004 → 리드로) | 1회                | 프레임 1장      | 무시 (양쪽 임계 미달)             |
+| 키 입력 에코 (타이핑)           | 키당 1회           | 키당 프레임 1장 | 무시 (2초 내 6회·64KiB 모두 미달) |
+| 셸 프롬프트 리드로              | 0회                | 수백 B          | 무시 (볼륨 임계 미달)             |
+| neovim 화면 갱신                | 수십 회/초         | —               | ⏳ (프레임 임계 즉시 충족)        |
+| Claude 응답 생성                | 프레임 주기에 따라 | 수십~수백 KiB   | ⏳ (볼륨 임계 충족)               |
+| 빌드/테스트 로그 플러드         | 0회                | MiB 급          | ⏳ (볼륨 임계 충족)               |
+
+> **볼륨 열은 미실측 추정이다.** 프레임 열은 기존 구현에서 확인된 값이지만, 볼륨 임계(2초/64KiB)와 "프레임 한 장·프롬프트 한 줄이 임계에 못 미친다"는 판단은 계산으로 정한 것이고 `scripts/bench/` 플러드 벤치로 재지 않았다([ADR-0147](../adr/0147-output-volume-activity-and-app-declared-idle.md) Consequences 의 재검토 조건). 특히 **최대화된 pane 에서 셀마다 SGR 를 다시 내는 alt-screen 전체 리페인트 한 장은 수십 KiB** 가 될 수 있어, `less`·`lazygit` 처럼 사용자 조작마다 뷰포트를 다시 그리는 앱은 2초에 두세 장으로 임계를 넘길 여지가 있다. Claude pane 은 `✳` 선언 유휴가 막아주지만 셸·기타 TUI pane 은 막히지 않는다 — 그러면 스크롤만 하는 동안 ⏳ 가 뜨고 절전 억제까지 걸린다. 이 표를 근거로 인용하기 전에 [dev-repro-methodology.md §4.6](../dev-repro-methodology.md) 절차로 리페인트 한 장의 실제 바이트를 재고 숫자를 채워라.
 
 ### 인터랙티브 앱 인식 — 프로세스 트리 liveness ([ADR-0009](../adr/0009-process-tree-interactive-app-liveness.md))
 
