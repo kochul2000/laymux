@@ -20,12 +20,12 @@
 - [x] **인터랙티브 앱 인식(liveness)** — 프로세스 트리 권위 + false-exit 억제 + 마운트 동기화 ([ADR-0009](./adr/0009-process-tree-interactive-app-liveness.md), #234·#237·#239)
 - [x] **통합 파일 뷰어** — FileExplorerView + 텍스트/이미지/터미널 뷰어, MCP `show_image`(#277·#278·#279·#287)
 - [x] **알림 해제 모델** — 입력 수단이 아닌 진입/포커스 동작 기준, notificationDismiss 모드별 해제 단위 ([ADR-0010](./adr/0010-notification-dismiss-on-program-focus-entry.md), #302)
-- [x] **Android E2E pairing 기반** — 모노리포 독립 Gradle 앱, APK 내장 WebView UI, 기본 auth-per-use 강한 생체 인증 + 명시적 Keystore-only opt-out wrapping 저장, 5분 QR v2, 첫 client nonce를 고정하는 상호 HMAC ACK, 데스크톱 Rust 발급·회전·keyring 폐기와 Remote Access UI ([ADR-0144](./adr/0144-android-signed-hybrid-client-e2e-foundation.md), [ADR-0145](./adr/0145-android-pairing-authenticated-one-time-ack.md)); terminal data plane 암호화는 아직 미적용
+- [x] **Android E2E pairing 기반** — 모노리포 독립 Gradle 앱, APK 내장 WebView UI, 기본 auth-per-use 강한 생체 인증 + 명시적 Keystore-only opt-out wrapping 저장, 5분 QR v2, 첫 client nonce를 고정하는 상호 HMAC ACK, 데스크톱 Rust 발급·회전·keyring 폐기와 Remote Access UI ([ADR-0144](./adr/0144-android-signed-hybrid-client-e2e-foundation.md), [ADR-0145](./adr/0145-android-pairing-authenticated-one-time-ack.md))
 
 ## 다음 / 검토 중
 
 - [ ] View 플러그인 시스템 (현재 built-in only)
 - [ ] activity 핸들러 확장 (neovim, htop 등 — [ADR-0005](./adr/0005-display-state-raw-separation-compute.md))
-- [ ] Android↔desktop E2E data plane — 방향별 키 파생·세션 회전, nonce/replay 정책, relay ciphertext envelope, 로컬 Remote UI 자산 연결
+- [x] Android↔desktop E2E data plane — 생체 승인 후 사용 중 갱신되고 background에서도 최대 15분 보존되는 비활성 session, 방향별 HKDF/AES-GCM key, strict sequence+직전 응답 재현, 고정 ciphertext relay route, encrypted terminal 제어·output polling과 APK 내장 xterm UI ([ADR-0146](./adr/0146-android-e2e-session-and-encrypted-remote-rpc.md)); emulator/실기 background suspend/resume·biometric·렌더 왕복은 장비 준비 시 수행
 
 > 새 마일스톤/이슈가 확정되면 이 표에 한 줄 추가하고, 출하 시 `[x]` 로 옮긴다.

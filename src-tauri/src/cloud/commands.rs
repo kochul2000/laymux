@@ -50,6 +50,9 @@ fn cloud_disconnect_best_effort(state: &AppState) -> CloudStatus {
         if let Err(error) = crate::android_pairing::revoke_inner() {
             errors.push(format!("Android pairing revoke failed: {error}"));
         }
+        if let Err(error) = state.android_e2e.clear() {
+            errors.push(format!("Android E2E session clear failed: {error}"));
+        }
 
         if let Err(error) = keyring_store::delete_device_token() {
             errors.push(format!("keyring delete failed: {error}"));

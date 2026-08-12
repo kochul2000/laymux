@@ -531,6 +531,7 @@ fn persist_pairing_result_locked(
             != Some(complete.server_base_url.as_str());
     if cloud_identity_changed {
         crate::android_pairing::revoke_inner()?;
+        state.android_e2e.clear()?;
     }
     keyring_store::set_device_token(&complete.device_token)?;
 

@@ -36,6 +36,26 @@ class NativeBridge(
     }
 
     @JavascriptInterface
+    fun connectRemote() {
+        activity.runOnUiThread(activity::connectRemote)
+    }
+
+    @JavascriptInterface
+    fun disconnectRemote() {
+        activity.runOnUiThread(activity::disconnectRemote)
+    }
+
+    @JavascriptInterface
+    fun sendRemoteInput(data: String) {
+        activity.sendRemoteInput(data)
+    }
+
+    @JavascriptInterface
+    fun resizeRemoteTerminal(cols: Int, rows: Int) {
+        activity.resizeRemoteTerminal(cols, rows)
+    }
+
+    @JavascriptInterface
     fun forgetPairing() {
         activity.runOnUiThread(activity::forgetPairing)
     }
@@ -58,6 +78,16 @@ class NativeBridge(
             result.put(
                 "biometricStatusMessage",
                 biometricAvailability.userMessage ?: JSONObject.NULL,
+            )
+            result.put("remoteConnected", activity.remoteConnected())
+            result.put("remoteConnecting", activity.remoteConnecting())
+            result.put(
+                "remoteExpiresAt",
+                activity.remoteSessionExpiresAt() ?: JSONObject.NULL,
+            )
+            result.put(
+                "remoteTerminalTitle",
+                activity.remoteTerminalTitle() ?: JSONObject.NULL,
             )
 
             val stored = vault.loadMetadata()

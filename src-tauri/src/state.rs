@@ -145,6 +145,10 @@ pub struct AppState {
     pub cloud_tunnel: Mutex<Option<crate::cloud::tunnel::TunnelControl>>,
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
+    /// Memory-only Android E2E challenges and data sessions (ADR-0146).
+    /// Its registry mutex is held only to insert/remove/clone one session Arc;
+    /// per-session async locks are never acquired while the registry is held.
+    pub android_e2e: crate::android_e2e::AndroidE2eState,
     /// Process-global per-terminal lock table serializing `write_input` /
     /// `execute_command` on the same terminal (#314). Living on the shared
     /// `Arc<AppState>` — not on the per-MCP-session handler — is what makes the
@@ -341,6 +345,7 @@ impl AppState {
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
             cloud: Mutex::new(crate::cloud::CloudStatus::default()),
+            android_e2e: crate::android_e2e::AndroidE2eState::default(),
             exec_locks: Arc::new(Mutex::new(HashMap::new())),
             terminal_teardown_dispatcher: TerminalTeardownDispatcher::new(),
             settings_update_lock: tokio::sync::Mutex::new(()),

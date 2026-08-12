@@ -22,6 +22,10 @@ pub async fn create_android_pairing_qr(
 }
 
 #[tauri::command]
-pub async fn revoke_android_pairing() -> Result<AndroidPairingStatus, String> {
-    crate::android_pairing::revoke().await.map_err(Into::into)
+pub async fn revoke_android_pairing(
+    state: State<'_, Arc<AppState>>,
+) -> Result<AndroidPairingStatus, String> {
+    crate::android_pairing::revoke(state.inner().clone())
+        .await
+        .map_err(Into::into)
 }

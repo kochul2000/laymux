@@ -1,4 +1,5 @@
 mod access;
+mod android_e2e_routes;
 mod android_pairing_routes;
 mod appearance;
 mod assets;

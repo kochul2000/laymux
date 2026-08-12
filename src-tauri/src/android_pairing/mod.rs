@@ -1,6 +1,7 @@
 mod keyring_store;
 
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,6 +35,12 @@ const RESPONSE_PROOF_DOMAIN: &[u8] = b"laymux.android-pair.response.v1";
 /// Serializes the Android seed lifecycle with cloud identity replacement.
 /// The lock order is this mutex first, then `AppState.remote_access`.
 static PAIRING_LIFECYCLE: Mutex<()> = Mutex::new(());
+static PAIRING_REVISION: AtomicU64 = AtomicU64::new(1);
+
+pub(crate) struct ConfirmedPairingMaterial {
+    pub(crate) seed: Zeroizing<Vec<u8>>,
+    pub(crate) revision: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,15 +136,23 @@ pub async fn get_status() -> Result<AndroidPairingStatus, AppError> {
 }
 
 pub async fn create(state: Arc<AppState>) -> Result<AndroidPairingQr, AppError> {
-    tokio::task::spawn_blocking(move || create_inner(&state))
-        .await
-        .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
+    tokio::task::spawn_blocking(move || {
+        let result = create_inner(&state)?;
+        state.android_e2e.clear()?;
+        Ok(result)
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
 }
 
-pub async fn revoke() -> Result<AndroidPairingStatus, AppError> {
-    tokio::task::spawn_blocking(|| with_lifecycle(revoke_inner))
-        .await
-        .map_err(|error| AppError::Other(format!("Android pairing revoke task failed: {error}")))?
+pub async fn revoke(state: Arc<AppState>) -> Result<AndroidPairingStatus, AppError> {
+    tokio::task::spawn_blocking(move || {
+        let result = with_lifecycle(revoke_inner)?;
+        state.android_e2e.clear()?;
+        Ok(result)
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("Android pairing revoke task failed: {error}")))?
 }
 
 pub(crate) async fn confirm(
@@ -165,6 +180,40 @@ pub(crate) fn with_lifecycle<T>(
     operation()
 }
 
+pub(crate) fn pairing_revision() -> u64 {
+    PAIRING_REVISION.load(Ordering::Acquire)
+}
+
+pub(crate) fn load_confirmed_material(
+    instance_id: &str,
+    pairing_id: &str,
+    client_nonce: &str,
+) -> Result<ConfirmedPairingMaterial, AppError> {
+    with_lifecycle(|| {
+        let encoded_record = keyring_store::get_record()?
+            .ok_or_else(|| AppError::Other("Android pairing is not confirmed".into()))?;
+        let encoded_record = Zeroizing::new(encoded_record);
+        let record: StoredPairingRecord = serde_json::from_str(&encoded_record)
+            .map_err(|_| AppError::Other("Stored Android pairing is invalid".into()))?;
+        validate_stored_record(&record)?;
+        if record.confirmed_at.is_none()
+            || record.instance_id != instance_id
+            || record.pairing_id != pairing_id
+            || record.client_nonce.as_deref() != Some(client_nonce)
+        {
+            return Err(AppError::Other("Android pairing is not confirmed".into()));
+        }
+        Ok(ConfirmedPairingMaterial {
+            seed: decode_base64url_exact::<PAIRING_SECRET_BYTES>(&record.secret)?,
+            revision: pairing_revision(),
+        })
+    })
+}
+
+fn advance_pairing_revision() {
+    PAIRING_REVISION.fetch_add(1, Ordering::AcqRel);
+}
+
 pub(crate) fn get_status_inner() -> Result<AndroidPairingStatus, AppError> {
     get_status_inner_at(unix_time_now()?)
 }
@@ -179,6 +228,7 @@ fn get_status_inner_at(now: u64) -> Result<AndroidPairingStatus, AppError> {
     validate_stored_record(&record)?;
     if record.confirmed_at.is_none() && now >= record.expires_at {
         keyring_store::delete_record()?;
+        advance_pairing_revision();
         return Ok(empty_status());
     }
     Ok(status_from_record(&record))
@@ -256,6 +306,7 @@ fn create_for_settings_with_material(
     })?);
 
     keyring_store::set_record(&record)?;
+    advance_pairing_revision();
     Ok(AndroidPairingQr {
         status: AndroidPairingStatus {
             paired: true,
@@ -271,6 +322,7 @@ fn create_for_settings_with_material(
 
 pub(crate) fn revoke_inner() -> Result<AndroidPairingStatus, AppError> {
     keyring_store::delete_record()?;
+    advance_pairing_revision();
     Ok(empty_status())
 }
 
@@ -445,6 +497,7 @@ fn confirm_inner_at(
     }
     if record.confirmed_at.is_none() && now >= record.expires_at {
         keyring_store::delete_record().map_err(AndroidPairingAckError::Internal)?;
+        advance_pairing_revision();
         return Err(AndroidPairingAckError::Expired);
     }
 
@@ -467,6 +520,7 @@ fn confirm_inner_at(
     let updated_record =
         Zeroizing::new(serialize_stored_record(&record).map_err(AndroidPairingAckError::Internal)?);
     keyring_store::set_record(&updated_record).map_err(AndroidPairingAckError::Internal)?;
+    advance_pairing_revision();
     build_ack_response(&seed, request, now).map_err(AndroidPairingAckError::Internal)
 }
 

@@ -20,6 +20,9 @@ use crate::lock_ext::MutexExt;
 use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
+use super::android_e2e_routes::{
+    remote_android_e2e_challenge, remote_android_e2e_establish, remote_android_e2e_rpc,
+};
 use super::android_pairing_routes::remote_android_pairing_ack;
 use super::assets::{
     remote_addon_fit_js, remote_font, remote_unicode_provider_js, remote_web_links_addon_js,
@@ -118,6 +121,18 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/e2e/pair/ack",
             post(remote_android_pairing_ack).layer(DefaultBodyLimit::max(2 * 1024)),
+        )
+        .route(
+            "/remote/v1/e2e/session/challenge",
+            post(remote_android_e2e_challenge).layer(DefaultBodyLimit::max(2 * 1024)),
+        )
+        .route(
+            "/remote/v1/e2e/session/establish",
+            post(remote_android_e2e_establish).layer(DefaultBodyLimit::max(4 * 1024)),
+        )
+        .route(
+            "/remote/v1/e2e/rpc",
+            post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(2 * 1024 * 1024)),
         )
         .route("/remote/v1/session/status", get(remote_session_status))
         .route("/remote/v1/session/claim", post(remote_session_claim))
