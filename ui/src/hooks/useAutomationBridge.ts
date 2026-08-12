@@ -12,7 +12,17 @@ import { useFileViewerStore } from "@/stores/file-viewer-store";
 import { usePaneRevealStore } from "@/stores/pane-reveal-store";
 import { useTerminalRestartStore } from "@/stores/terminal-restart-store";
 import { TERMINAL_AUTOMATION_READY_TIMEOUT_MS } from "@/lib/terminal-startup-coordinator";
-import { computeWorkspaceSummary } from "@/lib/workspace-summary";
+import {
+  abbreviatePath,
+  computeCommandStatus,
+  computeWorkspaceSummary,
+  formatActivity,
+  getStatusDisplaySettings,
+  isWindowsProfile,
+  mntPathToWindows,
+  projectWorkspaceTerminals,
+  shortWorkspaceLabel,
+} from "@/lib/workspace-summary";
 import {
   getTerminalInspector,
   getTerminalRenderCheckpointProvider,
@@ -334,6 +344,79 @@ function enrichPane(p: WorkspacePane, index: number, paneNumbers: Map<string, nu
   };
 }
 
+function selectorStatusForTerminal(
+  terminal: ReturnType<typeof useTerminalStore.getState>["instances"][number],
+) {
+  if (
+    !terminal.lastCommand &&
+    !terminal.outputActive &&
+    terminal.activity?.type !== "interactiveApp"
+  ) {
+    return null;
+  }
+  const { claude, codex } = useSettingsStore.getState();
+  const display = getStatusDisplaySettings(terminal.activity, claude, codex);
+  return computeCommandStatus(
+    terminal.lastExitCode,
+    terminal.outputActive,
+    terminal.activityMessage,
+    terminal.activity,
+    terminal.title,
+    display.mode,
+    display.delimiter,
+  );
+}
+
+function selectorDisplayForTerminal(
+  terminal: ReturnType<typeof useTerminalStore.getState>["instances"][number],
+) {
+  const { pathEllipsis } = useSettingsStore.getState().workspaceSelector;
+  const cwd = terminal.cwd
+    ? abbreviatePath(
+        isWindowsProfile(terminal.profile) ? mntPathToWindows(terminal.cwd) : terminal.cwd,
+        pathEllipsis,
+      )
+    : null;
+  return {
+    environment: shortWorkspaceLabel(terminal.label),
+    activity: formatActivity(terminal.activity),
+    cwd,
+  };
+}
+
+function selectorSummaryForWorkspace(workspace: Workspace) {
+  const { instances } = useTerminalStore.getState();
+  const { notifications } = useNotificationStore.getState();
+  const projected = projectWorkspaceTerminals(workspace.id, workspace.panes, instances);
+  const summary = computeWorkspaceSummary(workspace.id, projected, new Map(), notifications);
+  const lastCommand = summary.lastCommand;
+  let displayLastCommand = null;
+  if (lastCommand) {
+    const { claude, codex } = useSettingsStore.getState();
+    const display = getStatusDisplaySettings(lastCommand.activity, claude, codex);
+    displayLastCommand = {
+      command: lastCommand.command,
+      timestamp: lastCommand.timestamp,
+      status: computeCommandStatus(
+        lastCommand.exitCode,
+        lastCommand.outputActive,
+        lastCommand.activityMessage,
+        lastCommand.activity,
+        lastCommand.title,
+        display.mode,
+        display.delimiter,
+      ),
+    };
+  }
+  return {
+    branch: summary.branch,
+    cwd: summary.cwd,
+    terminalCount: summary.terminalCount,
+    lastCommand: displayLastCommand,
+    latestNotification: summary.latestNotification,
+  };
+}
+
 function rectsOverlap(a: DOMRect, b: DOMRect): boolean {
   return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
 }
@@ -356,7 +439,19 @@ const handlers: HandlerMap = {
   workspaces: {
     list: () => {
       const { workspaces, activeWorkspaceId, workspaceDisplayOrder } = useWorkspaceStore.getState();
-      return ok({ workspaces, activeWorkspaceId, workspaceDisplayOrder });
+      const enrichedWorkspaces = workspaces.map((workspace) => {
+        const paneNumbers = computePaneNumbers(workspace.panes);
+        return {
+          ...workspace,
+          panes: workspace.panes.map((pane, index) => enrichPane(pane, index, paneNumbers)),
+          selectorSummary: selectorSummaryForWorkspace(workspace),
+        };
+      });
+      return ok({
+        workspaces: enrichedWorkspaces,
+        activeWorkspaceId,
+        workspaceDisplayOrder,
+      });
     },
     getActive: () => {
       const ws = useWorkspaceStore.getState().getActiveWorkspace();
@@ -722,9 +817,19 @@ const handlers: HandlerMap = {
     list: () => {
       const { instances } = useTerminalStore.getState();
       const { workspaces } = useWorkspaceStore.getState();
+      const projectedById = new Map(instances.map((instance) => [instance.id, instance]));
+      for (const workspace of workspaces) {
+        for (const terminal of projectWorkspaceTerminals(
+          workspace.id,
+          workspace.panes,
+          instances,
+        )) {
+          projectedById.set(terminal.id, terminal);
+        }
+      }
       // Memoize per-workspace number maps so we compute each ws once.
       const numbersByWs = new Map<string, Map<string, number>>();
-      const enriched = instances.map((inst) => {
+      const enriched = [...projectedById.values()].map((inst) => {
         const ws = workspaces.find((w) => w.id === inst.workspaceId);
         const paneId = toPaneId(inst.id);
         const paneIndex = ws?.panes.findIndex((p) => p.id === paneId) ?? -1;
@@ -743,6 +848,8 @@ const handlers: HandlerMap = {
           paneIndex: paneIndex >= 0 ? paneIndex : null,
           paneNumber,
           panePosition: pane ? { x: pane.x, y: pane.y, w: pane.w, h: pane.h } : null,
+          selectorStatus: selectorStatusForTerminal(inst),
+          selectorDisplay: selectorDisplayForTerminal(inst),
         };
       });
       return ok({ instances: enriched });

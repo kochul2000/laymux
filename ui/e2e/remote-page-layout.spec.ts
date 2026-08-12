@@ -18,28 +18,73 @@ async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
 /**
  * Serve the real remote page against a fixed navigation snapshot: active
  * workspace `ws-a` with two terminal panes (p-a1, p-a2) plus an inactive
- * `ws-b`. Spatial step requests are recorded into `spatialBodies`. Used by the
- * whole-workspace skip tests (issue #507).
+ * `ws-b` whose pane/status summary remains visible. Spatial step requests are
+ * recorded into `spatialBodies`.
  */
 async function routeRemoteWithWorkspaces(
   page: Page,
   spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }>,
-): Promise<void> {
+): Promise<{
+  setWorkspaceDisplay: (
+    display: Partial<{
+      minimap: boolean;
+      environment: boolean;
+      activity: boolean;
+      path: boolean;
+      result: boolean;
+    }>,
+  ) => void;
+}> {
+  let workspaceDisplay = {
+    minimap: false,
+    environment: true,
+    activity: true,
+    path: true,
+    result: true,
+  };
   const paneA1 = {
     id: "p-a1",
-    paneIndex: 0,
+    paneIndex: 1,
     paneNumber: 1,
     terminalId: "term-a1",
     terminalLive: true,
     viewType: "TerminalView",
+    x: 0,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    selectorDisplay: { environment: "A1" },
   };
   const paneA2 = {
     id: "p-a2",
-    paneIndex: 1,
+    paneIndex: 0,
     paneNumber: 2,
     terminalId: "term-a2",
     terminalLive: true,
     viewType: "TerminalView",
+    x: 0.5,
+    y: 0,
+    w: 0.5,
+    h: 1,
+    selectorDisplay: { environment: "A2" },
+  };
+  const paneB1 = {
+    id: "p-b1",
+    paneIndex: 0,
+    paneNumber: 1,
+    terminalId: "term-b1",
+    terminalLive: true,
+    viewType: "TerminalView",
+    profile: "PowerShell",
+    cwd: "C:\\Users\\kochul\\work\\beta",
+    branch: "feature/beta",
+    activity: { type: "running" },
+    selectorStatus: { icon: "⏳", color: "var(--yellow)", text: "Building" },
+    selectorDisplay: {
+      environment: "PS",
+      activity: { label: "running", color: "var(--yellow)" },
+      cwd: "~/work/beta",
+    },
   };
 
   await page.route("http://remote.test/remote/", (route) =>
@@ -74,12 +119,32 @@ async function routeRemoteWithWorkspaces(
               name: "Alpha",
               isActive: true,
               terminalPaneCount: 2,
+              selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
               panes: [paneA1, paneA2],
             },
-            { id: "ws-b", name: "Beta", isActive: false, terminalPaneCount: 1, panes: [] },
+            {
+              id: "ws-b",
+              name: "Beta",
+              isActive: false,
+              terminalPaneCount: 1,
+              selectorSummary: {
+                terminalCount: 1,
+                lastCommand: {
+                  command: "npm test",
+                  timestamp: Date.now(),
+                  status: { icon: "✓", color: "var(--green)" },
+                },
+                latestNotification: null,
+              },
+              panes: [paneB1],
+            },
           ],
           docks: [],
           notifications: [],
+          workspaceSelector: {
+            display: workspaceDisplay,
+            pathEllipsis: "start",
+          },
         },
       });
       return;
@@ -92,6 +157,11 @@ async function routeRemoteWithWorkspaces(
     await route.fulfill({ json: {} });
   });
   await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, () => {});
+  return {
+    setWorkspaceDisplay(display) {
+      workspaceDisplay = { ...workspaceDisplay, ...display };
+    },
+  };
 }
 
 test.describe("remote mobile layout", () => {
@@ -258,6 +328,23 @@ test.describe("remote mobile layout", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
   });
 
+  test("highlights the pane identity in a minimap when display order differs", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setWorkspaceDisplay({ minimap: true });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const alpha = page.locator(".workspace-item", { hasText: "Alpha" });
+    const a1Row = alpha.locator(".workspace-pane-row", { hasText: "A1" });
+    await expect(a1Row.locator('.pane-minimap rect[fill="var(--accent)"]')).toHaveAttribute(
+      "x",
+      "0",
+    );
+  });
+
   test("excludes the current workspace pane from spatial navigation in the Remote header", async ({
     page,
   }) => {
@@ -422,6 +509,13 @@ test.describe("remote mobile layout", () => {
         ),
       )
       .toEqual(["ws-b"]);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
+        ),
+      )
+      .toEqual(["p-b1"]);
 
     // The spatial step request now carries the workspace denylist.
     await page.locator("#navToggle").click();
@@ -430,8 +524,8 @@ test.describe("remote mobile layout", () => {
     await expect.poll(() => spatialBodies.length).toBe(1);
     expect(spatialBodies[0].excludedWorkspaceIds).toEqual(["ws-b"]);
 
-    // Skipping the ACTIVE workspace expands to its pane ids (vice-versa rule)
-    // so the header pane toggle reflects it; un-skipping clears both.
+    // Every workspace now exposes pane ids. Skipping the active workspace adds
+    // its panes alongside the already skipped inactive pane.
     await page.locator("#navToggle").click();
     const skipA = page.locator('[data-workspace-skip="ws-a"]');
     await skipA.click();
@@ -442,7 +536,7 @@ test.describe("remote mobile layout", () => {
           JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
         ),
       )
-      .toEqual(["p-a1", "p-a2"]);
+      .toEqual(["p-a1", "p-a2", "p-b1"]);
     await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "true");
 
     await skipA.click();
@@ -453,8 +547,47 @@ test.describe("remote mobile layout", () => {
           JSON.parse(localStorage.getItem("laymux.remote.spatialExcludedPaneIds") || "[]"),
         ),
       )
-      .toEqual([]);
+      .toEqual(["p-b1"]);
     await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("shows inactive pane status and the same bottom summary without selecting it", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies);
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const beta = page.locator(".workspace-item", { hasText: "Beta" });
+    await expect(beta.locator(".workspace-pane-row")).toHaveCount(1);
+    await expect(beta.locator(".pane-env")).toHaveText("PS");
+    await expect(beta.locator(".pane-activity")).toHaveText("running");
+    await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
+    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
+    await expect(beta.locator(".workspace-status-line")).toContainText("npm test");
+    await expect(beta.locator(".workspace-status-line")).toContainText("✓");
+  });
+
+  test("follows changing PC selector display settings while the drawer stays open", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const beta = page.locator(".workspace-item", { hasText: "Beta" });
+    await expect(beta.locator(".pane-activity")).toHaveText("running");
+    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
+
+    controls.setWorkspaceDisplay({ activity: false, result: false });
+    await expect(beta.locator(".pane-activity")).toHaveCount(0, { timeout: 5000 });
+    await expect(beta.locator(".pane-command-status")).toHaveCount(0);
   });
 
   test("promotes a workspace to skipped once its every pane is excluded", async ({ page }) => {
@@ -738,6 +871,7 @@ test.describe("remote mobile layout", () => {
       { id: "c-k", sequence: "\x0b" },
       { id: "c-l", sequence: "\x0c" },
       { id: "c-r", sequence: "\x12" },
+      { id: "c-t", sequence: "\x14" },
       { id: "c-u", sequence: "\x15" },
       { id: "c-w", sequence: "\x17" },
       { id: "c-z", sequence: "\x1a" },
@@ -789,6 +923,7 @@ test.describe("remote mobile layout", () => {
       "c-k",
       "c-l",
       "c-r",
+      "c-t",
       "c-u",
       "c-w",
       "c-z",

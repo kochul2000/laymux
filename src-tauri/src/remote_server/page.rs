@@ -756,7 +756,7 @@ mod tests {
         // <-> workspace skipped) live in named functions.
         assert!(html.contains("function computeSkipStateAfterPaneToggle("));
         assert!(html.contains("function computeSkipStateAfterWorkspaceToggle("));
-        assert!(html.contains("function reconcileActiveWorkspaceSkip()"));
+        assert!(html.contains("function reconcileWorkspaceSkips()"));
         // The spatial step request carries both denylists.
         assert!(html.contains("excludedWorkspaceIds: [...spatialExcludedWorkspaceIds]"));
     }
@@ -1202,6 +1202,41 @@ mod tests {
         assert!(html.contains("dockToggleButton.addEventListener"));
         assert!(!render_workspace_list.contains("dockListEl"));
         assert!(!render_workspace_list.contains("renderDockTerminalRow"));
+    }
+
+    #[test]
+    fn remote_page_mirrors_all_workspace_panes_status_and_bottom_summary() {
+        let html = remote_page_html();
+        let list_start = html.find("function renderWorkspaceList").unwrap();
+        let item_start = html.find("function renderWorkspaceItem").unwrap();
+        let pane_start = html.find("function renderPaneRow").unwrap();
+        let pane_end = html.find("function paneMinimapElement").unwrap();
+        let render_list = &html[list_start..item_start];
+        let render_item = &html[item_start..pane_start];
+        let render_pane = &html[pane_start..pane_end];
+
+        assert!(render_list.contains("workspace.panes || []"));
+        assert!(!render_list.contains("workspace.isActive ?"));
+        assert!(render_pane.contains("pane.selectorStatus"));
+        assert!(render_pane.contains("pane.selectorDisplay"));
+        assert!(render_pane.contains("pane-command-status"));
+        assert!(render_pane.contains("paneMinimapElement(panes, pane.id)"));
+        assert!(render_item.contains("workspace.selectorSummary"));
+        assert!(render_item.contains("workspace-status-line"));
+        assert!(render_item.contains("lastCommand"));
+        assert!(render_item.contains("latestNotification"));
+    }
+
+    #[test]
+    fn remote_page_refreshes_variable_selector_state_while_drawer_is_open() {
+        let html = remote_page_html();
+
+        assert!(html.contains("const NAVIGATION_VIEW_REFRESH_MS = 2000;"));
+        assert!(html.contains("async function refreshNavigationView()"));
+        assert!(html.contains("function startNavigationViewPolling()"));
+        assert!(html.contains("function stopNavigationViewPolling()"));
+        assert!(html.contains("if (open) startNavigationViewPolling();"));
+        assert!(html.contains("else stopNavigationViewPolling();"));
     }
 
     #[test]

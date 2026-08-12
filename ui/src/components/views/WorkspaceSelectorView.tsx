@@ -15,6 +15,9 @@ import {
   ACTIVITY_MSG_TRUNCATE_LEN,
   formatRelativeTime,
   formatActivity,
+  getStatusDisplaySettings,
+  projectWorkspaceTerminals,
+  shortWorkspaceLabel,
 } from "@/lib/workspace-summary";
 import { useTerminalStore } from "@/stores/terminal-store";
 import { usePortDetection } from "@/hooks/usePortDetection";
@@ -23,7 +26,6 @@ import { PaneMinimap } from "./PaneMinimap";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ExitFade } from "@/components/ui/ExitFade";
 import type { WorkspacePane } from "@/stores/types";
-import type { TerminalActivityInfo } from "@/stores/terminal-store";
 import { persistSession } from "@/lib/persist-session";
 import { useUiStore } from "@/stores/ui-store";
 import { useRenameWorkspaceStore } from "@/stores/rename-workspace-store";
@@ -37,46 +39,6 @@ import { switchActiveWorkspace } from "@/lib/workspace-transition";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
-
-/** Abbreviate profile/view labels to max 3 characters. */
-const LABEL_ABBREV: Record<string, string> = {
-  PowerShell: "PS",
-  WSL: "WSL",
-  Ubuntu: "UBT",
-  Debian: "DEB",
-  Browser: "WEB",
-  Empty: "---",
-  EmptyView: "---",
-};
-function getStatusDisplaySettings(
-  activity: TerminalActivityInfo | undefined,
-  claudeSettings: ReturnType<typeof useSettingsStore.getState>["claude"],
-  codexSettings: ReturnType<typeof useSettingsStore.getState>["codex"],
-): {
-  mode: "bullet" | "title" | "title-bullet" | "bullet-title" | undefined;
-  delimiter: string | undefined;
-} {
-  if (activity?.type !== "interactiveApp") {
-    return { mode: undefined, delimiter: undefined };
-  }
-  if (activity.name === "Claude") {
-    return {
-      mode: claudeSettings.statusMessageMode,
-      delimiter: claudeSettings.statusMessageDelimiter,
-    };
-  }
-  if (activity.name === "Codex") {
-    return {
-      mode: codexSettings.statusMessageMode,
-      delimiter: codexSettings.statusMessageDelimiter,
-    };
-  }
-  return { mode: undefined, delimiter: undefined };
-}
-
-function shortLabel(label: string): string {
-  return LABEL_ABBREV[label] ?? label.slice(0, 3).toUpperCase();
-}
 
 /** 섹션 소제목 라벨 (uppercase, 작은 폰트, 반투명) */
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -546,7 +508,7 @@ function WorkspaceItem({
                                   opacity: isActive ? 0.9 : 0.7,
                                 }}
                               >
-                                {shortLabel(ts.label)}
+                                {shortWorkspaceLabel(ts.label)}
                               </span>
                             )}
                             {wsDisplay.activity && (
@@ -690,7 +652,7 @@ function WorkspaceItem({
                             className="shrink-0 font-medium"
                             style={{ color: "var(--text-secondary)", opacity: 0.4 }}
                           >
-                            {shortLabel(pane.view.type)}
+                            {shortWorkspaceLabel(pane.view.type)}
                           </span>
                         </div>
                       </div>
@@ -1432,30 +1394,7 @@ export function WorkspaceSelectorView() {
           // Compute summary from frontend stores (event-driven, no polling).
           // Include lastCwd from settings as fallback for terminals that haven't
           // emitted OSC 7 yet, or that don't have a session yet (early startup).
-          const wsTerminals = ws.panes
-            .filter((p) => p.view.type === "TerminalView")
-            .map((p) => {
-              const termId = toTerminalId(p.id);
-              const inst = terminalInstances.find((t) => t.id === termId);
-              if (inst) {
-                // Instance exists but no CWD yet — use lastCwd from settings
-                if (!inst.cwd && p.view.lastCwd) {
-                  return { ...inst, cwd: p.view.lastCwd as string };
-                }
-                return inst;
-              }
-              // No instance yet (session not created) — synthesize placeholder
-              return {
-                id: termId,
-                profile: (p.view.profile as string) || "PowerShell",
-                syncGroup: ws.id,
-                workspaceId: ws.id,
-                label: (p.view.profile as string) || "Terminal",
-                cwd: (p.view.lastCwd as string) || undefined,
-                lastActivityAt: 0,
-                isFocused: false,
-              };
-            });
+          const wsTerminals = projectWorkspaceTerminals(ws.id, ws.panes, terminalInstances);
           const summary = computeWorkspaceSummary(
             ws.id,
             wsTerminals,

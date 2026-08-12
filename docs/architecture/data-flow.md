@@ -847,6 +847,8 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 WorkspaceSelectorView에서 각 Pane(쉘) 요약 행의 왼쪽에 소형 레이아웃 미니맵을 표시한다.
 
+Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible workspace의 같은 pane 정보와 마지막 상태 한 줄을 표시한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). pane 번호·workspace 요약·명령 상태는 frontend bridge가 PC selector의 계산 함수와 현재 설정으로 만든 표시 모델이며 Remote JavaScript가 provider 상태를 다시 계산하지 않는다. 한 번도 mount되지 않은 inactive terminal pane도 양쪽이 같은 persisted profile/lastCwd placeholder projection을 사용한다. drawer가 열린 동안 2초마다 snapshot을 다시 읽어 activity·명령 결과·알림·표시 토글 변경을 따라가고, 닫힘·disconnect·document hidden에서는 폴을 멈춘다.
+
 #### 목적
 
 워크스페이스 내 해당 Pane의 물리적 위치를 시각적으로 즉시 파악할 수 있게 한다.
