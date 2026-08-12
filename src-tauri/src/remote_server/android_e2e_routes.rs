@@ -16,16 +16,21 @@ use crate::android_e2e::{ChallengeRequest, CipherEnvelope, E2eError, EstablishRe
 use crate::automation_server::ServerState;
 use crate::error::AppError;
 use crate::remote_server::TunnelAuthorized;
+use crate::terminal_output::TerminalOutputFrameHeaderV1;
 
 use super::access::effective_remote_settings;
 use super::lease::{active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds};
 use super::{internal_error, json_error};
 
 const INTERNAL_RESPONSE_LIMIT: usize = 1024 * 1024;
+const RESOURCE_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 enum PlainRequest {
+    Resource {
+        path: String,
+    },
     Http {
         method: String,
         path: String,
@@ -40,6 +45,7 @@ enum PlainRequest {
         lease_id: String,
         generation: u64,
         source_seq: u64,
+        wire_seq_offset: u64,
     },
 }
 
@@ -158,6 +164,7 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
     let request: PlainRequest = serde_json::from_value(value)
         .map_err(|_| AppError::Other("Android E2E plaintext request is invalid".into()))?;
     match request {
+        PlainRequest::Resource { path } => dispatch_resource(server, &path).await,
         PlainRequest::Http { method, path, body } => {
             dispatch_http(server, &method, &path, body).await
         }
@@ -178,6 +185,7 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
             lease_id,
             generation,
             source_seq,
+            wire_seq_offset,
         } => {
             if !valid_remote_identifier(&terminal_id) || !valid_remote_identifier(&lease_id) {
                 return Ok(rpc_error(
@@ -185,9 +193,72 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
                     "Terminal output identity is invalid",
                 ));
             }
-            output_poll(server, terminal_id, lease_id, generation, source_seq).await
+            output_poll(
+                server,
+                terminal_id,
+                lease_id,
+                generation,
+                source_seq,
+                wire_seq_offset,
+            )
+            .await
         }
     }
+}
+
+async fn dispatch_resource(server: ServerState, path: &str) -> Result<Value, AppError> {
+    if !resource_path_allowed(path) {
+        return Ok(rpc_error(
+            StatusCode::FORBIDDEN,
+            "Remote resource is not allowed",
+        ));
+    }
+    let mut request = Request::builder()
+        .method(Method::GET)
+        .uri(path)
+        .body(Body::empty())
+        .map_err(|error| AppError::Other(format!("Android E2E resource build failed: {error}")))?;
+    request.extensions_mut().insert(TunnelAuthorized);
+    request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        0,
+    )));
+    let router = super::build_router(server.clone()).with_state(server);
+    let response = router.oneshot(request).await.map_err(|error| {
+        AppError::Other(format!("Android E2E resource dispatch failed: {error}"))
+    })?;
+    let status = response.status();
+    let response_headers = response.headers().clone();
+    let bytes = match to_bytes(response.into_body(), RESOURCE_RESPONSE_LIMIT).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return Ok(rpc_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Remote resource is too large",
+            ))
+        }
+    };
+    let mut headers = serde_json::Map::new();
+    for name in [
+        header::CONTENT_TYPE,
+        header::CACHE_CONTROL,
+        header::CONTENT_SECURITY_POLICY,
+        header::X_CONTENT_TYPE_OPTIONS,
+        header::REFERRER_POLICY,
+    ] {
+        if let Some(value) = response_headers
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+        {
+            headers.insert(name.as_str().to_string(), Value::String(value.to_string()));
+        }
+    }
+    Ok(json!({
+        "kind": "resource",
+        "status": status.as_u16(),
+        "headers": headers,
+        "data": URL_SAFE_NO_PAD.encode(bytes),
+    }))
 }
 
 async fn dispatch_http(
@@ -276,12 +347,15 @@ async fn output_open(
             "Remote lease changed during output attach",
         ));
     }
-    let state = subscribed.attachment.state;
+    let header = TerminalOutputFrameHeaderV1::snapshot(&subscribed.attachment);
+    let state = &subscribed.attachment.state;
     Ok(json!({
         "kind": "terminalOutput",
         "phase": "snapshot",
         "generation": subscribed.generation,
         "sourceSeq": state.source_seq,
+        "wireSeqOffset": subscribed.wire_seq_offset,
+        "header": header,
         "geometry": state.geometry,
         "modes": state.modes,
         "data": URL_SAFE_NO_PAD.encode(subscribed.attachment.snapshot),
@@ -294,6 +368,7 @@ async fn output_poll(
     lease_id: String,
     generation: u64,
     source_seq: u64,
+    wire_seq_offset: u64,
 ) -> Result<Value, AppError> {
     if active_lease_timeout(&server, &lease_id)?.is_none() {
         return Ok(rpc_error(
@@ -314,11 +389,15 @@ async fn output_poll(
             "phase": "reattach",
         }));
     };
+    let header = TerminalOutputFrameHeaderV1::delta_with_offset(&delta, wire_seq_offset)
+        .map_err(AppError::Other)?;
     Ok(json!({
         "kind": "terminalOutput",
         "phase": if delta.data.is_empty() { "idle" } else { "delta" },
         "generation": delta.generation,
         "sourceSeq": delta.seq_end,
+        "wireSeqOffset": wire_seq_offset,
+        "header": header,
         "geometry": delta.geometry,
         "data": URL_SAFE_NO_PAD.encode(delta.data),
     }))
@@ -340,7 +419,7 @@ fn active_lease_timeout(
 }
 
 fn http_path_allowed(method: &Method, path: &str) -> bool {
-    if path.contains(['?', '#']) {
+    if invalid_inner_path(path) {
         return false;
     }
     match (method, path) {
@@ -348,12 +427,31 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/terminals")
+        | (&Method::GET, "/remote/v1/file-viewer/status")
         | (&Method::POST, "/remote/v1/session/claim")
         | (&Method::POST, "/remote/v1/session/heartbeat")
-        | (&Method::POST, "/remote/v1/session/release") => true,
-        (&Method::POST, _) => terminal_control_path(path),
+        | (&Method::POST, "/remote/v1/session/release")
+        | (&Method::POST, "/remote/v1/navigation/spatial")
+        | (&Method::POST, "/remote/v1/navigation/notification")
+        | (&Method::POST, "/remote/v1/workspaces/active")
+        | (&Method::POST, "/remote/v1/file-viewer/render")
+        | (&Method::POST, "/remote/v1/file-viewer/path-link")
+        | (&Method::POST, "/remote/v1/notifications/mark-all-read")
+        | (&Method::DELETE, "/remote/v1/notifications") => true,
+        (&Method::GET, _) => terminal_read_path(path),
+        (&Method::POST, _) => terminal_control_path(path) || notification_read_path(path),
         _ => false,
     }
+}
+
+fn terminal_read_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/remote/v1/terminals/") else {
+        return false;
+    };
+    let Some((terminal_id, action)) = rest.rsplit_once('/') else {
+        return false;
+    };
+    valid_remote_identifier(terminal_id) && action == "github-repo"
 }
 
 fn terminal_control_path(path: &str) -> bool {
@@ -364,6 +462,57 @@ fn terminal_control_path(path: &str) -> bool {
         return false;
     };
     valid_remote_identifier(terminal_id) && matches!(action, "focus" | "write" | "input" | "resize")
+}
+
+fn notification_read_path(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/remote/v1/notifications/") else {
+        return false;
+    };
+    let Some((notification_id, action)) = rest.rsplit_once('/') else {
+        return false;
+    };
+    valid_remote_identifier(notification_id) && action == "read"
+}
+
+fn resource_path_allowed(path: &str) -> bool {
+    if invalid_inner_path(path) {
+        return false;
+    }
+    if matches!(
+        path,
+        "/remote/"
+            | "/remote/vendor/xterm.js"
+            | "/remote/vendor/xterm.css"
+            | "/remote/vendor/unicode-provider.js"
+            | "/remote/vendor/addon-fit.js"
+            | "/remote/vendor/addon-web-links.js"
+            | "/remote/manifest.webmanifest"
+            | "/remote/viewer/"
+            | "/remote/viewer/viewer.js"
+    ) {
+        return true;
+    }
+    if let Some(file_name) = path.strip_prefix("/remote/pwa/") {
+        return valid_resource_file_name(file_name, &["png"]);
+    }
+    if let Some(file_name) = path.strip_prefix("/remote/font/") {
+        return valid_resource_file_name(file_name, &["ttf", "otf"]);
+    }
+    false
+}
+
+fn valid_resource_file_name(value: &str, extensions: &[&str]) -> bool {
+    let Some((stem, extension)) = value.rsplit_once('.') else {
+        return false;
+    };
+    valid_remote_identifier(stem) && extensions.contains(&extension)
+}
+
+fn invalid_inner_path(path: &str) -> bool {
+    !path.starts_with("/remote/")
+        || path.len() > 512
+        || path.contains(['?', '#', '\\', '%'])
+        || path.split('/').any(|part| part == "." || part == "..")
 }
 
 fn valid_remote_identifier(value: &str) -> bool {
@@ -418,6 +567,23 @@ mod tests {
     #[test]
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
+        assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/terminals/term-1/github-repo"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/navigation/spatial"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/file-viewer/path-link"
+        ));
+        assert!(http_path_allowed(
+            &Method::DELETE,
+            "/remote/v1/notifications"
+        ));
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/terminals/term-1/input"
@@ -434,8 +600,30 @@ mod tests {
             &Method::GET,
             "/remote/v1/terminals?token=secret"
         ));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/terminals/term-1/output"
+        ));
+        assert!(!http_path_allowed(
+            &Method::GET,
+            "/remote/v1/e2e/session/challenge"
+        ));
         assert!(!valid_remote_identifier("terminal/escape"));
         assert!(!valid_remote_identifier(&"x".repeat(129)));
+    }
+
+    #[test]
+    fn resource_allowlist_is_owned_by_the_desktop_remote_client() {
+        assert!(resource_path_allowed("/remote/"));
+        assert!(resource_path_allowed("/remote/vendor/xterm.js"));
+        assert!(resource_path_allowed("/remote/vendor/addon-web-links.js"));
+        assert!(resource_path_allowed("/remote/manifest.webmanifest"));
+        assert!(resource_path_allowed("/remote/pwa/icon-192.png"));
+        assert!(resource_path_allowed("/remote/font/0123456789abcdef.ttf"));
+        assert!(!resource_path_allowed("/remote/v1/navigation"));
+        assert!(!resource_path_allowed("/remote/v1/e2e/rpc"));
+        assert!(!resource_path_allowed("/remote/%2e%2e/admin"));
+        assert!(!resource_path_allowed("https://relay.example/remote/"));
     }
 
     #[test]

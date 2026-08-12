@@ -4,6 +4,7 @@
 - Date: 2026-08-11
 - Source: 사용자 요구("QR로 암호키를 교환하고 이후 종단 암호화를 적용할 최소 Android 앱을 모노리포에 추가", "생체 인증을 기본으로 활성화", "대응하는 Laymux 앱 기능도 구현") · [ADR-0013](0013-direct-remote-mode.md) · [ADR-0024](0024-cloud-native-wss-tunnel.md) · [ADR-0091](0091-remote-client-standalone-web-app-manifest.md) · architecture/api-contracts.md §13
 - Extends: ADR-0013, ADR-0024, ADR-0091
+- Superseded in part by: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) — APK가 Remote UI/xterm을 고정 소유한다는 결정에 한함. pairing·Keystore·native key 경계 결정은 유지한다.
 
 ## Context
 

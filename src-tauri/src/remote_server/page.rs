@@ -108,8 +108,9 @@ mod tests {
         // while the winner was released as stale.
         assert!(html.contains("let claimInFlight = false;"));
         assert!(html.contains("if (claimInFlight) {"));
-        assert!(html
-            .contains("if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;"));
+        assert!(html.contains(
+            "if (leaseId || claimInFlight || !autoConnectArmed() || (!androidE2eMode && !token())) return;"
+        ));
         // Landing with the intent armed: no drawer open-then-shut animation.
         assert!(html.contains("setNavigationOpen(!autoConnectArmed());"));
         assert!(html.contains("if (status && status.active && !resumeToken) {"));
@@ -395,6 +396,10 @@ mod tests {
             html.contains("JSON.stringify({ leaseId: activeLeaseId, cols, rows, exact: false })")
         );
         assert!(html.contains("new WebSocket"));
+        assert!(html.contains("const androidE2eMode ="));
+        assert!(html.contains("window.LaymuxNative.requestRemoteHttp"));
+        assert!(html.contains("window.LaymuxNative.openRemoteOutput"));
+        assert!(html.contains("new AndroidE2eOutputSocket(url)"));
         assert!(html.contains("new TerminalCtor"));
         assert!(html.contains("new WebLinksAddonCtor"));
         assert!(html.contains("function openRemoteUrl(uri)"));
@@ -1117,7 +1122,7 @@ mod tests {
             .find("await resizeTerminal(terminalId, outputLeaseId, attachCols, attachRows);")
             .unwrap();
         let websocket_attach = output_stream
-            .find("const outputSocket = new WebSocket(url);")
+            .find("const outputSocket = createOutputSocket(url);")
             .unwrap();
         assert!(resize_before_attach < websocket_attach);
         assert!(output_stream.contains("queueTerminalGeometry(header.state.geometry);"));
@@ -1164,7 +1169,7 @@ mod tests {
         let heartbeat_request = &html[heartbeat_start..heartbeat_end];
         let start_heartbeat = &html[html.find("function startHeartbeat").unwrap()..];
 
-        assert!(html.contains("error.status = response.status;"));
+        assert!(html.contains("error.status = status;"));
         assert!(heartbeat_error.contains("isFatalRemoteControlError(err) || heartbeatTimedOut()"));
         assert!(heartbeat_error.contains("loseRemoteControl(`Control returned to the host."));
         assert!(heartbeat_error.contains("scheduleTransientConnectionNotice(\"heartbeat\")"));
@@ -1298,7 +1303,7 @@ mod tests {
         // localApp), so auto-claim must fire on autoConnect=1 alone — otherwise
         // the user has to click Connect a second time to take control.
         let html = remote_page_html();
-        assert!(html.contains("if (autoConnectMode && token()) {"));
+        assert!(html.contains("if (autoConnectMode && (androidE2eMode || token())) {"));
         assert!(!html.contains("if (localAppMode && autoConnectMode && token())"));
     }
 }

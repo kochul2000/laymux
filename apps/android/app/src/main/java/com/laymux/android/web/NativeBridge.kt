@@ -46,13 +46,23 @@ class NativeBridge(
     }
 
     @JavascriptInterface
-    fun sendRemoteInput(data: String) {
-        activity.sendRemoteInput(data)
+    fun showCloudDashboard() {
+        activity.runOnUiThread(activity::showCloudDashboard)
     }
 
     @JavascriptInterface
-    fun resizeRemoteTerminal(cols: Int, rows: Int) {
-        activity.resizeRemoteTerminal(cols, rows)
+    fun requestRemoteHttp(requestId: String, method: String, path: String, bodyJson: String?) {
+        activity.requestRemoteHttp(requestId, method, path, bodyJson)
+    }
+
+    @JavascriptInterface
+    fun openRemoteOutput(streamId: String, terminalId: String, leaseId: String) {
+        activity.openRemoteOutput(streamId, terminalId, leaseId)
+    }
+
+    @JavascriptInterface
+    fun closeRemoteOutput(streamId: String) {
+        activity.closeRemoteOutput(streamId)
     }
 
     @JavascriptInterface
@@ -85,11 +95,6 @@ class NativeBridge(
                 "remoteExpiresAt",
                 activity.remoteSessionExpiresAt() ?: JSONObject.NULL,
             )
-            result.put(
-                "remoteTerminalTitle",
-                activity.remoteTerminalTitle() ?: JSONObject.NULL,
-            )
-
             val stored = vault.loadMetadata()
             result.put("paired", stored != null)
             result.put("confirmed", stored?.confirmedAtEpochSeconds != null)

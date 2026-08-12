@@ -620,6 +620,9 @@
       .connection-panel.connected #connect {
         display: none;
       }
+      .app.android-e2e .connection-panel label {
+        display: none;
+      }
       .connection-actions button {
         min-width: 0;
         padding-left: 6px;
@@ -2137,6 +2140,11 @@
 
         const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
         const searchParams = new URLSearchParams(location.search);
+        const androidE2eMode =
+          searchParams.get("androidE2e") === "1" &&
+          window.LaymuxNative &&
+          typeof window.LaymuxNative.requestRemoteHttp === "function" &&
+          typeof window.LaymuxNative.openRemoteOutput === "function";
         const localAppMode = searchParams.get("localApp") === "1" || hashParams.get("localApp") === "1";
         const autoConnectMode = searchParams.get("autoConnect") === "1" || hashParams.get("autoConnect") === "1";
         const clientNameFromParams = searchParams.get("clientName") || hashParams.get("clientName");
@@ -2147,8 +2155,15 @@
           "";
         if (clientNameFromParams) clientNameInput.value = clientNameFromParams;
         document.querySelector(".app").classList.toggle("local-app", localAppMode);
-        desktopModeHeaderButton.hidden = !localAppMode;
-        desktopModeDrawerButton.hidden = !localAppMode;
+        document.querySelector(".app").classList.toggle("android-e2e", Boolean(androidE2eMode));
+        if (androidE2eMode) clientNameInput.value = "Laymux Android E2E";
+        desktopModeHeaderButton.hidden = !(localAppMode || androidE2eMode);
+        desktopModeDrawerButton.hidden = !(localAppMode || androidE2eMode);
+        if (androidE2eMode) {
+          desktopModeHeaderButton.textContent = "Close";
+          desktopModeDrawerButton.textContent = "Close";
+          fileViewerSection.hidden = true;
+        }
         // Layout naming (canonical, ADR-0036):
         //   desktop layout — Enter sends, Shift+Enter newline, no Send button.
         //   mobile layout  — Enter is a newline, the Send button sends.
@@ -2240,6 +2255,7 @@
         }
 
         function token() {
+          if (androidE2eMode) return "android-e2e";
           return tokenInput.value.trim();
         }
 
@@ -2279,29 +2295,212 @@
           };
         }
 
+        let nextAndroidHttpRequestId = 0;
+        let nextAndroidOutputStreamId = 0;
+        const androidHttpRequests = new Map();
+        const androidOutputSockets = new Map();
+
+        function remoteResponseError(status, body = {}) {
+          const error = new Error(body.error || `Remote request failed (${status})`);
+          error.status = status;
+          for (const field of [
+            "code",
+            "claimReservationId",
+            "retryAfterMs",
+            "reservationTtlMs",
+            "active",
+            "transitioning",
+          ]) {
+            if (Object.prototype.hasOwnProperty.call(body, field)) error[field] = body[field];
+          }
+          return error;
+        }
+
+        function androidRemoteFetch(path, options = {}) {
+          return new Promise((resolve, reject) => {
+            if (options.signal?.aborted) {
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+              return;
+            }
+            const requestId = `http-${++nextAndroidHttpRequestId}`;
+            const abort = () => {
+              if (!androidHttpRequests.delete(requestId)) return;
+              reject(new DOMException("The operation was aborted.", "AbortError"));
+            };
+            options.signal?.addEventListener("abort", abort, { once: true });
+            androidHttpRequests.set(requestId, {
+              resolve,
+              reject,
+              cleanup: () => options.signal?.removeEventListener("abort", abort),
+            });
+            try {
+              window.LaymuxNative.requestRemoteHttp(
+                requestId,
+                String(options.method || "GET"),
+                String(path),
+                typeof options.body === "string" ? options.body : null,
+              );
+            } catch (error) {
+              const request = androidHttpRequests.get(requestId);
+              androidHttpRequests.delete(requestId);
+              request?.cleanup();
+              reject(error);
+            }
+          });
+        }
+
+        function decodeAndroidBase64Url(value) {
+          const padding = "=".repeat((4 - (value.length % 4)) % 4);
+          const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/") + padding);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          return bytes.buffer;
+        }
+
+        class AndroidE2eOutputSocket {
+          constructor(url) {
+            this.binaryType = "arraybuffer";
+            this.readyState = 0;
+            this.onopen = null;
+            this.onmessage = null;
+            this.onerror = null;
+            this.onclose = null;
+            this.streamId = `output-${++nextAndroidOutputStreamId}`;
+            try {
+              const parsed = new URL(url);
+              const prefix = "/remote/v1/terminals/";
+              const suffix = "/output";
+              if (!parsed.pathname.startsWith(prefix) || !parsed.pathname.endsWith(suffix)) {
+                throw new Error("Invalid Remote output path.");
+              }
+              const encodedTerminalId = parsed.pathname.slice(prefix.length, -suffix.length);
+              this.terminalId = decodeURIComponent(encodedTerminalId);
+              this.leaseId = parsed.searchParams.get("leaseId") || "";
+              if (!this.terminalId || !this.leaseId) {
+                throw new Error("Remote output identity is missing.");
+              }
+              androidOutputSockets.set(this.streamId, this);
+              setTimeout(() => {
+                if (this.readyState !== 0) return;
+                try {
+                  window.LaymuxNative.openRemoteOutput(
+                    this.streamId,
+                    this.terminalId,
+                    this.leaseId,
+                  );
+                } catch (error) {
+                  this.fail(error instanceof Error ? error.message : String(error));
+                }
+              }, 0);
+            } catch (error) {
+              setTimeout(
+                () => this.fail(error instanceof Error ? error.message : String(error)),
+                0,
+              );
+            }
+          }
+
+          acceptFrame(response) {
+            if (this.readyState >= 2 || response.phase === "idle") return;
+            if (response.phase !== "snapshot" && response.phase !== "delta") {
+              this.fail("Remote output frame is invalid.");
+              return;
+            }
+            if (!response.header || typeof response.data !== "string") {
+              this.fail("Remote output frame is incomplete.");
+              return;
+            }
+            if (this.readyState === 0) {
+              this.readyState = 1;
+              this.onopen?.({ type: "open", target: this });
+            }
+            try {
+              this.onmessage?.({ data: JSON.stringify(response.header), target: this });
+              this.onmessage?.({ data: decodeAndroidBase64Url(response.data), target: this });
+            } catch (error) {
+              this.fail(error instanceof Error ? error.message : String(error));
+            }
+          }
+
+          fail(message) {
+            if (this.readyState >= 2) return;
+            this.onerror?.({ type: "error", message, target: this });
+            this.finish();
+          }
+
+          finish() {
+            if (this.readyState === 3) return;
+            this.readyState = 3;
+            androidOutputSockets.delete(this.streamId);
+            this.onclose?.({ type: "close", target: this });
+          }
+
+          close() {
+            if (this.readyState >= 2) return;
+            this.readyState = 2;
+            androidOutputSockets.delete(this.streamId);
+            try {
+              window.LaymuxNative.closeRemoteOutput(this.streamId);
+            } catch (_) {}
+            setTimeout(() => this.finish(), 0);
+          }
+        }
+
+        window.laymuxAndroidE2e = Object.freeze({
+          onHttpResponse(requestId, responseJson) {
+            const request = androidHttpRequests.get(requestId);
+            if (!request) return;
+            androidHttpRequests.delete(requestId);
+            request.cleanup();
+            try {
+              const response = JSON.parse(responseJson);
+              const status = Number(response.status) || 500;
+              if (status < 200 || status >= 300) {
+                request.reject(remoteResponseError(status, response.body || {}));
+              } else {
+                request.resolve(response.body);
+              }
+            } catch (error) {
+              request.reject(error);
+            }
+          },
+          onHttpError(requestId, message) {
+            const request = androidHttpRequests.get(requestId);
+            if (!request) return;
+            androidHttpRequests.delete(requestId);
+            request.cleanup();
+            request.reject(new Error(message || "Secure Remote request failed."));
+          },
+          onOutputFrame(streamId, responseJson) {
+            const outputSocket = androidOutputSockets.get(streamId);
+            if (!outputSocket) return;
+            try {
+              outputSocket.acceptFrame(JSON.parse(responseJson));
+            } catch (error) {
+              outputSocket.fail(error instanceof Error ? error.message : String(error));
+            }
+          },
+          onOutputClosed(streamId, message, isError) {
+            const outputSocket = androidOutputSockets.get(streamId);
+            if (!outputSocket) return;
+            if (isError === "true") {
+              outputSocket.onerror?.({ type: "error", message, target: outputSocket });
+            }
+            outputSocket.finish();
+          },
+        });
+
         async function remoteFetch(path, options = {}) {
+          if (androidE2eMode) return androidRemoteFetch(path, options);
           const response = await fetch(path, {
             ...options,
             headers: { ...authHeaders(), ...(options.headers || {}) },
           });
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));
-            const error = new Error(body.error || `${response.status} ${response.statusText}`);
-            error.status = response.status;
-            // `active`/`transitioning` ride the 409 conflict-status body and are what
-            // separates "someone else has control" from "the owner handoff is still
-            // draining" (issue #561).
-            for (const field of [
-              "code",
-              "claimReservationId",
-              "retryAfterMs",
-              "reservationTtlMs",
-              "active",
-              "transitioning",
-            ]) {
-              if (Object.prototype.hasOwnProperty.call(body, field)) error[field] = body[field];
-            }
-            throw error;
+            throw remoteResponseError(response.status, body);
           }
           return response.json();
         }
@@ -5257,7 +5456,7 @@
           if (!widgetPollActive || widgetPollInFlight) return;
           // A hidden tab draws nothing worth a bridge round trip. The chain
           // stays alive so returning does not depend on one event handler.
-          if (document.hidden || !token()) {
+          if (document.hidden || (!androidE2eMode && !token())) {
             scheduleNextWidgetPoll(WIDGET_POLL_MS);
             return;
           }
@@ -6085,6 +6284,10 @@
           return `${protocol}//${location.host}`;
         }
 
+        function createOutputSocket(url) {
+          return androidE2eMode ? new AndroidE2eOutputSocket(url) : new WebSocket(url);
+        }
+
         function outputReconnectDelayMs(attempt) {
           return Math.min(
             OUTPUT_RECONNECT_MAX_DELAY_MS,
@@ -6186,7 +6389,7 @@
           }
           lastResizeKey = `${terminalId}:${attachCols}x${attachRows}`;
           const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}`;
-          const outputSocket = new WebSocket(url);
+          const outputSocket = createOutputSocket(url);
           let outputTerminalMissing = false;
           // Keep the previous surface visible until the replacement snapshot
           // has actually arrived. A checkpoint bridge/reconnect delay must not
@@ -6634,7 +6837,7 @@
           cancelAutoConnectRetry();
           // Visibility is the whole safety argument: never claim from the background.
           if (document.visibilityState !== "visible") return;
-          if (leaseId || claimInFlight || !autoConnectArmed() || !token()) return;
+          if (leaseId || claimInFlight || !autoConnectArmed() || (!androidE2eMode && !token())) return;
           autoConnectWhenFree().catch(() => {});
         }
 
@@ -6677,7 +6880,7 @@
         }
 
         async function connect({ auto = false } = {}) {
-          if (!token()) {
+          if (!androidE2eMode && !token()) {
             setStatus("Remote token is required.", true);
             return;
           }
@@ -6693,7 +6896,7 @@
           claimInFlight = true;
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
-          localStorage.setItem(tokenKey, token());
+          if (!androidE2eMode) localStorage.setItem(tokenKey, token());
           setStatus(auto ? "Reconnecting..." : "Claiming remote control...");
           try {
             const status = await claimRemoteControl(attemptRevision);
@@ -7868,6 +8071,18 @@
           clearPathLinkSelection();
           const currentLease = leaseId;
           if (!currentLease) return;
+          if (androidE2eMode) {
+            try {
+              window.LaymuxNative.requestRemoteHttp(
+                `http-unload-${++nextAndroidHttpRequestId}`,
+                "POST",
+                "/remote/v1/session/release",
+                JSON.stringify({ leaseId: currentLease }),
+              );
+            } catch (_) {}
+            leaseId = null;
+            return;
+          }
           const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
           const payload = JSON.stringify({ leaseId: currentLease });
           let sent = false;
@@ -7897,6 +8112,10 @@
           if (currentLease) {
             await releaseLease(currentLease).catch(() => {});
             disconnect(false);
+          }
+          if (androidE2eMode) {
+            window.LaymuxNative.disconnectRemote();
+            return;
           }
           window.parent.postMessage({ type: "laymux:desktop-mode" }, "*");
         }
@@ -8353,7 +8572,7 @@
         // control on connect — one fewer click. The remote-control enable toggle
         // still governs: if control is not allowed the claim fails and we stay an
         // observer with a status hint (no hard error).
-        if (autoConnectMode && token()) {
+        if (autoConnectMode && (androidE2eMode || token())) {
           setTimeout(() => connect().catch((err) => setStatus(err.message, true)), 0);
         }
         // pagehide (not beforeunload) is the only teardown event mobile

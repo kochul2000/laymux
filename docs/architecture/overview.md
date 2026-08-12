@@ -22,7 +22,7 @@ Windows 및 Linux 데스크톱을 지원하며, 터미널 중심의 작업 환�
 |---|---|
 | 프레임워크 | Tauri v2 (Rust + WebView2 / WebKitGTK) |
 | 데스크톱 플랫폼 | Windows, Linux |
-| Android 원격 클라이언트 | Kotlin 네이티브 셸 + APK 내장 WebView 자산 (`apps/android`) |
+| Android 원격 클라이언트 | Kotlin 네이티브 셸 + 분리된 Cloud/secure WebView (`apps/android`) |
 | 네이티브 대화상자 | `rfd 0.15.4`; Windows native backend / Linux GTK3 backend |
 | UI | React + TypeScript |
 | 스타일 | Tailwind CSS |
@@ -37,9 +37,15 @@ crash reporter의 `MessageDialog`이며, headless test에서는 대화상자를 
 GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prerequisite를 그대로
 재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
 
-Android 앱은 Cargo/Tauri workspace 구성원이 아니다. QR·Keystore·향후 암호화 transport는
-Kotlin 계층이 소유하고, 표시 UI는 `WebViewAssetLoader`의 로컬 HTTPS origin에서 APK 내장
-자산만 실행한다. 서버가 제공하는 `/remote/` 문서나 외부 script를 WebView에 적재하지 않는다.
+Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 기존 Laymux Cloud의
+landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택만 좁은 native bridge에
+위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
+Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에는 E2E bridge를 설치하지 않는다.
+별도 secure WebView와 Kotlin 계층이 QR·Keystore·암호화 transport를 소유한다. APK에는 pairing과
+보안 session을 여는 최소 bootstrap만 포함하며, terminal·workspace·입출력 표면은 사용자 PC에
+설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
+Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공하고,
+WebView의 API/output 요청도 key를 JavaScript에 노출하지 않는 native bridge로 암호화한다.
 pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
 읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
@@ -52,8 +58,9 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 승인할 때만 메모리 전용 방향별 key로 파생된다. foreground의 성공한 암호화 RPC마다 15분 비활성
 timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
 복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
-AES-256-GCM ciphertext envelope만 보내고, APK 내장 xterm UI는 복호화된 terminal 목록·출력과 입력을
-표시·전달한다([ADR-0146](../adr/0146-android-e2e-session-and-encrypted-remote-rpc.md)). 기존 브라우저
+AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
+native HTTP/output bridge에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)). Cloud dashboard가
+선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. 기존 브라우저
 Remote UI는 호환을 위해 별도 평문 relay 경로를 계속 사용하므로 Android의 열린 native session만 E2E다.
 
 ---

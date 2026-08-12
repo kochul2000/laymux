@@ -161,11 +161,12 @@ ADR 이 필요한 대표 기준:
 | [0141](0141-conpty-bootstrap-da-reply.md) | ConPTY 초기 DA 응답은 질의가 증명된 replay 예외로 전달한다 (0054·0068 확장) | Accepted |
 | [0142](0142-wheel-scroll-sensitivity-per-surface.md) | 휠 스크롤 민감도는 데스크톱·Remote 표면별로 따로 소유한다 | Accepted |
 | [0143](0143-parsed-ack-timeout-in-place-retry.md) | v3 parsed ACK timeout 은 교체 없이 제자리 재시도한다 (0095 Amend) | Accepted |
-| [0144](0144-android-signed-hybrid-client-e2e-foundation.md) | Android E2E 기반은 서명된 로컬 웹 클라이언트와 네이티브 키 경계를 사용한다 (0013·0024·0091 확장) | Accepted |
+| [0144](0144-android-signed-hybrid-client-e2e-foundation.md) | Android E2E 기반은 서명된 로컬 웹 클라이언트와 네이티브 키 경계를 사용한다 (Remote UI 소유 결정은 0149가 대체) | Accepted (partially superseded by 0149) |
 | [0145](0145-android-pairing-authenticated-one-time-ack.md) | Android 페어링은 만료되는 QR v2와 상호 HMAC ACK로 확정한다 (0024·0030·0144 확장) | Accepted |
-| [0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) | Android 데이터 평면은 생체 승인 세션과 순차 AEAD RPC를 사용한다 (0024·0030·0144·0145 확장) | Accepted |
+| [0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) | Android 데이터 평면은 생체 승인 세션과 순차 AEAD RPC를 사용한다 (APK UI 소유 결정은 0149가 대체) | Accepted (partially superseded by 0149) |
 | [0147](0147-output-volume-activity-and-app-declared-idle.md) | 출력 볼륨을 앱 협조 없는 활성 신호로 인정하고, 앱이 선언한 유휴는 추론된 활성을 이긴다 (0005 §outputActive 규칙 정정) | Accepted |
 | [0148](0148-bounded-multi-path-selection-links.md) | 선택 경로 링크는 bounded maximal-munch 복수 후보를 사용한다 (0045 확장) | Accepted |
+| [0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) | Android는 Cloud 계정 표면과 PC 소유 Remote UI를 분리하는 얇은 E2E wrapper다 (0144·0146 일부 대체) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

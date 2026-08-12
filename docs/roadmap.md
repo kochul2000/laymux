@@ -26,6 +26,6 @@
 
 - [ ] View 플러그인 시스템 (현재 built-in only)
 - [ ] activity 핸들러 확장 (neovim, htop 등 — [ADR-0005](./adr/0005-display-state-raw-separation-compute.md))
-- [x] Android↔desktop E2E data plane — 생체 승인 후 사용 중 갱신되고 background에서도 최대 15분 보존되는 비활성 session, 방향별 HKDF/AES-GCM key, strict sequence+직전 응답 재현, 고정 ciphertext relay route, encrypted terminal 제어·output polling과 APK 내장 xterm UI ([ADR-0146](./adr/0146-android-e2e-session-and-encrypted-remote-rpc.md)); emulator/실기 background suspend/resume·biometric·렌더 왕복은 장비 준비 시 수행
+- [x] Android↔desktop E2E thin wrapper — 별도 Cloud WebView의 기존 landing/dashboard + Credential Manager Google login + PC 선택, 생체 승인 후 사용 중 갱신되고 background에서도 현재 deadline까지 최대 15분 보존되는 session, 방향별 HKDF/AES-GCM key, strict sequence+직전 응답 재현, 고정 ciphertext relay route, PC Laymux 소유 Remote 문서·자산과 HTTP/V1 output native bridge. APK는 pairing/bootstrap만 내장하고 xterm·terminal 선택을 복제하지 않는다([ADR-0146](./adr/0146-android-e2e-session-and-encrypted-remote-rpc.md), [ADR-0149](./adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)); emulator/실기 Google account chooser·cookie redirect·QR·background suspend/resume·biometric·렌더 왕복은 장비 준비 시 수행
 
 > 새 마일스톤/이슈가 확정되면 이 표에 한 줄 추가하고, 출하 시 `[x]` 로 옮긴다.
