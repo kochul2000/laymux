@@ -3081,6 +3081,143 @@ describe("spatial pane numbers (issue #256)", () => {
     expect(byId[`terminal-${BL}`]).toBe(3);
   });
 
+  it("workspaces.list enriches every workspace pane and carries the PC selector summary", () => {
+    seedDivergentWorkspace();
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${TR}`, {
+      lastCommand: "cargo test",
+      lastExitCode: 0,
+      lastCommandAt: 42,
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "selector-workspaces",
+      category: "query",
+      target: "workspaces",
+      method: "list",
+      params: {},
+    });
+    const workspaces = (result.data as Record<string, unknown>).workspaces as Array<
+      Record<string, unknown>
+    >;
+    const panes = workspaces[0].panes as Array<Record<string, unknown>>;
+    const byId = Object.fromEntries(panes.map((pane) => [pane.id, pane.paneNumber]));
+    const summary = workspaces[0].selectorSummary as Record<string, unknown>;
+    const lastCommand = summary.lastCommand as Record<string, unknown>;
+    const status = lastCommand.status as Record<string, unknown>;
+
+    expect(byId[TL]).toBe(1);
+    expect(byId[TR]).toBe(2);
+    expect(byId[BL]).toBe(3);
+    expect(summary.terminalCount).toBe(3);
+    expect(lastCommand.command).toBe("cargo test");
+    expect(status).toMatchObject({ icon: "✓", color: "var(--green)" });
+  });
+
+  it("projects never-mounted workspace terminals with the same selector placeholders as PC", () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-live",
+          name: "Live",
+          panes: [{ id: "live", x: 0, y: 0, w: 1, h: 1, view: { type: "EmptyView" } }],
+        },
+        {
+          id: "ws-cold",
+          name: "Cold",
+          panes: [
+            {
+              id: "cold",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: {
+                type: "TerminalView",
+                profile: "WSL",
+                lastCwd: "/home/codex/projects/laymux",
+              },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-live",
+    });
+
+    const workspaceResult = handleAutomationRequest({
+      requestId: "cold-workspace",
+      category: "query",
+      target: "workspaces",
+      method: "list",
+      params: {},
+    });
+    const workspaces = (workspaceResult.data as Record<string, unknown>).workspaces as Array<
+      Record<string, unknown>
+    >;
+    expect(
+      workspaces.find((workspace) => workspace.id === "ws-cold")?.selectorSummary,
+    ).toMatchObject({ terminalCount: 1, cwd: "/home/codex/projects/laymux" });
+
+    const terminalResult = handleAutomationRequest({
+      requestId: "cold-terminal",
+      category: "query",
+      target: "terminals",
+      method: "list",
+      params: {},
+    });
+    const instances = (terminalResult.data as Record<string, unknown>).instances as Array<
+      Record<string, unknown>
+    >;
+    expect(instances.find((instance) => instance.id === "terminal-cold")).toMatchObject({
+      profile: "WSL",
+      workspaceId: "ws-cold",
+      selectorStatus: null,
+      selectorDisplay: {
+        environment: "WSL",
+        activity: { label: "shell", color: "var(--text-secondary)" },
+        cwd: "~/projects/laymux",
+      },
+    });
+  });
+
+  it("terminals.list carries the status computed with live PC agent settings", () => {
+    seedDivergentWorkspace();
+    useTerminalStore.getState().updateInstanceInfo(`terminal-${TL}`, {
+      title: "⠂ Editing navigation.rs",
+      activity: { type: "interactiveApp", name: "Codex" },
+      activityMessage: "Implementing",
+      lastCommand: "codex",
+      lastCommandAt: 10,
+      cwd: "/home/codex/laymux",
+    });
+    useSettingsStore.getState().setCodex({
+      statusMessageMode: "bullet-title",
+      statusMessageDelimiter: " / ",
+    });
+
+    const result = handleAutomationRequest({
+      requestId: "selector-status",
+      category: "query",
+      target: "terminals",
+      method: "list",
+      params: {},
+    });
+    const instances = (result.data as Record<string, unknown>).instances as Array<
+      Record<string, unknown>
+    >;
+    const terminal = instances.find((instance) => instance.id === `terminal-${TL}`)!;
+
+    expect(terminal.selectorStatus).toMatchObject({
+      icon: "⏳",
+      color: "var(--yellow)",
+      text: "Implementing / Editing navigation.rs",
+    });
+    expect(terminal.selectorDisplay).toMatchObject({
+      environment: "WSL",
+      activity: { label: "Codex", color: "var(--codex)" },
+      cwd: "~/laymux",
+    });
+  });
+
   it("identify exposes pane.number and neighbor paneNumber", () => {
     seedDivergentWorkspace();
     const result = handleAutomationRequest({

@@ -1137,6 +1137,31 @@
         font-weight: 600;
         opacity: 0.4;
       }
+      .pane-command-status {
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        border: 1.5px solid transparent;
+        border-radius: var(--radius-md);
+        font-size: 10px;
+        line-height: 1;
+      }
+      .pane-command-status.unread {
+        border-color: var(--accent);
+      }
+      .pane-notification-dot {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        margin-left: auto;
+        border-radius: 50%;
+        background: var(--accent);
+      }
       .workspace-summary-line {
         min-height: 18px;
         margin-top: 2px;
@@ -1148,6 +1173,38 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .workspace-status-line {
+        min-height: 18px;
+        margin-top: 2px;
+        padding-left: 18px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-status-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-status-time {
+        flex: 0 0 auto;
+        opacity: 0.4;
+      }
+      .workspace-status-notification {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-style: italic;
+      }
+      .workspace-status-notification.error { color: var(--red); }
+      .workspace-status-notification.success { color: var(--green); }
+      .workspace-status-notification.warning { color: var(--yellow); }
+      .workspace-status-notification.info { color: var(--accent); }
       .nav-empty {
         margin: 0 8px 7px;
         padding: 7px 8px;
@@ -2016,14 +2073,17 @@
         const lastSelectedTerminalIdByWorkspace = new Map();
         let terminalInfoById = new Map();
         let navigationState = null;
+        const NAVIGATION_VIEW_REFRESH_MS = 2000;
+        let navigationViewRefreshTimer = null;
+        let navigationViewRefreshInFlight = false;
         let spatialExcludedPaneIds = loadSpatialExcludedPaneIds();
         // Whole-workspace skip denylist (issue #507, ADR-0047). Independent
         // Set<workspaceId> alongside spatialExcludedPaneIds: a workspace is
         // skipped in remote spatial navigation when its id is here, regardless
         // of the per-pane set. The two stay consistent for the active workspace
         // via the promotion/demotion rule (all panes skipped <-> workspace
-        // skipped); inactive workspaces expose no pane ids, so they are tracked
-        // at workspace granularity only until entered.
+        // skipped). Navigation now carries every workspace's pane ids, so the
+        // invariant can be reconciled without first entering a workspace.
         let spatialExcludedWorkspaceIds = loadSpatialExcludedWorkspaceIds();
         let fileViewerStatusInFlight = false;
         let fileViewerStatusRequestRevision = 0;
@@ -4899,11 +4959,9 @@
         // These take the current denylists as string arrays plus the workspace
         // context and return the next denylists; they mutate nothing so they are
         // straightforward to reason about and test. The invariant they preserve,
-        // for a workspace whose terminal pane ids are known (the active
-        // workspace): the workspace id is in the workspace denylist IFF every one
-        // of its terminal panes is in the pane denylist. Inactive workspaces pass
-        // an empty terminalPaneIds and are only ever toggled at workspace
-        // granularity.
+        // for every workspace in the navigation snapshot: the workspace id is
+        // in the workspace denylist IFF every one of its terminal panes is in
+        // the pane denylist.
 
         // Toggling one pane: flip it in the pane set, then promote (all panes now
         // excluded) or demote (not all) the owning workspace to match.
@@ -4932,11 +4990,9 @@
           };
         }
 
-        // Toggling a whole workspace: flip it in the workspace set and, for the
-        // active workspace whose pane ids are known, add/remove all of them from
-        // the pane set so the header pane toggle stays consistent (vice-versa
-        // direction of the rule). Inactive workspaces pass an empty
-        // terminalPaneIds, so only the workspace set changes.
+        // Toggling a whole workspace: flip it in the workspace set and add/remove
+        // all of its known pane ids so the pane toggle stays consistent in both
+        // directions.
         function computeSkipStateAfterWorkspaceToggle({
           workspaceId,
           terminalPaneIds,
@@ -4960,27 +5016,26 @@
           };
         }
 
-        // Terminal pane ids of the active workspace from the latest navigation
-        // snapshot. Inactive workspaces carry no pane summaries (§13.3), so this
-        // returns [] for them — matching the "ids unknown" contract above.
+        // Terminal pane ids of any workspace from the latest navigation snapshot.
         function workspaceTerminalPaneIds(workspaceId) {
           if (!workspaceId || !navigationState) return [];
-          const active = navigationState.activeWorkspace;
-          if (!active || active.id !== workspaceId) return [];
-          return (active.panes || [])
+          const workspace = (navigationState.workspaces || []).find((item) => item.id === workspaceId);
+          if (!workspace) return [];
+          return (workspace.panes || [])
             .filter((pane) => pane.id && pane.viewType === "TerminalView")
             .map((pane) => pane.id);
         }
 
-        // Apply the on-entry expansion for the active workspace and persist if it
-        // changed. Runs on every navigation render before the drawer/header are
-        // drawn so their pressed states are consistent.
-        function reconcileActiveWorkspaceSkip() {
+        // Expand persisted whole-workspace exclusions to their pane ids and
+        // persist if needed. Runs before the drawer/header are drawn.
+        function reconcileWorkspaceSkips() {
           if (!navigationState) return;
-          const active = navigationState.activeWorkspace;
-          if (!active || !active.id || !spatialExcludedWorkspaceIds.has(active.id)) return;
           const before = spatialExcludedPaneIds.size;
-          workspaceTerminalPaneIds(active.id).forEach((id) => spatialExcludedPaneIds.add(id));
+          (navigationState.workspaces || [])
+            .filter((workspace) => spatialExcludedWorkspaceIds.has(workspace.id))
+            .forEach((workspace) => {
+              workspaceTerminalPaneIds(workspace.id).forEach((id) => spatialExcludedPaneIds.add(id));
+            });
           if (spatialExcludedPaneIds.size !== before) saveSpatialExcludedPaneIds();
         }
 
@@ -5173,6 +5228,8 @@
           navToggleButton.setAttribute("aria-expanded", String(open));
           navToggleButton.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
           navScrim.hidden = !open;
+          if (open) startNavigationViewPolling();
+          else stopNavigationViewPolling();
           scheduleTerminalFit(Boolean(activeTerminalId));
         }
 
@@ -5543,9 +5600,9 @@
         }
 
         function renderNavigation(data) {
-          // Keep the active workspace's pane/workspace skip sets consistent
-          // before drawing the drawer and header pressed states (ADR-0047).
-          reconcileActiveWorkspaceSkip();
+          // Keep every workspace's pane/workspace skip sets consistent before
+          // drawing the drawer and header pressed states.
+          reconcileWorkspaceSkips();
           renderNotificationPanel(data.notifications || [], data.unreadNotificationCount || 0);
           renderWorkspaceList(data.workspaces || []);
           renderDockList(data.docks || []);
@@ -5660,10 +5717,9 @@
             emptyNav(workspaceListEl, "No workspaces.");
             return;
           }
-          const activePanes = (navigationState && navigationState.activeWorkspace && navigationState.activeWorkspace.panes) || [];
           for (let index = 0; index < workspaces.length; index += 1) {
             const workspace = workspaces[index];
-            const panes = workspace.isActive ? (workspace.panes || activePanes) : [];
+            const panes = workspace.panes || [];
             workspaceListEl.append(renderWorkspaceItem(workspace, index, panes));
           }
         }
@@ -5699,10 +5755,11 @@
           nameEl.textContent = workspace.name || workspace.id || "Workspace";
           left.append(nameEl);
 
-          if ((workspace.terminalPaneCount || 0) > 0) {
+          const selectorSummary = workspace.selectorSummary || {};
+          if ((selectorSummary.terminalCount || 0) > 0) {
             const count = document.createElement("span");
             count.className = "workspace-terminal-count";
-            count.textContent = String(workspace.terminalPaneCount);
+            count.textContent = String(selectorSummary.terminalCount);
             left.append(count);
           }
 
@@ -5725,21 +5782,66 @@
             const paneList = document.createElement("div");
             paneList.className = "workspace-pane-list";
             content.append(paneList);
-            panes.forEach((pane, paneIndex) => {
-              paneList.append(renderPaneRow(pane, panes, paneIndex, workspace.isActive));
+            panes.forEach((pane) => {
+              paneList.append(renderPaneRow(pane, panes, workspace.isActive));
             });
           } else {
             const summary = document.createElement("div");
             summary.className = "workspace-summary-line";
-            summary.textContent = metaText([
-              `${workspace.paneCount || 0} panes`,
-              `${workspace.liveTerminalCount || 0} live`,
-              (workspace.unreadCount || 0) > 0 ? `${workspace.unreadCount} unread` : "",
-            ]);
+            summary.textContent = metaText([selectorSummary.branch, selectorSummary.cwd]);
             content.append(summary);
           }
 
+          content.append(renderWorkspaceStatusLine(workspace));
+
           return item;
+        }
+
+        function selectorRelativeTime(timestamp) {
+          const diff = Date.now() - Number(timestamp || 0);
+          if (diff < 60000) return "방금";
+          if (diff < 3600000) return `${Math.floor(diff / 60000)}분 전`;
+          return `${Math.floor(diff / 3600000)}시간 전`;
+        }
+
+        function truncateSelectorText(value, maxLength) {
+          const text = String(value || "").trim();
+          return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
+        }
+
+        function renderWorkspaceStatusLine(workspace) {
+          const line = document.createElement("div");
+          line.className = "workspace-status-line";
+          const summary = workspace.selectorSummary || {};
+          const lastCommand = summary.lastCommand;
+          if (lastCommand) {
+            const status = lastCommand.status || {};
+            const icon = document.createElement("span");
+            icon.className = "workspace-command-status";
+            icon.textContent = status.icon || "";
+            if (status.color) icon.style.color = status.color;
+            line.append(icon);
+
+            const text = document.createElement("span");
+            text.className = "workspace-status-text";
+            text.textContent = truncateSelectorText(
+              status.text || lastCommand.command,
+              status.text ? 50 : 30
+            );
+            line.append(text);
+
+            const time = document.createElement("span");
+            time.className = "workspace-status-time";
+            time.textContent = `· ${selectorRelativeTime(lastCommand.timestamp)}`;
+            line.append(time);
+          } else if (summary.latestNotification) {
+            const notification = document.createElement("span");
+            const level = notificationLevelClass(summary.latestNotification.level);
+            notification.className = `workspace-status-notification ${level}`;
+            notification.textContent = `“${summary.latestNotification.message || ""}”`;
+            line.append(notification);
+          }
+          return line;
         }
 
         function applyWorkspaceSkipState(button, workspaceId) {
@@ -5789,7 +5891,7 @@
           return button;
         }
 
-        function renderPaneRow(pane, panes, paneIndex, workspaceActive) {
+        function renderPaneRow(pane, panes, workspaceActive) {
           const isTerminal = isTerminalPane(pane);
           const isActive = Boolean(isTerminal && pane.terminalId === activeTerminalId);
           const canSelectTerminal = Boolean(workspaceActive && leaseId && isTerminal && !pane.collapsed);
@@ -5806,7 +5908,7 @@
 
           const display = workspaceDisplaySettings();
           if (display.minimap) {
-            const minimap = paneMinimapElement(panes, paneIndex);
+            const minimap = paneMinimapElement(panes, pane.id);
             row.append(minimap);
           } else {
             row.style.paddingLeft = "18px";
@@ -5817,18 +5919,26 @@
           row.append(main);
 
           if (isTerminal) {
+            const selectorDisplay = pane.selectorDisplay || {};
             if (display.environment) {
               const env = document.createElement("span");
               env.className = "pane-env";
-              env.textContent = shortLabel(pane.profile || pane.title || "TerminalView");
+              env.textContent =
+                selectorDisplay.environment || shortLabel(pane.profile || pane.title || "TerminalView");
               main.append(env);
             }
 
-            const activity = activityLabel(pane.activity, pane.commandRunning);
+            const computedActivity = selectorDisplay.activity || null;
+            const activity = computedActivity
+              ? computedActivity.label
+              : activityLabel(pane.activity, pane.commandRunning);
             if (display.activity && activity) {
               const activityEl = document.createElement("span");
               activityEl.className = `pane-activity ${activityClass(pane.activity)}`;
               activityEl.textContent = activity;
+              if (computedActivity && computedActivity.color) {
+                activityEl.style.color = computedActivity.color;
+              }
               main.append(activityEl);
             }
 
@@ -5839,10 +5949,10 @@
               main.append(branch);
             }
 
-            if (display.path) {
+            if (display.path && pane.cwd) {
               const path = document.createElement("span");
               path.className = "pane-path";
-              path.textContent = pane.cwd || pane.title || pane.terminalId;
+              path.textContent = selectorDisplay.cwd || pane.cwd;
               if (pathEllipsisMode() === "start") {
                 path.style.direction = "rtl";
                 path.style.textAlign = "left";
@@ -5850,10 +5960,17 @@
               main.append(path);
             }
 
-            if (display.result && (pane.unreadCount || 0) > 0) {
+            if (display.result && pane.selectorStatus && pane.selectorStatus.icon) {
+              const status = document.createElement("span");
+              status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
+              status.textContent = pane.selectorStatus.icon;
+              if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
+              status.title = pane.selectorStatus.text || pane.lastCommand || "";
+              main.append(status);
+            } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
-              unread.className = "workspace-count-badge";
-              fillCountBadge(unread, pane.unreadCount);
+              unread.className = "pane-notification-dot";
+              unread.setAttribute("aria-label", "Unread notification");
               main.append(unread);
             }
           } else {
@@ -5866,7 +5983,7 @@
           return row;
         }
 
-        function paneMinimapElement(panes, highlightIndex) {
+        function paneMinimapElement(panes, highlightPaneId) {
           const width = 18;
           const height = 12;
           const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -5874,9 +5991,9 @@
           svg.setAttribute("width", String(width));
           svg.setAttribute("height", String(height));
           svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-          panes.forEach((pane, index) => {
+          panes.forEach((pane) => {
             const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-            const highlighted = index === highlightIndex;
+            const highlighted = pane.id === highlightPaneId;
             rect.setAttribute("x", String((Number(pane.x) || 0) * width));
             rect.setAttribute("y", String((Number(pane.y) || 0) * height));
             rect.setAttribute("width", String((Number(pane.w) || 1) * width));
@@ -5910,11 +6027,12 @@
         function shortLabel(label) {
           if (!label) return "";
           const known = {
-            TerminalView: "TERM",
-            MemoView: "MEM",
-            FileExplorerView: "FS",
-            SettingsView: "SET",
-            IssueReporterView: "ISS",
+            PowerShell: "PS",
+            WSL: "WSL",
+            Ubuntu: "UBT",
+            Debian: "DEB",
+            Browser: "WEB",
+            Empty: "---",
             EmptyView: "---",
           };
           return known[label] || String(label).slice(0, 3).toUpperCase();
@@ -5998,6 +6116,57 @@
           return source ? terminalLabel(source) : terminalId;
         }
 
+        function installNavigationSnapshot(data, { render = true } = {}) {
+          navigationState = data;
+          const terminals = data.terminals || [];
+          terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
+          terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
+          if (render) {
+            renderNavigation(data);
+            if (activeTerminalId) {
+              terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
+            }
+          }
+        }
+
+        async function refreshNavigationView() {
+          if (
+            navigationViewRefreshInFlight ||
+            !leaseId ||
+            document.hidden ||
+            !document.querySelector(".app").classList.contains("nav-open")
+          ) return;
+          const selectedLeaseId = leaseId;
+          const selectionRevision = terminalSelectionRevision;
+          navigationViewRefreshInFlight = true;
+          try {
+            const data = await remoteFetch("/remote/v1/navigation");
+            if (
+              leaseId !== selectedLeaseId ||
+              terminalSelectionRevision !== selectionRevision
+            ) return;
+            installNavigationSnapshot(data);
+          } finally {
+            navigationViewRefreshInFlight = false;
+          }
+        }
+
+        function stopNavigationViewPolling() {
+          if (navigationViewRefreshTimer) {
+            clearInterval(navigationViewRefreshTimer);
+            navigationViewRefreshTimer = null;
+          }
+        }
+
+        function startNavigationViewPolling() {
+          stopNavigationViewPolling();
+          if (!leaseId || document.hidden) return;
+          refreshNavigationView().catch(() => {});
+          navigationViewRefreshTimer = setInterval(() => {
+            refreshNavigationView().catch(() => {});
+          }, NAVIGATION_VIEW_REFRESH_MS);
+        }
+
         async function loadNavigation(
           preferredTerminalId = activeTerminalId || lastSelectedTerminalId,
           options = {},
@@ -6007,12 +6176,7 @@
             : ++terminalSelectionRevision;
           const data = await remoteFetch("/remote/v1/navigation");
           if (selectionRevision !== terminalSelectionRevision) return;
-          navigationState = data;
-          const terminals = data.terminals || [];
-          terminalInfoById = new Map(terminals.map((terminalInfo) => [terminalInfo.id, terminalInfo]));
-          // Start font downloads before the user attaches, so the terminal is
-          // usually created with the desktop font already measurable.
-          terminals.forEach((terminalInfo) => ensureRemoteFont(terminalInfo.appearance));
+          installNavigationSnapshot(data, { render: false });
           const nextTerminalId = preferredTerminal(data, preferredTerminalId, {
             pinned: options.pinTerminal === true,
           });
@@ -8126,6 +8290,7 @@
           stopHeartbeat();
           stopInputFlush();
           stopResizeFlush();
+          stopNavigationViewPolling();
           cancelComposerSubmissions();
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();

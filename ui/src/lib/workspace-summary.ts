@@ -1,6 +1,8 @@
 import type { TerminalInstance, TerminalActivityInfo } from "@/stores/terminal-store";
 import type { Notification } from "@/stores/notification-store";
+import type { WorkspacePane } from "@/stores/types";
 import type { TerminalSummaryResponse } from "@/lib/tauri-api";
+import { toTerminalId } from "@/lib/pane-ids";
 import {
   getHandler,
   type ActivityStatusMessageMode,
@@ -44,6 +46,59 @@ export interface WorkspaceSummary {
   lastCommand: LastCommandInfo | null;
   terminalCount: number;
   terminalSummaries: TerminalSummaryInfo[];
+}
+
+/**
+ * Project layout terminal panes into the selector's terminal model.
+ *
+ * Lazy inactive workspaces may not have mounted TerminalView yet, so their
+ * terminal store instances do not exist. The selector still renders those
+ * panes from persisted profile/lastCwd data; Remote must consume the same
+ * projection to keep counts and pane labels identical before first mount.
+ */
+export function projectWorkspaceTerminals(
+  workspaceId: string,
+  panes: WorkspacePane[],
+  instances: TerminalInstance[],
+): TerminalInstance[] {
+  const instancesById = new Map(instances.map((instance) => [instance.id, instance]));
+  return panes
+    .filter((pane) => pane.view.type === "TerminalView")
+    .map((pane) => {
+      const terminalId = toTerminalId(pane.id);
+      const instance = instancesById.get(terminalId);
+      const lastCwd = pane.view.lastCwd as string | undefined;
+      if (instance) {
+        return !instance.cwd && lastCwd ? { ...instance, cwd: lastCwd } : instance;
+      }
+      const configuredProfile = pane.view.profile as string | undefined;
+      const profile = configuredProfile || "PowerShell";
+      return {
+        id: terminalId,
+        profile,
+        syncGroup: workspaceId,
+        workspaceId,
+        label: configuredProfile || "Terminal",
+        cwd: lastCwd,
+        lastActivityAt: 0,
+        isFocused: false,
+      };
+    });
+}
+
+const WORKSPACE_LABEL_ABBREVIATIONS: Record<string, string> = {
+  PowerShell: "PS",
+  WSL: "WSL",
+  Ubuntu: "UBT",
+  Debian: "DEB",
+  Browser: "WEB",
+  Empty: "---",
+  EmptyView: "---",
+};
+
+/** Compact environment/view label shared by desktop and Remote selector models. */
+export function shortWorkspaceLabel(label: string): string {
+  return WORKSPACE_LABEL_ABBREVIATIONS[label] ?? label.slice(0, 3).toUpperCase();
 }
 
 export function getBranchForWorkspace(terminals: TerminalInstance[]): string | null {
@@ -342,6 +397,38 @@ export interface CommandStatus {
   icon: string; // "⏳" | "✓" | "✗" | "—"
   color: string; // CSS color value
   text?: string; // display text override (e.g., Claude activity message)
+}
+
+export interface AgentStatusMessageSettings {
+  statusMessageMode?: ActivityStatusMessageMode;
+  statusMessageDelimiter?: string;
+}
+
+/** Resolve the provider-specific status text settings used by WorkspaceSelectorView. */
+export function getStatusDisplaySettings(
+  activity: TerminalActivityInfo | undefined,
+  claudeSettings: AgentStatusMessageSettings,
+  codexSettings: AgentStatusMessageSettings,
+): {
+  mode: ActivityStatusMessageMode | undefined;
+  delimiter: string | undefined;
+} {
+  if (activity?.type !== "interactiveApp") {
+    return { mode: undefined, delimiter: undefined };
+  }
+  if (activity.name === "Claude") {
+    return {
+      mode: claudeSettings.statusMessageMode,
+      delimiter: claudeSettings.statusMessageDelimiter,
+    };
+  }
+  if (activity.name === "Codex") {
+    return {
+      mode: codexSettings.statusMessageMode,
+      delimiter: codexSettings.statusMessageDelimiter,
+    };
+  }
+  return { mode: undefined, delimiter: undefined };
 }
 
 /**

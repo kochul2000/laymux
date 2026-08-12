@@ -73,8 +73,8 @@ pub(super) fn build_remote_navigation_payload(
         frontend_by_id: &frontend_by_id,
     };
 
-    // `workspaces.list` returns raw panes, while `workspaces.getActive` adds the
-    // derived paneNumber/paneIndex metadata needed by the remote selector.
+    // The active query carries focus metadata and remains a compatibility
+    // fallback for bridge clients that do not yet enrich every list pane.
     let active_workspace_source = active_workspace_data
         .get("workspace")
         .filter(|workspace| !workspace.is_null())
@@ -92,18 +92,24 @@ pub(super) fn build_remote_navigation_payload(
             )
             .into_iter()
             .map(|workspace| {
-                let workspace = if string_field(workspace, "id") == Some(active_workspace_id) {
+                let pane_source = if string_field(workspace, "id") == Some(active_workspace_id) {
                     active_workspace_source.unwrap_or(workspace)
                 } else {
                     workspace
                 };
-                summarize_workspace(
-                    workspace,
+                let mut summary = summarize_workspace(
+                    pane_source,
                     active_workspace_id,
                     terminal_instances,
                     &hidden_workspace_ids,
                     summary_context,
-                )
+                );
+                if let Some(selector_summary) = optional_field(workspace, "selectorSummary") {
+                    if let Some(object) = summary.as_object_mut() {
+                        object.insert("selectorSummary".to_string(), selector_summary);
+                    }
+                }
+                summary
             })
             .collect::<Vec<_>>()
         })
@@ -180,11 +186,7 @@ fn summarize_workspace(
                 .any(|terminal| string_field(terminal, "id") == Some(terminal_id.as_str()))
         })
         .count();
-    let pane_summaries = if is_active {
-        summarize_workspace_panes(panes, id, context)
-    } else {
-        Vec::new()
-    };
+    let pane_summaries = summarize_workspace_panes(panes, id, context);
     let hidden = hidden_workspace_ids.contains(id);
 
     json!({
@@ -198,6 +200,7 @@ fn summarize_workspace(
         "liveTerminalCount": live_terminal_count,
         "unreadCount": unread_count(context.notifications, Some(id), None),
         "panes": pane_summaries,
+        "selectorSummary": optional_field(workspace, "selectorSummary"),
     })
 }
 
@@ -346,6 +349,12 @@ fn summarize_pane(
         "activity": terminal_activity(backend, frontend),
         "outputActive": frontend.and_then(|terminal| optional_field(terminal, "outputActive")),
         "commandRunning": backend.map(|terminal| terminal.command_running).unwrap_or(false),
+        "lastCommand": frontend.and_then(|terminal| optional_field(terminal, "lastCommand")),
+        "lastExitCode": frontend.and_then(|terminal| optional_field(terminal, "lastExitCode")),
+        "lastCommandAt": frontend.and_then(|terminal| optional_field(terminal, "lastCommandAt")),
+        "activityMessage": frontend.and_then(|terminal| optional_field(terminal, "activityMessage")),
+        "selectorStatus": frontend.and_then(|terminal| optional_field(terminal, "selectorStatus")),
+        "selectorDisplay": frontend.and_then(|terminal| optional_field(terminal, "selectorDisplay")),
         "isFocused": focused_override
             .map(|focused| json!(focused))
             .or_else(|| frontend.and_then(|terminal| optional_field(terminal, "isFocused")))
@@ -375,6 +384,8 @@ fn terminal_summary_value(terminal: &RemoteTerminalInfo, frontend: Option<&Value
         "activity",
         "outputActive",
         "activityMessage",
+        "selectorStatus",
+        "selectorDisplay",
         "isFocused",
         "lastActivityAt",
         "lastCommand",
@@ -881,6 +892,12 @@ mod tests {
                     "paneIndex": 0,
                     "paneNumber": 1,
                     "activity": { "type": "shell" },
+                    "selectorStatus": { "icon": "✓", "color": "var(--green)" },
+                    "selectorDisplay": {
+                        "environment": "PS",
+                        "activity": { "label": "shell", "color": "var(--text-secondary)" },
+                        "cwd": "~/Project"
+                    },
                     "isFocused": true
                 },
                 {
@@ -954,6 +971,111 @@ mod tests {
             "Cascadia Mono"
         );
         assert_eq!(payload["terminals"][0]["paneNumber"], 1);
+        assert_eq!(payload["terminals"][0]["selectorStatus"]["icon"], "✓");
+        assert_eq!(
+            payload["activeWorkspace"]["panes"][0]["selectorDisplay"]["environment"],
+            "PS"
+        );
+    }
+
+    #[test]
+    fn navigation_payload_keeps_inactive_panes_and_desktop_selector_status_summary() {
+        let workspaces_data = json!({
+            "activeWorkspaceId": "ws-1",
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "Main",
+                    "panes": []
+                },
+                {
+                    "id": "ws-2",
+                    "name": "Background",
+                    "selectorSummary": {
+                        "branch": "feature/remote-parity",
+                        "cwd": "/work/laymux",
+                        "terminalCount": 1,
+                        "lastCommand": {
+                            "command": "cargo test",
+                            "timestamp": 42,
+                            "status": { "icon": "✓", "color": "var(--green)" }
+                        },
+                        "latestNotification": null
+                    },
+                    "panes": [
+                        {
+                            "id": "p2",
+                            "paneIndex": 0,
+                            "paneNumber": 1,
+                            "terminalId": "terminal-p2",
+                            "view": { "type": "TerminalView" },
+                            "x": 0,
+                            "y": 0,
+                            "w": 1,
+                            "h": 1
+                        }
+                    ]
+                }
+            ]
+        });
+        let terminal_instances_data = json!({
+            "instances": [
+                {
+                    "id": "terminal-p2",
+                    "workspaceId": "ws-2",
+                    "label": "WSL",
+                    "lastCommand": "cargo test",
+                    "lastExitCode": 0,
+                    "lastCommandAt": 42,
+                    "selectorStatus": { "icon": "✓", "color": "var(--green)" },
+                    "selectorDisplay": {
+                        "environment": "WSL",
+                        "activity": { "label": "shell", "color": "var(--text-secondary)" },
+                        "cwd": "~/laymux"
+                    }
+                }
+            ]
+        });
+
+        let payload = build_remote_navigation_payload(
+            &workspaces_data,
+            &json!({ "workspace": { "id": "ws-1", "name": "Main", "panes": [] } }),
+            &json!({ "docks": [] }),
+            &terminal_instances_data,
+            &json!({ "notifications": [] }),
+            &json!({
+                "hiddenWorkspaceIds": [],
+                "hiddenPaneIds": [],
+                "workspaceSelector": {
+                    "display": {
+                        "minimap": false,
+                        "environment": true,
+                        "activity": false,
+                        "path": true,
+                        "result": true
+                    }
+                }
+            }),
+            &[],
+        );
+
+        assert_eq!(
+            payload["workspaces"][1]["panes"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            payload["workspaces"][1]["panes"][0]["selectorStatus"]["icon"],
+            "✓"
+        );
+        assert_eq!(
+            payload["workspaces"][1]["panes"][0]["selectorDisplay"]["cwd"],
+            "~/laymux"
+        );
+        assert_eq!(
+            payload["workspaces"][1]["selectorSummary"]["lastCommand"]["command"],
+            "cargo test"
+        );
+        assert_eq!(payload["workspaceSelector"]["display"]["minimap"], false);
     }
 
     #[test]
@@ -1177,7 +1299,7 @@ mod tests {
         assert_eq!(payload["workspaces"][1]["collapsed"], true);
         assert_eq!(
             payload["workspaces"][1]["panes"].as_array().unwrap().len(),
-            0
+            1
         );
         assert_eq!(payload["unreadNotificationCount"], 2);
 
