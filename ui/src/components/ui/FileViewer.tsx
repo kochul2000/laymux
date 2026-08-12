@@ -315,7 +315,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
             </div>
           </ToolbarBar>
           <div
-            className="flex min-h-0 flex-1 overflow-auto"
+            className="empty-view-scroll flex min-h-0 flex-1 overflow-auto"
             style={{
               ...bodyStyle,
               alignItems: imageZoomAlignment(imageZoom),
@@ -622,7 +622,7 @@ function PreviewToggleShell({
         {rightControls && <div className="ml-auto flex items-center gap-1">{rightControls}</div>}
       </ToolbarBar>
       <div
-        className="flex min-h-0 flex-1 overflow-auto"
+        className="empty-view-scroll flex min-h-0 flex-1 overflow-auto"
         style={{ background: "var(--bg-surface)" }}
         onWheel={onWheel}
       >

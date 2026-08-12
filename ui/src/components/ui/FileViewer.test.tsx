@@ -60,6 +60,7 @@ describe("FileViewer", () => {
     });
     expect(readFileForViewer).toHaveBeenCalledWith("/home/user/a.txt");
     expect(screen.getByTestId("file-viewer-text")).toHaveTextContent("hello world");
+    expect(screen.getByTestId("file-viewer-text").parentElement).toHaveClass("empty-view-scroll");
   });
 
   it("renders html files in preview mode by default and can switch to source", async () => {
@@ -126,9 +127,9 @@ describe("FileViewer", () => {
       new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, cancelable: true, bubbles: true }),
     );
 
-    expect(
-      useOverridesStore.getState().viewOverrides[baseProps.viewerInstanceId]?.fontSize,
-    ).toBe(initialSize + 1);
+    expect(useOverridesStore.getState().viewOverrides[baseProps.viewerInstanceId]?.fontSize).toBe(
+      initialSize + 1,
+    );
   });
 
   it("renders markdown files in preview mode by default", async () => {
@@ -204,6 +205,7 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/home/user/photo.png" />);
     });
     expect(screen.getByTestId("file-viewer-image")).toBeInTheDocument();
+    expect(screen.getByTestId("file-viewer-image").parentElement).toHaveClass("empty-view-scroll");
   });
 
   it("scopes Ctrl+A to the viewer's own content instead of the whole page", async () => {

@@ -121,6 +121,17 @@ const MARKDOWN_PREVIEW_LAYOUT_CSS = [
   "@media(max-width:767px){.markdown-body{padding:15px;}}",
 ].join("");
 
+// The preview lives in a sandboxed iframe and cannot inherit index.css. Mirror
+// `.empty-view-scroll` so document previews use the same slim overlay thumb as
+// EmptyView and the structured FileViewer renderers instead of the browser's
+// bright default scrollbar.
+const PREVIEW_SCROLLBAR_CSS = [
+  "::-webkit-scrollbar{width:20px;height:20px;}",
+  "::-webkit-scrollbar-thumb{background:#ffffff33;border:6px solid transparent;background-clip:padding-box;}",
+  "::-webkit-scrollbar-thumb:hover{background:#ffffff59;border:6px solid transparent;background-clip:padding-box;}",
+  "::-webkit-scrollbar-track{background:transparent;}",
+].join("");
+
 export function documentPreviewKind(path: string): DocumentPreviewKind | null {
   const ext = fileExtension(path);
   if (HTML_EXTENSIONS.has(ext)) return "html";
@@ -194,6 +205,7 @@ export function buildPreviewDocument(
     "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'; frame-src 'none';\">",
     "<style>",
     stylesheet,
+    PREVIEW_SCROLLBAR_CSS,
     fontOverrideCss,
     "</style>",
     "</head><body>",

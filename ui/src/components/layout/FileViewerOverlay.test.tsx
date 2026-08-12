@@ -17,6 +17,21 @@ vi.mock("@/components/ui/FileViewer", () => ({
   ),
 }));
 
+// The explorer itself has a dedicated suite. Here we only verify how the
+// overlay places it, derives its starting directory, and wires file selection.
+vi.mock("@/components/views/FileExplorerView", () => ({
+  FileExplorerView: (props: { lastCwd?: string; onOpenFile?: (path: string) => void }) => (
+    <button
+      type="button"
+      data-testid="mock-file-explorer"
+      data-cwd={props.lastCwd}
+      onClick={() => props.onOpenFile?.(`${props.lastCwd}/sibling.txt`)}
+    >
+      Explorer
+    </button>
+  ),
+}));
+
 function useTerminalViewerFor(ext: string) {
   useSettingsStore.setState({
     fileExplorer: {
@@ -182,6 +197,53 @@ describe("FileViewerOverlay", () => {
     // The bar must not steal focus from the loaded viewer (terminal apps etc.).
     expect(input).not.toHaveFocus();
     expect(screen.getByTestId("mock-file-viewer")).toBeInTheDocument();
+  });
+
+  it("shows a collapsible file explorer rooted at the current file directory", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+
+    expect(screen.getByTestId("mock-file-explorer")).toHaveAttribute("data-cwd", "/home/user");
+    const toggle = screen.getByTestId("file-viewer-overlay-explorer-toggle");
+    expect(toggle).toHaveTextContent("Explorer");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      toggle.compareDocumentPosition(screen.getByTestId("file-viewer-overlay-path-input")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId("mock-file-explorer")).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("mock-file-explorer")).toHaveAttribute("data-cwd", "/home/user");
+  });
+
+  it("keeps the explorer aligned when an external command opens a file in another directory", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt");
+    });
+    render(<FileViewerOverlay />);
+    expect(screen.getByTestId("mock-file-explorer")).toHaveAttribute("data-cwd", "/home/user");
+
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/tmp/report/b.txt");
+    });
+    expect(screen.getByTestId("mock-file-explorer")).toHaveAttribute("data-cwd", "/tmp/report");
+  });
+
+  it("preserves maximized mode when a sibling file is opened from the explorer", () => {
+    act(() => {
+      useFileViewerStore.getState().openFileViewer("/home/user/a.txt", { maximized: true });
+    });
+    render(<FileViewerOverlay />);
+
+    fireEvent.click(screen.getByTestId("mock-file-explorer"));
+    expect(useFileViewerStore.getState().path).toBe("/home/user/sibling.txt");
+    expect(useFileViewerStore.getState().maximized).toBe(true);
   });
 
   it("navigates to another file when a new path is typed and Enter is pressed (#326)", () => {
