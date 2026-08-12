@@ -59,6 +59,9 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// `AppState` state, so they join no ordering above (ADR-0106).
 /// `sleep_inhibitor` likewise owns a mutex that guards only itself and is taken
 /// from the `set_sleep_inhibit` command alone, never under another lock (ADR-0114).
+/// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
+/// isolated registries it may nest `remote_access`: acquire it before every
+/// `AppState` lock and never enter it while holding one (ADR-0144).
 ///
 /// ## Poison policy
 ///

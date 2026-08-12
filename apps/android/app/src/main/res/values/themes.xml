@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Laymux" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/laymux_background</item>
+        <item name="android:colorAccent">#89b4fa</item>
+        <item name="android:statusBarColor">@color/laymux_background</item>
+        <item name="android:navigationBarColor">@color/laymux_navigation_bar</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -44,7 +44,18 @@
       "runtimeThisRunOff": "Off",
       "openMobileMode": "Open Mobile Mode",
       "openingMobileMode": "Opening...",
-      "missingTokenForMobileMode": "Remote token is required for mobile mode."
+      "missingTokenForMobileMode": "Remote token is required for mobile mode.",
+      "androidPairingTitle": "Android App Pairing",
+      "androidPairingDescription": "Creating a new QR replaces the previous pairing key.",
+      "androidPairingNeedsCloud": "Connect Cloud Remote before creating a pairing QR.",
+      "androidPairingStored": "Pairing key stored in OS keyring",
+      "androidPairingCreate": "Create Pairing QR",
+      "androidPairingCreating": "Creating...",
+      "androidPairingRotate": "Replace with New QR",
+      "androidPairingRevoke": "Revoke Key",
+      "androidPairingRevoking": "Revoking...",
+      "androidPairingQrAlt": "Android pairing QR code",
+      "androidPairingScanHint": "Scan this QR in the Laymux Android app. Closing the modal removes the QR from the screen."
     }
   },
   "settings": {

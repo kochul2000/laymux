@@ -32,8 +32,10 @@ sha2 = "0.10"
 brotli = "8"
 rmcp = { version = "1.4", features = ["server", "transport-streamable-http-server"] }
 base64 = "0.22"
+getrandom = "0.3"
 if-addrs = "0.13"
 keyring = { version = "3", features = ["windows-native", "linux-native"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
@@ -42,6 +44,8 @@ zip = { version = "8.6.0", default-features = false }
 tar = "0.4.46"
 flate2 = "1.1.9"
 serde_path_to_error = "0.1.20"
+url = "2"
+zeroize = { version = "1", features = ["derive"] }
 
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5"

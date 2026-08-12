@@ -35,6 +35,9 @@ import {
   cloudConnectStart,
   cloudDisconnect,
   setRemoteRuntimeAccess,
+  getAndroidPairingStatus,
+  createAndroidPairingQr,
+  revokeAndroidPairing,
   onTerminalOutput,
   onTerminalOutputV2,
   onOpenFile,
@@ -535,6 +538,31 @@ describe("tauri-api", () => {
 
       await expect(cloudDisconnect()).resolves.toEqual(status);
       expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
+    });
+
+    it("invokes the Android pairing lifecycle commands without passing a seed", async () => {
+      const empty = { paired: false, endpoint: null, instanceId: null };
+      const created = {
+        status: {
+          paired: true,
+          endpoint: "https://relay.example.test/",
+          instanceId: "instance-1",
+        },
+        qrSvg: "<svg />",
+      };
+      mockInvoke
+        .mockResolvedValueOnce(empty)
+        .mockResolvedValueOnce(created)
+        .mockResolvedValueOnce(empty);
+
+      await expect(getAndroidPairingStatus()).resolves.toEqual(empty);
+      await expect(createAndroidPairingQr()).resolves.toEqual(created);
+      await expect(revokeAndroidPairing()).resolves.toEqual(empty);
+
+      expect(mockInvoke).toHaveBeenNthCalledWith(1, "get_android_pairing_status");
+      expect(mockInvoke).toHaveBeenNthCalledWith(2, "create_android_pairing_qr");
+      expect(mockInvoke).toHaveBeenNthCalledWith(3, "revoke_android_pairing");
+      expect(mockInvoke.mock.calls.every((call) => call.length === 1)).toBe(true);
     });
   });
 

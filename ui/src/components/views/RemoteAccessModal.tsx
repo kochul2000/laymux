@@ -3,10 +3,14 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  createAndroidPairingQr,
+  getAndroidPairingStatus,
   getRemoteAccessStatus,
   getRemoteControlStatus,
   reclaimRemoteControl,
+  revokeAndroidPairing,
   setRemoteRuntimeAccess,
+  type AndroidPairingStatus,
   type RemoteAccessStatus,
   type RemoteControlStatus,
 } from "@/lib/tauri-api";
@@ -54,6 +58,8 @@ export function RemoteAccessModal() {
   const [port, setPort] = useState<number | null>(null);
   const [accessStatus, setAccessStatus] = useState<RemoteAccessStatus | null>(null);
   const [status, setStatus] = useState<RemoteControlStatus | null>(null);
+  const [androidPairing, setAndroidPairing] = useState<AndroidPairingStatus | null>(null);
+  const [androidQrSvg, setAndroidQrSvg] = useState<string | null>(null);
   // Read once at mount. It is a render input (it decides which host resolves by
   // default), so it lives in lazily-initialised state rather than a ref —
   // refs must not be read during render.
@@ -61,7 +67,9 @@ export function RemoteAccessModal() {
   // Raw user pick; "" means "no explicit choice yet, follow the resolved host".
   const [pickedHost, setPickedHost] = useState("");
   const [reclaiming, setReclaiming] = useState(false);
-  const [actionPending, setActionPending] = useState<"runtime" | "mobile" | null>(null);
+  const [actionPending, setActionPending] = useState<
+    "runtime" | "mobile" | "android-create" | "android-revoke" | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -83,6 +91,12 @@ export function RemoteAccessModal() {
   const urlWithToken = tokenConfigured
     ? buildRemoteUrlWithToken(urlHost, port ?? "...", token)
     : t("remoteAccess.missing");
+  const canCreateAndroidPairing = Boolean(
+    remote.cloudEnabled && remote.cloudInstanceId && remote.cloudServerBaseUrl,
+  );
+  const androidQrSrc = androidQrSvg
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(androidQrSvg)}`
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -131,6 +145,18 @@ export function RemoteAccessModal() {
       cancelled = true;
     };
   }, [setRemoteAccessStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAndroidPairingStatus()
+      .then((next) => {
+        if (!cancelled) setAndroidPairing((current) => current ?? next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleReclaim = async () => {
     setReclaiming(true);
@@ -185,6 +211,33 @@ export function RemoteAccessModal() {
       }
       enterMobileMode(buildLocalMobileModeUrl(port, nextToken));
       closeRemoteAccessModal();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handleCreateAndroidPairing = async () => {
+    setActionPending("android-create");
+    setError(null);
+    try {
+      const created = await createAndroidPairingQr();
+      setAndroidPairing(created.status);
+      setAndroidQrSvg(created.qrSvg);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActionPending(null);
+    }
+  };
+
+  const handleRevokeAndroidPairing = async () => {
+    setActionPending("android-revoke");
+    setError(null);
+    try {
+      setAndroidPairing(await revokeAndroidPairing());
+      setAndroidQrSvg(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -297,6 +350,89 @@ export function RemoteAccessModal() {
             ? t("remoteAccess.openingMobileMode")
             : t("remoteAccess.openMobileMode")}
         </button>
+      </div>
+      <div
+        data-testid="android-pairing-section"
+        className="mt-3 rounded px-3 py-3"
+        style={{
+          background: "var(--bg-overlay)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+              {t("remoteAccess.androidPairingTitle")}
+            </div>
+            <div
+              className="mt-1 text-[11px] leading-relaxed"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {canCreateAndroidPairing
+                ? t("remoteAccess.androidPairingDescription")
+                : t("remoteAccess.androidPairingNeedsCloud")}
+            </div>
+            {androidPairing?.paired && (
+              <div className="mt-1 text-[11px]" style={{ color: "var(--green)" }}>
+                {t("remoteAccess.androidPairingStored")}
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              data-testid="android-pairing-generate"
+              onClick={() => void handleCreateAndroidPairing()}
+              disabled={!canCreateAndroidPairing || actionPending !== null}
+              className="hover-bg rounded px-3 py-1.5 text-xs"
+              style={{
+                color: "var(--accent)",
+                background: "transparent",
+                border: "1px solid var(--border)",
+                cursor: !canCreateAndroidPairing || actionPending !== null ? "default" : "pointer",
+                opacity: !canCreateAndroidPairing || actionPending !== null ? 0.55 : 1,
+              }}
+            >
+              {actionPending === "android-create"
+                ? t("remoteAccess.androidPairingCreating")
+                : androidPairing?.paired
+                  ? t("remoteAccess.androidPairingRotate")
+                  : t("remoteAccess.androidPairingCreate")}
+            </button>
+            {androidPairing?.paired && (
+              <button
+                type="button"
+                data-testid="android-pairing-revoke"
+                onClick={() => void handleRevokeAndroidPairing()}
+                disabled={actionPending !== null}
+                className="hover-bg rounded px-3 py-1.5 text-xs"
+                style={{
+                  color: "var(--red)",
+                  background: "transparent",
+                  border: "1px solid var(--border)",
+                  cursor: actionPending !== null ? "default" : "pointer",
+                  opacity: actionPending !== null ? 0.55 : 1,
+                }}
+              >
+                {actionPending === "android-revoke"
+                  ? t("remoteAccess.androidPairingRevoking")
+                  : t("remoteAccess.androidPairingRevoke")}
+              </button>
+            )}
+          </div>
+        </div>
+        {androidQrSrc && (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <img
+              src={androidQrSrc}
+              alt={t("remoteAccess.androidPairingQrAlt")}
+              className="h-64 w-64 max-w-full rounded bg-white p-2"
+            />
+            <div className="text-center text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              {t("remoteAccess.androidPairingScanHint")}
+            </div>
+          </div>
+        )}
       </div>
       {status?.active && (
         <div className="mt-3">

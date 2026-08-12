@@ -130,6 +130,18 @@ cargo tauri build
 
 Platform installers land in `src-tauri/target/release/bundle/`.
 
+The Android remote client is a standalone Gradle project (JDK 17 and Android SDK 36 required).
+
+```powershell
+cd apps/android
+.\gradlew.bat :app:assembleDebug
+```
+
+The Android app and desktop Remote Access modal provide the QR and Keystore/keyring pairing
+foundation. Strong biometric authentication is enabled by default with an explicit Keystore-only
+opt-out, but existing remote traffic is not yet E2E-encrypted. See
+[`apps/android/README.md`](./apps/android/README.md) for the exact scope.
+
 ### Testing
 
 ```bash
@@ -177,6 +189,7 @@ See [`docs/architecture/api-contracts.md`](./docs/architecture/api-contracts.md)
 
 ```
 laymux/
+├── apps/android/              # QR/Keystore/biometric Android hybrid remote client
 ├── src-tauri/                # Rust backend
 │   ├── src/
 │   │   ├── lib.rs            # Tauri app setup

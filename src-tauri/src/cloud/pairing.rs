@@ -514,9 +514,26 @@ pub(crate) fn persist_pairing_result(
     relay_base_url: &str,
     complete: PairCompleteResponse,
 ) -> Result<CloudStatus, AppError> {
+    crate::android_pairing::with_lifecycle(|| {
+        persist_pairing_result_locked(state, relay_base_url, complete)
+    })
+}
+
+fn persist_pairing_result_locked(
+    state: &AppState,
+    relay_base_url: &str,
+    complete: PairCompleteResponse,
+) -> Result<CloudStatus, AppError> {
+    let mut settings = load_settings();
+    let cloud_identity_changed = !settings.remote.cloud_enabled
+        || settings.remote.cloud_instance_id.as_deref() != Some(complete.instance_id.as_str())
+        || settings.remote.cloud_server_base_url.as_deref()
+            != Some(complete.server_base_url.as_str());
+    if cloud_identity_changed {
+        crate::android_pairing::revoke_inner()?;
+    }
     keyring_store::set_device_token(&complete.device_token)?;
 
-    let mut settings = load_settings();
     settings.remote.cloud_enabled = true;
     settings.remote.relay_base_url = normalized_relay_base_url(relay_base_url);
     settings.remote.cloud_instance_id = Some(complete.instance_id.clone());
@@ -859,5 +876,36 @@ mod tests {
                 last_error: None,
             }
         );
+    }
+
+    #[test]
+    #[serial]
+    fn new_cloud_identity_revokes_the_previous_android_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        keyring_store::reset_mock_store().unwrap();
+
+        let mut settings = Settings::default();
+        settings.remote.cloud_enabled = true;
+        settings.remote.cloud_instance_id = Some("instance-1".into());
+        settings.remote.cloud_server_base_url = Some("https://old.example.test".into());
+        save_settings(&settings).unwrap();
+        crate::android_pairing::seed_mock_pairing(&settings.remote).unwrap();
+        assert!(crate::android_pairing::get_status_inner().unwrap().paired);
+
+        persist_pairing_result(
+            &AppState::new(),
+            "https://new.example.test",
+            PairCompleteResponse {
+                instance_id: "instance-2".into(),
+                device_token: "device-token-2".into(),
+                tunnel_url: "wss://new.example.test/tunnel/instance-2".into(),
+                server_base_url: "https://new.example.test".into(),
+                device_token_expires_at: None,
+            },
+        )
+        .unwrap();
+
+        assert!(!crate::android_pairing::get_status_inner().unwrap().paired);
     }
 }

@@ -1,5 +1,11 @@
 use std::time::Duration;
 
+// ── OS credential-store names ────────────────────────────────────
+
+pub const KEYRING_SERVICE: &str = "laymux";
+pub const KEYRING_SERVICE_DEV: &str = "laymux-dev";
+pub const ANDROID_PAIRING_KEYRING_ACCOUNT: &str = "android-pairing-v1";
+
 // ── Tauri event names ──────────────────────────────────────────────
 // These must match the frontend `listen()` / `useAutomationBridge` strings.
 
