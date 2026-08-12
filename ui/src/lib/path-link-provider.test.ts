@@ -10,28 +10,36 @@ import { createPathLinkController } from "./path-link-provider";
 function makeTerminal() {
   const markerDispose = vi.fn();
   const decorationDispose = vi.fn();
-  const el = document.createElement("div");
-  let renderCb: ((el: HTMLElement) => void) | undefined;
+  const elements: HTMLElement[] = [];
+  const renderCallbacks: Array<(el: HTMLElement) => void> = [];
 
   const terminal = {
     buffer: { active: { baseY: 0, cursorY: 0 } },
     registerMarker: vi.fn(() => ({ dispose: markerDispose })),
-    registerDecoration: vi.fn(() => ({
-      element: el,
-      dispose: decorationDispose,
-      onRender: (cb: (el: HTMLElement) => void) => {
-        renderCb = cb;
-        return { dispose: vi.fn() };
-      },
-    })),
+    registerDecoration: vi.fn(() => {
+      const element = document.createElement("div");
+      document.body.appendChild(element);
+      elements.push(element);
+      return {
+        element,
+        dispose: decorationDispose,
+        onRender: (cb: (el: HTMLElement) => void) => {
+          renderCallbacks.push(cb);
+          return { dispose: vi.fn() };
+        },
+      };
+    }),
   } as unknown as Terminal;
 
   return {
     terminal,
-    el,
+    get el() {
+      return elements[0];
+    },
+    elements,
     markerDispose,
     decorationDispose,
-    fireRender: () => renderCb?.(el),
+    fireRender: () => renderCallbacks.forEach((callback, index) => callback(elements[index])),
   };
 }
 
@@ -43,13 +51,15 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelection({
-      bufferLine: 3,
-      startCol: 5,
-      endCol: 20,
-      absPath: "/proj/src/a.ts",
-      isDirectory: false,
-    });
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 20,
+        absPath: "/proj/src/a.ts",
+        isDirectory: false,
+      },
+    ]);
 
     // bufferLine 3(0-based 2) - cursorAbsY 0 = offset 2
     expect(t.terminal.registerMarker).toHaveBeenCalledWith(2);
@@ -59,7 +69,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     );
     expect(t.el.style.borderBottom).not.toBe("");
     expect(t.el.style.pointerEvents).toBe("none");
-    expect(ctrl.getCurrent()?.absPath).toBe("/proj/src/a.ts");
+    expect(ctrl.getCurrent()[0]?.absPath).toBe("/proj/src/a.ts");
   });
 
   it("activate 는 파일이면 onOpenPath, 디렉토리면 onChangeDir 로 라우팅한다", () => {
@@ -128,49 +138,53 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
 
   it("hitTest 는 검증이 없으면 false, 있으면 데코 사각형 안일 때만 true", () => {
     const t = makeTerminal();
-    // jsdom 은 0 사각형을 주므로 명시적으로 mock.
-    t.el.getBoundingClientRect = () => ({ left: 10, right: 50, top: 20, bottom: 36 }) as DOMRect;
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    expect(ctrl.hitTest(20, 25)).toBe(false); // 검증 없음
-    ctrl.setVerifiedSelection({
-      bufferLine: 1,
-      startCol: 1,
-      endCol: 4,
-      absPath: "/x",
-      isDirectory: false,
-    });
-    expect(ctrl.hitTest(20, 25)).toBe(true); // 사각형 안
-    expect(ctrl.hitTest(5, 25)).toBe(false); // 왼쪽 밖
-    expect(ctrl.hitTest(20, 40)).toBe(false); // 아래 밖
+    expect(ctrl.getHit(20, 25)).toBeNull(); // 검증 없음
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 1,
+        startCol: 1,
+        endCol: 4,
+        absPath: "/x",
+        isDirectory: false,
+      },
+    ]);
+    // jsdom 은 0 사각형을 주므로 데코레이션 생성 뒤 명시적으로 mock.
+    t.el.getBoundingClientRect = () => ({ left: 10, right: 50, top: 20, bottom: 36 }) as DOMRect;
+    expect(ctrl.getHit(20, 25)?.selection.absPath).toBe("/x"); // 사각형 안
+    expect(ctrl.getHit(5, 25)).toBeNull(); // 왼쪽 밖
+    expect(ctrl.getHit(20, 40)).toBeNull(); // 아래 밖
     ctrl.clear();
-    expect(ctrl.hitTest(20, 25)).toBe(false);
+    expect(ctrl.getHit(20, 25)).toBeNull();
   });
 
   // #687: 힌트 라벨 배치의 유일한 좌표 소스다.
   it("getRect 는 검증이 없으면 null, 있으면 데코 사각형을 돌려준다", () => {
     const t = makeTerminal();
     const rect = { left: 10, right: 50, top: 20, bottom: 36 } as DOMRect;
-    t.el.getBoundingClientRect = () => rect;
     const ctrl = createPathLinkController(t.terminal, {
       onOpenPath: vi.fn(),
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    expect(ctrl.getRect()).toBeNull();
-    ctrl.setVerifiedSelection({
-      bufferLine: 1,
-      startCol: 1,
-      endCol: 4,
-      absPath: "/x",
-      isDirectory: false,
-    });
-    expect(ctrl.getRect()).toBe(rect);
+    expect(ctrl.getHit(20, 25)).toBeNull();
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 1,
+        startCol: 1,
+        endCol: 4,
+        absPath: "/x",
+        isDirectory: false,
+      },
+    ]);
+    t.el.getBoundingClientRect = () => rect;
+    expect(ctrl.getHit(20, 25)?.rect).toBe(rect);
     ctrl.clear();
-    expect(ctrl.getRect()).toBeNull();
+    expect(ctrl.getHit(20, 25)).toBeNull();
   });
 
   it("데코레이션 요소는 클릭을 가로채지 않는다(pointer-events:none)", () => {
@@ -180,13 +194,15 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelection({
-      bufferLine: 1,
-      startCol: 1,
-      endCol: 4,
-      absPath: "/x",
-      isDirectory: false,
-    });
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 1,
+        startCol: 1,
+        endCol: 4,
+        absPath: "/x",
+        isDirectory: false,
+      },
+    ]);
     expect(t.el.style.pointerEvents).toBe("none");
   });
 
@@ -197,17 +213,19 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelection({
-      bufferLine: 2,
-      startCol: 1,
-      endCol: 5,
-      absPath: "/x",
-      isDirectory: false,
-    });
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 2,
+        startCol: 1,
+        endCol: 5,
+        absPath: "/x",
+        isDirectory: false,
+      },
+    ]);
     ctrl.clear();
     expect(t.decorationDispose).toHaveBeenCalled();
     expect(t.markerDispose).toHaveBeenCalled();
-    expect(ctrl.getCurrent()).toBeNull();
+    expect(ctrl.getCurrent()).toEqual([]);
   });
 
   it("setVerifiedSelection 갱신 시 이전 데코레이션을 dispose 한다", () => {
@@ -217,21 +235,64 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelection({
-      bufferLine: 2,
-      startCol: 1,
-      endCol: 5,
-      absPath: "/a",
-      isDirectory: false,
-    });
-    ctrl.setVerifiedSelection({
-      bufferLine: 7,
-      startCol: 3,
-      endCol: 9,
-      absPath: "/b",
-      isDirectory: false,
-    });
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 2,
+        startCol: 1,
+        endCol: 5,
+        absPath: "/a",
+        isDirectory: false,
+      },
+    ]);
+    ctrl.setVerifiedSelections([
+      {
+        bufferLine: 7,
+        startCol: 3,
+        endCol: 9,
+        absPath: "/b",
+        isDirectory: false,
+      },
+    ]);
     expect(t.decorationDispose).toHaveBeenCalled();
-    expect(ctrl.getCurrent()?.absPath).toBe("/b");
+    expect(ctrl.getCurrent()[0]?.absPath).toBe("/b");
+  });
+
+  it("복수 경로를 각각 데코레이션하고 좌표 아래의 경로를 반환한다", () => {
+    const t = makeTerminal();
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections([
+      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", isDirectory: false },
+      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", isDirectory: true },
+    ]);
+    t.elements[0].getBoundingClientRect = () =>
+      ({ left: 10, right: 40, top: 10, bottom: 20 }) as DOMRect;
+    t.elements[1].getBoundingClientRect = () =>
+      ({ left: 50, right: 80, top: 30, bottom: 40 }) as DOMRect;
+
+    expect(t.terminal.registerDecoration).toHaveBeenCalledTimes(2);
+    expect(ctrl.getHit(60, 35)?.selection.absPath).toBe("/b");
+    expect(ctrl.getHit(20, 15)?.selection.absPath).toBe("/a");
+  });
+
+  it("앞 후보 데코레이션 실패가 뒤 후보 생성을 막지 않는다", () => {
+    const t = makeTerminal();
+    vi.mocked(t.terminal.registerMarker).mockReturnValueOnce(undefined);
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+
+    ctrl.setVerifiedSelections([
+      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", isDirectory: false },
+      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", isDirectory: false },
+    ]);
+
+    expect(t.terminal.registerMarker).toHaveBeenCalledTimes(2);
+    expect(t.terminal.registerDecoration).toHaveBeenCalledTimes(1);
   });
 });

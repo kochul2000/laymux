@@ -1175,6 +1175,11 @@ export async function statPath(path: string, wslDistro?: string): Promise<PathIn
   return invoke("stat_path", { path, wslDistro: wslDistro ?? null });
 }
 
+/** Validate a bounded path-link batch in input order with one WSL resolution pass. */
+export async function statPaths(paths: string[], wslDistro?: string): Promise<PathInfo[]> {
+  return invoke("stat_paths", { paths, wslDistro: wslDistro ?? null });
+}
+
 /**
  * Hand a verified path-link target to the host desktop (issue #687, ADR-0100).
  * `open` uses the host file association (file) or file manager (directory);

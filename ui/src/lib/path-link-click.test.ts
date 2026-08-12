@@ -35,8 +35,8 @@ function setup(
   const confirm = vi.fn(() => options.confirmResult ?? true);
   const onOsHandoffSettled = vi.fn();
   const handlers = createPathLinkClickHandlers({
-    getSelection: () => (options.target === undefined ? FILE : options.target),
-    hitTest: () => options.inside ?? true,
+    getSelectionAt: () =>
+      options.inside === false ? null : options.target === undefined ? FILE : options.target,
     getSettings: () => ({
       osOpenEnabled: options.osOpenEnabled ?? true,
       confirmAlways: options.confirmAlways ?? true,

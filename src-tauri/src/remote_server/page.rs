@@ -557,7 +557,11 @@ mod tests {
         assert!(html.contains("const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;"));
         assert!(html.contains("pathLinkAbortController.abort();"));
         assert!(html.contains("const currentPosition = term.getSelectionPosition?.();"));
-        assert!(html.contains("mapRemotePathLinkRange(currentPosition, rawFirstLine, data.token)"));
+        assert!(html.contains("data.valid !== true || !Array.isArray(data.matches)"));
+        assert!(html.contains("data.matches.length === 0 || data.matches.length > 16"));
+        assert!(html.contains("slice(match.startIndex, match.endIndex) === match.token"));
+        assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
+        assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
         assert!(html.contains("openFileViewerTab(press.path)"));
         assert!(html.contains("clearPathLinkSelection()"));

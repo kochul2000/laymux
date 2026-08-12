@@ -1,10 +1,10 @@
-import { readFileForViewer, statPath } from "./tauri-api";
+import { readFileForViewer, statPaths } from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
 import {
   decidePathLinkAction,
-  isWithinPathLengthLimit,
+  extractPathCandidatesFromSelection,
   joinCwdPath,
-  trimSelectionToPath,
+  pathSelectionLimits,
 } from "./path-link-detect";
 import {
   documentPreviewKind,
@@ -39,23 +39,47 @@ export async function handleRemoteFileViewerRequest(
     const selection = typeof params.selection === "string" ? params.selection : "";
     const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
     const settings = useSettingsStore.getState().terminal;
-    if (
-      !terminal ||
-      !settings.pathLinkEnabled ||
-      !isWithinPathLengthLimit(selection, settings.pathLinkMaxLength)
-    ) {
+    if (!terminal || !settings.pathLinkEnabled) {
       return ok({ valid: false });
     }
 
-    const token = trimSelectionToPath(selection);
-    if (!token) return ok({ valid: false });
-    const path = joinCwdPath(terminal.cwd, token);
-    if (!path) return ok({ valid: false });
+    const candidates = extractPathCandidatesFromSelection(
+      selection,
+      pathSelectionLimits(settings.pathLinkMaxLength),
+    );
+    if (candidates.length === 0) return ok({ valid: false });
+
+    const uniquePaths: string[] = [];
+    const pathIndexes = new Map<string, number>();
+    const pending = candidates.flatMap((candidate) => {
+      const path = joinCwdPath(terminal.cwd, candidate.text);
+      if (!path) return [];
+      let statIndex = pathIndexes.get(path);
+      if (statIndex === undefined) {
+        statIndex = uniquePaths.length;
+        pathIndexes.set(path, statIndex);
+        uniquePaths.push(path);
+      }
+      return [{ candidate, path, statIndex }];
+    });
+    if (pending.length === 0) return ok({ valid: false });
 
     try {
-      const info = await statPath(path);
-      if (decidePathLinkAction(info) !== "openFile") return ok({ valid: false });
-      return ok({ valid: true, token, path });
+      const infos = await statPaths(uniquePaths);
+      const matches = pending.flatMap(({ candidate, path, statIndex }) => {
+        const info = infos[statIndex];
+        if (!info || decidePathLinkAction(info) !== "openFile") return [];
+        return [
+          {
+            token: candidate.text,
+            path,
+            lineIndex: candidate.lineIndex,
+            startIndex: candidate.startIndex,
+            endIndex: candidate.endIndex,
+          },
+        ];
+      });
+      return matches.length > 0 ? ok({ valid: true, matches }) : ok({ valid: false });
     } catch (error) {
       return err(
         `Path link validation failed: ${error instanceof Error ? error.message : String(error)}`,
