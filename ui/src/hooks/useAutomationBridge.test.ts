@@ -566,6 +566,90 @@ describe("handleAutomationRequest", () => {
     });
   });
 
+  it("sets workspace visibility idempotently through the shared fallback owner", () => {
+    seedColdWorkspaces();
+
+    const hide = handleAutomationRequest({
+      requestId: "visibility-workspace-hide",
+      category: "action",
+      target: "ui",
+      method: "setWorkspaceHidden",
+      params: { id: "ws-cold", hidden: true },
+    });
+    const repeat = handleAutomationRequest({
+      requestId: "visibility-workspace-repeat",
+      category: "action",
+      target: "ui",
+      method: "setWorkspaceHidden",
+      params: { id: "ws-cold", hidden: true },
+    });
+
+    expect(hide).toEqual({
+      success: true,
+      data: { hidden: true, fallbackWorkspaceId: null },
+    });
+    expect(repeat).toEqual(hide);
+    expect(useUiStore.getState().hiddenWorkspaceIds).toEqual(new Set(["ws-cold"]));
+
+    const blocked = handleAutomationRequest({
+      requestId: "visibility-workspace-last",
+      category: "action",
+      target: "ui",
+      method: "setWorkspaceHidden",
+      params: { id: "ws-live", hidden: true },
+    });
+    expect(blocked).toEqual({
+      success: false,
+      error: "workspace not found or last visible workspace",
+    });
+  });
+
+  it("moves off the active workspace before hiding it", () => {
+    seedColdWorkspaces();
+
+    expect(
+      handleAutomationRequest({
+        requestId: "visibility-workspace-active",
+        category: "action",
+        target: "ui",
+        method: "setWorkspaceHidden",
+        params: { id: "ws-live", hidden: true },
+      }),
+    ).toEqual({
+      success: true,
+      data: { hidden: true, fallbackWorkspaceId: "ws-cold" },
+    });
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-cold");
+    expect(useUiStore.getState().hiddenWorkspaceIds).toEqual(new Set(["ws-live"]));
+  });
+
+  it("sets pane visibility idempotently and rejects invalid targets", () => {
+    seedColdWorkspaces();
+
+    for (const requestId of ["visibility-pane-hide", "visibility-pane-repeat"]) {
+      expect(
+        handleAutomationRequest({
+          requestId,
+          category: "action",
+          target: "ui",
+          method: "setPaneHidden",
+          params: { id: "cold-1", hidden: true },
+        }),
+      ).toEqual({ success: true, data: { hidden: true } });
+    }
+    expect(useUiStore.getState().hiddenPaneIds).toEqual(new Set(["cold-1"]));
+
+    expect(
+      handleAutomationRequest({
+        requestId: "visibility-pane-invalid",
+        category: "action",
+        target: "ui",
+        method: "setPaneHidden",
+        params: { id: "missing", hidden: false },
+      }),
+    ).toEqual({ success: false, error: "pane 'missing' not found" });
+  });
+
   it("returns layout list", () => {
     const result = handleAutomationRequest({
       requestId: "r10",

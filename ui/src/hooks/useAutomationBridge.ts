@@ -1159,6 +1159,25 @@ const handlers: HandlerMap = {
       useUiStore.getState().setHiddenShelfOpen(p.open);
       return ok({ open: useUiStore.getState().hiddenShelfOpen });
     },
+    setWorkspaceHidden: (p) => {
+      const id = typeof p.id === "string" ? p.id : null;
+      if (!id) return err("id required");
+      if (typeof p.hidden !== "boolean") return err("'hidden' must be a boolean");
+      const result = setWorkspaceHiddenWithFallback(id, p.hidden);
+      if (result.blocked) return err("workspace not found or last visible workspace");
+      return ok({ hidden: result.hidden, fallbackWorkspaceId: result.fallbackWorkspaceId });
+    },
+    setPaneHidden: (p) => {
+      const id = typeof p.id === "string" ? p.id : null;
+      if (!id) return err("id required");
+      if (typeof p.hidden !== "boolean") return err("'hidden' must be a boolean");
+      const paneExists = useWorkspaceStore
+        .getState()
+        .workspaces.some((workspace) => workspace.panes.some((pane) => pane.id === id));
+      if (!paneExists) return err(`pane '${id}' not found`);
+      useUiStore.getState().setPaneHidden(id, p.hidden);
+      return ok({ hidden: p.hidden });
+    },
     toggleWorkspaceHidden: (p) => {
       const id = typeof p.id === "string" ? p.id : null;
       if (!id) return err("id required");

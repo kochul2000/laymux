@@ -40,7 +40,8 @@ use super::lease::{
 };
 use super::navigation_routes::{
     remote_navigation, remote_notification_mark_read, remote_notifications_clear,
-    remote_notifications_mark_all_read, remote_terminal_focus, remote_workspace_switch_active,
+    remote_notifications_mark_all_read, remote_pane_visibility, remote_terminal_focus,
+    remote_workspace_switch_active, remote_workspace_visibility,
 };
 use super::navigation_step_routes::{
     remote_navigation_notification_step, remote_navigation_spatial_step,
@@ -167,6 +168,14 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/workspaces/active",
             post(remote_workspace_switch_active),
+        )
+        .route(
+            "/remote/v1/workspaces/{id}/visibility",
+            post(remote_workspace_visibility),
+        )
+        .route(
+            "/remote/v1/panes/{id}/visibility",
+            post(remote_pane_visibility),
         )
         .route("/remote/v1/terminals", get(remote_terminals_list))
         .route(

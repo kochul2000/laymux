@@ -390,6 +390,14 @@ mod tests {
         assert!(html.contains("/remote/v1/session/claim"));
         assert!(html.contains("/remote/v1/navigation"));
         assert!(html.contains("/remote/v1/workspaces/active"));
+        assert!(
+            html.contains("/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/visibility")
+        );
+        assert!(html.contains("/remote/v1/panes/${encodeURIComponent(paneId)}/visibility"));
+        assert!(html.contains("id=\"hiddenWorkspaceToggle\""));
+        assert!(html.contains("id=\"hiddenWorkspaceShelf\""));
+        assert!(html.contains("function setWorkspaceVisibility(workspaceId, hidden)"));
+        assert!(html.contains("function setPaneVisibility(paneId, hidden)"));
         assert!(html.contains("/remote/v1/terminals/${encodeURIComponent(terminalId)}/focus"));
         assert!(html.contains("/remote/v1/terminals"));
         assert!(

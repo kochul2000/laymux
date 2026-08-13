@@ -30,6 +30,13 @@ pub(super) struct TerminalFocusRequest {
     lease_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct VisibilityRequest {
+    hidden: bool,
+    lease_id: Option<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct NotificationActionRequest {
@@ -163,6 +170,82 @@ pub(super) async fn remote_workspace_switch_active(
                 &server,
                 "remote.workspaces.switchActive",
                 serde_json::json!({ "id": workspace_id }),
+            );
+            Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
+pub(super) async fn remote_workspace_visibility(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<VisibilityRequest>,
+) -> Response {
+    if id.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "workspace id is required");
+    }
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "ui",
+        "setWorkspaceHidden",
+        serde_json::json!({ "id": id.clone(), "hidden": body.hidden }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.ui.setWorkspaceHidden",
+                serde_json::json!({ "id": id, "hidden": body.hidden }),
+            );
+            Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
+pub(super) async fn remote_pane_visibility(
+    State(server): State<ServerState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<VisibilityRequest>,
+) -> Response {
+    if id.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "pane id is required");
+    }
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "ui",
+        "setPaneHidden",
+        serde_json::json!({ "id": id.clone(), "hidden": body.hidden }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.ui.setPaneHidden",
+                serde_json::json!({ "id": id, "hidden": body.hidden }),
             );
             Json(data).into_response()
         }
@@ -492,5 +575,29 @@ mod tests {
         }));
 
         assert_eq!(ids, vec!["n1", "n2"]);
+    }
+
+    #[test]
+    fn visibility_request_requires_an_explicit_boolean_target() {
+        let request: VisibilityRequest = serde_json::from_value(serde_json::json!({
+            "hidden": false,
+            "leaseId": "lease-1"
+        }))
+        .unwrap();
+        assert!(!request.hidden);
+        assert_eq!(request.lease_id.as_deref(), Some("lease-1"));
+
+        assert!(
+            serde_json::from_value::<VisibilityRequest>(serde_json::json!({
+                "leaseId": "lease-1"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<VisibilityRequest>(serde_json::json!({
+                "hidden": "false"
+            }))
+            .is_err()
+        );
     }
 }

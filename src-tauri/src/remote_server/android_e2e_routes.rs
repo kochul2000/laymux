@@ -439,7 +439,12 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/notifications/mark-all-read")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
         (&Method::GET, _) => terminal_read_path(path),
-        (&Method::POST, _) => terminal_control_path(path) || notification_read_path(path),
+        (&Method::POST, _) => {
+            terminal_control_path(path)
+                || notification_read_path(path)
+                || visibility_path(path, "/remote/v1/workspaces/")
+                || visibility_path(path, "/remote/v1/panes/")
+        }
         _ => false,
     }
 }
@@ -472,6 +477,16 @@ fn notification_read_path(path: &str) -> bool {
         return false;
     };
     valid_remote_identifier(notification_id) && action == "read"
+}
+
+fn visibility_path(path: &str, prefix: &str) -> bool {
+    let Some(rest) = path.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some((id, action)) = rest.rsplit_once('/') else {
+        return false;
+    };
+    valid_remote_identifier(id) && action == "visibility"
 }
 
 fn resource_path_allowed(path: &str) -> bool {
@@ -579,6 +594,14 @@ mod tests {
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/file-viewer/path-link"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/workspaces/ws-1/visibility"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/panes/pane-1/visibility"
         ));
         assert!(http_path_allowed(
             &Method::DELETE,
