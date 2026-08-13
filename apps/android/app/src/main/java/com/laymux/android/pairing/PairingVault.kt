@@ -57,8 +57,8 @@ class PairingKeyInvalidatedException(cause: Throwable) :
     IllegalStateException("생체 정보가 변경되어 페어링 키가 무효화됐습니다", cause)
 
 /**
- * Stores one pairing. Biometric protection is the fail-closed default; the
- * explicit opt-out uses a separate non-authenticated Keystore wrapping key.
+ * Stores one pairing envelope per desktop instance. Biometric protection is
+ * the fail-closed default; all envelopes using a policy share its wrapping key.
  */
 class PairingVault(
     context: Context,
@@ -70,6 +70,15 @@ class PairingVault(
         preferenceName,
         Context.MODE_PRIVATE,
     )
+
+    init {
+        // Storage v4 deliberately has no migration from the former singleton record.
+        if (preferences.contains(LEGACY_PAIRING_KEY) &&
+            !preferences.edit().remove(LEGACY_PAIRING_KEY).commit()
+        ) {
+            throw IllegalStateException("이전 페어링 정보를 폐기하지 못했습니다")
+        }
+    }
 
     @Synchronized
     fun protectionPolicy(): PairingProtectionPolicy = try {
@@ -129,7 +138,7 @@ class PairingVault(
                 .put("iv", encodeBase64(cipher.iv))
                 .put("ciphertext", encodeBase64(encrypted))
                 .toString()
-            if (!preferences.edit().putString(PAIRING_KEY, envelope).commit()) {
+            if (!preferences.edit().putString(pairingKey(payload.instanceId), envelope).commit()) {
                 throw IllegalStateException("페어링 정보를 저장하지 못했습니다")
             }
         } finally {
@@ -139,10 +148,17 @@ class PairingVault(
 
     /** Reads non-secret display metadata without initializing or using the wrapping key. */
     @Synchronized
-    fun loadMetadata(): PairingMetadata? = activeEnvelope()?.metadata
+    fun loadMetadata(): List<PairingMetadata> = pairingInstanceIds()
+        .mapNotNull { instanceId -> activeEnvelope(instanceId)?.metadata }
+
+    /** Cloud selection can only resolve an already confirmed record for that instance. */
+    @Synchronized
+    fun loadConfirmedMetadata(instanceId: String): PairingMetadata? =
+        activeEnvelope(instanceId)?.metadata?.takeIf { it.confirmedAtEpochSeconds != null }
 
     @Synchronized
     fun markConfirmed(
+        instanceId: String,
         pairingId: String,
         clientNonce: String,
         confirmedAtEpochSeconds: Long,
@@ -150,28 +166,30 @@ class PairingVault(
         if (confirmedAtEpochSeconds <= 0) {
             throw IllegalArgumentException("페어링 확인 시각이 올바르지 않습니다")
         }
-        val encodedEnvelope = preferences.getString(PAIRING_KEY, null)
+        val key = pairingKey(instanceId)
+        val encodedEnvelope = preferences.getString(key, null)
             ?: throw IllegalStateException("저장된 페어링이 없습니다")
         val json = try {
             JSONObject(encodedEnvelope)
         } catch (_: Exception) {
             throw corrupted()
         }
-        val envelope = storedEnvelope() ?: throw IllegalStateException("저장된 페어링이 없습니다")
+        val envelope = storedEnvelope(instanceId)
+            ?: throw IllegalStateException("저장된 페어링이 없습니다")
         if (envelope.metadata.pairingId != pairingId ||
             envelope.metadata.clientNonce != clientNonce
         ) {
             throw IllegalStateException("페어링 확인 대상이 변경됐습니다")
         }
         json.put("confirmedAt", confirmedAtEpochSeconds)
-        if (!preferences.edit().putString(PAIRING_KEY, json.toString()).commit()) {
+        if (!preferences.edit().putString(key, json.toString()).commit()) {
             throw IllegalStateException("페어링 확인 상태를 저장하지 못했습니다")
         }
     }
 
     @Synchronized
-    fun prepareDecryption(): PendingPairingDecryption? {
-        val envelope = activeEnvelope() ?: return null
+    fun prepareDecryption(instanceId: String): PendingPairingDecryption? {
+        val envelope = activeEnvelope(instanceId) ?: return null
         if (envelope.policy != protectionPolicy()) {
             throw IllegalStateException("저장된 페어링과 키 보호 설정이 일치하지 않습니다")
         }
@@ -216,7 +234,9 @@ class PairingVault(
 
     @Synchronized
     fun clear() {
-        if (!preferences.edit().remove(PAIRING_KEY).commit()) {
+        val editor = preferences.edit().remove(LEGACY_PAIRING_KEY)
+        pairingKeys().forEach(editor::remove)
+        if (!editor.commit()) {
             throw IllegalStateException("페어링 정보를 삭제하지 못했습니다")
         }
         val keyStore = androidKeyStore()
@@ -226,17 +246,25 @@ class PairingVault(
         }
     }
 
+    /** Deletes one desktop record without deleting the policy's shared wrapping key. */
+    @Synchronized
+    fun clear(instanceId: String) {
+        if (!preferences.edit().remove(pairingKey(instanceId)).commit()) {
+            throw IllegalStateException("페어링 정보를 삭제하지 못했습니다")
+        }
+    }
+
     /** A stale network result must not delete a newer scan of the same QR. */
     @Synchronized
-    fun clearIfMatches(pairingId: String, clientNonce: String): Boolean {
-        val metadata = storedEnvelope()?.metadata ?: return false
+    fun clearIfMatches(instanceId: String, pairingId: String, clientNonce: String): Boolean {
+        val metadata = storedEnvelope(instanceId)?.metadata ?: return false
         if (metadata.pairingId != pairingId || metadata.clientNonce != clientNonce) return false
-        clear()
+        clear(instanceId)
         return true
     }
 
-    private fun storedEnvelope(): StoredEnvelope? {
-        val encodedEnvelope = preferences.getString(PAIRING_KEY, null) ?: return null
+    private fun storedEnvelope(instanceId: String): StoredEnvelope? {
+        val encodedEnvelope = preferences.getString(pairingKey(instanceId), null) ?: return null
         val json = try {
             JSONObject(encodedEnvelope)
         } catch (_: Exception) {
@@ -262,21 +290,39 @@ class PairingVault(
             },
             label = if (json.isNull("label")) null else json.optString("label"),
         )
+        if (metadata.instanceId != instanceId) throw corrupted()
         val iv = decodeBase64(json.optString("iv"))
         val ciphertext = decodeBase64(json.optString("ciphertext"))
         if (iv.size != GCM_IV_BYTES || ciphertext.size <= GCM_TAG_BYTES) throw corrupted()
         return StoredEnvelope(policy, metadata, iv, ciphertext)
     }
 
-    private fun activeEnvelope(): StoredEnvelope? {
-        val envelope = storedEnvelope() ?: return null
+    private fun activeEnvelope(instanceId: String): StoredEnvelope? {
+        val envelope = storedEnvelope(instanceId) ?: return null
         if (envelope.metadata.confirmedAtEpochSeconds == null &&
             nowEpochSeconds() >= envelope.metadata.expiresAtEpochSeconds
         ) {
-            clear()
+            clear(instanceId)
             return null
         }
         return envelope
+    }
+
+    private fun pairingKeys(): List<String> = preferences.all.keys
+        .filter { it.startsWith(PAIRING_KEY_PREFIX) }
+
+    private fun pairingInstanceIds(): List<String> = pairingKeys()
+        .asSequence()
+        .map { it.removePrefix(PAIRING_KEY_PREFIX) }
+        .filter { INSTANCE_PATTERN.matches(it) }
+        .sorted()
+        .toList()
+
+    private fun pairingKey(instanceId: String): String {
+        if (!INSTANCE_PATTERN.matches(instanceId)) {
+            throw IllegalArgumentException("PC 식별자가 올바르지 않습니다")
+        }
+        return "$PAIRING_KEY_PREFIX$instanceId"
     }
 
     private fun validateMetadata(
@@ -394,12 +440,13 @@ class PairingVault(
 
     companion object {
         private const val PREFERENCE_NAME = "laymux-pairing-v1"
-        private const val PAIRING_KEY = "pairing"
+        private const val LEGACY_PAIRING_KEY = "pairing"
+        private const val PAIRING_KEY_PREFIX = "pairing:"
         private const val PROTECTION_POLICY_KEY = "protection-policy"
         private const val KEY_ALIAS = "com.laymux.android.pairing-wrap.v2"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val CIPHER_TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val STORAGE_VERSION = 3
+        private const val STORAGE_VERSION = 4
         private const val GCM_IV_BYTES = 12
         private const val GCM_TAG_BITS = 128
         private const val GCM_TAG_BYTES = GCM_TAG_BITS / Byte.SIZE_BITS

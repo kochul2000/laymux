@@ -9,6 +9,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0145](../../docs/adr/0145-android-pairing-authenticated-one-time-ack.md)와
 [ADR-0146](../../docs/adr/0146-android-e2e-session-and-encrypted-remote-rpc.md),
 [ADR-0149](../../docs/adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
+[ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -16,12 +17,13 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - 기존 Cloud landing/dashboard와 HttpOnly account session
 - Android Credential Manager의 Sign in with Google ID token + Cloud session-bound single-use nonce 검증
 - dashboard에서 선택한 PC instance와 저장/스캔한 E2E pairing instance 일치 검증
+- instance별 다중 pairing 저장·자동 선택과 pairing manager의 목록·개별 삭제
 - 5분 뒤 만료되는 `laymux://pair/v2` QR 검증
 - 32바이트 pairing seed의 AES-256-GCM wrapping 저장
 - 기본 auth-per-use 강한 생체 인증과 경고가 있는 명시적 Keystore-only opt-out
 - exact Cloud HTTPS origin만 허용하는 account WebView와 APK bootstrap/AEAD PC 자산만 허용하는 secure WebView의 분리
 - relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
-- pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
+- PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key
 - relay에는 ciphertext만 보이는 PC Remote resource·HTTP·V1 output bridge
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
