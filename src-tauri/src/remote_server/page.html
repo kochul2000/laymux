@@ -6504,15 +6504,7 @@
         async function setWorkspaceVisibility(workspaceId, hidden) {
           if (!leaseId || !workspaceId) return;
           const selectedLeaseId = leaseId;
-          const workspace = navigationState
-            ? (navigationState.workspaces || []).find(
-                (item) => item.id === workspaceId,
-              )
-            : null;
-          const movesActiveWorkspace = Boolean(
-            hidden && workspace && workspace.isActive,
-          );
-          await remoteFetch(
+          const result = await remoteFetch(
             `/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/visibility`,
             {
               method: "POST",
@@ -6523,6 +6515,12 @@
             },
           );
           if (leaseId !== selectedLeaseId) return;
+          // The frontend bridge owns the active-workspace fallback decision.
+          // Its response is authoritative even when this page rendered a stale
+          // navigation snapshot while another surface changed the active item.
+          const movesActiveWorkspace = Boolean(
+            hidden && result.data && result.data.fallbackWorkspaceId,
+          );
           await loadNavigation(activeTerminalId, {
             openOutput: movesActiveWorkspace,
           });

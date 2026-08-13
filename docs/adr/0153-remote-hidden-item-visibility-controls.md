@@ -1,6 +1,6 @@
 # 0153. Remote 숨김 항목 편집은 PC 상태 소유자를 재사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-13
 - Source: 사용자 요구(2026-08-13), [ADR-0033](0033-hidden-items-shelf-set-contract.md), [ADR-0035](0035-workspace-only-shelf-per-pane-hide-toggle.md), [ADR-0151](0151-remote-workspace-selector-information-parity.md), [api-contracts.md §13.3](../architecture/api-contracts.md#133-navigation-metadata)
 

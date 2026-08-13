@@ -35,6 +35,8 @@ async function routeRemoteWithWorkspaces(
     }>,
   ) => void;
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
+  outputAttachments: string[];
+  setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
 }> {
   let workspaceDisplay = {
     minimap: false,
@@ -49,6 +51,8 @@ async function routeRemoteWithWorkspaces(
   }> = [];
   const hiddenWorkspaceIds = new Set<string>();
   const hiddenPaneIds = new Set<string>();
+  const outputAttachments: string[] = [];
+  let visibilityFallbackWorkspaceId: string | null = null;
   const paneA1 = {
     id: "p-a1",
     paneIndex: 1,
@@ -180,7 +184,12 @@ async function routeRemoteWithWorkspaces(
       const id = decodeURIComponent((workspaceVisibilityMatch || paneVisibilityMatch)![1]);
       if (body.hidden) target.add(id);
       else target.delete(id);
-      await route.fulfill({ json: { hidden: body.hidden, fallbackWorkspaceId: null } });
+      await route.fulfill({
+        json: {
+          success: true,
+          data: { hidden: body.hidden, fallbackWorkspaceId: visibilityFallbackWorkspaceId },
+        },
+      });
       return;
     }
     if (url.pathname === "/remote/v1/navigation/spatial") {
@@ -190,9 +199,16 @@ async function routeRemoteWithWorkspaces(
     }
     await route.fulfill({ json: {} });
   });
-  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, () => {});
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, (socket) => {
+    const match = socket.url().match(/terminals\/([^/]+)\/output/);
+    if (match) outputAttachments.push(decodeURIComponent(match[1]));
+  });
   return {
+    outputAttachments,
     visibilityRequests,
+    setVisibilityFallbackWorkspaceId(workspaceId) {
+      visibilityFallbackWorkspaceId = workspaceId;
+    },
     setWorkspaceDisplay(display) {
       workspaceDisplay = { ...workspaceDisplay, ...display };
     },
@@ -642,6 +658,26 @@ test.describe("remote mobile layout", () => {
     await paneToggle.click();
     await expect(page.locator('[data-pane-row="p-a2"]')).not.toHaveClass(/hidden-item/);
     await expect(paneToggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("reattaches output when the host hides an active workspace beyond a stale snapshot", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect.poll(() => controls.outputAttachments).toEqual(["term-a1"]);
+    await page.locator("#navToggle").click();
+
+    // The rendered snapshot still says Beta is inactive, but the host changed
+    // active workspace before processing the hide. The bridge response is the
+    // authoritative proof that fallback moved the active output.
+    controls.setVisibilityFallbackWorkspaceId("ws-a");
+    await page.locator('[data-workspace-visibility="ws-b"]').click();
+
+    await expect.poll(() => controls.outputAttachments).toEqual(["term-a1", "term-a1"]);
   });
 
   test("follows changing PC selector display settings while the drawer stays open", async ({
