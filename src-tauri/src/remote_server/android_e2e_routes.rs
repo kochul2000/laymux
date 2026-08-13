@@ -25,8 +25,18 @@ use super::{internal_error, json_error};
 const INTERNAL_RESPONSE_LIMIT: usize = 1024 * 1024;
 const RESOURCE_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
+// `rename_all` renames the variant tags only; variant fields need
+// `rename_all_fields`. Without it the camelCase wire contract
+// (`terminalId`, `sourceSeq`, …) fails `deny_unknown_fields` and every
+// terminal-output RPC answers 500, which reads on the phone as a terminal
+// that never renders and reconnects forever.
 #[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum PlainRequest {
     Resource {
         path: String,
@@ -578,6 +588,66 @@ fn unix_time_now() -> Result<u64, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exact plaintext bodies `MainActivity` sends over the E2E RPC. These
+    /// are the wire contract from api-contracts.md §13.0, so they are written
+    /// out literally instead of being built from the Rust types.
+    #[test]
+    fn plain_requests_use_the_camel_case_wire_contract() {
+        let resource: PlainRequest =
+            serde_json::from_str(r#"{"kind":"resource","path":"/remote/"}"#).expect("resource");
+        assert!(matches!(resource, PlainRequest::Resource { .. }));
+
+        let http: PlainRequest = serde_json::from_str(
+            r#"{"kind":"http","method":"POST","path":"/remote/v1/session/claim","body":null}"#,
+        )
+        .expect("http");
+        assert!(matches!(http, PlainRequest::Http { .. }));
+
+        let open: PlainRequest = serde_json::from_str(
+            r#"{"kind":"terminalOutputOpen","terminalId":"terminal-pane-1","leaseId":"lease-1"}"#,
+        )
+        .expect("terminalOutputOpen");
+        match open {
+            PlainRequest::TerminalOutputOpen {
+                terminal_id,
+                lease_id,
+            } => {
+                assert_eq!(terminal_id, "terminal-pane-1");
+                assert_eq!(lease_id, "lease-1");
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+
+        let poll: PlainRequest = serde_json::from_str(
+            r#"{"kind":"terminalOutputPoll","terminalId":"terminal-pane-1","leaseId":"lease-1",
+                "generation":7,"sourceSeq":42,"wireSeqOffset":9}"#,
+        )
+        .expect("terminalOutputPoll");
+        match poll {
+            PlainRequest::TerminalOutputPoll {
+                generation,
+                source_seq,
+                wire_seq_offset,
+                ..
+            } => {
+                assert_eq!(generation, 7);
+                assert_eq!(source_seq, 42);
+                assert_eq!(wire_seq_offset, 9);
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+    }
+
+    /// Rust field spellings are not part of the contract: accepting them would
+    /// hide the camelCase regression this test pins down.
+    #[test]
+    fn plain_requests_reject_snake_case_field_names() {
+        assert!(serde_json::from_str::<PlainRequest>(
+            r#"{"kind":"terminalOutputOpen","terminal_id":"terminal-pane-1","lease_id":"lease-1"}"#
+        )
+        .is_err());
+    }
 
     #[test]
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
