@@ -1287,7 +1287,7 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     ▼
 [saveBeforeClose()]
     ├─ 0. collectSettingsSnapshot()을 완료해 interrupt 전 agent 귀속을 보존
-    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
+    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids / get_grok_session_ids
     │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
     │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
     │     ├─ Windows/WSL: distro 별 /proc probe에서 LX_TERMINAL_ID → Linux provider PID
@@ -1299,7 +1299,7 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장
     ├─ 3. 사전 수집한 snapshot을 settings.json에 저장
-    │     → lastCwd·lastClaudeSession·lastCodexSession 포함
+    │     → lastCwd·lastClaudeSession·lastCodexSession·lastGrokSession 포함(셋 중 둘 이상이면 모두 삭제)
     └─ 4. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
     ▼

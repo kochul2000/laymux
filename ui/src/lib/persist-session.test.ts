@@ -22,6 +22,7 @@ vi.mock("@/lib/tauri-api", () => ({
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
+  getGrokSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@/lib/interrupt-terminals-on-exit", () => ({
@@ -47,6 +48,7 @@ import {
   getTerminalCwds,
   getClaudeSessionIds,
   getCodexSessionIds,
+  getGrokSessionIds,
 } from "@/lib/tauri-api";
 import { interruptTerminalsOnExit } from "@/lib/interrupt-terminals-on-exit";
 import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
@@ -66,6 +68,7 @@ describe("persistSession", () => {
     vi.mocked(getTerminalCwds).mockResolvedValue({});
     vi.mocked(getClaudeSessionIds).mockResolvedValue({});
     vi.mocked(getCodexSessionIds).mockResolvedValue({});
+    vi.mocked(getGrokSessionIds).mockResolvedValue({});
     vi.mocked(interruptTerminalsOnExit).mockResolvedValue(undefined);
   });
 

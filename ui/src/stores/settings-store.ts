@@ -1260,6 +1260,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       configDirs: [],
       visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
     },
+    grok: {
+      ...DEFAULT_GROK_USAGE_AGENT,
+      configDirs: [],
+      visibleRows: [...DEFAULT_GROK_USAGE_VISIBLE_ROWS],
+    },
   },
   widgets: defaultWidgets(),
   dock: { ...DEFAULT_DOCK },

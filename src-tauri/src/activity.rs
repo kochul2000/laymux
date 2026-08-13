@@ -2255,6 +2255,28 @@ mod tests {
     }
 
     #[test]
+    fn sync_known_caches_grok_is_mutually_exclusive() {
+        let state = AppState::new();
+        let tid = "t-three-way-handover";
+        state
+            .known_claude_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+        state
+            .known_codex_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        sync_known_caches(&state, tid, "Grok");
+
+        assert!(state.known_grok_terminals.lock().unwrap().contains(tid));
+        assert!(!state.known_claude_terminals.lock().unwrap().contains(tid));
+        assert!(!state.known_codex_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
     fn command_detected_claude_wins_via_grace_window_when_codex_cache_stale() {
         // P1 #2 (review follow-up): a pane that previously ran Codex
         // still carries its stale entry in `known_codex_terminals`

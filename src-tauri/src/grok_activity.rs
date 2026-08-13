@@ -25,12 +25,7 @@ fn title_eq_ignore_ascii_case(title: &str, expected: &str) -> bool {
 
 /// Whether `title` ends with ` - grok`, ignoring ASCII case on the suffix.
 pub fn title_has_grok_suffix(title: &str) -> bool {
-    let trimmed = title.trim_end();
-    if trimmed.len() < GROK_SUFFIX.len() {
-        return false;
-    }
-    let suffix = &trimmed[trimmed.len() - GROK_SUFFIX.len()..];
-    suffix.eq_ignore_ascii_case(GROK_SUFFIX)
+    title.trim_end().to_ascii_lowercase().ends_with(GROK_SUFFIX)
 }
 
 /// A live OSC title that still belongs to Grok (exit disambiguator).
@@ -92,6 +87,9 @@ pub fn process_grok_title(title: &str, was_detected: bool) -> GrokTitleResult {
     if was_detected {
         if is_grok_title(title) {
             result.now_working = is_grok_working_title(title);
+        } else if is_braille_prefix(title) {
+            // Working spinner without the suffix is not an exit (ADR-0154).
+            result.now_working = true;
         } else if !title_eq_ignore_ascii_case(title, "grok") {
             result.exited = true;
         }
@@ -116,6 +114,14 @@ mod tests {
         assert!(!title_has_grok_suffix("grok"));
         assert!(!title_has_grok_suffix("grok-build"));
         assert!(!title_has_grok_suffix("laymux"));
+        assert!(title_has_grok_suffix("한글 제목 - grok"));
+    }
+
+    #[test]
+    fn process_stays_on_braille_only_after_detection() {
+        let r = process_grok_title("\u{280B} working", true);
+        assert!(!r.exited);
+        assert!(r.now_working);
     }
 
     #[test]

@@ -8,6 +8,7 @@ fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
         name: name.into(),
         home: "/home/user".into(),
         codex_home: None,
+        grok_home: None,
         rollout_paths: Vec::new(),
     }
 }
@@ -16,8 +17,8 @@ fn process(pid: u32, ppid: u32, name: &str) -> WslProcessEntry {
 fn parses_bounded_probe_rows_and_optional_roots() {
     let output = concat!(
         "LAYMUX_WSL_AGENT_PROBE_V2\n",
-        "P\tterminal-pane-a\t10\t1\tbash\t/home/user\t\n",
-        "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t/opt/codex\n",
+        "P\tterminal-pane-a\t10\t1\tbash\t/home/user\t\t\n",
+        "P\tterminal-pane-a\t20\t10\tcodex\t/home/user\t/opt/codex\t\n",
         "R\tterminal-pane-a\t20\t/opt/codex/sessions/2026/08/02/rollout-a.jsonl\n",
         "LAYMUX_WSL_AGENT_PROBE_END\n",
     );
@@ -35,7 +36,7 @@ fn parses_bounded_probe_rows_and_optional_roots() {
 fn malformed_or_incomplete_probe_output_fails_closed() {
     assert!(parse_probe_output(b"terminal-pane-a\t20\t10\tcodex\n").is_err());
     assert!(parse_probe_output(
-        b"LAYMUX_WSL_AGENT_PROBE_V2\nP\tterminal-pane-a\tbad\t10\tcodex\t/home/u\t\nLAYMUX_WSL_AGENT_PROBE_END\n"
+        b"LAYMUX_WSL_AGENT_PROBE_V2\nP\tterminal-pane-a\tbad\t10\tcodex\t/home/u\t\t\nLAYMUX_WSL_AGENT_PROBE_END\n"
     )
     .is_err());
     assert!(parse_probe_output(
@@ -104,6 +105,7 @@ fn converts_only_rollouts_below_the_process_codex_home() {
         distro: "Ubuntu".into(),
         home: "/home/user".into(),
         codex_home: Some("/opt/codex".into()),
+        grok_home: None,
         rollout_paths: vec![
             "/opt/codex/sessions/2026/08/02/rollout-a.jsonl".into(),
             "/elsewhere/rollout-b.jsonl".into(),

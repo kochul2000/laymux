@@ -61,7 +61,7 @@ printf 'LAYMUX_WSL_LIVENESS_PROBE_V1\n'
 for proc in /proc/[0-9]*; do
   name=$(cat "$proc/comm" 2>/dev/null) || continue
   case "$name" in
-    claude|codex) ;;
+    claude|codex|grok) ;;
     *) continue ;;
   esac
   pid=${proc##*/}
