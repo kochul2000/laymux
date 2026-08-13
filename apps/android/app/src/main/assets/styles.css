@@ -53,6 +53,7 @@ main {
 
 h1,
 h2,
+h3,
 p {
   margin-top: 0;
 }
@@ -115,11 +116,83 @@ h2 {
   line-height: 1.6;
 }
 
-dl {
+.pairing-manager {
   margin: 1.2rem 0;
   padding: 0.85rem;
+  border: 1px solid #45475a;
   border-radius: 0.7rem;
   background: #11111b;
+}
+
+.pairing-manager-heading,
+.pairing-row-heading,
+.pairing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pairing-manager-heading h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.count {
+  color: #a6adc8;
+  font-size: 0.82rem;
+}
+
+.pairing-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.pairing-row {
+  padding: 0.75rem;
+  border: 1px solid #313244;
+  border-radius: 0.6rem;
+  background: #181825;
+}
+
+.pairing-row.selected {
+  border-color: #89b4fa;
+}
+
+.pairing-row strong,
+.pairing-row code,
+.pairing-row small {
+  overflow-wrap: anywhere;
+}
+
+.pairing-row code,
+.pairing-row small {
+  display: block;
+  margin-top: 0.35rem;
+  color: #a6adc8;
+  font-size: 0.75rem;
+}
+
+.pairing-state {
+  color: #a6e3a1;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.pairing-state.pending {
+  color: #f9e2af;
+}
+
+.pairing-actions {
+  justify-content: flex-start;
+  margin-top: 0.65rem;
+}
+
+.pairing-actions button {
+  width: auto;
+  min-height: 2.25rem;
+  padding: 0 0.65rem;
+  font-size: 0.76rem;
 }
 
 .protection {
@@ -162,25 +235,6 @@ dl {
 
 .hint.unavailable {
   color: #f9e2af;
-}
-
-dl div {
-  display: grid;
-  grid-template-columns: 5rem minmax(0, 1fr);
-  gap: 0.5rem;
-  padding: 0.35rem 0;
-}
-
-dt {
-  color: #a6adc8;
-  font-size: 0.82rem;
-}
-
-dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-family: ui-monospace, "Cascadia Mono", monospace;
-  font-size: 0.82rem;
 }
 
 .error {

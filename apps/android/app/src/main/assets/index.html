@@ -29,20 +29,14 @@
         <p id="stateDescription">
           이 페어링 화면과 키 처리는 앱에 포함된 네이티브 경계에서 실행됩니다.
         </p>
-        <dl id="pairingDetails" hidden>
-          <div>
-            <dt>기기</dt>
-            <dd id="deviceLabel"></dd>
+        <section class="pairing-manager" aria-labelledby="pairingListTitle">
+          <div class="pairing-manager-heading">
+            <h3 id="pairingListTitle">저장된 PC</h3>
+            <span id="pairingCount" class="count">0</span>
           </div>
-          <div>
-            <dt>인스턴스</dt>
-            <dd id="instanceId"></dd>
-          </div>
-          <div>
-            <dt>Relay</dt>
-            <dd id="endpoint"></dd>
-          </div>
-        </dl>
+          <p id="pairingListEmpty" class="hint">저장된 페어링이 없습니다.</p>
+          <div id="pairingList" class="pairing-list"></div>
+        </section>
         <section class="protection" aria-labelledby="protectionTitle">
           <label class="protection-row" for="biometricToggle">
             <span>
@@ -57,15 +51,6 @@
         <p id="noticeMessage" class="notice" hidden></p>
         <button id="scanButton" class="primary" type="button">
           QR로 페어링
-        </button>
-        <button id="confirmButton" class="secondary" type="button" hidden>
-          데스크톱 확인 재시도
-        </button>
-        <button id="verifyButton" class="secondary" type="button" hidden>
-          생체 인증 확인
-        </button>
-        <button id="forgetButton" class="secondary" type="button" hidden>
-          페어링 해제
         </button>
         <button id="cloudButton" class="secondary" type="button">
           내 PC 목록으로
@@ -83,7 +68,8 @@
           </button>
         </div>
         <p id="remoteDescription">
-          생체 인증 후 세션을 엽니다. 사용 중에는 유지되고 15분 비활성 시 잠깁니다.
+          생체 인증 후 세션을 엽니다. 사용 중에는 유지되고 15분 비활성 시
+          잠깁니다.
         </p>
         <button id="connectButton" class="primary" type="button">
           보안 세션 열기
@@ -91,8 +77,8 @@
       </section>
 
       <p class="footnote">
-        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 이후
-        relay는 암호화된 terminal payload의 내용과 제어 lease를 볼 수 없습니다.
+        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 이후 relay는
+        암호화된 terminal payload의 내용과 제어 lease를 볼 수 없습니다.
       </p>
     </main>
     <script src="app.js"></script>

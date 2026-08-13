@@ -46,6 +46,7 @@ import com.laymux.android.remote.E2eTransportException
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
+import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.CloudBridge
 import com.laymux.android.web.CloudBridgeInput
@@ -73,6 +74,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var cloudWebView: WebView
     private lateinit var vault: PairingVault
     private lateinit var bridge: NativeBridge
+    private lateinit var remoteBridge: RemoteBridge
     private lateinit var cloudBridge: CloudBridge
     private lateinit var cloudNavigation: CloudNavigationPolicy
     private lateinit var credentialManager: CredentialManager
@@ -94,6 +96,7 @@ class MainActivity : FragmentActivity() {
     private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
+    private var localWebSurface = LocalWebSurface.PAIRING
     private var googleSignInInFlight = false
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
@@ -108,6 +111,7 @@ class MainActivity : FragmentActivity() {
         vault = PairingVault(this)
         biometricGate = BiometricGate(this)
         bridge = NativeBridge(this, vault)
+        remoteBridge = RemoteBridge(this)
         cloudBridge = CloudBridge(this)
         cloudNavigation = CloudNavigationPolicy(getString(R.string.laymux_cloud_base_url))
         credentialManager = CredentialManager.create(this)
@@ -269,18 +273,17 @@ class MainActivity : FragmentActivity() {
     }
 
     fun selectCloudInstance(instanceId: String) {
+        if (selectedCloudInstanceId != instanceId) closeRemoteSession()
         selectedCloudInstanceId = instanceId
         showPairingSurface()
         val metadata = try {
-            vault.loadMetadata()
+            vault.loadConfirmedMetadata(instanceId)
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
         }
         when {
-            metadata?.instanceId == instanceId && metadata.confirmedAtEpochSeconds != null ->
-                connectRemote()
-            metadata?.instanceId == instanceId -> retryPairingConfirmation()
+            metadata != null -> connectRemote()
             else -> {
                 notifyPairingChanged(notice = "선택한 PC에 표시된 E2E QR을 스캔하세요.")
                 startPairingScan()
@@ -299,6 +302,7 @@ class MainActivity : FragmentActivity() {
 
     private fun showPairingSurface() {
         if (!::webView.isInitialized || isDestroyed) return
+        installLocalBridge(LocalWebSurface.PAIRING)
         cloudWebView.visibility = View.GONE
         webView.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.START_URL)
@@ -306,9 +310,19 @@ class MainActivity : FragmentActivity() {
 
     private fun showRemoteSurface() {
         if (!::webView.isInitialized || isDestroyed) return
+        installLocalBridge(LocalWebSurface.REMOTE)
         cloudWebView.visibility = View.GONE
         webView.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
+    }
+
+    private fun installLocalBridge(surface: LocalWebSurface) {
+        webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
+        when (surface) {
+            LocalWebSurface.PAIRING -> webView.addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
+            LocalWebSurface.REMOTE -> webView.addJavascriptInterface(remoteBridge, NATIVE_BRIDGE_NAME)
+        }
+        localWebSurface = surface
     }
 
     private fun showCloudMessage(message: String) {
@@ -322,6 +336,8 @@ class MainActivity : FragmentActivity() {
     fun remoteConnecting(): Boolean = remoteConnecting
 
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
+
+    fun selectedCloudInstanceId(): String? = selectedCloudInstanceId
 
     fun startPairingScan() {
         if (scanInFlight || hasPendingCryptoOperation()) {
@@ -476,6 +492,7 @@ class MainActivity : FragmentActivity() {
     ) {
         val session = PairingHandshake.createSession(payload, clientNonce)
         try {
+            if (selectedCloudInstanceId == payload.instanceId) closeRemoteSession()
             vault.save(payload, clientNonce, policy, cipher)
         } catch (error: Exception) {
             session.close()
@@ -490,7 +507,7 @@ class MainActivity : FragmentActivity() {
         if (session.isExpired()) {
             session.close()
             try {
-                vault.clearIfMatches(pairingId, clientNonce)
+                vault.clearIfMatches(session.request.instanceId, pairingId, clientNonce)
             } catch (_: Exception) {
                 notifyPairingChanged(error = "만료된 페어링 정보를 삭제하지 못했습니다.")
                 return
@@ -521,6 +538,7 @@ class MainActivity : FragmentActivity() {
                         onSuccess = { confirmation ->
                             try {
                                 vault.markConfirmed(
+                                    session.request.instanceId,
                                     pairingId,
                                     clientNonce,
                                     confirmation.confirmedAtEpochSeconds,
@@ -534,7 +552,12 @@ class MainActivity : FragmentActivity() {
                             }
                         },
                         onFailure = { error ->
-                            handlePairingAckFailure(error, pairingId, clientNonce)
+                            handlePairingAckFailure(
+                                error,
+                                session.request.instanceId,
+                                pairingId,
+                                clientNonce,
+                            )
                         },
                     )
                 }
@@ -549,13 +572,14 @@ class MainActivity : FragmentActivity() {
 
     private fun handlePairingAckFailure(
         error: Throwable,
+        instanceId: String,
         pairingId: String,
         clientNonce: String,
     ) {
         val ackError = error as? PairingAckException
         if (ackError?.pairingInvalidated == true) {
             try {
-                vault.clearIfMatches(pairingId, clientNonce)
+                vault.clearIfMatches(instanceId, pairingId, clientNonce)
             } catch (_: Exception) {
                 notifyPairingChanged(error = "무효한 페어링 정보를 삭제하지 못했습니다.")
                 return
@@ -587,7 +611,7 @@ class MainActivity : FragmentActivity() {
             return
         }
         val hasPairing = try {
-            vault.loadMetadata() != null
+            vault.loadMetadata().isNotEmpty()
         } catch (_: Exception) {
             notifyPairingChanged(error = "저장된 페어링 정보를 읽지 못했습니다.")
             return
@@ -612,7 +636,8 @@ class MainActivity : FragmentActivity() {
                 append("앞으로 페어링 키를 저장하거나 사용할 때마다 강한 생체 인증을 요구합니다.")
             }
             if (hasPairing) {
-                append("\n\n보호 방식을 바꾸면 현재 페어링이 삭제되므로 다시 QR로 페어링해야 합니다.")
+                append("\n\n보호 방식을 바꾸면 저장된 모든 PC 페어링이 삭제됩니다. ")
+                append("각 PC를 QR로 다시 페어링해야 합니다.")
             }
         }
         policyDialog = AlertDialog.Builder(this)
@@ -638,10 +663,11 @@ class MainActivity : FragmentActivity() {
         hadPairing: Boolean,
     ) {
         try {
+            if (hadPairing) closeRemoteSession()
             vault.setProtectionPolicy(policy)
             notifyPairingChanged(
                 notice = if (hadPairing) {
-                    "키 보호 설정을 변경하고 기존 페어링을 삭제했습니다. 다시 페어링하세요."
+                    "키 보호 설정을 변경하고 모든 PC 페어링을 삭제했습니다. 다시 페어링하세요."
                 } else {
                     "키 보호 설정을 변경했습니다."
                 },
@@ -651,7 +677,7 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    fun verifyPairingProtection() {
+    fun verifyPairingProtection(instanceId: String) {
         if (scanInFlight || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
             return
@@ -670,7 +696,7 @@ class MainActivity : FragmentActivity() {
             }
         }
         val pending = try {
-            vault.prepareDecryption()
+            vault.prepareDecryption(instanceId)
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
@@ -722,13 +748,13 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    fun retryPairingConfirmation() {
+    fun retryPairingConfirmation(instanceId: String) {
         if (scanInFlight || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
             return
         }
         val metadata = try {
-            vault.loadMetadata()
+            vault.loadMetadata().firstOrNull { it.instanceId == instanceId }
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
@@ -755,7 +781,7 @@ class MainActivity : FragmentActivity() {
             }
         }
         val pending = try {
-            vault.prepareDecryption()
+            vault.prepareDecryption(instanceId)
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
@@ -815,19 +841,19 @@ class MainActivity : FragmentActivity() {
             if (!session.isExpired()) return
             closeRemoteSession()
         }
+        val expectedInstanceId = selectedCloudInstanceId
+        if (expectedInstanceId == null) {
+            notifyPairingChanged(error = "Cloud 대시보드에서 연결할 PC를 선택하세요.")
+            return
+        }
         val metadata = try {
-            vault.loadMetadata()
+            vault.loadMetadata().firstOrNull { it.instanceId == expectedInstanceId }
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
         }
         if (metadata?.confirmedAtEpochSeconds == null) {
             notifyPairingChanged(error = "먼저 데스크톱과 페어링을 확인하세요.")
-            return
-        }
-        val expectedInstanceId = selectedCloudInstanceId
-        if (!CloudBridgeInput.matchesSelectedInstance(expectedInstanceId, metadata.instanceId)) {
-            notifyPairingChanged(error = "선택한 PC와 저장된 E2E 페어링이 다릅니다.")
             return
         }
         val policy = try {
@@ -844,7 +870,7 @@ class MainActivity : FragmentActivity() {
             }
         }
         val pending = try {
-            vault.prepareDecryption()
+            vault.prepareDecryption(expectedInstanceId)
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
             return
@@ -1412,14 +1438,14 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    fun forgetPairing() {
+    fun forgetPairing(instanceId: String) {
         if (scanInFlight || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = "진행 중인 작업이 끝난 뒤 페어링을 해제하세요.")
             return
         }
         try {
-            closeRemoteSession()
-            vault.clear()
+            if (selectedCloudInstanceId == instanceId) closeRemoteSession()
+            vault.clear(instanceId)
             notifyPairingChanged(notice = "페어링을 해제했습니다.")
         } catch (_: Exception) {
             notifyPairingChanged(error = "페어링 정보를 삭제하지 못했습니다.")
@@ -1455,7 +1481,11 @@ class MainActivity : FragmentActivity() {
         notice: String? = null,
     ) {
         runOnUiThread {
-            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            if (!::webView.isInitialized || isDestroyed ||
+                localWebSurface != LocalWebSurface.PAIRING
+            ) {
+                return@runOnUiThread
+            }
             val status = JSONObject.quote(bridge.statusJson(error, notice))
             webView.evaluateJavascript(
                 "if (window.laymuxNative) window.laymuxNative.onPairingChanged($status);",
@@ -1568,6 +1598,11 @@ class MainActivity : FragmentActivity() {
         VERIFY,
         CONFIRM,
         CONNECT,
+    }
+
+    private enum class LocalWebSurface {
+        PAIRING,
+        REMOTE,
     }
 
     private data class RemoteOutputStream(
