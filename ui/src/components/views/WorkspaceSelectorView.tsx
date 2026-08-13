@@ -165,12 +165,14 @@ function WorkspaceItem({
   const wsDisplay = useSettingsStore((s) => s.workspaceSelector.display);
   const claudeSettings = useSettingsStore((s) => s.claude);
   const codexSettings = useSettingsStore((s) => s.codex);
+  const grokSettings = useSettingsStore((s) => s.grok);
 
   const cmdInfo = summary.lastCommand;
   const cmdStatusSettings = getStatusDisplaySettings(
     cmdInfo?.activity,
     claudeSettings,
     codexSettings,
+    grokSettings,
   );
   const cmdStatus = cmdInfo
     ? computeCommandStatus(
@@ -449,6 +451,7 @@ function WorkspaceItem({
                       ts.activity,
                       claudeSettings,
                       codexSettings,
+                      grokSettings,
                     );
                     // `outputActive` belongs in the gate, not just the input: a
                     // shell streaming output before any command was captured is

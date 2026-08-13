@@ -93,6 +93,7 @@
       "remote": "Remote",
       "claude": "Claude Code",
       "codex": "Codex",
+      "grok": "Grok",
       "memo": "Memo",
       "fileExplorer": "File Explorer",
       "viewer": "File Viewer",
@@ -485,6 +486,19 @@
       "delimiter": "Delimiter",
       "delimiterDesc": "Separator string between the two texts"
     },
+    "grok": {
+      "title": "Grok Build",
+      "groupSessionRestore": "Session Restore",
+      "groupStatusMessage": "Status Message",
+      "command": "Launch Command",
+      "commandInvalid": "Only an executable name/path and flags are allowed — shell metacharacters (; & | $ ` \" ' < >) and line breaks are rejected. \"{{command}}\" is used instead.",
+      "restoreSession": "Restore Session",
+      "sessionMaxAge": "Session Max Age",
+      "modeTitle": "Title only (default)",
+      "modeBulletTitle": "Bullet · Title",
+      "modeTitleBullet": "Title · Bullet",
+      "modeBullet": "Bullet only"
+    },
     "fileExplorer": {
       "title": "File Explorer",
       "groupShell": "Shell",
@@ -645,6 +659,7 @@
       "type": {
         "claudeUsage": "Claude Usage",
         "codexUsage": "Codex Usage",
+        "grokUsage": "Grok Usage",
         "terminalActivity": "Terminal Activity",
         "notifications": "Notifications",
         "cwd": "Working Directory"

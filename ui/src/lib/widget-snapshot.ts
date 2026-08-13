@@ -21,6 +21,7 @@ import { readCodexSnapshot } from "@/lib/codex-usage-subscription";
 import {
   buildClaudeUsageRows,
   buildCodexUsageRows,
+  buildGrokUsageRows,
   selectVisibleRows,
   usageRowStatuslineText,
   usageWidgetTooltip,
@@ -239,6 +240,19 @@ export async function buildRemoteWidgetSnapshot(
             capturedAtMs: snapshot?.capturedAtMs ?? null,
             colors: settings.usage.claude.colors,
             configDir,
+          }),
+        ];
+      }
+      case "grokUsage": {
+        return [
+          usageItem({
+            instance,
+            align,
+            label: "Grok",
+            rows: selectVisibleRows(buildGrokUsageRows([]), settings.usage.grok.visibleRows),
+            message: "No Grok usage probe is running.",
+            capturedAtMs: null,
+            colors: settings.usage.grok.colors,
           }),
         ];
       }

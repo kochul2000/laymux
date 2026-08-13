@@ -622,6 +622,17 @@ export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageS
   return invoke("get_codex_usage_snapshot", { configDir });
 }
 
+export interface GrokUsageSnapshot {
+  status: string;
+  rows: { key: string; percent: number | null; reset: string | null }[];
+  capturedAtMs: number | null;
+  message: string | null;
+}
+
+export async function getGrokUsageSnapshot(configDir = ""): Promise<GrokUsageSnapshot> {
+  return invoke("get_grok_usage_snapshot", { configDir });
+}
+
 // -- GitHub issue/PR list (issue #708) --
 
 export type GithubRepoStatus =
@@ -779,6 +790,16 @@ export interface CodexSettings {
   /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
+  statusMessageDelimiter: string;
+}
+
+export type GrokStatusMessageMode = CodexStatusMessageMode;
+
+export interface GrokSettings {
+  command: string;
+  restoreSession: boolean;
+  sessionMaxAgeHours: number;
+  statusMessageMode: GrokStatusMessageMode;
   statusMessageDelimiter: string;
 }
 
@@ -1011,6 +1032,7 @@ export interface Settings {
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
+  grok?: GrokSettings;
   exit?: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
@@ -1554,6 +1576,11 @@ export async function markCodexTerminal(id: string): Promise<boolean> {
   return invoke("mark_codex_terminal", { id });
 }
 
+/** Register a terminal as running Grok Build in the backend. */
+export async function markGrokTerminal(id: string): Promise<boolean> {
+  return invoke("mark_grok_terminal", { id });
+}
+
 /** Check if a terminal is registered as Claude Code in the backend. */
 export async function isClaudeTerminal(id: string): Promise<boolean> {
   return invoke("is_claude_terminal", { id });
@@ -1582,6 +1609,14 @@ export async function getCodexSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string | null>> {
   return invoke("get_codex_session_ids", {
+    sessionMaxAgeHours: sessionMaxAgeHours ?? null,
+  });
+}
+
+export async function getGrokSessionIds(
+  sessionMaxAgeHours?: number,
+): Promise<Record<string, string | null>> {
+  return invoke("get_grok_session_ids", {
     sessionMaxAgeHours: sessionMaxAgeHours ?? null,
   });
 }

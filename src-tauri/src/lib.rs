@@ -22,6 +22,7 @@ pub mod crash_reporter;
 pub mod error;
 pub mod frontend_health;
 pub mod git_watcher;
+pub mod grok_activity;
 pub mod ipc_server;
 pub mod lock_ext;
 pub mod osc;
@@ -236,10 +237,13 @@ pub fn run() {
             commands::close_terminal_session,
             commands::mark_claude_terminal,
             commands::mark_codex_terminal,
+            commands::mark_grok_terminal,
             commands::is_claude_terminal,
             commands::is_codex_terminal,
+            commands::is_grok_terminal,
             commands::get_claude_session_ids,
             commands::get_codex_session_ids,
+            commands::get_grok_session_ids,
             commands::get_sync_group_terminals,
             commands::handle_lx_message,
             commands::list_system_monospace_fonts,
@@ -287,6 +291,7 @@ pub fn run() {
             commands::get_usage_snapshot,
             commands::refresh_usage_probe,
             commands::get_codex_usage_snapshot,
+            commands::get_grok_usage_snapshot,
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,

@@ -2,6 +2,7 @@ import { toTerminalId } from "@/lib/pane-ids";
 import {
   getClaudeSessionIds,
   getCodexSessionIds,
+  getGrokSessionIds,
   getTerminalCwds,
   saveSettings,
   type Settings,
@@ -35,6 +36,7 @@ function applyTerminalSessionFields(
   backendCwds: Record<string, string>,
   claudeSessionIds: Record<string, string | null>,
   codexSessionIds: Record<string, string | null>,
+  grokSessionIds: Record<string, string | null>,
 ): SavedTerminalView {
   const savedView = { ...view };
   const cwd = backendCwds[terminalId];
@@ -42,23 +44,31 @@ function applyTerminalSessionFields(
 
   const claudeSession = claudeSessionIds[terminalId];
   const codexSession = codexSessionIds[terminalId];
+  const grokSession = grokSessionIds[terminalId];
   const claudeActive = Object.hasOwn(claudeSessionIds, terminalId);
   const codexActive = Object.hasOwn(codexSessionIds, terminalId);
-  if (
-    (claudeActive && codexActive) ||
+  const grokActive = Object.hasOwn(grokSessionIds, terminalId);
+  const activeCount = Number(claudeActive) + Number(codexActive) + Number(grokActive);
+  const unproven =
     (claudeActive && !claudeSession) ||
-    (codexActive && !codexSession)
-  ) {
-    // Provider attribution is contradictory or the active provider could not
-    // prove an exact session. Persist neither rather than resuming stale chat.
+    (codexActive && !codexSession) ||
+    (grokActive && !grokSession);
+  if (activeCount > 1 || unproven) {
     delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
+    delete savedView.lastGrokSession;
   } else if (claudeSession) {
     savedView.lastClaudeSession = claudeSession;
     delete savedView.lastCodexSession;
+    delete savedView.lastGrokSession;
   } else if (codexSession) {
     savedView.lastCodexSession = codexSession;
     delete savedView.lastClaudeSession;
+    delete savedView.lastGrokSession;
+  } else if (grokSession) {
+    savedView.lastGrokSession = grokSession;
+    delete savedView.lastClaudeSession;
+    delete savedView.lastCodexSession;
   }
   return savedView;
 }
@@ -72,13 +82,15 @@ export async function collectSettingsSnapshot(
   const dockState = useDockStore.getState();
   const maxAge = settingsState.claude?.sessionMaxAgeHours;
   const codexMaxAge = settingsState.codex?.sessionMaxAgeHours;
-  const [backendCwds, claudeSessionIds, codexSessionIds] =
+  const grokMaxAge = settingsState.grok?.sessionMaxAgeHours;
+  const [backendCwds, claudeSessionIds, codexSessionIds, grokSessionIds] =
     options.includeRuntimeStructuralState === false
-      ? [{}, {}, {}]
+      ? [{}, {}, {}, {}]
       : await Promise.all([
           getTerminalCwds().catch(() => ({}) as Record<string, string>),
           getClaudeSessionIds(maxAge).catch(() => ({}) as Record<string, string | null>),
           getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string | null>),
+          getGrokSessionIds(grokMaxAge).catch(() => ({}) as Record<string, string | null>),
         ]);
 
   return {
@@ -167,6 +179,7 @@ export async function collectSettingsSnapshot(
                 backendCwds,
                 claudeSessionIds,
                 codexSessionIds,
+                grokSessionIds,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {
@@ -186,6 +199,7 @@ export async function collectSettingsSnapshot(
     usage: {
       claude: { ...settingsState.usage.claude, colors: { ...settingsState.usage.claude.colors } },
       codex: { ...settingsState.usage.codex, colors: { ...settingsState.usage.codex.colors } },
+      grok: { ...settingsState.usage.grok, colors: { ...settingsState.usage.grok.colors } },
     },
     widgets: settingsState.widgets,
     dock: { ...settingsState.dock },
@@ -197,6 +211,7 @@ export async function collectSettingsSnapshot(
     },
     claude: { ...settingsState.claude },
     codex: { ...settingsState.codex },
+    grok: { ...settingsState.grok },
     exit: { ...settingsState.exit },
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
@@ -219,6 +234,7 @@ export async function collectSettingsSnapshot(
                 backendCwds,
                 claudeSessionIds,
                 codexSessionIds,
+                grokSessionIds,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {

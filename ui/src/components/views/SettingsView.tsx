@@ -79,6 +79,7 @@ import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "@/lib/agent-session-constan
 import {
   DEFAULT_CLAUDE_COMMAND,
   DEFAULT_CODEX_COMMAND,
+  DEFAULT_GROK_COMMAND,
   isSafeAgentCommand,
   resolveAgentCommand,
 } from "@/lib/agent-command";
@@ -3270,6 +3271,100 @@ function CodexSection() {
   );
 }
 
+function GrokSection() {
+  const { t } = useTranslation("settings");
+  const storeGrok = useSettingsStore((s) => s.grok);
+  const setGrok = useSettingsStore((s) => s.setGrok);
+  const [grok, setDraftGrok] = useDraft("grok", storeGrok, (v) => setGrok(v));
+  const updateGrok = (partial: Partial<typeof grok>) =>
+    setDraftGrok((prev) => ({ ...prev, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>{t("grok.title")}</SectionTitle>
+      <SubGroup title={t("grok.groupSessionRestore")}>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("grok.command")}
+            </span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <FocusInput
+              data-testid="grok-command-input"
+              className={inputCls}
+              type="text"
+              style={{ width: 320 }}
+              placeholder={DEFAULT_GROK_COMMAND}
+              value={grok.command}
+              onChange={(e) => updateGrok({ command: e.target.value })}
+            />
+            {isSafeAgentCommand(grok.command) ? (
+              <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+                {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
+              </p>
+            ) : (
+              <p className="mt-1 text-[11px]" style={{ color: "var(--claude)" }}>
+                {t("grok.commandInvalid", { command: DEFAULT_GROK_COMMAND })}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("grok.restoreSession")}
+            </span>
+          </div>
+          <input
+            data-testid="grok-restore-session"
+            type="checkbox"
+            checked={grok.restoreSession}
+            onChange={(e) => updateGrok({ restoreSession: e.target.checked })}
+          />
+        </div>
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("grok.sessionMaxAge")}
+            </span>
+          </div>
+          <FocusInput
+            data-testid="grok-session-max-age"
+            className={inputCls}
+            type="number"
+            min={0}
+            style={{ width: 80 }}
+            value={grok.sessionMaxAgeHours}
+            onChange={(e) => updateGrok({ sessionMaxAgeHours: Number(e.target.value) || 0 })}
+          />
+        </div>
+      </SubGroup>
+      <SubGroup title={t("grok.groupStatusMessage")}>
+        <FocusSelect
+          data-testid="grok-status-message-mode-select"
+          className={inputCls}
+          value={grok.statusMessageMode}
+          onChange={(e) =>
+            updateGrok({
+              statusMessageMode: e.target.value as
+                | "bullet"
+                | "title"
+                | "bullet-title"
+                | "title-bullet",
+            })
+          }
+        >
+          <option value="title">{t("grok.modeTitle")}</option>
+          <option value="bullet-title">{t("grok.modeBulletTitle")}</option>
+          <option value="title-bullet">{t("grok.modeTitleBullet")}</option>
+          <option value="bullet">{t("grok.modeBullet")}</option>
+        </FocusSelect>
+      </SubGroup>
+    </div>
+  );
+}
+
 // -- Section: Issue Reporter --
 
 function FileExplorerSection() {
@@ -5254,6 +5349,16 @@ export function SettingsView() {
           >
             {t("nav.codex")}
           </button>
+          <button
+            data-testid="nav-grok"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("grok")}
+            onClick={() => setActiveNav("grok")}
+            onMouseEnter={() => setNavHover("grok")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.grok")}
+          </button>
 
           {/* Views */}
           <NavGroupHeader label={t("nav.groupViews")} />
@@ -5422,6 +5527,7 @@ export function SettingsView() {
             {activeNav === "remote" && <RemoteSection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
+            {activeNav === "grok" && <GrokSection />}
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
             {activeNav === "viewer" && <ViewerSection />}

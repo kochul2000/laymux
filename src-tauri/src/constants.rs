@@ -163,6 +163,7 @@ pub const PROFILE_ANTIALIASING_MODES: &[&str] = &["grayscale", "cleartype", "ali
 pub const WIDGET_TYPES: &[&str] = &[
     "claudeUsage",
     "codexUsage",
+    "grokUsage",
     "terminalActivity",
     "notifications",
     "cwd",

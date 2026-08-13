@@ -3,6 +3,7 @@ import type {
   ClaudeSyncCwdMode,
   ClaudeSettings,
   CodexSettings,
+  GrokSettings,
   ExitSettings,
   FileExplorerSettings,
   GithubSettings,
@@ -34,7 +35,11 @@ import {
 } from "../lib/sleep-prevention";
 import type { LanguageSetting } from "../i18n/resolve-language";
 import { DEFAULT_AGENT_SESSION_MAX_AGE_HOURS } from "../lib/agent-session-constants";
-import { DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND } from "../lib/agent-command";
+import {
+  DEFAULT_CLAUDE_COMMAND,
+  DEFAULT_CODEX_COMMAND,
+  DEFAULT_GROK_COMMAND,
+} from "../lib/agent-command";
 import {
   DEFAULT_FAST_SCROLL_SENSITIVITY,
   DEFAULT_SCROLL_SENSITIVITY,
@@ -208,6 +213,9 @@ export function normalizeUsageVisibleRows(value: unknown): UsageVisibleRow[] {
 export const CODEX_USAGE_VISIBLE_ROW_KEYS = ["weekly", "sparkWeekly"] as const;
 export type CodexUsageVisibleRow = (typeof CODEX_USAGE_VISIBLE_ROW_KEYS)[number];
 
+export const GROK_USAGE_VISIBLE_ROW_KEYS = ["weekly", "monthly", "credits", "payg"] as const;
+export type GrokUsageVisibleRow = (typeof GROK_USAGE_VISIBLE_ROW_KEYS)[number];
+
 export const DEFAULT_CODEX_USAGE_VISIBLE_ROWS: CodexUsageVisibleRow[] = [
   ...CODEX_USAGE_VISIBLE_ROW_KEYS,
 ];
@@ -216,6 +224,14 @@ export function normalizeCodexUsageVisibleRows(value: unknown): CodexUsageVisibl
   if (!Array.isArray(value)) return [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS];
   const rows = CODEX_USAGE_VISIBLE_ROW_KEYS.filter((row) => value.includes(row));
   return rows.length > 0 ? rows : [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS];
+}
+
+export const DEFAULT_GROK_USAGE_VISIBLE_ROWS: GrokUsageVisibleRow[] = ["weekly", "monthly"];
+
+export function normalizeGrokUsageVisibleRows(value: unknown): GrokUsageVisibleRow[] {
+  if (!Array.isArray(value)) return [...DEFAULT_GROK_USAGE_VISIBLE_ROWS];
+  const rows = GROK_USAGE_VISIBLE_ROW_KEYS.filter((row) => value.includes(row));
+  return rows.length > 0 ? rows : [...DEFAULT_GROK_USAGE_VISIBLE_ROWS];
 }
 
 export interface UsageAgentSettings {
@@ -236,6 +252,10 @@ export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visib
   visibleRows: CodexUsageVisibleRow[];
 }
 
+export interface GrokUsageAgentSettings extends Omit<UsageAgentSettings, "visibleRows"> {
+  visibleRows: GrokUsageVisibleRow[];
+}
+
 /**
  * Usage monitor (UsageView, ADR-0102).
  *
@@ -247,6 +267,7 @@ export interface CodexUsageAgentSettings extends Omit<UsageAgentSettings, "visib
 export interface UsageSettings {
   claude: UsageAgentSettings;
   codex: CodexUsageAgentSettings;
+  grok: GrokUsageAgentSettings;
 }
 
 /** Meter colors for one provider. */
@@ -505,6 +526,7 @@ interface SettingsState {
   workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
+  grok: GrokSettings;
   exit: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
@@ -527,6 +549,7 @@ interface SettingsState {
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
+  setGrok: (data: Partial<GrokSettings>) => void;
   setExit: (data: Partial<ExitSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
@@ -534,7 +557,7 @@ interface SettingsState {
   setUsageAgent: (agent: "claude", data: Partial<UsageAgentSettings>) => void;
   setCodexUsage: (data: Partial<CodexUsageAgentSettings>) => void;
   /** Patch one agent's meter colours. Each provider owns its own palette. */
-  setUsageColors: (agent: "claude" | "codex", data: Partial<UsageColorSettings>) => void;
+  setUsageColors: (agent: "claude" | "codex" | "grok", data: Partial<UsageColorSettings>) => void;
   /**
    * Replace the whole widget placement.
    *
@@ -780,6 +803,12 @@ export const DEFAULT_CODEX_USAGE_COLORS: UsageColorSettings = {
   track: "#585858",
 };
 
+export const DEFAULT_GROK_USAGE_COLORS: UsageColorSettings = {
+  used: "#c084fc",
+  pace: "#f9e2af",
+  track: "#585858",
+};
+
 export const DEFAULT_USAGE_AGENT: UsageAgentSettings = {
   profile: "",
   refreshSeconds: 600,
@@ -794,6 +823,14 @@ export const DEFAULT_CODEX_USAGE_AGENT: CodexUsageAgentSettings = {
   configDirs: [],
   visibleRows: [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS],
   colors: { ...DEFAULT_CODEX_USAGE_COLORS },
+};
+
+export const DEFAULT_GROK_USAGE_AGENT: GrokUsageAgentSettings = {
+  profile: "",
+  refreshSeconds: 600,
+  configDirs: [],
+  visibleRows: [...DEFAULT_GROK_USAGE_VISIBLE_ROWS],
+  colors: { ...DEFAULT_GROK_USAGE_COLORS },
 };
 
 function normalizeUsageColors(
@@ -814,6 +851,7 @@ function normalizeUsageColor(value: unknown, fallback: string): string {
 export const DEFAULT_USAGE: UsageSettings = {
   claude: { ...DEFAULT_USAGE_AGENT },
   codex: { ...DEFAULT_CODEX_USAGE_AGENT },
+  grok: { ...DEFAULT_GROK_USAGE_AGENT },
 };
 
 export const DEFAULT_DOCK: DockSettings = {
@@ -1249,6 +1287,13 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageMode: "bullet-title" as const,
     statusMessageDelimiter: " · ",
   },
+  grok: {
+    command: DEFAULT_GROK_COMMAND,
+    restoreSession: true,
+    sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
+    statusMessageMode: "bullet-title" as const,
+    statusMessageDelimiter: " · ",
+  },
   exit: { ...DEFAULT_EXIT },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
@@ -1306,6 +1351,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setCodex: (data) =>
     set((state) => ({
       codex: { ...state.codex, ...data },
+    })),
+
+  setGrok: (data) =>
+    set((state) => ({
+      grok: { ...state.grok, ...data },
     })),
 
   setExit: (data) =>
@@ -1560,6 +1610,15 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
             visibleRows: normalizeCodexUsageVisibleRows(data.usage.codex?.visibleRows),
             colors: normalizeUsageColors(data.usage.codex?.colors, DEFAULT_CODEX_USAGE_COLORS),
           },
+          grok: {
+            ...DEFAULT_GROK_USAGE_AGENT,
+            ...(data.usage.grok ?? {}),
+            configDirs: Array.isArray(data.usage.grok?.configDirs)
+              ? data.usage.grok.configDirs
+              : [],
+            visibleRows: normalizeGrokUsageVisibleRows(data.usage.grok?.visibleRows),
+            colors: normalizeUsageColors(data.usage.grok?.colors, DEFAULT_GROK_USAGE_COLORS),
+          },
         }
       : undefined;
     // Always normalized, never spread: a hand-edited slot can be any shape, and
@@ -1608,6 +1667,16 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           statusMessageMode: "bullet-title" as const,
           statusMessageDelimiter: " · ",
           ...(data.codex as Partial<CodexSettings>),
+        }
+      : undefined;
+    const grok = data.grok
+      ? {
+          command: DEFAULT_GROK_COMMAND,
+          restoreSession: true,
+          sessionMaxAgeHours: DEFAULT_AGENT_SESSION_MAX_AGE_HOURS,
+          statusMessageMode: "bullet-title" as const,
+          statusMessageDelimiter: " · ",
+          ...(data.grok as Partial<GrokSettings>),
         }
       : undefined;
     // Ensure exit settings have all fields (backwards compat)
@@ -1702,6 +1771,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),
+      ...(grok ? { grok } : {}),
       ...(exit ? { exit } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),

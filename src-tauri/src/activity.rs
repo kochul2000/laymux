@@ -23,6 +23,7 @@ use crate::terminal::{TerminalActivity, TerminalStateInfo};
 pub const INTERACTIVE_APP_PATTERNS: &[(&str, &str)] = &[
     ("Claude Code", "Claude"),
     ("OpenAI Codex", "Codex"),
+    ("Grok Build", "Grok"),
     ("nvim", "neovim"),
     ("vim", "vim"),
     ("vi", "vim"),
@@ -147,7 +148,7 @@ pub fn is_claude_terminal_from_buffer(
     // stale cache. Without this, a Claude→Codex handover keeps reporting
     // Claude forever once the Codex banner has scrolled past
     // `is_codex_terminal_from_buffer`'s caller-order check.
-    if codex_signal_in_buffer(&recent) {
+    if codex_signal_in_buffer(&recent) || grok_signal_in_buffer(&recent) {
         if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
             known.remove(terminal_id);
         }
@@ -194,6 +195,13 @@ fn codex_signal_in_buffer(recent: &[u8]) -> bool {
 /// `codex_signal_in_buffer`, used by `is_codex_terminal_from_buffer`.
 fn claude_signal_in_buffer(recent: &[u8]) -> bool {
     osc::any_terminal_title_contains(recent, "Claude Code")
+}
+
+fn grok_signal_in_buffer(recent: &[u8]) -> bool {
+    osc::any_terminal_title_contains(recent, "Grok Build")
+        || recent_buffer_contains(recent, "Grok Build")
+        || osc::extract_last_terminal_title(recent)
+            .is_some_and(|title| crate::grok_activity::is_grok_title(&title))
 }
 
 /// Check if Claude Code is idle (at its prompt) by looking for ✳ (U+2733) prefix in terminal title.
@@ -399,7 +407,7 @@ pub fn is_codex_terminal_from_buffer(
     // Codex→Claude handover keeps reporting Codex once the Claude banner
     // has scrolled past Claude's caller-order check (because the Braille
     // spinner range overlaps).
-    if claude_signal_in_buffer(&recent) {
+    if claude_signal_in_buffer(&recent) || grok_signal_in_buffer(&recent) {
         if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
             known.remove(terminal_id);
         }
@@ -431,6 +439,82 @@ pub fn is_codex_terminal_from_buffer(
     false
 }
 
+/// Check if a terminal is running Grok Build.
+///
+/// Same cache-as-hint rule as Claude/Codex. Strong signals are the
+/// `"Grok Build"` banner and a live OSC title with the ` - grok` suffix.
+/// Exact `grok` is not a strong signal (ADR-0154).
+pub fn is_grok_terminal_from_buffer(
+    state: &AppState,
+    terminal_id: &str,
+    buffer: Option<&TerminalOutputBuffer>,
+) -> bool {
+    use crate::process_tree::PtyAppLiveness;
+    match crate::process_tree::interactive_app_in_pty(state, terminal_id) {
+        PtyAppLiveness::Running("Grok") => {
+            sync_known_caches(state, terminal_id, "Grok");
+            return true;
+        }
+        PtyAppLiveness::Running(_) | PtyAppLiveness::NoneAlive => {
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        PtyAppLiveness::Unknown => {}
+    }
+
+    let Some(buf) = buffer else {
+        return false;
+    };
+    let Ok(recent) = buf.recent_bytes(ACTIVITY_SCAN_BYTES) else {
+        return false;
+    };
+    if recent.is_empty() {
+        if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+        return false;
+    }
+
+    if grok_signal_in_buffer(&recent) {
+        if is_recently_exited(state, terminal_id, "Grok") {
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            return false;
+        }
+        sync_known_caches(state, terminal_id, "Grok");
+        return true;
+    }
+
+    if claude_signal_in_buffer(&recent) || codex_signal_in_buffer(&recent) {
+        if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+        return false;
+    }
+
+    let cache_hit = state
+        .known_grok_terminals
+        .lock_or_err()
+        .map(|known| known.contains(terminal_id))
+        .unwrap_or(false);
+    let live_title_is_grok = osc::extract_last_terminal_title(&recent)
+        .is_some_and(|title| crate::grok_activity::is_grok_title(&title));
+
+    if cache_hit && live_title_is_grok {
+        return true;
+    }
+
+    if cache_hit {
+        if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+            known.remove(terminal_id);
+        }
+    }
+    false
+}
+
 /// Sync the per-app `known_*_terminals` sets so they stay mutually exclusive.
 ///
 /// Without this, a pane that previously ran Claude keeps its
@@ -448,10 +532,27 @@ pub fn sync_known_caches(state: &AppState, terminal_id: &str, app_name: &str) {
             if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
                 known.remove(terminal_id);
             }
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
         }
         "Claude" => {
             if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
                 known.insert(terminal_id.to_string());
+            }
+            if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        "Grok" => {
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+                known.insert(terminal_id.to_string());
+            }
+            if let Ok(mut known) = state.known_claude_terminals.lock_or_err() {
+                known.remove(terminal_id);
             }
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
                 known.remove(terminal_id);
@@ -608,6 +709,9 @@ pub fn apply_interactive_app_exit(
                 "Codex" => callback_state
                     .codex_detected
                     .store(false, Ordering::Relaxed),
+                "Grok" => callback_state
+                    .grok_detected
+                    .store(false, Ordering::Relaxed),
                 _ => {}
             }
         }
@@ -623,6 +727,11 @@ pub fn apply_interactive_app_exit(
         }
         "Codex" => {
             if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+                known.remove(terminal_id);
+            }
+        }
+        "Grok" => {
+            if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
                 known.remove(terminal_id);
             }
         }
@@ -712,6 +821,9 @@ fn clear_known_interactive_app_state(state: &AppState, terminal_id: &str) {
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
         known.remove(terminal_id);
     }
+    if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+        known.remove(terminal_id);
+    }
     clear_interactive_app_grace_window(state, terminal_id);
     // Do NOT clear the recently-exited marker here. This helper runs from
     // the `is_explicit_empty_title_reset` branch in
@@ -732,6 +844,11 @@ fn has_known_interactive_app_state(state: &AppState, terminal_id: &str) -> bool 
         .unwrap_or(false)
         || state
             .known_codex_terminals
+            .lock_or_err()
+            .map(|known| known.contains(terminal_id))
+            .unwrap_or(false)
+        || state
+            .known_grok_terminals
             .lock_or_err()
             .map(|known| known.contains(terminal_id))
             .unwrap_or(false)
@@ -797,6 +914,10 @@ pub fn detect_interactive_app_from_live_title(
     if is_codex_terminal_from_buffer(state, terminal_id, buffer) {
         record_interactive_app_detection(state, terminal_id, "Codex");
         return Some("Codex".to_string());
+    }
+    if is_grok_terminal_from_buffer(state, terminal_id, buffer) {
+        record_interactive_app_detection(state, terminal_id, "Grok");
+        return Some("Grok".to_string());
     }
 
     // 3) Grace window fallback (issue #237). When every other signal returns
@@ -905,6 +1026,7 @@ pub fn detect_terminal_state_for_control(
 fn ensure_activity_control_state_healthy(state: &AppState) -> Result<(), AppError> {
     drop(state.known_claude_terminals.lock_or_err()?);
     drop(state.known_codex_terminals.lock_or_err()?);
+    drop(state.known_grok_terminals.lock_or_err()?);
     drop(state.last_detected_interactive_app.lock_or_err()?);
     drop(state.recently_exited_interactive_app.lock_or_err()?);
     drop(state.pty_handles.lock_or_err()?);
@@ -1240,6 +1362,8 @@ pub struct PtyCallbackState {
     /// path in `codex_activity::process_codex_title` cannot fire — there
     /// is no other persistent signal in the PTY callback closure.
     pub codex_detected: AtomicBool,
+    /// Mirrors `claude_detected` for Grok Build (ADR-0154).
+    pub grok_detected: AtomicBool,
     /// Bumped every time the title state machine confirms an agent *entered*
     /// this pane.
     ///
@@ -1274,6 +1398,7 @@ impl PtyCallbackState {
         Self {
             claude_detected: AtomicBool::new(false),
             codex_detected: AtomicBool::new(false),
+            grok_detected: AtomicBool::new(false),
             detection_epoch: AtomicU64::new(0),
             burst_detector: BurstDetector::new(burst_window_ms, burst_threshold, throttle_ms),
             volume_detector: OutputVolumeDetector::new(

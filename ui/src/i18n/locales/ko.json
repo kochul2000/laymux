@@ -93,6 +93,7 @@
       "remote": "원격",
       "claude": "Claude Code",
       "codex": "Codex",
+      "grok": "Grok",
       "memo": "메모",
       "fileExplorer": "파일 탐색기",
       "viewer": "파일 뷰어",
@@ -485,6 +486,19 @@
       "delimiter": "구분자",
       "delimiterDesc": "두 텍스트 사이 구분 문자열"
     },
+    "grok": {
+      "title": "Grok Build",
+      "groupSessionRestore": "세션 복원",
+      "groupStatusMessage": "상태 메시지",
+      "command": "실행 명령",
+      "commandInvalid": "실행 파일 이름/경로와 플래그만 허용합니다. 셸 메타문자(; & | $ ` \" ' < >)와 줄바꿈은 거부되며 \"{{command}}\" 가 쓰입니다.",
+      "restoreSession": "세션 복원",
+      "sessionMaxAge": "세션 유효 기간",
+      "modeTitle": "Title만 (기본)",
+      "modeBulletTitle": "Bullet · Title",
+      "modeTitleBullet": "Title · Bullet",
+      "modeBullet": "Bullet만"
+    },
     "fileExplorer": {
       "title": "파일 탐색기",
       "groupShell": "셸",
@@ -645,6 +659,7 @@
       "type": {
         "claudeUsage": "Claude 사용량",
         "codexUsage": "Codex 사용량",
+        "grokUsage": "Grok 사용량",
         "terminalActivity": "터미널 활동",
         "notifications": "알림",
         "cwd": "현재 디렉터리"

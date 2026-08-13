@@ -388,6 +388,7 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
     case "interactiveApp": {
       if (activity.name === "Claude") return { label: "Claude", color: "var(--claude)" };
       if (activity.name === "Codex") return { label: "Codex", color: "var(--codex)" };
+      if (activity.name === "Grok") return { label: "Grok", color: "var(--grok)" };
       return { label: activity.name ?? "app", color: "var(--accent)" };
     }
   }
@@ -409,6 +410,7 @@ export function getStatusDisplaySettings(
   activity: TerminalActivityInfo | undefined,
   claudeSettings: AgentStatusMessageSettings,
   codexSettings: AgentStatusMessageSettings,
+  grokSettings: AgentStatusMessageSettings = {},
 ): {
   mode: ActivityStatusMessageMode | undefined;
   delimiter: string | undefined;
@@ -426,6 +428,12 @@ export function getStatusDisplaySettings(
     return {
       mode: codexSettings.statusMessageMode,
       delimiter: codexSettings.statusMessageDelimiter,
+    };
+  }
+  if (activity.name === "Grok") {
+    return {
+      mode: grokSettings.statusMessageMode,
+      delimiter: grokSettings.statusMessageDelimiter,
     };
   }
   return { mode: undefined, delimiter: undefined };

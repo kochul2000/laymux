@@ -44,6 +44,7 @@ printf 'LAYMUX_WSL_AGENT_PROBE_END\n'
 pub(super) enum WslAgentProvider {
     Claude,
     Codex,
+    Grok,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,10 @@ impl WslAgentProcess {
             "{}/.claude/sessions",
             self.home.trim_end_matches('/')
         ))
+    }
+
+    pub(super) fn grok_home_dir(&self) -> Option<PathBuf> {
+        self.windows_path(&format!("{}/.grok", self.home.trim_end_matches('/')))
     }
 
     pub(super) fn codex_rollout_paths(&self) -> Vec<PathBuf> {
@@ -308,6 +313,7 @@ fn process_provider(name: &str) -> Option<WslAgentProvider> {
     match stem {
         "claude" => Some(WslAgentProvider::Claude),
         "codex" => Some(WslAgentProvider::Codex),
+        "grok" => Some(WslAgentProvider::Grok),
         _ => None,
     }
 }

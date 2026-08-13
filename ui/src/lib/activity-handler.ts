@@ -3,6 +3,7 @@ import { STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 import { CodexActivityHandler } from "./codex-activity-handler";
+import { GrokActivityHandler } from "./grok-activity-handler";
 
 /** Re-exported so status consumers can reach it from the handler entry point. */
 export { STATUS_ICON_WORKING };
@@ -70,6 +71,12 @@ registerInteractiveApp("Codex", {
     /\bcodex\s+(?:exec|resume)\b/i,
   ],
   titlePatterns: ["OpenAI Codex"],
+});
+registerInteractiveApp("Grok", {
+  handler: new GrokActivityHandler(),
+  commands: ["grok"],
+  commandPatterns: [/(?:^|[\\/])grok(?:\.exe)?$/i, /\bgrok\s+--resume\b/i],
+  titlePatterns: ["Grok Build", " - grok"],
 });
 
 export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {

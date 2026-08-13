@@ -11,6 +11,7 @@
 
 export const DEFAULT_CLAUDE_COMMAND = "claude";
 export const DEFAULT_CODEX_COMMAND = "codex";
+export const DEFAULT_GROK_COMMAND = "grok";
 
 /** Alphanumerics plus the punctuation an executable path and its flags need. */
 const SAFE_AGENT_COMMAND_PATTERN = /^[A-Za-z0-9 \-_./\\:=,]+$/;

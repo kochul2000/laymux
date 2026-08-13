@@ -9,6 +9,7 @@
 
 import { ClaudeUsageWidget } from "./ClaudeUsageWidget";
 import { CodexUsageWidget } from "./CodexUsageWidget";
+import { GrokUsageWidget } from "./GrokUsageWidget";
 import { CwdWidget } from "./CwdWidget";
 import { NotificationsWidget } from "./NotificationsWidget";
 import { TerminalActivityWidget } from "./TerminalActivityWidget";
@@ -110,6 +111,31 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
         env.fontSize,
       ),
     Component: CodexUsageWidget,
+  },
+  {
+    type: "grokUsage",
+    labelKey: "widgets.type.grokUsage",
+    interactive: false,
+    defaultOptions: { configDir: "", display: "both", ...BAR_HEIGHT_DEFAULTS },
+    optionSpecs: [
+      { key: "configDir", kind: "text", labelKey: "widgets.option.configDir" },
+      {
+        key: "display",
+        kind: "select",
+        labelKey: "widgets.option.display",
+        choices: USAGE_WIDGET_DISPLAYS,
+      },
+      BAR_WIDTH_SPEC,
+      ...BAR_HEIGHT_SPECS,
+    ],
+    estimateWidth: (instance, env) =>
+      estimateUsageWidgetWidth(
+        readDisplay(instance.options),
+        env.claudeVisibleRows,
+        readBarWidth(instance.options),
+        env.fontSize,
+      ),
+    Component: GrokUsageWidget,
   },
   {
     type: "terminalActivity",

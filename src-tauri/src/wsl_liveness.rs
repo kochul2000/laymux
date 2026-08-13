@@ -359,6 +359,7 @@ fn app_from_comm(name: &str) -> Option<&'static str> {
     match name.trim() {
         "claude" => Some("Claude"),
         "codex" => Some("Codex"),
+        "grok" => Some("Grok"),
         _ => None,
     }
 }

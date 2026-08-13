@@ -8,7 +8,11 @@
 import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
 import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
 import type { CodexUsageLimit, UsageSnapshot } from "@/lib/tauri-api";
-import type { CodexUsageVisibleRow, UsageVisibleRow } from "@/stores/settings-store";
+import type {
+  CodexUsageVisibleRow,
+  GrokUsageVisibleRow,
+  UsageVisibleRow,
+} from "@/stores/settings-store";
 
 /** One limit row, already resolved for display. */
 export interface UsageDisplayRow {
@@ -138,6 +142,37 @@ export function buildCodexUsageRows(
         },
       };
     });
+}
+
+const GROK_ROW_LABELS: Record<GrokUsageVisibleRow, { label: string; short: string }> = {
+  weekly: { label: "Weekly limit", short: "Week" },
+  monthly: { label: "Monthly limit", short: "Month" },
+  credits: { label: "Credits", short: "Credits" },
+  payg: { label: "Pay-as-you-go", short: "PAYG" },
+};
+
+export function buildGrokUsageRows(
+  rows: readonly { key: string; percent: number | null; reset: string | null }[],
+): KeyedUsageRow<GrokUsageVisibleRow>[] {
+  return rows.flatMap((row) => {
+    if (!(row.key in GROK_ROW_LABELS)) return [];
+    const key = row.key as GrokUsageVisibleRow;
+    const labels = GROK_ROW_LABELS[key];
+    return [
+      {
+        visibleKey: key,
+        row: {
+          key,
+          label: labels.label,
+          statuslineLabel: labels.short,
+          abbreviatedLabel: labels.short,
+          percent: row.percent,
+          reset: row.reset,
+          elapsed: null,
+        },
+      },
+    ];
+  });
 }
 
 /**

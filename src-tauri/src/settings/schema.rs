@@ -148,6 +148,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/usage/grok",
+        description: "Grok Build 사용량 probe 및 GrokUsageView 표시 설정입니다. profile 은 grok 를 실행할 터미널 프로필(빈 값이면 defaultProfile), refreshSeconds 는 프로세스 비용 때문에 600초 미만으로는 적용되지 않습니다, configDirs 는 추가로 모니터링할 GROK_HOME 목록이며 visibleRows 는 weekly/monthly/credits/payg 입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
         path: "/widgets",
         description: "상단 바와 status line 의 위젯 배치·공용 표시 설정입니다. fontFamily(빈 값은 인터페이스 글꼴 상속)와 fontSize(6~20px)는 모든 위젯이 공유합니다. topBar/statusLine 각각 left·right 슬롯의 배열 순서가 화면 순서이며, statusLine.enabled 는 하단 영역 표시만 결정합니다(끄더라도 배치는 보존). 각 항목은 { id, type, options } 이고 type 은 등록된 위젯 이름이어야 하며, 사용량 위젯의 barWidth는 8~200px입니다.",
         sensitive: false,
@@ -210,6 +216,30 @@ const ENTRIES: &[MetadataEntry] = &[
     MetadataEntry {
         path: "/codex/sessionMaxAgeHours",
         description: "Codex 세션 복원 후보 rollout의 최대 수정 경과 시간입니다. 0은 나이 필터를 끕니다. 다음 세션 수집부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/grok",
+        description: "Grok Build 세션 복원과 상태 메시지 표시 설정입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/grok/command",
+        description: "Grok Build 를 실행할 명령입니다(기본 \"grok\"). 플래그를 함께 적을 수 있고 세션 복원은 여기에 `--resume <id>` 를 덧붙입니다. 실행 파일 이름/경로와 플래그만 허용하며 셸 메타문자가 있으면 무시되고 기본 명령이 쓰입니다. 다음 터미널 생성부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/grok/restoreSession",
+        description: "앱 시작 시 저장된 Grok 세션 ID를 grok --resume 로 복원할지 정합니다. 다음 터미널 생성부터 적용됩니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::NextUse,
+    },
+    MetadataEntry {
+        path: "/grok/sessionMaxAgeHours",
+        description: "Grok 세션 복원 후보 summary.json 의 최대 수정 경과 시간입니다. 0은 나이 필터를 끕니다. 다음 세션 수집부터 적용됩니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

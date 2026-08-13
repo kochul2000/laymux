@@ -24,19 +24,20 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// 4. `output_buffers` compatibility table / per-terminal output ring
 /// 5. `known_claude_terminals`
 /// 6. `known_codex_terminals`
-/// 7. `last_detected_interactive_app`
-/// 8. `recently_exited_interactive_app`
-/// 9. `notifications`
-/// 10. `sync_groups`
-/// 11. `propagated_terminals`
-/// 12. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
-/// 13. `remote_access`
-/// 14. `remote_control`
-/// 15. `cloud_tunnel`
-/// 16. `cloud`
-/// 17. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
+/// 7. `known_grok_terminals`
+/// 8. `last_detected_interactive_app`
+/// 9. `recently_exited_interactive_app`
+/// 10. `notifications`
+/// 11. `sync_groups`
+/// 12. `propagated_terminals`
+/// 13. `pty_handles` / `automation_channels` / `automation_port` / `ipc_socket_path`
+/// 14. `remote_access`
+/// 15. `remote_control`
+/// 16. `cloud_tunnel`
+/// 17. `cloud`
+/// 18. `exec_locks` (table mutex; held only to get/insert a per-terminal lock,
 ///     never across `.await` and never while holding another `AppState` lock)
-/// 18. `pty_callback_states` (table mutex; held only to get/insert/remove one
+/// 19. `pty_callback_states` (table mutex; held only to get/insert/remove one
 ///     terminal's `Arc`, never while holding another `AppState` lock)
 ///
 /// Never acquire a lower-numbered lock while holding a higher-numbered one.
@@ -97,6 +98,9 @@ pub struct AppState {
     /// Populated proactively by the PTY output callback and frontend command detection.
     /// Removed when the terminal session closes.
     pub known_codex_terminals: Arc<Mutex<HashSet<String>>>,
+    /// Single source of truth for Grok Build terminal detection.
+    /// Same lifecycle as the Claude/Codex sets (ADR-0154).
+    pub known_grok_terminals: Arc<Mutex<HashSet<String>>>,
     /// The `Arc<PtyCallbackState>` each PTY output callback owns, published here
     /// so an exit observed *outside* that callback can clear its detection
     /// flags.
@@ -334,6 +338,7 @@ impl AppState {
             propagated_terminals: Mutex::new(HashMap::new()),
             known_claude_terminals: Arc::new(Mutex::new(HashSet::new())),
             known_codex_terminals: Arc::new(Mutex::new(HashSet::new())),
+            known_grok_terminals: Arc::new(Mutex::new(HashSet::new())),
             pty_callback_states: Mutex::new(HashMap::new()),
             last_detected_interactive_app: Arc::new(Mutex::new(HashMap::new())),
             recently_exited_interactive_app: Arc::new(Mutex::new(HashMap::new())),
@@ -480,6 +485,13 @@ mod tests {
     fn known_codex_terminals_starts_empty() {
         let state = AppState::new();
         let known = state.known_codex_terminals.lock().unwrap();
+        assert!(known.is_empty());
+    }
+
+    #[test]
+    fn known_grok_terminals_starts_empty() {
+        let state = AppState::new();
+        let known = state.known_grok_terminals.lock().unwrap();
         assert!(known.is_empty());
     }
 

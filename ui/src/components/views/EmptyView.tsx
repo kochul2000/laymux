@@ -165,6 +165,13 @@ function buildOptions(visibleProfiles: { name: string }[]): ViewOption[] {
     config: { type: "CodexUsageView" },
     testId: "empty-view-codex-usage",
   });
+  options.push({
+    key: "grok-usage",
+    label: "Grok Usage",
+    category: "tool",
+    config: { type: "GrokUsageView" },
+    testId: "empty-view-grok-usage",
+  });
 
   options.push({
     key: "usage",

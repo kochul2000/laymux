@@ -98,6 +98,7 @@ fn name_to_app(name: &str) -> Option<&'static str> {
     match stem {
         "claude" => Some("Claude"),
         "codex" => Some("Codex"),
+        "grok" => Some("Grok"),
         _ => None,
     }
 }
@@ -503,13 +504,16 @@ mod tests {
     fn name_to_app_matches_windows_exe() {
         assert_eq!(name_to_app("claude.exe"), Some("Claude"));
         assert_eq!(name_to_app("codex.exe"), Some("Codex"));
+        assert_eq!(name_to_app("grok.exe"), Some("Grok"));
         assert_eq!(name_to_app("CLAUDE.EXE"), Some("Claude"));
+        assert_eq!(name_to_app("GROK.EXE"), Some("Grok"));
     }
 
     #[test]
     fn name_to_app_matches_bare_name() {
         assert_eq!(name_to_app("claude"), Some("Claude"));
         assert_eq!(name_to_app("codex"), Some("Codex"));
+        assert_eq!(name_to_app("grok"), Some("Grok"));
     }
 
     #[test]

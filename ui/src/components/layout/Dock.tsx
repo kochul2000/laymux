@@ -33,6 +33,7 @@ const viewIcons: Record<ViewType, string> = {
   MemoView: "\u270e",
   UsageView: "\u25f4",
   CodexUsageView: "\u25f4",
+  GrokUsageView: "\u25f4",
   FileExplorerView: "\ud83d\udcc2",
   GitHubView: "\u25c9",
   IssueReporterView: "!",
