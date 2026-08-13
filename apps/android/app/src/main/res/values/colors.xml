@@ -2,4 +2,5 @@
 <resources>
     <color name="laymux_background">#1e1e2e</color>
     <color name="laymux_navigation_bar">#181825</color>
+    <color name="laymux_icon_background">#000000</color>
 </resources>

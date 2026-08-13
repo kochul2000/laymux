@@ -112,6 +112,7 @@ kotlin {
 
 dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.credentials:credentials:1.6.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
