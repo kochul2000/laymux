@@ -837,7 +837,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 - **보관함(shelf)은 hidden workspace 전용이며, 그것을 여는 count chip 바로 아래(목록 위)에 인라인으로 열린다**([ADR-0035](../adr/0035-workspace-only-shelf-per-pane-hide-toggle.md)). chip 카운트도 유효 hidden workspace 수만 세고, hidden pane 은 chip·보관함 어디에도 나타나지 않는다.
 - workspace 행의 quick-hide 버튼은 항상 DOM에 존재하고 hover 또는 `:focus-within`에서 시각화된다. 숨김은 즉시 반영하며 최근 action은 5초 Undo snackbar로 되돌릴 수 있다.
 - active workspace를 숨길 때의 visible fallback은 일반 workspace 전환과 같은 `workspace-transition.ts`의 `switchActiveWorkspace` 착지 경로를 사용한다. 따라서 이전 dock focus를 지우고 전역 `focusedPaneIndex`를 fallback workspace의 유효 pane으로 다시 계산한 뒤 숨김 raw state를 적용한다(issue #578, [ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)). Selector 클릭·생성·복제, 키보드, Automation/Remote, 외부 상태 주입을 수선하는 coordinator도 각자 store를 조립하지 않고 같은 전환 소유자를 사용한다.
-- **Pane 숨김은 workspace grid 의 각 pane 컨트롤바 eye 토글로만 제어한다**(숨김·복원 모두). selector 의 pane 요약 행에는 숨김 버튼이 없고, 숨겨진 pane 행은 목록에서 필터된다. dock pane 은 selector 에 나오지 않으므로 토글을 노출하지 않는다.
+- **Pane 숨김은 PC workspace grid 의 각 pane 컨트롤바 eye 토글로 제어한다**(숨김·복원 모두). PC selector 의 pane 요약 행에는 숨김 버튼이 없고, 숨겨진 pane 행은 목록에서 필터된다. Remote는 여러 pane grid를 동시에 표시하지 않으므로 drawer의 각 workspace pane 행에 같은 eye action을 두며, hidden pane은 선택 불가·저강조 control row로 남겨 그 자리에서 복원한다. dock pane은 어느 표면에서도 이 workspace-list 숨김 대상이 아니다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md)).
 - 보관함의 기본 복원(행 클릭)은 workspace 를 다시 표시하고 활성화한 뒤 보관함을 닫으며, eye 버튼은 표시만 하고 다른 hidden workspace가 남아 있으면 보관함을 유지한다. "모두 표시"는 hidden workspace set 만 비우고 개별 숨김 pane flag 는 유지한다.
 - workspace 를 복원해도 그 아래 pane 의 raw hidden flag 는 유지된다(복원은 pane 토글 소관).
 - active workspace를 숨길 때는 현재 정렬 순서에서 다음 visible workspace를 먼저 활성화한다. 마지막 visible workspace는 숨길 수 없다. `useHiddenItemsCoordinator`는 Automation·세션 교체·구조 삭제처럼 selector 밖에서 raw state가 바뀌는 경우에도 이 불변식과 stale ID 정리를 즉시 적용한다.
@@ -847,7 +847,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 WorkspaceSelectorView에서 각 Pane(쉘) 요약 행의 왼쪽에 소형 레이아웃 미니맵을 표시한다.
 
-Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible workspace의 같은 pane 정보와 마지막 상태 한 줄을 표시한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). pane 번호·workspace 요약·명령 상태는 frontend bridge가 PC selector의 계산 함수와 현재 설정으로 만든 표시 모델이며 Remote JavaScript가 provider 상태를 다시 계산하지 않는다. 한 번도 mount되지 않은 inactive terminal pane도 양쪽이 같은 persisted profile/lastCwd placeholder projection을 사용한다. drawer가 열린 동안 2초마다 snapshot을 다시 읽어 activity·명령 결과·알림·표시 토글 변경을 따라가고, 닫힘·disconnect·document hidden에서는 폴을 멈춘다.
+Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible workspace의 같은 pane 정보와 마지막 상태 한 줄을 표시한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). pane 번호·workspace 요약·명령 상태는 frontend bridge가 PC selector의 계산 함수와 현재 설정으로 만든 표시 모델이며 Remote JavaScript가 provider 상태를 다시 계산하지 않는다. 한 번도 mount되지 않은 inactive terminal pane도 양쪽이 같은 persisted profile/lastCwd placeholder projection을 사용한다. hidden workspace는 평상시 목록에서 빼고 PC처럼 헤더 `Hidden N` chip 아래 workspace-only shelf에 둔다. Remote의 workspace/pane eye action은 toggle이 아니라 목표 `hidden` 값을 lease-gated API로 보내며 PC의 `setWorkspaceHiddenWithFallback`/`setPaneHidden` 소유자를 호출한다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md)). drawer가 열린 동안 2초마다 snapshot을 다시 읽어 activity·명령 결과·알림·표시 토글 변경을 따라가고, 닫힘·disconnect·document hidden에서는 폴을 멈춘다.
 
 #### 목적
 
