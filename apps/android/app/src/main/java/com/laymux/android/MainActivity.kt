@@ -10,6 +10,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.credentials.CustomCredential
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -18,6 +20,7 @@ import androidx.credentials.exceptions.GetCredentialException
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
+import com.google.android.gms.tasks.Task
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -35,6 +38,7 @@ import com.laymux.android.pairing.PairingPayload
 import com.laymux.android.pairing.PairingProtectionPolicy
 import com.laymux.android.pairing.PairingVault
 import com.laymux.android.pairing.PendingPairingDecryption
+import com.laymux.android.pairing.ResumeGatedRunner
 import com.laymux.android.remote.E2eProtocolException
 import com.laymux.android.remote.E2eRemoteClient
 import com.laymux.android.remote.E2eSessionSuspendedException
@@ -79,6 +83,8 @@ class MainActivity : FragmentActivity() {
     private val e2eRemoteClient = E2eRemoteClient()
     private val pairingExecutor = Executors.newSingleThreadExecutor()
     private val remoteExecutor = Executors.newSingleThreadScheduledExecutor()
+    private val biometricPromptGate = ResumeGatedRunner()
+    private var scanTask: Task<Barcode>? = null
     private var scanInFlight = false
     private var pairingAckInFlight = false
     private var activePairingAckSession: PairingAckSession? = null
@@ -131,9 +137,27 @@ class MainActivity : FragmentActivity() {
             )
         }
         setContentView(root)
+        applySystemBarInsets(root)
         webView.visibility = View.GONE
         webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
+    }
+
+    /**
+     * targetSdk 36 draws every window edge to edge, so without this the PC-owned
+     * Remote page renders under the status bar and its top menu cannot be tapped.
+     * The WebViews own their own scrolling, so the system bars become padding on
+     * the container instead of insets the pages would have to know about.
+     */
+    private fun applySystemBarInsets(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+            )
+            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -290,7 +314,10 @@ class MainActivity : FragmentActivity() {
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
 
     fun startPairingScan() {
-        if (scanInFlight || hasPendingCryptoOperation()) return
+        if (scanInFlight || hasPendingCryptoOperation()) {
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         val policy = try {
             vault.protectionPolicy()
         } catch (_: Exception) {
@@ -306,7 +333,7 @@ class MainActivity : FragmentActivity() {
         }
 
         scanInFlight = true
-        scanner.startScan()
+        scanTask = scanner.startScan()
             .addOnSuccessListener { barcode ->
                 scanInFlight = false
                 val raw = barcode.rawValue
@@ -369,24 +396,26 @@ class MainActivity : FragmentActivity() {
 
         pendingPairing = payload
         pendingClientNonce = clientNonce
-        try {
-            biometricGate.authenticate(
-                cipher = cipher,
-                title = "페어링 키 저장",
-                subtitle = "Laymux 키를 생체 인증으로 보호합니다.",
-                onSuccess = ::completeBiometricPairing,
-                onError = { message ->
-                    pendingPairing?.close()
-                    pendingPairing = null
-                    pendingClientNonce = null
-                    notifyPairingChanged(error = message)
-                },
-            )
-        } catch (error: Exception) {
-            pendingPairing?.close()
-            pendingPairing = null
-            pendingClientNonce = null
-            throw error
+        biometricPromptGate.runWhenResumed {
+            try {
+                biometricGate.authenticate(
+                    cipher = cipher,
+                    title = "페어링 키 저장",
+                    subtitle = "Laymux 키를 생체 인증으로 보호합니다.",
+                    onSuccess = ::completeBiometricPairing,
+                    onError = { message ->
+                        pendingPairing?.close()
+                        pendingPairing = null
+                        pendingClientNonce = null
+                        notifyPairingChanged(error = message)
+                    },
+                )
+            } catch (error: Exception) {
+                pendingPairing?.close()
+                pendingPairing = null
+                pendingClientNonce = null
+                notifyPairingChanged(error = pairingOperationError(error))
+            }
         }
     }
 
@@ -597,7 +626,10 @@ class MainActivity : FragmentActivity() {
     }
 
     fun verifyPairingProtection() {
-        if (scanInFlight || hasPendingCryptoOperation()) return
+        if (scanInFlight || hasPendingCryptoOperation()) {
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         val policy = try {
             vault.protectionPolicy()
         } catch (_: Exception) {
@@ -628,37 +660,42 @@ class MainActivity : FragmentActivity() {
 
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.VERIFY
-        try {
-            biometricGate.authenticate(
-                cipher = pending.cipher,
-                title = "페어링 키 확인",
-                subtitle = "저장된 Laymux 키의 보호 상태를 확인합니다.",
-                onSuccess = { cipher ->
-                    val current = pendingDecryption
-                    val purpose = pendingDecryptionPurpose
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    if (current != null && purpose == DecryptionPurpose.VERIFY) {
-                        completeVerification(current, cipher)
-                    }
-                },
-                onError = { message ->
-                    pendingDecryption?.close()
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    notifyPairingChanged(error = message)
-                },
-            )
-        } catch (error: Exception) {
-            pendingDecryption?.close()
-            pendingDecryption = null
-            pendingDecryptionPurpose = null
-            notifyPairingChanged(error = pairingOperationError(error))
+        biometricPromptGate.runWhenResumed {
+            try {
+                biometricGate.authenticate(
+                    cipher = pending.cipher,
+                    title = "페어링 키 확인",
+                    subtitle = "저장된 Laymux 키의 보호 상태를 확인합니다.",
+                    onSuccess = { cipher ->
+                        val current = pendingDecryption
+                        val purpose = pendingDecryptionPurpose
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        if (current != null && purpose == DecryptionPurpose.VERIFY) {
+                            completeVerification(current, cipher)
+                        }
+                    },
+                    onError = { message ->
+                        pendingDecryption?.close()
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        notifyPairingChanged(error = message)
+                    },
+                )
+            } catch (error: Exception) {
+                pendingDecryption?.close()
+                pendingDecryption = null
+                pendingDecryptionPurpose = null
+                notifyPairingChanged(error = pairingOperationError(error))
+            }
         }
     }
 
     fun retryPairingConfirmation() {
-        if (scanInFlight || hasPendingCryptoOperation()) return
+        if (scanInFlight || hasPendingCryptoOperation()) {
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         val metadata = try {
             vault.loadMetadata()
         } catch (error: Exception) {
@@ -702,37 +739,40 @@ class MainActivity : FragmentActivity() {
 
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.CONFIRM
-        try {
-            biometricGate.authenticate(
-                cipher = pending.cipher,
-                title = "데스크톱 페어링 확인",
-                subtitle = "저장된 Laymux 키로 데스크톱을 확인합니다.",
-                onSuccess = { cipher ->
-                    val current = pendingDecryption
-                    val purpose = pendingDecryptionPurpose
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    if (current != null && purpose == DecryptionPurpose.CONFIRM) {
-                        completePairingConfirmation(current, cipher)
-                    }
-                },
-                onError = { message ->
-                    pendingDecryption?.close()
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    notifyPairingChanged(error = message)
-                },
-            )
-        } catch (error: Exception) {
-            pendingDecryption?.close()
-            pendingDecryption = null
-            pendingDecryptionPurpose = null
-            notifyPairingChanged(error = pairingOperationError(error))
+        biometricPromptGate.runWhenResumed {
+            try {
+                biometricGate.authenticate(
+                    cipher = pending.cipher,
+                    title = "데스크톱 페어링 확인",
+                    subtitle = "저장된 Laymux 키로 데스크톱을 확인합니다.",
+                    onSuccess = { cipher ->
+                        val current = pendingDecryption
+                        val purpose = pendingDecryptionPurpose
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        if (current != null && purpose == DecryptionPurpose.CONFIRM) {
+                            completePairingConfirmation(current, cipher)
+                        }
+                    },
+                    onError = { message ->
+                        pendingDecryption?.close()
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        notifyPairingChanged(error = message)
+                    },
+                )
+            } catch (error: Exception) {
+                pendingDecryption?.close()
+                pendingDecryption = null
+                pendingDecryptionPurpose = null
+                notifyPairingChanged(error = pairingOperationError(error))
+            }
         }
     }
 
     fun connectRemote() {
         if (scanInFlight || hasPendingCryptoOperation() || remoteOpeningSession != null) {
+            notifyPairingChanged(error = busyOperationMessage())
             return
         }
         remoteSession?.let { session ->
@@ -786,37 +826,39 @@ class MainActivity : FragmentActivity() {
 
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.CONNECT
-        try {
-            biometricGate.authenticate(
-                cipher = pending.cipher,
-                title = "Laymux 보안 세션 열기",
-                subtitle = "사용 중에는 유지되며 15분 비활성 시 잠깁니다.",
-                onSuccess = { cipher ->
-                    val current = pendingDecryption
-                    val purpose = pendingDecryptionPurpose
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    if (current != null && purpose == DecryptionPurpose.CONNECT) {
-                        completeRemoteConnection(current, cipher, connectionGeneration)
-                    }
-                },
-                onError = { message ->
-                    pendingDecryption?.close()
-                    pendingDecryption = null
-                    pendingDecryptionPurpose = null
-                    if (remoteConnectionGeneration.get() == connectionGeneration) {
-                        remoteConnecting = false
-                        notifyPairingChanged(error = message)
-                    }
-                },
-            )
-        } catch (error: Exception) {
-            pending.close()
-            pendingDecryption = null
-            pendingDecryptionPurpose = null
-            if (remoteConnectionGeneration.get() == connectionGeneration) {
-                remoteConnecting = false
-                notifyPairingChanged(error = pairingOperationError(error))
+        biometricPromptGate.runWhenResumed {
+            try {
+                biometricGate.authenticate(
+                    cipher = pending.cipher,
+                    title = "Laymux 보안 세션 열기",
+                    subtitle = "사용 중에는 유지되며 15분 비활성 시 잠깁니다.",
+                    onSuccess = { cipher ->
+                        val current = pendingDecryption
+                        val purpose = pendingDecryptionPurpose
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        if (current != null && purpose == DecryptionPurpose.CONNECT) {
+                            completeRemoteConnection(current, cipher, connectionGeneration)
+                        }
+                    },
+                    onError = { message ->
+                        pendingDecryption?.close()
+                        pendingDecryption = null
+                        pendingDecryptionPurpose = null
+                        if (remoteConnectionGeneration.get() == connectionGeneration) {
+                            remoteConnecting = false
+                            notifyPairingChanged(error = message)
+                        }
+                    },
+                )
+            } catch (error: Exception) {
+                pending.close()
+                pendingDecryption = null
+                pendingDecryptionPurpose = null
+                if (remoteConnectionGeneration.get() == connectionGeneration) {
+                    remoteConnecting = false
+                    notifyPairingChanged(error = pairingOperationError(error))
+                }
             }
         }
     }
@@ -1341,6 +1383,21 @@ class MainActivity : FragmentActivity() {
     private fun hasPendingCryptoOperation(): Boolean =
         pendingPairing != null || pendingDecryption != null || pairingAckInFlight || remoteConnecting
 
+    /**
+     * The pairing page clears its error and notice lines the moment a button is
+     * tapped, so a guard that returns without a status update leaves a screen
+     * with no text and a permanently disabled button. Every guarded entry point
+     * says which operation still owns the pairing state instead.
+     */
+    private fun busyOperationMessage(): String = when {
+        scanInFlight -> "QR 스캔이 진행 중입니다."
+        pendingPairing != null || pendingDecryption != null ->
+            "생체 인증을 마치거나 취소한 뒤 다시 시도하세요."
+        pairingAckInFlight -> "데스크톱 페어링 확인을 진행하고 있습니다."
+        remoteConnecting || remoteOpeningSession != null -> "보안 세션을 여는 중입니다."
+        else -> "이전 작업이 끝난 뒤 다시 시도하세요."
+    }
+
     private fun pairingOperationError(error: Exception): String = when (error) {
         is PairingKeyInvalidatedException ->
             "생체 정보가 변경되어 페어링 키가 무효화됐습니다. 페어링을 해제한 뒤 다시 연결하세요."
@@ -1378,11 +1435,25 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // The scanner runs in its own activity: if its listeners never fired the
+        // in-flight flag would block every later scan with no way back.
+        if (scanInFlight && scanTask?.isComplete == true) scanInFlight = false
+        biometricPromptGate.onResumed()
+    }
+
+    override fun onPause() {
+        biometricPromptGate.onPaused()
+        super.onPause()
+    }
+
     override fun onStop() {
         remoteLifecycleActive = false
         suspendRemoteSessionForBackground()
         if (pendingDecryptionPurpose == DecryptionPurpose.CONNECT) {
             biometricGate.cancel()
+            biometricPromptGate.cancelPending()
             pendingDecryption?.close()
             pendingDecryption = null
             pendingDecryptionPurpose = null
@@ -1393,6 +1464,7 @@ class MainActivity : FragmentActivity() {
     override fun onDestroy() {
         policyDialog?.dismiss()
         policyDialog = null
+        biometricPromptGate.cancelPending()
         if (::biometricGate.isInitialized) biometricGate.cancel()
         pendingPairing?.close()
         pendingPairing = null

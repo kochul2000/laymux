@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: the Laymux mark alone, scaled into the 72dp safe
+     zone of the 108dp adaptive canvas. The black plate is the background layer. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <group
+        android:pivotX="60"
+        android:pivotY="60"
+        android:scaleX="0.85"
+        android:scaleY="0.85">
+        <path
+            android:fillColor="#f50a3c"
+            android:pathData="M54,25H27L58,56L27,91.5H54L85,56L54,25Z" />
+        <path
+            android:fillColor="#f50a3c"
+            android:pathData="M89,91.5H62L75.0986,76.5H102.099L89,91.5Z" />
+        <path
+            android:fillColor="#0af1f5"
+            android:pathData="M45,29H18L49,60L18,95.5H45L76,60L45,29Z" />
+        <path
+            android:fillColor="#0af1f5"
+            android:pathData="M80,95.5H53L66.0986,80.5H93.0986L80,95.5Z" />
+        <path
+            android:fillColor="#ffffff"
+            android:pathData="M50,26H23L54,57L23,92.5H50L81,57L50,26Z" />
+        <path
+            android:fillColor="#ffffff"
+            android:pathData="M85,92.5H58L71.0986,77.5H98.0986L85,92.5Z" />
+    </group>
+</vector>
