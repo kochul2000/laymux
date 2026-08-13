@@ -53,21 +53,6 @@ class NativeBridge(
     }
 
     @JavascriptInterface
-    fun requestRemoteHttp(requestId: String, method: String, path: String, bodyJson: String?) {
-        activity.requestRemoteHttp(requestId, method, path, bodyJson)
-    }
-
-    @JavascriptInterface
-    fun openRemoteOutput(streamId: String, terminalId: String, leaseId: String) {
-        activity.openRemoteOutput(streamId, terminalId, leaseId)
-    }
-
-    @JavascriptInterface
-    fun closeRemoteOutput(streamId: String) {
-        activity.closeRemoteOutput(streamId)
-    }
-
-    @JavascriptInterface
     fun forgetPairing(instanceId: String) {
         activity.runOnUiThread { activity.forgetPairing(instanceId) }
     }
@@ -107,7 +92,6 @@ class NativeBridge(
         if (notice != null) result.put("notice", notice)
         return result.toString()
     }
-
 }
 
 internal fun appendPairingState(

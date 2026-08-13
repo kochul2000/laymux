@@ -1,0 +1,42 @@
+package com.laymux.android.web
+
+import android.webkit.JavascriptInterface
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class BridgeSurfaceTest {
+    @Test
+    fun remoteBridgeExposesOnlyTransportAndDisconnect() {
+        assertEquals(
+            setOf(
+                "requestRemoteHttp",
+                "openRemoteOutput",
+                "closeRemoteOutput",
+                "disconnectRemote",
+            ),
+            javascriptMethods(RemoteBridge::class.java),
+        )
+    }
+
+    @Test
+    fun pairingBridgeDoesNotExposeRemoteTransport() {
+        val methods = javascriptMethods(NativeBridge::class.java)
+
+        assertTrue("pairing status must remain available", "getPairingStatus" in methods)
+        assertTrue("per-instance deletion must remain available", "forgetPairing" in methods)
+        assertTrue(methods.intersect(REMOTE_TRANSPORT_METHODS).isEmpty())
+    }
+
+    private fun javascriptMethods(type: Class<*>): Set<String> = type.declaredMethods
+        .filter { it.isAnnotationPresent(JavascriptInterface::class.java) }
+        .mapTo(mutableSetOf()) { it.name }
+
+    companion object {
+        private val REMOTE_TRANSPORT_METHODS = setOf(
+            "requestRemoteHttp",
+            "openRemoteOutput",
+            "closeRemoteOutput",
+        )
+    }
+}

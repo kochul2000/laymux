@@ -251,6 +251,19 @@ class PairingVaultTest {
     }
 
     @Test
+    fun rejectsPairingPreferenceWithNonCanonicalInstanceSuffix() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences(preferenceName, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("pairing:not/canonical", "hidden-envelope")
+            .commit()
+
+        assertThrows(IllegalStateException::class.java) {
+            vault.loadMetadata()
+        }
+    }
+
+    @Test
     fun discardsLegacySingletonRecordWithoutMigration() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         context.getSharedPreferences(preferenceName, android.content.Context.MODE_PRIVATE)

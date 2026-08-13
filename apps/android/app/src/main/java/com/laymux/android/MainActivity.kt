@@ -46,6 +46,7 @@ import com.laymux.android.remote.E2eTransportException
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
+import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.CloudBridge
 import com.laymux.android.web.CloudBridgeInput
@@ -73,6 +74,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var cloudWebView: WebView
     private lateinit var vault: PairingVault
     private lateinit var bridge: NativeBridge
+    private lateinit var remoteBridge: RemoteBridge
     private lateinit var cloudBridge: CloudBridge
     private lateinit var cloudNavigation: CloudNavigationPolicy
     private lateinit var credentialManager: CredentialManager
@@ -94,6 +96,7 @@ class MainActivity : FragmentActivity() {
     private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
+    private var localWebSurface = LocalWebSurface.PAIRING
     private var googleSignInInFlight = false
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
@@ -108,6 +111,7 @@ class MainActivity : FragmentActivity() {
         vault = PairingVault(this)
         biometricGate = BiometricGate(this)
         bridge = NativeBridge(this, vault)
+        remoteBridge = RemoteBridge(this)
         cloudBridge = CloudBridge(this)
         cloudNavigation = CloudNavigationPolicy(getString(R.string.laymux_cloud_base_url))
         credentialManager = CredentialManager.create(this)
@@ -298,6 +302,7 @@ class MainActivity : FragmentActivity() {
 
     private fun showPairingSurface() {
         if (!::webView.isInitialized || isDestroyed) return
+        installLocalBridge(LocalWebSurface.PAIRING)
         cloudWebView.visibility = View.GONE
         webView.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.START_URL)
@@ -305,9 +310,19 @@ class MainActivity : FragmentActivity() {
 
     private fun showRemoteSurface() {
         if (!::webView.isInitialized || isDestroyed) return
+        installLocalBridge(LocalWebSurface.REMOTE)
         cloudWebView.visibility = View.GONE
         webView.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
+    }
+
+    private fun installLocalBridge(surface: LocalWebSurface) {
+        webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
+        when (surface) {
+            LocalWebSurface.PAIRING -> webView.addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
+            LocalWebSurface.REMOTE -> webView.addJavascriptInterface(remoteBridge, NATIVE_BRIDGE_NAME)
+        }
+        localWebSurface = surface
     }
 
     private fun showCloudMessage(message: String) {
@@ -1466,7 +1481,11 @@ class MainActivity : FragmentActivity() {
         notice: String? = null,
     ) {
         runOnUiThread {
-            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            if (!::webView.isInitialized || isDestroyed ||
+                localWebSurface != LocalWebSurface.PAIRING
+            ) {
+                return@runOnUiThread
+            }
             val status = JSONObject.quote(bridge.statusJson(error, notice))
             webView.evaluateJavascript(
                 "if (window.laymuxNative) window.laymuxNative.onPairingChanged($status);",
@@ -1579,6 +1598,11 @@ class MainActivity : FragmentActivity() {
         VERIFY,
         CONFIRM,
         CONNECT,
+    }
+
+    private enum class LocalWebSurface {
+        PAIRING,
+        REMOTE,
     }
 
     private data class RemoteOutputStream(

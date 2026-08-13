@@ -1,6 +1,6 @@
 # 0154. Android pairing vault는 instance별 레코드와 정책별 공유 wrapping key를 사용한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-13
 - Source: 사용자 요구(GitHub issue #806: "Android APK 다중 PC 페어링 저장 지원") · [architecture/api-contracts.md §13.0](../architecture/api-contracts.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
 - Amends: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)의 단일 Android pairing 범위와 consequence
@@ -26,6 +26,7 @@ Pairing seed는 계속 Android Keystore 비추출 키로 감싸야 한다. PC마
 - wrapping key alias는 `biometric`과 `keystoreOnly` 보호 정책별 하나씩만 유지한다. 개별 pairing 삭제는 envelope만 삭제하고 공유 alias를 보존한다. 보호 정책 변경은 모든 envelope와 두 alias를 삭제한 다음 새 정책을 저장하며 모든 PC에 재pairing을 요구한다.
 - Cloud dashboard의 선택은 연결 의도일 뿐이다. native는 선택 instance와 같은 confirmed envelope만 자동 선택한다. confirmed 레코드가 없으면 그 PC의 QR을 요구하며, 기존 pending 레코드의 ACK 재시도는 pairing manager의 명시적 동작으로만 제공한다. 선택 변경 시 다른 PC의 열린 native session은 먼저 닫는다.
 - pairing manager는 전체 metadata 목록과 각 레코드의 confirmed/pending 상태를 표시하고 instance별 확인 재시도·키 보호 확인·삭제를 제공한다. secret과 client nonce는 JavaScript 상태에 넣지 않는다.
+- APK pairing manager 문서와 PC 제공 Remote 문서는 같은 WebView를 재사용하되 navigation 전에 JavaScript interface를 교체한다. pairing manager에만 vault 관리 interface를 주고, Remote 문서에는 E2E HTTP/output transport와 현재 session disconnect만 노출한다. native pairing 상태 callback도 pairing manager surface에서만 실행한다.
 - storage version을 4로 올리고 이전 `pairing` singleton key는 읽거나 migration하지 않고 앱의 새 vault 초기화 시 폐기한다.
 
 ## Alternatives Considered

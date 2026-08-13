@@ -21,13 +21,14 @@
   const disconnectButton = document.getElementById("disconnectButton");
   const nativeBridge = window.LaymuxNative;
 
-  function actionButton(label, action, instanceId) {
+  function actionButton(label, action, instanceId, deviceName) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "compact";
     button.textContent = label;
     button.dataset.action = action;
     button.dataset.instanceId = instanceId;
+    button.setAttribute("aria-label", `${deviceName}: ${label}`);
     return button;
   }
 
@@ -66,6 +67,7 @@
           "확인 재시도",
           "confirm",
           pairing.instanceId,
+          pairing.label || pairing.instanceId,
         );
         confirm.disabled = biometricRequired && !biometricAvailable;
         actions.append(confirm);
@@ -75,11 +77,19 @@
           "키 보호 확인",
           "verify",
           pairing.instanceId,
+          pairing.label || pairing.instanceId,
         );
         verify.disabled = !biometricAvailable;
         actions.append(verify);
       }
-      actions.append(actionButton("삭제", "forget", pairing.instanceId));
+      actions.append(
+        actionButton(
+          "삭제",
+          "forget",
+          pairing.instanceId,
+          pairing.label || pairing.instanceId,
+        ),
+      );
       row.append(heading, id, endpoint, actions);
       pairingList.append(row);
     });

@@ -313,8 +313,11 @@ class PairingVault(
 
     private fun pairingInstanceIds(): List<String> = pairingKeys()
         .asSequence()
-        .map { it.removePrefix(PAIRING_KEY_PREFIX) }
-        .filter { INSTANCE_PATTERN.matches(it) }
+        .map { key ->
+            key.removePrefix(PAIRING_KEY_PREFIX).also { instanceId ->
+                if (!INSTANCE_PATTERN.matches(instanceId)) throw corrupted()
+            }
+        }
         .sorted()
         .toList()
 
