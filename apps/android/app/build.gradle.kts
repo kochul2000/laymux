@@ -6,6 +6,33 @@ val laymuxCloudBaseUrl = providers.gradleProperty("laymuxCloudBaseUrl")
 val laymuxGoogleWebClientId = providers.gradleProperty("laymuxGoogleWebClientId")
     .orElse(providers.environmentVariable("LAYMUX_GOOGLE_WEB_CLIENT_ID"))
     .orElse("")
+val laymuxAndroidVersionCode = providers.environmentVariable("LAYMUX_ANDROID_VERSION_CODE")
+    .orElse("1")
+val laymuxAndroidVersionName = providers.environmentVariable("LAYMUX_ANDROID_VERSION_NAME")
+    .orElse("0.1.0")
+val releaseSigningStoreFile = providers.environmentVariable(
+    "LAYMUX_ANDROID_APP_SIGNING_STORE_FILE",
+).orElse("")
+val releaseSigningStorePassword = providers.environmentVariable(
+    "LAYMUX_ANDROID_APP_SIGNING_STORE_PASSWORD",
+).orElse("")
+val releaseSigningKeyAlias = providers.environmentVariable(
+    "LAYMUX_ANDROID_APP_SIGNING_KEY_ALIAS",
+).orElse("")
+val releaseSigningKeyPassword = providers.environmentVariable(
+    "LAYMUX_ANDROID_APP_SIGNING_KEY_PASSWORD",
+).orElse("")
+val releaseSigningValues = listOf(
+    releaseSigningStoreFile,
+    releaseSigningStorePassword,
+    releaseSigningKeyAlias,
+    releaseSigningKeyPassword,
+).map { it.get() }
+val releaseSigningConfigured = releaseSigningValues.all { it.isNotBlank() }
+
+if (releaseSigningValues.any { it.isNotBlank() } && !releaseSigningConfigured) {
+    throw GradleException("Android release signing configuration is incomplete")
+}
 
 plugins {
     id("com.android.application")
@@ -21,8 +48,14 @@ android {
         applicationId = "com.laymux.android"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = laymuxAndroidVersionCode.get().toInt().also {
+            require(it in 1..2_100_000_000) { "Android versionCode is out of range" }
+        }
+        versionName = laymuxAndroidVersionName.get().also {
+            require(it.matches(Regex("[0-9]+[.][0-9]+[.][0-9]+(?:[-+][0-9A-Za-z.-]+)?"))) {
+                "Android versionName is not a supported release version"
+            }
+        }
 
         resValue("string", "laymux_cloud_base_url", laymuxCloudBaseUrl.get())
         resValue("string", "laymux_google_web_client_id", laymuxGoogleWebClientId.get())
@@ -30,8 +63,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseSigningStoreFile.get())
+                storePassword = releaseSigningStorePassword.get()
+                keyAlias = releaseSigningKeyAlias.get()
+                keyPassword = releaseSigningKeyPassword.get()
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

@@ -53,3 +53,130 @@ jobs:
           releaseBody: ${{ github.event.release.body }}
           releaseDraft: false
           prerelease: false
+
+  android:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}
+      ANDROID_GOOGLE_WEB_CLIENT_ID: ${{ vars.ANDROID_GOOGLE_WEB_CLIENT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release source
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "Android releases must point to a commit on main" >&2
+            exit 1
+          }
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate release inputs
+        shell: bash
+        env:
+          ANDROID_APP_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_APP_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_APP_SIGNING_KEYSTORE_PASSWORD }}
+          ANDROID_APP_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_APP_SIGNING_KEY_ALIAS }}
+          ANDROID_APP_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_APP_SIGNING_KEY_PASSWORD }}
+        run: |
+          for name in \
+            ANDROID_APP_SIGNING_KEYSTORE_BASE64 \
+            ANDROID_APP_SIGNING_KEYSTORE_PASSWORD \
+            ANDROID_APP_SIGNING_KEY_ALIAS \
+            ANDROID_APP_SIGNING_KEY_PASSWORD \
+            ANDROID_APP_SIGNING_CERT_SHA256 \
+            ANDROID_GOOGLE_WEB_CLIENT_ID; do
+            [[ -n "${!name}" ]] || { echo "Missing release input: $name" >&2; exit 1; }
+          done
+
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
+            echo "Android release tag must be a stable semantic version: $GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+          (( major < 2100 && minor < 1000 && patch < 1000 )) || {
+            echo "Release version cannot be encoded as Android versionCode" >&2
+            exit 1
+          }
+          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
+          (( version_code > 0 && version_code <= 2100000000 )) || {
+            echo "Android versionCode is out of range: $version_code" >&2
+            exit 1
+          }
+
+          keystore="$RUNNER_TEMP/laymux-android-app-signing.jks"
+          printf '%s' "$ANDROID_APP_SIGNING_KEYSTORE_BASE64" | base64 --decode >"$keystore"
+          chmod 600 "$keystore"
+          [[ -s "$keystore" ]] || { echo "Decoded keystore is empty" >&2; exit 1; }
+
+          {
+            echo "LAYMUX_ANDROID_VERSION_NAME=$version"
+            echo "LAYMUX_ANDROID_VERSION_CODE=$version_code"
+            echo "LAYMUX_ANDROID_APP_SIGNING_STORE_FILE=$keystore"
+            echo "LAYMUX_ANDROID_APP_SIGNING_STORE_PASSWORD=$ANDROID_APP_SIGNING_KEYSTORE_PASSWORD"
+            echo "LAYMUX_ANDROID_APP_SIGNING_KEY_ALIAS=$ANDROID_APP_SIGNING_KEY_ALIAS"
+            echo "LAYMUX_ANDROID_APP_SIGNING_KEY_PASSWORD=$ANDROID_APP_SIGNING_KEY_PASSWORD"
+            echo "LAYMUX_CLOUD_BASE_URL=https://app.laymux.com"
+            echo "LAYMUX_GOOGLE_WEB_CLIENT_ID=$ANDROID_GOOGLE_WEB_CLIENT_ID"
+          } >>"$GITHUB_ENV"
+
+      - name: Test and build signed Android APK
+        working-directory: apps/android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Verify and stage Android APK
+        shell: bash
+        run: |
+          build_tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk="apps/android/app/build/outputs/apk/release/app-release.apk"
+          [[ -f "$apk" ]] || { echo "Signed release APK was not produced" >&2; exit 1; }
+
+          verify_output="$($build_tools/apksigner verify --verbose --print-certs "$apk")"
+          printf '%s\n' "$verify_output"
+          actual_fingerprint="$({ printf '%s\n' "$verify_output" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1; } | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          expected_fingerprint="$(printf '%s' "$ANDROID_APP_SIGNING_CERT_SHA256" | tr -d ':' | tr '[:lower:]' '[:upper:]')"
+          [[ -n "$actual_fingerprint" && "$actual_fingerprint" == "$expected_fingerprint" ]] || {
+            echo "Android signer certificate fingerprint mismatch" >&2
+            exit 1
+          }
+
+          output_dir="$RUNNER_TEMP/laymux-android-release"
+          output_apk="$output_dir/Laymux-Android-${LAYMUX_ANDROID_VERSION_NAME}.apk"
+          mkdir -p "$output_dir"
+          cp "$apk" "$output_apk"
+          (cd "$output_dir" && sha256sum "$(basename "$output_apk")" >"$(basename "$output_apk").sha256")
+          echo "ANDROID_RELEASE_APK=$output_apk" >>"$GITHUB_ENV"
+          echo "ANDROID_RELEASE_CHECKSUM=$output_apk.sha256" >>"$GITHUB_ENV"
+
+      - name: Upload Android APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "$ANDROID_RELEASE_APK" "$ANDROID_RELEASE_CHECKSUM" --clobber
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f -- "${LAYMUX_ANDROID_APP_SIGNING_STORE_FILE:-$RUNNER_TEMP/laymux-android-app-signing.jks}"
