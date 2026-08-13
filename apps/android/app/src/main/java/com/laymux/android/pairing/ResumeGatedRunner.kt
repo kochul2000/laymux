@@ -29,13 +29,21 @@ class ResumeGatedRunner {
         resumed = false
     }
 
-    /** Runs [action] now when resumed, otherwise once the host resumes again. */
-    fun runWhenResumed(action: () -> Unit) {
+    /**
+     * Runs [action] now when resumed, otherwise once the host resumes again.
+     *
+     * Returns false when a request is already waiting: the deferred lambda owns
+     * the cleanup of the secret its caller prepared, so replacing it would drop
+     * that cleanup silently. The caller cleans up its own request instead.
+     */
+    fun runWhenResumed(action: () -> Unit): Boolean {
+        if (pending != null) return false
         if (resumed) {
             action()
-            return
+            return true
         }
         pending = action
+        return true
     }
 
     /** Drops a deferred request. Returns true when one was waiting. */

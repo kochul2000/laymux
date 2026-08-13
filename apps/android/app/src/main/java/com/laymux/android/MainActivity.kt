@@ -95,6 +95,8 @@ class MainActivity : FragmentActivity() {
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
     private var googleSignInInFlight = false
+    @Volatile private var undeliveredError: String? = null
+    @Volatile private var undeliveredNotice: String? = null
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
@@ -151,11 +153,21 @@ class MainActivity : FragmentActivity() {
      */
     private fun applySystemBarInsets(root: View) {
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
-            val insets = windowInsets.getInsets(
+            val bars = windowInsets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
             )
-            view.setPadding(insets.left, insets.top, insets.right, insets.bottom)
-            windowInsets
+            // Edge-to-edge windows no longer resize for the soft keyboard, so the
+            // IME would cover the Remote composer unless it becomes padding too.
+            val ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(
+                bars.left,
+                bars.top,
+                bars.right,
+                maxOf(bars.bottom, ime.bottom),
+            )
+            // Consumed so the pages inside do not apply the same cutout again
+            // through their own `env(safe-area-inset-*)` rules.
+            WindowInsetsCompat.CONSUMED
         }
         ViewCompat.requestApplyInsets(root)
     }
@@ -336,6 +348,9 @@ class MainActivity : FragmentActivity() {
         scanTask = scanner.startScan()
             .addOnSuccessListener { barcode ->
                 scanInFlight = false
+                // The scanned string carries the pairing seed, so the task that
+                // owns the barcode must not outlive this callback.
+                scanTask = null
                 val raw = barcode.rawValue
                 if (raw == null) {
                     notifyPairingChanged(error = "QR에서 페어링 정보를 읽지 못했습니다.")
@@ -365,10 +380,12 @@ class MainActivity : FragmentActivity() {
             }
             .addOnCanceledListener {
                 scanInFlight = false
+                scanTask = null
                 notifyPairingChanged(error = "QR 스캔을 취소했습니다.")
             }
             .addOnFailureListener {
                 scanInFlight = false
+                scanTask = null
                 notifyPairingChanged(error = "QR 스캐너를 시작하지 못했습니다.")
             }
     }
@@ -394,6 +411,11 @@ class MainActivity : FragmentActivity() {
             return
         }
 
+        if (biometricPromptGate.hasPending) {
+            payload.close()
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         pendingPairing = payload
         pendingClientNonce = clientNonce
         biometricPromptGate.runWhenResumed {
@@ -658,6 +680,11 @@ class MainActivity : FragmentActivity() {
             return
         }
 
+        if (biometricPromptGate.hasPending) {
+            pending.close()
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.VERIFY
         biometricPromptGate.runWhenResumed {
@@ -737,6 +764,11 @@ class MainActivity : FragmentActivity() {
             return
         }
 
+        if (biometricPromptGate.hasPending) {
+            pending.close()
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.CONFIRM
         biometricPromptGate.runWhenResumed {
@@ -824,6 +856,12 @@ class MainActivity : FragmentActivity() {
             return
         }
 
+        if (biometricPromptGate.hasPending) {
+            pending.close()
+            remoteConnecting = false
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.CONNECT
         biometricPromptGate.runWhenResumed {
@@ -1409,13 +1447,33 @@ class MainActivity : FragmentActivity() {
         notice: String? = null,
     ) {
         runOnUiThread {
-            if (!::webView.isInitialized) return@runOnUiThread
+            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            if (error != null) undeliveredError = error
+            if (notice != null) undeliveredNotice = notice
             val status = JSONObject.quote(bridge.statusJson(error, notice))
             webView.evaluateJavascript(
-                "if (window.laymuxNative) window.laymuxNative.onPairingChanged($status);",
-                null,
-            )
+                "(function(){if(!window.laymuxNative)return false;" +
+                    "window.laymuxNative.onPairingChanged($status);return true;})()",
+            ) { delivered ->
+                if (delivered == "true") {
+                    if (error != null) undeliveredError = null
+                    if (notice != null) undeliveredNotice = null
+                }
+            }
         }
+    }
+
+    /**
+     * Read by the pairing document as it loads. Switching surfaces reloads that
+     * page, so a message emitted before `window.laymuxNative` existed would be
+     * dropped and leave the screen with no explanation — the exact failure this
+     * change is fixing elsewhere.
+     */
+    fun consumeUndeliveredStatus(): Pair<String?, String?> {
+        val undelivered = undeliveredError to undeliveredNotice
+        undeliveredError = null
+        undeliveredNotice = null
+        return undelivered
     }
 
     override fun onStart() {
@@ -1435,11 +1493,17 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        // The scanner runs in its own activity: if its listeners never fired the
+    override fun onPostResume() {
+        super.onPostResume()
+        // The scanner runs in its own activity. Its listeners clear `scanTask`,
+        // so a completed task still parked here means they never ran and the
         // in-flight flag would block every later scan with no way back.
-        if (scanInFlight && scanTask?.isComplete == true) scanInFlight = false
+        if (scanInFlight && scanTask?.isComplete == true) {
+            scanInFlight = false
+            scanTask = null
+        }
+        // Drained after the FragmentManager dispatched resume: BiometricPrompt
+        // commits a fragment transaction and needs a RESUMED host.
         biometricPromptGate.onResumed()
     }
 
@@ -1451,9 +1515,20 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         remoteLifecycleActive = false
         suspendRemoteSessionForBackground()
+        // A prompt deferred here would otherwise surface hours later, out of
+        // context, still holding the scanned seed. Backgrounding cancels it.
+        if (biometricPromptGate.cancelPending()) {
+            pendingPairing?.close()
+            pendingPairing = null
+            pendingClientNonce = null
+            pendingDecryption?.close()
+            pendingDecryption = null
+            pendingDecryptionPurpose = null
+            remoteConnecting = false
+            notifyPairingChanged(error = "앱이 백그라운드로 전환돼 생체 인증 요청을 취소했습니다.")
+        }
         if (pendingDecryptionPurpose == DecryptionPurpose.CONNECT) {
             biometricGate.cancel()
-            biometricPromptGate.cancelPending()
             pendingDecryption?.close()
             pendingDecryption = null
             pendingDecryptionPurpose = null
@@ -1465,6 +1540,7 @@ class MainActivity : FragmentActivity() {
         policyDialog?.dismiss()
         policyDialog = null
         biometricPromptGate.cancelPending()
+        scanTask = null
         if (::biometricGate.isInitialized) biometricGate.cancel()
         pendingPairing?.close()
         pendingPairing = null

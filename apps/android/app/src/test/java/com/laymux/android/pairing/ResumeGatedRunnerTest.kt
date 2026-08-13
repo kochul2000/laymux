@@ -12,7 +12,7 @@ class ResumeGatedRunnerTest {
         runner.onResumed()
         var runs = 0
 
-        runner.runWhenResumed { runs += 1 }
+        assertTrue(runner.runWhenResumed { runs += 1 })
 
         assertEquals(1, runs)
         assertFalse(runner.hasPending)
@@ -64,14 +64,26 @@ class ResumeGatedRunnerTest {
     }
 
     @Test
-    fun onlyTheLatestDeferredRequestSurvives() {
+    fun aSecondRequestIsRejectedInsteadOfReplacingTheDeferredOne() {
+        val runner = ResumeGatedRunner()
+        val order = mutableListOf<String>()
+
+        assertTrue(runner.runWhenResumed { order.add("first") })
+        assertFalse(runner.runWhenResumed { order.add("second") })
+        runner.onResumed()
+
+        assertEquals(listOf("first"), order)
+    }
+
+    @Test
+    fun aRequestIsAcceptedAgainAfterThePendingOneRan() {
         val runner = ResumeGatedRunner()
         val order = mutableListOf<String>()
 
         runner.runWhenResumed { order.add("first") }
-        runner.runWhenResumed { order.add("second") }
         runner.onResumed()
+        assertTrue(runner.runWhenResumed { order.add("second") })
 
-        assertEquals(listOf("second"), order)
+        assertEquals(listOf("first", "second"), order)
     }
 }
