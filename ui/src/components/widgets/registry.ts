@@ -131,7 +131,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
     estimateWidth: (instance, env) =>
       estimateUsageWidgetWidth(
         readDisplay(instance.options),
-        env.claudeVisibleRows,
+        env.grokVisibleRows,
         readBarWidth(instance.options),
         env.fontSize,
       ),

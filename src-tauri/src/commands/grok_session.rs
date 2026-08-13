@@ -13,10 +13,7 @@ use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 
 /// `<configured grok command> --resume <uuid>` only. Prefix is re-derived
 /// from disk settings (ADR-0125 / ADR-0154).
-pub(crate) fn is_valid_grok_startup_command_override(
-    cmd: &str,
-    configured_command: &str,
-) -> bool {
+pub(crate) fn is_valid_grok_startup_command_override(cmd: &str, configured_command: &str) -> bool {
     let agent = crate::settings::agent_command::resolve_agent_command(
         configured_command,
         crate::settings::agent_command::DEFAULT_GROK_COMMAND,
@@ -63,10 +60,20 @@ fn grok_home() -> PathBuf {
 
 fn read_active_sessions(home: &Path) -> Vec<ActiveGrokSession> {
     let path = home.join("active_sessions.json");
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };
-    serde_json::from_str(&text).unwrap_or_default()
+    match serde_json::from_str(&text) {
+        Ok(sessions) => sessions,
+        Err(error) => {
+            tracing::warn!(
+                path = %path.display(),
+                %error,
+                "failed to parse Grok active_sessions.json"
+            );
+            Vec::new()
+        }
+    }
 }
 
 fn session_summary_path(home: &Path, session_id: &str) -> Option<PathBuf> {
@@ -188,6 +195,8 @@ pub fn get_grok_session_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
 
     #[test]
     fn resume_override_requires_uuid() {
@@ -211,5 +220,84 @@ mod tests {
             "grok --resume 019ffa7fb8c17511872f911e8dc8d179",
             "grok"
         ));
+    }
+
+    fn write_summary(home: &Path, session_id: &str) -> PathBuf {
+        let summary = home
+            .join("sessions")
+            .join("proj")
+            .join(session_id)
+            .join("summary.json");
+        std::fs::create_dir_all(summary.parent().unwrap()).unwrap();
+        std::fs::write(&summary, "{}").unwrap();
+        summary
+    }
+
+    #[test]
+    fn session_id_for_pid_matches_live_uuid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let sid = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+        std::fs::write(
+            home.join("active_sessions.json"),
+            format!(r#"[{{"session_id":"{sid}","pid":4242}}]"#),
+        )
+        .unwrap();
+        write_summary(home, sid);
+        assert_eq!(
+            session_id_for_pid(home, 4242, Some(24)).as_deref(),
+            Some(sid)
+        );
+    }
+
+    #[test]
+    fn session_id_for_pid_rejects_non_uuid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::write(
+            home.join("active_sessions.json"),
+            r#"[{"session_id":"not-a-uuid","pid":4242}]"#,
+        )
+        .unwrap();
+        write_summary(home, "not-a-uuid");
+        assert_eq!(session_id_for_pid(home, 4242, Some(24)), None);
+    }
+
+    #[test]
+    fn session_id_for_pid_requires_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let sid = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+        std::fs::write(
+            home.join("active_sessions.json"),
+            format!(r#"[{{"session_id":"{sid}","pid":4242}}]"#),
+        )
+        .unwrap();
+        assert_eq!(session_id_for_pid(home, 4242, Some(24)), None);
+    }
+
+    #[test]
+    fn session_id_for_pid_rejects_stale_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let sid = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+        std::fs::write(
+            home.join("active_sessions.json"),
+            format!(r#"[{{"session_id":"{sid}","pid":4242}}]"#),
+        )
+        .unwrap();
+        let summary = write_summary(home, sid);
+        let file = std::fs::File::options().write(true).open(summary).unwrap();
+        let old = SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
+        file.set_modified(old).unwrap();
+        assert_eq!(session_id_for_pid(home, 4242, Some(24)), None);
+    }
+
+    #[test]
+    fn malformed_active_sessions_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        std::fs::write(home.join("active_sessions.json"), "{not json").unwrap();
+        assert!(read_active_sessions(home).is_empty());
     }
 }

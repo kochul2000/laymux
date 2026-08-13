@@ -602,6 +602,76 @@ describe("persistSession", () => {
     expect(savedView.lastCodexSession).toBe("current-codex-session");
   });
 
+  it("injects lastGrokSession into workspace TerminalView panes from backend", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      profile: "WSL",
+      lastClaudeSession: "stale-claude-session",
+      lastCodexSession: "stale-codex-session",
+    });
+
+    vi.mocked(getGrokSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "019ffa7f-b8c1-7511-872f-911e8dc8d179",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastGrokSession).toBe("019ffa7f-b8c1-7511-872f-911e8dc8d179");
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+    expect(getGrokSessionIds).toHaveBeenCalledWith(24);
+  });
+
+  it("removes stale sessions when the active Grok pane cannot be attributed", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+      lastCodexSession: "stale-codex-session",
+      lastGrokSession: "019ffa7f-b8c1-7511-872f-911e8dc8d179",
+    });
+    vi.mocked(getGrokSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: null,
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+    expect(savedView).not.toHaveProperty("lastGrokSession");
+  });
+
+  it("persists neither provider when Claude and Grok attribution conflict", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+      lastGrokSession: "019ffa7f-b8c1-7511-872f-911e8dc8d179",
+    });
+    vi.mocked(getClaudeSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "current-claude-session",
+    });
+    vi.mocked(getGrokSessionIds).mockResolvedValue({
+      [`terminal-${paneId}`]: "019ffa7f-b8c1-7511-872f-911e8dc8d179",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+    expect(savedView).not.toHaveProperty("lastCodexSession");
+    expect(savedView).not.toHaveProperty("lastGrokSession");
+  });
+
   it("does not inject lastClaudeSession for non-TerminalView panes", async () => {
     useWorkspaceStore.getState().setPaneView(0, { type: "MemoView" });
 

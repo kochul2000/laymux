@@ -3,11 +3,11 @@ use laymux_lib::commands::get_remote_host_candidates;
 use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
-    FontSettings, GithubSettings, IssueReporterSettings, Keybinding, Layout, LayoutPane,
-    MemoSettings, OutputActivityBurstSettings, PowerSettings, Profile, ProfileDefaults,
-    RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets, TerminalSettings,
-    ValidationWarning, ViewerSettings, WidgetInstance, WidgetSlots, WidgetsSettings, Workspace,
-    WorkspacePane, WorkspacePaneView,
+    FontSettings, GithubSettings, GrokSettings, GrokStatusMessageMode, IssueReporterSettings,
+    Keybinding, Layout, LayoutPane, MemoSettings, OutputActivityBurstSettings, PowerSettings,
+    Profile, ProfileDefaults, RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets,
+    TerminalSettings, ValidationWarning, ViewerSettings, WidgetInstance, WidgetSlots,
+    WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -210,6 +210,13 @@ fn settings_round_trip_with_full_config() {
         workspace_selector: Default::default(),
         claude: ClaudeSettings::default(),
         codex: Default::default(),
+        grok: GrokSettings {
+            command: "grok --yolo".into(),
+            restore_session: false,
+            session_max_age_hours: 6,
+            status_message_mode: GrokStatusMessageMode::Title,
+            status_message_delimiter: " | ".into(),
+        },
         exit: Default::default(),
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
@@ -269,6 +276,21 @@ fn settings_round_trip_with_full_config() {
     // Spot-check a non-default value: a section left at its default would round
     // trip even if it never reached the file at all.
     assert!(loaded.power.keep_awake_when_busy);
+    assert_eq!(loaded.grok.command, "grok --yolo");
+    assert!(!loaded.grok.restore_session);
+    assert_eq!(loaded.grok.session_max_age_hours, 6);
+    assert_eq!(
+        loaded.grok.status_message_mode,
+        GrokStatusMessageMode::Title
+    );
+}
+
+#[test]
+fn omitted_grok_section_falls_back_to_defaults() {
+    let settings: Settings = serde_json::from_str("{}").unwrap();
+    assert_eq!(settings.grok, GrokSettings::default());
+    assert!(settings.grok.restore_session);
+    assert_eq!(settings.grok.command, "grok");
 }
 
 #[test]
