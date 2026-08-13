@@ -54,6 +54,27 @@ $env:LAYMUX_GOOGLE_WEB_CLIENT_ID='<server-web-client-id>.apps.googleusercontent.
 .\gradlew.bat :app:assembleDebug
 ```
 
+## 배포 서명
+
+공개 APK는 debug key를 사용하지 않는다. GitHub Releases APK와 Google Play가 사용자에게 전달하는
+APK는 `com.laymux.android`의 같은 장기 앱 서명 키를 사용한다. Play App Signing에는 이 기존 키를
+등록하고, Play에 AAB를 제출하는 업로드 키만 별도로 생성한다. 이 구성이어야 GitHub 설치본과 Play
+설치본이 서로를 업데이트하면서 pairing·Keystore 데이터를 유지한다([ADR-0152](../../docs/adr/0152-android-cross-store-signing-and-release.md)).
+
+GitHub `release` workflow는 다음 repository secret을 사용한다.
+
+- `ANDROID_APP_SIGNING_KEYSTORE_BASE64`
+- `ANDROID_APP_SIGNING_KEYSTORE_PASSWORD`
+- `ANDROID_APP_SIGNING_KEY_ALIAS`
+- `ANDROID_APP_SIGNING_KEY_PASSWORD`
+
+공개 repository variable `ANDROID_APP_SIGNING_CERT_SHA256`은 기대 signer 인증서를 고정하고,
+`ANDROID_GOOGLE_WEB_CLIENT_ID`는 production Credential Manager audience를 주입한다. workflow는 JVM
+테스트와 minified release build 뒤 `apksigner` 검증을 통과한 universal APK와 SHA-256 checksum을
+같은 GitHub Release에 첨부한다. 앱 서명 keystore와 비밀번호의 오프라인 복구본은 서로 분리해
+보관하며 GitHub secret을 유일한 사본으로 사용하지 않는다. Play upload key/AAB workflow는 Play
+Console 등록 뒤 별도로 연결한다.
+
 Google Cloud Console에는 `com.laymux.android` Android OAuth client와 실제 debug/release signing
 certificate SHA-1을 등록하고, 위 값에는 Cloud 서버가 검증하는 Web application client ID를 쓴다.
 ID token은 앱 JavaScript나 WebView request에 전달되지 않고 별도 native HTTPS stack이 고정 Cloud

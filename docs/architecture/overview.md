@@ -65,6 +65,12 @@ native HTTP/output bridge에 연결한다([ADR-0149](../adr/0149-android-thin-wr
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
 Local/Tailscale Direct Remote에는 적용하지 않는다([ADR-0150](../adr/0150-desktop-owned-cloud-remote-access-policy.md)).
 
+Android 배포 신원은 `com.laymux.android`의 장기 앱 서명 키 하나다. GitHub Releases의 universal APK와
+Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 사용하고, Play 제출용 AAB만 별도 업로드
+키로 서명한다. release workflow는 tag 기반 version, production Cloud/Google client 설정과 서명 secret을
+주입하고 APK signer certificate를 고정 SHA-256 fingerprint와 대조한 뒤 APK와 checksum을 첨부한다
+([ADR-0152](../adr/0152-android-cross-store-signing-and-release.md)).
+
 ---
 
 ## 3. 레이아웃 구조
