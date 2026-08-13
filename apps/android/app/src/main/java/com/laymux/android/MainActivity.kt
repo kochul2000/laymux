@@ -95,8 +95,6 @@ class MainActivity : FragmentActivity() {
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
     private var googleSignInInFlight = false
-    @Volatile private var undeliveredError: String? = null
-    @Volatile private var undeliveredNotice: String? = null
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
@@ -394,6 +392,12 @@ class MainActivity : FragmentActivity() {
         payload: PairingPayload,
         policy: PairingProtectionPolicy,
     ) {
+        // The scanner callback outlives this activity: a destroyed instance can
+        // never drain a deferred prompt, so its seed would never be wiped.
+        if (isDestroyed || isFinishing) {
+            payload.close()
+            return
+        }
         val cipher = try {
             vault.prepareEncryption(policy)
         } catch (error: Exception) {
@@ -848,6 +852,16 @@ class MainActivity : FragmentActivity() {
             notifyPairingChanged(error = "먼저 페어링하세요.")
             return
         }
+        // Checked before the generation bumps: rejecting afterwards would strand
+        // an earlier CONNECT whose prompt is still up but whose result no longer
+        // matches the current generation.
+        if (pending.policy != PairingProtectionPolicy.KEYSTORE_ONLY &&
+            biometricPromptGate.hasPending
+        ) {
+            pending.close()
+            notifyPairingChanged(error = busyOperationMessage())
+            return
+        }
         val connectionGeneration = remoteConnectionGeneration.incrementAndGet()
         remoteConnecting = true
         notifyPairingChanged(notice = "보안 세션을 준비하고 있습니다.")
@@ -856,12 +870,6 @@ class MainActivity : FragmentActivity() {
             return
         }
 
-        if (biometricPromptGate.hasPending) {
-            pending.close()
-            remoteConnecting = false
-            notifyPairingChanged(error = busyOperationMessage())
-            return
-        }
         pendingDecryption = pending
         pendingDecryptionPurpose = DecryptionPurpose.CONNECT
         biometricPromptGate.runWhenResumed {
@@ -1448,32 +1456,12 @@ class MainActivity : FragmentActivity() {
     ) {
         runOnUiThread {
             if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
-            if (error != null) undeliveredError = error
-            if (notice != null) undeliveredNotice = notice
             val status = JSONObject.quote(bridge.statusJson(error, notice))
             webView.evaluateJavascript(
-                "(function(){if(!window.laymuxNative)return false;" +
-                    "window.laymuxNative.onPairingChanged($status);return true;})()",
-            ) { delivered ->
-                if (delivered == "true") {
-                    if (error != null) undeliveredError = null
-                    if (notice != null) undeliveredNotice = null
-                }
-            }
+                "if (window.laymuxNative) window.laymuxNative.onPairingChanged($status);",
+                null,
+            )
         }
-    }
-
-    /**
-     * Read by the pairing document as it loads. Switching surfaces reloads that
-     * page, so a message emitted before `window.laymuxNative` existed would be
-     * dropped and leave the screen with no explanation — the exact failure this
-     * change is fixing elsewhere.
-     */
-    fun consumeUndeliveredStatus(): Pair<String?, String?> {
-        val undelivered = undeliveredError to undeliveredNotice
-        undeliveredError = null
-        undeliveredNotice = null
-        return undelivered
     }
 
     override fun onStart() {
@@ -1516,7 +1504,8 @@ class MainActivity : FragmentActivity() {
         remoteLifecycleActive = false
         suspendRemoteSessionForBackground()
         // A prompt deferred here would otherwise surface hours later, out of
-        // context, still holding the scanned seed. Backgrounding cancels it.
+        // context, still holding the scanned seed. Backgrounding cancels it and
+        // `onStart` re-renders the real state when the user comes back.
         if (biometricPromptGate.cancelPending()) {
             pendingPairing?.close()
             pendingPairing = null
@@ -1524,8 +1513,6 @@ class MainActivity : FragmentActivity() {
             pendingDecryption?.close()
             pendingDecryption = null
             pendingDecryptionPurpose = null
-            remoteConnecting = false
-            notifyPairingChanged(error = "앱이 백그라운드로 전환돼 생체 인증 요청을 취소했습니다.")
         }
         if (pendingDecryptionPurpose == DecryptionPurpose.CONNECT) {
             biometricGate.cancel()

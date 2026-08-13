@@ -13,10 +13,7 @@ class NativeBridge(
     private val vault: PairingVault,
 ) {
     @JavascriptInterface
-    fun getPairingStatus(): String {
-        val (error, notice) = activity.consumeUndeliveredStatus()
-        return statusJson(error, notice)
-    }
+    fun getPairingStatus(): String = statusJson()
 
     @JavascriptInterface
     fun scanPairingQr() {
