@@ -171,6 +171,7 @@ ADR 이 필요한 대표 기준:
 | [0151](0151-remote-workspace-selector-information-parity.md) | Remote 워크스페이스 목록은 PC selector의 표시 모델을 계속 미러한다 (0018·0020·0039·0047 일부 정정) | Accepted |
 | [0152](0152-android-cross-store-signing-and-release.md) | Android 앱 서명 키는 GitHub와 Play 배포에서 공유하고 업로드 키만 분리한다 (0144·0149 확장) | Accepted |
 | [0153](0153-remote-hidden-item-visibility-controls.md) | Remote 숨김 항목 편집은 PC 상태 소유자를 재사용한다 (0033·0035·0151 확장) | Accepted |
+| [0154](0154-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
