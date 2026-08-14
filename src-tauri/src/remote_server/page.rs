@@ -485,6 +485,21 @@ mod tests {
         assert!(html.contains("const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;"));
         assert!(html.contains("const HEARTBEAT_RETRY_DELAY_MS = 1000;"));
         assert!(html.contains("const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;"));
+        assert!(html.contains(".status.warning"));
+        assert!(html.contains("overflow-x: auto;"));
+        let status_css = html
+            .split(".status {")
+            .nth(1)
+            .and_then(|rules| rules.split(".status.error").next())
+            .expect("Remote status CSS must exist");
+        assert!(!status_css.contains("text-overflow: ellipsis;"));
+        assert!(html.contains("function setStatus(message, error = false, warning = false)"));
+        assert!(html.contains("statusEl.classList.toggle(\"warning\", warning);"));
+        assert!(html.contains("setStatus(\"Connection interrupted. Reconnecting...\", false, true);"));
+        assert!(html.contains(".input-mode-toggle {"));
+        assert!(html.contains("width: var(--header-control-height);"));
+        assert!(!html.contains("id=\"inputModeLabel\""));
+        assert!(html.contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
