@@ -145,6 +145,27 @@ impl GrokUsageProbe {
         Ok(all)
     }
 
+    pub fn shutdown_all(&self) -> Result<(), AppError> {
+        let handles: Vec<WorkerHandle> = {
+            let mut registry = self.registry.lock_or_err()?;
+            registry.subscriptions.clear();
+            registry
+                .entries
+                .values_mut()
+                .filter_map(|entry| {
+                    entry.subscribers.clear();
+                    entry.snapshot.status = GrokProbeStatus::Idle;
+                    entry.snapshot.next_query_at_ms = None;
+                    entry.worker.take()
+                })
+                .collect()
+        };
+        for handle in handles {
+            handle.shutdown();
+        }
+        Ok(())
+    }
+
     pub fn request_refresh(&self, config_dir: &str) -> Result<bool, AppError> {
         let registry = self.registry.lock_or_err()?;
         match registry
@@ -172,6 +193,8 @@ impl GrokUsageProbe {
         if !entry.subscribers.is_empty() {
             return Ok(None);
         }
+        entry.snapshot.status = GrokProbeStatus::Idle;
+        entry.snapshot.next_query_at_ms = None;
         Ok(entry.worker.take())
     }
 
@@ -182,6 +205,9 @@ impl GrokUsageProbe {
         Arc::new(move |snapshot: GrokUsageSnapshot| {
             if let Ok(mut registry) = registry.lock_or_err() {
                 if let Some(entry) = registry.entries.get_mut(&config_dir) {
+                    if entry.subscribers.is_empty() {
+                        return;
+                    }
                     entry.snapshot = snapshot.clone();
                 }
             }

@@ -634,7 +634,12 @@ export type GrokUsageStatus =
 export interface GrokUsageSnapshot {
   configDir: string;
   status: GrokUsageStatus;
-  rows: { key: string; percent: number | null; reset: string | null }[];
+  rows: {
+    key: string;
+    percent: number | null;
+    remaining: number | null;
+    reset: string | null;
+  }[];
   capturedAtMs: number | null;
   nextQueryAtMs: number | null;
   rawScreen: string | null;

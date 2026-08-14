@@ -18,6 +18,8 @@ const WAIT_SLICE: Duration = Duration::from_millis(100);
 const BOOT_POLL: Duration = Duration::from_secs(1);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
 const USAGE_RENDER: Duration = Duration::from_secs(5);
+const KEY_SETTLE: Duration = Duration::from_millis(300);
+const ESCAPE: &[u8] = b"\x1b";
 const READY_MARKER: &str = "grok build";
 const MISSING_MARKERS: [&str; 4] = [
     "command not found",
@@ -265,6 +267,13 @@ fn query(
     shutdown: &AtomicBool,
     snapshot: &mut GrokUsageSnapshot,
 ) {
+    // Close a leftover `/usage` panel so the next command lands on the prompt.
+    if let Err(error) = handle.write(ESCAPE) {
+        snapshot.status = GrokProbeStatus::Failed { message: error };
+        snapshot.raw_screen = Some(screen.text());
+        return;
+    }
+    wait(shutdown, KEY_SETTLE);
     if let Err(error) = handle.write(b"/usage\r") {
         snapshot.status = GrokProbeStatus::Failed { message: error };
         snapshot.raw_screen = Some(screen.text());
@@ -274,6 +283,10 @@ fn query(
     let text = screen.text();
     snapshot.raw_screen = Some(text.clone());
     let rows = parse_grok_usage_screen(&text);
+    let _ = handle.write(ESCAPE);
+    wait(shutdown, KEY_SETTLE);
+    let _ = handle.write(ESCAPE);
+    wait(shutdown, KEY_SETTLE);
     if rows.is_empty() {
         snapshot.status = GrokProbeStatus::ParseFailed;
         snapshot.rows.clear();

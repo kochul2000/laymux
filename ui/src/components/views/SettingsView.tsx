@@ -29,8 +29,10 @@ import {
   USAGE_REFRESH_MIN_SECONDS,
   USAGE_VISIBLE_ROW_KEYS,
   CODEX_USAGE_VISIBLE_ROW_KEYS,
+  GROK_USAGE_VISIBLE_ROW_KEYS,
   type UsageVisibleRow,
   type CodexUsageVisibleRow,
+  type GrokUsageVisibleRow,
   type Keybinding,
   type LanguageSetting,
 } from "@/stores/settings-store";
@@ -3360,6 +3362,48 @@ function GrokSection() {
           <option value="title-bullet">{t("grok.modeTitleBullet")}</option>
           <option value="bullet">{t("grok.modeBullet")}</option>
         </FocusSelect>
+        {(grok.statusMessageMode === "bullet-title" ||
+          grok.statusMessageMode === "title-bullet") && (
+          <div className="flex items-start gap-3 py-1.5">
+            <div className="w-36 shrink-0 pt-1">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {t("grok.delimiter")}
+              </span>
+              <p
+                className="mt-0.5 text-[11px] leading-tight"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
+                {t("grok.delimiterDesc")}
+              </p>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <FocusInput
+                  data-testid="grok-status-message-delimiter-input"
+                  className={inputCls}
+                  type="text"
+                  style={{ width: 100 }}
+                  value={grok.statusMessageDelimiter}
+                  onChange={(e) => updateGrok({ statusMessageDelimiter: e.target.value })}
+                />
+                {grok.statusMessageDelimiter !== DEFAULT_STATUS_MESSAGE_DELIMITER && (
+                  <button
+                    data-testid="grok-status-message-delimiter-reset"
+                    className="hover-bg rounded px-1.5 py-0.5 text-[11px]"
+                    style={{ color: "var(--text-secondary)" }}
+                    onClick={() =>
+                      updateGrok({
+                        statusMessageDelimiter: DEFAULT_STATUS_MESSAGE_DELIMITER,
+                      })
+                    }
+                  >
+                    {t("common.default")}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </SubGroup>
     </div>
   );
@@ -4243,19 +4287,24 @@ function UsageSection() {
   const { t } = useTranslation("settings");
   const storeClaudeUsage = useSettingsStore((s) => s.usage.claude);
   const storeCodexUsage = useSettingsStore((s) => s.usage.codex);
+  const storeGrokUsage = useSettingsStore((s) => s.usage.grok);
   const setUsageAgent = useSettingsStore((s) => s.setUsageAgent);
   const setCodexUsage = useSettingsStore((s) => s.setCodexUsage);
+  const setGrokUsage = useSettingsStore((s) => s.setGrokUsage);
   const profiles = useSettingsStore((s) => s.profiles);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const [claudeUsage, setDraftClaudeUsage] = useDraft("usage-claude", storeClaudeUsage, (v) =>
     setUsageAgent("claude", v),
   );
   const [codexUsage, setDraftCodexUsage] = useDraft("usage-codex", storeCodexUsage, setCodexUsage);
+  const [grokUsage, setDraftGrokUsage] = useDraft("usage-grok", storeGrokUsage, setGrokUsage);
 
   const updateClaude = (partial: Partial<typeof claudeUsage>) =>
     setDraftClaudeUsage((prev) => ({ ...prev, ...partial }));
   const updateCodex = (partial: Partial<typeof codexUsage>) =>
     setDraftCodexUsage((prev) => ({ ...prev, ...partial }));
+  const updateGrokUsage = (partial: Partial<typeof grokUsage>) =>
+    setDraftGrokUsage((prev) => ({ ...prev, ...partial }));
 
   const addConfigDir = () => updateClaude({ configDirs: [...claudeUsage.configDirs, ""] });
   const removeConfigDir = (index: number) =>
@@ -4270,6 +4319,12 @@ function UsageSection() {
   const codexVisibleRowLabels: Record<CodexUsageVisibleRow, string> = {
     weekly: t("usage.rowWeekly"),
     sparkWeekly: t("usage.rowSparkWeekly"),
+  };
+  const grokVisibleRowLabels: Record<GrokUsageVisibleRow, string> = {
+    weekly: t("usage.rowWeekly"),
+    monthly: t("usage.rowMonthly"),
+    credits: t("usage.rowCredits"),
+    payg: t("usage.rowPayg"),
   };
 
   return (
@@ -4439,6 +4494,90 @@ function UsageSection() {
           testIdPrefix="usage-codex"
           colors={codexUsage.colors}
           update={(partial) => updateCodex({ colors: { ...codexUsage.colors, ...partial } })}
+        />
+      </SubGroup>
+
+      <SubGroup title={t("usage.groupGrok")}>
+        <UsageProfileFields
+          usage={grokUsage}
+          update={updateGrokUsage}
+          profiles={profiles}
+          defaultProfile={defaultProfile}
+          testIdPrefix="grok-usage"
+          profileLabel={t("usage.grokProfile")}
+          profileDescription={t("usage.grokProfileDesc")}
+          refreshDescription={t("usage.grokRefreshDesc")}
+        />
+        <UsageRowSelection
+          rows={GROK_USAGE_VISIBLE_ROW_KEYS}
+          visibleRows={grokUsage.visibleRows}
+          labels={grokVisibleRowLabels}
+          testIdPrefix="grok-usage"
+          update={(visibleRows) => updateGrokUsage({ visibleRows })}
+        />
+        <div className="flex items-start gap-3 py-1.5">
+          <div className="w-36 shrink-0 pt-1">
+            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+              {t("usage.grokConfigDirs")}
+            </span>
+            <p
+              className="mt-0.5 text-[11px] leading-tight"
+              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+            >
+              {t("usage.grokConfigDirsDesc")}
+            </p>
+          </div>
+          <div className="min-w-0 flex-1">
+            {grokUsage.configDirs.map((dir, i) => (
+              <div key={i} className="mb-2 flex items-center gap-2">
+                <FocusInput
+                  data-testid={`grok-usage-config-dir-input-${i}`}
+                  placeholder={t("usage.grokConfigDirPlaceholder")}
+                  value={dir}
+                  onChange={(e) =>
+                    updateGrokUsage({
+                      configDirs: grokUsage.configDirs.map((value, index) =>
+                        index === i ? e.target.value : value,
+                      ),
+                    })
+                  }
+                />
+                <button
+                  data-testid={`grok-usage-config-dir-remove-${i}`}
+                  className="rounded px-1.5 py-0.5 text-xs"
+                  style={{
+                    background: "var(--bg-overlay)",
+                    color: "var(--red)",
+                    border: "1px solid var(--border)",
+                  }}
+                  onClick={() =>
+                    updateGrokUsage({
+                      configDirs: grokUsage.configDirs.filter((_, index) => index !== i),
+                    })
+                  }
+                >
+                  {t("common.remove")}
+                </button>
+              </div>
+            ))}
+            <button
+              data-testid="grok-usage-config-dir-add"
+              className="rounded px-2 py-1 text-xs"
+              style={{
+                background: "var(--bg-overlay)",
+                color: "var(--accent)",
+                border: "1px solid var(--border)",
+              }}
+              onClick={() => updateGrokUsage({ configDirs: [...grokUsage.configDirs, ""] })}
+            >
+              {t("usage.addGrokConfigDir")}
+            </button>
+          </div>
+        </div>
+        <UsageColorFields
+          testIdPrefix="usage-grok"
+          colors={grokUsage.colors}
+          update={(partial) => updateGrokUsage({ colors: { ...grokUsage.colors, ...partial } })}
         />
       </SubGroup>
     </div>

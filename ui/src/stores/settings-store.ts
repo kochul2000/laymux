@@ -556,6 +556,7 @@ interface SettingsState {
   /** Patch one monitored agent's usage settings. */
   setUsageAgent: (agent: "claude", data: Partial<UsageAgentSettings>) => void;
   setCodexUsage: (data: Partial<CodexUsageAgentSettings>) => void;
+  setGrokUsage: (data: Partial<GrokUsageAgentSettings>) => void;
   /** Patch one agent's meter colours. Each provider owns its own palette. */
   setUsageColors: (agent: "claude" | "codex" | "grok", data: Partial<UsageColorSettings>) => void;
   /**
@@ -1403,6 +1404,20 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           ...(data.visibleRows === undefined
             ? {}
             : { visibleRows: normalizeCodexUsageVisibleRows(data.visibleRows) }),
+        },
+      },
+    })),
+
+  setGrokUsage: (data) =>
+    set((state) => ({
+      usage: {
+        ...state.usage,
+        grok: {
+          ...state.usage.grok,
+          ...data,
+          ...(data.visibleRows === undefined
+            ? {}
+            : { visibleRows: normalizeGrokUsageVisibleRows(data.visibleRows) }),
         },
       },
     })),

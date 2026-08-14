@@ -22,6 +22,8 @@ export interface UsageDisplayRow {
   statuslineLabel?: string;
   abbreviatedLabel?: string;
   percent: number | null;
+  /** Absolute remaining when the screen has no percentage (Grok credits). */
+  valueText?: string | null;
   reset: string | null;
   elapsed: number | null;
 }
@@ -152,7 +154,12 @@ const GROK_ROW_LABELS: Record<GrokUsageVisibleRow, { label: string; short: strin
 };
 
 export function buildGrokUsageRows(
-  rows: readonly { key: string; percent: number | null; reset: string | null }[],
+  rows: readonly {
+    key: string;
+    percent: number | null;
+    remaining?: number | null;
+    reset: string | null;
+  }[],
 ): KeyedUsageRow<GrokUsageVisibleRow>[] {
   return rows.flatMap((row) => {
     if (!(row.key in GROK_ROW_LABELS)) return [];
@@ -167,6 +174,8 @@ export function buildGrokUsageRows(
           statuslineLabel: labels.short,
           abbreviatedLabel: labels.short,
           percent: row.percent,
+          valueText:
+            row.percent == null && row.remaining != null ? String(row.remaining) : undefined,
           reset: row.reset,
           elapsed: null,
         },
@@ -183,12 +192,13 @@ export function buildGrokUsageRows(
  * (ADR-0124). Two implementations of "what this row says" would let the same
  * limit read differently on the desktop and in a browser.
  */
-export function usageRowPercentText(percent: number | null): string {
+export function usageRowPercentText(percent: number | null, valueText?: string | null): string {
+  if (valueText) return valueText;
   return percent == null ? USAGE_UNAVAILABLE_TEXT : `${percent}%`;
 }
 
 export function usageRowStatuslineText(row: UsageDisplayRow): string {
-  const percent = usageRowPercentText(row.percent);
+  const percent = usageRowPercentText(row.percent, row.valueText);
   return row.statuslineLabel == null ? percent : `${row.statuslineLabel} ${percent}`;
 }
 
@@ -224,7 +234,7 @@ export function usageWidgetTooltip({
       rows
         .map(
           (row) =>
-            `${row.label}: ${usageRowPercentText(row.percent)}` +
+            `${row.label}: ${usageRowPercentText(row.percent, row.valueText)}` +
             (row.elapsed == null ? "" : ` · ${row.elapsed}% elapsed`),
         )
         .join("\n"),

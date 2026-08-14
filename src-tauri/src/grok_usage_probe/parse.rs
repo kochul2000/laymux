@@ -7,6 +7,7 @@ use serde::Serialize;
 pub struct GrokUsageRow {
     pub key: String,
     pub percent: Option<f64>,
+    pub remaining: Option<f64>,
     pub reset: Option<String>,
 }
 
@@ -31,6 +32,7 @@ pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
         rows.push(GrokUsageRow {
             key: key.to_string(),
             percent: parse_percent(rest),
+            remaining: parse_remaining(rest),
             reset: parse_reset(screen),
         });
     }
@@ -68,6 +70,14 @@ fn parse_used_of_limit(rest: &str) -> Option<f64> {
         return None;
     }
     Some(((used / limit) * 100.0).clamp(0.0, 100.0))
+}
+
+fn parse_remaining(rest: &str) -> Option<f64> {
+    let lower = rest.to_ascii_lowercase();
+    if !lower.contains("left") {
+        return None;
+    }
+    parse_leading_amount(rest)
 }
 
 fn parse_leading_amount(text: &str) -> Option<f64> {
@@ -112,6 +122,8 @@ Pay-as-you-go: $3 used of $20 limit
         );
         assert_eq!(rows[0].percent, Some(42.0));
         assert_eq!(rows[1].percent, Some(10.0));
+        assert_eq!(rows[2].percent, None);
+        assert_eq!(rows[2].remaining, Some(12.0));
         assert_eq!(rows[3].percent, Some(15.0));
         assert_eq!(rows[0].reset.as_deref(), Some("Mon 9am"));
     }

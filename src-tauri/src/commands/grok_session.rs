@@ -105,13 +105,20 @@ fn summary_within_age(path: &Path, max_age_hours: Option<u64>) -> bool {
 }
 
 fn session_id_for_pid(home: &Path, pid: u32, max_age_hours: Option<u64>) -> Option<String> {
-    let session_id = read_active_sessions(home)
+    let mut session_ids: Vec<String> = read_active_sessions(home)
         .into_iter()
-        .find(|entry| entry.pid == pid)
-        .map(|entry| entry.session_id)?;
-    if !is_valid_grok_session_id(&session_id) {
+        .filter(|entry| entry.pid == pid)
+        .map(|entry| entry.session_id)
+        .filter(|id| is_valid_grok_session_id(id))
+        .collect();
+    session_ids.sort();
+    session_ids.dedup();
+    // One Grok process can list multiple sessions; pick nothing rather than
+    // resume the first JSON entry (ADR-0154).
+    if session_ids.len() != 1 {
         return None;
     }
+    let session_id = session_ids.pop()?;
     let summary = session_summary_path(home, &session_id)?;
     if !summary_within_age(&summary, max_age_hours) {
         return None;
@@ -291,6 +298,41 @@ mod tests {
         let old = SystemTime::now() - std::time::Duration::from_secs(48 * 3600);
         file.set_modified(old).unwrap();
         assert_eq!(session_id_for_pid(home, 4242, Some(24)), None);
+    }
+
+    #[test]
+    fn session_id_for_pid_rejects_duplicate_pid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let first = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+        let second = "019ffa7f-b8c1-7511-872f-911e8dc8d180";
+        std::fs::write(
+            home.join("active_sessions.json"),
+            format!(
+                r#"[{{"session_id":"{first}","pid":4242}},{{"session_id":"{second}","pid":4242}}]"#
+            ),
+        )
+        .unwrap();
+        write_summary(home, first);
+        write_summary(home, second);
+        assert_eq!(session_id_for_pid(home, 4242, Some(24)), None);
+    }
+
+    #[test]
+    fn session_id_for_pid_accepts_duplicate_rows_of_the_same_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let sid = "019ffa7f-b8c1-7511-872f-911e8dc8d179";
+        std::fs::write(
+            home.join("active_sessions.json"),
+            format!(r#"[{{"session_id":"{sid}","pid":4242}},{{"session_id":"{sid}","pid":4242}}]"#),
+        )
+        .unwrap();
+        write_summary(home, sid);
+        assert_eq!(
+            session_id_for_pid(home, 4242, Some(24)).as_deref(),
+            Some(sid)
+        );
     }
 
     #[test]

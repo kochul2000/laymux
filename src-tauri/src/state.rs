@@ -378,6 +378,9 @@ impl Drop for AppState {
         if let Err(err) = self.usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "usage probe cleanup during app shutdown failed");
         }
+        if let Err(err) = self.grok_usage_probe.shutdown_all() {
+            tracing::warn!(error = %err, "grok usage probe cleanup during app shutdown failed");
+        }
         let handles = self
             .pty_handles
             .get_mut_or_recover_for_discard("dropping PTY handle registry");
