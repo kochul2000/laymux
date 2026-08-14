@@ -1905,7 +1905,7 @@
               <label>Name <input id="clientName" autocomplete="nickname" value="browser" /></label>
               <div class="connection-actions">
                 <button id="connect" class="primary">Connect</button>
-                <button id="release" class="danger" disabled>Release</button>
+                <button id="exit" class="danger">Exit</button>
                 <button id="refresh" disabled>Refresh</button>
               </div>
             </section>
@@ -2056,7 +2056,7 @@
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
         const connectButton = $("connect");
-        const releaseButton = $("release");
+        const exitButton = $("exit");
         const refreshButton = $("refresh");
         const connectionPanel = document.querySelector(".connection-panel");
         const connectionHint = document.querySelector(".connection-hint");
@@ -3534,7 +3534,6 @@
           dockToggleButton.disabled = !connected;
           notificationSection.classList.toggle("locked", !connected);
           notificationToggleButton.disabled = !connected;
-          releaseButton.disabled = !connected;
           refreshButton.disabled = !connected;
           connectButton.disabled = connected;
           updateTerminalControls();
@@ -8545,18 +8544,26 @@
           });
         }
 
-        async function release() {
-          if (!leaseId) return;
-          // Releasing on purpose withdraws the standing intent to hold control.
+        async function exitRemote() {
+          // Leaving always withdraws the standing intent to hold control, even
+          // when the connection has already failed and no lease remains.
           disarmAutoConnect();
           const currentLease = leaseId;
-          await releaseLease(currentLease);
+          if (currentLease) await releaseLease(currentLease).catch(() => {});
           disconnect(false);
-          setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
-          setStatus("Released remote control.");
+          stopWidgetPolling();
           // Android's former Close button released this same lease and then
-          // closed the native Remote surface. Release is now the single exit.
-          if (androidE2eMode) window.LaymuxNative.disconnectRemote();
+          // closed the native Remote surface. Exit is now the single path.
+          if (androidE2eMode) {
+            window.LaymuxNative.disconnectRemote();
+            return;
+          }
+          if (localAppMode) {
+            window.parent.postMessage({ type: "laymux:desktop-mode" }, "*");
+            return;
+          }
+          setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
+          setStatus("Exited remote control.");
         }
 
         async function releaseLease(id) {
@@ -8733,12 +8740,7 @@
         navCloseButton.addEventListener("click", () => setNavigationOpen(false));
         navScrim.addEventListener("click", () => setNavigationOpen(false));
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
-        releaseButton.addEventListener("click", () => {
-          // An explicit release is the user leaving, so the strip goes with it.
-          // A lease *lost* to the host is not — that path keeps polling.
-          stopWidgetPolling();
-          release().catch((err) => setStatus(`Release failed: ${err.message}`, true));
-        });
+        exitButton.addEventListener("click", () => exitRemote());
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
         fileViewerPathInput.addEventListener("input", () => {
           fileViewerPathRevision += 1;

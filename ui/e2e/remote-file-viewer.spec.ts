@@ -140,7 +140,7 @@ test("opens a lease-gated host file in a credential-free new tab", async ({ cont
   await page.goto("http://remote.test/remote/");
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
-  await expect(page.locator("#release")).toBeEnabled();
+  await expect(page.locator("#exit")).toBeEnabled();
 
   await page.locator("#navToggle").click();
   await page.waitForTimeout(100);
@@ -185,7 +185,7 @@ test("keeps a newer edit when a host path request finishes", async ({ context, p
   await page.goto("http://remote.test/remote/");
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
-  await expect(page.locator("#release")).toBeEnabled();
+  await expect(page.locator("#exit")).toBeEnabled();
   await page.locator("#navToggle").click();
 
   await page.locator("#fileViewerPath").fill("C:\\work\\draft.txt");
