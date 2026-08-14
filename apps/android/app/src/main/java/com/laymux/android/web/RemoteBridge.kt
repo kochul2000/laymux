@@ -6,6 +6,11 @@ import com.laymux.android.MainActivity
 /** PC-provided Remote documents receive transport access, never pairing-vault authority. */
 class RemoteBridge(private val activity: MainActivity) {
     @JavascriptInterface
+    fun setRemoteLease(leaseId: String?) {
+        activity.setRemoteLease(leaseId)
+    }
+
+    @JavascriptInterface
     fun requestRemoteHttp(requestId: String, method: String, path: String, bodyJson: String?) {
         activity.requestRemoteHttp(requestId, method, path, bodyJson)
     }
