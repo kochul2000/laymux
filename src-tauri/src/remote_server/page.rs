@@ -491,6 +491,7 @@ mod tests {
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
         assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
         assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
+        assert!(html.contains("if (androidE2eMode) window.LaymuxNative.disconnectRemote();"));
         assert!(html.contains("const localAppMode ="));
         assert!(html.contains("const autoConnectMode ="));
         assert!(html.contains("clientNameInput.value = clientNameFromParams"));

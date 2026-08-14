@@ -8554,6 +8554,9 @@
           disconnect(false);
           setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           setStatus("Released remote control.");
+          // Android's former Close button released this same lease and then
+          // closed the native Remote surface. Release is now the single exit.
+          if (androidE2eMode) window.LaymuxNative.disconnectRemote();
         }
 
         async function releaseLease(id) {
