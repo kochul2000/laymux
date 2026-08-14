@@ -101,6 +101,7 @@ class MainActivity : FragmentActivity() {
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
+    @Volatile private var remoteLeaseId: String? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, RemoteOutputStream>()
     private val remoteConnectionGeneration = AtomicLong()
@@ -336,6 +337,11 @@ class MainActivity : FragmentActivity() {
     fun remoteConnecting(): Boolean = remoteConnecting
 
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
+
+    fun setRemoteLease(leaseId: String?) {
+        remoteLeaseId = leaseId?.takeIf { it.isNotBlank() }
+    }
+
 
     fun selectedCloudInstanceId(): String? = selectedCloudInstanceId
 
@@ -1245,6 +1251,23 @@ class MainActivity : FragmentActivity() {
         remoteOpeningSession = null
         remoteConnecting = false
         val session = remoteSession ?: return
+        val leaseId = remoteLeaseId
+        if (!leaseId.isNullOrBlank()) {
+            try {
+                remoteExecutor.execute {
+                    if (!remoteLifecycleActive && remoteSession === session) {
+                        runCatching { e2eRemoteClient.transitionBackgroundLease(session, leaseId) }
+                    }
+                    if (!remoteLifecycleActive && remoteSession === session) {
+                        session.suspendForBackground()
+                        scheduleBackgroundSessionExpiry(session)
+                    }
+                }
+                return
+            } catch (_: RejectedExecutionException) {
+                // Fall through to immediate local session suspension.
+            }
+        }
         session.suspendForBackground()
         scheduleBackgroundSessionExpiry(session)
     }
@@ -1342,6 +1365,7 @@ class MainActivity : FragmentActivity() {
         remoteOpeningSession = null
         remoteSession?.close()
         remoteSession = null
+        remoteLeaseId = null
         remoteConnecting = false
     }
 

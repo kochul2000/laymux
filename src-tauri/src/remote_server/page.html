@@ -7415,6 +7415,7 @@
               return;
             }
             leaseId = status.leaseId;
+            if (androidE2eMode) window.LaymuxNative.setRemoteLease(leaseId);
             armAutoConnect();
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
@@ -8593,15 +8594,9 @@
           const currentLease = leaseId;
           if (!currentLease) return;
           if (androidE2eMode) {
-            try {
-              window.LaymuxNative.requestRemoteHttp(
-                `http-unload-${++nextAndroidHttpRequestId}`,
-                "POST",
-                "/remote/v1/session/release",
-                JSON.stringify({ leaseId: currentLease }),
-              );
-            } catch (_) {}
-            leaseId = null;
+            // Native performs the encrypted background transition. It reads
+            // the current desktop setting atomically with retain/release, so
+            // pagehide never makes a stale policy decision.
             return;
           }
           const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
@@ -8652,6 +8647,7 @@
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();
           leaseId = null;
+          if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
           clearPendingFileViewerWindows();
           setActiveTerminal(null);

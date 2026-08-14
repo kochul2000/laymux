@@ -73,6 +73,12 @@ internal class E2eRemoteClient(
         return executePending(session, pending)
     }
 
+    fun transitionBackgroundLease(session: RemoteSession, leaseId: String): JSONObject =
+        rpc(
+            session,
+            JSONObject().put("kind", "backgroundTransition").put("leaseId", leaseId),
+        )
+
     private fun executePending(session: RemoteSession, pending: PendingRpc): JSONObject {
         while (true) {
             session.requireTransportAllowed()
