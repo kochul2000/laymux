@@ -487,6 +487,10 @@ mod tests {
         assert!(html.contains("const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
+        assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
+        assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
+        assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
+        assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
         assert!(html.contains("const localAppMode ="));
         assert!(html.contains("const autoConnectMode ="));
         assert!(html.contains("clientNameInput.value = clientNameFromParams"));

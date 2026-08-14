@@ -2339,11 +2339,12 @@
         document.querySelector(".app").classList.toggle("local-app", localAppMode);
         document.querySelector(".app").classList.toggle("android-e2e", Boolean(androidE2eMode));
         if (androidE2eMode) clientNameInput.value = "Laymux Android E2E";
-        desktopModeHeaderButton.hidden = !(localAppMode || androidE2eMode);
-        desktopModeDrawerButton.hidden = !(localAppMode || androidE2eMode);
+        // Android E2E exits Remote control through Release. Keep the PC-mode
+        // switch only for the desktop app's embedded mobile view, where it
+        // changes the surrounding desktop layout rather than releasing a lease.
+        desktopModeHeaderButton.hidden = !localAppMode;
+        desktopModeDrawerButton.hidden = !localAppMode;
         if (androidE2eMode) {
-          desktopModeHeaderButton.textContent = "Close";
-          desktopModeDrawerButton.textContent = "Close";
           fileViewerSection.hidden = true;
         }
         // Layout naming (canonical, ADR-0036):
