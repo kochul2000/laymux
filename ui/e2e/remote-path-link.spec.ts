@@ -437,7 +437,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await dragPathSelection();
   await releaseHold.started.promise;
   await page.locator("#navToggle").click();
-  await page.locator("#release").click();
+  await page.locator("#exit").click();
   releaseHold.release.resolve();
   await releaseHold.resumed.promise;
   await expect(decoration).toHaveCount(0);
