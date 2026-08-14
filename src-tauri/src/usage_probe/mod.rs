@@ -23,6 +23,7 @@ use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 
 pub use schedule::{sanitize_refresh_seconds, MAX_REFRESH_SECS, MIN_REFRESH_SECS};
+pub(crate) use screen::{ProbeScreen, PROBE_COLS, PROBE_ROWS};
 pub use snapshot::{ProbeStatus, UsageLimit, UsageSnapshot};
 pub use worker::WorkerSpec;
 

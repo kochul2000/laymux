@@ -36,6 +36,8 @@ export interface WidgetsSectionBodyProps {
   onChange: (next: WidgetsSettings) => void;
   /** Claude config dirs offered for a `claudeUsage` widget; "" is the default one. */
   claudeConfigDirs: readonly string[];
+  /** Extra GROK_HOME dirs offered for a `grokUsage` widget; "" is the default one. */
+  grokConfigDirs?: readonly string[];
   /** Installed font families offered for the shared widget face. */
   fontFamilies?: readonly string[];
 }
@@ -64,6 +66,7 @@ export function WidgetsSectionBody({
   widgets,
   onChange,
   claudeConfigDirs,
+  grokConfigDirs = [],
   fontFamilies = [],
 }: WidgetsSectionBodyProps) {
   const { t } = useTranslation("settings");
@@ -173,6 +176,7 @@ export function WidgetsSectionBody({
           count={readSlot(widgets, selected.slot).length}
           widgets={widgets}
           claudeConfigDirs={claudeConfigDirs}
+          grokConfigDirs={grokConfigDirs}
           onChange={change}
           onRemoved={() => setSelectedId(null)}
         />
@@ -408,6 +412,7 @@ function WidgetDetail({
   count,
   widgets,
   claudeConfigDirs,
+  grokConfigDirs,
   onChange,
   onRemoved,
 }: {
@@ -417,6 +422,7 @@ function WidgetDetail({
   count: number;
   widgets: WidgetsSettings;
   claudeConfigDirs: readonly string[];
+  grokConfigDirs: readonly string[];
   onChange: (next: WidgetsSettings) => void;
   onRemoved: () => void;
 }) {
@@ -506,6 +512,7 @@ function WidgetDetail({
                 widgets={widgets}
                 onChange={onChange}
                 claudeConfigDirs={claudeConfigDirs}
+                grokConfigDirs={grokConfigDirs}
               />
             </div>
           ))}
@@ -522,6 +529,7 @@ function OptionControl({
   widgets,
   onChange,
   claudeConfigDirs,
+  grokConfigDirs,
 }: {
   spec: WidgetOptionSpec;
   instance: WidgetInstance;
@@ -529,6 +537,7 @@ function OptionControl({
   widgets: WidgetsSettings;
   onChange: (next: WidgetsSettings) => void;
   claudeConfigDirs: readonly string[];
+  grokConfigDirs: readonly string[];
 }) {
   const { t } = useTranslation("settings");
 
@@ -562,7 +571,11 @@ function OptionControl({
   const value =
     typeof rawValue === "string" ? rawValue : typeof defaultValue === "string" ? defaultValue : "";
   const choices =
-    spec.kind === "claudeConfigDir" ? ["", ...claudeConfigDirs.filter(Boolean)] : spec.choices;
+    spec.kind === "claudeConfigDir"
+      ? ["", ...claudeConfigDirs.filter(Boolean)]
+      : spec.kind === "grokConfigDir"
+        ? ["", ...grokConfigDirs.filter(Boolean)]
+        : spec.choices;
 
   return (
     <FocusSelect
@@ -576,7 +589,7 @@ function OptionControl({
     >
       {choices.map((choice) => (
         <option key={choice} value={choice}>
-          {spec.kind === "claudeConfigDir"
+          {spec.kind === "claudeConfigDir" || spec.kind === "grokConfigDir"
             ? choice || t("widgets.configDirDefault")
             : t(`widgets.value.${spec.key}.${choice}`)}
         </option>

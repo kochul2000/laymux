@@ -118,7 +118,7 @@ export const WIDGET_DEFINITIONS: readonly WidgetDefinition[] = [
     interactive: false,
     defaultOptions: { configDir: "", display: "both", ...BAR_HEIGHT_DEFAULTS },
     optionSpecs: [
-      { key: "configDir", kind: "text", labelKey: "widgets.option.configDir" },
+      { key: "configDir", kind: "grokConfigDir", labelKey: "widgets.option.configDir" },
       {
         key: "display",
         kind: "select",

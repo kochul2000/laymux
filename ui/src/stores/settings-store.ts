@@ -615,6 +615,7 @@ interface SettingsState {
         | "workspaceSelector"
         | "claude"
         | "codex"
+        | "grok"
         | "exit"
         | "memo"
         | "issueReporter"

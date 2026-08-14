@@ -24,6 +24,8 @@ pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 /// A Claude usage probe published a new snapshot (ADR-0102).
 pub const EVENT_USAGE_SNAPSHOT_CHANGED: &str = "usage-snapshot-changed";
+/// A Grok usage probe published a new snapshot (ADR-0154).
+pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed";
 /// Emitted when the OS sleep inhibitor state changes without a request having
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
 pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
@@ -64,6 +66,9 @@ pub const ENV_WSLENV: &str = "WSLENV";
 /// Claude Code's config directory override. Set on a usage probe PTY so one
 /// probe can monitor a non-default profile.
 pub const ENV_CLAUDE_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
+/// Grok Build state directory override. Set on a usage probe PTY so one
+/// probe can monitor a non-default `$GROK_HOME`.
+pub const ENV_GROK_HOME: &str = "GROK_HOME";
 /// Codex CLI's state directory override. Session rollout discovery follows it.
 pub const ENV_CODEX_HOME: &str = "CODEX_HOME";
 /// Codex CLI's SQLite state directory override. Defaults to `CODEX_HOME`.

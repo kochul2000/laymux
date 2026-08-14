@@ -4215,6 +4215,7 @@ function WidgetsSection() {
   const storeWidgets = useSettingsStore((s) => s.widgets);
   const setWidgets = useSettingsStore((s) => s.setWidgets);
   const claudeConfigDirs = useSettingsStore((s) => s.usage.claude.configDirs);
+  const grokConfigDirs = useSettingsStore((s) => s.usage.grok.configDirs);
   const monoFonts = useMonospacedFonts();
   const [widgets, setDraftWidgets] = useDraft("widgets", storeWidgets, setWidgets);
 
@@ -4231,6 +4232,7 @@ function WidgetsSection() {
         widgets={widgets}
         onChange={setDraftWidgets}
         claudeConfigDirs={claudeConfigDirs}
+        grokConfigDirs={grokConfigDirs}
         fontFamilies={monoFonts}
       />
     </div>

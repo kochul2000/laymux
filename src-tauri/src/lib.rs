@@ -23,6 +23,7 @@ pub mod error;
 pub mod frontend_health;
 pub mod git_watcher;
 pub mod grok_activity;
+pub mod grok_usage_probe;
 pub mod ipc_server;
 pub mod lock_ext;
 pub mod osc;
@@ -182,6 +183,21 @@ pub fn run() {
                 }
             }
 
+            {
+                let grok_app = app.handle().clone();
+                if let Err(error) = app_state.grok_usage_probe.set_sink(Arc::new(
+                    move |snapshot: &grok_usage_probe::GrokUsageSnapshot| {
+                        if let Err(error) =
+                            grok_app.emit(constants::EVENT_GROK_USAGE_SNAPSHOT_CHANGED, snapshot)
+                        {
+                            tracing::warn!(%error, "failed to emit grok usage snapshot");
+                        }
+                    },
+                )) {
+                    tracing::warn!(%error, "failed to install grok usage snapshot sink");
+                }
+            }
+
             // Set window icon (for taskbar in dev mode)
             if let Some(window) = app.get_webview_window("main") {
                 if let Ok(icon) = Image::from_bytes(include_bytes!("../icons/icon.png")) {
@@ -291,7 +307,10 @@ pub fn run() {
             commands::get_usage_snapshot,
             commands::refresh_usage_probe,
             commands::get_codex_usage_snapshot,
+            commands::subscribe_grok_usage_probe,
+            commands::unsubscribe_grok_usage_probe,
             commands::get_grok_usage_snapshot,
+            commands::refresh_grok_usage_probe,
             commands::get_remote_access_status,
             commands::set_remote_runtime_access,
             commands::get_remote_control_status,

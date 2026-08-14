@@ -2,9 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri-api", () => ({
   getUsageSnapshot: vi.fn(),
+  getGrokUsageSnapshot: vi.fn(),
 }));
 
-import { getUsageSnapshot, type UsageSnapshot } from "@/lib/tauri-api";
+import { getGrokUsageSnapshot, getUsageSnapshot, type UsageSnapshot } from "@/lib/tauri-api";
 import { WIDGET_DEFINITIONS } from "@/components/widgets/registry";
 import { useNotificationStore } from "@/stores/notification-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -56,6 +57,14 @@ describe("buildRemoteWidgetSnapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getUsageSnapshot).mockResolvedValue(claudeSnapshot());
+    vi.mocked(getGrokUsageSnapshot).mockResolvedValue({
+      configDir: "",
+      status: { type: "idle" },
+      rows: [],
+      capturedAtMs: null,
+      nextQueryAtMs: null,
+      rawScreen: null,
+    });
     useSettingsStore.setState({ widgets: defaultWidgets() });
     useTerminalStore.setState(useTerminalStore.getInitialState());
     useWorkspaceStore.setState({ activeWorkspaceId: "ws-1" });

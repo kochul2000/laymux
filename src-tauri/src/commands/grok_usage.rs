@@ -1,93 +1,82 @@
-//! Grok `/usage` snapshot contract (ADR-0154).
+//! Tauri commands for the Grok usage probe (ADR-0154).
 //!
-//! Collection is a demand-based headless probe owned separately; this
-//! module owns the closed row-key parse and the read path that never
-//! starts a worker.
+//! Thin entry points: they resolve settings into a [`WorkerSpec`] and delegate
+//! to [`GrokUsageProbe`]. Reads never start a worker.
 
-use serde::Serialize;
+use std::sync::Arc;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct GrokUsageRow {
-    pub key: String,
-    pub percent: Option<f64>,
-    pub reset: Option<String>,
-}
+use tauri::State;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct GrokUsageSnapshot {
-    pub status: String,
-    pub rows: Vec<GrokUsageRow>,
-    pub captured_at_ms: Option<u64>,
-    pub message: Option<String>,
-}
+use crate::grok_usage_probe::{GrokUsageSnapshot, WorkerSpec};
+use crate::state::AppState;
 
-const ROW_KEYS: &[(&str, &str)] = &[
-    ("Weekly limit", "weekly"),
-    ("Monthly limit", "monthly"),
-    ("Credits", "credits"),
-    ("Pay-as-you-go", "payg"),
-    ("Pay as you go", "payg"),
-];
+fn resolve_spec(config_dir: String) -> Result<WorkerSpec, String> {
+    let settings = crate::settings::load_settings();
+    let usage = &settings.usage.grok;
+    let profile_name = if usage.profile.is_empty() {
+        settings.default_profile.clone()
+    } else {
+        usage.profile.clone()
+    };
+    let profile = settings
+        .profiles
+        .iter()
+        .find(|candidate| candidate.name == profile_name)
+        .ok_or_else(|| format!("Terminal profile '{profile_name}' does not exist"))?;
 
-/// Parse a `/usage` screen dump into the closed row-key set.
-pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
-    let mut rows = Vec::new();
-    for line in screen.lines() {
-        let Some((key, rest)) = match_row(line) else {
-            continue;
-        };
-        if rows.iter().any(|row: &GrokUsageRow| row.key == key) {
-            continue;
-        }
-        rows.push(GrokUsageRow {
-            key: key.to_string(),
-            percent: parse_percent(rest),
-            reset: parse_reset(screen),
-        });
-    }
-    rows
-}
-
-fn match_row(line: &str) -> Option<(&'static str, &str)> {
-    for (label, key) in ROW_KEYS {
-        if let Some(idx) = line.find(label) {
-            return Some((*key, line[idx + label.len()..].trim()));
-        }
-    }
-    None
-}
-
-fn parse_percent(rest: &str) -> Option<f64> {
-    let percent_at = rest.find('%')?;
-    let before = rest[..percent_at].trim();
-    let number = before
-        .rsplit(|c: char| !(c.is_ascii_digit() || c == '.'))
-        .find(|part| !part.is_empty())?;
-    number.parse().ok()
-}
-
-fn parse_reset(screen: &str) -> Option<String> {
-    for prefix in ["Next reset:", "Resets:"] {
-        if let Some(idx) = screen.find(prefix) {
-            let rest = screen[idx + prefix.len()..].lines().next()?.trim();
-            if !rest.is_empty() {
-                return Some(rest.to_string());
-            }
-        }
-    }
-    None
+    Ok(WorkerSpec {
+        config_dir,
+        profile: profile.name.clone(),
+        command_line: profile.command_line.clone(),
+        starting_directory: profile.starting_directory.clone(),
+        refresh_seconds: usage.refresh_seconds,
+    })
 }
 
 #[tauri::command]
-pub fn get_grok_usage_snapshot(_config_dir: String) -> GrokUsageSnapshot {
-    GrokUsageSnapshot {
-        status: "idle".into(),
-        rows: Vec::new(),
-        captured_at_ms: None,
-        message: None,
-    }
+pub fn subscribe_grok_usage_probe(
+    subscriber_id: String,
+    config_dir: String,
+    state: State<Arc<AppState>>,
+) -> Result<GrokUsageSnapshot, String> {
+    let spec = resolve_spec(config_dir)?;
+    state
+        .grok_usage_probe
+        .subscribe(&subscriber_id, spec)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn unsubscribe_grok_usage_probe(
+    subscriber_id: String,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .grok_usage_probe
+        .unsubscribe(&subscriber_id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn get_grok_usage_snapshot(
+    config_dir: String,
+    state: State<Arc<AppState>>,
+) -> Result<GrokUsageSnapshot, String> {
+    state
+        .grok_usage_probe
+        .snapshot(&config_dir)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn refresh_grok_usage_probe(
+    config_dir: String,
+    state: State<Arc<AppState>>,
+) -> Result<bool, String> {
+    state
+        .grok_usage_probe
+        .request_refresh(&config_dir)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
@@ -95,29 +84,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_weekly_monthly_credits() {
-        let screen = "\
-Usage
-Weekly limit: 42%
-Monthly limit: 10%
-Next reset: Mon 9am
-Credits: 12 left
-Pay-as-you-go: $3 used of $20 limit
-";
-        let rows = parse_grok_usage_screen(screen);
-        assert_eq!(rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), [
-            "weekly", "monthly", "credits", "payg"
-        ]);
-        assert_eq!(rows[0].percent, Some(42.0));
-        assert_eq!(rows[1].percent, Some(10.0));
-        assert_eq!(rows[0].reset.as_deref(), Some("Mon 9am"));
-    }
-
-    #[test]
-    fn parse_ignores_unknown_and_duplicate_labels() {
-        let screen = "Weekly limit: 1%\nWeekly limit: 2%\nMystery: 9%\n";
-        let rows = parse_grok_usage_screen(screen);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].percent, Some(1.0));
+    fn spec_carries_the_requested_config_dir() {
+        if let Ok(spec) = resolve_spec("/home/me/.grok-work".into()) {
+            assert_eq!(spec.config_dir, "/home/me/.grok-work");
+        }
     }
 }

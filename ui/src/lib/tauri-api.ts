@@ -622,15 +622,49 @@ export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageS
   return invoke("get_codex_usage_snapshot", { configDir });
 }
 
+export type GrokUsageStatus =
+  | { type: "idle" }
+  | { type: "starting" }
+  | { type: "ready" }
+  | { type: "grokMissing" }
+  | { type: "startupTimeout" }
+  | { type: "parseFailed" }
+  | { type: "failed"; message: string };
+
 export interface GrokUsageSnapshot {
-  status: string;
+  configDir: string;
+  status: GrokUsageStatus;
   rows: { key: string; percent: number | null; reset: string | null }[];
   capturedAtMs: number | null;
-  message: string | null;
+  nextQueryAtMs: number | null;
+  rawScreen: string | null;
+}
+
+export async function subscribeGrokUsageProbe(
+  subscriberId: string,
+  configDir: string,
+): Promise<GrokUsageSnapshot> {
+  return invoke("subscribe_grok_usage_probe", { subscriberId, configDir });
+}
+
+export async function unsubscribeGrokUsageProbe(subscriberId: string): Promise<void> {
+  return invoke("unsubscribe_grok_usage_probe", { subscriberId });
 }
 
 export async function getGrokUsageSnapshot(configDir = ""): Promise<GrokUsageSnapshot> {
   return invoke("get_grok_usage_snapshot", { configDir });
+}
+
+export async function refreshGrokUsageProbe(configDir: string): Promise<boolean> {
+  return invoke("refresh_grok_usage_probe", { configDir });
+}
+
+export function onGrokUsageSnapshotChanged(
+  callback: (snapshot: GrokUsageSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<GrokUsageSnapshot>("grok-usage-snapshot-changed", (event) => {
+    callback(event.payload);
+  });
 }
 
 // -- GitHub issue/PR list (issue #708) --

@@ -39,6 +39,11 @@ export type WidgetOptionSpec =
     }
   | {
       key: string;
+      kind: "grokConfigDir";
+      labelKey: string;
+    }
+  | {
+      key: string;
       kind: "number";
       labelKey: string;
       min: number;

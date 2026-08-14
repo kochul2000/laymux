@@ -793,6 +793,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/terminals/:id/write` | 터미널 입력 |
 | GET | `/api/v1/terminals/:id/output?lines=N` | 터미널 출력 읽기 |
 | GET | `/api/v1/usage` | Claude 사용량 스냅샷 목록 (config dir 당 1개 → `{ usage: [...], count }`). 각 항목은 `session` · `weekAll` · `weekModel`(+`weekModelLabel`, 예 `Fable`) 3행. 읽기 전용·부작용 없음 — probe 를 기동시키지 않으므로 빈 목록은 "구독 없음"을 뜻한다. `status.type === "ready"` 일 때만 숫자가 유효하고, `reset` 은 Claude Code 원문 그대로다 |
+| GET | `/api/v1/usage/grok` | Grok 사용량 스냅샷 목록 (GROK_HOME 당 1개 → `{ usage: [...], count }`). 읽기 전용·부작용 없음 — probe 를 기동시키지 않는다. 행 키는 `weekly`/`monthly`/`credits`/`payg` ([ADR-0154](../adr/0154-grok-first-class-agent.md)) |
 | GET | `/api/v1/memos` | 모든 메모 목록 조회 (`cache/memo.json` → `{ memos: [{ key, content }, ...], count }`) |
 | GET | `/api/v1/memos/:key` | 특정 키의 메모 내용 조회 (없으면 404) |
 | GET | `/api/v1/notifications` | 알림 목록 |
@@ -971,6 +972,7 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_claude_usage` | 백엔드 상태 | Claude 사용량 스냅샷 (config dir 당 1개). 최대 10분 낡을 수 있고(`capturedAtMs`) 조회가 probe 를 기동시키지 않는다 |
+| `get_grok_usage` | 백엔드 상태 | Grok 사용량 스냅샷 (`GROK_HOME` 당 1개). 조회가 probe 를 기동시키지 않는다 |
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 

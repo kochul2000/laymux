@@ -180,6 +180,9 @@ pub struct AppState {
     /// Claude usage probes. Owns headless `claude` PTYs that are deliberately
     /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0102).
     pub usage_probe: Arc<crate::usage_probe::UsageProbe>,
+    /// Grok usage probes. Owns headless `grok` PTYs that are deliberately
+    /// absent from `terminals`, keyed by `GROK_HOME` (ADR-0154).
+    pub grok_usage_probe: Arc<crate::grok_usage_probe::GrokUsageProbe>,
     /// The process's only OS sleep inhibitor (ADR-0114). Owns its own mutex and
     /// participates in no ordering above: nothing acquires it while holding
     /// another AppState lock.
@@ -356,6 +359,7 @@ impl AppState {
             settings_update_lock: tokio::sync::Mutex::new(()),
             frontend_health: Arc::new(crate::frontend_health::FrontendHealthState::default()),
             usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
+            grok_usage_probe: Arc::new(crate::grok_usage_probe::GrokUsageProbe::new()),
             sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
         }
     }

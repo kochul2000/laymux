@@ -6,7 +6,7 @@
  * good number as if it were current (ADR-0102, ADR-0105).
  */
 
-import type { CodexUsageStatus, UsageProbeStatus } from "@/lib/tauri-api";
+import type { CodexUsageStatus, GrokUsageStatus, UsageProbeStatus } from "@/lib/tauri-api";
 
 /**
  * Exhaustive on purpose: the `never` binding makes a new `UsageProbeStatus`
@@ -27,6 +27,29 @@ export function claudeUsageStatusMessage(status: UsageProbeStatus): string | nul
     case "parseFailed":
       return "Could not read the /usage panel";
     case "upstreamError":
+    case "failed":
+      return status.message;
+    default: {
+      const unhandled: never = status;
+      return unhandled;
+    }
+  }
+}
+
+export function grokUsageStatusMessage(status: GrokUsageStatus): string | null {
+  switch (status.type) {
+    case "ready":
+      return null;
+    case "idle":
+      return "Probe stopped";
+    case "starting":
+      return "Starting Grok…";
+    case "grokMissing":
+      return "`grok` not found in this profile's shell";
+    case "startupTimeout":
+      return "Grok did not become ready";
+    case "parseFailed":
+      return "Could not read the /usage panel";
     case "failed":
       return status.message;
     default: {

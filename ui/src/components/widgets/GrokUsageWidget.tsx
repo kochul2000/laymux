@@ -1,47 +1,37 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getGrokUsageSnapshot } from "@/lib/tauri-api";
+import { useMemo } from "react";
+import { useGrokUsageSnapshot } from "@/hooks/useGrokUsageSnapshot";
 import { useSettingsStore } from "@/stores/settings-store";
 import { buildGrokUsageRows, selectVisibleRows } from "@/lib/usage-rows";
-import { UsageWidgetBody, type UsageWidgetDisplay } from "./UsageWidgetBody";
-import type { WidgetRenderProps } from "./types";
+import { grokUsageStatusMessage } from "@/lib/usage-status";
+import { UsageWidgetBody } from "./UsageWidgetBody";
+import { readBarHeight, readBarWidth, readDisplay, readElapsedHeight } from "./widget-options";
+import type { WidgetComponentProps } from "./types";
 
-export function GrokUsageWidget({ instance }: WidgetRenderProps) {
-  const usage = useSettingsStore((s) => s.usage.grok);
-  const configDir = typeof instance.options.configDir === "string" ? instance.options.configDir : "";
-  const display = (instance.options.display as UsageWidgetDisplay | undefined) ?? "both";
-  const [rows, setRows] = useState(buildGrokUsageRows([]));
-
-  const refresh = useCallback(() => {
-    void getGrokUsageSnapshot(configDir).then((snapshot) => {
-      setRows(
-        buildGrokUsageRows(
-          snapshot.rows.map((row) => ({
-            key: row.key,
-            percent: row.percent ?? null,
-            reset: row.reset ?? null,
-          })),
-        ),
-      );
-    });
-  }, [configDir]);
-
-  useEffect(() => {
-    refresh();
-    const id = window.setInterval(refresh, Math.max(usage.refreshSeconds, 600) * 1000);
-    return () => window.clearInterval(id);
-  }, [refresh, usage.refreshSeconds]);
-
-  const visible = useMemo(
-    () => selectVisibleRows(rows, usage.visibleRows),
-    [rows, usage.visibleRows],
+export function GrokUsageWidget({ instance, dragRegion }: WidgetComponentProps) {
+  const configDir =
+    typeof instance.options.configDir === "string" ? instance.options.configDir : "";
+  const { snapshot, error } = useGrokUsageSnapshot(`widget-${instance.id}`, configDir);
+  const visibleRows = useSettingsStore((s) => s.usage.grok.visibleRows);
+  const colors = useSettingsStore((s) => s.usage.grok.colors);
+  const rows = useMemo(
+    () => selectVisibleRows(buildGrokUsageRows(snapshot.rows), visibleRows),
+    [snapshot.rows, visibleRows],
   );
 
   return (
     <UsageWidgetBody
-      rows={visible}
-      display={display}
-      colors={usage.colors}
-      options={instance.options}
+      testId={`widget-grok-usage-${instance.id}`}
+      label="Grok"
+      rows={rows}
+      display={readDisplay(instance.options)}
+      colors={colors}
+      usedHeight={readBarHeight(instance.options)}
+      elapsedHeight={readElapsedHeight(instance.options)}
+      barWidth={readBarWidth(instance.options)}
+      message={error ?? grokUsageStatusMessage(snapshot.status)}
+      capturedAtMs={snapshot.capturedAtMs}
+      configDir={configDir}
+      dragRegion={dragRegion}
     />
   );
 }

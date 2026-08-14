@@ -252,8 +252,7 @@ pub fn create_terminal_session(
         } else if super::is_valid_codex_startup_command_override(&command, &settings.codex.command)
         {
             Some(ValidatedStartupOverride::Codex(command))
-        } else if super::is_valid_grok_startup_command_override(&command, &settings.grok.command)
-        {
+        } else if super::is_valid_grok_startup_command_override(&command, &settings.grok.command) {
             Some(ValidatedStartupOverride::Grok(command))
         } else {
             None
@@ -798,7 +797,8 @@ pub fn create_terminal_session(
                         .map(|known| known.contains(&terminal_id))
                         .unwrap_or(false);
 
-                let mut cr_grok = crate::grok_activity::process_grok_title(&event.data, was_detected);
+                let mut cr_grok =
+                    crate::grok_activity::process_grok_title(&event.data, was_detected);
 
                 if cr_grok.exited
                     && crate::process_tree::suppresses_false_exit(
@@ -1608,6 +1608,11 @@ pub fn close_terminal_session(
 
     // Clean up Codex terminal tracking
     if let Ok(mut known) = state.known_codex_terminals.lock_or_err() {
+        known.remove(&id);
+    }
+
+    // Clean up Grok terminal tracking
+    if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
         known.remove(&id);
     }
 
