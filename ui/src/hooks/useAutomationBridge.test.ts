@@ -6,6 +6,8 @@ import {
   handleAutomationRequest,
   handleAsyncAutomationRequest,
   BRIDGE_REQUEST_BUDGET_MS,
+  AUTOMATION_PANE_CLEAR_DEADLINE_MS,
+  AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS,
   WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS,
 } from "./useAutomationBridge";
 import html2canvas from "html2canvas";
@@ -26,6 +28,7 @@ import {
   readFileForViewer,
   reportFrontendHealth,
   writeToTerminal,
+  writeTerminalInput,
   type AutomationRequest,
 } from "@/lib/tauri-api";
 import { frontendBridgeCounters, resetFrontendHealthForTest } from "@/lib/frontend-health-reporter";
@@ -138,6 +141,11 @@ describe("bridge timing budget", () => {
     expect(WORKSPACE_SWITCH_LANDING_READY_TIMEOUT_MS + 1_000).toBeLessThanOrEqual(
       BRIDGE_REQUEST_BUDGET_MS,
     );
+  });
+
+  it("keeps pane-clear waits before the hard deadline and bridge timeout", () => {
+    expect(AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS).toBeLessThan(AUTOMATION_PANE_CLEAR_DEADLINE_MS);
+    expect(AUTOMATION_PANE_CLEAR_DEADLINE_MS).toBeLessThan(BRIDGE_REQUEST_BUDGET_MS);
   });
 });
 
@@ -3868,5 +3876,103 @@ describe("workspaces.clear over the async bridge (issue #726, ADR-0137)", () => 
 
     expect(result.success).toBe(false);
     expect(vi.mocked(writeToTerminal)).not.toHaveBeenCalled();
+  });
+});
+
+describe("panes.clear over the async bridge (ADR-0158)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(writeTerminalInput).mockResolvedValue(undefined);
+    useWorkspaceStore.setState(useWorkspaceStore.getInitialState());
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    useDockStore.setState(useDockStore.getInitialState());
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  function seedPanes() {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-clear",
+          name: "Clear",
+          panes: [
+            { id: "idle", x: 0, y: 0, w: 0.5, h: 1, view: { type: "TerminalView" } },
+            { id: "memo", x: 0.5, y: 0, w: 0.5, h: 1, view: { type: "MemoView" } },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-clear",
+      workspaceDisplayOrder: [],
+    });
+    const bottom = useDockStore.getState().getDock("bottom")!;
+    useDockStore.setState({
+      docks: [
+        ...useDockStore.getState().docks.filter((dock) => dock.position !== "bottom"),
+        {
+          ...bottom,
+          panes: [{ id: "dock-clear", x: 0, y: 0, w: 1, h: 1, view: { type: "TerminalView" } }],
+        },
+      ],
+    });
+    for (const paneId of ["idle", "dock-clear"]) {
+      useTerminalStore.getState().registerInstance({
+        id: `terminal-${paneId}`,
+        profile: "WSL",
+        syncGroup: "ws-clear",
+        workspaceId: "ws-clear",
+      });
+      useTerminalStore.getState().updateInstanceInfo(`terminal-${paneId}`, { sessionReady: true });
+    }
+  }
+
+  function paneClearRequest(paneId: string): AutomationRequest {
+    return {
+      requestId: "pane-clear-1",
+      category: "action",
+      target: "panes",
+      method: "clear",
+      params: { paneId },
+    };
+  }
+
+  it("actually clears only the named grid pane and returns effective settings", async () => {
+    seedPanes();
+
+    const result = await handleAsyncAutomationRequest(paneClearRequest("idle"));
+
+    expect(result.data).toMatchObject({
+      paneId: "idle",
+      cleared: ["terminal-idle"],
+      waitCapped: false,
+      interruptRounds: 2,
+      settleMs: 400,
+    });
+    expect(vi.mocked(writeTerminalInput)).toHaveBeenCalledExactlyOnceWith(
+      "terminal-idle",
+      "clear",
+      true,
+    );
+  });
+
+  it("reaches a dock pane by pane id", async () => {
+    seedPanes();
+
+    const result = await handleAsyncAutomationRequest(paneClearRequest("dock-clear"));
+
+    expect(result.data).toMatchObject({
+      paneId: "dock-clear",
+      cleared: ["terminal-dock-clear"],
+    });
+  });
+
+  it("rejects non-terminal and unknown pane ids", async () => {
+    seedPanes();
+
+    for (const paneId of ["memo", "missing"]) {
+      const result = await handleAsyncAutomationRequest(paneClearRequest(paneId));
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Pane clear error");
+    }
+    expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
   });
 });

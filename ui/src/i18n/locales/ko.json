@@ -323,7 +323,20 @@
       "interruptRounds": "Ctrl+C 전송 횟수",
       "interruptRoundsDesc": "각 터미널에 Ctrl+C를 몇 번 보낼지 정합니다 (1~10). Claude·Codex는 보통 2회 이상 필요합니다.",
       "interruptSettle": "대기 시간 (ms)",
-      "interruptSettleDesc": "마지막 Ctrl+C 이후 창을 닫기 전까지 기다리는 시간. 세션 ID가 스크롤백에 출력될 여유를 줍니다 (0~10000)."
+      "interruptSettleDesc": "마지막 Ctrl+C 이후 창을 닫기 전까지 기다리는 시간. 세션 ID가 스크롤백에 출력될 여유를 줍니다 (0~10000).",
+      "paneClearGroup": "포커스 Pane 실제 클리어",
+      "paneClearGroupDesc": "Alt+L은 포커스된 terminal pane 하나를 실제로 클리어합니다. shell에는 아래 명령을, Claude Code·Codex·Grok에는 /clear를 보냅니다. 전용 처리기가 없는 대화형 앱에는 아무것도 쓰지 않습니다.",
+      "paneClearShellCommand": "shell 클리어 명령",
+      "paneClearShellCommandDesc": "일반 shell에 제출할 명령입니다. cmd.exe는 cls를 씁니다.",
+      "paneClearBusyPolicy": "작업 중인 pane 처리",
+      "paneClearBusyPolicySkip": "그냥 두기",
+      "paneClearBusyPolicyInterrupt": "멈추고 클리어",
+      "paneClearBusyPolicyRestart": "view 재시작",
+      "paneClearBusyPolicyDesc": "작업 중 Alt+L의 동작을 정합니다. 재시작은 새 터미널 세션을 만들어 스크롤백을 버리고, 멈추고 클리어는 먼저 Ctrl+C를 보냅니다.",
+      "paneClearInterruptRounds": "Ctrl+C 전송 횟수",
+      "paneClearInterruptRoundsDesc": "클리어 전에 Ctrl+C를 몇 번 보낼지 정합니다 (1~10).",
+      "paneClearSettle": "대기 시간 (ms)",
+      "paneClearSettleDesc": "마지막 Ctrl+C 이후 클리어 입력을 제출하기까지 기다리는 시간입니다 (0~10000)."
     },
     "interface": {
       "title": "인터페이스",

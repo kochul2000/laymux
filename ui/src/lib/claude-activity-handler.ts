@@ -61,6 +61,16 @@ function isInputPending(activityMessage: string | undefined): boolean {
 }
 
 export class ClaudeActivityHandler extends ShellActivityHandler {
+  clearInput(): string {
+    return "/clear";
+  }
+
+  isBusy(raw: RawTerminalState): boolean {
+    if (super.isBusy(raw)) return true;
+    if (isInputPending(raw.activityMessage)) return true;
+    return isClaudeWorkingTitle(raw.title);
+  }
+
   shouldPreserveActivityOnExitCode(): boolean {
     return true;
   }

@@ -156,6 +156,13 @@ export const DEFAULT_KEYBINDINGS: KeybindingDef[] = [
   },
   // -- Pane --
   {
+    id: "pane.clearTerminal",
+    label: "포커스 Pane 실제 클리어",
+    defaultKeys: "Alt+L",
+    group: "Pane",
+    passThroughTerminal: true,
+  },
+  {
     id: "pane.focus",
     label: "Pane 포커스 이동",
     defaultKeys: "Alt+Arrow",

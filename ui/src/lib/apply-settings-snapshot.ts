@@ -96,6 +96,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.codex ? { codex: rawSettings.codex } : {}),
     ...(rawSettings.grok ? { grok: rawSettings.grok } : {}),
     ...(rawSettings.exit ? { exit: rawSettings.exit } : {}),
+    ...(rawSettings.paneClear ? { paneClear: rawSettings.paneClear } : {}),
     ...(rawSettings.issueReporter ? { issueReporter: rawSettings.issueReporter } : {}),
     ...(rawSettings.fileExplorer ? { fileExplorer: rawSettings.fileExplorer } : {}),
     ...(rawSettings.viewer ? { viewer: rawSettings.viewer } : {}),

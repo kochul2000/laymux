@@ -23,6 +23,16 @@ export function extractCodexTitleMessage(title: string | undefined): string | un
 }
 
 export class CodexActivityHandler extends ShellActivityHandler {
+  clearInput(): string {
+    return "/clear";
+  }
+
+  isBusy(raw: RawTerminalState): boolean {
+    if (super.isBusy(raw)) return true;
+    if (isInputPending(raw.activityMessage)) return true;
+    return startsWithBrailleSpinner(raw.title);
+  }
+
   shouldPreserveActivityOnTitleReset(): boolean {
     return true;
   }

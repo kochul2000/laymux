@@ -44,6 +44,7 @@ describe("settings snapshot", () => {
       stabilizeInteractiveCursor: false,
       maxOutputCacheKB: 512,
     });
+    useSettingsStore.getState().setPaneClear({ shellCommand: "cls", busyPolicy: "interrupt" });
 
     const snapshot = await collectSettingsSnapshot();
 
@@ -58,6 +59,7 @@ describe("settings snapshot", () => {
       stabilizeInteractiveCursor: false,
       maxOutputCacheKB: 512,
     });
+    expect(snapshot.paneClear).toMatchObject({ shellCommand: "cls", busyPolicy: "interrupt" });
     expect(snapshot.workspaces).toHaveLength(1);
     expect(snapshot.layouts).toHaveLength(1);
     expect(snapshot.docks).toHaveLength(4);
@@ -68,6 +70,12 @@ describe("settings snapshot", () => {
     snapshot.appearance.themeId = "github-light";
     snapshot.profiles[0].cursorBlink = false;
     snapshot.profiles[0].stabilizeInteractiveCursor = false;
+    snapshot.paneClear = {
+      shellCommand: "reset",
+      busyPolicy: "restart",
+      interruptRounds: 3,
+      settleMs: 250,
+    };
 
     applySettingsSnapshot(snapshot, { includeStructural: false });
 
@@ -76,6 +84,7 @@ describe("settings snapshot", () => {
       cursorBlink: false,
       stabilizeInteractiveCursor: false,
     });
+    expect(useSettingsStore.getState().paneClear).toEqual(snapshot.paneClear);
   });
 
   it("saves before applying so a persistence failure leaves runtime state unchanged", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useSettingsStore, makeDefaultColorScheme } from "./settings-store";
+import { DEFAULT_PANE_CLEAR } from "@/lib/pane-clear";
 
 describe("settings-store", () => {
   beforeEach(() => {
@@ -16,6 +17,29 @@ describe("settings-store", () => {
 
   it("defaults language to system", () => {
     expect(useSettingsStore.getState().language).toBe("system");
+  });
+
+  it("exposes safe focused-pane clear defaults", () => {
+    expect(useSettingsStore.getState().paneClear).toEqual(DEFAULT_PANE_CLEAR);
+  });
+
+  it("patches pane clear settings without dropping the other fields", () => {
+    useSettingsStore.getState().setPaneClear({ busyPolicy: "interrupt", settleMs: 900 });
+    expect(useSettingsStore.getState().paneClear).toEqual({
+      ...DEFAULT_PANE_CLEAR,
+      busyPolicy: "interrupt",
+      settleMs: 900,
+    });
+  });
+
+  it("fills omitted pane clear fields from defaults when loading settings", () => {
+    useSettingsStore.getState().loadFromSettings({
+      paneClear: { shellCommand: "cls" } as never,
+    });
+    expect(useSettingsStore.getState().paneClear).toEqual({
+      ...DEFAULT_PANE_CLEAR,
+      shellCommand: "cls",
+    });
   });
 
   it("setLanguage updates the language setting", () => {

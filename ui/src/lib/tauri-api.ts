@@ -852,6 +852,20 @@ export interface ExitSettings {
   settleMs: number;
 }
 
+export type PaneClearBusyPolicy = "skip" | "interrupt" | "restart";
+
+/** Focused-pane activity-aware clear settings (ADR-0158). */
+export interface PaneClearSettings {
+  /** Command submitted to a plain shell. Use `cls` for cmd.exe. */
+  shellCommand: string;
+  /** What to do when the focused activity is busy. */
+  busyPolicy: PaneClearBusyPolicy;
+  /** Raw Ctrl+C presses before `/clear`/shell clear under `interrupt`. */
+  interruptRounds: number;
+  /** Prompt repaint delay after the final Ctrl+C. */
+  settleMs: number;
+}
+
 export interface IssueReporterSettings {
   shell: string;
   paddingTop: number;
@@ -1075,6 +1089,7 @@ export interface Settings {
   codex?: CodexSettings;
   grok?: GrokSettings;
   exit?: ExitSettings;
+  paneClear?: PaneClearSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;

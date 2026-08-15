@@ -62,6 +62,15 @@ describe("keybinding-registry", () => {
       expect(def?.passThroughTerminal).toBe(true);
     });
 
+    it("registers the activity-aware single-pane clear on Alt+L", () => {
+      const def = DEFAULT_KEYBINDINGS.find((entry) => entry.id === "pane.clearTerminal");
+      expect(def).toMatchObject({
+        defaultKeys: "Alt+L",
+        group: "Pane",
+        passThroughTerminal: true,
+      });
+    });
+
     it("should include terminal.copy / terminal.paste with OS-default combos", () => {
       const copy = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.copy");
       const paste = DEFAULT_KEYBINDINGS.find((d) => d.id === "terminal.paste");

@@ -213,6 +213,7 @@ export async function collectSettingsSnapshot(
     codex: { ...settingsState.codex },
     grok: { ...settingsState.grok },
     exit: { ...settingsState.exit },
+    paneClear: { ...settingsState.paneClear },
     memo: { ...settingsState.memo },
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },

@@ -1135,7 +1135,9 @@ document 레벨 단축키 실행은 `useKeyboardShortcuts` 의 **액션 ID → �
 | `workspace.duplicate`                       | `Ctrl+Alt+D`                   | 워크스페이스 복제                                                                                                      |
 | `workspace.close`                           | `Ctrl+Alt+W`                   | 워크스페이스 닫기                                                                                                      |
 | `workspace.rename`                          | `Ctrl+Alt+R`                   | 워크스페이스 이름 변경                                                                                                 |
+| `workspace.clearTerminals`                  | `Ctrl+Alt+L`                   | 활성 워크스페이스 격자의 모든 터미널에 화면 클리어용 Ctrl+L 브로드캐스트                                               |
 | `pane.focus`                                | `Alt+Arrow`                    | Pane 포커스 이동 (상하좌우)                                                                                            |
+| `pane.clearTerminal`                        | `Alt+L`                        | 포커스된 terminal pane 하나에 activity별 실제 클리어(`/clear` 또는 설정된 shell 명령)                                  |
 | `pane.delete`                               | `Delete`                       | 편집 모드에서 포커스된 Pane 제거                                                                                       |
 | `pane.propagateCwdOnce`                     | `Ctrl+Alt+P`                   | 포커스된 Pane의 CWD를 sync group에 1회 전파 (#324) — 컨트롤 바 버튼과 동일 동작                                        |
 | `pane.copyIdentifier`                       | `Ctrl+Alt+C`                   | 포커스된 Pane 식별자를 클립보드에 복사 — Pane 번호 배지 클릭과 동일 포맷                                               |
