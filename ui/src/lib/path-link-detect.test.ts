@@ -96,10 +96,24 @@ describe("extractPathCandidatesFromSelection", () => {
     ]);
   });
 
-  it("한 선택 안의 여러 경로에서 각 줄번호 접미사를 독립적으로 제거한다", () => {
+  it("슬래시가 앞에 붙은 Windows 절대경로를 드라이브 경로로 정규화한다", () => {
     expect(
-      extractPathCandidatesFromSelection("src/a.ts:1에서 src/b.ts:2에서", options),
+      extractPathCandidatesFromSelection(
+        "/D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html:17",
+        options,
+      ),
     ).toEqual([
+      {
+        text: "D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html",
+        lineIndex: 0,
+        startIndex: 1,
+        endIndex: 74,
+      },
+    ]);
+  });
+
+  it("한 선택 안의 여러 경로에서 각 줄번호 접미사를 독립적으로 제거한다", () => {
+    expect(extractPathCandidatesFromSelection("src/a.ts:1에서 src/b.ts:2에서", options)).toEqual([
       { text: "src/a.ts", lineIndex: 0, startIndex: 0, endIndex: 8 },
       { text: "src/b.ts", lineIndex: 0, startIndex: 13, endIndex: 21 },
     ]);
@@ -288,6 +302,10 @@ describe("trimSelectionToPath", () => {
 
   it("절대 경로도 그대로 인정한다", () => {
     expect(trimSelectionToPath("/etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("슬래시가 앞에 붙은 Windows 드라이브 경로의 슬래시를 제거한다", () => {
+    expect(trimSelectionToPath("/D:/work/src/main.ts:17")).toBe("D:/work/src/main.ts");
   });
 
   it("공백이 끼어 여러 토큰이면 경로 한 건으로 보지 않는다", () => {
