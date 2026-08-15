@@ -459,6 +459,7 @@ fn remote_output_timeout_seconds(app_state: &AppState) -> u64 {
 mod tests {
     use super::*;
     use crate::lock_ext::MutexExt;
+    use serial_test::serial;
     use std::time::Instant;
 
     const QUERY: &str = "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
@@ -482,6 +483,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn shared_core_decrypts_open_and_emits_remote_v1_header_binary_pair() {
         let now = unix_time_seconds().unwrap();
         let (session, cipher, mut peer) =
