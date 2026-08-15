@@ -4,6 +4,7 @@
 //! subscribed. Automation/MCP reads never start a worker.
 
 mod parse;
+mod session;
 mod snapshot;
 mod worker;
 
