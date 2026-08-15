@@ -539,13 +539,26 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 조율은 **프론트엔드 종료 흐름**이 담당한다([ADR-0048](../adr/0048-kill-terminals-on-exit.md)). `saveBeforeClose()` 는 스크롤백을 직렬화하기 **전에** `interruptTerminalsOnExit()`(`ui/src/lib/interrupt-terminals-on-exit.ts`)를 먼저 await 하므로, 세션 ID 가 캐시에 담긴다. 인터럽트는 종료 전용 커맨드 `interrupt_terminal_on_exit` 로 `0x03` 을 PTY FIFO 에 바로 써서 ConPTY/line discipline 이 포그라운드 앱에 실제 Ctrl+C 를 전달한다. 일반 `write_to_terminal`(`HumanControlOrigin::Local`) 경로는 원격 제어 lease/claim 활성 시 거부되므로, 종료 인터럽트는 owner 게이트를 우회하는 이 전용 경로(ETX 전용)를 쓴다. 특정 앱을 감지하지 않고 열린 모든 터미널에 보내며(유휴 셸에는 무해), 개별 write 실패는 나머지 인터럽트를 막지 않는다. Ctrl+C 사이 간격은 설정이 아니라 상수(120ms)다. Rust 는 `settings.exit` 스키마·기본값·범위 검증(applyMode `live`)만 소유하고 실제 인터럽트 실행에는 관여하지 않는다.
 
-### 워크스페이스 터미널 클리어
+### 터미널 클리어
 
-Ctrl+Alt+L(및 워크스페이스 행의 지우개 버튼, `POST /api/v1/workspaces/{id}/clear`)은 한 워크스페이스의 `TerminalView` pane 전부에 Ctrl+L 키 입력 하나를 그대로 뿌린다(issue #726, [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) — pane 마다 손으로 Ctrl+L 을 누르는 것과 동일하고, 설정 항목은 없다.
+Ctrl+Alt+L(및 워크스페이스 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear`)은 한 워크스페이스의 `TerminalView` pane 전부에 Ctrl+L 키 입력 하나를 그대로 뿌린다(issue #726, [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) — pane마다 손으로 Ctrl+L을 누르는 것과 동일하고, 설정 항목은 없다.
 
-이전에는 pane 의 activity handler 가 `clear`/`cls`/`/clear` 중 무엇을 칠지 정하고, 작업 중인 pane 을 skip/interrupt/restart 중 하나로 처리했다(`workspaceClear` 설정). 그 판정과 설정, 그리고 판정을 pane 하나에 적용하던 단일 pane 클리어(issue #741, Alt+L, [ADR-0121](../adr/0121-single-pane-clear-user-pointed-scope.md))는 모두 제거됐다 — Ctrl+L 은 어떤 앱에 보내도 안전해서 activity 별 분기가 필요 없었다.
+Alt+L(`pane.clearTerminal`)과 `POST /api/v1/panes/{paneId}/clear`는 포커스된 terminal pane 하나에 activity별 실제 클리어를 적용한다([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)). shell은 `paneClear.shellCommand`, Claude·Codex·Grok은 `/clear`를 제출한다. 등록되지 않은 interactive app은 문자열을 잘못 입력하지 않도록 skip한다. 격자와 dock pane을 모두 지원하고, 비터미널 pane의 단축키는 no-op, Automation 호출은 오류다.
 
-세션이 아직 없는 pane(`notReady`)은 건너뛴다. 쓰기가 거부된 pane(원격이 제어 lease 를 쥐고 있거나 PTY 가 이미 죽은 경우)은 결과의 `failed` 에 담긴다 — 조용히 버리면 "터미널 pane 이 없는 워크스페이스"와 구분되지 않는다. dock pane 은 대상이 아니다: 워크스페이스 전환에도 살아남는 고정 surface 라 "이 워크스페이스"의 일부가 아니다.
+```jsonc
+{
+  "paneClear": {
+    "shellCommand": "clear",      // cmd.exe는 "cls"
+    "busyPolicy": "skip",         // "skip" | "interrupt" | "restart"
+    "interruptRounds": 2,          // 1..10
+    "settleMs": 400                // 0..10000
+  }
+}
+```
+
+`skip`은 busy pane을 그대로 두고, `interrupt`는 raw Ctrl+C를 `interruptRounds`회 보낸 뒤 `settleMs`를 기다려 실제 클리어 입력을 제출하며, `restart`는 새 PTY를 요청한다. 기본 `skip`만 비파괴적이다. Automation은 bridge 5초 예산 안에서 대기를 cap하고 응답의 `waitCapped`·`interruptRounds`·`settleMs`에 실제 적용값을 싣는다.
+
+세션이 아직 없는 pane(`notReady`)은 건너뛴다. 쓰기가 거부된 pane(원격이 제어 lease를 쥐고 있거나 PTY가 이미 죽은 경우)은 결과의 `failed`에 담긴다. 워크스페이스 브로드캐스트에서는 dock을 제외하지만, 단일 pane 실제 클리어는 사용자가 직접 가리킨 dock terminal도 대상으로 삼는다.
 
 ### CWD 동기화 기본값
 
@@ -763,7 +776,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 57개 = REST 56 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 58개 = REST 57 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
@@ -776,7 +789,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/workspaces` | 워크스페이스 생성 (layoutId로 Layout 지정) |
 | PUT | `/api/v1/workspaces/:id` | 이름 변경 |
 | DELETE | `/api/v1/workspaces/:id` | 삭제 |
-| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 모든 TerminalView pane 에 Ctrl+L 브로드캐스트. 응답은 pane 별 결과(`cleared`/`skipped`/`failed`) |
+| POST | `/api/v1/workspaces/:id/clear` | 워크스페이스의 모든 TerminalView pane에 Ctrl+L 브로드캐스트. 응답은 pane별 결과(`cleared`/`skipped`/`failed`) |
+| POST | `/api/v1/panes/:paneId/clear` | 격자 또는 dock의 TerminalView pane 하나에 activity별 실제 클리어. busy 정책 결과와 Automation wait cap을 함께 반환 |
 | POST | `/api/v1/layouts/export` | 현재 워크스페이스를 레이아웃으로 내보내기 (새로 생성 또는 덮어쓰기) |
 | GET | `/api/v1/grid` | 그리드 상태 |
 | POST | `/api/v1/grid/edit-mode` | 편집 모드 설정 |
@@ -1780,9 +1794,7 @@ if (matchesKeybinding(e, "issueReporter.submit")) { handleSubmit(); }
 
 ### 15.6 앱 전용 편의 코드 격리
 
-각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시를 도출한다.
-
-(과거에는 워크스페이스 클리어가 이 핸들러에게 "무엇을 칠지"·"지금 busy 한지"도 물었다 — [ADR-0113](../adr/0113-workspace-clear-activity-owned.md). [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md) 이후 클리어는 activity 판정 없이 Ctrl+L 만 보내므로 `clearInput`/`isBusy` 는 인터페이스에서 제거됐다.)
+각 앱 activity 타입별로 **ActivityHandler** 클래스를 구현하여 notification, status, statusMessage 계산과 단일 pane 실제 클리어 입력·busy 판정을 분기한다. 원시 상태는 공통으로 저장하고, activity 타입에 따라 해당 핸들러가 최종 표시와 안전한 쓰기 계약을 도출한다. 워크스페이스 화면 클리어는 이 계약을 사용하지 않고 Ctrl+L만 브로드캐스트한다([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md), [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)).
 
 #### ActivityHandler 인터페이스
 
@@ -1791,6 +1803,8 @@ interface ActivityHandler {
   computeStatus(raw: RawTerminalState): StatusResult;        // 아이콘, 색상
   computeStatusMessage(raw: RawTerminalState): string;       // 표시 텍스트
   computeNotification(raw: RawTerminalState): Notification | null;  // 알림 발생 여부/내용
+  clearInput(shellClearCommand: string): string;             // 실제 클리어 제출 텍스트
+  isBusy(raw: RawTerminalState): boolean;                    // 지금 제출해도 안전한지
 }
 ```
 
@@ -1812,5 +1826,5 @@ function getHandler(activity?: Activity): ActivityHandler {
 
 - 각 핸들러는 독립 모듈 파일에 구현한다 (`shell-activity-handler.ts`, `claude-activity-handler.ts`).
 - 핸들러를 import하지 않으면 해당 앱 전용 로직이 완전히 제거되어야 한다.
-- 핸들러 추가 시 기존 핸들러의 테스트가 깨지지 않아야 한다.
+- 핸들러 추가 시 기존 핸들러의 테스트가 깨지지 않아야 하고, 등록된 interactive app은 실제 클리어 입력과 busy 판정을 명시해야 한다.
 - 핸들러 동작은 설정으로 조절 가능하게 한다 — 현재는 Claude 상태 메시지 구성을 `claude.statusMessageMode`/`statusMessageDelimiter`(§10)가 제어한다. 핸들러 전체를 default 로 폴백시키는 플래그는 아직 없다(필요해지면 추가).

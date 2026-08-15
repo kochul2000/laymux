@@ -35,6 +35,10 @@ export interface ActivityHandler {
   shouldPreserveActivityOnTitleReset?(raw: RawTerminalState): boolean;
   shouldPreserveActivityOnExitCode?(raw: RawTerminalState): boolean;
   isActiveTitle?(title: string | undefined): boolean;
+  /** Text submitted as one line when the user requests an actual pane clear. */
+  clearInput(shellClearCommand: string): string;
+  /** Whether submitting `clearInput()` now could disrupt an active prompt/task. */
+  isBusy(raw: RawTerminalState): boolean;
 }
 
 type InteractiveAppRegistration = {
@@ -84,6 +88,15 @@ export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {
     return interactiveApps.get(activity.name)?.handler ?? defaultHandler;
   }
   return defaultHandler;
+}
+
+/**
+ * Status display deliberately falls back to the shell handler, but a writing
+ * action must not: typing `clear` into an unknown TUI can corrupt its buffer.
+ */
+export function isRegisteredInteractiveApp(activity?: TerminalActivityInfo): boolean {
+  if (activity?.type !== "interactiveApp" || !activity.name) return false;
+  return interactiveApps.has(activity.name);
 }
 
 function escapeRegExp(value: string): string {

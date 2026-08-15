@@ -1531,6 +1531,14 @@ function TerminalSection() {
   const updateExit = (partial: Partial<typeof exit>) =>
     setDraftExit((prev) => ({ ...prev, ...partial }));
 
+  const storePaneClear = useSettingsStore((s) => s.paneClear);
+  const setPaneClear = useSettingsStore((s) => s.setPaneClear);
+  const [paneClear, setDraftPaneClear] = useDraft("paneClear", storePaneClear, (value) =>
+    setPaneClear(value),
+  );
+  const updatePaneClear = (partial: Partial<typeof paneClear>) =>
+    setDraftPaneClear((previous) => ({ ...previous, ...partial }));
+
   // Default input mode is a desktop-surface UI preference (localStorage), not part
   // of the Rust-backed settings.json — so it stays outside the terminal draft.
   const [defaultInputMode, setDefaultInputMode] = useState<InputMode>(() =>
@@ -1775,6 +1783,99 @@ function TerminalSection() {
                 onChange={(e) =>
                   updateExit({
                     settleMs: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))),
+                  })
+                }
+              />
+            </SettingRow>
+          </>
+        )}
+      </SubGroup>
+
+      <SubGroup title={t("terminal.paneClearGroup")}>
+        <p className="mb-3 text-[11px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+          {t("terminal.paneClearGroupDesc")}
+        </p>
+
+        <SettingRow
+          label={t("terminal.paneClearShellCommand")}
+          desc={t("terminal.paneClearShellCommandDesc")}
+        >
+          <FocusInput
+            data-testid="pane-clear-shell-command-input"
+            type="text"
+            className={inputCls}
+            style={{ width: 140 }}
+            value={paneClear.shellCommand}
+            onChange={(event) => updatePaneClear({ shellCommand: event.target.value })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("terminal.paneClearBusyPolicy")}
+          desc={t("terminal.paneClearBusyPolicyDesc")}
+        >
+          <FocusSelect
+            data-testid="pane-clear-busy-policy-select"
+            value={paneClear.busyPolicy}
+            onChange={(event) =>
+              updatePaneClear({
+                busyPolicy: event.target.value as typeof paneClear.busyPolicy,
+              })
+            }
+            className={inputCls}
+            style={inputStyle}
+          >
+            <option value="skip">{t("terminal.paneClearBusyPolicySkip")}</option>
+            <option value="interrupt">{t("terminal.paneClearBusyPolicyInterrupt")}</option>
+            <option value="restart">{t("terminal.paneClearBusyPolicyRestart")}</option>
+          </FocusSelect>
+        </SettingRow>
+
+        {paneClear.busyPolicy === "interrupt" && (
+          <>
+            <SettingRow
+              label={t("terminal.paneClearInterruptRounds")}
+              desc={t("terminal.paneClearInterruptRoundsDesc")}
+            >
+              <FocusInput
+                data-testid="pane-clear-rounds-input"
+                type="number"
+                min={1}
+                max={10}
+                step={1}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={paneClear.interruptRounds}
+                onChange={(event) =>
+                  updatePaneClear({
+                    interruptRounds: Math.min(
+                      10,
+                      Math.max(1, Math.round(Number(event.target.value) || 1)),
+                    ),
+                  })
+                }
+              />
+            </SettingRow>
+
+            <SettingRow
+              label={t("terminal.paneClearSettle")}
+              desc={t("terminal.paneClearSettleDesc")}
+            >
+              <FocusInput
+                data-testid="pane-clear-settle-input"
+                type="number"
+                min={0}
+                max={10000}
+                step={100}
+                className={inputCls}
+                style={{ width: 90 }}
+                value={paneClear.settleMs}
+                onChange={(event) =>
+                  updatePaneClear({
+                    settleMs: Math.min(
+                      10000,
+                      Math.max(0, Math.round(Number(event.target.value) || 0)),
+                    ),
                   })
                 }
               />
@@ -3335,7 +3436,10 @@ function GrokSection() {
               onChange={(e) => updateGrok({ command: e.target.value })}
             />
             {isSafeAgentCommand(grok.command) ? (
-              <p className="mt-1 text-[11px]" style={{ color: "var(--text-secondary)", opacity: 0.65 }}>
+              <p
+                className="mt-1 text-[11px]"
+                style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+              >
                 {`${resolveAgentCommand(grok.command, DEFAULT_GROK_COMMAND)} --resume <session-id>`}
               </p>
             ) : (

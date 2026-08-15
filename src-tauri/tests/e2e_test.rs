@@ -4,10 +4,10 @@ use laymux_lib::settings::validation::validate_and_repair;
 use laymux_lib::settings::{
     AppearanceSettings, ClaudeSettings, ColorScheme, DockSetting, FileExplorerSettings,
     FontSettings, GithubSettings, GrokSettings, GrokStatusMessageMode, IssueReporterSettings,
-    Keybinding, Layout, LayoutPane, MemoSettings, OutputActivityBurstSettings, PowerSettings,
-    Profile, ProfileDefaults, RemoteSettings, Settings, SettingsLoadResult, StatusLineWidgets,
-    TerminalSettings, ValidationWarning, ViewerSettings, WidgetInstance, WidgetSlots,
-    WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
+    Keybinding, Layout, LayoutPane, MemoSettings, OutputActivityBurstSettings, PaneClearBusyPolicy,
+    PaneClearSettings, PowerSettings, Profile, ProfileDefaults, RemoteSettings, Settings,
+    SettingsLoadResult, StatusLineWidgets, TerminalSettings, ValidationWarning, ViewerSettings,
+    WidgetInstance, WidgetSlots, WidgetsSettings, Workspace, WorkspacePane, WorkspacePaneView,
 };
 use laymux_lib::state::AppState;
 use laymux_lib::terminal::{SyncGroup, TerminalConfig, TerminalSession};
@@ -218,6 +218,12 @@ fn settings_round_trip_with_full_config() {
             status_message_delimiter: " | ".into(),
         },
         exit: Default::default(),
+        pane_clear: PaneClearSettings {
+            shell_command: "cls".into(),
+            busy_policy: PaneClearBusyPolicy::Interrupt,
+            interrupt_rounds: 4,
+            settle_ms: 900,
+        },
         memo: MemoSettings::default(),
         issue_reporter: IssueReporterSettings::default(),
         file_explorer: FileExplorerSettings::default(),
@@ -373,6 +379,29 @@ fn hand_edited_github_section_loads_and_an_omitted_one_falls_back_to_defaults() 
     assert!(bare.github.show_draft_badge);
     assert_eq!(bare.github.label_max_count, 2);
     assert_eq!(bare.github.label_max_width, 80);
+}
+
+#[test]
+fn hand_edited_pane_clear_section_loads_and_omissions_use_safe_defaults() {
+    let configured: Settings = serde_json::from_str(
+        r#"{ "paneClear": { "shellCommand": "cls", "busyPolicy": "restart",
+             "interruptRounds": 4, "settleMs": 1200 } }"#,
+    )
+    .unwrap();
+    assert_eq!(configured.pane_clear.shell_command, "cls");
+    assert_eq!(
+        configured.pane_clear.busy_policy,
+        PaneClearBusyPolicy::Restart
+    );
+    assert_eq!(configured.pane_clear.interrupt_rounds, 4);
+    assert_eq!(configured.pane_clear.settle_ms, 1200);
+
+    let bare: Settings = serde_json::from_str(r#"{ "paneClear": {} }"#).unwrap();
+    assert_eq!(bare.pane_clear, PaneClearSettings::default());
+    assert_eq!(bare.pane_clear.shell_command, "clear");
+    assert_eq!(bare.pane_clear.busy_policy, PaneClearBusyPolicy::Skip);
+    assert_eq!(bare.pane_clear.interrupt_rounds, 2);
+    assert_eq!(bare.pane_clear.settle_ms, 400);
 }
 
 #[tokio::test]

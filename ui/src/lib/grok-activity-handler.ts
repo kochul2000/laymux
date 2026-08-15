@@ -51,6 +51,14 @@ export function extractGrokTitleMessage(title: string | undefined): string | und
 }
 
 export class GrokActivityHandler extends ShellActivityHandler {
+  clearInput(): string {
+    return "/clear";
+  }
+
+  isBusy(raw: RawTerminalState): boolean {
+    return super.isBusy(raw) || isGrokWorkingTitle(raw.title);
+  }
+
   shouldPreserveActivityOnTitleReset(): boolean {
     return true;
   }

@@ -619,6 +619,59 @@ fn default_exit_settle_ms() -> u64 {
     700
 }
 
+/// Activity-aware clear settings for one focused terminal pane (ADR-0158).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneClearSettings {
+    /// Command submitted to an idle shell. Interactive providers own their input.
+    #[serde(default = "default_pane_clear_shell_command")]
+    pub shell_command: String,
+    /// What to do when the target pane is still working.
+    #[serde(default)]
+    pub busy_policy: PaneClearBusyPolicy,
+    /// Ctrl+C presses sent before clear under the interrupt policy.
+    #[serde(default = "default_pane_clear_interrupt_rounds")]
+    pub interrupt_rounds: u32,
+    /// Delay after the last Ctrl+C, in milliseconds.
+    #[serde(default = "default_pane_clear_settle_ms")]
+    pub settle_ms: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PaneClearBusyPolicy {
+    /// Preserve running work. This is the safe default.
+    #[default]
+    Skip,
+    /// Send Ctrl+C, wait for a prompt, then submit the activity-specific clear input.
+    Interrupt,
+    /// Replace the PTY, discarding its scrollback and process state.
+    Restart,
+}
+
+impl Default for PaneClearSettings {
+    fn default() -> Self {
+        Self {
+            shell_command: default_pane_clear_shell_command(),
+            busy_policy: PaneClearBusyPolicy::default(),
+            interrupt_rounds: default_pane_clear_interrupt_rounds(),
+            settle_ms: default_pane_clear_settle_ms(),
+        }
+    }
+}
+
+fn default_pane_clear_shell_command() -> String {
+    "clear".to_string()
+}
+
+fn default_pane_clear_interrupt_rounds() -> u32 {
+    2
+}
+
+fn default_pane_clear_settle_ms() -> u64 {
+    400
+}
+
 /// Path ellipsis direction: "start" truncates the beginning, "end" truncates the end.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1972,6 +2025,8 @@ pub struct Settings {
     #[serde(default)]
     pub exit: ExitSettings,
     #[serde(default)]
+    pub pane_clear: PaneClearSettings,
+    #[serde(default)]
     pub memo: MemoSettings,
     #[serde(default)]
     pub issue_reporter: IssueReporterSettings,
@@ -2074,6 +2129,7 @@ impl Default for Settings {
             codex: CodexSettings::default(),
             grok: GrokSettings::default(),
             exit: ExitSettings::default(),
+            pane_clear: PaneClearSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),
             file_explorer: FileExplorerSettings::default(),

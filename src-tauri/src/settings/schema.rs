@@ -184,6 +184,12 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/paneClear",
+        description: "포커스된 terminal pane 하나의 activity별 실제 클리어와 busy 처리 정책입니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/claude",
         description: "Claude Code CWD·세션 복원·상태 메시지·자동 resume 설정입니다.",
         sensitive: false,

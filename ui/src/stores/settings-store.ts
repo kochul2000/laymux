@@ -9,6 +9,7 @@ import type {
   GithubSettings,
   IssueReporterSettings,
   MemoSettings,
+  PaneClearSettings,
   RemoteSettings,
   ViewerSettings,
 } from "../lib/tauri-api";
@@ -44,6 +45,7 @@ import {
   DEFAULT_FAST_SCROLL_SENSITIVITY,
   DEFAULT_SCROLL_SENSITIVITY,
 } from "../lib/scroll-sensitivity";
+import { DEFAULT_PANE_CLEAR } from "../lib/pane-clear";
 
 /** Re-export so settings consumers can import the language type from one place. */
 export type { LanguageSetting };
@@ -528,6 +530,7 @@ interface SettingsState {
   codex: CodexSettings;
   grok: GrokSettings;
   exit: ExitSettings;
+  paneClear: PaneClearSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
@@ -551,6 +554,7 @@ interface SettingsState {
   setCodex: (data: Partial<CodexSettings>) => void;
   setGrok: (data: Partial<GrokSettings>) => void;
   setExit: (data: Partial<ExitSettings>) => void;
+  setPaneClear: (data: Partial<PaneClearSettings>) => void;
   setMemo: (data: Partial<MemoSettings>) => void;
   setIssueReporter: (data: Partial<IssueReporterSettings>) => void;
   /** Patch one monitored agent's usage settings. */
@@ -618,6 +622,7 @@ interface SettingsState {
         | "codex"
         | "grok"
         | "exit"
+        | "paneClear"
         | "memo"
         | "issueReporter"
         | "fileExplorer"
@@ -1303,6 +1308,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     statusMessageDelimiter: " · ",
   },
   exit: { ...DEFAULT_EXIT },
+  paneClear: { ...DEFAULT_PANE_CLEAR },
   memo: { ...DEFAULT_MEMO },
   issueReporter: { ...DEFAULT_ISSUE_REPORTER },
   fileExplorer: { ...DEFAULT_FILE_EXPLORER },
@@ -1369,6 +1375,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setExit: (data) =>
     set((state) => ({
       exit: { ...state.exit, ...data },
+    })),
+
+  setPaneClear: (data) =>
+    set((state) => ({
+      paneClear: { ...state.paneClear, ...data },
     })),
 
   setMemo: (data) =>
@@ -1705,6 +1716,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const exit = data.exit
       ? { ...DEFAULT_EXIT, ...(data.exit as Partial<ExitSettings>) }
       : undefined;
+    const paneClear = data.paneClear
+      ? { ...DEFAULT_PANE_CLEAR, ...(data.paneClear as Partial<PaneClearSettings>) }
+      : undefined;
     // Ensure issueReporter settings have all required fields with defaults
     const issueReporter = data.issueReporter
       ? { ...DEFAULT_ISSUE_REPORTER, ...(data.issueReporter as Partial<IssueReporterSettings>) }
@@ -1763,6 +1777,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       notifications: _rawNotifications,
       power: _rawPower,
       workspaceSelector: _rawWorkspaceSelector,
+      paneClear: _rawPaneClear,
       remote: _rawRemote,
       language: _rawLanguage,
       ...rest
@@ -1795,6 +1810,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(codex ? { codex } : {}),
       ...(grok ? { grok } : {}),
       ...(exit ? { exit } : {}),
+      ...(paneClear ? { paneClear } : {}),
       ...(issueReporter ? { issueReporter } : {}),
       ...(memo ? { memo } : {}),
       ...(fileExplorer ? { fileExplorer } : {}),

@@ -72,6 +72,7 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
     validate_profiles(settings, &mut issues);
     validate_terminal(settings, &mut issues);
     validate_exit(settings, &mut issues);
+    validate_pane_clear(settings, &mut issues);
     validate_agent_commands(settings, &mut issues);
     validate_remote(settings, &mut issues);
     validate_view_settings(settings, &mut issues);
@@ -397,6 +398,23 @@ fn validate_exit(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         10,
     );
     range_u64(issues, "/exit/settleMs", settings.exit.settle_ms, 0, 10_000);
+}
+
+fn validate_pane_clear(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
+    range_u64(
+        issues,
+        "/paneClear/interruptRounds",
+        u64::from(settings.pane_clear.interrupt_rounds),
+        1,
+        10,
+    );
+    range_u64(
+        issues,
+        "/paneClear/settleMs",
+        settings.pane_clear.settle_ms,
+        0,
+        10_000,
+    );
 }
 
 /// The agent launch commands are typed into a shell, so a value carrying shell

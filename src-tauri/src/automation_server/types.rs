@@ -206,6 +206,7 @@ pub const REGISTERED_ROUTES: &[(&str, &str)] = &[
     ("DELETE", "/api/v1/panes/{index}"),
     ("POST", "/api/v1/panes/{index}/resize"),
     ("PUT", "/api/v1/panes/{index}/view"),
+    ("POST", "/api/v1/panes/{paneId}/clear"),
     ("GET", "/api/v1/docks"),
     ("POST", "/api/v1/docks/layout-mode/toggle"),
     ("PUT", "/api/v1/docks/{position}/active-view"),
@@ -448,5 +449,10 @@ mod tests {
     fn hidden_items_route_replaces_hide_mode_toggle() {
         assert!(REGISTERED_ROUTES.contains(&("POST", "/api/v1/ui/hidden-items")));
         assert!(!REGISTERED_ROUTES.contains(&("POST", "/api/v1/ui/hide-mode/toggle")));
+    }
+
+    #[test]
+    fn single_pane_clear_route_is_registered_by_pane_id() {
+        assert!(REGISTERED_ROUTES.contains(&("POST", "/api/v1/panes/{paneId}/clear")));
     }
 }

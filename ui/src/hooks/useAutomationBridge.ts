@@ -56,6 +56,7 @@ import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
+import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
 
 export interface HandlerResult {
   success: boolean;
@@ -85,6 +86,8 @@ const TERMINAL_SESSION_READY_TIMEOUT_MS = TERMINAL_AUTOMATION_READY_TIMEOUT_MS;
  * fail when either side moves without the other.
  */
 export const BRIDGE_REQUEST_BUDGET_MS = 5_000;
+export const AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS = 3_000;
+export const AUTOMATION_PANE_CLEAR_DEADLINE_MS = 4_000;
 // Together with TerminalRenderCheckpointModel's 3-second catch-up timeout,
 // provider discovery stays at 3.5 seconds inside the backend bridge's 5-second
 // request budget, leaving time for serialization and IPC delivery.
@@ -129,6 +132,30 @@ function checkWorkspaceExists(workspaceId: string): HandlerResult | null {
     return err(`Workspace '${workspaceId}' not found`);
   }
   return null;
+}
+
+/** Run a single-pane clear without exceeding the frontend bridge budget. */
+async function runCappedPaneClear(paneId: string): Promise<HandlerResult> {
+  const settings = useSettingsStore.getState().paneClear;
+  const configured = resolvePaneClear(settings);
+  const effective = resolvePaneClear(settings, {
+    maxWaitMs: AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS,
+  });
+  try {
+    const result = await clearPane(paneId, settings, {
+      maxWaitMs: AUTOMATION_PANE_CLEAR_WAIT_BUDGET_MS,
+      hardDeadlineMs: AUTOMATION_PANE_CLEAR_DEADLINE_MS,
+    });
+    return ok({
+      paneId,
+      ...result,
+      waitCapped: paneClearWaitBudgetMs(effective) < paneClearWaitBudgetMs(configured),
+      interruptRounds: effective.interruptRounds,
+      settleMs: effective.settleMs,
+    });
+  } catch (error) {
+    return err(`Pane clear error: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /** Find a terminal instance by id. */
@@ -1411,6 +1438,9 @@ export async function handleAsyncAutomationRequest(
     } catch (e) {
       return err(`Workspace clear error: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+  if (request.target === "panes" && request.method === "clear") {
+    return runCappedPaneClear(request.params.paneId as string);
   }
   if (request.target === "terminals" && request.method === "setFocus") {
     const result = handleAutomationRequest(request);

@@ -125,6 +125,25 @@ pub async fn workspaces_clear(
     }
 }
 
+/// Clear one grid or dock terminal pane by its globally unique pane id (ADR-0158).
+pub async fn panes_clear(
+    AxumState(state): AxumState<ServerState>,
+    Path(pane_id): Path<String>,
+) -> impl IntoResponse {
+    match bridge_request(
+        &state,
+        "action",
+        "panes",
+        "clear",
+        serde_json::json!({ "paneId": pane_id }),
+    )
+    .await
+    {
+        Ok(data) => (StatusCode::OK, Json(data)),
+        Err(e) => e,
+    }
+}
+
 pub async fn workspaces_rename(
     AxumState(state): AxumState<ServerState>,
     Path(id): Path<String>,
