@@ -14,22 +14,39 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main>
-      <section class="brand" aria-labelledby="title">
-        <div class="mark" aria-hidden="true">Lx</div>
-        <div>
-          <h1 id="title">Laymux</h1>
-          <p>안전한 원격 연결</p>
+    <main class="app-shell">
+      <header class="app-header" aria-labelledby="title">
+        <img
+          class="app-logo"
+          src="logo.svg"
+          width="52"
+          height="52"
+          alt=""
+          aria-hidden="true"
+        />
+        <div class="brand-copy">
+          <div class="eyebrow">Laymux Android</div>
+          <h1 id="title">안전한 원격 연결</h1>
+          <p>내 PC와 종단 암호화로 연결합니다.</p>
         </div>
-      </section>
+      </header>
 
-      <section class="card" aria-live="polite">
-        <div id="stateBadge" class="badge">확인 중</div>
-        <h2 id="stateTitle">페어링 상태를 확인하고 있습니다</h2>
-        <p id="stateDescription">
-          이 페어링 화면과 키 처리는 앱에 포함된 네이티브 경계에서 실행됩니다.
-        </p>
-        <section class="pairing-manager" aria-labelledby="pairingListTitle">
+      <section class="card connection-card" aria-live="polite">
+        <div class="status-heading">
+          <div id="stateBadge" class="badge">확인 중</div>
+          <div class="status-copy">
+            <h2 id="stateTitle">페어링 상태를 확인하고 있습니다</h2>
+            <p id="stateDescription">
+              이 페어링 화면과 키 처리는 앱에 포함된 네이티브 경계에서
+              실행됩니다.
+            </p>
+          </div>
+        </div>
+
+        <section
+          class="pairing-manager panel-section"
+          aria-labelledby="pairingListTitle"
+        >
           <div class="pairing-manager-heading">
             <h3 id="pairingListTitle">저장된 PC</h3>
             <span id="pairingCount" class="count">0</span>
@@ -37,7 +54,10 @@
           <p id="pairingListEmpty" class="hint">저장된 페어링이 없습니다.</p>
           <div id="pairingList" class="pairing-list"></div>
         </section>
-        <section class="protection" aria-labelledby="protectionTitle">
+        <section
+          class="protection panel-section"
+          aria-labelledby="protectionTitle"
+        >
           <label class="protection-row" for="biometricToggle">
             <span>
               <strong id="protectionTitle">생체 인증으로 키 보호</strong>
@@ -49,12 +69,14 @@
         </section>
         <p id="errorMessage" class="error" hidden></p>
         <p id="noticeMessage" class="notice" hidden></p>
-        <button id="scanButton" class="primary" type="button">
-          QR로 페어링
-        </button>
-        <button id="cloudButton" class="secondary" type="button">
-          내 PC 목록으로
-        </button>
+        <div class="primary-actions">
+          <button id="scanButton" class="primary" type="button">
+            QR로 페어링
+          </button>
+          <button id="cloudButton" class="secondary" type="button">
+            내 PC 목록으로
+          </button>
+        </div>
       </section>
 
       <section id="remoteSection" class="card remote" hidden>
@@ -76,10 +98,24 @@
         </button>
       </section>
 
-      <p class="footnote">
-        생체 인증을 꺼도 키는 Android Keystore로 보호됩니다. 페어링 이후 relay는
-        암호화된 terminal payload의 내용과 제어 lease를 볼 수 없습니다.
-      </p>
+      <aside class="security-note" aria-label="보안 안내">
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          aria-hidden="true"
+        >
+          <rect x="5" y="10" width="14" height="10" />
+          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+        </svg>
+        <p>
+          키는 Android Keystore에 보관됩니다. Relay는 암호화된 터미널 내용과
+          제어 정보를 읽을 수 없습니다.
+        </p>
+      </aside>
     </main>
     <script src="app.js"></script>
   </body>
