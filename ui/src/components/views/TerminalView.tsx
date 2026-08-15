@@ -5635,8 +5635,12 @@ export function TerminalView({
           lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
             ? lastGrokSession
             : undefined;
-        const hasAgentSessionConflict =
-          [safeSessionId, safeCodexSessionId, safeGrokSessionId].filter(Boolean).length > 1;
+        const presentAgentSessionKeys = [
+          lastClaudeSession,
+          lastCodexSession,
+          lastGrokSession,
+        ].filter((value) => typeof value === "string" && value.length > 0).length;
+        const hasAgentSessionConflict = presentAgentSessionKeys > 1;
         // The launch command is configurable so a user can carry flags such as
         // `--dangerously-skip-permissions` / `--yolo` into the restored session.
         // Rust re-derives the same string from settings and rejects the rest.

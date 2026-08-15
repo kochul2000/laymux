@@ -197,6 +197,34 @@ fn claude_signal_in_buffer(recent: &[u8]) -> bool {
     osc::any_terminal_title_contains(recent, "Claude Code")
 }
 
+fn last_needle_pos(haystack: &[u8], needle: &str) -> Option<usize> {
+    let needle = needle.as_bytes();
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .rposition(|window| window.eq_ignore_ascii_case(needle))
+}
+
+/// Last painted Claude/Codex/Grok banner in the recent window.
+fn latest_agent_banner_in_buffer(buffer: Option<&TerminalOutputBuffer>) -> Option<&'static str> {
+    let buf = buffer?;
+    let recent = buf.recent_bytes(ACTIVITY_SCAN_BYTES).ok()?;
+    if recent.is_empty() {
+        return None;
+    }
+    [
+        ("Claude Code", "Claude"),
+        ("OpenAI Codex", "Codex"),
+        ("Grok Build", "Grok"),
+    ]
+    .into_iter()
+    .filter_map(|(needle, app)| last_needle_pos(&recent, needle).map(|pos| (pos, app)))
+    .max_by_key(|(pos, _)| *pos)
+    .map(|(_, app)| app)
+}
+
 fn grok_signal_in_buffer(recent: &[u8]) -> bool {
     osc::any_terminal_title_contains(recent, "Grok Build")
         || recent_buffer_contains(recent, "Grok Build")
@@ -709,9 +737,7 @@ pub fn apply_interactive_app_exit(
                 "Codex" => callback_state
                     .codex_detected
                     .store(false, Ordering::Relaxed),
-                "Grok" => callback_state
-                    .grok_detected
-                    .store(false, Ordering::Relaxed),
+                "Grok" => callback_state.grok_detected.store(false, Ordering::Relaxed),
                 _ => {}
             }
         }
@@ -898,15 +924,24 @@ pub fn detect_interactive_app_from_live_title(
     //    `detect_terminal_state` when the recent window has no OSC 0/2) and
     //    still recover the right app.
     //
-    //    Order matters: Claude is checked first. `sync_known_caches` and
-    //    the Codex PTY exit path (`codex_activity::process_codex_title`
-    //    -> exited) keep the two `known_*_terminals` sets mutually
-    //    exclusive in steady state, but a brief overlap can occur when
-    //    frontend command-text detection (`mark_claude_terminal`)
-    //    populates Claude before the next OSC 0/2 title arrives to drive
-    //    Codex cleanup. In that window Claude is the right answer —
-    //    Codex-first ordering misclassified Claude sessions for spinner/
-    //    path-like/empty titles (PR 242 P1 #2 regression).
+    //    When several agent banners share the recent window (a missed
+    //    Claude/Codex exit plus a new Grok splash), the later paint is
+    //    the current session. Sequential Claude-then-Codex-then-Grok
+    //    checks would pin the stale banner first (ADR-0154 3-way).
+    if let Some(app) = latest_agent_banner_in_buffer(buffer) {
+        let hit = match app {
+            "Claude" => is_claude_terminal_from_buffer(state, terminal_id, buffer),
+            "Codex" => is_codex_terminal_from_buffer(state, terminal_id, buffer),
+            "Grok" => is_grok_terminal_from_buffer(state, terminal_id, buffer),
+            _ => false,
+        };
+        if hit {
+            record_interactive_app_detection(state, terminal_id, app);
+            return Some(app.to_string());
+        }
+        return lookup_interactive_app_within_grace_window(state, terminal_id);
+    }
+
     if is_claude_terminal_from_buffer(state, terminal_id, buffer) {
         record_interactive_app_detection(state, terminal_id, "Claude");
         return Some("Claude".to_string());
@@ -2252,6 +2287,23 @@ mod tests {
             !state.known_codex_terminals.lock().unwrap().contains(tid),
             "marking a terminal as Claude must drop any stale Codex cache entry"
         );
+    }
+
+    #[test]
+    fn later_grok_banner_wins_over_stale_claude_banner() {
+        let state = AppState::new();
+        let tid = "t-claude-to-grok-unknown-liveness";
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;Claude Code\x07old claude output\r\n");
+        buf.push(b"Grok Build 1.0.3\r\n");
+
+        assert_eq!(
+            detect_interactive_app_from_live_title(&state, tid, r"C:\Users\me", Some(&buf)),
+            Some("Grok".to_string()),
+            "a later Grok Build splash must beat a leftover Claude Code banner when liveness is unknown",
+        );
+        assert!(state.known_grok_terminals.lock().unwrap().contains(tid));
+        assert!(!state.known_claude_terminals.lock().unwrap().contains(tid));
     }
 
     #[test]

@@ -23,29 +23,41 @@ const ROW_KEYS: &[(&str, &str)] = &[
 pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
     let mut rows = Vec::new();
     for line in screen.lines() {
-        let Some((key, rest)) = match_row(line) else {
-            continue;
-        };
-        if rows.iter().any(|row: &GrokUsageRow| row.key == key) {
-            continue;
+        for (key, rest) in match_rows(line) {
+            if rows.iter().any(|row: &GrokUsageRow| row.key == key) {
+                continue;
+            }
+            rows.push(GrokUsageRow {
+                key: key.to_string(),
+                percent: parse_percent(rest),
+                remaining: parse_remaining(rest),
+                reset: parse_reset(screen),
+            });
         }
-        rows.push(GrokUsageRow {
-            key: key.to_string(),
-            percent: parse_percent(rest),
-            remaining: parse_remaining(rest),
-            reset: parse_reset(screen),
-        });
     }
     rows
 }
 
-fn match_row(line: &str) -> Option<(&'static str, &str)> {
+fn match_rows(line: &str) -> Vec<(&'static str, &str)> {
+    let mut hits: Vec<(usize, usize, &'static str)> = Vec::new();
     for (label, key) in ROW_KEYS {
         if let Some(idx) = line.find(label) {
-            return Some((*key, line[idx + label.len()..].trim()));
+            hits.push((idx, label.len(), *key));
         }
     }
-    None
+    hits.sort_by_key(|(idx, _, _)| *idx);
+    hits.dedup_by_key(|(_, _, key)| *key);
+    hits.iter()
+        .enumerate()
+        .map(|(i, (idx, label_len, key))| {
+            let start = idx + label_len;
+            let end = hits
+                .get(i + 1)
+                .map(|(next, _, _)| *next)
+                .unwrap_or(line.len());
+            (*key, line.get(start..end).unwrap_or("").trim())
+        })
+        .collect()
 }
 
 fn parse_percent(rest: &str) -> Option<f64> {
@@ -74,10 +86,16 @@ fn parse_used_of_limit(rest: &str) -> Option<f64> {
 
 fn parse_remaining(rest: &str) -> Option<f64> {
     let lower = rest.to_ascii_lowercase();
-    if !(lower.contains("left") || lower.contains("remaining")) {
+    if lower.contains("left") || lower.contains("remaining") {
+        return parse_leading_amount(rest);
+    }
+    if lower.contains("used") {
         return None;
     }
-    parse_leading_amount(rest)
+    if rest.contains('$') {
+        return parse_leading_amount(rest);
+    }
+    None
 }
 
 fn parse_leading_amount(text: &str) -> Option<f64> {
@@ -135,6 +153,30 @@ Pay-as-you-go: $3 used of $20 limit
         assert_eq!(rows[0].key, "credits");
         assert_eq!(rows[0].percent, None);
         assert_eq!(rows[0].remaining, Some(12.0));
+    }
+
+    #[test]
+    fn parse_credits_dollar_amount() {
+        let rows = parse_grok_usage_screen("Credits: $12\n");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "credits");
+        assert_eq!(rows[0].percent, None);
+        assert_eq!(rows[0].remaining, Some(12.0));
+    }
+
+    #[test]
+    fn parse_collects_every_bucket_on_one_wrapped_line() {
+        let screen =
+            "Weekly limit: 42% Monthly limit: 10% Credits: $12 Pay-as-you-go: $3 used of $20 limit";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(
+            rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            ["weekly", "monthly", "credits", "payg"]
+        );
+        assert_eq!(rows[0].percent, Some(42.0));
+        assert_eq!(rows[1].percent, Some(10.0));
+        assert_eq!(rows[2].remaining, Some(12.0));
+        assert_eq!(rows[3].percent, Some(15.0));
     }
 
     #[test]

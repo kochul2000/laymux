@@ -9583,6 +9583,33 @@ describe("TerminalView", () => {
       });
     });
 
+    it("fails closed when an invalid Claude key shares the pane with Grok", async () => {
+      render(
+        <TerminalView
+          instanceId="t-invalid-claude-valid-grok"
+          paneId="pane-invalid-claude-valid-grok"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="bad; rm -rf /"
+          lastGrokSession="019ffa7f-b8c1-7511-872f-911e8dc8d179"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-invalid-claude-valid-grok",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
     it("fails closed when Claude and Grok session IDs are present", async () => {
       render(
         <TerminalView

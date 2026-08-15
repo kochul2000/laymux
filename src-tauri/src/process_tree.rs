@@ -161,16 +161,30 @@ pub fn match_interactive_app_process(
     let mut seen = HashSet::new();
     queue.push_back(root);
     seen.insert(root);
-    while let Some(pid) = queue.pop_front() {
-        if let Some(kids) = children.get(&pid) {
-            for kid in kids {
-                if seen.insert(kid.pid) {
-                    if let Some(app) = name_to_app(&kid.name) {
-                        return Some((kid.pid, app));
+    while !queue.is_empty() {
+        let level = queue.len();
+        let mut found = Vec::new();
+        for _ in 0..level {
+            let pid = queue.pop_front().expect("level drained from queue");
+            if let Some(kids) = children.get(&pid) {
+                for kid in kids {
+                    if seen.insert(kid.pid) {
+                        if let Some(app) = name_to_app(&kid.name) {
+                            found.push((kid.pid, app));
+                        } else {
+                            queue.push_back(kid.pid);
+                        }
                     }
-                    queue.push_back(kid.pid);
                 }
             }
+        }
+        if found.len() == 1 {
+            return Some(found[0]);
+        }
+        if found.len() > 1 {
+            // Same-depth Claude/Codex/Grok siblings are ambiguous — snapshot
+            // order is not a contract (ADR-0154 unique top-level).
+            return None;
         }
     }
     None
@@ -596,6 +610,17 @@ mod tests {
         // PTY launched `claude` directly: root == claude.exe.
         let snapshot = vec![entry(200, 100, "claude.exe"), entry(300, 200, "bash.exe")];
         assert_eq!(match_interactive_app(&snapshot, 200), Some("Claude"));
+    }
+
+    #[test]
+    fn match_same_depth_grok_and_claude_is_ambiguous() {
+        let snapshot = vec![
+            entry(100, 1, "pwsh.exe"),
+            entry(200, 100, "claude.exe"),
+            entry(300, 100, "grok.exe"),
+        ];
+        assert_eq!(match_interactive_app(&snapshot, 100), None);
+        assert_eq!(match_interactive_app_process(&snapshot, 100), None);
     }
 
     #[test]
