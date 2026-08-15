@@ -3,6 +3,7 @@ package com.laymux.android
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.pm.ApplicationInfo
+import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.webkit.CookieManager
@@ -48,6 +49,8 @@ import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteResourceResponse
+import com.laymux.android.web.VisibleWebSurface
+import com.laymux.android.web.WebSurfaceLayerPolicy
 import com.laymux.android.web.CloudBridge
 import com.laymux.android.web.CloudBridgeInput
 import com.laymux.android.web.CloudAuthClient
@@ -97,6 +100,7 @@ class MainActivity : FragmentActivity() {
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
     private var localWebSurface = LocalWebSurface.PAIRING
+    private var visibleWebSurface = VisibleWebSurface.CLOUD
     private var googleSignInInFlight = false
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
@@ -143,7 +147,7 @@ class MainActivity : FragmentActivity() {
         }
         setContentView(root)
         applySystemBarInsets(root)
-        webView.visibility = View.GONE
+        applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
     }
@@ -184,6 +188,7 @@ class MainActivity : FragmentActivity() {
             )
             .build()
         return WebView(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = false
@@ -219,6 +224,7 @@ class MainActivity : FragmentActivity() {
     }
 
     fun signInWithGoogle(nonce: String) {
+        if (!cloudBridgeActionsEnabled()) return
         if (googleSignInInFlight) return
         val clientId = getString(R.string.laymux_google_web_client_id)
         if (clientId.isBlank()) {
@@ -274,6 +280,7 @@ class MainActivity : FragmentActivity() {
     }
 
     fun selectCloudInstance(instanceId: String) {
+        if (!cloudBridgeActionsEnabled()) return
         if (selectedCloudInstanceId != instanceId) closeRemoteSession()
         selectedCloudInstanceId = instanceId
         showPairingSurface()
@@ -296,26 +303,46 @@ class MainActivity : FragmentActivity() {
         closeRemoteSession()
         selectedCloudInstanceId = null
         if (!::cloudWebView.isInitialized || isDestroyed) return
-        webView.visibility = View.GONE
-        cloudWebView.visibility = View.VISIBLE
+        applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
     }
 
     private fun showPairingSurface() {
         if (!::webView.isInitialized || isDestroyed) return
         installLocalBridge(LocalWebSurface.PAIRING)
-        cloudWebView.visibility = View.GONE
-        webView.visibility = View.VISIBLE
+        applyWebSurfaceLayers(VisibleWebSurface.PAIRING)
         webView.loadUrl(LocalContentWebViewClient.START_URL)
     }
 
     private fun showRemoteSurface() {
         if (!::webView.isInitialized || isDestroyed) return
         installLocalBridge(LocalWebSurface.REMOTE)
-        cloudWebView.visibility = View.GONE
-        webView.visibility = View.VISIBLE
+        applyWebSurfaceLayers(VisibleWebSurface.REMOTE)
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
     }
+
+    private fun applyWebSurfaceLayers(surface: VisibleWebSurface) {
+        val layers = WebSurfaceLayerPolicy.forSurface(surface)
+        visibleWebSurface = surface
+        cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
+        webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
+        cloudWebView.isEnabled = layers.cloudInteractive
+        cloudWebView.isFocusable = layers.cloudInteractive
+        cloudWebView.isFocusableInTouchMode = layers.cloudInteractive
+        cloudWebView.importantForAccessibility = if (layers.cloudAccessible) {
+            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        } else {
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        if (layers.secureVisible) {
+            cloudWebView.clearFocus()
+            webView.bringToFront()
+            webView.requestFocus()
+        }
+    }
+
+    private fun cloudBridgeActionsEnabled(): Boolean =
+        WebSurfaceLayerPolicy.forSurface(visibleWebSurface).cloudBridgeEnabled
 
     private fun installLocalBridge(surface: LocalWebSurface) {
         webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
