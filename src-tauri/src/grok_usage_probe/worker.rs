@@ -11,22 +11,10 @@ use crate::pty::{self, PtyHandle, PtyOutputControl};
 use crate::terminal::{TerminalConfig, TerminalSession};
 use crate::usage_probe::{sanitize_refresh_seconds, ProbeScreen, PROBE_COLS, PROBE_ROWS};
 
-use super::parse::parse_grok_usage_screen;
+use super::session::{BootOutcome, Pacer, ProbeSession, ProbeTiming, ProbeTransport};
 use super::snapshot::{GrokProbeStatus, GrokUsageSnapshot};
 
 const WAIT_SLICE: Duration = Duration::from_millis(100);
-const BOOT_POLL: Duration = Duration::from_secs(1);
-const BOOT_TIMEOUT: Duration = Duration::from_secs(60);
-const USAGE_RENDER: Duration = Duration::from_secs(5);
-const KEY_SETTLE: Duration = Duration::from_millis(300);
-const ESCAPE: &[u8] = b"\x1b";
-const READY_MARKER: &str = "grok build";
-const MISSING_MARKERS: [&str; 4] = [
-    "command not found",
-    "is not recognized as the name of a cmdlet",
-    "not found in %path%",
-    "no such file or directory",
-];
 
 pub type Publisher = Arc<dyn Fn(GrokUsageSnapshot) + Send + Sync>;
 
@@ -173,19 +161,40 @@ fn build_session(spec: &WorkerSpec) -> TerminalSession {
     TerminalSession::new(probe_terminal_id(&spec.config_dir), config)
 }
 
-fn cancelled(flag: &AtomicBool) -> bool {
-    flag.load(Ordering::SeqCst)
+struct PtyTransport {
+    handle: PtyHandle,
+    screen: ProbeScreen,
 }
 
-fn wait(flag: &AtomicBool, duration: Duration) {
-    let mut remaining = duration;
-    while !remaining.is_zero() {
-        if cancelled(flag) {
-            return;
+impl ProbeTransport for PtyTransport {
+    fn write(&self, bytes: &[u8]) -> Result<(), String> {
+        self.handle.write(bytes)
+    }
+
+    fn screen_text(&self) -> String {
+        self.screen.text()
+    }
+}
+
+struct FlagPacer {
+    shutdown: Arc<AtomicBool>,
+}
+
+impl Pacer for FlagPacer {
+    fn wait(&self, duration: Duration) {
+        let mut remaining = duration;
+        while !remaining.is_zero() {
+            if self.cancelled() {
+                return;
+            }
+            let slice = remaining.min(WAIT_SLICE);
+            thread::sleep(slice);
+            remaining -= slice;
         }
-        let slice = remaining.min(WAIT_SLICE);
-        thread::sleep(slice);
-        remaining -= slice;
+    }
+
+    fn cancelled(&self) -> bool {
+        self.shutdown.load(Ordering::SeqCst)
     }
 }
 
@@ -215,46 +224,75 @@ fn run(
         }
     };
 
-    match boot(&handle, &screen, &shutdown) {
-        Boot::Ready => {}
-        Boot::Cancelled => {
-            let _ = handle.terminate();
+    let transport = PtyTransport { handle, screen };
+    let pacer = FlagPacer {
+        shutdown: Arc::clone(&shutdown),
+    };
+    let probe = ProbeSession::new(&transport, &pacer, ProbeTiming::default());
+
+    match probe.boot() {
+        BootOutcome::Ready => {}
+        BootOutcome::Cancelled => {
+            let _ = transport.handle.terminate();
             return;
         }
         other => {
             snapshot.status = match other {
-                Boot::GrokMissing => GrokProbeStatus::GrokMissing,
-                Boot::Timeout => GrokProbeStatus::StartupTimeout,
-                Boot::TransportFailed(message) => GrokProbeStatus::Failed { message },
-                Boot::Ready | Boot::Cancelled => unreachable!(),
+                BootOutcome::GrokMissing => GrokProbeStatus::GrokMissing,
+                BootOutcome::Timeout => GrokProbeStatus::StartupTimeout,
+                BootOutcome::TransportFailed(message) => GrokProbeStatus::Failed { message },
+                BootOutcome::Ready | BootOutcome::Cancelled => unreachable!(),
             };
-            snapshot.raw_screen = Some(screen.text());
+            snapshot.raw_screen = Some(transport.screen_text());
             publish(snapshot);
-            let _ = handle.terminate();
+            let _ = transport.handle.terminate();
             return;
         }
     }
 
     let refresh_seconds = sanitize_refresh_seconds(spec.refresh_seconds);
     loop {
-        if cancelled(&shutdown) {
+        if pacer.cancelled() {
             break;
         }
-        query(&handle, &screen, &shutdown, &mut snapshot);
+        match probe.query() {
+            Ok(outcome) => {
+                snapshot.raw_screen = Some(outcome.screen);
+                if outcome.rows.is_empty() {
+                    snapshot.status = GrokProbeStatus::ParseFailed;
+                    snapshot.rows.clear();
+                } else {
+                    snapshot.rows = outcome.rows;
+                    snapshot.status = GrokProbeStatus::Ready;
+                    snapshot.captured_at_ms = Some(now_ms());
+                }
+            }
+            Err(error) => {
+                if error == "cancelled" {
+                    let _ = transport.handle.terminate();
+                    return;
+                }
+                // Query-time relaunch failures must not retire the worker.
+                // Leftover `Command 'usage' not found` used to look like
+                // GrokMissing and leave the UI stuck until remount.
+                snapshot.status = GrokProbeStatus::Failed { message: error };
+                snapshot.raw_screen = Some(transport.screen_text());
+            }
+        }
         snapshot.next_query_at_ms = Some(now_ms() + refresh_seconds * 1000);
         publish(snapshot.clone());
 
         let deadline = Duration::from_secs(refresh_seconds);
         let mut remaining = deadline;
         loop {
-            if cancelled(&shutdown) {
-                let _ = handle.terminate();
+            if pacer.cancelled() {
+                let _ = transport.handle.terminate();
                 return;
             }
             match rx.recv_timeout(remaining.min(WAIT_SLICE)) {
                 Ok(WorkerCommand::Refresh) => break,
                 Ok(WorkerCommand::Shutdown) => {
-                    let _ = handle.terminate();
+                    let _ = transport.handle.terminate();
                     return;
                 }
                 Err(RecvTimeoutError::Timeout) => {
@@ -264,77 +302,11 @@ fn run(
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    let _ = handle.terminate();
+                    let _ = transport.handle.terminate();
                     return;
                 }
             }
         }
     }
-    let _ = handle.terminate();
-}
-
-enum Boot {
-    Ready,
-    GrokMissing,
-    Timeout,
-    Cancelled,
-    TransportFailed(String),
-}
-
-fn boot(handle: &PtyHandle, screen: &ProbeScreen, shutdown: &AtomicBool) -> Boot {
-    if let Err(error) = handle.write(b"grok\r") {
-        return Boot::TransportFailed(error);
-    }
-    let mut waited = Duration::ZERO;
-    while waited < BOOT_TIMEOUT {
-        if cancelled(shutdown) {
-            return Boot::Cancelled;
-        }
-        wait(shutdown, BOOT_POLL);
-        waited += BOOT_POLL;
-        let text = screen.text().to_ascii_lowercase();
-        if MISSING_MARKERS.iter().any(|marker| text.contains(marker)) {
-            return Boot::GrokMissing;
-        }
-        if text.contains(READY_MARKER) {
-            return Boot::Ready;
-        }
-    }
-    Boot::Timeout
-}
-
-fn query(
-    handle: &PtyHandle,
-    screen: &ProbeScreen,
-    shutdown: &AtomicBool,
-    snapshot: &mut GrokUsageSnapshot,
-) {
-    // Close a leftover `/usage` panel so the next command lands on the prompt.
-    if let Err(error) = handle.write(ESCAPE) {
-        snapshot.status = GrokProbeStatus::Failed { message: error };
-        snapshot.raw_screen = Some(screen.text());
-        return;
-    }
-    wait(shutdown, KEY_SETTLE);
-    if let Err(error) = handle.write(b"/usage\r") {
-        snapshot.status = GrokProbeStatus::Failed { message: error };
-        snapshot.raw_screen = Some(screen.text());
-        return;
-    }
-    wait(shutdown, USAGE_RENDER);
-    let text = screen.text();
-    snapshot.raw_screen = Some(text.clone());
-    let rows = parse_grok_usage_screen(&text);
-    let _ = handle.write(ESCAPE);
-    wait(shutdown, KEY_SETTLE);
-    let _ = handle.write(ESCAPE);
-    wait(shutdown, KEY_SETTLE);
-    if rows.is_empty() {
-        snapshot.status = GrokProbeStatus::ParseFailed;
-        snapshot.rows.clear();
-        return;
-    }
-    snapshot.rows = rows;
-    snapshot.status = GrokProbeStatus::Ready;
-    snapshot.captured_at_ms = Some(now_ms());
+    let _ = transport.handle.terminate();
 }

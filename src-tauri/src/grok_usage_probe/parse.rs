@@ -69,7 +69,9 @@ fn following_value_text(lines: &[&str], start: usize) -> String {
         }
         parts.push(line.trim());
     }
-    parts.join(" ")
+    // Keep newlines so `parse_reset` can take only the Resets: line and not
+    // swallow "Session usage: …" from a later paragraph.
+    parts.join("\n")
 }
 
 fn match_rows(line: &str) -> Vec<(&'static str, &str)> {
@@ -156,12 +158,22 @@ fn parse_reset(screen: &str) -> Option<String> {
     for prefix in ["Next reset:", "Resets:"] {
         if let Some(idx) = screen.find(prefix) {
             let rest = screen[idx + prefix.len()..].lines().next()?.trim();
-            if !rest.is_empty() {
-                return Some(rest.to_string());
+            let cleaned = sanitize_reset_text(rest);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
             }
         }
     }
     None
+}
+
+/// TUI frames keep box-drawing on the same row as `Resets: August 20, 16:13`.
+fn sanitize_reset_text(rest: &str) -> String {
+    rest.split(|c: char| c == '│' || c == '|' || c == '┃' || c == '┤')
+        .next()
+        .unwrap_or(rest)
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -308,5 +320,50 @@ Resets: Jun 1, 00:00
         assert_eq!(rows[0].key, "monthly");
         assert_eq!(rows[0].percent, Some(10.0));
         assert_eq!(rows[0].reset.as_deref(), Some("Jun 1, 00:00"));
+    }
+
+    #[test]
+    fn parse_reset_strips_box_drawing() {
+        let screen = "\
+Weekly limit (SuperGrok)
+
+███████████████░░░░░░░░░░░░░░░  66%
+Resets: August 20, 16:13                                                                        │ │
+";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].percent, Some(66.0));
+        assert_eq!(rows[0].reset.as_deref(), Some("August 20, 16:13"));
+    }
+
+    #[test]
+    fn parse_live_usage_limit_tab() {
+        // Captured from grok 1.0.4 `/usage` → Usage limit tab.
+        let screen = "\
+Context usage  Usage limit  Session info
+Weekly limit (SuperGrok)
+
+████████████████████░░░░░░░░░░  66%
+Resets: August 20, 16:13
+
+Session usage: no model calls yet in this session.
+";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "weekly");
+        assert_eq!(rows[0].percent, Some(66.0));
+        assert_eq!(rows[0].reset.as_deref(), Some("August 20, 16:13"));
+    }
+
+    #[test]
+    fn parse_ignores_a_shell_usage_miss() {
+        // Regression: ESC on the trust/welcome screen quits grok, then `/usage`
+        // is typed into bash and the dump has no buckets.
+        let screen = "\
+Command 'usage' not found, did you mean:
+  command 'osage' from deb graphviz
+kochul@AMD9950:~/python_projects$ usage
+";
+        assert!(parse_grok_usage_screen(screen).is_empty());
     }
 }
