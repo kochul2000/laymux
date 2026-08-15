@@ -43,9 +43,14 @@ struct Registry {
     subscriptions: HashMap<String, String>,
 }
 
+#[cfg(test)]
+type SpawnFn = Box<dyn Fn(WorkerSpec, worker::Publisher) -> WorkerHandle + Send + Sync>;
+
 pub struct GrokUsageProbe {
     registry: Arc<Mutex<Registry>>,
     sink: Arc<Mutex<Option<SnapshotSink>>>,
+    #[cfg(test)]
+    spawn_override: Mutex<Option<SpawnFn>>,
 }
 
 impl Default for GrokUsageProbe {
@@ -59,7 +64,30 @@ impl GrokUsageProbe {
         Self {
             registry: Arc::new(Mutex::new(Registry::default())),
             sink: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            spawn_override: Mutex::new(None),
         }
+    }
+
+    #[cfg(test)]
+    fn set_spawn_for_test(
+        &self,
+        spawn: impl Fn(WorkerSpec, worker::Publisher) -> WorkerHandle + Send + Sync + 'static,
+    ) {
+        *self.spawn_override.lock().expect("spawn override") = Some(Box::new(spawn));
+    }
+
+    fn spawn_worker(&self, spec: WorkerSpec) -> WorkerHandle {
+        let publish = self.publisher(&spec.config_dir);
+        #[cfg(test)]
+        {
+            if let Ok(guard) = self.spawn_override.lock() {
+                if let Some(spawn) = guard.as_ref() {
+                    return spawn(spec, publish);
+                }
+            }
+        }
+        worker::spawn(spec, publish)
     }
 
     pub fn set_sink(&self, sink: SnapshotSink) -> Result<(), AppError> {
@@ -83,7 +111,7 @@ impl GrokUsageProbe {
         }
 
         let config_dir = spec.config_dir.clone();
-        let needs_worker = {
+        let (needs_worker, dead) = {
             let mut registry = self.registry.lock_or_err()?;
             registry
                 .subscriptions
@@ -95,24 +123,16 @@ impl GrokUsageProbe {
             if !entry.subscribers.iter().any(|id| id == subscriber_id) {
                 entry.subscribers.push(subscriber_id.to_string());
             }
-            entry.worker.is_none()
+            let dead = match entry.worker.as_ref() {
+                Some(worker) if !worker.is_alive() => entry.worker.take(),
+                _ => None,
+            };
+            (entry.worker.is_none(), dead)
         };
+        drop(dead);
 
         if needs_worker {
-            let handle = worker::spawn(spec, self.publisher(&config_dir));
-            let orphaned = {
-                let mut registry = self.registry.lock_or_err()?;
-                match registry.entries.get_mut(&config_dir) {
-                    Some(entry) if !entry.subscribers.is_empty() => {
-                        entry.worker = Some(handle);
-                        None
-                    }
-                    _ => Some(handle),
-                }
-            };
-            if let Some(handle) = orphaned {
-                handle.shutdown();
-            }
+            self.attach_worker(spec)?;
         }
 
         self.snapshot(&config_dir)
@@ -166,19 +186,52 @@ impl GrokUsageProbe {
         Ok(())
     }
 
-    pub fn request_refresh(&self, config_dir: &str) -> Result<bool, AppError> {
-        let registry = self.registry.lock_or_err()?;
-        match registry
-            .entries
-            .get(config_dir)
-            .and_then(|entry| entry.worker.as_ref())
-        {
-            Some(worker) => {
-                worker.request_refresh();
-                Ok(true)
+    pub fn request_refresh(&self, spec: &WorkerSpec) -> Result<bool, AppError> {
+        let (refresh_live, should_restart, dead) = {
+            let mut registry = self.registry.lock_or_err()?;
+            let Some(entry) = registry.entries.get_mut(&spec.config_dir) else {
+                return Ok(false);
+            };
+            match entry.worker.as_ref() {
+                Some(worker) if worker.is_alive() => {
+                    worker.request_refresh();
+                    (true, false, None)
+                }
+                Some(_) => {
+                    let dead = entry.worker.take();
+                    (false, !entry.subscribers.is_empty(), dead)
+                }
+                None => (false, false, None),
             }
-            None => Ok(false),
+        };
+        drop(dead);
+        if refresh_live {
+            return Ok(true);
         }
+        if !should_restart {
+            return Ok(false);
+        }
+        self.attach_worker(spec.clone())
+    }
+
+    fn attach_worker(&self, spec: WorkerSpec) -> Result<bool, AppError> {
+        let config_dir = spec.config_dir.clone();
+        let handle = self.spawn_worker(spec);
+        let orphaned = {
+            let mut registry = self.registry.lock_or_err()?;
+            match registry.entries.get_mut(&config_dir) {
+                Some(entry) if !entry.subscribers.is_empty() => {
+                    entry.worker = Some(handle);
+                    None
+                }
+                _ => Some(handle),
+            }
+        };
+        if let Some(handle) = orphaned {
+            handle.shutdown();
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     fn detach(&self, subscriber_id: &str) -> Result<Option<WorkerHandle>, AppError> {
@@ -235,7 +288,7 @@ mod tests {
     #[test]
     fn refresh_without_worker_is_false() {
         let probe = GrokUsageProbe::new();
-        assert!(!probe.request_refresh("").unwrap());
+        assert!(!probe.request_refresh(&spec("")).unwrap());
     }
 
     #[test]
@@ -319,6 +372,77 @@ mod tests {
         }
         probe.shutdown_all().unwrap();
         assert_eq!(probe.snapshot("/a").unwrap().status, GrokProbeStatus::Idle);
-        assert!(!probe.request_refresh("/a").unwrap());
+        assert!(!probe.request_refresh(&spec("/a")).unwrap());
+    }
+
+    fn spec(config_dir: &str) -> WorkerSpec {
+        WorkerSpec {
+            config_dir: config_dir.to_string(),
+            profile: "PowerShell".into(),
+            command_line: String::new(),
+            starting_directory: String::new(),
+            refresh_seconds: 600,
+        }
+    }
+
+    #[test]
+    fn refresh_on_dead_worker_respawns_when_subscribed() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let probe = GrokUsageProbe::new();
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let spawn_count = Arc::clone(&spawns);
+        probe.set_spawn_for_test(move |_spec, _publish| {
+            spawn_count.fetch_add(1, Ordering::SeqCst);
+            WorkerHandle::idle_for_test()
+        });
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            let mut entry = Entry::new("");
+            entry.subscribers.push("view-1".into());
+            entry.worker = Some(WorkerHandle::finished_for_test());
+            registry.entries.insert(String::new(), entry);
+            registry
+                .subscriptions
+                .insert("view-1".into(), String::new());
+        }
+
+        assert!(probe.request_refresh(&spec("")).unwrap());
+        assert_eq!(spawns.load(Ordering::SeqCst), 1);
+        let alive = {
+            let registry = probe.registry.lock().unwrap();
+            registry
+                .entries
+                .get("")
+                .and_then(|entry| entry.worker.as_ref())
+                .is_some_and(|worker| worker.is_alive())
+        };
+        assert!(alive, "refresh must replace the finished worker handle");
+    }
+
+    #[test]
+    fn resubscribe_respawns_a_dead_worker() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let probe = GrokUsageProbe::new();
+        let spawns = Arc::new(AtomicUsize::new(0));
+        let spawn_count = Arc::clone(&spawns);
+        probe.set_spawn_for_test(move |_spec, _publish| {
+            spawn_count.fetch_add(1, Ordering::SeqCst);
+            WorkerHandle::idle_for_test()
+        });
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            let mut entry = Entry::new("");
+            entry.subscribers.push("view-1".into());
+            entry.worker = Some(WorkerHandle::finished_for_test());
+            registry.entries.insert(String::new(), entry);
+            registry
+                .subscriptions
+                .insert("view-1".into(), String::new());
+        }
+
+        probe.subscribe("view-1", spec("")).unwrap();
+        assert_eq!(spawns.load(Ordering::SeqCst), 1);
     }
 }

@@ -471,7 +471,8 @@ pub fn is_codex_terminal_from_buffer(
 ///
 /// Same cache-as-hint rule as Claude/Codex. Strong signals are the
 /// `"Grok Build"` banner and a live OSC title with the ` - grok` suffix.
-/// Exact `grok` is not a strong signal (ADR-0154).
+/// Exact `grok` cannot seed detection, but with a cache hit it (and a
+/// Braille-only working frame) must keep the classification (ADR-0154).
 pub fn is_grok_terminal_from_buffer(
     state: &AppState,
     terminal_id: &str,
@@ -528,10 +529,12 @@ pub fn is_grok_terminal_from_buffer(
         .lock_or_err()
         .map(|known| known.contains(terminal_id))
         .unwrap_or(false);
-    let live_title_is_grok = osc::extract_last_terminal_title(&recent)
-        .is_some_and(|title| crate::grok_activity::is_grok_title(&title));
+    let live_title_keeps_grok = osc::extract_last_terminal_title(&recent).is_some_and(|title| {
+        crate::grok_activity::is_grok_title(&title)
+            || crate::grok_activity::is_grok_preserve_title(&title)
+    });
 
-    if cache_hit && live_title_is_grok {
+    if cache_hit && live_title_keeps_grok {
         return true;
     }
 
@@ -2326,6 +2329,60 @@ mod tests {
         assert!(state.known_grok_terminals.lock().unwrap().contains(tid));
         assert!(!state.known_claude_terminals.lock().unwrap().contains(tid));
         assert!(!state.known_codex_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn known_grok_preserved_via_welcome_title_when_banner_scrolled_off() {
+        let state = AppState::new();
+        let tid = "t-grok-welcome-only";
+        state
+            .known_grok_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;grok\x07");
+        assert!(
+            is_grok_terminal_from_buffer(&state, tid, Some(&buf)),
+            "cache + exact welcome title must keep Grok when liveness is Unknown"
+        );
+        assert!(state.known_grok_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn known_grok_preserved_via_braille_title_when_banner_scrolled_off() {
+        let state = AppState::new();
+        let tid = "t-grok-braille-only";
+        state
+            .known_grok_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push("\x1b]0;\u{280B} working\x07".as_bytes());
+        assert!(
+            is_grok_terminal_from_buffer(&state, tid, Some(&buf)),
+            "cache + Braille-only title must keep Grok when liveness is Unknown"
+        );
+        assert!(state.known_grok_terminals.lock().unwrap().contains(tid));
+    }
+
+    #[test]
+    fn known_grok_dropped_on_shell_title_without_banner() {
+        let state = AppState::new();
+        let tid = "t-grok-stale-shell";
+        state
+            .known_grok_terminals
+            .lock()
+            .unwrap()
+            .insert(tid.to_string());
+
+        let mut buf = TerminalOutputBuffer::default();
+        buf.push(b"\x1b]0;PS C:\\Users\\me\x07PS C:\\Users\\me> dir\r\n");
+        assert!(!is_grok_terminal_from_buffer(&state, tid, Some(&buf)));
+        assert!(!state.known_grok_terminals.lock().unwrap().contains(tid));
     }
 
     #[test]

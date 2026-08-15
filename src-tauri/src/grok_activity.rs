@@ -16,7 +16,10 @@ const RUNNING_MARKER: &str = "- Running:";
 const BRAILLE_SPINNERS: std::ops::RangeInclusive<char> = '\u{2800}'..='\u{28FF}';
 
 fn is_braille_prefix(title: &str) -> bool {
-    title.chars().next().is_some_and(|c| BRAILLE_SPINNERS.contains(&c))
+    title
+        .chars()
+        .next()
+        .is_some_and(|c| BRAILLE_SPINNERS.contains(&c))
 }
 
 fn title_eq_ignore_ascii_case(title: &str, expected: &str) -> bool {
@@ -35,6 +38,15 @@ pub fn title_has_grok_suffix(title: &str) -> bool {
 /// as exit either — see `process_grok_title`.
 pub fn is_grok_title(title: &str) -> bool {
     title.contains(GROK_BANNER) || title_has_grok_suffix(title)
+}
+
+/// Titles that cannot seed detection but must not evict an existing cache.
+///
+/// Exact `grok` is the welcome/idle pager. A Braille prefix without
+/// ` - grok` is a working frame whose suffix has been clipped. Neither
+/// is an exit once the pane is already known as Grok (ADR-0154).
+pub fn is_grok_preserve_title(title: &str) -> bool {
+    title_eq_ignore_ascii_case(title, "grok") || is_braille_prefix(title)
 }
 
 /// Working frame: confirmed Grok title with a Braille prefix or `- Running:`.
@@ -171,10 +183,7 @@ mod tests {
         let r = process_grok_title("Grok Build", false);
         assert!(r.entered);
 
-        let r = process_grok_title(
-            "\u{280B} - Running: tool - title - grok",
-            false,
-        );
+        let r = process_grok_title("\u{280B} - Running: tool - title - grok", false);
         assert!(r.entered);
         assert!(r.now_working);
     }
@@ -215,5 +224,16 @@ mod tests {
         let r = process_grok_title("\u{280B} - Running: t - title - grok", true);
         assert!(!r.exited);
         assert!(r.now_working);
+    }
+
+    #[test]
+    fn preserve_title_is_welcome_or_braille_prefix() {
+        assert!(is_grok_preserve_title("grok"));
+        assert!(is_grok_preserve_title("GROK"));
+        assert!(is_grok_preserve_title("  grok  "));
+        assert!(is_grok_preserve_title("\u{280B} working"));
+        assert!(!is_grok_preserve_title("session - grok"));
+        assert!(!is_grok_preserve_title("PS C:\\Users\\me"));
+        assert!(!is_grok_preserve_title(""));
     }
 }

@@ -56,6 +56,10 @@ impl WorkerHandle {
         let _ = self.tx.send(WorkerCommand::Refresh);
     }
 
+    pub fn is_alive(&self) -> bool {
+        self.join.as_ref().is_some_and(|join| !join.is_finished())
+    }
+
     pub fn shutdown(mut self) {
         self.signal_shutdown();
         if let Some(join) = self.join.take() {
@@ -66,6 +70,44 @@ impl WorkerHandle {
     fn signal_shutdown(&self) {
         self.shutdown.store(true, Ordering::SeqCst);
         let _ = self.tx.send(WorkerCommand::Shutdown);
+    }
+
+    #[cfg(test)]
+    pub fn finished_for_test() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let join = thread::spawn(move || {
+            drop(rx);
+        });
+        while !join.is_finished() {
+            thread::sleep(Duration::from_millis(1));
+        }
+        Self {
+            tx,
+            shutdown,
+            join: Some(join),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn idle_for_test() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&shutdown);
+        let join = thread::spawn(move || loop {
+            if flag.load(Ordering::SeqCst) {
+                break;
+            }
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(WorkerCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                Ok(WorkerCommand::Refresh) | Err(RecvTimeoutError::Timeout) => {}
+            }
+        });
+        Self {
+            tx,
+            shutdown,
+            join: Some(join),
+        }
     }
 }
 

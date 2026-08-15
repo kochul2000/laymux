@@ -21,21 +21,54 @@ const ROW_KEYS: &[(&str, &str)] = &[
 
 /// Parse a `/usage` screen dump into the closed row-key set.
 pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
+    let lines: Vec<&str> = screen.lines().collect();
     let mut rows = Vec::new();
-    for line in screen.lines() {
-        for (key, rest) in match_rows(line) {
-            if rows.iter().any(|row: &GrokUsageRow| row.key == key) {
+    for (i, line) in lines.iter().enumerate() {
+        let hits = match_rows(line);
+        for (key, rest) in &hits {
+            if rows.iter().any(|row: &GrokUsageRow| row.key == *key) {
                 continue;
             }
+            let value = if hits.len() == 1 && !has_parseable_value(rest) {
+                let mut combined = rest.to_string();
+                let following = following_value_text(&lines, i + 1);
+                if !following.is_empty() {
+                    if !combined.is_empty() {
+                        combined.push(' ');
+                    }
+                    combined.push_str(&following);
+                }
+                combined
+            } else {
+                rest.to_string()
+            };
             rows.push(GrokUsageRow {
-                key: key.to_string(),
-                percent: parse_percent(rest),
-                remaining: parse_remaining(rest),
+                key: (*key).to_string(),
+                percent: parse_percent(&value),
+                remaining: parse_remaining(&value),
                 reset: parse_reset(screen),
             });
         }
     }
     rows
+}
+
+fn has_parseable_value(rest: &str) -> bool {
+    parse_percent(rest).is_some() || parse_remaining(rest).is_some()
+}
+
+fn following_value_text(lines: &[&str], start: usize) -> String {
+    let mut parts = Vec::new();
+    for line in &lines[start..] {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if !match_rows(line).is_empty() {
+            break;
+        }
+        parts.push(line.trim());
+    }
+    parts.join(" ")
 }
 
 fn match_rows(line: &str) -> Vec<(&'static str, &str)> {
@@ -68,7 +101,18 @@ fn parse_percent(rest: &str) -> Option<f64> {
             .find(|part| !part.is_empty())?;
         return number.parse().ok();
     }
-    parse_used_of_limit(rest)
+    parse_used_of_limit(rest).or_else(|| parse_slash_amounts(rest))
+}
+
+/// `Usage: $3.00 / $20.00 per month` has no `used of` wording.
+fn parse_slash_amounts(rest: &str) -> Option<f64> {
+    let slash = rest.find('/')?;
+    let used = parse_leading_amount(&rest[..slash])?;
+    let limit = parse_leading_amount(&rest[slash + 1..])?;
+    if limit <= 0.0 {
+        return None;
+    }
+    Some(((used / limit) * 100.0).clamp(0.0, 100.0))
 }
 
 /// `$3 used of $20 limit` has no `%`; the used/limit ratio is the fill.
@@ -89,7 +133,7 @@ fn parse_remaining(rest: &str) -> Option<f64> {
     if lower.contains("left") || lower.contains("remaining") {
         return parse_leading_amount(rest);
     }
-    if lower.contains("used") {
+    if lower.contains("used") || parse_slash_amounts(rest).is_some() {
         return None;
     }
     if rest.contains('$') {
@@ -185,5 +229,48 @@ Pay-as-you-go: $3 used of $20 limit
         let rows = parse_grok_usage_screen(screen);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].percent, Some(1.0));
+    }
+
+    #[test]
+    fn parse_pairs_adjacent_value_lines_from_usage_modal() {
+        // grok-build usage_modal.rs allowance_lines: header, blank, bar+%,
+        // Resets, Credits $x.xx, Pay as you go + Usage $used / $cap.
+        let screen = "\
+Weekly limit (SuperGrok)
+
+███████████████░░░░░░░░░░░░░░░  50%
+Resets: May 29, 00:00
+
+Credits: $12.34
+
+Pay as you go: Enabled
+Usage: $3.00 / $20.00 per month
+";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(
+            rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            ["weekly", "credits", "payg"]
+        );
+        assert_eq!(rows[0].percent, Some(50.0));
+        assert_eq!(rows[0].reset.as_deref(), Some("May 29, 00:00"));
+        assert_eq!(rows[1].percent, None);
+        assert_eq!(rows[1].remaining, Some(12.34));
+        assert_eq!(rows[2].percent, Some(15.0));
+        assert_eq!(rows[2].remaining, None);
+    }
+
+    #[test]
+    fn parse_pairs_monthly_header_with_following_percent_bar() {
+        let screen = "\
+Monthly limit
+
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  10%
+Resets: Jun 1, 00:00
+";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "monthly");
+        assert_eq!(rows[0].percent, Some(10.0));
+        assert_eq!(rows[0].reset.as_deref(), Some("Jun 1, 00:00"));
     }
 }

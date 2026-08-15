@@ -73,9 +73,10 @@ pub fn refresh_grok_usage_probe(
     config_dir: String,
     state: State<Arc<AppState>>,
 ) -> Result<bool, String> {
+    let spec = resolve_spec(config_dir)?;
     state
         .grok_usage_probe
-        .request_refresh(&config_dir)
+        .request_refresh(&spec)
         .map_err(Into::into)
 }
 

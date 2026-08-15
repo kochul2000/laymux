@@ -1195,7 +1195,11 @@ Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usa
 
 Codex는 `/status` TUI를 파싱하지 않는다. `CodexUsageView`가 마운트된 동안 Rust command가 짧게 실행한 로컬 `codex app-server --stdio`에 `initialize`/`initialized` 뒤 `account/rateLimits/read`를 요청한다. 응답의 `rateLimitsByLimitId` primary window를 원시 usage row로 만들고, 프론트가 reset 시각과 window duration에서 elapsed bar를 계산한다. 비-Spark 행은 `Weekly limit`(좁으면 `Weekly`), Spark 행은 `Spark Weekly limit`(좁으면 `Spark`)으로 표시한다. `settings.usage.codex`가 font profile·600~3600초 갱신 간격·두 행의 표시 선택(하나 이상)·추가 `CODEX_HOME` 계정을 소유한다. 추가 계정은 해당 경로에서 사용자가 `codex login`을 끝낸 뒤 pane control bar에서 선택하며, Rust는 그 경로를 app-server 자식의 `CODEX_HOME` 환경으로만 전달한다. app-server listener·Codex thread·사용자 terminal에는 접근하지 않는다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)).
 
-Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다.
+### 10.5.2 GrokUsageView
+
+Grok은 Claude와 같이 레지스트리 밖 headless PTY probe가 `grok`를 띄워 `/usage`를 읽는다. 상류 `allowance_lines`는 한도 헤더·퍼센트 막대·`Credits: $x.xx`·`Pay as you go: Enabled` + `Usage: $used / $cap`를 서로 다른 행에 그리므로, 파서는 라벨 행과 다음 비어 있지 않은 값 행을 결합한다. 값이 있는 행이 있어야 `ready`이며, 라벨만 있고 수치가 없으면 UI `--`로 남는 조용한 오답을 내지 않는다([ADR-0154](../adr/0154-grok-first-class-agent.md)). 첫 기동이 `grokMissing`/`startupTimeout`/PTY 오류로 끝나면 워커 스레드는 종료된다. 구독이 남은 채 refresh하거나 같은 id로 재구독하면 끊긴 handle을 버리고 워커를 다시 만든다. 구독이 없으면 refresh는 워커를 기동하지 않는다.
+
+Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다. Grok Usage도 같은 표시 컴포넌트를 쓴다.
 
 ---
 
