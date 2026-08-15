@@ -11,20 +11,28 @@ describe("Android pairing bootstrap assets", () => {
     delete (window as Window & { LaymuxNative?: unknown }).LaymuxNative;
   });
 
-  it("presents the connection step as a separate dashboard scene and bottom sheet", async () => {
-    const html = await readFile(path.join(ANDROID_ASSET_ROOT, "index.html"), "utf8");
+  it("renders only a transparent secure overlay and bottom sheet above the native Cloud layer", async () => {
+    const [html, styles] = await Promise.all([
+      readFile(path.join(ANDROID_ASSET_ROOT, "index.html"), "utf8"),
+      readFile(path.join(ANDROID_ASSET_ROOT, "styles.css"), "utf8"),
+    ]);
 
     expect(html).not.toContain(">Lx</div>");
     expect(html).toContain('class="connection-stage"');
-    expect(html).toContain('class="dashboard-scene"');
     expect(html).toContain('id="dismissLayer"');
     expect(html).toContain('id="connectionSheet"');
     expect(html).toContain('class="sheet-handle"');
     expect(html).toContain('class="status-heading"');
     expect(html).toContain('class="primary-actions"');
     expect(html).toContain('class="connection-settings"');
+    expect(html).not.toContain('class="dashboard-scene"');
+    expect(html).not.toContain('id="sceneDeviceName"');
+    expect(html).not.toContain("logo.svg");
     expect(html).not.toContain('class="app-header"');
     expect(html).not.toContain('class="security-note"');
+    expect(styles).toContain("background: transparent");
+    expect(styles).not.toContain(".dashboard-scene");
+    expect(styles).not.toContain(".scene-device");
   });
 
   it("animates the sheet out before returning to the unchanged Cloud dashboard path", async () => {
@@ -88,15 +96,5 @@ describe("Android pairing bootstrap assets", () => {
 
     expect(document.getElementById("connectionSheet")).not.toHaveClass("is-closing");
     expect(showCloudDashboard).not.toHaveBeenCalled();
-  });
-
-  it("bundles the same colored arrow mark as the Android launcher", async () => {
-    const logo = await readFile(path.join(ANDROID_ASSET_ROOT, "logo.svg"), "utf8");
-
-    expect(logo).toContain('viewBox="0 0 120 120"');
-    expect(logo).toContain("#f50a3c");
-    expect(logo).toContain("#0af1f5");
-    expect(logo).toContain("#ffffff");
-    expect(logo).not.toContain("<text");
   });
 });

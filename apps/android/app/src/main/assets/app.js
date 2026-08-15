@@ -3,7 +3,6 @@
 (() => {
   const dismissLayer = document.getElementById("dismissLayer");
   const connectionSheet = document.getElementById("connectionSheet");
-  const sceneDeviceName = document.getElementById("sceneDeviceName");
   const stateBadge = document.getElementById("stateBadge");
   const stateTitle = document.getElementById("stateTitle");
   const stateDescription = document.getElementById("stateDescription");
@@ -112,11 +111,6 @@
     const pairingTotal = Array.isArray(status.pairings)
       ? status.pairings.length
       : 0;
-
-    sceneDeviceName.textContent =
-      typeof status.label === "string" && status.label.trim()
-        ? status.label
-        : "선택한 PC";
 
     stateBadge.textContent = confirmed
       ? "페어링 확인됨"

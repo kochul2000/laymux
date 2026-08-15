@@ -22,6 +22,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - 32바이트 pairing seed의 AES-256-GCM wrapping 저장
 - 기본 auth-per-use 강한 생체 인증과 경고가 있는 명시적 Keystore-only opt-out
 - exact Cloud HTTPS origin만 허용하는 account WebView와 APK bootstrap/AEAD PC 자산만 허용하는 secure WebView의 분리
+- PC 선택 뒤 실제 Cloud dashboard는 하위 WebView로 유지하고, 입력·접근성·Cloud bridge가 비활성인 상태에서 secure WebView의 투명 overlay와 bottom sheet만 위에 표시
 - relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
 - PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key

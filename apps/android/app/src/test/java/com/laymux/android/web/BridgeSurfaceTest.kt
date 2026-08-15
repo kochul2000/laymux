@@ -11,6 +11,7 @@ class BridgeSurfaceTest {
         assertEquals(
             setOf(
                 "requestRemoteHttp",
+                "setRemoteLease",
                 "openRemoteOutput",
                 "closeRemoteOutput",
                 "disconnectRemote",
