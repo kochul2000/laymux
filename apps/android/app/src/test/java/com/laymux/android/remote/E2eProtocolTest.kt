@@ -20,6 +20,12 @@ class E2eProtocolTest {
         val maximumSnapshotRecord = 1 + 1024 * 1024 + (512 * 1024 + 1024 * 1024 + 2 * 4096)
 
         assertEquals(E2eOutputLimits.MAX_PLAINTEXT_RECORD_BYTES, maximumSnapshotRecord)
+        assertEquals(
+            maximumSnapshotRecord + 25,
+            E2eOutputLimits.MAX_ENCRYPTED_RECORD_BYTES,
+        )
+        assertEquals(true, E2eOutputLimits.canDecrypt(maximumSnapshotRecord + 25))
+        assertEquals(false, E2eOutputLimits.canDecrypt(maximumSnapshotRecord + 26))
         assertEquals(true, E2eOutputLimits.canEnqueue(0, maximumSnapshotRecord))
         assertEquals(true, E2eOutputLimits.canEnqueue(256, maximumSnapshotRecord))
         assertEquals(

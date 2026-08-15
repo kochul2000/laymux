@@ -21,6 +21,8 @@ interface E2eOutputSocketCallbacks {
 
 internal object E2eOutputLimits {
     const val MAX_PLAINTEXT_RECORD_BYTES = 1 + 1024 * 1024 + (512 * 1024 + 1024 * 1024 + 2 * 4096)
+    const val RECORD_WIRE_OVERHEAD_BYTES = 1 + 8 + 16
+    const val MAX_ENCRYPTED_RECORD_BYTES = MAX_PLAINTEXT_RECORD_BYTES + RECORD_WIRE_OVERHEAD_BYTES
     const val EXTRA_PENDING_BYTES = 2 * 1024 * 1024
     const val MAX_PENDING_BYTES = MAX_PLAINTEXT_RECORD_BYTES + EXTRA_PENDING_BYTES
     const val MAX_ACTIVE_STREAMS = 8
@@ -29,6 +31,8 @@ internal object E2eOutputLimits {
         pendingBytes >= 0 &&
             recordBytes in 1..MAX_PLAINTEXT_RECORD_BYTES &&
             pendingBytes <= MAX_PENDING_BYTES - recordBytes
+
+    fun canDecrypt(recordBytes: Int): Boolean = recordBytes in 1..MAX_ENCRYPTED_RECORD_BYTES
 }
 
 internal class E2eOutputStreamReservations(
@@ -119,6 +123,10 @@ class E2eOutputSocket internal constructor(
     }
 
     override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+        if (!E2eOutputLimits.canDecrypt(bytes.size)) {
+            fail("Secure output record exceeded the protocol limit.")
+            return
+        }
         val encrypted = bytes.toByteArray()
         val plaintext = try {
             cipher.decryptResponse(encrypted)

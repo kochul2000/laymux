@@ -10,7 +10,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0146](../../docs/adr/0146-android-e2e-session-and-encrypted-remote-rpc.md),
 [ADR-0149](../../docs/adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
-[ADR-0158](../../docs/adr/0158-android-e2e-websocket-output-transport.md),
+[ADR-0159](../../docs/adr/0159-android-e2e-websocket-output-transport.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
