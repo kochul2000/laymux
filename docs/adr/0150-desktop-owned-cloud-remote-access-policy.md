@@ -4,6 +4,7 @@
 - Date: 2026-08-12
 - Source: 사용자 요구("세팅에서 앱을 통한 종단 암호화만 허용할지, 단순 등록도 허용할지 사용자가 정한다", "laymux-server cloud는 철저히 중계만") · [ADR-0024](0024-cloud-native-wss-tunnel.md) · [ADR-0139](0139-cloud-tunnel-tailscale-route-advertisement-and-direct-gate.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
 - Extends: [ADR-0024](0024-cloud-native-wss-tunnel.md), [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
+- Superseded in part by: [ADR-0158](0158-android-e2e-websocket-output-transport.md) — `androidE2eOnly`에서도 고정된 encrypted output WebSocket 하나를 허용함. 일반 Remote WebSocket 거부와 PC 소유 정책은 유지한다.
 
 ## Context
 

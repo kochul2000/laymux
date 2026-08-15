@@ -17,12 +17,11 @@ use crate::automation_server::ServerState;
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
 use crate::remote_server::TunnelAuthorized;
-use crate::terminal_output::TerminalOutputFrameHeaderV1;
 
 use super::access::effective_remote_settings;
 use super::lease::{
-    active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
-    emit_remote_control_status, status_from_state, wait_for_remote_owner_transition_async,
+    effective_heartbeat_timeout_seconds, emit_remote_control_status, status_from_state,
+    wait_for_remote_owner_transition_async,
 };
 use super::{internal_error, json_error};
 
@@ -49,17 +48,6 @@ enum PlainRequest {
         method: String,
         path: String,
         body: Option<Value>,
-    },
-    TerminalOutputOpen {
-        terminal_id: String,
-        lease_id: String,
-    },
-    TerminalOutputPoll {
-        terminal_id: String,
-        lease_id: String,
-        generation: u64,
-        source_seq: u64,
-        wire_seq_offset: u64,
     },
     BackgroundTransition {
         lease_id: String,
@@ -185,44 +173,12 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
         PlainRequest::Http { method, path, body } => {
             dispatch_http(server, &method, &path, body).await
         }
-        PlainRequest::TerminalOutputOpen {
-            terminal_id,
-            lease_id,
-        } => {
-            if !valid_remote_identifier(&terminal_id) || !valid_remote_identifier(&lease_id) {
-                return Ok(rpc_error(
-                    StatusCode::BAD_REQUEST,
-                    "Terminal output identity is invalid",
-                ));
-            }
-            output_open(server, terminal_id, lease_id).await
-        }
-        PlainRequest::TerminalOutputPoll {
-            terminal_id,
-            lease_id,
-            generation,
-            source_seq,
-            wire_seq_offset,
-        } => {
-            if !valid_remote_identifier(&terminal_id) || !valid_remote_identifier(&lease_id) {
-                return Ok(rpc_error(
-                    StatusCode::BAD_REQUEST,
-                    "Terminal output identity is invalid",
-                ));
-            }
-            output_poll(
-                server,
-                terminal_id,
-                lease_id,
-                generation,
-                source_seq,
-                wire_seq_offset,
-            )
-            .await
-        }
         PlainRequest::BackgroundTransition { lease_id } => {
             if !valid_remote_identifier(&lease_id) {
-                return Ok(rpc_error(StatusCode::BAD_REQUEST, "Remote lease identity is invalid"));
+                return Ok(rpc_error(
+                    StatusCode::BAD_REQUEST,
+                    "Remote lease identity is invalid",
+                ));
             }
             let settings = effective_remote_settings(&server.app_state).map_err(AppError::Other)?;
             let seconds = settings.android_background_lease_seconds;
@@ -234,14 +190,23 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
                     Duration::from_secs(effective_heartbeat_timeout_seconds(&settings)),
                 );
                 if seconds == 0 {
-                    if !control.lease.as_ref().is_some_and(|lease| lease.lease_id == lease_id) {
-                        return Ok(rpc_error(StatusCode::CONFLICT, "Remote lease is not active"));
+                    if control.lease.as_ref().map(|lease| lease.lease_id.as_str())
+                        != Some(lease_id.as_str())
+                    {
+                        return Ok(rpc_error(
+                            StatusCode::CONFLICT,
+                            "Remote lease is not active",
+                        ));
                     }
                     control.begin_voluntary_release_transition(now)
-                } else if control.refresh_remote_lease(&lease_id, now, Duration::from_secs(seconds)) {
+                } else if control.refresh_remote_lease(&lease_id, now, Duration::from_secs(seconds))
+                {
                     None
                 } else {
-                    return Ok(rpc_error(StatusCode::CONFLICT, "Remote lease is not active"));
+                    return Ok(rpc_error(
+                        StatusCode::CONFLICT,
+                        "Remote lease is not active",
+                    ));
                 }
             };
             if let Some(transition) = transition {
@@ -250,10 +215,8 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
                     .map_err(AppError::Other)?;
                 let mut control = server.app_state.remote_control.lock_or_err()?;
                 control.finalize_owner_transition_if_drained(transition);
-                let status = status_from_state(
-                    &control,
-                    effective_heartbeat_timeout_seconds(&settings),
-                );
+                let status =
+                    status_from_state(&control, effective_heartbeat_timeout_seconds(&settings));
                 emit_remote_control_status(&server.app_handle, &status);
             }
             Ok(json!({
@@ -370,111 +333,6 @@ async fn dispatch_http(
         "status": status.as_u16(),
         "body": body,
     }))
-}
-
-async fn output_open(
-    server: ServerState,
-    terminal_id: String,
-    lease_id: String,
-) -> Result<Value, AppError> {
-    let timeout = match active_lease_timeout(&server, &lease_id)? {
-        Some(timeout) => timeout,
-        None => {
-            return Ok(rpc_error(
-                StatusCode::CONFLICT,
-                "Remote lease is not active",
-            ))
-        }
-    };
-    let settings = effective_remote_settings(&server.app_state).map_err(AppError::Other)?;
-    let snapshot_max_bytes = super::effective_snapshot_max_bytes(&settings);
-    let subscribed = match super::attach_and_subscribe_render_checkpoint(
-        &server,
-        &terminal_id,
-        snapshot_max_bytes,
-    )
-    .await
-    {
-        Ok(subscribed) => subscribed,
-        Err(error) => return Ok(rpc_error(StatusCode::CONFLICT, &error.to_string())),
-    };
-    if !active_lease_matches_with_timeout(&server.app_state, &lease_id, timeout)
-        .map_err(AppError::Other)?
-    {
-        return Ok(rpc_error(
-            StatusCode::CONFLICT,
-            "Remote lease changed during output attach",
-        ));
-    }
-    let header = TerminalOutputFrameHeaderV1::snapshot(&subscribed.attachment);
-    let state = &subscribed.attachment.state;
-    Ok(json!({
-        "kind": "terminalOutput",
-        "phase": "snapshot",
-        "generation": subscribed.generation,
-        "sourceSeq": state.source_seq,
-        "wireSeqOffset": subscribed.wire_seq_offset,
-        "header": header,
-        "geometry": state.geometry,
-        "modes": state.modes,
-        "data": URL_SAFE_NO_PAD.encode(subscribed.attachment.snapshot),
-    }))
-}
-
-async fn output_poll(
-    server: ServerState,
-    terminal_id: String,
-    lease_id: String,
-    generation: u64,
-    source_seq: u64,
-    wire_seq_offset: u64,
-) -> Result<Value, AppError> {
-    if active_lease_timeout(&server, &lease_id)?.is_none() {
-        return Ok(rpc_error(
-            StatusCode::CONFLICT,
-            "Remote lease is not active",
-        ));
-    }
-    let delta = crate::terminal_output::resume_terminal_output(
-        &server.app_state.terminal_protocol_states,
-        &terminal_id,
-        generation,
-        source_seq,
-    )
-    .map_err(AppError::Other)?;
-    let Some(delta) = delta else {
-        return Ok(json!({
-            "kind": "terminalOutput",
-            "phase": "reattach",
-        }));
-    };
-    let header = TerminalOutputFrameHeaderV1::delta_with_offset(&delta, wire_seq_offset)
-        .map_err(AppError::Other)?;
-    Ok(json!({
-        "kind": "terminalOutput",
-        "phase": if delta.data.is_empty() { "idle" } else { "delta" },
-        "generation": delta.generation,
-        "sourceSeq": delta.seq_end,
-        "wireSeqOffset": wire_seq_offset,
-        "header": header,
-        "geometry": delta.geometry,
-        "data": URL_SAFE_NO_PAD.encode(delta.data),
-    }))
-}
-
-fn active_lease_timeout(
-    server: &ServerState,
-    lease_id: &str,
-) -> Result<Option<Duration>, AppError> {
-    if lease_id.is_empty() {
-        return Ok(None);
-    }
-    let settings = effective_remote_settings(&server.app_state).map_err(AppError::Other)?;
-    let timeout = Duration::from_secs(effective_heartbeat_timeout_seconds(&settings));
-    active_lease_matches_with_timeout(&server.app_state, lease_id, timeout)
-        .map(Some)
-        .map(|result| result.filter(|active| *active).map(|_| timeout))
-        .map_err(AppError::Other)
 }
 
 fn http_path_allowed(method: &Method, path: &str) -> bool {
@@ -653,44 +511,20 @@ mod tests {
         .expect("http");
         assert!(matches!(http, PlainRequest::Http { .. }));
 
-        let open: PlainRequest = serde_json::from_str(
+        assert!(serde_json::from_str::<PlainRequest>(
             r#"{"kind":"terminalOutputOpen","terminalId":"terminal-pane-1","leaseId":"lease-1"}"#,
         )
-        .expect("terminalOutputOpen");
-        match open {
-            PlainRequest::TerminalOutputOpen {
-                terminal_id,
-                lease_id,
-            } => {
-                assert_eq!(terminal_id, "terminal-pane-1");
-                assert_eq!(lease_id, "lease-1");
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
+        .is_err());
 
-        let poll: PlainRequest = serde_json::from_str(
+        assert!(serde_json::from_str::<PlainRequest>(
             r#"{"kind":"terminalOutputPoll","terminalId":"terminal-pane-1","leaseId":"lease-1",
                 "generation":7,"sourceSeq":42,"wireSeqOffset":9}"#,
         )
-        .expect("terminalOutputPoll");
-        match poll {
-            PlainRequest::TerminalOutputPoll {
-                generation,
-                source_seq,
-                wire_seq_offset,
-                ..
-            } => {
-                assert_eq!(generation, 7);
-                assert_eq!(source_seq, 42);
-                assert_eq!(wire_seq_offset, 9);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
+        .is_err());
 
-        let background: PlainRequest = serde_json::from_str(
-            r#"{"kind":"backgroundTransition","leaseId":"lease-1"}"#,
-        )
-        .expect("backgroundTransition");
+        let background: PlainRequest =
+            serde_json::from_str(r#"{"kind":"backgroundTransition","leaseId":"lease-1"}"#)
+                .expect("backgroundTransition");
         assert!(matches!(
             background,
             PlainRequest::BackgroundTransition { lease_id } if lease_id == "lease-1"
@@ -700,7 +534,7 @@ mod tests {
     /// Rust field spellings are not part of the contract: accepting them would
     /// hide the camelCase regression this test pins down.
     #[test]
-    fn plain_requests_reject_snake_case_field_names() {
+    fn terminal_output_is_not_an_rpc_plaintext_operation() {
         assert!(serde_json::from_str::<PlainRequest>(
             r#"{"kind":"terminalOutputOpen","terminal_id":"terminal-pane-1","lease_id":"lease-1"}"#
         )

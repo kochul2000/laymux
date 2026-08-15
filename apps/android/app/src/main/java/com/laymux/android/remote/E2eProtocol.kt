@@ -167,6 +167,25 @@ internal class RemoteSession internal constructor(
     }
 
     @Synchronized
+    fun openOutputCipher(streamNonce: String): E2eOutputCipher {
+        requireTransportAllowed()
+        val keys = E2eOutputProtocol.deriveKeys(
+            requestKey,
+            responseKey,
+            instanceId,
+            sessionId,
+            streamNonce,
+        )
+        return E2eOutputCipher(
+            instanceId,
+            sessionId,
+            streamNonce,
+            keys.first,
+            keys.second,
+        )
+    }
+
+    @Synchronized
     fun pendingRequest(): PendingRpc? = inFlight
 
     @Synchronized

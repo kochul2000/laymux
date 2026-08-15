@@ -16,6 +16,71 @@ import org.json.JSONObject
 
 class E2eProtocolTest {
     @Test
+    fun outputRecordsAreBinaryDirectionalAndBoundToTheStreamNonce() {
+        val sessionKeys = E2eProtocol.deriveKeys(
+            ByteArray(32) { 3 },
+            arrayOf("p", "desktop-7", "c", "cs", "sn", "s"),
+        )
+        val streamNonce = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        val outputKeys = E2eOutputProtocol.deriveKeys(
+            sessionKeys.first,
+            sessionKeys.second,
+            "desktop-7",
+            "s",
+            streamNonce,
+        )
+        assertEquals(
+            "e5df689e823e95d6a84af57c73af53e006598abd39838cc04c1c4057b13939e5",
+            outputKeys.first.toHex(),
+        )
+        assertEquals(
+            "3ea5a2e48f7b8a53e1c6369b6f3b560bc0bfa47c1ef92e50eef2c0d6f7e5ec76",
+            outputKeys.second.toHex(),
+        )
+        val responsePlaintext = byteArrayOf(E2eOutputProtocol.RECORD_BINARY, 4, 5, 6)
+        val record = E2eOutputProtocol.encryptRecord(
+            outputKeys.second,
+            E2eOutputProtocol.D2A_AAD_DOMAIN,
+            "desktop-7",
+            "s",
+            streamNonce,
+            0,
+            responsePlaintext,
+        )
+
+        assertEquals(E2eProtocol.VERSION.toByte(), record[0])
+        assertArrayEquals(
+            responsePlaintext,
+            E2eOutputProtocol.decryptRecord(
+                outputKeys.second,
+                E2eOutputProtocol.D2A_AAD_DOMAIN,
+                "desktop-7",
+                "s",
+                streamNonce,
+                0,
+                record,
+            ),
+        )
+        assertThrows(E2eProtocolException::class.java) {
+            E2eOutputProtocol.decryptRecord(
+                outputKeys.second,
+                E2eOutputProtocol.D2A_AAD_DOMAIN,
+                "desktop-7",
+                "s",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+                0,
+                record,
+            )
+        }
+        Arrays.fill(sessionKeys.first, 0)
+        Arrays.fill(sessionKeys.second, 0)
+        Arrays.fill(outputKeys.first, 0)
+        Arrays.fill(outputKeys.second, 0)
+        Arrays.fill(responsePlaintext, 0)
+        Arrays.fill(record, 0)
+    }
+
+    @Test
     fun matchesTheDesktopCrossPlatformVector() {
         val seed = ByteArray(32) { it.toByte() }
         val pairingId = "AAECAwQFBgcICQoLDA0ODw"

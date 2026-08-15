@@ -10,6 +10,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0146](../../docs/adr/0146-android-e2e-session-and-encrypted-remote-rpc.md),
 [ADR-0149](../../docs/adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
+[ADR-0158](../../docs/adr/0158-android-e2e-websocket-output-transport.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -26,13 +27,15 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
 - PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key
-- relay에는 ciphertext만 보이는 PC Remote resource·HTTP·V1 output bridge
+- relay에는 ciphertext만 보이는 PC Remote resource·HTTP와 native WebSocket 기반 V1 output bridge
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
 - background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 PC Remote page를 다시 적재
 
 데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 QR을 발급·회전·폐기하고, 첫 Android
 client nonce의 ACK를 확인한다. 이후 Android native 계층과 desktop은 같은 seed에서 방향별 session
-key를 파생해 Remote UI와 terminal payload를 종단 암호화하고 성공한 RPC마다 15분 비활성 deadline을 갱신한다. terminal 선택·navigation·입출력 UX는 APK가 복제하지 않고 PC가 배포한 기존 Remote page가 소유한다. 기존 browser cloud/direct Remote는 호환을
+key를 파생해 Remote UI와 terminal payload를 종단 암호화한다. control/resource는 순차 AEAD RPC를,
+terminal output은 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge를 사용하며 성공한
+RPC마다 15분 비활성 deadline을 갱신한다. terminal 선택·navigation·입출력 UX는 APK가 복제하지 않고 PC가 배포한 기존 Remote page가 소유한다. 기존 browser cloud/direct Remote는 호환을
 위한 별도 평문 경로이므로 Android 앱의 열린 보안 session만 E2E로 표시한다.
 
 ## 빌드

@@ -12,8 +12,6 @@ class BridgeSurfaceTest {
             setOf(
                 "requestRemoteHttp",
                 "setRemoteLease",
-                "openRemoteOutput",
-                "closeRemoteOutput",
                 "disconnectRemote",
             ),
             javascriptMethods(RemoteBridge::class.java),
@@ -36,8 +34,6 @@ class BridgeSurfaceTest {
     companion object {
         private val REMOTE_TRANSPORT_METHODS = setOf(
             "requestRemoteHttp",
-            "openRemoteOutput",
-            "closeRemoteOutput",
         )
     }
 }

@@ -19,10 +19,209 @@ const A2D_INFO: &[u8] = b"laymux.android-e2e.a2d.v1";
 const D2A_INFO: &[u8] = b"laymux.android-e2e.d2a.v1";
 const A2D_AAD_DOMAIN: &[u8] = b"laymux.android-e2e.a2d.aad.v1";
 const D2A_AAD_DOMAIN: &[u8] = b"laymux.android-e2e.d2a.aad.v1";
+const OUTPUT_SALT_DOMAIN: &[u8] = b"laymux.android-e2e.output.hkdf.salt.v1";
+const OUTPUT_A2D_INFO: &[u8] = b"laymux.android-e2e.output.a2d.v1";
+const OUTPUT_D2A_INFO: &[u8] = b"laymux.android-e2e.output.d2a.v1";
+const OUTPUT_A2D_AAD_DOMAIN: &[u8] = b"laymux.android-e2e.output.a2d.aad.v1";
+const OUTPUT_D2A_AAD_DOMAIN: &[u8] = b"laymux.android-e2e.output.d2a.aad.v1";
+const OUTPUT_RECORD_HEADER_BYTES: usize = 9;
 
 pub(super) struct SessionKeys {
     pub(super) a2d: Zeroizing<[u8; KEY_BYTES]>,
     pub(super) d2a: Zeroizing<[u8; KEY_BYTES]>,
+}
+
+pub(super) struct OutputKeys {
+    pub(super) a2d: Zeroizing<[u8; KEY_BYTES]>,
+    pub(super) d2a: Zeroizing<[u8; KEY_BYTES]>,
+}
+
+pub(super) fn derive_output_keys(
+    keys: &SessionKeys,
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+) -> Result<OutputKeys, AppError> {
+    let mut salt_input = Vec::with_capacity(192);
+    salt_input.extend_from_slice(OUTPUT_SALT_DOMAIN);
+    append_framed(&mut salt_input, &[instance_id, session_id, stream_nonce])?;
+    let salt = Zeroizing::new(Sha256::digest(&salt_input).to_vec());
+    salt_input.zeroize();
+
+    let mut a2d = Zeroizing::new([0_u8; KEY_BYTES]);
+    let mut d2a = Zeroizing::new([0_u8; KEY_BYTES]);
+    Hkdf::<Sha256>::new(Some(&salt), keys.a2d.as_slice())
+        .expand(OUTPUT_A2D_INFO, a2d.as_mut())
+        .map_err(|_| AppError::Other("Android E2E output request key derivation failed".into()))?;
+    Hkdf::<Sha256>::new(Some(&salt), keys.d2a.as_slice())
+        .expand(OUTPUT_D2A_INFO, d2a.as_mut())
+        .map_err(|_| AppError::Other("Android E2E output response key derivation failed".into()))?;
+    Ok(OutputKeys { a2d, d2a })
+}
+
+pub(super) fn encrypt_output_response(
+    key: &[u8; KEY_BYTES],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    sequence: u64,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, AppError> {
+    encrypt_output_record(
+        key,
+        OUTPUT_D2A_AAD_DOMAIN,
+        instance_id,
+        session_id,
+        stream_nonce,
+        sequence,
+        plaintext,
+    )
+}
+
+pub(super) fn decrypt_output_request(
+    key: &[u8; KEY_BYTES],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    expected_sequence: u64,
+    record: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, AppError> {
+    decrypt_output_record(
+        key,
+        OUTPUT_A2D_AAD_DOMAIN,
+        instance_id,
+        session_id,
+        stream_nonce,
+        expected_sequence,
+        record,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn encrypt_output_request(
+    key: &[u8; KEY_BYTES],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    sequence: u64,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, AppError> {
+    encrypt_output_record(
+        key,
+        OUTPUT_A2D_AAD_DOMAIN,
+        instance_id,
+        session_id,
+        stream_nonce,
+        sequence,
+        plaintext,
+    )
+}
+
+#[cfg(test)]
+pub(super) fn decrypt_output_response(
+    key: &[u8; KEY_BYTES],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    expected_sequence: u64,
+    record: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, AppError> {
+    decrypt_output_record(
+        key,
+        OUTPUT_D2A_AAD_DOMAIN,
+        instance_id,
+        session_id,
+        stream_nonce,
+        expected_sequence,
+        record,
+    )
+}
+
+fn encrypt_output_record(
+    key: &[u8; KEY_BYTES],
+    aad_domain: &[u8],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    sequence: u64,
+    plaintext: &[u8],
+) -> Result<Vec<u8>, AppError> {
+    validate_sequence(sequence)?;
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|_| AppError::Other("Android E2E output AES key is invalid".into()))?;
+    let nonce = sequence_nonce(sequence);
+    let aad = output_aad(aad_domain, instance_id, session_id, stream_nonce, sequence)?;
+    let ciphertext = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: plaintext,
+                aad: &aad,
+            },
+        )
+        .map_err(|_| AppError::Other("Android E2E output encryption failed".into()))?;
+    let mut record = Vec::with_capacity(OUTPUT_RECORD_HEADER_BYTES + ciphertext.len());
+    record.push(super::PROTOCOL_VERSION);
+    record.extend_from_slice(&sequence.to_be_bytes());
+    record.extend_from_slice(&ciphertext);
+    Ok(record)
+}
+
+fn decrypt_output_record(
+    key: &[u8; KEY_BYTES],
+    aad_domain: &[u8],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    expected_sequence: u64,
+    record: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, AppError> {
+    validate_sequence(expected_sequence)?;
+    if record.len() < OUTPUT_RECORD_HEADER_BYTES + TAG_BYTES || record[0] != super::PROTOCOL_VERSION
+    {
+        return Err(AppError::Other(
+            "Android E2E output record is invalid".into(),
+        ));
+    }
+    let sequence = u64::from_be_bytes(
+        record[1..OUTPUT_RECORD_HEADER_BYTES]
+            .try_into()
+            .map_err(|_| AppError::Other("Android E2E output record is invalid".into()))?,
+    );
+    if sequence != expected_sequence {
+        return Err(AppError::Other(
+            "Android E2E output record sequence is invalid".into(),
+        ));
+    }
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|_| AppError::Other("Android E2E output AES key is invalid".into()))?;
+    let nonce = sequence_nonce(sequence);
+    let aad = output_aad(aad_domain, instance_id, session_id, stream_nonce, sequence)?;
+    cipher
+        .decrypt(
+            Nonce::from_slice(&nonce),
+            Payload {
+                msg: &record[OUTPUT_RECORD_HEADER_BYTES..],
+                aad: &aad,
+            },
+        )
+        .map(Zeroizing::new)
+        .map_err(|_| AppError::Other("Android E2E output authentication failed".into()))
+}
+
+fn output_aad(
+    domain: &[u8],
+    instance_id: &str,
+    session_id: &str,
+    stream_nonce: &str,
+    sequence: u64,
+) -> Result<Vec<u8>, AppError> {
+    let mut aad = Vec::with_capacity(192);
+    aad.extend_from_slice(domain);
+    aad.push(super::PROTOCOL_VERSION);
+    append_framed(&mut aad, &[instance_id, session_id, stream_nonce])?;
+    aad.extend_from_slice(&sequence.to_be_bytes());
+    Ok(aad)
 }
 
 pub(super) fn proof(seed: &[u8], domain: &[u8], fields: &[&str]) -> Result<String, AppError> {
@@ -293,6 +492,86 @@ mod tests {
             b"ok"
         );
         assert!(decrypt_request(&keys.d2a, "i", "s", 0, &response).is_err());
+    }
+
+    #[test]
+    fn output_records_are_binary_directional_and_bind_the_stream_nonce() {
+        let session_keys =
+            derive_session_keys(&[3_u8; 32], &["p", "desktop-7", "c", "cs", "sn", "s"]).unwrap();
+        let stream_nonce = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+        let output_keys =
+            derive_output_keys(&session_keys, "desktop-7", "s", stream_nonce).unwrap();
+        assert_eq!(
+            hex(output_keys.a2d.as_slice()),
+            "e5df689e823e95d6a84af57c73af53e006598abd39838cc04c1c4057b13939e5"
+        );
+        assert_eq!(
+            hex(output_keys.d2a.as_slice()),
+            "3ea5a2e48f7b8a53e1c6369b6f3b560bc0bfa47c1ef92e50eef2c0d6f7e5ec76"
+        );
+        let request =
+            encrypt_output_request(&output_keys.a2d, "desktop-7", "s", stream_nonce, 0, b"open")
+                .unwrap();
+        assert_eq!(request[0], super::super::PROTOCOL_VERSION);
+        assert_eq!(&request[1..9], &0_u64.to_be_bytes());
+        assert_eq!(
+            decrypt_output_request(
+                &output_keys.a2d,
+                "desktop-7",
+                "s",
+                stream_nonce,
+                0,
+                &request,
+            )
+            .unwrap()
+            .as_slice(),
+            b"open"
+        );
+        assert!(decrypt_output_request(
+            &output_keys.a2d,
+            "desktop-7",
+            "s",
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            0,
+            &request,
+        )
+        .is_err());
+
+        let response = encrypt_output_response(
+            &output_keys.d2a,
+            "desktop-7",
+            "s",
+            stream_nonce,
+            0,
+            b"delta",
+        )
+        .unwrap();
+        assert_eq!(
+            URL_SAFE_NO_PAD.encode(&request),
+            "AQAAAAAAAAAAgeMMonNSHkfsnOec8CoqaqX6zbc"
+        );
+        assert_eq!(
+            decrypt_output_response(
+                &output_keys.d2a,
+                "desktop-7",
+                "s",
+                stream_nonce,
+                0,
+                &response,
+            )
+            .unwrap()
+            .as_slice(),
+            b"delta"
+        );
+        assert!(decrypt_output_request(
+            &output_keys.a2d,
+            "desktop-7",
+            "s",
+            stream_nonce,
+            0,
+            &response,
+        )
+        .is_err());
     }
 
     #[test]

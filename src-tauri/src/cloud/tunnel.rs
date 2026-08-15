@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONNECTION, CONTENT_LENGTH};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Uri};
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,10 @@ use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tower::ServiceExt;
 
 use super::{keyring_store, CloudStatus};
+use crate::android_e2e::{
+    AndroidE2eOutputCipher, AndroidE2eSession, E2eError, OUTPUT_RECORD_BINARY, OUTPUT_RECORD_OPEN,
+    OUTPUT_RECORD_TEXT,
+};
 use crate::automation_server::{automation_port, ServerState};
 use crate::commands::{get_remote_host_candidates, HostCandidate};
 use crate::constants::{
@@ -38,8 +42,8 @@ use crate::remote_server::{self, TunnelAuthorized};
 use crate::settings::models::{CloudAccessMode, RemoteSettings};
 use crate::state::AppState;
 use crate::terminal_output::{
-    TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputPhase,
-    TerminalOutputSubscribedAttachment, TerminalOutputSubscriptionEvent,
+    TerminalOutputAttachment, TerminalOutputDelta, TerminalOutputFrameHeaderV1,
+    TerminalOutputPhase, TerminalOutputSubscribedAttachment, TerminalOutputSubscriptionEvent,
     TERMINAL_OUTPUT_PROTOCOL_NAME, TERMINAL_OUTPUT_PROTOCOL_VERSION,
 };
 
@@ -58,6 +62,7 @@ const KIND_HTTP_REQUEST: &str = "http.request";
 const KIND_HTTP_RESPONSE: &str = "http.response";
 const KIND_WEBSOCKET: &str = "websocket";
 const KIND_WEBSOCKET_ACCEPT: &str = "websocket.accept";
+const ANDROID_E2E_OUTPUT_PATH: &str = "/remote/v1/e2e/output";
 const ENCODING_BASE64: &str = "base64";
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(20);
@@ -71,6 +76,9 @@ const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEASE_CHECK_MS: u64 = 500;
 const STREAM_DATA_CHUNK_BYTES: usize = 64 * 1024;
+const E2E_OUTPUT_INPUT_QUEUE_SIZE: usize = 2;
+const E2E_OUTPUT_OPEN_RECORD_LIMIT: usize = 4 * 1024;
+const E2E_OUTPUT_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[cfg(not(test))]
 type OutputCheckpointBridge = AppHandle;
@@ -156,6 +164,7 @@ enum ActiveStream {
     },
     WebSocket {
         shutdown: watch::Sender<bool>,
+        input: Option<mpsc::Sender<Vec<u8>>>,
         join: TokioJoinHandle<()>,
     },
 }
@@ -194,6 +203,30 @@ struct StreamOpenPayload {
     query: Option<String>,
     #[serde(default)]
     headers: Vec<(String, String)>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidE2eOutputOpen {
+    terminal_id: String,
+    lease_id: String,
+}
+
+struct AndroidE2eOutputRoute {
+    instance_id: String,
+    session_id: String,
+    stream_nonce: String,
+}
+
+struct AndroidE2eOutputTask {
+    outbound_tx: OutboundSender,
+    app_state: Arc<AppState>,
+    output_checkpoint_bridge: OutputCheckpointBridge,
+    stream_id: String,
+    session: Arc<AndroidE2eSession>,
+    cipher: AndroidE2eOutputCipher,
+    input: mpsc::Receiver<Vec<u8>>,
+    shutdown: watch::Receiver<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -1046,6 +1079,11 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
     if mode == CloudAccessMode::BrowserAndE2e {
         return true;
     }
+    if payload.kind == KIND_WEBSOCKET {
+        return payload.path.as_deref() == Some(ANDROID_E2E_OUTPUT_PATH)
+            && payload.headers.is_empty()
+            && parse_android_e2e_output_route(payload.query.as_deref()).is_some();
+    }
     if payload.kind != KIND_HTTP_REQUEST
         || payload.method.as_deref() != Some("POST")
         || !payload.query.as_deref().unwrap_or("").is_empty()
@@ -1165,6 +1203,96 @@ async fn handle_stream_open(
                 .await;
                 return;
             };
+            if path == ANDROID_E2E_OUTPUT_PATH {
+                let Some(route) = parse_android_e2e_output_route(payload.query.as_deref()) else {
+                    let _ = send_stream_error(
+                        outbound_tx,
+                        &frame.stream_id,
+                        StreamErrorPayload::new(
+                            "bad_websocket",
+                            "Android E2E output route is invalid",
+                            false,
+                        ),
+                    )
+                    .await;
+                    return;
+                };
+                let now = match unix_time_seconds() {
+                    Ok(now) => now,
+                    Err(error) => {
+                        let _ = send_stream_error(
+                            outbound_tx,
+                            &frame.stream_id,
+                            StreamErrorPayload::new(
+                                "session_check_failed",
+                                error.to_string(),
+                                false,
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let session =
+                    match state
+                        .android_e2e
+                        .session(&route.instance_id, &route.session_id, now)
+                    {
+                        Ok(session) => session,
+                        Err(_) => {
+                            let _ = send_stream_error(
+                                outbound_tx,
+                                &frame.stream_id,
+                                StreamErrorPayload::new(
+                                    "session_unavailable",
+                                    "Android E2E output session is unavailable",
+                                    false,
+                                ),
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                let cipher = match session.open_output_cipher(&route.stream_nonce, now).await {
+                    Ok(cipher) => cipher,
+                    Err(_) => {
+                        let _ = send_stream_error(
+                            outbound_tx,
+                            &frame.stream_id,
+                            StreamErrorPayload::new(
+                                "session_unavailable",
+                                "Android E2E output session is unavailable",
+                                false,
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let (input_tx, input_rx) = mpsc::channel(E2E_OUTPUT_INPUT_QUEUE_SIZE);
+                let (shutdown_tx, shutdown_rx) = watch::channel(false);
+                let join = tokio::spawn(stream_android_e2e_output_over_tunnel(
+                    AndroidE2eOutputTask {
+                        outbound_tx: outbound_tx.clone(),
+                        app_state: state.clone(),
+                        output_checkpoint_bridge,
+                        stream_id: frame.stream_id.clone(),
+                        session,
+                        cipher,
+                        input: input_rx,
+                        shutdown: shutdown_rx,
+                    },
+                ));
+                active_streams.insert(
+                    frame.stream_id,
+                    ActiveStream::WebSocket {
+                        shutdown: shutdown_tx,
+                        input: Some(input_tx),
+                        join,
+                    },
+                );
+                return;
+            }
             let Some(terminal_id) = terminal_id_from_output_path(&path) else {
                 let _ = send_stream_error(
                     outbound_tx,
@@ -1201,6 +1329,7 @@ async fn handle_stream_open(
                 frame.stream_id,
                 ActiveStream::WebSocket {
                     shutdown: shutdown_tx,
+                    input: None,
                     join,
                 },
             );
@@ -1236,6 +1365,57 @@ async fn handle_stream_data(
     outbound_tx: &OutboundSender,
 ) {
     let stream_id = frame.stream_id.clone();
+    let websocket_input = active_streams
+        .get(&stream_id)
+        .and_then(|stream| match stream {
+            ActiveStream::WebSocket {
+                input: Some(input), ..
+            } => Some(input.clone()),
+            _ => None,
+        });
+    if let Some(input) = websocket_input {
+        let decoded = match decode_stream_data(&frame) {
+            Ok(decoded) if decoded.len() <= E2E_OUTPUT_OPEN_RECORD_LIMIT => decoded,
+            Ok(_) => {
+                let _ = send_stream_error(
+                    outbound_tx,
+                    &stream_id,
+                    StreamErrorPayload::new(
+                        "bad_stream_data",
+                        "Android E2E output input record exceeded limit",
+                        false,
+                    ),
+                )
+                .await;
+                remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+                return;
+            }
+            Err(error) => {
+                let _ = send_stream_error(
+                    outbound_tx,
+                    &stream_id,
+                    StreamErrorPayload::new("bad_stream_data", error.to_string(), false),
+                )
+                .await;
+                remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+                return;
+            }
+        };
+        if input.try_send(decoded).is_err() {
+            let _ = send_stream_error(
+                outbound_tx,
+                &stream_id,
+                StreamErrorPayload::new(
+                    "backpressure_limit_exceeded",
+                    "Android E2E output input queue is full",
+                    false,
+                ),
+            )
+            .await;
+            remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+        }
+        return;
+    }
     let Some(ActiveStream::Http(request)) = active_streams.get_mut(&stream_id) else {
         match active_streams.get(&stream_id) {
             Some(ActiveStream::WebSocket { .. }) => {}
@@ -1550,6 +1730,252 @@ fn hop_by_hop_header(name: &str) -> bool {
             | "authorization"
     ) || name.eq_ignore_ascii_case(CONNECTION.as_str())
         || name.eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
+}
+
+async fn stream_android_e2e_output_over_tunnel(task: AndroidE2eOutputTask) {
+    let AndroidE2eOutputTask {
+        outbound_tx,
+        app_state,
+        output_checkpoint_bridge,
+        stream_id,
+        session,
+        mut cipher,
+        mut input,
+        mut shutdown,
+    } = task;
+    if send_frame(
+        &outbound_tx,
+        TunnelFrame::new(
+            &stream_id,
+            FRAME_STREAM_OPEN,
+            json!({ "kind": KIND_WEBSOCKET_ACCEPT }),
+        ),
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+
+    let encrypted_open = match timeout(E2E_OUTPUT_OPEN_TIMEOUT, input.recv()).await {
+        Ok(Some(record)) => record,
+        _ => {
+            let _ = send_frame(
+                &outbound_tx,
+                TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+            )
+            .await;
+            return;
+        }
+    };
+    let plaintext = match cipher.decrypt_request(&encrypted_open) {
+        Ok(plaintext) => plaintext,
+        Err(_) => {
+            let _ = send_frame(
+                &outbound_tx,
+                TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+            )
+            .await;
+            return;
+        }
+    };
+    let Some((&OUTPUT_RECORD_OPEN, open_json)) = plaintext.split_first() else {
+        let _ = send_frame(
+            &outbound_tx,
+            TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+        )
+        .await;
+        return;
+    };
+    let open: AndroidE2eOutputOpen = match serde_json::from_slice(open_json) {
+        Ok(open) => open,
+        Err(_) => {
+            let _ = send_frame(
+                &outbound_tx,
+                TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+            )
+            .await;
+            return;
+        }
+    };
+    if !valid_remote_identifier(&open.terminal_id) || !valid_remote_identifier(&open.lease_id) {
+        let _ = send_frame(
+            &outbound_tx,
+            TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+        )
+        .await;
+        return;
+    }
+
+    let timeout_seconds = remote_output_timeout_seconds(&app_state);
+    if !remote_server::active_lease_matches_with_timeout(
+        &app_state,
+        &open.lease_id,
+        Duration::from_secs(timeout_seconds),
+    )
+    .unwrap_or(false)
+    {
+        let _ = send_frame(
+            &outbound_tx,
+            TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+        )
+        .await;
+        return;
+    }
+
+    let subscription =
+        terminal_output_subscription(&app_state, output_checkpoint_bridge, &open.terminal_id);
+    let subscribed = match prepare_terminal_output_after_checkpoint(
+        &app_state,
+        &open.lease_id,
+        timeout_seconds,
+        subscription,
+    )
+    .await
+    {
+        Ok(subscribed) => subscribed,
+        Err(_) => {
+            let _ = send_frame(
+                &outbound_tx,
+                TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+            )
+            .await;
+            return;
+        }
+    };
+    if unix_time_seconds()
+        .ok()
+        .and_then(|now| session.ensure_active(now).ok())
+        .is_none()
+    {
+        let _ = send_frame(
+            &outbound_tx,
+            TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+        )
+        .await;
+        return;
+    }
+
+    let attachment = subscribed.attachment;
+    let generation = subscribed.generation;
+    let wire_seq_offset = subscribed.wire_seq_offset;
+    let mut subscription = subscribed.subscription;
+    if send_android_e2e_output_pair(
+        &outbound_tx,
+        &stream_id,
+        &mut cipher,
+        TerminalOutputFrameHeaderV1::snapshot(&attachment),
+        &attachment.snapshot,
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+
+    let mut lease_check = interval(Duration::from_millis(LEASE_CHECK_MS));
+    loop {
+        tokio::select! {
+            event = subscription.recv() => {
+                let delta = match event {
+                    Some(TerminalOutputSubscriptionEvent::Delta(delta)) => delta,
+                    Some(TerminalOutputSubscriptionEvent::Gap { .. })
+                    | Some(TerminalOutputSubscriptionEvent::Retired { .. })
+                    | None => break,
+                };
+                let header = match TerminalOutputFrameHeaderV1::delta_with_offset(
+                    &delta,
+                    wire_seq_offset,
+                ) {
+                    Ok(header) => header,
+                    Err(_) => break,
+                };
+                if send_android_e2e_output_pair(
+                    &outbound_tx,
+                    &stream_id,
+                    &mut cipher,
+                    header,
+                    &delta.data,
+                ).await.is_err() {
+                    break;
+                }
+            }
+            _ = lease_check.tick() => {
+                let lease_active = remote_server::active_lease_matches_with_timeout(
+                    &app_state,
+                    &open.lease_id,
+                    Duration::from_secs(timeout_seconds),
+                ).unwrap_or(false);
+                let session_active = unix_time_seconds()
+                    .ok()
+                    .is_some_and(|now| session.ensure_active(now).is_ok());
+                if !lease_active || !session_active {
+                    break;
+                }
+            }
+            client_record = input.recv() => {
+                if client_record.is_none() {
+                    break;
+                }
+                // The v1 output socket is server-to-client after its encrypted OPEN.
+                break;
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+    tracing::debug!(
+        terminal_id = %open.terminal_id,
+        generation,
+        "Android E2E terminal output stream closed"
+    );
+    let _ = send_frame(
+        &outbound_tx,
+        TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+    )
+    .await;
+}
+
+async fn send_android_e2e_output_pair(
+    outbound_tx: &OutboundSender,
+    stream_id: &str,
+    cipher: &mut AndroidE2eOutputCipher,
+    header: TerminalOutputFrameHeaderV1,
+    data: &[u8],
+) -> Result<(), AppError> {
+    if header.byte_length != data.len()
+        || header.seq_end.saturating_sub(header.seq_start) != data.len() as u64
+    {
+        return Err(AppError::Other(
+            "Android E2E terminal output frame length mismatch".into(),
+        ));
+    }
+    let header_json = serde_json::to_vec(&header)?;
+    let mut text_plaintext = Vec::with_capacity(1 + header_json.len());
+    text_plaintext.push(OUTPUT_RECORD_TEXT);
+    text_plaintext.extend_from_slice(&header_json);
+    let encrypted_header = cipher
+        .encrypt_response(&text_plaintext)
+        .map_err(android_e2e_error)?;
+    send_stream_data(outbound_tx, stream_id, &encrypted_header).await?;
+
+    let mut binary_plaintext = Vec::with_capacity(1 + data.len());
+    binary_plaintext.push(OUTPUT_RECORD_BINARY);
+    binary_plaintext.extend_from_slice(data);
+    let encrypted_data = cipher
+        .encrypt_response(&binary_plaintext)
+        .map_err(android_e2e_error)?;
+    send_stream_data(outbound_tx, stream_id, &encrypted_data).await
+}
+
+fn android_e2e_error(error: E2eError) -> AppError {
+    match error {
+        E2eError::Internal(error) => error,
+        _ => AppError::Other("Android E2E output record failed".into()),
+    }
 }
 
 async fn stream_terminal_output_over_tunnel(
@@ -2046,7 +2472,7 @@ fn subtract_stream_pending_bytes(stream: &ActiveStream, socket_pending_bytes: &m
 
 fn close_active_stream(stream: ActiveStream) {
     match stream {
-        ActiveStream::WebSocket { shutdown, join } => {
+        ActiveStream::WebSocket { shutdown, join, .. } => {
             let _ = shutdown.send(true);
             join.abort();
         }
@@ -2069,6 +2495,62 @@ fn query_param(query: Option<&str>, key: &str) -> Option<String> {
         let (name, value) = pair.split_once('=')?;
         (name == key && !value.is_empty()).then(|| decode_query_component(value))?
     })
+}
+
+fn parse_android_e2e_output_route(query: Option<&str>) -> Option<AndroidE2eOutputRoute> {
+    let mut instance_id = None;
+    let mut session_id = None;
+    let mut stream_nonce = None;
+    let mut count = 0;
+    for pair in query?.split('&') {
+        let (name, value) = pair.split_once('=')?;
+        if value.is_empty() || value.contains(['%', '+']) {
+            return None;
+        }
+        count += 1;
+        match name {
+            "instanceId" if instance_id.is_none() => instance_id = Some(value.to_string()),
+            "sessionId" if session_id.is_none() => session_id = Some(value.to_string()),
+            "streamNonce" if stream_nonce.is_none() => stream_nonce = Some(value.to_string()),
+            _ => return None,
+        }
+    }
+    if count != 3 {
+        return None;
+    }
+    let route = AndroidE2eOutputRoute {
+        instance_id: instance_id?,
+        session_id: session_id?,
+        stream_nonce: stream_nonce?,
+    };
+    if !valid_remote_identifier(&route.instance_id)
+        || !valid_canonical_base64url(&route.session_id, 16)
+        || !valid_canonical_base64url(&route.stream_nonce, 32)
+    {
+        return None;
+    }
+    Some(route)
+}
+
+fn valid_canonical_base64url(value: &str, expected_bytes: usize) -> bool {
+    URL_SAFE_NO_PAD.decode(value).ok().is_some_and(|decoded| {
+        decoded.len() == expected_bytes && URL_SAFE_NO_PAD.encode(decoded) == value
+    })
+}
+
+fn valid_remote_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+fn unix_time_seconds() -> Result<u64, AppError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|error| AppError::Other(format!("System clock is before Unix epoch: {error}")))
 }
 
 fn decode_query_component(value: &str) -> Option<String> {
@@ -2666,6 +3148,7 @@ mod tests {
                 "websocket".into(),
                 ActiveStream::WebSocket {
                     shutdown: websocket_shutdown,
+                    input: None,
                     join: pending_task(websocket_dropped.clone()),
                 },
             ),
@@ -2702,7 +3185,7 @@ mod tests {
     }
 
     #[test]
-    fn android_e2e_only_allows_only_exact_fixed_post_routes() {
+    fn android_e2e_only_allows_fixed_post_routes_and_exact_encrypted_output_websocket() {
         for path in [
             "/remote/v1/e2e/pair/ack",
             "/remote/v1/e2e/session/challenge",
@@ -2721,6 +3204,20 @@ mod tests {
                 &payload
             ));
         }
+
+        let output = StreamOpenPayload {
+            kind: KIND_WEBSOCKET.into(),
+            method: None,
+            path: Some(ANDROID_E2E_OUTPUT_PATH.into()),
+            query: Some(
+                "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+            ),
+            headers: Vec::new(),
+        };
+        assert!(cloud_stream_allowed(
+            CloudAccessMode::AndroidE2eOnly,
+            &output
+        ));
 
         for payload in [
             StreamOpenPayload {
@@ -2749,6 +3246,15 @@ mod tests {
                 method: None,
                 path: Some("/remote/v1/terminals/term-1/output".into()),
                 query: Some("leaseId=lease-1".into()),
+                headers: Vec::new(),
+            },
+            StreamOpenPayload {
+                kind: KIND_WEBSOCKET.into(),
+                method: None,
+                path: Some(ANDROID_E2E_OUTPUT_PATH.into()),
+                query: Some(
+                    "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=bad".into(),
+                ),
                 headers: Vec::new(),
             },
         ] {

@@ -5,6 +5,7 @@ mod validation;
 use serde::{Deserialize, Serialize};
 
 pub use state::AndroidE2eState;
+pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eSession};
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
 pub(crate) const CHALLENGE_ID_BYTES: usize = 16;
@@ -13,6 +14,10 @@ pub(crate) const SERVER_NONCE_BYTES: usize = 32;
 pub(crate) const SESSION_ID_BYTES: usize = 16;
 pub(crate) const CHALLENGE_TTL_SECONDS: u64 = 60;
 pub(crate) const SESSION_INACTIVITY_TIMEOUT_SECONDS: u64 = 15 * 60;
+pub(crate) const OUTPUT_STREAM_NONCE_BYTES: usize = 32;
+pub(crate) const OUTPUT_RECORD_OPEN: u8 = 1;
+pub(crate) const OUTPUT_RECORD_TEXT: u8 = 2;
+pub(crate) const OUTPUT_RECORD_BINARY: u8 = 3;
 
 pub(crate) const CHALLENGE_RESPONSE_DOMAIN: &[u8] = b"laymux.android-e2e.challenge.response.v1";
 pub(crate) const ESTABLISH_REQUEST_DOMAIN: &[u8] = b"laymux.android-e2e.establish.request.v1";

@@ -19,6 +19,32 @@ fn material() -> ConfirmedPairingMaterial {
     }
 }
 
+#[tokio::test]
+async fn output_stream_nonce_can_only_be_used_once_per_session() {
+    let keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let session = AndroidE2eSession {
+        instance_id: "desktop-7".into(),
+        session_id: URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]),
+        pairing_revision: crate::android_pairing::pairing_revision(),
+        expires_at: AtomicU64::new(1_060),
+        revoked: AtomicBool::new(false),
+        state: AsyncMutex::new(SessionState {
+            keys,
+            used_output_nonces: HashSet::new(),
+            next_sequence: 0,
+            last_request_digest: None,
+            last_response: None,
+        }),
+    };
+    let nonce = URL_SAFE_NO_PAD.encode([5_u8; OUTPUT_STREAM_NONCE_BYTES]);
+
+    assert!(session.open_output_cipher(&nonce, 1_000).await.is_ok());
+    assert!(matches!(
+        session.open_output_cipher(&nonce, 1_000).await,
+        Err(E2eError::Invalid)
+    ));
+}
+
 fn establish_request(
     challenge_request: &ChallengeRequest,
     response: &ChallengeResponse,
@@ -128,6 +154,7 @@ async fn authenticated_requests_slide_the_inactivity_deadline() {
         revoked: AtomicBool::new(false),
         state: AsyncMutex::new(SessionState {
             keys: session_keys,
+            used_output_nonces: HashSet::new(),
             next_sequence: 0,
             last_request_digest: None,
             last_response: None,
@@ -215,6 +242,7 @@ async fn failed_dispatch_does_not_slide_the_inactivity_deadline() {
         revoked: AtomicBool::new(false),
         state: AsyncMutex::new(SessionState {
             keys,
+            used_output_nonces: HashSet::new(),
             next_sequence: 0,
             last_request_digest: None,
             last_response: None,
@@ -273,6 +301,7 @@ async fn session_expires_at_the_exact_boundary_after_waiting_for_its_lock() {
         revoked: AtomicBool::new(false),
         state: AsyncMutex::new(SessionState {
             keys,
+            used_output_nonces: HashSet::new(),
             next_sequence: 0,
             last_request_digest: None,
             last_response: None,
@@ -319,6 +348,7 @@ async fn clear_revokes_a_session_arc_that_was_already_looked_up() {
         revoked: AtomicBool::new(false),
         state: AsyncMutex::new(SessionState {
             keys,
+            used_output_nonces: HashSet::new(),
             next_sequence: 0,
             last_request_digest: None,
             last_response: None,
@@ -408,50 +438,4 @@ async fn a_new_establish_replaces_the_previous_session_for_the_pairing() {
             1_003,
         )
         .is_ok());
-}
-
-#[tokio::test]
-async fn maximum_render_checkpoint_and_output_suffix_fit_the_rpc_response_limit() {
-    let keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
-    let session_id = URL_SAFE_NO_PAD.encode([8_u8; SESSION_ID_BYTES]);
-    let ciphertext = encrypt_request(
-        &keys.a2d,
-        "desktop-7",
-        &session_id,
-        0,
-        br#"{"kind":"test"}"#,
-    )
-    .unwrap();
-    let session = AndroidE2eSession {
-        instance_id: "desktop-7".into(),
-        session_id: session_id.clone(),
-        pairing_revision: crate::android_pairing::pairing_revision(),
-        expires_at: AtomicU64::new(2_000),
-        revoked: AtomicBool::new(false),
-        state: AsyncMutex::new(SessionState {
-            keys,
-            next_sequence: 0,
-            last_request_digest: None,
-            last_response: None,
-        }),
-    };
-    let maximum_snapshot_bytes = crate::constants::REMOTE_RENDER_CHECKPOINT_ABSOLUTE_MAX_BYTES
-        + crate::constants::TERMINAL_OUTPUT_RING_MAX_BYTES;
-    let snapshot = URL_SAFE_NO_PAD.encode(vec![0_u8; maximum_snapshot_bytes]);
-    let response = session
-        .process(
-            CipherEnvelope {
-                version: 1,
-                instance_id: "desktop-7".into(),
-                session_id,
-                sequence: 0,
-                ciphertext,
-            },
-            || Ok(1_000),
-            |_| async move { Ok(serde_json::json!({"data": snapshot})) },
-        )
-        .await
-        .unwrap();
-
-    assert!(serde_json::to_vec(&response).unwrap().len() < 6 * 1024 * 1024);
 }
