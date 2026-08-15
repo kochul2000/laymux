@@ -23,6 +23,9 @@ const SELECTION_TOKEN_RE = /[^\s"'`()<>[\]{}|]+/g;
 /** 넓은 선택에서 맨이름 오탐을 줄이는 파일 확장자 형태. */
 const FILE_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/;
 
+/** Markdown/file-link 계열이 만드는 `/C:/...` 형태의 Windows 드라이브 경로. */
+const SLASH_PREFIXED_WINDOWS_DRIVE_RE = /^\/[A-Za-z]:[\\/]/;
+
 export const PATH_LINK_MAX_SELECTION_LENGTH = 1024;
 export const PATH_LINK_MAX_SELECTION_LINES = 8;
 export const PATH_LINK_MAX_CANDIDATES = 16;
@@ -85,6 +88,13 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
   if (leadMatch) {
     leading = leadMatch[0].length;
     text = text.slice(leading);
+  }
+
+  // `/C:/...`는 POSIX 경로가 아니라 Windows 드라이브 경로로 취급한다. 제거한
+  // 슬래시는 원문 후보 범위를 드라이브 문자부터 시작하도록 leading에 반영한다.
+  if (SLASH_PREFIXED_WINDOWS_DRIVE_RE.test(text)) {
+    leading += 1;
+    text = text.slice(1);
   }
 
   // 뒤쪽 닫는 괄호/따옴표 제거.
