@@ -1,6 +1,9 @@
 "use strict";
 
 (() => {
+  const dismissLayer = document.getElementById("dismissLayer");
+  const connectionSheet = document.getElementById("connectionSheet");
+  const sceneDeviceName = document.getElementById("sceneDeviceName");
   const stateBadge = document.getElementById("stateBadge");
   const stateTitle = document.getElementById("stateTitle");
   const stateDescription = document.getElementById("stateDescription");
@@ -20,6 +23,8 @@
   const connectButton = document.getElementById("connectButton");
   const disconnectButton = document.getElementById("disconnectButton");
   const nativeBridge = window.LaymuxNative;
+  const exitAnimationMilliseconds = 200;
+  let dismissing = false;
 
   function actionButton(label, action, instanceId, deviceName) {
     const button = document.createElement("button");
@@ -107,6 +112,11 @@
     const pairingTotal = Array.isArray(status.pairings)
       ? status.pairings.length
       : 0;
+
+    sceneDeviceName.textContent =
+      typeof status.label === "string" && status.label.trim()
+        ? status.label
+        : "선택한 PC";
 
     stateBadge.textContent = confirmed
       ? "페어링 확인됨"
@@ -255,9 +265,19 @@
     nativeBridge.disconnectRemote();
   });
 
-  cloudButton.addEventListener("click", () => {
-    nativeBridge.showCloudDashboard();
-  });
+  function dismissConnectionEntry() {
+    if (dismissing) return;
+    dismissing = true;
+    dismissLayer.disabled = true;
+    connectionSheet.classList.add("is-closing");
+    connectionSheet.setAttribute("aria-hidden", "true");
+    window.setTimeout(() => {
+      nativeBridge.showCloudDashboard();
+    }, exitAnimationMilliseconds);
+  }
+
+  dismissLayer.addEventListener("click", dismissConnectionEntry);
+  cloudButton.addEventListener("click", dismissConnectionEntry);
 
   window.laymuxNative = Object.freeze({
     onPairingChanged(statusJson) {

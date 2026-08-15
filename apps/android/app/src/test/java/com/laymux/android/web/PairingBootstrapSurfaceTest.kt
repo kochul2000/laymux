@@ -7,15 +7,20 @@ import org.junit.Test
 
 class PairingBootstrapSurfaceTest {
     @Test
-    fun pairingEntryUsesTheAppLogoAndASectionedConnectionLayout() {
+    fun pairingEntryUsesASeparateDashboardSceneAndBottomSheet() {
         val html = asset("index.html").readText()
 
-        assertTrue(html.contains("src=\"logo.svg\""))
         assertFalse(html.contains(">Lx</div>"))
-        assertTrue(html.contains("class=\"app-header\""))
+        assertTrue(html.contains("class=\"connection-stage\""))
+        assertTrue(html.contains("class=\"dashboard-scene\""))
+        assertTrue(html.contains("id=\"dismissLayer\""))
+        assertTrue(html.contains("id=\"connectionSheet\""))
+        assertTrue(html.contains("class=\"sheet-handle\""))
         assertTrue(html.contains("class=\"status-heading\""))
         assertTrue(html.contains("class=\"primary-actions\""))
-        assertTrue(html.contains("class=\"security-note\""))
+        assertTrue(html.contains("class=\"connection-settings\""))
+        assertFalse(html.contains("class=\"app-header\""))
+        assertFalse(html.contains("class=\"security-note\""))
     }
 
     @Test

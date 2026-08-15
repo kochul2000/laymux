@@ -14,108 +14,153 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <header class="app-header" aria-labelledby="title">
-        <img
-          class="app-logo"
-          src="logo.svg"
-          width="52"
-          height="52"
-          alt=""
-          aria-hidden="true"
-        />
-        <div class="brand-copy">
-          <div class="eyebrow">Laymux Android</div>
-          <h1 id="title">안전한 원격 연결</h1>
-          <p>내 PC와 종단 암호화로 연결합니다.</p>
-        </div>
-      </header>
+    <main class="connection-stage">
+      <section class="dashboard-scene" aria-hidden="true">
+        <header class="scene-topbar">
+          <div class="scene-brand">
+            <img src="logo.svg" width="30" height="30" alt="" />
+            <strong>Laymux</strong>
+          </div>
+          <span class="scene-avatar"></span>
+        </header>
 
-      <section class="card connection-card" aria-live="polite">
+        <div class="scene-content">
+          <div class="scene-heading">
+            <span>내 PC</span>
+            <h1>어디에서 작업할까요?</h1>
+          </div>
+          <div class="scene-device selected">
+            <span class="scene-device-icon">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+              >
+                <rect x="3" y="4" width="18" height="13" />
+                <path d="M8 21h8M12 17v4" />
+              </svg>
+            </span>
+            <span class="scene-device-copy">
+              <strong id="sceneDeviceName">선택한 PC</strong>
+              <small>Laymux Desktop</small>
+            </span>
+            <span class="scene-online">온라인</span>
+          </div>
+          <div class="scene-device muted">
+            <span class="scene-device-icon"></span>
+            <span class="scene-device-copy">
+              <strong></strong>
+              <small></small>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <button
+        id="dismissLayer"
+        class="dismiss-layer"
+        type="button"
+        aria-label="PC 목록으로 돌아가기"
+      ></button>
+
+      <section
+        id="connectionSheet"
+        class="connection-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stateTitle"
+        aria-describedby="stateDescription"
+        aria-live="polite"
+      >
+        <div class="sheet-handle" aria-hidden="true"></div>
+
+        <div class="connection-context">
+          <span class="context-icon" aria-hidden="true">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+            >
+              <rect x="3" y="4" width="18" height="13" />
+              <path d="M8 21h8M12 17v4" />
+            </svg>
+          </span>
+          <span>선택한 PC에 연결</span>
+        </div>
+
         <div class="status-heading">
           <div id="stateBadge" class="badge">확인 중</div>
           <div class="status-copy">
-            <h2 id="stateTitle">페어링 상태를 확인하고 있습니다</h2>
-            <p id="stateDescription">
-              이 페어링 화면과 키 처리는 앱에 포함된 네이티브 경계에서
-              실행됩니다.
-            </p>
+            <h2 id="stateTitle">연결 상태를 확인하고 있습니다</h2>
+            <p id="stateDescription">이 화면에서 안전한 연결을 준비합니다.</p>
           </div>
         </div>
 
-        <section
-          class="pairing-manager panel-section"
-          aria-labelledby="pairingListTitle"
-        >
-          <div class="pairing-manager-heading">
-            <h3 id="pairingListTitle">저장된 PC</h3>
-            <span id="pairingCount" class="count">0</span>
-          </div>
-          <p id="pairingListEmpty" class="hint">저장된 페어링이 없습니다.</p>
-          <div id="pairingList" class="pairing-list"></div>
-        </section>
-        <section
-          class="protection panel-section"
-          aria-labelledby="protectionTitle"
-        >
-          <label class="protection-row" for="biometricToggle">
-            <span>
-              <strong id="protectionTitle">생체 인증으로 키 보호</strong>
-              <small>키를 저장하거나 사용할 때마다 인증합니다.</small>
-            </span>
-            <input id="biometricToggle" type="checkbox" role="switch" checked />
-          </label>
-          <p id="biometricHint" class="hint"></p>
-        </section>
         <p id="errorMessage" class="error" hidden></p>
         <p id="noticeMessage" class="notice" hidden></p>
+
+        <section id="remoteSection" class="remote" hidden>
+          <div class="remote-heading">
+            <div>
+              <div id="remoteBadge" class="badge secure">E2E 잠김</div>
+              <h3 id="remoteTitle">암호화 원격 연결</h3>
+            </div>
+            <button id="disconnectButton" class="compact" type="button" hidden>
+              연결 해제
+            </button>
+          </div>
+          <p id="remoteDescription">
+            생체 인증 후 세션을 엽니다. 15분 동안 사용하지 않으면 잠깁니다.
+          </p>
+          <button id="connectButton" class="primary" type="button">
+            보안 세션 열기
+          </button>
+        </section>
+
         <div class="primary-actions">
           <button id="scanButton" class="primary" type="button">
             QR로 페어링
           </button>
-          <button id="cloudButton" class="secondary" type="button">
-            내 PC 목록으로
-          </button>
+          <button id="cloudButton" class="secondary" type="button">취소</button>
         </div>
-      </section>
 
-      <section id="remoteSection" class="card remote" hidden>
-        <div class="remote-heading">
-          <div>
-            <div id="remoteBadge" class="badge secure">E2E 잠김</div>
-            <h2 id="remoteTitle">암호화 터미널</h2>
+        <details class="connection-settings">
+          <summary>
+            <span>연결 설정</span>
+            <span id="pairingCount" class="count">0</span>
+          </summary>
+          <div class="settings-content">
+            <section class="pairing-manager" aria-labelledby="pairingListTitle">
+              <h3 id="pairingListTitle">저장된 PC</h3>
+              <p id="pairingListEmpty" class="hint">
+                저장된 페어링이 없습니다.
+              </p>
+              <div id="pairingList" class="pairing-list"></div>
+            </section>
+            <section class="protection" aria-labelledby="protectionTitle">
+              <label class="protection-row" for="biometricToggle">
+                <span>
+                  <strong id="protectionTitle">생체 인증으로 키 보호</strong>
+                  <small>키를 저장하거나 사용할 때마다 인증합니다.</small>
+                </span>
+                <input
+                  id="biometricToggle"
+                  type="checkbox"
+                  role="switch"
+                  checked
+                />
+              </label>
+              <p id="biometricHint" class="hint"></p>
+            </section>
           </div>
-          <button id="disconnectButton" class="compact" type="button" hidden>
-            연결 해제
-          </button>
-        </div>
-        <p id="remoteDescription">
-          생체 인증 후 세션을 엽니다. 사용 중에는 유지되고 15분 비활성 시
-          잠깁니다.
-        </p>
-        <button id="connectButton" class="primary" type="button">
-          보안 세션 열기
-        </button>
+        </details>
       </section>
-
-      <aside class="security-note" aria-label="보안 안내">
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          aria-hidden="true"
-        >
-          <rect x="5" y="10" width="14" height="10" />
-          <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-        </svg>
-        <p>
-          키는 Android Keystore에 보관됩니다. Relay는 암호화된 터미널 내용과
-          제어 정보를 읽을 수 없습니다.
-        </p>
-      </aside>
     </main>
     <script src="app.js"></script>
   </body>
