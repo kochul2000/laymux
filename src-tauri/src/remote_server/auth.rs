@@ -11,6 +11,7 @@ use crate::settings::models::RemoteSettings;
 use crate::automation_server::ServerState;
 
 use super::access::effective_remote_settings;
+use super::android_e2e_output::ANDROID_E2E_OUTPUT_PATH;
 use super::{internal_error, json_error};
 
 const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
@@ -33,6 +34,11 @@ pub(crate) async fn remote_guard(
         TunnelAuthorizedDecision::Allowed => return next.run(req).await,
         TunnelAuthorizedDecision::Denied(response) => return response,
         TunnelAuthorizedDecision::NotTunnel => {}
+    }
+    match local_connector_authorized_decision(&req, &settings, addr) {
+        LocalConnectorAuthorizedDecision::Allowed => return next.run(req).await,
+        LocalConnectorAuthorizedDecision::Denied(response) => return response,
+        LocalConnectorAuthorizedDecision::NotConnector => {}
     }
 
     if let Some(response) = check_remote_base_access(&settings, addr) {
@@ -58,6 +64,12 @@ enum TunnelAuthorizedDecision {
     Denied(Response),
 }
 
+enum LocalConnectorAuthorizedDecision {
+    NotConnector,
+    Allowed,
+    Denied(Response),
+}
+
 fn tunnel_authorized_decision(
     req: &Request,
     settings: &RemoteSettings,
@@ -73,6 +85,35 @@ fn tunnel_authorized_decision(
         return TunnelAuthorizedDecision::Denied(response);
     }
     TunnelAuthorizedDecision::Allowed
+}
+
+fn local_connector_authorized_decision(
+    req: &Request,
+    settings: &RemoteSettings,
+    addr: SocketAddr,
+) -> LocalConnectorAuthorizedDecision {
+    // The Python tunnel connector reaches this one fixed adapter over
+    // loopback. Direct-client IP/Tailscale/Origin policy describes the public
+    // socket peer and must not reject this internal hop. Keep the Remote
+    // enabled gate and its exact bearer/query token as the local authority;
+    // the handler then independently requires a valid E2E session and AEAD
+    // OPEN before terminal state is attached.
+    if req.uri().path() != ANDROID_E2E_OUTPUT_PATH
+        || !normalize_ip(addr.ip()).is_loopback()
+        || req.headers().contains_key(header::ORIGIN)
+    {
+        return LocalConnectorAuthorizedDecision::NotConnector;
+    }
+    if let Some(response) = check_remote_enabled(settings) {
+        return LocalConnectorAuthorizedDecision::Denied(response);
+    }
+    if !remote_token_matches(req.headers(), req.uri(), settings) {
+        return LocalConnectorAuthorizedDecision::Denied(json_error(
+            StatusCode::UNAUTHORIZED,
+            "remote connector token is invalid",
+        ));
+    }
+    LocalConnectorAuthorizedDecision::Allowed
 }
 
 /// The user-facing remote-control gate shared by every transport (Tailscale and
@@ -561,6 +602,89 @@ mod tests {
             check_remote_base_access(&settings, "203.0.113.10:1".parse::<SocketAddr>().unwrap())
                 .unwrap();
         assert_eq!(direct_response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn local_e2e_connector_bypasses_direct_ip_and_origin_policy_with_exact_token() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: "connector-secret".into(),
+            allowed_ips: vec!["100.64.0.0/10".into()],
+            allowed_origins: vec!["https://remote.example".into()],
+            tailscale_only: true,
+            ..RemoteSettings::default()
+        };
+        let request = Request::builder()
+            .uri(concat!(
+                "/remote/v1/e2e/output?instanceId=desktop-7&",
+                "sessionId=UFFSU1RVVldYWVpbXF1eXw&",
+                "streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&",
+                "token=connector-secret"
+            ))
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(matches!(
+            local_connector_authorized_decision(
+                &request,
+                &settings,
+                "127.0.0.1:43100".parse().unwrap(),
+            ),
+            LocalConnectorAuthorizedDecision::Allowed
+        ));
+
+        let non_loopback = local_connector_authorized_decision(
+            &request,
+            &settings,
+            "100.100.10.20:43100".parse().unwrap(),
+        );
+        assert!(matches!(
+            non_loopback,
+            LocalConnectorAuthorizedDecision::NotConnector
+        ));
+    }
+
+    #[test]
+    fn local_e2e_connector_still_requires_enabled_remote_and_exact_token() {
+        let request = |token: &str| {
+            Request::builder()
+                .uri(format!(
+                    "/remote/v1/e2e/output?instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&token={token}"
+                ))
+                .body(Body::empty())
+                .unwrap()
+        };
+        let enabled = RemoteSettings {
+            enabled: true,
+            auth_token: "connector-secret".into(),
+            ..RemoteSettings::default()
+        };
+        match local_connector_authorized_decision(
+            &request("wrong"),
+            &enabled,
+            "127.0.0.1:43100".parse().unwrap(),
+        ) {
+            LocalConnectorAuthorizedDecision::Denied(response) => {
+                assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+            }
+            _ => panic!("expected invalid connector token to be denied"),
+        }
+
+        let disabled = RemoteSettings {
+            enabled: false,
+            auth_token: "connector-secret".into(),
+            ..RemoteSettings::default()
+        };
+        match local_connector_authorized_decision(
+            &request("connector-secret"),
+            &disabled,
+            "127.0.0.1:43100".parse().unwrap(),
+        ) {
+            LocalConnectorAuthorizedDecision::Denied(response) => {
+                assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            }
+            _ => panic!("expected disabled Remote connector to be denied"),
+        }
     }
 
     #[tokio::test]

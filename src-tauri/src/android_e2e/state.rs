@@ -19,6 +19,8 @@ use super::crypto::{
     encrypt_output_response, encrypt_response, proof, verify_proof, OutputKeys, SessionKeys,
     MAX_SEQUENCE,
 };
+#[cfg(test)]
+use super::crypto::{decrypt_output_response, encrypt_output_request};
 use super::validation::{valid_base64url, valid_instance_id};
 use super::{
     field_refs, key_fields, proof_fields_challenge, proof_fields_establish, proof_fields_response,
@@ -527,6 +529,106 @@ impl AndroidE2eOutputCipher {
             .ok_or(E2eError::Sequence)?;
         Ok(record)
     }
+}
+
+#[cfg(test)]
+pub(crate) struct AndroidE2eOutputTestPeer {
+    instance_id: String,
+    session_id: String,
+    stream_nonce: String,
+    keys: OutputKeys,
+    next_request_sequence: u64,
+    next_response_sequence: u64,
+}
+
+#[cfg(test)]
+impl AndroidE2eOutputTestPeer {
+    pub(crate) fn encrypt_request(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, AppError> {
+        let record = encrypt_output_request(
+            &self.keys.a2d,
+            &self.instance_id,
+            &self.session_id,
+            &self.stream_nonce,
+            self.next_request_sequence,
+            plaintext,
+        )?;
+        self.next_request_sequence += 1;
+        Ok(record)
+    }
+
+    pub(crate) fn decrypt_response(
+        &mut self,
+        record: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, AppError> {
+        let plaintext = decrypt_output_response(
+            &self.keys.d2a,
+            &self.instance_id,
+            &self.session_id,
+            &self.stream_nonce,
+            self.next_response_sequence,
+            record,
+        )?;
+        self.next_response_sequence += 1;
+        Ok(plaintext)
+    }
+}
+
+#[cfg(test)]
+pub(crate) async fn test_output_cipher_pair(
+    now: u64,
+    expires_at: u64,
+) -> (
+    Arc<AndroidE2eSession>,
+    AndroidE2eOutputCipher,
+    AndroidE2eOutputTestPeer,
+) {
+    let instance_id = "desktop-7".to_string();
+    let session_id = URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]);
+    let stream_nonce = URL_SAFE_NO_PAD.encode([5_u8; OUTPUT_STREAM_NONCE_BYTES]);
+    let key_fields = [
+        "pairing",
+        instance_id.as_str(),
+        "client",
+        "client-session",
+        "server",
+        session_id.as_str(),
+    ];
+    let server_session_keys = derive_session_keys(&[7_u8; 32], &key_fields).unwrap();
+    let client_session_keys = derive_session_keys(&[7_u8; 32], &key_fields).unwrap();
+    let client_output_keys = derive_output_keys(
+        &client_session_keys,
+        &instance_id,
+        &session_id,
+        &stream_nonce,
+    )
+    .unwrap();
+    let session = Arc::new(AndroidE2eSession {
+        instance_id: instance_id.clone(),
+        session_id: session_id.clone(),
+        pairing_revision: crate::android_pairing::pairing_revision(),
+        expires_at: AtomicU64::new(expires_at),
+        revoked: AtomicBool::new(false),
+        state: AsyncMutex::new(SessionState {
+            keys: server_session_keys,
+            used_output_nonces: HashSet::new(),
+            next_sequence: 0,
+            last_request_digest: None,
+            last_response: None,
+        }),
+    });
+    let cipher = session
+        .open_output_cipher(&stream_nonce, now)
+        .await
+        .unwrap();
+    let peer = AndroidE2eOutputTestPeer {
+        instance_id,
+        session_id,
+        stream_nonce,
+        keys: client_output_keys,
+        next_request_sequence: 0,
+        next_response_sequence: 0,
+    };
+    (session, cipher, peer)
 }
 
 fn challenge_matches(challenge: &Challenge, request: &EstablishRequest) -> bool {

@@ -458,6 +458,8 @@ fn remote_output_timeout_seconds(app_state: &AppState) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lock_ext::MutexExt;
+    use std::time::Instant;
 
     const QUERY: &str = "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
@@ -477,5 +479,88 @@ mod tests {
             "instanceId=desktop%2D7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&token=local"
         ))
         .is_none());
+    }
+
+    #[tokio::test]
+    async fn shared_core_decrypts_open_and_emits_remote_v1_header_binary_pair() {
+        let now = unix_time_seconds().unwrap();
+        let (session, cipher, mut peer) =
+            crate::android_e2e::test_output_cipher_pair(now, now + 60).await;
+        let prepared = PreparedAndroidE2eOutput { session, cipher };
+        let app_state = Arc::new(AppState::new());
+        {
+            let mut control = app_state.remote_control.lock_or_err().unwrap();
+            control.lease = Some(crate::remote_server::RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: Some("android-test".into()),
+                last_heartbeat: Instant::now(),
+            });
+        }
+        let registration = crate::terminal_output::register_terminal_output_session(
+            &app_state.terminal_protocol_states,
+            &app_state.output_buffers,
+            "terminal-1",
+        )
+        .unwrap();
+        let terminal_session = registration.commit().unwrap();
+        terminal_session.record_output(b"snapshot-bytes").unwrap();
+
+        let mut open = vec![OUTPUT_RECORD_OPEN];
+        open.extend_from_slice(br#"{"terminalId":"terminal-1","leaseId":"lease-1"}"#);
+        let encrypted_open = peer.encrypt_request(&open).unwrap();
+        let (input_tx, input_rx) = mpsc::channel(E2E_OUTPUT_INPUT_QUEUE_SIZE);
+        input_tx.send(encrypted_open).await.unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (record_tx, mut record_rx) = mpsc::channel(2);
+        let attach_state = Arc::clone(&app_state);
+        let core = tokio::spawn(stream_android_e2e_output(
+            Arc::clone(&app_state),
+            prepared,
+            input_rx,
+            shutdown_rx,
+            move |terminal_id| async move {
+                crate::terminal_output::attach_and_subscribe_terminal_output(
+                    &attach_state.terminal_protocol_states,
+                    &terminal_id,
+                    E2E_OUTPUT_MAX_PLAINTEXT_RECORD_BYTES,
+                )
+                .map_err(RenderCheckpointAttachError::fatal)
+            },
+            move |record| {
+                let record_tx = record_tx.clone();
+                async move {
+                    record_tx
+                        .send(record)
+                        .await
+                        .map_err(|_| AppError::Other("test output receiver closed".into()))
+                }
+            },
+        ));
+
+        let encrypted_header = timeout(Duration::from_secs(1), record_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let encrypted_binary = timeout(Duration::from_secs(1), record_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        shutdown_tx.send(true).unwrap();
+        core.await.unwrap();
+
+        let header_plaintext = peer.decrypt_response(&encrypted_header).unwrap();
+        assert_eq!(header_plaintext[0], OUTPUT_RECORD_TEXT);
+        let header: TerminalOutputFrameHeaderV1 =
+            serde_json::from_slice(&header_plaintext[1..]).unwrap();
+        assert_eq!(
+            header.phase,
+            crate::terminal_output::TerminalOutputPhase::Snapshot
+        );
+        assert_eq!(header.byte_length, b"snapshot-bytes".len());
+
+        let binary_plaintext = peer.decrypt_response(&encrypted_binary).unwrap();
+        assert_eq!(binary_plaintext[0], OUTPUT_RECORD_BINARY);
+        assert_eq!(&binary_plaintext[1..], b"snapshot-bytes");
     }
 }

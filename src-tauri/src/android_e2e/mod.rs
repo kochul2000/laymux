@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 pub use state::AndroidE2eState;
 pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eSession};
+#[cfg(test)]
+pub(crate) use state::test_output_cipher_pair;
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
 pub(crate) const CHALLENGE_ID_BYTES: usize = 16;
