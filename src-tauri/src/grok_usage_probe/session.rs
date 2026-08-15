@@ -144,12 +144,11 @@ impl<'a> ProbeSession<'a> {
             if let Err(error) = self.transport.write(keys::TRUST_YES) {
                 return BootOutcome::TransportFailed(error);
             }
-            self.pacer.wait(self.timing.boot_poll);
-            if is_ready_screen(&self.transport.screen_text()) {
-                return BootOutcome::Ready;
-            }
+            // Do not type `grok --trust` into a TUI that is still leaving
+            // the trust gate. Wait out the same ready budget as boot.
+            return self.wait_until_ready();
         }
-        if is_ready_screen(&self.transport.screen_text()) {
+        if in_grok_tui(&screen) {
             return BootOutcome::Ready;
         }
         self.boot()
@@ -166,7 +165,6 @@ impl<'a> ProbeSession<'a> {
             }
 
             let screen = self.transport.screen_text();
-            let lower = screen.to_ascii_lowercase();
 
             // Ready is checked before the missing-marker scan: once Grok is up,
             // its own output can legitimately contain "no such file or directory".
@@ -174,7 +172,7 @@ impl<'a> ProbeSession<'a> {
                 return BootOutcome::Ready;
             }
 
-            if MISSING_MARKERS.iter().any(|marker| lower.contains(marker)) {
+            if is_grok_missing(&screen) {
                 return BootOutcome::GrokMissing;
             }
 
@@ -275,9 +273,33 @@ pub fn is_ready_screen(screen: &str) -> bool {
     lower.contains(READY_MARKER) && !is_trust_prompt(screen)
 }
 
+/// Welcome banner *or* a `/usage` modal. The 1.0.4 Usage limit tab does not
+/// reprint `Grok Build`, so banner-only ready would treat it as a shell.
+fn in_grok_tui(screen: &str) -> bool {
+    is_ready_screen(screen) || is_usage_limit_modal(screen) || has_limit_labels(screen)
+}
+
+/// `Command 'usage' not found` is a leftover from a previous failed query.
+/// Only a line that names `grok` and a missing-command marker is uninstalled.
+fn is_grok_missing(screen: &str) -> bool {
+    screen.lines().any(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.contains("grok") && MISSING_MARKERS.iter().any(|marker| lower.contains(marker))
+    })
+}
+
 fn has_limit_rows(rows: &[GrokUsageRow]) -> bool {
     rows.iter()
         .any(|row| matches!(row.key.as_str(), "weekly" | "monthly" | "credits" | "payg"))
+}
+
+fn has_limit_labels(screen: &str) -> bool {
+    let lower = screen.to_ascii_lowercase();
+    lower.contains("weekly limit")
+        || lower.contains("monthly limit")
+        || lower.contains("credits:")
+        || lower.contains("pay as you go")
+        || lower.contains("pay-as-you-go")
 }
 
 /// New `/usage` modal header. Weekly/monthly live on the Usage limit tab.
@@ -294,13 +316,7 @@ fn should_stop_tabbing(screen: &str, rows: &[GrokUsageRow]) -> bool {
 }
 
 fn usage_modal_visible(screen: &str) -> bool {
-    let lower = screen.to_ascii_lowercase();
-    (lower.contains("weekly limit")
-        || lower.contains("monthly limit")
-        || lower.contains("credits:")
-        || lower.contains("pay as you go")
-        || lower.contains("pay-as-you-go"))
-        && is_ready_screen(screen)
+    !is_trust_prompt(screen) && (is_usage_limit_modal(screen) || has_limit_labels(screen))
 }
 
 fn merge_rows(into: &mut Vec<GrokUsageRow>, extra: Vec<GrokUsageRow>) {

@@ -165,6 +165,20 @@ fn boot_detects_missing_grok() {
 }
 
 #[test]
+fn leftover_shell_usage_miss_is_not_grok_missing() {
+    // Live failure dump stays in the vt100 screen after we type `grok --trust`.
+    // A substring scan for "command not found" would kill the worker as
+    // GrokMissing before the banner can paint.
+    let transport = ScriptedTransport::new(
+        "Command 'usage' not found, did you mean:\n  command 'osage'\n$ usage\n",
+        |_, _| {},
+    );
+    let pacer = FakePacer::new();
+    let outcome = ProbeSession::new(&transport, &pacer, fast_timing()).boot();
+    assert_eq!(outcome, BootOutcome::Timeout);
+}
+
+#[test]
 fn ready_output_mentioning_a_missing_file_is_not_read_as_missing_grok() {
     let transport = ScriptedTransport::new("", |_, screen| {
         *screen = " Grok Build\n Error: no such file or directory\n".into();
@@ -248,7 +262,8 @@ fn query_relaunches_grok_after_escape_drops_to_the_shell() {
         "Command 'usage' not found\nkochul@host:~/python_projects$ usage\n",
         |bytes, screen| {
             if bytes == keys::GROK {
-                *screen = WELCOME.into();
+                // Banner paints on top of the leftover dump; the miss stays.
+                screen.push_str(WELCOME);
             } else if bytes == keys::ENTER {
                 *screen = USAGE_PANEL.into();
             }
@@ -260,6 +275,33 @@ fn query_relaunches_grok_after_escape_drops_to_the_shell() {
         .expect("query");
     assert!(transport.written().contains(&keys::GROK.to_vec()));
     assert_eq!(outcome.rows[0].percent, Some(50.0));
+}
+
+#[test]
+fn query_does_not_retype_grok_into_a_usage_modal_without_banner() {
+    let modal = "\
+Context usage  Usage limit  Session info
+Weekly limit (SuperGrok)
+
+███████████████░░░░░░░░░░░░░░░  66%
+Resets: August 20, 16:13
+";
+    let transport = ScriptedTransport::new(modal, |bytes, screen| {
+        if bytes == keys::GROK {
+            panic!("must not type grok --trust into the leftover /usage modal");
+        }
+        if bytes == keys::ESCAPE {
+            *screen = WELCOME.into();
+        } else if bytes == keys::ENTER {
+            *screen = modal.into();
+        }
+    });
+    let pacer = FakePacer::new();
+    let outcome = ProbeSession::new(&transport, &pacer, fast_timing())
+        .query()
+        .expect("query");
+    assert!(!transport.written().contains(&keys::GROK.to_vec()));
+    assert_eq!(outcome.rows[0].percent, Some(66.0));
 }
 
 #[test]
@@ -278,6 +320,10 @@ fn query_answers_a_leftover_trust_prompt_instead_of_escaping() {
         .query()
         .expect("query");
     assert!(transport.written().contains(&keys::TRUST_YES.to_vec()));
+    assert!(
+        !transport.written().contains(&keys::GROK.to_vec()),
+        "answering trust must not retype grok --trust into the TUI"
+    );
     let writes = transport.written();
     let first_non_trust = writes
         .iter()

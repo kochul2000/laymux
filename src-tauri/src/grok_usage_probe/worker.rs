@@ -268,24 +268,15 @@ fn run(
                 }
             }
             Err(error) => {
-                snapshot.status = match error.as_str() {
-                    "cancelled" => {
-                        let _ = transport.handle.terminate();
-                        return;
-                    }
-                    "grok missing" => GrokProbeStatus::GrokMissing,
-                    "startup timeout" => GrokProbeStatus::StartupTimeout,
-                    _ => GrokProbeStatus::Failed { message: error },
-                };
-                snapshot.raw_screen = Some(transport.screen_text());
-                if matches!(
-                    snapshot.status,
-                    GrokProbeStatus::GrokMissing | GrokProbeStatus::StartupTimeout
-                ) {
-                    publish(snapshot);
+                if error == "cancelled" {
                     let _ = transport.handle.terminate();
                     return;
                 }
+                // Query-time relaunch failures must not retire the worker.
+                // Leftover `Command 'usage' not found` used to look like
+                // GrokMissing and leave the UI stuck until remount.
+                snapshot.status = GrokProbeStatus::Failed { message: error };
+                snapshot.raw_screen = Some(transport.screen_text());
             }
         }
         snapshot.next_query_at_ms = Some(now_ms() + refresh_seconds * 1000);
