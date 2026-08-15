@@ -406,6 +406,7 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
     for (path, value) in [
         ("/claude/command", &settings.claude.command),
         ("/codex/command", &settings.codex.command),
+        ("/grok/command", &settings.grok.command),
     ] {
         if !super::agent_command::is_safe_agent_command(value) {
             issue(
@@ -610,6 +611,8 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     // registered, so a widget may not name anything else.
     let mut claude_config_dirs: Vec<&str> = vec![""];
     claude_config_dirs.extend(settings.usage.claude.config_dirs.iter().map(String::as_str));
+    let mut grok_config_dirs: Vec<&str> = vec![""];
+    grok_config_dirs.extend(settings.usage.grok.config_dirs.iter().map(String::as_str));
 
     for (slot_path, instances) in slots {
         for (index, instance) in instances.iter().enumerate() {
@@ -635,7 +638,13 @@ fn validate_widgets(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
                     format!("위젯 id '{}'가 중복됩니다.", instance.id),
                 );
             }
-            validate_widget_options(issues, &base, instance, &claude_config_dirs);
+            validate_widget_options(
+                issues,
+                &base,
+                instance,
+                &claude_config_dirs,
+                &grok_config_dirs,
+            );
         }
     }
 }
@@ -654,6 +663,7 @@ fn validate_widget_options(
     base: &str,
     instance: &WidgetInstance,
     claude_config_dirs: &[&str],
+    grok_config_dirs: &[&str],
 ) {
     if !instance.options.is_object() && !instance.options.is_null() {
         issue(
@@ -687,11 +697,18 @@ fn validate_widget_options(
             string_option("configDir", claude_config_dirs);
         }
         "codexUsage" => string_option("display", USAGE_WIDGET_DISPLAY_MODES),
+        "grokUsage" => {
+            string_option("display", USAGE_WIDGET_DISPLAY_MODES);
+            string_option("configDir", grok_config_dirs);
+        }
         "terminalActivity" => string_option("scope", TERMINAL_ACTIVITY_WIDGET_SCOPES),
         _ => {}
     }
 
-    if matches!(instance.widget_type.as_str(), "claudeUsage" | "codexUsage") {
+    if matches!(
+        instance.widget_type.as_str(),
+        "claudeUsage" | "codexUsage" | "grokUsage"
+    ) {
         for key in ["barHeight", "elapsedHeight"] {
             let Some(value) = instance.options.get(key) else {
                 continue;

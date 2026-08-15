@@ -27,7 +27,8 @@ for proc in /proc/[0-9]*; do
   ppid=$(sed -n 's/^PPid:[[:space:]]*//p' "$proc/status" 2>/dev/null)
   home=$(printf '%s\n' "$env_lines" | sed -n 's/^HOME=//p' | head -n 1)
   codex_home=$(printf '%s\n' "$env_lines" | sed -n 's/^CODEX_HOME=//p' | head -n 1)
-  printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home"
+  grok_home=$(printf '%s\n' "$env_lines" | sed -n 's/^GROK_HOME=//p' | head -n 1)
+  printf 'P\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$terminal_id" "${proc##*/}" "$ppid" "$name" "$home" "$codex_home" "$grok_home"
   for fd in "$proc"/fd/*; do
     target=$(readlink "$fd" 2>/dev/null) || continue
     case "$target" in
@@ -44,6 +45,7 @@ printf 'LAYMUX_WSL_AGENT_PROBE_END\n'
 pub(super) enum WslAgentProvider {
     Claude,
     Codex,
+    Grok,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,7 @@ struct WslProcessEntry {
     name: String,
     home: String,
     codex_home: Option<String>,
+    grok_home: Option<String>,
     rollout_paths: Vec<String>,
 }
 
@@ -63,6 +66,7 @@ pub(super) struct WslAgentProcess {
     pub distro: String,
     pub home: String,
     pub codex_home: Option<String>,
+    pub grok_home: Option<String>,
     pub rollout_paths: Vec<String>,
 }
 
@@ -72,6 +76,13 @@ impl WslAgentProcess {
             "{}/.claude/sessions",
             self.home.trim_end_matches('/')
         ))
+    }
+
+    pub(super) fn grok_home_dir(&self) -> Option<PathBuf> {
+        if let Some(home) = self.grok_home.as_deref().filter(|path| !path.is_empty()) {
+            return self.windows_path(home);
+        }
+        self.windows_path(&format!("{}/.grok", self.home.trim_end_matches('/')))
     }
 
     pub(super) fn codex_rollout_paths(&self) -> Vec<PathBuf> {
@@ -165,6 +176,7 @@ pub(super) fn resolve_wsl_agent_processes(
                         distro: distro.clone(),
                         home: entry.home,
                         codex_home: entry.codex_home,
+                        grok_home: entry.grok_home,
                         rollout_paths: entry.rollout_paths,
                     }),
                 );
@@ -194,7 +206,7 @@ fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
     {
         let fields: Vec<&str> = line.split('\t').collect();
         match fields.as_slice() {
-            ["P", terminal_id, pid, ppid, name, home, codex_home]
+            ["P", terminal_id, pid, ppid, name, home, codex_home, grok_home]
                 if !terminal_id.is_empty() && !name.is_empty() =>
             {
                 entries.push(WslProcessEntry {
@@ -206,6 +218,7 @@ fn parse_probe_output(output: &[u8]) -> Result<Vec<WslProcessEntry>, String> {
                     name: (*name).to_string(),
                     home: (*home).to_string(),
                     codex_home: non_empty(codex_home),
+                    grok_home: non_empty(grok_home),
                     rollout_paths: Vec::new(),
                 });
             }
@@ -308,6 +321,7 @@ fn process_provider(name: &str) -> Option<WslAgentProvider> {
     match stem {
         "claude" => Some(WslAgentProvider::Claude),
         "codex" => Some(WslAgentProvider::Codex),
+        "grok" => Some(WslAgentProvider::Grok),
         _ => None,
     }
 }

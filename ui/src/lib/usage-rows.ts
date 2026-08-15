@@ -8,7 +8,11 @@
 import { sessionElapsedPercent, weekElapsedPercent } from "@/lib/usage-pace";
 import { USAGE_UNAVAILABLE_TEXT } from "@/lib/usage-status";
 import type { CodexUsageLimit, UsageSnapshot } from "@/lib/tauri-api";
-import type { CodexUsageVisibleRow, UsageVisibleRow } from "@/stores/settings-store";
+import type {
+  CodexUsageVisibleRow,
+  GrokUsageVisibleRow,
+  UsageVisibleRow,
+} from "@/stores/settings-store";
 
 /** One limit row, already resolved for display. */
 export interface UsageDisplayRow {
@@ -18,6 +22,8 @@ export interface UsageDisplayRow {
   statuslineLabel?: string;
   abbreviatedLabel?: string;
   percent: number | null;
+  /** Absolute remaining when the screen has no percentage (Grok credits). */
+  valueText?: string | null;
   reset: string | null;
   elapsed: number | null;
 }
@@ -140,6 +146,44 @@ export function buildCodexUsageRows(
     });
 }
 
+const GROK_ROW_LABELS: Record<GrokUsageVisibleRow, { label: string; short: string }> = {
+  weekly: { label: "Weekly limit", short: "Week" },
+  monthly: { label: "Monthly limit", short: "Month" },
+  credits: { label: "Credits", short: "Credits" },
+  payg: { label: "Pay-as-you-go", short: "PAYG" },
+};
+
+export function buildGrokUsageRows(
+  rows: readonly {
+    key: string;
+    percent: number | null;
+    remaining?: number | null;
+    reset: string | null;
+  }[],
+): KeyedUsageRow<GrokUsageVisibleRow>[] {
+  return rows.flatMap((row) => {
+    if (!(row.key in GROK_ROW_LABELS)) return [];
+    const key = row.key as GrokUsageVisibleRow;
+    const labels = GROK_ROW_LABELS[key];
+    return [
+      {
+        visibleKey: key,
+        row: {
+          key,
+          label: labels.label,
+          statuslineLabel: labels.short,
+          abbreviatedLabel: labels.short,
+          percent: row.percent,
+          valueText:
+            row.percent == null && row.remaining != null ? String(row.remaining) : undefined,
+          reset: row.reset,
+          elapsed: null,
+        },
+      },
+    ];
+  });
+}
+
 /**
  * The text a one-line surface prints for a row.
  *
@@ -148,12 +192,13 @@ export function buildCodexUsageRows(
  * (ADR-0124). Two implementations of "what this row says" would let the same
  * limit read differently on the desktop and in a browser.
  */
-export function usageRowPercentText(percent: number | null): string {
+export function usageRowPercentText(percent: number | null, valueText?: string | null): string {
+  if (valueText) return valueText;
   return percent == null ? USAGE_UNAVAILABLE_TEXT : `${percent}%`;
 }
 
 export function usageRowStatuslineText(row: UsageDisplayRow): string {
-  const percent = usageRowPercentText(row.percent);
+  const percent = usageRowPercentText(row.percent, row.valueText);
   return row.statuslineLabel == null ? percent : `${row.statuslineLabel} ${percent}`;
 }
 
@@ -189,7 +234,7 @@ export function usageWidgetTooltip({
       rows
         .map(
           (row) =>
-            `${row.label}: ${usageRowPercentText(row.percent)}` +
+            `${row.label}: ${usageRowPercentText(row.percent, row.valueText)}` +
             (row.elapsed == null ? "" : ` · ${row.elapsed}% elapsed`),
         )
         .join("\n"),

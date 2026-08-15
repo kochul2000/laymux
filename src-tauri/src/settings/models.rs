@@ -535,6 +535,50 @@ fn default_codex_status_message_delimiter() -> String {
     " · ".to_string()
 }
 
+/// Status message display mode for Grok in WorkspaceSelectorView.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+#[derive(Default)]
+pub enum GrokStatusMessageMode {
+    Bullet,
+    Title,
+    TitleBullet,
+    #[default]
+    BulletTitle,
+}
+
+/// Grok Build integration settings (ADR-0156). Same field set as Codex.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GrokSettings {
+    #[serde(default = "default_grok_command")]
+    pub command: String,
+    #[serde(default = "default_restore_session")]
+    pub restore_session: bool,
+    #[serde(default = "default_session_max_age_hours")]
+    pub session_max_age_hours: u64,
+    #[serde(default)]
+    pub status_message_mode: GrokStatusMessageMode,
+    #[serde(default = "default_codex_status_message_delimiter")]
+    pub status_message_delimiter: String,
+}
+
+impl Default for GrokSettings {
+    fn default() -> Self {
+        Self {
+            command: default_grok_command(),
+            restore_session: true,
+            session_max_age_hours: 24,
+            status_message_mode: GrokStatusMessageMode::default(),
+            status_message_delimiter: default_codex_status_message_delimiter(),
+        }
+    }
+}
+
+fn default_grok_command() -> String {
+    super::agent_command::DEFAULT_GROK_COMMAND.to_string()
+}
+
 /// App-exit behavior settings.
 ///
 /// Controls the "interrupt running terminal work on quit" feature (issue #451):
@@ -934,6 +978,8 @@ pub struct UsageSettings {
     pub claude: UsageAgentSettings,
     #[serde(default = "default_codex_usage_settings")]
     pub codex: UsageAgentSettings,
+    #[serde(default = "default_grok_usage_settings")]
+    pub grok: UsageAgentSettings,
 }
 
 impl Default for UsageSettings {
@@ -941,6 +987,7 @@ impl Default for UsageSettings {
         Self {
             claude: UsageAgentSettings::default(),
             codex: default_codex_usage_settings(),
+            grok: default_grok_usage_settings(),
         }
     }
 }
@@ -971,6 +1018,10 @@ fn default_claude_used_color() -> String {
 /// Codex's brand green, for the same reason.
 fn default_codex_used_color() -> String {
     "#10a37f".into()
+}
+/// GrokNight magenta accent — selector and usage bars share this (ADR-0156).
+fn default_grok_used_color() -> String {
+    "#c084fc".into()
 }
 /// Elapsed time is provider-neutral, so it keeps one colour across agents —
 /// yellow, far enough from both brand colours to never be mistaken for the
@@ -1037,6 +1088,16 @@ fn default_codex_usage_settings() -> UsageAgentSettings {
         config_dirs: Vec::new(),
         visible_rows: vec!["weekly".into(), "sparkWeekly".into()],
         colors: UsageColorSettings::for_agent(default_codex_used_color()),
+    }
+}
+
+fn default_grok_usage_settings() -> UsageAgentSettings {
+    UsageAgentSettings {
+        profile: String::new(),
+        refresh_seconds: default_usage_refresh_seconds(),
+        config_dirs: Vec::new(),
+        visible_rows: vec!["weekly".into(), "monthly".into()],
+        colors: UsageColorSettings::for_agent(default_grok_used_color()),
     }
 }
 
@@ -1907,6 +1968,8 @@ pub struct Settings {
     #[serde(default)]
     pub codex: CodexSettings,
     #[serde(default)]
+    pub grok: GrokSettings,
+    #[serde(default)]
     pub exit: ExitSettings,
     #[serde(default)]
     pub memo: MemoSettings,
@@ -2009,6 +2072,7 @@ impl Default for Settings {
             workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),
+            grok: GrokSettings::default(),
             exit: ExitSettings::default(),
             memo: MemoSettings::default(),
             issue_reporter: IssueReporterSettings::default(),

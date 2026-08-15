@@ -89,7 +89,7 @@ function RowBlock({
             fontWeight: 600,
           }}
         >
-          {row.percent == null ? "--" : `${row.percent}%`}
+          {row.valueText ?? (row.percent == null ? "--" : `${row.percent}%`)}
         </span>
       </div>
       <Meter

@@ -19,6 +19,7 @@ import type { WidgetInstance } from "@/lib/widget-placement";
 export interface WidgetEnv {
   claudeVisibleRows: number;
   codexVisibleRows: number;
+  grokVisibleRows: number;
   fontSize: number;
 }
 
@@ -34,6 +35,11 @@ export type WidgetOptionSpec =
   | {
       key: string;
       kind: "claudeConfigDir";
+      labelKey: string;
+    }
+  | {
+      key: string;
+      kind: "grokConfigDir";
       labelKey: string;
     }
   | {

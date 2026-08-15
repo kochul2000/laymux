@@ -3,6 +3,7 @@ import { STATUS_ICON_WORKING } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 import { CodexActivityHandler } from "./codex-activity-handler";
+import { GrokActivityHandler, isGrokTitle } from "./grok-activity-handler";
 
 /** Re-exported so status consumers can reach it from the handler entry point. */
 export { STATUS_ICON_WORKING };
@@ -71,6 +72,12 @@ registerInteractiveApp("Codex", {
   ],
   titlePatterns: ["OpenAI Codex"],
 });
+registerInteractiveApp("Grok", {
+  handler: new GrokActivityHandler(),
+  commands: ["grok"],
+  commandPatterns: [/(?:^|[\\/])grok(?:\.exe)?$/i, /\bgrok\s+--resume\b/i],
+  titlePatterns: ["Grok Build"],
+});
 
 export function getHandler(activity?: TerminalActivityInfo): ActivityHandler {
   if (activity?.type === "interactiveApp" && activity.name) {
@@ -104,6 +111,9 @@ export function detectRegisteredActivityFromTitle(title: string): TerminalActivi
   if (!title || title.includes("/") || title.includes("\\")) return undefined;
 
   for (const [name, registration] of interactiveApps) {
+    if (name === "Grok" && isGrokTitle(title)) {
+      return { type: "interactiveApp", name };
+    }
     if (registration.titlePatterns?.some((pattern) => matchTitlePattern(title, pattern))) {
       return { type: "interactiveApp", name };
     }

@@ -120,6 +120,7 @@ fn apply_claude_title_state(
 enum ValidatedStartupOverride {
     Claude(String),
     Codex(String),
+    Grok(String),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -156,6 +157,10 @@ fn plan_terminal_startup(
             }
         }
         Some(ValidatedStartupOverride::Claude(command)) => TerminalStartupPlan {
+            command,
+            arm_native_windows_codex_color_probe: false,
+        },
+        Some(ValidatedStartupOverride::Grok(command)) => TerminalStartupPlan {
             command,
             arm_native_windows_codex_color_probe: false,
         },
@@ -247,6 +252,8 @@ pub fn create_terminal_session(
         } else if super::is_valid_codex_startup_command_override(&command, &settings.codex.command)
         {
             Some(ValidatedStartupOverride::Codex(command))
+        } else if super::is_valid_grok_startup_command_override(&command, &settings.grok.command) {
+            Some(ValidatedStartupOverride::Grok(command))
         } else {
             None
         }
@@ -777,6 +784,47 @@ pub fn create_terminal_session(
                     // Mirror of the Claude exit flag: tell the frontend to
                     // unpin the interactive-app activity even though Codex's
                     // handler also preserves across title resets.
+                    interactive_app_exited = true;
+                }
+            }
+
+            // ── Grok Build title state machine (ADR-0156) ──
+            if event.code == 0 || event.code == 2 {
+                let was_detected = pty_cb_state.grok_detected.load(Ordering::Relaxed)
+                    || state_for_pty
+                        .known_grok_terminals
+                        .lock_or_err()
+                        .map(|known| known.contains(&terminal_id))
+                        .unwrap_or(false);
+
+                let mut cr_grok =
+                    crate::grok_activity::process_grok_title(&event.data, was_detected);
+
+                if cr_grok.exited
+                    && crate::process_tree::suppresses_false_exit(
+                        "Grok",
+                        crate::process_tree::interactive_app_in_pty_fresh(
+                            &state_for_pty,
+                            &terminal_id,
+                        ),
+                    )
+                {
+                    cr_grok.exited = false;
+                }
+
+                if cr_grok.entered {
+                    pty_cb_state.grok_detected.store(true, Ordering::Relaxed);
+                    activity::sync_known_caches(&state_for_pty, &terminal_id, "Grok");
+                    activity::record_interactive_app_entry(&state_for_pty, &terminal_id);
+                }
+
+                if cr_grok.exited {
+                    activity::apply_interactive_app_exit(
+                        &state_for_pty,
+                        &terminal_id,
+                        "Grok",
+                        None,
+                    );
                     interactive_app_exited = true;
                 }
             }
@@ -1563,6 +1611,11 @@ pub fn close_terminal_session(
         known.remove(&id);
     }
 
+    // Clean up Grok terminal tracking
+    if let Ok(mut known) = state.known_grok_terminals.lock_or_err() {
+        known.remove(&id);
+    }
+
     // Drop the PTY callback's detection flags. The callback closure is gone with
     // the PTY, so keeping the entry would only pin dead state and grow the table
     // over a long session.
@@ -1741,6 +1794,30 @@ pub fn is_claude_terminal(id: String, state: State<Arc<AppState>>) -> Result<boo
 #[tauri::command]
 pub fn is_codex_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
     let known = state.known_codex_terminals.lock_or_err()?;
+    Ok(known.contains(&id))
+}
+
+#[tauri::command]
+pub fn mark_grok_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    mark_grok_terminal_inner(&state, &id).map_err(|e| e.to_string())
+}
+
+pub fn mark_grok_terminal_inner(
+    state: &AppState,
+    id: &str,
+) -> Result<bool, crate::error::AppError> {
+    let inserted = {
+        let mut known = state.known_grok_terminals.lock_or_err()?;
+        known.insert(id.to_string())
+    };
+    activity::sync_known_caches(state, id, "Grok");
+    activity::record_interactive_app_detection(state, id, "Grok");
+    Ok(inserted)
+}
+
+#[tauri::command]
+pub fn is_grok_terminal(id: String, state: State<Arc<AppState>>) -> Result<bool, String> {
+    let known = state.known_grok_terminals.lock_or_err()?;
     Ok(known.contains(&id))
 }
 

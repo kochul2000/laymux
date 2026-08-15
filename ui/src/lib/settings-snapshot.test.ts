@@ -5,11 +5,13 @@ vi.mock("@/lib/tauri-api", () => ({
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
+  getGrokSessionIds: vi.fn().mockResolvedValue({}),
 }));
 
 import {
   getClaudeSessionIds,
   getCodexSessionIds,
+  getGrokSessionIds,
   getTerminalCwds,
   saveSettings,
 } from "@/lib/tauri-api";
@@ -166,6 +168,7 @@ describe("settings snapshot", () => {
     expect(getTerminalCwds).not.toHaveBeenCalled();
     expect(getClaudeSessionIds).not.toHaveBeenCalled();
     expect(getCodexSessionIds).not.toHaveBeenCalled();
+    expect(getGrokSessionIds).not.toHaveBeenCalled();
     expect(saveSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -268,6 +271,27 @@ describe("settings snapshot — widget placement and usage", () => {
 
     expect(snapshot.usage.claude.visibleRows).toEqual(["session"]);
   });
+
+  it("hydrates grok integration settings from disk instead of defaults", () => {
+    applySettingsSnapshot(
+      {
+        grok: {
+          command: "grok --yolo",
+          restoreSession: false,
+          sessionMaxAgeHours: 6,
+          statusMessageMode: "title",
+        },
+      } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().grok).toMatchObject({
+      command: "grok --yolo",
+      restoreSession: false,
+      sessionMaxAgeHours: 6,
+      statusMessageMode: "title",
+    });
+  });
 });
 
 describe("settings snapshot — save/load round trip does not drop sections", () => {
@@ -295,6 +319,19 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
           visibleRows: ["weekly"],
           colors: { used: "#444444", pace: "#555555", track: "#666666" },
         },
+        grok: {
+          profile: "",
+          refreshSeconds: 600,
+          configDirs: [],
+          visibleRows: ["weekly", "credits"],
+          colors: { used: "#777777", pace: "#888888", track: "#999999" },
+        },
+      },
+      grok: {
+        command: "grok --yolo",
+        restoreSession: false,
+        sessionMaxAgeHours: 6,
+        statusMessageMode: "title",
       },
       widgets: {
         topBar: { left: [{ id: "w1", type: "cwd", options: {} }], right: [] },
@@ -311,6 +348,10 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(written.usage.claude.visibleRows).toEqual(["session"]);
     expect(written.usage.claude.colors.used).toBe("#111111");
     expect(written.usage.codex.colors.used).toBe("#444444");
+    expect(written.usage.grok.visibleRows).toEqual(["weekly", "credits"]);
+    expect(written.usage.grok.colors.used).toBe("#777777");
+    expect(written.grok.command).toBe("grok --yolo");
+    expect(written.grok.restoreSession).toBe(false);
     expect(written.widgets.topBar.left.map((w) => w.id)).toEqual(["w1"]);
     expect(written.widgets.statusLine.enabled).toBe(true);
   });

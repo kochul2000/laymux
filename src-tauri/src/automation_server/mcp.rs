@@ -2942,6 +2942,23 @@ impl McpHandler {
         Ok(json_result(&payload))
     }
 
+    /// Cached Grok usage snapshots, one per monitored `GROK_HOME`.
+    ///
+    /// Reading never starts a probe: an empty list means no `GrokUsageView`
+    /// pane or `grokUsage` widget is open, not that usage is zero.
+    #[tool]
+    async fn get_grok_usage(&self) -> Result<CallToolResult, ErrorData> {
+        let snapshots = match self.state.app_state.grok_usage_probe.snapshots() {
+            Ok(snapshots) => snapshots,
+            Err(error) => {
+                let message: String = error.to_string();
+                return Ok(CallToolResult::error(vec![Content::text(message)]));
+            }
+        };
+        let payload = super::handlers_backend::build_grok_usage_payload(snapshots);
+        Ok(json_result(&payload))
+    }
+
     /// List all memos stored in `cache/memo.json` as `{ key, content }` entries.
     /// Returns an empty list when the memo file is missing or unreadable.
     /// Memo keys are typically workspace pane IDs (e.g. `pane-abc12345`) so

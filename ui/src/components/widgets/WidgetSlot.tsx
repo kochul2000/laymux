@@ -43,11 +43,12 @@ export function WidgetSlot({
   // a new snapshot on every store read and re-render forever.
   const claudeVisibleRows = useSettingsStore((s) => s.usage.claude.visibleRows.length);
   const codexVisibleRows = useSettingsStore((s) => s.usage.codex.visibleRows.length);
+  const grokVisibleRows = useSettingsStore((s) => s.usage.grok.visibleRows.length);
   const fontFamily = useSettingsStore((s) => s.widgets.fontFamily);
   const fontSize = useSettingsStore((s) => readWidgetFontSize(s.widgets.fontSize));
   const env: WidgetEnv = useMemo(
-    () => ({ claudeVisibleRows, codexVisibleRows, fontSize }),
-    [claudeVisibleRows, codexVisibleRows, fontSize],
+    () => ({ claudeVisibleRows, codexVisibleRows, grokVisibleRows, fontSize }),
+    [claudeVisibleRows, codexVisibleRows, grokVisibleRows, fontSize],
   );
 
   // An unknown type has no definition and therefore no width and no component;

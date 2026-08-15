@@ -78,12 +78,14 @@ import {
   handleLxMessage,
   markClaudeTerminal,
   markCodexTerminal,
+  markGrokTerminal,
   type TerminalOutputSurfaceFailStoppedPayload,
 } from "@/lib/tauri-api";
 import { useRemoteControlStatusSnapshot } from "@/lib/remote-control-status";
 import {
   DEFAULT_CLAUDE_COMMAND,
   DEFAULT_CODEX_COMMAND,
+  DEFAULT_GROK_COMMAND,
   resolveAgentCommand,
 } from "@/lib/agent-command";
 import { colorSchemeToXtermTheme, type WTColorScheme } from "@/lib/color-scheme";
@@ -408,6 +410,8 @@ function markBackendInteractiveTerminal(instanceId: string, activity: TerminalAc
     markClaudeTerminal(instanceId).catch(() => {});
   } else if (activity.name === "Codex") {
     markCodexTerminal(instanceId).catch(() => {});
+  } else if (activity.name === "Grok") {
+    markGrokTerminal(instanceId).catch(() => {});
   }
 }
 
@@ -684,6 +688,8 @@ interface TerminalViewProps {
   lastClaudeSession?: string;
   /** Codex CLI session ID from previous session, used for `codex resume` on startup. */
   lastCodexSession?: string;
+  /** Grok Build session ID from previous session, used for `grok --resume` on startup. */
+  lastGrokSession?: string;
   /** Override the startup command (takes precedence over agent session restore). */
   startupCommandOverride?: string;
   /** Structured external viewer command. Rust validates and quotes the path. */
@@ -712,6 +718,7 @@ export function TerminalView({
   onRestart,
   lastClaudeSession,
   lastCodexSession,
+  lastGrokSession,
   startupCommandOverride,
   viewerStartup,
 }: TerminalViewProps) {
@@ -5620,7 +5627,20 @@ export function TerminalView({
           lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession)
             ? lastCodexSession
             : undefined;
-        const hasAgentSessionConflict = Boolean(safeSessionId && safeCodexSessionId);
+        const shouldRestoreGrokSession =
+          !isFreshRestart && settingsState.grok?.restoreSession !== false;
+        const GROK_SESSION_ID_PATTERN =
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+        const safeGrokSessionId =
+          lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
+            ? lastGrokSession
+            : undefined;
+        const presentAgentSessionKeys = [
+          lastClaudeSession,
+          lastCodexSession,
+          lastGrokSession,
+        ].filter((value) => typeof value === "string" && value.length > 0).length;
+        const hasAgentSessionConflict = presentAgentSessionKeys > 1;
         // The launch command is configurable so a user can carry flags such as
         // `--dangerously-skip-permissions` / `--yolo` into the restored session.
         // Rust re-derives the same string from settings and rejects the rest.
@@ -5632,6 +5652,10 @@ export function TerminalView({
           settingsState.codex?.command,
           DEFAULT_CODEX_COMMAND,
         );
+        const grokCommand = resolveAgentCommand(
+          settingsState.grok?.command,
+          DEFAULT_GROK_COMMAND,
+        );
         const startupOverride = startupCommandOverride
           ? startupCommandOverride
           : hasAgentSessionConflict
@@ -5640,7 +5664,9 @@ export function TerminalView({
               ? `${claudeCommand} --resume ${safeSessionId}`
               : shouldRestoreCodexSession && safeCodexSessionId
                 ? `${codexCommand} resume ${safeCodexSessionId}`
-                : undefined;
+                : shouldRestoreGrokSession && safeGrokSessionId
+                  ? `${grokCommand} --resume ${safeGrokSessionId}`
+                  : undefined;
 
         cacheRestorePromise =
           !isFreshRestart && shouldRestoreOutput && paneId

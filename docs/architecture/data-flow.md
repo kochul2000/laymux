@@ -1184,7 +1184,7 @@ Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usa
 
 - **갱신 간격**: 정상 `settings.usage.claude.refreshSeconds`(하한 600s, 상한 3600s), 실패 시 60s 로 최대 3회 재조회 후 정상 간격 복귀.
 - **구독 id 는 이펙트 실행마다 고유하다** (`usage-<paneId>#<seq>`). pane 당 고정 id 를 쓰면 React 가 이펙트를 실행→정리→재실행할 때 **죽은 정리 콜백이 살아있는 구독을 취소**해 수요가 0 이 되고, 마운트된 view 앞에서 probe 가 은퇴한다(실기에서 `idle` 로 관측). 백엔드도 같은 id·같은 config dir 재구독을 no-op 으로 처리해 정상 `claude` 를 죽이고 다시 띄우지 않는다.
-- **읽기 경로는 부작용이 없다**: `get_usage_snapshot` / `GET /api/v1/usage` / MCP `get_claude_usage` 는 워커를 기동시키지 않으며, 구독이 없으면 `status: idle` 또는 빈 목록을 반환한다.
+- **읽기 경로는 부작용이 없다**: `get_usage_snapshot` / `GET /api/v1/usage` / MCP `get_claude_usage` 는 워커를 기동시키지 않으며, 구독이 없으면 `status: idle` 또는 빈 목록을 반환한다. Grok 형제 계약도 같다: `get_grok_usage_snapshot` / `GET /api/v1/usage/grok` / MCP `get_grok_usage` ([ADR-0156](../adr/0156-grok-first-class-agent.md)).
 - **실패는 표시된다**: `claudeMissing` / `startupTimeout` / `parseFailed` / `upstreamError` / `failed` 를 구분해 view 푸터에 그대로 노출하고, 마지막 캡처 화면을 `rawScreen` 으로 남긴다(부팅 실패도 포함 — 화면이 비었는지 프롬프트에 막혔는지가 진단의 핵심이다).
 - **표시 행은 전역 설정이다**: `visibleRows`는 현재 세션·전체 주간·모델별 주간 중 하나 이상을 선택하며 모든 Claude UsageView에 적용된다. 좁은 행에서는 의미를 유지하는 짧은 제목과 리셋/경과 퍼센트 원문만 표시한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 - **세로 밀도는 높이에서 도출한다**: 높이가 줄면 `Ready`/`Last capture` 푸터를 먼저 감추고, 사용량 막대와 제목을 시간선/elapsed 텍스트 크기까지 줄인 뒤 상세 텍스트를 감춘다. `compact` 높이에서는 라벨·퍼센트까지 감춰 각 한도의 사용량·시간선 두 막대만 남긴다.
@@ -1195,7 +1195,11 @@ Claude Code 잔여 사용량의 유일한 정확한 원천은 `claude` 의 `/usa
 
 Codex는 `/status` TUI를 파싱하지 않는다. `CodexUsageView`가 마운트된 동안 Rust command가 짧게 실행한 로컬 `codex app-server --stdio`에 `initialize`/`initialized` 뒤 `account/rateLimits/read`를 요청한다. 응답의 `rateLimitsByLimitId` primary window를 원시 usage row로 만들고, 프론트가 reset 시각과 window duration에서 elapsed bar를 계산한다. 비-Spark 행은 `Weekly limit`(좁으면 `Weekly`), Spark 행은 `Spark Weekly limit`(좁으면 `Spark`)으로 표시한다. `settings.usage.codex`가 font profile·600~3600초 갱신 간격·두 행의 표시 선택(하나 이상)·추가 `CODEX_HOME` 계정을 소유한다. 추가 계정은 해당 경로에서 사용자가 `codex login`을 끝낸 뒤 pane control bar에서 선택하며, Rust는 그 경로를 app-server 자식의 `CODEX_HOME` 환경으로만 전달한다. app-server listener·Codex thread·사용자 terminal에는 접근하지 않는다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)).
 
-Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다.
+### 10.5.2 GrokUsageView
+
+Grok은 Claude와 같이 레지스트리 밖 headless PTY probe가 `grok`를 띄워 `/usage`를 읽는다. 상류 `allowance_lines`는 한도 헤더·퍼센트 막대·`Credits: $x.xx`·`Pay as you go: Enabled` + `Usage: $used / $cap`를 서로 다른 행에 그리므로, 파서는 라벨 행과 다음 비어 있지 않은 값 행을 결합한다. 값이 있는 행이 있어야 `ready`이며, 라벨만 있고 수치가 없으면 UI `--`로 남는 조용한 오답을 내지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)). 첫 기동이 `grokMissing`/`startupTimeout`/PTY 오류로 끝나면 워커 스레드는 종료된다. 구독이 남은 채 refresh하거나 같은 id로 재구독하면 끊긴 handle을 버리고 워커를 다시 만든다. 구독이 없으면 refresh는 워커를 기동하지 않는다.
+
+Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다. Grok Usage도 같은 표시 컴포넌트를 쓴다.
 
 ---
 
@@ -1287,26 +1291,29 @@ Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter �
     ▼
 [saveBeforeClose()]
     ├─ 0. collectSettingsSnapshot()을 완료해 interrupt 전 agent 귀속을 보존
-    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids
+    │     ├─ get_terminal_cwds / get_claude_session_ids / get_codex_session_ids / get_grok_session_ids
     │     ├─ Claude: PTY descendant PID → ~/.claude/sessions/<pid>.json
     │     ├─ Codex: PTY child → 가장 얕은 Codex PID → logs DB process_uuid/thread_id
+    │     ├─ Grok: PTY descendant PID ↔ `$GROK_HOME/active_sessions.json`의 `pid` 직접 일치
+    │     │    → 유효 UUID가 정확히 하나일 때만 `sessions/.../<id>/summary.json` mtime age 게이트
+    │     │    → 같은 PID에 유효 session_id가 둘 이상이면 전부 `null` (첫 JSON 항목을 고르지 않음)
     │     ├─ Windows/WSL: distro 별 /proc probe에서 LX_TERMINAL_ID → Linux provider PID
-    │     │    → Claude PID 세션 파일 또는 Codex PID가 연 rollout FD를 직접 읽음
+    │     │    → Claude PID 세션 파일, Codex PID가 연 rollout FD, 또는 guest GROK_HOME의 active_sessions.json
     │     └─ state DB/rollout header로 top-level interactive thread 검증
     │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
-    │        → null 귀속은 해당 pane의 양쪽 stale session ID를 제거
+    │        → null 귀속은 해당 pane의 lastClaudeSession/lastCodexSession/lastGrokSession을 모두 제거
     ├─ 1. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
     ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장
     ├─ 3. 사전 수집한 snapshot을 settings.json에 저장
-    │     → lastCwd·lastClaudeSession·lastCodexSession 포함
+    │     → lastCwd·lastClaudeSession·lastCodexSession·lastGrokSession 포함(셋 중 둘 이상이면 모두 삭제)
     └─ 4. cleanTerminalOutputCache(activePaneIds)
           → 고아 캐시 파일 정리
     ▼
 [appWindow.destroy()]
 ```
 
-Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 `<HOME>/.claude/sessions/<pid>.json`을 `\\wsl.localhost\<distro>` 경로로 읽는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md)).
+Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 `<HOME>/.claude/sessions/<pid>.json`을 `\\wsl.localhost\<distro>` 경로로 읽는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. Codex subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
 ### 13.5 시작 시퀀스
 

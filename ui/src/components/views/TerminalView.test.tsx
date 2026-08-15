@@ -9523,6 +9523,120 @@ describe("TerminalView", () => {
       });
     });
 
+    it("passes grok --resume as startupCommandOverride when lastGrokSession is set", async () => {
+      render(
+        <TerminalView
+          instanceId="t-grok-restore"
+          paneId="pane-grok"
+          profile="PowerShell"
+          syncGroup="default"
+          lastCwd="/home/user/project"
+          lastGrokSession="019ffa7f-b8c1-7511-872f-911e8dc8d179"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-grok-restore",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          "/home/user/project",
+          "grok --resume 019ffa7f-b8c1-7511-872f-911e8dc8d179",
+        );
+      });
+    });
+
+    it("restores with the configured grok command and its flags", async () => {
+      useSettingsStore.setState({
+        grok: {
+          ...useSettingsStore.getState().grok,
+          command: "grok --yolo",
+        },
+      });
+
+      render(
+        <TerminalView
+          instanceId="t-grok-flagged"
+          paneId="pane-grok-flagged"
+          profile="PowerShell"
+          syncGroup="default"
+          lastGrokSession="019ffa7f-b8c1-7511-872f-911e8dc8d179"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-grok-flagged",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          "grok --yolo --resume 019ffa7f-b8c1-7511-872f-911e8dc8d179",
+        );
+      });
+    });
+
+    it("fails closed when an invalid Claude key shares the pane with Grok", async () => {
+      render(
+        <TerminalView
+          instanceId="t-invalid-claude-valid-grok"
+          paneId="pane-invalid-claude-valid-grok"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="bad; rm -rf /"
+          lastGrokSession="019ffa7f-b8c1-7511-872f-911e8dc8d179"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-invalid-claude-valid-grok",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
+    it("fails closed when Claude and Grok session IDs are present", async () => {
+      render(
+        <TerminalView
+          instanceId="t-ambiguous-claude-grok"
+          paneId="pane-ambiguous-claude-grok"
+          profile="PowerShell"
+          syncGroup="default"
+          lastClaudeSession="claude-session"
+          lastGrokSession="019ffa7f-b8c1-7511-872f-911e8dc8d179"
+        />,
+      );
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "t-ambiguous-claude-grok",
+          "PowerShell",
+          80,
+          24,
+          "default",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+      });
+    });
+
     it("passes a structured external viewer request to session creation", async () => {
       const viewerStartup = { command: "vi", path: "C:\\Users\\me\\README.md" };
       render(

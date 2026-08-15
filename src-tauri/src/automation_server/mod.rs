@@ -200,6 +200,7 @@ pub fn build_router(
         .route("/api/v1/terminals/{id}/output", get(terminal_output))
         .route("/api/v1/terminals/{id}/buffer", get(terminal_buffer_dump))
         .route("/api/v1/usage", get(usage_list))
+        .route("/api/v1/usage/grok", get(usage_grok_list))
         .route("/api/v1/memos", get(memos_list))
         .route("/api/v1/memos/{key}", get(memo_get))
         .route("/api/v1/notifications", get(notifications_list))

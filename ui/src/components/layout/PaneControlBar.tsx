@@ -247,6 +247,9 @@ function ViewSelect({
   const codexUsageConfigDirs = useSettingsStore((s) => s.usage.codex.configDirs);
   const codexUsageConfigDir =
     currentView.type === "CodexUsageView" ? (currentView.configDir as string) || "" : "";
+  const grokUsageConfigDirs = useSettingsStore((s) => s.usage.grok.configDirs);
+  const grokUsageConfigDir =
+    currentView.type === "GrokUsageView" ? (currentView.configDir as string) || "" : "";
 
   const value =
     currentView.type === "TerminalView"
@@ -255,7 +258,9 @@ function ViewSelect({
         ? `UsageView:${usageConfigDir}`
         : currentView.type === "CodexUsageView"
           ? `CodexUsageView:${codexUsageConfigDir}`
-          : currentView.type;
+          : currentView.type === "GrokUsageView"
+            ? `GrokUsageView:${grokUsageConfigDir}`
+            : currentView.type;
 
   return (
     <select
@@ -274,6 +279,8 @@ function ViewSelect({
           onChange({ type: "UsageView", configDir: val.slice("UsageView:".length) });
         } else if (val.startsWith("CodexUsageView:")) {
           onChange({ type: "CodexUsageView", configDir: val.slice("CodexUsageView:".length) });
+        } else if (val.startsWith("GrokUsageView:")) {
+          onChange({ type: "GrokUsageView", configDir: val.slice("GrokUsageView:".length) });
         } else {
           onChange({ type: val as ViewType });
         }
@@ -302,6 +309,7 @@ function ViewSelect({
       <option value="MemoView">Memo</option>
       <option value="UsageView:">Claude Usage</option>
       <option value="CodexUsageView:">Codex Usage</option>
+      <option value="GrokUsageView:">Grok Usage</option>
       {usageConfigDirs.map((dir) => (
         <option key={dir} value={`UsageView:${dir}`}>
           Usage: {dir}
@@ -310,6 +318,11 @@ function ViewSelect({
       {codexUsageConfigDirs.map((dir) => (
         <option key={dir} value={`CodexUsageView:${dir}`}>
           Codex: {dir}
+        </option>
+      ))}
+      {grokUsageConfigDirs.map((dir) => (
+        <option key={dir} value={`GrokUsageView:${dir}`}>
+          Grok: {dir}
         </option>
       ))}
       <option value="GitHubView">GitHub</option>
@@ -826,6 +839,7 @@ const VIEW_LABELS: Partial<Record<ViewType, string>> = {
   MemoView: "Memo",
   UsageView: "Claude Usage",
   CodexUsageView: "Codex Usage",
+  GrokUsageView: "Grok Usage",
   IssueReporterView: "Issue Reporter",
   FileExplorerView: "File Explorer",
   GitHubView: "GitHub",

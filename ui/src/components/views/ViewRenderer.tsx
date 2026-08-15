@@ -11,6 +11,7 @@ import { IssueReporterView } from "./IssueReporterView";
 import { MemoView } from "./MemoView";
 import { UsageView } from "./UsageView";
 import { CodexUsageView } from "./CodexUsageView";
+import { GrokUsageView } from "./GrokUsageView";
 import { FileExplorerView } from "./FileExplorerView";
 import { GitHubView } from "./GitHubView";
 
@@ -75,6 +76,7 @@ function TerminalViewWithSyncCwd({
   const lastCwd = (viewConfig?.lastCwd as string) ?? undefined;
   const lastClaudeSession = (viewConfig?.lastClaudeSession as string) ?? undefined;
   const lastCodexSession = (viewConfig?.lastCodexSession as string) ?? undefined;
+  const lastGrokSession = (viewConfig?.lastGrokSession as string) ?? undefined;
   const profileName = (viewConfig?.profile as string) || defaultProfile || FALLBACK_PROFILE;
   const profileSyncCwd = useSettingsStore(
     (s) => s.profiles.find((p) => p.name === profileName)?.syncCwd,
@@ -104,6 +106,7 @@ function TerminalViewWithSyncCwd({
       lastCwd={lastCwd}
       lastClaudeSession={lastClaudeSession}
       lastCodexSession={lastCodexSession}
+      lastGrokSession={lastGrokSession}
       restartCwd={terminalRestartCwd}
       isUserRestart={terminalRestartFresh ?? false}
       onUserRestartConsumed={onTerminalRestartConsumed}
@@ -332,6 +335,14 @@ export function ViewRenderer({
       return (
         <div data-testid="view-codex-usage" className="h-full">
           <CodexUsageView paneId={paneId ?? fallbackId} configDir={configDir} />
+        </div>
+      );
+    }
+    case "GrokUsageView": {
+      const configDir = typeof viewConfig?.configDir === "string" ? viewConfig.configDir : "";
+      return (
+        <div data-testid="view-grok-usage" className="h-full">
+          <GrokUsageView paneId={paneId ?? fallbackId} configDir={configDir} />
         </div>
       );
     }

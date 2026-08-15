@@ -178,6 +178,11 @@ pub async fn api_docs() -> impl IntoResponse {
                 "response": "{ usage: [{ configDir, status: { type, message? }, session: { percent, reset }, weekAll: {...}, weekModel: {...}, weekModelLabel, plan, model, capturedAtMs, nextQueryAtMs, rawScreen }], count: number }"
             },
             {
+                "method": "GET", "path": "/api/v1/usage/grok",
+                "description": "Cached Grok usage snapshots, one per monitored GROK_HOME. Read-only and side-effect free: it never starts a probe, so an empty list means no GrokUsageView is subscribed.",
+                "response": "{ usage: [{ configDir, status: { type }, rows: [{ key, percent, reset }], capturedAtMs, nextQueryAtMs, rawScreen }], count: number }"
+            },
+            {
                 "method": "GET", "path": "/api/v1/memos",
                 "description": "List every memo stored in cache/memo.json. Each entry is { key, content }. Keys are sorted alphabetically for stable ordering. Returns an empty list when the file does not exist.",
                 "response": "{ memos: [{ key: string, content: string }, ...], count: number }"
@@ -471,6 +476,25 @@ pub fn build_usage_payload(snapshots: Vec<crate::usage_probe::UsageSnapshot>) ->
 pub async fn usage_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     match state.app_state.usage_probe.snapshots() {
         Ok(snapshots) => (StatusCode::OK, Json(build_usage_payload(snapshots))),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(err_json(&error.to_string())),
+        ),
+    }
+}
+
+pub fn build_grok_usage_payload(
+    snapshots: Vec<crate::grok_usage_probe::GrokUsageSnapshot>,
+) -> serde_json::Value {
+    let count = snapshots.len();
+    serde_json::json!({ "usage": snapshots, "count": count })
+}
+
+/// `GET /api/v1/usage/grok` — cached Grok usage snapshots, one per monitored
+/// `GROK_HOME`. Never starts a probe (ADR-0156).
+pub async fn usage_grok_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    match state.app_state.grok_usage_probe.snapshots() {
+        Ok(snapshots) => (StatusCode::OK, Json(build_grok_usage_payload(snapshots))),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(err_json(&error.to_string())),

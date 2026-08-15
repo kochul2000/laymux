@@ -354,8 +354,8 @@ function selectorStatusForTerminal(
   ) {
     return null;
   }
-  const { claude, codex } = useSettingsStore.getState();
-  const display = getStatusDisplaySettings(terminal.activity, claude, codex);
+  const { claude, codex, grok } = useSettingsStore.getState();
+  const display = getStatusDisplaySettings(terminal.activity, claude, codex, grok);
   return computeCommandStatus(
     terminal.lastExitCode,
     terminal.outputActive,
@@ -392,8 +392,8 @@ function selectorSummaryForWorkspace(workspace: Workspace) {
   const lastCommand = summary.lastCommand;
   let displayLastCommand = null;
   if (lastCommand) {
-    const { claude, codex } = useSettingsStore.getState();
-    const display = getStatusDisplaySettings(lastCommand.activity, claude, codex);
+    const { claude, codex, grok } = useSettingsStore.getState();
+    const display = getStatusDisplaySettings(lastCommand.activity, claude, codex, grok);
     displayLastCommand = {
       command: lastCommand.command,
       timestamp: lastCommand.timestamp,

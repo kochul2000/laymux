@@ -750,6 +750,40 @@ describe("PaneControlBar", () => {
     });
   });
 
+  it("offers additional Grok homes and selects their UsageView", async () => {
+    const user = userEvent.setup();
+    useSettingsStore.setState({
+      usage: {
+        ...useSettingsStore.getState().usage,
+        grok: {
+          ...useSettingsStore.getState().usage.grok,
+          configDirs: ["C:\\Users\\me\\.grok-work"],
+        },
+      },
+    });
+    const onChangeView = vi.fn();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onChangeView }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    const select = screen.getByTestId("pane-control-view-select") as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.value)).toContain("GrokUsageView:");
+    expect(Array.from(select.options).map((option) => option.value)).toContain(
+      "GrokUsageView:C:\\Users\\me\\.grok-work",
+    );
+
+    await user.selectOptions(select, "GrokUsageView:C:\\Users\\me\\.grok-work");
+    expect(onChangeView).toHaveBeenCalledWith({
+      type: "GrokUsageView",
+      configDir: "C:\\Users\\me\\.grok-work",
+    });
+  });
+
   it("selecting Memo calls onChangeView with MemoView type", async () => {
     const user = userEvent.setup();
     render(

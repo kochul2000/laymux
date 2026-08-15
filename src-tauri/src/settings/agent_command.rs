@@ -12,6 +12,8 @@
 pub const DEFAULT_CLAUDE_COMMAND: &str = "claude";
 /// Default launch command for the Codex CLI.
 pub const DEFAULT_CODEX_COMMAND: &str = "codex";
+/// Default launch command for Grok Build.
+pub const DEFAULT_GROK_COMMAND: &str = "grok";
 
 /// Characters allowed in a configured agent command.
 ///

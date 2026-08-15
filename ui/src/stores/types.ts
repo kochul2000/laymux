@@ -6,6 +6,7 @@ export type ViewType =
   | "MemoView"
   | "UsageView"
   | "CodexUsageView"
+  | "GrokUsageView"
   | "FileExplorerView"
   | "GitHubView"
   | "EmptyView";

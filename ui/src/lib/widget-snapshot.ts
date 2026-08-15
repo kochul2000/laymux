@@ -16,17 +16,27 @@
 
 import i18n from "i18next";
 
-import { getUsageSnapshot, type UsageSnapshot } from "@/lib/tauri-api";
+import {
+  getGrokUsageSnapshot,
+  getUsageSnapshot,
+  type GrokUsageSnapshot,
+  type UsageSnapshot,
+} from "@/lib/tauri-api";
 import { readCodexSnapshot } from "@/lib/codex-usage-subscription";
 import {
   buildClaudeUsageRows,
   buildCodexUsageRows,
+  buildGrokUsageRows,
   selectVisibleRows,
   usageRowStatuslineText,
   usageWidgetTooltip,
   type UsageDisplayRow,
 } from "@/lib/usage-rows";
-import { claudeUsageStatusMessage, codexUsageStatusMessage } from "@/lib/usage-status";
+import {
+  claudeUsageStatusMessage,
+  codexUsageStatusMessage,
+  grokUsageStatusMessage,
+} from "@/lib/usage-status";
 import { isTerminalWorking } from "@/lib/terminal-working";
 import { abbreviatePath } from "@/lib/workspace-summary";
 import {
@@ -192,6 +202,22 @@ function claudeConfigDir(instance: WidgetInstance): string {
   return typeof instance.options.configDir === "string" ? instance.options.configDir : "";
 }
 
+async function grokSnapshots(
+  configDirs: readonly string[],
+): Promise<Map<string, GrokUsageSnapshot>> {
+  const unique = [...new Set(configDirs)];
+  const entries = await Promise.all(
+    unique.map(async (configDir): Promise<[string, GrokUsageSnapshot] | null> => {
+      try {
+        return [configDir, await getGrokUsageSnapshot(configDir)];
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return new Map(entries.filter((entry): entry is [string, GrokUsageSnapshot] => entry !== null));
+}
+
 /**
  * Everything the remote strip needs, resolved against the desktop's own state.
  *
@@ -208,6 +234,11 @@ export async function buildRemoteWidgetSnapshot(
   const snapshots = await claudeSnapshots(
     placed
       .filter((placement) => placement.instance.type === "claudeUsage")
+      .map((placement) => claudeConfigDir(placement.instance)),
+  );
+  const grokSnaps = await grokSnapshots(
+    placed
+      .filter((placement) => placement.instance.type === "grokUsage")
       .map((placement) => claudeConfigDir(placement.instance)),
   );
 
@@ -238,6 +269,25 @@ export async function buildRemoteWidgetSnapshot(
             message: snapshot ? claudeUsageStatusMessage(snapshot.status) : "Probe stopped",
             capturedAtMs: snapshot?.capturedAtMs ?? null,
             colors: settings.usage.claude.colors,
+            configDir,
+          }),
+        ];
+      }
+      case "grokUsage": {
+        const configDir = claudeConfigDir(instance);
+        const snapshot = grokSnaps.get(configDir);
+        const rows = snapshot
+          ? selectVisibleRows(buildGrokUsageRows(snapshot.rows), settings.usage.grok.visibleRows)
+          : [];
+        return [
+          usageItem({
+            instance,
+            align,
+            label: "Grok",
+            rows,
+            message: snapshot ? grokUsageStatusMessage(snapshot.status) : "Probe stopped",
+            capturedAtMs: snapshot?.capturedAtMs ?? null,
+            colors: settings.usage.grok.colors,
             configDir,
           }),
         ];

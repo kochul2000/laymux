@@ -622,6 +622,56 @@ export async function getCodexUsageSnapshot(configDir = ""): Promise<CodexUsageS
   return invoke("get_codex_usage_snapshot", { configDir });
 }
 
+export type GrokUsageStatus =
+  | { type: "idle" }
+  | { type: "starting" }
+  | { type: "ready" }
+  | { type: "grokMissing" }
+  | { type: "startupTimeout" }
+  | { type: "parseFailed" }
+  | { type: "failed"; message: string };
+
+export interface GrokUsageSnapshot {
+  configDir: string;
+  status: GrokUsageStatus;
+  rows: {
+    key: string;
+    percent: number | null;
+    remaining: number | null;
+    reset: string | null;
+  }[];
+  capturedAtMs: number | null;
+  nextQueryAtMs: number | null;
+  rawScreen: string | null;
+}
+
+export async function subscribeGrokUsageProbe(
+  subscriberId: string,
+  configDir: string,
+): Promise<GrokUsageSnapshot> {
+  return invoke("subscribe_grok_usage_probe", { subscriberId, configDir });
+}
+
+export async function unsubscribeGrokUsageProbe(subscriberId: string): Promise<void> {
+  return invoke("unsubscribe_grok_usage_probe", { subscriberId });
+}
+
+export async function getGrokUsageSnapshot(configDir = ""): Promise<GrokUsageSnapshot> {
+  return invoke("get_grok_usage_snapshot", { configDir });
+}
+
+export async function refreshGrokUsageProbe(configDir: string): Promise<boolean> {
+  return invoke("refresh_grok_usage_probe", { configDir });
+}
+
+export function onGrokUsageSnapshotChanged(
+  callback: (snapshot: GrokUsageSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<GrokUsageSnapshot>("grok-usage-snapshot-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 // -- GitHub issue/PR list (issue #708) --
 
 export type GithubRepoStatus =
@@ -779,6 +829,16 @@ export interface CodexSettings {
   /** Status message display mode (default: "bullet-title"). */
   statusMessageMode: CodexStatusMessageMode;
   /** Delimiter between bullet and title when both shown (default: " · "). */
+  statusMessageDelimiter: string;
+}
+
+export type GrokStatusMessageMode = CodexStatusMessageMode;
+
+export interface GrokSettings {
+  command: string;
+  restoreSession: boolean;
+  sessionMaxAgeHours: number;
+  statusMessageMode: GrokStatusMessageMode;
   statusMessageDelimiter: string;
 }
 
@@ -1013,6 +1073,7 @@ export interface Settings {
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
+  grok?: GrokSettings;
   exit?: ExitSettings;
   memo: MemoSettings;
   issueReporter: IssueReporterSettings;
@@ -1556,6 +1617,11 @@ export async function markCodexTerminal(id: string): Promise<boolean> {
   return invoke("mark_codex_terminal", { id });
 }
 
+/** Register a terminal as running Grok Build in the backend. */
+export async function markGrokTerminal(id: string): Promise<boolean> {
+  return invoke("mark_grok_terminal", { id });
+}
+
 /** Check if a terminal is registered as Claude Code in the backend. */
 export async function isClaudeTerminal(id: string): Promise<boolean> {
   return invoke("is_claude_terminal", { id });
@@ -1584,6 +1650,14 @@ export async function getCodexSessionIds(
   sessionMaxAgeHours?: number,
 ): Promise<Record<string, string | null>> {
   return invoke("get_codex_session_ids", {
+    sessionMaxAgeHours: sessionMaxAgeHours ?? null,
+  });
+}
+
+export async function getGrokSessionIds(
+  sessionMaxAgeHours?: number,
+): Promise<Record<string, string | null>> {
+  return invoke("get_grok_session_ids", {
     sessionMaxAgeHours: sessionMaxAgeHours ?? null,
   });
 }

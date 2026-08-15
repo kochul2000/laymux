@@ -185,12 +185,19 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
       "configDirs": [], // 별도 로그인한 CODEX_HOME 목록. 기본 CODEX_HOME은 항상 포함
       "visibleRows": ["weekly", "sparkWeekly"], // Weekly limit / Spark Weekly limit. 하나 이상 필수
       "colors": { "used": "#10a37f", "pace": "#f9e2af", "track": "#585858" }
+    },
+    "grok": {
+      "profile": "", // grok 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
+      "refreshSeconds": 600, // 프로세스 비용 clamp 600~3600
+      "configDirs": [], // 추가 GROK_HOME. 기본 홈은 항상 포함
+      "visibleRows": ["weekly", "monthly"], // weekly/monthly/credits/payg. 하나 이상 필수
+      "colors": { "used": "#c084fc", "pace": "#f9e2af", "track": "#585858" }
     }
   }
 }
 ```
 
-**에이전트별 수집 경로는 분리한다.** Claude는 profile/config dir를 가진 PTY probe를 쓰며, Codex는 CLI가 제공하는 app-server 계정 API를 쓴다. 두 provider는 원시 snapshot만 만들고 화면 규칙은 공통 `UsagePresentation`이 소유한다.
+**에이전트별 수집 경로는 분리한다.** Claude는 profile/config dir를 가진 PTY probe를 쓰며, Codex는 CLI가 제공하는 app-server 계정 API를 쓰고, Grok은 `/usage` TUI를 읽는 headless PTY probe를 쓴다([ADR-0156](../adr/0156-grok-first-class-agent.md)). provider는 원시 snapshot만 만들고 화면 규칙은 공통 `UsagePresentation`이 소유한다.
 
 Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdio JSON-RPC `account/rateLimits/read`다. 이 호출은 설정·네트워크 listener·사용자 대화 state를 만들지 않는다. 응답에서 직접 얻는 window와 reset epoch만 `get_codex_usage_snapshot` Tauri command로 WebView에 전달한다([ADR-0104](../adr/0104-codex-usage-app-server-probe.md)). `usage.codex.profile`은 화면의 terminal font를, `refreshSeconds`는 local app-server 재조회 간격을 정한다. `configDirs`의 각 경로는 app-server 자식 프로세스의 `CODEX_HOME`으로 전달되며, 사용자는 해당 경로에서 `codex login`을 먼저 실행한다.
 
@@ -202,7 +209,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
 
-**`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 두 에이전트 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 두 브랜드색과 떨어져 있다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
+**`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`, Grok `#c084fc`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 두 에이전트 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 두 브랜드색과 떨어져 있다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
 
 ### 상태 위젯 배치 (widgets)
 
@@ -233,7 +240,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `type` 은 프론트 위젯 레지스트리(`ui/src/components/widgets/registry.ts`)가 정의하는 이름이며 정본 목록은 Rust `constants.rs::WIDGET_TYPES` 다. 두 목록의 일치는 `registry.test.ts` 가 강제한다. 쓰기 경로는 미등록 `type` 과 중복 `id` 를 [ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md) 대로 거부하고, 이미 디스크에 있던 위반은 `existingIssues` 로 보고하며 값은 보존한다 — 로드는 미등록 위젯을 지우지 않고 렌더만 건너뛴다.
 
-`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barWidth`·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 너비(`barWidth` 기본 26, 8~200px)와 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 크기가 맞지 않는다. `barWidth`는 consumed·elapsed 두 track과 슬롯 요구 폭 계산에 함께 적용된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
+`options` 는 위젯 타입별 값 도메인이다. `claudeUsage` 는 `configDir`(기본 config dir 은 빈 문자열)·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `codexUsage` 는 `display`(`"bar" | "number" | "both"`)·`barWidth`·`barHeight`·`elapsedHeight`, `grokUsage` 는 `configDir`·`display`·`barWidth`·`barHeight`·`elapsedHeight`, `terminalActivity` 는 `scope`(`"workspace" | "all"`) 를 갖는다. 막대 너비(`barWidth` 기본 26, 8~200px)와 두께(`barHeight` 기본 4, `elapsedHeight` 기본 2, 둘 다 1~10px)는 **인스턴스마다** 정한다 — 같은 계정이라도 상단 바와 status line 은 보는 거리가 달라 같은 크기가 맞지 않는다. `barWidth`는 consumed·elapsed 두 track과 슬롯 요구 폭 계산에 함께 적용된다([ADR-0107](../adr/0107-widget-typography-and-usage-bar-width.md)). **사용량 위젯이 어떤 한도 행을 보이는지는 위젯이 소유하지 않고** 전역 `usage.*.visibleRows` 를 따르며, 막대 색도 해당 에이전트의 `usage.<agent>.colors` 를 그대로 쓴다.
 
 폭이 모자라면 위젯을 자르지 않는다. 상단 바의 우선순위는 **창 버튼 > 창 드래그 영역 최소 폭 > 앱 크롬 버튼·위젯** 이다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)). 창 버튼(최소화·최대화·닫기)은 어떤 폭에서도 46px 를 유지한 채 오른쪽 끝에 남고, 그 다음 드래그 최소 폭이 확보된다. 남은 폭 안에서 각 슬롯이 **화면 가장자리에서 먼 쪽부터**(left 슬롯은 배열 뒤쪽, right 슬롯은 배열 앞쪽) 오버플로 팝오버로 접는다. 앱이 소유하는 우선순위 값은 없다.
 
@@ -453,17 +460,35 @@ Codex 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어�
 
 `restoreSession`/`sessionMaxAgeHours`는 세션 영속([data-flow.md §13](./data-flow.md))에서 검증된 Codex thread ID를 다음 시작 명령 `codex resume <id>`로 사용할지를 제어한다([ADR-0118](../adr/0118-codex-session-pid-attribution.md)). 저장 시에는 terminal PTY의 가장 얕은 Codex descendant PID를 얻고, Codex의 읽기 전용 `logs_*.sqlite`에서 그 PID의 현재 `process_uuid`와 thread ID를 연결한다. `state_*.sqlite`가 제공한 rollout 경로(없으면 정확한 ID가 파일명에 있는 rollout 검색)의 첫 `session_meta`를 대조해 최상위 interactive thread만 허용한다. terminal CWD와 최신 rollout은 귀속에 사용하지 않는다. 서로 다른 terminal이 같은 ID를 얻거나 DB·스키마·rollout 중 하나라도 검증되지 않으면 관련 pane은 복원하지 않는다.
 
-rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `<claude.command> --resume <id>`와 `<codex.command> resume <id>` 두 형태만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host의 WSL terminal은 자신의 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID를 선택한다. Claude/Codex가 중첩 실행됐으면 provider별 최상위가 아니라 두 provider 전체에서 유일한 최상위 agent 하나만 활성 provider로 인정한다. Claude는 해당 PID 세션 파일을 읽고, Codex는 해당 PID의 open FD 중 process `CODEX_HOME/sessions` 아래의 rollout header를 검증해 유일한 top-level thread만 저장한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md)). native·WSL 결과를 모두 합친 뒤 같은 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 만든다. 명시 distro가 잘못됐으면 bare WSL로 재해석하지 않으며, default-distro 조회와 여러 distro probe는 하나의 3초 종료 예산을 공유한다. WSL live SQLite는 Windows UNC 경계에서 WAL lock을 안전하게 공유할 수 없으므로 귀속에 사용하지 않는다. WSL에서도 CWD·최신 파일·다른 distro fallback은 허용하지 않는다.
+rollout 나이 필터는 파일의 nanosecond 수정 시각만 사용하며, 생성일인 `sessions/YYYY/MM/DD` 디렉터리명으로 미리 pruning하지 않는다. 세션 ID는 영숫자로 시작하고 이후 영숫자·`-`·`_`만 허용한다. Rust의 비구조화 startup override도 `<claude.command> --resume <id>`와 `<codex.command> resume <id>`, `<grok.command> --resume <uuid>` 세 형태만 허용한다. `restoreSession`은 다음 시작에서 resume할지만 제어하므로 꺼져 있어도 Claude/Codex/Grok의 현재 ID를 수집·보존한다. native host의 `CODEX_HOME`(rollout, 기본 host OS 사용자 홈의 `.codex`)과 `CODEX_SQLITE_HOME`(DB, 기본 `CODEX_HOME`)을 지원한다. Windows host의 WSL terminal은 자신의 distro 안에서 `LX_TERMINAL_ID`를 상속한 Linux provider PID를 선택한다. Claude/Codex/Grok가 중첩 실행됐으면 provider별 최상위가 아니라 세 provider 전체에서 유일한 최상위 agent 하나만 활성 provider로 인정한다. Claude는 해당 PID 세션 파일을 읽고, Codex는 해당 PID의 open FD 중 process `CODEX_HOME/sessions` 아래의 rollout header를 검증해 유일한 top-level thread만 저장한다. Grok는 guest `GROK_HOME`(없으면 guest `HOME/.grok`)의 `active_sessions.json`에서 그 PID와 일치하는 유효 UUID가 정확히 하나일 때만 저장한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)). native·WSL 결과를 모두 합친 뒤 같은 session ID가 둘 이상의 terminal에 귀속되면 충돌한 terminal을 전부 `null`로 만든다. 명시 distro가 잘못됐으면 bare WSL로 재해석하지 않으며, default-distro 조회와 여러 distro probe는 하나의 3초 종료 예산을 공유한다. WSL live SQLite는 Windows UNC 경계에서 WAL lock을 안전하게 공유할 수 없으므로 귀속에 사용하지 않는다. WSL에서도 CWD·최신 파일·다른 distro fallback은 허용하지 않는다.
 
-한 TerminalView의 `lastClaudeSession`과 `lastCodexSession`은 상호배타적으로 영속한다. 저장 시 새 Codex ID를 얻으면 stale Claude ID를 제거하고, 새 Claude ID를 얻으면 stale Codex ID를 제거한다. `get_claude_session_ids`와 `get_codex_session_ids`는 현재 provider가 실행 중이지만 정확한 ID를 증명하지 못한 terminal을 `null` 값으로 반환하며, 이 경우 저장 측은 양쪽 stale ID를 모두 제거한다. backend 결과나 손편집 설정에 두 provider가 동시에 귀속되면 provider를 추측하지 않고 둘 다 복원하지 않는다. 사용자가 누른 Restart View는 두 agent 복원을 모두 건너뛴다.
+한 TerminalView의 `lastClaudeSession`/`lastCodexSession`/`lastGrokSession`은 상호배타적으로 영속한다. 저장 시 새 provider ID를 얻으면 나머지 두 stale 키를 제거하고, `get_claude_session_ids`/`get_codex_session_ids`/`get_grok_session_ids`가 실행 중이지만 정확한 ID를 증명하지 못한 terminal을 `null`로 반환하면 세 stale 키를 모두 제거한다. backend 결과나 손편집 설정에 둘 이상이 동시에 귀속되면 provider를 추측하지 않고 셋 다 복원하지 않는다. 사용자가 누른 Restart View는 세 agent 복원을 모두 건너뛴다.
 
-#### 에이전트 실행 명령 (`claude.command` / `codex.command`)
+### Grok 설정
 
-복원 명령의 실행부는 설정이 소유한다([ADR-0125](../adr/0125-configurable-agent-launch-command.md)). 값의 문법은 실행 파일 이름/경로 하나와 플래그이며, 허용 문자는 영숫자와 ` - _ . / \ : = ,` 뿐이고 첫 글자는 `-` 일 수 없다. 앞뒤 공백은 잘라내고 연속 공백은 하나로 접지만, 줄바꿈·탭은 접지 않고 값 전체를 거부한다. 문법을 어긴 값은 무시되어 기본 `claude`/`codex` 가 쓰이고, `validate_settings` 가 `/claude/command`·`/codex/command` 이슈로 보고하며 설정 UI 는 미리보기 대신 경고를 표시한다. 정규화는 Rust `settings/agent_command.rs` 와 프론트 `ui/src/lib/agent-command.ts` 가 같은 규칙으로 수행한다.
+Grok Build 관련 동작(세션 복원, 셀렉터 상태 메시지 구성)을 제어한다. 필드 집합은 Codex와 같다 — `syncCwd`와 `sessionLimit*`는 두지 않는다([ADR-0156](../adr/0156-grok-first-class-agent.md)).
 
-프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. 적용 시점은 `nextUse`(다음 터미널 생성)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
+```jsonc
+{
+  "grok": {
+    "command": "grok",
+    "restoreSession": true,
+    "sessionMaxAgeHours": 24,
+    "statusMessageMode": "bullet-title",
+    "statusMessageDelimiter": " · "
+  }
+}
+```
 
-metadata apply mode는 `/codex/statusMessageMode`와 `/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/claude/command`·`/codex/command`는 `nextUse`다. `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
+복원 override는 `<grok.command> --resume <uuid>` 만 허용한다. UUID는 `8-4-4-4-12` 십육진이다. 세션 ID SoT는 PTY descendant Grok PID와 `$GROK_HOME/active_sessions.json`의 `pid` 일치이며, `summary.json` mtime이 age 게이트를 통과해야 한다. `lastGrokSession`은 Claude/Codex 키와 상호배타적이다.
+
+#### 에이전트 실행 명령 (`claude.command` / `codex.command` / `grok.command`)
+
+복원 명령의 실행부는 설정이 소유한다([ADR-0125](../adr/0125-configurable-agent-launch-command.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)). 값의 문법은 실행 파일 이름/경로 하나와 플래그이며, 허용 문자는 영숫자와 ` - _ . / \ : = ,` 뿐이고 첫 글자는 `-` 일 수 없다. 앞뒤 공백은 잘라내고 연속 공백은 하나로 접지만, 줄바꿈·탭은 접지 않고 값 전체를 거부한다. 문법을 어긴 값은 무시되어 기본 `claude`/`codex`/`grok` 가 쓰이고, `validate_settings` 가 `/claude/command`·`/codex/command`·`/grok/command` 이슈로 보고하며 설정 UI 는 미리보기 대신 경고를 표시한다. 정규화는 Rust `settings/agent_command.rs` 와 프론트 `ui/src/lib/agent-command.ts` 가 같은 규칙으로 수행한다.
+
+프론트는 이 값으로 `<command> --resume <id>` / `<command> resume <id>` / `<command> --resume <uuid>` 를 만들어 `startupCommandOverride` 로 보내고, Rust 는 **디스크의 settings 에서 접두어를 다시 도출해** 그 형태와만 대조한다 — 호출자가 보낸 문자열에서 접두어를 추출하지 않으므로 사용자가 설정하지 않은 플래그는 통과하지 못한다. Claude는 `--resume`, Codex는 서브커맨드 `resume`, Grok는 플래그 `--resume`이며 Grok `<id>`는 하이픈 포함 UUID만 허용한다. 적용 시점은 `nextUse`(다음 터미널 생성)이며, 실행 중인 pane 의 명령은 바뀌지 않는다. 공백이 들어간 실행 파일 경로는 인용 문법을 두지 않아 지원하지 않는다. 이 설정은 세션 복원 경로에만 쓰이며 pane 신규 시작을 자동 기동하지 않는다.
+
+metadata apply mode는 `/codex/statusMessageMode`와 `/codex/statusMessageDelimiter`가 부모 `/codex`의 `live`를 따르고, `/grok/statusMessageMode`와 `/grok/statusMessageDelimiter`는 부모 `/grok`의 `live`를 따른다. `/codex/restoreSession`·`/codex/sessionMaxAgeHours`·`/grok/restoreSession`·`/grok/sessionMaxAgeHours`·`/claude/command`·`/codex/command`·`/grok/command`는 `nextUse`다. `restoreSession`은 다음 terminal 생성부터, 최대 나이는 다음 세션 ID 수집부터 적용된다.
 
 Claude의 `syncCwd: "command"`는 Claude Code가 제공하는 `! cd` 부모 세션 변경 계약에 의존한다. Codex shell mode는 부모 TUI CWD 변경 계약이 아니므로 Codex 설정에 같은 옵션을 두지 않고, 실행 중인 Codex pane은 다른 일반 interactive app처럼 CWD 수신에서 제외한다. `sessionLimit*`도 현재 Claude 고유 배너 파서 계약이므로 Codex에 복제하지 않는다.
 
@@ -768,6 +793,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/terminals/:id/write` | 터미널 입력 |
 | GET | `/api/v1/terminals/:id/output?lines=N` | 터미널 출력 읽기 |
 | GET | `/api/v1/usage` | Claude 사용량 스냅샷 목록 (config dir 당 1개 → `{ usage: [...], count }`). 각 항목은 `session` · `weekAll` · `weekModel`(+`weekModelLabel`, 예 `Fable`) 3행. 읽기 전용·부작용 없음 — probe 를 기동시키지 않으므로 빈 목록은 "구독 없음"을 뜻한다. `status.type === "ready"` 일 때만 숫자가 유효하고, `reset` 은 Claude Code 원문 그대로다 |
+| GET | `/api/v1/usage/grok` | Grok 사용량 스냅샷 목록 (GROK_HOME 당 1개 → `{ usage: [...], count }`). 읽기 전용·부작용 없음 — probe 를 기동시키지 않는다. 행 키는 `weekly`/`monthly`/`credits`/`payg` ([ADR-0156](../adr/0156-grok-first-class-agent.md)) |
 | GET | `/api/v1/memos` | 모든 메모 목록 조회 (`cache/memo.json` → `{ memos: [{ key, content }, ...], count }`) |
 | GET | `/api/v1/memos/:key` | 특정 키의 메모 내용 조회 (없으면 404) |
 | GET | `/api/v1/notifications` | 알림 목록 |
@@ -946,6 +972,7 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 | Tool | 구현 방식 | 설명 |
 |------|-----------|------|
 | `get_claude_usage` | 백엔드 상태 | Claude 사용량 스냅샷 (config dir 당 1개). 최대 10분 낡을 수 있고(`capturedAtMs`) 조회가 probe 를 기동시키지 않는다 |
+| `get_grok_usage` | 백엔드 상태 | Grok 사용량 스냅샷 (`GROK_HOME` 당 1개). 조회가 probe 를 기동시키지 않는다 |
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
