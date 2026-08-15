@@ -27,7 +27,11 @@ export function isGrokTitle(title: string | undefined): boolean {
 }
 
 export function isGrokWorkingTitle(title: string | undefined): boolean {
-  return !!title && isGrokTitle(title) && (startsWithBrailleSpinner(title) || title.includes(RUNNING_MARKER));
+  if (!title) return false;
+  // Already-detected Grok panes keep Braille-only frames as working
+  // (ADR-0156). Entry still requires isGrokTitle.
+  if (startsWithBrailleSpinner(title)) return true;
+  return isGrokTitle(title) && title.includes(RUNNING_MARKER);
 }
 
 export function extractGrokTitleMessage(title: string | undefined): string | undefined {

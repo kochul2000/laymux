@@ -29,7 +29,7 @@ pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
             if rows.iter().any(|row: &GrokUsageRow| row.key == *key) {
                 continue;
             }
-            let value = if hits.len() == 1 && !has_parseable_value(rest) {
+            let value = if hits.len() == 1 {
                 let mut combined = rest.to_string();
                 let following = following_value_text(&lines, i + 1);
                 if !following.is_empty() {
@@ -42,19 +42,20 @@ pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
             } else {
                 rest.to_string()
             };
+            let percent = parse_percent(&value);
+            let remaining = parse_remaining(&value);
+            if percent.is_none() && remaining.is_none() {
+                continue;
+            }
             rows.push(GrokUsageRow {
                 key: (*key).to_string(),
-                percent: parse_percent(&value),
-                remaining: parse_remaining(&value),
-                reset: parse_reset(screen),
+                percent,
+                remaining,
+                reset: parse_reset(&value),
             });
         }
     }
     rows
-}
-
-fn has_parseable_value(rest: &str) -> bool {
-    parse_percent(rest).is_some() || parse_remaining(rest).is_some()
 }
 
 fn following_value_text(lines: &[&str], start: usize) -> String {
@@ -172,8 +173,8 @@ mod tests {
         let screen = "\
 Usage
 Weekly limit: 42%
-Monthly limit: 10%
 Next reset: Mon 9am
+Monthly limit: 10%
 Credits: 12 left
 Pay-as-you-go: $3 used of $20 limit
 ";
@@ -257,6 +258,41 @@ Usage: $3.00 / $20.00 per month
         assert_eq!(rows[1].remaining, Some(12.34));
         assert_eq!(rows[2].percent, Some(15.0));
         assert_eq!(rows[2].remaining, None);
+        assert_eq!(rows[1].reset, None);
+        assert_eq!(rows[2].reset, None);
+    }
+
+    #[test]
+    fn parse_drops_label_only_rows() {
+        let rows = parse_grok_usage_screen(
+            "Weekly limit (SuperGrok)\n\nCredits\nPay as you go: Enabled\n",
+        );
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn parse_reset_stays_on_its_own_bucket() {
+        let screen = "\
+Weekly limit (SuperGrok)
+
+███████████████░░░░░░░░░░░░░░░  50%
+Resets: May 29, 00:00
+
+Monthly limit
+
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  10%
+Resets: Jun 1, 00:00
+
+Credits: $12.34
+";
+        let rows = parse_grok_usage_screen(screen);
+        assert_eq!(
+            rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            ["weekly", "monthly", "credits"]
+        );
+        assert_eq!(rows[0].reset.as_deref(), Some("May 29, 00:00"));
+        assert_eq!(rows[1].reset.as_deref(), Some("Jun 1, 00:00"));
+        assert_eq!(rows[2].reset, None);
     }
 
     #[test]

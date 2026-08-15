@@ -29,7 +29,15 @@ describe("GrokActivityHandler", () => {
       isGrokWorkingTitle("\u{280B} - Running: laymux__list_terminals - title - grok"),
     ).toBe(true);
     expect(isGrokWorkingTitle("- Running: tool - title - grok")).toBe(true);
+    expect(isGrokWorkingTitle("\u{280B} working")).toBe(true);
     expect(isGrokWorkingTitle("title - grok")).toBe(false);
+  });
+
+  it("shows working icon for a braille-only title on a detected pane", () => {
+    const status = handler.computeStatus(
+      raw({ title: "\u{280B} working", outputActive: false }),
+    );
+    expect(status.icon).toBe(STATUS_ICON_WORKING);
   });
 
   it("keeps tool and session title after stripping", () => {
