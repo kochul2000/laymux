@@ -20,3 +20,9 @@ class RemoteBridge(private val activity: MainActivity) {
         activity.runOnUiThread(activity::disconnectRemote)
     }
 }
+
+internal fun stringWebMessagePayload(
+    messageType: Int,
+    stringType: Int,
+    readPayload: () -> String?,
+): String? = if (messageType == stringType) readPayload() else null

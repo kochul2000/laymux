@@ -23,6 +23,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.gms.tasks.Task
@@ -57,6 +58,7 @@ import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.VisibleWebSurface
 import com.laymux.android.web.WebSurfaceLayerPolicy
+import com.laymux.android.web.stringWebMessagePayload
 import com.laymux.android.web.CloudBridge
 import com.laymux.android.web.CloudBridgeInput
 import com.laymux.android.web.CloudAuthClient
@@ -223,7 +225,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     setOf(REMOTE_WRAPPER_ORIGIN),
                 ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
                     if (isMainFrame && sourceOrigin == Uri.parse(REMOTE_WRAPPER_ORIGIN)) {
-                        message.data?.let { handleRemoteOutputMessage(it, replyProxy) }
+                        stringWebMessagePayload(
+                            message.type,
+                            WebMessageCompat.TYPE_STRING,
+                        ) { message.data }?.let { handleRemoteOutputMessage(it, replyProxy) }
                     }
                 }
             }

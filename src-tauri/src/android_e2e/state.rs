@@ -8,6 +8,7 @@ use base64::Engine;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex as AsyncMutex;
+use zeroize::Zeroizing;
 
 use crate::android_pairing::ConfirmedPairingMaterial;
 use crate::error::AppError;
@@ -491,7 +492,10 @@ pub(crate) struct AndroidE2eOutputCipher {
 }
 
 impl AndroidE2eOutputCipher {
-    pub(crate) fn decrypt_request(&mut self, record: &[u8]) -> Result<Vec<u8>, E2eError> {
+    pub(crate) fn decrypt_request(
+        &mut self,
+        record: &[u8],
+    ) -> Result<Zeroizing<Vec<u8>>, E2eError> {
         let plaintext = decrypt_output_request(
             &self.keys.a2d,
             &self.instance_id,
@@ -505,7 +509,7 @@ impl AndroidE2eOutputCipher {
             .next_request_sequence
             .checked_add(1)
             .ok_or(E2eError::Sequence)?;
-        Ok(plaintext.to_vec())
+        Ok(plaintext)
     }
 
     pub(crate) fn encrypt_response(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, E2eError> {
