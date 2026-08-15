@@ -90,6 +90,53 @@ fn nested_providers_select_only_the_global_top_level_agent() {
 }
 
 #[test]
+fn selects_the_unique_shallowest_grok_process() {
+    let entries = vec![
+        process(10, 1, "bash"),
+        process(20, 10, "grok"),
+        process(30, 20, "grok"),
+    ];
+    let selected = select_top_level_agent(&entries, WslAgentProvider::Grok)
+        .expect("Grok should be active")
+        .expect("Grok attribution should be exact");
+    assert_eq!(selected.pid, 20);
+}
+
+#[test]
+fn nested_claude_hides_deeper_grok() {
+    let entries = vec![
+        process(10, 1, "bash"),
+        process(20, 10, "claude"),
+        process(30, 20, "grok"),
+    ];
+    let claude = select_top_level_agent(&entries, WslAgentProvider::Claude)
+        .expect("Claude should be the active provider")
+        .expect("Claude attribution should be exact");
+    assert_eq!(claude.pid, 20);
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Grok),
+        None
+    );
+}
+
+#[test]
+fn equal_depth_claude_and_grok_are_ambiguous() {
+    let entries = vec![
+        process(10, 1, "bash"),
+        process(20, 10, "claude"),
+        process(30, 10, "grok"),
+    ];
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Claude),
+        Some(None)
+    );
+    assert_eq!(
+        select_top_level_agent(&entries, WslAgentProvider::Grok),
+        Some(None)
+    );
+}
+
+#[test]
 fn groups_processes_by_their_exact_terminal_marker() {
     let mut other = process(40, 1, "claude");
     other.terminal_id = "terminal-pane-b".into();
@@ -120,5 +167,37 @@ fn converts_only_rollouts_below_the_process_codex_home() {
         [PathBuf::from(
             r"\\wsl.localhost\Ubuntu\opt\codex\sessions\2026\08\02\rollout-a.jsonl"
         )]
+    );
+}
+
+#[test]
+fn grok_home_dir_defaults_to_guest_home_dot_grok() {
+    let process = WslAgentProcess {
+        pid: 20,
+        distro: "Ubuntu".into(),
+        home: "/home/user".into(),
+        codex_home: None,
+        grok_home: None,
+        rollout_paths: Vec::new(),
+    };
+    assert_eq!(
+        process.grok_home_dir().unwrap(),
+        PathBuf::from(r"\\wsl.localhost\Ubuntu\home\user\.grok")
+    );
+}
+
+#[test]
+fn grok_home_dir_uses_explicit_guest_grok_home() {
+    let process = WslAgentProcess {
+        pid: 20,
+        distro: "Ubuntu".into(),
+        home: "/home/user".into(),
+        codex_home: None,
+        grok_home: Some("/opt/grok".into()),
+        rollout_paths: Vec::new(),
+    };
+    assert_eq!(
+        process.grok_home_dir().unwrap(),
+        PathBuf::from(r"\\wsl.localhost\Ubuntu\opt\grok")
     );
 }

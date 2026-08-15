@@ -243,4 +243,82 @@ mod tests {
         let probe = GrokUsageProbe::new();
         probe.unsubscribe("missing").unwrap();
     }
+
+    #[test]
+    fn last_subscriber_leaving_marks_the_entry_idle() {
+        let probe = GrokUsageProbe::new();
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            let entry = registry.entries.entry(String::new()).or_insert_with(|| {
+                let mut entry = Entry::new("");
+                entry.snapshot.status = GrokProbeStatus::Ready;
+                entry.snapshot.captured_at_ms = Some(1);
+                entry
+            });
+            entry.subscribers.push("view-1".into());
+            registry
+                .subscriptions
+                .insert("view-1".into(), String::new());
+        }
+
+        probe.unsubscribe("view-1").unwrap();
+
+        let snapshot = probe.snapshot("").unwrap();
+        assert_eq!(snapshot.status, GrokProbeStatus::Idle);
+        assert_eq!(snapshot.captured_at_ms, Some(1));
+    }
+
+    #[test]
+    fn a_remaining_subscriber_keeps_the_probe() {
+        let probe = GrokUsageProbe::new();
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            let entry = registry
+                .entries
+                .entry(String::new())
+                .or_insert_with(|| Entry::new(""));
+            entry.snapshot.status = GrokProbeStatus::Ready;
+            entry.subscribers.push("view-1".into());
+            entry.subscribers.push("view-2".into());
+            registry
+                .subscriptions
+                .insert("view-1".into(), String::new());
+            registry
+                .subscriptions
+                .insert("view-2".into(), String::new());
+        }
+
+        probe.unsubscribe("view-1").unwrap();
+        assert_eq!(probe.snapshot("").unwrap().status, GrokProbeStatus::Ready);
+    }
+
+    #[test]
+    fn publisher_ignores_a_late_publish_after_retirement() {
+        let probe = GrokUsageProbe::new();
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            registry.entries.insert(String::new(), Entry::new(""));
+        }
+        let publish = probe.publisher("");
+        let mut snapshot = GrokUsageSnapshot::idle("");
+        snapshot.status = GrokProbeStatus::Ready;
+        publish(snapshot);
+        assert_eq!(probe.snapshot("").unwrap().status, GrokProbeStatus::Idle);
+    }
+
+    #[test]
+    fn shutdown_all_marks_every_entry_idle() {
+        let probe = GrokUsageProbe::new();
+        {
+            let mut registry = probe.registry.lock().unwrap();
+            let mut entry = Entry::new("/a");
+            entry.snapshot.status = GrokProbeStatus::Ready;
+            entry.subscribers.push("view-1".into());
+            registry.entries.insert("/a".into(), entry);
+            registry.subscriptions.insert("view-1".into(), "/a".into());
+        }
+        probe.shutdown_all().unwrap();
+        assert_eq!(probe.snapshot("/a").unwrap().status, GrokProbeStatus::Idle);
+        assert!(!probe.request_refresh("/a").unwrap());
+    }
 }

@@ -74,7 +74,7 @@ fn parse_used_of_limit(rest: &str) -> Option<f64> {
 
 fn parse_remaining(rest: &str) -> Option<f64> {
     let lower = rest.to_ascii_lowercase();
-    if !lower.contains("left") {
+    if !(lower.contains("left") || lower.contains("remaining")) {
         return None;
     }
     parse_leading_amount(rest)
@@ -126,6 +126,15 @@ Pay-as-you-go: $3 used of $20 limit
         assert_eq!(rows[2].remaining, Some(12.0));
         assert_eq!(rows[3].percent, Some(15.0));
         assert_eq!(rows[0].reset.as_deref(), Some("Mon 9am"));
+    }
+
+    #[test]
+    fn parse_credits_remaining_wording() {
+        let rows = parse_grok_usage_screen("Credits remaining: 12\n");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].key, "credits");
+        assert_eq!(rows[0].percent, None);
+        assert_eq!(rows[0].remaining, Some(12.0));
     }
 
     #[test]
