@@ -48,6 +48,7 @@ import com.laymux.android.pairing.ResumeGatedRunner
 import com.laymux.android.remote.E2eProtocolException
 import com.laymux.android.remote.E2eOutputSocket
 import com.laymux.android.remote.E2eOutputSocketCallbacks
+import com.laymux.android.remote.E2eOutputStreamReservations
 import com.laymux.android.remote.E2eRemoteClient
 import com.laymux.android.remote.E2eSessionSuspendedException
 import com.laymux.android.remote.E2eTransportException
@@ -85,6 +86,12 @@ import org.json.JSONObject
 import okhttp3.OkHttpClient
 
 class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
+    private data class RemoteOutputBridgeEntry(
+        val token: Long,
+        val generation: Long,
+        val reply: JavaScriptReplyProxy,
+    )
+
     private lateinit var webView: WebView
     private lateinit var cloudWebView: WebView
     private lateinit var vault: PairingVault
@@ -121,7 +128,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     @Volatile private var remoteLeaseId: String? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
-    private val remoteOutputReplies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
+    private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
+    private val remoteOutputReservations = E2eOutputStreamReservations()
     private val remoteConnectionGeneration = AtomicLong()
     @Volatile private var remoteLifecycleActive = false
 
@@ -1200,12 +1208,27 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     emitOutputBridgeClose(replyProxy, streamId, "Secure session is unavailable.", true)
                     return
                 }
-                remoteOutputStreams.remove(streamId)?.disconnect()
-                remoteOutputReplies[streamId] = replyProxy
+                val token = remoteOutputReservations.reserve(streamId)
+                if (token == null) {
+                    emitOutputBridgeClose(
+                        replyProxy,
+                        streamId,
+                        "Secure output stream limit was exceeded.",
+                        true,
+                    )
+                    return
+                }
+                val entry = RemoteOutputBridgeEntry(
+                    token = token,
+                    generation = remoteConnectionGeneration.get(),
+                    reply = replyProxy,
+                )
+                remoteOutputEntries[streamId] = entry
                 try {
                     remoteExecutor.execute {
+                        var socket: E2eOutputSocket? = null
                         try {
-                            val socket = E2eOutputSocket(
+                            val created = E2eOutputSocket(
                                 streamId,
                                 terminalId,
                                 leaseId,
@@ -1213,17 +1236,28 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                                 outputHttpClient,
                                 this,
                             )
-                            if (!remoteLifecycleActive || remoteSession !== session ||
-                                remoteOutputReplies[streamId] !== replyProxy
+                            socket = created
+                            if (!remoteOutputEntryIsCurrent(streamId, entry, session)
                             ) {
-                                socket.disconnect()
+                                created.disconnect()
+                                removeRemoteOutputEntry(streamId, entry)
                                 return@execute
                             }
-                            remoteOutputStreams.put(streamId, socket)?.disconnect()
-                            socket.connect()
+                            if (remoteOutputStreams.putIfAbsent(streamId, created) != null) {
+                                created.disconnect()
+                                removeRemoteOutputEntry(streamId, entry)
+                                return@execute
+                            }
+                            if (!remoteOutputEntryIsCurrent(streamId, entry, session)) {
+                                remoteOutputStreams.remove(streamId, created)
+                                created.disconnect()
+                                removeRemoteOutputEntry(streamId, entry)
+                                return@execute
+                            }
+                            created.connect()
                         } catch (error: Throwable) {
-                            remoteOutputStreams.remove(streamId)
-                            if (remoteOutputReplies.remove(streamId, replyProxy)) {
+                            socket?.let { remoteOutputStreams.remove(streamId, it) }
+                            if (removeRemoteOutputEntry(streamId, entry)) {
                                 emitOutputBridgeClose(
                                     replyProxy,
                                     streamId,
@@ -1234,30 +1268,57 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         }
                     }
                 } catch (_: RejectedExecutionException) {
-                    remoteOutputReplies.remove(streamId)
-                    emitOutputBridgeClose(replyProxy, streamId, "Secure session is unavailable.", true)
+                    if (removeRemoteOutputEntry(streamId, entry)) {
+                        emitOutputBridgeClose(
+                            replyProxy,
+                            streamId,
+                            "Secure session is unavailable.",
+                            true,
+                        )
+                    }
                 }
             }
             "ack" -> if (jsonHasExactKeys(message, setOf("type", "streamId"))) {
                 remoteOutputStreams[streamId]?.acknowledge()
             }
             "close" -> if (jsonHasExactKeys(message, setOf("type", "streamId"))) {
-                remoteOutputReplies.remove(streamId)
+                remoteOutputEntries.remove(streamId)?.let { entry ->
+                    remoteOutputReservations.release(streamId, entry.token)
+                }
                 remoteOutputStreams.remove(streamId)?.disconnect()
             }
         }
     }
 
+    private fun remoteOutputEntryIsCurrent(
+        streamId: String,
+        entry: RemoteOutputBridgeEntry,
+        session: RemoteSession,
+    ): Boolean = remoteLifecycleActive &&
+        remoteSession === session &&
+        remoteConnectionGeneration.get() == entry.generation &&
+        remoteOutputEntries[streamId] === entry &&
+        remoteOutputReservations.isCurrent(streamId, entry.token)
+
+    private fun removeRemoteOutputEntry(
+        streamId: String,
+        entry: RemoteOutputBridgeEntry,
+    ): Boolean {
+        if (!remoteOutputEntries.remove(streamId, entry)) return false
+        remoteOutputReservations.release(streamId, entry.token)
+        return true
+    }
+
     override fun onOpen(socket: E2eOutputSocket, streamId: String) {
-        val reply = remoteOutputReplies[streamId] ?: return
+        val entry = remoteOutputEntries[streamId] ?: return
         if (remoteOutputStreams[streamId] !== socket) return
-        emitOutputBridgeRecord(reply, streamId, OUTPUT_BRIDGE_OPEN, ByteArray(0))
+        emitOutputBridgeRecord(entry.reply, streamId, OUTPUT_BRIDGE_OPEN, ByteArray(0))
     }
 
     override fun onRecord(socket: E2eOutputSocket, streamId: String, plaintext: ByteArray) {
-        val reply = remoteOutputReplies[streamId] ?: return
+        val entry = remoteOutputEntries[streamId] ?: return
         if (remoteOutputStreams[streamId] !== socket) return
-        emitOutputBridgeRecord(reply, streamId, OUTPUT_BRIDGE_MESSAGE, plaintext)
+        emitOutputBridgeRecord(entry.reply, streamId, OUTPUT_BRIDGE_MESSAGE, plaintext)
     }
 
     override fun onClose(
@@ -1267,12 +1328,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         isError: Boolean,
     ) {
         if (!remoteOutputStreams.remove(streamId, socket)) return
-        val reply = remoteOutputReplies.remove(streamId) ?: return
-        emitOutputBridgeClose(reply, streamId, reason, isError)
+        val entry = remoteOutputEntries[streamId] ?: return
+        if (!removeRemoteOutputEntry(streamId, entry)) return
+        emitOutputBridgeClose(entry.reply, streamId, reason, isError)
     }
 
     private fun clearRemoteOutputStreams() {
-        remoteOutputReplies.clear()
+        remoteOutputEntries.clear()
+        remoteOutputReservations.clear()
         remoteOutputStreams.values.toList().forEach(E2eOutputSocket::disconnect)
         remoteOutputStreams.clear()
     }

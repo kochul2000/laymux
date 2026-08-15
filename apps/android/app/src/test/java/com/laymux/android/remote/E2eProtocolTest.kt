@@ -16,6 +16,42 @@ import org.json.JSONObject
 
 class E2eProtocolTest {
     @Test
+    fun outputQueueAcceptsTheProtocolMaximumSnapshotPlusBoundedBacklog() {
+        val maximumSnapshotRecord = 1 + 1024 * 1024 + (512 * 1024 + 1024 * 1024 + 2 * 4096)
+
+        assertEquals(E2eOutputLimits.MAX_PLAINTEXT_RECORD_BYTES, maximumSnapshotRecord)
+        assertEquals(true, E2eOutputLimits.canEnqueue(0, maximumSnapshotRecord))
+        assertEquals(true, E2eOutputLimits.canEnqueue(256, maximumSnapshotRecord))
+        assertEquals(
+            false,
+            E2eOutputLimits.canEnqueue(0, maximumSnapshotRecord + 1),
+        )
+        assertEquals(
+            false,
+            E2eOutputLimits.canEnqueue(
+                E2eOutputLimits.MAX_PENDING_BYTES - maximumSnapshotRecord + 1,
+                maximumSnapshotRecord,
+            ),
+        )
+    }
+
+    @Test
+    fun outputStreamReservationsBoundPendingAndActiveOpens() {
+        val reservations = E2eOutputStreamReservations(maxStreams = 2)
+        val first = requireNotNull(reservations.reserve("stream-1"))
+        val second = requireNotNull(reservations.reserve("stream-2"))
+
+        assertEquals(null, reservations.reserve("stream-3"))
+        assertEquals(null, reservations.reserve("stream-1"))
+        assertEquals(false, reservations.release("stream-1", first + 1))
+        assertEquals(true, reservations.isCurrent("stream-1", first))
+        assertEquals(true, reservations.release("stream-1", first))
+        assertEquals(false, reservations.isCurrent("stream-1", first))
+        assertEquals(true, reservations.reserve("stream-3") != null)
+        assertEquals(true, reservations.release("stream-2", second))
+    }
+
+    @Test
     fun outputRecordsAreBinaryDirectionalAndBoundToTheStreamNonce() {
         val sessionKeys = E2eProtocol.deriveKeys(
             ByteArray(32) { 3 },

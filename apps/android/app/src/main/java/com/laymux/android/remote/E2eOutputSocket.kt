@@ -19,6 +19,53 @@ interface E2eOutputSocketCallbacks {
     fun onClose(socket: E2eOutputSocket, streamId: String, reason: String, isError: Boolean)
 }
 
+internal object E2eOutputLimits {
+    const val MAX_PLAINTEXT_RECORD_BYTES = 1 + 1024 * 1024 + (512 * 1024 + 1024 * 1024 + 2 * 4096)
+    const val EXTRA_PENDING_BYTES = 2 * 1024 * 1024
+    const val MAX_PENDING_BYTES = MAX_PLAINTEXT_RECORD_BYTES + EXTRA_PENDING_BYTES
+    const val MAX_ACTIVE_STREAMS = 8
+
+    fun canEnqueue(pendingBytes: Int, recordBytes: Int): Boolean =
+        pendingBytes >= 0 &&
+            recordBytes in 1..MAX_PLAINTEXT_RECORD_BYTES &&
+            pendingBytes <= MAX_PENDING_BYTES - recordBytes
+}
+
+internal class E2eOutputStreamReservations(
+    private val maxStreams: Int = E2eOutputLimits.MAX_ACTIVE_STREAMS,
+) {
+    private val tokens = HashMap<String, Long>()
+    private var nextToken = 1L
+
+    init {
+        require(maxStreams > 0)
+    }
+
+    @Synchronized
+    fun reserve(streamId: String): Long? {
+        if (streamId in tokens || tokens.size >= maxStreams) return null
+        val token = nextToken
+        nextToken = if (token == Long.MAX_VALUE) 1L else token + 1
+        tokens[streamId] = token
+        return token
+    }
+
+    @Synchronized
+    fun isCurrent(streamId: String, token: Long): Boolean = tokens[streamId] == token
+
+    @Synchronized
+    fun release(streamId: String, token: Long): Boolean {
+        if (tokens[streamId] != token) return false
+        tokens.remove(streamId)
+        return true
+    }
+
+    @Synchronized
+    fun clear() {
+        tokens.clear()
+    }
+}
+
 class E2eOutputSocket internal constructor(
     private val streamId: String,
     private val terminalId: String,
@@ -86,7 +133,7 @@ class E2eOutputSocket internal constructor(
             if (closed.get()) {
                 Arrays.fill(plaintext, 0)
                 null
-            } else if (pendingBytes > MAX_PENDING_BYTES - plaintext.size) {
+            } else if (!E2eOutputLimits.canEnqueue(pendingBytes, plaintext.size)) {
                 Arrays.fill(plaintext, 0)
                 overflow = true
                 null
@@ -169,9 +216,5 @@ class E2eOutputSocket internal constructor(
             "instanceId=${session.instanceId}&sessionId=${session.sessionId}&streamNonce=$streamNonce",
             null,
         ).toASCIIString()
-    }
-
-    companion object {
-        private const val MAX_PENDING_BYTES = 2 * 1024 * 1024
     }
 }
