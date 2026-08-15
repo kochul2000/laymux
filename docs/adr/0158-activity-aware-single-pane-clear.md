@@ -1,6 +1,6 @@
 # 0158. 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-15
 - Source: 사용자 요구(2026-08-15, PR #742의 activity별 단일 pane 클리어 복구), [PR #742](https://github.com/kochul2000/laymux/pull/742), [PR #778](https://github.com/kochul2000/laymux/pull/778), [ADR-0113](0113-workspace-clear-activity-owned.md), [ADR-0121](0121-single-pane-clear-user-pointed-scope.md), [ADR-0137](0137-workspace-clear-ctrl-l-broadcast.md) 일부 정정
 

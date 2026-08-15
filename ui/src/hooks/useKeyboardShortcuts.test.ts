@@ -2091,6 +2091,20 @@ describe("useKeyboardShortcuts", () => {
     beforeEach(() => {
       useTerminalStore.setState(useTerminalStore.getInitialState());
       vi.mocked(writeTerminalInput).mockClear();
+      vi.mocked(writeToTerminal).mockClear();
+    });
+
+    it("leaves plain Ctrl+L entirely with the terminal", async () => {
+      seedTwoTerminals();
+      useDockStore.getState().setFocusedDock(null);
+      useGridStore.setState({ focusedPaneIndex: 0 });
+      renderHook(() => useKeyboardShortcuts());
+
+      fireKey("l", { ctrlKey: true });
+
+      await Promise.resolve();
+      expect(vi.mocked(writeTerminalInput)).not.toHaveBeenCalled();
+      expect(vi.mocked(writeToTerminal)).not.toHaveBeenCalled();
     });
 
     it("Alt+L actually clears only the focused grid pane", async () => {
