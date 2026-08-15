@@ -20,6 +20,7 @@ use crate::lock_ext::MutexExt;
 use crate::terminal_output::{TerminalOutputFrameHeaderV1, TerminalOutputSubscriptionEvent};
 
 use super::access::{effective_remote_settings, with_effective_remote_control_state};
+use super::android_e2e_output::{remote_android_e2e_output_ws, ANDROID_E2E_OUTPUT_PATH};
 use super::android_e2e_routes::{
     remote_android_e2e_challenge, remote_android_e2e_establish, remote_android_e2e_rpc,
 };
@@ -135,6 +136,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/e2e/rpc",
             post(remote_android_e2e_rpc).layer(DefaultBodyLimit::max(2 * 1024 * 1024)),
         )
+        .route(ANDROID_E2E_OUTPUT_PATH, get(remote_android_e2e_output_ws))
         .route("/remote/v1/session/status", get(remote_session_status))
         .route("/remote/v1/session/claim", post(remote_session_claim))
         .route(

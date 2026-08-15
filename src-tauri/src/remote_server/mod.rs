@@ -1,4 +1,5 @@
 mod access;
+mod android_e2e_output;
 mod android_e2e_routes;
 mod android_pairing_routes;
 mod appearance;
@@ -32,6 +33,11 @@ pub(crate) use access::{
 pub use access::{
     get_remote_access_status, set_remote_runtime_access, RemoteAccessRuntimeState,
     RemoteAccessStatus,
+};
+pub(crate) use android_e2e_output::{
+    parse_android_e2e_output_route, prepare_android_e2e_output, stream_android_e2e_output,
+    unix_time_seconds, PreparedAndroidE2eOutput, ANDROID_E2E_OUTPUT_PATH,
+    E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
 };
 pub(crate) use auth::TunnelAuthorized;
 pub(crate) use lease::{
