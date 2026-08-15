@@ -1219,6 +1219,55 @@ describe("SettingsView", () => {
     expect(exit.settleMs).toBe(1200);
   });
 
+  // -- Terminal section: focused-pane actual clear (ADR-0158) --
+
+  it("shows safe pane-clear defaults and hides interrupt-only tuning", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    expect(screen.getByTestId("pane-clear-shell-command-input")).toHaveValue("clear");
+    expect(screen.getByTestId("pane-clear-busy-policy-select")).toHaveValue("skip");
+    expect(screen.queryByTestId("pane-clear-rounds-input")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pane-clear-settle-input")).not.toBeInTheDocument();
+  });
+
+  it("keeps interrupt tuning hidden for the restart policy", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    await user.selectOptions(screen.getByTestId("pane-clear-busy-policy-select"), "restart");
+
+    expect(screen.queryByTestId("pane-clear-rounds-input")).not.toBeInTheDocument();
+  });
+
+  it("persists pane-clear command and interrupt tuning only after Save", async () => {
+    const user = userEvent.setup();
+    render(<SettingsView />);
+
+    await user.click(screen.getByTestId("nav-terminal"));
+    fireEvent.change(screen.getByTestId("pane-clear-shell-command-input"), {
+      target: { value: "cls" },
+    });
+    await user.selectOptions(screen.getByTestId("pane-clear-busy-policy-select"), "interrupt");
+    fireEvent.change(screen.getByTestId("pane-clear-rounds-input"), {
+      target: { value: "4" },
+    });
+    fireEvent.change(screen.getByTestId("pane-clear-settle-input"), {
+      target: { value: "900" },
+    });
+
+    expect(useSettingsStore.getState().paneClear.shellCommand).toBe("clear");
+    await user.click(screen.getByTestId("save-settings-btn"));
+    expect(useSettingsStore.getState().paneClear).toEqual({
+      shellCommand: "cls",
+      busyPolicy: "interrupt",
+      interruptRounds: 4,
+      settleMs: 900,
+    });
+  });
+
   // -- Terminal section: path link host OS open (#687, ADR-0100) --
 
   it("defaults both path-link OS open toggles to on", async () => {

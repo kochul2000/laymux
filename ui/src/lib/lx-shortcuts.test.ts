@@ -85,6 +85,11 @@ describe("isLxShortcut", () => {
     expect(isLxShortcut(makeKeyEvent("ArrowDown", { altKey: true }))).toBe(true);
   });
 
+  it("keeps Ctrl+L with the terminal while routing Alt+L to laymux", () => {
+    expect(isLxShortcut(makeKeyEvent("l", { ctrlKey: true }))).toBe(false);
+    expect(isLxShortcut(makeKeyEvent("l", { altKey: true }))).toBe(true);
+  });
+
   // Should NOT match — shell keys must pass through
   it("returns false for plain keys (no modifier)", () => {
     expect(isLxShortcut(makeKeyEvent("["))).toBe(false);

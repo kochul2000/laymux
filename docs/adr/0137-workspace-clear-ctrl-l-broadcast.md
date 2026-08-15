@@ -1,6 +1,6 @@
 # 0137. 워크스페이스 클리어는 activity 판정 없이 Ctrl+L 브로드캐스트로 단순화하고, 단일 pane 클리어는 폐지한다
 
-- Status: Accepted
+- Status: Accepted (partially superseded by [0158](0158-activity-aware-single-pane-clear.md))
 - Date: 2026-08-06
 - Source: 사용자 판단(Alt+L 은 Ctrl+L 과 동일해 무의미한 기능이었다는 지적) — [ADR-0113](0113-workspace-clear-activity-owned.md), [ADR-0121](0121-single-pane-clear-user-pointed-scope.md) 정정
 

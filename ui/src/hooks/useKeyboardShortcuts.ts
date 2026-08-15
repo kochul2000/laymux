@@ -20,6 +20,7 @@ import {
 } from "@/lib/workspace-transition";
 import { getDockForDirection, getDockExitDirection } from "@/lib/dock-navigation";
 import { clipboardWriteText } from "@/lib/tauri-api";
+import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 
 const ARROW_TO_DIRECTION: Record<string, Direction> = {
@@ -102,6 +103,22 @@ function copyFocusedPaneIdentifier(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Focus target that would receive a terminal keystroke; dock focus wins. */
+function focusedTerminalPaneId(): string | null {
+  const { focusedDock, focusedDockPaneId, getDock } = useDockStore.getState();
+  const pane =
+    focusedDock !== null
+      ? getDock(focusedDock)?.panes.find((candidate) => candidate.id === focusedDockPaneId)
+      : (() => {
+          const workspace = useWorkspaceStore.getState().getActiveWorkspace();
+          const { focusedPaneIndex } = useGridStore.getState();
+          return workspace && focusedPaneIndex !== null
+            ? workspace.panes[focusedPaneIndex]
+            : undefined;
+        })();
+  return pane?.view.type === "TerminalView" ? pane.id : null;
 }
 
 /** Check if the currently focused element is a text-editable field (input, textarea, contentEditable). */
@@ -244,6 +261,15 @@ const SHORTCUT_HANDLERS: Record<string, (e: KeyboardEvent) => void> = {
     if (copyFocusedPaneIdentifier()) {
       e.preventDefault();
     }
+  },
+
+  // pane.clearTerminal (default Alt+L): activity-aware actual clear for the
+  // focused grid or dock terminal. Other view types retain the keypress.
+  "pane.clearTerminal": (e) => {
+    const paneId = focusedTerminalPaneId();
+    if (!paneId) return;
+    e.preventDefault();
+    void runPaneClearFromUi(paneId);
   },
 
   // pane.focus (default Alt+Arrow wildcard): pane navigation (workspace + dock)

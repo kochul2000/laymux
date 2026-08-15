@@ -2,6 +2,14 @@ import type { ActivityHandler, RawTerminalState, StatusResult } from "./activity
 import { STATUS_ICON_WORKING } from "./activity-markers";
 
 export class ShellActivityHandler implements ActivityHandler {
+  clearInput(shellClearCommand: string): string {
+    return shellClearCommand;
+  }
+
+  isBusy(raw: RawTerminalState): boolean {
+    return raw.outputActive || raw.activity?.type === "running";
+  }
+
   computeStatus(raw: RawTerminalState): StatusResult {
     if (raw.outputActive) return { icon: STATUS_ICON_WORKING, color: "var(--yellow)" };
     // Activity === "running" means a command started but has not yet exited.

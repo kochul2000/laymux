@@ -154,7 +154,7 @@ ADR 이 필요한 대표 기준:
 | [0134](0134-wsl-guest-interactive-app-liveness.md) | WSL pane 의 인터랙티브 앱 liveness 는 게스트 프로브가 권위 (0009 확장·정정) | Accepted |
 | [0135](0135-activity-reconcile-backend-diff-push.md) | Activity 는 백엔드가 주기적으로 재판정해 변경분만 push (0009 확장, 0134 관측 게이팅 정정) | Accepted |
 | [0136](0136-activity-derivation-stamp-and-scoped-exit.md) | Activity 는 파생 시점 stamp 로 순서화하고 종료 정리는 종료한 앱에만 적용 (0135 4·4-1·4-2 정정) | Accepted |
-| [0137](0137-workspace-clear-ctrl-l-broadcast.md) | 워크스페이스 클리어는 activity 판정 없이 Ctrl+L 브로드캐스트로 단순화하고, 단일 pane 클리어는 폐지한다 (0113/0121 대체) | Accepted |
+| [0137](0137-workspace-clear-ctrl-l-broadcast.md) | 워크스페이스 클리어는 activity 판정 없이 Ctrl+L 브로드캐스트로 단순화하고, 단일 pane 클리어는 폐지한다 (0113/0121 대체) | Accepted (partially superseded by 0158) |
 | [0138](0138-remote-opens-queued-panes-on-entry.md) | Remote 진입은 아직 열리지 않은 pane 을 focus 로 직접 열고 세션이 생기면 attach 한다 (0039 원칙 확장) | Accepted |
 | [0139](0139-cloud-tunnel-tailscale-route-advertisement-and-direct-gate.md) | 클라우드 터널은 Tailscale 직접 경로를 광고하고 Direct Remote는 Tailscale 전용 게이트를 제공한다 (0013·0021·0024 확장) | Accepted |
 | [0140](0140-split-pane-inherits-source-cwd.md) | 분할로 생긴 pane 은 분할한 그 pane 의 CWD 에서 첫 세션을 시작한다 (0003·0130 확장) | Accepted |
@@ -163,11 +163,11 @@ ADR 이 필요한 대표 기준:
 | [0143](0143-parsed-ack-timeout-in-place-retry.md) | v3 parsed ACK timeout 은 교체 없이 제자리 재시도한다 (0095 Amend) | Accepted |
 | [0144](0144-android-signed-hybrid-client-e2e-foundation.md) | Android E2E 기반은 서명된 로컬 웹 클라이언트와 네이티브 키 경계를 사용한다 (Remote UI 소유 결정은 0149가 대체) | Accepted (partially superseded by 0149) |
 | [0145](0145-android-pairing-authenticated-one-time-ack.md) | Android 페어링은 만료되는 QR v2와 상호 HMAC ACK로 확정한다 (0024·0030·0144 확장) | Accepted |
-| [0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) | Android 데이터 평면은 생체 승인 세션과 순차 AEAD RPC를 사용한다 (APK UI는 0149, output polling은 0158이 대체) | Accepted (partially superseded by 0149·0158) |
+| [0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) | Android 데이터 평면은 생체 승인 세션과 순차 AEAD RPC를 사용한다 (APK UI는 0149, output polling은 0159가 대체) | Accepted (partially superseded by 0149·0159) |
 | [0147](0147-output-volume-activity-and-app-declared-idle.md) | 출력 볼륨을 앱 협조 없는 활성 신호로 인정하고, 앱이 선언한 유휴는 추론된 활성을 이긴다 (0005 §outputActive 규칙 정정) | Accepted |
 | [0148](0148-bounded-multi-path-selection-links.md) | 선택 경로 링크는 bounded maximal-munch 복수 후보를 사용한다 (0045 확장) | Accepted |
 | [0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) | Android는 Cloud 계정 표면과 PC 소유 Remote UI를 분리하는 얇은 E2E wrapper다 (0144·0146 일부 대체) | Accepted |
-| [0150](0150-desktop-owned-cloud-remote-access-policy.md) | Cloud Remote 접속 정책은 PC Laymux가 소유하고 터널 입구에서 강제한다 (0024·0149 확장, E2E output WS는 0158이 확장) | Accepted (partially superseded by 0158) |
+| [0150](0150-desktop-owned-cloud-remote-access-policy.md) | Cloud Remote 접속 정책은 PC Laymux가 소유하고 터널 입구에서 강제한다 (0024·0149 확장, E2E output WS는 0159가 확장) | Accepted (partially superseded by 0159) |
 | [0151](0151-remote-workspace-selector-information-parity.md) | Remote 워크스페이스 목록은 PC selector의 표시 모델을 계속 미러한다 (0018·0020·0039·0047 일부 정정) | Accepted |
 | [0152](0152-android-cross-store-signing-and-release.md) | Android 앱 서명 키는 GitHub와 Play 배포에서 공유하고 업로드 키만 분리한다 (0144·0149 확장) | Accepted |
 | [0153](0153-remote-hidden-item-visibility-controls.md) | Remote 숨김 항목 편집은 PC 상태 소유자를 재사용한다 (0033·0035·0151 확장) | Accepted |
@@ -175,7 +175,8 @@ ADR 이 필요한 대표 기준:
 | [0155](0155-android-background-remote-lease-grace.md) | Android E2E Remote의 설정 가능한 백그라운드 controller lease 유예 | Proposed |
 | [0156](0156-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Accepted |
 | [0157](0157-android-pairing-sheet-over-live-cloud-webview.md) | Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다 (0149 확장) | Accepted |
-| [0158](0158-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
+| [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted |
+| [0159](0159-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -62,7 +62,7 @@ timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadl
 복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
 native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
-[ADR-0158](../adr/0158-android-e2e-websocket-output-transport.md)). Cloud dashboard가
+[ADR-0159](../adr/0159-android-e2e-websocket-output-transport.md)). Cloud dashboard가
 선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. PC별
 `settings.remote.cloudAccessMode`는 기존 평문 Cloud browser Remote와 Android E2E를 함께 허용하거나
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
@@ -166,13 +166,14 @@ Workspace (Independent)
 
 ### 4.1.1 터미널 클리어
 
-| 동작                | 진입점                                                                                                                 | 범위                                                                                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| 워크스페이스 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) |
+| 동작 | 진입점 | 범위 |
+| --- | --- | --- |
+| 워크스페이스 화면 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) |
+| 단일 pane 실제 클리어 | `Alt+L`(`pane.clearTerminal`), `POST /api/v1/panes/{paneId}/clear` | 사용자가 가리킨 `TerminalView` pane 하나. 격자와 Dock 모두 포함 ([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)) |
 
-pane 마다 `Ctrl+L`(`\x0c`) 하나를 그대로 브로드캐스트한다 — activity 판정도, 설정도 없다. 세션이 아직 없는 pane(`notReady`)만 건너뛰고, 작업 중인 pane 에도 그대로 보낸다(Ctrl+L 은 언제 보내도 안전하다). 실행은 `ui/src/lib/workspace-clear.ts` 의 `clearWorkspace()` 한 함수다.
+워크스페이스 화면 클리어는 pane마다 `Ctrl+L`(`\x0c`) 하나를 그대로 브로드캐스트한다 — activity 판정도, 설정도 없다. 세션이 아직 없는 pane(`notReady`)만 건너뛰고, 작업 중인 pane에도 그대로 보낸다. 실행은 `ui/src/lib/workspace-clear.ts`의 `clearWorkspace()` 한 함수다.
 
-이전에는 이 동작이 pane 의 activity handler 에게 "무엇을 칠지"(`clear`/`/clear`)와 "작업 중이면 어떻게 할지"(`settings.workspaceClear.busyPolicy`: skip/interrupt/restart)를 물었고, 포커스된 pane 하나만 지우는 `Alt+L`(`pane.clearTerminal`) 단축키도 따로 있었다. 둘 다 [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md) 로 폐기됐다 — `Alt+L` 은 포커스된 pane 에서 그냥 `Ctrl+L` 을 누르는 것과 동일해 무의미했고, activity 판정은 `Ctrl+L` 이 애초에 안전한 입력이라 불필요했다.
+단일 pane 실제 클리어는 activity handler가 shell의 설정된 `clear`/`cls` 또는 Claude·Codex·Grok의 `/clear`를 고르고, `settings.paneClear.busyPolicy`에 따라 busy pane을 skip/interrupt/restart한다. `Ctrl+L`이 화면만 지우고 agent 대화 context를 유지한다는 차이가 확인되어 ADR-0137의 단일-pane 폐지 부분을 [ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)이 대체했다. 계획과 실행, 격자·dock pane 조회는 `ui/src/lib/pane-clear.ts` 한 곳이 소유한다.
 
 ### 4.2 인스턴스 오버라이드 레이어 (Pane / View)
 

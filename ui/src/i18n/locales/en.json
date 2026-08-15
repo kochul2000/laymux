@@ -323,7 +323,20 @@
       "interruptRounds": "Ctrl+C presses",
       "interruptRoundsDesc": "How many times to send Ctrl+C to each terminal (1–10). Claude / Codex usually need at least 2.",
       "interruptSettle": "Settle delay (ms)",
-      "interruptSettleDesc": "How long to wait after the last Ctrl+C before closing the window, so the session id can print into the scrollback (0–10000)."
+      "interruptSettleDesc": "How long to wait after the last Ctrl+C before closing the window, so the session id can print into the scrollback (0–10000).",
+      "paneClearGroup": "Focused Pane Actual Clear",
+      "paneClearGroupDesc": "Alt+L actually clears the focused terminal pane. Shells receive the command below; Claude Code, Codex, and Grok receive /clear. Unknown interactive apps are left untouched.",
+      "paneClearShellCommand": "Shell clear command",
+      "paneClearShellCommandDesc": "Submitted to a plain shell. Use cls for cmd.exe.",
+      "paneClearBusyPolicy": "While the pane is busy",
+      "paneClearBusyPolicySkip": "Leave it alone",
+      "paneClearBusyPolicyInterrupt": "Interrupt, then clear",
+      "paneClearBusyPolicyRestart": "Restart the view",
+      "paneClearBusyPolicyDesc": "Choose what Alt+L does while work is running. Restart creates a fresh terminal session and discards scrollback; interrupt sends Ctrl+C first.",
+      "paneClearInterruptRounds": "Ctrl+C presses",
+      "paneClearInterruptRoundsDesc": "How many times to send Ctrl+C before clearing (1–10).",
+      "paneClearSettle": "Settle delay (ms)",
+      "paneClearSettleDesc": "How long to wait after the last Ctrl+C before submitting the clear input (0–10000)."
     },
     "interface": {
       "title": "Interface",

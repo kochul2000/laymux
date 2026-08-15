@@ -3,7 +3,7 @@ use laymux_lib::settings::contract::{
     select_settings_paths, sensitive_settings_paths, settings_revision, ApplyMode,
     READ_ONLY_SETTINGS_PATHS, REDACTED_SETTING_VALUE,
 };
-use laymux_lib::settings::Settings;
+use laymux_lib::settings::{PaneClearBusyPolicy, Settings};
 use serde_json::json;
 
 #[test]
@@ -357,6 +357,64 @@ fn exit_metadata_is_live_applied() {
     let description = describe_settings(&["/exit".into()]).expect("known path");
     assert_eq!(description["metadata"]["/exit"]["applyMode"], json!("live"));
     assert_eq!(description["metadata"]["/exit"]["writable"], json!(true));
+}
+
+#[test]
+fn pane_clear_accepts_a_valid_patch() {
+    let prepared = prepare_settings_update(
+        &Settings::default(),
+        &json!({
+            "paneClear": {
+                "shellCommand": "cls",
+                "busyPolicy": "interrupt",
+                "interruptRounds": 4,
+                "settleMs": 900
+            }
+        }),
+    );
+    assert!(prepared.valid, "errors: {:?}", prepared.errors);
+    let candidate = prepared.candidate.unwrap();
+    assert_eq!(candidate.pane_clear.shell_command, "cls");
+    assert_eq!(
+        candidate.pane_clear.busy_policy,
+        PaneClearBusyPolicy::Interrupt
+    );
+    assert_eq!(candidate.pane_clear.interrupt_rounds, 4);
+    assert_eq!(candidate.pane_clear.settle_ms, 900);
+}
+
+#[test]
+fn pane_clear_out_of_range_values_are_rejected() {
+    for (patch, expected_path) in [
+        (
+            json!({ "paneClear": { "interruptRounds": 0 } }),
+            "/paneClear/interruptRounds",
+        ),
+        (
+            json!({ "paneClear": { "settleMs": 999_999 } }),
+            "/paneClear/settleMs",
+        ),
+    ] {
+        let prepared = prepare_settings_update(&Settings::default(), &patch);
+        assert!(!prepared.valid);
+        assert!(prepared
+            .errors
+            .iter()
+            .any(|issue| issue.path == expected_path));
+    }
+}
+
+#[test]
+fn pane_clear_metadata_is_live_applied() {
+    let description = describe_settings(&["/paneClear".into()]).expect("known path");
+    assert_eq!(
+        description["metadata"]["/paneClear"]["applyMode"],
+        json!("live")
+    );
+    assert_eq!(
+        description["metadata"]["/paneClear"]["writable"],
+        json!(true)
+    );
 }
 
 #[test]

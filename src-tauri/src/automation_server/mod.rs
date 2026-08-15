@@ -171,6 +171,7 @@ pub fn build_router(
         .route("/api/v1/panes/{index}", delete(panes_remove))
         .route("/api/v1/panes/{index}/resize", post(panes_resize))
         .route("/api/v1/panes/{index}/view", put(panes_set_view))
+        .route("/api/v1/panes/{paneId}/clear", post(panes_clear))
         .route("/api/v1/docks", get(docks_list))
         .route(
             "/api/v1/docks/layout-mode/toggle",
@@ -328,5 +329,37 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["port"], DEV_PORT);
+    }
+
+    /// Grid pane routes use an index while actual clear also accepts dock pane ids.
+    #[tokio::test]
+    async fn pane_routes_with_mixed_param_names_build_and_match() {
+        use tower::ServiceExt;
+
+        async fn stub(axum::extract::Path(value): axum::extract::Path<String>) -> String {
+            value
+        }
+
+        let router: Router = Router::new()
+            .route("/api/v1/panes/{index}", delete(stub))
+            .route("/api/v1/panes/{index}/resize", post(stub))
+            .route("/api/v1/panes/{index}/view", put(stub))
+            .route("/api/v1/panes/{paneId}/clear", post(stub));
+        let response = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/panes/dp-7/clear")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(&body[..], b"dp-7");
     }
 }

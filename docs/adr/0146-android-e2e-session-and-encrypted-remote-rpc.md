@@ -5,7 +5,7 @@
 - Source: 사용자 요구("다음 단계로 가라", "쓰는 중에는 계속 유지", "background 전환도 똑같이 15분") · [ADR-0024](0024-cloud-native-wss-tunnel.md) · [ADR-0030](0030-cloud-tunnel-follows-remote-control-gate.md) · [ADR-0144](0144-android-signed-hybrid-client-e2e-foundation.md) · [ADR-0145](0145-android-pairing-authenticated-one-time-ack.md) · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Extends: ADR-0024, ADR-0030, ADR-0144, ADR-0145
 - Superseded in part by: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) — APK xterm과 Kotlin의 Remote 도메인 상태 소유 결정에 한함. handshake·AEAD·sequence·15분 session 결정은 유지한다.
-- Superseded in part by: [ADR-0158](0158-android-e2e-websocket-output-transport.md) — terminal output의 `terminalOutputOpen`/`terminalOutputPoll`과 120ms polling을 stream별 AEAD WebSocket으로 대체함. control/resource RPC와 session 결정은 유지한다.
+- Superseded in part by: [ADR-0159](0159-android-e2e-websocket-output-transport.md) — terminal output의 `terminalOutputOpen`/`terminalOutputPoll`과 120ms polling을 stream별 AEAD WebSocket으로 대체함. control/resource RPC와 session 결정은 유지한다.
 
 ## Context
 

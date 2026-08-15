@@ -1,4 +1,4 @@
-# 0158. Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다
+# 0159. Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다
 
 - Status: Accepted
 - Date: 2026-08-15
