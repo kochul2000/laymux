@@ -72,6 +72,26 @@ describe("Remote FileViewer path-link bridge", () => {
     });
   });
 
+  it("슬래시가 앞에 붙은 Windows 절대경로를 CWD와 조합하지 않고 검증한다", async () => {
+    registerTerminal("C:\\ignored");
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      selection: "/D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html:17",
+    });
+
+    const path = "D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html";
+    expect(statPaths).toHaveBeenCalledWith([path]);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [{ token: path, path, lineIndex: 0, startIndex: 1, endIndex: 74 }],
+      },
+    });
+  });
+
   it.each([
     ["없는 파일", { exists: false, isDirectory: false }],
     ["디렉터리", { exists: true, isDirectory: true }],

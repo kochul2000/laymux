@@ -405,6 +405,8 @@ mod tests {
         );
         assert!(html.contains("new WebSocket"));
         assert!(html.contains("const androidE2eMode ="));
+        assert!(html.contains("Native performs the encrypted background transition"));
+        assert!(!html.contains("androidBackgroundLeaseSeconds()"));
         assert!(html.contains("window.LaymuxNative.requestRemoteHttp"));
         assert!(html.contains("window.LaymuxNative.openRemoteOutput"));
         assert!(html.contains("new AndroidE2eOutputSocket(url)"));
@@ -485,8 +487,32 @@ mod tests {
         assert!(html.contains("const HEARTBEAT_REQUEST_TIMEOUT_MAX_MS = 4000;"));
         assert!(html.contains("const HEARTBEAT_RETRY_DELAY_MS = 1000;"));
         assert!(html.contains("const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;"));
+        assert!(html.contains(".status.warning"));
+        assert!(html.contains("overflow-x: auto;"));
+        let status_css = html
+            .split(".status {")
+            .nth(1)
+            .and_then(|rules| rules.split(".status.error").next())
+            .expect("Remote status CSS must exist");
+        assert!(!status_css.contains("text-overflow: ellipsis;"));
+        assert!(html.contains("function setStatus(message, error = false, warning = false)"));
+        assert!(html.contains("statusEl.classList.toggle(\"warning\", warning);"));
+        assert!(html.contains("setStatus(\"Connection interrupted. Reconnecting...\", false, true);"));
+        assert!(html.contains(".input-mode-toggle {"));
+        assert!(html.contains("width: var(--header-control-height);"));
+        assert!(!html.contains("id=\"inputModeLabel\""));
+        assert!(html.contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
+        assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
+        assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
+        assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
+        assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
+        assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
+        assert!(!html.contains("id=\"exit\" class=\"danger\" disabled"));
+        assert!(html.contains("async function exitRemote()"));
+        assert!(html.contains("if (currentLease) await releaseLease(currentLease).catch(() => {});"));
+        assert!(html.contains("window.LaymuxNative.disconnectRemote();"));
         assert!(html.contains("const localAppMode ="));
         assert!(html.contains("const autoConnectMode ="));
         assert!(html.contains("clientNameInput.value = clientNameFromParams"));

@@ -1,4 +1,4 @@
-//! Tauri commands for the Grok usage probe (ADR-0154).
+//! Tauri commands for the Grok usage probe (ADR-0156).
 //!
 //! Thin entry points: they resolve settings into a [`WorkerSpec`] and delegate
 //! to [`GrokUsageProbe`]. Reads never start a worker.

@@ -1,6 +1,6 @@
 //! Grok Build terminal activity detection.
 //!
-//! Title shapes observed on grok 1.0.3 (Windows grok.exe, ADR-0154):
+//! Title shapes observed on grok 1.0.3 (Windows grok.exe, ADR-0156):
 //! - welcome / idle pager: exact `grok`
 //! - session: `<status> - <title>… - grok`
 //! - working: `<braille> - Running: <tool> - <title>… - grok`
@@ -44,7 +44,7 @@ pub fn is_grok_title(title: &str) -> bool {
 ///
 /// Exact `grok` is the welcome/idle pager. A Braille prefix without
 /// ` - grok` is a working frame whose suffix has been clipped. Neither
-/// is an exit once the pane is already known as Grok (ADR-0154).
+/// is an exit once the pane is already known as Grok (ADR-0156).
 pub fn is_grok_preserve_title(title: &str) -> bool {
     title_eq_ignore_ascii_case(title, "grok") || is_braille_prefix(title)
 }
@@ -100,7 +100,7 @@ pub fn process_grok_title(title: &str, was_detected: bool) -> GrokTitleResult {
         if is_grok_title(title) {
             result.now_working = is_grok_working_title(title);
         } else if is_braille_prefix(title) {
-            // Working spinner without the suffix is not an exit (ADR-0154).
+            // Working spinner without the suffix is not an exit (ADR-0156).
             result.now_working = true;
         } else if !title_eq_ignore_ascii_case(title, "grok") {
             result.exited = true;

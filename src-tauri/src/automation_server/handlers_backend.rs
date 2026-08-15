@@ -491,7 +491,7 @@ pub fn build_grok_usage_payload(
 }
 
 /// `GET /api/v1/usage/grok` — cached Grok usage snapshots, one per monitored
-/// `GROK_HOME`. Never starts a probe (ADR-0154).
+/// `GROK_HOME`. Never starts a probe (ADR-0156).
 pub async fn usage_grok_list(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
     match state.app_state.grok_usage_probe.snapshots() {
         Ok(snapshots) => (StatusCode::OK, Json(build_grok_usage_payload(snapshots))),

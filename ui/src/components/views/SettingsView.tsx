@@ -1950,6 +1950,10 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
     allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
     autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
     snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
+    androidBackgroundLeaseSeconds: Math.min(
+      900,
+      Math.max(0, Math.trunc(Number(remote.androidBackgroundLeaseSeconds) || 0)),
+    ),
     scrollSensitivity: normalizeScrollSensitivity(
       remote.scrollSensitivity,
       DEFAULT_SCROLL_SENSITIVITY,
@@ -2284,6 +2288,35 @@ function RemoteSection() {
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
               KiB
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label="Android 백그라운드 제어권 유지"
+          desc="Android 앱을 잠시 벗어났을 때 Remote 제어권을 유지할 시간입니다. 0이면 즉시 반납합니다."
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-android-background-lease-input"
+              type="number"
+              min={0}
+              max={900}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.androidBackgroundLeaseSeconds}
+              onChange={(event) =>
+                update({
+                  androidBackgroundLeaseSeconds: Math.min(
+                    900,
+                    Math.max(0, Math.trunc(Number(event.target.value) || 0)),
+                  ),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              초
             </span>
           </div>
         </SettingRow>

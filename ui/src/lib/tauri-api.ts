@@ -1022,6 +1022,8 @@ export interface RemoteSettings {
   tailscaleOnly: boolean;
   authToken: string;
   heartbeatTimeoutSeconds: number;
+  /** Android E2E controller lease grace after the app enters background (0..900 seconds). */
+  androidBackgroundLeaseSeconds: number;
   autoMobileModeMinWidth: number;
   snapshotMaxKib: number;
   preferredHost: string;

@@ -397,7 +397,7 @@ test("an explicit release reconnects to the last selected workspace pane", async
   await expect.poll(() => remote.outputTerminalIds.at(-1)).toBe("terminal-2");
 
   await page.locator("#navToggle").click();
-  await page.locator("#release").click();
+  await page.locator("#exit").click();
   await expect(page.locator("#connect")).toBeEnabled();
   await connectRemote(page, "Main · Pane 2");
 
@@ -442,7 +442,7 @@ test("a reconnect falls back when the last selected terminal is no longer live",
   await expect.poll(() => remote.outputTerminalIds.at(-1)).toBe("terminal-2");
 
   await page.locator("#navToggle").click();
-  await page.locator("#release").click();
+  await page.locator("#exit").click();
   changingNavigation.activeWorkspace.panes[1].terminalLive = false;
   changingNavigation.workspaces[0].panes[1].terminalLive = false;
   await connectRemote(page);

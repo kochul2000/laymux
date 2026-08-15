@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon foreground: the Laymux mark alone, scaled into the 72dp safe
-     zone of the 108dp adaptive canvas. The black plate is the background layer. -->
+<!-- Adaptive icon foreground: the Laymux mark leaves a generous black border
+     inside the adaptive canvas. The black plate is the background layer. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -9,8 +9,8 @@
     <group
         android:pivotX="60"
         android:pivotY="60"
-        android:scaleX="0.72"
-        android:scaleY="0.72">
+        android:scaleX="0.60"
+        android:scaleY="0.60">
         <path
             android:fillColor="#f50a3c"
             android:pathData="M54,25H27L58,56L27,91.5H54L85,56L54,25Z" />

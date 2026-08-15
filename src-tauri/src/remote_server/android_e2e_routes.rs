@@ -15,11 +15,15 @@ use tower::ServiceExt;
 use crate::android_e2e::{ChallengeRequest, CipherEnvelope, E2eError, EstablishRequest};
 use crate::automation_server::ServerState;
 use crate::error::AppError;
+use crate::lock_ext::MutexExt;
 use crate::remote_server::TunnelAuthorized;
 use crate::terminal_output::TerminalOutputFrameHeaderV1;
 
 use super::access::effective_remote_settings;
-use super::lease::{active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds};
+use super::lease::{
+    active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
+    emit_remote_control_status, status_from_state, wait_for_remote_owner_transition_async,
+};
 use super::{internal_error, json_error};
 
 const INTERNAL_RESPONSE_LIMIT: usize = 1024 * 1024;
@@ -56,6 +60,9 @@ enum PlainRequest {
         generation: u64,
         source_seq: u64,
         wire_seq_offset: u64,
+    },
+    BackgroundTransition {
+        lease_id: String,
     },
 }
 
@@ -212,6 +219,48 @@ async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Val
                 wire_seq_offset,
             )
             .await
+        }
+        PlainRequest::BackgroundTransition { lease_id } => {
+            if !valid_remote_identifier(&lease_id) {
+                return Ok(rpc_error(StatusCode::BAD_REQUEST, "Remote lease identity is invalid"));
+            }
+            let settings = effective_remote_settings(&server.app_state).map_err(AppError::Other)?;
+            let seconds = settings.android_background_lease_seconds;
+            let now = std::time::Instant::now();
+            let transition = {
+                let mut control = server.app_state.remote_control.lock_or_err()?;
+                control.observe_lease_expiry(
+                    now,
+                    Duration::from_secs(effective_heartbeat_timeout_seconds(&settings)),
+                );
+                if seconds == 0 {
+                    if !control.lease.as_ref().is_some_and(|lease| lease.lease_id == lease_id) {
+                        return Ok(rpc_error(StatusCode::CONFLICT, "Remote lease is not active"));
+                    }
+                    control.begin_voluntary_release_transition(now)
+                } else if control.refresh_remote_lease(&lease_id, now, Duration::from_secs(seconds)) {
+                    None
+                } else {
+                    return Ok(rpc_error(StatusCode::CONFLICT, "Remote lease is not active"));
+                }
+            };
+            if let Some(transition) = transition {
+                wait_for_remote_owner_transition_async(&server.app_state, transition)
+                    .await
+                    .map_err(AppError::Other)?;
+                let mut control = server.app_state.remote_control.lock_or_err()?;
+                control.finalize_owner_transition_if_drained(transition);
+                let status = status_from_state(
+                    &control,
+                    effective_heartbeat_timeout_seconds(&settings),
+                );
+                emit_remote_control_status(&server.app_handle, &status);
+            }
+            Ok(json!({
+                "kind": "backgroundTransition",
+                "action": if seconds == 0 { "released" } else { "retained" },
+                "leaseSeconds": seconds,
+            }))
         }
     }
 }
@@ -637,6 +686,15 @@ mod tests {
             }
             other => panic!("unexpected variant: {other:?}"),
         }
+
+        let background: PlainRequest = serde_json::from_str(
+            r#"{"kind":"backgroundTransition","leaseId":"lease-1"}"#,
+        )
+        .expect("backgroundTransition");
+        assert!(matches!(
+            background,
+            PlainRequest::BackgroundTransition { lease_id } if lease_id == "lease-1"
+        ));
     }
 
     /// Rust field spellings are not part of the contract: accepting them would

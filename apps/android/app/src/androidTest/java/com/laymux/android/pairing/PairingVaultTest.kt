@@ -8,6 +8,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,9 +22,10 @@ class PairingVaultTest {
     private val expiresAt = 4_102_444_800L
     private var nowEpochSeconds = 1_786_500_000L
     private val suffix = System.nanoTime().toString()
+    private val preferenceName = "pairing-vault-test-$suffix"
     private val vault = PairingVault(
         context = ApplicationProvider.getApplicationContext(),
-        preferenceName = "pairing-vault-test-$suffix",
+        preferenceName = preferenceName,
         keyAlias = "com.laymux.android.test.$suffix",
         nowEpochSeconds = { nowEpochSeconds },
     )
@@ -62,9 +64,9 @@ class PairingVaultTest {
                 null,
                 "work",
             ),
-            vault.loadMetadata(),
+            vault.loadMetadata().single(),
         )
-        val pending = requireNotNull(vault.prepareDecryption())
+        val pending = requireNotNull(vault.prepareDecryption("desktop-7"))
         assertEquals(PairingProtectionPolicy.KEYSTORE_ONLY, pending.policy)
         vault.completeDecryption(pending, pending.cipher).use { restored ->
             requireNotNull(restored)
@@ -92,7 +94,7 @@ class PairingVaultTest {
 
         vault.clear()
 
-        assertNull(vault.loadMetadata())
+        assertTrue(vault.loadMetadata().isEmpty())
     }
 
     @Test
@@ -110,7 +112,7 @@ class PairingVaultTest {
         vault.setProtectionPolicy(PairingProtectionPolicy.BIOMETRIC)
 
         assertEquals(PairingProtectionPolicy.BIOMETRIC, vault.protectionPolicy())
-        assertNull(vault.loadMetadata())
+        assertTrue(vault.loadMetadata().isEmpty())
     }
 
     @Test
@@ -123,10 +125,10 @@ class PairingVaultTest {
             vault.save(it, clientNonce, PairingProtectionPolicy.KEYSTORE_ONLY, cipher)
         }
 
-        vault.markConfirmed(pairingId, clientNonce, 1_786_500_000)
+        vault.markConfirmed("desktop", pairingId, clientNonce, 1_786_500_000)
 
-        assertEquals(1_786_500_000, vault.loadMetadata()?.confirmedAtEpochSeconds)
-        val pending = requireNotNull(vault.prepareDecryption())
+        assertEquals(1_786_500_000, vault.loadMetadata().single().confirmedAtEpochSeconds)
+        val pending = requireNotNull(vault.prepareDecryption("desktop"))
         vault.completeDecryption(pending, pending.cipher).use { restored ->
             assertArrayEquals(secret, restored.secretCopy())
         }
@@ -145,11 +147,11 @@ class PairingVaultTest {
             .encodeToString(ByteArray(PairingHandshake.CLIENT_NONCE_BYTES) { 99 })
 
         assertThrows(IllegalStateException::class.java) {
-            vault.markConfirmed(pairingId, staleNonce, 1_786_500_000)
+            vault.markConfirmed("desktop", pairingId, staleNonce, 1_786_500_000)
         }
-        assertFalse(vault.clearIfMatches(pairingId, staleNonce))
-        assertNull(vault.loadMetadata()?.confirmedAtEpochSeconds)
-        assertEquals(clientNonce, vault.loadMetadata()?.clientNonce)
+        assertFalse(vault.clearIfMatches("desktop", pairingId, staleNonce))
+        assertNull(vault.loadMetadata().single().confirmedAtEpochSeconds)
+        assertEquals(clientNonce, vault.loadMetadata().single().clientNonce)
     }
 
     @Test
@@ -163,10 +165,124 @@ class PairingVaultTest {
         }
 
         nowEpochSeconds = expiresAt - 1
-        assertEquals(pairingId, vault.loadMetadata()?.pairingId)
+        assertEquals(pairingId, vault.loadMetadata().single().pairingId)
         nowEpochSeconds = expiresAt
-        assertNull(vault.loadMetadata())
-        assertNull(vault.prepareDecryption())
+        assertTrue(vault.loadMetadata().isEmpty())
+        assertNull(vault.prepareDecryption("desktop"))
+    }
+
+    @Test
+    fun expiredPendingPairingDoesNotDeleteAnotherInstance() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
+        savePairing("desktop-b", ByteArray(PairingPayload.SECRET_BYTES) { 2 })
+        vault.markConfirmed("desktop-b", pairingId, clientNonce, nowEpochSeconds)
+
+        nowEpochSeconds = expiresAt
+
+        assertEquals(listOf("desktop-b"), vault.loadMetadata().map { it.instanceId })
+    }
+
+    @Test
+    fun storesMultiplePairingsByInstance() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        val secondSecret = ByteArray(PairingPayload.SECRET_BYTES) { (it + 40).toByte() }
+        savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { (it + 20).toByte() })
+        savePairing("desktop-b", secondSecret)
+
+        assertEquals(listOf("desktop-a", "desktop-b"), vault.loadMetadata().map { it.instanceId })
+    }
+
+    @Test
+    fun selectingOnePairingReturnsOnlyThatSecret() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        val firstSecret = ByteArray(PairingPayload.SECRET_BYTES) { (it + 20).toByte() }
+        val secondSecret = ByteArray(PairingPayload.SECRET_BYTES) { (it + 40).toByte() }
+        savePairing("desktop-a", firstSecret)
+        savePairing("desktop-b", secondSecret)
+
+        val pending = requireNotNull(vault.prepareDecryption("desktop-b"))
+        vault.completeDecryption(pending, pending.cipher).use { restored ->
+            assertEquals("desktop-b", restored.metadata.instanceId)
+            assertArrayEquals(secondSecret, restored.secretCopy())
+        }
+    }
+
+    @Test
+    fun clearInstancePreservesOtherPairingsAndSharedWrappingKey() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        val preservedSecret = ByteArray(PairingPayload.SECRET_BYTES) { (it + 50).toByte() }
+        savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
+        savePairing("desktop-b", preservedSecret)
+
+        vault.clear("desktop-a")
+
+        assertEquals(listOf("desktop-b"), vault.loadMetadata().map { it.instanceId })
+        val pending = requireNotNull(vault.prepareDecryption("desktop-b"))
+        vault.completeDecryption(pending, pending.cipher).use { restored ->
+            assertArrayEquals(preservedSecret, restored.secretCopy())
+        }
+    }
+
+    @Test
+    fun changingProtectionPolicyClearsAllPairings() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
+        savePairing("desktop-b", ByteArray(PairingPayload.SECRET_BYTES) { 2 })
+
+        vault.setProtectionPolicy(PairingProtectionPolicy.BIOMETRIC)
+
+        assertTrue(vault.loadMetadata().isEmpty())
+    }
+
+    @Test
+    fun confirmationUpdatesOnlyTheTargetInstance() {
+        vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
+        savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
+        savePairing("desktop-b", ByteArray(PairingPayload.SECRET_BYTES) { 2 })
+
+        vault.markConfirmed("desktop-a", pairingId, clientNonce, 1_786_500_000)
+
+        val metadata = vault.loadMetadata().associateBy { it.instanceId }
+        assertEquals(1_786_500_000, metadata.getValue("desktop-a").confirmedAtEpochSeconds)
+        assertNull(metadata.getValue("desktop-b").confirmedAtEpochSeconds)
+        assertEquals("desktop-a", vault.loadConfirmedMetadata("desktop-a")?.instanceId)
+        assertNull(vault.loadConfirmedMetadata("desktop-b"))
+    }
+
+    @Test
+    fun rejectsPairingPreferenceWithNonCanonicalInstanceSuffix() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences(preferenceName, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("pairing:not/canonical", "hidden-envelope")
+            .commit()
+
+        assertThrows(IllegalStateException::class.java) {
+            vault.loadMetadata()
+        }
+    }
+
+    @Test
+    fun discardsLegacySingletonRecordWithoutMigration() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        context.getSharedPreferences(preferenceName, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putString("pairing", "legacy-v3-envelope")
+            .commit()
+
+        val reopened = PairingVault(
+            context = context,
+            preferenceName = preferenceName,
+            keyAlias = "com.laymux.android.test.$suffix",
+            nowEpochSeconds = { nowEpochSeconds },
+        )
+
+        assertTrue(reopened.loadMetadata().isEmpty())
+        assertFalse(
+            context.getSharedPreferences(preferenceName, android.content.Context.MODE_PRIVATE)
+                .contains("pairing"),
+        )
     }
 
     @Test
@@ -203,5 +319,13 @@ class PairingVaultTest {
         return "laymux://pair/v2?endpoint=https%3A%2F%2Fapp.laymux.com" +
             "&instance=$instance&pairing=$pairingId&expires=$expiresAt" +
             "&secret=$secret$labelQuery"
+    }
+
+    private fun savePairing(instance: String, secret: ByteArray) {
+        val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(secret)
+        PairingPayload.parse(pairingUri(instance, encoded)).use {
+            val cipher = vault.prepareEncryption(PairingProtectionPolicy.KEYSTORE_ONLY)
+            vault.save(it, clientNonce, PairingProtectionPolicy.KEYSTORE_ONLY, cipher)
+        }
     }
 }

@@ -24,7 +24,7 @@ pub const EVENT_TERMINAL_OUTPUT_ACTIVITY: &str = "terminal-output-activity";
 pub const EVENT_REMOTE_CONTROL_CHANGED: &str = "remote-control-changed";
 /// A Claude usage probe published a new snapshot (ADR-0102).
 pub const EVENT_USAGE_SNAPSHOT_CHANGED: &str = "usage-snapshot-changed";
-/// A Grok usage probe published a new snapshot (ADR-0154).
+/// A Grok usage probe published a new snapshot (ADR-0156).
 pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed";
 /// Emitted when the OS sleep inhibitor state changes without a request having
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).

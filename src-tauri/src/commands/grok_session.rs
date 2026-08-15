@@ -12,7 +12,7 @@ use crate::state::AppState;
 use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProvider};
 
 /// `<configured grok command> --resume <uuid>` only. Prefix is re-derived
-/// from disk settings (ADR-0125 / ADR-0154).
+/// from disk settings (ADR-0125 / ADR-0156).
 pub(crate) fn is_valid_grok_startup_command_override(cmd: &str, configured_command: &str) -> bool {
     let agent = crate::settings::agent_command::resolve_agent_command(
         configured_command,
@@ -114,7 +114,7 @@ fn session_id_for_pid(home: &Path, pid: u32, max_age_hours: Option<u64>) -> Opti
     session_ids.sort();
     session_ids.dedup();
     // One Grok process can list multiple sessions; pick nothing rather than
-    // resume the first JSON entry (ADR-0154).
+    // resume the first JSON entry (ADR-0156).
     if session_ids.len() != 1 {
         return None;
     }

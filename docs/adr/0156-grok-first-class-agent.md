@@ -1,4 +1,4 @@
-# 0154. Grok Build는 Claude·Codex와 같은 1급 에이전트다
+# 0156. Grok Build는 Claude·Codex와 같은 1급 에이전트다
 
 - Status: Proposed
 - Date: 2026-08-13

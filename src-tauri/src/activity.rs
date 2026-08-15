@@ -472,7 +472,7 @@ pub fn is_codex_terminal_from_buffer(
 /// Same cache-as-hint rule as Claude/Codex. Strong signals are the
 /// `"Grok Build"` banner and a live OSC title with the ` - grok` suffix.
 /// Exact `grok` cannot seed detection, but with a cache hit it (and a
-/// Braille-only working frame) must keep the classification (ADR-0154).
+/// Braille-only working frame) must keep the classification (ADR-0156).
 pub fn is_grok_terminal_from_buffer(
     state: &AppState,
     terminal_id: &str,
@@ -930,7 +930,7 @@ pub fn detect_interactive_app_from_live_title(
     //    When several agent banners share the recent window (a missed
     //    Claude/Codex exit plus a new Grok splash), the later paint is
     //    the current session. Sequential Claude-then-Codex-then-Grok
-    //    checks would pin the stale banner first (ADR-0154 3-way).
+    //    checks would pin the stale banner first (ADR-0156 3-way).
     if let Some(app) = latest_agent_banner_in_buffer(buffer) {
         let hit = match app {
             "Claude" => is_claude_terminal_from_buffer(state, terminal_id, buffer),
@@ -1400,7 +1400,7 @@ pub struct PtyCallbackState {
     /// path in `codex_activity::process_codex_title` cannot fire — there
     /// is no other persistent signal in the PTY callback closure.
     pub codex_detected: AtomicBool,
-    /// Mirrors `claude_detected` for Grok Build (ADR-0154).
+    /// Mirrors `claude_detected` for Grok Build (ADR-0156).
     pub grok_detected: AtomicBool,
     /// Bumped every time the title state machine confirms an agent *entered*
     /// this pane.

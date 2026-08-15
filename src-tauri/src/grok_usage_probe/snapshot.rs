@@ -1,4 +1,4 @@
-//! Cached Grok `/usage` snapshot (ADR-0154).
+//! Cached Grok `/usage` snapshot (ADR-0156).
 
 use serde::Serialize;
 

@@ -66,6 +66,65 @@ describe("extractPathCandidatesFromSelection", () => {
     ]);
   });
 
+  it("경로:줄번호 뒤에 문장이 붙은 입력을 재현한다", () => {
+    expect(
+      extractPathCandidatesFromSelection(
+        "orchestrator/src/mdb_orchestrator/graphs/task_types/dd_generate/phases/design_assembly/routing_axis.py:126에서",
+        options,
+      ),
+    ).toEqual([
+      {
+        text: "orchestrator/src/mdb_orchestrator/graphs/task_types/dd_generate/phases/design_assembly/routing_axis.py",
+        lineIndex: 0,
+        startIndex: 0,
+        endIndex: 102,
+      },
+    ]);
+  });
+
+  it("줄번호·열번호와 뒤의 문장을 함께 제거한다", () => {
+    expect(extractPathCandidatesFromSelection("src/main.py:126:9에서", options)).toEqual([
+      { text: "src/main.py", lineIndex: 0, startIndex: 0, endIndex: 11 },
+    ]);
+  });
+
+  it("Windows 절대경로의 줄번호 접미사를 제거한다", () => {
+    expect(
+      extractPathCandidatesFromSelection(String.raw`C:\work\src\main.py:126에서`, options),
+    ).toEqual([
+      { text: String.raw`C:\work\src\main.py`, lineIndex: 0, startIndex: 0, endIndex: 19 },
+    ]);
+  });
+
+  it("슬래시가 앞에 붙은 Windows 절대경로를 드라이브 경로로 정규화한다", () => {
+    expect(
+      extractPathCandidatesFromSelection(
+        "/D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html:17",
+        options,
+      ),
+    ).toEqual([
+      {
+        text: "D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html",
+        lineIndex: 0,
+        startIndex: 1,
+        endIndex: 74,
+      },
+    ]);
+  });
+
+  it("한 선택 안의 여러 경로에서 각 줄번호 접미사를 독립적으로 제거한다", () => {
+    expect(extractPathCandidatesFromSelection("src/a.ts:1에서 src/b.ts:2에서", options)).toEqual([
+      { text: "src/a.ts", lineIndex: 0, startIndex: 0, endIndex: 8 },
+      { text: "src/b.ts", lineIndex: 0, startIndex: 13, endIndex: 21 },
+    ]);
+  });
+
+  it("포트가 있는 URL을 경로 후보로 만들지 않는다", () => {
+    expect(
+      extractPathCandidatesFromSelection("https://example.com:443/src/main.ts", options),
+    ).toEqual([]);
+  });
+
   it("넓은 선택에서는 강한 형태만 찾고 단일 토큰 선택은 맨이름도 유지한다", () => {
     expect(extractPathCandidatesFromSelection("open laymux then Cargo.toml", options)).toEqual([
       { text: "Cargo.toml", lineIndex: 0, startIndex: 17, endIndex: 27 },
@@ -243,6 +302,10 @@ describe("trimSelectionToPath", () => {
 
   it("절대 경로도 그대로 인정한다", () => {
     expect(trimSelectionToPath("/etc/hosts")).toBe("/etc/hosts");
+  });
+
+  it("슬래시가 앞에 붙은 Windows 드라이브 경로의 슬래시를 제거한다", () => {
+    expect(trimSelectionToPath("/D:/work/src/main.ts:17")).toBe("D:/work/src/main.ts");
   });
 
   it("공백이 끼어 여러 토큰이면 경로 한 건으로 보지 않는다", () => {

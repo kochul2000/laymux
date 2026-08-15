@@ -183,7 +183,7 @@ pub fn match_interactive_app_process(
         }
         if found.len() > 1 {
             // Same-depth Claude/Codex/Grok siblings are ambiguous — snapshot
-            // order is not a contract (ADR-0154 unique top-level).
+            // order is not a contract (ADR-0156 unique top-level).
             return None;
         }
     }

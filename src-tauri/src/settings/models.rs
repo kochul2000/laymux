@@ -547,7 +547,7 @@ pub enum GrokStatusMessageMode {
     BulletTitle,
 }
 
-/// Grok Build integration settings (ADR-0154). Same field set as Codex.
+/// Grok Build integration settings (ADR-0156). Same field set as Codex.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokSettings {
@@ -1019,7 +1019,7 @@ fn default_claude_used_color() -> String {
 fn default_codex_used_color() -> String {
     "#10a37f".into()
 }
-/// GrokNight magenta accent — selector and usage bars share this (ADR-0154).
+/// GrokNight magenta accent — selector and usage bars share this (ADR-0156).
 fn default_grok_used_color() -> String {
     "#c084fc".into()
 }
@@ -1710,6 +1710,10 @@ pub struct RemoteSettings {
     /// Seconds before an inactive remote controller lease expires.
     #[serde(default = "default_remote_heartbeat_timeout_seconds")]
     pub heartbeat_timeout_seconds: u64,
+    /// Seconds an Android E2E controller lease remains reserved after the app
+    /// enters the background. 0 releases it immediately; capped at 15 minutes.
+    #[serde(default = "default_android_background_lease_seconds")]
+    pub android_background_lease_seconds: u64,
     /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
     #[serde(default = "default_remote_auto_mobile_mode_min_width")]
     pub auto_mobile_mode_min_width: u32,
@@ -1785,6 +1789,12 @@ fn default_remote_heartbeat_timeout_seconds() -> u64 {
     DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS
 }
 
+pub const MAX_ANDROID_BACKGROUND_LEASE_SECONDS: u64 = 15 * 60;
+
+fn default_android_background_lease_seconds() -> u64 {
+    MAX_ANDROID_BACKGROUND_LEASE_SECONDS
+}
+
 fn default_remote_auto_mobile_mode_min_width() -> u32 {
     720
 }
@@ -1834,6 +1844,7 @@ impl Default for RemoteSettings {
             tailscale_only: false,
             auth_token: String::new(),
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
+            android_background_lease_seconds: default_android_background_lease_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
             snapshot_max_kib: default_remote_snapshot_max_kib(),
             preferred_host: String::new(),

@@ -23,6 +23,9 @@ const SELECTION_TOKEN_RE = /[^\s"'`()<>[\]{}|]+/g;
 /** 넓은 선택에서 맨이름 오탐을 줄이는 파일 확장자 형태. */
 const FILE_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9_-]{0,15}$/;
 
+/** Markdown/file-link 계열이 만드는 `/C:/...` 형태의 Windows 드라이브 경로. */
+const SLASH_PREFIXED_WINDOWS_DRIVE_RE = /^\/[A-Za-z]:[\\/]/;
+
 export const PATH_LINK_MAX_SELECTION_LENGTH = 1024;
 export const PATH_LINK_MAX_SELECTION_LINES = 8;
 export const PATH_LINK_MAX_CANDIDATES = 16;
@@ -72,7 +75,7 @@ export function isAbsolutePath(path: string): boolean {
 
 /**
  * 토큰에서 경로가 아닌 장식을 떼어낸다.
- * - 후행 `:line:col`(grep/컴파일러 스타일) 제거.
+ * - `:line` 또는 `:line:col`(grep/컴파일러 스타일)와 그 뒤의 문장 접미사를 제거.
  * - 후행 문장부호(`.,;:` 등) 제거.
  * 시작/끝 컬럼 보정을 위해 앞에서 떼어낸 길이도 함께 반환한다.
  */
@@ -87,6 +90,13 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
     text = text.slice(leading);
   }
 
+  // `/C:/...`는 POSIX 경로가 아니라 Windows 드라이브 경로로 취급한다. 제거한
+  // 슬래시는 원문 후보 범위를 드라이브 문자부터 시작하도록 leading에 반영한다.
+  if (SLASH_PREFIXED_WINDOWS_DRIVE_RE.test(text)) {
+    leading += 1;
+    text = text.slice(1);
+  }
+
   // 뒤쪽 닫는 괄호/따옴표 제거.
   text = text.replace(/[)"'`\]}>]+$/, "");
 
@@ -94,9 +104,11 @@ export function trimPathToken(raw: string): { text: string; leading: number } {
   // 줄번호 뒤에 콜론이 더 붙은 grep 출력을 정리한다.
   text = text.replace(/[.,;:]+$/, "");
 
-  // 후행 `:line` 또는 `:line:col`(숫자) 제거 — 경로 자체에는 포함 안 함.
-  // 여러 번 붙을 수 있으므로(`file:42:5`) 반복 매칭으로 모두 제거한다.
-  text = text.replace(/(:\d+)+$/, "");
+  // `:line` 또는 `:line:col`(숫자)부터 뒤를 제거 — 경로 자체에는 포함하지 않는다.
+  // `path.ts:42에서`처럼 줄번호 뒤에 문장이 붙어도 줄번호부터 뒤를 버린다.
+  // Windows 드라이브의 `C:`는 뒤에 숫자가 바로 오지 않으므로 영향을 받지 않는다.
+  const lineMarker = text.search(/:\d+(?::\d+)?/);
+  if (lineMarker >= 0) text = text.slice(0, lineMarker);
 
   return { text, leading };
 }

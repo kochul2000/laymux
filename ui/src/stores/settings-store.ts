@@ -702,6 +702,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   tailscaleOnly: false,
   authToken: "",
   heartbeatTimeoutSeconds: 45,
+  androidBackgroundLeaseSeconds: 900,
   autoMobileModeMinWidth: 720,
   snapshotMaxKib: 4,
   preferredHost: "",

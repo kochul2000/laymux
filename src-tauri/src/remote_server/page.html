@@ -309,22 +309,31 @@
         min-width: 0;
         padding: 0;
         color: var(--muted);
-        overflow: hidden;
-        text-overflow: ellipsis;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
         white-space: nowrap;
+      }
+      .status::-webkit-scrollbar {
+        display: none;
       }
       .status.error {
         color: var(--danger);
       }
-      /* Single toggle button (mirrors the desktop pane-bar toggle): shows the
-         current mode and flips it on click. accent when Composer is active. */
+      .status.warning {
+        color: var(--yellow);
+      }
+      /* Icon-only toggle mirrors the desktop pane-bar control. Its dynamic
+         accessible name states the destination mode; accent means Composer. */
       .input-mode-toggle {
         display: inline-flex;
         flex: 0 0 auto;
         align-items: center;
-        gap: 5px;
+        justify-content: center;
+        width: var(--header-control-height);
         height: var(--header-control-height);
-        padding: 0 8px;
+        padding: 0;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         background: var(--panel-2);
@@ -342,13 +351,6 @@
       }
       .input-mode-toggle svg {
         flex: 0 0 auto;
-      }
-      /* Very narrow headers collapse the toggle to its icon; the button title
-         still names the mode for assistive tech. */
-      @media (max-width: 360px) {
-        .input-mode-toggle .seg-label {
-          display: none;
-        }
       }
       .terminal-shell {
         min-width: 0;
@@ -1868,9 +1870,8 @@
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <svg data-icon="circle-minus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
         </button>
-        <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" title="Switch to Composer input">
+        <button id="inputModeToggle" class="input-mode-toggle" type="button" aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
           <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
-          <span id="inputModeLabel" class="seg-label">Direct</span>
         </button>
         <button id="desktopModeHeader" class="desktop-mode-button" type="button" hidden>PC</button>
       </header>
@@ -1905,7 +1906,7 @@
               <label>Name <input id="clientName" autocomplete="nickname" value="browser" /></label>
               <div class="connection-actions">
                 <button id="connect" class="primary">Connect</button>
-                <button id="release" class="danger" disabled>Release</button>
+                <button id="exit" class="danger">Exit</button>
                 <button id="refresh" disabled>Refresh</button>
               </div>
             </section>
@@ -2056,7 +2057,7 @@
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
         const connectButton = $("connect");
-        const releaseButton = $("release");
+        const exitButton = $("exit");
         const refreshButton = $("refresh");
         const connectionPanel = document.querySelector(".connection-panel");
         const connectionHint = document.querySelector(".connection-hint");
@@ -2101,7 +2102,6 @@
           typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
         const inputModeToggleButton = $("inputModeToggle");
         const inputModeIcon = $("inputModeIcon");
-        const inputModeLabel = $("inputModeLabel");
         const INPUT_MODE_ICONS = {
           direct:
             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" stroke-linecap="round"/></svg>',
@@ -2339,11 +2339,12 @@
         document.querySelector(".app").classList.toggle("local-app", localAppMode);
         document.querySelector(".app").classList.toggle("android-e2e", Boolean(androidE2eMode));
         if (androidE2eMode) clientNameInput.value = "Laymux Android E2E";
-        desktopModeHeaderButton.hidden = !(localAppMode || androidE2eMode);
-        desktopModeDrawerButton.hidden = !(localAppMode || androidE2eMode);
+        // Android E2E exits Remote control through Release. Keep the PC-mode
+        // switch only for the desktop app's embedded mobile view, where it
+        // changes the surrounding desktop layout rather than releasing a lease.
+        desktopModeHeaderButton.hidden = !localAppMode;
+        desktopModeDrawerButton.hidden = !localAppMode;
         if (androidE2eMode) {
-          desktopModeHeaderButton.textContent = "Close";
-          desktopModeDrawerButton.textContent = "Close";
           fileViewerSection.hidden = true;
         }
         // Layout naming (canonical, ADR-0036):
@@ -2391,9 +2392,10 @@
           })
         });
 
-        function setStatus(message, error = false) {
+        function setStatus(message, error = false, warning = false) {
           statusEl.textContent = message;
           statusEl.classList.toggle("error", error);
+          statusEl.classList.toggle("warning", warning);
         }
 
         function hasTransientConnectionInterruption() {
@@ -2408,7 +2410,7 @@
             transientConnectionNoticeTimer = null;
             if (!leaseId || !hasTransientConnectionInterruption()) return;
             transientConnectionNoticeVisible = true;
-            setStatus("Connection interrupted. Reconnecting...", true);
+            setStatus("Connection interrupted. Reconnecting...", false, true);
           }, TRANSIENT_CONNECTION_NOTICE_DELAY_MS);
         }
 
@@ -3450,11 +3452,12 @@
           const draft = composerDraft();
           terminalComposer.hidden = !composerMode || composerCollapsed;
           inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
-          inputModeToggleButton.title = composerMode
+          const inputModeActionLabel = composerMode
             ? "Switch to Direct input"
             : "Switch to Composer input";
+          inputModeToggleButton.title = inputModeActionLabel;
+          inputModeToggleButton.setAttribute("aria-label", inputModeActionLabel);
           inputModeIcon.innerHTML = INPUT_MODE_ICONS[composerMode ? "composer" : "direct"];
-          inputModeLabel.textContent = composerMode ? "Composer" : "Direct";
 
           const nextText = draft ? draft.text : "";
           if (composerInput.value !== nextText) composerInput.value = nextText;
@@ -3533,7 +3536,6 @@
           dockToggleButton.disabled = !connected;
           notificationSection.classList.toggle("locked", !connected);
           notificationToggleButton.disabled = !connected;
-          releaseButton.disabled = !connected;
           refreshButton.disabled = !connected;
           connectButton.disabled = connected;
           updateTerminalControls();
@@ -7401,7 +7403,11 @@
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
           if (!androidE2eMode) localStorage.setItem(tokenKey, token());
-          setStatus(auto ? "Reconnecting..." : "Claiming remote control...");
+          setStatus(
+            auto ? "Reconnecting..." : "Claiming remote control...",
+            false,
+            auto,
+          );
           try {
             const status = await claimRemoteControl(attemptRevision);
             if (attemptRevision !== claimAttemptRevision) {
@@ -7409,6 +7415,7 @@
               return;
             }
             leaseId = status.leaseId;
+            if (androidE2eMode) window.LaymuxNative.setRemoteLease(leaseId);
             armAutoConnect();
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
@@ -7450,7 +7457,7 @@
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.
-              setStatus(`Reconnecting... ${err.message}`);
+              setStatus(`Reconnecting... ${err.message}`, false, true);
               return;
             }
             setStatus(err.message, true);
@@ -7538,7 +7545,7 @@
           event.preventDefault();
           event.stopImmediatePropagation();
           if (!leaseId || !activeTerminalId || !composerReady) {
-            setStatus("Terminal input is not ready. Reconnecting...", true);
+            setStatus("Terminal input is not ready. Reconnecting...", false, true);
             return;
           }
           const text = event.clipboardData?.getData("text/plain") || "";
@@ -8544,15 +8551,26 @@
           });
         }
 
-        async function release() {
-          if (!leaseId) return;
-          // Releasing on purpose withdraws the standing intent to hold control.
+        async function exitRemote() {
+          // Leaving always withdraws the standing intent to hold control, even
+          // when the connection has already failed and no lease remains.
           disarmAutoConnect();
           const currentLease = leaseId;
-          await releaseLease(currentLease);
+          if (currentLease) await releaseLease(currentLease).catch(() => {});
           disconnect(false);
+          stopWidgetPolling();
+          // Android's former Close button released this same lease and then
+          // closed the native Remote surface. Exit is now the single path.
+          if (androidE2eMode) {
+            window.LaymuxNative.disconnectRemote();
+            return;
+          }
+          if (localAppMode) {
+            window.parent.postMessage({ type: "laymux:desktop-mode" }, "*");
+            return;
+          }
           setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
-          setStatus("Released remote control.");
+          setStatus("Exited remote control.");
         }
 
         async function releaseLease(id) {
@@ -8576,15 +8594,9 @@
           const currentLease = leaseId;
           if (!currentLease) return;
           if (androidE2eMode) {
-            try {
-              window.LaymuxNative.requestRemoteHttp(
-                `http-unload-${++nextAndroidHttpRequestId}`,
-                "POST",
-                "/remote/v1/session/release",
-                JSON.stringify({ leaseId: currentLease }),
-              );
-            } catch (_) {}
-            leaseId = null;
+            // Native performs the encrypted background transition. It reads
+            // the current desktop setting atomically with retain/release, so
+            // pagehide never makes a stale policy decision.
             return;
           }
           const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
@@ -8635,6 +8647,7 @@
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();
           leaseId = null;
+          if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
           clearPendingFileViewerWindows();
           setActiveTerminal(null);
@@ -8674,7 +8687,7 @@
             // (`transitioning`) that would answer our own reclaim with 409, and a
             // 409 disarms the intent.
             setConnectionHint("Reconnecting...", false);
-            setStatus("Reconnecting...");
+            setStatus("Reconnecting...", false, true);
             // Leaves the navigation menu as the user had it: this is not a state that
             // needs their attention.
             maybeAutoConnect();
@@ -8729,12 +8742,7 @@
         navCloseButton.addEventListener("click", () => setNavigationOpen(false));
         navScrim.addEventListener("click", () => setNavigationOpen(false));
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
-        releaseButton.addEventListener("click", () => {
-          // An explicit release is the user leaving, so the strip goes with it.
-          // A lease *lost* to the host is not — that path keeps polling.
-          stopWidgetPolling();
-          release().catch((err) => setStatus(`Release failed: ${err.message}`, true));
-        });
+        exitButton.addEventListener("click", () => exitRemote());
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
         fileViewerPathInput.addEventListener("input", () => {
           fileViewerPathRevision += 1;

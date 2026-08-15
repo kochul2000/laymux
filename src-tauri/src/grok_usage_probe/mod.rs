@@ -1,4 +1,4 @@
-//! Demand-based Grok `/usage` collection (ADR-0154).
+//! Demand-based Grok `/usage` collection (ADR-0156).
 //!
 //! A probe exists only while a `GrokUsageView` or `grokUsage` widget is
 //! subscribed. Automation/MCP reads never start a worker.

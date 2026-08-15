@@ -99,7 +99,7 @@ pub struct AppState {
     /// Removed when the terminal session closes.
     pub known_codex_terminals: Arc<Mutex<HashSet<String>>>,
     /// Single source of truth for Grok Build terminal detection.
-    /// Same lifecycle as the Claude/Codex sets (ADR-0154).
+    /// Same lifecycle as the Claude/Codex sets (ADR-0156).
     pub known_grok_terminals: Arc<Mutex<HashSet<String>>>,
     /// The `Arc<PtyCallbackState>` each PTY output callback owns, published here
     /// so an exit observed *outside* that callback can clear its detection
@@ -181,7 +181,7 @@ pub struct AppState {
     /// absent from `terminals`, keyed by `CLAUDE_CONFIG_DIR` (ADR-0102).
     pub usage_probe: Arc<crate::usage_probe::UsageProbe>,
     /// Grok usage probes. Owns headless `grok` PTYs that are deliberately
-    /// absent from `terminals`, keyed by `GROK_HOME` (ADR-0154).
+    /// absent from `terminals`, keyed by `GROK_HOME` (ADR-0156).
     pub grok_usage_probe: Arc<crate::grok_usage_probe::GrokUsageProbe>,
     /// The process's only OS sleep inhibitor (ADR-0114). Owns its own mutex and
     /// participates in no ordering above: nothing acquires it while holding

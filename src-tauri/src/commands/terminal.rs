@@ -788,7 +788,7 @@ pub fn create_terminal_session(
                 }
             }
 
-            // ── Grok Build title state machine (ADR-0154) ──
+            // ── Grok Build title state machine (ADR-0156) ──
             if event.code == 0 || event.code == 2 {
                 let was_detected = pty_cb_state.grok_detected.load(Ordering::Relaxed)
                     || state_for_pty
