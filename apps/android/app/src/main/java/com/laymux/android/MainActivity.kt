@@ -452,7 +452,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-
     fun selectedCloudInstanceId(): String? = selectedCloudInstanceId
 
     fun startPairingScan() {

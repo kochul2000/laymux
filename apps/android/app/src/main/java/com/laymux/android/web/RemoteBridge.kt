@@ -26,8 +26,8 @@ class RemoteBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun openExternalUrl(url: String) {
-        activity.openExternalUrl(url)
+    fun openExternalUrl(url: String?) {
+        activity.openExternalUrl(url ?: return)
     }
 }
 

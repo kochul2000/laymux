@@ -1,6 +1,6 @@
 # 0162. Android Remote의 터미널 링크는 native bridge를 통해 OS 브라우저로 연다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-16
 - Source: 사용자 요구("현재 remote 에서는 url 이 클릭되면 브라우저 바로 여는 동작이 없니?") · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Extends: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
@@ -21,7 +21,8 @@ WebView 정책을 완화해 링크를 열 수는 없다. 다중 창을 켜면 re
 
 - `openRemoteUrl`은 `http`/`https` 검사를 먼저 수행한 뒤, `androidE2eMode`일 때만 `window.LaymuxNative.openExternalUrl(url.href)`를 호출하고 반환한다. 다른 모든 표면은 기존 `window.open(..., "noopener,noreferrer")` 경로를 그대로 쓴다. bridge 메서드가 없는 구버전 APK에서는 호출을 생략해 기존 무동작을 유지하며, Remote 문서를 링크 URL로 navigate시키는 fallback은 만들지 않는다.
 - `openExternalUrl(url)`은 PC 제공 Remote 문서에 설치되는 `RemoteBridge`에만 존재한다. pairing manager의 `NativeBridge`에는 노출하지 않으며, 이 메서드는 pairing metadata·seed·session key·transport 상태를 읽거나 바꾸지 않는다.
-- native는 WebView의 검사를 신뢰하지 않고 `ExternalUrlPolicy`로 다시 판정한다. 절대 URI, opaque 아님, scheme이 `http` 또는 `https`, host 비어 있지 않음, userinfo 없음을 모두 만족해야 한다. scheme만 소문자로 정규화하고 나머지 문자열은 터미널이 만든 그대로 둔다. 판정에 실패하면 조용히 무시한다.
+- native는 WebView의 검사를 신뢰하지 않고 `ExternalUrlPolicy`로 다시 판정한다. 판정 대상은 intent가 어디로 가는지를 결정하는 scheme과 authority뿐이다. 전체 문자열에 공백·제어문자가 없어야 하고, scheme이 `http` 또는 `https`여야 하며, authority는 비어 있지 않고 userinfo(`@`)가 없어야 한다. path·query·fragment는 검증하지 않고 그대로 통과시킨다. scheme만 소문자로 정규화하고 나머지 문자열은 터미널이 만든 그대로 둔다. 판정에 실패하면 조용히 무시한다.
+- 검증에 `java.net.URI`를 쓰지 않는다. RFC 2396 기준이라 WHATWG URL 파서가 이스케이프하지 않는 `[]`·`{}`·`|` 등을 거부하고, 그러면 `?filter[]=1` 같은 평범한 링크가 이 결정이 고치려는 무동작 상태로 남는다. 파서를 하나 더 끼우면 `android.net.Uri`와의 해석 차이도 생기므로, scheme/authority만 직접 검사해 검증 파서와 실행 파서의 차이를 없앤다.
 - Intent는 `ACTION_VIEW` + `CATEGORY_BROWSABLE` + `FLAG_ACTIVITY_NEW_TASK`로 만들고, 현재 local surface가 Remote일 때만 시작한다. 처리할 activity가 없으면 toast로 알리고 실패 닫힘한다. 앱은 `http`/`https` intent filter를 선언하지 않으므로 링크가 앱 자신으로 되돌아오지 않는다.
 - 열린 페이지는 별도 앱의 별도 task다. Remote session, lease, E2E key는 영향을 받지 않으며 앱이 background로 가면 기존 background lease grace 규칙([ADR-0155](0155-android-background-remote-lease-grace.md))이 그대로 적용된다.
 
@@ -38,5 +39,5 @@ WebView 정책을 완화해 링크를 열 수는 없다. 다중 창을 켜면 re
 - Android에서 터미널 링크·OSC 8 hyperlink·`#123` 이슈 참조가 데스크톱·브라우저 Remote와 같은 대상을 연다. 표면별 동작 차이는 "새 탭" 대 "OS 브라우저"뿐이다.
 - APK의 JavaScript 노출 표면이 메서드 하나 늘어난다. 이 메서드는 `http`/`https` URL을 사용자 기본 브라우저에 넘기는 것 외의 권한을 갖지 않으며, bridge surface 테스트가 Remote/pairing 각각의 허용 메서드 집합을 고정한다.
 - PC의 `page.html`과 APK는 독립 배포된다. 새 PC + 구버전 APK는 링크가 계속 열리지 않고, 구버전 PC + 새 APK는 bridge 메서드가 호출되지 않는다. 두 조합 모두 기존 동작으로 안전하게 축퇴한다.
-- 자동 검증은 URL 정책 단위 테스트, bridge surface 테스트, `page.html` 자산 문자열 테스트, Remote 문서를 Android wrapper 모드로 구동해 링크 탭이 bridge를 호출하고 새 탭을 만들지 않음을 확인하는 e2e다. 실기 검증은 실제 브라우저 실행과 복귀 후 session 유지다.
+- 자동 검증은 URL 정책 단위 테스트, bridge surface 테스트, `page.html` 자산 문자열 테스트, Remote 문서를 Android wrapper 모드로 구동해 링크 탭이 bridge를 호출하고 새 탭을 만들지 않음을 확인하는 e2e다. `MainActivity`의 surface gate와 intent flag 조합은 JVM 단위 테스트 범위 밖이라 자동 검증이 없다. 실기 검증은 실제 브라우저 실행과 복귀 후 session 유지다.
 - 재검토 조건은 앱 내 브라우징(Custom Tabs)이 필요해지거나, Remote가 파일·디렉터리처럼 브라우저 대상이 아닌 링크 종류를 Android에서 열어야 할 때다.
