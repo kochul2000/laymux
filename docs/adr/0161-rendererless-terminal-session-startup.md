@@ -1,6 +1,6 @@
 # 0161. 터미널 세션 시작과 DOM 렌더러 시작을 분리한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-16
 - Source: 사용자 RDP 최소 폭 재현 요구, `docs/architecture/overview.md` §3.2, `docs/architecture/data-flow.md` §8·§13.5, [ADR-0043](0043-global-terminal-ready-startup-slot.md), [ADR-0127](0127-terminal-startup-slot-follows-eligibility.md), [ADR-0138](0138-remote-opens-queued-panes-on-entry.md)
 
