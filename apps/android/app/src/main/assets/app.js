@@ -108,7 +108,8 @@
     const confirmationPending = status.confirmationPending === true;
     const biometricRequired = status.biometricRequired !== false;
     const biometricAvailable = status.biometricAvailable === true;
-    const biometricBlocked = biometricRequired && !biometricAvailable;
+    const biometricBlocked =
+      status.biometricRequired === true && status.biometricAvailable === false;
     const remoteConnected = status.remoteConnected === true;
     const remoteConnecting = status.remoteConnecting === true;
     const pairingTotal = Array.isArray(status.pairings)

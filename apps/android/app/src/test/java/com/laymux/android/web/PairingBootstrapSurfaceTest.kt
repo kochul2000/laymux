@@ -40,6 +40,11 @@ class PairingBootstrapSurfaceTest {
         val script = asset("app.js").readText()
 
         assertTrue(html.contains("id=\"connectionSettings\""))
+        assertTrue(
+            script.contains(
+                "status.biometricRequired === true && status.biometricAvailable === false",
+            ),
+        )
         assertTrue(script.contains("보호 설정 열기"))
         assertTrue(script.contains("connectionSettings.open = true"))
         assertTrue(script.contains("QR 스캔을 계속하려면"))
