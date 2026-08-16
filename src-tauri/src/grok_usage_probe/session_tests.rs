@@ -428,14 +428,10 @@ Resets: Jun 1, 00:00
         .query()
         .expect("query");
     let keys: Vec<&str> = outcome.rows.iter().map(|row| row.key.as_str()).collect();
-    assert_eq!(keys, ["weekly", "credits", "monthly"]);
-    assert_eq!(
-        outcome
-            .rows
-            .iter()
-            .find(|row| row.key == "monthly")
-            .and_then(|row| row.percent),
-        Some(10.0)
+    assert_eq!(keys, ["weekly", "credits"]);
+    assert!(
+        outcome.rows.iter().all(|row| row.key != "monthly"),
+        "legacy Monthly limit is a section boundary, not a snapshot row"
     );
 }
 

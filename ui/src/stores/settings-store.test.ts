@@ -1007,6 +1007,7 @@ describe("settings-store", () => {
       expect(usage.codex.refreshSeconds).toBe(600);
       expect(usage.codex.configDirs).toEqual([]);
       expect(usage.codex.visibleRows).toEqual(["weekly", "sparkWeekly"]);
+      expect(usage.grok.visibleRows).toEqual(["weekly"]);
       // Each agent defaults to the colour the rest of the app marks it with.
       expect(usage.claude.colors).toEqual({ used: "#d97757", pace: "#f9e2af", track: "#585858" });
       expect(usage.codex.colors).toEqual({ used: "#10a37f", pace: "#f9e2af", track: "#585858" });
@@ -1068,6 +1069,13 @@ describe("settings-store", () => {
       const { usage } = useSettingsStore.getState();
       expect(usage.codex.visibleRows).toEqual(["weekly"]);
       expect(usage.claude.visibleRows).toEqual(["session", "weekAll", "weekModel"]);
+    });
+
+    it("drops a saved Grok monthly row and keeps the remaining selection", () => {
+      useSettingsStore.getState().loadFromSettings({
+        usage: { grok: { visibleRows: ["weekly", "monthly", "credits"] } },
+      } as never);
+      expect(useSettingsStore.getState().usage.grok.visibleRows).toEqual(["weekly", "credits"]);
     });
 
     it("keeps Codex account homes and per-agent colors in usage settings", () => {

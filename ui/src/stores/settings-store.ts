@@ -215,7 +215,7 @@ export function normalizeUsageVisibleRows(value: unknown): UsageVisibleRow[] {
 export const CODEX_USAGE_VISIBLE_ROW_KEYS = ["weekly", "sparkWeekly"] as const;
 export type CodexUsageVisibleRow = (typeof CODEX_USAGE_VISIBLE_ROW_KEYS)[number];
 
-export const GROK_USAGE_VISIBLE_ROW_KEYS = ["weekly", "monthly", "credits", "payg"] as const;
+export const GROK_USAGE_VISIBLE_ROW_KEYS = ["weekly", "credits", "payg"] as const;
 export type GrokUsageVisibleRow = (typeof GROK_USAGE_VISIBLE_ROW_KEYS)[number];
 
 export const DEFAULT_CODEX_USAGE_VISIBLE_ROWS: CodexUsageVisibleRow[] = [
@@ -228,7 +228,7 @@ export function normalizeCodexUsageVisibleRows(value: unknown): CodexUsageVisibl
   return rows.length > 0 ? rows : [...DEFAULT_CODEX_USAGE_VISIBLE_ROWS];
 }
 
-export const DEFAULT_GROK_USAGE_VISIBLE_ROWS: GrokUsageVisibleRow[] = ["weekly", "monthly"];
+export const DEFAULT_GROK_USAGE_VISIBLE_ROWS: GrokUsageVisibleRow[] = ["weekly"];
 
 export function normalizeGrokUsageVisibleRows(value: unknown): GrokUsageVisibleRow[] {
   if (!Array.isArray(value)) return [...DEFAULT_GROK_USAGE_VISIBLE_ROWS];

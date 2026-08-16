@@ -719,7 +719,6 @@
       "grokProfile": "실행 프로필",
       "grokProfileDesc": "grok가 설치된 셸의 프로필",
       "grokRefreshDesc": "초 단위. 프로세스 비용 때문에 600~3600으로 맞춰진다",
-      "rowMonthly": "Monthly limit",
       "rowCredits": "Credits",
       "rowPayg": "Pay-as-you-go",
       "grokConfigDirs": "추가 홈",

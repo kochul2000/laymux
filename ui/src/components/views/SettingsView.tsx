@@ -4459,7 +4459,6 @@ function UsageSection() {
   };
   const grokVisibleRowLabels: Record<GrokUsageVisibleRow, string> = {
     weekly: t("usage.rowWeekly"),
-    monthly: t("usage.rowMonthly"),
     credits: t("usage.rowCredits"),
     payg: t("usage.rowPayg"),
   };
