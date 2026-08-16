@@ -100,7 +100,8 @@ endpoint로 POST한다. 성공 응답의 bounded HttpOnly cookie만 Android cook
 생체 인증을 요구한다. 강한 생체 인증을 쓸 수 없는 기기는 보호된 pairing을 막으며, 사용자가
 경고를 확인해 설정을 끈 경우에만 앱 전용 Android Keystore 키만 사용한다. 이 상태에서는 pairing
 화면이 연결 설정을 자동으로 펼치고 `보호 설정 열기` 동작과 opt-out 절차를 표시한다. 보호 설정을
-바꾸거나 생체 등록 정보가 변경되면 기존 키를 재포장하지 않고 다시 pairing해야 한다.
+바꾸거나 생체 등록 정보가 변경되면 기존 키를 재포장하지 않고 다시 pairing해야 한다. API 28의
+`androidx.biometric`도 내부 AppCompat dialog를 사용하므로 Activity theme은 AppCompat 계열을 유지한다.
 
 Google Code Scanner는 Google Play services의 on-device scanner UI를 사용한다. 앱 자체는 camera
 permission을 선언하지 않는다. 최초 실행에서 scanner module이 아직 설치되지 않았다면 인터넷에
