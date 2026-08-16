@@ -13,6 +13,7 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -333,6 +334,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
+            )
+            addView(
+                Button(this@MainActivity).apply {
+                    text = "연결 취소"
+                    setOnClickListener { cancelRemoteConnection() }
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = (20 * density).toInt() },
             )
         }
     }
@@ -1746,6 +1757,33 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun disconnectRemote() {
         showCloudDashboard()
+    }
+
+    /**
+     * Aborts an in-progress connection: the biometric/handshake phase on the
+     * pairing surface and the resource-streaming phase behind the loading
+     * overlay. The active generation bump makes the in-flight open observe
+     * cancellation; an already-established idle session is left to
+     * disconnect/expiry instead.
+     */
+    fun cancelRemoteConnection() {
+        val opening = remoteConnecting || remoteOpeningSession != null
+        val streamingRemoteUi = remoteSession != null &&
+            ::remoteLoadingOverlay.isInitialized &&
+            remoteLoadingOverlay.visibility == View.VISIBLE
+        if (!opening && !streamingRemoteUi) return
+        // A pending CONNECT decryption must die with the attempt — a late
+        // biometric success would otherwise revive the cancelled connection.
+        if (pendingDecryptionPurpose == DecryptionPurpose.CONNECT) {
+            pendingDecryption?.close()
+            pendingDecryption = null
+            pendingDecryptionPurpose = null
+        }
+        closeRemoteSession()
+        if (localWebSurface == LocalWebSurface.REMOTE) {
+            showPairingSurface()
+        }
+        notifyPairingChanged(notice = "보안 세션 연결을 취소했습니다.")
     }
 
     private fun closeRemoteSession() {

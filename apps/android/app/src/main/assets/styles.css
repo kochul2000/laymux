@@ -288,6 +288,19 @@ button:disabled {
   background: var(--accent);
 }
 
+/* 연결 시도 중 connectButton은 취소 동작으로 바뀐다 — 채움색을 빼서
+   진행을 멈추는 버튼임이 드러나게 한다. */
+.primary.is-cancel {
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.primary.is-cancel:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
 .secondary,
 .compact {
   border: 1px solid var(--border-strong);

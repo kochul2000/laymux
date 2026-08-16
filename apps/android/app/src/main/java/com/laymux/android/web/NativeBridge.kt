@@ -43,6 +43,11 @@ class NativeBridge(
     }
 
     @JavascriptInterface
+    fun cancelRemoteConnection() {
+        activity.runOnUiThread(activity::cancelRemoteConnection)
+    }
+
+    @JavascriptInterface
     fun disconnectRemote() {
         activity.runOnUiThread(activity::disconnectRemote)
     }
