@@ -43,13 +43,14 @@ const commonJsMouseReportRepetition = "for(let o=0;o<n;o++)";
 const moduleAltBufferRepetition = "c.repeat(Math.abs(h))";
 const commonJsAltBufferRepetition = "s.repeat(Math.abs(i))";
 const moduleTextareaDiffSkipSending =
-  "setTimeout(()=>{if(!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+  "_handleAnyTextareaChanges(){let t=this._textarea.value,s=this._compositionEpoch||0;setTimeout(()=>{if(s===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
 const commonJsTextareaDiffSkipSending =
-  "setTimeout((()=>{if(!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
+  "_handleAnyTextareaChanges(){const e=this._textarea.value,o=this._compositionEpoch||0;setTimeout((()=>{if(o===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
 const staleModuleTextareaDiffSkipSending =
-  "setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
+  "_handleAnyTextareaChanges(){let t=this._textarea.value;setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
 const staleCommonJsTextareaDiffSkipSending =
-  "setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
+  "_handleAnyTextareaChanges(){const e=this._textarea.value;setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
+const compositionEpochBump = "this._compositionEpoch=(this._compositionEpoch||0)+1";
 
 describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
@@ -126,5 +127,8 @@ describe("pinned xterm bundle patches", () => {
     expect(moduleSource).not.toContain(staleModuleTextareaDiffSkipSending);
     expect(commonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
     expect(remoteCommonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
+    expect(moduleSource).toContain(compositionEpochBump);
+    expect(commonJsSource).toContain(compositionEpochBump);
+    expect(remoteCommonJsSource).toContain(compositionEpochBump);
   });
 });

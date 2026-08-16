@@ -331,6 +331,22 @@ describe("patched xterm composition keypress reconciliation", () => {
     expect(emitted.join("")).toBe("가");
   });
 
+  it("does not replay Hangul after an immediate finalize from a following keydown", async () => {
+    // 229 schedules the textarea-diff timer, compositionend queues the
+    // delayed finalizer, then a real keydown force-finalizes and clears
+    // `_isSendingComposition`. The earlier timer must not send `가` again
+    // after that (`가a가`).
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    dispatchKeydown(textarea, "Process", "Process", 229);
+    startComposition(textarea, "가");
+    endComposition(textarea, "가");
+    dispatchKeydown(textarea, "a", "KeyA", 65);
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("가a");
+  });
+
   it("still forwards a 229 textarea insertion when no composition starts", async () => {
     const { emitted, textarea } = openTerminal();
     textarea.focus();

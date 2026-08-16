@@ -17,9 +17,9 @@ Windows IME는 첫 한글 키에서 `compositionstart`보다 먼저 `keydown` 22
 
 ## Decision
 
-**`_handleAnyTextareaChanges`의 deferred textarea-diff는 `_isComposing`이거나 `_isSendingComposition`이면 보내지 않는다.**
+**`_handleAnyTextareaChanges`의 deferred textarea-diff는 스냅샷 이후 조합이 시작됐거나, `_isComposing`이거나, `_isSendingComposition`이면 보내지 않는다.**
 
-pending generation이 있는 동안 `_isSendingComposition`은 true로 유지되므로, ADR-0093 큐와 stock finalizer 모두에서 같은 음절을 두 번 쓰지 않는다. 조합이 시작되지 않은 229 삽입(IME가 켜진 상태의 숫자·구두점)은 두 플래그가 모두 false이므로 기존처럼 보낸다. ESM·CJS·Remote 번들에 같은 설치 관문을 적용한다.
+`compositionstart`마다 `_compositionEpoch`를 올린다. 229 타이머는 예약 시점 epoch를 닫고, 발화 때 epoch가 바뀌었으면 그 스냅샷은 IME 조합의 시작이지 비조합 삽입이 아니므로 버린다. `_isSendingComposition`만 보면 이후 일반 keydown의 immediate finalize가 플래그를 내린 뒤 같은 `가`를 다시 보낸다. 조합이 시작되지 않은 229 삽입은 epoch가 그대로이므로 기존처럼 보낸다. ESM·CJS·Remote 번들에 같은 설치 관문을 적용한다.
 
 ## Alternatives Considered
 
