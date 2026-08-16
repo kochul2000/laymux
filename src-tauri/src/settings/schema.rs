@@ -149,7 +149,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/usage/grok",
-        description: "Grok Build 사용량 probe 및 GrokUsageView 표시 설정입니다. profile 은 grok 를 실행할 터미널 프로필(빈 값이면 defaultProfile), refreshSeconds 는 프로세스 비용 때문에 600초 미만으로는 적용되지 않습니다, configDirs 는 추가로 모니터링할 GROK_HOME 목록이며 visibleRows 는 weekly/monthly/credits/payg 입니다.",
+        description: "Grok Build 사용량 probe 및 GrokUsageView 표시 설정입니다. profile 은 grok 를 실행할 터미널 프로필(빈 값이면 defaultProfile), refreshSeconds 는 프로세스 비용 때문에 600초 미만으로는 적용되지 않습니다, configDirs 는 추가로 모니터링할 GROK_HOME 목록이며 visibleRows 는 weekly/credits/payg 입니다.",
         sensitive: false,
         apply_mode: ApplyMode::NextUse,
     },

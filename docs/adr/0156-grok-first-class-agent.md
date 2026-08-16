@@ -4,6 +4,7 @@
 - Date: 2026-08-13
 - Source: 사용자 요구(Claude/Codex activity·연동 설정·usage 패리티를 Grok Build에 적용). [ADR-0009](0009-process-tree-interactive-app-liveness.md), [ADR-0102](0102-claude-usage-probe-headless-pty.md), [ADR-0104](0104-codex-usage-app-server-probe.md), [ADR-0118](0118-codex-session-pid-attribution.md), [ADR-0120](0120-wsl-agent-session-attribution.md), [ADR-0134](0134-wsl-guest-interactive-app-liveness.md), [ADR-0125](0125-configurable-agent-launch-command.md), [ADR-0147](0147-output-volume-activity-and-app-declared-idle.md)
 - Extends: 0009, 0102, 0103, 0104, 0105, 0118, 0120, 0125, 0134, 0147
+- Amended by: [0167](0167-grok-usage-drops-legacy-monthly.md)
 
 ## Context
 

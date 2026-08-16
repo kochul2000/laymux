@@ -1149,7 +1149,7 @@ fn default_grok_usage_settings() -> UsageAgentSettings {
         profile: String::new(),
         refresh_seconds: default_usage_refresh_seconds(),
         config_dirs: Vec::new(),
-        visible_rows: vec!["weekly".into(), "monthly".into()],
+        visible_rows: vec!["weekly".into()],
         colors: UsageColorSettings::for_agent(default_grok_used_color()),
     }
 }

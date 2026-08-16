@@ -190,7 +190,7 @@ settings store 가 누락값을 `true`로 보완한다([ADR-0100](../adr/0100-pa
       "profile": "", // grok 를 실행할 터미널 프로필. 빈 값이면 defaultProfile
       "refreshSeconds": 600, // 프로세스 비용 clamp 600~3600
       "configDirs": [], // 추가 GROK_HOME. 기본 홈은 항상 포함
-      "visibleRows": ["weekly", "monthly"], // weekly/monthly/credits/payg. 하나 이상 필수
+      "visibleRows": ["weekly"], // weekly/credits/payg. 하나 이상 필수
       "colors": { "used": "#c084fc", "pace": "#f9e2af", "track": "#585858" }
     }
   }
@@ -207,7 +207,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 편집 UI 는 Settings → **Views → 사용량**이다. view 의 데이터 소스 설정이므로 Integrations 의 Claude/Codex(연동 동작) 섹션이 아니라 Views 그룹에 둔다.
 
-`visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 전체 행을 표시하는 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md)).
+`visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly, Grok는 weekly/credits/payg를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md), [ADR-0167](../adr/0167-grok-usage-drops-legacy-monthly.md)).
 
 **`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`, Grok `#c084fc`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 두 에이전트 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 두 브랜드색과 떨어져 있다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
 
@@ -820,7 +820,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | POST | `/api/v1/terminals/:id/write` | 터미널 입력 |
 | GET | `/api/v1/terminals/:id/output?lines=N` | 터미널 출력 읽기 |
 | GET | `/api/v1/usage` | Claude 사용량 스냅샷 목록 (config dir 당 1개 → `{ usage: [...], count }`). 각 항목은 `session` · `weekAll` · `weekModel`(+`weekModelLabel`, 예 `Fable`) 3행. 읽기 전용·부작용 없음 — probe 를 기동시키지 않으므로 빈 목록은 "구독 없음"을 뜻한다. `status.type === "ready"` 일 때만 숫자가 유효하고, `reset` 은 Claude Code 원문 그대로다 |
-| GET | `/api/v1/usage/grok` | Grok 사용량 스냅샷 목록 (GROK_HOME 당 1개 → `{ usage: [...], count }`). 읽기 전용·부작용 없음 — probe 를 기동시키지 않는다. 행 키는 `weekly`/`monthly`/`credits`/`payg` ([ADR-0156](../adr/0156-grok-first-class-agent.md)) |
+| GET | `/api/v1/usage/grok` | Grok 사용량 스냅샷 목록 (GROK_HOME 당 1개 → `{ usage: [...], count }`). 읽기 전용·부작용 없음 — probe 를 기동시키지 않는다. 행 키는 `weekly`/`credits`/`payg` ([ADR-0156](../adr/0156-grok-first-class-agent.md), [ADR-0167](../adr/0167-grok-usage-drops-legacy-monthly.md)) |
 | GET | `/api/v1/memos` | 모든 메모 목록 조회 (`cache/memo.json` → `{ memos: [{ key, content }, ...], count }`) |
 | GET | `/api/v1/memos/:key` | 특정 키의 메모 내용 조회 (없으면 404) |
 | GET | `/api/v1/notifications` | 알림 목록 |

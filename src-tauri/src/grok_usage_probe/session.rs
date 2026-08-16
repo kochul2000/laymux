@@ -290,7 +290,7 @@ fn is_grok_missing(screen: &str) -> bool {
 
 fn has_limit_rows(rows: &[GrokUsageRow]) -> bool {
     rows.iter()
-        .any(|row| matches!(row.key.as_str(), "weekly" | "monthly" | "credits" | "payg"))
+        .any(|row| matches!(row.key.as_str(), "weekly" | "credits" | "payg"))
 }
 
 fn has_limit_labels(screen: &str) -> bool {
@@ -302,7 +302,7 @@ fn has_limit_labels(screen: &str) -> bool {
         || lower.contains("pay-as-you-go")
 }
 
-/// New `/usage` modal header. Weekly/monthly live on the Usage limit tab.
+/// New `/usage` modal header. Weekly/credits/payg live on the Usage limit tab.
 fn is_usage_limit_modal(screen: &str) -> bool {
     let lower = screen.to_ascii_lowercase();
     lower.contains("usage limit")

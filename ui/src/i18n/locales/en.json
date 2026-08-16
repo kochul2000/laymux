@@ -719,7 +719,6 @@
       "grokProfile": "Shell profile",
       "grokProfileDesc": "Profile of the shell that has grok installed",
       "grokRefreshDesc": "Seconds. Process cost pins this to 600-3600",
-      "rowMonthly": "Monthly limit",
       "rowCredits": "Credits",
       "rowPayg": "Pay-as-you-go",
       "grokConfigDirs": "Additional homes",

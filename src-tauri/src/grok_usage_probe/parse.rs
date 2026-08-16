@@ -55,6 +55,9 @@ pub fn parse_grok_usage_screen(screen: &str) -> Vec<GrokUsageRow> {
             });
         }
     }
+    // Legacy Monthly limit is only a section boundary. SuperGrok's live
+    // quota is the weekly pool; do not emit a monthly snapshot row.
+    rows.retain(|row| row.key != "monthly");
     rows
 }
 
@@ -193,13 +196,12 @@ Pay-as-you-go: $3 used of $20 limit
         let rows = parse_grok_usage_screen(screen);
         assert_eq!(
             rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
-            ["weekly", "monthly", "credits", "payg"]
+            ["weekly", "credits", "payg"]
         );
         assert_eq!(rows[0].percent, Some(42.0));
-        assert_eq!(rows[1].percent, Some(10.0));
-        assert_eq!(rows[2].percent, None);
-        assert_eq!(rows[2].remaining, Some(12.0));
-        assert_eq!(rows[3].percent, Some(15.0));
+        assert_eq!(rows[1].percent, None);
+        assert_eq!(rows[1].remaining, Some(12.0));
+        assert_eq!(rows[2].percent, Some(15.0));
         assert_eq!(rows[0].reset.as_deref(), Some("Mon 9am"));
     }
 
@@ -228,12 +230,11 @@ Pay-as-you-go: $3 used of $20 limit
         let rows = parse_grok_usage_screen(screen);
         assert_eq!(
             rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
-            ["weekly", "monthly", "credits", "payg"]
+            ["weekly", "credits", "payg"]
         );
         assert_eq!(rows[0].percent, Some(42.0));
-        assert_eq!(rows[1].percent, Some(10.0));
-        assert_eq!(rows[2].remaining, Some(12.0));
-        assert_eq!(rows[3].percent, Some(15.0));
+        assert_eq!(rows[1].remaining, Some(12.0));
+        assert_eq!(rows[2].percent, Some(15.0));
     }
 
     #[test]
@@ -300,15 +301,14 @@ Credits: $12.34
         let rows = parse_grok_usage_screen(screen);
         assert_eq!(
             rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
-            ["weekly", "monthly", "credits"]
+            ["weekly", "credits"]
         );
         assert_eq!(rows[0].reset.as_deref(), Some("May 29, 00:00"));
-        assert_eq!(rows[1].reset.as_deref(), Some("Jun 1, 00:00"));
-        assert_eq!(rows[2].reset, None);
+        assert_eq!(rows[1].reset, None);
     }
 
     #[test]
-    fn parse_pairs_monthly_header_with_following_percent_bar() {
+    fn parse_drops_legacy_monthly_header() {
         let screen = "\
 Monthly limit
 
@@ -316,10 +316,7 @@ Monthly limit
 Resets: Jun 1, 00:00
 ";
         let rows = parse_grok_usage_screen(screen);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].key, "monthly");
-        assert_eq!(rows[0].percent, Some(10.0));
-        assert_eq!(rows[0].reset.as_deref(), Some("Jun 1, 00:00"));
+        assert!(rows.is_empty());
     }
 
     #[test]

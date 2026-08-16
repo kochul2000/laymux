@@ -148,7 +148,6 @@ export function buildCodexUsageRows(
 
 const GROK_ROW_LABELS: Record<GrokUsageVisibleRow, { label: string; short: string }> = {
   weekly: { label: "Weekly limit", short: "Week" },
-  monthly: { label: "Monthly limit", short: "Month" },
   credits: { label: "Credits", short: "Credits" },
   payg: { label: "Pay-as-you-go", short: "PAYG" },
 };
