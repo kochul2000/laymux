@@ -408,6 +408,15 @@ mod tests {
         assert!(html.contains("Native performs the encrypted background transition"));
         assert!(!html.contains("androidBackgroundLeaseSeconds()"));
         assert!(html.contains("window.LaymuxNative.requestRemoteHttp"));
+        assert!(html.contains("function cancelAndroidRemoteHttp(requestId)"));
+        assert!(html.contains(
+            "if (typeof window.LaymuxNative?.cancelRemoteHttp !== \"function\") return;"
+        ));
+        assert!(html.contains("const androidHttpDocumentId = (() => {"));
+        assert!(html.contains("cancelAndroidRemoteHttp(requestId);"));
+        assert!(!html.contains(
+            "typeof window.LaymuxNative.cancelRemoteHttp === \"function\" &&"
+        ));
         assert!(html.contains("window.LaymuxOutputTransport.postMessage"));
         assert!(html.contains("outputSocket.acknowledge()"));
         assert!(!html.contains("window.LaymuxNative.openRemoteOutput"));
