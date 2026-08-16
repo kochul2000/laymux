@@ -88,11 +88,11 @@ internal class RemoteResourceCache(
             val cacheControl = response.headers["cache-control"] ?: return null
             var maxAgeSeconds: Long? = null
             for (directive in cacheControl.split(',')) {
-                val normalized = directive.trim().lowercase()
-                if (normalized == "no-store" || normalized == "no-cache") return null
-                if (normalized.startsWith("max-age=")) {
-                    maxAgeSeconds = normalized.substringAfter('=').trim()
-                        .toLongOrNull()
+                val parts = directive.trim().lowercase().split('=', limit = 2)
+                when (parts[0].trim()) {
+                    "no-store", "no-cache" -> return null
+                    "max-age" -> maxAgeSeconds = parts.getOrNull(1)?.trim()
+                        ?.toLongOrNull()
                         ?.takeIf { it > 0 }
                 }
             }

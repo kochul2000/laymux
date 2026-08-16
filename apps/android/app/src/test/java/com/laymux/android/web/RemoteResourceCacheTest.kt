@@ -39,6 +39,9 @@ class RemoteResourceCacheTest {
         assertNull(RemoteResourceCache.cacheTtlSeconds(response("max-age=0")))
         assertNull(RemoteResourceCache.cacheTtlSeconds(response("max-age=weird")))
         assertNull(RemoteResourceCache.cacheTtlSeconds(response("max-age=60", status = 404)))
+        // Lenient with whitespace and directive arguments, still fail closed.
+        assertEquals(86_400L, RemoteResourceCache.cacheTtlSeconds(response("private, max-age = 86400")))
+        assertNull(RemoteResourceCache.cacheTtlSeconds(response("no-cache=\"set-cookie\", max-age=60")))
     }
 
     @Test
