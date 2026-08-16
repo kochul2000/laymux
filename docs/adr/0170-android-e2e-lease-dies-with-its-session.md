@@ -1,6 +1,6 @@
 # 0170. Android E2E 세션으로 claim 한 controller lease 는 그 세션과 함께 죽는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-17
 - Source: 실기기 재현("잠깐 연결되고 409, 재접속해도 계속 409") · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0037](0037-remote-lease-takeover-and-pagehide-release.md) 계열 lease 의미론
 - Extends: ADR-0146
