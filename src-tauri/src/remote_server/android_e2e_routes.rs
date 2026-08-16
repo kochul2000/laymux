@@ -130,12 +130,20 @@ pub(super) async fn remote_android_e2e_rpc(
         Err(error) => return no_store(e2e_error_response(error)),
     };
     let dispatch_server = server.clone();
+    // The claim handler binds the granted lease to this session (ADR-0170), so
+    // the internally re-injected request carries which session is asking.
+    let claim_context = super::lease::AndroidE2eClaimContext {
+        instance_id: session.instance_id.clone(),
+        session_id: session.session_id.clone(),
+    };
     no_store(
         match session
             .process(
                 envelope,
                 || unix_time_now().map_err(E2eError::Internal),
-                move |request| dispatch_plain_request(dispatch_server, request),
+                move |request| {
+                    dispatch_plain_request(dispatch_server, claim_context.clone(), request)
+                },
             )
             .await
         {
@@ -165,13 +173,17 @@ async fn load_material(
     })?
 }
 
-async fn dispatch_plain_request(server: ServerState, value: Value) -> Result<Value, AppError> {
+async fn dispatch_plain_request(
+    server: ServerState,
+    claim_context: super::lease::AndroidE2eClaimContext,
+    value: Value,
+) -> Result<Value, AppError> {
     let request: PlainRequest = serde_json::from_value(value)
         .map_err(|_| AppError::Other("Android E2E plaintext request is invalid".into()))?;
     match request {
         PlainRequest::Resource { path } => dispatch_resource(server, &path).await,
         PlainRequest::Http { method, path, body } => {
-            dispatch_http(server, &method, &path, body).await
+            dispatch_http(server, claim_context, &method, &path, body).await
         }
         PlainRequest::BackgroundTransition { lease_id } => {
             if !valid_remote_identifier(&lease_id) {
@@ -291,6 +303,7 @@ async fn dispatch_resource(server: ServerState, path: &str) -> Result<Value, App
 
 async fn dispatch_http(
     server: ServerState,
+    claim_context: super::lease::AndroidE2eClaimContext,
     method: &str,
     path: &str,
     body: Option<Value>,
@@ -315,6 +328,7 @@ async fn dispatch_http(
         .body(Body::from(encoded_body))
         .map_err(|error| AppError::Other(format!("Android E2E request build failed: {error}")))?;
     request.extensions_mut().insert(TunnelAuthorized);
+    request.extensions_mut().insert(claim_context);
     request.extensions_mut().insert(ConnectInfo(SocketAddr::new(
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         0,

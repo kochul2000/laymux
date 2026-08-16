@@ -1255,6 +1255,8 @@ resource 응답 중 desktop이 `Cache-Control: max-age>0`으로 명시하고 `no
 
 RPC plaintext `kind=http`는 session status/claim/heartbeat/release, navigation/widgets/notification/workspace/terminal Remote 동작의 exact method/path만 desktop 내부 Remote router에 재주입한다. PC page가 async request id와 JSON body를 native bridge에 넘기며 Kotlin은 terminal·workspace·lease 의미를 해석하지 않는다. terminal output은 RPC가 아니며 `terminalOutputOpen`과 `terminalOutputPoll` tag를 거부한다.
 
+E2E 경로의 claim 은 lease 를 그 세션에 결합한다([ADR-0170](../adr/0170-android-e2e-lease-dies-with-its-session.md)). rpc 핸들러가 재주입 요청에 crate 내부 extension 으로 `(instanceId, sessionId)`를 싣고, claim 핸들러는 granted lease 를 그 신원으로 태깅한다. 이후 claim 전처리에서 태그된 세션이 registry 에 살아있지 않으면(새 establish 의 revoke, 15분 만료, pairing revision 변경) 그 lease 를 heartbeat 만료와 같은 owner transition 으로 즉시 해제해, 재접속이 자기 자신의 죽은 lease 와 heartbeat timeout 까지 409 로 싸우지 않게 한다. browser claim(태그 없음)과 살아있는 세션의 lease 의미론은 불변이다.
+
 RPC plaintext의 field 이름은 tag와 마찬가지로 camelCase가 정본이다. `resource`는 `path`, `http`는 `method`·`path`·`body`, `backgroundTransition`은 `leaseId`를 보낸다. desktop은 알 수 없는 tag와 field를 거부하며 Rust field 철자(`lease_id` 등)는 계약이 아니다.
 
 cloud server의 세 public POST route는 public origin에서만 받고 challenge/establish는 4 KiB request·8 KiB response, RPC는 2 MiB request·6 MiB response로 제한한다. exact Pydantic schema, IP·instance별 rate limit, 기존 user/IP concurrency limit을 적용하고 caller가 desktop path/header/query를 고르지 못하게 하며 모든 desktop E2E HTTP 응답은 `Cache-Control: no-store`다. challenge/establish는 body parsing 전부터 기존 인증 시도 제한(기본 60초당 30회)을 쓰고, control/resource RPC는 별도 bounded limiter `ANDROID_E2E_RPC_RATE_LIMIT_ATTEMPTS`(기본 같은 60초 window당 1200회)를 IP와 instance 각각에 적용한다.

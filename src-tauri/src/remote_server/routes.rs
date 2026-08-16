@@ -36,8 +36,8 @@ use super::lease::{
     active_lease_matches_with_timeout, effective_heartbeat_timeout_seconds,
     emit_remote_control_status, get_remote_control_status, reclaim_lockout_active,
     require_active_lease, status_from_state, wait_for_remote_owner_transition_async,
-    ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease, RemoteControlState,
-    RemoteControlStatus, RemoteOwnerTransition,
+    AndroidE2eClaimContext, ClaimReservationAttempt, HumanControlOrigin, RemoteControlLease,
+    RemoteControlState, RemoteControlStatus, RemoteOwnerTransition,
 };
 use super::navigation_routes::{
     remote_layouts_list, remote_navigation, remote_notification_mark_read,
@@ -408,9 +408,17 @@ fn complete_handoff_claim_attempt(
 async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    claim_context: Option<axum::Extension<AndroidE2eClaimContext>>,
     Json(body): Json<ClaimRequest>,
 ) -> Response {
     let remote_addr = addr.to_string();
+    // A lease claimed through an E2E session must not outlive that session:
+    // a reconnecting phone otherwise fights its own dead lease with 409s
+    // until the heartbeat timeout (ADR-0170). The registry is consulted
+    // outside the controller lock; the release re-validates under it.
+    if let Some(response) = release_dead_android_e2e_lease(&server) {
+        return response;
+    }
     let attempt =
         match with_effective_remote_control_state(&server.app_state, |settings, current| {
             attempt_claim(settings, current, &body, &remote_addr, true)
@@ -442,6 +450,14 @@ async fn remote_session_claim(
 
     match attempt {
         ClaimAttempt::Granted(response) => {
+            if let (Some(axum::Extension(context)), Some(lease_id)) =
+                (claim_context.as_ref(), response.status.lease_id.as_ref())
+            {
+                match server.app_state.remote_control.lock_or_err() {
+                    Ok(mut control) => control.tag_android_e2e_lease(lease_id, context),
+                    Err(err) => return internal_error(err),
+                }
+            }
             emit_remote_control_status(&server.app_handle, &response.status);
             Json(*response).into_response()
         }
@@ -451,6 +467,38 @@ async fn remote_session_claim(
             "remote controller lease is not active",
         ),
     }
+}
+
+/// Releases a controller lease whose Android E2E session is gone (revoked by
+/// a newer establish or expired). Returns an error response only on lock
+/// failure; "nothing to release" is a normal claim precondition.
+fn release_dead_android_e2e_lease(server: &ServerState) -> Option<Response> {
+    let tag = match server.app_state.remote_control.lock_or_err() {
+        Ok(control) => control.active_android_e2e_lease(),
+        Err(err) => return Some(internal_error(err)),
+    };
+    let tag = tag?;
+    let now_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    if server
+        .app_state
+        .android_e2e
+        .session_is_active(&tag.instance_id, &tag.session_id, now_epoch)
+    {
+        return None;
+    }
+    let released = match server.app_state.remote_control.lock_or_err() {
+        Ok(mut control) => control.release_android_e2e_lease_of_dead_session(&tag, Instant::now()),
+        Err(err) => return Some(internal_error(err)),
+    };
+    if released {
+        if let Ok(status) = get_remote_control_status(&server.app_state) {
+            emit_remote_control_status(&server.app_handle, &status);
+        }
+    }
+    None
 }
 
 fn duration_millis_ceil(duration: Duration) -> u64 {

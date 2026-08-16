@@ -32,9 +32,28 @@ pub struct RemoteControlLease {
     pub last_heartbeat: Instant,
 }
 
+/// Which Android E2E session performed a claim. Injected into the internally
+/// re-dispatched `kind=http` request by the E2E RPC handler (ADR-0170) so the
+/// claim can bind the lease to its session's lifetime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AndroidE2eClaimContext {
+    pub instance_id: String,
+    pub session_id: String,
+}
+
+/// The lease currently bound to an Android E2E session. Only honored while
+/// `lease_id` still names the active lease, so stale tags are inert.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AndroidE2eLeaseTag {
+    pub lease_id: String,
+    pub instance_id: String,
+    pub session_id: String,
+}
+
 #[derive(Debug, Default)]
 pub struct RemoteControlState {
     pub lease: Option<RemoteControlLease>,
+    pub(crate) android_e2e_lease: Option<AndroidE2eLeaseTag>,
     pub reclaim_lockout_until: Option<Instant>,
     /// Monotonic generation for the process-global human controller owner.
     pub owner_epoch: u64,
@@ -346,11 +365,57 @@ impl RemoteControlState {
             phase: RemoteLeasePhase::Active,
         });
         self.lease = Some(lease);
+        // A fresh lease starts unbound; the E2E claim handler re-tags it when
+        // the claim arrived through an encrypted session.
+        self.android_e2e_lease = None;
         self.transitioning = false;
         self.transition_deadline = None;
         self.resume_capability = None;
         self.file_viewer_capability = None;
         self.cancel_claim_reservation();
+    }
+
+    /// Binds the active lease to the Android E2E session that claimed it.
+    /// No-op when the lease already changed hands.
+    pub(crate) fn tag_android_e2e_lease(
+        &mut self,
+        lease_id: &str,
+        context: &AndroidE2eClaimContext,
+    ) {
+        if self.lease.as_ref().map(|lease| lease.lease_id.as_str()) != Some(lease_id) {
+            return;
+        }
+        self.android_e2e_lease = Some(AndroidE2eLeaseTag {
+            lease_id: lease_id.to_string(),
+            instance_id: context.instance_id.clone(),
+            session_id: context.session_id.clone(),
+        });
+    }
+
+    /// The tag of the active lease, if it is bound to an E2E session.
+    pub(crate) fn active_android_e2e_lease(&self) -> Option<AndroidE2eLeaseTag> {
+        let tag = self.android_e2e_lease.as_ref()?;
+        let lease = self.lease.as_ref()?;
+        (lease.lease_id == tag.lease_id).then(|| tag.clone())
+    }
+
+    /// Releases the active lease when the E2E session that claimed it is gone
+    /// (revoked by a newer establish, or expired). Same shutdown an expiry
+    /// takes: begin the owner transition and finalize it if already drained.
+    /// Returns true when the lease state changed.
+    pub(crate) fn release_android_e2e_lease_of_dead_session(
+        &mut self,
+        tag: &AndroidE2eLeaseTag,
+        now: Instant,
+    ) -> bool {
+        if self.active_android_e2e_lease().as_ref() != Some(tag) {
+            return false;
+        }
+        self.android_e2e_lease = None;
+        if let Some(transition) = self.begin_remote_owner_transition(now) {
+            self.finalize_owner_transition_if_drained(transition);
+        }
+        true
     }
 
     /// Observe the sticky absolute lease deadline. Once this returns `true`,
@@ -1365,6 +1430,63 @@ mod tests {
 
         settings.heartbeat_timeout_seconds = 60;
         assert_eq!(effective_heartbeat_timeout_seconds(&settings), 60);
+    }
+
+    /// ADR-0170: a lease claimed through an E2E session dies with the session.
+    /// A reconnecting phone was otherwise stuck behind its own dead lease with
+    /// 409s until the heartbeat timeout.
+    #[test]
+    fn android_e2e_lease_tag_binds_and_releases_with_its_session() {
+        let now = Instant::now();
+        let mut state = RemoteControlState::default();
+        state.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "relay".into(),
+                client_name: None,
+                last_heartbeat: now,
+            },
+            Duration::from_secs(45),
+        );
+        let context = AndroidE2eClaimContext {
+            instance_id: "desktop-7".into(),
+            session_id: "session-a".into(),
+        };
+
+        // Tagging binds only the currently active lease id.
+        state.tag_android_e2e_lease("lease-0", &context);
+        assert!(state.active_android_e2e_lease().is_none());
+        state.tag_android_e2e_lease("lease-1", &context);
+        let tag = state.active_android_e2e_lease().expect("lease tagged");
+        assert_eq!(tag.session_id, "session-a");
+
+        // A stale tag from an earlier lease never releases the current one.
+        let stale = AndroidE2eLeaseTag {
+            lease_id: "lease-0".into(),
+            instance_id: tag.instance_id.clone(),
+            session_id: tag.session_id.clone(),
+        };
+        assert!(!state.release_android_e2e_lease_of_dead_session(&stale, now));
+        assert!(state.lease.is_some());
+
+        // The exact tag releases through the same owner transition an expiry
+        // takes, so a drained state drops the lease immediately.
+        assert!(state.release_android_e2e_lease_of_dead_session(&tag, now));
+        assert!(state.lease.is_none());
+        assert!(state.active_android_e2e_lease().is_none());
+        assert!(!state.release_android_e2e_lease_of_dead_session(&tag, now));
+
+        // A successor lease starts unbound until its own claim re-tags it.
+        state.install_remote_lease(
+            RemoteControlLease {
+                lease_id: "lease-2".into(),
+                remote_addr: "relay".into(),
+                client_name: None,
+                last_heartbeat: now,
+            },
+            Duration::from_secs(45),
+        );
+        assert!(state.active_android_e2e_lease().is_none());
     }
 
     #[test]
