@@ -413,9 +413,12 @@ test.describe("remote mobile layout", () => {
     // Device-local settings remain reachable before a lease exists.
     await page.locator("#drawerBack").click();
     await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#widgetStripToggle")).toBeEnabled();
     await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await page.locator("#drawerConnectionButton").click();
+    await expect(page.locator("#drawerBack")).toBeFocused();
 
     await page.locator("#connect").click();
     await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
@@ -432,20 +435,25 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator(".drawer-header")).toHaveCSS("height", "32px");
 
     await page.locator("#drawerNotificationsButton").click();
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerNotificationsView")).toBeVisible();
     await expect(page.locator("#notificationSection")).toBeVisible();
     await expect(page.locator("#drawerTitle")).toHaveText("Notifications");
     await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerNotificationsButton")).toBeFocused();
 
     await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
     await expect(page.locator("#displaySection")).toBeVisible();
     await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
 
     await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerSettingsButton")).toBeFocused();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
     await page.locator("#drawerConnectionButton").click();
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerConnectionView")).toBeVisible();
     await expect(page.locator(".connection-panel")).toBeVisible();
 

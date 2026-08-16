@@ -2332,6 +2332,7 @@
         // hides and restores together with the soft keyboard.
         let composerCollapsed = false;
         let dockPanelOpen = false;
+        let drawerView = "workspace";
         let hiddenWorkspaceShelfOpen = false;
         let touchGesture = null;
         let touchPointers = new Map();
@@ -5428,6 +5429,7 @@
           const nextView = ["workspace", "notifications", "connection", "settings"].includes(view)
             ? view
             : "workspace";
+          drawerView = nextView;
           drawerWorkspaceView.hidden = nextView !== "workspace";
           drawerNotificationsView.hidden = nextView !== "notifications";
           drawerConnectionView.hidden = nextView !== "connection";
@@ -5444,6 +5446,24 @@
           drawerNotificationsButton.hidden = nextView !== "workspace";
           drawerConnectionButton.hidden = nextView !== "workspace";
           drawerSettingsButton.hidden = nextView !== "workspace";
+        }
+
+        function drawerEntryButton(view) {
+          if (view === "notifications") return drawerNotificationsButton;
+          if (view === "connection") return drawerConnectionButton;
+          if (view === "settings") return drawerSettingsButton;
+          return null;
+        }
+
+        function openDrawerSubview(view) {
+          setDrawerView(view);
+          drawerBackButton.focus();
+        }
+
+        function returnToWorkspaceView() {
+          const entryButton = drawerEntryButton(drawerView);
+          setDrawerView("workspace");
+          entryButton?.focus();
         }
 
         // ── Widget strip (ADR-0124) ─────────────────────────────────────
@@ -5614,7 +5634,7 @@
           keepInputSurfaceFocus(node);
           node.addEventListener("click", () => {
             setNavigationOpen(true);
-            setDrawerView("notifications");
+            openDrawerSubview("notifications");
           });
           return node;
         }
@@ -8834,10 +8854,10 @@
           clearNotifications().catch((err) => setStatus(`Clear failed: ${err.message}`, true));
         });
         navScrim.addEventListener("click", () => setNavigationOpen(false));
-        drawerBackButton.addEventListener("click", () => setDrawerView("workspace"));
-        drawerNotificationsButton.addEventListener("click", () => setDrawerView("notifications"));
-        drawerConnectionButton.addEventListener("click", () => setDrawerView("connection"));
-        drawerSettingsButton.addEventListener("click", () => setDrawerView("settings"));
+        drawerBackButton.addEventListener("click", returnToWorkspaceView);
+        drawerNotificationsButton.addEventListener("click", () => openDrawerSubview("notifications"));
+        drawerConnectionButton.addEventListener("click", () => openDrawerSubview("connection"));
+        drawerSettingsButton.addEventListener("click", () => openDrawerSubview("settings"));
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         exitButton.addEventListener("click", () => exitRemote());
         refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
