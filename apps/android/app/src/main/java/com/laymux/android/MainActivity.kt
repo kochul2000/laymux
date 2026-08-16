@@ -29,6 +29,7 @@ import androidx.webkit.WebViewFeature
 import com.google.android.gms.tasks.Task
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.mlkit.common.MlKitException
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanner
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -45,6 +46,7 @@ import com.laymux.android.pairing.PairingProtectionPolicy
 import com.laymux.android.pairing.PairingVault
 import com.laymux.android.pairing.PendingPairingDecryption
 import com.laymux.android.pairing.ResumeGatedRunner
+import com.laymux.android.pairing.pairingScannerFailureMessage
 import com.laymux.android.remote.E2eProtocolException
 import com.laymux.android.remote.E2eOutputSocket
 import com.laymux.android.remote.E2eOutputSocketCallbacks
@@ -468,10 +470,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 scanTask = null
                 notifyPairingChanged(error = "QR 스캔을 취소했습니다.")
             }
-            .addOnFailureListener {
+            .addOnFailureListener { error ->
                 scanInFlight = false
                 scanTask = null
-                notifyPairingChanged(error = "QR 스캐너를 시작하지 못했습니다.")
+                notifyPairingChanged(
+                    error = pairingScannerFailureMessage(
+                        (error as? MlKitException)?.errorCode,
+                    ),
+                )
             }
     }
 

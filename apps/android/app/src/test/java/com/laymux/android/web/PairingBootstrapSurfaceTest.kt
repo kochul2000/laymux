@@ -34,6 +34,18 @@ class PairingBootstrapSurfaceTest {
         assertFalse(styles.contains(".scene-device"))
     }
 
+    @Test
+    fun blockedBiometricFlowPointsToTheProtectionSetting() {
+        val html = asset("index.html").readText()
+        val script = asset("app.js").readText()
+
+        assertTrue(html.contains("id=\"connectionSettings\""))
+        assertTrue(script.contains("보호 설정 열기"))
+        assertTrue(script.contains("connectionSettings.open = true"))
+        assertTrue(script.contains("QR 스캔을 계속하려면"))
+        assertTrue(script.contains("biometricToggle.focus()"))
+    }
+
     private fun asset(name: String): File {
         val candidates = listOf(
             File("src/main/assets", name),
