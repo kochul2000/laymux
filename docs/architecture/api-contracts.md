@@ -1251,6 +1251,8 @@ HKDF-SHA-256 IKM은 pairing seed다. salt는 `SHA-256("laymux.android-e2e.hkdf.s
 
 RPC plaintext `kind=resource`는 PC Laymux가 소유한 `/remote/` main document와 그 문서가 참조하는 고정 vendor/PWA/viewer/font 자산만 읽는다. desktop은 기존 Remote resource route를 내부 호출하고 status, 제한된 security/cache/content-type header, 최대 2 MiB body를 base64url로 암호화한다. Android는 AEAD 검증 뒤에만 이를 `https://remote.laymux.invalid/remote/` synthetic origin의 `WebResourceResponse`로 제공한다. redirect, 외부 origin, caller header·cookie·query, path traversal와 E2E route 재귀는 허용하지 않는다. APK 자체에는 xterm이나 terminal UI를 포함하지 않는다.
 
+resource 응답 중 desktop이 `Cache-Control: max-age>0`으로 명시하고 `no-store`/`no-cache`가 없는 200만 Android가 `instanceId + path` 키의 메모리 전용 LRU 캐시(총량 상한, TTL은 max-age를 1년으로 상한)에 보관해 재연결 전송을 줄인다([ADR-0168](../adr/0168-android-remote-resource-memory-cache-and-transfer-overlay.md)). 실질 대상은 콘텐츠 해시 폰트(ADR-0077)와 PWA 아이콘이며, 헤더 없는 vendor 자산과 `no-store` 문서는 휴리스틱 없이 매번 다시 받는다. 캐시는 디스크에 쓰지 않고 프로세스 종료로 소멸하며 해당 pairing 해제 시 그 인스턴스 항목을 비운다. Remote 문서 적재 동안에는 네이티브 오버레이가 수신 개수·바이트·현재 파일·캐시 적중을 표시하고 main document `onPageFinished` 또는 표면 이탈에서 사라진다.
+
 RPC plaintext `kind=http`는 session status/claim/heartbeat/release, navigation/widgets/notification/workspace/terminal Remote 동작의 exact method/path만 desktop 내부 Remote router에 재주입한다. PC page가 async request id와 JSON body를 native bridge에 넘기며 Kotlin은 terminal·workspace·lease 의미를 해석하지 않는다. terminal output은 RPC가 아니며 `terminalOutputOpen`과 `terminalOutputPoll` tag를 거부한다.
 
 RPC plaintext의 field 이름은 tag와 마찬가지로 camelCase가 정본이다. `resource`는 `path`, `http`는 `method`·`path`·`body`, `backgroundTransition`은 `leaseId`를 보낸다. desktop은 알 수 없는 tag와 field를 거부하며 Rust field 철자(`lease_id` 등)는 계약이 아니다.

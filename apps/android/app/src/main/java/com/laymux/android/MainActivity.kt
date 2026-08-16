@@ -8,11 +8,15 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -66,6 +70,8 @@ import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
 import com.laymux.android.web.RemoteBridge
+import com.laymux.android.web.RemoteLoadProgress
+import com.laymux.android.web.RemoteResourceCache
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
@@ -147,6 +153,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteOutputReservations = E2eOutputStreamReservations()
     private val remoteHttpRequests = RemoteHttpRequestRegistry()
     private val remoteHttpResumeTracker = RemoteHttpResumeTracker()
+    private val remoteResourceCache = RemoteResourceCache()
+    private var remoteLoadProgress = RemoteLoadProgress()
+    private lateinit var remoteLoadingOverlay: LinearLayout
+    private lateinit var remoteLoadingStatus: TextView
     private val remoteConnectionGeneration = AtomicLong()
     @Volatile private var remoteLifecycleActive = false
 
@@ -168,6 +178,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         )
         webView = createWebView()
         cloudWebView = createCloudWebView()
+        remoteLoadingOverlay = createRemoteLoadingOverlay()
         val root = FrameLayout(this).apply {
             addView(
                 cloudWebView,
@@ -178,6 +189,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             )
             addView(
                 webView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                remoteLoadingOverlay,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -239,7 +257,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             settings.mediaPlaybackRequiresUserGesture = true
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            webViewClient = LocalContentWebViewClient(assetLoader, ::loadRemoteResource)
+            webViewClient = LocalContentWebViewClient(
+                assetLoader,
+                ::loadRemoteResource,
+                ::onRemoteDocumentLoaded,
+            )
             addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
                 WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)
@@ -276,6 +298,53 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         addJavascriptInterface(cloudBridge, CLOUD_BRIDGE_NAME)
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+    }
+
+    /**
+     * Covers the WebView while the Remote document and its assets stream in as
+     * serial encrypted RPCs (ADR-0168). Clickable so touches cannot reach the
+     * stale document underneath.
+     */
+    private fun createRemoteLoadingOverlay(): LinearLayout {
+        val density = resources.displayMetrics.density
+        remoteLoadingStatus = TextView(this).apply {
+            setTextColor(Color.parseColor("#f2f5f7"))
+            textSize = 14f
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, (16 * density).toInt(), 0, 0)
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#e6101418"))
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+            addView(
+                ProgressBar(this@MainActivity),
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                remoteLoadingStatus,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
+    }
+
+    private fun updateRemoteLoadProgress(update: (RemoteLoadProgress) -> RemoteLoadProgress) {
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            remoteLoadProgress = update(remoteLoadProgress)
+            if (remoteLoadingOverlay.visibility == View.VISIBLE) {
+                remoteLoadingStatus.text = remoteLoadProgress.statusText()
+            }
+        }
     }
 
     fun signInWithGoogle(nonce: String) {
@@ -379,7 +448,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (!::webView.isInitialized || isDestroyed) return
         installLocalBridge(LocalWebSurface.REMOTE)
         applyWebSurfaceLayers(VisibleWebSurface.REMOTE)
+        // The old document keeps rendering until the Remote page paints, so the
+        // overlay is the only signal that assets are crossing the relay.
+        remoteLoadProgress = RemoteLoadProgress()
+        remoteLoadingStatus.text = remoteLoadProgress.statusText()
+        remoteLoadingOverlay.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
+    }
+
+    private fun onRemoteDocumentLoaded() {
+        remoteLoadingOverlay.visibility = View.GONE
     }
 
     private fun resumeRemoteSurfaceAfterBackground(
@@ -424,6 +502,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun applyWebSurfaceLayers(surface: VisibleWebSurface) {
         val layers = WebSurfaceLayerPolicy.forSurface(surface)
         visibleWebSurface = surface
+        if (surface != VisibleWebSurface.REMOTE) {
+            remoteLoadingOverlay.visibility = View.GONE
+        }
         cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
         webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
         cloudWebView.isEnabled = layers.cloudInteractive
@@ -1197,6 +1278,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (path.length > MAX_REMOTE_PATH_LENGTH) return null
         val session = remoteSession ?: return null
         if (!remoteLifecycleActive || session.isExpired()) return null
+        remoteResourceCache.get(session.instanceId, path)?.let { cached ->
+            updateRemoteLoadProgress(RemoteLoadProgress::cacheHit)
+            return cached
+        }
         val future = try {
             remoteExecutor.submit<RemoteResourceResponse?> {
                 if (!remoteLifecycleActive || remoteSession !== session) return@submit null
@@ -1211,18 +1296,29 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         response.optString("error", "Remote resource failed"),
                     )
                 }
-                RemoteResourceResponse.parse(response)
+                RemoteResourceResponse.parse(response).also { resource ->
+                    // put() keeps only responses the desktop explicitly marked
+                    // cacheable; everything else passes through untouched.
+                    remoteResourceCache.put(session.instanceId, path, resource)
+                }
             }
         } catch (_: RejectedExecutionException) {
             return null
         }
+        updateRemoteLoadProgress { it.fetching(path) }
         return try {
-            future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            val resource = future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            updateRemoteLoadProgress {
+                if (resource != null) it.fetched(resource.body.size) else it.fetchFailed()
+            }
+            resource
         } catch (error: ExecutionException) {
+            updateRemoteLoadProgress(RemoteLoadProgress::fetchFailed)
             handleRemoteFailure(error.cause ?: error, session)
             null
         } catch (error: TimeoutException) {
             future.cancel(true)
+            updateRemoteLoadProgress(RemoteLoadProgress::fetchFailed)
             handleRemoteFailure(
                 E2eTransportException(
                     "Remote UI resource request timed out.",
@@ -1818,6 +1914,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         try {
             if (selectedCloudInstanceId == instanceId) closeRemoteSession()
+            remoteResourceCache.clear(instanceId)
             vault.clear(instanceId)
             notifyPairingChanged(notice = "페어링을 해제했습니다.")
         } catch (_: Exception) {
