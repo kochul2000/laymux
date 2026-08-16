@@ -224,20 +224,6 @@ pub(super) async fn remote_workspace_create(
         Ok(data) => data,
         Err(response) => return response,
     };
-    let layout_name = layouts
-        .get("layouts")
-        .and_then(Value::as_array)
-        .and_then(|layouts| {
-            layouts.iter().find_map(|layout| {
-                (layout.get("id").and_then(Value::as_str) == Some(body.layout_id.as_str()))
-                    .then(|| layout.get("name").and_then(Value::as_str))
-                    .flatten()
-            })
-        });
-    let Some(layout_name) = layout_name else {
-        return json_error(StatusCode::BAD_REQUEST, "layout not found");
-    };
-
     let workspace_count = match frontend_bridge_json(
         &server,
         "query",
@@ -253,14 +239,17 @@ pub(super) async fn remote_workspace_create(
             .map_or(0, Vec::len),
         Err(response) => return response,
     };
-    let name = format!("{} {}", layout_name, workspace_count + 1);
+    let (name, params) = match workspace_create_params(&layouts, workspace_count, &body.layout_id) {
+        Some(params) => params,
+        None => return json_error(StatusCode::BAD_REQUEST, "layout not found"),
+    };
 
     match frontend_bridge_json(
         &server,
         "action",
         "workspaces",
         "add",
-        serde_json::json!({ "name": name, "layoutId": body.layout_id }),
+        params,
     )
     .await
     {
@@ -599,6 +588,28 @@ fn workspace_create_request_from_body(
     serde_json::from_slice(body)
 }
 
+fn workspace_create_params(
+    layouts: &Value,
+    workspace_count: usize,
+    layout_id: &str,
+) -> Option<(String, Value)> {
+    let layout_name = layouts
+        .get("layouts")
+        .and_then(Value::as_array)
+        .and_then(|layouts| {
+            layouts.iter().find_map(|layout| {
+                (layout.get("id").and_then(Value::as_str) == Some(layout_id))
+                    .then(|| layout.get("name").and_then(Value::as_str))
+                    .flatten()
+            })
+        })?;
+    let name = format!("{} {}", layout_name, workspace_count + 1);
+    Some((
+        name.clone(),
+        serde_json::json!({ "name": name, "layoutId": layout_id }),
+    ))
+}
+
 fn notification_action_request_from_body(
     body: &[u8],
 ) -> Result<NotificationActionRequest, serde_json::Error> {
@@ -717,5 +728,20 @@ mod tests {
 
         assert!(workspace_create_request_from_body(b"").is_err());
         assert!(workspace_create_request_from_body(br#"{"layoutId":42}"#).is_err());
+    }
+
+    #[test]
+    fn workspace_create_params_uses_the_selected_desktop_layout() {
+        let layouts = serde_json::json!({
+            "layouts": [
+                { "id": "default", "name": "Default" },
+                { "id": "split", "name": "Three Pane" }
+            ]
+        });
+
+        let (name, params) = workspace_create_params(&layouts, 2, "split").unwrap();
+        assert_eq!(name, "Three Pane 3");
+        assert_eq!(params, serde_json::json!({ "name": "Three Pane 3", "layoutId": "split" }));
+        assert!(workspace_create_params(&layouts, 2, "missing").is_none());
     }
 }
