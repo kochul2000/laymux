@@ -12,6 +12,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
 [ADR-0159](../../docs/adr/0159-android-e2e-websocket-output-transport.md),
 [ADR-0160](../../docs/adr/0160-android-e2e-tailscale-direct-transport.md),
+[ADR-0163](../../docs/adr/0163-android-foreground-preserves-remote-document.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -31,7 +32,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - relay에는 ciphertext만 보이는 PC Remote resource·HTTP와 native WebSocket 기반 V1 output bridge
 - Cloud presence의 검증된 Tailscale literal-IP URL이 있으면 고정 Direct E2E route를 우선하고, 최초·열린 session의 socket 네트워크 실패에만 기존 session을 폐기한 뒤 새 Cloud E2E session으로 fallback. runtime 전환은 vault 보호 정책에 따라 생체 인증을 다시 요구할 수 있음
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
-- background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 PC Remote page를 다시 적재
+- background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 살아 있는 PC Remote 문서는 유지한 채 HTTP/output transport만 복원(호환되지 않는 문서는 다시 적재)
 
 데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 QR을 발급·회전·폐기하고, 첫 Android
 client nonce의 ACK를 확인한다. 이후 Android native 계층과 desktop은 같은 seed에서 방향별 session
