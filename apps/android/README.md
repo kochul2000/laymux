@@ -10,6 +10,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0146](../../docs/adr/0146-android-e2e-session-and-encrypted-remote-rpc.md),
 [ADR-0149](../../docs/adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
+[ADR-0159](../../docs/adr/0159-android-e2e-websocket-output-transport.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -26,13 +27,15 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
 - PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key
-- relay에는 ciphertext만 보이는 PC Remote resource·HTTP·V1 output bridge
+- relay에는 ciphertext만 보이는 PC Remote resource·HTTP와 native WebSocket 기반 V1 output bridge
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
 - background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 PC Remote page를 다시 적재
 
 데스크톱 Laymux의 Remote Access 모달은 cloud pairing 뒤 QR을 발급·회전·폐기하고, 첫 Android
 client nonce의 ACK를 확인한다. 이후 Android native 계층과 desktop은 같은 seed에서 방향별 session
-key를 파생해 Remote UI와 terminal payload를 종단 암호화하고 성공한 RPC마다 15분 비활성 deadline을 갱신한다. terminal 선택·navigation·입출력 UX는 APK가 복제하지 않고 PC가 배포한 기존 Remote page가 소유한다. 기존 browser cloud/direct Remote는 호환을
+key를 파생해 Remote UI와 terminal payload를 종단 암호화한다. control/resource는 순차 AEAD RPC를,
+terminal output은 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge를 사용하며 성공한
+RPC마다 15분 비활성 deadline을 갱신한다. terminal 선택·navigation·입출력 UX는 APK가 복제하지 않고 PC가 배포한 기존 Remote page가 소유한다. 기존 browser cloud/direct Remote는 호환을
 위한 별도 평문 경로이므로 Android 앱의 열린 보안 session만 E2E로 표시한다.
 
 ## 빌드
@@ -95,8 +98,13 @@ endpoint로 POST한다. 성공 응답의 bounded HttpOnly cookie만 Android cook
 
 앱은 생체 인증을 기본으로 켠다. PIN·패턴 fallback 없이 QR 키를 저장하거나 사용할 때마다 강한
 생체 인증을 요구한다. 강한 생체 인증을 쓸 수 없는 기기는 보호된 pairing을 막으며, 사용자가
-경고를 확인해 설정을 끈 경우에만 앱 전용 Android Keystore 키만 사용한다. 보호 설정을 바꾸거나
-생체 등록 정보가 변경되면 기존 키를 재포장하지 않고 다시 pairing해야 한다.
+경고를 확인해 설정을 끈 경우에만 앱 전용 Android Keystore 키만 사용한다. 이 상태에서는 pairing
+화면이 연결 설정을 자동으로 펼치고 `보호 설정 열기` 동작과 opt-out 절차를 표시한다. 보호 설정을
+바꾸거나 생체 등록 정보가 변경되면 기존 키를 재포장하지 않고 다시 pairing해야 한다. API 28의
+`androidx.biometric`도 내부 AppCompat dialog를 사용하므로 Activity theme은 AppCompat 계열을 유지한다.
 
 Google Code Scanner는 Google Play services의 on-device scanner UI를 사용한다. 앱 자체는 camera
-permission을 선언하지 않는다. Google Play services가 없는 기기 지원은 현재 범위 밖이다.
+permission을 선언하지 않는다. 최초 실행에서 scanner module이 아직 설치되지 않았다면 인터넷에
+연결한 채 module 준비를 기다린 뒤 QR 스캔을 다시 누르라고 안내한다. Google Play services가 오래된
+경우에는 업데이트를, 카메라 권한이 거부된 경우에는 Google Play services의 권한 허용을 각각
+안내한다. Google Play services가 없는 기기 지원은 현재 범위 밖이다.

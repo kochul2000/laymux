@@ -34,7 +34,10 @@ use crate::constants::{
 };
 use crate::error::AppError;
 use crate::lock_ext::MutexExt;
-use crate::remote_server::{self, TunnelAuthorized};
+use crate::remote_server::{
+    self, parse_android_e2e_output_route, unix_time_seconds, TunnelAuthorized,
+    ANDROID_E2E_OUTPUT_PATH, E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
+};
 use crate::settings::models::{CloudAccessMode, RemoteSettings};
 use crate::state::AppState;
 use crate::terminal_output::{
@@ -71,6 +74,7 @@ const HTTP_RESPONSE_BYTES_LIMIT: usize = 16 * 1024 * 1024;
 const BACKPRESSURE_TIMEOUT: Duration = Duration::from_secs(5);
 const LEASE_CHECK_MS: u64 = 500;
 const STREAM_DATA_CHUNK_BYTES: usize = 64 * 1024;
+const E2E_OUTPUT_INPUT_QUEUE_SIZE: usize = 2;
 
 #[cfg(not(test))]
 type OutputCheckpointBridge = AppHandle;
@@ -78,18 +82,19 @@ type OutputCheckpointBridge = AppHandle;
 // Keeping AppHandle out of their shared function signatures also avoids
 // linking Common Controls UI imports into the manifest-less Windows test exe.
 #[cfg(test)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct OutputCheckpointBridge;
 
 struct FrameDispatchState {
     app_state: Arc<AppState>,
     output_checkpoint_bridge: OutputCheckpointBridge,
+    completion_tx: CompletionSender,
 }
 
 struct FrameHandlerContext<'a> {
     active_streams: &'a mut HashMap<String, ActiveStream>,
     socket_pending_bytes: &'a mut usize,
-    next_response_id: &'a mut u64,
+    next_task_id: &'a mut u64,
     outbound_tx: &'a OutboundSender,
     completion_tx: &'a CompletionSender,
     state: &'a Arc<AppState>,
@@ -150,12 +155,14 @@ struct TunnelConfig {
 enum ActiveStream {
     Http(IncomingHttpRequest),
     Responding {
-        response_id: u64,
+        task_id: u64,
         pending_bytes: usize,
         join: TokioJoinHandle<()>,
     },
     WebSocket {
+        task_id: u64,
         shutdown: watch::Sender<bool>,
+        input: Option<mpsc::Sender<Vec<u8>>>,
         join: TokioJoinHandle<()>,
     },
 }
@@ -194,6 +201,16 @@ struct StreamOpenPayload {
     query: Option<String>,
     #[serde(default)]
     headers: Vec<(String, String)>,
+}
+
+struct AndroidE2eOutputTask {
+    outbound_tx: OutboundSender,
+    app_state: Arc<AppState>,
+    output_checkpoint_bridge: OutputCheckpointBridge,
+    stream_id: String,
+    prepared: remote_server::PreparedAndroidE2eOutput,
+    input: mpsc::Receiver<Vec<u8>>,
+    shutdown: watch::Receiver<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -332,12 +349,12 @@ impl TunnelTerminalOutputMetadata {
 
 type OutboundSender = mpsc::Sender<TunnelFrame>;
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ResponseCompletion {
+struct StreamCompletion {
     stream_id: String,
-    response_id: u64,
+    task_id: u64,
 }
 
-type CompletionSender = mpsc::UnboundedSender<ResponseCompletion>;
+type CompletionSender = mpsc::UnboundedSender<StreamCompletion>;
 
 #[derive(Debug)]
 enum TunnelConnectionError {
@@ -635,7 +652,7 @@ async fn connect_once(
     let (socket, _) = connect_async(request).await.map_err(map_ws_dial_error)?;
     let (mut writer, mut reader) = socket.split();
     let (outbound_tx, mut outbound_rx) = mpsc::channel::<TunnelFrame>(OUTBOUND_QUEUE_SIZE);
-    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<ResponseCompletion>();
+    let (completion_tx, mut completion_rx) = mpsc::unbounded_channel::<StreamCompletion>();
     let mut writer_shutdown = shutdown.clone();
     // The writer's interval ticks immediately, so seed the policy before the
     // asynchronous Tailscale probe can race that first heartbeat. An E2E-only
@@ -727,10 +744,25 @@ async fn connect_once(
         presence_join,
     };
     let mut socket_pending_bytes = 0_usize;
-    let mut next_response_id = 1_u64;
+    let mut next_task_id = 1_u64;
     let mut terminal_error: Option<TunnelConnectionError> = None;
     loop {
         tokio::select! {
+            biased;
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    break;
+                }
+            }
+            completed = completion_rx.recv() => {
+                if let Some(completion) = completed {
+                    let _ = handle_stream_completion(
+                        &mut resources.active_streams,
+                        completion,
+                        &mut socket_pending_bytes,
+                    );
+                }
+            }
             message = reader.next() => {
                 let Some(message) = message else {
                     break;
@@ -742,7 +774,7 @@ async fn connect_once(
                                 handle_frame(frame, FrameHandlerContext {
                                     active_streams: &mut resources.active_streams,
                                     socket_pending_bytes: &mut socket_pending_bytes,
-                                    next_response_id: &mut next_response_id,
+                                    next_task_id: &mut next_task_id,
                                     outbound_tx: &outbound_tx,
                                     completion_tx: &completion_tx,
                                     state: &state,
@@ -771,20 +803,6 @@ async fn connect_once(
                         )));
                         break;
                     }
-                }
-            }
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    break;
-                }
-            }
-            completed = completion_rx.recv() => {
-                if let Some(completion) = completed {
-                    let _ = handle_response_completion(
-                        &mut resources.active_streams,
-                        completion,
-                        &mut socket_pending_bytes,
-                    );
                 }
             }
         }
@@ -881,7 +899,7 @@ async fn handle_frame(frame: TunnelFrame, context: FrameHandlerContext<'_>) {
     let FrameHandlerContext {
         active_streams,
         socket_pending_bytes,
-        next_response_id,
+        next_task_id,
         outbound_tx,
         completion_tx,
         state,
@@ -899,11 +917,12 @@ async fn handle_frame(frame: TunnelFrame, context: FrameHandlerContext<'_>) {
         frame,
         active_streams,
         socket_pending_bytes,
-        next_response_id,
+        next_task_id,
         outbound_tx,
         FrameDispatchState {
             app_state: state.clone(),
             output_checkpoint_bridge,
+            completion_tx: completion_tx.clone(),
         },
         move |task_stream_id, response_id, request| {
             tokio::spawn(async move {
@@ -923,9 +942,9 @@ async fn handle_frame(frame: TunnelFrame, context: FrameHandlerContext<'_>) {
                     )
                     .await;
                 }
-                let _ = completion.send(ResponseCompletion {
+                let _ = completion.send(StreamCompletion {
                     stream_id: task_stream_id,
-                    response_id,
+                    task_id: response_id,
                 });
             })
         },
@@ -937,7 +956,7 @@ async fn handle_frame_with_dispatch(
     frame: TunnelFrame,
     active_streams: &mut HashMap<String, ActiveStream>,
     socket_pending_bytes: &mut usize,
-    next_response_id: &mut u64,
+    next_task_id: &mut u64,
     outbound_tx: &OutboundSender,
     dispatch_state: FrameDispatchState,
     spawn_dispatch: impl FnOnce(String, u64, IncomingHttpRequest) -> TokioJoinHandle<()>,
@@ -961,9 +980,9 @@ async fn handle_frame_with_dispatch(
                 frame,
                 active_streams,
                 socket_pending_bytes,
+                next_task_id,
                 outbound_tx,
-                &dispatch_state.app_state,
-                dispatch_state.output_checkpoint_bridge,
+                &dispatch_state,
             )
             .await;
         }
@@ -975,7 +994,7 @@ async fn handle_frame_with_dispatch(
                 frame,
                 active_streams,
                 socket_pending_bytes,
-                next_response_id,
+                next_task_id,
                 outbound_tx,
                 spawn_dispatch,
             )
@@ -1046,6 +1065,11 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
     if mode == CloudAccessMode::BrowserAndE2e {
         return true;
     }
+    if payload.kind == KIND_WEBSOCKET {
+        return payload.path.as_deref() == Some(ANDROID_E2E_OUTPUT_PATH)
+            && payload.headers.is_empty()
+            && parse_android_e2e_output_route(payload.query.as_deref()).is_some();
+    }
     if payload.kind != KIND_HTTP_REQUEST
         || payload.method.as_deref() != Some("POST")
         || !payload.query.as_deref().unwrap_or("").is_empty()
@@ -1084,10 +1108,13 @@ async fn handle_stream_open(
     frame: TunnelFrame,
     active_streams: &mut HashMap<String, ActiveStream>,
     socket_pending_bytes: &mut usize,
+    next_task_id: &mut u64,
     outbound_tx: &OutboundSender,
-    state: &Arc<AppState>,
-    output_checkpoint_bridge: OutputCheckpointBridge,
+    dispatch_state: &FrameDispatchState,
 ) {
+    let state = &dispatch_state.app_state;
+    let completion_tx = &dispatch_state.completion_tx;
+    let output_checkpoint_bridge = dispatch_state.output_checkpoint_bridge.clone();
     if active_streams.contains_key(&frame.stream_id) {
         let _ = send_stream_error(
             outbound_tx,
@@ -1165,6 +1192,87 @@ async fn handle_stream_open(
                 .await;
                 return;
             };
+            if path == ANDROID_E2E_OUTPUT_PATH {
+                let Some(route) = parse_android_e2e_output_route(payload.query.as_deref()) else {
+                    let _ = send_stream_error(
+                        outbound_tx,
+                        &frame.stream_id,
+                        StreamErrorPayload::new(
+                            "bad_websocket",
+                            "Android E2E output route is invalid",
+                            false,
+                        ),
+                    )
+                    .await;
+                    return;
+                };
+                let now = match unix_time_seconds() {
+                    Ok(now) => now,
+                    Err(error) => {
+                        let _ = send_stream_error(
+                            outbound_tx,
+                            &frame.stream_id,
+                            StreamErrorPayload::new(
+                                "session_check_failed",
+                                error.to_string(),
+                                false,
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let prepared =
+                    match remote_server::prepare_android_e2e_output(state, route, now).await {
+                        Ok(prepared) => prepared,
+                        Err(_) => {
+                            let _ = send_stream_error(
+                                outbound_tx,
+                                &frame.stream_id,
+                                StreamErrorPayload::new(
+                                    "session_unavailable",
+                                    "Android E2E output session is unavailable",
+                                    false,
+                                ),
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                let (input_tx, input_rx) = mpsc::channel(E2E_OUTPUT_INPUT_QUEUE_SIZE);
+                let (shutdown_tx, shutdown_rx) = watch::channel(false);
+                let task_id = allocate_task_id(next_task_id);
+                let task_stream_id = frame.stream_id.clone();
+                let completion = completion_tx.clone();
+                let task_outbound = outbound_tx.clone();
+                let task_state = state.clone();
+                let join = tokio::spawn(async move {
+                    stream_android_e2e_output_over_tunnel(AndroidE2eOutputTask {
+                        outbound_tx: task_outbound,
+                        app_state: task_state,
+                        output_checkpoint_bridge,
+                        stream_id: task_stream_id.clone(),
+                        prepared,
+                        input: input_rx,
+                        shutdown: shutdown_rx,
+                    })
+                    .await;
+                    let _ = completion.send(StreamCompletion {
+                        stream_id: task_stream_id,
+                        task_id,
+                    });
+                });
+                active_streams.insert(
+                    frame.stream_id,
+                    ActiveStream::WebSocket {
+                        task_id,
+                        shutdown: shutdown_tx,
+                        input: Some(input_tx),
+                        join,
+                    },
+                );
+                return;
+            }
             let Some(terminal_id) = terminal_id_from_output_path(&path) else {
                 let _ = send_stream_error(
                     outbound_tx,
@@ -1188,19 +1296,33 @@ async fn handle_stream_open(
                 return;
             };
             let (shutdown_tx, shutdown_rx) = watch::channel(false);
-            let join = tokio::spawn(stream_terminal_output_over_tunnel(
-                outbound_tx.clone(),
-                state.clone(),
-                output_checkpoint_bridge,
-                frame.stream_id.clone(),
-                terminal_id,
-                lease_id,
-                shutdown_rx,
-            ));
+            let task_id = allocate_task_id(next_task_id);
+            let task_stream_id = frame.stream_id.clone();
+            let completion = completion_tx.clone();
+            let task_outbound = outbound_tx.clone();
+            let task_state = state.clone();
+            let join = tokio::spawn(async move {
+                stream_terminal_output_over_tunnel(
+                    task_outbound,
+                    task_state,
+                    output_checkpoint_bridge,
+                    task_stream_id.clone(),
+                    terminal_id,
+                    lease_id,
+                    shutdown_rx,
+                )
+                .await;
+                let _ = completion.send(StreamCompletion {
+                    stream_id: task_stream_id,
+                    task_id,
+                });
+            });
             active_streams.insert(
                 frame.stream_id,
                 ActiveStream::WebSocket {
+                    task_id,
                     shutdown: shutdown_tx,
+                    input: None,
                     join,
                 },
             );
@@ -1236,6 +1358,69 @@ async fn handle_stream_data(
     outbound_tx: &OutboundSender,
 ) {
     let stream_id = frame.stream_id.clone();
+    let websocket_input = active_streams
+        .get(&stream_id)
+        .and_then(|stream| match stream {
+            ActiveStream::WebSocket {
+                input: Some(input), ..
+            } => Some(input.clone()),
+            _ => None,
+        });
+    if let Some(input) = websocket_input {
+        let decoded = match decode_stream_data(&frame) {
+            Ok(decoded) if decoded.len() <= E2E_OUTPUT_OPEN_RECORD_LIMIT => decoded,
+            Ok(_) => {
+                let _ = send_stream_error(
+                    outbound_tx,
+                    &stream_id,
+                    StreamErrorPayload::new(
+                        "bad_stream_data",
+                        "Android E2E output input record exceeded limit",
+                        false,
+                    ),
+                )
+                .await;
+                if let Some(stream) =
+                    remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+                {
+                    close_active_stream(stream);
+                }
+                return;
+            }
+            Err(error) => {
+                let _ = send_stream_error(
+                    outbound_tx,
+                    &stream_id,
+                    StreamErrorPayload::new("bad_stream_data", error.to_string(), false),
+                )
+                .await;
+                if let Some(stream) =
+                    remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+                {
+                    close_active_stream(stream);
+                }
+                return;
+            }
+        };
+        if input.try_send(decoded).is_err() {
+            let _ = send_stream_error(
+                outbound_tx,
+                &stream_id,
+                StreamErrorPayload::new(
+                    "backpressure_limit_exceeded",
+                    "Android E2E output input queue is full",
+                    false,
+                ),
+            )
+            .await;
+            if let Some(stream) =
+                remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+            {
+                close_active_stream(stream);
+            }
+        }
+        return;
+    }
     let Some(ActiveStream::Http(request)) = active_streams.get_mut(&stream_id) else {
         match active_streams.get(&stream_id) {
             Some(ActiveStream::WebSocket { .. }) => {}
@@ -1352,14 +1537,14 @@ fn begin_http_response_dispatch(
     };
 
     let pending_bytes = request.body.len();
-    let response_id = allocate_response_id(next_response_id);
+    let response_id = allocate_task_id(next_response_id);
     let task_stream_id = stream_id.to_string();
     let join = spawn_dispatch(task_stream_id, response_id, request);
 
     active_streams.insert(
         stream_id.to_string(),
         ActiveStream::Responding {
-            response_id,
+            task_id: response_id,
             pending_bytes,
             join,
         },
@@ -1367,26 +1552,27 @@ fn begin_http_response_dispatch(
     true
 }
 
-fn allocate_response_id(next_response_id: &mut u64) -> u64 {
-    let response_id = (*next_response_id).max(1);
-    *next_response_id = response_id.checked_add(1).unwrap_or(1);
-    response_id
+fn allocate_task_id(next_task_id: &mut u64) -> u64 {
+    let task_id = (*next_task_id).max(1);
+    *next_task_id = task_id.checked_add(1).unwrap_or(1);
+    task_id
 }
 
-fn handle_response_completion(
+fn handle_stream_completion(
     active_streams: &mut HashMap<String, ActiveStream>,
-    completion: ResponseCompletion,
+    completion: StreamCompletion,
     socket_pending_bytes: &mut usize,
 ) -> bool {
     let matches_current = matches!(
         active_streams.get(&completion.stream_id),
-        Some(ActiveStream::Responding { response_id, .. }) if *response_id == completion.response_id
+        Some(ActiveStream::Responding { task_id, .. }
+            | ActiveStream::WebSocket { task_id, .. }) if *task_id == completion.task_id
     );
     if !matches_current {
         tracing::debug!(
             stream_id = %completion.stream_id,
-            response_id = completion.response_id,
-            "ignored stale cloud tunnel response completion"
+            task_id = completion.task_id,
+            "ignored stale cloud tunnel stream completion"
         );
         return false;
     }
@@ -1550,6 +1736,55 @@ fn hop_by_hop_header(name: &str) -> bool {
             | "authorization"
     ) || name.eq_ignore_ascii_case(CONNECTION.as_str())
         || name.eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
+}
+
+async fn stream_android_e2e_output_over_tunnel(task: AndroidE2eOutputTask) {
+    let AndroidE2eOutputTask {
+        outbound_tx,
+        app_state,
+        output_checkpoint_bridge,
+        stream_id,
+        prepared,
+        input,
+        shutdown,
+    } = task;
+    if send_frame(
+        &outbound_tx,
+        TunnelFrame::new(
+            &stream_id,
+            FRAME_STREAM_OPEN,
+            json!({ "kind": KIND_WEBSOCKET_ACCEPT }),
+        ),
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
+    let attach_state = Arc::clone(&app_state);
+    let send_outbound = outbound_tx.clone();
+    let send_stream_id = stream_id.clone();
+    remote_server::stream_android_e2e_output(
+        app_state,
+        prepared,
+        input,
+        shutdown,
+        move |terminal_id| async move {
+            terminal_output_subscription(&attach_state, output_checkpoint_bridge, &terminal_id)
+                .await
+        },
+        move |record| {
+            let outbound_tx = send_outbound.clone();
+            let stream_id = send_stream_id.clone();
+            async move { send_stream_data(&outbound_tx, &stream_id, &record).await }
+        },
+    )
+    .await;
+    let _ = send_frame(
+        &outbound_tx,
+        TunnelFrame::empty(stream_id, FRAME_STREAM_CLOSE),
+    )
+    .await;
 }
 
 async fn stream_terminal_output_over_tunnel(
@@ -1898,16 +2133,64 @@ async fn send_stream_data(
     if data.is_empty() {
         return Ok(());
     }
+    send_stream_data_message(outbound_tx, stream_id, data, None).await
+}
+
+async fn send_stream_data_message(
+    outbound_tx: &OutboundSender,
+    stream_id: &str,
+    data: &[u8],
+    output: Option<Value>,
+) -> Result<(), AppError> {
+    if data.len() > E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES {
+        return Err(AppError::Other(
+            "Cloud tunnel WebSocket message exceeded protocol limit".into(),
+        ));
+    }
+    let fragment_count = data.len().max(1).div_ceil(STREAM_DATA_CHUNK_BYTES);
+    if fragment_count == 1 {
+        return send_stream_data_fragment(outbound_tx, stream_id, data, output, None).await;
+    }
+
+    for (index, chunk) in data.chunks(STREAM_DATA_CHUNK_BYTES).enumerate() {
+        send_stream_data_fragment(
+            outbound_tx,
+            stream_id,
+            chunk,
+            (index == 0).then(|| output.clone()).flatten(),
+            Some((index, fragment_count, data.len())),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn send_stream_data_fragment(
+    outbound_tx: &OutboundSender,
+    stream_id: &str,
+    data: &[u8],
+    output: Option<Value>,
+    fragment: Option<(usize, usize, usize)>,
+) -> Result<(), AppError> {
+    let mut payload = serde_json::Map::new();
+    payload.insert("encoding".into(), Value::String(ENCODING_BASE64.into()));
+    payload.insert("data".into(), Value::String(BASE64.encode(data)));
+    if let Some(output) = output {
+        payload.insert("output".into(), output);
+    }
+    if let Some((index, count, message_bytes)) = fragment {
+        payload.insert(
+            "fragment".into(),
+            json!({
+                "index": index,
+                "count": count,
+                "messageBytes": message_bytes,
+            }),
+        );
+    }
     send_frame(
         outbound_tx,
-        TunnelFrame::new(
-            stream_id,
-            FRAME_STREAM_DATA,
-            json!({
-                "encoding": ENCODING_BASE64,
-                "data": BASE64.encode(data),
-            }),
-        ),
+        TunnelFrame::new(stream_id, FRAME_STREAM_DATA, Value::Object(payload)),
     )
     .await
 }
@@ -1955,17 +2238,11 @@ async fn send_terminal_output_chunk(
     data: &[u8],
 ) -> Result<(), AppError> {
     metadata.validate(data)?;
-    send_frame(
+    send_stream_data_message(
         outbound_tx,
-        TunnelFrame::new(
-            stream_id,
-            FRAME_STREAM_DATA,
-            json!({
-                "encoding": ENCODING_BASE64,
-                "data": BASE64.encode(data),
-                "output": metadata,
-            }),
-        ),
+        stream_id,
+        data,
+        Some(serde_json::to_value(metadata)?),
     )
     .await
 }
@@ -2046,7 +2323,7 @@ fn subtract_stream_pending_bytes(stream: &ActiveStream, socket_pending_bytes: &m
 
 fn close_active_stream(stream: ActiveStream) {
     match stream {
-        ActiveStream::WebSocket { shutdown, join } => {
+        ActiveStream::WebSocket { shutdown, join, .. } => {
             let _ = shutdown.send(true);
             join.abort();
         }
@@ -2305,6 +2582,7 @@ mod tests {
         state: Arc<AppState>,
         spawn_dispatch: impl FnOnce(String, u64, IncomingHttpRequest) -> TokioJoinHandle<()>,
     ) {
+        let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
         handle_frame_with_dispatch(
             frame,
             active_streams,
@@ -2314,6 +2592,7 @@ mod tests {
             FrameDispatchState {
                 app_state: state,
                 output_checkpoint_bridge: OutputCheckpointBridge,
+                completion_tx,
             },
             spawn_dispatch,
         )
@@ -2328,9 +2607,9 @@ mod tests {
         completion_tx: CompletionSender,
     ) -> impl FnOnce(String, u64, IncomingHttpRequest) -> TokioJoinHandle<()> {
         move |stream_id, response_id, _| {
-            let _ = completion_tx.send(ResponseCompletion {
+            let _ = completion_tx.send(StreamCompletion {
                 stream_id,
-                response_id,
+                task_id: response_id,
             });
             pending_response_task()
         }
@@ -2501,7 +2780,11 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_screen_snapshot_stays_one_header_binary_pair_over_cloud() {
-        let data = vec![b'x'; STREAM_DATA_CHUNK_BYTES + 17];
+        let data = vec![
+            b'x';
+            crate::constants::REMOTE_RENDER_CHECKPOINT_ABSOLUTE_MAX_BYTES
+                + crate::constants::TERMINAL_OUTPUT_RING_MAX_BYTES
+        ];
         let metadata = TunnelTerminalOutputMetadata {
             version: TERMINAL_OUTPUT_PROTOCOL_VERSION,
             phase: TerminalOutputPhase::Snapshot,
@@ -2509,16 +2792,55 @@ mod tests {
             seq_end: 12 + data.len() as u64,
             byte_length: data.len(),
         };
-        let (tx, mut rx) = mpsc::channel(2);
+        let (tx, mut rx) = mpsc::channel(64);
 
         send_terminal_output_data(&tx, "screen", metadata, &data)
             .await
             .unwrap();
 
-        let frame = rx.recv().await.unwrap();
-        assert_eq!(frame.frame_type, FRAME_STREAM_DATA);
-        assert_eq!(decode_stream_data(&frame).unwrap(), data);
-        assert!(rx.try_recv().is_err());
+        let mut frames = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            frames.push(frame);
+        }
+        assert!(frames.len() > 1, "protocol-max snapshot must be fragmented");
+        let mut rebuilt = Vec::new();
+        for (index, frame) in frames.iter().enumerate() {
+            assert_eq!(frame.frame_type, FRAME_STREAM_DATA);
+            assert!(serde_json::to_vec(frame).unwrap().len() <= 1024 * 1024);
+            let fragment = frame.payload.as_ref().unwrap()["fragment"]
+                .as_object()
+                .unwrap();
+            assert_eq!(fragment["index"], index);
+            assert_eq!(fragment["count"], frames.len());
+            assert_eq!(fragment["messageBytes"], data.len());
+            if index == 0 {
+                assert_eq!(output_metadata(frame)["phase"], "snapshot");
+            } else {
+                assert!(frame.payload.as_ref().unwrap().get("output").is_none());
+            }
+            rebuilt.extend_from_slice(&decode_stream_data(frame).unwrap());
+        }
+        assert_eq!(rebuilt, data);
+    }
+
+    #[tokio::test]
+    async fn encrypted_output_protocol_max_record_stays_below_tunnel_frame_limit() {
+        let record = vec![b'c'; E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES];
+        let (tx, mut rx) = mpsc::channel(64);
+
+        send_stream_data(&tx, "encrypted-output", &record)
+            .await
+            .unwrap();
+
+        let mut rebuilt = Vec::new();
+        let mut frame_count = 0;
+        while let Ok(frame) = rx.try_recv() {
+            assert!(serde_json::to_vec(&frame).unwrap().len() <= 1024 * 1024);
+            rebuilt.extend_from_slice(&decode_stream_data(&frame).unwrap());
+            frame_count += 1;
+        }
+        assert!(frame_count > 1);
+        assert_eq!(rebuilt, record);
     }
 
     #[test]
@@ -2657,7 +2979,7 @@ mod tests {
             (
                 "responding".into(),
                 ActiveStream::Responding {
-                    response_id: 1,
+                    task_id: 1,
                     pending_bytes: 12,
                     join: pending_task(responding_dropped.clone()),
                 },
@@ -2665,7 +2987,9 @@ mod tests {
             (
                 "websocket".into(),
                 ActiveStream::WebSocket {
+                    task_id: 2,
                     shutdown: websocket_shutdown,
+                    input: None,
                     join: pending_task(websocket_dropped.clone()),
                 },
             ),
@@ -2702,7 +3026,7 @@ mod tests {
     }
 
     #[test]
-    fn android_e2e_only_allows_only_exact_fixed_post_routes() {
+    fn android_e2e_only_allows_fixed_post_routes_and_exact_encrypted_output_websocket() {
         for path in [
             "/remote/v1/e2e/pair/ack",
             "/remote/v1/e2e/session/challenge",
@@ -2721,6 +3045,20 @@ mod tests {
                 &payload
             ));
         }
+
+        let output = StreamOpenPayload {
+            kind: KIND_WEBSOCKET.into(),
+            method: None,
+            path: Some(ANDROID_E2E_OUTPUT_PATH.into()),
+            query: Some(
+                "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8".into(),
+            ),
+            headers: Vec::new(),
+        };
+        assert!(cloud_stream_allowed(
+            CloudAccessMode::AndroidE2eOnly,
+            &output
+        ));
 
         for payload in [
             StreamOpenPayload {
@@ -2749,6 +3087,15 @@ mod tests {
                 method: None,
                 path: Some("/remote/v1/terminals/term-1/output".into()),
                 query: Some("leaseId=lease-1".into()),
+                headers: Vec::new(),
+            },
+            StreamOpenPayload {
+                kind: KIND_WEBSOCKET.into(),
+                method: None,
+                path: Some(ANDROID_E2E_OUTPUT_PATH.into()),
+                query: Some(
+                    "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=bad".into(),
+                ),
                 headers: Vec::new(),
             },
         ] {
@@ -2824,14 +3171,20 @@ mod tests {
         let (outbound_tx, mut outbound_rx) = mpsc::channel(4);
         let mut active_streams = HashMap::new();
         let mut pending_bytes = 0;
+        let mut next_task_id = 1;
+        let (completion_tx, _completion_rx) = mpsc::unbounded_channel();
 
         handle_stream_open(
             frame,
             &mut active_streams,
             &mut pending_bytes,
+            &mut next_task_id,
             &outbound_tx,
-            &state,
-            OutputCheckpointBridge,
+            &FrameDispatchState {
+                app_state: state,
+                output_checkpoint_bridge: OutputCheckpointBridge,
+                completion_tx,
+            },
         )
         .await;
 
@@ -3315,7 +3668,7 @@ mod tests {
         .await;
         assert!(matches!(
             active_streams.get("srv-1"),
-            Some(ActiveStream::Responding { response_id: 1, .. })
+            Some(ActiveStream::Responding { task_id: 1, .. })
         ));
         assert_eq!(socket_pending_bytes, 3);
 
@@ -3358,7 +3711,7 @@ mod tests {
         .await;
 
         let stale = completion_rx.recv().await.unwrap();
-        assert!(!handle_response_completion(
+        assert!(!handle_stream_completion(
             &mut active_streams,
             stale,
             &mut socket_pending_bytes
@@ -3369,6 +3722,125 @@ mod tests {
         ));
         assert_eq!(socket_pending_bytes, 3);
         close_test_streams(active_streams);
+    }
+
+    #[tokio::test]
+    async fn completed_websocket_tasks_release_their_active_stream_slots() {
+        let mut active_streams = HashMap::new();
+        let mut socket_pending_bytes = 0;
+
+        for task_id in 1..=(MAX_ACTIVE_STREAMS as u64 + 1) {
+            let stream_id = format!("srv-output-{task_id}");
+            let (shutdown, shutdown_rx) = watch::channel(false);
+            active_streams.insert(
+                stream_id.clone(),
+                ActiveStream::WebSocket {
+                    task_id,
+                    shutdown,
+                    input: None,
+                    join: pending_response_task(),
+                },
+            );
+
+            assert!(handle_stream_completion(
+                &mut active_streams,
+                StreamCompletion { stream_id, task_id },
+                &mut socket_pending_bytes,
+            ));
+            assert!(active_streams.is_empty());
+            assert!(*shutdown_rx.borrow());
+        }
+    }
+
+    async fn assert_rejected_websocket_data_cancels_task(
+        frame: TunnelFrame,
+        fill_input_queue: bool,
+        expected_code: &str,
+    ) {
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(2);
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        if fill_input_queue {
+            input_tx.try_send(vec![0]).unwrap();
+        }
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let task_dropped = Arc::new(AtomicBool::new(false));
+        let mut active_streams = HashMap::from([(
+            frame.stream_id.clone(),
+            ActiveStream::WebSocket {
+                task_id: 1,
+                shutdown,
+                input: Some(input_tx),
+                join: pending_task(task_dropped.clone()),
+            },
+        )]);
+        let mut socket_pending_bytes = 0;
+
+        handle_stream_data(
+            frame,
+            &mut active_streams,
+            &mut socket_pending_bytes,
+            &outbound_tx,
+        )
+        .await;
+
+        let error = outbound_rx.recv().await.unwrap();
+        assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
+        assert_eq!(error_code(&error), Some(expected_code));
+        assert!(active_streams.is_empty());
+        assert!(*shutdown_rx.borrow());
+        timeout(Duration::from_secs(1), async {
+            while !task_dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("rejected WebSocket input must cancel its task");
+        drop(input_rx.recv().await);
+    }
+
+    #[tokio::test]
+    async fn oversized_websocket_data_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({
+                    "encoding": ENCODING_BASE64,
+                    "data": BASE64.encode(vec![0; E2E_OUTPUT_OPEN_RECORD_LIMIT + 1]),
+                }),
+            ),
+            false,
+            "bad_stream_data",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn malformed_websocket_data_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({ "encoding": ENCODING_BASE64, "data": "%%%" }),
+            ),
+            false,
+            "bad_stream_data",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn websocket_input_backpressure_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({ "encoding": ENCODING_BASE64, "data": BASE64.encode(b"open") }),
+            ),
+            true,
+            "backpressure_limit_exceeded",
+        )
+        .await;
     }
 
     #[tokio::test]

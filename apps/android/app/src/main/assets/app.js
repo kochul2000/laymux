@@ -11,6 +11,7 @@
   const pairingListEmpty = document.getElementById("pairingListEmpty");
   const biometricToggle = document.getElementById("biometricToggle");
   const biometricHint = document.getElementById("biometricHint");
+  const connectionSettings = document.getElementById("connectionSettings");
   const errorMessage = document.getElementById("errorMessage");
   const noticeMessage = document.getElementById("noticeMessage");
   const scanButton = document.getElementById("scanButton");
@@ -24,6 +25,7 @@
   const nativeBridge = window.LaymuxNative;
   const exitAnimationMilliseconds = 200;
   let dismissing = false;
+  let scanBlockedByBiometric = false;
 
   function actionButton(label, action, instanceId, deviceName) {
     const button = document.createElement("button");
@@ -106,28 +108,37 @@
     const confirmationPending = status.confirmationPending === true;
     const biometricRequired = status.biometricRequired !== false;
     const biometricAvailable = status.biometricAvailable === true;
+    const biometricBlocked =
+      status.biometricRequired === true && status.biometricAvailable === false;
     const remoteConnected = status.remoteConnected === true;
     const remoteConnecting = status.remoteConnecting === true;
     const pairingTotal = Array.isArray(status.pairings)
       ? status.pairings.length
       : 0;
 
-    stateBadge.textContent = confirmed
-      ? "페어링 확인됨"
-      : confirmationPending
-        ? "데스크톱 확인 대기"
-        : pairingTotal > 0
-          ? `저장된 PC ${pairingTotal}대`
-          : "페어링 필요";
-    stateBadge.classList.toggle("paired", confirmed);
-    stateTitle.textContent = confirmed
-      ? "데스크톱과 키를 서로 확인했습니다"
-      : confirmationPending
-        ? "키는 저장됐고 데스크톱 확인이 남았습니다"
-        : status.selectedInstanceId
-          ? "선택한 데스크톱 QR을 스캔하세요"
-          : "Cloud에서 연결할 PC를 선택하세요";
-    if (confirmed && biometricRequired) {
+    stateBadge.textContent = biometricBlocked
+      ? "보호 설정 필요"
+      : confirmed
+        ? "페어링 확인됨"
+        : confirmationPending
+          ? "데스크톱 확인 대기"
+          : pairingTotal > 0
+            ? `저장된 PC ${pairingTotal}대`
+            : "페어링 필요";
+    stateBadge.classList.toggle("paired", confirmed && !biometricBlocked);
+    stateTitle.textContent = biometricBlocked
+      ? "강한 생체 인증을 사용할 수 없습니다"
+      : confirmed
+        ? "데스크톱과 키를 서로 확인했습니다"
+        : confirmationPending
+          ? "키는 저장됐고 데스크톱 확인이 남았습니다"
+          : status.selectedInstanceId
+            ? "선택한 데스크톱 QR을 스캔하세요"
+            : "Cloud에서 연결할 PC를 선택하세요";
+    if (biometricBlocked) {
+      stateDescription.textContent =
+        "연결 설정에서 앱 전용 Keystore 보호를 명시적으로 선택하거나, 강한 생체 인증을 등록한 뒤 다시 시도하세요.";
+    } else if (confirmed && biometricRequired) {
       stateDescription.textContent =
         "암호키는 Android Keystore와 강한 생체 인증으로 보호되며 웹 화면에는 노출되지 않습니다.";
     } else if (confirmed) {
@@ -148,17 +159,22 @@
     }
 
     scanButton.hidden = !status.selectedInstanceId;
-    scanButton.textContent = paired
-      ? "선택한 PC 다시 페어링"
-      : "선택한 PC QR 스캔";
+    scanBlockedByBiometric = biometricBlocked;
+    scanButton.textContent = biometricBlocked
+      ? "보호 설정 열기"
+      : paired
+        ? "선택한 PC 다시 페어링"
+        : "선택한 PC QR 스캔";
     renderPairings(status, biometricRequired, biometricAvailable);
 
     biometricToggle.checked = biometricRequired;
     biometricToggle.disabled = false;
     if (biometricRequired && !biometricAvailable) {
-      biometricHint.textContent =
+      const unavailableReason =
         status.biometricStatusMessage || "강한 생체 인증을 사용할 수 없습니다.";
+      biometricHint.textContent = `${unavailableReason} QR 스캔을 계속하려면 이 스위치를 끄고 경고를 확인하세요.`;
       biometricHint.classList.add("unavailable");
+      connectionSettings.open = true;
     } else if (biometricRequired) {
       biometricHint.textContent =
         "기본값 · PIN이나 패턴으로 자동 대체하지 않습니다.";
@@ -172,7 +188,7 @@
     errorMessage.textContent = status.error || "";
     noticeMessage.hidden = !status.notice;
     noticeMessage.textContent = status.notice || "";
-    scanButton.disabled = biometricRequired && !biometricAvailable;
+    scanButton.disabled = false;
 
     remoteSection.hidden = !confirmed;
     connectButton.hidden = remoteConnected;
@@ -217,6 +233,11 @@
   }
 
   scanButton.addEventListener("click", () => {
+    if (scanBlockedByBiometric) {
+      connectionSettings.open = true;
+      biometricToggle.focus();
+      return;
+    }
     scanButton.disabled = true;
     errorMessage.hidden = true;
     noticeMessage.hidden = true;

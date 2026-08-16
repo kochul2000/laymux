@@ -16,17 +16,13 @@ class RemoteBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun openRemoteOutput(streamId: String, terminalId: String, leaseId: String) {
-        activity.openRemoteOutput(streamId, terminalId, leaseId)
-    }
-
-    @JavascriptInterface
-    fun closeRemoteOutput(streamId: String) {
-        activity.closeRemoteOutput(streamId)
-    }
-
-    @JavascriptInterface
     fun disconnectRemote() {
         activity.runOnUiThread(activity::disconnectRemote)
     }
 }
+
+internal fun stringWebMessagePayload(
+    messageType: Int,
+    stringType: Int,
+    readPayload: () -> String?,
+): String? = if (messageType == stringType) readPayload() else null

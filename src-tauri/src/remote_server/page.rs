@@ -408,7 +408,10 @@ mod tests {
         assert!(html.contains("Native performs the encrypted background transition"));
         assert!(!html.contains("androidBackgroundLeaseSeconds()"));
         assert!(html.contains("window.LaymuxNative.requestRemoteHttp"));
-        assert!(html.contains("window.LaymuxNative.openRemoteOutput"));
+        assert!(html.contains("window.LaymuxOutputTransport.postMessage"));
+        assert!(html.contains("outputSocket.acknowledge()"));
+        assert!(!html.contains("window.LaymuxNative.openRemoteOutput"));
+        assert!(!html.contains("terminalOutputPoll"));
         assert!(html.contains("new AndroidE2eOutputSocket(url)"));
         assert!(html.contains("new TerminalCtor"));
         assert!(html.contains("new WebLinksAddonCtor"));

@@ -16,6 +16,113 @@ import org.json.JSONObject
 
 class E2eProtocolTest {
     @Test
+    fun outputQueueAcceptsTheProtocolMaximumSnapshotPlusBoundedBacklog() {
+        val maximumSnapshotRecord = 1 + 1024 * 1024 + (512 * 1024 + 1024 * 1024 + 2 * 4096)
+
+        assertEquals(E2eOutputLimits.MAX_PLAINTEXT_RECORD_BYTES, maximumSnapshotRecord)
+        assertEquals(
+            maximumSnapshotRecord + 25,
+            E2eOutputLimits.MAX_ENCRYPTED_RECORD_BYTES,
+        )
+        assertEquals(true, E2eOutputLimits.canDecrypt(maximumSnapshotRecord + 25))
+        assertEquals(false, E2eOutputLimits.canDecrypt(maximumSnapshotRecord + 26))
+        assertEquals(true, E2eOutputLimits.canEnqueue(0, maximumSnapshotRecord))
+        assertEquals(true, E2eOutputLimits.canEnqueue(256, maximumSnapshotRecord))
+        assertEquals(
+            false,
+            E2eOutputLimits.canEnqueue(0, maximumSnapshotRecord + 1),
+        )
+        assertEquals(
+            false,
+            E2eOutputLimits.canEnqueue(
+                E2eOutputLimits.MAX_PENDING_BYTES - maximumSnapshotRecord + 1,
+                maximumSnapshotRecord,
+            ),
+        )
+    }
+
+    @Test
+    fun outputStreamReservationsBoundPendingAndActiveOpens() {
+        val reservations = E2eOutputStreamReservations(maxStreams = 2)
+        val first = requireNotNull(reservations.reserve("stream-1"))
+        val second = requireNotNull(reservations.reserve("stream-2"))
+
+        assertEquals(null, reservations.reserve("stream-3"))
+        assertEquals(null, reservations.reserve("stream-1"))
+        assertEquals(false, reservations.release("stream-1", first + 1))
+        assertEquals(true, reservations.isCurrent("stream-1", first))
+        assertEquals(true, reservations.release("stream-1", first))
+        assertEquals(false, reservations.isCurrent("stream-1", first))
+        assertEquals(true, reservations.reserve("stream-3") != null)
+        assertEquals(true, reservations.release("stream-2", second))
+    }
+
+    @Test
+    fun outputRecordsAreBinaryDirectionalAndBoundToTheStreamNonce() {
+        val sessionKeys = E2eProtocol.deriveKeys(
+            ByteArray(32) { 3 },
+            arrayOf("p", "desktop-7", "c", "cs", "sn", "s"),
+        )
+        val streamNonce = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+        val outputKeys = E2eOutputProtocol.deriveKeys(
+            sessionKeys.first,
+            sessionKeys.second,
+            "desktop-7",
+            "s",
+            streamNonce,
+        )
+        assertEquals(
+            "e5df689e823e95d6a84af57c73af53e006598abd39838cc04c1c4057b13939e5",
+            outputKeys.first.toHex(),
+        )
+        assertEquals(
+            "3ea5a2e48f7b8a53e1c6369b6f3b560bc0bfa47c1ef92e50eef2c0d6f7e5ec76",
+            outputKeys.second.toHex(),
+        )
+        val responsePlaintext = byteArrayOf(E2eOutputProtocol.RECORD_BINARY, 4, 5, 6)
+        val record = E2eOutputProtocol.encryptRecord(
+            outputKeys.second,
+            E2eOutputProtocol.D2A_AAD_DOMAIN,
+            "desktop-7",
+            "s",
+            streamNonce,
+            0,
+            responsePlaintext,
+        )
+
+        assertEquals(E2eProtocol.VERSION.toByte(), record[0])
+        assertArrayEquals(
+            responsePlaintext,
+            E2eOutputProtocol.decryptRecord(
+                outputKeys.second,
+                E2eOutputProtocol.D2A_AAD_DOMAIN,
+                "desktop-7",
+                "s",
+                streamNonce,
+                0,
+                record,
+            ),
+        )
+        assertThrows(E2eProtocolException::class.java) {
+            E2eOutputProtocol.decryptRecord(
+                outputKeys.second,
+                E2eOutputProtocol.D2A_AAD_DOMAIN,
+                "desktop-7",
+                "s",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+                0,
+                record,
+            )
+        }
+        Arrays.fill(sessionKeys.first, 0)
+        Arrays.fill(sessionKeys.second, 0)
+        Arrays.fill(outputKeys.first, 0)
+        Arrays.fill(outputKeys.second, 0)
+        Arrays.fill(responsePlaintext, 0)
+        Arrays.fill(record, 0)
+    }
+
+    @Test
     fun matchesTheDesktopCrossPlatformVector() {
         val seed = ByteArray(32) { it.toByte() }
         val pairingId = "AAECAwQFBgcICQoLDA0ODw"

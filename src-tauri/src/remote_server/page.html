@@ -2326,7 +2326,8 @@
           searchParams.get("androidE2e") === "1" &&
           window.LaymuxNative &&
           typeof window.LaymuxNative.requestRemoteHttp === "function" &&
-          typeof window.LaymuxNative.openRemoteOutput === "function";
+          window.LaymuxOutputTransport &&
+          typeof window.LaymuxOutputTransport.postMessage === "function";
         const localAppMode = searchParams.get("localApp") === "1" || hashParams.get("localApp") === "1";
         const autoConnectMode = searchParams.get("autoConnect") === "1" || hashParams.get("autoConnect") === "1";
         const clientNameFromParams = searchParams.get("clientName") || hashParams.get("clientName");
@@ -2533,16 +2534,6 @@
           });
         }
 
-        function decodeAndroidBase64Url(value) {
-          const padding = "=".repeat((4 - (value.length % 4)) % 4);
-          const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/") + padding);
-          const bytes = new Uint8Array(binary.length);
-          for (let index = 0; index < binary.length; index += 1) {
-            bytes[index] = binary.charCodeAt(index);
-          }
-          return bytes.buffer;
-        }
-
         class AndroidE2eOutputSocket {
           constructor(url) {
             this.binaryType = "arraybuffer";
@@ -2565,15 +2556,19 @@
               if (!this.terminalId || !this.leaseId) {
                 throw new Error("Remote output identity is missing.");
               }
+              if (!window.LaymuxOutputTransport?.postMessage) {
+                throw new Error("Secure binary output bridge is unavailable.");
+              }
               androidOutputSockets.set(this.streamId, this);
               setTimeout(() => {
                 if (this.readyState !== 0) return;
                 try {
-                  window.LaymuxNative.openRemoteOutput(
-                    this.streamId,
-                    this.terminalId,
-                    this.leaseId,
-                  );
+                  window.LaymuxOutputTransport.postMessage(JSON.stringify({
+                    type: "open",
+                    streamId: this.streamId,
+                    terminalId: this.terminalId,
+                    leaseId: this.leaseId,
+                  }));
                 } catch (error) {
                   this.fail(error instanceof Error ? error.message : String(error));
                 }
@@ -2586,32 +2581,54 @@
             }
           }
 
-          acceptFrame(response) {
-            if (this.readyState >= 2 || response.phase === "idle") return;
-            if (response.phase !== "snapshot" && response.phase !== "delta") {
-              this.fail("Remote output frame is invalid.");
-              return;
-            }
-            if (!response.header || typeof response.data !== "string") {
-              this.fail("Remote output frame is incomplete.");
-              return;
-            }
-            if (this.readyState === 0) {
+          acceptBridgeEvent(kind, payload) {
+            if (this.readyState >= 2) return;
+            if (kind === 1) {
+              if (this.readyState !== 0) return;
               this.readyState = 1;
               this.onopen?.({ type: "open", target: this });
+              return;
             }
-            try {
-              this.onmessage?.({ data: JSON.stringify(response.header), target: this });
-              this.onmessage?.({ data: decodeAndroidBase64Url(response.data), target: this });
-            } catch (error) {
-              this.fail(error instanceof Error ? error.message : String(error));
+            if (kind === 2) {
+              if (this.readyState !== 1 || payload.byteLength < 1) {
+                this.fail("Secure output bridge record is invalid.");
+                return;
+              }
+              const recordKind = payload[0];
+              if (recordKind === 2) {
+                this.onmessage?.({
+                  data: new TextDecoder().decode(payload.subarray(1)),
+                  target: this,
+                });
+                return;
+              }
+              if (recordKind === 3) {
+                this.onmessage?.({ data: payload.slice(1).buffer, target: this });
+                return;
+              }
+              this.fail("Secure output record type is invalid.");
+              return;
             }
+            if (kind === 3) {
+              const isError = payload[0] === 1;
+              const message = new TextDecoder().decode(payload.subarray(1));
+              if (isError) this.onerror?.({ type: "error", message, target: this });
+              this.finish();
+            }
+          }
+
+          acknowledge() {
+            if (this.readyState !== 1) return;
+            window.LaymuxOutputTransport.postMessage(JSON.stringify({
+              type: "ack",
+              streamId: this.streamId,
+            }));
           }
 
           fail(message) {
             if (this.readyState >= 2) return;
             this.onerror?.({ type: "error", message, target: this });
-            this.finish();
+            this.close();
           }
 
           finish() {
@@ -2626,10 +2643,27 @@
             this.readyState = 2;
             androidOutputSockets.delete(this.streamId);
             try {
-              window.LaymuxNative.closeRemoteOutput(this.streamId);
+              window.LaymuxOutputTransport.postMessage(JSON.stringify({
+                type: "close",
+                streamId: this.streamId,
+              }));
             } catch (_) {}
             setTimeout(() => this.finish(), 0);
           }
+        }
+
+        if (window.LaymuxOutputTransport) {
+          window.LaymuxOutputTransport.onmessage = (event) => {
+            if (!(event.data instanceof ArrayBuffer) || event.data.byteLength < 3) return;
+            const bytes = new Uint8Array(event.data);
+            const streamIdLength = new DataView(event.data).getUint16(1, false);
+            if (bytes.byteLength < 3 + streamIdLength) return;
+            const streamId = new TextDecoder().decode(bytes.subarray(3, 3 + streamIdLength));
+            androidOutputSockets.get(streamId)?.acceptBridgeEvent(
+              bytes[0],
+              bytes.subarray(3 + streamIdLength),
+            );
+          };
         }
 
         window.laymuxAndroidE2e = Object.freeze({
@@ -2656,23 +2690,6 @@
             androidHttpRequests.delete(requestId);
             request.cleanup();
             request.reject(new Error(message || "Secure Remote request failed."));
-          },
-          onOutputFrame(streamId, responseJson) {
-            const outputSocket = androidOutputSockets.get(streamId);
-            if (!outputSocket) return;
-            try {
-              outputSocket.acceptFrame(JSON.parse(responseJson));
-            } catch (error) {
-              outputSocket.fail(error instanceof Error ? error.message : String(error));
-            }
-          },
-          onOutputClosed(streamId, message, isError) {
-            const outputSocket = androidOutputSockets.get(streamId);
-            if (!outputSocket) return;
-            if (isError === "true") {
-              outputSocket.onerror?.({ type: "error", message, target: outputSocket });
-            }
-            outputSocket.finish();
           },
         });
 
@@ -7119,7 +7136,7 @@
             pendingOutputHeader = null;
             if (!header || payload.byteLength !== header.byteLength) {
               failOutputProtocol("binary payload length mismatch");
-              return;
+              return Promise.resolve();
             }
 
             if (header.phase === "snapshot") {
@@ -7144,8 +7161,9 @@
               const syntheticMode = header.state.modes.bracketedPaste
                 ? "\x1b[?2004h"
                 : "\x1b[?2004l";
-              queueTerminalWrite(payload, true);
-              queueTerminalWrite(syntheticMode, true).then(() => {
+              return queueTerminalWrite(payload, true)
+                .then(() => queueTerminalWrite(syntheticMode, true))
+                .then(() => {
                 if (
                   outputProtocolFailed ||
                   outputGeneration !== terminalOutputGeneration ||
@@ -7167,15 +7185,16 @@
                 composerReady = true;
                 updateComposerControls();
                 scheduleTerminalFit(true);
-              });
-              return;
+                });
             }
 
             const suffix = header.trimPrefix
               ? payload.subarray(header.trimPrefix)
               : payload;
             expectedOutputSeq = Math.max(expectedOutputSeq, header.seqEnd);
-            if (suffix.byteLength > 0) queueTerminalWrite(suffix);
+            return suffix.byteLength > 0
+              ? queueTerminalWrite(suffix)
+              : Promise.resolve();
           };
 
           outputSocket.onopen = () => {
@@ -7196,12 +7215,16 @@
             if (socket !== outputSocket || outputProtocolFailed) return;
             if (event.data instanceof ArrayBuffer) {
               const payload = new Uint8Array(event.data);
+              let completion = Promise.resolve();
               if (pendingOutputHeader) {
-                acceptOutputBinary(payload);
+                completion = acceptOutputBinary(payload);
               } else if (outputPhase === "attached") {
                 failOutputProtocol("binary payload received without a header");
               } else {
                 acceptLegacyOutput(payload);
+              }
+              if (typeof outputSocket.acknowledge === "function") {
+                completion.finally(() => outputSocket.acknowledge());
               }
               return;
             }
@@ -7224,6 +7247,9 @@
               return;
             }
             acceptOutputHeader(header);
+            if (typeof outputSocket.acknowledge === "function") {
+              outputSocket.acknowledge();
+            }
           };
           outputSocket.onclose = () => {
             if (socket === outputSocket) {

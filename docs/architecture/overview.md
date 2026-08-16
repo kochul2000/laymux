@@ -44,8 +44,10 @@ Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에�
 별도 secure WebView와 Kotlin 계층이 QR·Keystore·암호화 transport를 소유한다. APK에는 pairing과
 보안 session을 여는 최소 bootstrap만 포함하며, terminal·workspace·입출력 표면은 사용자 PC에
 설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
-Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공하고,
-WebView의 API/output 요청도 key를 JavaScript에 노출하지 않는 native bridge로 암호화한다.
+Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공한다.
+WebView의 API 요청은 native HTTP bridge가 기존 AEAD RPC로 암호화하고, terminal output은 native가
+소유한 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge로 browser와 같은 Remote v1
+text-header/binary-body 계약을 전달한다. key와 ciphertext는 JavaScript에 노출하지 않는다.
 pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
 읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
@@ -59,7 +61,8 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
 복귀 시 같은 session을 재개하며, 만료 뒤에는 폐기한다. Android native transport가 고정 relay route에
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
-native HTTP/output bridge에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)). Cloud dashboard가
+native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
+[ADR-0159](../adr/0159-android-e2e-websocket-output-transport.md)). Cloud dashboard가
 선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. PC별
 `settings.remote.cloudAccessMode`는 기존 평문 Cloud browser Remote와 Android E2E를 함께 허용하거나
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
