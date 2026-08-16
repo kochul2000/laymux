@@ -43,6 +43,39 @@ async fn output_stream_nonce_can_only_be_used_once_per_session() {
         session.open_output_cipher(&nonce, 1_000).await,
         Err(E2eError::Invalid)
     ));
+    assert!(!session.is_revoked());
+}
+
+#[tokio::test]
+async fn output_stream_nonce_limit_revokes_session_for_rollover() {
+    let keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let session = AndroidE2eSession {
+        instance_id: "desktop-7".into(),
+        session_id: URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]),
+        pairing_revision: crate::android_pairing::pairing_revision(),
+        expires_at: AtomicU64::new(1_060),
+        revoked: AtomicBool::new(false),
+        state: AsyncMutex::new(SessionState {
+            keys,
+            used_output_nonces: (0..MAX_OUTPUT_STREAM_NONCES)
+                .map(|index| format!("used-{index}"))
+                .collect(),
+            next_sequence: 0,
+            last_request_digest: None,
+            last_response: None,
+        }),
+    };
+    let nonce = URL_SAFE_NO_PAD.encode([5_u8; OUTPUT_STREAM_NONCE_BYTES]);
+
+    assert!(matches!(
+        session.open_output_cipher(&nonce, 1_000).await,
+        Err(E2eError::Expired)
+    ));
+    assert!(session.is_revoked());
+    assert!(matches!(
+        session.ensure_active(1_000),
+        Err(E2eError::Invalid)
+    ));
 }
 
 fn establish_request(
