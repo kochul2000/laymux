@@ -1271,6 +1271,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     val stale = remoteConnectionGeneration.get() != connectionGeneration ||
                         !remoteLifecycleActive || isDestroyed
                     if (stale) {
+                        hideRemoteLoadingOverlay()
                         result.getOrNull()?.let { session ->
                             if (remoteOpeningSession === session) remoteOpeningSession = null
                             session.close()
@@ -1292,8 +1293,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             showRemoteSurface()
                         },
                         onFailure = { error ->
-                            hideRemoteLoadingOverlay()
                             closeRemoteSession()
+                            hideRemoteLoadingOverlay()
                             if (error !is RemoteConnectionCancelledException) {
                                 notifyPairingChanged(error = remoteErrorMessage(error))
                             }
