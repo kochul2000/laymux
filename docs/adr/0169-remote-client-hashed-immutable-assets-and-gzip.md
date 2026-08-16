@@ -1,6 +1,6 @@
 # 0169. Remote 클라이언트는 셸 문서 + 콘텐츠 해시 불변 자산으로 분리하고 gzip 으로 전송한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-16
 - Source: 사용자 요구("page.html 사이즈 줄여라 — 분리·압축·minify 다 해라") · [ADR-0077](0077-remote-terminal-font-serving.md) · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) · [ADR-0168](0168-android-remote-resource-memory-cache-and-transfer-overlay.md)
 - Extends: ADR-0077, ADR-0168
