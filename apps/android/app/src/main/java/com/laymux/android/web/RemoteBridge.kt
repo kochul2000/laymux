@@ -16,6 +16,11 @@ class RemoteBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
+    fun cancelRemoteHttp(requestId: String) {
+        activity.cancelRemoteHttp(requestId)
+    }
+
+    @JavascriptInterface
     fun disconnectRemote() {
         activity.runOnUiThread(activity::disconnectRemote)
     }

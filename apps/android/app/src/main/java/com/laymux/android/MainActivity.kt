@@ -54,6 +54,7 @@ import com.laymux.android.remote.E2eOutputStreamReservations
 import com.laymux.android.remote.E2eRemoteClient
 import com.laymux.android.remote.E2eSessionSuspendedException
 import com.laymux.android.remote.E2eTransportException
+import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
@@ -132,6 +133,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
     private val remoteOutputReservations = E2eOutputStreamReservations()
+    private val remoteHttpRequests = RemoteHttpRequestRegistry()
     private val remoteConnectionGeneration = AtomicLong()
     @Volatile private var remoteLifecycleActive = false
 
@@ -1149,10 +1151,18 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             emitHttpError(requestId, "Secure session is unavailable.")
             return
         }
+        val ticket = remoteHttpRequests.register(requestId)
+        if (ticket == null) {
+            emitHttpError(requestId, "Remote request id is already active.")
+            return
+        }
+        val connectionGeneration = remoteConnectionGeneration.get()
         try {
             remoteExecutor.execute {
-                if (remoteSession !== session || !remoteLifecycleActive) return@execute
                 try {
+                    if (!remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
+                        return@execute
+                    }
                     val response = e2eRemoteClient.rpc(
                         session,
                         JSONObject()
@@ -1161,18 +1171,38 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             .put("path", path)
                             .put("body", body ?: JSONObject.NULL),
                     )
-                    emitHttpResponse(requestId, normalizeHttpResponse(response))
+                    if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
+                        emitHttpResponse(requestId, normalizeHttpResponse(response))
+                    }
                 } catch (_: E2eSessionSuspendedException) {
                     // Foreground resume reloads the authenticated PC-owned page.
                 } catch (error: Throwable) {
-                    emitHttpError(requestId, remoteErrorMessage(error))
+                    if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
+                        emitHttpError(requestId, remoteErrorMessage(error))
+                    }
                     handleRemoteFailure(error, session)
+                } finally {
+                    remoteHttpRequests.complete(ticket)
                 }
             }
         } catch (_: RejectedExecutionException) {
-            emitHttpError(requestId, "Secure session is unavailable.")
+            if (remoteHttpRequests.complete(ticket)) {
+                emitHttpError(requestId, "Secure session is unavailable.")
+            }
         }
     }
+
+    fun cancelRemoteHttp(requestId: String) {
+        if (validBridgeId(requestId)) remoteHttpRequests.cancel(requestId)
+    }
+
+    private fun remoteHttpRequestIsCurrent(
+        ticket: RemoteHttpRequestRegistry.Ticket,
+        session: RemoteSession,
+        connectionGeneration: Long,
+    ): Boolean = remoteHttpRequests.isCurrent(ticket) &&
+        remoteLifecycleActive && remoteSession === session &&
+        remoteConnectionGeneration.get() == connectionGeneration
 
     private fun normalizeHttpResponse(response: JSONObject): JSONObject {
         if (response.optString("kind") == "http") return response
@@ -1348,6 +1378,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun suspendRemoteSessionForBackground() {
         remoteConnectionGeneration.incrementAndGet()
+        remoteHttpRequests.clear()
         clearRemoteOutputStreams()
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
@@ -1462,6 +1493,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun closeRemoteSession() {
         remoteConnectionGeneration.incrementAndGet()
+        remoteHttpRequests.clear()
         clearRemoteOutputStreams()
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null

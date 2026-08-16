@@ -2481,9 +2481,21 @@
         }
 
         let nextAndroidHttpRequestId = 0;
+        const androidHttpDocumentId = (() => {
+          const bytes = new Uint8Array(8);
+          window.crypto.getRandomValues(bytes);
+          return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+        })();
         let nextAndroidOutputStreamId = 0;
         const androidHttpRequests = new Map();
         const androidOutputSockets = new Map();
+
+        function cancelAndroidRemoteHttp(requestId) {
+          if (typeof window.LaymuxNative?.cancelRemoteHttp !== "function") return;
+          try {
+            window.LaymuxNative.cancelRemoteHttp(requestId);
+          } catch (_) {}
+        }
 
         function remoteResponseError(status, body = {}) {
           const error = new Error(body.error || `Remote request failed (${status})`);
@@ -2507,9 +2519,10 @@
               reject(new DOMException("The operation was aborted.", "AbortError"));
               return;
             }
-            const requestId = `http-${++nextAndroidHttpRequestId}`;
+            const requestId = `http-${androidHttpDocumentId}-${++nextAndroidHttpRequestId}`;
             const abort = () => {
               if (!androidHttpRequests.delete(requestId)) return;
+              cancelAndroidRemoteHttp(requestId);
               reject(new DOMException("The operation was aborted.", "AbortError"));
             };
             options.signal?.addEventListener("abort", abort, { once: true });

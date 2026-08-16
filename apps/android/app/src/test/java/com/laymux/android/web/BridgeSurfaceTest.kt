@@ -12,6 +12,7 @@ class BridgeSurfaceTest {
     fun remoteBridgeExposesOnlyTransportAndDisconnect() {
         assertEquals(
             setOf(
+                "cancelRemoteHttp",
                 "requestRemoteHttp",
                 "setRemoteLease",
                 "disconnectRemote",
@@ -48,6 +49,7 @@ class BridgeSurfaceTest {
 
     companion object {
         private val REMOTE_TRANSPORT_METHODS = setOf(
+            "cancelRemoteHttp",
             "requestRemoteHttp",
         )
     }
