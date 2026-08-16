@@ -33,4 +33,5 @@ controller lease 의 수명은 heartbeat timeout(기본 30~45초)뿐이다. Andr
 - E2E 재접속 claim 은 죽은 lease 에 막히지 않는다. 데스크톱 재시작·세션 만료 후 첫 재접속이 즉시 성공한다.
 - lease 상태에 `android_e2e_lease` 태그가 추가되지만 상태 소유권·직렬화 표면(status 응답)은 불변이다.
 - 검증: lease 태깅/해제/재설치 unbound 단위 테스트, 세션 교체·만료 후 `session_is_active` 판정 테스트. 실기기에서는 데스크톱 재시작 후 재접속이 409 없이 붙는지 수동 확인한다.
+- 해제 시점에 remote operation 이 아직 drain 중이면 lease 는 `transitioning` 으로 남고 해당 claim 은 구조화된 transitioning 충돌(페이지가 자동 재시도)로 답한다. 이 drain 은 in-flight PTY write 에 바운드되므로(밀리초 규모) 이 결정이 제거하려는 heartbeat timeout(수십 초) 대기와는 규모가 다르다.
 - 남은 결함 창: 세션이 살아있는 동안 페이지 문서만 lease 를 잃는 경우(기존 heartbeat 409 → loseRemoteControl → 재claim 경로)가 계속 담당한다.

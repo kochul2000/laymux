@@ -472,12 +472,24 @@ async fn remote_session_claim(
 /// Releases a controller lease whose Android E2E session is gone (revoked by
 /// a newer establish or expired). Returns an error response only on lock
 /// failure; "nothing to release" is a normal claim precondition.
+///
+/// The registry is consulted between the two controller-lock sections, so the
+/// world may move underneath: if another claim installs a fresh lease (and
+/// possibly re-tags it for the successor session) in that window, the exact-tag
+/// re-validation inside `release_android_e2e_lease_of_dead_session` turns this
+/// call into a no-op — only the observed dead-session lease is ever released.
+/// If operations are still draining, the release leaves `transitioning=true`
+/// and the claim below answers the structured `transitioning` conflict the
+/// page already retries; that drain is bounded by in-flight PTY writes, not by
+/// the heartbeat timeout this path exists to avoid.
 fn release_dead_android_e2e_lease(server: &ServerState) -> Option<Response> {
     let tag = match server.app_state.remote_control.lock_or_err() {
         Ok(control) => control.active_android_e2e_lease(),
         Err(err) => return Some(internal_error(err)),
     };
     let tag = tag?;
+    // Session expiry is a protocol clock (unix epoch, ADR-0146); lease
+    // transitions run on the monotonic clock like every other lease path.
     let now_epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
