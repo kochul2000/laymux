@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::OnceLock;
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header;
@@ -58,21 +59,79 @@ pub(crate) async fn remote_page(
         return response;
     }
 
-    // The page is compiled in via include_str!, so there is no mtime/ETag for
-    // revalidation — without this, browsers heuristically cache it and users
-    // need a hard refresh after every update.
+    // The page shell is compiled in via include_str!, so there is no mtime/ETag
+    // for revalidation — without no-store, browsers heuristically cache it and
+    // users need a hard refresh after every update. The heavy app bundle and
+    // vendor assets it references are immutable hashed URLs (ADR-0169) instead.
+    if super::page_assets::accepts_gzip(req.headers()) {
+        return (
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                (header::CONTENT_ENCODING, "gzip"),
+                (header::VARY, "Accept-Encoding"),
+            ],
+            remote_page_gzip().to_vec(),
+        )
+            .into_response();
+    }
     (
-        [(header::CACHE_CONTROL, "no-store")],
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::VARY, "Accept-Encoding"),
+        ],
         Html(remote_page_html()),
     )
         .into_response()
 }
 
+/// The committed shell references assets as `{{ASSET:<logical name>}}`; the
+/// served document points them at the content-hashed immutable URLs.
 pub(super) fn remote_page_html() -> &'static str {
-    REMOTE_PAGE_HTML
+    static RENDERED: OnceLock<String> = OnceLock::new();
+    RENDERED.get_or_init(|| {
+        let mut html = REMOTE_PAGE_SHELL.to_string();
+        for logical_name in [
+            "xterm.css",
+            "remote-app.css",
+            "xterm.js",
+            "unicode-provider.js",
+            "addon-fit.js",
+            "addon-web-links.js",
+            "remote-app.js",
+        ] {
+            let placeholder = format!("{{{{ASSET:{logical_name}}}}}");
+            let url = super::page_assets::hashed_asset_url(logical_name)
+                .expect("page shell references only registered assets");
+            html = html.replace(&placeholder, &url);
+        }
+        assert!(
+            !html.contains("{{ASSET:"),
+            "page shell references an unregistered asset"
+        );
+        html
+    })
 }
 
-const REMOTE_PAGE_HTML: &str = include_str!("page.html");
+fn remote_page_gzip() -> &'static [u8] {
+    static GZIP: OnceLock<Vec<u8>> = OnceLock::new();
+    GZIP.get_or_init(|| super::page_assets::gzip_for_page(remote_page_html().as_bytes()))
+}
+
+/// What the browser effectively loads: the rendered shell plus the readable
+/// app sources the shell's hashed bundle was built from. Content-pinning
+/// tests assert against this instead of the minified artifact.
+#[cfg(test)]
+pub(super) fn remote_client_source() -> String {
+    format!(
+        "{}\n{}\n{}",
+        remote_page_html(),
+        include_str!("assets/remote-app.css"),
+        include_str!("assets/remote-app.js"),
+    )
+}
+
+const REMOTE_PAGE_SHELL: &str = include_str!("page.html");
 
 #[cfg(test)]
 mod tests {
@@ -93,7 +152,7 @@ mod tests {
     /// definitive refusal disarms it (ADR-0027 stays intact for takeovers).
     #[test]
     fn remote_page_html_auto_reconnects_only_from_a_visible_document() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Tab-scoped intent. It survives the reload/discard a long background causes,
         // but a second tab must not inherit it — a stale tab that kept re-claiming
         // turned a fresh dashboard "Connect" into a 409 lease conflict.
@@ -169,7 +228,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_registers_the_desktop_terminal_font() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Only the exact advertised shapes may be registered as a font.
         assert!(html.contains("const REMOTE_FONT_FAMILY_PATTERN = /^LxRemoteFont-[0-9a-f]{12}$/;"));
         assert!(html.contains(
@@ -209,7 +268,7 @@ mod tests {
     /// wherever the font and theme are, both at creation and on a live update.
     #[test]
     fn remote_page_html_applies_the_served_wheel_sensitivities() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("scrollSensitivity: normalized.scrollSensitivity,"));
         assert!(html.contains("fastScrollSensitivity: normalized.fastScrollSensitivity,"));
         // An older desktop omits the field and a hand-edited value can be out of
@@ -223,7 +282,7 @@ mod tests {
     /// option (xterm rejects unknown option keys).
     #[test]
     fn remote_page_html_scales_finger_drag_scrollback() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("gesture.scrollRemainderPx += -deltaY * touchScrollSensitivity;"));
         assert!(html.contains("function adoptTouchScrollSensitivity(appearance = {}) {"));
         // Both the first terminal and every later appearance update adopt it.
@@ -236,7 +295,7 @@ mod tests {
     /// previous width — so attach publishes exactly one geometry.
     #[test]
     fn remote_page_html_publishes_one_attach_geometry() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Bounded wait: a font that never arrives must not hold the terminal.
         assert!(html.contains("const REMOTE_ATTACH_CHROME_SETTLE_MS = 900;"));
         assert!(html
@@ -268,7 +327,7 @@ mod tests {
     /// (ADR-0091).
     #[test]
     fn remote_page_html_declares_an_installable_standalone_app() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // A manifest fetch omits cookies by default, and this route carries the
         // same gate as the rest of `/remote/*` — without the attribute the
         // manifest 401s and the install prompt never appears.
@@ -295,7 +354,7 @@ mod tests {
     /// surrounding the workspace list on every open.
     #[test]
     fn remote_page_html_keeps_secondary_pages_out_of_the_workspace_home() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         let workspace_view = html
             .split("<div id=\"drawerWorkspaceView\"")
@@ -361,7 +420,7 @@ mod tests {
     /// spend the terminal rows ADR-0091 set out to win back.
     #[test]
     fn remote_page_html_offers_installation_from_the_drawer() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Inside the navigation drawer, after the last section — not the header
         // (already crowded) and not over the terminal.
         assert!(html.contains("<section id=\"installSection\""));
@@ -385,7 +444,7 @@ mod tests {
     /// piece of chrome being visible.
     #[test]
     fn remote_page_html_offers_the_widget_bar_toggle_from_the_drawer() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let drawer = html
             .split("<aside id=\"navigationPanel\"")
             .nth(1)
@@ -406,7 +465,7 @@ mod tests {
     /// condition that rules installation out keeps the section hidden (ADR-0099).
     #[test]
     fn remote_page_html_hides_the_install_offer_when_it_cannot_be_acted_on() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Already on the home screen: nothing left to offer. iOS' legacy flag is
         // checked too — its standalone launch predates `display-mode`.
         assert!(html.contains("window.matchMedia(\"(display-mode: standalone)\")"));
@@ -424,7 +483,7 @@ mod tests {
     /// a call into an API that does not exist (ADR-0099).
     #[test]
     fn remote_page_html_installs_through_the_deferred_prompt_or_explains_ios() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("window.addEventListener(\"beforeinstallprompt\""));
         // Letting the event through would spend Chromium's own mini-infobar and
         // leave nothing to trigger from the drawer.
@@ -445,14 +504,23 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_remote_bootstrap() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("Laymux Remote"));
-        assert!(html.contains("/remote/vendor/xterm.js"));
-        assert!(html.contains("/remote/vendor/addon-web-links.js"));
+        // The rendered shell references the hashed immutable asset URLs
+        // (ADR-0169), never the fixed vendor paths.
+        for logical_name in ["xterm.js", "xterm.css", "remote-app.js", "remote-app.css"] {
+            let url = super::super::page_assets::hashed_asset_url(logical_name)
+                .expect("registered asset");
+            assert!(html.contains(&url), "shell must reference {url}");
+        }
+        assert!(!html.contains("/remote/vendor/"));
         // Without the provider script the remote client silently falls back to
         // xterm default Unicode 6 widths and wraps at different columns than the
         // desktop for emoji and 89 BMP code points (issue #538).
-        assert!(html.contains("/remote/vendor/unicode-provider.js"));
+        assert!(html.contains(
+            &super::super::page_assets::hashed_asset_url("unicode-provider.js")
+                .expect("registered asset")
+        ));
         assert!(html.contains("window.LaymuxUnicodeProvider"));
         assert!(html.contains("/remote/v1/session/claim"));
         assert!(html.contains("/remote/v1/navigation"));
@@ -488,9 +556,7 @@ mod tests {
         ));
         assert!(html.contains("const androidHttpDocumentId = (() => {"));
         assert!(html.contains("cancelAndroidRemoteHttp(requestId);"));
-        assert!(!html.contains(
-            "typeof window.LaymuxNative.cancelRemoteHttp === \"function\" &&"
-        ));
+        assert!(!html.contains("typeof window.LaymuxNative.cancelRemoteHttp === \"function\" &&"));
         assert!(html.contains("window.LaymuxOutputTransport.postMessage"));
         assert!(html.contains("onNativeForeground()"));
         assert!(html.contains("Secure Remote transport resumed after background."));
@@ -592,11 +658,14 @@ mod tests {
         assert!(!status_css.contains("text-overflow: ellipsis;"));
         assert!(html.contains("function setStatus(message, error = false, warning = false)"));
         assert!(html.contains("statusEl.classList.toggle(\"warning\", warning);"));
-        assert!(html.contains("setStatus(\"Connection interrupted. Reconnecting...\", false, true);"));
+        assert!(
+            html.contains("setStatus(\"Connection interrupted. Reconnecting...\", false, true);")
+        );
         assert!(html.contains(".input-mode-toggle {"));
         assert!(html.contains("width: var(--header-control-height);"));
         assert!(!html.contains("id=\"inputModeLabel\""));
-        assert!(html.contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
+        assert!(html
+            .contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
         assert!(html.contains("id=\"desktopModeHeader\""));
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
@@ -606,7 +675,9 @@ mod tests {
         assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
         assert!(!html.contains("id=\"exit\" class=\"danger\" disabled"));
         assert!(html.contains("async function exitRemote()"));
-        assert!(html.contains("if (currentLease) await releaseLease(currentLease).catch(() => {});"));
+        assert!(
+            html.contains("if (currentLease) await releaseLease(currentLease).catch(() => {});")
+        );
         assert!(html.contains("window.LaymuxNative.disconnectRemote();"));
         assert!(html.contains("const localAppMode ="));
         assert!(html.contains("const autoConnectMode ="));
@@ -657,7 +728,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_file_viewer_new_tab_handshake() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
         assert!(html.contains(
             "id=\"fileViewerPath\" type=\"text\" autocomplete=\"off\" autocapitalize=\"off\""
@@ -684,7 +755,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_selected_file_path_links() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("/remote/v1/file-viewer/path-link"));
         assert!(html.contains("function evaluatePathLinkSelection()"));
         assert!(html.contains("function schedulePathLinkSelectionEvaluation("));
@@ -708,7 +779,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_jump_to_bottom_button() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         assert!(html.contains(
             "id=\"scrollToBottom\" class=\"terminal-scroll-to-bottom\" type=\"button\" hidden"
@@ -724,7 +795,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_soft_key_toolbar() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Markup: toolbar row, footer toggle, and the settings popover.
         assert!(html.contains("id=\"keyBar\""));
         assert!(html.contains("id=\"keyBarToggle\""));
@@ -805,7 +876,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_step_navigation_keys() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Step navigation lives INSIDE the soft-key toolbar as a configurable
         // key set (issue #474): no dedicated bar row exists.
         assert!(!html.contains("id=\"navStepBar\""));
@@ -845,7 +916,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_spatial_pane_exclusion_toggle() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         assert!(html.contains("id=\"spatialExclusion\""));
         assert!(html.contains("data-icon=\"circle-minus\""));
@@ -865,7 +936,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_workspace_skip_toggle() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         // Drawer per-workspace skip toggle reuses the same circle-minus icon
         // and a Set<workspaceId> denylist persisted under its own key (#507).
@@ -892,7 +963,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_header_pane_identity() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // The header shows a friendly "Workspace · Pane N" context title
         // instead of the raw terminal id, and doubles as the landing indicator
         // after a navigation step (issue #474).
@@ -911,7 +982,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_detached_input_composer() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         // The focused Remote surface exposes the same Direct/Composer choice on
         // fine-pointer desktops and coarse-pointer mobile clients.
@@ -988,7 +1059,7 @@ mod tests {
 
     #[test]
     fn remote_page_html_contains_composer_recall_history_and_autocomplete() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         // Two floating listboxes over the editor: Tab recall popup (#504) and
         // as-you-type autocomplete (#505). They share one CSS class since only
@@ -1128,7 +1199,7 @@ mod tests {
 
     #[test]
     fn remote_page_mobile_layout_tracks_viewport_without_outer_scroll() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         // Ask supporting mobile browsers to resize layout content for the native keyboard,
         // then use VisualViewport as the cross-browser source for the actual visible height.
@@ -1159,18 +1230,18 @@ mod tests {
     /// are pre-mixed 8-digit hex — the same form the desktop tokens use.
     #[test]
     fn remote_page_writes_colors_as_color_codes() {
-        let offenders: Vec<(usize, &str)> = remote_page_html()
+        let offenders: Vec<(usize, String)> = remote_client_source()
             .lines()
             .enumerate()
             .filter(|(_, line)| line.contains("rgb(") || line.contains("rgba("))
-            .map(|(i, line)| (i + 1, line.trim()))
+            .map(|(i, line)| (i + 1, line.trim().to_string()))
             .collect();
         assert!(offenders.is_empty(), "rgb()/rgba() literals: {offenders:?}");
     }
 
     #[test]
     fn remote_page_activity_badge_colors_match_desktop() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         // Palette vars ported from ui/src/index.css so badges match the desktop.
         assert!(html.contains("--claude: #d97757;"));
         assert!(html.contains("--codex: #10a37f;"));
@@ -1211,7 +1282,7 @@ mod tests {
 
     #[test]
     fn remote_page_terminal_notification_focuses_without_prior_workspace_switch() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let start = html.find("async function openNotification").unwrap();
         let end = start
             + html[start..]
@@ -1233,7 +1304,7 @@ mod tests {
 
     #[test]
     fn remote_page_reconnects_output_socket_without_releasing_lease() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let start = html.find("function scheduleOutputReconnect").unwrap();
         let end = start + html[start..].find("async function connect").unwrap();
         let output_stream = &html[start..end];
@@ -1286,7 +1357,7 @@ mod tests {
 
     #[test]
     fn remote_page_heartbeat_tolerates_transient_failures_until_timeout() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let start = html.find("function handleHeartbeatError").unwrap();
         let end = start + html[start..].find("function startHeartbeat").unwrap();
         let heartbeat_error = &html[start..end];
@@ -1319,7 +1390,7 @@ mod tests {
 
     #[test]
     fn remote_page_keeps_dock_navigation_separate_from_workspace_list() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let workspace_start = html.find("id=\"workspaceSection\"").unwrap();
         let dock_start = html.find("id=\"dockSection\"").unwrap();
         let script_start = html.find("function renderWorkspaceList").unwrap();
@@ -1335,7 +1406,7 @@ mod tests {
 
     #[test]
     fn remote_page_mirrors_all_workspace_panes_status_and_bottom_summary() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let list_start = html.find("function renderWorkspaceList").unwrap();
         let item_start = html.find("function renderWorkspaceItem").unwrap();
         let pane_start = html.find("function renderPaneRow").unwrap();
@@ -1358,7 +1429,7 @@ mod tests {
 
     #[test]
     fn remote_page_refreshes_variable_selector_state_while_drawer_is_open() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         assert!(html.contains("const NAVIGATION_VIEW_REFRESH_MS = 2000;"));
         assert!(html.contains("async function refreshNavigationView()"));
@@ -1370,7 +1441,7 @@ mod tests {
 
     #[test]
     fn remote_page_prefers_only_visible_dock_terminal_fallbacks() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let start = html.find("function preferredTerminal").unwrap();
         let end = start + html[start..].find("async function loadNavigation").unwrap();
         let preferred_terminal = &html[start..end];
@@ -1385,7 +1456,7 @@ mod tests {
 
     #[test]
     fn remote_page_rejects_hidden_dock_preferred_terminal_ids() {
-        let html = remote_page_html();
+        let html = remote_client_source();
         let start = html.find("function isMainOutputTerminal").unwrap();
         let end = start + html[start..].find("async function loadNavigation").unwrap();
         let main_output_selection = &html[start..end];
@@ -1419,7 +1490,7 @@ mod tests {
     /// those panes are unreachable and a workspace full of them dead-ends.
     #[test]
     fn remote_page_enters_panes_the_desktop_has_not_opened_yet() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         assert!(html.contains(
             "function isTerminalPane(pane) {\n          return Boolean(pane && pane.terminalId);\n        }"
@@ -1442,7 +1513,7 @@ mod tests {
 
     #[test]
     fn remote_page_keeps_last_selection_only_in_document_memory() {
-        let html = remote_page_html();
+        let html = remote_client_source();
 
         assert!(html.contains("let lastSelectedTerminalId = null;"));
         assert!(html.contains("if (nextId) {\n            lastSelectedTerminalId = nextId;"));
@@ -1466,7 +1537,7 @@ mod tests {
         // The cloud dashboard flow serves the page in an external browser (not
         // localApp), so auto-claim must fire on autoConnect=1 alone — otherwise
         // the user has to click Connect a second time to take control.
-        let html = remote_page_html();
+        let html = remote_client_source();
         assert!(html.contains("if (autoConnectMode && (androidE2eMode || token())) {"));
         assert!(!html.contains("if (localAppMode && autoConnectMode && token())"));
     }

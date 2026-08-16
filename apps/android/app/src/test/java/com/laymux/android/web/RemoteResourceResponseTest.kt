@@ -58,4 +58,60 @@ class RemoteResourceResponseTest {
             )
         }
     }
+
+    @Test
+    fun inflatesGzipBodiesAndDropsTheEncodingHeader() {
+        val plain = "console.log(\"remote app\");".repeat(64).toByteArray()
+        val compressed = java.io.ByteArrayOutputStream().also { buffer ->
+            java.util.zip.GZIPOutputStream(buffer).use { it.write(plain) }
+        }.toByteArray()
+
+        val response = RemoteResourceResponse.parse(
+            JSONObject()
+                .put("kind", "resource")
+                .put("status", 200)
+                .put(
+                    "headers",
+                    JSONObject()
+                        .put("content-type", "application/javascript")
+                        .put("content-encoding", "gzip"),
+                )
+                .put("data", Base64Url.encode(compressed)),
+        )
+
+        assertArrayEquals(plain, response.body)
+        assertEquals(null, response.headers["content-encoding"])
+    }
+
+    @Test
+    fun rejectsUnknownEncodingsCorruptGzipAndDecompressionBombs() {
+        fun resource(encoding: String, data: ByteArray) = JSONObject()
+            .put("kind", "resource")
+            .put("status", 200)
+            .put(
+                "headers",
+                JSONObject()
+                    .put("content-type", "text/plain")
+                    .put("content-encoding", encoding),
+            )
+            .put("data", Base64Url.encode(data))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteResourceResponse.parse(resource("br", ByteArray(4)))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteResourceResponse.parse(resource("gzip", ByteArray(16)))
+        }
+        // 2 MiB of zeros compresses to ~2 KiB; the decompressed size must
+        // still be capped at the plain-body limit plus nothing.
+        val bomb = java.io.ByteArrayOutputStream().also { buffer ->
+            java.util.zip.GZIPOutputStream(buffer).use {
+                val zeros = ByteArray(64 * 1024)
+                repeat(33) { _ -> it.write(zeros) }
+            }
+        }.toByteArray()
+        assertThrows(IllegalArgumentException::class.java) {
+            RemoteResourceResponse.parse(resource("gzip", bomb))
+        }
+    }
 }

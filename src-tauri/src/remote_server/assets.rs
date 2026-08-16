@@ -18,15 +18,15 @@ use super::internal_error;
 /// the cloud relay sits on this path — no shared cache may keep a copy.
 const FONT_CACHE_CONTROL: &str = "private, max-age=31536000, immutable";
 
-const XTERM_JS: &str = include_str!("assets/xterm.js");
-const XTERM_CSS: &str = include_str!("assets/xterm.css");
-const ADDON_FIT_JS: &str = include_str!("assets/addon-fit.js");
-const WEB_LINKS_ADDON_JS: &str = include_str!("assets/addon-web-links.js");
+pub(super) const XTERM_JS: &str = include_str!("assets/xterm.js");
+pub(super) const XTERM_CSS: &str = include_str!("assets/xterm.css");
+pub(super) const ADDON_FIT_JS: &str = include_str!("assets/addon-fit.js");
+pub(super) const WEB_LINKS_ADDON_JS: &str = include_str!("assets/addon-web-links.js");
 /// Shared cell-width provider, generated from `ui/src/lib/terminal-unicode-width.ts`
 /// by `npm run build:remote-provider` (issue #538). Without it the remote client
 /// keeps xterm default Unicode 6 widths and wraps at different columns than the
 /// desktop for emoji and 89 BMP code points.
-const UNICODE_PROVIDER_JS: &str = include_str!("assets/unicode-provider.js");
+pub(super) const UNICODE_PROVIDER_JS: &str = include_str!("assets/unicode-provider.js");
 
 pub(crate) async fn remote_xterm_js(
     State(server): State<ServerState>,

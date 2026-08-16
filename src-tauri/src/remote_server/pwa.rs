@@ -261,7 +261,7 @@ mod tests {
     /// see the other's literals, so check them against each other here.
     #[test]
     fn the_client_page_links_only_urls_this_module_serves() {
-        let html = super::super::page::remote_page_html();
+        let html = super::super::page::remote_client_source();
         assert!(html.contains(MANIFEST_ROUTE_PATH));
 
         let prefix = ICON_ROUTE_PATH.trim_end_matches("{file_name}");

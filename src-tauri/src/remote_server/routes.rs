@@ -40,14 +40,16 @@ use super::lease::{
     RemoteControlStatus, RemoteOwnerTransition,
 };
 use super::navigation_routes::{
-    remote_layouts_list, remote_navigation, remote_notification_mark_read, remote_notifications_clear,
-    remote_notifications_mark_all_read, remote_pane_visibility, remote_terminal_focus,
-    remote_workspace_create, remote_workspace_switch_active, remote_workspace_visibility,
+    remote_layouts_list, remote_navigation, remote_notification_mark_read,
+    remote_notifications_clear, remote_notifications_mark_all_read, remote_pane_visibility,
+    remote_terminal_focus, remote_workspace_create, remote_workspace_switch_active,
+    remote_workspace_visibility,
 };
 use super::navigation_step_routes::{
     remote_navigation_notification_step, remote_navigation_spatial_step,
 };
 use super::page::{remote_page, remote_page_redirect};
+use super::page_assets::remote_hashed_asset;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
@@ -235,6 +237,10 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
     Router::new()
         .route("/remote", get(remote_page_redirect))
         .route("/remote/", get(remote_page))
+        // Content-hashed immutable client assets (ADR-0169) — what the served
+        // page actually references. The fixed vendor paths below stay for
+        // compatibility with older clients and the E2E allowlist.
+        .route("/remote/asset/{file_name}", get(remote_hashed_asset))
         .route("/remote/vendor/xterm.js", get(remote_xterm_js))
         .route("/remote/vendor/xterm.css", get(remote_xterm_css))
         .route(

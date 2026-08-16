@@ -1,0 +1,1861 @@
+      :root {
+        color-scheme: dark;
+        --bg-base: #1e1e2e;
+        --bg-surface: #181825;
+        --bg-overlay: #313244;
+        --text-primary: #cdd6f4;
+        --text-secondary: #a6adc8;
+        --accent: #89b4fa;
+        /* Alpha variants are 8-digit hex (#rrggbbaa), same as the desktop
+           tokens in ui/src/index.css — never r/g/b channels (ADR-0112). */
+        --accent-50: #89b4fa80;
+        --accent-20: #89b4fa33;
+        --accent-12: #89b4fa1f;
+        --accent-08: #89b4fa14;
+        --green: #a6e3a1;
+        --red: #f38ba8;
+        --claude: #d97757;
+        --codex: #10a37f;
+        --orange-15: #d9775726;
+        --yellow: #f9e2af;
+        --border: #313244;
+        --hover-bg: #ffffff0f;
+        --active-bg: #ffffff0a;
+        --backdrop-light: #0000004d;
+        --terminal-bg: #0c0c0c;
+        /* Tracks the active terminal's own theme background; see
+           applyTerminalSurfaceBackground. */
+        --terminal-surface-bg: var(--terminal-bg);
+        --bg: var(--bg-base);
+        --panel: var(--bg-surface);
+        --panel-2: var(--bg-overlay);
+        --text: var(--text-primary);
+        --muted: var(--text-secondary);
+        --accent-strong: #6c8fd8;
+        --danger: var(--red);
+        --danger-bg: #f38ba82e;
+        --radius-sm: 2px;
+        --radius-md: 3px;
+        --radius-lg: 6px;
+        --fs-xs: 10px;
+        --fs-sm: 11px;
+        --fs-md: 13px;
+        /* Compact controls in the Remote header share one border-box height. */
+        --header-control-height: 26px;
+        --key-bar-control-height: 26px;
+        --terminal-scroll-btn-right: 26px;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+      }
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font: var(--fs-md)/1.45 "Consolas", "Fira Code", monospace;
+        overflow: hidden;
+      }
+      button, input, select, textarea {
+        font: inherit;
+      }
+      .app {
+        display: grid;
+        /* header · widget strip · main · key bar · footer. The strip row is
+           `auto`, so an empty (hidden) strip costs no height at all.
+
+           Every child is placed explicitly. Auto-placement would fill the
+           tracks in DOM order among the children that are *rendered*, so a
+           hidden strip pulled `main` up into an `auto` row and the terminal
+           collapsed to zero height. */
+        grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        height: var(--remote-viewport-height, 100%);
+      }
+      .app > header {
+        grid-row: 1;
+      }
+      .app > .widget-strip {
+        grid-row: 2;
+      }
+      .app > main {
+        grid-row: 3;
+      }
+      .app > .key-bar {
+        grid-row: 4;
+      }
+      .app > footer {
+        grid-row: 5;
+      }
+      header, footer {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 8px;
+        border-color: var(--border);
+        background: var(--panel);
+      }
+      header {
+        border-bottom: 1px solid var(--border);
+        flex-wrap: nowrap;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+      }
+      input, select {
+        min-width: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 5px 7px;
+        background: var(--bg-base);
+        color: var(--text);
+      }
+      input[type="password"] {
+        width: 100%;
+      }
+      button {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: 5px 9px;
+        background: var(--panel-2);
+        color: var(--text);
+        cursor: pointer;
+      }
+      button.primary {
+        border-color: #3d7dd1;
+        background: var(--accent-strong);
+      }
+      button.danger {
+        border-color: #8b3440;
+        background: var(--danger-bg);
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.55;
+      }
+      /* Mobile-only Send affordance (desktop sends with Enter). Square button
+         matching the sibling footer keys, but filled with the accent. */
+      .composer-send {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 5px 9px;
+        border: 1px solid var(--accent);
+        border-radius: var(--radius-md);
+        background: var(--accent);
+        color: #11111b;
+      }
+      .composer-send[hidden] {
+        display: none;
+      }
+      .composer-send:disabled {
+        cursor: default;
+        opacity: 0.4;
+      }
+      main {
+        position: relative;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+      }
+      /* Widget strip (ADR-0124). One line mirroring what the desktop draws:
+         the two desktop surfaces fold into this row and only left/right
+         survives. It scrolls sideways instead of collapsing — unlike the
+         desktop top bar it competes with no drag region, and an overflow
+         popover would cover the terminal on a phone. */
+      .widget-strip {
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+      }
+      .widget-strip::-webkit-scrollbar {
+        display: none;
+      }
+      .widget-strip[hidden] {
+        display: none;
+      }
+      /* `min-width: 100%` keeps the right group pinned to the right edge while
+         the row fits; `width: max-content` is what lets it scroll once it does
+         not. */
+      .widget-strip-track {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: max-content;
+        min-width: 100%;
+        padding: 3px 8px;
+      }
+      .widget-strip-side {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        white-space: nowrap;
+      }
+      .widget-strip-side + .widget-strip-side {
+        margin-left: auto;
+      }
+      .widget-item {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--text-secondary);
+        line-height: 1;
+        white-space: nowrap;
+      }
+      button.widget-item {
+        border: none;
+        border-radius: var(--radius-md);
+        padding: 2px 3px;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
+      }
+      button.widget-item:active {
+        background: var(--hover-bg);
+      }
+      .widget-muted {
+        color: var(--muted);
+      }
+      .widget-accent {
+        color: var(--accent);
+      }
+      .widget-usage-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .widget-usage-separator {
+        width: 1px;
+        height: 12px;
+        flex: 0 0 auto;
+        background: var(--border);
+      }
+      /* Consumption over elapsed, the same pairing the desktop widget draws:
+         a percentage without the clock invites misreading. */
+      .widget-bars {
+        display: inline-flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 2px;
+      }
+      .widget-bar {
+        display: block;
+        overflow: hidden;
+      }
+      .widget-bar-fill {
+        display: block;
+        height: 100%;
+      }
+      .widget-cwd {
+        display: inline-block;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      .status {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 0;
+        color: var(--muted);
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
+        white-space: nowrap;
+      }
+      .status::-webkit-scrollbar {
+        display: none;
+      }
+      .status.error {
+        color: var(--danger);
+      }
+      .status.warning {
+        color: var(--yellow);
+      }
+      /* Icon-only toggle mirrors the desktop pane-bar control. Its dynamic
+         accessible name states the destination mode; accent means Composer. */
+      .input-mode-toggle {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: var(--header-control-height);
+        height: var(--header-control-height);
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--panel-2);
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1;
+      }
+      .input-mode-toggle:hover:not([aria-pressed="true"]) {
+        background: var(--hover-bg);
+      }
+      .input-mode-toggle[aria-pressed="true"] {
+        background: var(--accent-20);
+        color: var(--accent);
+        border-color: var(--accent-50);
+      }
+      .input-mode-toggle svg {
+        flex: 0 0 auto;
+      }
+      .terminal-shell {
+        min-width: 0;
+        min-height: 0;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr) auto;
+        width: 100%;
+        height: 100%;
+        padding: 6px;
+        background: var(--terminal-bg);
+      }
+      .terminal-composer {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(72px, auto);
+        min-width: 0;
+        max-height: 42vh;
+        padding: 0;
+        border-top: 1px solid var(--border);
+        background: var(--terminal-bg);
+      }
+      /* Tab recall (issue #504) and as-you-type autocomplete (issue #505) lists.
+         They float above the editor over the terminal so they never grow the
+         composer strip; both share one class since only one shows at a time. */
+      .composer-suggest-list {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 100%;
+        z-index: 30;
+        margin: 0;
+        max-height: min(40vh, 220px);
+        overflow-y: auto;
+        list-style: none;
+        padding: 4px;
+        border: 1px solid var(--border);
+        border-bottom: 0;
+        background: var(--bg-overlay);
+        box-shadow: 0 -8px 24px #00000066;
+        font-size: 14px;
+      }
+      .composer-suggest-list[hidden] {
+        display: none;
+      }
+      .composer-suggest-item {
+        overflow: hidden;
+        padding: 5px 8px;
+        border-radius: var(--radius-md);
+        color: var(--text-primary);
+        cursor: pointer;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .composer-suggest-item:hover {
+        background: var(--hover-bg);
+      }
+      .composer-suggest-item[aria-selected="true"] {
+        background: var(--accent-20);
+      }
+      /* Flush editor (mirrors desktop): no outer margin / parent padding, no
+         border or rounding — it fills the strip under the divider. */
+      .composer-input {
+        width: 100%;
+        min-width: 0;
+        min-height: 72px;
+        max-height: 40vh;
+        resize: vertical;
+        margin: 0;
+        border: 0;
+        border-radius: 0;
+        padding: 7px 8px;
+        background: var(--bg-base);
+        color: var(--text-primary);
+        font-size: 16px;
+        line-height: 1.4;
+        outline: none;
+        overflow: auto;
+      }
+      .composer-input:disabled {
+        opacity: 0.6;
+      }
+      .remote-body {
+        position: relative;
+        display: grid;
+        grid-template-rows: minmax(0, 1fr);
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .navigation-panel {
+        position: absolute;
+        inset: 0 auto 0 0;
+        z-index: 20;
+        width: min(360px, calc(100vw - 28px));
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: auto;
+        padding: 0;
+        border-right: 1px solid var(--border);
+        background: var(--bg-surface);
+        box-shadow: 12px 0 32px #00000061;
+        transform: translateX(-104%);
+        transition: transform 140ms ease;
+      }
+      .app.nav-open .navigation-panel {
+        transform: translateX(0);
+      }
+      .nav-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: var(--backdrop-light);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .menu-button,
+      .drawer-header-button,
+      .desktop-mode-button,
+      .copy-pane-button,
+      .spatial-exclusion-button {
+        width: 28px;
+        height: var(--header-control-height);
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+      }
+      .menu-button:hover,
+      .drawer-header-button:hover,
+      .desktop-mode-button:hover,
+      .copy-pane-button:hover,
+      .spatial-exclusion-button:hover {
+        background: var(--hover-bg);
+      }
+      .copy-pane-button {
+        color: var(--text-secondary);
+      }
+      .spatial-exclusion-button {
+        color: var(--text-secondary);
+      }
+      .spatial-exclusion-button[aria-pressed="true"] {
+        border-color: var(--danger);
+        background: var(--danger-bg);
+        color: var(--danger);
+      }
+      .desktop-mode-button {
+        width: auto;
+        min-width: 34px;
+        padding: 0 8px;
+        color: var(--accent);
+        font-size: var(--fs-sm);
+        font-weight: 650;
+      }
+      .menu-button {
+        flex-direction: column;
+        gap: 3px;
+      }
+      .menu-button span {
+        width: 14px;
+        height: 1px;
+        border-radius: 1px;
+        background: var(--text-primary);
+      }
+      .drawer-header {
+        height: 32px;
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 6px 0 9px;
+        border-bottom: 1px solid var(--border);
+      }
+      .drawer-heading {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 4px;
+      }
+      .drawer-header-button {
+        width: 28px;
+        height: var(--header-control-height);
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+        color: var(--text-secondary);
+      }
+      .drawer-notification-button {
+        position: relative;
+      }
+      .drawer-notification-badge {
+        position: absolute;
+        top: 0;
+        right: -1px;
+        min-width: 12px;
+        height: 12px;
+        padding: 0 3px;
+        font-size: 8px;
+        pointer-events: none;
+      }
+      .drawer-title {
+        color: var(--text-primary);
+        font-size: var(--fs-md);
+        font-weight: 650;
+      }
+      .drawer-header-actions {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 4px;
+      }
+      .drawer-view {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        overflow: auto;
+      }
+      .connection-title {
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        opacity: 0.72;
+        text-transform: uppercase;
+      }
+      .connection-panel {
+        display: grid;
+        gap: 7px;
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+        background: #ffffff04;
+      }
+      .connection-panel:not(.connected) {
+        background: var(--accent-08);
+      }
+      .connection-panel.attention {
+        background: #f38ba81a;
+      }
+      .connection-panel.connected {
+        grid-template-columns: 1fr;
+        background: #ffffff04;
+      }
+      .connection-panel label {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr);
+        gap: 7px;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+      }
+      .connection-panel.connected label {
+        display: none;
+      }
+      .connection-hint {
+        color: var(--accent);
+        font-size: var(--fs-sm);
+        line-height: 1.35;
+        opacity: 0.9;
+      }
+      .connection-panel.connected .connection-hint {
+        display: none;
+      }
+      .connection-panel.attention .connection-hint {
+        color: var(--danger);
+        font-weight: 700;
+      }
+      .connection-panel input {
+        width: 100%;
+      }
+      .connection-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 6px;
+      }
+      .connection-panel.connected .connection-actions {
+        grid-template-columns: 1fr 1fr;
+      }
+      .connection-panel.connected #connect {
+        display: none;
+      }
+      .app.android-e2e .connection-panel label {
+        display: none;
+      }
+      .connection-actions button {
+        min-width: 0;
+        padding-left: 6px;
+        padding-right: 6px;
+      }
+      .file-viewer-panel {
+        display: grid;
+        gap: 7px;
+        padding: 0 8px 9px;
+        border-bottom: 1px solid var(--border);
+      }
+      .file-viewer-status {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file-viewer-status.error {
+        color: var(--danger);
+      }
+      .file-viewer-path-row {
+        min-width: 0;
+      }
+      .file-viewer-path-row input {
+        min-width: 0;
+        width: 100%;
+      }
+      .file-viewer-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .file-viewer-actions button {
+        min-width: 0;
+      }
+      .nav-section + .nav-section {
+        margin-top: 0;
+      }
+      .nav-section-title {
+        margin: 0;
+        padding: 7px 8px 5px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        opacity: 0.72;
+        text-transform: uppercase;
+      }
+      /* Device-local display switches in the drawer (ADR-0132). Same shape as
+         the popover's .key-set-row, but named for where it lives — the two
+         surfaces are free to drift. */
+      .nav-toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 8px 8px;
+        padding: 5px 4px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+      }
+      .nav-toggle-row:hover {
+        background: var(--hover-bg);
+      }
+      .nav-toggle-row input {
+        flex: 0 0 auto;
+      }
+      .nav-toggle-name {
+        flex: 1 1 auto;
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+      }
+      .nav-toggle-desc {
+        flex: 0 0 auto;
+        max-width: 52%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        opacity: 0.8;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .install-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 0 8px 8px;
+      }
+      .install-button {
+        width: 100%;
+      }
+      .install-hint {
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1.35;
+      }
+      .nav-list {
+        display: flex;
+        min-height: 0;
+        flex: 1 1 auto;
+        flex-direction: column;
+        overflow-y: auto;
+      }
+      .workspace-section-heading {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding-right: 8px;
+      }
+      .hidden-workspace-toggle {
+        flex: 0 0 auto;
+        padding: 2px 6px;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        background: var(--active-bg);
+        color: var(--yellow);
+        font-size: 9px;
+        line-height: 1.3;
+      }
+      .hidden-workspace-toggle:hover,
+      .hidden-workspace-toggle[aria-expanded="true"] {
+        background: var(--accent-12);
+      }
+      .new-workspace-button {
+        width: calc(100% - 16px);
+        margin: 0 8px 6px;
+      }
+      .new-workspace-panel {
+        display: grid;
+        gap: 4px;
+        margin: 0 8px 6px;
+      }
+      .new-workspace-layout {
+        width: 100%;
+        text-align: left;
+      }
+      .hidden-workspace-shelf {
+        max-height: min(34vh, 260px);
+        overflow-y: auto;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        padding: 3px 5px;
+      }
+      .hidden-workspace-row {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 2px;
+      }
+      .hidden-workspace-primary {
+        display: flex;
+        min-width: 0;
+        min-height: 24px;
+        flex: 1 1 auto;
+        align-items: center;
+        overflow: hidden;
+        padding: 4px 5px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-primary);
+        font-size: var(--fs-sm);
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .hidden-workspace-primary:hover {
+        background: var(--hover-bg);
+      }
+      .workspace-item {
+        width: 100%;
+        min-width: 0;
+        display: grid;
+        flex: 0 0 auto;
+        grid-template-rows: 1fr;
+        overflow: hidden;
+        padding: 7px 10px 7px 9px;
+        text-align: left;
+        border: 0;
+        border-left: 3px solid transparent;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+          grid-template-rows 160ms ease,
+          opacity 160ms ease,
+          transform 160ms ease,
+          border-bottom-width 160ms ease,
+          padding 160ms ease;
+      }
+      .workspace-item:hover {
+        background: var(--active-bg);
+      }
+      .workspace-item.active {
+        border-left-color: var(--accent);
+        background: var(--accent-08);
+      }
+      .workspace-item.collapsed {
+        grid-template-rows: 0fr;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-4px);
+        padding-top: 0;
+        padding-bottom: 0;
+        border-bottom-width: 0;
+      }
+      .workspace-item-content {
+        min-height: 0;
+        overflow: hidden;
+      }
+      .workspace-row-primary {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .workspace-primary-left,
+      .workspace-primary-right {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+      }
+      .workspace-primary-right {
+        flex: 0 0 auto;
+      }
+      .workspace-index {
+        flex: 0 0 auto;
+        min-width: 10px;
+        color: var(--text-primary);
+        font-size: 10px;
+        font-weight: 500;
+        opacity: 0.6;
+      }
+      .workspace-item.active .workspace-index {
+        color: var(--accent);
+        opacity: 0.9;
+      }
+      .workspace-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .workspace-item.active .workspace-name {
+        color: var(--text-primary);
+      }
+      .workspace-terminal-count {
+        flex: 0 0 auto;
+        color: var(--text-secondary);
+        font-size: 9px;
+        line-height: 1.3;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        background: var(--hover-bg);
+        opacity: 0.7;
+      }
+      /* Whole-workspace skip toggle in the drawer — same circle-minus icon and
+         danger pressed style as the header pane exclusion toggle (issue #507). */
+      .workspace-skip-button {
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        opacity: 0.7;
+      }
+      .visibility-button {
+        width: 24px;
+        height: 24px;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--text-secondary);
+        opacity: 0.72;
+      }
+      .visibility-button:hover:not(:disabled) {
+        background: var(--hover-bg);
+        opacity: 1;
+      }
+      .visibility-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.28;
+      }
+      .visibility-button[aria-pressed="true"] {
+        border-color: var(--accent);
+        background: var(--accent-12);
+        color: var(--accent);
+        opacity: 1;
+      }
+      .workspace-skip-button:hover {
+        background: var(--hover-bg);
+        opacity: 1;
+      }
+      .workspace-skip-button[aria-pressed="true"] {
+        border-color: var(--danger);
+        background: var(--danger-bg);
+        color: var(--danger);
+        opacity: 1;
+      }
+      .workspace-count-badge {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        min-width: 14px;
+        height: 14px;
+        padding: 0 3px;
+        border-radius: var(--radius-sm);
+        background: var(--accent);
+        color: var(--bg-base);
+        font-size: 10px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        line-height: 1;
+      }
+      .dock-tab {
+        width: 100%;
+        min-height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 8px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-primary);
+        text-align: left;
+      }
+      .dock-tab:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .dock-tab[aria-expanded="true"] {
+        background: var(--accent-08);
+      }
+      .dock-tab-label {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--fs-sm);
+        font-weight: 650;
+      }
+      .notification-panel,
+      .dock-panel {
+        display: flex;
+        flex-direction: column;
+        max-height: min(46vh, 360px);
+        border-bottom: 1px solid var(--border);
+        background: #ffffff03;
+      }
+      .drawer-notifications-view .notification-panel {
+        max-height: none;
+        flex: 1 1 auto;
+        border-bottom: 0;
+      }
+      .notification-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        padding: 7px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .notification-actions button {
+        min-width: 0;
+        padding-left: 6px;
+        padding-right: 6px;
+        font-size: var(--fs-sm);
+      }
+      .notification-list {
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .notification-group-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 8px 4px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .notification-item {
+        width: 100%;
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(52px, 72px) minmax(0, 1fr) auto;
+        gap: 7px;
+        align-items: center;
+        padding: 7px 8px;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--text-secondary);
+        text-align: left;
+      }
+      .notification-item:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .notification-item.read {
+        opacity: 0.6;
+      }
+      .notification-source,
+      .notification-message,
+      .notification-time {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: var(--fs-sm);
+      }
+      .notification-source {
+        color: var(--text-secondary);
+        opacity: 0.84;
+      }
+      .notification-message {
+        color: var(--text-primary);
+      }
+      .notification-message.error {
+        color: var(--red);
+      }
+      .notification-message.warning {
+        color: var(--yellow);
+      }
+      .notification-message.success {
+        color: var(--green);
+      }
+      .notification-time {
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        opacity: 0.78;
+      }
+      .dock-group-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 8px 4px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .dock-terminal-row {
+        padding-left: 8px;
+        padding-right: 8px;
+        border-radius: 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .dock-position-badge {
+        flex: 0 0 auto;
+        min-width: 38px;
+        color: var(--accent);
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+      .workspace-pane-list {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        margin-top: 4px;
+      }
+      .workspace-pane-entry {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 2px;
+      }
+      .workspace-pane-entry > .workspace-pane-row {
+        width: auto;
+        flex: 1 1 auto;
+      }
+      .workspace-pane-row,
+      .dock-terminal-row {
+        width: 100%;
+        min-width: 0;
+        min-height: 18px;
+        max-height: 18px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 1px 3px 1px 0;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        line-height: 1.25;
+        text-align: left;
+        cursor: pointer;
+        overflow: hidden;
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+          max-height 160ms ease,
+          opacity 160ms ease,
+          transform 160ms ease,
+          margin 160ms ease;
+      }
+      .workspace-pane-row:hover:not(:disabled),
+      .dock-terminal-row:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .workspace-pane-row:disabled,
+      .dock-terminal-row:disabled {
+        cursor: default;
+        opacity: 0.72;
+      }
+      .workspace-pane-row.active,
+      .dock-terminal-row.active {
+        background: var(--accent-12);
+        filter: brightness(1.3);
+      }
+      .workspace-pane-row.collapsed {
+        max-height: 0;
+        min-height: 0;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(-3px);
+        margin-top: 0;
+        margin-bottom: 0;
+      }
+      .workspace-pane-row.hidden-item {
+        opacity: 0.48;
+      }
+      .workspace-pane-row.hidden-item .pane-row-main {
+        text-decoration: line-through;
+        text-decoration-thickness: 1px;
+      }
+      .pane-minimap {
+        flex: 0 0 auto;
+        width: 18px;
+        height: 12px;
+        opacity: 0.5;
+      }
+      .workspace-pane-row.active .pane-minimap {
+        opacity: 1;
+      }
+      .pane-row-main {
+        display: flex;
+        min-width: 0;
+        flex: 1 1 auto;
+        align-items: center;
+        gap: 4px;
+      }
+      .pane-env {
+        flex: 0 0 auto;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        opacity: 0.85;
+      }
+      .pane-activity {
+        flex: 0 0 auto;
+        min-width: 40px;
+        margin-right: 4px;
+        padding: 1px 4px;
+        border-radius: var(--radius-sm);
+        background: var(--active-bg);
+        color: var(--text-secondary);
+        font-size: 9px;
+        text-align: center;
+      }
+      .pane-activity.running {
+        color: var(--yellow);
+        background: var(--active-bg);
+      }
+      .pane-activity.interactive {
+        color: var(--accent);
+        background: var(--accent-12);
+      }
+      .pane-activity.claude {
+        color: var(--claude);
+        background: var(--orange-15);
+      }
+      .pane-activity.codex {
+        color: var(--codex);
+        background: var(--accent-12);
+      }
+      .pane-branch {
+        flex: 0 0 auto;
+        color: var(--green);
+      }
+      .pane-path {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-secondary);
+        opacity: 0.7;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pane-view-label {
+        color: var(--text-secondary);
+        font-weight: 600;
+        opacity: 0.4;
+      }
+      .pane-command-status {
+        flex: 0 0 auto;
+        width: 16px;
+        height: 16px;
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        border: 1.5px solid transparent;
+        border-radius: var(--radius-md);
+        font-size: 10px;
+        line-height: 1;
+      }
+      .pane-command-status.unread {
+        border-color: var(--accent);
+      }
+      .pane-notification-dot {
+        flex: 0 0 auto;
+        width: 6px;
+        height: 6px;
+        margin-left: auto;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+      .workspace-summary-line {
+        min-height: 18px;
+        margin-top: 2px;
+        padding-left: 18px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        opacity: 0.5;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-status-line {
+        min-height: 18px;
+        margin-top: 2px;
+        padding-left: 18px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-status-text {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-status-time {
+        flex: 0 0 auto;
+        opacity: 0.4;
+      }
+      .workspace-status-notification {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-style: italic;
+      }
+      .workspace-status-notification.error { color: var(--red); }
+      .workspace-status-notification.success { color: var(--green); }
+      .workspace-status-notification.warning { color: var(--yellow); }
+      .workspace-status-notification.info { color: var(--accent); }
+      .nav-empty {
+        margin: 0 8px 7px;
+        padding: 7px 8px;
+        color: var(--muted);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+      }
+      .nav-section.locked {
+        opacity: 0.45;
+        pointer-events: none;
+      }
+      #terminal {
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        position: relative;
+        /* Touch gestures are mediated below: drag scrolls, long-press drag selects. */
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        overscroll-behavior: contain;
+      }
+      /* Match the desktop terminal's floating jump-to-bottom affordance while
+         keeping the remote scroll position entirely surface-local. */
+      .terminal-scroll-to-bottom {
+        position: absolute;
+        right: var(--terminal-scroll-btn-right);
+        bottom: 16px;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--bg-base);
+        opacity: 0.4;
+        box-shadow: 0 2px 8px var(--backdrop-light);
+        transition:
+          opacity 120ms ease,
+          transform 120ms ease;
+      }
+      .terminal-scroll-to-bottom:hover {
+        opacity: 1;
+        transform: translateY(-1px);
+      }
+      /* Clips the cropped xterm without clipping the selection handles, which
+         are appended to the host itself and may overhang the bottom row. */
+      #terminalViewport {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        /* A tail-anchored crop can leave the sizer's top edge below the host
+           top; the strip it exposes must read as empty terminal screen. */
+        background: var(--terminal-surface-bg);
+      }
+      /* xterm mounts inside the sizer, not the host. The sizer normally tracks
+         the viewport (height: 100%); when the visual viewport shrinks without
+         a width change (soft keyboard, composer drag) fitTerminal pins it to
+         the last fitted pixel height so PTY rows stay stable. The bottom
+         anchor is the starting point and updateCropTransform shifts it down so
+         the crop window ends at the live tail instead of at the screen bottom
+         (blank rows below the tail would otherwise fill the window). */
+      #terminalSizer {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 100%;
+      }
+      .xterm {
+        height: 100%;
+        padding: 4px;
+        touch-action: none;
+      }
+      .xterm .xterm-viewport {
+        background-color: transparent;
+      }
+      .grow {
+        flex: 1 1 auto;
+      }
+      .terminal-meta {
+        min-width: 160px;
+        max-width: min(420px, 100%);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      footer .status-hint {
+        min-width: 0;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      @media (max-width: 820px) {
+        header {
+          display: flex;
+        }
+        .remote-body {
+          min-height: 0;
+        }
+        footer {
+          align-items: center;
+          flex-wrap: nowrap;
+        }
+        footer .status-hint {
+          align-self: center;
+        }
+      }
+      @media (max-width: 520px) {
+        footer .status-hint {
+          display: none;
+        }
+        footer button {
+          flex: 1 1 0;
+          width: 0;
+          min-width: 0;
+          overflow: hidden;
+          padding-left: 4px;
+          padding-right: 4px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        /* Send joins the equal split — its base flex: 0 0 auto outranks the
+           rule above and would collapse against width: 0, clipping the icon. */
+        footer .composer-send {
+          flex: 1 1 0;
+        }
+        .terminal-composer {
+          grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: minmax(64px, auto);
+        }
+        .composer-input {
+          min-height: 64px;
+          margin: 0;
+          padding: 6px 8px;
+        }
+      }
+      @supports (height: 100dvh) {
+        .app {
+          height: var(--remote-viewport-height, 100dvh);
+        }
+      }
+      .xterm-screen .xterm-decoration-top {
+        pointer-events: none;
+      }
+      .remote-path-link-decoration {
+        box-sizing: border-box;
+        border-bottom: 1px solid currentColor;
+        pointer-events: none;
+      }
+      #terminal.remote-path-link-clickable .xterm,
+      #terminal.remote-path-link-clickable .xterm-screen {
+        cursor: pointer;
+      }
+      .xterm-helper-textarea {
+        font-size: 16px;
+      }
+      .xterm-helpers textarea {
+        opacity: 0;
+      }
+      .xterm-rows {
+        letter-spacing: 0;
+      }
+      .xterm .xterm-scroll-area {
+        width: 100%;
+      }
+      .touch-selection-handle {
+        position: absolute;
+        z-index: 12;
+        display: none;
+        width: 18px;
+        height: 18px;
+        border: 2px solid var(--terminal-bg);
+        border-radius: 50%;
+        background: var(--accent);
+        box-shadow: 0 2px 8px #00000059;
+        touch-action: none;
+        transform: translate(-50%, -50%);
+      }
+      /* --- Special key toolbar (soft keys) ---
+         A client-side row of buttons that send terminal escape sequences via
+         the existing write path (ADR-0028). Toolbar config is remote-client UI
+         state (localStorage). Since issue #474 the toolbar also hosts step
+         NAVIGATION keys (pane/alert movement) that call the lease-gated
+         /remote/v1/navigation endpoints instead of writing bytes. */
+      .key-bar {
+        position: relative;
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 5px 6px;
+        border-top: 1px solid var(--border);
+        background: var(--panel);
+      }
+      .key-bar-settings {
+        width: 30px;
+        height: var(--key-bar-control-height);
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        color: var(--text-secondary);
+        font-size: 14px;
+      }
+      .key-bar-settings:hover {
+        background: var(--hover-bg);
+      }
+      .key-bar-settings.open {
+        border-color: var(--accent-50);
+        color: var(--accent);
+      }
+      .key-row {
+        display: flex;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+        min-height: var(--key-bar-control-height);
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .key-row::-webkit-scrollbar {
+        display: none;
+      }
+      .key-btn {
+        position: relative;
+        flex: 0 0 auto;
+        min-width: 34px;
+        height: var(--key-bar-control-height);
+        padding: 4px 9px;
+        background: var(--panel-2);
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        white-space: nowrap;
+        touch-action: manipulation;
+      }
+      .key-btn.busy {
+        opacity: 0.55;
+      }
+      .key-nav-badge {
+        position: absolute;
+        top: 1px;
+        right: 1px;
+        pointer-events: none;
+      }
+      .key-btn:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }
+      .key-btn:active:not(:disabled) {
+        border-color: var(--accent-50);
+        background: var(--accent-12);
+      }
+      .key-flick-btn {
+        min-width: 42px;
+        touch-action: none;
+        user-select: none;
+      }
+      .key-flick-btn.flicking {
+        border-color: var(--accent-50);
+        background: var(--accent-12);
+        color: var(--accent);
+      }
+      .key-flick-hint {
+        position: fixed;
+        z-index: 60;
+        width: 96px;
+        height: 96px;
+        border: 1px solid var(--accent-50);
+        border-radius: 50%;
+        background: var(--panel);
+        box-shadow: 0 8px 24px #00000073;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+      }
+      .key-flick-hint[hidden] {
+        display: none;
+      }
+      .key-flick-arrow,
+      .key-flick-center {
+        position: absolute;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .key-flick-arrow {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        color: var(--text-secondary);
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .key-flick-arrow.active {
+        background: var(--accent-20);
+        color: var(--accent);
+      }
+      .key-flick-arrow[data-flick-direction="up"] {
+        top: 3px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="right"] {
+        top: 50%;
+        right: 3px;
+        transform: translateY(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="down"] {
+        bottom: 3px;
+        left: 50%;
+        transform: translateX(-50%);
+      }
+      .key-flick-arrow[data-flick-direction="left"] {
+        top: 50%;
+        left: 3px;
+        transform: translateY(-50%);
+      }
+      .key-flick-center {
+        top: 50%;
+        left: 50%;
+        width: 14px;
+        height: 14px;
+        border: 2px solid var(--text-secondary);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .key-row-empty {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        height: var(--key-bar-control-height);
+        padding: 0 6px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        opacity: 0.85;
+      }
+      .key-toggle.active {
+        border-color: var(--accent-50);
+        color: var(--accent);
+      }
+      .key-popover {
+        position: absolute;
+        left: 6px;
+        bottom: calc(100% + 6px);
+        z-index: 40;
+        width: min(340px, calc(100vw - 24px));
+        max-height: min(60vh, 440px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--panel);
+        box-shadow: 0 12px 32px #00000073;
+      }
+      .key-popover-scroll {
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px 10px 10px;
+      }
+      .key-popover-title {
+        margin: 10px 0 4px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .key-popover-title:first-child {
+        margin-top: 0;
+      }
+      .key-set-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 4px;
+        border-radius: var(--radius-md);
+        cursor: pointer;
+      }
+      .key-set-row:hover {
+        background: var(--hover-bg);
+      }
+      .key-set-row input {
+        flex: 0 0 auto;
+      }
+      .key-set-name {
+        flex: 1 1 auto;
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 600;
+      }
+      .key-set-desc {
+        flex: 0 0 auto;
+        max-width: 52%;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        opacity: 0.8;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* Scope picker in the "Composer recall" popover section (ADR-0055). */
+      .key-set-select {
+        flex: 0 0 auto;
+        max-width: 56%;
+        padding: 3px 6px;
+        background: var(--bg-base);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        color: var(--text);
+        font-size: var(--fs-xs);
+      }
+      .key-chip-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 2px;
+      }
+      .key-chip {
+        flex: 0 0 auto;
+        min-width: 30px;
+        padding: 3px 8px;
+        background: var(--bg-base);
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-chip:hover {
+        background: var(--hover-bg);
+      }
+      .key-chip.selected {
+        border-color: var(--accent);
+        background: var(--accent-12);
+        color: var(--accent);
+      }
+      .key-order-section {
+        margin-top: 10px;
+      }
+      .key-order-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .key-order-heading .key-popover-title {
+        margin: 0;
+      }
+      .key-order-reset {
+        flex: 0 0 auto;
+        padding: 2px 7px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .key-order-reset:hover {
+        background: var(--hover-bg);
+      }
+      .key-order-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        padding-top: 6px;
+        user-select: none;
+      }
+      .key-order-chip {
+        position: relative;
+        touch-action: none;
+        cursor: grab;
+      }
+      .key-order-chip.dragging {
+        opacity: 0.45;
+        cursor: grabbing;
+      }
+      .key-order-chip.drop-before::before,
+      .key-order-chip.drop-after::after {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 3px;
+        border-radius: 2px;
+        background: var(--accent);
+        content: "";
+      }
+      .key-order-chip.drop-before::before {
+        left: -4px;
+      }
+      .key-order-chip.drop-after::after {
+        right: -4px;
+      }
+      .key-order-help {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .key-order-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        margin-top: 6px;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+      }
+      .key-order-selected {
+        flex: 1 1 auto;
+        min-width: 54px;
+        color: var(--text);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-order-action {
+        min-width: 34px;
+        height: 26px;
+        padding: 0 7px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .key-order-action:hover:not(:disabled) {
+        background: var(--hover-bg);
+      }

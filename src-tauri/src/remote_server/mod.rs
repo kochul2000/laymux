@@ -12,6 +12,7 @@ mod navigation;
 mod navigation_routes;
 mod navigation_step_routes;
 mod page;
+mod page_assets;
 mod pwa;
 mod render_checkpoint;
 mod routes;

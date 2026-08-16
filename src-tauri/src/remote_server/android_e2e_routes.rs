@@ -238,6 +238,11 @@ async fn dispatch_resource(server: ServerState, path: &str) -> Result<Value, App
     let mut request = Request::builder()
         .method(Method::GET)
         .uri(path)
+        // Android inflates gzip natively before handing bytes to the WebView
+        // (ADR-0169); compressing before AEAD shrinks the base64 RPC envelope.
+        // Static compiled-in assets only — no secret or caller data shares the
+        // compressed stream, so CRIME-style attacks do not apply.
+        .header(header::ACCEPT_ENCODING, "gzip")
         .body(Body::empty())
         .map_err(|error| AppError::Other(format!("Android E2E resource build failed: {error}")))?;
     request.extensions_mut().insert(TunnelAuthorized);
@@ -263,6 +268,7 @@ async fn dispatch_resource(server: ServerState, path: &str) -> Result<Value, App
     let mut headers = serde_json::Map::new();
     for name in [
         header::CONTENT_TYPE,
+        header::CONTENT_ENCODING,
         header::CACHE_CONTROL,
         header::CONTENT_SECURITY_POLICY,
         header::X_CONTENT_TYPE_OPTIONS,
@@ -431,6 +437,12 @@ fn resource_path_allowed(path: &str) -> bool {
     }
     if let Some(file_name) = path.strip_prefix("/remote/font/") {
         return valid_resource_file_name(file_name, &["ttf", "otf"]);
+    }
+    // Exactly the hashed immutable assets the served page references
+    // (ADR-0169) — the registry is the allowlist, so a new asset never needs
+    // a second list updated here.
+    if let Some(file_name) = path.strip_prefix("/remote/asset/") {
+        return super::page_assets::is_hashed_asset_file(file_name);
     }
     false
 }
@@ -609,6 +621,14 @@ mod tests {
         assert!(resource_path_allowed("/remote/manifest.webmanifest"));
         assert!(resource_path_allowed("/remote/pwa/icon-192.png"));
         assert!(resource_path_allowed("/remote/font/0123456789abcdef.ttf"));
+        // The hashed asset registry (ADR-0169) is the allowlist: exactly the
+        // files the served page references, nothing invented by the caller.
+        let served =
+            super::super::page_assets::hashed_asset_url("remote-app.js").expect("registered asset");
+        assert!(resource_path_allowed(&served));
+        assert!(!resource_path_allowed(
+            "/remote/asset/remote-app-0000000000000000.js"
+        ));
         assert!(!resource_path_allowed("/remote/v1/navigation"));
         assert!(!resource_path_allowed("/remote/v1/e2e/rpc"));
         assert!(!resource_path_allowed("/remote/%2e%2e/admin"));
