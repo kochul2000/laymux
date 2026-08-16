@@ -26,6 +26,7 @@
   const exitAnimationMilliseconds = 200;
   let dismissing = false;
   let scanBlockedByBiometric = false;
+  let remoteConnectingActive = false;
 
   function actionButton(label, action, instanceId, deviceName) {
     const button = document.createElement("button");
@@ -188,15 +189,20 @@
     errorMessage.textContent = status.error || "";
     noticeMessage.hidden = !status.notice;
     noticeMessage.textContent = status.notice || "";
-    scanButton.disabled = false;
+    // 연결 시도 중에는 QR 재스캔이 진행 중인 세션 수립과 경합하므로 잠근다.
+    // 취소는 아래 connectButton이 담당한다. 단 biometricBlocked에서는 이
+    // 버튼이 "보호 설정 열기"라 설정 접근을 막으면 안 된다.
+    scanButton.disabled = remoteConnecting && !biometricBlocked;
 
     remoteSection.hidden = !confirmed;
+    remoteConnectingActive = remoteConnecting;
     connectButton.hidden = remoteConnected;
     connectButton.disabled =
-      remoteConnecting || (biometricRequired && !biometricAvailable);
+      !remoteConnecting && biometricRequired && !biometricAvailable;
     connectButton.textContent = remoteConnecting
-      ? "보안 세션 여는 중…"
+      ? "연결 취소"
       : "보안 세션 열기";
+    connectButton.classList.toggle("is-cancel", remoteConnecting);
     disconnectButton.hidden = !remoteConnected;
     remoteBadge.textContent = remoteConnected ? "E2E 연결됨" : "E2E 잠김";
     remoteBadge.classList.toggle("connected", remoteConnected);
@@ -270,9 +276,13 @@
   });
 
   connectButton.addEventListener("click", () => {
-    connectButton.disabled = true;
     errorMessage.hidden = true;
     noticeMessage.hidden = true;
+    if (remoteConnectingActive) {
+      nativeBridge.cancelRemoteConnection();
+      return;
+    }
+    connectButton.disabled = true;
     nativeBridge.connectRemote();
   });
 

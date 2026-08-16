@@ -30,6 +30,13 @@ internal class E2eRemoteClient(
         val metadata = pairing.metadata
         require(metadata.confirmedAtEpochSeconds != null) { "데스크톱 확인이 끝난 페어링이 필요합니다." }
         val seed = pairing.secretCopy()
+        // A Tailscale Direct probe against a phone that is not on the tailnet
+        // dies by connect timeout, and the user sits through every millisecond
+        // of it before the cloud fallback fires — so the first direct contact
+        // gets one short attempt. Once the challenge answered, the host is
+        // reachable and establish keeps the lost-response retransmit.
+        val direct = transport.kind == E2eTransportKind.TAILSCALE_DIRECT
+        val connectTimeoutMs = if (direct) DIRECT_CONNECT_TIMEOUT_MS else CONNECT_TIMEOUT_MS
         try {
             val clientSessionNonce = E2eProtocol.newClientSessionNonce()
             val challengeRaw = postWithRetry(
@@ -37,9 +44,10 @@ internal class E2eRemoteClient(
                 "",
                 E2eProtocol.challengeRequest(metadata, clientSessionNonce),
                 HANDSHAKE_RESPONSE_LIMIT,
-                HANDSHAKE_ATTEMPTS,
+                if (direct) DIRECT_PROBE_ATTEMPTS else HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
                 beforeAttempt = beforeAttempt,
+                connectTimeoutMs = connectTimeoutMs,
             )
             val challenge = E2eProtocol.verifyChallenge(
                 metadata,
@@ -56,6 +64,7 @@ internal class E2eRemoteClient(
                 HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
                 beforeAttempt = beforeAttempt,
+                connectTimeoutMs = connectTimeoutMs,
             )
             return E2eProtocol.verifyEstablished(
                 challenge,
@@ -127,12 +136,13 @@ internal class E2eRemoteClient(
         attempts: Int,
         invalidatesSession: Boolean,
         beforeAttempt: (() -> Unit)? = null,
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
     ): String {
         var lastError: E2eTransportException? = null
         repeat(attempts) {
             beforeAttempt?.invoke()
             try {
-                return post(endpoint, path, body, responseLimit)
+                return post(endpoint, path, body, responseLimit, connectTimeoutMs)
             } catch (error: E2eTransportException) {
                 if (!error.retryable) throw error
                 lastError = error
@@ -152,6 +162,7 @@ internal class E2eRemoteClient(
         path: String,
         body: String,
         responseLimit: Int,
+        connectTimeoutMs: Int = CONNECT_TIMEOUT_MS,
     ): String {
         val endpointUri = URI(endpoint)
         val connection = connectionFactory(
@@ -160,7 +171,7 @@ internal class E2eRemoteClient(
         return try {
             connection.requestMethod = "POST"
             connection.instanceFollowRedirects = false
-            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.connectTimeout = connectTimeoutMs
             connection.readTimeout = READ_TIMEOUT_MS
             connection.doOutput = true
             connection.setRequestProperty("Content-Type", "application/json")
@@ -223,6 +234,13 @@ internal class E2eRemoteClient(
         private const val HANDSHAKE_RESPONSE_LIMIT = 8 * 1024
         private const val RPC_RESPONSE_LIMIT = 6 * 1024 * 1024
         private const val HANDSHAKE_ATTEMPTS = 2
+
+        // First direct contact is a reachability probe: WireGuard-lan RTT fits
+        // comfortably in 2.5s, and an off-tailnet phone should reach the cloud
+        // fallback in seconds, not after 2 x 10s connect timeouts.
+        internal const val DIRECT_CONNECT_TIMEOUT_MS = 2_500
+        internal const val DIRECT_PROBE_ATTEMPTS = 1
+
         private const val RPC_ATTEMPTS = 2
         private const val RPC_RETRY_DELAY_MS = 1_000L
     }

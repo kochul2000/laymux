@@ -13,6 +13,7 @@ import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -334,6 +335,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
+            addView(
+                Button(this@MainActivity).apply {
+                    text = "연결 취소"
+                    setOnClickListener { cancelRemoteConnection() }
+                },
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = (20 * density).toInt() },
+            )
         }
     }
 
@@ -344,6 +355,26 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             if (remoteLoadingOverlay.visibility == View.VISIBLE) {
                 remoteLoadingStatus.text = remoteLoadProgress.statusText()
             }
+        }
+    }
+
+    /**
+     * The handshake happens while the pairing sheet is still on screen with no
+     * motion of its own, so the overlay covers the whole connection — transport
+     * stage first, then the resource counters once the document loads.
+     */
+    private fun showRemoteConnectStage(stage: String) {
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            remoteLoadingStatus.text = stage
+            remoteLoadingOverlay.visibility = View.VISIBLE
+        }
+    }
+
+    private fun hideRemoteLoadingOverlay() {
+        runOnUiThread {
+            if (isDestroyed) return@runOnUiThread
+            remoteLoadingOverlay.visibility = View.GONE
         }
     }
 
@@ -1197,6 +1228,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         try {
             val directUrl = selectedTailscaleUrl?.takeUnless { cloudFallbackActive }
+            showRemoteConnectStage(
+                if (directUrl != null) {
+                    "Tailscale 직접 연결 시도 중…"
+                } else {
+                    "보안 세션 여는 중…"
+                },
+            )
             remoteExecutor.execute {
                 val result = runCatching {
                     stored.use { material ->
@@ -1210,6 +1248,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             },
                             beforeCloudFallback = {
                                 ensureRemoteConnectionCurrent(connectionGeneration)
+                                showRemoteConnectStage("Cloud 릴레이로 연결 중…")
                             },
                             openCloud = {
                                 e2eRemoteClient.open(material) {
@@ -1232,6 +1271,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     val stale = remoteConnectionGeneration.get() != connectionGeneration ||
                         !remoteLifecycleActive || isDestroyed
                     if (stale) {
+                        hideRemoteLoadingOverlay()
                         result.getOrNull()?.let { session ->
                             if (remoteOpeningSession === session) remoteOpeningSession = null
                             session.close()
@@ -1254,6 +1294,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         },
                         onFailure = { error ->
                             closeRemoteSession()
+                            hideRemoteLoadingOverlay()
                             if (error !is RemoteConnectionCancelledException) {
                                 notifyPairingChanged(error = remoteErrorMessage(error))
                             }
@@ -1264,6 +1305,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         } catch (_: RejectedExecutionException) {
             stored.close()
             remoteConnecting = false
+            hideRemoteLoadingOverlay()
             notifyPairingChanged(error = "보안 연결 작업을 시작하지 못했습니다.")
         }
     }
@@ -1746,6 +1788,34 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun disconnectRemote() {
         showCloudDashboard()
+    }
+
+    /**
+     * Aborts an in-progress connection: the biometric/handshake phase on the
+     * pairing surface and the resource-streaming phase behind the loading
+     * overlay. The active generation bump makes the in-flight open observe
+     * cancellation; an already-established idle session is left to
+     * disconnect/expiry instead.
+     */
+    fun cancelRemoteConnection() {
+        val opening = remoteConnecting || remoteOpeningSession != null
+        val streamingRemoteUi = remoteSession != null &&
+            ::remoteLoadingOverlay.isInitialized &&
+            remoteLoadingOverlay.visibility == View.VISIBLE
+        if (!opening && !streamingRemoteUi) return
+        // A pending CONNECT decryption must die with the attempt — a late
+        // biometric success would otherwise revive the cancelled connection.
+        if (pendingDecryptionPurpose == DecryptionPurpose.CONNECT) {
+            pendingDecryption?.close()
+            pendingDecryption = null
+            pendingDecryptionPurpose = null
+        }
+        closeRemoteSession()
+        hideRemoteLoadingOverlay()
+        if (localWebSurface == LocalWebSurface.REMOTE) {
+            showPairingSurface()
+        }
+        notifyPairingChanged(notice = "보안 세션 연결을 취소했습니다.")
     }
 
     private fun closeRemoteSession() {
