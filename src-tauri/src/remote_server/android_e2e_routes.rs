@@ -342,6 +342,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
     match (method, path) {
         (&Method::GET, "/remote/v1/session/status")
         | (&Method::GET, "/remote/v1/navigation")
+        | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
         | (&Method::GET, "/remote/v1/terminals")
         | (&Method::GET, "/remote/v1/file-viewer/status")
@@ -350,6 +351,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/session/release")
         | (&Method::POST, "/remote/v1/navigation/spatial")
         | (&Method::POST, "/remote/v1/navigation/notification")
+        | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
         | (&Method::POST, "/remote/v1/file-viewer/render")
         | (&Method::POST, "/remote/v1/file-viewer/path-link")
@@ -545,6 +547,7 @@ mod tests {
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
+        assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
         assert!(http_path_allowed(
             &Method::GET,
             "/remote/v1/terminals/term-1/github-repo"
@@ -557,6 +560,7 @@ mod tests {
             &Method::POST,
             "/remote/v1/file-viewer/path-link"
         ));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/workspaces"));
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/workspaces/ws-1/visibility"

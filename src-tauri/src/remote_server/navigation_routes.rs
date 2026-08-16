@@ -24,6 +24,13 @@ pub(super) struct WorkspaceSwitchRequest {
     lease_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WorkspaceCreateRequest {
+    lease_id: Option<String>,
+    layout_id: String,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct TerminalFocusRequest {
@@ -172,6 +179,98 @@ pub(super) async fn remote_workspace_switch_active(
                 serde_json::json!({ "id": workspace_id }),
             );
             Json(data).into_response()
+        }
+        Err(response) => response,
+    }
+}
+
+pub(super) async fn remote_layouts_list(State(server): State<ServerState>) -> Response {
+    match frontend_bridge_json(&server, "query", "layouts", "list", serde_json::json!({})).await {
+        Ok(data) => Json(data).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Create one workspace from the layout selected in the Remote drawer.
+pub(super) async fn remote_workspace_create(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let body = match workspace_create_request_from_body(&body) {
+        Ok(body) => body,
+        Err(_) => return json_error(StatusCode::BAD_REQUEST, "invalid JSON body"),
+    };
+    if body.layout_id.trim().is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "layout id is required");
+    }
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    if let Err(response) = require_active_lease(&server.app_state, lease_id) {
+        return response;
+    }
+
+    let layouts = match frontend_bridge_json(
+        &server,
+        "query",
+        "layouts",
+        "list",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => data,
+        Err(response) => return response,
+    };
+    let layout_name = layouts
+        .get("layouts")
+        .and_then(Value::as_array)
+        .and_then(|layouts| {
+            layouts.iter().find_map(|layout| {
+                (layout.get("id").and_then(Value::as_str) == Some(body.layout_id.as_str()))
+                    .then(|| layout.get("name").and_then(Value::as_str))
+                    .flatten()
+            })
+        });
+    let Some(layout_name) = layout_name else {
+        return json_error(StatusCode::BAD_REQUEST, "layout not found");
+    };
+
+    let workspace_count = match frontend_bridge_json(
+        &server,
+        "query",
+        "workspaces",
+        "list",
+        serde_json::json!({}),
+    )
+    .await
+    {
+        Ok(data) => data
+            .get("workspaces")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len),
+        Err(response) => return response,
+    };
+    let name = format!("{} {}", layout_name, workspace_count + 1);
+
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "workspaces",
+        "add",
+        serde_json::json!({ "name": name, "layoutId": body.layout_id }),
+    )
+    .await
+    {
+        Ok(data) => {
+            emit_workspace_state_changed(
+                &server,
+                "remote.workspaces.add",
+                serde_json::json!({ "name": name, "layoutId": body.layout_id }),
+            );
+            (StatusCode::CREATED, Json(data)).into_response()
         }
         Err(response) => response,
     }
@@ -494,6 +593,12 @@ fn terminal_focus_request_from_body(
     serde_json::from_slice(body)
 }
 
+fn workspace_create_request_from_body(
+    body: &[u8],
+) -> Result<WorkspaceCreateRequest, serde_json::Error> {
+    serde_json::from_slice(body)
+}
+
 fn notification_action_request_from_body(
     body: &[u8],
 ) -> Result<NotificationActionRequest, serde_json::Error> {
@@ -599,5 +704,18 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn workspace_create_request_allows_body_or_header_lease() {
+        let body = workspace_create_request_from_body(
+            br#"{"leaseId":"lease-body","layoutId":"layout-default"}"#,
+        )
+        .unwrap();
+        assert_eq!(body.lease_id.as_deref(), Some("lease-body"));
+        assert_eq!(body.layout_id, "layout-default");
+
+        assert!(workspace_create_request_from_body(b"").is_err());
+        assert!(workspace_create_request_from_body(br#"{"layoutId":42}"#).is_err());
     }
 }

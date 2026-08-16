@@ -774,6 +774,19 @@
       .hidden-workspace-toggle[aria-expanded="true"] {
         background: var(--accent-12);
       }
+      .new-workspace-button {
+        width: calc(100% - 16px);
+        margin: 0 8px 6px;
+      }
+      .new-workspace-panel {
+        display: grid;
+        gap: 4px;
+        margin: 0 8px 6px;
+      }
+      .new-workspace-layout {
+        width: 100%;
+        text-align: left;
+      }
       .hidden-workspace-shelf {
         max-height: min(34vh, 260px);
         overflow-y: auto;
@@ -1960,6 +1973,8 @@
                   Hidden 0
                 </button>
               </div>
+              <button id="newWorkspace" class="new-workspace-button" type="button" aria-expanded="false" aria-controls="newWorkspacePanel" disabled>New workspace</button>
+              <div id="newWorkspacePanel" class="new-workspace-panel" aria-label="Choose workspace layout" hidden></div>
               <div
                 id="hiddenWorkspaceShelf"
                 class="hidden-workspace-shelf"
@@ -2117,6 +2132,8 @@
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
         const workspaceSection = $("workspaceSection");
+        const newWorkspaceButton = $("newWorkspace");
+        const newWorkspacePanel = $("newWorkspacePanel");
         const hiddenWorkspaceToggle = $("hiddenWorkspaceToggle");
         const hiddenWorkspaceShelf = $("hiddenWorkspaceShelf");
         const workspaceListEl = $("workspaceList");
@@ -2237,6 +2254,8 @@
         const lastSelectedTerminalIdByWorkspace = new Map();
         let terminalInfoById = new Map();
         let navigationState = null;
+        let workspaceLayouts = [];
+        let newWorkspacePanelOpen = false;
         const NAVIGATION_VIEW_REFRESH_MS = 2000;
         let navigationViewRefreshTimer = null;
         let navigationViewRefreshInFlight = false;
@@ -3647,6 +3666,8 @@
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
+          newWorkspaceButton.disabled = !connected;
+          if (!connected) setNewWorkspacePanelOpen(false);
           dockSection.classList.toggle("locked", !connected);
           dockToggleButton.disabled = !connected;
           notificationSection.classList.toggle("locked", !connected);
@@ -6665,6 +6686,51 @@
           });
         }
 
+        function setNewWorkspacePanelOpen(open) {
+          newWorkspacePanelOpen = Boolean(open) && Boolean(leaseId);
+          newWorkspacePanel.hidden = !newWorkspacePanelOpen;
+          newWorkspaceButton.setAttribute("aria-expanded", String(newWorkspacePanelOpen));
+        }
+
+        function renderWorkspaceLayouts() {
+          newWorkspacePanel.innerHTML = "";
+          workspaceLayouts.forEach((layout) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = "new-workspace-layout";
+            button.textContent = layout.name || layout.id;
+            button.disabled = !leaseId;
+            button.addEventListener("click", () => {
+              createWorkspace(layout.id).catch((err) => setStatus(err.message || String(err), true));
+            });
+            newWorkspacePanel.append(button);
+          });
+        }
+
+        async function loadWorkspaceLayouts() {
+          const data = await remoteFetch("/remote/v1/layouts");
+          workspaceLayouts = Array.isArray(data.layouts) ? data.layouts : [];
+          renderWorkspaceLayouts();
+        }
+
+        async function createWorkspace(layoutId) {
+          if (!leaseId || !layoutId) return;
+          const selectedLeaseId = leaseId;
+          newWorkspaceButton.disabled = true;
+          try {
+            await remoteFetch("/remote/v1/workspaces", {
+              method: "POST",
+              body: JSON.stringify({ leaseId: selectedLeaseId, layoutId }),
+            });
+            if (leaseId !== selectedLeaseId) return;
+            await loadNavigation(activeTerminalId, { openOutput: false });
+            setNewWorkspacePanelOpen(false);
+            setStatus("Workspace created.");
+          } finally {
+            newWorkspaceButton.disabled = !leaseId;
+          }
+        }
+
         async function setWorkspaceVisibility(workspaceId, hidden) {
           if (!leaseId || !workspaceId) return;
           const selectedLeaseId = leaseId;
@@ -8897,6 +8963,15 @@
         });
         hiddenWorkspaceToggle.addEventListener("click", () => {
           setHiddenWorkspaceShelfOpen(!hiddenWorkspaceShelfOpen);
+        });
+        newWorkspaceButton.addEventListener("click", () => {
+          if (newWorkspacePanelOpen) {
+            setNewWorkspacePanelOpen(false);
+            return;
+          }
+          loadWorkspaceLayouts()
+            .then(() => setNewWorkspacePanelOpen(true))
+            .catch((err) => setStatus(err.message || String(err), true));
         });
         dockToggleButton.addEventListener("click", () => {
           setDockPanelOpen(!dockPanelOpen);

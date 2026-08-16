@@ -1304,6 +1304,8 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 
 ### 13.3 Navigation Metadata
 
+`GET /remote/v1/layouts`는 PC에 정의된 layout 목록을 읽어 Remote drawer의 생성 하위 패널에 제공한다. `POST /remote/v1/workspaces`는 `{ "layoutId": "...", "leaseId": "..." }`의 layout id를 PC 목록에서 다시 검증하고 active controller를 확인한 뒤 선택한 layout으로 워크스페이스를 생성한다. 성공 뒤에는 navigation snapshot만 다시 읽어 현재 workspace·terminal focus를 유지한다. 이 변경은 `workspace-state-changed`를 발행하고 Android E2E 내부 HTTP exact allowlist에도 포함된다([ADR-0166](../adr/0166-remote-workspace-create-action.md)).
+
 Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/pane 요약과 single terminal stream을 분리한다. 이 요약은 frontend Zustand store가 알고 있는 workspace/dock 구조를 Rust remote server가 bridge로 조회한 뒤 remote 전용 계약으로 축약한 값이다. Remote client는 raw settings나 전체 store를 직접 읽지 않는다.
 
 Remote drawer 본문은 workspace 기본 화면과 Notifications·Connection·Settings 하위 화면을 가진다. 연결된 상태에서 drawer를 열면 매번 workspace 기본 화면으로 시작하며 기존 File viewer·workspace 목록·Dock terminals를 렌더한다. Notifications·Connection은 헤더의 각 버튼으로, 기기-로컬 Display와 설치 권유는 Settings 버튼으로 진입하고 뒤로가기는 workspace 기본 화면으로 돌아간다. drawer는 상단 메뉴 버튼을 다시 누르거나 바깥 scrim을 눌러 닫으며 별도 닫기 버튼을 두지 않는다. 아직 lease가 없거나 확정적으로 제어권을 잃어 drawer가 열릴 때만 Connection을 바로 표시한다. 이 화면 선택은 ADR-0015의 surface-local drawer 상태이며 Remote API나 host 설정에 저장하지 않는다.
@@ -1316,6 +1318,8 @@ Remote drawer 본문은 workspace 기본 화면과 Notifications·Connection·Se
 | `/remote/v1/notifications/{id}/read` | POST | active `leaseId`로 단일 notification id를 읽음 처리 |
 | `/remote/v1/notifications/mark-all-read` | POST | active `leaseId`로 모든 unread notification을 읽음 처리 |
 | `/remote/v1/notifications` | DELETE | active `leaseId`로 모든 notification 제거 |
+| `/remote/v1/layouts` | GET | PC에 정의된 workspace layout 목록 |
+| `/remote/v1/workspaces` | POST | 선택한 `layoutId`로 workspace 생성 (active controller lease 필요) |
 | `/remote/v1/workspaces/active` | POST | active `leaseId`로 PC WebView의 active workspace 전환 |
 | `/remote/v1/terminals/{id}/focus` | POST | active `leaseId`로 PC WebView의 terminal focus 전환 |
 | `/remote/v1/navigation/spatial` | POST | active `leaseId`로 공간순서 스텝 이동 (`direction: "prev"\|"next"`) |

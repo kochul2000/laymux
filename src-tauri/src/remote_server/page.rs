@@ -456,12 +456,19 @@ mod tests {
         assert!(html.contains("window.LaymuxUnicodeProvider"));
         assert!(html.contains("/remote/v1/session/claim"));
         assert!(html.contains("/remote/v1/navigation"));
+        assert!(html.contains("/remote/v1/layouts"));
+        assert!(html.contains("/remote/v1/workspaces"));
         assert!(html.contains("/remote/v1/workspaces/active"));
         assert!(
             html.contains("/remote/v1/workspaces/${encodeURIComponent(workspaceId)}/visibility")
         );
         assert!(html.contains("/remote/v1/panes/${encodeURIComponent(paneId)}/visibility"));
         assert!(html.contains("id=\"hiddenWorkspaceToggle\""));
+        assert!(html.contains("id=\"newWorkspace\""));
+        assert!(html.contains("id=\"newWorkspacePanel\""));
+        assert!(html.contains("function createWorkspace(layoutId)"));
+        assert!(html.contains("function loadWorkspaceLayouts()"));
+        assert!(html.contains("JSON.stringify({ leaseId: selectedLeaseId, layoutId })"));
         assert!(html.contains("id=\"hiddenWorkspaceShelf\""));
         assert!(html.contains("function setWorkspaceVisibility(workspaceId, hidden)"));
         assert!(html.contains("function setPaneVisibility(paneId, hidden)"));

@@ -40,9 +40,9 @@ use super::lease::{
     RemoteControlStatus, RemoteOwnerTransition,
 };
 use super::navigation_routes::{
-    remote_navigation, remote_notification_mark_read, remote_notifications_clear,
+    remote_layouts_list, remote_navigation, remote_notification_mark_read, remote_notifications_clear,
     remote_notifications_mark_all_read, remote_pane_visibility, remote_terminal_focus,
-    remote_workspace_switch_active, remote_workspace_visibility,
+    remote_workspace_create, remote_workspace_switch_active, remote_workspace_visibility,
 };
 use super::navigation_step_routes::{
     remote_navigation_notification_step, remote_navigation_spatial_step,
@@ -145,6 +145,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         )
         .route("/remote/v1/session/release", post(remote_session_release))
         .route("/remote/v1/navigation", get(remote_navigation))
+        .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
         .route(
@@ -171,6 +172,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/workspaces/active",
             post(remote_workspace_switch_active),
         )
+        .route("/remote/v1/workspaces", post(remote_workspace_create))
         .route(
             "/remote/v1/workspaces/{id}/visibility",
             post(remote_workspace_visibility),
