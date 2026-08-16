@@ -125,9 +125,9 @@ class PairingVaultTest {
             vault.save(it, clientNonce, PairingProtectionPolicy.KEYSTORE_ONLY, cipher)
         }
 
-        vault.markConfirmed("desktop", pairingId, clientNonce, 1_786_500_000)
+        vault.markConfirmed("desktop", pairingId, clientNonce, 1_786_500_000L)
 
-        assertEquals(1_786_500_000, vault.loadMetadata().single().confirmedAtEpochSeconds)
+        assertEquals(1_786_500_000L, vault.loadMetadata().single().confirmedAtEpochSeconds)
         val pending = requireNotNull(vault.prepareDecryption("desktop"))
         vault.completeDecryption(pending, pending.cipher).use { restored ->
             assertArrayEquals(secret, restored.secretCopy())
@@ -241,10 +241,10 @@ class PairingVaultTest {
         savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
         savePairing("desktop-b", ByteArray(PairingPayload.SECRET_BYTES) { 2 })
 
-        vault.markConfirmed("desktop-a", pairingId, clientNonce, 1_786_500_000)
+        vault.markConfirmed("desktop-a", pairingId, clientNonce, 1_786_500_000L)
 
         val metadata = vault.loadMetadata().associateBy { it.instanceId }
-        assertEquals(1_786_500_000, metadata.getValue("desktop-a").confirmedAtEpochSeconds)
+        assertEquals(1_786_500_000L, metadata.getValue("desktop-a").confirmedAtEpochSeconds)
         assertNull(metadata.getValue("desktop-b").confirmedAtEpochSeconds)
         assertEquals("desktop-a", vault.loadConfirmedMetadata("desktop-a")?.instanceId)
         assertNull(vault.loadConfirmedMetadata("desktop-b"))

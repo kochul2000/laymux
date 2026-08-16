@@ -303,6 +303,19 @@ desktop WebView의 controller owner snapshot은 `lib/remote-control-status.ts` �
 
 Remote Access 모달의 복사 URL 호스트는 `get_remote_host_candidates` Tauri IPC command가 반환하는 감지 후보와 `settings.remote.customHosts` 를 프론트엔드가 병합해 만든다([ADR-0021](../adr/0021-remote-host-candidate-discovery.md)). 감지 후보는 항상 loopback `127.0.0.1` 을 포함하고, 사용 가능하면 Tailscale IPv4/IPv6 주소와 LAN interface 주소를 추가한다. `settings.remote.preferredHost` 가 후보 목록에 있으면 URL host select 의 초기값으로 쓰고, 빈 문자열이면 첫 후보를 자동 선택한다. IPv6 host 는 복사 URL에서 `http://[addr]:port/...` 형태로 bracket 처리한다. 이 후보 목록은 URL 작성 편의용일 뿐이며 실제 접속 허용 여부는 계속 `settings.remote.allowedIps`, bearer token, Origin 정책이 결정한다.
 
+Android 앱의 Tailscale Direct E2E는 browser Direct 인증과 분리한다([ADR-0160](../adr/0160-android-e2e-tailscale-direct-transport.md)). Cloud Android dashboard는 PC 선택 bridge에 현재 presence의 선택적 `tailscaleUrl`을 함께 넘기며, 앱은 `http` + Tailscale literal IP + 고정 release/dev port + exact `/remote/`만 routing hint로 받는다. 빈 hint는 Cloud-only를 뜻하지만 비어 있지 않은 invalid hint는 선택을 거부한다. Desktop `remote_guard`는 Tailscale source IP·Origin 부재·exact E2E route에 한해 bearer 없이 진입시킨 뒤 기존 pairing/session/AEAD 검증에 권한 판정을 맡긴다. 유효한 bearer가 있는 기존 browser·Python connector 요청은 이 우회로 분류하지 않고 common enabled/IP/Origin/token gate를 그대로 탄다. 일반 Remote 문서·vendor asset·`/remote/v1/*`는 계속 allowed IP·Origin·bearer를 모두 요구한다.
+
+Android transport route mapping은 다음과 같다.
+
+| 작업 | Cloud relay | Tailscale Direct |
+|---|---|---|
+| challenge | `POST /api/android/e2e/session/challenge` | `POST /remote/v1/e2e/session/challenge` |
+| establish | `POST /api/android/e2e/session/establish` | `POST /remote/v1/e2e/session/establish` |
+| control/resource RPC | `POST /api/android/e2e/rpc` | `POST /remote/v1/e2e/rpc` |
+| encrypted output | `WSS /api/android/e2e/output` | `WS /remote/v1/e2e/output` |
+
+Direct 네트워크 연결 실패에만 새 Cloud session으로 fallback한다. 최초 시도 중 generation/lifecycle이 바뀌면 Cloud 요청을 시작하지 않는다. 열린 Direct session의 RPC/output network failure는 그 session과 stream을 닫고 vault 보호 정책을 다시 적용한 새 Cloud handshake·page·snapshot으로 전환한다. HTTP 거절, 잘못된 response/proof, instance mismatch, AEAD·sequence 실패는 fail closed한다. `cloudAccessMode`는 Cloud tunnel만 제한하며 이 Direct E2E route에는 적용하지 않는다.
+
 ```jsonc
 {
   "remote": {

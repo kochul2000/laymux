@@ -11,6 +11,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0149](../../docs/adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0154](../../docs/adr/0154-android-multi-instance-pairing-vault.md),
 [ADR-0159](../../docs/adr/0159-android-e2e-websocket-output-transport.md),
+[ADR-0160](../../docs/adr/0160-android-e2e-tailscale-direct-transport.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -28,6 +29,7 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key
 - relay에는 ciphertext만 보이는 PC Remote resource·HTTP와 native WebSocket 기반 V1 output bridge
+- Cloud presence의 검증된 Tailscale literal-IP URL이 있으면 고정 Direct E2E route를 우선하고, 최초·열린 session의 socket 네트워크 실패에만 기존 session을 폐기한 뒤 새 Cloud E2E session으로 fallback. runtime 전환은 vault 보호 정책에 따라 생체 인증을 다시 요구할 수 있음
 - 일시적 네트워크 실패에는 같은 pending ciphertext만 15분 비활성 deadline 안에서 재시도
 - background에서 bridge traffic을 중지하고 현재 deadline까지 최대 15분간 key·pending ciphertext를 보존한 뒤 foreground에서 PC Remote page를 다시 적재
 
@@ -37,6 +39,9 @@ key를 파생해 Remote UI와 terminal payload를 종단 암호화한다. contro
 terminal output은 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge를 사용하며 성공한
 RPC마다 15분 비활성 deadline을 갱신한다. terminal 선택·navigation·입출력 UX는 APK가 복제하지 않고 PC가 배포한 기존 Remote page가 소유한다. 기존 browser cloud/direct Remote는 호환을
 위한 별도 평문 경로이므로 Android 앱의 열린 보안 session만 E2E로 표시한다.
+Android Direct의 `http`/`ws`는 Tailscale WireGuard 구간 안에서만 사용하고, Remote payload는
+Cloud 경로와 동일하게 pairing seed에서 파생한 AEAD key로 종단간 암호화한다. 임의
+cleartext URL은 native transport에 전달할 수 없고 WebView의 HTTP navigation 차단도 그대로 유지한다.
 
 ## 빌드
 

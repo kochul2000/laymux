@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{header, HeaderMap, StatusCode, Uri};
+use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -11,7 +11,7 @@ use crate::settings::models::RemoteSettings;
 use crate::automation_server::ServerState;
 
 use super::access::effective_remote_settings;
-use super::android_e2e_output::ANDROID_E2E_OUTPUT_PATH;
+use super::android_e2e_output::{parse_android_e2e_output_route, ANDROID_E2E_OUTPUT_PATH};
 use super::{internal_error, json_error};
 
 const REMOTE_TOKEN_HEADER: &str = "x-laymux-remote-token";
@@ -40,6 +40,11 @@ pub(crate) async fn remote_guard(
         LocalConnectorAuthorizedDecision::Denied(response) => return response,
         LocalConnectorAuthorizedDecision::NotConnector => {}
     }
+    match android_tailscale_e2e_authorized_decision(&req, &settings, addr) {
+        AndroidTailscaleE2eDecision::Allowed => return next.run(req).await,
+        AndroidTailscaleE2eDecision::Denied(response) => return response,
+        AndroidTailscaleE2eDecision::NotAndroidE2e => {}
+    }
 
     if let Some(response) = check_remote_base_access(&settings, addr) {
         return response;
@@ -66,6 +71,12 @@ enum TunnelAuthorizedDecision {
 
 enum LocalConnectorAuthorizedDecision {
     NotConnector,
+    Allowed,
+    Denied(Response),
+}
+
+enum AndroidTailscaleE2eDecision {
+    NotAndroidE2e,
     Allowed,
     Denied(Response),
 }
@@ -114,6 +125,57 @@ fn local_connector_authorized_decision(
         ));
     }
     LocalConnectorAuthorizedDecision::Allowed
+}
+
+fn android_tailscale_e2e_authorized_decision(
+    req: &Request,
+    settings: &RemoteSettings,
+    addr: SocketAddr,
+) -> AndroidTailscaleE2eDecision {
+    let is_fixed_http_route = req.method() == Method::POST
+        && req.uri().query().is_none()
+        && matches!(
+            req.uri().path(),
+            "/remote/v1/e2e/session/challenge"
+                | "/remote/v1/e2e/session/establish"
+                | "/remote/v1/e2e/rpc"
+        );
+    let is_fixed_output_route = req.method() == Method::GET
+        && req.uri().path() == ANDROID_E2E_OUTPUT_PATH
+        && parse_android_e2e_output_route(req.uri().query()).is_some();
+    if !is_fixed_http_route && !is_fixed_output_route {
+        return AndroidTailscaleE2eDecision::NotAndroidE2e;
+    }
+    // Preserve the existing authenticated Direct/loopback path. In particular,
+    // the Python cloud connector forwards these fixed HTTP routes to loopback
+    // with the desktop remote token. Only tokenless native requests need the
+    // Tailscale E2E bypass below; bearer requests still pass every common
+    // enabled/IP/Origin/token check in `remote_guard`.
+    if remote_token_matches(req.headers(), req.uri(), settings) {
+        return AndroidTailscaleE2eDecision::NotAndroidE2e;
+    }
+    if let Some(response) = check_remote_enabled(settings) {
+        return AndroidTailscaleE2eDecision::Denied(response);
+    }
+    if req.headers().contains_key(header::ORIGIN) {
+        return AndroidTailscaleE2eDecision::Denied(json_error(
+            StatusCode::FORBIDDEN,
+            "Android Tailscale E2E requests must not include Origin",
+        ));
+    }
+    let remote_ip = normalize_ip(addr.ip());
+    if !is_tailscale_ip(&remote_ip) {
+        tracing::warn!(
+            remote_addr = %addr,
+            remote_ip = %remote_ip,
+            "non-Tailscale Android E2E client denied"
+        );
+        return AndroidTailscaleE2eDecision::Denied(json_error(
+            StatusCode::FORBIDDEN,
+            "Android Direct E2E requires a Tailscale peer",
+        ));
+    }
+    AndroidTailscaleE2eDecision::Allowed
 }
 
 /// The user-facing remote-control gate shared by every transport (Tailscale and
@@ -602,6 +664,139 @@ mod tests {
             check_remote_base_access(&settings, "203.0.113.10:1".parse::<SocketAddr>().unwrap())
                 .unwrap();
         assert_eq!(direct_response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn android_e2e_direct_allows_only_exact_native_routes_from_tailscale() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: "browser-secret".into(),
+            ..RemoteSettings::default()
+        };
+        let request = |method: &str, uri: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap()
+        };
+        for (method, uri) in [
+            ("POST", "/remote/v1/e2e/session/challenge"),
+            ("POST", "/remote/v1/e2e/session/establish"),
+            ("POST", "/remote/v1/e2e/rpc"),
+            (
+                "GET",
+                "/remote/v1/e2e/output?instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+            ),
+        ] {
+            assert!(matches!(
+                android_tailscale_e2e_authorized_decision(
+                    &request(method, uri),
+                    &settings,
+                    "100.100.10.20:43100".parse().unwrap(),
+                ),
+                AndroidTailscaleE2eDecision::Allowed
+            ));
+        }
+
+        for (method, uri) in [
+            ("GET", "/remote/v1/e2e/session/challenge"),
+            ("POST", "/remote/v1/e2e/session/challenge/"),
+            ("POST", "/remote/v1/session/claim"),
+            ("GET", "/remote/"),
+        ] {
+            assert!(matches!(
+                android_tailscale_e2e_authorized_decision(
+                    &request(method, uri),
+                    &settings,
+                    "100.100.10.20:43100".parse().unwrap(),
+                ),
+                AndroidTailscaleE2eDecision::NotAndroidE2e
+            ));
+        }
+    }
+
+    #[test]
+    fn android_e2e_direct_rejects_non_tailscale_origin_and_disabled_remote() {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/remote/v1/e2e/session/challenge")
+            .body(Body::empty())
+            .unwrap();
+        let enabled = RemoteSettings {
+            enabled: true,
+            ..RemoteSettings::default()
+        };
+        assert!(matches!(
+            android_tailscale_e2e_authorized_decision(
+                &request,
+                &enabled,
+                "192.168.1.10:43100".parse().unwrap(),
+            ),
+            AndroidTailscaleE2eDecision::Denied(_)
+        ));
+
+        let mut with_origin = Request::builder()
+            .method("POST")
+            .uri("/remote/v1/e2e/session/challenge")
+            .body(Body::empty())
+            .unwrap();
+        with_origin.headers_mut().insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://untrusted.example"),
+        );
+        assert!(matches!(
+            android_tailscale_e2e_authorized_decision(
+                &with_origin,
+                &enabled,
+                "100.100.10.20:43100".parse().unwrap(),
+            ),
+            AndroidTailscaleE2eDecision::Denied(_)
+        ));
+
+        let disabled = RemoteSettings::default();
+        assert!(matches!(
+            android_tailscale_e2e_authorized_decision(
+                &request,
+                &disabled,
+                "100.100.10.20:43100".parse().unwrap(),
+            ),
+            AndroidTailscaleE2eDecision::Denied(_)
+        ));
+    }
+
+    #[test]
+    fn android_e2e_direct_preserves_existing_bearer_authenticated_connector_http() {
+        let settings = RemoteSettings {
+            enabled: true,
+            auth_token: "connector-secret".into(),
+            ..RemoteSettings::default()
+        };
+        let request = Request::builder()
+            .method("POST")
+            .uri("/remote/v1/e2e/session/challenge")
+            .header(REMOTE_TOKEN_HEADER, "connector-secret")
+            .body(Body::empty())
+            .unwrap();
+
+        assert!(matches!(
+            android_tailscale_e2e_authorized_decision(
+                &request,
+                &settings,
+                "127.0.0.1:43100".parse().unwrap(),
+            ),
+            AndroidTailscaleE2eDecision::NotAndroidE2e
+        ));
+        assert!(check_remote_base_access(
+            &settings,
+            "127.0.0.1:43100".parse().unwrap(),
+        )
+        .is_none());
+        assert!(remote_token_matches(
+            request.headers(),
+            request.uri(),
+            &settings,
+        ));
     }
 
     #[test]
