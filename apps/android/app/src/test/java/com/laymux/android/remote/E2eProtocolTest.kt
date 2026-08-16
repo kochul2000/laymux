@@ -537,8 +537,10 @@ class E2eProtocolTest {
             )
         }
 
-        assertEquals(2, directAttempts.size)
-        assertEquals(1, directAttempts.distinct().size)
+        // An off-tailnet phone pays the direct connect timeout in full before
+        // the cloud fallback, so the first direct contact is a single short
+        // probe instead of the cloud handshake's two attempts.
+        assertEquals(1, directAttempts.size)
         assertNotEquals(
             JSONObject(directAttempts.first()).getString("clientSessionNonce"),
             requireNotNull(cloudClientSessionNonce),
@@ -546,13 +548,77 @@ class E2eProtocolTest {
         assertEquals(
             listOf(
                 "http://100.100.10.20:19281/remote/v1/e2e/session/challenge",
-                "http://100.100.10.20:19281/remote/v1/e2e/session/challenge",
                 "https://relay.example/api/android/e2e/session/challenge",
                 "https://relay.example/api/android/e2e/session/establish",
             ),
             observed.map { it.first },
         )
         assertEquals(E2eTransportKind.CLOUD_RELAY, session.transport.kind)
+        session.close()
+        Arrays.fill(seed, 0)
+    }
+
+    @Test
+    fun directProbeUsesAShortConnectTimeoutAndCloudKeepsTheDefault() {
+        val seed = ByteArray(32) { it.toByte() }
+        val metadata = PairingMetadata(
+            endpoint = "https://relay.example/",
+            instanceId = "desktop-7",
+            pairingId = "AAECAwQFBgcICQoLDA0ODw",
+            expiresAtEpochSeconds = 2_000,
+            clientNonce = "EBESExQVFhcYGRobHB0eHw",
+            confirmedAtEpochSeconds = 900,
+            label = null,
+        )
+        val created = mutableListOf<java.net.HttpURLConnection>()
+        var cloudClientSessionNonce: String? = null
+        val client = E2eRemoteClient(
+            connectionFactory = { uri ->
+                if (uri.host == "100.100.10.20") {
+                    RecordingConnection(
+                        uri.toURL(),
+                        mutableListOf(),
+                        failResponse = true,
+                    )
+                } else {
+                    HandshakeConnection(uri.toURL()) { body ->
+                        val request = JSONObject(body)
+                        when {
+                            uri.path.endsWith("/session/challenge") -> {
+                                val nonce = request.getString("clientSessionNonce")
+                                cloudClientSessionNonce = nonce
+                                challengeResponse(metadata, seed, nonce)
+                            }
+                            uri.path.endsWith("/session/establish") -> establishResponse(
+                                metadata,
+                                seed,
+                                requireNotNull(cloudClientSessionNonce),
+                            )
+                            else -> error("unexpected handshake route: $uri")
+                        }
+                    }
+                }.also(created::add)
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+        val direct = E2eTransport.tailscale("http://100.100.10.20:19281/remote/")
+
+        val session = StoredPairing(metadata, seed.copyOf()).use { pairing ->
+            E2eTransportPolicy.connectDirectFirst(
+                direct,
+                openDirect = { transport -> client.open(pairing, transport) },
+                openCloud = { client.open(pairing) },
+            )
+        }
+
+        assertEquals(
+            listOf(
+                "100.100.10.20" to E2eRemoteClient.DIRECT_CONNECT_TIMEOUT_MS,
+                "relay.example" to 10_000,
+                "relay.example" to 10_000,
+            ),
+            created.map { it.url.host to it.connectTimeout },
+        )
         session.close()
         Arrays.fill(seed, 0)
     }
