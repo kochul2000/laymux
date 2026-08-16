@@ -1,6 +1,6 @@
 # 0168. Android는 Cache-Control 을 존중하는 메모리 전용 원격 자원 캐시와 전송 진행 오버레이를 둔다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-16
 - Source: 사용자 요구("보안 세션 여는 중이 너무 오래 걸린다 — 오가는 것을 보여주고, 두 번째 연결은 캐싱으로 빨라야 한다") · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md) · [ADR-0077](0077-remote-terminal-font-serving.md)
 - Extends: ADR-0146, ADR-0149
