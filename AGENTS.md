@@ -64,6 +64,7 @@ ADR 은 구현 설명서가 아니라 결정과 근거의 불변 기록이다. �
 - **화면(셀 격자) 테스트는 별도 스위트** — 실제 xterm 에 바이트를 흘려 셀을 읽는 `*.screen.test.ts` 는 `cd ui && npm run test:screen` 으로만 돈다(기본 `vitest run` 에서 제외). "이 바이트를 흘리면 화면이 이렇게 된다" 류 주장은 mock 으로 쓰지 말고 여기에 쓴다. ([ADR-0074](docs/adr/0074-xterm-cell-grid-screen-test-tier.md), [dev-repro-methodology.md §4.5](docs/dev-repro-methodology.md))
 - **컴파일 에러 우선 처리:** 새 필드/기능으로 기존 테스트가 깨지면 기본값(`None`/`0`)만 채워 컴파일만 통과시키지 말고, 그 기능을 실제 검증하는 e2e 테스트를 추가한다.
 - **CI lint 없음** — 로컬에서 fmt/clippy/eslint/prettier 관리.
+- **target 자동 정리** — `cargo tauri dev|build` 의 before 커맨드가 `node scripts/sweep-target.mjs` 를 먼저 돌려 오래된 빌드 산출물을 치운다(하루 1회 throttle, 기본 10일 초과분). `cargo-sweep` 이 설치돼 있으면 그걸 쓰고, 없으면 `incremental` 캐시만 지운다. 즉시 돌리려면 `npm run sweep:target`, 끄려면 `LAYMUX_SWEEP_TARGET=0`. 테스트는 `npm run test:sweep-target`.
 - **마이그레이션 불필요** — 내부 개발 단계. 설정 경로/스키마 변경에 마이그레이션 로직을 만들지 않고 기존 데이터는 수동 처리.
 
 ## 자율 검증 루프

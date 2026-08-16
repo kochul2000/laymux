@@ -4,6 +4,8 @@
     "lint-staged": "^16.4.0"
   },
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "sweep:target": "node scripts/sweep-target.mjs --force",
+    "test:sweep-target": "node scripts/tests/sweep-target.test.mjs"
   }
 }
