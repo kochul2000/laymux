@@ -53,7 +53,11 @@ import com.laymux.android.remote.E2eOutputSocketCallbacks
 import com.laymux.android.remote.E2eOutputStreamReservations
 import com.laymux.android.remote.E2eRemoteClient
 import com.laymux.android.remote.E2eSessionSuspendedException
+import com.laymux.android.remote.E2eTransport
 import com.laymux.android.remote.E2eTransportException
+import com.laymux.android.remote.E2eTransportFailureKind
+import com.laymux.android.remote.E2eTransportKind
+import com.laymux.android.remote.E2eTransportPolicy
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
@@ -122,6 +126,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
+    private var selectedTailscaleUrl: String? = null
+    @Volatile private var cloudFallbackActive = false
     private var localWebSurface = LocalWebSurface.PAIRING
     private var visibleWebSurface = VisibleWebSurface.CLOUD
     private var googleSignInInFlight = false
@@ -321,10 +327,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    fun selectCloudInstance(instanceId: String) {
+    fun selectCloudInstance(instanceId: String, tailscaleUrl: String?) {
         if (!cloudBridgeActionsEnabled()) return
-        if (selectedCloudInstanceId != instanceId) closeRemoteSession()
+        if (selectedCloudInstanceId != instanceId || selectedTailscaleUrl != tailscaleUrl) {
+            closeRemoteSession()
+        }
         selectedCloudInstanceId = instanceId
+        selectedTailscaleUrl = tailscaleUrl
+        cloudFallbackActive = false
         showPairingSurface()
         val metadata = try {
             vault.loadConfirmedMetadata(instanceId)
@@ -344,6 +354,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     fun showCloudDashboard() {
         closeRemoteSession()
         selectedCloudInstanceId = null
+        selectedTailscaleUrl = null
+        cloudFallbackActive = false
         if (!::cloudWebView.isInitialized || isDestroyed) return
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
@@ -397,6 +409,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun showCloudMessage(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+    }
+
+    fun rejectInvalidTailscaleRoute() {
+        if (!cloudBridgeActionsEnabled()) return
+        showCloudMessage("PC가 알린 Tailscale 주소가 올바르지 않아 연결을 중단했습니다.")
     }
 
     fun biometricAvailability(): BiometricAvailability = biometricGate.availability()
@@ -1032,22 +1049,34 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             return
         }
         try {
+            val directUrl = selectedTailscaleUrl?.takeUnless { cloudFallbackActive }
             remoteExecutor.execute {
                 val result = runCatching {
                     stored.use { material ->
-                        if (remoteConnectionGeneration.get() != connectionGeneration ||
-                            !remoteLifecycleActive
-                        ) {
-                            throw RemoteConnectionCancelledException()
-                        }
-                        val session = e2eRemoteClient.open(material)
+                        ensureRemoteConnectionCurrent(connectionGeneration)
+                        val session = E2eTransportPolicy.connectDirectFirst(
+                            direct = directUrl?.let(E2eTransport::tailscale),
+                            openDirect = { direct ->
+                                e2eRemoteClient.open(material, direct) {
+                                    ensureRemoteConnectionCurrent(connectionGeneration)
+                                }
+                            },
+                            beforeCloudFallback = {
+                                ensureRemoteConnectionCurrent(connectionGeneration)
+                            },
+                            openCloud = {
+                                e2eRemoteClient.open(material) {
+                                    ensureRemoteConnectionCurrent(connectionGeneration)
+                                }
+                            },
+                        )
                         remoteOpeningSession = session
-                        if (remoteConnectionGeneration.get() != connectionGeneration ||
-                            !remoteLifecycleActive
-                        ) {
+                        try {
+                            ensureRemoteConnectionCurrent(connectionGeneration)
+                        } catch (error: RemoteConnectionCancelledException) {
                             if (remoteOpeningSession === session) remoteOpeningSession = null
                             session.close()
-                            throw RemoteConnectionCancelledException()
+                            throw error
                         }
                         session
                     }
@@ -1068,6 +1097,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             if (remoteOpeningSession === session) {
                                 remoteOpeningSession = null
                             }
+                            if (directUrl != null &&
+                                session.transport.kind == E2eTransportKind.CLOUD_RELAY
+                            ) {
+                                cloudFallbackActive = true
+                            }
                             remoteSession = session
                             showRemoteSurface()
                         },
@@ -1084,6 +1118,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             stored.close()
             remoteConnecting = false
             notifyPairingChanged(error = "보안 연결 작업을 시작하지 못했습니다.")
+        }
+    }
+
+    private fun ensureRemoteConnectionCurrent(connectionGeneration: Long) {
+        if (remoteConnectionGeneration.get() != connectionGeneration || !remoteLifecycleActive) {
+            throw RemoteConnectionCancelledException()
         }
     }
 
@@ -1118,7 +1158,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         } catch (error: TimeoutException) {
             future.cancel(true)
             handleRemoteFailure(
-                E2eTransportException("Remote UI resource request timed out."),
+                E2eTransportException(
+                    "Remote UI resource request timed out.",
+                    failureKind = E2eTransportFailureKind.NETWORK,
+                ),
                 session,
             )
             null
@@ -1301,6 +1344,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                                     true,
                                 )
                             }
+                            val failureKind = (error as? E2eTransportException)?.failureKind
+                            if (failureKind != null) {
+                                requestCloudSessionFallback(session, failureKind)
+                            }
                         }
                     }
                 } catch (_: RejectedExecutionException) {
@@ -1362,11 +1409,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         streamId: String,
         reason: String,
         isError: Boolean,
+        failureKind: E2eTransportFailureKind?,
     ) {
         if (!remoteOutputStreams.remove(streamId, socket)) return
         val entry = remoteOutputEntries[streamId] ?: return
         if (!removeRemoteOutputEntry(streamId, entry)) return
         emitOutputBridgeClose(entry.reply, streamId, reason, isError)
+        if (failureKind != null) {
+            requestCloudSessionFallback(socket.remoteSession(), failureKind)
+        }
     }
 
     private fun clearRemoteOutputStreams() {
@@ -1459,7 +1510,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         onSuccess = {
                             showRemoteSurface()
                         },
-                        onFailure = { error ->
+                        onFailure = failure@{ error ->
+                            val failureKind = (error as? E2eTransportException)?.failureKind
+                            if (failureKind != null &&
+                                requestCloudSessionFallback(session, failureKind)
+                            ) {
+                                return@failure
+                            }
                             closeRemoteSession()
                             if (error !is RemoteConnectionCancelledException &&
                                 error !is E2eSessionSuspendedException
@@ -1512,10 +1569,36 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         ) {
             return
         }
+        val failureKind = (error as? E2eTransportException)?.failureKind
+        if (failureKind != null && requestCloudSessionFallback(failedSession, failureKind)) return
         closeRemoteSession()
         runOnUiThread {
             if (::webView.isInitialized && !isDestroyed) showCloudDashboard()
         }
+    }
+
+    private fun requestCloudSessionFallback(
+        failedSession: RemoteSession,
+        failureKind: E2eTransportFailureKind,
+    ): Boolean {
+        if (!E2eTransportPolicy.shouldFallbackActiveSession(
+                failedSession.transport.kind,
+                failureKind,
+            )
+        ) {
+            return false
+        }
+        runOnUiThread {
+            if (remoteSession !== failedSession || !remoteLifecycleActive || isDestroyed) {
+                return@runOnUiThread
+            }
+            cloudFallbackActive = true
+            closeRemoteSession()
+            showPairingSurface()
+            showCloudMessage("Tailscale 연결이 끊겨 Cloud 종단간 암호화로 다시 연결합니다.")
+            connectRemote()
+        }
+        return true
     }
 
     private fun remoteErrorMessage(error: Throwable): String = when (error) {

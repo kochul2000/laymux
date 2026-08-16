@@ -1,5 +1,7 @@
 package com.laymux.android.remote
 
+import com.laymux.android.pairing.PairingMetadata
+import com.laymux.android.pairing.StoredPairing
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -475,6 +477,87 @@ class E2eProtocolTest {
     }
 
     @Test
+    fun directHandshakeUsesFixedRoutesAndCloudFallbackStartsWithAFreshNonce() {
+        val seed = ByteArray(32) { it.toByte() }
+        val metadata = PairingMetadata(
+            endpoint = "https://relay.example/",
+            instanceId = "desktop-7",
+            pairingId = "AAECAwQFBgcICQoLDA0ODw",
+            expiresAtEpochSeconds = 2_000,
+            clientNonce = "EBESExQVFhcYGRobHB0eHw",
+            confirmedAtEpochSeconds = 900,
+            label = null,
+        )
+        val observed = mutableListOf<Pair<String, String>>()
+        val directAttempts = mutableListOf<String>()
+        var cloudClientSessionNonce: String? = null
+        val client = E2eRemoteClient(
+            connectionFactory = { uri ->
+                if (uri.host == "100.100.10.20") {
+                    RecordingConnection(
+                        uri.toURL(),
+                        mutableListOf(),
+                        failResponse = true,
+                        requestObserver = { body ->
+                            directAttempts += body
+                            observed += uri.toString() to body
+                        },
+                    )
+                } else {
+                    HandshakeConnection(uri.toURL()) { body ->
+                        observed += uri.toString() to body
+                        val request = JSONObject(body)
+                        when {
+                            uri.path.endsWith("/session/challenge") -> {
+                                val nonce = request.getString("clientSessionNonce")
+                                cloudClientSessionNonce = nonce
+                                challengeResponse(metadata, seed, nonce)
+                            }
+                            uri.path.endsWith("/session/establish") -> {
+                                establishResponse(
+                                    metadata,
+                                    seed,
+                                    requireNotNull(cloudClientSessionNonce),
+                                )
+                            }
+                            else -> error("unexpected handshake route: $uri")
+                        }
+                    }
+                }
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+        val direct = E2eTransport.tailscale("http://100.100.10.20:19281/remote/")
+
+        val session = StoredPairing(metadata, seed.copyOf()).use { pairing ->
+            E2eTransportPolicy.connectDirectFirst(
+                direct,
+                openDirect = { transport -> client.open(pairing, transport) },
+                openCloud = { client.open(pairing) },
+            )
+        }
+
+        assertEquals(2, directAttempts.size)
+        assertEquals(1, directAttempts.distinct().size)
+        assertNotEquals(
+            JSONObject(directAttempts.first()).getString("clientSessionNonce"),
+            requireNotNull(cloudClientSessionNonce),
+        )
+        assertEquals(
+            listOf(
+                "http://100.100.10.20:19281/remote/v1/e2e/session/challenge",
+                "http://100.100.10.20:19281/remote/v1/e2e/session/challenge",
+                "https://relay.example/api/android/e2e/session/challenge",
+                "https://relay.example/api/android/e2e/session/establish",
+            ),
+            observed.map { it.first },
+        )
+        assertEquals(E2eTransportKind.CLOUD_RELAY, session.transport.kind)
+        session.close()
+        Arrays.fill(seed, 0)
+    }
+
+    @Test
     fun rpcKeepsRetryingTheExactCiphertextUntilAnAuthenticatedResponseArrives() {
         val requestBodies = mutableListOf<String>()
         val now = AtomicLong(100)
@@ -530,6 +613,39 @@ class E2eProtocolTest {
         assertEquals(1, requestBodies.distinct().size)
         session.close()
         Arrays.fill(responseKey, 0)
+    }
+
+    @Test
+    fun directRpcNetworkFailureEscapesAfterOneRetryBatchForCloudFallback() {
+        val requestBodies = mutableListOf<String>()
+        val now = AtomicLong(100)
+        val transport = E2eTransport.tailscale("http://100.64.0.1:19280/remote/")
+        val client = E2eRemoteClient(
+            connectionFactory = { uri ->
+                RecordingConnection(uri.toURL(), requestBodies, failResponse = true)
+            },
+            nowEpochSeconds = now::get,
+            rpcRetryWait = { now.set(1_000) },
+        )
+        val session = RemoteSession(
+            transport.endpoint,
+            "desktop-7",
+            "YGFiY2RlZmdoaWprbG1ubw",
+            1_000,
+            ByteArray(32) { 1 },
+            ByteArray(32) { 2 },
+            nowEpochSeconds = now::get,
+            transport = transport,
+        )
+
+        val error = assertThrows(E2eTransportException::class.java) {
+            client.rpc(session, JSONObject().put("kind", "test"))
+        }
+
+        assertEquals(E2eTransportFailureKind.NETWORK, error.failureKind)
+        assertEquals(2, requestBodies.size)
+        assertEquals(100, now.get())
+        session.close()
     }
 
     @Test
@@ -606,19 +722,115 @@ class E2eProtocolTest {
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
+    private fun challengeResponse(
+        metadata: PairingMetadata,
+        seed: ByteArray,
+        clientSessionNonce: String,
+    ): String {
+        val challengeId = "MDEyMzQ1Njc4OTo7PD0-Pw"
+        val serverNonce = "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
+        val expiresAt = 1_060L
+        val fields = arrayOf(
+            metadata.pairingId,
+            metadata.instanceId,
+            metadata.clientNonce,
+            clientSessionNonce,
+            challengeId,
+            serverNonce,
+            expiresAt.toString(),
+        )
+        return JSONObject()
+            .put("version", E2eProtocol.VERSION)
+            .put("instanceId", metadata.instanceId)
+            .put("pairingId", metadata.pairingId)
+            .put("clientNonce", metadata.clientNonce)
+            .put("clientSessionNonce", clientSessionNonce)
+            .put("challengeId", challengeId)
+            .put("serverNonce", serverNonce)
+            .put("challengeExpiresAt", expiresAt)
+            .put(
+                "serverProof",
+                E2eProtocol.proof(seed, E2eProtocol.CHALLENGE_RESPONSE_DOMAIN, fields),
+            )
+            .toString()
+    }
+
+    private fun establishResponse(
+        metadata: PairingMetadata,
+        seed: ByteArray,
+        clientSessionNonce: String,
+    ): String {
+        val challengeId = "MDEyMzQ1Njc4OTo7PD0-Pw"
+        val serverNonce = "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
+        val sessionId = "YGFiY2RlZmdoaWprbG1ubw"
+        val expiresAt = 1_900L
+        val fields = arrayOf(
+            metadata.pairingId,
+            metadata.instanceId,
+            metadata.clientNonce,
+            clientSessionNonce,
+            challengeId,
+            serverNonce,
+            sessionId,
+            expiresAt.toString(),
+        )
+        return JSONObject()
+            .put("version", E2eProtocol.VERSION)
+            .put("instanceId", metadata.instanceId)
+            .put("pairingId", metadata.pairingId)
+            .put("clientNonce", metadata.clientNonce)
+            .put("clientSessionNonce", clientSessionNonce)
+            .put("challengeId", challengeId)
+            .put("serverNonce", serverNonce)
+            .put("sessionId", sessionId)
+            .put("expiresAt", expiresAt)
+            .put(
+                "serverProof",
+                E2eProtocol.proof(seed, E2eProtocol.ESTABLISH_RESPONSE_DOMAIN, fields),
+            )
+            .toString()
+    }
+
+    private class HandshakeConnection(
+        url: URL,
+        private val responseProvider: (String) -> String,
+    ) : HttpURLConnection(url) {
+        private val request = ByteArrayOutputStream()
+        private var responseBody = ""
+
+        override fun getOutputStream(): ByteArrayOutputStream = request
+
+        override fun getResponseCode(): Int {
+            responseBody = responseProvider(request.toString(Charsets.UTF_8.name()))
+            return HTTP_OK
+        }
+
+        override fun getInputStream(): ByteArrayInputStream =
+            ByteArrayInputStream(responseBody.toByteArray())
+
+        override fun connect() = Unit
+
+        override fun disconnect() = Unit
+
+        override fun usingProxy(): Boolean = false
+    }
+
     private class RecordingConnection(
         url: URL,
         private val requestBodies: MutableList<String>,
         private val failResponse: Boolean,
         private val responseBody: String = "{}",
         private val onResponseCode: () -> Unit = {},
+        private val requestObserver: ((String) -> Unit)? = null,
     ) : HttpURLConnection(url) {
         private val request = ByteArrayOutputStream()
 
         override fun getOutputStream(): ByteArrayOutputStream = request
 
         override fun getResponseCode(): Int {
-            requestBodies += request.toString(Charsets.UTF_8.name())
+            val body = request.toString(Charsets.UTF_8.name())
+            requestBodies += body
+            requestObserver?.invoke(body)
             onResponseCode()
             if (failResponse) throw IOException("simulated response loss")
             return HTTP_OK

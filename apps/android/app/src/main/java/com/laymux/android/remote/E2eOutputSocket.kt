@@ -1,6 +1,5 @@
 package com.laymux.android.remote
 
-import java.net.URI
 import java.security.SecureRandom
 import java.util.ArrayDeque
 import java.util.Arrays
@@ -16,7 +15,13 @@ import okio.ByteString.Companion.toByteString
 interface E2eOutputSocketCallbacks {
     fun onOpen(socket: E2eOutputSocket, streamId: String)
     fun onRecord(socket: E2eOutputSocket, streamId: String, plaintext: ByteArray)
-    fun onClose(socket: E2eOutputSocket, streamId: String, reason: String, isError: Boolean)
+    fun onClose(
+        socket: E2eOutputSocket,
+        streamId: String,
+        reason: String,
+        isError: Boolean,
+        failureKind: E2eTransportFailureKind?,
+    )
 }
 
 internal object E2eOutputLimits {
@@ -99,9 +104,19 @@ class E2eOutputSocket internal constructor(
         try {
             session.requireTransportAllowed()
             webSocket = client.newWebSocket(Request.Builder().url(outputUrl()).build(), this)
-        } catch (error: Throwable) {
+        } catch (error: E2eProtocolException) {
             disconnect()
             throw error
+        } catch (error: E2eTransportException) {
+            disconnect()
+            throw error
+        } catch (error: Throwable) {
+            disconnect()
+            throw E2eTransportException(
+                "Secure output transport failed.",
+                failureKind = E2eTransportFailureKind.NETWORK,
+                cause = error,
+            )
         }
     }
 
@@ -178,23 +193,39 @@ class E2eOutputSocket internal constructor(
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        finish(reason.ifBlank { "Secure output closed." }, false)
+        finish(reason.ifBlank { "Secure output closed." }, false, null)
     }
 
     override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
-        fail(error.message ?: "Secure output transport failed.")
+        fail(
+            error.message ?: "Secure output transport failed.",
+            if (response == null) {
+                E2eTransportFailureKind.NETWORK
+            } else {
+                E2eTransportFailureKind.HTTP
+            },
+        )
     }
 
-    private fun fail(reason: String) {
+    private fun fail(
+        reason: String,
+        failureKind: E2eTransportFailureKind = E2eTransportFailureKind.OTHER,
+    ) {
         webSocket?.cancel()
-        finish(reason, true)
+        finish(reason, true, failureKind)
     }
 
-    private fun finish(reason: String, isError: Boolean) {
+    private fun finish(
+        reason: String,
+        isError: Boolean,
+        failureKind: E2eTransportFailureKind?,
+    ) {
         if (!closed.compareAndSet(false, true)) return
         clearSecrets()
-        callbacks.onClose(this, streamId, reason, isError)
+        callbacks.onClose(this, streamId, reason, isError, failureKind)
     }
+
+    internal fun remoteSession(): RemoteSession = session
 
     @Synchronized
     private fun clearSecrets() {
@@ -211,18 +242,6 @@ class E2eOutputSocket internal constructor(
     }
 
     private fun outputUrl(): String {
-        val endpoint = URI(session.endpoint)
-        val scheme = when (endpoint.scheme.lowercase()) {
-            "https" -> "wss"
-            "http" -> "ws"
-            else -> throw E2eProtocolException("Secure output endpoint is invalid.", true)
-        }
-        return URI(
-            scheme,
-            endpoint.rawAuthority,
-            "/api/android/e2e/output",
-            "instanceId=${session.instanceId}&sessionId=${session.sessionId}&streamNonce=$streamNonce",
-            null,
-        ).toASCIIString()
+        return session.transport.outputUrl(session.instanceId, session.sessionId, streamNonce)
     }
 }

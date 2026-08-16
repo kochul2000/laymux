@@ -36,6 +36,7 @@ internal class RemoteSession internal constructor(
     private val requestKey: ByteArray,
     private val responseKey: ByteArray,
     private val nowEpochSeconds: () -> Long,
+    val transport: E2eTransport = E2eTransport.cloud(endpoint),
 ) : Closeable {
     @Volatile
     var expiresAtEpochSeconds = expiresAtEpochSeconds
@@ -358,7 +359,7 @@ internal object E2eProtocol {
     fun verifyEstablished(
         challenge: VerifiedChallenge,
         seed: ByteArray,
-        endpoint: String,
+        transport: E2eTransport,
         rawResponse: String,
         nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1_000 },
     ): RemoteSession {
@@ -424,13 +425,14 @@ internal object E2eProtocol {
         val keys = deriveKeys(seed, keyFields)
         val localExpiresAt = boundedSessionExpiry(expiresAt, now)
         return RemoteSession(
-            endpoint,
+            transport.endpoint,
             metadata.instanceId,
             sessionId,
             localExpiresAt,
             keys.first,
             keys.second,
             nowEpochSeconds,
+            transport,
         )
     }
 

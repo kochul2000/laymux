@@ -22,19 +22,24 @@ internal class E2eRemoteClient(
         }
     },
 ) {
-    fun open(pairing: StoredPairing): RemoteSession {
+    fun open(
+        pairing: StoredPairing,
+        transport: E2eTransport = E2eTransport.cloud(pairing.metadata.endpoint),
+        beforeAttempt: () -> Unit = {},
+    ): RemoteSession {
         val metadata = pairing.metadata
         require(metadata.confirmedAtEpochSeconds != null) { "데스크톱 확인이 끝난 페어링이 필요합니다." }
         val seed = pairing.secretCopy()
         try {
             val clientSessionNonce = E2eProtocol.newClientSessionNonce()
             val challengeRaw = postWithRetry(
-                metadata.endpoint,
-                CHALLENGE_PATH,
+                transport.httpUrl(E2eHttpOperation.CHALLENGE),
+                "",
                 E2eProtocol.challengeRequest(metadata, clientSessionNonce),
                 HANDSHAKE_RESPONSE_LIMIT,
                 HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
+                beforeAttempt = beforeAttempt,
             )
             val challenge = E2eProtocol.verifyChallenge(
                 metadata,
@@ -44,17 +49,18 @@ internal class E2eRemoteClient(
                 nowEpochSeconds(),
             )
             val establishRaw = postWithRetry(
-                metadata.endpoint,
-                ESTABLISH_PATH,
+                transport.httpUrl(E2eHttpOperation.ESTABLISH),
+                "",
                 E2eProtocol.establishRequest(challenge, seed),
                 HANDSHAKE_RESPONSE_LIMIT,
                 HANDSHAKE_ATTEMPTS,
                 invalidatesSession = false,
+                beforeAttempt = beforeAttempt,
             )
             return E2eProtocol.verifyEstablished(
                 challenge,
                 seed,
-                metadata.endpoint,
+                transport,
                 establishRaw,
                 nowEpochSeconds,
             )
@@ -84,8 +90,8 @@ internal class E2eRemoteClient(
             session.requireTransportAllowed()
             val response = try {
                 postWithRetry(
-                    session.endpoint,
-                    RPC_PATH,
+                    session.transport.httpUrl(E2eHttpOperation.RPC),
+                    "",
                     pending.envelopeJson,
                     RPC_RESPONSE_LIMIT,
                     RPC_ATTEMPTS,
@@ -94,6 +100,13 @@ internal class E2eRemoteClient(
                 )
             } catch (error: E2eTransportException) {
                 if (!error.retryable || error.invalidatesSession) throw error
+                if (E2eTransportPolicy.shouldFallbackActiveSession(
+                        session.transport.kind,
+                        error.failureKind,
+                    )
+                ) {
+                    throw error
+                }
                 if (session.isSuspendedForBackground()) throw E2eSessionSuspendedException()
                 if (session.isExpired()) {
                     throw E2eProtocolException("보안 세션이 비활성 상태로 만료됐습니다.", true)
@@ -129,6 +142,7 @@ internal class E2eRemoteClient(
             lastError?.message ?: "암호화 RPC에 실패했습니다.",
             retryable = lastError?.retryable ?: false,
             invalidatesSession = lastError?.invalidatesSession ?: invalidatesSession,
+            failureKind = lastError?.failureKind ?: E2eTransportFailureKind.OTHER,
             cause = lastError,
         )
     }
@@ -139,7 +153,10 @@ internal class E2eRemoteClient(
         body: String,
         responseLimit: Int,
     ): String {
-        val connection = connectionFactory(URI(endpoint).resolve(path))
+        val endpointUri = URI(endpoint)
+        val connection = connectionFactory(
+            if (path.isEmpty()) endpointUri else endpointUri.resolve(path),
+        )
         return try {
             connection.requestMethod = "POST"
             connection.instanceFollowRedirects = false
@@ -168,13 +185,19 @@ internal class E2eRemoteClient(
                         HttpURLConnection.HTTP_UNAUTHORIZED,
                         HttpURLConnection.HTTP_CONFLICT,
                     ),
+                    failureKind = E2eTransportFailureKind.HTTP,
                 )
             }
             readBounded(connection.inputStream, responseLimit)
         } catch (error: E2eTransportException) {
             throw error
         } catch (error: Exception) {
-            throw E2eTransportException("보안 연결에 실패했습니다.", retryable = true, cause = error)
+            throw E2eTransportException(
+                "보안 연결에 실패했습니다.",
+                retryable = true,
+                failureKind = E2eTransportFailureKind.NETWORK,
+                cause = error,
+            )
         } finally {
             connection.disconnect()
         }
@@ -195,9 +218,6 @@ internal class E2eRemoteClient(
     }
 
     companion object {
-        private const val CHALLENGE_PATH = "/api/android/e2e/session/challenge"
-        private const val ESTABLISH_PATH = "/api/android/e2e/session/establish"
-        private const val RPC_PATH = "/api/android/e2e/rpc"
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 15_000
         private const val HANDSHAKE_RESPONSE_LIMIT = 8 * 1024
@@ -212,5 +232,6 @@ internal class E2eTransportException(
     message: String,
     val retryable: Boolean = false,
     val invalidatesSession: Boolean = false,
+    val failureKind: E2eTransportFailureKind = E2eTransportFailureKind.OTHER,
     cause: Throwable? = null,
 ) : Exception(message, cause)

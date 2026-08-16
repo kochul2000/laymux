@@ -68,6 +68,13 @@ native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/01
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
 Local/Tailscale Direct Remote에는 적용하지 않는다([ADR-0150](../adr/0150-desktop-owned-cloud-remote-access-policy.md)).
 
+같은 Tailnet에서는 Android native가 Cloud presence의 `tailscaleUrl`을 비신뢰 routing hint로 검증한 뒤
+PC의 고정 `/remote/v1/e2e/*` route로 동일한 pairing/session/AEAD protocol을 직접 운반한다. 일반
+browser Direct의 bearer token과 plaintext Remote API를 재사용하지 않는다. Direct socket이 도달하지
+않거나 열린 Direct session의 RPC/output network가 끊길 때만 기존 session을 폐기하고 새 nonce로 Cloud E2E session을 열며, HTTP policy·pairing proof·AEAD 실패는 fallback하지 않는다. runtime fallback은 보호 정책에 따라 생체 인증을 다시 요구할 수 있고 PC 문서·output snapshot을 새로 적재한다. 따라서 UI가 표시하는 보안 속성은 두 transport 모두 E2E이며, 경로를 사용자의 보안 수준
+선택으로 노출하지 않는다. native `RemoteSession`은 실제 Tailscale 직접/Cloud 경유 transport를 내부 상태로
+유지한다([ADR-0160](../adr/0160-android-e2e-tailscale-direct-transport.md)).
+
 Android 배포 신원은 `com.laymux.android`의 장기 앱 서명 키 하나다. GitHub Releases의 universal APK와
 Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 사용하고, Play 제출용 AAB만 별도 업로드
 키로 서명한다. release workflow는 tag 기반 version, production Cloud/Google client 설정과 서명 secret을
