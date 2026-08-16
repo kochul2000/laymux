@@ -396,6 +396,64 @@ test.describe("remote mobile layout", () => {
     );
   });
 
+  test("opens workspace navigation by default and keeps secondary tools on separate drawer pages", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies);
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+
+    // Before a lease exists, the open drawer takes the user straight to the
+    // only actionable page: Connection.
+    await expect(page.locator(".app")).toHaveClass(/nav-open/);
+    await expect(page.locator("#drawerConnectionView")).toBeVisible();
+    await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
+
+    // Device-local settings remain reachable before a lease exists.
+    await page.locator("#drawerBack").click();
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#widgetStripToggle")).toBeEnabled();
+    await page.locator("#drawerBack").click();
+    await page.locator("#drawerConnectionButton").click();
+
+    await page.locator("#connect").click();
+    await expect(page.locator(".app")).not.toHaveClass(/nav-open/);
+
+    // A connected drawer always reopens on the unchanged workspace home.
+    await page.locator("#navToggle").click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+    await expect(page.locator("#workspaceSection")).toBeVisible();
+    await expect(page.locator("#workspaceSection .nav-section-title")).toHaveCount(0);
+    await expect(page.locator("#notificationSection")).toBeHidden();
+    await expect(page.locator("#drawerConnectionView")).toBeHidden();
+    await expect(page.locator("#drawerSettingsView")).toBeHidden();
+    await expect(page.locator("#navClose")).toHaveCount(0);
+    await expect(page.locator(".drawer-header")).toHaveCSS("height", "32px");
+
+    await page.locator("#drawerNotificationsButton").click();
+    await expect(page.locator("#drawerNotificationsView")).toBeVisible();
+    await expect(page.locator("#notificationSection")).toBeVisible();
+    await expect(page.locator("#drawerTitle")).toHaveText("Notifications");
+    await page.locator("#drawerBack").click();
+
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#drawerSettingsView")).toBeVisible();
+    await expect(page.locator("#displaySection")).toBeVisible();
+    await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
+
+    await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+
+    await page.locator("#drawerConnectionButton").click();
+    await expect(page.locator("#drawerConnectionView")).toBeVisible();
+    await expect(page.locator(".connection-panel")).toBeVisible();
+
+    await page.locator("#navToggle").click();
+    await page.locator("#navToggle").click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+  });
+
   test("excludes the current workspace pane from spatial navigation in the Remote header", async ({
     page,
   }) => {
