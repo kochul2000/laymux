@@ -282,9 +282,26 @@ pub(crate) async fn stream_android_e2e_output<F, Fut, A, AttachFuture>(
     {
         return;
     }
-    let subscribed = match attach(open.terminal_id.clone()).await {
-        Ok(subscribed) => subscribed,
-        Err(_) => return,
+    let attach = attach(open.terminal_id.clone());
+    tokio::pin!(attach);
+    let subscribed = loop {
+        tokio::select! {
+            biased;
+            _ = input.recv() => {
+                return;
+            }
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            result = &mut attach => {
+                break match result {
+                    Ok(subscribed) => subscribed,
+                    Err(_) => return,
+                };
+            }
+        }
     };
     if !active_lease_matches_with_timeout(
         &app_state,
@@ -460,6 +477,8 @@ mod tests {
     use super::*;
     use crate::lock_ext::MutexExt;
     use serial_test::serial;
+    use std::future::pending;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     const QUERY: &str = "instanceId=desktop-7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
@@ -480,6 +499,84 @@ mod tests {
             "instanceId=desktop%2D7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&token=local"
         ))
         .is_none());
+    }
+
+    struct AttachDropProbe(Arc<AtomicBool>);
+
+    impl Drop for AttachDropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    async fn assert_attach_wait_observes_cancellation(cancel_with_peer_close: bool) {
+        let now = unix_time_seconds().unwrap();
+        let (session, cipher, mut peer) =
+            crate::android_e2e::test_output_cipher_pair(now, now + 60).await;
+        let prepared = PreparedAndroidE2eOutput { session, cipher };
+        let app_state = Arc::new(AppState::new());
+        {
+            let mut control = app_state.remote_control.lock_or_err().unwrap();
+            control.lease = Some(crate::remote_server::RemoteControlLease {
+                lease_id: "lease-1".into(),
+                remote_addr: "127.0.0.1:1".into(),
+                client_name: Some("android-test".into()),
+                last_heartbeat: Instant::now(),
+            });
+        }
+        let mut open = vec![OUTPUT_RECORD_OPEN];
+        open.extend_from_slice(br#"{"terminalId":"terminal-1","leaseId":"lease-1"}"#);
+        let encrypted_open = peer.encrypt_request(&open).unwrap();
+        let (input_tx, input_rx) = mpsc::channel(E2E_OUTPUT_INPUT_QUEUE_SIZE);
+        input_tx.send(encrypted_open).await.unwrap();
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let (attach_started_tx, attach_started_rx) = tokio::sync::oneshot::channel();
+        let attach_dropped = Arc::new(AtomicBool::new(false));
+        let attach_drop_probe = attach_dropped.clone();
+        let core = tokio::spawn(stream_android_e2e_output(
+            app_state,
+            prepared,
+            input_rx,
+            shutdown_rx,
+            move |_| async move {
+                let _ = attach_started_tx.send(());
+                let _probe = AttachDropProbe(attach_drop_probe);
+                pending::<Result<TerminalOutputSubscribedAttachment, RenderCheckpointAttachError>>()
+                    .await
+            },
+            |_| async { Ok(()) },
+        ));
+
+        timeout(Duration::from_secs(1), attach_started_rx)
+            .await
+            .expect("attach should start")
+            .expect("attach start signal should be delivered");
+        let core_result = if cancel_with_peer_close {
+            drop(input_tx);
+            timeout(Duration::from_secs(1), core).await
+        } else {
+            shutdown_tx.send(true).unwrap();
+            let result = timeout(Duration::from_secs(1), core).await;
+            drop(input_tx);
+            result
+        };
+
+        core_result
+            .expect("cancellation must stop an in-flight attach")
+            .unwrap();
+        assert!(attach_dropped.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn peer_close_cancels_renderer_attach_wait() {
+        assert_attach_wait_observes_cancellation(true).await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn shutdown_cancels_renderer_attach_wait() {
+        assert_attach_wait_observes_cancellation(false).await;
     }
 
     #[tokio::test]

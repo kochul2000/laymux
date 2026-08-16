@@ -348,9 +348,13 @@ impl AndroidE2eSession {
         }
         let mut state = self.state.lock().await;
         self.ensure_active(now)?;
-        if state.used_output_nonces.len() >= MAX_OUTPUT_STREAM_NONCES
-            || !state.used_output_nonces.insert(stream_nonce.to_string())
-        {
+        if state.used_output_nonces.len() >= MAX_OUTPUT_STREAM_NONCES {
+            // Forgetting an accepted nonce would make its encrypted OPEN
+            // replayable, so roll the session instead of recycling entries.
+            self.revoked.store(true, Ordering::Release);
+            return Err(E2eError::Expired);
+        }
+        if !state.used_output_nonces.insert(stream_nonce.to_string()) {
             return Err(E2eError::Invalid);
         }
         let keys = derive_output_keys(

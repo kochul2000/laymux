@@ -1380,7 +1380,11 @@ async fn handle_stream_data(
                     ),
                 )
                 .await;
-                remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+                if let Some(stream) =
+                    remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+                {
+                    close_active_stream(stream);
+                }
                 return;
             }
             Err(error) => {
@@ -1390,7 +1394,11 @@ async fn handle_stream_data(
                     StreamErrorPayload::new("bad_stream_data", error.to_string(), false),
                 )
                 .await;
-                remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+                if let Some(stream) =
+                    remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+                {
+                    close_active_stream(stream);
+                }
                 return;
             }
         };
@@ -1405,7 +1413,11 @@ async fn handle_stream_data(
                 ),
             )
             .await;
-            remove_active_stream(active_streams, &stream_id, socket_pending_bytes);
+            if let Some(stream) =
+                remove_active_stream(active_streams, &stream_id, socket_pending_bytes)
+            {
+                close_active_stream(stream);
+            }
         }
         return;
     }
@@ -3738,6 +3750,97 @@ mod tests {
             assert!(active_streams.is_empty());
             assert!(*shutdown_rx.borrow());
         }
+    }
+
+    async fn assert_rejected_websocket_data_cancels_task(
+        frame: TunnelFrame,
+        fill_input_queue: bool,
+        expected_code: &str,
+    ) {
+        let (outbound_tx, mut outbound_rx) = mpsc::channel(2);
+        let (input_tx, mut input_rx) = mpsc::channel(1);
+        if fill_input_queue {
+            input_tx.try_send(vec![0]).unwrap();
+        }
+        let (shutdown, shutdown_rx) = watch::channel(false);
+        let task_dropped = Arc::new(AtomicBool::new(false));
+        let mut active_streams = HashMap::from([(
+            frame.stream_id.clone(),
+            ActiveStream::WebSocket {
+                task_id: 1,
+                shutdown,
+                input: Some(input_tx),
+                join: pending_task(task_dropped.clone()),
+            },
+        )]);
+        let mut socket_pending_bytes = 0;
+
+        handle_stream_data(
+            frame,
+            &mut active_streams,
+            &mut socket_pending_bytes,
+            &outbound_tx,
+        )
+        .await;
+
+        let error = outbound_rx.recv().await.unwrap();
+        assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
+        assert_eq!(error_code(&error), Some(expected_code));
+        assert!(active_streams.is_empty());
+        assert!(*shutdown_rx.borrow());
+        timeout(Duration::from_secs(1), async {
+            while !task_dropped.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("rejected WebSocket input must cancel its task");
+        drop(input_rx.recv().await);
+    }
+
+    #[tokio::test]
+    async fn oversized_websocket_data_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({
+                    "encoding": ENCODING_BASE64,
+                    "data": BASE64.encode(vec![0; E2E_OUTPUT_OPEN_RECORD_LIMIT + 1]),
+                }),
+            ),
+            false,
+            "bad_stream_data",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn malformed_websocket_data_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({ "encoding": ENCODING_BASE64, "data": "%%%" }),
+            ),
+            false,
+            "bad_stream_data",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn websocket_input_backpressure_cancels_its_active_task() {
+        assert_rejected_websocket_data_cancels_task(
+            TunnelFrame::new(
+                "srv-output",
+                FRAME_STREAM_DATA,
+                json!({ "encoding": ENCODING_BASE64, "data": BASE64.encode(b"open") }),
+            ),
+            true,
+            "backpressure_limit_exceeded",
+        )
+        .await;
     }
 
     #[tokio::test]
