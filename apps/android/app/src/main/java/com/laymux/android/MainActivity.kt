@@ -61,6 +61,7 @@ import com.laymux.android.remote.E2eTransportFailureKind
 import com.laymux.android.remote.E2eTransportKind
 import com.laymux.android.remote.E2eTransportPolicy
 import com.laymux.android.remote.RemoteHttpRequestRegistry
+import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
@@ -145,6 +146,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
     private val remoteOutputReservations = E2eOutputStreamReservations()
     private val remoteHttpRequests = RemoteHttpRequestRegistry()
+    private val remoteHttpResumeTracker = RemoteHttpResumeTracker()
     private val remoteConnectionGeneration = AtomicLong()
     @Volatile private var remoteLifecycleActive = false
 
@@ -383,6 +385,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun resumeRemoteSurfaceAfterBackground(
         session: RemoteSession,
         connectionGeneration: Long,
+        completion: RemoteHttpResumeTracker.Completion?,
     ) {
         if (!::webView.isInitialized || isDestroyed) return
         val action = RemoteSurfaceResumePolicy.action(
@@ -393,12 +396,29 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             showRemoteSurface()
             return
         }
-        webView.evaluateJavascript(REMOTE_FOREGROUND_RESUME_SCRIPT) { handled ->
+        webView.evaluateJavascript(remoteForegroundResumeScript(completion)) { handled ->
             if (handled == "true") return@evaluateJavascript
             val stale = remoteConnectionGeneration.get() != connectionGeneration ||
                 !remoteLifecycleActive || remoteSession !== session || isDestroyed
             if (!stale) showRemoteSurface()
         }
+    }
+
+    private fun remoteForegroundResumeScript(
+        completion: RemoteHttpResumeTracker.Completion?,
+    ): String {
+        val response = completion?.response
+        val deliverResponse = if (completion != null && response != null) {
+            "if(typeof receiver.onHttpResponse!=='function')return false;" +
+                "receiver.onHttpResponse(" +
+                "${JSONObject.quote(completion.requestId)},${JSONObject.quote(response.toString())});"
+        } else {
+            ""
+        }
+        return "(function(){var receiver=window.laymuxAndroidE2e;" +
+            "if(!receiver)return false;" + deliverResponse +
+            "if(typeof receiver.onNativeForeground!=='function')return false;" +
+            "return receiver.onNativeForeground()===true;})()"
     }
 
     private fun applyWebSurfaceLayers(surface: VisibleWebSurface) {
@@ -1248,10 +1268,22 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         val connectionGeneration = remoteConnectionGeneration.get()
         try {
             remoteExecutor.execute {
+                var resumeAttempt: RemoteHttpResumeTracker.Attempt? = null
+                var retainForResume = false
                 try {
                     if (!remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
                         return@execute
                     }
+                    val currentResumeAttempt = remoteHttpResumeTracker.begin(
+                        requestId,
+                        session,
+                        connectionGeneration,
+                    )
+                    if (currentResumeAttempt == null) {
+                        emitHttpError(requestId, "Secure Remote request is already resuming.")
+                        return@execute
+                    }
+                    resumeAttempt = currentResumeAttempt
                     val response = e2eRemoteClient.rpc(
                         session,
                         JSONObject()
@@ -1260,11 +1292,21 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             .put("path", path)
                             .put("body", body ?: JSONObject.NULL),
                     )
+                    val normalizedResponse = normalizeHttpResponse(response)
                     if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
-                        emitHttpResponse(requestId, normalizeHttpResponse(response))
+                        emitHttpResponse(requestId, normalizedResponse)
+                    } else if (remoteHttpRequestCanResume(currentResumeAttempt)) {
+                        retainForResume = remoteHttpResumeTracker.retain(
+                            currentResumeAttempt,
+                            normalizedResponse,
+                        )
                     }
                 } catch (_: E2eSessionSuspendedException) {
-                    // Foreground recovery settles the stale page Promise after resumePending().
+                    resumeAttempt?.let { attempt ->
+                        if (remoteHttpRequestCanResume(attempt)) {
+                            retainForResume = remoteHttpResumeTracker.retain(attempt)
+                        }
+                    }
                 } catch (error: Throwable) {
                     if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
                         emitHttpError(requestId, remoteErrorMessage(error))
@@ -1272,6 +1314,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     handleRemoteFailure(error, session)
                 } finally {
                     remoteHttpRequests.complete(ticket)
+                    if (!retainForResume) resumeAttempt?.let(remoteHttpResumeTracker::finish)
                 }
             }
         } catch (_: RejectedExecutionException) {
@@ -1282,7 +1325,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun cancelRemoteHttp(requestId: String) {
-        if (validBridgeId(requestId)) remoteHttpRequests.cancel(requestId)
+        if (validBridgeId(requestId)) {
+            remoteHttpRequests.cancel(requestId)
+            remoteHttpResumeTracker.cancel(requestId)
+        }
     }
 
     private fun remoteHttpRequestIsCurrent(
@@ -1292,6 +1338,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     ): Boolean = remoteHttpRequests.isCurrent(ticket) &&
         remoteLifecycleActive && remoteSession === session &&
         remoteConnectionGeneration.get() == connectionGeneration
+
+    private fun remoteHttpRequestCanResume(
+        attempt: RemoteHttpResumeTracker.Attempt,
+    ): Boolean = remoteSession === attempt.session &&
+        remoteConnectionGeneration.get() != attempt.generation
 
     private fun normalizeHttpResponse(response: JSONObject): JSONObject {
         if (response.optString("kind") == "http") return response
@@ -1544,7 +1595,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         try {
             remoteExecutor.execute {
                 val result = runCatching {
-                    e2eRemoteClient.resumePending(session)
+                    val resumedResponse = e2eRemoteClient.resumePending(session)
+                        ?.let(::normalizeHttpResponse)
+                    remoteHttpResumeTracker.captureResumedResponse(session, resumedResponse)
                     ensureRemoteResumeCurrent(session, connectionGeneration)
                 }
                 runOnUiThread {
@@ -1554,7 +1607,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     remoteConnecting = false
                     result.fold(
                         onSuccess = {
-                            resumeRemoteSurfaceAfterBackground(session, connectionGeneration)
+                            val completion = remoteHttpResumeTracker.take(session)
+                            resumeRemoteSurfaceAfterBackground(
+                                session,
+                                connectionGeneration,
+                                completion,
+                            )
                         },
                         onFailure = failure@{ error ->
                             val failureKind = (error as? E2eTransportException)?.failureKind
@@ -1597,6 +1655,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun closeRemoteSession() {
         remoteConnectionGeneration.incrementAndGet()
         remoteHttpRequests.clear()
+        remoteHttpResumeTracker.clear()
         clearRemoteOutputStreams()
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
@@ -1902,10 +1961,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val CLOUD_BRIDGE_NAME = "LaymuxCloud"
         private const val REMOTE_OUTPUT_BRIDGE_NAME = "LaymuxOutputTransport"
         private const val REMOTE_WRAPPER_ORIGIN = "https://remote.laymux.invalid"
-        private const val REMOTE_FOREGROUND_RESUME_SCRIPT =
-            "(function(){var receiver=window.laymuxAndroidE2e;" +
-                "if(!receiver||typeof receiver.onNativeForeground!=='function')return false;" +
-                "return receiver.onNativeForeground()===true;})()"
         private const val OUTPUT_BRIDGE_OPEN: Byte = 1
         private const val OUTPUT_BRIDGE_MESSAGE: Byte = 2
         private const val OUTPUT_BRIDGE_CLOSE: Byte = 3

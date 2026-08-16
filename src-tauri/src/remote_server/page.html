@@ -2761,9 +2761,9 @@
             const stashedResumeToken = consumeStashedResumeToken();
             if (!resumeToken && stashedResumeToken) resumeToken = stashedResumeToken;
 
-            // Native invalidates every in-flight request before suspending its
-            // encrypted session. A reload used to settle these Promises by
-            // destroying the document; an in-place resume must do so explicitly.
+            // Native delivers the exact resumed sequential RPC before invoking
+            // this callback. Requests still left here were queued or cancelled
+            // before native execution, so an in-place resume must settle them.
             const pendingRequests = Array.from(androidHttpRequests.entries());
             androidHttpRequests.clear();
             for (const [requestId, request] of pendingRequests) {

@@ -57,6 +57,7 @@ type AndroidLifecycleState = {
   cancelledRequests: number;
   claimRequests: number;
   heartbeatRequests: number;
+  heldRequestId: string | null;
   holdNextClaim: boolean;
   holdNextNavigation: boolean;
   navigationRequests: number;
@@ -98,6 +99,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         cancelledRequests: 0,
         claimRequests: 0,
         heartbeatRequests: 0,
+        heldRequestId: null,
         holdNextClaim: holdInitialClaim,
         holdNextNavigation: false,
         navigationRequests: 0,
@@ -169,6 +171,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
             state.claimRequests += 1;
             if (state.holdNextClaim) {
               state.holdNextClaim = false;
+              state.heldRequestId = requestId;
               return;
             }
             body = {
@@ -276,5 +279,40 @@ test("Android foreground retries an auto-connect interrupted before the first le
   await expect.poll(async () => (await state()).cancelledRequests).toBe(1);
   await expect.poll(async () => (await state()).claimRequests).toBe(2);
   await expect.poll(async () => (await state()).outputOpens).toBe(1);
+  expect((await state()).leases).toContain("lease-1");
+});
+
+test("Android foreground delivers a resumed claim before rejecting stale requests", async ({
+  page,
+}) => {
+  await installAndroidRemote(page, { holdInitialClaim: true });
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+
+  await expect.poll(async () => (await state()).claimRequests).toBe(1);
+  const handled = await page.evaluate(() => {
+    const target = window as AndroidLifecycleWindow;
+    const requestId = target.__androidLifecycleState.heldRequestId;
+    if (!requestId) throw new Error("claim request was not retained for native resume");
+    target.laymuxAndroidE2e?.onHttpResponse(
+      requestId,
+      JSON.stringify({
+        kind: "http",
+        status: 200,
+        body: {
+          active: true,
+          leaseId: "lease-1",
+          resumeToken: "resume-1",
+          heartbeatTimeoutSeconds: 45,
+        },
+      }),
+    );
+    return target.laymuxAndroidE2e?.onNativeForeground?.();
+  });
+
+  expect(handled).toBe(true);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+  expect((await state()).claimRequests).toBe(1);
+  expect((await state()).cancelledRequests).toBe(0);
   expect((await state()).leases).toContain("lease-1");
 });
