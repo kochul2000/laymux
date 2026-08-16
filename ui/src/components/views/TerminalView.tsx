@@ -1356,6 +1356,59 @@ export function TerminalView({
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);
 
+    // Rendererless startup is a supported xterm mode: parsing, buffer
+    // inspection and serialization do not require terminal.open(). Register
+    // these owners before PTY creation so a zero-sized desktop surface still
+    // preserves output and can serve Remote/Automation while its DOM renderer
+    // waits for usable dimensions (ADR-0161).
+    const serializeAddon = new SerializeAddon();
+    terminal.loadAddon(serializeAddon);
+    if (paneId) {
+      registerTerminalSerializer(paneId, () => serializeTerminalOutput(terminal, serializeAddon));
+    }
+    registerTerminalSerializer(instanceId, () => serializeTerminalOutput(terminal, serializeAddon));
+
+    const dumpBuffer = (limit: number) => {
+      const buf = terminal.buffer.active;
+      const total = buf.length;
+      const start = limit > 0 ? Math.max(0, total - limit) : 0;
+      const lines: TerminalBufferLine[] = [];
+      for (let i = start; i < total; i++) {
+        const line = buf.getLine(i);
+        if (!line) continue;
+        lines.push({
+          index: i,
+          text: line.translateToString(true),
+          isWrapped: line.isWrapped,
+        });
+      }
+      return {
+        cols: terminal.cols,
+        rows: terminal.rows,
+        length: total,
+        baseY: buf.baseY,
+        lines,
+      };
+    };
+    if (paneId) registerTerminalInspector(paneId, dumpBuffer);
+    registerTerminalInspector(instanceId, dumpBuffer);
+
+    const scrollViewport = (lines: number) => {
+      terminal.scrollLines(lines);
+      const buffer = terminal.buffer.active as { baseY?: number; viewportY?: number };
+      const baseY = buffer.baseY ?? 0;
+      const viewportY = buffer.viewportY ?? baseY;
+      return {
+        cols: terminal.cols,
+        rows: terminal.rows,
+        baseY,
+        viewportY,
+        isAtBottom: viewportY === baseY,
+      };
+    };
+    if (paneId) registerTerminalScroller(paneId, scrollViewport);
+    registerTerminalScroller(instanceId, scrollViewport);
+
     // Additional link provider for hard-wrapped indented URLs (e.g. Claude Code OAuth).
     // Always registered; checks smartLinkJoin dynamically so setting changes apply immediately.
     terminal.registerLinkProvider(
@@ -5455,10 +5508,128 @@ export function TerminalView({
     };
     outerContainer?.addEventListener("contextmenu", handleContextMenu);
 
+    // A PTY and its rendererless parsers are not visual resources. Start them
+    // as soon as the startup coordinator mounts this TerminalView, even when
+    // RDP/window layout currently leaves the xterm host at 0×N or N×0. The DOM
+    // renderer remains size-gated below; xterm's parser/buffer and the Remote
+    // checkpoint model both work before terminal.open() (ADR-0161).
+    const isFreshRestart = isUserRestart && firstSessionStartRef.current;
+    firstSessionStartRef.current = false;
+    const shouldRestoreCwd = profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
+    const shouldRestoreOutput =
+      profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
+
+    // Determine startup command override for Claude/Codex/Grok session restore.
+    // Validate session ID format to prevent command injection.
+    const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+    const shouldRestoreClaudeSession =
+      !isFreshRestart && settingsState.claude?.restoreSession !== false;
+    const safeSessionId =
+      lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
+        ? lastClaudeSession
+        : undefined;
+    const shouldRestoreCodexSession =
+      !isFreshRestart && settingsState.codex?.restoreSession !== false;
+    const safeCodexSessionId =
+      lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession) ? lastCodexSession : undefined;
+    const shouldRestoreGrokSession =
+      !isFreshRestart && settingsState.grok?.restoreSession !== false;
+    const GROK_SESSION_ID_PATTERN =
+      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    const safeGrokSessionId =
+      lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
+        ? lastGrokSession
+        : undefined;
+    const presentAgentSessionKeys = [lastClaudeSession, lastCodexSession, lastGrokSession].filter(
+      (value) => typeof value === "string" && value.length > 0,
+    ).length;
+    const hasAgentSessionConflict = presentAgentSessionKeys > 1;
+    // The launch command is configurable so a user can carry flags such as
+    // `--dangerously-skip-permissions` / `--yolo` into the restored session.
+    // Rust re-derives the same string from settings and rejects the rest.
+    const claudeCommand = resolveAgentCommand(
+      settingsState.claude?.command,
+      DEFAULT_CLAUDE_COMMAND,
+    );
+    const codexCommand = resolveAgentCommand(settingsState.codex?.command, DEFAULT_CODEX_COMMAND);
+    const grokCommand = resolveAgentCommand(settingsState.grok?.command, DEFAULT_GROK_COMMAND);
+    const startupOverride = startupCommandOverride
+      ? startupCommandOverride
+      : hasAgentSessionConflict
+        ? undefined
+        : shouldRestoreClaudeSession && safeSessionId
+          ? `${claudeCommand} --resume ${safeSessionId}`
+          : shouldRestoreCodexSession && safeCodexSessionId
+            ? `${codexCommand} resume ${safeCodexSessionId}`
+            : shouldRestoreGrokSession && safeGrokSessionId
+              ? `${grokCommand} --resume ${safeGrokSessionId}`
+              : undefined;
+
+    cacheRestorePromise =
+      !isFreshRestart && shouldRestoreOutput && paneId
+        ? loadTerminalOutputCache(paneId)
+            .then((cached) =>
+              cancelled || !cached || cached.length === 0 ? null : normalBufferOnly(cached),
+            )
+            .catch((err) => {
+              const msg = err instanceof Error ? err.message : String(err);
+              if (!msg.startsWith("Cache not found:")) {
+                console.warn(`[TerminalView] Unexpected error restoring cache for ${paneId}:`, err);
+              }
+              return null;
+            })
+        : Promise.resolve(null);
+
+    // Start PTY session immediately (don't wait for cache restore or a visual
+    // surface). Cache restore runs in parallel so the shell starts booting ASAP.
+    if (!cancelled) {
+      createTerminalSession(
+        instanceId,
+        profile,
+        terminal.cols,
+        terminal.rows,
+        syncGroup,
+        cwdSendRef.current,
+        cwdReceiveRef.current,
+        isFreshRestart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
+        viewerStartup ?? startupOverride,
+      )
+        .then((createdSession) => {
+          initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
+          stabilizeNativeWindowsOutput = shouldStabilizeInitialExecutionHost(initialExecutionHost);
+          terminalSessionReady = true;
+          if (cancelled) return;
+          useTerminalStore.getState().updateInstanceInfo(instanceId, {
+            sessionReady: true,
+            // The backend seeds the session CWD from the PTY's actual start
+            // directory, and that seed produces no `terminal-cwd-changed`
+            // event. A resumed agent pane may never emit an accepted OSC 7,
+            // so this reply is the only CWD its sync group will observe.
+            ...(createdSession.cwd ? { cwd: createdSession.cwd } : {}),
+          });
+          settleStartupIfReady();
+          outputListenerReady
+            .then(() => startOutputAttach())
+            .catch((error) => {
+              console.warn("[TerminalView] terminal output listener failed:", error);
+              setOutputReady(false);
+            });
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
+          trackedTerminalWrite(`\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`);
+          settleFailedStartup();
+        })
+        .finally(() => {
+          if (isFreshRestart) onUserRestartConsumed?.();
+        });
+    }
+
     // Wait for container to have actual dimensions before opening terminal.
     // xterm.js viewport gets height 0 if opened in a zero-sized container,
     // causing rendering artifacts (garbled first row).
-    let sessionCreated = false;
+    let terminalOpened = false;
     // Tracks whether the previous ResizeObserver entry reported a zero-size
     // container. WorkspaceArea / PaneGrid hide inactive workspaces and panes
     // via `display: none`, which collapses the box and fires a 0×0 resize.
@@ -5500,8 +5671,8 @@ export function TerminalView({
         deferredResizeRequestedAt = 0;
         clearDeferredResizeQuietTimer();
       }
-      if (width > 0 && height > 0 && !sessionCreated) {
-        sessionCreated = true;
+      if (width > 0 && height > 0 && !terminalOpened) {
+        terminalOpened = true;
         prevW = Math.round(width);
         prevH = Math.round(height);
         // Open terminal now that container has real dimensions
@@ -5525,68 +5696,6 @@ export function TerminalView({
             }
           }, delay);
         }
-        // Load SerializeAddon for session persistence
-        const serializeAddon = new SerializeAddon();
-        terminal.loadAddon(serializeAddon);
-
-        // Register serializer for shutdown save
-        if (paneId) {
-          registerTerminalSerializer(paneId, () =>
-            serializeTerminalOutput(terminal, serializeAddon),
-          );
-        }
-        registerTerminalSerializer(instanceId, () =>
-          serializeTerminalOutput(terminal, serializeAddon),
-        );
-
-        // Register buffer inspector for automated reflow verification (issue #285).
-        // Exposes xterm's reflowed line model (text + isWrapped) so the
-        // Automation API can confirm width-change reflow without screenshots.
-        const dumpBuffer = (limit: number) => {
-          const buf = terminal.buffer.active;
-          const total = buf.length;
-          const start = limit > 0 ? Math.max(0, total - limit) : 0;
-          const lines: TerminalBufferLine[] = [];
-          for (let i = start; i < total; i++) {
-            const line = buf.getLine(i);
-            if (!line) continue;
-            lines.push({
-              index: i,
-              text: line.translateToString(true),
-              isWrapped: line.isWrapped,
-            });
-          }
-          return {
-            cols: terminal.cols,
-            rows: terminal.rows,
-            length: total,
-            baseY: buf.baseY,
-            lines,
-          };
-        };
-        if (paneId) {
-          registerTerminalInspector(paneId, dumpBuffer);
-        }
-        registerTerminalInspector(instanceId, dumpBuffer);
-
-        const scrollViewport = (lines: number) => {
-          terminal.scrollLines(lines);
-          const buffer = terminal.buffer.active as { baseY?: number; viewportY?: number };
-          const baseY = buffer.baseY ?? 0;
-          const viewportY = buffer.viewportY ?? baseY;
-          return {
-            cols: terminal.cols,
-            rows: terminal.rows,
-            baseY,
-            viewportY,
-            isAtBottom: viewportY === baseY,
-          };
-        };
-        if (paneId) {
-          registerTerminalScroller(paneId, scrollViewport);
-        }
-        registerTerminalScroller(instanceId, scrollViewport);
-
         // Rebuild hook for a foreign atlas clear (issue #571). Registered under
         // the instance id only — a second registration under paneId would
         // rebuild this terminal twice per clear.
@@ -5602,140 +5711,7 @@ export function TerminalView({
         if (isFocusedRef.current) {
           terminal.focus();
         }
-
-        // Resolve profile restore settings and create session (async)
-        const profileConfig = settingsState.profiles.find((p) => p.name === profile);
-        const isFreshRestart = isUserRestart && firstSessionStartRef.current;
-        firstSessionStartRef.current = false;
-        const shouldRestoreCwd =
-          profileConfig?.restoreCwd ?? settingsState.profileDefaults.restoreCwd;
-        const shouldRestoreOutput =
-          profileConfig?.restoreOutput ?? settingsState.profileDefaults.restoreOutput;
-
-        // Determine startup command override for Claude/Codex session restore.
-        // Validate session ID format to prevent command injection.
-        const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
-        const shouldRestoreClaudeSession =
-          !isFreshRestart && settingsState.claude?.restoreSession !== false;
-        const safeSessionId =
-          lastClaudeSession && SESSION_ID_PATTERN.test(lastClaudeSession)
-            ? lastClaudeSession
-            : undefined;
-        const shouldRestoreCodexSession =
-          !isFreshRestart && settingsState.codex?.restoreSession !== false;
-        const safeCodexSessionId =
-          lastCodexSession && SESSION_ID_PATTERN.test(lastCodexSession)
-            ? lastCodexSession
-            : undefined;
-        const shouldRestoreGrokSession =
-          !isFreshRestart && settingsState.grok?.restoreSession !== false;
-        const GROK_SESSION_ID_PATTERN =
-          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-        const safeGrokSessionId =
-          lastGrokSession && GROK_SESSION_ID_PATTERN.test(lastGrokSession)
-            ? lastGrokSession
-            : undefined;
-        const presentAgentSessionKeys = [
-          lastClaudeSession,
-          lastCodexSession,
-          lastGrokSession,
-        ].filter((value) => typeof value === "string" && value.length > 0).length;
-        const hasAgentSessionConflict = presentAgentSessionKeys > 1;
-        // The launch command is configurable so a user can carry flags such as
-        // `--dangerously-skip-permissions` / `--yolo` into the restored session.
-        // Rust re-derives the same string from settings and rejects the rest.
-        const claudeCommand = resolveAgentCommand(
-          settingsState.claude?.command,
-          DEFAULT_CLAUDE_COMMAND,
-        );
-        const codexCommand = resolveAgentCommand(
-          settingsState.codex?.command,
-          DEFAULT_CODEX_COMMAND,
-        );
-        const grokCommand = resolveAgentCommand(
-          settingsState.grok?.command,
-          DEFAULT_GROK_COMMAND,
-        );
-        const startupOverride = startupCommandOverride
-          ? startupCommandOverride
-          : hasAgentSessionConflict
-            ? undefined
-            : shouldRestoreClaudeSession && safeSessionId
-              ? `${claudeCommand} --resume ${safeSessionId}`
-              : shouldRestoreCodexSession && safeCodexSessionId
-                ? `${codexCommand} resume ${safeCodexSessionId}`
-                : shouldRestoreGrokSession && safeGrokSessionId
-                  ? `${grokCommand} --resume ${safeGrokSessionId}`
-                  : undefined;
-
-        cacheRestorePromise =
-          !isFreshRestart && shouldRestoreOutput && paneId
-            ? loadTerminalOutputCache(paneId)
-                .then((cached) =>
-                  cancelled || !cached || cached.length === 0 ? null : normalBufferOnly(cached),
-                )
-                .catch((err) => {
-                  const msg = err instanceof Error ? err.message : String(err);
-                  if (!msg.startsWith("Cache not found:")) {
-                    console.warn(
-                      `[TerminalView] Unexpected error restoring cache for ${paneId}:`,
-                      err,
-                    );
-                  }
-                  return null;
-                })
-            : Promise.resolve(null);
-
-        // Start PTY session immediately (don't wait for cache restore).
-        // Cache restore runs in parallel so the shell starts booting ASAP.
-        if (!cancelled) {
-          createTerminalSession(
-            instanceId,
-            profile,
-            terminal.cols,
-            terminal.rows,
-            syncGroup,
-            cwdSendRef.current,
-            cwdReceiveRef.current,
-            isFreshRestart ? restartCwd : shouldRestoreCwd ? lastCwd : undefined,
-            viewerStartup ?? startupOverride,
-          )
-            .then((createdSession) => {
-              initialExecutionHost = createdSession.initialExecutionHost ?? "unknown";
-              stabilizeNativeWindowsOutput =
-                shouldStabilizeInitialExecutionHost(initialExecutionHost);
-              terminalSessionReady = true;
-              if (cancelled) return;
-              useTerminalStore.getState().updateInstanceInfo(instanceId, {
-                sessionReady: true,
-                // The backend seeds the session CWD from the PTY's actual start
-                // directory, and that seed produces no `terminal-cwd-changed`
-                // event. A pane restored into `claude --resume` / `codex resume`
-                // never emits an accepted OSC 7, so this reply is the only CWD
-                // its sync group — and any GitHubView following it — will see.
-                ...(createdSession.cwd ? { cwd: createdSession.cwd } : {}),
-              });
-              settleStartupIfReady();
-              outputListenerReady
-                .then(() => startOutputAttach())
-                .catch((error) => {
-                  console.warn("[TerminalView] terminal output listener failed:", error);
-                  setOutputReady(false);
-                });
-            })
-            .catch((err) => {
-              if (cancelled) return;
-              console.error(`[TerminalView] Failed to create session ${instanceId}:`, err);
-              trackedTerminalWrite(
-                `\r\n\x1b[31mFailed to create terminal session: ${err}\x1b[0m\r\n`,
-              );
-              settleFailedStartup();
-            })
-            .finally(() => {
-              if (isFreshRestart) onUserRestartConsumed?.();
-            });
-        }
-      } else if (sessionCreated && width > 0 && height > 0) {
+      } else if (terminalOpened && width > 0 && height > 0) {
         const recoveringFromHidden = prevWasHidden;
         const consumeDirty = reflowDirtyRef.current;
         const w = Math.round(width);

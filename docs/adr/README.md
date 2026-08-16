@@ -178,6 +178,7 @@ ADR 이 필요한 대표 기준:
 | [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted |
 | [0159](0159-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
 | [0160](0160-android-e2e-tailscale-direct-transport.md) | Android E2E는 Tailscale Direct를 우선 전송 경로로 사용한다 (0139·0146·0149·0159 확장) | Proposed |
+| [0161](0161-rendererless-terminal-session-startup.md) | terminal host가 0폭이어도 PTY·rendererless output surface를 시작하고 DOM renderer만 양의 크기를 기다린다 (0043·0127·0138 확장) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

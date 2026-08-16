@@ -126,11 +126,12 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 
 #### Terminal startup coordinator (흰 화면 방지)
 
-여러 `TerminalView`가 한꺼번에 마운트되면 `terminal.open()`·PTY 생성·canvas 초기화가 겹쳐 메인 스레드와 GPU에 순간 부하를 만들고, pane 콘텐츠가 자기 배경을 칠하기 전에 빈 영역이 노출될 수 있다. `AppLayout`에서 한 번 구동하는 전역 시작 조정기가 활성 워크스페이스, 보이는 dock, terminal-backed FileViewer overlay를 함께 직렬화한다([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)).
+여러 `TerminalView`가 한꺼번에 마운트되면 `terminal.open()`·PTY 생성·canvas 초기화가 겹쳐 메인 스레드와 GPU에 순간 부하를 만들고, pane 콘텐츠가 자기 배경을 칠하기 전에 빈 영역이 노출될 수 있다. `AppLayout`에서 한 번 구동하는 전역 시작 조정기가 활성 워크스페이스, 보이는 dock, terminal-backed FileViewer overlay를 함께 직렬화한다([ADR-0043](../adr/0043-global-terminal-ready-startup-slot.md)). 다만 시작 슬롯을 받은 view의 PTY·output attach·rendererless xterm buffer/checkpoint는 host 크기와 무관하게 즉시 시작하고, DOM renderer만 양의 폭과 높이를 기다린다([ADR-0161](../adr/0161-rendererless-terminal-session-startup.md)).
 
 - **흰색 backstop**: `PaneGrid` 의 위치 지정 pane `<div>` 는 항상 `background: var(--bg-base)` 를 가진다. 콘텐츠 마운트 전에도 어두운 배경 → 흰 번쩍임 없음.
 - **전역 단일 슬롯**: `useTerminalStartupCoordinator`가 workspace·dock의 terminal pane과 terminal-backed FileViewer를 `terminal-startup-store` 한 곳에서 조정한다. 시작 슬롯을 받은 terminal 하나만 `ViewRenderer`/`TerminalView`를 마운트하고 나머지는 `PaneLoadingPlaceholder`를 렌더한다. non-terminal view는 즉시 마운트한다.
 - **준비 완료 경계**: 슬롯은 backend `createTerminalSession` 성공과 xterm 첫 `onRender`가 모두 관측된 뒤 다음 terminal로 넘어간다. 생성 실패는 즉시 다음 슬롯을 열고, 어느 한 신호가 오지 않는 결함에는 10초 watchdog이 liveness를 보장한다. 준비 전 slot owner가 workspace 전환·dock 숨김 등으로 현재 후보 eligibility를 잃으면 같은 상태 전이에서 즉시 다음 eligible terminal로 slot을 넘긴다. 이전 terminal은 reveal 집합에 남고 늦은 settle은 현재 slot을 바꾸지 않는다([ADR-0127](../adr/0127-terminal-startup-slot-follows-eligibility.md)).
+- **0축 시작**: RDP 최소 폭이나 초기 flex 계산으로 host가 `0×N`/`N×0`이어도 PTY는 기본 `80×24` grid로 생성되고 output attach·cache replay·serializer/inspector가 rendererless xterm에 연결된다. `terminal.open()`·fit·WebGL·focus만 최초 양의 크기까지 보류한다. 크기가 계속 0이면 첫 `onRender`가 없으므로 기존 10초 watchdog이 다음 슬롯을 연다.
 - **대상과 우선순위**: 활성 workspace, visible dock, 현재 열린 terminal-backed FileViewer가 새 시작 후보가 된다. Automation 요청 → 전경 FileViewer terminal → 현재 focused pane terminal → 활성 workspace 배열 순서 → visible dock 순서로 대기열을 계산한다. 비활성 workspace와 숨은 dock은 보류하지만 이미 시작한 PTY는 기존 lazy-mount/persist 정책에 따라 유지한다. `prefers-reduced-motion`은 spinner 애니메이션만 멈추며 리소스 안전 경계인 직렬화는 우회하지 않는다.
 - **Automation 대기**: 아직 마운트되지 않은 deterministic terminal id도 layout에서 찾아 요청 우선순위를 올린다. 비활성 workspace 대상이면 세션 생성 동안 활성화한 뒤 원래 workspace로 복원하며, focus/write 응답은 PTY 등록을 최대 20초 기다린다. 요청은 진행 중 슬롯을 선점하거나 동시 시작시키지 않는다.
 - **WebGL 예약 타임라인**: 기존 전역 150ms WebGL 예약 간격은 별도 2차 안전장치로 유지한다. 시작 슬롯은 PTY+xterm 준비를, WebGL 타임라인은 GPU context 생성 간격을 각각 책임진다.

@@ -629,6 +629,13 @@ async function waitForLocalTerminalControl(): Promise<void> {
   });
 }
 
+async function waitForTerminalRendererOpen(): Promise<void> {
+  await vi.waitFor(() => {
+    expect(mockCreateTerminalSession).toHaveBeenCalled();
+    expect(createdTerminals.at(-1)?.wasOpened).toBe(true);
+  });
+}
+
 // File level, not per-`describe`: `streamAttachResetSeen` is module-global, so a
 // `describe` without this arming inherits an already-open gate from whichever
 // test ran last and the ordering rule silently stops applying there. Every
@@ -977,9 +984,7 @@ describe("TerminalView", () => {
     // sequences.
     render(<TerminalView instanceId="t-settings-refresh" profile="PowerShell" syncGroup="" />);
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     mockFit.mockClear();
     mockRefresh.mockClear();
@@ -1466,9 +1471,7 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 9;
@@ -1546,9 +1549,7 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 4;
@@ -1613,9 +1614,7 @@ describe("TerminalView", () => {
     terminal.element.appendChild(helper);
     container.getBoundingClientRect = rect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     terminal.buffer.active.cursorX = 4;
     terminal.buffer.active.cursorY = 2;
@@ -1685,9 +1684,7 @@ describe("TerminalView", () => {
     terminal.element.appendChild(helper);
     container.getBoundingClientRect = rect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     // The shadow cursor is left at its initial 0,0 — the stale state the trace
     // showed. The buffer cursor is where the user actually is.
@@ -1992,9 +1989,7 @@ describe("TerminalView", () => {
     terminal.element.appendChild(helper);
     container.getBoundingClientRect = rect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     act(() => {
       useTerminalStore.getState().updateInstanceInfo("t-ime-alt-switch", {
@@ -2176,9 +2171,7 @@ describe("TerminalView", () => {
         toJSON: () => ({}),
       }) as DOMRect;
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     terminal.buffer.active.baseY = 0;
     terminal.buffer.active.cursorX = 2;
@@ -3206,6 +3199,83 @@ describe("TerminalView", () => {
     act(() => renderHandler?.());
 
     expect(useTerminalStartupStore.getState().activePaneId).toBe("pane-second");
+  });
+
+  it("starts the PTY and rendererless output attach when the first measured size is zero", async () => {
+    type Observer = {
+      target: Element | null;
+      callback: ResizeObserverCallback;
+    };
+    const observers: Observer[] = [];
+    const originalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private readonly observer: Observer;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.observer = { target: null, callback };
+        observers.push(this.observer);
+      }
+
+      observe(target: Element) {
+        this.observer.target = target;
+      }
+
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+
+    const resize = (observer: Observer, width: number, height: number) => {
+      observer.callback(
+        [
+          {
+            target: observer.target as Element,
+            contentRect: { width, height },
+          } as unknown as ResizeObserverEntry,
+        ],
+        {} as ResizeObserver,
+      );
+    };
+
+    try {
+      render(
+        <TerminalView
+          instanceId="terminal-pane-zero-size"
+          paneId="pane-zero-size"
+          profile="PowerShell"
+          syncGroup=""
+        />,
+      );
+      expect(observers).toHaveLength(1);
+      const observer = observers[0];
+      const terminal = createdTerminals[0] as unknown as {
+        open: ReturnType<typeof vi.fn>;
+      };
+
+      act(() => resize(observer, 0, 600));
+
+      await vi.waitFor(() => {
+        expect(mockCreateTerminalSession).toHaveBeenCalledWith(
+          "terminal-pane-zero-size",
+          "PowerShell",
+          80,
+          24,
+          "",
+          true,
+          true,
+          undefined,
+          undefined,
+        );
+        expect(mockAttachTerminalOutput).toHaveBeenCalledWith("terminal-pane-zero-size");
+      });
+      expect(terminal.open).not.toHaveBeenCalled();
+
+      act(() => resize(observer, 800, 600));
+
+      expect(terminal.open).toHaveBeenCalledTimes(1);
+      expect(mockCreateTerminalSession).toHaveBeenCalledTimes(1);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it("releases the global startup slot when PTY creation fails", async () => {
@@ -4888,9 +4958,7 @@ describe("TerminalView", () => {
     );
 
     // Wait for ResizeObserver to fire (setTimeout(0)) and terminal.open()
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     mockFocus.mockClear();
 
@@ -4933,9 +5001,7 @@ describe("TerminalView", () => {
       <TerminalView instanceId="t-blur" profile="PowerShell" syncGroup="" isFocused={true} />,
     );
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     mockBlur.mockClear();
 
@@ -4965,9 +5031,7 @@ describe("TerminalView", () => {
     terminal.element.appendChild(helper);
     host.appendChild(terminal.element);
 
-    await vi.waitFor(() => {
-      expect(mockCreateTerminalSession).toHaveBeenCalled();
-    });
+    await waitForTerminalRendererOpen();
 
     helper.focus();
     expect(document.activeElement).toBe(helper);
@@ -6716,6 +6780,7 @@ describe("TerminalView", () => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
         expect(observers[0]?.target).toBeTruthy();
       });
+      await waitForTerminalRendererOpen();
       const obs = observers[0];
 
       // The workspace goes away: PaneGrid collapses the box to 0×0.
@@ -6835,6 +6900,7 @@ describe("TerminalView", () => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
+    await waitForTerminalRendererOpen();
 
     mockFit.mockClear();
     mockClearTextureAtlas.mockClear();
@@ -6950,6 +7016,7 @@ describe("TerminalView", () => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
+    await waitForTerminalRendererOpen();
     mockResizeTerminal.mockRejectedValueOnce(new Error("resize rejected"));
     mockResizeTerminal.mockResolvedValue(undefined);
     mockResizeTerminal.mockClear();
@@ -6990,6 +7057,7 @@ describe("TerminalView", () => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
+    await waitForTerminalRendererOpen();
     mockResizeTerminal.mockClear();
 
     act(() => {
@@ -7031,6 +7099,7 @@ describe("TerminalView", () => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
       expect(capturedRemoteControlChanged).toBeTruthy();
     });
+    await waitForTerminalRendererOpen();
     mockResizeTerminal.mockImplementationOnce(() => new Promise<void>(() => {}));
     mockResizeTerminal.mockResolvedValue(undefined);
     mockResizeTerminal.mockClear();
@@ -7529,6 +7598,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
 
       mockClearTextureAtlas.mockClear();
       mockRefresh.mockClear();
@@ -7780,6 +7850,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
 
       const obs = observers[0];
       const target = obs.target as Element;
@@ -8417,6 +8488,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
 
       const obs = observers[0];
       const target = obs.target as Element;
@@ -8501,6 +8573,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
       const obs = observers[0];
       const target = obs.target as Element;
 
@@ -8601,6 +8674,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
       const obs = observers[0];
       const target = obs.target as Element;
 
@@ -8670,6 +8744,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
       const obs = observers[0];
       const target = obs.target as Element;
 
@@ -8746,6 +8821,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
       const onOutput = mockOnTerminalOutput.mock.calls.at(-1)?.[1] as
         | ((data: Uint8Array) => void)
         | undefined;
@@ -8845,6 +8921,7 @@ describe("TerminalView", () => {
       await vi.waitFor(() => {
         expect(mockCreateTerminalSession).toHaveBeenCalled();
       });
+      await waitForTerminalRendererOpen();
 
       const obs = observers[0];
       expect(obs).toBeDefined();
