@@ -15,6 +15,7 @@ data class RemoteResourceResponse(
         internal const val MAX_ENCODED_BODY_LENGTH = (MAX_BODY_BYTES * 4 + 2) / 3
         private val FORWARDED_HEADERS = setOf(
             "cache-control",
+            "content-encoding",
             "content-security-policy",
             "content-type",
             "referrer-policy",
@@ -57,9 +58,46 @@ data class RemoteResourceResponse(
             }
             val expectedBytes = encoded.length * 6 / 8
             require(expectedBytes <= MAX_BODY_BYTES) { "resource body가 너무 큽니다" }
-            val body = Base64Url.decodeExact(encoded, expectedBytes)
+            val rawBody = Base64Url.decodeExact(encoded, expectedBytes)
                 ?: throw IllegalArgumentException("resource body가 올바르지 않습니다")
-            return RemoteResourceResponse(status, mimeType, encoding, headers, body)
+            // The desktop compresses static resources before AEAD (ADR-0169);
+            // the WebView never decodes intercepted responses itself, so the
+            // body is inflated here and the header dropped. Unknown codings
+            // fail closed.
+            val body = when (headers["content-encoding"]?.trim()?.lowercase()) {
+                null, "", "identity" -> rawBody
+                "gzip" -> gunzipBounded(rawBody)
+                else -> throw IllegalArgumentException("resource encoding이 지원되지 않습니다")
+            }
+            return RemoteResourceResponse(
+                status,
+                mimeType,
+                encoding,
+                headers - "content-encoding",
+                body,
+            )
+        }
+
+        private fun gunzipBounded(compressed: ByteArray): ByteArray {
+            val output = java.io.ByteArrayOutputStream()
+            try {
+                java.util.zip.GZIPInputStream(compressed.inputStream()).use { input ->
+                    val buffer = ByteArray(8 * 1024)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        // Bounded before writing: a decompression bomb must not
+                        // allocate past the plain-body limit.
+                        if (output.size() + read > MAX_BODY_BYTES) {
+                            throw IllegalArgumentException("resource body가 너무 큽니다")
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                }
+            } catch (error: java.io.IOException) {
+                throw IllegalArgumentException("resource body 압축 해제에 실패했습니다", error)
+            }
+            return output.toByteArray()
         }
 
         fun error(status: Int, message: String): RemoteResourceResponse =

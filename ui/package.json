@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "build:remote-provider": "vite build --config vite.remote-provider.config.ts",
+    "build:remote-page": "vite build --config vite.remote-page.config.ts && node scripts/stamp-remote-page.mjs",
     "build:pwa-icons": "node scripts/build-pwa-icons.mjs"
   },
   "dependencies": {
