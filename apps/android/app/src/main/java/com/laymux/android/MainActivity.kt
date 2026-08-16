@@ -66,6 +66,8 @@ import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteResourceResponse
+import com.laymux.android.web.RemoteSurfaceResumeAction
+import com.laymux.android.web.RemoteSurfaceResumePolicy
 import com.laymux.android.web.VisibleWebSurface
 import com.laymux.android.web.WebSurfaceLayerPolicy
 import com.laymux.android.web.stringWebMessagePayload
@@ -376,6 +378,27 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         installLocalBridge(LocalWebSurface.REMOTE)
         applyWebSurfaceLayers(VisibleWebSurface.REMOTE)
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
+    }
+
+    private fun resumeRemoteSurfaceAfterBackground(
+        session: RemoteSession,
+        connectionGeneration: Long,
+    ) {
+        if (!::webView.isInitialized || isDestroyed) return
+        val action = RemoteSurfaceResumePolicy.action(
+            remoteSurfaceInstalled = localWebSurface == LocalWebSurface.REMOTE,
+            currentUrl = webView.url,
+        )
+        if (action == RemoteSurfaceResumeAction.RELOAD_DOCUMENT) {
+            showRemoteSurface()
+            return
+        }
+        webView.evaluateJavascript(REMOTE_FOREGROUND_RESUME_SCRIPT) { handled ->
+            if (handled == "true") return@evaluateJavascript
+            val stale = remoteConnectionGeneration.get() != connectionGeneration ||
+                !remoteLifecycleActive || remoteSession !== session || isDestroyed
+            if (!stale) showRemoteSurface()
+        }
     }
 
     private fun applyWebSurfaceLayers(surface: VisibleWebSurface) {
@@ -1241,7 +1264,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         emitHttpResponse(requestId, normalizeHttpResponse(response))
                     }
                 } catch (_: E2eSessionSuspendedException) {
-                    // Foreground resume reloads the authenticated PC-owned page.
+                    // Foreground recovery settles the stale page Promise after resumePending().
                 } catch (error: Throwable) {
                     if (remoteHttpRequestIsCurrent(ticket, session, connectionGeneration)) {
                         emitHttpError(requestId, remoteErrorMessage(error))
@@ -1531,7 +1554,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     remoteConnecting = false
                     result.fold(
                         onSuccess = {
-                            showRemoteSurface()
+                            resumeRemoteSurfaceAfterBackground(session, connectionGeneration)
                         },
                         onFailure = failure@{ error ->
                             val failureKind = (error as? E2eTransportException)?.failureKind
@@ -1879,6 +1902,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val CLOUD_BRIDGE_NAME = "LaymuxCloud"
         private const val REMOTE_OUTPUT_BRIDGE_NAME = "LaymuxOutputTransport"
         private const val REMOTE_WRAPPER_ORIGIN = "https://remote.laymux.invalid"
+        private const val REMOTE_FOREGROUND_RESUME_SCRIPT =
+            "(function(){var receiver=window.laymuxAndroidE2e;" +
+                "if(!receiver||typeof receiver.onNativeForeground!=='function')return false;" +
+                "return receiver.onNativeForeground()===true;})()"
         private const val OUTPUT_BRIDGE_OPEN: Byte = 1
         private const val OUTPUT_BRIDGE_MESSAGE: Byte = 2
         private const val OUTPUT_BRIDGE_CLOSE: Byte = 3

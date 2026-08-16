@@ -485,6 +485,11 @@ mod tests {
             "typeof window.LaymuxNative.cancelRemoteHttp === \"function\" &&"
         ));
         assert!(html.contains("window.LaymuxOutputTransport.postMessage"));
+        assert!(html.contains("onNativeForeground()"));
+        assert!(html.contains("Secure Remote transport resumed after background."));
+        assert!(
+            html.contains("for (const outputSocket of Array.from(androidOutputSockets.values()))")
+        );
         assert!(html.contains("outputSocket.acknowledge()"));
         assert!(!html.contains("window.LaymuxNative.openRemoteOutput"));
         assert!(!html.contains("terminalOutputPoll"));

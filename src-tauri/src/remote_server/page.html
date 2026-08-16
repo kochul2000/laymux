@@ -2747,6 +2747,48 @@
             request.cleanup();
             request.reject(new Error(message || "Secure Remote request failed."));
           },
+          onNativeForeground() {
+            if (!androidE2eMode) return false;
+
+            // The Android entry URL expresses standing auto-connect intent even
+            // if backgrounding interrupted the very first claim before it could
+            // persist that intent on success.
+            if (autoConnectMode) armAutoConnect();
+
+            // pagehide may have copied the capability to sessionStorage even
+            // though Android retained this same document. Empty that temporary
+            // handoff slot again before a duplicated tab can inherit it.
+            const stashedResumeToken = consumeStashedResumeToken();
+            if (!resumeToken && stashedResumeToken) resumeToken = stashedResumeToken;
+
+            // Native invalidates every in-flight request before suspending its
+            // encrypted session. A reload used to settle these Promises by
+            // destroying the document; an in-place resume must do so explicitly.
+            const pendingRequests = Array.from(androidHttpRequests.entries());
+            androidHttpRequests.clear();
+            for (const [requestId, request] of pendingRequests) {
+              cancelAndroidRemoteHttp(requestId);
+              request.cleanup();
+              request.reject(new Error("Secure Remote transport resumed after background."));
+            }
+
+            // Native output sockets were closed onStop and no longer have a
+            // callback entry. Finish their JS peers so the existing snapshot
+            // reattach path replaces them without resetting the current surface
+            // until the new checkpoint arrives.
+            for (const outputSocket of Array.from(androidOutputSockets.values())) {
+              outputSocket.finish();
+            }
+
+            // Promise rejection handlers above run before this task. That clears
+            // heartbeatInFlight (or a stale claim) before we probe the retained
+            // lease and lets a lost lease enter the normal visible-only reclaim.
+            setTimeout(() => {
+              if (leaseId) heartbeat().catch((err) => handleHeartbeatError(err));
+              else maybeAutoConnect();
+            }, 0);
+            return true;
+          },
         });
 
         async function remoteFetch(path, options = {}) {
