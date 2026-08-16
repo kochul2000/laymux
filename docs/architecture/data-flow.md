@@ -248,6 +248,8 @@ ResizeObserver의 hidden→visible 분기에서는 `FitAddon.proposeDimensions()
 
 이 메커니즘은 §8.4의 "0×0 hidden 상태에서 실제 크기로 복귀할 때만 atlas 재생성" 원칙을 위반하지 않는다. 오히려 hidden 동안 발생한 폰트/DPR/scrollbar 변경을 그 단일 transition에 합류시켜 reflow 호출을 추가하지 않는다.
 
+최초 마운트의 0축 크기는 renderer 시작만 막고 terminal session 시작은 막지 않는다([ADR-0161](../adr/0161-rendererless-terminal-session-startup.md)). `TerminalView`는 xterm의 기본 `80×24` grid로 PTY를 만들고 output listener·cache/snapshot replay·rendererless checkpoint를 연결한다. xterm parser와 buffer는 `terminal.open()` 전에도 byte를 처리하므로 그 사이 출력과 Remote checkpoint가 보존된다. `ResizeObserver`가 최초 양의 폭과 높이를 보고하면 같은 xterm instance에 DOM renderer를 정확히 한 번 열고 fit/WebGL/focus를 수행한다. 0축 entry 자체로는 `fit()`이나 PTY resize를 보내지 않는다.
+
 **워크스페이스 전환은 remount 가 아니다.** `WorkspaceArea` 는 한 번 활성화된 워크스페이스를 계속 마운트해 둔 채 `display:none` 으로만 감추고(`PaneGrid` 도 pane 박스에 같은 처리), `TerminalView` 의 xterm/PTY 수명은 `[instanceId, profile, …]` 에 달려 있으며 `resizePane` 은 pane id 를 보존한다. 따라서 전환도 pane resize 도 `TerminalView` 를 unmount 하지 않고, `TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES` snapshot replay 는 두 경로 어디에도 없다 — 남는 것은 위 hide→show 복귀의 atlas 재생성과 공통 스케줄러를 통과하는 fit 하나다. 실제로 remount 하는 경로는 profile 변경, hidden pane 회수(#269), `movePaneToWorkspace` 뿐이다. 폭주 중 레이아웃 변경이 프론트를 수십 초 무응답으로 만드는 비용은 이 replay 가 아니라 §8.8 의 출력 백로그이며, `attaches`/`attachReplayBytes` 카운터가 이 판정을 실기에서도 반증 가능하게 한다([ADR-0080](../adr/0080-output-backlog-coalescing-and-out-of-band-frontend-vitals.md)).
 
 Windows output quiet window 는 **delta 도착 시각**으로 잰다. "최근에 PTY 출력이 도착하지 않았다"는 뜻이므로 write 시점이 아니라 `applyOutputSegments` 진입에서 기록한다 — write 시점에 기록하면 stabilizer나 §8.8의 physical write FIFO에 붙들린 byte가 침묵으로 읽힌다. grid를 바꾸는 fit은 quiet window뿐 아니라 attach parser·exact repair·native stabilizer transaction과 open lexical sequence·in-flight/queued xterm write가 모두 끝날 때까지 기다린다. standalone split ESC/CSI prefix는 완결 byte가 오거나 lifecycle reset이 일어날 때까지 보류하고, xterm에 fail-open된 partial sequence도 실제 final/terminator가 올 때까지 fit barrier로 남긴다. 유한 timeout으로 한 제어 시퀀스를 old grid와 new grid 사이에 쪼개지 않는다. 이전 grid용 byte가 FIFO에 남은 채 새 grid로 넘어가는 것보다 fit 지연을 우선하므로 불완전한 시퀀스나 sustained flood에서는 fit이 오래 굶을 수 있다. exact physical boundary의 선택 설계는 [ADR-0085](../adr/0085-provenance-barrier-three-phase-geometry-cutover.md)에 있다. `pty_geometry`의 platform-independent core는 provenance capability, 고정 participant quorum, prepare/apply/adoption phase, token/status/idempotence와 lexical-neutral gate를 실행한다. 이 gate는 bundled xterm의 streaming `Utf8ToUtf32` 규칙(불완전 scalar 보류, invalid sequence 폐기·재동기화)을 먼저 적용한 codepoint만 VT transition에 넘긴다. 따라서 `ESC ] 0 ; 한`의 마지막 raw continuation `9C`는 ST가 아니고 BEL/encoded U+009C/7-bit ST만 OSC를 닫으며, decoded non-ASCII의 CSI·DCS·SOS/PM/APC 전이는 xterm VT500 table과 같은 상태를 따른다. 현재 pinned `portable-pty` fork는 Windows 전용 Read thread+`CancelSynchronousIo` handshake와 Linux PTY fd+wake pipe `poll`로 generation-scoped interruptible reader를 제공한다. native event는 `Data | Wake(generation) | EOF | Failure`를 구분하고 callback `Stop` 또는 handle teardown은 idle read를 먼저 깨운 뒤 그 terminal generation의 reader completion을 기다린다. wake는 control liveness일 뿐 byte provenance나 geometry revision을 만들지 않는다. 실제 ConPTY/Linux PTY 대조군에서도 resize 전에 이미 queued 된 byte가 resize/get-size 뒤 도착하고, `PeekNamedPipe`/`poll`이 empty를 관측한 뒤에도 보유 중인 writer가 새 byte를 만들 수 있으므로 quiet/empty는 producer barrier가 아니다. 모든 producer freeze+authoritative drain 또는 kernel byte epoch는 여전히 증명되지 않아 `exactGeometryCutover`는 false이고, Windows OpenConsole/Linux kernel 수준의 exact primitive는 issue [#643](https://github.com/kochul2000/laymux/issues/643)이 추적한다. pinned reader seam의 upstream 제안과 fork 제거는 별도 issue [#657](https://github.com/kochul2000/laymux/issues/657)이 추적한다([ADR-0089](../adr/0089-interruptible-pty-reader-is-not-provenance.md)).
@@ -270,7 +272,7 @@ Remote FileViewer는 데스크톱 overlay를 복제하거나 외부 프로세스
 
 Remote xterm의 선택 파일 링크도 같은 FileViewer 권한 경계와 명시적 host path action을 사용한다([ADR-0148](../adr/0148-bounded-multi-path-selection-links.md)). 브라우저는 선택 원문과 active terminal id만 `/remote/v1/file-viewer/path-link`로 보내며 CWD나 조합된 path를 제안하지 않는다. `fileViewer.pathLink` frontend bridge가 desktop `useTerminalStore`의 최신 CWD와 `useSettingsStore.terminal` 설정을 읽고, 위 §8.6과 같은 bounded maximal-munch 후보 추출 → `joinCwdPath` → 중복 제거 → `statPaths` 흐름을 실행한다. 존재하는 일반 파일만 token·절대 path·선택 상대 범위 목록으로 반환하고 디렉터리는 Remote 링크로 활성화하지 않는다. Remote page는 드래그 중 selection 변화를 trailing debounce하고 pointer-up에서 최종 선택을 즉시 검증하며, 새 선택·terminal/lease 전환·xterm reset·resize/reflow에서는 진행 중 요청과 모든 marker를 폐기한다. 각 응답 범위는 최신 선택 원문과 exact match인지 다시 확인한 뒤 실제 xterm cell width(CJK·전각 포함)를 사용해 surface-local 좌표에 매핑하고 `registerMarker`+`registerDecoration`으로 밑줄을 그리며, pointer 아래 정확한 사각형의 primary click에서 `openFileViewerTab(path)`를 호출한다. selection revision·terminal·lease·capability가 바뀐 늦은 bridge 응답은 표시되지 않는다. 실제 파일 내용은 클릭 뒤 child의 기존 render 요청에서만 읽는다.
 
-`FileViewer`의 외부 터미널 뷰어 root는 flex 부모 안에서 `min-width: 0`과 `flex: 1`을 유지해 초기 관찰 폭이 0으로 축소되지 않게 한다(#446). 이 폭이 0이면 `TerminalView`의 `ResizeObserver`가 세션 spawn 조건인 nonzero 분기에 진입하지 못해 vi 프로세스 자체가 시작되지 않는다. `PaneControlBar`의 root/content slot, `ViewRenderer`의 terminal wrapper, `TerminalView`의 최상위 wrapper도 모두 `min-width: 0`과 overflow clipping을 유지한다. xterm canvas의 이전 고정 폭이 flex item의 intrinsic minimum으로 역전파되면 pane이 좁아져도 관찰 대상 host가 줄지 않아 `ResizeObserver`와 `fit()`이 새 열 수를 계산하지 못하고, 오래된 넓은 canvas가 잘리면서 scrollback이 좌우에 반복된 것처럼 보인다. 각 flex 경계가 실제 pane 폭까지 줄어들어야 buffer reflow와 renderer 크기 갱신이 같은 geometry를 사용한다.
+`FileViewer`의 외부 터미널 뷰어 root는 flex 부모 안에서 `min-width: 0`과 `flex: 1`을 유지해 사용 가능한 폭을 terminal host까지 전달한다(#446). 최초 관찰 폭이 0이어도 ADR-0161에 따라 vi 프로세스와 output attach는 시작하지만 DOM renderer는 양의 폭을 기다리므로, flex 경계가 올바르지 않으면 화면만 계속 보류된다. `PaneControlBar`의 root/content slot, `ViewRenderer`의 terminal wrapper, `TerminalView`의 최상위 wrapper도 모두 `min-width: 0`과 overflow clipping을 유지한다. xterm canvas의 이전 고정 폭이 flex item의 intrinsic minimum으로 역전파되면 pane이 좁아져도 관찰 대상 host가 줄지 않아 `ResizeObserver`와 `fit()`이 새 열 수를 계산하지 못하고, 오래된 넓은 canvas가 잘리면서 scrollback이 좌우에 반복된 것처럼 보인다. 각 flex 경계가 실제 pane 폭까지 줄어들어야 buffer reflow와 renderer 크기 갱신이 같은 geometry를 사용한다.
 
 Legacy in-box ConPTY는 폭 변경 뒤 현재 화면을 `ESC[?25l (ESC[8;<rows>;<cols>t)? ESC[H ... ESC[?25h` 프레임으로 다시 출력했지만, 번들 `1.23.251008001`은 normal buffer+scrollback 폭 변경에서도 이 host repaint를 내보내지 않는다. 지원 Windows 빌드는 번들 배치를 필수로 하므로 legacy 런타임은 제품 경로에서 도달할 수 없고, ADR-0026의 resize repaint 필터와 그 arm 배선은 제거했다. live PTY 출력은 어떤 repaint 필터도 거치지 않고 xterm write FIFO로 들어간다. legacy in-box 런타임을 명시적으로 다시 지원한다면 스트리밍 필터 알고리즘을 git 이력(`ui/src/lib/conpty-resize-repaint-filter.ts`)에서 되살리는 것이 선행 작업이다. Rust OSC 파이프라인과 raw output ring, Linux와 alternate buffer 동작은 변경하지 않는다([ADR-0067](../adr/0067-bundled-conpty-output-and-staging-contract.md)).
 
@@ -1335,7 +1337,8 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
     │  앱 전체에서 시작 슬롯 1개 부여
     ▼
 [선택된 TerminalView 마운트 / 나머지는 dark placeholder]
-    │  terminal-output-v3 listener 선등록
+    │  Unicode provider + SerializeAddon + inspector/scroller 등록
+    │  terminal-output-v3 listener 선등록 (DOM renderer 불필요)
     ├─ loadTerminalOutputCache(paneId)
     │     → legacy cache의 SerializeAddon alternate-buffer suffix 제거
     └─ createTerminalSession(cwd: lastCwd, startupCommandOverride)
@@ -1352,9 +1355,12 @@ Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 n
           → live snapshot
           → backend 최종 bracketed-paste mode 합성
           → snapshot 이후 sequenced delta 재생
+          → host가 0축이어도 rendererless xterm buffer/checkpoint가 계속 파싱
     │
-    ├─ createTerminalSession 성공
-    └─ xterm 첫 onRender
+    ├─ createTerminalSession 성공 (host 크기와 무관)
+    └─ ResizeObserver가 최초 양의 크기 관측
+          → terminal.open() + fit + WebGL/focus
+          → xterm 첫 onRender
           → 두 조건이 모두 충족되면 현재 슬롯 완료
           → 다음 대기 TerminalView 마운트
           → 생성 실패는 즉시 완료, 신호 누락은 10초 watchdog 후 진행
