@@ -174,10 +174,8 @@ async fn exact_request_replay_returns_cached_encrypted_response() {
 
 #[tokio::test]
 async fn authenticated_requests_slide_the_inactivity_deadline() {
-    let session_keys =
-        derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
-    let client_keys =
-        derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let session_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
+    let client_keys = derive_session_keys(&[7_u8; 32], &["p", "i", "c", "cs", "sn", "s"]).unwrap();
     let session_id = URL_SAFE_NO_PAD.encode([9_u8; SESSION_ID_BYTES]);
     let session = AndroidE2eSession {
         instance_id: "desktop-7".into(),
@@ -471,4 +469,24 @@ async fn a_new_establish_replaces_the_previous_session_for_the_pairing() {
             1_003,
         )
         .is_ok());
+
+    // The claim path frees a lease bound to the replaced session (ADR-0170):
+    // the revoked session must read as dead, the replacement as alive, and an
+    // expired clock must kill both.
+    assert!(!e2e.session_is_active(
+        &first_established.instance_id,
+        &first_established.session_id,
+        1_003,
+    ));
+    assert!(e2e.session_is_active(
+        &second_established.instance_id,
+        &second_established.session_id,
+        1_003,
+    ));
+    assert!(!e2e.session_is_active("other-instance", &second_established.session_id, 1_003,));
+    assert!(!e2e.session_is_active(
+        &second_established.instance_id,
+        &second_established.session_id,
+        1_003 + 15 * 60,
+    ));
 }

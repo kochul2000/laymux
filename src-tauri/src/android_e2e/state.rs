@@ -320,6 +320,25 @@ impl AndroidE2eState {
         Ok(session)
     }
 
+    /// Whether the session that claimed a controller lease is still alive.
+    /// The claim path uses this to release leases whose E2E session was
+    /// revoked by a newer establish or expired (ADR-0170); without it a dead
+    /// session's lease blocks every reconnect claim with a 409 until the
+    /// heartbeat timeout.
+    pub(crate) fn session_is_active(&self, instance_id: &str, session_id: &str, now: u64) -> bool {
+        let Ok(registry) = self.registry.lock_or_err() else {
+            // Fail toward keeping the lease: a poisoned registry must not let
+            // a racing claim steal control from a live session.
+            return true;
+        };
+        registry.sessions.get(session_id).is_some_and(|session| {
+            session.instance_id == instance_id
+                && !session.revoked.load(Ordering::Acquire)
+                && now < session.expires_at.load(Ordering::Acquire)
+                && session.pairing_revision == crate::android_pairing::pairing_revision()
+        })
+    }
+
     pub(crate) fn clear(&self) -> Result<(), AppError> {
         let mut registry = self.registry.lock_or_err()?;
         registry.challenges.clear();
