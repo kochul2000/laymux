@@ -90,8 +90,12 @@ const compositionGenerationMethods =
 
 const compositionStartOriginal =
   "compositionstart(){this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
-const compositionStartPatched =
+const compositionStartBoundOnly =
   "compositionstart(){this._boundPendingComposition(),this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
+const compositionStartPatched =
+  "compositionstart(){this._boundPendingComposition(),this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
+const compositionStartRemotePatched =
+  "compositionstart(){this._compositionEpoch=(this._compositionEpoch||0)+1,this._isComposing=!0,this._compositionPosition.start=this._textarea.value.length";
 
 const moduleTerminalKeypressSendOriginal =
   "this.coreService.triggerDataEvent(i,!0),this._keyPressHandled=!0";
@@ -154,6 +158,24 @@ const commonJsAltBufferWheelOriginal =
 const commonJsAltBufferWheelPatched =
   'const i=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===i)return this.cancel(t,!0);const s=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(s.repeat(Math.abs(i)),!0),this.cancel(t,!0)';
 
+// xterm 6.0.0's 229 textarea-diff timer only checks `_isComposing`. A main-thread
+// stall lets compositionend run first, so the delayed diff sees a finished
+// composition and sends the same Hangul syllable the finalizer will send (ADR-0164).
+// `_isSendingComposition` is not enough: an immediate finalize from a later
+// keydown clears that flag before the 229 timer runs. Bump an epoch on
+// compositionstart and skip the diff if a composition started after the snap.
+const moduleTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){let t=this._textarea.value;setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
+const moduleTextareaDiffSkipSendingWhileSending =
+  "_handleAnyTextareaChanges(){let t=this._textarea.value;setTimeout(()=>{if(!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+const moduleTextareaDiffSkipSendingPatched =
+  "_handleAnyTextareaChanges(){let t=this._textarea.value,s=this._compositionEpoch||0;setTimeout(()=>{if(s===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+const commonJsTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){const e=this._textarea.value;setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
+const commonJsTextareaDiffSkipSendingWhileSending =
+  "_handleAnyTextareaChanges(){const e=this._textarea.value;setTimeout((()=>{if(!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
+const commonJsTextareaDiffSkipSendingPatched =
+  "_handleAnyTextareaChanges(){const e=this._textarea.value,o=this._compositionEpoch||0;setTimeout((()=>{if(o===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
 const moduleWheelPatches = [
   {
     name: "wheel fractional accumulator",
@@ -288,11 +310,28 @@ await patchBundle(moduleTarget, [
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
     patchedText: compositionStartPatched,
+    acceptedTexts: [compositionStartPatched, compositionStartBoundOnly],
+  },
+  {
+    name: "composition generation boundary epoch upgrade",
+    originalText: compositionStartBoundOnly,
+    patchedText: compositionStartPatched,
   },
   {
     name: "terminal composition input handoff",
     originalText: moduleTerminalInputSendOriginal,
     patchedText: moduleTerminalInputSendPatched,
+  },
+  {
+    name: "textarea diff skip while sending",
+    originalText: moduleTextareaDiffSkipSending,
+    patchedText: moduleTextareaDiffSkipSendingPatched,
+    acceptedTexts: [moduleTextareaDiffSkipSendingPatched, moduleTextareaDiffSkipSendingWhileSending],
+  },
+  {
+    name: "textarea diff skip upgrade from sending flag",
+    originalText: moduleTextareaDiffSkipSendingWhileSending,
+    patchedText: moduleTextareaDiffSkipSendingPatched,
   },
 ]);
 await patchBundle(commonJsTarget, [
@@ -357,11 +396,47 @@ await patchBundle(commonJsTarget, [
     name: "composition generation boundary",
     originalText: compositionStartOriginal,
     patchedText: compositionStartPatched,
+    acceptedTexts: [compositionStartPatched, compositionStartBoundOnly],
+  },
+  {
+    name: "composition generation boundary epoch upgrade",
+    originalText: compositionStartBoundOnly,
+    patchedText: compositionStartPatched,
   },
   {
     name: "terminal composition input handoff",
     originalText: commonJsTerminalInputSendOriginal,
     patchedText: commonJsTerminalInputSendPatched,
   },
+  {
+    name: "textarea diff skip while sending",
+    originalText: commonJsTextareaDiffSkipSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+    acceptedTexts: [commonJsTextareaDiffSkipSendingPatched, commonJsTextareaDiffSkipSendingWhileSending],
+  },
+  {
+    name: "textarea diff skip upgrade from sending flag",
+    originalText: commonJsTextareaDiffSkipSendingWhileSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+  },
 ]);
-await patchBundle(remoteCommonJsTarget, commonJsWheelPatches);
+await patchBundle(remoteCommonJsTarget, [
+  ...commonJsWheelPatches,
+  {
+    name: "textarea diff skip while sending",
+    originalText: commonJsTextareaDiffSkipSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+    acceptedTexts: [commonJsTextareaDiffSkipSendingPatched, commonJsTextareaDiffSkipSendingWhileSending],
+  },
+  {
+    name: "textarea diff skip upgrade from sending flag",
+    originalText: commonJsTextareaDiffSkipSendingWhileSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+  },
+  {
+    name: "composition epoch bump",
+    originalText: compositionStartOriginal,
+    patchedText: compositionStartRemotePatched,
+    acceptedTexts: [compositionStartRemotePatched],
+  },
+]);

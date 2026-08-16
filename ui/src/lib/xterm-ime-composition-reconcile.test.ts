@@ -312,4 +312,50 @@ describe("patched xterm composition keypress reconciliation", () => {
 
     expect(emitted.join("")).toBe("한a");
   });
+
+  it("does not duplicate Hangul when a pre-composition 229 diff timer fires after compositionend", async () => {
+    // Windows IME delivers keydown 229 before compositionstart. That schedules
+    // `_handleAnyTextareaChanges` with setTimeout(0). A main-thread stall
+    // (output flood) lets compositionend run first, so the deferred diff sees
+    // `!_isComposing` and sends the same syllable the finalizer will send.
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    dispatchKeydown(textarea, "Process", "Process", 229);
+    startComposition(textarea, "가");
+    endComposition(textarea, "가");
+    textarea.dispatchEvent(
+      new InputEvent("input", { data: "가", inputType: "insertText", bubbles: true }),
+    );
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("가");
+  });
+
+  it("does not replay Hangul after an immediate finalize from a following keydown", async () => {
+    // 229 schedules the textarea-diff timer, compositionend queues the
+    // delayed finalizer, then a real keydown force-finalizes and clears
+    // `_isSendingComposition`. The earlier timer must not send `가` again
+    // after that (`가a가`).
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    dispatchKeydown(textarea, "Process", "Process", 229);
+    startComposition(textarea, "가");
+    endComposition(textarea, "가");
+    dispatchKeydown(textarea, "a", "KeyA", 65);
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("가a");
+  });
+
+  it("still forwards a 229 textarea insertion when no composition starts", async () => {
+    const { emitted, textarea } = openTerminal();
+    textarea.focus();
+    dispatchKeydown(textarea, "Process", "Process", 229);
+    textarea.value = "2";
+    textarea.selectionStart = 1;
+    textarea.selectionEnd = 1;
+    await flushEventLoop();
+
+    expect(emitted.join("")).toBe("2");
+  });
 });

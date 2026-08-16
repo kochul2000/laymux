@@ -42,6 +42,15 @@ const moduleMouseReportRepetition = "for(let c=0;c<p;c++)";
 const commonJsMouseReportRepetition = "for(let o=0;o<n;o++)";
 const moduleAltBufferRepetition = "c.repeat(Math.abs(h))";
 const commonJsAltBufferRepetition = "s.repeat(Math.abs(i))";
+const moduleTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){let t=this._textarea.value,s=this._compositionEpoch||0;setTimeout(()=>{if(s===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+const commonJsTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){const e=this._textarea.value,o=this._compositionEpoch||0;setTimeout((()=>{if(o===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
+const staleModuleTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){let t=this._textarea.value;setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
+const staleCommonJsTextareaDiffSkipSending =
+  "_handleAnyTextareaChanges(){const e=this._textarea.value;setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
+const compositionEpochBump = "this._compositionEpoch=(this._compositionEpoch||0)+1";
 
 describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
@@ -103,5 +112,23 @@ describe("pinned xterm bundle patches", () => {
     expect(remoteCommonJsSource).toContain(commonJsWheelAccumulator);
     expect(remoteCommonJsSource).toContain(commonJsMouseReportRepetition);
     expect(remoteCommonJsSource).toContain(commonJsAltBufferRepetition);
+  });
+
+  it("skips the 229 textarea-diff send while a composition finalizer is pending", async () => {
+    const [moduleSource, commonJsSource, remoteCommonJsSource] = await Promise.all([
+      readFile(moduleTarget, "utf8"),
+      readFile(commonJsTarget, "utf8"),
+      readFile(remoteCommonJsTarget, "utf8"),
+    ]);
+
+    expect(moduleSource).toContain(moduleTextareaDiffSkipSending);
+    expect(commonJsSource).toContain(commonJsTextareaDiffSkipSending);
+    expect(remoteCommonJsSource).toContain(commonJsTextareaDiffSkipSending);
+    expect(moduleSource).not.toContain(staleModuleTextareaDiffSkipSending);
+    expect(commonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
+    expect(remoteCommonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
+    expect(moduleSource).toContain(compositionEpochBump);
+    expect(commonJsSource).toContain(compositionEpochBump);
+    expect(remoteCommonJsSource).toContain(compositionEpochBump);
   });
 });
