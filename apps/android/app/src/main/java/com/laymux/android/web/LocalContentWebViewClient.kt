@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream
 class LocalContentWebViewClient(
     private val assetLoader: WebViewAssetLoader,
     private val remoteResourceLoader: (String) -> RemoteResourceResponse?,
+    private val onRemotePageFinished: () -> Unit = {},
 ) : WebViewClientCompat() {
     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
         !isAllowedOrigin(request.url)
@@ -34,6 +35,12 @@ class LocalContentWebViewClient(
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
         if (!isAllowedOrigin(Uri.parse(url))) {
             view.stopLoading()
+        }
+    }
+
+    override fun onPageFinished(view: WebView, url: String) {
+        if (isRemoteWrapperResource(Uri.parse(url))) {
+            onRemotePageFinished()
         }
     }
 
