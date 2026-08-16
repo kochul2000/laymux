@@ -55,6 +55,7 @@ const mockBlur = vi.fn();
 const mockPaste = vi.fn();
 const mockHasSelection = vi.fn().mockReturnValue(false);
 const mockGetSelection = vi.fn().mockReturnValue("");
+const mockGetSelectionPosition = vi.fn().mockReturnValue(null);
 const mockClearSelection = vi.fn();
 const mockOnCursorMove = vi.fn().mockReturnValue({ dispose: vi.fn() });
 const mockOnWriteParsed = vi.fn().mockReturnValue({ dispose: vi.fn() });
@@ -318,7 +319,14 @@ vi.mock("@xterm/xterm", () => ({
     paste = mockPaste;
     hasSelection = mockHasSelection;
     getSelection = mockGetSelection;
+    getSelectionPosition = mockGetSelectionPosition;
     clearSelection = mockClearSelection;
+    registerMarker = vi.fn(() => ({ dispose: vi.fn() }));
+    registerDecoration = vi.fn(() => ({
+      element: document.createElement("div"),
+      onRender: vi.fn(),
+      dispose: vi.fn(),
+    }));
     refresh = mockRefresh;
     // Passes itself so a test can tell *which* terminals were cleared, not just
     // how many calls happened (issue #571).
@@ -529,6 +537,7 @@ const mockClipboardWriteText = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdSend = vi.fn().mockResolvedValue(undefined);
 const mockSetTerminalCwdReceive = vi.fn().mockResolvedValue(undefined);
 const mockOpenExternal = vi.fn().mockResolvedValue(undefined);
+const mockStatPaths = vi.fn().mockResolvedValue([]);
 const mockMarkClaudeTerminal = vi.fn().mockResolvedValue(true);
 const mockMarkCodexTerminal = vi.fn().mockResolvedValue(true);
 const mockLoadTerminalOutputCache = vi
@@ -603,6 +612,7 @@ vi.mock("@/lib/tauri-api", () => ({
   setTerminalCwdReceive: (...args: unknown[]) => mockSetTerminalCwdReceive(...args),
   updateTerminalSyncGroup: vi.fn().mockResolvedValue(undefined),
   openExternal: (...args: unknown[]) => mockOpenExternal(...args),
+  statPaths: (...args: unknown[]) => mockStatPaths(...args),
   resolveGitRemote: vi.fn().mockResolvedValue(null),
   loadTerminalOutputCache: (...args: unknown[]) => mockLoadTerminalOutputCache(...args),
   markClaudeTerminal: (...args: unknown[]) => mockMarkClaudeTerminal(...args),
@@ -6368,6 +6378,156 @@ describe("TerminalView", () => {
     selectionCallback();
 
     expect(mockClipboardWriteText).not.toHaveBeenCalled();
+  });
+
+  it("validates a selected path only once after the pointer drag ends", async () => {
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(
+      <TerminalView instanceId="t-path-selection-release" profile="PowerShell" syncGroup="" />,
+    );
+
+    const outer = screen.getByTestId("terminal-view-t-path-selection-release");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+    expect(mockStatPaths).not.toHaveBeenCalled();
+
+    // Browser order is pointerup, then xterm's document mouseup finalizes the
+    // selection and fires onSelectionChange, then mouseup reaches window.
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 1, clientX: 30, clientY: 0 }),
+    );
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+      expect(outer).toHaveClass("terminal-path-link-clickable");
+    });
+    expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+  });
+
+  it("invalidates the previous path link as soon as a new pointer drag moves", async () => {
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(
+      <TerminalView instanceId="t-path-selection-reselect" profile="PowerShell" syncGroup="" />,
+    );
+
+    const outer = screen.getByTestId("terminal-view-t-path-selection-reselect");
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 2, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 2, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 2, clientX: 30, clientY: 0 }),
+    );
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+
+    await vi.waitFor(() => expect(outer).toHaveClass("terminal-path-link-clickable"));
+
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 3, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 3, clientX: 30, clientY: 0 }),
+    );
+
+    expect(outer).not.toHaveClass("terminal-path-link-clickable");
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 3 }));
+  });
+
+  it("discards an in-flight path stat when a new pointer gesture starts", async () => {
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+    let resolveStat:
+      | ((value: Array<{ exists: boolean; isDirectory: boolean }>) => void)
+      | undefined;
+    mockStatPaths.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStat = resolve;
+        }),
+    );
+
+    render(<TerminalView instanceId="t-path-selection-stale" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-selection-stale");
+    const selectionCallback = mockOnSelectionChange.mock.calls[0][0];
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 5, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 5, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 5, clientX: 30, clientY: 0 }),
+    );
+    selectionCallback();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 30, clientY: 0 }));
+    expect(mockStatPaths).toHaveBeenCalledTimes(1);
+
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 6, clientX: 0, clientY: 0 }),
+    );
+    await act(async () => {
+      resolveStat?.([{ exists: true, isDirectory: false }]);
+      await Promise.resolve();
+    });
+
+    expect(outer).not.toHaveClass("terminal-path-link-clickable");
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 6 }));
+  });
+
+  it("does not validate a path after the pointer selection gesture is cancelled", async () => {
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 0, y: 0 },
+      end: { x: 19, y: 0 },
+    });
+
+    render(<TerminalView instanceId="t-path-selection-cancel" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-selection-cancel");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 4, clientX: 0, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 4, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 4 }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 4 }));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(mockStatPaths).not.toHaveBeenCalled();
   });
 
   // -- Issue #230: drag ending outside the terminal still copies selection --

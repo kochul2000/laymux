@@ -32,7 +32,7 @@ import {
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
 import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
-import { createPathLinkClickHandlers } from "@/lib/path-link-click";
+import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
 import {
   extractPathCandidatesFromSelection,
@@ -1127,10 +1127,9 @@ export function TerminalView({
   // identity 를 기억해, 앱 복귀 다음 프레임에 focus 가 여전히 body/null 일 때만
   // 같은 helper 로 복원한다. 메인 effect 가 생성하고 isFocused effect 도 참조한다.
   const focusOwnershipRef = useRef<TerminalFocusOwnership | null>(null);
-  // Issue #363: 선택 기반 path-link 컨트롤러와 검증 흐름. effect 안에서 채우고
-  // selection/pointerup 핸들러에서 호출한다(메인 effect 1회 생성).
+  // Issue #363: 선택 기반 path-link 컨트롤러. effect 안에서 채우고
+  // pointer release가 확정된 뒤 최종 선택만 검증한다(메인 effect 1회 생성).
   const pathLinkControllerRef = useRef<ReturnType<typeof createPathLinkController> | null>(null);
-  const pathLinkEvaluateRef = useRef<(() => void) | null>(null);
   const registerInstance = useTerminalStore((s) => s.registerInstance);
   const unregisterInstance = useTerminalStore((s) => s.unregisterInstance);
 
@@ -1439,8 +1438,8 @@ export function TerminalView({
     // Issue #363 (선택 기반): 사용자가 *선택(드래그)* 한 파일/디렉토리 경로에
     // 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다.
     // 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고 Windows 에서 동작
-    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 onSelectionChange/pointerup
-    // 시점에 **선택당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
+    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 pointer release의 최종 선택에
+    // **gesture당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
     // #687: 밑줄 위 hover 힌트 라벨. 좌표를 wrapper 기준으로 계산하므로 반드시
@@ -1506,7 +1505,7 @@ export function TerminalView({
       pathLink.clear();
     };
 
-    // 선택 settle 시점(onSelectionChange / pointerup)에 1회 호출되는 검증 흐름.
+    // 선택 drag의 mouseup 처리까지 끝난 뒤 1회 호출되는 검증 흐름.
     // 동시 호출/race 를 막기 위해 토큰으로 마지막 요청만 반영한다.
     let pathLinkSelectionSeq = 0;
     const evaluatePathLinkSelection = () => {
@@ -1596,18 +1595,6 @@ export function TerminalView({
           clearPathLinkSelection();
         });
     };
-    pathLinkEvaluateRef.current = evaluatePathLinkSelection;
-    let pathLinkEvaluationTimer: number | undefined;
-    const schedulePathLinkSelectionEvaluation = (delay = 120) => {
-      pathLinkSelectionSeq += 1;
-      clearPathLinkSelection();
-      if (pathLinkEvaluationTimer !== undefined) window.clearTimeout(pathLinkEvaluationTimer);
-      pathLinkEvaluationTimer = window.setTimeout(() => {
-        pathLinkEvaluationTimer = undefined;
-        evaluatePathLinkSelection();
-      }, delay);
-    };
-
     terminalRef.current = terminal;
 
     // Renderer-level cursor gate (issue #598). Installed once per xterm instance
@@ -3007,7 +2994,7 @@ export function TerminalView({
     // 이라 mousedown/up 은 그대로 xterm 으로 흘러가 선택/드래그가 정상 동작한다.
     // 여기서는 관찰만 하여 — 밑줄 위에서 시작한 '클릭'(드래그 아님)이면 캡처한
     // 경로를 연다(파일=viewer, 디렉토리=cwd 전파). 드래그면 무시해 일반 재선택이
-    // 되게 두고, 경로는 onSelectionChange 가 새로 평가/해제한다. 클릭 시 xterm 이
+    // 되게 두고, 경로는 gesture 완료 뒤 최종 선택으로 새로 평가한다. 클릭 시 xterm 이
     // 선택을 지워 current 가 비므로, 경로는 mousedown 시점에 캡처해 둔다.
     //
     // #687(ADR-0100): Ctrl / Ctrl+Shift 는 호스트 OS 로 위임한다. 이 조합만은
@@ -3050,6 +3037,73 @@ export function TerminalView({
     outerEl?.addEventListener("mousedown", handlePathLinkMouseDown, true);
     window.addEventListener("mouseup", handlePathLinkMouseUp);
 
+    // xterm finalizes a mouse selection in its document-level `mouseup`
+    // listener and only then fires onSelectionChange. Browser compatibility
+    // events arrive as pointerup -> mouseup, so pointerup itself is too early
+    // to read the final selection. Keep one gesture record and finish from the
+    // window mouseup (after document); a zero-delay pointerup fallback covers
+    // releases for which xterm/browser never delivers that mouseup (#230).
+    let pointerSelectionGesture: {
+      pointerId: number;
+      startX: number;
+      startY: number;
+      moved: boolean;
+      selectionChanged: boolean;
+    } | null = null;
+    let pointerSelectionFinalizeTimer: number | undefined;
+
+    const handlePointerSelectionMove = (event: PointerEvent) => {
+      const gesture = pointerSelectionGesture;
+      if (!gesture || event.pointerId !== gesture.pointerId || gesture.moved) return;
+      if (
+        Math.abs(event.clientX - gesture.startX) <= PATH_LINK_CLICK_SLOP &&
+        Math.abs(event.clientY - gesture.startY) <= PATH_LINK_CLICK_SLOP
+      ) {
+        return;
+      }
+      gesture.moved = true;
+      // Preserve an existing verified target through mousedown so
+      // pathLinkClick can capture it, then retire its decoration as soon as
+      // the gesture becomes a drag rather than a click.
+      clearPathLinkSelection();
+    };
+
+    const removePointerSelectionListeners = () => {
+      window.removeEventListener("pointermove", handlePointerSelectionMove);
+      window.removeEventListener("pointerup", handlePointerSelectionUp);
+      window.removeEventListener("pointercancel", handlePointerSelectionCancel);
+      window.removeEventListener("mouseup", handlePointerSelectionMouseUp);
+    };
+    const retirePointerSelectionGesture = () => {
+      const gesture = pointerSelectionGesture;
+      pointerSelectionGesture = null;
+      removePointerSelectionListeners();
+      if (pointerSelectionFinalizeTimer !== undefined) {
+        window.clearTimeout(pointerSelectionFinalizeTimer);
+        pointerSelectionFinalizeTimer = undefined;
+      }
+      return gesture;
+    };
+    const finalizePointerSelection = () => {
+      const gesture = retirePointerSelectionGesture();
+      if (!gesture) return;
+      if (gesture.moved || gesture.selectionChanged) evaluatePathLinkSelection();
+      if (useSettingsStore.getState().terminal.copyOnSelect) runTerminalCopy(terminal);
+    };
+    const handlePointerSelectionUp = (event: PointerEvent) => {
+      const gesture = pointerSelectionGesture;
+      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      if (pointerSelectionFinalizeTimer === undefined) {
+        pointerSelectionFinalizeTimer = window.setTimeout(finalizePointerSelection, 0);
+      }
+    };
+    const handlePointerSelectionCancel = (event: PointerEvent) => {
+      const gesture = pointerSelectionGesture;
+      if (!gesture || event.pointerId !== gesture.pointerId) return;
+      retirePointerSelectionGesture();
+    };
+    const handlePointerSelectionMouseUp = () => finalizePointerSelection();
+
     // Copy-on-select: auto-copy to clipboard when text is selected.
     // `runTerminalCopy` handles the has-selection guard and smart-indent
     // branching, keeping this path in lockstep with Ctrl+C and right-click.
@@ -3057,9 +3111,11 @@ export function TerminalView({
       if (useSettingsStore.getState().terminal.copyOnSelect) {
         runTerminalCopy(terminal);
       }
-      // Issue #363/#ADR-0148: 드래그 중에는 stale 링크를 지우고 trailing debounce한다.
-      // copyOnSelect 와 독립적으로 동작(off 여도 링크는 켜질 수 있음).
-      schedulePathLinkSelectionEvaluation();
+      if (pointerSelectionGesture) pointerSelectionGesture.selectionChanged = true;
+      // Issue #363/#ADR-0165: 선택 변경에서는 stale 링크와 진행 중인 검증만
+      // 무효화한다. 후보 파싱과 filesystem stat은 gesture 완료 뒤에만 한다.
+      pathLinkSelectionSeq += 1;
+      clearPathLinkSelection();
     });
 
     // Issue #230: drag ending outside the terminal. xterm.js relies on
@@ -3072,28 +3128,27 @@ export function TerminalView({
     // `runTerminalCopy` still gates on `hasSelection()`, so click-without-
     // drag is a no-op.
     //
-    // The one-shot watcher is tracked so it can be torn down on cleanup: if
-    // this terminal unmounts mid-drag (before pointerup fires) the listener
-    // would otherwise linger on window and run a copy against a disposed
-    // terminal on some later, unrelated release. We also drop any prior
-    // watcher when a fresh pointerdown arrives without an intervening
-    // pointerup (missed/cancelled release).
-    let pointerUpWatcher: (() => void) | null = null;
-    const handlePointerDown = () => {
-      if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
-      const onWindowPointerUp = () => {
-        pointerUpWatcher = null;
-        // Issue #363/#ADR-0148: 드래그 종료 시 bounded 후보 batch를 즉시 검증한다.
-        if (pathLinkEvaluationTimer !== undefined) {
-          window.clearTimeout(pathLinkEvaluationTimer);
-          pathLinkEvaluationTimer = undefined;
-        }
-        pathLinkEvaluateRef.current?.();
-        if (!useSettingsStore.getState().terminal.copyOnSelect) return;
-        runTerminalCopy(terminal);
+    // The gesture listeners are removed on pointerup+mouseup, pointercancel,
+    // replacement pointerdown, and unmount so a cancelled drag cannot make a
+    // later unrelated release parse paths or copy a disposed terminal.
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      retirePointerSelectionGesture();
+      // Invalidate an earlier async stat immediately, but leave its verified
+      // decoration through mousedown so an ordinary path-link click can still
+      // capture the target. The first real move clears it above.
+      pathLinkSelectionSeq += 1;
+      pointerSelectionGesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+        selectionChanged: false,
       };
-      pointerUpWatcher = onWindowPointerUp;
-      window.addEventListener("pointerup", onWindowPointerUp, { once: true });
+      window.addEventListener("pointermove", handlePointerSelectionMove);
+      window.addEventListener("pointerup", handlePointerSelectionUp);
+      window.addEventListener("pointercancel", handlePointerSelectionCancel);
+      window.addEventListener("mouseup", handlePointerSelectionMouseUp);
     };
     outerEl?.addEventListener("pointerdown", handlePointerDown);
 
@@ -5828,7 +5883,6 @@ export function TerminalView({
       if (resizeFitTimer !== undefined) clearTimeout(resizeFitTimer);
       if (sessionLimitTimer !== undefined) clearTimeout(sessionLimitTimer);
       if (sessionLimitSubmitTimer !== undefined) clearTimeout(sessionLimitSubmitTimer);
-      if (pathLinkEvaluationTimer !== undefined) clearTimeout(pathLinkEvaluationTimer);
       if (terminalReflowFrameRef.current !== null) {
         cancelAnimationFrame(terminalReflowFrameRef.current);
         terminalReflowFrameRef.current = null;
@@ -5851,7 +5905,7 @@ export function TerminalView({
         wrapperEl?.removeEventListener(eventName, markHumanDataEmission, true);
       }
       xtermUserInputOriginDisposable?.dispose();
-      if (pointerUpWatcher) window.removeEventListener("pointerup", pointerUpWatcher);
+      retirePointerSelectionGesture();
       window.removeEventListener("blur", handleAppBlurForFocusOwnership);
       window.removeEventListener("focus", handleAppFocusForFocusOwnership);
       window.removeEventListener("pointerdown", handlePointerDownForFocusOwnership, true);
