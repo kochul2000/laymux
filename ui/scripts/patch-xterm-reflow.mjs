@@ -154,6 +154,18 @@ const commonJsAltBufferWheelOriginal =
 const commonJsAltBufferWheelPatched =
   'const i=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===i)return this.cancel(t,!0);const s=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(s.repeat(Math.abs(i)),!0),this.cancel(t,!0)';
 
+// xterm 6.0.0's 229 textarea-diff timer only checks `_isComposing`. A main-thread
+// stall lets compositionend run first, so the delayed diff sees a finished
+// composition and sends the same Hangul syllable the finalizer will send (ADR-0164).
+const moduleTextareaDiffSkipSending =
+  "setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
+const moduleTextareaDiffSkipSendingPatched =
+  "setTimeout(()=>{if(!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+const commonJsTextareaDiffSkipSending =
+  "setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
+const commonJsTextareaDiffSkipSendingPatched =
+  "setTimeout((()=>{if(!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
+
 const moduleWheelPatches = [
   {
     name: "wheel fractional accumulator",
@@ -294,6 +306,11 @@ await patchBundle(moduleTarget, [
     originalText: moduleTerminalInputSendOriginal,
     patchedText: moduleTerminalInputSendPatched,
   },
+  {
+    name: "textarea diff skip while sending",
+    originalText: moduleTextareaDiffSkipSending,
+    patchedText: moduleTextareaDiffSkipSendingPatched,
+  },
 ]);
 await patchBundle(commonJsTarget, [
   ...commonJsWheelPatches,
@@ -363,5 +380,17 @@ await patchBundle(commonJsTarget, [
     originalText: commonJsTerminalInputSendOriginal,
     patchedText: commonJsTerminalInputSendPatched,
   },
+  {
+    name: "textarea diff skip while sending",
+    originalText: commonJsTextareaDiffSkipSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+  },
 ]);
-await patchBundle(remoteCommonJsTarget, commonJsWheelPatches);
+await patchBundle(remoteCommonJsTarget, [
+  ...commonJsWheelPatches,
+  {
+    name: "textarea diff skip while sending",
+    originalText: commonJsTextareaDiffSkipSending,
+    patchedText: commonJsTextareaDiffSkipSendingPatched,
+  },
+]);

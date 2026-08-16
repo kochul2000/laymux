@@ -42,6 +42,14 @@ const moduleMouseReportRepetition = "for(let c=0;c<p;c++)";
 const commonJsMouseReportRepetition = "for(let o=0;o<n;o++)";
 const moduleAltBufferRepetition = "c.repeat(Math.abs(h))";
 const commonJsAltBufferRepetition = "s.repeat(Math.abs(i))";
+const moduleTextareaDiffSkipSending =
+  "setTimeout(()=>{if(!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
+const commonJsTextareaDiffSkipSending =
+  "setTimeout((()=>{if(!this._isComposing&&!this._isSendingComposition){const t=this._textarea.value";
+const staleModuleTextareaDiffSkipSending =
+  "setTimeout(()=>{if(!this._isComposing){let e=this._textarea.value";
+const staleCommonJsTextareaDiffSkipSending =
+  "setTimeout((()=>{if(!this._isComposing){const t=this._textarea.value";
 
 describe("pinned xterm bundle patches", () => {
   it("is applied to the pinned xterm bundle", async () => {
@@ -103,5 +111,20 @@ describe("pinned xterm bundle patches", () => {
     expect(remoteCommonJsSource).toContain(commonJsWheelAccumulator);
     expect(remoteCommonJsSource).toContain(commonJsMouseReportRepetition);
     expect(remoteCommonJsSource).toContain(commonJsAltBufferRepetition);
+  });
+
+  it("skips the 229 textarea-diff send while a composition finalizer is pending", async () => {
+    const [moduleSource, commonJsSource, remoteCommonJsSource] = await Promise.all([
+      readFile(moduleTarget, "utf8"),
+      readFile(commonJsTarget, "utf8"),
+      readFile(remoteCommonJsTarget, "utf8"),
+    ]);
+
+    expect(moduleSource).toContain(moduleTextareaDiffSkipSending);
+    expect(commonJsSource).toContain(commonJsTextareaDiffSkipSending);
+    expect(remoteCommonJsSource).toContain(commonJsTextareaDiffSkipSending);
+    expect(moduleSource).not.toContain(staleModuleTextareaDiffSkipSending);
+    expect(commonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
+    expect(remoteCommonJsSource).not.toContain(staleCommonJsTextareaDiffSkipSending);
   });
 });
