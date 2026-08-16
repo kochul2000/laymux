@@ -190,8 +190,9 @@
     noticeMessage.hidden = !status.notice;
     noticeMessage.textContent = status.notice || "";
     // 연결 시도 중에는 QR 재스캔이 진행 중인 세션 수립과 경합하므로 잠근다.
-    // 취소는 아래 connectButton이 담당한다.
-    scanButton.disabled = remoteConnecting;
+    // 취소는 아래 connectButton이 담당한다. 단 biometricBlocked에서는 이
+    // 버튼이 "보호 설정 열기"라 설정 접근을 막으면 안 된다.
+    scanButton.disabled = remoteConnecting && !biometricBlocked;
 
     remoteSection.hidden = !confirmed;
     remoteConnectingActive = remoteConnecting;

@@ -60,7 +60,9 @@ class PairingBootstrapSurfaceTest {
     fun connectingStateSwapsConnectForCancelAndLocksRescan() {
         val script = asset("app.js").readText()
 
-        assertTrue(script.contains("scanButton.disabled = remoteConnecting;"))
+        // The scan button doubles as the protection-settings opener while
+        // biometrics are blocked, so the connecting lock must exempt that state.
+        assertTrue(script.contains("scanButton.disabled = remoteConnecting && !biometricBlocked;"))
         assertTrue(script.contains("? \"연결 취소\""))
         assertTrue(script.contains("nativeBridge.cancelRemoteConnection();"))
         // Cancel stays tappable even when biometrics are unavailable.
