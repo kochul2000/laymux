@@ -1,6 +1,6 @@
 # 0148. 선택 경로 링크는 bounded maximal-munch 복수 후보를 사용한다
 
-- Status: Accepted
+- Status: Superseded by [0165](0165-desktop-path-link-validates-on-pointer-release.md)
 - Date: 2026-08-12
 - Source: 사용자 요구("좀 넓게 선택해도 검사", "최대 드래그 범위", "한 경로로 이미 포함된 것이 다른 경로로 해석되지 않도록", "remote 도 동일") · [ADR-0045](0045-remote-path-link-reuses-desktop-parser.md) · [architecture/data-flow.md §8.6](../architecture/data-flow.md)
 - Extends: ADR-0045
