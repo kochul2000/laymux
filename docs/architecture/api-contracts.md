@@ -1267,7 +1267,7 @@ terminal output의 public WSS는 `/api/android/e2e/output` 하나다([ADR-0159](
 
 `/remote/manifest.webmanifest`와 `/remote/pwa/*`는 vendor asset과 같은 base access gate를 쓰는 설치 자산이다([ADR-0091](../adr/0091-remote-client-standalone-web-app-manifest.md)). manifest는 `display: standalone`과 `scope`=`start_url`=`id`=`/remote/`를 선언하고 `application/manifest+json`, `Cache-Control: no-store`로 응답한다 — 컴파일 내장이라 revalidation 근거가 없고, 이미 설치된 앱 안에 stale한 `start_url`/아이콘 목록이 남으면 안 된다. 아이콘은 `image/png`, `Cache-Control: private, max-age=86400`이며 등록되지 않은 파일 이름은 404다. `page.html`의 manifest link는 `crossorigin="use-credentials"`를 반드시 갖는다 — manifest fetch는 기본적으로 credential을 생략하므로 gate 안쪽에서는 이 속성이 없으면 401이다. iOS/iPadOS도 manifest를 지원하지만 `apple-touch-icon`이 manifest 아이콘보다 우선하고 오래된 설치 경로는 `apple-mobile-web-app-*` 메타를 사용하므로 두 계열을 함께 둔다. 아이콘 PNG는 `ui/public/logo.svg`에서 `cd ui && npm run build:pwa-icons`로 생성해 커밋한 자산이다. service worker는 등록하지 않는다(오프라인 캐싱 비목표, cloud remote origin CSP는 `worker-src 'none'`). 설치 자체는 HTTPS origin(cloud relay, 또는 HTTPS 앞단을 둔 direct)에서만 성립하며 평문 HTTP direct에서는 브라우저가 manifest를 무시한다.
 
-설치 권유 UI는 내비게이션 드로어 최하단의 `#installSection` 하나다([ADR-0100](../adr/0099-remote-client-install-affordance-in-drawer.md)). 상시 배너나 헤더 버튼을 두지 않는다 — ADR-0091이 되찾으려던 터미널 행을 다시 먹기 때문이다. 이 섹션은 기본 `hidden`이고, `window.isSecureContext`가 참이며 standalone 실행(`display-mode: standalone` 또는 iOS `navigator.standalone`)이 아니고, Chromium이 `beforeinstallprompt`를 발생시켰거나 iOS/iPadOS로 식별될 때만 나타난다. 클릭은 보관한 `beforeinstallprompt` 이벤트의 `prompt()`를 호출하고 그 이벤트를 즉시 버린다(재사용 불가); 이벤트가 없는 iOS에서는 "공유 → 홈 화면에 추가" 안내를 토글한다. `appinstalled` 이후에는 다시 숨는다 — 단 이 이벤트는 Chromium 경로에만 오고, iOS 는 공유 시트 설치로 이를 발생시키지 않으므로 그 탭에서는 다음 방문의 standalone 판정으로만 사라진다. 프롬프트를 자동으로 띄우지 않는다.
+설치 권유 UI는 내비게이션 드로어 Settings 화면 최하단의 `#installSection` 하나다([ADR-0100](../adr/0099-remote-client-install-affordance-in-drawer.md)). 상시 배너나 헤더 버튼을 두지 않는다 — ADR-0091이 되찾으려던 터미널 행을 다시 먹기 때문이다. 이 섹션은 기본 `hidden`이고, `window.isSecureContext`가 참이며 standalone 실행(`display-mode: standalone` 또는 iOS `navigator.standalone`)이 아니고, Chromium이 `beforeinstallprompt`를 발생시켰거나 iOS/iPadOS로 식별될 때만 나타난다. 클릭은 보관한 `beforeinstallprompt` 이벤트의 `prompt()`를 호출하고 그 이벤트를 즉시 버린다(재사용 불가); 이벤트가 없는 iOS에서는 "공유 → 홈 화면에 추가" 안내를 토글한다. `appinstalled` 이후에는 다시 숨는다 — 단 이 이벤트는 Chromium 경로에만 오고, iOS 는 공유 시트 설치로 이를 발생시키지 않으므로 그 탭에서는 다음 방문의 standalone 판정으로만 사라진다. 프롬프트를 자동으로 띄우지 않는다.
 
 `/remote/viewer/*`도 같은 base access gate를 공유하고 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`를 보낸다. viewer HTML은 inline script나 자격 증명을 포함하지 않으며 `script-src 'self'`, `frame-ancestors 'none'` CSP를 적용한다. 파일 내용은 이 bootstrap route가 아니라 active lease를 요구하는 §13.3.1 API로만 가져온다.
 
@@ -1305,6 +1305,8 @@ PC WebView는 `remote-control-changed` Tauri event를 받아 local input overlay
 ### 13.3 Navigation Metadata
 
 Focused remote UI는 전체 React layout을 복제하지 않고, workspace/dock/pane 요약과 single terminal stream을 분리한다. 이 요약은 frontend Zustand store가 알고 있는 workspace/dock 구조를 Rust remote server가 bridge로 조회한 뒤 remote 전용 계약으로 축약한 값이다. Remote client는 raw settings나 전체 store를 직접 읽지 않는다.
+
+Remote drawer 본문은 workspace 기본 화면과 Notifications·Connection·Settings 하위 화면을 가진다. 연결된 상태에서 drawer를 열면 매번 workspace 기본 화면으로 시작하며 기존 File viewer·workspace 목록·Dock terminals를 렌더한다. Notifications·Connection은 헤더의 각 버튼으로, 기기-로컬 Display와 설치 권유는 Settings 버튼으로 진입하고 뒤로가기는 workspace 기본 화면으로 돌아간다. drawer는 상단 메뉴 버튼을 다시 누르거나 바깥 scrim을 눌러 닫으며 별도 닫기 버튼을 두지 않는다. 아직 lease가 없거나 확정적으로 제어권을 잃어 drawer가 열릴 때만 Connection을 바로 표시한다. 이 화면 선택은 ADR-0015의 surface-local drawer 상태이며 Remote API나 host 설정에 저장하지 않는다.
 
 | Endpoint | Method | 용도 |
 |---|---|---|
@@ -1458,7 +1460,7 @@ Android E2E wrapper는 native bridge가 지원하면 위 heartbeat의 `AbortSign
 
 `/remote/v1/navigation` 과 같이 bearer token·IP/Origin gate 만 요구하고 **lease 는 요구하지 않는다** — 스트립은 호스트를 조작하지 않으므로 열람만 하는 접속에서도 지표가 보인다. `settings.remote.widgets` 가 `false` 면 frontend bridge 를 거치지 않고 `{"enabled": false, "items": []}` 를 돌려준다.
 
-스트립이 실제로 보이는 조건은 **호스트 게이트 AND 기기-로컬 게이트**의 논리곱이다([ADR-0132](../adr/0132-remote-widget-strip-device-local-toggle.md)). 기기 게이트는 drawer 의 `Display` 섹션 토글(`#widgetStripToggle`)이며 브라우저별 `localStorage["laymux.remote.widgetStrip"]`(`"0"` 만 끔, 기본 켬)에 산다 — 호스트로 전송되지 않고 다른 클라이언트에 영향을 주지 않으며, 연결 전에도 조작할 수 있다. 끄면 표시뿐 아니라 **폴 자체가 멈추고**(끈 기기는 `/remote/v1/widgets` 요청을 전혀 만들지 않는다) 다시 켜면 재개한다. 반대 방향은 없다 — 호스트 게이트가 꺼져 있으면 기기 토글로 되살릴 수 없다.
+스트립이 실제로 보이는 조건은 **호스트 게이트 AND 기기-로컬 게이트**의 논리곱이다([ADR-0132](../adr/0132-remote-widget-strip-device-local-toggle.md)). 기기 게이트는 drawer Settings 화면의 `Display` 섹션 토글(`#widgetStripToggle`)이며 브라우저별 `localStorage["laymux.remote.widgetStrip"]`(`"0"` 만 끔, 기본 켬)에 산다 — 호스트로 전송되지 않고 다른 클라이언트에 영향을 주지 않으며, 연결 전에도 조작할 수 있다. 끄면 표시뿐 아니라 **폴 자체가 멈추고**(끈 기기는 `/remote/v1/widgets` 요청을 전혀 만들지 않는다) 다시 켜면 재개한다. 반대 방향은 없다 — 호스트 게이트가 꺼져 있으면 기기 토글로 되살릴 수 없다.
 
 응답은 `{ enabled, fontFamily, fontSize, items[] }` 다. `fontFamily`/`fontSize` 는 `widgets.fontFamily`/`widgets.fontSize` 를 그대로 미러하며(빈 `fontFamily` = 인터페이스 글꼴 상속), 각 item 은 `{ id, type, align, title, kind, ... }` 형태다. `align` 은 `"left"|"right"` 뿐이고 데스크톱의 두 표면은 여기서 사라진다 — 원격 좌측은 `topBar.left`+`statusLine.left`, 우측은 `topBar.right`+`statusLine.right` 를 각 슬롯 배열 순서대로 이어 붙인 것이다. `statusLine.enabled` 가 꺼져 있거나 `type` 이 미등록이면 데스크톱이 그리지 않으므로 item 도 만들어지지 않는다.
 

@@ -289,6 +289,73 @@ mod tests {
         ));
     }
 
+    /// The drawer opens on workspace navigation once control is connected.
+    /// Notifications, connection, and infrequently changed device settings
+    /// remain available, but live on their own drawer pages instead of
+    /// surrounding the workspace list on every open.
+    #[test]
+    fn remote_page_html_keeps_secondary_pages_out_of_the_workspace_home() {
+        let html = remote_page_html();
+
+        let workspace_view = html
+            .split("<div id=\"drawerWorkspaceView\"")
+            .nth(1)
+            .expect("the workspace drawer view is present")
+            .split("</div><!-- /drawerWorkspaceView -->")
+            .next()
+            .unwrap();
+        assert!(workspace_view.contains("id=\"workspaceSection\""));
+        assert!(workspace_view.contains("id=\"dockSection\""));
+        assert!(!workspace_view.contains("id=\"notificationSection\""));
+        assert!(!workspace_view.contains("class=\"connection-panel\""));
+        assert!(!workspace_view.contains("id=\"displaySection\""));
+        assert!(!workspace_view.contains(">Workspaces</h2>"));
+
+        let notifications_view = html
+            .split("<div id=\"drawerNotificationsView\"")
+            .nth(1)
+            .expect("the notifications drawer view is present")
+            .split("</div><!-- /drawerNotificationsView -->")
+            .next()
+            .unwrap();
+        assert!(notifications_view.contains("id=\"notificationSection\""));
+        assert!(notifications_view.contains("id=\"notificationPanel\""));
+
+        let connection_view = html
+            .split("<div id=\"drawerConnectionView\"")
+            .nth(1)
+            .expect("the connection drawer view is present")
+            .split("</div><!-- /drawerConnectionView -->")
+            .next()
+            .unwrap();
+        assert!(connection_view.contains("class=\"connection-panel\""));
+
+        let settings_view = html
+            .split("<div id=\"drawerSettingsView\"")
+            .nth(1)
+            .expect("the settings drawer view is present")
+            .split("</div><!-- /drawerSettingsView -->")
+            .next()
+            .unwrap();
+        assert!(settings_view.contains("id=\"displaySection\""));
+        assert!(settings_view.contains("id=\"installSection\""));
+
+        assert!(html.contains("id=\"drawerNotificationsButton\""));
+        assert!(html.contains("id=\"drawerConnectionButton\""));
+        assert!(html.contains("id=\"drawerSettingsButton\""));
+        assert!(html.contains("id=\"drawerBack\""));
+        assert!(!html.contains("id=\"navClose\""));
+        assert!(!html.contains("class=\"drawer-close\""));
+        let drawer_header_css = html
+            .split(".drawer-header {")
+            .nth(1)
+            .and_then(|rules| rules.split('}').next())
+            .expect("the drawer header CSS is present");
+        assert!(drawer_header_css.contains("height: 32px;"));
+        assert!(html.contains("function setDrawerView(view)"));
+        assert!(html.contains("setDrawerView(leaseId ? \"workspace\" : \"connection\");"));
+    }
+
     /// ADR-0099: the manifest makes installation possible, but every browser hides
     /// the path inside its own menu. The offer lives in the drawer — a banner would
     /// spend the terminal rows ADR-0091 set out to win back.
@@ -549,7 +616,7 @@ mod tests {
         assert!(html.contains("workspace-item-content"));
         assert!(html.contains("workspace-pane-row"));
         assert!(html.contains("id=\"notificationSection\""));
-        assert!(html.contains("id=\"notificationToggle\""));
+        assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"notificationPanel\""));
         assert!(html.contains("id=\"notificationBadge\""));
         assert!(html.contains("renderNotificationPanel(data.notifications || []"));
