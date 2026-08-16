@@ -24,6 +24,11 @@ class RemoteBridge(private val activity: MainActivity) {
     fun disconnectRemote() {
         activity.runOnUiThread(activity::disconnectRemote)
     }
+
+    @JavascriptInterface
+    fun openExternalUrl(url: String?) {
+        activity.openExternalUrl(url ?: return)
+    }
 }
 
 internal fun stringWebMessagePayload(

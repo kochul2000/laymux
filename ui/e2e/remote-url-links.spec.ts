@@ -189,7 +189,110 @@ type RemoteTerminalWindow = typeof window & {
     getSelection: () => string;
   };
   __copiedSelections?: string[];
+  __openedExternalUrls?: string[];
 };
+
+/**
+ * Android wrapper mode: the secure WebView has no multiple-window support and no
+ * off-origin navigation, so `page.html` must route link activation to the native
+ * bridge instead of `window.open` (ADR-0162). The stub below stands in for the
+ * Kotlin side — HTTP over `requestRemoteHttp`, output over the binary transport —
+ * so the real xterm link path runs in wrapper mode.
+ */
+async function installAndroidWrapperBridge(
+  page: import("@playwright/test").Page,
+  options: { navigation: unknown; repoBase: string; snapshotText: string },
+) {
+  const { header } = snapshotFrames(options.snapshotText);
+  await page.addInitScript(
+    (args: { navigation: unknown; repoBase: string; header: string; payload: string }) => {
+      const target = window as RemoteTerminalWindow & {
+        LaymuxNative?: unknown;
+        LaymuxOutputTransport?: { onmessage?: (event: { data: ArrayBuffer }) => void };
+        laymuxAndroidE2e?: { onHttpResponse: (requestId: string, responseJson: string) => void };
+      };
+      target.__openedExternalUrls = [];
+      const encoder = new TextEncoder();
+
+      const responseBodyFor = (path: string): unknown => {
+        if (path.startsWith("/remote/v1/session/claim")) {
+          return {
+            active: true,
+            leaseId: "lease-links",
+            resumeToken: "resume-links",
+            heartbeatTimeoutSeconds: 45,
+          };
+        }
+        if (path.startsWith("/remote/v1/session/heartbeat")) {
+          return { active: true, leaseId: "lease-links" };
+        }
+        if (path.startsWith("/remote/v1/navigation")) return args.navigation;
+        if (path.includes("/github-repo")) return { cwd: "C:\\work", repoBase: args.repoBase };
+        if (path.includes("/focus")) return { focused: "terminal-1" };
+        if (path.includes("/resize")) return { resized: true };
+        return {};
+      };
+
+      target.LaymuxNative = {
+        requestRemoteHttp(requestId: string, _method: string, path: string) {
+          setTimeout(
+            () =>
+              target.laymuxAndroidE2e?.onHttpResponse(
+                requestId,
+                JSON.stringify({ status: 200, body: responseBodyFor(path) }),
+              ),
+            0,
+          );
+        },
+        cancelRemoteHttp() {},
+        setRemoteLease() {},
+        disconnectRemote() {},
+        openExternalUrl(url: string) {
+          target.__openedExternalUrls?.push(url);
+        },
+      };
+
+      const bridgeFrame = (kind: number, streamId: string, payload: Uint8Array): ArrayBuffer => {
+        const id = encoder.encode(streamId);
+        const frame = new Uint8Array(3 + id.byteLength + payload.byteLength);
+        frame[0] = kind;
+        frame[1] = (id.byteLength >> 8) & 0xff;
+        frame[2] = id.byteLength & 0xff;
+        frame.set(id, 3);
+        frame.set(payload, 3 + id.byteLength);
+        return frame.buffer;
+      };
+      const record = (recordKind: number, body: Uint8Array): Uint8Array => {
+        const payload = new Uint8Array(1 + body.byteLength);
+        payload[0] = recordKind;
+        payload.set(body, 1);
+        return payload;
+      };
+
+      target.LaymuxOutputTransport = {
+        postMessage(json: string) {
+          const message = JSON.parse(json) as { type: string; streamId: string };
+          if (message.type !== "open") return;
+          const deliver = (kind: number, payload: Uint8Array) =>
+            target.LaymuxOutputTransport?.onmessage?.({
+              data: bridgeFrame(kind, message.streamId, payload),
+            });
+          setTimeout(() => {
+            deliver(1, new Uint8Array(0));
+            deliver(2, record(2, encoder.encode(args.header)));
+            deliver(2, record(3, encoder.encode(args.payload)));
+          }, 0);
+        },
+      };
+    },
+    {
+      navigation: options.navigation,
+      repoBase: options.repoBase,
+      header,
+      payload: options.snapshotText,
+    },
+  );
+}
 
 test("Remote xterm opens URL and GitHub issue/PR links in safe new tabs", async ({
   context,
@@ -271,6 +374,77 @@ test("Remote xterm opens URL and GitHub issue/PR links in safe new tabs", async 
   await clickCell("Ignored: abc#12 #fff v1.2".length, 5);
   await page.waitForTimeout(100);
   expect(context.pages()).toHaveLength(pageCount);
+});
+
+test.describe("Android wrapper URL activation", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("Remote hands links to the native bridge instead of opening a tab", async ({
+    context,
+    page,
+  }) => {
+    await installRemoteMocks(context);
+    await installAndroidWrapperBridge(page, { navigation, repoBase, snapshotText });
+
+    await page.goto("http://remote.test/remote/?androidE2e=1");
+    await page.evaluate(() => {
+      const target = window as RemoteTerminalWindow;
+      const originalReset = target.Terminal.prototype.reset;
+      target.Terminal.prototype.reset = function resetCapturingInstance() {
+        target.__remoteTerm = this as never;
+        return originalReset.call(this);
+      };
+    });
+
+    await page.locator("#connect").click();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const buffer = (window as RemoteTerminalWindow).__remoteTerm?.buffer.active;
+          return Array.from(
+            { length: 10 },
+            (_, row) => buffer?.getLine(row)?.translateToString() || "",
+          ).join("\n");
+        }),
+      )
+      .toContain("Unsafe: blocked");
+
+    await page.waitForTimeout(250);
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const geometry = await page.evaluate(() => {
+      const term = (window as RemoteTerminalWindow).__remoteTerm;
+      return { cols: term?.cols || 1, rows: term?.rows || 1 };
+    });
+    const cellWidth = screenBox!.width / geometry.cols;
+    const cellHeight = screenBox!.height / geometry.rows;
+    const tapCell = (column: number, row: number) =>
+      page.touchscreen.tap(
+        screenBox!.x + (column + 0.5) * cellWidth,
+        screenBox!.y + (row + 0.5) * cellHeight,
+      );
+    const openedUrls = () =>
+      page.evaluate(() => (window as RemoteTerminalWindow).__openedExternalUrls || []);
+
+    const pageCount = context.pages().length;
+
+    await tapCell("Plain: https://".length, 0);
+    await expect.poll(openedUrls).toEqual([plainUrl]);
+    await tapCell("OSC: ".length, 2);
+    await expect.poll(openedUrls).toEqual([plainUrl, oscUrl]);
+    await tapCell("Issue: ".length, 4);
+    await expect.poll(openedUrls).toEqual([plainUrl, oscUrl, `${repoBase}/issues/123`]);
+
+    // The wrapper must keep the same scheme gate, and must never fall back to a
+    // new tab or a navigation of the Remote document itself.
+    await tapCell("Unsafe: ".length, 3);
+    await tapCell("Ignored: abc".length, 5);
+    await page.waitForTimeout(200);
+    expect(await openedUrls()).toEqual([plainUrl, oscUrl, `${repoBase}/issues/123`]);
+    expect(context.pages()).toHaveLength(pageCount);
+    expect(new URL(page.url()).pathname).toBe("/remote/");
+  });
 });
 
 test.describe("touch URL activation", () => {

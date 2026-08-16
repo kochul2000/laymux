@@ -2,6 +2,8 @@ package com.laymux.android
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.net.Uri
@@ -74,6 +76,7 @@ import com.laymux.android.web.CloudAuthException
 import com.laymux.android.web.CloudCookieInstaller
 import com.laymux.android.web.CloudNavigationPolicy
 import com.laymux.android.web.CloudWebViewClient
+import com.laymux.android.web.ExternalUrlPolicy
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -428,6 +431,26 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         remoteLeaseId = leaseId?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * The Remote document cannot open a link itself: the secure WebView has no multiple-window
+     * support and its navigation allowlist rejects every off-origin URL. Native starts the OS
+     * browser instead, after re-validating the terminal-controlled URL.
+     */
+    fun openExternalUrl(rawUrl: String) {
+        val url = ExternalUrlPolicy.browsableUrl(rawUrl) ?: return
+        runOnUiThread {
+            if (localWebSurface != LocalWebSurface.REMOTE) return@runOnUiThread
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                startActivity(intent)
+            } catch (_: ActivityNotFoundException) {
+                showCloudMessage("링크를 열 브라우저를 찾지 못했습니다.")
+            }
+        }
+    }
 
     fun selectedCloudInstanceId(): String? = selectedCloudInstanceId
 

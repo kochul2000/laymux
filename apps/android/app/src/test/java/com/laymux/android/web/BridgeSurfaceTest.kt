@@ -9,25 +9,27 @@ import org.junit.Test
 
 class BridgeSurfaceTest {
     @Test
-    fun remoteBridgeExposesOnlyTransportAndDisconnect() {
+    fun remoteBridgeExposesOnlyTransportDisconnectAndLinkOpening() {
         assertEquals(
             setOf(
                 "cancelRemoteHttp",
                 "requestRemoteHttp",
                 "setRemoteLease",
                 "disconnectRemote",
+                "openExternalUrl",
             ),
             javascriptMethods(RemoteBridge::class.java),
         )
     }
 
     @Test
-    fun pairingBridgeDoesNotExposeRemoteTransport() {
+    fun pairingBridgeDoesNotExposeRemoteTransportOrLinkOpening() {
         val methods = javascriptMethods(NativeBridge::class.java)
 
         assertTrue("pairing status must remain available", "getPairingStatus" in methods)
         assertTrue("per-instance deletion must remain available", "forgetPairing" in methods)
         assertTrue(methods.intersect(REMOTE_TRANSPORT_METHODS).isEmpty())
+        assertFalse("openExternalUrl" in methods)
     }
 
     @Test
