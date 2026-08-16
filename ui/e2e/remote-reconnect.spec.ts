@@ -96,6 +96,7 @@ type RemoteMockOptions = {
   heartbeatTimeoutSeconds?: number;
   heartbeatFailures?: number;
   heartbeatFailureStatus?: number;
+  claimTransitionConflicts?: number;
   reconnectPayloadDelayMs?: number;
   snapshotLineCount?: number;
 };
@@ -115,6 +116,7 @@ type InstrumentedRemoteWindow = typeof window & {
 async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
   const state = {
     claimRequests: 0,
+    claimTransitionConflictsRemaining: options.claimTransitionConflicts ?? 0,
     heartbeatRequests: 0,
     heartbeatFailuresRemaining: options.heartbeatFailures ?? 0,
     sockets: [] as WebSocketRoute[],
@@ -148,6 +150,19 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
       state.claimRequests += 1;
+      if (state.claimRequests > 1 && state.claimTransitionConflictsRemaining > 0) {
+        state.claimTransitionConflictsRemaining -= 1;
+        await route.fulfill({
+          status: 409,
+          json: {
+            active: true,
+            leaseId: "lease-1",
+            heartbeatTimeoutSeconds: options.heartbeatTimeoutSeconds ?? 45,
+            transitioning: true,
+          },
+        });
+        return;
+      }
       await route.fulfill({
         json: {
           active: true,
@@ -360,6 +375,7 @@ test("an automatic lease reclaim preserves dismissed composer input and scroll v
     heartbeatTimeoutSeconds: 5,
     heartbeatFailures: 1,
     heartbeatFailureStatus: 409,
+    claimTransitionConflicts: 1,
     snapshotLineCount: 300,
   });
   await instrumentRemotePage(page);
@@ -378,7 +394,7 @@ test("an automatic lease reclaim preserves dismissed composer input and scroll v
   await composerInput.evaluate((element: HTMLElement) => element.blur());
   await expect(composerInput).not.toBeFocused();
 
-  await expect.poll(() => remote.claimRequests, { timeout: 5000 }).toBe(2);
+  await expect.poll(() => remote.claimRequests, { timeout: 5000 }).toBe(3);
   await expect.poll(() => resetCount(page)).toBe(2);
   await expect(composerInput).not.toBeFocused();
   await expect
