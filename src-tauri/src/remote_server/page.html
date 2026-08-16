@@ -3860,6 +3860,17 @@
           try {
             const url = new URL(uri);
             if (url.protocol !== "http:" && url.protocol !== "https:") return;
+            // The Android wrapper WebView disables multiple windows, so
+            // `window.open` cannot surface a link there. Hand the already
+            // scheme-checked URL to native, which re-validates it and starts
+            // the OS browser. Older APKs without the bridge method keep the
+            // previous no-op instead of navigating the Remote document away.
+            if (androidE2eMode) {
+              if (typeof window.LaymuxNative?.openExternalUrl === "function") {
+                window.LaymuxNative.openExternalUrl(url.href);
+              }
+              return;
+            }
             window.open(url.href, "_blank", "noopener,noreferrer");
           } catch (_) {
             // Ignore malformed terminal-controlled links.

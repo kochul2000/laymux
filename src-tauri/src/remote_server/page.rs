@@ -510,6 +510,10 @@ mod tests {
         assert!(html.contains("allowNonHttpProtocols: false"));
         assert!(html.contains("url.protocol !== \"http:\" && url.protocol !== \"https:\""));
         assert!(html.contains("window.open(url.href, \"_blank\", \"noopener,noreferrer\")"));
+        // The Android wrapper WebView cannot open a window, so links there go to
+        // the OS browser through the native bridge instead (ADR-0162).
+        assert!(html.contains("if (typeof window.LaymuxNative?.openExternalUrl === \"function\")"));
+        assert!(html.contains("window.LaymuxNative.openExternalUrl(url.href);"));
         assert!(html.contains("terminalOptionsForAppearance"));
         assert!(html.contains("terminalInfo.appearance"));
         assert!(html.contains("inputWriteChain"));
