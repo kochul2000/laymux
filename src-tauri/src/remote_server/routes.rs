@@ -386,6 +386,17 @@ fn attempt_claim(
     }))
 }
 
+fn complete_handoff_claim_attempt(
+    settings: &crate::settings::models::RemoteSettings,
+    current: &mut RemoteControlState,
+    body: &ClaimRequest,
+    remote_addr: &str,
+    transition: RemoteOwnerTransition,
+) -> ClaimAttempt {
+    current.finalize_owner_transition_if_drained(transition);
+    attempt_claim(settings, current, body, remote_addr, false)
+}
+
 async fn remote_session_claim(
     State(server): State<ServerState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
@@ -403,16 +414,16 @@ async fn remote_session_claim(
     let attempt = match attempt {
         ClaimAttempt::AwaitHandoff(transition) => {
             // A voluntary release is draining and the claimant proved the
-            // handoff capability: follow the drain, then claim the freed
-            // lease instead of bouncing the reconnect on a generic 409.
-            if let Err(err) =
-                wait_for_remote_owner_transition_async(&server.app_state, transition).await
-            {
-                return json_error(StatusCode::CONFLICT, &err);
-            }
+            // handoff capability: follow the drain for its bounded budget,
+            // then re-check the owner state under the lock. If the operation
+            // is still draining, `attempt_claim` returns the structured status
+            // conflict (`transitioning: true`) that keeps auto-reconnect armed.
+            // A lock failure is observed again by the state access below and
+            // remains an internal error rather than a retryable conflict.
+            let _wait_result =
+                wait_for_remote_owner_transition_async(&server.app_state, transition).await;
             match with_effective_remote_control_state(&server.app_state, |settings, current| {
-                current.finalize_owner_transition_if_drained(transition);
-                attempt_claim(settings, current, &body, &remote_addr, false)
+                complete_handoff_claim_attempt(settings, current, &body, &remote_addr, transition)
             }) {
                 Ok(attempt) => attempt,
                 Err(err) => return internal_error(err),
@@ -923,9 +934,10 @@ fn terminal_size_is_positive(cols: u16, rows: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        attempt_claim, claim_input_busy_response, exact_resize_unavailable_response,
-        terminal_control_response, terminal_size_is_positive, ClaimAttempt, ClaimRequest,
-        ClaimResponse, RemoteControlLease, RemoteControlState, TerminalResizeRequest,
+        attempt_claim, claim_input_busy_response, complete_handoff_claim_attempt,
+        exact_resize_unavailable_response, terminal_control_response, terminal_size_is_positive,
+        ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlLease, RemoteControlState,
+        TerminalResizeRequest,
     };
     use crate::lock_ext::MutexExt;
     use crate::settings::models::RemoteSettings;
@@ -1247,6 +1259,37 @@ mod tests {
         ));
         assert_ne!(second.status.lease_id.as_deref(), Some(lease_id.as_str()));
         assert_ne!(second.resume_token, granted.resume_token);
+    }
+
+    #[tokio::test]
+    async fn handoff_wait_timeout_returns_a_retryable_transition_conflict() {
+        let settings = enabled_settings();
+        let mut control = RemoteControlState::default();
+        let granted = expect_granted(attempt_claim(
+            &settings,
+            &mut control,
+            &claim_body(None),
+            "127.0.0.1:1",
+            true,
+        ));
+        let lease_id = granted.status.lease_id.as_deref().unwrap();
+        control.register_enqueued_remote_operation_for_test(lease_id, "t1");
+        let transition = control
+            .begin_voluntary_release_transition(Instant::now())
+            .expect("the active lease should begin the release transition");
+
+        let rejected = expect_rejected(complete_handoff_claim_attempt(
+            &settings,
+            &mut control,
+            &claim_body(Some(&granted.resume_token)),
+            "127.0.0.1:1",
+            transition,
+        ));
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        let body = to_bytes(rejected.into_body(), usize::MAX).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["active"], true);
+        assert_eq!(body["transitioning"], true);
     }
 
     #[test]

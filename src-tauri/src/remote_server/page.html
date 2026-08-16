@@ -8801,9 +8801,10 @@
           if (reclaimingOurOwn) {
             // Do not paint an expiry we are already undoing: the red notice used to
             // flash for the second before the reconnect replaced it. Skipping the
-            // release matters too — releasing puts the server in a drain
-            // (`transitioning`) that would answer our own reclaim with 409, and a
-            // 409 disarms the intent.
+            // release matters too — it would add an unnecessary voluntary drain
+            // before our next claim. A drain that outlives the server's bounded
+            // wait now returns `transitioning: true` and keeps this intent armed,
+            // but avoiding that round trip remains the fastest recovery path.
             setConnectionHint("Reconnecting...", false);
             setStatus("Reconnecting...", false, true);
             // Leaves the navigation menu as the user had it: this is not a state that
