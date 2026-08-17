@@ -28,7 +28,7 @@ pub(crate) fn is_valid_grok_session_id(id: &str) -> bool {
         return false;
     }
     for (index, byte) in bytes.iter().enumerate() {
-        let hex = matches!(byte, b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F');
+        let hex = byte.is_ascii_hexdigit();
         let hyphen = *byte == b'-' && matches!(index, 8 | 13 | 18 | 23);
         if !hex && !hyphen {
             return false;
