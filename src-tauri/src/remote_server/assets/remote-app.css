@@ -40,6 +40,7 @@
         --fs-xs: 10px;
         --fs-sm: 11px;
         --fs-md: 13px;
+        --remote-composer-font-size: 16px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
         --key-bar-control-height: 26px;
@@ -361,7 +362,7 @@
         border-bottom: 0;
         background: var(--bg-overlay);
         box-shadow: 0 -8px 24px #00000066;
-        font-size: 14px;
+        font-size: var(--remote-composer-font-size);
       }
       .composer-suggest-list[hidden] {
         display: none;
@@ -395,7 +396,7 @@
         padding: 7px 8px;
         background: var(--bg-base);
         color: var(--text-primary);
-        font-size: 16px;
+        font-size: var(--remote-composer-font-size);
         line-height: 1.4;
         outline: none;
         overflow: auto;
@@ -700,6 +701,40 @@
         opacity: 0.8;
         text-overflow: ellipsis;
         white-space: nowrap;
+      }
+      .nav-number-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 64px auto;
+        align-items: center;
+        gap: 6px;
+        margin: 0 8px 8px;
+        padding: 3px 4px;
+      }
+      .nav-number-copy {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .nav-number-desc,
+      .nav-number-unit,
+      .nav-settings-status {
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .nav-number-row input {
+        width: 64px;
+        min-width: 0;
+        padding: 4px 5px;
+      }
+      .nav-number-row input:disabled {
+        opacity: 0.55;
+      }
+      .nav-settings-status {
+        margin: -2px 12px 8px;
+      }
+      .nav-settings-status.error {
+        color: var(--danger);
       }
       .install-panel {
         display: flex;

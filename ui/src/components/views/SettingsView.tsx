@@ -2023,22 +2023,60 @@ function InterfaceSection() {
   );
 }
 
-// -- Section: Remote --
+// -- Sections: Remote Connection / Remote Display --
 
-type RemoteSectionDraft = RemoteSettings & {
+type RemoteDisplaySettings = Pick<
+  RemoteSettings,
+  | "terminalFontSize"
+  | "composerFontSize"
+  | "snapshotMaxKib"
+  | "serveTerminalFont"
+  | "widgets"
+  | "scrollSensitivity"
+  | "fastScrollSensitivity"
+  | "touchScrollSensitivity"
+>;
+type RemoteConnectionSettings = Omit<RemoteSettings, keyof RemoteDisplaySettings>;
+const REMOTE_FONT_SIZE_MIN = 6;
+const REMOTE_FONT_SIZE_MAX = 72;
+
+function normalizeRemoteFontSize(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(REMOTE_FONT_SIZE_MAX, Math.max(REMOTE_FONT_SIZE_MIN, Math.trunc(parsed)));
+}
+
+type RemoteSectionDraft = RemoteConnectionSettings & {
   allowedIpsText: string;
   customHostInput: string;
 };
 
 function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
   return {
-    ...remote,
+    enabled: remote.enabled,
+    bindAddress: remote.bindAddress,
+    allowedOrigins: remote.allowedOrigins,
+    allowedIps: remote.allowedIps,
+    tailscaleOnly: remote.tailscaleOnly,
+    authToken: remote.authToken,
+    heartbeatTimeoutSeconds: remote.heartbeatTimeoutSeconds,
+    androidBackgroundLeaseSeconds: remote.androidBackgroundLeaseSeconds,
+    autoMobileModeMinWidth: remote.autoMobileModeMinWidth,
+    preferredHost: remote.preferredHost,
+    customHosts: remote.customHosts,
+    cloudEnabled: remote.cloudEnabled,
+    relayBaseUrl: remote.relayBaseUrl,
+    cloudInstanceId: remote.cloudInstanceId,
+    cloudTunnelUrl: remote.cloudTunnelUrl,
+    cloudServerBaseUrl: remote.cloudServerBaseUrl,
+    cloudAutoReconnect: remote.cloudAutoReconnect,
+    cloudAccessMode: remote.cloudAccessMode,
     allowedIpsText: formatAllowedIps(remote.allowedIps),
     customHostInput: "",
   };
 }
 
-function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
+function toRemoteSettings(draft: RemoteSectionDraft): RemoteConnectionSettings {
   const { allowedIpsText, customHostInput: _customHostInput, ...remote } = draft;
   const allowedIps = parseAllowedIps(allowedIpsText);
   const customHosts = normalizeCustomHosts(remote.customHosts);
@@ -2050,22 +2088,9 @@ function toRemoteSettings(draft: RemoteSectionDraft): RemoteSettings {
     customHosts,
     allowedIps: allowedIps.length > 0 ? allowedIps : LOOPBACK_ALLOWED_IPS,
     autoMobileModeMinWidth: normalizeAutoMobileWidth(remote.autoMobileModeMinWidth),
-    snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
     androidBackgroundLeaseSeconds: Math.min(
       900,
       Math.max(0, Math.trunc(Number(remote.androidBackgroundLeaseSeconds) || 0)),
-    ),
-    scrollSensitivity: normalizeScrollSensitivity(
-      remote.scrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
-    ),
-    fastScrollSensitivity: normalizeScrollSensitivity(
-      remote.fastScrollSensitivity,
-      DEFAULT_FAST_SCROLL_SENSITIVITY,
-    ),
-    touchScrollSensitivity: normalizeScrollSensitivity(
-      remote.touchScrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
     ),
   };
 }
@@ -2089,13 +2114,15 @@ async function reconcileRemoteAccessAfterRemoteSave(
   setStatus(current);
 }
 
-function RemoteSection() {
+function RemoteConnectionSection() {
   const { t } = useTranslation("settings");
   const storeRemote = useSettingsStore((s) => s.remote);
   const setRemote = useSettingsStore((s) => s.setRemote);
   const storeDraft = useMemo(() => toRemoteSectionDraft(storeRemote), [storeRemote]);
-  const [remote, setDraftRemote] = useDraft<RemoteSectionDraft>("remote", storeDraft, (draft) =>
-    setRemote(toRemoteSettings(draft)),
+  const [remote, setDraftRemote] = useDraft<RemoteSectionDraft>(
+    "remoteConnection",
+    storeDraft,
+    (draft) => setRemote(toRemoteSettings(draft)),
   );
   const hostOptions = useRemoteHostOptions(remote.customHosts);
   const preferredAvailable =
@@ -2274,7 +2301,7 @@ function RemoteSection() {
 
   return (
     <div>
-      <SectionTitle>{t("remote.title")}</SectionTitle>
+      <SectionTitle>{t("remote.connectionTitle")}</SectionTitle>
 
       <SubGroup title={t("remote.groupAccess")}>
         <ToggleRow
@@ -2372,27 +2399,6 @@ function RemoteSection() {
           </div>
         </SettingRow>
 
-        <SettingRow label={t("remote.snapshotMaxKib")} desc={t("remote.snapshotMaxKibDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-snapshot-max-kib-input"
-              type="number"
-              min={SNAPSHOT_MAX_KIB_MIN}
-              max={SNAPSHOT_MAX_KIB_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.snapshotMaxKib}
-              onChange={(event) =>
-                update({ snapshotMaxKib: normalizeSnapshotMaxKib(event.target.value) })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              KiB
-            </span>
-          </div>
-        </SettingRow>
-
         <SettingRow
           label="Android 백그라운드 제어권 유지"
           desc="Android 앱을 잠시 벗어났을 때 Remote 제어권을 유지할 시간입니다. 0이면 즉시 반납합니다."
@@ -2421,91 +2427,6 @@ function RemoteSection() {
             </span>
           </div>
         </SettingRow>
-
-        <SettingRow label={t("remote.scrollSensitivity")} desc={t("remote.scrollSensitivityDesc")}>
-          <FocusInput
-            data-testid="remote-settings-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.scrollSensitivity}
-            onChange={(event) =>
-              update({
-                scrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.fastScrollSensitivity")}
-          desc={t("remote.fastScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-fast-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.fastScrollSensitivity}
-            onChange={(event) =>
-              update({
-                fastScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_FAST_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.touchScrollSensitivity")}
-          desc={t("remote.touchScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-touch-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.touchScrollSensitivity}
-            onChange={(event) =>
-              update({
-                touchScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <ToggleRow
-          label={t("remote.serveTerminalFont")}
-          desc={t("remote.serveTerminalFontDesc")}
-          testid="remote-settings-serve-terminal-font-toggle"
-          checked={remote.serveTerminalFont}
-          onChange={(value) => update({ serveTerminalFont: value })}
-        />
-
-        <ToggleRow
-          label={t("remote.widgets")}
-          desc={t("remote.widgetsDesc")}
-          testid="remote-settings-widgets-toggle"
-          checked={remote.widgets}
-          onChange={(value) => update({ widgets: value })}
-        />
       </SubGroup>
 
       <SubGroup title={t("remote.groupHosts")}>
@@ -2664,6 +2585,214 @@ function RemoteSection() {
             onChange={(event) => update({ relayBaseUrl: event.target.value })}
           />
         </SettingRow>
+      </SubGroup>
+    </div>
+  );
+}
+
+function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings {
+  return {
+    terminalFontSize: remote.terminalFontSize,
+    composerFontSize: remote.composerFontSize,
+    snapshotMaxKib: remote.snapshotMaxKib,
+    serveTerminalFont: remote.serveTerminalFont,
+    widgets: remote.widgets,
+    scrollSensitivity: remote.scrollSensitivity,
+    fastScrollSensitivity: remote.fastScrollSensitivity,
+    touchScrollSensitivity: remote.touchScrollSensitivity,
+  };
+}
+
+function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDisplaySettings {
+  return {
+    ...remote,
+    terminalFontSize: normalizeRemoteFontSize(remote.terminalFontSize, 14),
+    composerFontSize: normalizeRemoteFontSize(remote.composerFontSize, 16),
+    snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
+    scrollSensitivity: normalizeScrollSensitivity(
+      remote.scrollSensitivity,
+      DEFAULT_SCROLL_SENSITIVITY,
+    ),
+    fastScrollSensitivity: normalizeScrollSensitivity(
+      remote.fastScrollSensitivity,
+      DEFAULT_FAST_SCROLL_SENSITIVITY,
+    ),
+    touchScrollSensitivity: normalizeScrollSensitivity(
+      remote.touchScrollSensitivity,
+      DEFAULT_SCROLL_SENSITIVITY,
+    ),
+  };
+}
+
+function RemoteDisplaySection() {
+  const { t } = useTranslation("settings");
+  const storeRemote = useSettingsStore((s) => s.remote);
+  const setRemote = useSettingsStore((s) => s.setRemote);
+  const storeDraft = useMemo(() => toRemoteDisplaySettings(storeRemote), [storeRemote]);
+  const [remote, setDraftRemote] = useDraft<RemoteDisplaySettings>(
+    "remoteDisplay",
+    storeDraft,
+    (draft) => setRemote(normalizeRemoteDisplaySettings(draft)),
+  );
+  const update = (partial: Partial<RemoteDisplaySettings>) =>
+    setDraftRemote((previous) => ({ ...previous, ...partial }));
+
+  return (
+    <div>
+      <SectionTitle>{t("remote.displayTitle")}</SectionTitle>
+
+      <SubGroup title={t("remote.groupDisplay")}>
+        <SettingRow label={t("remote.terminalFontSize")} desc={t("remote.terminalFontSizeDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-terminal-font-size-input"
+              type="number"
+              min={REMOTE_FONT_SIZE_MIN}
+              max={REMOTE_FONT_SIZE_MAX}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.terminalFontSize}
+              onChange={(event) =>
+                update({
+                  terminalFontSize: normalizeRemoteFontSize(event.target.value, 14),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              px
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.composerFontSize")} desc={t("remote.composerFontSizeDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-composer-font-size-input"
+              type="number"
+              min={REMOTE_FONT_SIZE_MIN}
+              max={REMOTE_FONT_SIZE_MAX}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.composerFontSize}
+              onChange={(event) =>
+                update({
+                  composerFontSize: normalizeRemoteFontSize(event.target.value, 16),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              px
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.snapshotMaxKib")} desc={t("remote.snapshotMaxKibDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-snapshot-max-kib-input"
+              type="number"
+              min={SNAPSHOT_MAX_KIB_MIN}
+              max={SNAPSHOT_MAX_KIB_MAX}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.snapshotMaxKib}
+              onChange={(event) =>
+                update({ snapshotMaxKib: normalizeSnapshotMaxKib(event.target.value) })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              KiB
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.scrollSensitivity")} desc={t("remote.scrollSensitivityDesc")}>
+          <FocusInput
+            data-testid="remote-settings-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.scrollSensitivity}
+            onChange={(event) =>
+              update({
+                scrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.fastScrollSensitivity")}
+          desc={t("remote.fastScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="remote-settings-fast-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.fastScrollSensitivity}
+            onChange={(event) =>
+              update({
+                fastScrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_FAST_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.touchScrollSensitivity")}
+          desc={t("remote.touchScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="remote-settings-touch-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.touchScrollSensitivity}
+            onChange={(event) =>
+              update({
+                touchScrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <ToggleRow
+          label={t("remote.serveTerminalFont")}
+          desc={t("remote.serveTerminalFontDesc")}
+          testid="remote-settings-serve-terminal-font-toggle"
+          checked={remote.serveTerminalFont}
+          onChange={(value) => update({ serveTerminalFont: value })}
+        />
+
+        <ToggleRow
+          label={t("remote.widgets")}
+          desc={t("remote.widgetsDesc")}
+          testid="remote-settings-widgets-toggle"
+          checked={remote.widgets}
+          onChange={(value) => update({ widgets: value })}
+        />
       </SubGroup>
     </div>
   );
@@ -5378,7 +5507,10 @@ export function SettingsView() {
   // external target wins until the user picks a section, which releases it;
   // closing the settings modal releases it too (see `closeSettingsPatch`), so
   // reopening never replays a stale request.
-  const activeNav = settingsNavTarget ?? navChoice;
+  const requestedNav = settingsNavTarget ?? navChoice;
+  // Keep the historical automation target `remote` as an alias for the
+  // connection page while exposing the two new navigation entries to users.
+  const activeNav = requestedNav === "remote" ? "remoteConnection" : requestedNav;
   const setActiveNav = (id: string) => {
     setNavChoice(id);
     if (useUiStore.getState().settingsNavTarget !== null) setSettingsNavTarget(null);
@@ -5444,7 +5576,7 @@ export function SettingsView() {
   );
 
   const handleSave = () => {
-    const shouldReconcileRemote = dirtySetRef.current.has("remote");
+    const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
@@ -5615,12 +5747,22 @@ export function SettingsView() {
           <button
             data-testid="nav-remote"
             className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("remote")}
-            onClick={() => setActiveNav("remote")}
-            onMouseEnter={() => setNavHover("remote")}
+            style={navBtnStyle("remoteConnection")}
+            onClick={() => setActiveNav("remoteConnection")}
+            onMouseEnter={() => setNavHover("remoteConnection")}
             onMouseLeave={() => setNavHover(null)}
           >
-            {t("nav.remote")}
+            {t("nav.remoteConnection")}
+          </button>
+          <button
+            data-testid="nav-remote-display"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("remoteDisplay")}
+            onClick={() => setActiveNav("remoteDisplay")}
+            onMouseEnter={() => setNavHover("remoteDisplay")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.remoteDisplay")}
           </button>
 
           {/* Agents */}
@@ -5810,7 +5952,8 @@ export function SettingsView() {
             {activeNav === "paste" && <PasteSection />}
             {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
-            {activeNav === "remote" && <RemoteSection />}
+            {activeNav === "remoteConnection" && <RemoteConnectionSection />}
+            {activeNav === "remoteDisplay" && <RemoteDisplaySection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "grok" && <GrokSection />}

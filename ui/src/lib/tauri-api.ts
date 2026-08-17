@@ -1040,6 +1040,10 @@ export interface RemoteSettings {
   androidBackgroundLeaseSeconds: number;
   autoMobileModeMinWidth: number;
   snapshotMaxKib: number;
+  /** Remote terminal cell font size in pixels. */
+  terminalFontSize: number;
+  /** Remote input composer and suggestion font size in pixels. */
+  composerFontSize: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;

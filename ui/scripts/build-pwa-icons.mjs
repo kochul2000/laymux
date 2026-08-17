@@ -16,6 +16,7 @@
  * Run: cd ui && npm run build:pwa-icons
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { Buffer } from "node:buffer";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

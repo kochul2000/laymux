@@ -30,6 +30,7 @@ use super::assets::{
     remote_xterm_css, remote_xterm_js,
 };
 use super::auth::remote_guard;
+use super::display_settings::{remote_display_settings, update_remote_display_settings};
 use super::font_assets::FONT_ROUTE_PATH;
 use super::github_repo_routes::remote_terminal_github_repo;
 use super::lease::{
@@ -146,6 +147,12 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_session_heartbeat),
         )
         .route("/remote/v1/session/release", post(remote_session_release))
+        .route(
+            "/remote/v1/display-settings",
+            get(remote_display_settings)
+                .put(update_remote_display_settings)
+                .layer(DefaultBodyLimit::max(2 * 1024)),
+        )
         .route("/remote/v1/navigation", get(remote_navigation))
         .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).

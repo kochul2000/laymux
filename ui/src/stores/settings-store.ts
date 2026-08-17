@@ -710,6 +710,8 @@ const DEFAULT_REMOTE: RemoteSettings = {
   androidBackgroundLeaseSeconds: 900,
   autoMobileModeMinWidth: 720,
   snapshotMaxKib: 4,
+  terminalFontSize: 14,
+  composerFontSize: 16,
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,

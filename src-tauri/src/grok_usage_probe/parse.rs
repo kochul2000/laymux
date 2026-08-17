@@ -172,7 +172,7 @@ fn parse_reset(screen: &str) -> Option<String> {
 
 /// TUI frames keep box-drawing on the same row as `Resets: August 20, 16:13`.
 fn sanitize_reset_text(rest: &str) -> String {
-    rest.split(|c: char| c == '│' || c == '|' || c == '┃' || c == '┤')
+    rest.split(['│', '|', '┃', '┤'])
         .next()
         .unwrap_or(rest)
         .trim()

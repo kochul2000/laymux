@@ -306,6 +306,37 @@ fn remote_snapshot_max_kib_defaults_to_four() {
 }
 
 #[test]
+fn remote_display_font_sizes_default_and_validate_as_pc_owned_settings() {
+    let defaults = Settings::default();
+    assert_eq!(defaults.remote.terminal_font_size, 14);
+    assert_eq!(defaults.remote.composer_font_size, 16);
+
+    let valid = prepare_settings_update(
+        &defaults,
+        &json!({ "remote": { "terminalFontSize": 18, "composerFontSize": 20 } }),
+    );
+    assert!(valid.valid, "errors: {:?}", valid.errors);
+    let candidate = valid.candidate.unwrap();
+    assert_eq!(candidate.remote.terminal_font_size, 18);
+    assert_eq!(candidate.remote.composer_font_size, 20);
+
+    for (field, value) in [
+        ("terminalFontSize", 5),
+        ("terminalFontSize", 73),
+        ("composerFontSize", 5),
+        ("composerFontSize", 73),
+    ] {
+        let mut patch = json!({ "remote": {} });
+        patch["remote"][field] = json!(value);
+        let prepared = prepare_settings_update(&Settings::default(), &patch);
+        assert!(!prepared.valid, "{field}={value} must be rejected");
+        assert!(prepared.errors.iter().any(|issue| {
+            issue.code == "out_of_range" && issue.path == format!("/remote/{field}")
+        }));
+    }
+}
+
+#[test]
 fn exit_interrupt_defaults_are_off_and_conservative() {
     let defaults = Settings::default();
     assert!(

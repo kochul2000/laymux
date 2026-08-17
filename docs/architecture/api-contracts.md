@@ -297,7 +297,7 @@ Tauri command 는 두 개다([ADR-0106](../adr/0106-github-list-view-repo-regist
 
 remote 의 실효 활성화 상태는 `settings.remote.enabled || runtimeRemoteAccess.enabled` 로 계산한다. 토큰은 `settings.remote.authToken` 을 우선 사용하고, 이 값이 비어 있을 때만 런타임 허용 토큰을 사용한다. IP allowlist, Origin 정책, heartbeat timeout 은 `settings.remote` 계약을 따른다.
 
-Remote Access 모달은 런타임 성격의 조작만 담당한다: 이번 실행 동안 허용, URL/token 복사, 데스크톱 앱 내부 모바일 모드 열기, remote controller reclaim. 시작 시 자동 허용, IP allowlist, 자동 모바일 폭, 수동 호스트 목록, 기본 호스트 같은 영속 설정은 Settings → Remote 섹션에서 편집하며 기존 settings store → `persistSession()` → `save_settings` 경로로 `settings.json` 에 저장된다. 데스크톱 앱 내부의 모바일 모드는 기존 `/remote/` Direct Remote UI를 `localApp=1&autoConnect=1` iframe으로 여는 로컬 전용 표시 모드이며, 외부 브라우저 지원을 새로 의미하지 않는다. 해당 iframe은 remote lease를 잡을 수 있으므로 PC WebView의 remote-control overlay는 로컬 모바일 모드가 활성인 동안 숨긴다.
+Remote Access 모달은 런타임 성격의 조작만 담당한다: 이번 실행 동안 허용, URL/token 복사, 데스크톱 앱 내부 모바일 모드 열기, remote controller reclaim. PC Settings의 Remote 그룹은 `Remote Connection`과 `Remote Display`로 나뉜다. 시작 시 자동 허용, 인증·IP allowlist, 자동 모바일 폭, host·Cloud 연결 정책은 Connection에서, Remote terminal/composer 글자 크기와 checkpoint·스크롤·폰트 전송·위젯 표시는 Display에서 편집한다. 두 화면은 `settings.remote`의 겹치지 않는 부분 draft만 저장하므로 한쪽의 미저장 입력을 다른 쪽 갱신이 덮지 않는다. 저장은 기존 settings store → `persistSession()` → `save_settings` 경로로 `settings.json` 에 반영된다. 데스크톱 앱 내부의 모바일 모드는 기존 `/remote/` Direct Remote UI를 `localApp=1&autoConnect=1` iframe으로 여는 로컬 전용 표시 모드이며, 외부 브라우저 지원을 새로 의미하지 않는다. 해당 iframe은 remote lease를 잡을 수 있으므로 PC WebView의 remote-control overlay는 로컬 모바일 모드가 활성인 동안 숨긴다.
 
 desktop WebView의 controller owner snapshot은 `lib/remote-control-status.ts` 전역 coordinator가 소유한다([ADR-0128](../adr/0128-app-global-remote-control-status-coordinator.md)). listener 설치 뒤 initial `get_remote_control_status`를 한 번 호출하고, Remote active 동안에만 이전 조회 완료 후 3초 fallback poll 하나를 예약한다. `TerminalView` 수와 무관하게 listener·조회는 window당 하나이며, 각 surface는 `useSyncExternalStore` snapshot만 구독한다. listener 또는 initial snapshot이 준비되지 않은 `null` 상태는 Local human input·resize를 fail-closed한다. event revision은 늦은 snapshot이 최신 owner event를 덮지 못하게 하고, Remote→Local `releaseRevision`은 React batch 안의 짧은 owner 전환도 terminal 복귀 reflow에 전달한다.
 
@@ -328,6 +328,8 @@ Direct 네트워크 연결 실패에만 새 Cloud session으로 fallback한다. 
     "heartbeatTimeoutSeconds": 45,      // 기본 45초, 최소 30초로 clamp
     "autoMobileModeMinWidth": 720,      // 앱 창 폭이 이 값 이하이거나, 휴대폰(세로 화면+짧은 변이 이 값 이하)에서 RDP 접속 시 Remote Access 모달 자동 표시. 0 = 비활성
     "snapshotMaxKib": 4,                // 원격 screen checkpoint의 scrollback 소프트 예산(KiB). 1~1024로 clamp; 현재 화면·alt buffer·mode 복원 bytes는 예산을 넘을 수 있으나 절대 상한은 1 MiB
+    "terminalFontSize": 14,              // Remote terminal 전용 글자 크기(px). 6~72, desktop profile 크기와 별개
+    "composerFontSize": 16,              // Remote 입력 composer와 추천 목록 글자 크기(px). 6~72
     "preferredHost": "",               // 복사 URL 기본 호스트. 빈 값 = 자동
     "customHosts": [],                  // 감지 후보 외에 URL host select 에 표시할 수동 호스트
     "cloudEnabled": false,              // 클라우드 연결 영속 설정. pairing 전 기본값 false
@@ -1385,6 +1387,15 @@ Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015
 | surface 로컬 상태 | DOM pixel size, devicePixelRatio, xterm canvas/WebGL atlas, cell metrics cache, scroll viewport, selection, focus, IME/composition, drawer state | PC WebView와 browser remote가 각자 보유한다. Remote API 계약에 섞지 않는다. |
 | controller owner 상태 | active input writer, active resize writer, workspace/pane focus request 권한 | active lease가 있으면 remote가 owner이고, lease가 없으면 PC가 owner다. owner가 아닌 surface는 PTY write/resize를 보내지 않는다. |
 
+Remote 표시 글자 크기의 SoT는 PC의 `settings.remote.terminalFontSize`(기본 14)와 `settings.remote.composerFontSize`(기본 16)이며 둘 다 6~72 정수다([ADR-0173](../adr/0173-remote-display-settings-pc-owned-and-lease-gated.md)). 전자는 Remote xterm cell에만 적용하고 desktop profile 크기는 바꾸지 않으며, 후자는 composer textarea와 history/autocomplete 목록에 함께 적용한다. Remote Settings drawer는 연결 시와 drawer 진입 시 아래의 좁은 projection을 다시 읽고, 저장 성공 시 현재 xterm appearance를 다시 적용해 fit하며 composer CSS 변수도 즉시 갱신한다. revision 충돌은 `409`로 받고 최신 projection을 재조회한다.
+
+| Endpoint | Method | 권한·응답 |
+|---|---|---|
+| `/remote/v1/display-settings` | GET | 기존 Remote enabled + Direct bearer/IP/Origin 또는 Android E2E session/AEAD gate. lease 불필요. `{terminalFontSize,composerFontSize,revision}`만 반환 |
+| `/remote/v1/display-settings` | PUT | 같은 인증 gate + active controller `leaseId`. body `{leaseId,expectedRevision,terminalFontSize,composerFontSize}`; 공통 settings snapshot/apply bridge의 CAS로 검증·Zustand 갱신·영속 저장. stale revision은 `409` |
+
+Android E2E의 native encrypted HTTP bridge exact allowlist에는 위 GET/PUT 조합만 있으며 다른 method와 범용 settings 경로는 열지 않는다. 따라서 Android도 PC가 제공하는 같은 Remote 문서와 endpoint를 쓰되 기존 pairing/session/AEAD 경계와 mutation lease 경계를 모두 유지한다. PUT은 lease 검증부터 frontend apply 완료까지 owner handoff barrier에 등록되므로 release·reclaim·expiry가 먼저 선형화된 stale controller는 저장할 수 없고, PUT이 먼저 등록된 경우 handoff가 해당 저장을 drain한다.
+
 브라우저 remote의 모바일 터치 스크롤/선택은 surface-local 처리다. Remote HTML은 Pointer Events 기반 gesture layer를 두고 일반 한 손 드래그를 텍스트 선택에 쓰지 않는다. normal buffer이며 mouse tracking mode가 꺼진 shell/log 화면에서는 한 손 세로 스와이프가 xterm scrollback을 움직이고, alternate buffer 또는 mouse tracking mode에서는 한 손 스와이프를 TUI 앱 내부 스크롤 입력으로 전달한다. scrollback을 위로 올리면 데스크톱 TerminalView와 같은 하단 이동 버튼을 띄우고, 누르면 해당 remote xterm viewport만 live tail로 이동한 뒤 버튼을 숨긴다. 움직임 없이 long-press가 성립하면 누른 셀의 단어 전체를 seed로 선택 모드에 들어가고, 이후 드래그 또는 표시된 선택 핸들 이동은 그 단어를 유지한 채 셀 단위로 선택 범위를 확장한다. 첫 단일 탭은 `.xterm-screen`의 링크 hit-test로 전달하며 평문/OSC 8 HTTP(S) 링크 셀일 때만 Linkifier의 mouse down/up 활성화 경로를 합성한다. 링크가 아니면 기존 focus·선택 해제 동작을 유지한다. double tap은 단어 선택, triple tap은 줄 선택으로 처리한다. 두 손가락 세로 스와이프는 현재 surface에서 가능한 스크롤 경로로 라우팅한다. mouse tracking mode에서 선택 또는 링크 활성화 합성 이벤트를 만들면 force-selection modifier를 실어 TUI로 입력이 전달되지 않게 한다. 선택된 텍스트는 별도 버튼 없이 선택 interaction이 끝나는 시점에 브라우저 클립보드로 복사한다. 마우스 선택을 terminal 밖까지 끌고 놓는 경우도 xterm의 document-level `mouseup` 선택 확정 뒤 복사를 예약한다. Clipboard API가 거절되면 같은 user-activation task 안에서 `execCommand("copy")` fallback을 사용하고, 로컬 모바일 iframe은 `clipboard-write` 권한을 명시한다. 이 동작은 Remote API 계약이나 PTY 전역 상태를 바꾸지 않는다.
 
 평문 `#123` GitHub 이슈/PR 링크는 [ADR-0050](../adr/0050-remote-github-reference-links.md)을 따른다. `GET /remote/v1/terminals/{id}/github-repo`는 client path를 받지 않고 server-side terminal session의 CWD를 스냅샷해 기존 git `origin` resolver로 `{cwd,repoBase}`를 반환한다. 기존 Remote bearer token/IP/Origin gate는 적용하지만 host 상태를 바꾸지 않는 observer 조회라 controller lease는 요구하지 않는다. terminal lock은 CWD 복사까지만 잡고 filesystem 조회는 blocking worker에서 수행한다. terminal 없음은 `404`, CWD 없음·비-GitHub repo·해석 실패는 `repoBase:null`이며 성공 응답은 `Cache-Control: no-store`다. 브라우저는 active terminal/CWD/request revision 및 응답 CWD가 모두 일치할 때만 base를 적용하고, 전환·실패 시 즉시 null로 복구한다.
@@ -1409,9 +1420,10 @@ attach 는 이 fit 정책 위에서 geometry 를 **한 번만** 게시한다([AD
 | `/remote/v1/terminals/{id}/output?leaseId=...&token=...` | WS | V1 snapshot header/binary pair + sequenced delta pair |
 
 `/remote/v1/terminals` 응답의 각 terminal 항목은 `appearance`를 포함한다. 이 값은 remote
-브라우저가 settings 전체를 직접 읽지 않도록 backend가 profile/profileDefaults/colorSchemes에서
-해석한 표시 전용 계약이다. 포함 범위는 xterm option으로 바로 적용 가능한 `fontFamily`,
-`fontSize`, `cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
+브라우저가 settings 전체를 직접 읽지 않도록 backend가 profile/profileDefaults/colorSchemes와
+Remote 표시 설정에서 해석한 표시 전용 계약이다. `fontFamily`는 profile을 따르지만 `fontSize`는
+`settings.remote.terminalFontSize`를 따른다. 나머지 포함 범위는 xterm option으로 바로 적용 가능한
+`cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
 `purple`/`brightPurple`은 xterm.js의 `magenta`/`brightMagenta`로 매핑한다. 색상 스킴을 찾을 수
 없으면 로컬 `TerminalView`의 기본 테마와 동일한 CampbellClear 기반 fallback을 사용한다.
 
