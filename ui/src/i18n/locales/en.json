@@ -79,7 +79,8 @@
       "groupAppearance": "Appearance",
       "groupTerminal": "Terminal",
       "groupInterface": "Interface",
-      "groupIntegrations": "Integrations",
+      "groupRemote": "Remote",
+      "groupAgents": "Agents",
       "groupViews": "Views",
       "groupInput": "Input",
       "groupProfiles": "Profiles",
@@ -102,7 +103,6 @@
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
       "deleteProfile": "Delete profile",
-      "usage": "Usage",
       "widgets": "Widgets"
     },
     "save": {
@@ -704,9 +704,6 @@
     },
     "usage": {
       "title": "Usage Monitor",
-      "groupClaude": "Claude Code",
-      "groupCodex": "Codex",
-      "groupGrok": "Grok Build",
       "intro": "Reads Claude Code's /usage panel in a hidden session and shows it in a UsageView pane. The query process only runs while at least one UsageView pane is open.",
       "profile": "Shell profile",
       "codexProfile": "Font profile",

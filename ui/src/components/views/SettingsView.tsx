@@ -3187,6 +3187,7 @@ function ClaudeSection() {
           </>
         )}
       </SubGroup>
+      <ClaudeUsageGroup />
     </div>
   );
 }
@@ -3403,6 +3404,7 @@ function CodexSection() {
           </div>
         )}
       </SubGroup>
+      <CodexUsageGroup />
     </div>
   );
 }
@@ -3542,6 +3544,7 @@ function GrokSection() {
           </div>
         )}
       </SubGroup>
+      <GrokUsageGroup />
     </div>
   );
 }
@@ -4420,28 +4423,18 @@ function WidgetsSection() {
   );
 }
 
-function UsageSection() {
+function ClaudeUsageGroup() {
   const { t } = useTranslation("settings");
   const storeClaudeUsage = useSettingsStore((s) => s.usage.claude);
-  const storeCodexUsage = useSettingsStore((s) => s.usage.codex);
-  const storeGrokUsage = useSettingsStore((s) => s.usage.grok);
   const setUsageAgent = useSettingsStore((s) => s.setUsageAgent);
-  const setCodexUsage = useSettingsStore((s) => s.setCodexUsage);
-  const setGrokUsage = useSettingsStore((s) => s.setGrokUsage);
   const profiles = useSettingsStore((s) => s.profiles);
   const defaultProfile = useSettingsStore((s) => s.defaultProfile);
   const [claudeUsage, setDraftClaudeUsage] = useDraft("usage-claude", storeClaudeUsage, (v) =>
     setUsageAgent("claude", v),
   );
-  const [codexUsage, setDraftCodexUsage] = useDraft("usage-codex", storeCodexUsage, setCodexUsage);
-  const [grokUsage, setDraftGrokUsage] = useDraft("usage-grok", storeGrokUsage, setGrokUsage);
 
   const updateClaude = (partial: Partial<typeof claudeUsage>) =>
     setDraftClaudeUsage((prev) => ({ ...prev, ...partial }));
-  const updateCodex = (partial: Partial<typeof codexUsage>) =>
-    setDraftCodexUsage((prev) => ({ ...prev, ...partial }));
-  const updateGrokUsage = (partial: Partial<typeof grokUsage>) =>
-    setDraftGrokUsage((prev) => ({ ...prev, ...partial }));
 
   const addConfigDir = () => updateClaude({ configDirs: [...claudeUsage.configDirs, ""] });
   const removeConfigDir = (index: number) =>
@@ -4453,10 +4446,203 @@ function UsageSection() {
     weekAll: t("usage.rowWeekAll"),
     weekModel: t("usage.rowWeekModel"),
   };
+
+  return (
+    <SubGroup title={t("usage.title")}>
+      <p
+        className="pb-2 text-[11px] leading-relaxed"
+        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
+      >
+        {t("usage.intro")}
+      </p>
+      <UsageProfileFields
+        usage={claudeUsage}
+        update={updateClaude}
+        profiles={profiles}
+        defaultProfile={defaultProfile}
+        testIdPrefix="usage"
+        profileLabel={t("usage.profile")}
+        profileDescription={t("usage.profileDesc")}
+        refreshDescription={t("usage.refreshDesc")}
+      />
+      <UsageRowSelection
+        rows={USAGE_VISIBLE_ROW_KEYS}
+        visibleRows={claudeUsage.visibleRows}
+        labels={visibleRowLabels}
+        testIdPrefix="usage"
+        update={(visibleRows) => updateClaude({ visibleRows })}
+      />
+
+      <div className="flex items-start gap-3 py-1.5">
+        <div className="w-36 shrink-0 pt-1">
+          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+            {t("usage.configDirs")}
+          </span>
+          <p
+            className="mt-0.5 text-[11px] leading-tight"
+            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+          >
+            {t("usage.configDirsDesc")}
+          </p>
+        </div>
+        <div className="min-w-0 flex-1">
+          {claudeUsage.configDirs.map((dir, i) => (
+            <div key={i} className="mb-2 flex items-center gap-2">
+              <FocusInput
+                data-testid={`usage-config-dir-input-${i}`}
+                placeholder={t("usage.configDirPlaceholder")}
+                value={dir}
+                onChange={(e) => updateConfigDir(i, e.target.value)}
+              />
+              <button
+                data-testid={`usage-config-dir-remove-${i}`}
+                className="rounded px-1.5 py-0.5 text-xs"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--red)",
+                  border: "1px solid var(--border)",
+                }}
+                onClick={() => removeConfigDir(i)}
+              >
+                {t("common.remove")}
+              </button>
+            </div>
+          ))}
+          <button
+            data-testid="usage-config-dir-add"
+            className="rounded px-2 py-1 text-xs"
+            style={{
+              background: "var(--bg-overlay)",
+              color: "var(--accent)",
+              border: "1px solid var(--border)",
+            }}
+            onClick={addConfigDir}
+          >
+            {t("usage.addConfigDir")}
+          </button>
+        </div>
+      </div>
+      <UsageColorFields
+        testIdPrefix="usage-claude"
+        colors={claudeUsage.colors}
+        update={(partial) => updateClaude({ colors: { ...claudeUsage.colors, ...partial } })}
+      />
+    </SubGroup>
+  );
+}
+
+function CodexUsageGroup() {
+  const { t } = useTranslation("settings");
+  const storeCodexUsage = useSettingsStore((s) => s.usage.codex);
+  const setCodexUsage = useSettingsStore((s) => s.setCodexUsage);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const [codexUsage, setDraftCodexUsage] = useDraft("usage-codex", storeCodexUsage, setCodexUsage);
+
+  const updateCodex = (partial: Partial<typeof codexUsage>) =>
+    setDraftCodexUsage((prev) => ({ ...prev, ...partial }));
   const codexVisibleRowLabels: Record<CodexUsageVisibleRow, string> = {
     weekly: t("usage.rowWeekly"),
     sparkWeekly: t("usage.rowSparkWeekly"),
   };
+
+  return (
+    <SubGroup title={t("usage.title")}>
+      <UsageProfileFields
+        usage={codexUsage}
+        update={updateCodex}
+        profiles={profiles}
+        defaultProfile={defaultProfile}
+        testIdPrefix="codex-usage"
+        profileLabel={t("usage.codexProfile")}
+        profileDescription={t("usage.codexProfileDesc")}
+        refreshDescription={t("usage.codexRefreshDesc")}
+      />
+      <UsageRowSelection
+        rows={CODEX_USAGE_VISIBLE_ROW_KEYS}
+        visibleRows={codexUsage.visibleRows}
+        labels={codexVisibleRowLabels}
+        testIdPrefix="codex-usage"
+        update={(visibleRows) => updateCodex({ visibleRows })}
+      />
+      <div className="flex items-start gap-3 py-1.5">
+        <div className="w-36 shrink-0 pt-1">
+          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+            {t("usage.codexAccountDirs")}
+          </span>
+          <p
+            className="mt-0.5 text-[11px] leading-tight"
+            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+          >
+            {t("usage.codexAccountDirsDesc")}
+          </p>
+        </div>
+        <div className="min-w-0 flex-1">
+          {codexUsage.configDirs.map((dir, i) => (
+            <div key={i} className="mb-2 flex items-center gap-2">
+              <FocusInput
+                data-testid={`codex-usage-config-dir-input-${i}`}
+                placeholder={t("usage.codexAccountDirPlaceholder")}
+                value={dir}
+                onChange={(e) =>
+                  updateCodex({
+                    configDirs: codexUsage.configDirs.map((value, index) =>
+                      index === i ? e.target.value : value,
+                    ),
+                  })
+                }
+              />
+              <button
+                data-testid={`codex-usage-config-dir-remove-${i}`}
+                className="rounded px-1.5 py-0.5 text-xs"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--red)",
+                  border: "1px solid var(--border)",
+                }}
+                onClick={() =>
+                  updateCodex({
+                    configDirs: codexUsage.configDirs.filter((_, index) => index !== i),
+                  })
+                }
+              >
+                {t("common.remove")}
+              </button>
+            </div>
+          ))}
+          <button
+            data-testid="codex-usage-config-dir-add"
+            className="rounded px-2 py-1 text-xs"
+            style={{
+              background: "var(--bg-overlay)",
+              color: "var(--accent)",
+              border: "1px solid var(--border)",
+            }}
+            onClick={() => updateCodex({ configDirs: [...codexUsage.configDirs, ""] })}
+          >
+            {t("usage.addCodexAccount")}
+          </button>
+        </div>
+      </div>
+      <UsageColorFields
+        testIdPrefix="usage-codex"
+        colors={codexUsage.colors}
+        update={(partial) => updateCodex({ colors: { ...codexUsage.colors, ...partial } })}
+      />
+    </SubGroup>
+  );
+}
+
+function GrokUsageGroup() {
+  const { t } = useTranslation("settings");
+  const storeGrokUsage = useSettingsStore((s) => s.usage.grok);
+  const setGrokUsage = useSettingsStore((s) => s.setGrokUsage);
+  const profiles = useSettingsStore((s) => s.profiles);
+  const defaultProfile = useSettingsStore((s) => s.defaultProfile);
+  const [grokUsage, setDraftGrokUsage] = useDraft("usage-grok", storeGrokUsage, setGrokUsage);
+
+  const updateGrokUsage = (partial: Partial<typeof grokUsage>) =>
+    setDraftGrokUsage((prev) => ({ ...prev, ...partial }));
   const grokVisibleRowLabels: Record<GrokUsageVisibleRow, string> = {
     weekly: t("usage.rowWeekly"),
     credits: t("usage.rowCredits"),
@@ -4464,259 +4650,89 @@ function UsageSection() {
   };
 
   return (
-    <div data-testid="settings-usage-section">
-      <SectionTitle>{t("usage.title")}</SectionTitle>
-
-      <p
-        className="px-4 pb-2 text-[11px] leading-relaxed"
-        style={{ color: "var(--text-secondary)", opacity: 0.75 }}
-      >
-        {t("usage.intro")}
-      </p>
-
-      <SubGroup title={t("usage.groupClaude")}>
-        <UsageProfileFields
-          usage={claudeUsage}
-          update={updateClaude}
-          profiles={profiles}
-          defaultProfile={defaultProfile}
-          testIdPrefix="usage"
-          profileLabel={t("usage.profile")}
-          profileDescription={t("usage.profileDesc")}
-          refreshDescription={t("usage.refreshDesc")}
-        />
-        <UsageRowSelection
-          rows={USAGE_VISIBLE_ROW_KEYS}
-          visibleRows={claudeUsage.visibleRows}
-          labels={visibleRowLabels}
-          testIdPrefix="usage"
-          update={(visibleRows) => updateClaude({ visibleRows })}
-        />
-
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("usage.configDirs")}
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              {t("usage.configDirsDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            {claudeUsage.configDirs.map((dir, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <FocusInput
-                  data-testid={`usage-config-dir-input-${i}`}
-                  placeholder={t("usage.configDirPlaceholder")}
-                  value={dir}
-                  onChange={(e) => updateConfigDir(i, e.target.value)}
-                />
-                <button
-                  data-testid={`usage-config-dir-remove-${i}`}
-                  className="rounded px-1.5 py-0.5 text-xs"
-                  style={{
-                    background: "var(--bg-overlay)",
-                    color: "var(--red)",
-                    border: "1px solid var(--border)",
-                  }}
-                  onClick={() => removeConfigDir(i)}
-                >
-                  {t("common.remove")}
-                </button>
-              </div>
-            ))}
-            <button
-              data-testid="usage-config-dir-add"
-              className="rounded px-2 py-1 text-xs"
-              style={{
-                background: "var(--bg-overlay)",
-                color: "var(--accent)",
-                border: "1px solid var(--border)",
-              }}
-              onClick={addConfigDir}
-            >
-              {t("usage.addConfigDir")}
-            </button>
-          </div>
+    <SubGroup title={t("usage.title")}>
+      <UsageProfileFields
+        usage={grokUsage}
+        update={updateGrokUsage}
+        profiles={profiles}
+        defaultProfile={defaultProfile}
+        testIdPrefix="grok-usage"
+        profileLabel={t("usage.grokProfile")}
+        profileDescription={t("usage.grokProfileDesc")}
+        refreshDescription={t("usage.grokRefreshDesc")}
+      />
+      <UsageRowSelection
+        rows={GROK_USAGE_VISIBLE_ROW_KEYS}
+        visibleRows={grokUsage.visibleRows}
+        labels={grokVisibleRowLabels}
+        testIdPrefix="grok-usage"
+        update={(visibleRows) => updateGrokUsage({ visibleRows })}
+      />
+      <div className="flex items-start gap-3 py-1.5">
+        <div className="w-36 shrink-0 pt-1">
+          <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+            {t("usage.grokConfigDirs")}
+          </span>
+          <p
+            className="mt-0.5 text-[11px] leading-tight"
+            style={{ color: "var(--text-secondary)", opacity: 0.65 }}
+          >
+            {t("usage.grokConfigDirsDesc")}
+          </p>
         </div>
-        <UsageColorFields
-          testIdPrefix="usage-claude"
-          colors={claudeUsage.colors}
-          update={(partial) => updateClaude({ colors: { ...claudeUsage.colors, ...partial } })}
-        />
-      </SubGroup>
-
-      <SubGroup title={t("usage.groupCodex")}>
-        <UsageProfileFields
-          usage={codexUsage}
-          update={updateCodex}
-          profiles={profiles}
-          defaultProfile={defaultProfile}
-          testIdPrefix="codex-usage"
-          profileLabel={t("usage.codexProfile")}
-          profileDescription={t("usage.codexProfileDesc")}
-          refreshDescription={t("usage.codexRefreshDesc")}
-        />
-        <UsageRowSelection
-          rows={CODEX_USAGE_VISIBLE_ROW_KEYS}
-          visibleRows={codexUsage.visibleRows}
-          labels={codexVisibleRowLabels}
-          testIdPrefix="codex-usage"
-          update={(visibleRows) => updateCodex({ visibleRows })}
-        />
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("usage.codexAccountDirs")}
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              {t("usage.codexAccountDirsDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            {codexUsage.configDirs.map((dir, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <FocusInput
-                  data-testid={`codex-usage-config-dir-input-${i}`}
-                  placeholder={t("usage.codexAccountDirPlaceholder")}
-                  value={dir}
-                  onChange={(e) =>
-                    updateCodex({
-                      configDirs: codexUsage.configDirs.map((value, index) =>
-                        index === i ? e.target.value : value,
-                      ),
-                    })
-                  }
-                />
-                <button
-                  data-testid={`codex-usage-config-dir-remove-${i}`}
-                  className="rounded px-1.5 py-0.5 text-xs"
-                  style={{
-                    background: "var(--bg-overlay)",
-                    color: "var(--red)",
-                    border: "1px solid var(--border)",
-                  }}
-                  onClick={() =>
-                    updateCodex({
-                      configDirs: codexUsage.configDirs.filter((_, index) => index !== i),
-                    })
-                  }
-                >
-                  {t("common.remove")}
-                </button>
-              </div>
-            ))}
-            <button
-              data-testid="codex-usage-config-dir-add"
-              className="rounded px-2 py-1 text-xs"
-              style={{
-                background: "var(--bg-overlay)",
-                color: "var(--accent)",
-                border: "1px solid var(--border)",
-              }}
-              onClick={() => updateCodex({ configDirs: [...codexUsage.configDirs, ""] })}
-            >
-              {t("usage.addCodexAccount")}
-            </button>
-          </div>
+        <div className="min-w-0 flex-1">
+          {grokUsage.configDirs.map((dir, i) => (
+            <div key={i} className="mb-2 flex items-center gap-2">
+              <FocusInput
+                data-testid={`grok-usage-config-dir-input-${i}`}
+                placeholder={t("usage.grokConfigDirPlaceholder")}
+                value={dir}
+                onChange={(e) =>
+                  updateGrokUsage({
+                    configDirs: grokUsage.configDirs.map((value, index) =>
+                      index === i ? e.target.value : value,
+                    ),
+                  })
+                }
+              />
+              <button
+                data-testid={`grok-usage-config-dir-remove-${i}`}
+                className="rounded px-1.5 py-0.5 text-xs"
+                style={{
+                  background: "var(--bg-overlay)",
+                  color: "var(--red)",
+                  border: "1px solid var(--border)",
+                }}
+                onClick={() =>
+                  updateGrokUsage({
+                    configDirs: grokUsage.configDirs.filter((_, index) => index !== i),
+                  })
+                }
+              >
+                {t("common.remove")}
+              </button>
+            </div>
+          ))}
+          <button
+            data-testid="grok-usage-config-dir-add"
+            className="rounded px-2 py-1 text-xs"
+            style={{
+              background: "var(--bg-overlay)",
+              color: "var(--accent)",
+              border: "1px solid var(--border)",
+            }}
+            onClick={() => updateGrokUsage({ configDirs: [...grokUsage.configDirs, ""] })}
+          >
+            {t("usage.addGrokConfigDir")}
+          </button>
         </div>
-        <UsageColorFields
-          testIdPrefix="usage-codex"
-          colors={codexUsage.colors}
-          update={(partial) => updateCodex({ colors: { ...codexUsage.colors, ...partial } })}
-        />
-      </SubGroup>
-
-      <SubGroup title={t("usage.groupGrok")}>
-        <UsageProfileFields
-          usage={grokUsage}
-          update={updateGrokUsage}
-          profiles={profiles}
-          defaultProfile={defaultProfile}
-          testIdPrefix="grok-usage"
-          profileLabel={t("usage.grokProfile")}
-          profileDescription={t("usage.grokProfileDesc")}
-          refreshDescription={t("usage.grokRefreshDesc")}
-        />
-        <UsageRowSelection
-          rows={GROK_USAGE_VISIBLE_ROW_KEYS}
-          visibleRows={grokUsage.visibleRows}
-          labels={grokVisibleRowLabels}
-          testIdPrefix="grok-usage"
-          update={(visibleRows) => updateGrokUsage({ visibleRows })}
-        />
-        <div className="flex items-start gap-3 py-1.5">
-          <div className="w-36 shrink-0 pt-1">
-            <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
-              {t("usage.grokConfigDirs")}
-            </span>
-            <p
-              className="mt-0.5 text-[11px] leading-tight"
-              style={{ color: "var(--text-secondary)", opacity: 0.65 }}
-            >
-              {t("usage.grokConfigDirsDesc")}
-            </p>
-          </div>
-          <div className="min-w-0 flex-1">
-            {grokUsage.configDirs.map((dir, i) => (
-              <div key={i} className="mb-2 flex items-center gap-2">
-                <FocusInput
-                  data-testid={`grok-usage-config-dir-input-${i}`}
-                  placeholder={t("usage.grokConfigDirPlaceholder")}
-                  value={dir}
-                  onChange={(e) =>
-                    updateGrokUsage({
-                      configDirs: grokUsage.configDirs.map((value, index) =>
-                        index === i ? e.target.value : value,
-                      ),
-                    })
-                  }
-                />
-                <button
-                  data-testid={`grok-usage-config-dir-remove-${i}`}
-                  className="rounded px-1.5 py-0.5 text-xs"
-                  style={{
-                    background: "var(--bg-overlay)",
-                    color: "var(--red)",
-                    border: "1px solid var(--border)",
-                  }}
-                  onClick={() =>
-                    updateGrokUsage({
-                      configDirs: grokUsage.configDirs.filter((_, index) => index !== i),
-                    })
-                  }
-                >
-                  {t("common.remove")}
-                </button>
-              </div>
-            ))}
-            <button
-              data-testid="grok-usage-config-dir-add"
-              className="rounded px-2 py-1 text-xs"
-              style={{
-                background: "var(--bg-overlay)",
-                color: "var(--accent)",
-                border: "1px solid var(--border)",
-              }}
-              onClick={() => updateGrokUsage({ configDirs: [...grokUsage.configDirs, ""] })}
-            >
-              {t("usage.addGrokConfigDir")}
-            </button>
-          </div>
-        </div>
-        <UsageColorFields
-          testIdPrefix="usage-grok"
-          colors={grokUsage.colors}
-          update={(partial) => updateGrokUsage({ colors: { ...grokUsage.colors, ...partial } })}
-        />
-      </SubGroup>
-    </div>
+      </div>
+      <UsageColorFields
+        testIdPrefix="usage-grok"
+        colors={grokUsage.colors}
+        update={(partial) => updateGrokUsage({ colors: { ...grokUsage.colors, ...partial } })}
+      />
+    </SubGroup>
   );
 }
 
@@ -5594,8 +5610,8 @@ export function SettingsView() {
             {t("nav.workspaces")}
           </button>
 
-          {/* Integrations */}
-          <NavGroupHeader label={t("nav.groupIntegrations")} />
+          {/* Remote */}
+          <NavGroupHeader label={t("nav.groupRemote")} />
           <button
             data-testid="nav-remote"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -5606,6 +5622,9 @@ export function SettingsView() {
           >
             {t("nav.remote")}
           </button>
+
+          {/* Agents */}
+          <NavGroupHeader label={t("nav.groupAgents")} />
           <button
             data-testid="nav-claude"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -5639,16 +5658,6 @@ export function SettingsView() {
 
           {/* Views */}
           <NavGroupHeader label={t("nav.groupViews")} />
-          <button
-            data-testid="nav-usage"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("usage")}
-            onClick={() => setActiveNav("usage")}
-            onMouseEnter={() => setNavHover("usage")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.usage")}
-          </button>
           <button
             data-testid="nav-memo"
             className="w-full px-4 py-2 text-left text-[13px]"
@@ -5808,7 +5817,6 @@ export function SettingsView() {
             {activeNav === "memo" && <MemoSection />}
             {activeNav === "fileExplorer" && <FileExplorerSection />}
             {activeNav === "viewer" && <ViewerSection />}
-            {activeNav === "usage" && <UsageSection />}
             {activeNav === "widgets" && <WidgetsSection />}
             {activeNav === "issueReporter" && <IssueReporterSection />}
             {activeNav === "github" && <GitHubSection />}
