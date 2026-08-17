@@ -1,19 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-
-const remotePagePath = new URL("../../src-tauri/src/remote_server/page.html", import.meta.url);
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
-
-async function loadRemotePageMarkup(runInlineScript = false): Promise<string> {
-  const html = await readFile(remotePagePath, "utf8");
-  const withoutExternalAssets = html
-    .replace(/<script\s+src=[^>]*><\/script>/g, "")
-    .replace(/<link[^>]*xterm\.css[^>]*>/g, "");
-  return runInlineScript
-    ? withoutExternalAssets
-    : withoutExternalAssets.replace(/<script[\s\S]*?<\/script>/g, "");
-}
+import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
 /**
  * Serve the real remote page against a fixed navigation snapshot: active
@@ -98,18 +84,7 @@ async function routeRemoteWithWorkspaces(
     },
   };
 
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
-  for (const [asset, contentType] of [
-    ["xterm.js", "application/javascript; charset=utf-8"],
-    ["addon-fit.js", "application/javascript; charset=utf-8"],
-    ["xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-    );
-  }
+  await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
@@ -220,7 +195,7 @@ test.describe("remote mobile layout", () => {
 
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.setContent(await loadRemotePageMarkup());
+    await page.setContent(remoteClientMarkupWithoutXterm({ script: false }));
   });
 
   test("keeps the hidden-key footer compact", async ({ page }) => {
@@ -350,7 +325,7 @@ test.describe("remote mobile layout", () => {
       }),
     );
     await page.goto("http://remote.test/");
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
 
     // No dedicated bar row — the keys live in the toggleable key bar.
@@ -477,30 +452,7 @@ test.describe("remote mobile layout", () => {
     };
     let workspacePaneActive = true;
 
-    await page.route("http://remote.test/remote/", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}page.html`,
-        contentType: "text/html; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/xterm.js`,
-        contentType: "application/javascript; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/addon-fit.js`,
-        contentType: "application/javascript; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/xterm.css`,
-        contentType: "text/css; charset=utf-8",
-      }),
-    );
+    await installRemoteClientRoutes(page);
     await page.route("http://remote.test/remote/v1/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/remote/v1/session/claim") {
@@ -820,7 +772,7 @@ test.describe("remote mobile layout", () => {
       }),
     );
     await page.goto("http://remote.test/");
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
 
     const flickButton = page.locator('[data-key="dpad"]');
@@ -875,7 +827,7 @@ test.describe("remote mobile layout", () => {
         JSON.stringify({ visible: true, sets: [], custom: ["tab", "enter"] }),
       );
     });
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
 
     const renderedKeyIds = () =>
       page
@@ -935,7 +887,7 @@ test.describe("remote mobile layout", () => {
       .toEqual(["esc", "tab", "enter"]);
 
     await page.reload();
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
     await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
 
     await page.locator("#keyBarSettings").click();
@@ -957,30 +909,7 @@ test.describe("remote mobile layout", () => {
         JSON.stringify({ visible: true, sets: ["nav", "edit", "ctrl", "fn"], custom: [] }),
       );
     });
-    await page.route("http://remote.test/remote/", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}page.html`,
-        contentType: "text/html; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/xterm.js`,
-        contentType: "application/javascript; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/addon-fit.js`,
-        contentType: "application/javascript; charset=utf-8",
-      }),
-    );
-    await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}assets/xterm.css`,
-        contentType: "text/css; charset=utf-8",
-      }),
-    );
+    await installRemoteClientRoutes(page);
     await page.route("http://remote.test/remote/v1/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/remote/v1/session/claim") {
@@ -1274,7 +1203,7 @@ test.describe("remote mobile layout", () => {
       return route.fulfill({ json: {} });
     });
     await page.goto("http://remote.test/");
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#token").fill("test-token");
     await page.locator("#connect").click();
     await expect(page.locator("#ctrlC")).toBeEnabled();
@@ -1321,7 +1250,7 @@ test.describe("remote mobile layout", () => {
       }),
     );
     await page.goto("http://remote.test/");
-    await page.setContent(await loadRemotePageMarkup(true));
+    await page.setContent(remoteClientMarkupWithoutXterm());
     const app = page.locator(".app");
 
     // Default sets: "step" (5 nav keys) + "nav" (10 escape keys).
@@ -1366,21 +1295,7 @@ test.describe("remote terminal protocol query ownership", () => {
       });
     });
 
-    await page.route("http://remote.test/remote/", (route) =>
-      route.fulfill({
-        path: `${remoteRoot}page.html`,
-        contentType: "text/html; charset=utf-8",
-      }),
-    );
-    for (const [asset, contentType] of [
-      ["xterm.js", "application/javascript; charset=utf-8"],
-      ["addon-fit.js", "application/javascript; charset=utf-8"],
-      ["xterm.css", "text/css; charset=utf-8"],
-    ] as const) {
-      await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-        route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-      );
-    }
+    await installRemoteClientRoutes(page);
     await page.route("http://remote.test/remote/v1/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/remote/v1/session/claim") {

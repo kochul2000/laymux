@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fileURLToPath } from "node:url";
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 // Issue #779: a pane the desktop has not opened yet owns no PTY, so the
 // navigation payload reports `terminalLive: false` for it. Remote used to treat
@@ -7,8 +7,6 @@ import { fileURLToPath } from "node:url";
 // workspace was live, the page dead-ended on "No open terminal sessions." with
 // no way back. Entering such a pane must ask the host to open it and then
 // attach, the same way step navigation lands on a queued pane (ADR-0039).
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 interface HostTerminal {
   id: string;
@@ -33,26 +31,7 @@ async function mockColdHost(
   focusCalls: string[],
   openedOutputs: string[],
 ) {
-  for (const asset of [
-    [
-      "http://remote.test/remote/vendor/xterm.js",
-      "assets/xterm.js",
-      "application/javascript; charset=utf-8",
-    ],
-    [
-      "http://remote.test/remote/vendor/addon-fit.js",
-      "assets/addon-fit.js",
-      "application/javascript; charset=utf-8",
-    ],
-    ["http://remote.test/remote/vendor/xterm.css", "assets/xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(asset[0], (route) =>
-      route.fulfill({ path: `${remoteRoot}${asset[1]}`, contentType: asset[2] }),
-    );
-  }
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
+  await installRemoteClientRoutes(page);
 
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const request = route.request();

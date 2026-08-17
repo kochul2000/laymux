@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 /**
  * ADR-0129: the widget strip is chrome, not an input surface. It appears once,
@@ -142,18 +140,7 @@ interface Harness {
 }
 
 async function installRemoteMocks(page: Page, harness: Harness) {
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
-  for (const [asset, contentType] of [
-    ["xterm.js", "application/javascript; charset=utf-8"],
-    ["addon-fit.js", "application/javascript; charset=utf-8"],
-    ["xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-    );
-  }
+  await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {

@@ -1,65 +1,70 @@
 import { expect, test } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
 const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+
+// The drawer renders pane rows from `workspaces[].panes`, so the fixture has
+// to carry the same panes there as in `activeWorkspace`.
+const workspacePanes = [
+  {
+    id: "pane-1",
+    location: "workspace",
+    workspaceId: "ws-1",
+    paneIndex: 0,
+    paneNumber: 1,
+    viewType: "terminal",
+    terminalId: "terminal-1",
+    terminalLive: true,
+    title: "Shell",
+    profile: "PowerShell",
+    cwd: "C:\\work",
+    branch: "main",
+    activity: { type: "shell" },
+    outputActive: false,
+    commandRunning: false,
+    isFocused: true,
+    unreadCount: 0,
+    hidden: false,
+    collapsed: false,
+    x: 0,
+    y: 0,
+    w: 0.5,
+    h: 1,
+  },
+  {
+    id: "pane-2",
+    location: "workspace",
+    workspaceId: "ws-1",
+    paneIndex: 1,
+    paneNumber: 2,
+    viewType: "terminal",
+    terminalId: "terminal-2",
+    terminalLive: true,
+    title: "Second Shell",
+    profile: "PowerShell",
+    cwd: "C:\\work",
+    branch: "main",
+    activity: { type: "shell" },
+    outputActive: false,
+    commandRunning: false,
+    isFocused: false,
+    unreadCount: 0,
+    hidden: false,
+    collapsed: false,
+    x: 0.5,
+    y: 0,
+    w: 0.5,
+    h: 1,
+  },
+];
 
 const navigation = {
   activeWorkspace: {
     id: "ws-1",
     name: "Main",
     focusedPaneNumber: 1,
-    panes: [
-      {
-        id: "pane-1",
-        location: "workspace",
-        workspaceId: "ws-1",
-        paneIndex: 0,
-        paneNumber: 1,
-        viewType: "terminal",
-        terminalId: "terminal-1",
-        terminalLive: true,
-        title: "Shell",
-        profile: "PowerShell",
-        cwd: "C:\\work",
-        branch: "main",
-        activity: { type: "shell" },
-        outputActive: false,
-        commandRunning: false,
-        isFocused: true,
-        unreadCount: 0,
-        hidden: false,
-        collapsed: false,
-        x: 0,
-        y: 0,
-        w: 0.5,
-        h: 1,
-      },
-      {
-        id: "pane-2",
-        location: "workspace",
-        workspaceId: "ws-1",
-        paneIndex: 1,
-        paneNumber: 2,
-        viewType: "terminal",
-        terminalId: "terminal-2",
-        terminalLive: true,
-        title: "Second Shell",
-        profile: "PowerShell",
-        cwd: "C:\\work",
-        branch: "main",
-        activity: { type: "shell" },
-        outputActive: false,
-        commandRunning: false,
-        isFocused: false,
-        unreadCount: 0,
-        hidden: false,
-        collapsed: false,
-        x: 0.5,
-        y: 0,
-        w: 0.5,
-        h: 1,
-      },
-    ],
+    panes: workspacePanes,
   },
   workspaces: [
     {
@@ -72,7 +77,7 @@ const navigation = {
       terminalPaneCount: 2,
       liveTerminalCount: 2,
       unreadCount: 0,
-      panes: undefined,
+      panes: workspacePanes,
     },
   ],
   docks: [],
@@ -178,12 +183,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/remote/") {
-      return route.fulfill({
-        path: `${remoteRoot}page.html`,
-        contentType: "text/html; charset=utf-8",
-      });
-    }
+    if (await fulfillRemoteClientAsset(route, url.pathname)) return;
     if (url.pathname === "/remote/viewer/") {
       return route.fulfill({
         path: `${remoteRoot}viewer_page.html`,
@@ -194,24 +194,6 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
       return route.fulfill({
         path: `${remoteRoot}viewer_page.js`,
         contentType: "text/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/xterm.js") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/xterm.js`,
-        contentType: "application/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/addon-fit.js") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/addon-fit.js`,
-        contentType: "application/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/xterm.css") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/xterm.css`,
-        contentType: "text/css; charset=utf-8",
       });
     }
     if (url.pathname === "/remote/v1/session/claim") {
@@ -262,11 +244,20 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
         // for Playwright to fulfill a response that can no longer be delivered.
         return route.abort();
       }
+      // ADR-0148 shape: the bridge answers with every verified match and its
+      // range inside the selection, not one token.
       return route.fulfill({
         json: {
           valid: true,
-          token: "src/main.rs",
-          path: "C:\\work\\src\\main.rs",
+          matches: [
+            {
+              token: "src/main.rs",
+              path: "C:\\work\\src\\main.rs",
+              lineIndex: 0,
+              startIndex: 0,
+              endIndex: "src/main.rs".length,
+            },
+          ],
         },
       });
     }
@@ -437,6 +428,8 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await dragPathSelection();
   await releaseHold.started.promise;
   await page.locator("#navToggle").click();
+  // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   releaseHold.release.resolve();
   await releaseHold.resumed.promise;

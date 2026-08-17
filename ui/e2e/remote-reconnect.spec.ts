@@ -1,7 +1,5 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 const navigation = {
   activeWorkspace: {
@@ -122,30 +120,7 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     sockets: [] as WebSocketRoute[],
   };
 
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}page.html`,
-      contentType: "text/html; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/xterm.js`,
-      contentType: "application/javascript; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/addon-fit.js`,
-      contentType: "application/javascript; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/xterm.css`,
-      contentType: "text/css; charset=utf-8",
-    }),
-  );
+  await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
