@@ -65,13 +65,13 @@
           <aside id="navigationPanel" class="navigation-panel" aria-label="Remote navigation">
             <div class="drawer-header">
               <div class="drawer-heading">
-                <button id="drawerBack" class="drawer-header-button" type="button" aria-label="Back to workspace navigation" title="Back" hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-                </button>
                 <div id="drawerTitle" class="drawer-title">Remote</div>
               </div>
               <div class="drawer-header-actions">
                 <button id="desktopModeDrawer" class="desktop-mode-button" type="button" hidden>PC</button>
+                <button id="newWorkspace" class="drawer-header-button" type="button" aria-label="New workspace" title="New workspace" disabled>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                </button>
                 <button id="drawerNotificationsButton" class="drawer-header-button drawer-notification-button" type="button" aria-label="Open notifications" title="Notifications" disabled>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
                   <span id="notificationBadge" class="workspace-count-badge drawer-notification-badge" hidden>0</span>
@@ -81,6 +81,9 @@
                 </button>
                 <button id="drawerSettingsButton" class="drawer-header-button" type="button" aria-label="Open settings" title="Settings">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.09A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.09A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.1.37.32.7.6 1 .3.26.68.4 1.1.4H21v4h-.09A1.7 1.7 0 0 0 19.4 15Z"/></svg>
+                </button>
+                <button id="drawerBack" class="drawer-header-button" type="button" aria-label="Close and return to workspace navigation" title="Close" hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
                 </button>
               </div>
             </div>
@@ -110,11 +113,7 @@
                 >
                   Hidden 0
                 </button>
-                <button id="newWorkspace" class="new-workspace-button" type="button" aria-label="New workspace" title="New workspace" aria-expanded="false" aria-controls="newWorkspacePanel" disabled>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-                </button>
               </div>
-              <div id="newWorkspacePanel" class="new-workspace-panel" aria-label="Choose workspace layout" hidden></div>
               <div
                 id="hiddenWorkspaceShelf"
                 class="hidden-workspace-shelf"
@@ -144,6 +143,11 @@
                 </div>
               </section>
             </div><!-- /drawerNotificationsView -->
+            <div id="drawerCreateView" class="drawer-view" hidden>
+              <section class="nav-section" aria-label="New workspace">
+                <div id="newWorkspacePanel" class="new-workspace-panel" aria-label="Choose workspace layout"></div>
+              </section>
+            </div><!-- /drawerCreateView -->
             <div id="drawerConnectionView" class="drawer-view" hidden>
               <section class="connection-panel" aria-label="Remote connection">
                 <div class="connection-title">Connection</div>
