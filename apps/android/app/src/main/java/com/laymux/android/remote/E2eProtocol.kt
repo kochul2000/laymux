@@ -218,7 +218,7 @@ internal class E2eSessionSuspendedException : Exception("보안 세션이 백그
 internal object E2eProtocol {
     const val VERSION = 1
 
-    // desktop↔앱 같은-릴리즈 계약의 호환 번호 (ADR-0171). 비호환 변경이
+    // desktop↔앱 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이
     // 실릴 때만 1씩 올린다 — 릴리즈마다 올리지 않는다. desktop의
     // COMPAT_VERSION(android_e2e/mod.rs)과 항상 같은 값이어야 한다.
     const val COMPAT_VERSION = 1
@@ -301,7 +301,7 @@ internal object E2eProtocol {
             // 구버전으로 안내한다.
             optionalKeys = setOf("compatVersion"),
         )
-        // 같은-릴리즈 계약의 호환 게이트 (ADR-0171). proof에 안 실리는 표시
+        // 같은-릴리즈 계약의 호환 게이트 (ADR-0172). proof에 안 실리는 표시
         // 전용 필드다 — 위조해 봐야 이 오류를 띄우고 연결을 접게 만들 뿐,
         // relay가 이미 가진 연결 거부 능력을 넘지 않는다. 필드 부재(0)는
         // 버저닝 도입 전 데스크톱이다.

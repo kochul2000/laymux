@@ -625,7 +625,7 @@ class E2eProtocolTest {
     }
 
     /**
-     * 같은-릴리즈 계약의 호환 게이트 (ADR-0171): challenge 응답의
+     * 같은-릴리즈 계약의 호환 게이트 (ADR-0172): challenge 응답의
      * compatVersion이 앱과 다르면 방향에 맞는 안내로 연결을 접는다.
      * 필드 부재(버저닝 도입 전 데스크톱)는 PC 구버전으로 취급한다.
      */
@@ -643,16 +643,29 @@ class E2eProtocolTest {
         )
 
         fun openAgainst(compatVersion: Int): Exception? = try {
+            var clientSessionNonce: String? = null
             val client = E2eRemoteClient(
                 connectionFactory = { uri ->
                     HandshakeConnection(uri.toURL()) { body ->
                         val request = JSONObject(body)
-                        challengeResponse(
-                            metadata,
-                            seed,
-                            request.getString("clientSessionNonce"),
-                            compatVersion = compatVersion,
-                        )
+                        when {
+                            uri.path.endsWith("/session/challenge") -> {
+                                val nonce = request.getString("clientSessionNonce")
+                                clientSessionNonce = nonce
+                                challengeResponse(
+                                    metadata,
+                                    seed,
+                                    nonce,
+                                    compatVersion = compatVersion,
+                                )
+                            }
+                            uri.path.endsWith("/session/establish") -> establishResponse(
+                                metadata,
+                                seed,
+                                requireNotNull(clientSessionNonce),
+                            )
+                            else -> error("unexpected handshake route: $uri")
+                        }
                     }
                 },
                 nowEpochSeconds = { 1_000 },
@@ -673,7 +686,22 @@ class E2eProtocolTest {
         assertTrue("actual: $newer", newer is E2eProtocolException)
         assertTrue("msg: ${newer?.message}", requireNotNull(newer?.message).contains("앱이 구버전"))
 
+        // 일치하면 게이트를 그대로 통과해 세션이 열린다.
+        val matched = openAgainst(E2eProtocol.COMPAT_VERSION)
+        assertTrue("actual: $matched", matched == null)
+
         Arrays.fill(seed, 0)
+    }
+
+    /**
+     * desktop의 android_e2e/mod.rs COMPAT_VERSION과 항상 같은 값이어야 한다
+     * (ADR-0172). 양쪽 리포지터리가 언어가 달라 공유 상수를 둘 수 없으므로,
+     * 각자 리터럴로 핀해 비호환 변경 PR이 두 파일을 모두 건드리게 만든다 —
+     * Rust 쪽 동일 핀은 android_e2e::state_tests에 있다.
+     */
+    @Test
+    fun compatVersionIsPinnedToTheSharedContractNumber() {
+        assertEquals(1, E2eProtocol.COMPAT_VERSION)
     }
 
     @Test

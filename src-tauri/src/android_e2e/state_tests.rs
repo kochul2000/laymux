@@ -470,6 +470,12 @@ async fn a_new_establish_replaces_the_previous_session_for_the_pairing() {
         )
         .is_ok());
 
+    // 앱의 E2eProtocol.COMPAT_VERSION과 항상 같은 값이어야 한다 (ADR-0172).
+    // 언어가 달라 공유 상수를 둘 수 없으므로 양쪽에 리터럴로 핀한다 —
+    // Kotlin 쪽 동일 핀은 E2eProtocolTest에 있다.
+    assert_eq!(crate::android_e2e::COMPAT_VERSION, 1);
+    assert_eq!(second_challenge.compat_version, 1);
+
     // The claim path frees a lease bound to the replaced session (ADR-0170):
     // the revoked session must read as dead, the replacement as alive, and an
     // expired clock must kill both.
