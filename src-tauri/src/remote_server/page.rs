@@ -544,8 +544,14 @@ mod tests {
         );
         assert!(html.contains("/remote/v1/panes/${encodeURIComponent(paneId)}/visibility"));
         assert!(html.contains("id=\"hiddenWorkspaceToggle\""));
+        // New-workspace entry lives in the drawer header (left of
+        // notifications) and opens its own subview instead of an inline row.
         assert!(html.contains("id=\"newWorkspace\""));
+        assert!(html.contains("id=\"drawerCreateView\""));
         assert!(html.contains("id=\"newWorkspacePanel\""));
+        assert!(html.contains("if (view === \"create\") return newWorkspaceButton;"));
+        // Subviews close with the top-right X, not a leading back arrow.
+        assert!(html.contains("aria-label=\"Close and return to workspace navigation\""));
         assert!(html.contains("function createWorkspace(layoutId)"));
         assert!(html.contains("function loadWorkspaceLayouts()"));
         assert!(html.contains("JSON.stringify({ leaseId: selectedLeaseId, layoutId })"));

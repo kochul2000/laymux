@@ -10,6 +10,7 @@
         const drawerSettingsButton = $("drawerSettingsButton");
         const drawerWorkspaceView = $("drawerWorkspaceView");
         const drawerNotificationsView = $("drawerNotificationsView");
+        const drawerCreateView = $("drawerCreateView");
         const drawerConnectionView = $("drawerConnectionView");
         const drawerSettingsView = $("drawerSettingsView");
         const desktopModeHeaderButton = $("desktopModeHeader");
@@ -154,7 +155,6 @@
         let terminalInfoById = new Map();
         let navigationState = null;
         let workspaceLayouts = [];
-        let newWorkspacePanelOpen = false;
         const NAVIGATION_VIEW_REFRESH_MS = 2000;
         let navigationViewRefreshTimer = null;
         let navigationViewRefreshInFlight = false;
@@ -1566,7 +1566,9 @@
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
           newWorkspaceButton.disabled = !connected;
-          if (!connected) setNewWorkspacePanelOpen(false);
+          // The create subview is lease-gated like its entry button: losing
+          // control while it is open falls back to the workspace list.
+          if (!connected && drawerView === "create") returnToWorkspaceView();
           dockSection.classList.toggle("locked", !connected);
           dockToggleButton.disabled = !connected;
           notificationSection.classList.toggle("locked", !connected);
@@ -3470,12 +3472,13 @@
         }
 
         function setDrawerView(view) {
-          const nextView = ["workspace", "notifications", "connection", "settings"].includes(view)
+          const nextView = ["workspace", "notifications", "create", "connection", "settings"].includes(view)
             ? view
             : "workspace";
           drawerView = nextView;
           drawerWorkspaceView.hidden = nextView !== "workspace";
           drawerNotificationsView.hidden = nextView !== "notifications";
+          drawerCreateView.hidden = nextView !== "create";
           drawerConnectionView.hidden = nextView !== "connection";
           drawerSettingsView.hidden = nextView !== "settings";
           drawerTitle.textContent =
@@ -3483,10 +3486,13 @@
               ? "Connection"
               : nextView === "notifications"
                 ? "Notifications"
-                : nextView === "settings"
-                  ? "Settings"
-                  : "Remote";
+                : nextView === "create"
+                  ? "New workspace"
+                  : nextView === "settings"
+                    ? "Settings"
+                    : "Remote";
           drawerBackButton.hidden = nextView === "workspace";
+          newWorkspaceButton.hidden = nextView !== "workspace";
           drawerNotificationsButton.hidden = nextView !== "workspace";
           drawerConnectionButton.hidden = nextView !== "workspace";
           drawerSettingsButton.hidden = nextView !== "workspace";
@@ -3494,6 +3500,7 @@
 
         function drawerEntryButton(view) {
           if (view === "notifications") return drawerNotificationsButton;
+          if (view === "create") return newWorkspaceButton;
           if (view === "connection") return drawerConnectionButton;
           if (view === "settings") return drawerSettingsButton;
           return null;
@@ -4656,12 +4663,6 @@
           });
         }
 
-        function setNewWorkspacePanelOpen(open) {
-          newWorkspacePanelOpen = Boolean(open) && Boolean(leaseId);
-          newWorkspacePanel.hidden = !newWorkspacePanelOpen;
-          newWorkspaceButton.setAttribute("aria-expanded", String(newWorkspacePanelOpen));
-        }
-
         function renderWorkspaceLayouts() {
           newWorkspacePanel.innerHTML = "";
           workspaceLayouts.forEach((layout) => {
@@ -4694,7 +4695,8 @@
             });
             if (leaseId !== selectedLeaseId) return;
             await loadNavigation(activeTerminalId, { openOutput: false });
-            setNewWorkspacePanelOpen(false);
+            // Land back on the workspace list, where the new workspace is.
+            if (drawerView === "create") returnToWorkspaceView();
             setStatus("Workspace created.");
           } finally {
             newWorkspaceButton.disabled = !leaseId;
@@ -6943,12 +6945,10 @@
           setHiddenWorkspaceShelfOpen(!hiddenWorkspaceShelfOpen);
         });
         newWorkspaceButton.addEventListener("click", () => {
-          if (newWorkspacePanelOpen) {
-            setNewWorkspacePanelOpen(false);
-            return;
-          }
+          // A drawer subview like notifications/connection/settings — the
+          // layout list loads first so the view never opens empty.
           loadWorkspaceLayouts()
-            .then(() => setNewWorkspacePanelOpen(true))
+            .then(() => openDrawerSubview("create"))
             .catch((err) => setStatus(err.message || String(err), true));
         });
         dockToggleButton.addEventListener("click", () => {
