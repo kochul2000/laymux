@@ -1956,7 +1956,7 @@ export function TerminalView({
       // preview in every non-Codex pane (issue #551). They are still passed to
       // `resolveVisualCaretOwner` below, which returns "hidden" for them whenever no
       // composition is in flight, so the caret behaviour is unchanged.
-      if (!openedRef.current || !isFocusedRef.current || syncOutputActiveRef.current) {
+      if (!openedRef.current || !isFocusedRef.current) {
         hideOverlay();
         trace("overlay-hidden", {
           reason: "gating",
@@ -1984,6 +1984,15 @@ export function TerminalView({
         hasPromptBoundary: shadowCursor.hasPromptBoundary,
         isInputPhase: shadowCursor.isInputPhase,
       });
+      if (caretOwner === "frozen") {
+        // DEC 2026 keeps the previously rendered xterm surface visible while
+        // parser state advances. The overlay is part of that surface: leave its
+        // opacity, geometry, composition preview, and helper anchor untouched
+        // until the frame closes. WSL can expose this state across rAFs because
+        // it intentionally does not hold the whole output transaction.
+        trace("overlay-frozen", { reason: "sync-output-active" });
+        return;
+      }
       if (caretOwner === "alt-buffer" || caretOwner === "hidden") {
         hideOverlay();
         trace("overlay-hidden", { reason: caretOwner, shadowCursor });

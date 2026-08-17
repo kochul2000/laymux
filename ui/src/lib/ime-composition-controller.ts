@@ -946,6 +946,7 @@ export function createImeCompositionController(
 
 export type VisualCaretOwner =
   | "hidden"
+  | "frozen"
   | "alt-buffer"
   | "composition-preview"
   | "sync-frame"
@@ -975,7 +976,7 @@ type VisualCaretOwnerInput = {
 };
 
 export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCaretOwner {
-  if (!input.opened || !input.focused || input.syncOutputActive) {
+  if (!input.opened || !input.focused) {
     return "hidden";
   }
   // Scrolled into the scrollback: nothing may paint, composition included. The
@@ -986,6 +987,14 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   // than a gap to close (issue #553 non-goals).
   if (input.viewportScrolledUp) {
     return "hidden";
+  }
+  // DEC 2026 freezes xterm's rendered surface while parser/buffer state keeps
+  // advancing. Preserve the last committed overlay DOM as part of that same
+  // visual frame. Hiding it here made WSL Codex blink whenever a Working frame
+  // crossed a PTY-write / animation-frame boundary; native Windows normally
+  // hid the bug by delivering the stabilized transaction in one write.
+  if (input.syncOutputActive) {
+    return "frozen";
   }
   // Composition outranks the caret policy gate below (issue #551) and the alt buffer
   // (issue #553).
@@ -1009,9 +1018,10 @@ export function resolveVisualCaretOwner(input: VisualCaretOwnerInput): VisualCar
   // OSC 133 prompt nor a sync frame, so `computeUseShadowCursor` is false and the
   // anchor comes from the live buffer cursor — which is exactly where vim put it.
   //
-  // It stays *below* opened/focused/syncOutputActive and viewportScrolledUp: those are
-  // genuine "not visible / geometry not trustworthy" conditions, and painting a
-  // preview against them would place it wrongly.
+  // It stays *below* opened/focused and viewportScrolledUp: those are genuine
+  // "not visible" conditions. Synchronized output is different: geometry is not
+  // trustworthy yet, so the already-painted preview/caret is frozen above rather
+  // than hidden or recomputed.
   if (input.compositionActive) {
     return "composition-preview";
   }

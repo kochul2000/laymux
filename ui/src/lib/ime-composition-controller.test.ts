@@ -45,12 +45,15 @@ describe("resolveVisualCaretOwner", () => {
         focused: false,
       }),
     ).toBe("hidden");
+  });
+
+  it("freezes the last painted caret during synchronized output", () => {
     expect(
       resolveVisualCaretOwner({
         ...baseInput,
         syncOutputActive: true,
       }),
-    ).toBe("hidden");
+    ).toBe("frozen");
   });
 
   // This case used to assert "alt-buffer" — the defect in issue #553 was pinned as
