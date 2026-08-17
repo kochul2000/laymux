@@ -177,6 +177,11 @@ mod tests {
             "setNavigationOpen(!(autoConnectArmed() || (autoConnectMode && (androidE2eMode || token()))));"
         ));
         assert!(html.contains("if (status && status.active && !resumeToken) {"));
+        // A boot-time autoConnect claim runs outside a user gesture: focusing
+        // the input would strand DOM focus without a soft keyboard and turn the
+        // Keyboard toggle's first tap into a dismiss.
+        assert!(html.contains("connect({ focusInput: false })"));
+        assert!(html.contains("async function connect({ auto = false, focusInput = !auto } = {})"));
         // The pre-check is advisory. Only a bad token or remote access being off are
         // answers on their own; the claim judges ownership.
         assert!(html.contains("if (err && (err.status === 401 || err.status === 403)) {"));
@@ -223,7 +228,10 @@ mod tests {
         // remembered pane, and an explicit `null` opts out of it — a reconnect
         // would then land on the focused pane instead of this tab's own.
         assert!(html.contains("await loadNavigation(undefined, {"));
-        assert!(html.contains("focusInput: !auto,"));
+        // `focusInput` is the connect() option (default `!auto`); the boot-time
+        // autoConnect claim passes false so no gesture-less focus strands DOM
+        // focus without a soft keyboard.
+        assert!(html.contains("focusInput,"));
         assert!(html.contains("preserveViewport: auto,"));
         assert!(html.contains("\"transitioning\","));
         assert!(html.contains("scheduleAutoConnectRetry();"));
