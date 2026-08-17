@@ -1,6 +1,6 @@
 [package]
 name = "laymux"
-version = "0.10.12"
+version = "0.10.13"
 edition = "2021"
 description = "A terminal-focused IDE built with Tauri"
 default-run = "laymux"
