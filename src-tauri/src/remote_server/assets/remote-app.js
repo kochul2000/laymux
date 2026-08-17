@@ -6843,8 +6843,10 @@
         setDockPanelOpen(false);
         // The drawer is the landing surface when the user has to connect by hand — it
         // holds Connect and the "Not connected." hints. With the reconnect intent
-        // armed it would open only to slide shut a moment later, so start closed.
-        setNavigationOpen(!autoConnectArmed());
+        // armed — or an autoConnect=1 load that is about to claim on its own
+        // (the Android E2E entry always is) — it would open only to slide shut a
+        // moment later, so start closed.
+        setNavigationOpen(!(autoConnectArmed() || (autoConnectMode && (androidE2eMode || token()))));
         renderInputSurface();
         renderKeyRow();
         setKeyBarVisible(keyBarConfig.visible, false);

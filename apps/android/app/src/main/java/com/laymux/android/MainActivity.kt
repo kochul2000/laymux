@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
@@ -70,6 +71,7 @@ import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.NativeBridge
+import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteLoadProgress
 import com.laymux.android.web.RemoteResourceCache
@@ -155,6 +157,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteHttpRequests = RemoteHttpRequestRegistry()
     private val remoteHttpResumeTracker = RemoteHttpResumeTracker()
     private val remoteResourceCache = RemoteResourceCache()
+    private val remoteBackGuard = RemoteBackGuard()
     private var remoteLoadProgress = RemoteLoadProgress()
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
@@ -206,8 +209,38 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         setContentView(root)
         applySystemBarInsets(root)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
+        installRemoteBackGuard()
         webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
+    }
+
+    /**
+     * A system back press on the Remote surface would quit the app mid-session.
+     * First press warns, a second within the window disconnects to the
+     * dashboard; every other surface keeps the default behavior.
+     */
+    private fun installRemoteBackGuard() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : androidx.activity.OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (visibleWebSurface == VisibleWebSurface.REMOTE && !isDestroyed) {
+                        when (remoteBackGuard.onBackPressed(SystemClock.elapsedRealtime())) {
+                            RemoteBackGuard.Action.WARN -> Toast.makeText(
+                                this@MainActivity,
+                                "한 번 더 누르면 연결을 끊고 대시보드로 이동합니다.",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                            RemoteBackGuard.Action.LEAVE -> disconnectRemote()
+                        }
+                        return
+                    }
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            },
+        )
     }
 
     /**
@@ -367,6 +400,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         runOnUiThread {
             if (isDestroyed) return@runOnUiThread
             remoteLoadingStatus.text = stage
+            remoteLoadingOverlay.bringToFront()
             remoteLoadingOverlay.visibility = View.VISIBLE
         }
     }
@@ -550,6 +584,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             cloudWebView.clearFocus()
             webView.bringToFront()
             webView.requestFocus()
+            // bringToFront reorders the WebView past the loading overlay, which
+            // must stay the topmost child or the connect progress never shows.
+            remoteLoadingOverlay.bringToFront()
         }
     }
 
