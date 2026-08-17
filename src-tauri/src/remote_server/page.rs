@@ -170,8 +170,12 @@ mod tests {
         assert!(html.contains(
             "if (leaseId || claimInFlight || !autoConnectArmed() || (!androidE2eMode && !token())) return;"
         ));
-        // Landing with the intent armed: no drawer open-then-shut animation.
-        assert!(html.contains("setNavigationOpen(!autoConnectArmed());"));
+        // Landing with the intent armed — or an imminent autoConnect claim
+        // (the Android E2E entry always loads with autoConnect=1): no drawer
+        // open-then-shut animation.
+        assert!(html.contains(
+            "setNavigationOpen(!(autoConnectArmed() || (autoConnectMode && (androidE2eMode || token()))));"
+        ));
         assert!(html.contains("if (status && status.active && !resumeToken) {"));
         // The pre-check is advisory. Only a bad token or remote access being off are
         // answers on their own; the claim judges ownership.
