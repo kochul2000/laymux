@@ -236,8 +236,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         return
                     }
                     isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
-                    isEnabled = true
+                    try {
+                        onBackPressedDispatcher.onBackPressed()
+                    } finally {
+                        isEnabled = true
+                    }
                 }
             },
         )
@@ -352,8 +355,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             gravity = Gravity.CENTER
             setBackgroundColor(Color.parseColor("#e6101418"))
             visibility = View.GONE
+            // Clickable blocks touches from reaching the stale document below.
+            // NOT focusable: taking view focus here leaves the WebView unfocused
+            // once the overlay hides, and the first tap on the Remote page then
+            // only restores view focus instead of raising the soft keyboard.
             isClickable = true
-            isFocusable = true
+            isFocusable = false
             addView(
                 ProgressBar(this@MainActivity),
                 LinearLayout.LayoutParams(
@@ -523,6 +530,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     private fun onRemoteDocumentLoaded() {
         remoteLoadingOverlay.visibility = View.GONE
+        // The Remote page's first Keyboard tap can only raise the IME when the
+        // WebView already holds view focus at that moment.
+        if (visibleWebSurface == VisibleWebSurface.REMOTE && ::webView.isInitialized) {
+            webView.requestFocus()
+        }
     }
 
     private fun resumeRemoteSurfaceAfterBackground(
@@ -569,6 +581,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         visibleWebSurface = surface
         if (surface != VisibleWebSurface.REMOTE) {
             remoteLoadingOverlay.visibility = View.GONE
+            // A warning armed on the Remote surface must not carry into the
+            // next visit — re-entering within the window would treat a single
+            // back press as the confirmed second one.
+            remoteBackGuard.reset()
         }
         cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
         webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
