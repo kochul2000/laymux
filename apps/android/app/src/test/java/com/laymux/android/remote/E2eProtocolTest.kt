@@ -13,6 +13,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.json.JSONObject
 
@@ -623,6 +624,58 @@ class E2eProtocolTest {
         Arrays.fill(seed, 0)
     }
 
+    /**
+     * 같은-릴리즈 계약의 호환 게이트 (ADR-0171): challenge 응답의
+     * compatVersion이 앱과 다르면 방향에 맞는 안내로 연결을 접는다.
+     * 필드 부재(버저닝 도입 전 데스크톱)는 PC 구버전으로 취급한다.
+     */
+    @Test
+    fun compatVersionMismatchFailsClosedWithDirectionalGuidance() {
+        val seed = ByteArray(32) { it.toByte() }
+        val metadata = PairingMetadata(
+            endpoint = "https://relay.example/",
+            instanceId = "desktop-7",
+            pairingId = "AAECAwQFBgcICQoLDA0ODw",
+            expiresAtEpochSeconds = 2_000,
+            clientNonce = "EBESExQVFhcYGRobHB0eHw",
+            confirmedAtEpochSeconds = 900,
+            label = null,
+        )
+
+        fun openAgainst(compatVersion: Int): Exception? = try {
+            val client = E2eRemoteClient(
+                connectionFactory = { uri ->
+                    HandshakeConnection(uri.toURL()) { body ->
+                        val request = JSONObject(body)
+                        challengeResponse(
+                            metadata,
+                            seed,
+                            request.getString("clientSessionNonce"),
+                            compatVersion = compatVersion,
+                        )
+                    }
+                },
+                nowEpochSeconds = { 1_000 },
+            )
+            StoredPairing(metadata, seed.copyOf()).use { pairing ->
+                client.open(pairing).close()
+            }
+            null
+        } catch (error: Exception) {
+            error
+        }
+
+        val older = openAgainst(0)
+        assertTrue("actual: $older", older is E2eProtocolException)
+        assertTrue("msg: ${older?.message}", requireNotNull(older?.message).contains("PC Laymux가 구버전"))
+
+        val newer = openAgainst(E2eProtocol.COMPAT_VERSION + 1)
+        assertTrue("actual: $newer", newer is E2eProtocolException)
+        assertTrue("msg: ${newer?.message}", requireNotNull(newer?.message).contains("앱이 구버전"))
+
+        Arrays.fill(seed, 0)
+    }
+
     @Test
     fun rpcKeepsRetryingTheExactCiphertextUntilAnAuthenticatedResponseArrives() {
         val requestBodies = mutableListOf<String>()
@@ -792,6 +845,7 @@ class E2eProtocolTest {
         metadata: PairingMetadata,
         seed: ByteArray,
         clientSessionNonce: String,
+        compatVersion: Int = E2eProtocol.COMPAT_VERSION,
     ): String {
         val challengeId = "MDEyMzQ1Njc4OTo7PD0-Pw"
         val serverNonce = "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8"
@@ -805,7 +859,7 @@ class E2eProtocolTest {
             serverNonce,
             expiresAt.toString(),
         )
-        return JSONObject()
+        val response = JSONObject()
             .put("version", E2eProtocol.VERSION)
             .put("instanceId", metadata.instanceId)
             .put("pairingId", metadata.pairingId)
@@ -818,7 +872,9 @@ class E2eProtocolTest {
                 "serverProof",
                 E2eProtocol.proof(seed, E2eProtocol.CHALLENGE_RESPONSE_DOMAIN, fields),
             )
-            .toString()
+        // 0 = 버저닝 도입 전 데스크톱(필드 부재) 시뮬레이션.
+        if (compatVersion != 0) response.put("compatVersion", compatVersion)
+        return response.toString()
     }
 
     private fun establishResponse(

@@ -217,6 +217,12 @@ internal class E2eSessionSuspendedException : Exception("보안 세션이 백그
 
 internal object E2eProtocol {
     const val VERSION = 1
+
+    // desktop↔앱 같은-릴리즈 계약의 호환 번호 (ADR-0171). 비호환 변경이
+    // 실릴 때만 1씩 올린다 — 릴리즈마다 올리지 않는다. desktop의
+    // COMPAT_VERSION(android_e2e/mod.rs)과 항상 같은 값이어야 한다.
+    const val COMPAT_VERSION = 1
+
     const val MAX_SEQUENCE = 9_007_199_254_740_991L
     const val CLIENT_SESSION_NONCE_BYTES = 16
     const val SESSION_ID_BYTES = 16
@@ -291,7 +297,24 @@ internal object E2eProtocol {
                 "challengeExpiresAt",
                 "serverProof",
             ),
+            // 버저닝 도입 전 데스크톱엔 없다 — 부재는 아래 게이트가 PC
+            // 구버전으로 안내한다.
+            optionalKeys = setOf("compatVersion"),
         )
+        // 같은-릴리즈 계약의 호환 게이트 (ADR-0171). proof에 안 실리는 표시
+        // 전용 필드다 — 위조해 봐야 이 오류를 띄우고 연결을 접게 만들 뿐,
+        // relay가 이미 가진 연결 거부 능력을 넘지 않는다. 필드 부재(0)는
+        // 버저닝 도입 전 데스크톱이다.
+        val compatVersion = response.optInt("compatVersion", 0)
+        if (compatVersion != COMPAT_VERSION) {
+            throw E2eProtocolException(
+                if (compatVersion < COMPAT_VERSION) {
+                    "PC Laymux가 구버전이라 연결할 수 없습니다. PC를 업데이트하세요."
+                } else {
+                    "앱이 구버전이라 연결할 수 없습니다. 앱을 업데이트하세요."
+                },
+            )
+        }
         val challengeId = response.optString("challengeId")
         val serverNonce = response.optString("serverNonce")
         val challengeExpiresAt = response.optLong("challengeExpiresAt", -1)
@@ -504,7 +527,11 @@ internal object E2eProtocol {
         }
     }
 
-    internal fun strictObject(raw: String, expectedKeys: Set<String>): JSONObject {
+    internal fun strictObject(
+        raw: String,
+        expectedKeys: Set<String>,
+        optionalKeys: Set<String> = emptySet(),
+    ): JSONObject {
         val json = try {
             JSONObject(raw)
         } catch (error: Exception) {
@@ -513,7 +540,9 @@ internal object E2eProtocol {
         val actual = mutableSetOf<String>()
         val keys = json.keys()
         while (keys.hasNext()) actual.add(keys.next())
-        if (actual != expectedKeys) {
+        // optional 은 있어도 되고 없어도 되지만, 그 밖의 미지의 필드는 계속
+        // fail closed 다. (compatVersion 처럼 구 데스크톱엔 없는 필드용)
+        if ((actual - optionalKeys) != expectedKeys) {
             throw E2eProtocolException("보안 응답 필드가 올바르지 않습니다.")
         }
         return json
