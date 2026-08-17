@@ -152,6 +152,13 @@ const GROK_ROW_LABELS: Record<GrokUsageVisibleRow, { label: string; short: strin
   payg: { label: "Pay-as-you-go", short: "PAYG" },
 };
 
+/**
+ * Grok's limit rows.
+ *
+ * Weekly is a 7-day window anchored on `Resets:` / `Next reset:`, the same
+ * calendar walk Claude's week rows use. Credits and pay-as-you-go have no
+ * window, so they keep `elapsed` null and the yellow bar stays off.
+ */
 export function buildGrokUsageRows(
   rows: readonly {
     key: string;
@@ -159,6 +166,7 @@ export function buildGrokUsageRows(
     remaining?: number | null;
     reset: string | null;
   }[],
+  now: Date,
 ): KeyedUsageRow<GrokUsageVisibleRow>[] {
   return rows.flatMap((row) => {
     if (!(row.key in GROK_ROW_LABELS)) return [];
@@ -176,7 +184,7 @@ export function buildGrokUsageRows(
           valueText:
             row.percent == null && row.remaining != null ? String(row.remaining) : undefined,
           reset: row.reset,
-          elapsed: null,
+          elapsed: key === "weekly" ? weekElapsedPercent(row.reset, now) : null,
         },
       },
     ];

@@ -67,6 +67,34 @@ describe("resolveResetInstant", () => {
     expect(resolveResetInstant("Xyz 6, 11:59am", WEEK_WINDOW_MS, now)).toBeNull();
     expect(resolveResetInstant("", SESSION_WINDOW_MS, now)).toBeNull();
   });
+
+  it("reads a Grok weekday reset as the next that weekday", () => {
+    // Wednesday 15:00 → next Monday 9am, not the Monday that already passed.
+    const now = at(2026, 3, 4, 15, 0);
+    expect(resolveResetInstant("Mon 9am", WEEK_WINDOW_MS, now)).toEqual(at(2026, 3, 9, 9));
+  });
+
+  it("keeps a Grok weekday reset later today", () => {
+    const now = at(2026, 3, 2, 8, 0);
+    expect(resolveResetInstant("Mon 9am", WEEK_WINDOW_MS, now)).toEqual(at(2026, 3, 2, 9));
+  });
+
+  it("rolls a Grok weekday reset to next week once that time has passed", () => {
+    const now = at(2026, 3, 2, 10, 0);
+    expect(resolveResetInstant("Mon 9am", WEEK_WINDOW_MS, now)).toEqual(at(2026, 3, 9, 9));
+  });
+
+  it("reads a Grok dated 24-hour reset", () => {
+    const now = at(2026, 8, 18, 12, 0);
+    expect(resolveResetInstant("August 20, 16:13", WEEK_WINDOW_MS, now)).toEqual(
+      at(2026, 8, 20, 16, 13),
+    );
+  });
+
+  it("reads a Grok midnight 24-hour reset", () => {
+    const now = at(2026, 5, 25, 12, 0);
+    expect(resolveResetInstant("May 29, 00:00", WEEK_WINDOW_MS, now)).toEqual(at(2026, 5, 29, 0));
+  });
 });
 
 describe("elapsedPercent", () => {
@@ -81,6 +109,17 @@ describe("elapsedPercent", () => {
     // Window ends Mar 6 12pm, so it began Feb 27 12pm.
     expect(weekElapsedPercent("Mar 6, 12pm", at(2026, 2, 27, 12, 0))).toBe(0);
     expect(weekElapsedPercent("Mar 6, 12pm", at(2026, 3, 3, 0, 0))).toBe(50);
+  });
+
+  it("measures a Grok weekly window from a 24-hour dated reset", () => {
+    // Window ends Aug 20 16:13, so it began Aug 13 16:13.
+    expect(weekElapsedPercent("August 20, 16:13", at(2026, 8, 13, 16, 13))).toBe(0);
+    expect(weekElapsedPercent("August 20, 16:13", at(2026, 8, 17, 4, 13))).toBe(50);
+  });
+
+  it("measures a Grok weekly window from a weekday reset", () => {
+    // Next reset Mon 9am on Wed 15:00 → window began last Monday 9am.
+    expect(weekElapsedPercent("Mon 9am", at(2026, 3, 4, 15, 0))).toBe(32);
   });
 
   it("clamps to 0-100", () => {

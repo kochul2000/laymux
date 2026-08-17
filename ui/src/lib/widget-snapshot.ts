@@ -277,7 +277,10 @@ export async function buildRemoteWidgetSnapshot(
         const configDir = claudeConfigDir(instance);
         const snapshot = grokSnaps.get(configDir);
         const rows = snapshot
-          ? selectVisibleRows(buildGrokUsageRows(snapshot.rows), settings.usage.grok.visibleRows)
+          ? selectVisibleRows(
+              buildGrokUsageRows(snapshot.rows, now),
+              settings.usage.grok.visibleRows,
+            )
           : [];
         return [
           usageItem({

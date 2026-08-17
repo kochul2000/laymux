@@ -3,9 +3,10 @@
  * has been used.
  *
  * The backend carries reset times verbatim (`7pm (Asia/Seoul)`,
- * `Mar 6, 12pm (Asia/Seoul)`) and never interprets them. Turning one into an
- * elapsed fraction needs local-calendar reasoning, so that lives here — one
- * implementation, on the side that already has a calendar (ADR-0102).
+ * `Mar 6, 12pm (Asia/Seoul)`, Grok's `August 20, 16:13` / `Mon 9am`) and never
+ * interprets them. Turning one into an elapsed fraction needs local-calendar
+ * reasoning, so that lives here — one implementation, on the side that already
+ * has a calendar (ADR-0102).
  */
 
 /** Length of a Claude session window. */
@@ -19,6 +20,12 @@ const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "
 const TIME_ONLY = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
 /** `Mar 6, 11:59am` — month name, day, then the same time shape. */
 const DATE_TIME = /^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+/** `August 20, 16:13` / `May 29, 00:00` — Grok's 24-hour dated reset. */
+const DATE_TIME_24 = /^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{1,2}):(\d{2})\b/;
+/** `Mon 9am` — Grok's weekday reset. Next occurrence of that weekday. */
+const WEEKDAY_TIME = /^(sun|mon|tue|wed|thu|fri|sat)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 function to24Hour(hour: number, meridiem: string): number {
   const lower = meridiem.toLowerCase();
@@ -47,9 +54,30 @@ export function resolveResetInstant(
     const day = Number(dated[2]);
     const hour = to24Hour(Number(dated[3]), dated[5]);
     const minute = dated[4] ? Number(dated[4]) : 0;
-    const candidate = new Date(now.getFullYear(), monthIndex, day, hour, minute, 0, 0);
-    if (candidate.getTime() < now.getTime() - windowMs) {
-      candidate.setFullYear(now.getFullYear() + 1);
+    return datedCandidate(now, windowMs, monthIndex, day, hour, minute);
+  }
+
+  const dated24 = DATE_TIME_24.exec(trimmed);
+  if (dated24) {
+    const monthIndex = MONTHS.indexOf(dated24[1].slice(0, 3).toLowerCase());
+    if (monthIndex < 0) return null;
+    const hour = Number(dated24[3]);
+    const minute = Number(dated24[4]);
+    if (hour > 23 || minute > 59) return null;
+    return datedCandidate(now, windowMs, monthIndex, Number(dated24[2]), hour, minute);
+  }
+
+  const weekday = WEEKDAY_TIME.exec(trimmed);
+  if (weekday) {
+    const targetDow = WEEKDAYS.indexOf(weekday[1].slice(0, 3).toLowerCase());
+    if (targetDow < 0) return null;
+    const hour = to24Hour(Number(weekday[2]), weekday[4]);
+    const minute = weekday[3] ? Number(weekday[3]) : 0;
+    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
+    const deltaDays = (targetDow - candidate.getDay() + 7) % 7;
+    candidate.setDate(candidate.getDate() + deltaDays);
+    if (candidate.getTime() <= now.getTime()) {
+      candidate.setDate(candidate.getDate() + 7);
     }
     return candidate;
   }
@@ -61,6 +89,21 @@ export function resolveResetInstant(
   const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
   if (candidate.getTime() <= now.getTime()) {
     candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate;
+}
+
+function datedCandidate(
+  now: Date,
+  windowMs: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+): Date {
+  const candidate = new Date(now.getFullYear(), monthIndex, day, hour, minute, 0, 0);
+  if (candidate.getTime() < now.getTime() - windowMs) {
+    candidate.setFullYear(now.getFullYear() + 1);
   }
   return candidate;
 }
