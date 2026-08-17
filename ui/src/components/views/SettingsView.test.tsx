@@ -2717,37 +2717,56 @@ describe("SettingsView", () => {
     });
   });
 
-  describe("UsageSection", () => {
-    async function openUsage() {
+  describe("usage settings inside the agent sections", () => {
+    async function openAgent(nav: "nav-claude" | "nav-codex" | "nav-grok") {
       const user = userEvent.setup();
       render(<SettingsView />);
-      await user.click(screen.getByTestId("nav-usage"));
+      await user.click(screen.getByTestId(nav));
       return user;
     }
+    const openClaude = () => openAgent("nav-claude");
+    const openCodex = () => openAgent("nav-codex");
+    const openGrok = () => openAgent("nav-grok");
 
-    it("renders the usage settings under the Views group", async () => {
-      await openUsage();
-      expect(screen.getByTestId("settings-usage-section")).toBeInTheDocument();
+    it("renders the Claude usage settings inside the Claude Code section", async () => {
+      await openClaude();
       expect(screen.getByTestId("usage-profile-select")).toBeInTheDocument();
       expect(screen.getByTestId("usage-refresh-input")).toBeInTheDocument();
       expect(screen.getByTestId("usage-visible-row-session")).toBeInTheDocument();
       expect(screen.getByTestId("usage-visible-row-weekAll")).toBeInTheDocument();
       expect(screen.getByTestId("usage-visible-row-weekModel")).toBeInTheDocument();
       expect(screen.getByTestId("usage-config-dir-add")).toBeInTheDocument();
+      // The section keeps its own palette pickers.
+      expect(screen.getByTestId("usage-claude-color-used")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-claude-color-pace")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-claude-color-track")).toBeInTheDocument();
+      // Other agents' usage settings live in their own sections.
+      expect(screen.queryByTestId("codex-usage-profile-select")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("grok-usage-profile-select")).not.toBeInTheDocument();
+    });
+
+    it("renders the Codex usage settings inside the Codex section", async () => {
+      await openCodex();
       expect(screen.getByTestId("codex-usage-profile-select")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-refresh-input")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-visible-row-weekly")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-visible-row-sparkWeekly")).toBeInTheDocument();
       expect(screen.getByTestId("codex-usage-config-dir-add")).toBeInTheDocument();
-      // Each agent has its own palette pickers, on its own sub-group.
-      expect(screen.getByTestId("usage-claude-color-used")).toBeInTheDocument();
-      expect(screen.getByTestId("usage-claude-color-pace")).toBeInTheDocument();
-      expect(screen.getByTestId("usage-claude-color-track")).toBeInTheDocument();
       expect(screen.getByTestId("usage-codex-color-used")).toBeInTheDocument();
+      expect(screen.queryByTestId("usage-profile-select")).not.toBeInTheDocument();
+    });
+
+    it("renders the Grok usage settings inside the Grok section", async () => {
+      await openGrok();
+      expect(screen.getByTestId("grok-usage-profile-select")).toBeInTheDocument();
+      expect(screen.getByTestId("grok-usage-refresh-input")).toBeInTheDocument();
+      expect(screen.getByTestId("grok-usage-visible-row-weekly")).toBeInTheDocument();
+      expect(screen.getByTestId("grok-usage-config-dir-add")).toBeInTheDocument();
+      expect(screen.getByTestId("usage-grok-color-used")).toBeInTheDocument();
     });
 
     it("offers every terminal profile plus a default option", async () => {
-      await openUsage();
+      await openClaude();
       const select = screen.getByTestId("usage-profile-select") as HTMLSelectElement;
       const values = Array.from(select.options).map((o) => o.value);
       // Empty value = follow defaultProfile.
@@ -2760,7 +2779,7 @@ describe("SettingsView", () => {
     it("hints the rate-limit bounds on the interval input", async () => {
       // The floor is a provider constraint, so the control must not invite
       // values the backend will silently clamp.
-      await openUsage();
+      await openClaude();
       const input = screen.getByTestId("usage-refresh-input") as HTMLInputElement;
       expect(input.min).toBe("600");
       expect(input.max).toBe("3600");
@@ -2768,7 +2787,7 @@ describe("SettingsView", () => {
     });
 
     it("edits stay in the draft until saved", async () => {
-      const user = await openUsage();
+      const user = await openClaude();
       const input = screen.getByTestId("usage-refresh-input");
       await user.clear(input);
       await user.type(input, "900");
@@ -2780,7 +2799,7 @@ describe("SettingsView", () => {
     });
 
     it("saves selected rows and prevents deselecting the last one", async () => {
-      const user = await openUsage();
+      const user = await openClaude();
       await user.click(screen.getByTestId("usage-visible-row-weekAll"));
       await user.click(screen.getByTestId("save-settings-btn"));
       expect(useSettingsStore.getState().usage.claude.visibleRows).toEqual([
@@ -2795,7 +2814,7 @@ describe("SettingsView", () => {
     });
 
     it("saves Codex limits independently and prevents deselecting its last row", async () => {
-      const user = await openUsage();
+      const user = await openCodex();
       await user.click(screen.getByTestId("codex-usage-visible-row-sparkWeekly"));
       await user.click(screen.getByTestId("save-settings-btn"));
       expect(useSettingsStore.getState().usage.codex.visibleRows).toEqual(["weekly"]);
@@ -2806,7 +2825,7 @@ describe("SettingsView", () => {
     });
 
     it("adds and removes config dirs", async () => {
-      const user = await openUsage();
+      const user = await openClaude();
       await user.click(screen.getByTestId("usage-config-dir-add"));
       await user.type(screen.getByTestId("usage-config-dir-input-0"), "/home/me/.claude-personal");
       await user.click(screen.getByTestId("save-settings-btn"));
@@ -2820,7 +2839,7 @@ describe("SettingsView", () => {
     });
 
     it("adds a separately signed-in Codex account and saves its own colors", async () => {
-      const user = await openUsage();
+      const user = await openCodex();
       await user.click(screen.getByTestId("codex-usage-config-dir-add"));
       await user.type(
         screen.getByTestId("codex-usage-config-dir-input-0"),
@@ -2840,7 +2859,7 @@ describe("SettingsView", () => {
     });
 
     it("discards unsaved usage edits", async () => {
-      const user = await openUsage();
+      const user = await openClaude();
       await user.click(screen.getByTestId("usage-config-dir-add"));
       await user.click(screen.getByTestId("discard-settings-btn"));
       expect(useSettingsStore.getState().usage.claude.configDirs).toEqual([]);
