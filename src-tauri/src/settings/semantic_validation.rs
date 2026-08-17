@@ -441,6 +441,20 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let remote = &settings.remote;
+    range_u64(
+        issues,
+        "/remote/terminalFontSize",
+        u64::from(remote.terminal_font_size),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
+    );
+    range_u64(
+        issues,
+        "/remote/composerFontSize",
+        u64::from(remote.composer_font_size),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
+    );
     range_scroll_sensitivity(
         issues,
         "/remote/scrollSensitivity",

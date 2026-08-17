@@ -1773,6 +1773,12 @@ pub struct RemoteSettings {
     /// Max KiB of recent output replayed to a remote client on terminal attach.
     #[serde(default = "default_remote_snapshot_max_kib")]
     pub snapshot_max_kib: u32,
+    /// Terminal cell font size used only by the Remote surface.
+    #[serde(default = "default_remote_terminal_font_size")]
+    pub terminal_font_size: u16,
+    /// Text size for the Remote input composer and its suggestions.
+    #[serde(default = "default_remote_composer_font_size")]
+    pub composer_font_size: u16,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1856,6 +1862,19 @@ fn default_remote_snapshot_max_kib() -> u32 {
     DEFAULT_REMOTE_SNAPSHOT_MAX_KIB
 }
 
+pub const REMOTE_FONT_SIZE_MIN: u16 = 6;
+pub const REMOTE_FONT_SIZE_MAX: u16 = 72;
+pub const DEFAULT_REMOTE_TERMINAL_FONT_SIZE: u16 = 14;
+pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 16;
+
+fn default_remote_terminal_font_size() -> u16 {
+    DEFAULT_REMOTE_TERMINAL_FONT_SIZE
+}
+
+fn default_remote_composer_font_size() -> u16 {
+    DEFAULT_REMOTE_COMPOSER_FONT_SIZE
+}
+
 fn default_cloud_auto_reconnect() -> bool {
     true
 }
@@ -1900,6 +1919,8 @@ impl Default for RemoteSettings {
             android_background_lease_seconds: default_android_background_lease_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
             snapshot_max_kib: default_remote_snapshot_max_kib(),
+            terminal_font_size: default_remote_terminal_font_size(),
+            composer_font_size: default_remote_composer_font_size(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,

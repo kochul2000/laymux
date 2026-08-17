@@ -473,6 +473,23 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn remote_page_html_edits_pc_owned_terminal_and_composer_font_sizes() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"remoteTerminalFontSize\""));
+        assert!(html.contains("id=\"remoteComposerFontSize\""));
+        assert!(html.contains("/remote/v1/display-settings"));
+        assert!(html.contains("method: \"PUT\""));
+        assert!(html.contains("body: JSON.stringify({"));
+        assert!(html.contains("leaseId: selectedLeaseId"));
+        assert!(html.contains("terminalFontSize"));
+        assert!(html.contains("composerFontSize"));
+        assert!(html.contains("--remote-composer-font-size"));
+        assert!(html.contains("applyTerminalAppearance(appearance);"));
+        assert!(html.contains("scheduleTerminalFit();"));
+    }
+
     /// A button that cannot install anything is worse than no button, so every
     /// condition that rules installation out keeps the section hidden (ADR-0099).
     #[test]

@@ -162,10 +162,30 @@
               </section>
             </div><!-- /drawerConnectionView -->
             <div id="drawerSettingsView" class="drawer-view" hidden>
-              <!-- Device-local display choices (ADR-0132). Not `locked`: what
-                   this browser spends its chrome rows on is nobody's lease. -->
               <section id="displaySection" class="nav-section" aria-label="Display">
               <h2 class="nav-section-title">Display</h2>
+              <!-- These two values are PC-owned settings (ADR-0173). Reading
+                   stays behind Remote auth; editing additionally needs the
+                   active controller lease. -->
+              <label class="nav-number-row" for="remoteTerminalFontSize">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Terminal text</span>
+                  <span class="nav-number-desc">Remote screen cells</span>
+                </span>
+                <input id="remoteTerminalFontSize" type="number" min="6" max="72" step="1" disabled />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <label class="nav-number-row" for="remoteComposerFontSize">
+                <span class="nav-number-copy">
+                  <span class="nav-toggle-name">Composer text</span>
+                  <span class="nav-number-desc">Input and suggestions</span>
+                </span>
+                <input id="remoteComposerFontSize" type="number" min="6" max="72" step="1" disabled />
+                <span class="nav-number-unit">px</span>
+              </label>
+              <div id="remoteDisplaySettingsStatus" class="nav-settings-status">Connect to edit PC settings.</div>
+              <!-- Device-local display choice (ADR-0132). Not `locked`: what
+                   this browser spends its chrome rows on is nobody's lease. -->
               <label class="nav-toggle-row" for="widgetStripToggle">
                 <input id="widgetStripToggle" type="checkbox" checked />
                 <span class="nav-toggle-name">Widget bar</span>

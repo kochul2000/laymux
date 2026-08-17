@@ -2,7 +2,8 @@ use serde::Serialize;
 
 use crate::constants::{DEFAULT_FAST_SCROLL_SENSITIVITY, DEFAULT_SCROLL_SENSITIVITY};
 use crate::settings::models::{
-    clamp_scroll_sensitivity, ColorScheme, FontSettings, Profile, Settings,
+    clamp_scroll_sensitivity, ColorScheme, Profile, Settings, REMOTE_FONT_SIZE_MAX,
+    REMOTE_FONT_SIZE_MIN,
 };
 
 use super::font_assets::{resolve_font_assets, RemoteFontAssets};
@@ -100,11 +101,10 @@ pub(super) fn resolve_remote_terminal_appearance(
 
     RemoteTerminalAppearance {
         font_family: terminal_font_family(face),
-        font_size: if font.size == 0 {
-            FontSettings::default().size
-        } else {
-            font.size
-        },
+        font_size: settings
+            .remote
+            .terminal_font_size
+            .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
         cursor_style: cursor_style.into(),
         cursor_width,
         font_assets: resolve_font_assets(face, settings),
@@ -303,6 +303,7 @@ fn value_or_default(value: &str, default: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::models::FontSettings;
 
     #[test]
     fn inherits_default_font_and_builtin_campbell_clear_theme() {
@@ -324,7 +325,7 @@ mod tests {
             appearance.font_family,
             "'Fira Code', 'Cascadia Mono', 'Consolas', monospace"
         );
-        assert_eq!(appearance.font_size, 15);
+        assert_eq!(appearance.font_size, 14);
         assert_eq!(appearance.cursor_style, "bar");
         assert_eq!(appearance.cursor_width, Some(1));
         assert_eq!(appearance.theme.background.as_deref(), Some("#0C0C0C"));
@@ -365,7 +366,7 @@ mod tests {
             appearance.font_family,
             "'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace"
         );
-        assert_eq!(appearance.font_size, 18);
+        assert_eq!(appearance.font_size, 14);
         assert_eq!(appearance.cursor_style, "block");
         assert_eq!(appearance.cursor_width, None);
         assert_eq!(appearance.theme.foreground.as_deref(), Some("#111111"));
@@ -430,6 +431,30 @@ mod tests {
         assert_eq!(appearance.scroll_sensitivity, 2.5);
         assert_eq!(appearance.fast_scroll_sensitivity, 12.0);
         assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
+    }
+
+    #[test]
+    fn terminal_font_size_comes_from_remote_settings_not_the_desktop_profile() {
+        let mut settings = Settings::default();
+        settings.profile_defaults.font.size = 11;
+        settings.profiles = vec![Profile {
+            name: "PowerShell".into(),
+            font: Some(FontSettings {
+                face: "JetBrains Mono".into(),
+                size: 22,
+                weight: "normal".into(),
+            }),
+            ..Profile::default()
+        }];
+        settings.remote.terminal_font_size = 18;
+
+        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
+
+        assert_eq!(appearance.font_size, 18);
+        assert_eq!(
+            appearance.font_family,
+            "'JetBrains Mono', 'Cascadia Mono', 'Consolas', monospace"
+        );
     }
 
     /// A hand-edited settings.json is normalized before it reaches the client.

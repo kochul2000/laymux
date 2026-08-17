@@ -13,6 +13,9 @@
         const drawerCreateView = $("drawerCreateView");
         const drawerConnectionView = $("drawerConnectionView");
         const drawerSettingsView = $("drawerSettingsView");
+        const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
+        const remoteComposerFontSizeInput = $("remoteComposerFontSize");
+        const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
         const desktopModeHeaderButton = $("desktopModeHeader");
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
@@ -116,7 +119,13 @@
         const AUTO_CONNECT_RETRY_MAX_MS = 15000;
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
+        const REMOTE_FONT_SIZE_MIN = 6;
+        const REMOTE_FONT_SIZE_MAX = 72;
         let leaseId = null;
+        let remoteDisplaySettings = null;
+        let remoteDisplaySettingsLoading = false;
+        let remoteDisplaySettingsPending = false;
+        let remoteDisplaySettingsRevision = 0;
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
@@ -720,6 +729,148 @@
             throw remoteResponseError(response.status, body);
           }
           return response.json();
+        }
+
+        function normalizeRemoteFontSize(value, fallback) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return fallback;
+          return Math.min(
+            REMOTE_FONT_SIZE_MAX,
+            Math.max(REMOTE_FONT_SIZE_MIN, Math.floor(parsed)),
+          );
+        }
+
+        function updateRemoteDisplaySettingsControls(message = null, error = false) {
+          const editable =
+            Boolean(leaseId) &&
+            Boolean(remoteDisplaySettings?.revision) &&
+            !remoteDisplaySettingsLoading &&
+            !remoteDisplaySettingsPending;
+          remoteTerminalFontSizeInput.disabled = !editable;
+          remoteComposerFontSizeInput.disabled = !editable;
+          remoteDisplaySettingsStatus.textContent =
+            message ||
+            (leaseId
+              ? remoteDisplaySettingsLoading
+                ? "Loading PC settings..."
+                : "Stored on this PC."
+              : "Connect to edit PC settings.");
+          remoteDisplaySettingsStatus.classList.toggle("error", error);
+        }
+
+        function applyRemoteDisplaySettings(settings) {
+          const normalized = {
+            terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize, 14),
+            composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize, 16),
+            revision: typeof settings?.revision === "string" ? settings.revision : "",
+          };
+          remoteDisplaySettings = normalized;
+          remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
+          remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
+          document.documentElement.style.setProperty(
+            "--remote-composer-font-size",
+            `${normalized.composerFontSize}px`,
+          );
+          for (const info of terminalInfoById.values()) {
+            if (info.appearance) {
+              info.appearance = {
+                ...info.appearance,
+                fontSize: normalized.terminalFontSize,
+              };
+            }
+          }
+          const appearance = activeTerminalId && terminalInfoById.get(activeTerminalId)?.appearance
+            ? terminalInfoById.get(activeTerminalId).appearance
+            : { ...defaultAppearance, fontSize: normalized.terminalFontSize };
+          applyTerminalAppearance(appearance);
+          scheduleTerminalFit();
+        }
+
+        async function loadRemoteDisplaySettings({ reportErrors = true } = {}) {
+          // A same-document save owns the newest value until it settles. A
+          // drawer re-entry while PUT is in flight must not start a GET that
+          // can return the pre-save snapshot, supersede the PUT revision, and
+          // leave the controls permanently pending.
+          if (remoteDisplaySettingsPending) return;
+          const revision = ++remoteDisplaySettingsRevision;
+          remoteDisplaySettingsLoading = true;
+          updateRemoteDisplaySettingsControls();
+          let message = null;
+          let failed = false;
+          try {
+            const settings = await remoteFetch("/remote/v1/display-settings");
+            if (revision !== remoteDisplaySettingsRevision) return;
+            applyRemoteDisplaySettings(settings);
+          } catch (error) {
+            if (revision !== remoteDisplaySettingsRevision) return;
+            if (reportErrors) {
+              message = error.message || String(error);
+              failed = true;
+            }
+          } finally {
+            if (revision === remoteDisplaySettingsRevision) {
+              remoteDisplaySettingsLoading = false;
+              updateRemoteDisplaySettingsControls(message, failed);
+            }
+          }
+        }
+
+        async function saveRemoteDisplaySettings() {
+          const selectedLeaseId = leaseId;
+          const expectedRevision = remoteDisplaySettings?.revision;
+          if (!selectedLeaseId || !expectedRevision || remoteDisplaySettingsPending) return;
+          const revision = ++remoteDisplaySettingsRevision;
+          const terminalFontSize = normalizeRemoteFontSize(
+            remoteTerminalFontSizeInput.value,
+            remoteDisplaySettings?.terminalFontSize || 14,
+          );
+          const composerFontSize = normalizeRemoteFontSize(
+            remoteComposerFontSizeInput.value,
+            remoteDisplaySettings?.composerFontSize || 16,
+          );
+          remoteDisplaySettingsPending = true;
+          updateRemoteDisplaySettingsControls("Saving...");
+          let reloadAfterConflict = false;
+          try {
+            const settings = await remoteFetch("/remote/v1/display-settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                leaseId: selectedLeaseId,
+                expectedRevision,
+                terminalFontSize,
+                composerFontSize,
+              }),
+            });
+            if (revision !== remoteDisplaySettingsRevision || leaseId !== selectedLeaseId) return;
+            applyRemoteDisplaySettings(settings);
+            updateRemoteDisplaySettingsControls("Saved on this PC.");
+          } catch (error) {
+            if (revision !== remoteDisplaySettingsRevision) return;
+            if (error?.status === 409) {
+              reloadAfterConflict = true;
+            } else {
+              updateRemoteDisplaySettingsControls(error.message || String(error), true);
+            }
+          } finally {
+            if (revision === remoteDisplaySettingsRevision) {
+              remoteDisplaySettingsPending = false;
+              if (leaseId !== selectedLeaseId) {
+                updateRemoteDisplaySettingsControls();
+                if (leaseId) {
+                  loadRemoteDisplaySettings({ reportErrors: false }).catch(() => {});
+                }
+              } else if (reloadAfterConflict) {
+                updateRemoteDisplaySettingsControls("PC settings changed. Reloading...");
+                loadRemoteDisplaySettings().catch(() => {});
+              } else {
+                updateRemoteDisplaySettingsControls(
+                  remoteDisplaySettingsStatus.textContent,
+                  remoteDisplaySettingsStatus.classList.contains("error"),
+                );
+              }
+            }
+          }
         }
 
         function clearActiveGithubRepo() {
@@ -1574,6 +1725,7 @@
           notificationSection.classList.toggle("locked", !connected);
           drawerNotificationsButton.disabled = !connected;
           refreshButton.disabled = !connected;
+          updateRemoteDisplaySettingsControls();
           connectButton.disabled = connected;
           updateTerminalControls();
           renderInputSurface();
@@ -3509,6 +3661,9 @@
         function openDrawerSubview(view) {
           setDrawerView(view);
           drawerBackButton.focus();
+          if (view === "settings" && leaseId) {
+            loadRemoteDisplaySettings().catch(() => {});
+          }
         }
 
         function returnToWorkspaceView() {
@@ -5638,6 +5793,11 @@
             ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
+            // The terminal list already carries the PC-owned terminal size in
+            // its appearance. Refresh the narrow settings projection in the
+            // background so composer size follows too without delaying the
+            // first heartbeat or navigation attach.
+            loadRemoteDisplaySettings({ reportErrors: false }).catch(() => {});
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
@@ -6936,6 +7096,12 @@
 
         widgetStripToggle.addEventListener("change", () => {
           setWidgetStripAllowed(widgetStripToggle.checked);
+        });
+        remoteTerminalFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteComposerFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
         });
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";

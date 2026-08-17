@@ -310,6 +310,18 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::NextUse,
     },
     MetadataEntry {
+        path: "/remote/terminalFontSize",
+        description: "Remote terminal cell font size in pixels (6-72, default 14).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/remote/composerFontSize",
+        description: "Remote input composer font size in pixels (6-72, default 16).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/remote/scrollSensitivity",
         description: "원격 브라우저 터미널의 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 다음 attach부터 적용됩니다.",
         sensitive: false,

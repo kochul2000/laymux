@@ -149,11 +149,14 @@ pub enum HumanControlOrigin {
 struct HumanControlOperation {
     owner_epoch: u64,
     origin: HumanControlOrigin,
-    terminal_id: String,
+    terminal_id: Option<String>,
     /// True only after the PTY job has been placed on the terminal FIFO while
     /// holding the owner gate. Before that point an owner transition may
     /// detach the operation immediately: no physical I/O can have started.
     pty_enqueued: bool,
+    /// Non-PTY lease mutation that has already linearized under the owner gate.
+    /// Owner handoff must wait for it just as it waits for enqueued PTY work.
+    owner_transition_barrier: bool,
     completion: Option<PtyControlCompletion>,
 }
 
@@ -165,6 +168,7 @@ impl fmt::Debug for HumanControlOperation {
             .field("origin", &self.origin)
             .field("terminal_id", &self.terminal_id)
             .field("pty_enqueued", &self.pty_enqueued)
+            .field("owner_transition_barrier", &self.owner_transition_barrier)
             .field(
                 "completion_pending",
                 &self
@@ -192,6 +196,14 @@ pub struct HumanControlPermit<'a> {
     origin: HumanControlOrigin,
     terminal_id: String,
     finished: bool,
+}
+
+/// Lease-bound non-PTY mutation admitted under the same owner gate as Remote
+/// terminal operations. Keeping this permit alive prevents reclaim, expiry, or
+/// release from publishing the next owner until the mutation settles.
+pub(crate) struct RemoteLeaseMutationPermit<'a> {
+    app_state: &'a AppState,
+    operation_id: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -575,7 +587,9 @@ impl RemoteControlState {
         // the FIFO submission wins first and remains a cancellation barrier,
         // or this removal wins and the request can never submit any bytes.
         self.active_operations.retain(|_, operation| {
-            !matches!(operation.origin, HumanControlOrigin::Remote { .. }) || operation.pty_enqueued
+            !matches!(operation.origin, HumanControlOrigin::Remote { .. })
+                || operation.pty_enqueued
+                || operation.owner_transition_barrier
         });
         if self.lease.is_none() && !self.has_any_remote_operations() {
             return None;
@@ -745,7 +759,8 @@ impl RemoteControlState {
     fn register_operation(
         &mut self,
         origin: HumanControlOrigin,
-        terminal_id: String,
+        terminal_id: Option<String>,
+        owner_transition_barrier: bool,
     ) -> (u64, u64) {
         self.next_operation_id = self.next_operation_id.wrapping_add(1).max(1);
         let operation_id = self.next_operation_id;
@@ -757,6 +772,7 @@ impl RemoteControlState {
                 origin,
                 terminal_id,
                 pty_enqueued: false,
+                owner_transition_barrier,
                 completion: None,
             },
         );
@@ -768,7 +784,7 @@ impl RemoteControlState {
             .iter()
             .any(|(candidate_id, operation)| {
                 *candidate_id < operation_id
-                    && operation.terminal_id == terminal_id
+                    && operation.terminal_id.as_deref() == Some(terminal_id)
                     && !operation.pty_enqueued
             })
     }
@@ -789,7 +805,8 @@ impl RemoteControlState {
             HumanControlOrigin::Remote {
                 lease_id: lease_id.to_owned(),
             },
-            terminal_id.to_owned(),
+            Some(terminal_id.to_owned()),
+            false,
         );
         if let Some(operation) = self.active_operations.get_mut(&operation_id) {
             operation.pty_enqueued = true;
@@ -821,7 +838,7 @@ impl HumanControlPermit<'_> {
                     control.operation_is_current(operation)
                         && operation.owner_epoch == self.owner_epoch
                         && operation.origin == self.origin
-                        && operation.terminal_id == self.terminal_id
+                        && operation.terminal_id.as_deref() == Some(self.terminal_id.as_str())
                 })
     }
 
@@ -912,6 +929,15 @@ impl Drop for HumanControlPermit<'_> {
         if self.finished {
             return;
         }
+        if let Ok(mut control) = self.app_state.remote_control.lock_or_err() {
+            control.active_operations.remove(&self.operation_id);
+            control.prune_completed_operations();
+        }
+    }
+}
+
+impl Drop for RemoteLeaseMutationPermit<'_> {
+    fn drop(&mut self) {
         if let Ok(mut control) = self.app_state.remote_control.lock_or_err() {
             control.active_operations.remove(&self.operation_id);
             control.prune_completed_operations();
@@ -1017,7 +1043,7 @@ pub fn begin_human_control_operation<'a>(
         .checked_add(Duration::from_millis(PTY_CONTROL_JOB_TIMEOUT_MS))
         .ok_or_else(|| "terminal control operation deadline overflowed".to_string())?;
     let (operation_id, owner_epoch) =
-        control.register_operation(origin.clone(), terminal_id.to_string());
+        control.register_operation(origin.clone(), Some(terminal_id.to_string()), false);
     Ok(HumanControlPermit {
         app_state,
         operation_id,
@@ -1026,6 +1052,51 @@ pub fn begin_human_control_operation<'a>(
         origin,
         terminal_id: terminal_id.to_string(),
         finished: false,
+    })
+}
+
+/// Atomically validates a Remote lease and registers a non-PTY mutation as an
+/// owner-transition barrier. A release, reclaim, or expiry that wins the owner
+/// gate first rejects this request; if registration wins first, handoff drains
+/// this permit before publishing the next owner.
+#[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
+pub(crate) fn begin_remote_lease_mutation<'a>(
+    app_state: &'a AppState,
+    lease_id: Option<&str>,
+) -> Result<RemoteLeaseMutationPermit<'a>, Response> {
+    let Some(lease_id) = lease_id.filter(|value| !value.is_empty()) else {
+        return Err(json_error(
+            StatusCode::CONFLICT,
+            "remote controller lease is required",
+        ));
+    };
+
+    let settings = effective_remote_settings(app_state).map_err(internal_error)?;
+    let timeout = Duration::from_secs(effective_heartbeat_timeout_seconds(&settings));
+    let mut control = app_state
+        .remote_control
+        .lock_or_err()
+        .map_err(internal_error)?;
+    let now = Instant::now();
+    control.observe_lease_expiry(now, timeout);
+    control.prune_expired_claim_reservation(now);
+    if control.transitioning || !control.active_lease_id_matches(lease_id) {
+        return Err(json_error(
+            StatusCode::CONFLICT,
+            "remote controller lease is not active",
+        ));
+    }
+
+    let (operation_id, _) = control.register_operation(
+        HumanControlOrigin::Remote {
+            lease_id: lease_id.to_owned(),
+        },
+        None,
+        true,
+    );
+    Ok(RemoteLeaseMutationPermit {
+        app_state,
+        operation_id,
     })
 }
 
@@ -1769,7 +1840,8 @@ mod tests {
             HumanControlOrigin::Remote {
                 lease_id: "lease-1".into(),
             },
-            "t1".into(),
+            Some("t1".into()),
+            false,
         );
         control
             .active_operations
@@ -1809,7 +1881,8 @@ mod tests {
                 HumanControlOrigin::Remote {
                     lease_id: "lease-1".into(),
                 },
-                "t1".into(),
+                Some("t1".into()),
+                false,
             );
             control
                 .active_operations
@@ -1857,7 +1930,7 @@ mod tests {
     fn one_shot_claim_reservation_blocks_local_work_until_matching_consume() {
         let now = Instant::now();
         let mut control = RemoteControlState::default();
-        control.register_operation(HumanControlOrigin::Local, "t1".into());
+        control.register_operation(HumanControlOrigin::Local, Some("t1".into()), false);
         let token = control.create_claim_reservation(now, Duration::from_secs(2));
 
         assert!(matches!(
@@ -1928,7 +2001,7 @@ mod tests {
     fn matching_busy_claim_retries_renew_the_short_reservation() {
         let now = Instant::now();
         let mut control = RemoteControlState::default();
-        control.register_operation(HumanControlOrigin::Local, "t1".into());
+        control.register_operation(HumanControlOrigin::Local, Some("t1".into()), false);
         let ttl = Duration::from_millis(50);
         let token = control.create_claim_reservation(now, ttl);
 
@@ -1987,5 +2060,44 @@ mod tests {
         drop(control);
 
         assert!(begin_human_control_operation(&state, HumanControlOrigin::Local, "t1").is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn remote_lease_mutation_blocks_owner_handoff_until_the_mutation_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env_guard = isolate_settings_dir(dir.path());
+        save_remote_settings(true, "token");
+        let state = AppState::new();
+        let now = Instant::now();
+        state
+            .remote_control
+            .lock_or_err()
+            .unwrap()
+            .install_remote_lease(
+                RemoteControlLease {
+                    lease_id: "lease-1".into(),
+                    remote_addr: "127.0.0.1:1".into(),
+                    client_name: None,
+                    last_heartbeat: now,
+                },
+                Duration::from_secs(30),
+            );
+
+        let permit = begin_remote_lease_mutation(&state, Some("lease-1")).unwrap();
+        let transition = {
+            let mut control = state.remote_control.lock_or_err().unwrap();
+            let transition = control.begin_remote_owner_transition(now).unwrap();
+            assert!(control.has_active_operations());
+            assert!(!control.finalize_owner_transition_if_drained(transition));
+            assert!(control.lease.is_some());
+            transition
+        };
+
+        drop(permit);
+
+        let mut control = state.remote_control.lock_or_err().unwrap();
+        assert!(control.finalize_owner_transition_if_drained(transition));
+        assert!(control.lease.is_none());
     }
 }

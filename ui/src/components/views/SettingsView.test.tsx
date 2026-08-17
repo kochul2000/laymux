@@ -111,6 +111,16 @@ describe("SettingsView", () => {
       expect(screen.getByTestId("fe-padding-top")).toBeInTheDocument();
     });
 
+    it("keeps the historical remote target mapped to Remote Connection", () => {
+      act(() => useUiStore.getState().setSettingsNavTarget("remote"));
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("remote-settings-terminal-font-size-input"),
+      ).not.toBeInTheDocument();
+    });
+
     it("lets a user nav click take over and release the external target", async () => {
       const user = userEvent.setup();
       act(() => useUiStore.getState().setSettingsNavTarget("fileExplorer"));
@@ -2145,16 +2155,41 @@ describe("SettingsView", () => {
     });
   });
 
-  describe("RemoteSection", () => {
-    it("renders the Remote nav section", async () => {
+  describe("Remote settings sections", () => {
+    it("splits Remote navigation into connection and display sections", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
       await user.click(screen.getByTestId("nav-remote"));
 
       expect(await screen.findByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
-      expect(screen.getAllByText("Remote").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Remote Connection").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByTestId("remote-settings-allowed-ips-input")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("nav-remote-display"));
+
+      expect(
+        await screen.findByTestId("remote-settings-terminal-font-size-input"),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("remote-settings-composer-font-size-input")).toBeInTheDocument();
+      expect(screen.queryByTestId("remote-settings-enabled-toggle")).not.toBeInTheDocument();
+    });
+
+    it("saves PC-owned Remote terminal and composer font sizes", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-remote-display"));
+      fireEvent.change(await screen.findByTestId("remote-settings-terminal-font-size-input"), {
+        target: { value: "18" },
+      });
+      fireEvent.change(screen.getByTestId("remote-settings-composer-font-size-input"), {
+        target: { value: "20" },
+      });
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
+      expect(useSettingsStore.getState().remote.composerFontSize).toBe(20);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {
@@ -2218,7 +2253,7 @@ describe("SettingsView", () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(screen.getByTestId("nav-remote-display"));
       const wheel = (await screen.findByTestId(
         "remote-settings-scroll-sensitivity-input",
       )) as HTMLInputElement;
