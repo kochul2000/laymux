@@ -124,7 +124,9 @@ pub(crate) async fn remote_font(
     // brotli first (browsers), gzip as the fallback coding — the Android E2E
     // resource dispatch only negotiates gzip, and without compression an
     // MB-scale sfnt overflows the 2 MiB resource wire cap and the phone never
-    // receives the desktop font at all.
+    // receives the desktop font at all. A client accepting neither coding gets
+    // the raw bytes: the only wire-capped consumer is the E2E dispatch, and it
+    // always sends `Accept-Encoding: gzip`.
     let coding = if accepts_brotli(req.headers()) {
         Some("br")
     } else if super::page_assets::accepts_gzip(req.headers()) {

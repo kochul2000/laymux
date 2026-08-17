@@ -25,7 +25,7 @@ const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
 /// face 이름 → 광고 캐시 상한.
 const MAX_CACHED_FACES: usize = 8;
 /// 토큰 → 바이트 캐시 상한. face 하나가 최대 4 파일이므로 face 캐시의 두 배로 둔다.
-/// 상주 바이트 천장은 이 값 × `MAX_FONT_BYTES`(+ brotli 본)이다.
+/// 상주 바이트 천장은 이 값 × `MAX_FONT_BYTES`(+ brotli 본 + gzip 본)이다.
 const MAX_CACHED_FONT_FILES: usize = 16;
 /// 콘텐츠 해시에서 URL 토큰으로 쓰는 hex 자리수.
 const CONTENT_TOKEN_HEX_LEN: usize = 16;
