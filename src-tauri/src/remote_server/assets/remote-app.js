@@ -5521,7 +5521,13 @@
           }, delay);
         }
 
-        async function connect({ auto = false } = {}) {
+        // `focusInput` defaults to manual-connect behavior. A boot-time
+        // autoConnect claim runs outside any user gesture: focusing the input
+        // there leaves DOM focus WITHOUT a soft keyboard (mobile browsers only
+        // raise the IME for gesture-driven focus), and the Keyboard toggle then
+        // reads that stray focus as "keyboard is up" — its first tap dismisses
+        // instead of raising.
+        async function connect({ auto = false, focusInput = !auto } = {}) {
           if (!androidE2eMode && !token()) {
             setStatus("Remote token is required.", true);
             return;
@@ -5566,7 +5572,7 @@
             // pane hint, and an explicit `null` opts out of it — a reconnect then
             // lands on the focused pane instead of the one this tab was on.
             await loadNavigation(undefined, {
-              focusInput: !auto,
+              focusInput,
               preserveViewport: auto,
             });
             setNavigationOpen(false);
@@ -7234,9 +7240,15 @@
         // localAppMode so the cloud dashboard flow (external browser) also grabs
         // control on connect — one fewer click. The remote-control enable toggle
         // still governs: if control is not allowed the claim fails and we stay an
-        // observer with a status hint (no hard error).
+        // observer with a status hint (no hard error). No input focus: this
+        // claim runs outside a user gesture, so focusing would strand DOM focus
+        // without a soft keyboard and flip the Keyboard toggle's first tap into
+        // a dismiss.
         if (autoConnectMode && (androidE2eMode || token())) {
-          setTimeout(() => connect().catch((err) => setStatus(err.message, true)), 0);
+          setTimeout(
+            () => connect({ focusInput: false }).catch((err) => setStatus(err.message, true)),
+            0,
+          );
         }
         // pagehide (not beforeunload) is the only teardown event mobile
         // browsers fire reliably, and it also covers bfcache entry.
