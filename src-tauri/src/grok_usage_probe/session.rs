@@ -28,9 +28,13 @@ pub mod keys {
 /// Tab / Right; they never re-issue `/usage`, so they cost no extra server query.
 const TAB_RETRIES: usize = 4;
 
-/// Marker that means Grok finished booting. Must not match the trust prompt,
-/// which also contains the product name (`Grok Build may run or modify…`).
-const READY_MARKER: &str = "grok build";
+/// Ready screens. Must not match the trust prompt, which also contains
+/// `Grok Build may run or modify…`.
+///
+/// Current grok 4.6 session chrome no longer reprints `Grok Build`; it
+/// shows a model footer and key hints instead. Treating that as a shell
+/// types `grok --trust` into the live TUI and times out the probe.
+const READY_MARKERS: [&str; 3] = ["grok build", "shift+tab:mode", "ctrl+x:shortcuts"];
 
 const TRUST_MARKERS: [&str; 3] = [
     "do you trust the contents",
@@ -269,8 +273,11 @@ pub fn is_trust_prompt(screen: &str) -> bool {
 }
 
 pub fn is_ready_screen(screen: &str) -> bool {
+    if is_trust_prompt(screen) {
+        return false;
+    }
     let lower = screen.to_ascii_lowercase();
-    lower.contains(READY_MARKER) && !is_trust_prompt(screen)
+    READY_MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
 /// Welcome banner *or* a `/usage` modal. The 1.0.4 Usage limit tab does not
