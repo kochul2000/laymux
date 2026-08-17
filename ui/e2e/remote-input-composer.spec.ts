@@ -1,14 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { readFile } from "node:fs/promises";
 
-const remotePagePath = new URL("../../src-tauri/src/remote_server/page.html", import.meta.url);
-
-async function remotePageMarkup(): Promise<string> {
-  const html = await readFile(remotePagePath, "utf8");
-  return html
-    .replace(/<script\s+src=[^>]*><\/script>/g, "")
-    .replace(/<link[^>]*xterm\.css[^>]*>/g, "");
-}
+import { remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
 type InputRequest = {
   body: { leaseId: string; text: string; submit: boolean };
@@ -519,7 +511,7 @@ async function installRemotePage(
   // setContent keeps the URL, so the page script still reads localApp=1
   // from location.search at init (ADR-0036 layout classification).
   await page.goto(options.localApp ? "http://remote.test/?localApp=1" : "http://remote.test/");
-  await page.setContent(await remotePageMarkup());
+  await page.setContent(remoteClientMarkupWithoutXterm());
   return state;
 }
 
@@ -570,7 +562,7 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   expect(geometry.terminalBottom).toBeLessThanOrEqual(geometry.editorTop);
 
   // Re-running the static entry simulates a reload: preference survives, drafts do not.
-  await page.setContent(await remotePageMarkup());
+  await page.setContent(remoteClientMarkupWithoutXterm());
   await expect(page.locator("#terminalComposer")).toBeVisible();
   await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "true");
 });
@@ -1094,7 +1086,7 @@ test("disconnect releases an in-flight Composer action while preserving its draf
 
   // The mobile connected layout collapses this control outside the viewport;
   // invoke the same button action without coupling this state test to drawer UX.
-  await page.locator("#release").evaluate((button: HTMLButtonElement) => button.click());
+  await page.locator("#exit").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#connect")).toBeEnabled();
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
@@ -1215,7 +1207,7 @@ test("reconnect keeps a collapsed Composer editor collapsed and unfocused", asyn
 
   // The mobile connected layout collapses this control outside the viewport;
   // invoke the same button action without coupling this state test to drawer UX.
-  await page.locator("#release").evaluate((button: HTMLButtonElement) => button.click());
+  await page.locator("#exit").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#connect")).toBeEnabled();
   await page.locator("#connect").evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");

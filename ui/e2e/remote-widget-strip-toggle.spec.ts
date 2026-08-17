@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 /**
  * ADR-0132: the strip has two gates. The host owns `settings.remote.widgets`
@@ -126,18 +124,7 @@ interface Harness {
 }
 
 async function installRemoteMocks(page: Page, harness: Harness) {
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
-  for (const [asset, contentType] of [
-    ["xterm.js", "application/javascript; charset=utf-8"],
-    ["addon-fit.js", "application/javascript; charset=utf-8"],
-    ["xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-    );
-  }
+  await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
@@ -221,6 +208,19 @@ const RESIZE_SETTLE_MS = 800;
 // really down rather than between ticks.
 const POLL_QUIET_MS = 7000;
 
+/**
+ * Reach the drawer's Display section, from whatever state the previous step
+ * left: the drawer opens on the workspace view and the settings entry only
+ * exists there, but a drawer already parked on Settings must be left alone —
+ * its entry button is hidden, so clicking through again would close it.
+ */
+async function openDrawerSettings(page: Page) {
+  if (await page.locator("#widgetStripToggle").isVisible()) return;
+  const settings = page.locator("#drawerSettingsButton");
+  if (!(await settings.isVisible())) await page.locator("#navToggle").click();
+  await settings.click();
+}
+
 test("the drawer toggle takes the widget bar down and gives the rows back", async ({ page }) => {
   const harness: Harness = { resizeCalls: [], widgetRequests: 0 };
   await installRemoteMocks(page, harness);
@@ -231,7 +231,7 @@ test("the drawer toggle takes the widget bar down and gives the rows back", asyn
   await page.waitForTimeout(RESIZE_SETTLE_MS);
   const withStrip = await surfaceState(page);
 
-  await page.locator("#navToggle").click();
+  await openDrawerSettings(page);
   const toggle = page.locator("#widgetStripToggle");
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
@@ -264,7 +264,7 @@ test("a browser that turned the widget bar off stays off across reloads", async 
   await connectRemote(page);
 
   await expect(page.locator("#widgetStrip")).toBeVisible();
-  await page.locator("#navToggle").click();
+  await openDrawerSettings(page);
   await page.locator("#widgetStripToggle").uncheck();
   await expect(page.locator("#widgetStrip")).toBeHidden();
 
@@ -274,7 +274,7 @@ test("a browser that turned the widget bar off stays off across reloads", async 
   // The device gate is remembered, so the strip never appears — not even for
   // the first poll — and the reconnected session asks for nothing.
   const requestsAfterReload = harness.widgetRequests;
-  await page.locator("#navToggle").click();
+  await openDrawerSettings(page);
   await expect(page.locator("#widgetStripToggle")).not.toBeChecked();
   await expect(page.locator("#widgetStrip")).toBeHidden();
   await page.waitForTimeout(POLL_QUIET_MS);

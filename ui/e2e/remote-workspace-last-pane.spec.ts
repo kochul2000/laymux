@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fileURLToPath } from "node:url";
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 // Issue #508: re-entering a Remote workspace should resume the pane the user
 // last stayed on in that workspace, not always snap back to the first pane.
@@ -7,8 +7,6 @@ import { fileURLToPath } from "node:url";
 // api-contracts §13.3). The host still exposes only a single global focused
 // pane number, so this test models that global-index behavior to prove the
 // per-workspace resume overrides it.
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 const TERMINALS = [
   { id: "term-a1", title: "A1", workspaceId: "ws-a", paneNumber: 1, appearance: {} },
@@ -129,26 +127,7 @@ test.describe("remote workspace last-pane resume", () => {
     const latestResize = new Map<string, OutputGeometry>();
     let alphaPaneTwoAttachCount = 0;
 
-    for (const asset of [
-      [
-        "http://remote.test/remote/vendor/xterm.js",
-        "assets/xterm.js",
-        "application/javascript; charset=utf-8",
-      ],
-      [
-        "http://remote.test/remote/vendor/addon-fit.js",
-        "assets/addon-fit.js",
-        "application/javascript; charset=utf-8",
-      ],
-      ["http://remote.test/remote/vendor/xterm.css", "assets/xterm.css", "text/css; charset=utf-8"],
-    ] as const) {
-      await page.route(asset[0], (route) =>
-        route.fulfill({ path: `${remoteRoot}${asset[1]}`, contentType: asset[2] }),
-      );
-    }
-    await page.route("http://remote.test/remote/", (route) =>
-      route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-    );
+    await installRemoteClientRoutes(page);
 
     await page.route("http://remote.test/remote/v1/**", async (route) => {
       const request = route.request();
@@ -332,26 +311,7 @@ test.describe("remote workspace last-pane resume", () => {
     const hostFocusedPaneNumber = 1;
     const openedOutputs: string[] = [];
 
-    for (const asset of [
-      [
-        "http://remote.test/remote/vendor/xterm.js",
-        "assets/xterm.js",
-        "application/javascript; charset=utf-8",
-      ],
-      [
-        "http://remote.test/remote/vendor/addon-fit.js",
-        "assets/addon-fit.js",
-        "application/javascript; charset=utf-8",
-      ],
-      ["http://remote.test/remote/vendor/xterm.css", "assets/xterm.css", "text/css; charset=utf-8"],
-    ] as const) {
-      await page.route(asset[0], (route) =>
-        route.fulfill({ path: `${remoteRoot}${asset[1]}`, contentType: asset[2] }),
-      );
-    }
-    await page.route("http://remote.test/remote/", (route) =>
-      route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-    );
+    await installRemoteClientRoutes(page);
     await page.route("http://remote.test/remote/v1/**", async (route) => {
       const request = route.request();
       const url = new URL(request.url());

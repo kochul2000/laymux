@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 
+import { fulfillRemoteClientAsset } from "./remote-client-assets";
+
 const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 const navigation = {
@@ -214,8 +216,8 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
 
   await page.route("http://remote.test/remote/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const asset = path === "/remote/" ? "page.html" : path.replace("/remote/vendor/", "assets/");
-    await route.fulfill({ path: `${remoteRoot}${asset}` });
+    if (await fulfillRemoteClientAsset(route, path)) return;
+    await route.fulfill({ path: `${remoteRoot}${path.replace("/remote/", "")}` });
   });
 
   await page.goto("http://remote.test/remote/?androidE2e=1&autoConnect=1");

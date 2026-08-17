@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 const navigation = {
   activeWorkspace: {
@@ -170,30 +168,7 @@ async function installLeaseMocks(
   state: LeaseMockState,
   navigationResponse: NavigationResponse = navigation,
 ) {
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}page.html`,
-      contentType: "text/html; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/xterm.js", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/xterm.js`,
-      contentType: "application/javascript; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/addon-fit.js", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/addon-fit.js`,
-      contentType: "application/javascript; charset=utf-8",
-    }),
-  );
-  await page.route("http://remote.test/remote/vendor/xterm.css", (route) =>
-    route.fulfill({
-      path: `${remoteRoot}assets/xterm.css`,
-      contentType: "text/css; charset=utf-8",
-    }),
-  );
+  await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -397,6 +372,8 @@ test("an explicit release reconnects to the last selected workspace pane", async
   await expect.poll(() => remote.outputTerminalIds.at(-1)).toBe("terminal-2");
 
   await page.locator("#navToggle").click();
+  // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   await expect(page.locator("#connect")).toBeEnabled();
   await connectRemote(page, "Main · Pane 2");
@@ -442,6 +419,8 @@ test("a reconnect falls back when the last selected terminal is no longer live",
   await expect.poll(() => remote.outputTerminalIds.at(-1)).toBe("terminal-2");
 
   await page.locator("#navToggle").click();
+  // Exit lives in the drawer's connection view; the drawer opens on workspace.
+  await page.locator("#drawerConnectionButton").click();
   await page.locator("#exit").click();
   changingNavigation.activeWorkspace.panes[1].terminalLive = false;
   changingNavigation.workspaces[0].panes[1].terminalLive = false;

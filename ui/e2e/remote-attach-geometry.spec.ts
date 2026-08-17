@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 /**
  * ADR-0133: one PTY geometry per attach. The two surfaces that move the grid
@@ -149,18 +147,7 @@ function snapshotFrames(text: string, geometry: { cols: number; rows: number }) 
 }
 
 async function installRemoteMocks(page: Page, harness: Harness) {
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
-  for (const [asset, contentType] of [
-    ["xterm.js", "application/javascript; charset=utf-8"],
-    ["addon-fit.js", "application/javascript; charset=utf-8"],
-    ["xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-    );
-  }
+  await installRemoteClientRoutes(page);
 
   await page.route("http://remote.test/remote/font/**", async (route) => {
     if (harness.hangFont) {

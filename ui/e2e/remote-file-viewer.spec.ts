@@ -1,5 +1,6 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
 const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
@@ -23,12 +24,7 @@ async function installRemoteViewerMocks(
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/remote/") {
-      return route.fulfill({
-        path: `${remoteRoot}page.html`,
-        contentType: "text/html; charset=utf-8",
-      });
-    }
+    if (await fulfillRemoteClientAsset(route, url.pathname)) return;
     if (url.pathname === "/remote/viewer/") {
       return route.fulfill({
         path: `${remoteRoot}viewer_page.html`,
@@ -43,24 +39,6 @@ async function installRemoteViewerMocks(
       return route.fulfill({
         path: `${remoteRoot}viewer_page.js`,
         contentType: "text/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/xterm.js") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/xterm.js`,
-        contentType: "application/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/addon-fit.js") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/addon-fit.js`,
-        contentType: "application/javascript; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/vendor/xterm.css") {
-      return route.fulfill({
-        path: `${remoteRoot}assets/xterm.css`,
-        contentType: "text/css; charset=utf-8",
       });
     }
     if (url.pathname === "/remote/v1/session/claim") {

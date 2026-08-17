@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+import { installRemoteClientRoutes } from "./remote-client-assets";
 
 /**
  * ADR-0077: the desktop serves its own terminal font and the remote page must
@@ -99,18 +97,7 @@ interface FontHarness {
 }
 
 async function installRemoteMocks(page: Page, harness: FontHarness) {
-  await page.route("http://remote.test/remote/", (route) =>
-    route.fulfill({ path: `${remoteRoot}page.html`, contentType: "text/html; charset=utf-8" }),
-  );
-  for (const [asset, contentType] of [
-    ["xterm.js", "application/javascript; charset=utf-8"],
-    ["addon-fit.js", "application/javascript; charset=utf-8"],
-    ["xterm.css", "text/css; charset=utf-8"],
-  ] as const) {
-    await page.route(`http://remote.test/remote/vendor/${asset}`, (route) =>
-      route.fulfill({ path: `${remoteRoot}assets/${asset}`, contentType }),
-    );
-  }
+  await installRemoteClientRoutes(page);
 
   await page.route("http://remote.test/remote/font/**", async (route) => {
     harness.fontRequests.push(new URL(route.request().url()).pathname);
@@ -264,6 +251,8 @@ test.describe("remote terminal font", () => {
 
     // Attach and navigation refresh both re-arm the attempt.
     await page.locator("#navToggle").click();
+    // Refresh lives in the drawer's connection view; the drawer opens on workspace.
+    await page.locator("#drawerConnectionButton").click();
     await page.locator("#refresh").click();
     await expect
       .poll(() => terminalFontFamily(page), { timeout: 10000 })
@@ -288,6 +277,7 @@ test.describe("remote terminal font", () => {
     await connectRemote(page);
 
     await page.locator("#navToggle").click();
+    await page.locator("#drawerConnectionButton").click();
     for (let refresh = 0; refresh < 4; refresh += 1) {
       await page.locator("#refresh").click();
       await page.waitForTimeout(150);
