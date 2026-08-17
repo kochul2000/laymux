@@ -16,9 +16,17 @@
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
 
+        <!-- 회전·리사이즈에 Activity를 재생성하지 않는다: E2E 세션 키와
+             WebView 상태가 Activity 인스턴스에 살아 있어, 재생성은 곧 원격
+             세션 종료(대시보드 튕김)다. WebView는 리사이즈를 스스로 처리하고
+             원격 페이지는 resize에서 터미널 fit을 다시 잡는다. density는
+             의도적으로 제외 — 회전에는 안 바뀌고, 디스플레이 전환처럼 실제로
+             바뀌는 경우엔 onCreate에서 잡아둔 dp 계산이 낡으므로 재생성이
+             맞다. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
