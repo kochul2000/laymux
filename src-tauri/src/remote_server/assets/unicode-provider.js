@@ -36,6 +36,9 @@
 	function createCharProperties(clusterState, cellWidth, shouldJoin) {
 		return (clusterState & 16777215) << 3 | (cellWidth & 3) << 1 | (shouldJoin ? 1 : 0);
 	}
+	function extractShouldJoin(properties) {
+		return (properties & 1) !== 0;
+	}
 	function extractCellWidth(properties) {
 		return properties >> 1 & 3;
 	}
@@ -65,8 +68,29 @@
 	var CLUSTER_FLAG_EMOJI_MODIFIER_BASE = 8;
 	var CLUSTER_FLAG_MASK = 12;
 	/**
-	* East Asian Wide / Fullwidth ranges (Unicode 11 baseline plus later emoji
-	* blocks). Sorted and non-overlapping — `isWideCodePoint` binary searches it.
+	* East Asian Wide / Fullwidth ranges. Sorted and non-overlapping —
+	* `isWideCodePoint` binary searches it.
+	*
+	* The table is a **subset of `EastAsianWidth=W ∪ F`**, verified against the UCD:
+	* every member is W or F in Unicode 17, and nothing that is W/F *and* `gc=Mc` is
+	* missing from it. That subset property is what the `Mc` reasoning below relies
+	* on, so it is the invariant to preserve when editing.
+	*
+	* It is **not** "Unicode 11 plus later emoji blocks" — an earlier version of this
+	* comment said that and it is wrong. 719 members are not W/F in Unicode 11, and
+	* they are not all emoji: ideographic description characters
+	* (`U+2FFC`–`U+2FFF`), `U+31BB`–`U+31BF`, `U+16FE2`–`U+16FE4`,
+	* `U+16FF0`–`U+16FF1`, Tangut Components (`U+187F2`–`U+187F7`), Khitan
+	* (`U+18AF3`–`U+18CD5`), Kana Extended-B (`U+1AFF0`–`U+1AFFE`), Nushu/Kana
+	* (`U+1B11F`–`U+1B167`). Conversely `U+1F93B` and `U+1F946` are W in Unicode 11
+	* and absent here.
+	*
+	* The table also lags current UCD by design: 349 code points that are W/F in
+	* Unicode 17 are absent because their EAW value changed after the table was
+	* built (Yijing `U+4DC0`–`U+4DFF`, Tai Xuan Jing `U+1D300`–`U+1D356`, trigrams
+	* `U+2630`–`U+2637`, counting rods `U+1D360`–`U+1D376`). Adding them is a
+	* separate decision — widening a code point changes wrap columns for every
+	* surface at once.
 	*/
 	var WIDE_RANGES = [
 		[4352, 4447],
@@ -202,6 +226,35 @@
 	* Nonspacing/enclosing marks and format characters. Using Unicode property
 	* escapes keeps the zero-width set in sync with the engine's Unicode data
 	* instead of a hand-maintained range list that has to grow every release.
+	*
+	* `\p{Mc}` is deliberately **excluded**, and the reason that decides it is
+	* ADR-0058's invariant: the width has to be **the same number the program on the
+	* other side of the PTY computes**. Kuhn/glibc-family `wcwidth` puts only
+	* `Mn`/`Me` in its combining table and defers everything else to East Asian
+	* Width, so a shell or TUI counts `Mc` by its EAW value. `Mc` is
+	* Spacing_Combining_Mark — it advances a cell by definition — so our answer
+	* matches theirs, and xterm's V6 zero is the outlier.
+	*
+	* Measured over the whole range: 471 code points are `Mc`, and 467 resolve to
+	* width 1 here, matching V6 exactly (Devanagari `U+0903`/`U+093B`/`U+093E`, Thai
+	* `U+0E33`, Lao `U+0EB3`, Balinese `U+1B44`, …).
+	*
+	* The remaining 4 sit inside `WIDE_RANGES` and resolve to 2: `U+302E`/`U+302F`
+	* (Hangul tone marks, EAW=W, introduced in Unicode 1.1) and
+	* `U+16FF0`/`U+16FF1` (Vietnamese alternate reading marks, EAW=W, Unicode 13).
+	* V6 reports 0 for the first pair because it zeroes the whole `U+302A`–`U+302F`
+	* run without separating `Mn` from `Mc`. Folding `Mc` into the zero-width set to
+	* match V6 would silently change the width of 467 Indic/SEA marks *and* diverge
+	* from the PTY side.
+	*
+	* A font that draws these with zero advance is a **different axis**: the glyph
+	* would look misplaced, but the column arithmetic would still agree with the
+	* shell. Narrowing the width to match such a font is what would break agreement.
+	* So font inspection is visual QA here, not grounds to change the width.
+	*
+	* `terminal-unicode-width.test.ts` pins the four widths **and** their
+	* `shouldJoin` bit — width alone would still pass if someone wired `Mc` into the
+	* cluster-join condition only (issue #547).
 	*/
 	var ZERO_WIDTH_CATEGORY = /^[\p{Mn}\p{Me}\p{Cf}]$/u;
 	/**
@@ -324,6 +377,48 @@
 		}
 		return createCharProperties(CLUSTER_STATE_NONE | baseFlagsFor(codePoint), width, false);
 	}
+	function forEachCodePoint(text, visit) {
+		let precedingProperties = 0;
+		for (let index = 0; index < text.length;) {
+			const codePoint = text.codePointAt(index);
+			if (codePoint === void 0) break;
+			const length = codePoint > 65535 ? 2 : 1;
+			const properties = charProperties(codePoint, precedingProperties);
+			visit({
+				codePoint,
+				length,
+				properties,
+				precedingProperties
+			});
+			precedingProperties = properties;
+			index += length;
+		}
+	}
+	/**
+	* Split `text` into the cell clusters xterm will build, so callers can lay out
+	* rows without ever cutting a ZWJ sequence, variation selector or combining
+	* mark away from its base character.
+	*/
+	function splitCellClusters(text) {
+		const clusters = [];
+		let index = 0;
+		forEachCodePoint(text, ({ length, properties }) => {
+			const segment = text.slice(index, index + length);
+			index += length;
+			const width = extractCellWidth(properties);
+			const previous = clusters[clusters.length - 1];
+			if (extractShouldJoin(properties) && previous) {
+				previous.segment += segment;
+				previous.width = width;
+				return;
+			}
+			clusters.push({
+				segment,
+				width
+			});
+		});
+		return clusters;
+	}
 	//#endregion
 	//#region src/remote/unicode-provider-entry.ts
 	/**
@@ -350,7 +445,8 @@
 	window.LaymuxUnicodeProvider = {
 		version: LAYMUX_UNICODE_VERSION,
 		wcwidth: codePointCellWidth,
-		charProperties
+		charProperties,
+		splitCellClusters
 	};
 	//#endregion
 })();

@@ -2742,6 +2742,76 @@
           }
         }
 
+        // Cell clusters of a preedit string, from the one width table this
+        // surface uses (`unicode-provider.js`, ADR-0058). The fallback only
+        // runs when that asset is missing — the same degraded state the
+        // provider registration above already warns about — and then splits per
+        // code point, so a combining mark shows as its own box instead of
+        // widening its base. Wrong, but bounded and still cell-aligned.
+        function compositionCellClusters(text) {
+          const provider = window.LaymuxUnicodeProvider;
+          if (provider && typeof provider.splitCellClusters === "function") {
+            return provider.splitCellClusters(text);
+          }
+          return Array.from(text, (segment) => ({
+            segment,
+            width: provider && typeof provider.wcwidth === "function"
+              ? provider.wcwidth(segment.codePointAt(0) || 0)
+              : 1,
+          }));
+        }
+
+        // Lay the IME preedit on the cells its committed text will occupy
+        // (ADR-0171).
+        //
+        // xterm's DOM renderer gives every committed span a per-glyph
+        // letter-spacing (`_setDefaultSpacing`) so the glyph fills exactly the
+        // cells `wcwidth` claims for it. Its composition view gets no such
+        // spacing: it is the raw preedit string laid out at the font's natural
+        // advance. A Hangul syllable advances ~1 cell in the fallback face while
+        // the committed run takes 2, so the composing text renders narrower than
+        // itself and every glyph jumps right the moment the IME commits.
+        //
+        // Fix the layout, not the position: xterm already anchors the view at the
+        // cursor cell and keeps it there (`updateCompositionElements`), so only
+        // the view's own content is re-laid here — one inline-block box per
+        // cluster, each exactly as many cells wide as the buffer will spend.
+        // xterm writes `textContent` on compositionstart and compositionupdate
+        // only, and these listeners are registered on the same textarea after
+        // its own, so nothing overwrites the boxes afterwards. The box widths
+        // also give `updateCompositionElements` a correctly sized rect to
+        // mirror onto the helper textarea, which is where the OS candidate
+        // window anchors (ADR-0061).
+        //
+        // Not in scope: the view still does not wrap at the right edge — that is
+        // xterm's own `white-space: nowrap` behaviour and is unchanged here.
+        function installCompositionCellLayout(term) {
+          const textarea = term.textarea;
+          const view = term.element && term.element.querySelector(".composition-view");
+          if (!textarea || !view) return;
+          const relayout = (text) => {
+            const metrics = terminalMetrics(term);
+            const cellWidth = metrics ? metrics.cellWidth : 0;
+            if (!text || !(cellWidth > 0)) {
+              view.replaceChildren();
+              return;
+            }
+            const cells = compositionCellClusters(text).map((cluster) => {
+              const cell = document.createElement("span");
+              cell.className = "remote-composition-cell";
+              cell.textContent = cluster.segment;
+              cell.style.width = `${Math.max(0, cluster.width) * cellWidth}px`;
+              return cell;
+            });
+            view.replaceChildren(...cells);
+          };
+          textarea.addEventListener("compositionstart", () => relayout(""));
+          textarea.addEventListener("compositionupdate", (event) => relayout(event.data || ""));
+          // xterm drops `.active` here, so the view is hidden either way; clearing
+          // keeps a stale preedit from flashing when the next composition starts.
+          textarea.addEventListener("compositionend", () => relayout(""));
+        }
+
         function ensureTerminal(appearance = {}) {
           if (terminal) return terminal;
           const TerminalCtor = window.Terminal;
@@ -2827,6 +2897,7 @@
           terminalHost.addEventListener("paste", handleDirectTerminalPaste, true);
           installSelectionHandles(terminal);
           installTouchSelectionBridge(terminal);
+          installCompositionCellLayout(terminal);
           terminal.onData((data) => {
             // Known query replies are already suppressed at the parser
             // (suppressMirrorQueryReplies). This is the catch-all for the

@@ -21,9 +21,11 @@
  */
 
 import {
+  type CellCluster,
   LAYMUX_UNICODE_VERSION,
   charProperties,
   codePointCellWidth,
+  splitCellClusters,
 } from "@/lib/terminal-unicode-width";
 
 declare global {
@@ -32,6 +34,7 @@ declare global {
       version: string;
       wcwidth: (codePoint: number) => number;
       charProperties: (codePoint: number, preceding: number) => number;
+      splitCellClusters: (text: string) => CellCluster[];
     };
   }
 }
@@ -40,4 +43,10 @@ window.LaymuxUnicodeProvider = {
   version: LAYMUX_UNICODE_VERSION,
   wcwidth: codePointCellWidth,
   charProperties,
+  // xterm only asks for `wcwidth`/`charProperties`; the extra export is for the
+  // Remote client's IME preedit, which has to lay its own boxes on the cells the
+  // committed text will occupy (ADR-0171). Deriving the clusters there from
+  // `wcwidth` alone would rebuild the grapheme rules this module owns — exactly
+  // the second source of truth ADR-0058 removed.
+  splitCellClusters,
 };

@@ -4,9 +4,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  type CellCluster,
   LAYMUX_UNICODE_VERSION,
   charProperties,
   codePointCellWidth,
+  splitCellClusters,
 } from "./terminal-unicode-width";
 
 /**
@@ -32,6 +34,7 @@ type Provider = {
   version: string;
   wcwidth: (codePoint: number) => number;
   charProperties: (codePoint: number, preceding: number) => number;
+  splitCellClusters: (text: string) => CellCluster[];
 };
 
 /** Run the committed IIFE against a fake `window` and hand back what it installed. */
@@ -74,6 +77,28 @@ describe("committed remote unicode provider asset", () => {
   it("exposes the two functions xterm's provider contract requires", () => {
     expect(typeof provider.wcwidth).toBe("function");
     expect(typeof provider.charProperties).toBe("function");
+  });
+
+  it("exposes the cluster splitter the remote IME preedit lays out with", () => {
+    expect(typeof provider.splitCellClusters).toBe("function");
+  });
+
+  it("matches the source cluster split, so preedit boxes land on committed cells", () => {
+    // The Remote preedit sizes one box per cluster (ADR-0171). Drift here would
+    // put the composing text on different cells than the committed text — the
+    // exact mismatch the asset exists to prevent, one layer up from `wcwidth`.
+    const samples = [
+      "한글", // 2 cells each
+      "a한b", // mixed advance widths in one run
+      "が", // NFD: combining mark joins its base
+      "👍🏻", // skin tone modifier joins
+      "🇰🇷", // regional indicator pair
+      "1️⃣", // keycap
+      "",
+    ];
+    for (const text of samples) {
+      expect(provider.splitCellClusters(text)).toEqual(splitCellClusters(text));
+    }
   });
 
   it("matches the source width for every code point measured to diverge from V6", () => {

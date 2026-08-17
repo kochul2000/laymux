@@ -1501,6 +1501,15 @@
       .xterm-helper-textarea {
         font-size: 16px;
       }
+      /* IME 조합 텍스트를 확정 후 차지할 셀 위에 얹는다 (ADR-0171).
+         너비는 remote-app.js 가 클러스터별 셀 수 × cellWidth 로 넣는다.
+         글리프가 셀보다 넓은 폰트에서도 xterm 행과 같이 넘쳐 보이도록
+         overflow 는 자르지 않는다. */
+      .xterm .composition-view .remote-composition-cell {
+        display: inline-block;
+        vertical-align: top;
+        white-space: pre;
+      }
       .xterm-helpers textarea {
         opacity: 0;
       }
