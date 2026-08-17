@@ -114,11 +114,55 @@ Resets: May 29, 00:00
 Credits: $12.34
 ";
 
+/// Captured grok 4.6 session chrome: no `Grok Build` banner.
+const SESSION_CHROME: &str = "\
+  ~/python_projects                                         59K / 500K
+
+     › grok --trust                                          6:03 PM
+     › trusted.
+
+     Worked for 2.7s                                  stop  [hooks: 2]
+
+  Grok 4.6 (high)
+  Shift+Tab:mode   Ctrl+x:shortcuts
+";
+
 #[test]
 fn trust_prompt_is_not_a_ready_screen() {
     assert!(is_trust_prompt(TRUST));
     assert!(!is_ready_screen(TRUST));
     assert!(is_ready_screen(WELCOME));
+}
+
+#[test]
+fn session_chrome_without_grok_build_is_ready() {
+    assert!(is_ready_screen(SESSION_CHROME));
+    assert!(!is_trust_prompt(SESSION_CHROME));
+}
+
+#[test]
+fn ensure_ready_does_not_retype_grok_into_session_chrome() {
+    let transport = ScriptedTransport::new(SESSION_CHROME, |bytes, _| {
+        if bytes == keys::GROK {
+            panic!("must not type grok --trust into a live session");
+        }
+    });
+    let pacer = FakePacer::new();
+    let outcome = ProbeSession::new(&transport, &pacer, fast_timing()).ensure_ready();
+    assert_eq!(outcome, BootOutcome::Ready);
+    assert!(transport.written().is_empty());
+}
+
+#[test]
+fn boot_accepts_session_chrome_as_ready() {
+    let transport = ScriptedTransport::new("", |bytes, screen| {
+        if bytes == keys::GROK {
+            *screen = SESSION_CHROME.into();
+        }
+    });
+    let pacer = FakePacer::new();
+    let outcome = ProbeSession::new(&transport, &pacer, fast_timing()).boot();
+    assert_eq!(outcome, BootOutcome::Ready);
 }
 
 #[test]
