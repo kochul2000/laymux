@@ -4537,6 +4537,79 @@ describe("TerminalView", () => {
       }
     });
 
+    it("keeps the painted WSL Codex caret frozen while a Working frame spans animation frames", async () => {
+      const terminalId = "t-wsl-working-caret";
+      mockCreateTerminalSession.mockResolvedValueOnce({
+        ...sessionResult("wsl"),
+        id: terminalId,
+      });
+      render(<TerminalView instanceId={terminalId} profile="WSL" syncGroup="" isFocused />);
+      await waitForTerminalInputReady();
+      await waitForStreamAttachReset();
+
+      act(() => {
+        useTerminalStore.getState().updateInstanceInfo(terminalId, {
+          activity: { type: "interactiveApp", name: "Codex" },
+        });
+      });
+
+      const terminal = createdTerminals.at(-1)! as MockTerminalInstance & {
+        buffer: { active: typeof mockBufferActive };
+      };
+      const container = screen.getByTestId(`terminal-view-${terminalId}`);
+      const overlay = screen.getByTestId(`terminal-overlay-caret-${terminalId}`);
+      const screenEl = document.createElement("div");
+      screenEl.className = "xterm-screen";
+      const terminalRect = {
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 480,
+        right: 800,
+        bottom: 480,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect;
+      screenEl.getBoundingClientRect = () => terminalRect;
+      container.getBoundingClientRect = () => terminalRect;
+      terminal.element.appendChild(screenEl);
+      terminal.buffer.active.baseY = 0;
+      terminal.buffer.active.viewportY = 0;
+      terminal.buffer.active.cursorX = 2;
+      terminal.buffer.active.cursorY = 17;
+
+      await act(async () => {
+        await oscHandlers.get("133")?.("B");
+      });
+      await vi.waitFor(() => {
+        expect(overlay.style.opacity).toBe("1");
+        expect(overlay.style.transform).toBe("translate(20px, 340px)");
+      });
+
+      // WSL passes bytes through instead of holding the whole DEC 2026
+      // transaction. A PTY boundary can therefore leave frame-open visible to
+      // an animation frame before the strict in-frame park/reset arrives.
+      mockModes.synchronizedOutputMode = true;
+      terminal.buffer.active.cursorX = 40;
+      terminal.buffer.active.cursorY = 10;
+      await act(async () => {
+        await csiHandlers.get("?:h")?.([2026]);
+        const renderHandler = mockOnRender.mock.calls.at(-1)?.[0] as (() => void) | undefined;
+        renderHandler?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(container).toHaveClass("terminal-sync-output-active");
+      expect(overlay.style.opacity).toBe("1");
+      expect(overlay.style.transform).toBe("translate(20px, 340px)");
+
+      mockModes.synchronizedOutputMode = false;
+      await act(async () => {
+        await csiHandlers.get("?:l")?.([2026]);
+      });
+    });
+
     it("lets an open IME composition adopt Codex 0.145's in-frame park", async () => {
       const terminalId = "t-native-in-frame-ime";
       mockCreateTerminalSession.mockResolvedValueOnce({
