@@ -364,6 +364,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
+        | (&Method::GET, "/remote/v1/display-settings")
         | (&Method::GET, "/remote/v1/terminals")
         | (&Method::GET, "/remote/v1/file-viewer/status")
         | (&Method::POST, "/remote/v1/session/claim")
@@ -377,6 +378,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/file-viewer/path-link")
         | (&Method::POST, "/remote/v1/notifications/mark-all-read")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
+        (&Method::PATCH, "/remote/v1/display-settings") => true,
         (&Method::GET, _) => terminal_read_path(path),
         (&Method::POST, _) => {
             terminal_control_path(path)
@@ -573,6 +575,14 @@ mod tests {
     fn inner_http_allowlist_rejects_e2e_recursion_and_path_escaping() {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
+        assert!(http_path_allowed(
+            &Method::GET,
+            "/remote/v1/display-settings"
+        ));
+        assert!(http_path_allowed(
+            &Method::PATCH,
+            "/remote/v1/display-settings"
+        ));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
         assert!(http_path_allowed(
             &Method::GET,

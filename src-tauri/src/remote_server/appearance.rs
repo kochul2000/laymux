@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::constants::{DEFAULT_FAST_SCROLL_SENSITIVITY, DEFAULT_SCROLL_SENSITIVITY};
 use crate::settings::models::{
-    clamp_scroll_sensitivity, ColorScheme, FontSettings, Profile, Settings,
+    clamp_scroll_sensitivity, ColorScheme, Profile, Settings,
 };
 
 use super::font_assets::{resolve_font_assets, RemoteFontAssets};
@@ -15,6 +15,7 @@ const DEFAULT_FONT_FACE: &str = "Cascadia Mono";
 pub(super) struct RemoteTerminalAppearance {
     pub font_family: String,
     pub font_size: u16,
+    pub composer_font_size: u16,
     pub cursor_style: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_width: Option<u16>,
@@ -100,11 +101,8 @@ pub(super) fn resolve_remote_terminal_appearance(
 
     RemoteTerminalAppearance {
         font_family: terminal_font_family(face),
-        font_size: if font.size == 0 {
-            FontSettings::default().size
-        } else {
-            font.size
-        },
+        font_size: settings.remote.terminal_font_size,
+        composer_font_size: settings.remote.composer_font_size,
         cursor_style: cursor_style.into(),
         cursor_width,
         font_assets: resolve_font_assets(face, settings),
@@ -303,6 +301,7 @@ fn value_or_default(value: &str, default: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::models::FontSettings;
 
     #[test]
     fn inherits_default_font_and_builtin_campbell_clear_theme() {
@@ -430,6 +429,18 @@ mod tests {
         assert_eq!(appearance.scroll_sensitivity, 2.5);
         assert_eq!(appearance.fast_scroll_sensitivity, 12.0);
         assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
+    }
+
+    #[test]
+    fn remote_terminal_font_size_overrides_the_desktop_profile_size() {
+        let mut settings = Settings::default();
+        settings.profile_defaults.font.size = 24;
+        settings.remote.terminal_font_size = 18;
+
+        let appearance = resolve_remote_terminal_appearance("PowerShell", &settings);
+
+        assert_eq!(appearance.font_size, 18);
+        assert_eq!(appearance.composer_font_size, 14);
     }
 
     /// A hand-edited settings.json is normalized before it reaches the client.

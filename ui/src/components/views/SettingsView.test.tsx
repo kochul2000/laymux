@@ -2153,8 +2153,33 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("nav-remote"));
 
       expect(await screen.findByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
-      expect(screen.getAllByText("Remote").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Remote Connection").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByTestId("remote-settings-allowed-ips-input")).toBeInTheDocument();
+    });
+
+    it("separates Remote connection from host-owned Remote display settings", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      expect(screen.getByTestId("nav-remote")).toHaveTextContent("Remote Connection");
+      await user.click(screen.getByTestId("nav-remote-display"));
+
+      const terminalSize = screen.getByTestId(
+        "remote-display-terminal-font-size-input",
+      ) as HTMLInputElement;
+      const composerSize = screen.getByTestId(
+        "remote-display-composer-font-size-input",
+      ) as HTMLInputElement;
+      expect(terminalSize).toHaveValue(14);
+      expect(composerSize).toHaveValue(14);
+
+      fireEvent.change(terminalSize, { target: { value: "18" } });
+      fireEvent.change(composerSize, { target: { value: "16" } });
+      expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
+      expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {
@@ -2218,7 +2243,7 @@ describe("SettingsView", () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(screen.getByTestId("nav-remote-display"));
       const wheel = (await screen.findByTestId(
         "remote-settings-scroll-sensitivity-input",
       )) as HTMLInputElement;

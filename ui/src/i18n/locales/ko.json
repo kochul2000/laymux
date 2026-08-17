@@ -90,7 +90,8 @@
       "paste": "붙여넣기",
       "interface": "인터페이스",
       "workspaces": "워크스페이스",
-      "remote": "원격",
+      "remote": "원격 연결",
+      "remoteDisplay": "원격 화면",
       "claude": "Claude Code",
       "codex": "Codex",
       "grok": "Grok",
@@ -369,6 +370,7 @@
     },
     "remote": {
       "title": "원격",
+      "connectionTitle": "원격 연결",
       "groupAccess": "접속",
       "groupHosts": "호스트",
       "groupCloud": "클라우드 연결",
@@ -418,6 +420,16 @@
       "cloudConnecting": "연결 중...",
       "cloudDisconnect": "연결 해제",
       "cloudDisconnecting": "해제 중..."
+    },
+    "remoteDisplay": {
+      "title": "원격 화면",
+      "groupTypography": "글자",
+      "groupInteraction": "조작",
+      "groupSurface": "표시",
+      "terminalFontSize": "터미널 화면 글자 크기",
+      "terminalFontSizeDesc": "Remote 브라우저와 Android 앱의 터미널 화면에만 적용합니다(8~32px).",
+      "composerFontSize": "입력 컴포저 글자 크기",
+      "composerFontSizeDesc": "Remote 입력 컴포저에만 적용합니다(8~32px)."
     },
     "workspaces": {
       "title": "워크스페이스",

@@ -1813,6 +1813,12 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
+    /// Terminal cell text size used only by Remote surfaces (ADR-0173).
+    #[serde(default = "default_remote_terminal_font_size")]
+    pub terminal_font_size: u16,
+    /// Input composer text size used only by Remote surfaces (ADR-0173).
+    #[serde(default = "default_remote_composer_font_size")]
+    pub composer_font_size: u16,
     /// Wheel scroll multiplier for the Remote browser terminal (xterm
     /// `scrollSensitivity`). Separate from `terminal.scrollSensitivity`: the
     /// remote client is a different device with its own pointer.
@@ -1864,6 +1870,14 @@ fn default_remote_widgets() -> bool {
     true
 }
 
+fn default_remote_terminal_font_size() -> u16 {
+    crate::constants::DEFAULT_REMOTE_TERMINAL_FONT_SIZE
+}
+
+fn default_remote_composer_font_size() -> u16 {
+    crate::constants::DEFAULT_REMOTE_COMPOSER_FONT_SIZE
+}
+
 /// Prod cloud relay base URL (release-build default). LIVE, TLS via Let's Encrypt.
 pub const PROD_CLOUD_RELAY_BASE_URL: &str = "https://app.laymux.com";
 
@@ -1911,6 +1925,8 @@ impl Default for RemoteSettings {
             cloud_access_mode: CloudAccessMode::default(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
+            terminal_font_size: default_remote_terminal_font_size(),
+            composer_font_size: default_remote_composer_font_size(),
             scroll_sensitivity: default_scroll_sensitivity(),
             fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
             touch_scroll_sensitivity: default_scroll_sensitivity(),

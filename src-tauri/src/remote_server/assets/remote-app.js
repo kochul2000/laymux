@@ -30,6 +30,9 @@
         const composerInput = $("composerInput");
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
+        const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
+        const remoteComposerFontSizeInput = $("remoteComposerFontSize");
+        const remoteTypographyStatus = $("remoteTypographyStatus");
         const workspaceSection = $("workspaceSection");
         const newWorkspaceButton = $("newWorkspace");
         const newWorkspacePanel = $("newWorkspacePanel");
@@ -128,6 +131,13 @@
         let heartbeatRetryTimer = null;
         let heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS * 1000;
         let lastHeartbeatOkAt = 0;
+        const REMOTE_FONT_SIZE_MIN = 8;
+        const REMOTE_FONT_SIZE_MAX = 32;
+        const DEFAULT_REMOTE_FONT_SIZE = 14;
+        let remoteDisplaySettings = {
+          terminalFontSize: DEFAULT_REMOTE_FONT_SIZE,
+          composerFontSize: DEFAULT_REMOTE_FONT_SIZE,
+        };
         let socket = null;
         let outputReconnectTimer = null;
         let outputReconnectAttempt = 0;
@@ -720,6 +730,72 @@
             throw remoteResponseError(response.status, body);
           }
           return response.json();
+        }
+
+        function normalizeRemoteFontSize(value) {
+          const parsed = Number(value);
+          const rounded = Number.isFinite(parsed) ? Math.round(parsed) : DEFAULT_REMOTE_FONT_SIZE;
+          return Math.max(REMOTE_FONT_SIZE_MIN, Math.min(REMOTE_FONT_SIZE_MAX, rounded));
+        }
+
+        function setRemoteTypographyStatus(message, error = false) {
+          remoteTypographyStatus.textContent = message;
+          remoteTypographyStatus.classList.toggle("error", error);
+        }
+
+        function applyRemoteDisplaySettings(settings, { refit = true } = {}) {
+          remoteDisplaySettings = {
+            terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize),
+            composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize),
+          };
+          remoteTerminalFontSizeInput.value = String(remoteDisplaySettings.terminalFontSize);
+          remoteComposerFontSizeInput.value = String(remoteDisplaySettings.composerFontSize);
+          composerInput.style.fontSize = `${remoteDisplaySettings.composerFontSize}px`;
+
+          for (const info of terminalInfoById.values()) {
+            info.appearance = {
+              ...(info.appearance || {}),
+              fontSize: remoteDisplaySettings.terminalFontSize,
+              composerFontSize: remoteDisplaySettings.composerFontSize,
+            };
+          }
+          const activeAppearance = activeTerminalId
+            ? terminalInfoById.get(activeTerminalId)?.appearance
+            : null;
+          if (terminal && activeAppearance) applyTerminalAppearance(activeAppearance);
+          if (refit) scheduleTerminalFit(Boolean(activeTerminalId));
+        }
+
+        async function loadRemoteDisplaySettings() {
+          if (!androidE2eMode && !token()) return;
+          try {
+            const settings = await remoteFetch("/remote/v1/display-settings");
+            applyRemoteDisplaySettings(settings);
+            setRemoteTypographyStatus(leaseId ? "Stored on this PC." : "Connect to edit.");
+          } catch (error) {
+            setRemoteTypographyStatus(error?.message || String(error), true);
+          }
+        }
+
+        async function saveRemoteDisplaySetting(name, value) {
+          const normalized = normalizeRemoteFontSize(value);
+          if (!leaseId) {
+            applyRemoteDisplaySettings(remoteDisplaySettings, { refit: false });
+            setRemoteTypographyStatus("Connect to edit.", true);
+            return;
+          }
+          setRemoteTypographyStatus("Saving...");
+          try {
+            const settings = await remoteFetch("/remote/v1/display-settings", {
+              method: "PATCH",
+              body: JSON.stringify({ leaseId, [name]: normalized }),
+            });
+            applyRemoteDisplaySettings(settings);
+            setRemoteTypographyStatus("Stored on this PC.");
+          } catch (error) {
+            applyRemoteDisplaySettings(remoteDisplaySettings, { refit: false });
+            setRemoteTypographyStatus(error?.message || String(error), true);
+          }
         }
 
         function clearActiveGithubRepo() {
@@ -1778,6 +1854,9 @@
               ? `'${fontAssets.family}', ${serverFontFamily}`
               : serverFontFamily,
             fontSize: Number.isFinite(fontSize) && fontSize > 0 ? Math.floor(fontSize) : defaultAppearance.fontSize,
+            composerFontSize: normalizeRemoteFontSize(
+              appearance.composerFontSize ?? remoteDisplaySettings.composerFontSize
+            ),
             cursorStyle,
             cursorWidth: Number.isFinite(cursorWidth) && cursorWidth > 0 ? Math.floor(cursorWidth) : undefined,
             scrollback: defaultAppearance.scrollback,
@@ -1987,6 +2066,14 @@
           delete options.cols;
           delete options.rows;
           terminal.options = options;
+          const normalized = normalizeAppearance(appearance);
+          remoteDisplaySettings = {
+            terminalFontSize: normalized.fontSize,
+            composerFontSize: normalized.composerFontSize,
+          };
+          remoteTerminalFontSizeInput.value = String(normalized.fontSize);
+          remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
+          composerInput.style.fontSize = `${normalized.composerFontSize}px`;
           if (options.cursorWidth === undefined) {
             try {
               delete terminal.options.cursorWidth;
@@ -2003,6 +2090,8 @@
           const canControl = Boolean(leaseId && activeTerminalId);
           ctrlCButton.disabled = !canControl;
           focusTerminalButton.disabled = !canControl;
+          remoteTerminalFontSizeInput.disabled = !leaseId;
+          remoteComposerFontSizeInput.disabled = !leaseId;
           updateComposerControls();
           updateKeyBarControls();
         }
@@ -3501,6 +3590,7 @@
 
         function openDrawerSubview(view) {
           setDrawerView(view);
+          if (view === "settings") loadRemoteDisplaySettings();
           drawerBackButton.focus();
         }
 
@@ -6934,6 +7024,12 @@
 
         widgetStripToggle.addEventListener("change", () => {
           setWidgetStripAllowed(widgetStripToggle.checked);
+        });
+        remoteTerminalFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySetting("terminalFontSize", remoteTerminalFontSizeInput.value);
+        });
+        remoteComposerFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySetting("composerFontSize", remoteComposerFontSizeInput.value);
         });
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";

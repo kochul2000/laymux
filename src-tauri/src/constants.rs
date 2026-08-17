@@ -180,6 +180,10 @@ pub const WIDGET_OVERFLOW_MODES: &[&str] = &["collapse"];
 pub const WIDGET_FONT_SIZE_MIN: u64 = 6;
 pub const WIDGET_FONT_SIZE_MAX: u64 = 20;
 pub const WIDGET_FONT_SIZE_DEFAULT: u16 = 9;
+pub const REMOTE_FONT_SIZE_MIN: u16 = 8;
+pub const REMOTE_FONT_SIZE_MAX: u16 = 32;
+pub const DEFAULT_REMOTE_TERMINAL_FONT_SIZE: u16 = 14;
+pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 14;
 /// Rendering styles a usage widget may pick. The rows themselves stay owned by
 /// `usage.*.visibleRows` (ADR-0103), so this only decides how each row is drawn.
 pub const USAGE_WIDGET_DISPLAY_MODES: &[&str] = &["bar", "number", "both"];

@@ -5,6 +5,7 @@ mod android_pairing_routes;
 mod appearance;
 mod assets;
 mod auth;
+mod display_settings;
 mod font_assets;
 mod github_repo_routes;
 mod lease;

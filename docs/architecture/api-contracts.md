@@ -1403,6 +1403,8 @@ attach 는 이 fit 정책 위에서 geometry 를 **한 번만** 게시한다([AD
 |---|---|---|
 | `/remote/v1/terminals` | GET | 현재 backend terminal session 목록 |
 | `/remote/v1/terminals/{id}/github-repo` | GET | server-side terminal CWD의 GitHub `origin` base 조회 (`{cwd,repoBase}`, observer read, no-store) |
+| `/remote/v1/display-settings` | GET | PC 소유 Remote 전용 `terminalFontSize`·`composerFontSize` 조회 |
+| `/remote/v1/display-settings` | PATCH | active `leaseId`로 PC 소유 Remote 글자 크기 수정 |
 | `/remote/v1/terminals/{id}/write` | POST | active `leaseId`로 raw key/protocol/soft-key bytes 전송 |
 | `/remote/v1/terminals/{id}/input` | POST | active `leaseId`로 `{text, submit}` structured input 전송 |
 | `/remote/v1/terminals/{id}/resize` | POST | active `leaseId`로 PTY 크기 변경 |
@@ -1411,7 +1413,8 @@ attach 는 이 fit 정책 위에서 geometry 를 **한 번만** 게시한다([AD
 `/remote/v1/terminals` 응답의 각 terminal 항목은 `appearance`를 포함한다. 이 값은 remote
 브라우저가 settings 전체를 직접 읽지 않도록 backend가 profile/profileDefaults/colorSchemes에서
 해석한 표시 전용 계약이다. 포함 범위는 xterm option으로 바로 적용 가능한 `fontFamily`,
-`fontSize`, `cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
+PC 소유 `settings.remote.terminalFontSize`에서 온 `fontSize`, 입력 컴포저에 적용할
+`composerFontSize`, `cursorStyle`, 선택적 `cursorWidth`, `theme`이며, Windows Terminal 색상 스킴의
 `purple`/`brightPurple`은 xterm.js의 `magenta`/`brightMagenta`로 매핑한다. 색상 스킴을 찾을 수
 없으면 로컬 `TerminalView`의 기본 테마와 동일한 CampbellClear 기반 fallback을 사용한다.
 
@@ -1425,6 +1428,18 @@ appearance 에 선택적 `fontAssets: { family, faces: [{ url, weight, style }] 
 `fontFamily` 스택 맨 앞에 붙인다 — xterm `OptionsService`는 값이 바뀔 때만 셀을 다시 재기 때문에,
 로드 완료가 곧 문자열 변경이어야 재계측과 재fit 이 일어난다. 로드 실패는 다음 navigation 갱신이나
 attach 에서 재시도하며 face 당 3 회로 제한한다.
+
+Remote 전용 글자 크기는 [ADR-0173](../adr/0173-host-owned-remote-display-settings.md)을 따른다.
+정본은 `settings.remote.terminalFontSize`와 `settings.remote.composerFontSize`(각 8~32px,
+기본 14)이며 데스크톱 profile/TerminalView/입력 UI의 크기와 독립적이다. PC Settings는 기존
+접속·인증 페이지를 `원격 연결`로 표시하고, 휠·터치 민감도·폰트 전송·위젯 표시와 두 글자 크기는
+별도 `원격 화면` 페이지에서 편집한다. Remote drawer의 Settings도 두 글자 크기를 조회·수정한다.
+GET은 settings 전체나 secret을 노출하지 않고 두 값만 반환한다. PATCH body는
+`{ leaseId, terminalFontSize?: number, composerFontSize?: number }`이며 적어도 한 값을 요구하고
+active controller lease를 검증한 뒤 기존 settings bridge로 PC store와 settings.json을 함께 갱신한다.
+수정한 Remote 문서는 성공 응답을 xterm/composer에 즉시 적용하고 terminal 크기 변경이면 기존 fit
+정책을 실행한다. 다른 Remote 문서는 다음 설정 조회나 attach에서 PC 정본을 받는다. Android E2E
+inner HTTP allowlist도 exact GET/PATCH 경로만 허용하고 APK에 중복 설정 정본을 만들지 않는다.
 
 `write`/`input`/`resize`는 JSON body의 `leaseId` 또는 `X-Laymux-Remote-Lease` 헤더가 현재 active lease와 일치해야 한다. resize body는 `{leaseId,cols,rows,exact?:boolean}`이며 현재 page는 `exact:false`를 명시한다. `exact:true`도 bearer/IP/Origin 인증과 sticky-expiry를 포함한 active lease 검증을 먼저 통과해야 하며, missing/bogus/stale lease는 기존처럼 409다. 유효한 active lease일 때만 현재 backend가 HTTP 501을 반환하고, 이 fail-closed 분기는 human-control permit 등록·terminal FIFO·physical/logical resize보다 앞선다. `exact:false`의 최종 소유권 검사는 route의 선행 status 확인이 아니라 Local Tauri command와 공유하는 backend human-control operation permit 등록 시점에 수행한다. permit은 등록 시점의 absolute deadline·owner epoch·operation id와 enqueue phase를 가지며, structured input은 protocol-state gate에서 mode를 캡처한 뒤 PTY control worker 큐 진입 직전에 소유권을 재검증한다. 동일 terminal의 작업은 permit 등록 순서대로 enqueue되므로 structured input 준비 중 뒤에 등록된 raw write/resize가 먼저 PTY에 도착하지 않는다. owner 전환은 아직 enqueue되지 않은 등록 요청을 취소·분리하고, 이미 queued/running인 요청은 per-terminal worker cancel과 completion acknowledgement까지 장벽에 남긴다. PTY handle table/protocol gate/owner gate는 queue wait나 물리 write 동안 잡지 않으며, worker는 physical operation 전후에 owner token을 재검증한다. 취소 adapter가 grace 안에 종료를 증명하지 못하면 해당 PTY를 종료·input-fault 격리하고 worker lifecycle completion을 확인할 때까지 Local owner를 공개하지 않는다. 출력 WebSocket도 `leaseId` 쿼리를 요구한다.
 

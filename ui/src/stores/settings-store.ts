@@ -15,6 +15,10 @@ import type {
 } from "../lib/tauri-api";
 import { GITHUB_FONT_SIZE_DEFAULT, GITHUB_LABEL_MAX_WIDTH_DEFAULT } from "../lib/github-display";
 import {
+  DEFAULT_REMOTE_COMPOSER_FONT_SIZE,
+  DEFAULT_REMOTE_TERMINAL_FONT_SIZE,
+} from "../lib/remote-display";
+import {
   resolveSyncCwd,
   DEFAULT_SYNC_CWD_DEFAULTS,
   type SyncCwdPair,
@@ -721,6 +725,8 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
+  terminalFontSize: DEFAULT_REMOTE_TERMINAL_FONT_SIZE,
+  composerFontSize: DEFAULT_REMOTE_COMPOSER_FONT_SIZE,
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
   fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
   touchScrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,

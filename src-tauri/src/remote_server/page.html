@@ -168,6 +168,24 @@
                 <span class="nav-toggle-desc">Row under the header</span>
               </label>
               </section>
+              <!-- Host-owned Remote typography (ADR-0173). Both this UI and
+                   the PC Settings page edit the same settings.remote values. -->
+              <section id="remoteTypographySection" class="nav-section" aria-label="Remote typography">
+              <h2 class="nav-section-title">Typography</h2>
+              <div class="remote-typography-panel">
+                <label for="remoteTerminalFontSize">
+                  <span>Terminal</span>
+                  <input id="remoteTerminalFontSize" type="number" min="8" max="32" step="1" value="14" inputmode="numeric" />
+                  <span>px</span>
+                </label>
+                <label for="remoteComposerFontSize">
+                  <span>Composer</span>
+                  <input id="remoteComposerFontSize" type="number" min="8" max="32" step="1" value="14" inputmode="numeric" />
+                  <span>px</span>
+                </label>
+                <div id="remoteTypographyStatus" class="remote-typography-status">Stored on this PC.</div>
+              </div>
+              </section>
               <!-- Installing drops the address bar (ADR-0091), but every browser
                    buries that path in its own menu. The offer lives here, not over
                    the terminal, and only appears while it can be acted on

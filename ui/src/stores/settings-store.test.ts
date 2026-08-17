@@ -689,6 +689,25 @@ describe("settings-store", () => {
     expect(state.remote.touchScrollSensitivity).toBe(1);
   });
 
+  it("keeps Remote terminal and composer font sizes separate from desktop fonts", () => {
+    useSettingsStore.getState().loadFromSettings({
+      appearance: { font: { face: "Cascadia Mono", size: 20, weight: "normal" } } as any,
+      remote: { terminalFontSize: 18, composerFontSize: 16 } as any,
+    });
+
+    const state = useSettingsStore.getState();
+    expect(state.appearance.font.size).toBe(20);
+    expect(state.remote.terminalFontSize).toBe(18);
+    expect(state.remote.composerFontSize).toBe(16);
+  });
+
+  it("fills missing Remote display font sizes with their defaults", () => {
+    useSettingsStore.getState().loadFromSettings({ remote: { enabled: false } as any });
+
+    expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
+    expect(useSettingsStore.getState().remote.composerFontSize).toBe(14);
+  });
+
   // -- Jump-to-bottom button setting (issue #361) --
 
   it("has default showScrollToBottomButton as true", () => {

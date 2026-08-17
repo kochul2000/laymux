@@ -290,6 +290,12 @@ View:     viewOverrides[paneId]        (localStorage: "laymux-view-overrides")
 | `GitHubView` | 자유 | 현재 CWD 리포의 열린 이슈/PR 목록. sync group CWD 를 **수신만** 하며(컨트롤 바에 receive 토글만 노출), 백엔드의 `owner/repo` 레지스트리가 10초 주기로 `gh issue/pr list` 결과를 공유하고, 주기가 지난 요청에는 기억된 목록을 먼저 내려준 뒤 뒤에서 갱신한다([ADR-0110](../adr/0110-github-snapshot-stale-while-revalidate.md)). 행 클릭은 브라우저 열기, 링크 복사 버튼은 상시 노출(PR 행은 그 옆에 브랜치 복사 버튼 추가), `⋯` 메뉴는 이슈 close(completed/not planned)·PR merge/squash/rebase/close 를 2단계 확인으로 실행한다. `#숫자` 는 title 과 같은 크기·강조 색으로 그리며, 글꼴·크기·번호 색·표시 열·라벨 개수/폭은 전역 `settings.github` 이 소유한다([ADR-0111](../adr/0111-github-view-display-settings.md)). Issues/PRs 탭 선택은 반대로 pane 인스턴스 UI 상태(`viewOverrides.githubTab`)이고 `settings.github.defaultTab` 은 아직 고르지 않은 pane 의 씨앗값이다([ADR-0115](../adr/0115-github-view-tab-per-pane-state.md)) (#708, [ADR-0106](../adr/0106-github-list-view-repo-registry.md)) |
 | `EmptyView` | 자유 | View 미지정 상태. 실행할 View 선택 UI |
 
+`SettingsView`의 Remote 항목은 책임별로 나뉜다. `원격 연결`은 접속·인증·Cloud·전송 수명주기를,
+`원격 화면`은 Remote 전용 터미널/컴포저 글자 크기, 휠·터치 민감도, 폰트 전송과 위젯 표시를
+편집한다. 두 페이지 모두 PC의 `settings.remote`를 저장하지만 서로의 필드를 덮어쓰지 않는다.
+Remote 문서의 Settings에서도 같은 글자 크기 정본을 인증된 API로 조회하고 active controller만
+수정한다([ADR-0173](../adr/0173-host-owned-remote-display-settings.md)).
+
 ### 6.2 EmptyView
 
 Pane 또는 Dock에 View가 지정되지 않은 경우 표시된다.

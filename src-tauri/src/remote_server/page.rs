@@ -409,6 +409,9 @@ mod tests {
             .next()
             .unwrap();
         assert!(settings_view.contains("id=\"displaySection\""));
+        assert!(settings_view.contains("id=\"remoteTypographySection\""));
+        assert!(settings_view.contains("id=\"remoteTerminalFontSize\""));
+        assert!(settings_view.contains("id=\"remoteComposerFontSize\""));
         assert!(settings_view.contains("id=\"installSection\""));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
@@ -425,6 +428,19 @@ mod tests {
         assert!(drawer_header_css.contains("height: 32px;"));
         assert!(html.contains("function setDrawerView(view)"));
         assert!(html.contains("setDrawerView(leaseId ? \"workspace\" : \"connection\");"));
+    }
+
+    #[test]
+    fn remote_typography_reads_and_writes_the_host_owned_settings() {
+        let html = remote_client_source();
+
+        assert!(html.contains("remoteFetch(\"/remote/v1/display-settings\")"));
+        assert!(html.contains("method: \"PATCH\""));
+        assert!(html.contains("body: JSON.stringify({ leaseId, [name]: normalized })"));
+        assert!(html.contains("composerInput.style.fontSize"));
+        assert!(html.contains("scheduleTerminalFit(Boolean(activeTerminalId))"));
+        assert!(!html.contains("laymux.remote.terminalFontSize"));
+        assert!(!html.contains("laymux.remote.composerFontSize"));
     }
 
     /// ADR-0099: the manifest makes installation possible, but every browser hides

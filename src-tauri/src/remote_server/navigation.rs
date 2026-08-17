@@ -798,6 +798,7 @@ mod tests {
             appearance: RemoteTerminalAppearance {
                 font_family: "Cascadia Mono".into(),
                 font_size: 14,
+                composer_font_size: 14,
                 cursor_style: "bar".into(),
                 cursor_width: Some(1),
                 font_assets: None,

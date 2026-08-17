@@ -701,6 +701,30 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+      .remote-typography-panel {
+        display: grid;
+        gap: 7px;
+        padding: 0 8px 8px;
+      }
+      .remote-typography-panel label {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 64px 18px;
+        align-items: center;
+        gap: 6px;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+      }
+      .remote-typography-panel input {
+        width: 64px;
+        text-align: right;
+      }
+      .remote-typography-status {
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .remote-typography-status.error {
+        color: var(--danger);
+      }
       .install-panel {
         display: flex;
         flex-direction: column;

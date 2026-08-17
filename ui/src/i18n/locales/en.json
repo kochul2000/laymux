@@ -90,7 +90,8 @@
       "paste": "Paste",
       "interface": "Interface",
       "workspaces": "Workspaces",
-      "remote": "Remote",
+      "remote": "Remote Connection",
+      "remoteDisplay": "Remote Display",
       "claude": "Claude Code",
       "codex": "Codex",
       "grok": "Grok",
@@ -369,6 +370,7 @@
     },
     "remote": {
       "title": "Remote",
+      "connectionTitle": "Remote Connection",
       "groupAccess": "Access",
       "groupHosts": "Hosts",
       "groupCloud": "Cloud Connection",
@@ -418,6 +420,16 @@
       "cloudConnecting": "Connecting...",
       "cloudDisconnect": "Disconnect",
       "cloudDisconnecting": "Disconnecting..."
+    },
+    "remoteDisplay": {
+      "title": "Remote Display",
+      "groupTypography": "Typography",
+      "groupInteraction": "Interaction",
+      "groupSurface": "Surface",
+      "terminalFontSize": "Terminal Font Size",
+      "terminalFontSizeDesc": "Text size used only by terminal screens in Remote browsers and the Android app (8-32px).",
+      "composerFontSize": "Composer Font Size",
+      "composerFontSizeDesc": "Text size used only by the Remote input composer (8-32px)."
     },
     "workspaces": {
       "title": "Workspaces",

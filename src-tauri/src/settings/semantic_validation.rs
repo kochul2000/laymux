@@ -441,6 +441,20 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let remote = &settings.remote;
+    range_u64(
+        issues,
+        "/remote/terminalFontSize",
+        u64::from(remote.terminal_font_size),
+        u64::from(crate::constants::REMOTE_FONT_SIZE_MIN),
+        u64::from(crate::constants::REMOTE_FONT_SIZE_MAX),
+    );
+    range_u64(
+        issues,
+        "/remote/composerFontSize",
+        u64::from(remote.composer_font_size),
+        u64::from(crate::constants::REMOTE_FONT_SIZE_MIN),
+        u64::from(crate::constants::REMOTE_FONT_SIZE_MAX),
+    );
     range_scroll_sensitivity(
         issues,
         "/remote/scrollSensitivity",
@@ -888,6 +902,19 @@ mod tests {
         assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
+    }
+
+    #[test]
+    fn out_of_band_remote_display_font_sizes_are_reported() {
+        let mut settings = Settings::default();
+        settings.remote.terminal_font_size = 7;
+        settings.remote.composer_font_size = 33;
+
+        let issues = validate_settings(&settings);
+        let paths: Vec<&str> = issues.iter().map(|issue| issue.path.as_str()).collect();
+
+        assert!(paths.contains(&"/remote/terminalFontSize"));
+        assert!(paths.contains(&"/remote/composerFontSize"));
     }
 
     #[test]
