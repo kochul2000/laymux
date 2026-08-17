@@ -121,14 +121,31 @@ pub(crate) async fn remote_font(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let compressed = if accepts_brotli(req.headers()) {
+    // brotli first (browsers), gzip as the fallback coding — the Android E2E
+    // resource dispatch only negotiates gzip, and without compression an
+    // MB-scale sfnt overflows the 2 MiB resource wire cap and the phone never
+    // receives the desktop font at all. A client accepting neither coding gets
+    // the raw bytes: the only wire-capped consumer is the E2E dispatch, and it
+    // always sends `Accept-Encoding: gzip`.
+    let coding = if accepts_brotli(req.headers()) {
+        Some("br")
+    } else if super::page_assets::accepts_gzip(req.headers()) {
+        Some("gzip")
+    } else {
+        None
+    };
+    let compressed = if let Some(coding) = coding {
         let font = Arc::clone(&font);
         // Compressing an MB-scale font is CPU work; keep it off the async
         // runtime threads. The result is cached, so this runs once per font.
-        tokio::task::spawn_blocking(move || font.brotli_bytes())
-            .await
-            .ok()
-            .flatten()
+        tokio::task::spawn_blocking(move || match coding {
+            "br" => font.brotli_bytes(),
+            _ => font.gzip_bytes(),
+        })
+        .await
+        .ok()
+        .flatten()
+        .map(|bytes| (coding, bytes))
     } else {
         None
     };
@@ -136,11 +153,12 @@ pub(crate) async fn remote_font(
     font_response(&font, compressed)
 }
 
-/// `compressed` carries the brotli body when the client accepts it; `None`
-/// serves the original sfnt bytes.
-fn font_response(font: &ServedFont, compressed: Option<Bytes>) -> Response {
-    let brotli_encoded = compressed.is_some();
+/// `compressed` carries the negotiated coding and body when the client accepts
+/// one; `None` serves the original sfnt bytes.
+fn font_response(font: &ServedFont, compressed: Option<(&'static str, Bytes)>) -> Response {
+    let coding = compressed.as_ref().map(|(coding, _)| *coding);
     let mut response = compressed
+        .map(|(_, bytes)| bytes)
         .unwrap_or_else(|| font.bytes.clone())
         .into_response();
     let headers = response.headers_mut();
@@ -153,8 +171,8 @@ fn font_response(font: &ServedFont, compressed: Option<Bytes>) -> Response {
         HeaderValue::from_static(FONT_CACHE_CONTROL),
     );
     headers.insert(header::VARY, HeaderValue::from_static("Accept-Encoding"));
-    if brotli_encoded {
-        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("br"));
+    if let Some(coding) = coding {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(coding));
     }
     response
 }
@@ -345,7 +363,7 @@ mod tests {
         let brotli = font
             .brotli_bytes()
             .expect("brotli bytes should be produced");
-        let encoded = font_response(&font, Some(brotli.clone()));
+        let encoded = font_response(&font, Some(("br", brotli.clone())));
         assert_eq!(
             encoded.headers().get(header::CONTENT_ENCODING).unwrap(),
             "br"
@@ -359,6 +377,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(body, brotli);
+
+        // gzip is the Android E2E coding: JDK-decodable and small enough to fit
+        // an MB-scale font under the 2 MiB resource wire cap.
+        let gzip = font.gzip_bytes().expect("gzip bytes should be produced");
+        let encoded = font_response(&font, Some(("gzip", gzip.clone())));
+        assert_eq!(
+            encoded.headers().get(header::CONTENT_ENCODING).unwrap(),
+            "gzip"
+        );
+        let body = axum::body::to_bytes(encoded.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(body, gzip);
+        let mut decoder = flate2::read::GzDecoder::new(body.as_ref());
+        let mut decoded = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decoded).unwrap();
+        assert_eq!(Bytes::from(decoded), raw);
     }
 
     #[test]
