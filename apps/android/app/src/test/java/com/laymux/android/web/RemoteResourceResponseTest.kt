@@ -102,16 +102,20 @@ class RemoteResourceResponseTest {
         assertThrows(IllegalArgumentException::class.java) {
             RemoteResourceResponse.parse(resource("gzip", ByteArray(16)))
         }
-        // 2 MiB of zeros compresses to ~2 KiB; the decompressed size must
-        // still be capped at the plain-body limit plus nothing.
-        val bomb = java.io.ByteArrayOutputStream().also { buffer ->
+        // Zeros compress to almost nothing; the decompressed size is what the
+        // bomb guard caps. ~2.5 MiB must inflate (the desktop terminal font is
+        // ~2.7 MiB raw and only fits the 2 MiB wire compressed), while
+        // anything past the 4 MiB inflation cap fails closed.
+        fun zeros(chunks: Int) = java.io.ByteArrayOutputStream().also { buffer ->
             java.util.zip.GZIPOutputStream(buffer).use {
-                val zeros = ByteArray(64 * 1024)
-                repeat(33) { _ -> it.write(zeros) }
+                val block = ByteArray(64 * 1024)
+                repeat(chunks) { _ -> it.write(block) }
             }
         }.toByteArray()
+        val inflated = RemoteResourceResponse.parse(resource("gzip", zeros(40)))
+        assertEquals(40 * 64 * 1024, inflated.body.size)
         assertThrows(IllegalArgumentException::class.java) {
-            RemoteResourceResponse.parse(resource("gzip", bomb))
+            RemoteResourceResponse.parse(resource("gzip", zeros(65)))
         }
     }
 }

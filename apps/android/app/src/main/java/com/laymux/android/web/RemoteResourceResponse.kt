@@ -12,6 +12,12 @@ data class RemoteResourceResponse(
 ) {
     companion object {
         private const val MAX_BODY_BYTES = 2 * 1024 * 1024
+
+        // The wire cap stays 2 MiB (ADR-0146); this only bounds the local
+        // gzip inflation. The desktop terminal font is the driving case —
+        // ~2.7 MiB sfnt that only fits the wire compressed (ADR-0077 serving,
+        // gzip ~0.9 MiB) — while still capping decompression bombs.
+        private const val MAX_INFLATED_BYTES = 4 * 1024 * 1024
         internal const val MAX_ENCODED_BODY_LENGTH = (MAX_BODY_BYTES * 4 + 2) / 3
         private val FORWARDED_HEADERS = setOf(
             "cache-control",
@@ -87,8 +93,8 @@ data class RemoteResourceResponse(
                         val read = input.read(buffer)
                         if (read < 0) break
                         // Bounded before writing: a decompression bomb must not
-                        // allocate past the plain-body limit.
-                        if (output.size() + read > MAX_BODY_BYTES) {
+                        // allocate past the inflated-body limit.
+                        if (output.size() + read > MAX_INFLATED_BYTES) {
                             throw IllegalArgumentException("resource body가 너무 큽니다")
                         }
                         output.write(buffer, 0, read)

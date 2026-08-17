@@ -61,6 +61,10 @@ pub(super) struct ServedFont {
     pub content_type: &'static str,
     /// brotli 본은 첫 요청에서 한 번 만들어 재사용한다.
     compressed: Mutex<Option<Bytes>>,
+    /// gzip 본. Android E2E resource 경로는 brotli 디코더가 없어 gzip 만
+    /// 협상하는데, MB 급 sfnt 원본은 2 MiB wire 상한을 넘어 폰트 전송이
+    /// 통째로 실패한다 — gzip 본(약 1/3 크기)이 그 경로의 유일한 통로다.
+    gzipped: Mutex<Option<Bytes>>,
 }
 
 impl ServedFont {
@@ -78,6 +82,17 @@ impl ServedFont {
         *slot = Some(compressed.clone());
         Some(compressed)
     }
+
+    /// gzip 본 — brotli 와 같은 한 번-압축 캐시 규칙.
+    pub fn gzip_bytes(&self) -> Option<Bytes> {
+        let mut slot = self.gzipped.lock_or_err().ok()?;
+        if let Some(bytes) = slot.as_ref() {
+            return Some(bytes.clone());
+        }
+        let compressed = compress_gzip(&self.bytes)?;
+        *slot = Some(compressed.clone());
+        Some(compressed)
+    }
 }
 
 #[cfg(test)]
@@ -86,6 +101,7 @@ pub(super) fn served_font_for_test(bytes: Bytes, content_type: &'static str) -> 
         bytes,
         content_type,
         compressed: Mutex::new(None),
+        gzipped: Mutex::new(None),
     }
 }
 
@@ -285,6 +301,7 @@ fn register_served_font(token: String, bytes: Bytes, kind: SfntKind) {
             bytes,
             content_type: kind.content_type,
             compressed: Mutex::new(None),
+            gzipped: Mutex::new(None),
         }),
     );
 }
@@ -338,6 +355,15 @@ pub(super) fn parse_font_token(file_name: &str) -> Option<&str> {
         return None;
     }
     Some(token)
+}
+
+fn compress_gzip(data: &[u8]) -> Option<Bytes> {
+    let mut encoder =
+        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    if encoder.write_all(data).is_err() {
+        return None;
+    }
+    encoder.finish().ok().map(Bytes::from)
 }
 
 fn compress_brotli(data: &[u8]) -> Option<Bytes> {
