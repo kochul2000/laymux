@@ -169,6 +169,7 @@ impl AndroidE2eState {
             server_nonce: URL_SAFE_NO_PAD.encode(server_nonce),
             challenge_expires_at,
             server_proof: String::new(),
+            compat_version: super::COMPAT_VERSION,
         };
         let fields = proof_fields_challenge(&response);
         response.server_proof = proof(

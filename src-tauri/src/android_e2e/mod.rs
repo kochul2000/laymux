@@ -10,6 +10,10 @@ pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eSession};
 pub(crate) use state::test_output_cipher_pair;
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
+/// desktop↔Android 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이
+/// 실릴 때만 1씩 올린다 — 릴리즈마다 올리지 않는다. challenge 응답으로
+/// 광고하고 앱이 자기 값과 비교해 불일치면 연결을 거부한다.
+pub(crate) const COMPAT_VERSION: u32 = 1;
 pub(crate) const CHALLENGE_ID_BYTES: usize = 16;
 pub(crate) const CLIENT_SESSION_NONCE_BYTES: usize = 16;
 pub(crate) const SERVER_NONCE_BYTES: usize = 32;
@@ -47,6 +51,10 @@ pub(crate) struct ChallengeResponse {
     pub server_nonce: String,
     pub challenge_expires_at: u64,
     pub server_proof: String,
+    /// HMAC proof 에 넣지 않는 표시 전용 필드 (ADR-0172): 위조해 봐야 앱이
+    /// 버전 불일치 오류를 띄우고 연결을 접는 것뿐이라 relay 의 기존 DoS
+    /// 능력을 넘지 않는다. 구버전 앱은 모르는 필드라 무시한다.
+    pub compat_version: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
