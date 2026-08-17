@@ -1,6 +1,6 @@
 # 0172. Android E2E 는 비호환 시에만 올리는 호환 번호로 연결을 게이트한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-17
 - Source: 사용자 요구("버전이 안 맞다고 표시해라, 비호환일 때만 하나씩 올리는 버저닝") · 실사고(구 APK + 신 데스크톱의 폰트 gzip 비호환으로 "접속하자마자 꺼짐") · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0169](0169-remote-client-hashed-immutable-assets-and-gzip.md)
 - Extends: ADR-0146
