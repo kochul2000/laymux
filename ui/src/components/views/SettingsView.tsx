@@ -2035,6 +2035,7 @@ type RemoteDisplaySettings = Pick<
   | "scrollSensitivity"
   | "fastScrollSensitivity"
   | "touchScrollSensitivity"
+  | "twoFingerScrollSensitivity"
 >;
 type RemoteConnectionSettings = Omit<RemoteSettings, keyof RemoteDisplaySettings>;
 const REMOTE_FONT_SIZE_MIN = 6;
@@ -2600,6 +2601,7 @@ function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings 
     scrollSensitivity: remote.scrollSensitivity,
     fastScrollSensitivity: remote.fastScrollSensitivity,
     touchScrollSensitivity: remote.touchScrollSensitivity,
+    twoFingerScrollSensitivity: remote.twoFingerScrollSensitivity,
   };
 }
 
@@ -2620,6 +2622,10 @@ function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDi
     touchScrollSensitivity: normalizeScrollSensitivity(
       remote.touchScrollSensitivity,
       DEFAULT_SCROLL_SENSITIVITY,
+    ),
+    twoFingerScrollSensitivity: normalizeScrollSensitivity(
+      remote.twoFingerScrollSensitivity,
+      DEFAULT_FAST_SCROLL_SENSITIVITY,
     ),
   };
 }
@@ -2772,6 +2778,30 @@ function RemoteDisplaySection() {
                 touchScrollSensitivity: normalizeScrollSensitivity(
                   event.target.value,
                   DEFAULT_SCROLL_SENSITIVITY,
+                ),
+              })
+            }
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.twoFingerScrollSensitivity")}
+          desc={t("remote.twoFingerScrollSensitivityDesc")}
+        >
+          <FocusInput
+            data-testid="remote-settings-two-finger-scroll-sensitivity-input"
+            type="number"
+            min={SCROLL_SENSITIVITY_MIN}
+            max={SCROLL_SENSITIVITY_MAX}
+            step={SCROLL_SENSITIVITY_STEP}
+            className={inputCls}
+            inputStyle={{ width: 110 }}
+            value={remote.twoFingerScrollSensitivity}
+            onChange={(event) =>
+              update({
+                twoFingerScrollSensitivity: normalizeScrollSensitivity(
+                  event.target.value,
+                  DEFAULT_FAST_SCROLL_SENSITIVITY,
                 ),
               })
             }

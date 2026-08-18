@@ -126,7 +126,8 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
   "remote": {
     "scrollSensitivity": 1, // 원격 브라우저 터미널 휠 배율
     "fastScrollSensitivity": 5,
-    "touchScrollSensitivity": 1 // 손가락 드래그 스크롤백 배율. 1 = 1:1 물리 스크롤
+    "touchScrollSensitivity": 1, // 한 손가락 드래그 스크롤백 배율. 1 = 1:1 물리 스크롤
+    "twoFingerScrollSensitivity": 5 // 두 손가락 드래그 스크롤백 배율. 기본 5
   }
 }
 ```
@@ -139,7 +140,7 @@ native 셸은 `CommandBuilder::env`/`env_remove`, WSL은 같은 mutation의 rcfi
 
 적용 시점은 다르다. 데스크톱은 **live** — 저장 즉시 실행 중인 xterm 옵션에 반영하며 fit·레이아웃을 건드리지 않는다. Remote 는 **nextUse** 로, 값이 per-terminal `appearance` payload(§Remote terminals)에 실려 다음 attach 의 `terminalOptionsForAppearance`/`applyTerminalAppearance` 에서 적용된다. 원격 클라이언트는 필드가 없거나(구버전 데스크톱) 비정상이면 자기 기본값(1/5/1)으로 떨어진다.
 
-`remote.touchScrollSensitivity`(기본 1)는 **xterm 옵션이 아니다**. Remote 페이지가 소유한 손가락 드래그 스크롤백의 픽셀→행 환산에서 입력 델타에 한 번 곱하며(`scrollTouchTerminal`), 하위 셀 나머지(`scrollRemainderPx`)에는 다시 곱하지 않는다. 옵션 번들 대신 페이지 지역 상태(`adoptTouchScrollSensitivity`)가 들고 있으며 appearance 가 적용되는 두 지점(터미널 생성·appearance 갱신)에서 갱신된다 — xterm 은 모르는 옵션 키를 거부한다. 한 손가락·두 손가락 드래그 모두 같은 값을 쓰고, **마우스 트래킹을 켠 전체화면 TUI 에서는 드래그가 합성 wheel 이벤트로 앱에 전달되므로 `remote.scrollSensitivity` 가 적용된다**(두 배율을 겹쳐 곱하지 않는다).
+`remote.touchScrollSensitivity`(한 손가락, 기본 1)와 `remote.twoFingerScrollSensitivity`(두 손가락, 기본 5)는 **xterm 옵션이 아니다**([ADR-0177](../adr/0177-remote-two-finger-touch-scroll-sensitivity.md)). Remote 페이지가 소유한 손가락 드래그 스크롤백의 픽셀→행 환산에서 입력 델타에 한 번 곱하며(`scrollTouchTerminal(term, deltaY, sensitivity)`), 하위 셀 나머지(`scrollRemainderPx`)에는 다시 곱하지 않는다. 옵션 번들 대신 페이지 지역 상태(`adoptTouchScrollSensitivity` 가 두 값을 흡수)가 들고 있으며 appearance 가 적용되는 두 지점(터미널 생성·appearance 갱신)에서 갱신된다 — xterm 은 모르는 옵션 키를 거부한다. 정상 스크롤백 모드에서 한 손가락은 `touchScrollSensitivity`, 두 손가락(`twoFingerScrolling` 모드)은 `twoFingerScrollSensitivity` 를 쓴다. **마우스 트래킹을 켠 전체화면 TUI 에서는 드래그가 합성 wheel 이벤트로 앱에 전달되므로 한 손가락·두 손가락 모두 `remote.scrollSensitivity` 가 적용된다**(두 배율을 겹쳐 곱하지 않는다).
 
 ### 경로 링크의 호스트 OS 열기
 
@@ -342,7 +343,8 @@ Direct 네트워크 연결 실패에만 새 Cloud session으로 fallback한다. 
     "serveTerminalFont": false,         // 데스크톱 터미널 폰트 파일을 원격 브라우저로 전송(ADR-0077). 폰트 바이너리 재배포이므로 기본 off
     "scrollSensitivity": 1,             // 원격 브라우저 터미널의 휠 배율. 0.1~20, 기본 1(ADR-0142). 데스크톱 terminal.scrollSensitivity 와 별개
     "fastScrollSensitivity": 5,         // 원격에서 Alt 를 누른 채 굴릴 때의 배율. 0.1~20 으로 clamp, 기본 5
-    "touchScrollSensitivity": 1,        // 손가락 드래그 스크롤백 배율. 0.1~20, 기본 1(=1:1 물리 스크롤). xterm 옵션이 아니라 Remote 페이지의 픽셀→행 환산에 곱한다
+    "touchScrollSensitivity": 1,        // 한 손가락 드래그 스크롤백 배율. 0.1~20, 기본 1(=1:1 물리 스크롤). xterm 옵션이 아니라 Remote 페이지의 픽셀→행 환산에 곱한다
+    "twoFingerScrollSensitivity": 5,    // 두 손가락 드래그 스크롤백 배율. 0.1~20, 기본 5. 한 손가락과 분리(ADR-0177)
     "widgets": true                     // 데스크톱에 배치한 위젯을 원격 스트립에 미러(ADR-0124). 배치 SoT 는 settings.widgets 이며 이 값은 원격 표면 표시 여부만 정한다. 전역 게이트이고, 기기별 on/off 는 브라우저 localStorage 가 따로 갖는다(§13.5, ADR-0132)
   }
 }

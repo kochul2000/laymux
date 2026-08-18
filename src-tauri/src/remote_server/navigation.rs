@@ -805,6 +805,7 @@ mod tests {
                 scroll_sensitivity: crate::constants::DEFAULT_SCROLL_SENSITIVITY,
                 fast_scroll_sensitivity: crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY,
                 touch_scroll_sensitivity: crate::constants::DEFAULT_SCROLL_SENSITIVITY,
+                two_finger_scroll_sensitivity: crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY,
             },
         }
     }

@@ -1061,8 +1061,10 @@ export interface RemoteSettings {
   scrollSensitivity: number;
   /** Remote wheel multiplier while the fast-scroll modifier (Alt) is held. */
   fastScrollSensitivity: number;
-  /** Finger-drag scrollback multiplier on the remote surface. 1 = 1:1 physical scroll. */
+  /** One-finger drag scrollback multiplier on the remote surface. 1 = 1:1 physical scroll. */
   touchScrollSensitivity: number;
+  /** Two-finger drag scrollback multiplier on the remote surface. Defaults to 5. */
+  twoFingerScrollSensitivity: number;
 }
 
 export interface Settings {

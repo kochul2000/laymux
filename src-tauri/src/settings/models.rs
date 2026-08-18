@@ -1828,12 +1828,18 @@ pub struct RemoteSettings {
     /// (xterm `fastScrollSensitivity`).
     #[serde(default = "default_fast_scroll_sensitivity")]
     pub fast_scroll_sensitivity: f32,
-    /// Multiplier for finger-drag scrollback on the Remote surface. 1 keeps the
-    /// 1:1 physical scroll the gesture starts out as; above 1 the content moves
-    /// further than the finger. Not an xterm option — the Remote page owns this
-    /// gesture and converts pixels to lines itself.
+    /// Multiplier for **one-finger** finger-drag scrollback on the Remote
+    /// surface. 1 keeps the 1:1 physical scroll the gesture starts out as;
+    /// above 1 the content moves further than the finger. Not an xterm option —
+    /// the Remote page owns this gesture and converts pixels to lines itself.
     #[serde(default = "default_scroll_sensitivity")]
     pub touch_scroll_sensitivity: f32,
+    /// Multiplier for **two-finger** finger-drag scrollback on the Remote
+    /// surface. Separate from the one-finger value so a two-finger swipe can
+    /// cover more scrollback per drag; defaults to the fast-scroll factor (5).
+    /// Same pixel→line path as `touch_scroll_sensitivity`, not an xterm option.
+    #[serde(default = "default_fast_scroll_sensitivity")]
+    pub two_finger_scroll_sensitivity: f32,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1935,6 +1941,7 @@ impl Default for RemoteSettings {
             scroll_sensitivity: default_scroll_sensitivity(),
             fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
             touch_scroll_sensitivity: default_scroll_sensitivity(),
+            two_finger_scroll_sensitivity: default_fast_scroll_sensitivity(),
         }
     }
 }

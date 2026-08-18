@@ -31,9 +31,12 @@ pub(super) struct RemoteTerminalAppearance {
     /// client is its own device and does not inherit the desktop's value.
     pub scroll_sensitivity: f32,
     pub fast_scroll_sensitivity: f32,
-    /// Finger-drag scrollback multiplier. Unlike the two above it is not an
+    /// One-finger drag scrollback multiplier. Unlike the two above it is not an
     /// xterm option — the page converts drag pixels to lines itself.
     pub touch_scroll_sensitivity: f32,
+    /// Two-finger drag scrollback multiplier. Same pixel→line path as
+    /// `touch_scroll_sensitivity`, applied when two pointers drive the scroll.
+    pub two_finger_scroll_sensitivity: f32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]
@@ -120,6 +123,10 @@ pub(super) fn resolve_remote_terminal_appearance(
         touch_scroll_sensitivity: clamp_scroll_sensitivity(
             settings.remote.touch_scroll_sensitivity,
             DEFAULT_SCROLL_SENSITIVITY,
+        ),
+        two_finger_scroll_sensitivity: clamp_scroll_sensitivity(
+            settings.remote.two_finger_scroll_sensitivity,
+            DEFAULT_FAST_SCROLL_SENSITIVITY,
         ),
     }
 }
@@ -421,6 +428,7 @@ mod tests {
         settings.remote.scroll_sensitivity = 2.5;
         settings.remote.fast_scroll_sensitivity = 12.0;
         settings.remote.touch_scroll_sensitivity = 1.8;
+        settings.remote.two_finger_scroll_sensitivity = 6.5;
         settings.profiles = vec![Profile {
             name: "PowerShell".into(),
             ..Profile::default()
@@ -431,6 +439,7 @@ mod tests {
         assert_eq!(appearance.scroll_sensitivity, 2.5);
         assert_eq!(appearance.fast_scroll_sensitivity, 12.0);
         assert_eq!(appearance.touch_scroll_sensitivity, 1.8);
+        assert_eq!(appearance.two_finger_scroll_sensitivity, 6.5);
     }
 
     #[test]

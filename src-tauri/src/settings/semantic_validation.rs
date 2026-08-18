@@ -470,6 +470,11 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         "/remote/touchScrollSensitivity",
         remote.touch_scroll_sensitivity,
     );
+    range_scroll_sensitivity(
+        issues,
+        "/remote/twoFingerScrollSensitivity",
+        remote.two_finger_scroll_sensitivity,
+    );
     if remote.enabled && remote.auth_token.trim().is_empty() {
         issue(
             issues,

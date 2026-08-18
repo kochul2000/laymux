@@ -726,6 +726,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
   fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
   touchScrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
+  twoFingerScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };
