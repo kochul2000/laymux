@@ -54,6 +54,7 @@ use super::page::{remote_page, remote_page_redirect};
 use super::page_assets::remote_hashed_asset;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
+use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
 use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
 use super::viewer_routes::{
     remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
@@ -158,6 +159,9 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
         .route("/remote/v1/widgets", get(remote_widgets))
+        .route("/remote/v1/update", get(remote_update_status))
+        .route("/remote/v1/update/check", post(remote_update_check))
+        .route("/remote/v1/update/install", post(remote_update_install))
         .route(
             "/remote/v1/navigation/spatial",
             post(remote_navigation_spatial_step),

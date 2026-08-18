@@ -137,6 +137,28 @@ pub async fn get_status() -> Result<AndroidPairingStatus, AppError> {
 
 pub async fn create(state: Arc<AppState>) -> Result<AndroidPairingQr, AppError> {
     tokio::task::spawn_blocking(move || {
+        let (result, _payload) = create_inner(&state)?;
+        state.android_e2e.clear()?;
+        Ok(result)
+    })
+    .await
+    .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
+}
+
+/// Dev-only variant of [`create`] that also returns the QR payload text so an
+/// emulator can be paired without a camera (the payload is injected into the
+/// debug app via an adb deep link). The payload carries the pairing secret,
+/// so release builds refuse this outright — the secret leaves the process
+/// only as a QR image there.
+pub async fn create_with_payload(
+    state: Arc<AppState>,
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
+    if !cfg!(debug_assertions) {
+        return Err(AppError::Other(
+            "Pairing payload export is a dev-build-only capability".into(),
+        ));
+    }
+    tokio::task::spawn_blocking(move || {
         let result = create_inner(&state)?;
         state.android_e2e.clear()?;
         Ok(result)
@@ -234,7 +256,7 @@ fn get_status_inner_at(now: u64) -> Result<AndroidPairingStatus, AppError> {
     Ok(status_from_record(&record))
 }
 
-fn create_inner(state: &AppState) -> Result<AndroidPairingQr, AppError> {
+fn create_inner(state: &AppState) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
     with_lifecycle(|| {
         let settings =
             crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
@@ -246,7 +268,7 @@ fn create_inner(state: &AppState) -> Result<AndroidPairingQr, AppError> {
 fn create_inner_with_hook(
     state: &AppState,
     after_settings_loaded: impl FnOnce(),
-) -> Result<AndroidPairingQr, AppError> {
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
     with_lifecycle(|| {
         let settings =
             crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
@@ -255,7 +277,9 @@ fn create_inner_with_hook(
     })
 }
 
-fn create_for_settings(settings: &RemoteSettings) -> Result<AndroidPairingQr, AppError> {
+fn create_for_settings(
+    settings: &RemoteSettings,
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
     let mut seed = [0_u8; PAIRING_SECRET_BYTES];
     let mut pairing_id = [0_u8; PAIRING_ID_BYTES];
     let result = (|| {
@@ -276,7 +300,7 @@ fn create_for_settings(settings: &RemoteSettings) -> Result<AndroidPairingQr, Ap
 fn create_for_settings_with_seed(
     settings: &RemoteSettings,
     seed: &[u8; PAIRING_SECRET_BYTES],
-) -> Result<AndroidPairingQr, AppError> {
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
     create_for_settings_with_material(settings, seed, &[42_u8; PAIRING_ID_BYTES], unix_time_now()?)
 }
 
@@ -285,7 +309,7 @@ fn create_for_settings_with_material(
     seed: &[u8; PAIRING_SECRET_BYTES],
     pairing_id_bytes: &[u8; PAIRING_ID_BYTES],
     issued_at: u64,
-) -> Result<AndroidPairingQr, AppError> {
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
     let source = pairing_source(settings)?;
     let expires_at = issued_at
         .checked_add(PAIRING_TTL_SECONDS)
@@ -307,17 +331,20 @@ fn create_for_settings_with_material(
 
     keyring_store::set_record(&record)?;
     advance_pairing_revision();
-    Ok(AndroidPairingQr {
-        status: AndroidPairingStatus {
-            paired: true,
-            phase: AndroidPairingPhase::Pending,
-            endpoint: Some(source.endpoint),
-            instance_id: Some(source.instance_id),
-            expires_at: Some(expires_at),
-            confirmed_at: None,
+    Ok((
+        AndroidPairingQr {
+            status: AndroidPairingStatus {
+                paired: true,
+                phase: AndroidPairingPhase::Pending,
+                endpoint: Some(source.endpoint),
+                instance_id: Some(source.instance_id),
+                expires_at: Some(expires_at),
+                confirmed_at: None,
+            },
+            qr_svg,
         },
-        qr_svg,
-    })
+        payload,
+    ))
 }
 
 pub(crate) fn revoke_inner() -> Result<AndroidPairingStatus, AppError> {
@@ -938,16 +965,21 @@ mod tests {
         keyring_store::reset_mock_store().unwrap();
         let settings = paired_settings();
 
-        let first = create_for_settings_with_seed(&settings, &[1; PAIRING_SECRET_BYTES]).unwrap();
+        let (first, first_payload) =
+            create_for_settings_with_seed(&settings, &[1; PAIRING_SECRET_BYTES]).unwrap();
         let first_record = keyring_store::get_record().unwrap().unwrap();
-        let second = create_for_settings_with_seed(&settings, &[2; PAIRING_SECRET_BYTES]).unwrap();
+        let (second, _second_payload) =
+            create_for_settings_with_seed(&settings, &[2; PAIRING_SECRET_BYTES]).unwrap();
         let second_record = keyring_store::get_record().unwrap().unwrap();
 
         assert!(first.qr_svg.starts_with("<?xml"));
         assert!(first.qr_svg.contains("<svg"));
         assert!(!first.qr_svg.contains("laymux://pair/v1"));
+        assert!(first_payload.starts_with("laymux://pair/v2?"));
         assert_eq!(first.status, second.status);
         assert_ne!(first_record, second_record);
+        // The serialized QR result (what the Tauri command returns) must not
+        // leak the secret; only the dev-only payload carries it.
         assert!(!serde_json::to_string(&second).unwrap().contains("secret"));
     }
 

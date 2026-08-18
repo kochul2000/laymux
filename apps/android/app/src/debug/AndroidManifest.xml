@@ -5,5 +5,19 @@
     <!-- Debug pairing may target the local relay on 127.0.0.1/::1. -->
     <application
         android:usesCleartextTraffic="true"
-        tools:replace="android:usesCleartextTraffic" />
+        tools:replace="android:usesCleartextTraffic">
+        <!-- Debug-only camera bypass: an emulator has no usable scanner UI,
+             so the pairing payload is injected as a laymux://pair/v2 VIEW
+             intent via adb (dev MCP tool `create_android_pairing_payload`).
+             MainActivity re-checks FLAG_DEBUGGABLE before honoring it. -->
+        <activity
+            android:name=".MainActivity"
+            tools:node="merge">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="laymux" android:host="pair" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>

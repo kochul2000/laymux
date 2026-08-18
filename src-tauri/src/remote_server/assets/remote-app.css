@@ -736,6 +736,57 @@
       .nav-settings-status.error {
         color: var(--danger);
       }
+      .drawer-header-button {
+        position: relative;
+      }
+      .drawer-header-button.update-available::after {
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
+      }
+      .pc-update-panel {
+        display: grid;
+        gap: 8px;
+        padding: 0 8px 8px;
+      }
+      .pc-update-panel .nav-settings-status {
+        margin: 0 4px;
+      }
+      .pc-update-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .pc-update-actions button {
+        min-height: 28px;
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        background: var(--panel-2);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+      }
+      .pc-update-actions button.primary {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .pc-update-actions button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+      .pc-update-notes {
+        max-height: 96px;
+        overflow: auto;
+        white-space: pre-wrap;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        line-height: 1.4;
+      }
       .install-panel {
         display: flex;
         flex-direction: column;

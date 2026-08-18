@@ -791,13 +791,16 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 ### 12.3 엔드포인트
 
-> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 58개 = REST 57 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
+> **전체·정본 엔드포인트 목록은 `REGISTERED_ROUTES`(`automation_server/types.rs`)와 `GET /api/v1/docs`(JSON 자기설명)가 SoT** 다. e2e 테스트가 `build_router()` ↔ `/docs` 일치를 강제한다(현재 `REGISTERED_ROUTES` 62개 = REST 61 + `/mcp` 와일드카드). 아래 표는 대표 엔드포인트 요약이며 전수 목록이 아니다.
 
 | Method | Path | 설명 |
 |--------|------|------|
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 + 응답 프로세스·빌드 신원(`instance`) |
 | GET | `/api/v1/diagnostics/frontend` | Rust terminal-output v3 상태 + 마지막 프론트엔드 vitals 합성 (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
+| GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회 (`Cache-Control: no-store`) |
+| POST | `/api/v1/update/check` | GitHub latest Release 즉시 확인. 실행 중인 작업이 있으면 그 snapshot 반환 |
+| POST | `/api/v1/update/install` | 발견된 update 다운로드·서명 검증·설치·재시작 예약. 프로세스 종료 전에 수락 snapshot 반환 |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
 | GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
 | POST | `/api/v1/workspaces/active` | 워크스페이스 전환 |
@@ -898,7 +901,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 
 MCP handler 는 `automation_port()` 결과로 dev 여부를 주입받는다. release(`19280`)에서는 운영·사용자 상태 조작에 필요한 안정 툴만 노출하고, laymux-dev(`19281`)에서는 UI 검증/설정 모달/hover 시뮬레이션처럼 기능 개발 e2e 구동에 필요한 dev 전용 툴을 추가 노출한다. dev 전용 툴은 release 의 `tools/list` 결과에서 숨기며, 이름을 직접 호출해도 `tool not found` 로 거부한다([ADR-0017](../adr/0017-mcp-dev-only-tools.md)).
 
-#### Tool 목록 (release 37개 + dev 전용 19개)
+#### Tool 목록 (release 37개 + dev 전용 20개)
 
 **설정 (4)** — release/dev 공통, frontend snapshot bridge 기반([ADR-0032](../adr/0032-llm-settings-introspection-and-safe-mutation.md)):
 
@@ -1005,7 +1008,7 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 | `list_memos` | 파일 시스템 | `cache/memo.json`의 모든 `{ key, content }` 항목 (key 알파벳 정렬) |
 | `read_memo` | 파일 시스템 | 특정 키의 메모 내용 조회 (없으면 에러) |
 
-**Dev 전용 (19)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
+**Dev 전용 (20)** — laymux-dev(`19281`)에서만 `tools/list`와 `tools/call`에 노출:
 
 | Tool | bridge method | 설명 |
 |------|---------------|------|
@@ -1028,6 +1031,7 @@ Rust 의 `TEXT_EXTENSIONS`(`commands/file_viewer.rs`)는 표시 힌트가 아니
 | `set_pane_view` | `panes.setView` | pane view config 직접 변경 |
 | `scroll_terminal` | `terminals.scroll` | live xterm viewport 상대 스크롤. PTY 입력 없이 `cols`/`rows`/`baseY`/`viewportY`/`isAtBottom` 반환 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
 | `dump_terminal_buffer` | `terminals.dumpBuffer` | live xterm의 reflow 완료 line model(`text`, `isWrapped`) 조회. WebGL 화면과 실제 버퍼 손상을 분리 진단 ([ADR-0025](../adr/0025-dev-terminal-viewport-automation.md)) |
+| `create_android_pairing_payload` | 백엔드 상태 (`android_pairing::create_with_payload`) | Android 페어링 세션 생성 + QR payload 텍스트(`laymux://pair/v2?...`) 반환. **payload 는 페어링 시크릿을 포함**하며 debug 앱 딥링크 주입용(에뮬레이터, 카메라 스캔 불가). 뒷받침 함수가 `cfg!(debug_assertions)` 아니면 즉시 거부해 release 는 목록 은닉+호출 차단 이중 게이트 ([ADR-0176](../adr/0176-dev-android-pairing-payload-injection.md)) |
 
 #### MCP Resources — 구독형 read-only 상태 (issue #202)
 
@@ -1406,6 +1410,16 @@ Remote 표시 글자 크기의 SoT는 PC의 `settings.remote.terminalFontSize`(�
 | `/remote/v1/display-settings` | PUT | 같은 인증 gate + active controller `leaseId`. body `{leaseId,expectedRevision,terminalFontSize,composerFontSize}`; 공통 settings snapshot/apply bridge의 CAS로 검증·Zustand 갱신·영속 저장. stale revision은 `409` |
 
 Android E2E의 native encrypted HTTP bridge exact allowlist에는 위 GET/PUT 조합만 있으며 다른 method와 범용 settings 경로는 열지 않는다. 따라서 Android도 PC가 제공하는 같은 Remote 문서와 endpoint를 쓰되 기존 pairing/session/AEAD 경계와 mutation lease 경계를 모두 유지한다. PUT은 lease 검증부터 frontend apply 완료까지 owner handoff barrier에 등록되므로 release·reclaim·expiry가 먼저 선형화된 stale controller는 저장할 수 없고, PUT이 먼저 등록된 경우 handoff가 해당 저장을 drain한다.
+
+PC updater도 Remote enabled + transport/auth gate 뒤에 좁은 계약으로 노출한다([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)). 세 endpoint는 모두 process-global `UpdateStatus`를 반환하며 응답을 캐시하지 않는다. status/check는 observer가 업데이트 유무를 알 수 있도록 lease를 요구하지 않지만, install은 PC 바이너리 교체와 재시작을 유발하므로 active controller lease가 필요하다. 권한은 install 요청 수락 때 owner mutation permit으로 선형화하고, 수락된 signed install은 이후 lease 만료와 독립적으로 진행한다.
+
+| Endpoint | Method | 권한·동작 |
+|---|---|---|
+| `/remote/v1/update` | GET | 기존 Remote 인증 gate, lease 불필요. 현재/가용 버전·notes/date·operation/progress/check/error snapshot |
+| `/remote/v1/update/check` | POST | 같은 인증 gate, lease 불필요. GitHub latest 즉시 확인 |
+| `/remote/v1/update/install` | POST | 같은 인증 gate + active controller `leaseId`. 다운로드·검증·설치·재시작을 예약하고 즉시 응답 |
+
+Android E2E inner exact allowlist에도 위 GET/POST 세 조합만 추가한다. 이는 Android 앱을 업데이트하는 API가 아니라 연결된 PC updater를 같은 PC 소유 Remote 문서에서 조작하는 API다. debug build는 세 endpoint에서 상태 조회만 가능하고 check/install은 `501`로 거절한다.
 
 브라우저 remote의 모바일 터치 스크롤/선택은 surface-local 처리다. Remote HTML은 Pointer Events 기반 gesture layer를 두고 일반 한 손 드래그를 텍스트 선택에 쓰지 않는다. normal buffer이며 mouse tracking mode가 꺼진 shell/log 화면에서는 한 손 세로 스와이프가 xterm scrollback을 움직이고, alternate buffer 또는 mouse tracking mode에서는 한 손 스와이프를 TUI 앱 내부 스크롤 입력으로 전달한다. scrollback을 위로 올리면 데스크톱 TerminalView와 같은 하단 이동 버튼을 띄우고, 누르면 해당 remote xterm viewport만 live tail로 이동한 뒤 버튼을 숨긴다. 움직임 없이 long-press가 성립하면 누른 셀의 단어 전체를 seed로 선택 모드에 들어가고, 이후 드래그 또는 표시된 선택 핸들 이동은 그 단어를 유지한 채 셀 단위로 선택 범위를 확장한다. 첫 단일 탭은 `.xterm-screen`의 링크 hit-test로 전달하며 평문/OSC 8 HTTP(S) 링크 셀일 때만 Linkifier의 mouse down/up 활성화 경로를 합성한다. 링크가 아니면 기존 focus·선택 해제 동작을 유지한다. double tap은 단어 선택, triple tap은 줄 선택으로 처리한다. 두 손가락 세로 스와이프는 현재 surface에서 가능한 스크롤 경로로 라우팅한다. mouse tracking mode에서 선택 또는 링크 활성화 합성 이벤트를 만들면 force-selection modifier를 실어 TUI로 입력이 전달되지 않게 한다. 선택된 텍스트는 별도 버튼 없이 선택 interaction이 끝나는 시점에 브라우저 클립보드로 복사한다. 마우스 선택을 terminal 밖까지 끌고 놓는 경우도 xterm의 document-level `mouseup` 선택 확정 뒤 복사를 예약한다. Clipboard API가 거절되면 같은 user-activation task 안에서 `execCommand("copy")` fallback을 사용하고, 로컬 모바일 iframe은 `clipboard-write` 권한을 명시한다. 이 동작은 Remote API 계약이나 PTY 전역 상태를 바꾸지 않는다.
 

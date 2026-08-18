@@ -29,6 +29,10 @@ pub const EVENT_GROK_USAGE_SNAPSHOT_CHANGED: &str = "grok-usage-snapshot-changed
 /// Emitted when the OS sleep inhibitor state changes without a request having
 /// asked for it — the watchdog re-acquiring or losing one (ADR-0114).
 pub const EVENT_SLEEP_INHIBIT_CHANGED: &str = "sleep-inhibit-changed";
+pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
+pub const GITHUB_UPDATE_HOST: &str = "github.com";
+pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
+pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
 /// viewed over a remote session. The UI uses it to auto-open the Remote Access

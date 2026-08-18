@@ -1,4 +1,5 @@
 mod android_pairing;
+mod app_update;
 mod archive_listing;
 mod claude_session;
 mod codex_session;
@@ -23,6 +24,7 @@ mod wsl_agent_session;
 
 pub use crate::cloud::commands::*;
 pub use android_pairing::*;
+pub use app_update::*;
 pub use archive_listing::*;
 pub use claude_session::*;
 pub use codex_session::*;

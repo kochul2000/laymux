@@ -29,6 +29,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
@@ -36,6 +37,17 @@
     "resources": {
       "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
       "../vendor/portable-pty/LICENSE.md": "licenses/portable-pty-LICENSE.md"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI5QkNFNTBBNkNBMkE4NkEKUldScXFLSnNDdVc4dWZlckxVK3lYSytwWmxrU1ZscVhTZ3JxaUg2eHJ4ZEw4SUJUUFB5a2lvc3kK",
+      "endpoints": [
+        "https://github.com/kochul2000/laymux/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

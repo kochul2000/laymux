@@ -1777,6 +1777,41 @@ export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
   return invoke("set_sleep_inhibit", { enabled });
 }
 
+export type AppUpdateOperation = "idle" | "checking" | "downloading" | "installing";
+
+export interface AppUpdateStatus {
+  enabled: boolean;
+  currentVersion: string;
+  availableVersion: string | null;
+  notes: string | null;
+  publishedAt: string | null;
+  operation: AppUpdateOperation;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  checkedAtMs: number | null;
+  lastError: string | null;
+}
+
+export async function getAppUpdateStatus(): Promise<AppUpdateStatus> {
+  return invoke("get_app_update_status");
+}
+
+export async function checkAppUpdate(): Promise<AppUpdateStatus> {
+  return invoke("check_app_update");
+}
+
+export async function installAppUpdate(): Promise<AppUpdateStatus> {
+  return invoke("install_app_update");
+}
+
+export function onAppUpdateStatusChanged(
+  callback: (status: AppUpdateStatus) => void,
+): Promise<UnlistenFn> {
+  return listen<AppUpdateStatus>("app-update-status-changed", (event) => {
+    callback(event.payload);
+  });
+}
+
 /** Mark notifications as read for the given terminal IDs. Returns count of marked. */
 export async function markNotificationsRead(terminalIds: string[]): Promise<number> {
   return invoke("mark_notifications_read", { terminalIds });

@@ -16,6 +16,10 @@
         const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
         const remoteComposerFontSizeInput = $("remoteComposerFontSize");
         const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
+        const pcUpdateStatusElement = $("pcUpdateStatus");
+        const pcUpdateNotes = $("pcUpdateNotes");
+        const checkPcUpdateButton = $("checkPcUpdate");
+        const installPcUpdateButton = $("installPcUpdate");
         const desktopModeHeaderButton = $("desktopModeHeader");
         const desktopModeDrawerButton = $("desktopModeDrawer");
         const navScrim = $("navScrim");
@@ -260,6 +264,9 @@
         let composerCollapsed = false;
         let dockPanelOpen = false;
         let drawerView = "workspace";
+        let pcUpdateStatus = null;
+        let pcUpdatePollTimer = null;
+        let pcUpdateRequestInFlight = false;
         let hiddenWorkspaceShelfOpen = false;
         let touchGesture = null;
         let touchPointers = new Map();
@@ -871,6 +878,94 @@
               }
             }
           }
+        }
+
+        function renderPcUpdateStatus(message = null, isError = false) {
+          const status = pcUpdateStatus;
+          const availableVersion = status?.availableVersion || null;
+          const operation = status?.operation || "idle";
+          const busy = operation === "checking" || operation === "downloading" || operation === "installing";
+          const total = Number(status?.totalBytes) || 0;
+          const downloaded = Number(status?.downloadedBytes) || 0;
+          const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
+          const defaultMessage = !status
+            ? "Update status unavailable."
+            : !status.enabled
+              ? `Development build ${status.currentVersion}; self-update is disabled.`
+              : operation === "checking"
+                ? "Checking GitHub Releases..."
+                : operation === "downloading"
+                  ? `Downloading ${availableVersion || "update"}${percent === null ? "..." : ` (${percent}%)`}`
+                  : operation === "installing"
+                    ? "Installing update; the PC will restart..."
+                    : availableVersion
+                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).`
+                      : `Laymux ${status.currentVersion} is up to date.`;
+          pcUpdateStatusElement.textContent = message || status?.lastError || defaultMessage;
+          pcUpdateStatusElement.classList.toggle("error", isError || Boolean(status?.lastError));
+          drawerSettingsButton.classList.toggle("update-available", Boolean(availableVersion));
+          checkPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !status?.enabled;
+          installPcUpdateButton.hidden = !availableVersion;
+          installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId;
+          pcUpdateNotes.textContent = status?.notes || "";
+          pcUpdateNotes.hidden = !status?.notes;
+        }
+
+        async function loadPcUpdateStatus({ check = false } = {}) {
+          if (pcUpdateRequestInFlight) return;
+          pcUpdateRequestInFlight = true;
+          renderPcUpdateStatus(check ? "Checking GitHub Releases..." : null);
+          try {
+            pcUpdateStatus = await remoteFetch(check ? "/remote/v1/update/check" : "/remote/v1/update", {
+              ...(check ? { method: "POST" } : {}),
+            });
+            renderPcUpdateStatus();
+          } catch (error) {
+            renderPcUpdateStatus(error.message || String(error), true);
+          } finally {
+            pcUpdateRequestInFlight = false;
+            renderPcUpdateStatus(
+              pcUpdateStatusElement.textContent,
+              pcUpdateStatusElement.classList.contains("error"),
+            );
+            schedulePcUpdatePoll();
+          }
+        }
+
+        async function installPcUpdate() {
+          const selectedLeaseId = leaseId;
+          if (!selectedLeaseId || !pcUpdateStatus?.availableVersion || pcUpdateRequestInFlight) return;
+          if (!window.confirm(`Install Laymux ${pcUpdateStatus.availableVersion} and restart the PC now?`)) return;
+          pcUpdateRequestInFlight = true;
+          renderPcUpdateStatus("Starting signed update...");
+          try {
+            pcUpdateStatus = await remoteFetch("/remote/v1/update/install", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ leaseId: selectedLeaseId }),
+            });
+            renderPcUpdateStatus();
+          } catch (error) {
+            // The installer can sever this request while the PC is restarting.
+            // Keep polling: a surviving page will reconnect to the new process.
+            renderPcUpdateStatus(error.message || String(error), true);
+          } finally {
+            pcUpdateRequestInFlight = false;
+            schedulePcUpdatePoll(1000);
+          }
+        }
+
+        function schedulePcUpdatePoll(delay = null) {
+          if (pcUpdatePollTimer) clearTimeout(pcUpdatePollTimer);
+          const busy = pcUpdateStatus && ["checking", "downloading", "installing"].includes(pcUpdateStatus.operation);
+          pcUpdatePollTimer = setTimeout(() => {
+            pcUpdatePollTimer = null;
+            if (document.visibilityState === "visible") {
+              loadPcUpdateStatus().catch(() => {});
+            } else {
+              schedulePcUpdatePoll();
+            }
+          }, delay ?? (busy ? 1000 : 60000));
         }
 
         function clearActiveGithubRepo() {
@@ -1726,6 +1821,10 @@
           drawerNotificationsButton.disabled = !connected;
           refreshButton.disabled = !connected;
           updateRemoteDisplaySettingsControls();
+          renderPcUpdateStatus();
+          if (connected && !pcUpdateStatus && !pcUpdateRequestInFlight) {
+            loadPcUpdateStatus().catch(() => {});
+          }
           connectButton.disabled = connected;
           updateTerminalControls();
           renderInputSurface();
@@ -3927,8 +4026,9 @@
         function openDrawerSubview(view) {
           setDrawerView(view);
           drawerBackButton.focus();
-          if (view === "settings" && leaseId) {
-            loadRemoteDisplaySettings().catch(() => {});
+          if (view === "settings") {
+            loadPcUpdateStatus().catch(() => {});
+            if (leaseId) loadRemoteDisplaySettings().catch(() => {});
           }
         }
 
@@ -7369,6 +7469,12 @@
         remoteComposerFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings().catch(() => {});
         });
+        checkPcUpdateButton.addEventListener("click", () => {
+          loadPcUpdateStatus({ check: true }).catch(() => {});
+        });
+        installPcUpdateButton.addEventListener("click", () => {
+          installPcUpdate().catch(() => {});
+        });
         navToggleButton.addEventListener("click", () => {
           const open = navToggleButton.getAttribute("aria-expanded") !== "true";
           setNavigationOpen(open);
@@ -7778,6 +7884,7 @@
           if (stashed) resumeToken = stashed;
         });
         window.addEventListener("beforeunload", () => {
+          if (pcUpdatePollTimer) clearTimeout(pcUpdatePollTimer);
           stopSocket();
           stopHeartbeat();
           stopInputFlush();

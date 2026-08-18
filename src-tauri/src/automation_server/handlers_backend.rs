@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use axum::extract::{Path, Query, State as AxumState};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::http::{header, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::lock_ext::MutexExt;
@@ -34,6 +36,18 @@ pub async fn api_docs() -> impl IntoResponse {
                 "method": "GET", "path": "/api/v1/diagnostics/frontend",
                 "description": "Frontend responsiveness vitals, served from backend state with no frontend round-trip — so it still answers while every bridged endpoint returns 'Frontend response timeout'. Read lastReportAgeMs first: large = the WebView main thread is stalled; small next to rising bridge.requestTimeouts = the thread is alive and the requests are queued.",
                 "response": "{ nowMs, lastReportAgeMs: number|null, lastReportAtMs, bridge: { requestsEmitted, responsesMatched, responsesOrphaned, requestTimeouts, requestDisconnects }, frontend: { sentAtMs, probeLagMs, probeLagMaxMs, stalls, bridge: {...}, pipeline: { [terminalId]: {...} }, inputDelivery: { [terminalId]: { attempts, succeeded, failed, attemptedBytes, succeededBytes, failedBytes } } } | null, terminalOutput: [{ terminalId, generation, desktopOutputState, reason, ...bounded counters/identities }] }"
+            },
+            {
+                "method": "GET", "path": "/api/v1/update",
+                "description": "Read the process-global desktop update status. Update artifacts come from the latest GitHub Release and are signature-verified before installation."
+            },
+            {
+                "method": "POST", "path": "/api/v1/update/check",
+                "description": "Check the configured GitHub Release endpoint now. Concurrent checks collapse into the running operation."
+            },
+            {
+                "method": "POST", "path": "/api/v1/update/install",
+                "description": "Schedule download, signature verification, installation, and process restart for the known update. Returns before the process exits."
             },
             {
                 "method": "GET", "path": "/api/v1/docs",
@@ -317,6 +331,40 @@ pub async fn api_docs() -> impl IntoResponse {
             "All state-changing operations return immediately. Use screenshot to verify visual results."
         ]
     }))
+}
+
+pub async fn update_status(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    update_response(state.app_state.app_update.snapshot())
+}
+
+pub async fn update_check(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    update_response(
+        crate::app_update::check_now(&state.app_handle, &state.app_state.app_update).await,
+    )
+}
+
+pub async fn update_install(AxumState(state): AxumState<ServerState>) -> impl IntoResponse {
+    update_response(crate::app_update::schedule_install(
+        state.app_handle.clone(),
+        Arc::clone(&state.app_state.app_update),
+    ))
+}
+
+fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> Response {
+    let mut response = match result {
+        Ok(status) => Json(status).into_response(),
+        Err(error) if error.contains("already running") || error.contains("pending update") => {
+            (StatusCode::CONFLICT, Json(err_json(&error))).into_response()
+        }
+        Err(error) if error.contains("disabled in development") => {
+            (StatusCode::NOT_IMPLEMENTED, Json(err_json(&error))).into_response()
+        }
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&error))).into_response(),
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 // ---- Backend-only handlers ----
@@ -698,6 +746,15 @@ mod tests {
         assert_eq!(memos[0]["content"], "a");
         assert_eq!(memos[1]["key"], "mike");
         assert_eq!(memos[2]["key"], "zeta");
+    }
+
+    #[test]
+    fn update_responses_are_never_cached() {
+        let response = update_response(Ok(crate::app_update::UpdateStatus::default()));
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL),
+            Some(&axum::http::HeaderValue::from_static("no-store"))
+        );
     }
 
     #[test]
