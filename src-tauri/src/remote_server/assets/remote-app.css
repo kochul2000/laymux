@@ -1899,3 +1899,57 @@
       .key-order-action:hover:not(:disabled) {
         background: var(--hover-bg);
       }
+
+      /* OAuth loopback relay (ADR-0175) */
+      .oauth-relay-scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: #0000008c;
+      }
+      .oauth-relay-dialog {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: min(440px, 100%);
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-base);
+      }
+      .oauth-relay-title {
+        color: var(--text);
+        font-size: var(--fs-sm);
+        font-weight: 700;
+      }
+      .oauth-relay-hint {
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        line-height: 1.5;
+      }
+      .oauth-relay-manual {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .oauth-relay-manual input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .oauth-relay-status {
+        min-height: 1em;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .oauth-relay-status.error {
+        color: var(--danger);
+      }
+      .oauth-relay-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }

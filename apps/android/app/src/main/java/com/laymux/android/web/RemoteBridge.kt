@@ -29,6 +29,33 @@ class RemoteBridge(private val activity: MainActivity) {
     fun openExternalUrl(url: String?) {
         activity.openExternalUrl(url ?: return)
     }
+
+    // OAuth loopback relay (ADR-0175): catch the provider's localhost
+    // redirect on this device and hand it back to the Remote document.
+    @JavascriptInterface
+    fun beginOauthRelay(sessionId: String?, port: String?, expectedPath: String?, authUrl: String?) {
+        activity.beginOauthRelay(
+            sessionId ?: return,
+            port ?: return,
+            expectedPath ?: return,
+            authUrl ?: return,
+        )
+    }
+
+    @JavascriptInterface
+    fun completeOauthRelay(requestId: String?, status: String?, contentType: String?, body: String?) {
+        activity.completeOauthRelay(
+            requestId ?: return,
+            status ?: return,
+            contentType ?: return,
+            body ?: return,
+        )
+    }
+
+    @JavascriptInterface
+    fun cancelOauthRelay() {
+        activity.cancelOauthRelay()
+    }
 }
 
 internal fun stringWebMessagePayload(

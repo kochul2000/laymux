@@ -49,6 +49,7 @@ use super::navigation_routes::{
 use super::navigation_step_routes::{
     remote_navigation_notification_step, remote_navigation_spatial_step,
 };
+use super::oauth_relay_routes::{remote_oauth_relay_begin, remote_oauth_relay_forward};
 use super::page::{remote_page, remote_page_redirect};
 use super::page_assets::remote_hashed_asset;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
@@ -226,6 +227,16 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/file-viewer/path-link",
             post(remote_file_viewer_path_link),
+        )
+        // OAuth loopback relay (ADR-0175). Sized for an auth URL / callback
+        // query, both bounded well under these caps by the handlers.
+        .route(
+            "/remote/v1/oauth-relay/begin",
+            post(remote_oauth_relay_begin).layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
+            "/remote/v1/oauth-relay/forward",
+            post(remote_oauth_relay_forward).layer(DefaultBodyLimit::max(8 * 1024)),
         )
         // `route_layer`, not `layer`: `Router::layer` wraps the router's
         // fallback too, and `merge` donates that fallback to the combined

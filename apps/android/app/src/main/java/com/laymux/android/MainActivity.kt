@@ -66,6 +66,7 @@ import com.laymux.android.remote.E2eTransportException
 import com.laymux.android.remote.E2eTransportFailureKind
 import com.laymux.android.remote.E2eTransportKind
 import com.laymux.android.remote.E2eTransportPolicy
+import com.laymux.android.remote.OauthLoopbackRelay
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
@@ -150,6 +151,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
     @Volatile private var remoteLeaseId: String? = null
+    private var oauthRelay: OauthLoopbackRelay? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
@@ -657,6 +659,89 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             } catch (_: ActivityNotFoundException) {
                 showCloudMessage("링크를 열 브라우저를 찾지 못했습니다.")
             }
+        }
+    }
+
+    /**
+     * OAuth loopback relay (ADR-0175): bind the phone's `localhost:{port}`,
+     * open the OS browser on the auth URL, and hand the provider's redirect
+     * back to the Remote document, which forwards it to the PC listener over
+     * the authenticated transport. Every parameter is Remote-document input,
+     * so it is re-validated here like the other bridge entry points.
+     */
+    fun beginOauthRelay(sessionId: String, portValue: String, expectedPath: String, authUrl: String) {
+        if (!validBridgeId(sessionId)) return
+        val port = portValue.toIntOrNull() ?: return
+        if (port < 1024 || port > 65535) return
+        if (expectedPath.isEmpty() || expectedPath.length > MAX_REMOTE_PATH_LENGTH ||
+            !expectedPath.startsWith('/')
+        ) {
+            return
+        }
+        val url = ExternalUrlPolicy.browsableUrl(authUrl) ?: return
+        runOnUiThread {
+            if (localWebSurface != LocalWebSurface.REMOTE) return@runOnUiThread
+            oauthRelay?.stop()
+            val relay = OauthLoopbackRelay(
+                port = port,
+                expectedPath = expectedPath,
+                onCallback = { requestId, pathAndQuery ->
+                    dispatchOauthRelayEvent("onCallback", requestId, pathAndQuery)
+                },
+                onError = { message -> dispatchOauthRelayEvent("onError", message) },
+            )
+            if (!relay.start()) {
+                oauthRelay = null
+                dispatchOauthRelayEvent(
+                    "onError",
+                    "Could not open the sign-in relay port on this device.",
+                )
+                return@runOnUiThread
+            }
+            oauthRelay = relay
+            openExternalUrl(url)
+        }
+    }
+
+    /** Serve the PC tool's forwarded response to the waiting phone browser. */
+    fun completeOauthRelay(requestId: String, statusValue: String, contentType: String, body: String) {
+        if (!validBridgeId(requestId)) return
+        val status = statusValue.toIntOrNull()?.coerceIn(100, 599) ?: 502
+        val relay = oauthRelay ?: return
+        relay.complete(
+            requestId,
+            status,
+            sanitizedOauthRelayContentType(contentType),
+            body.take(MAX_OAUTH_RELAY_BODY_CHARS),
+        )
+        oauthRelay = null
+    }
+
+    fun cancelOauthRelay() {
+        oauthRelay?.stop()
+        oauthRelay = null
+    }
+
+    /**
+     * The value is written into a raw HTTP header by the relay, so anything
+     * that is not a plain `type/subtype` token collapses to text/plain —
+     * never a header-injection vector.
+     */
+    private fun sanitizedOauthRelayContentType(value: String): String {
+        val trimmed = value.substringBefore(';').trim()
+        val valid = trimmed.length in 3..100 && trimmed.count { it == '/' } == 1 &&
+            trimmed.all { it.isLetterOrDigit() || it == '/' || it == '-' || it == '+' || it == '.' }
+        return if (valid) trimmed else "text/plain"
+    }
+
+    private fun dispatchOauthRelayEvent(method: String, vararg arguments: String) {
+        val encodedArguments = arguments.joinToString(",") { JSONObject.quote(it) }
+        runOnUiThread {
+            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            webView.evaluateJavascript(
+                "window.laymuxOauthRelay?.$method($encodedArguments);",
+                null,
+            )
         }
     }
 
@@ -2147,6 +2232,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onDestroy() {
+        oauthRelay?.stop()
+        oauthRelay = null
         policyDialog?.dismiss()
         policyDialog = null
         biometricPromptGate.cancelPending()
@@ -2189,6 +2276,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val MAX_REMOTE_HTTP_BODY_CHARS = 256 * 1024
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
+
+        /** Matches the desktop relay's MAX_FORWARD_RESPONSE_BYTES (ADR-0175). */
+        private const val MAX_OAUTH_RELAY_BODY_CHARS = 64 * 1024
     }
 
     private enum class DecryptionPurpose {
