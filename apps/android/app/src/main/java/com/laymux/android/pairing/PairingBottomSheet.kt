@@ -33,6 +33,8 @@ class PairingBottomSheet(
         val notice: TextView,
         val remoteSection: View,
         val connectButton: MaterialButton,
+        val defaultConnectBackgroundTint: ColorStateList?,
+        val defaultConnectTextColors: ColorStateList,
         val scanButton: MaterialButton,
         val defaultScanTextColors: ColorStateList,
         val defaultScanStrokeColor: ColorStateList?,
@@ -102,6 +104,7 @@ class PairingBottomSheet(
 
     private fun bind(content: View): Views {
         val scanButton = content.findViewById<MaterialButton>(R.id.pairing_scan_button)
+        val connectButton = content.findViewById<MaterialButton>(R.id.pairing_connect_button)
         return Views(
             statusBadge = content.findViewById(R.id.pairing_status_badge),
             title = content.findViewById(R.id.pairing_state_title),
@@ -109,7 +112,9 @@ class PairingBottomSheet(
             error = content.findViewById(R.id.pairing_error),
             notice = content.findViewById(R.id.pairing_notice),
             remoteSection = content.findViewById(R.id.pairing_remote_section),
-            connectButton = content.findViewById(R.id.pairing_connect_button),
+            connectButton = connectButton,
+            defaultConnectBackgroundTint = connectButton.backgroundTintList,
+            defaultConnectTextColors = connectButton.textColors,
             scanButton = scanButton,
             defaultScanTextColors = scanButton.textColors,
             defaultScanStrokeColor = scanButton.strokeColor,
@@ -198,6 +203,7 @@ class PairingBottomSheet(
                 PairingConnectAction.DISCONNECT -> R.string.pairing_disconnect
             },
         )
+        renderConnectEmphasis(bound, presentation.connectAction)
         bound.connectButton.setOnClickListener {
             bound.connectButton.isEnabled = false
             when (presentation.connectAction) {
@@ -207,6 +213,32 @@ class PairingBottomSheet(
                 PairingConnectAction.HIDDEN -> Unit
             }
         }
+    }
+
+    // "연결 취소"(CANCEL) is a mid-connect abort, not the promoted action, so it
+    // drops from the filled primary look to a neutral tonal one — distinct from
+    // both the primary CONNECT and the text-button "취소" below it. CONNECT and
+    // DISCONNECT keep the default filled primary.
+    private fun renderConnectEmphasis(bound: Views, action: PairingConnectAction) {
+        if (action == PairingConnectAction.CANCEL) {
+            // Stateful CSLs so a momentarily-disabled CANCEL button dims like the
+            // default filled button does, instead of staying fully opaque.
+            bound.connectButton.backgroundTintList = AppCompatResources.getColorStateList(
+                activity,
+                R.color.pairing_connect_cancel_bg,
+            )
+            bound.connectButton.setTextColor(
+                requireNotNull(
+                    AppCompatResources.getColorStateList(
+                        activity,
+                        R.color.pairing_rescan_text,
+                    ),
+                ),
+            )
+            return
+        }
+        bound.connectButton.backgroundTintList = bound.defaultConnectBackgroundTint
+        bound.connectButton.setTextColor(bound.defaultConnectTextColors)
     }
 
     private fun renderScan(
