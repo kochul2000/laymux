@@ -100,6 +100,7 @@ export function applySettingsSnapshot(
     ...(rawSettings.issueReporter ? { issueReporter: rawSettings.issueReporter } : {}),
     ...(rawSettings.fileExplorer ? { fileExplorer: rawSettings.fileExplorer } : {}),
     ...(rawSettings.viewer ? { viewer: rawSettings.viewer } : {}),
+    ...(rawSettings.github ? { github: rawSettings.github } : {}),
     ...(rawSettings.remote ? { remote: rawSettings.remote } : {}),
     ...(rawSettings.memo ? { memo: rawSettings.memo } : {}),
     ...(rawSettings.syncCwdDefaults ? { syncCwdDefaults: rawSettings.syncCwdDefaults } : {}),

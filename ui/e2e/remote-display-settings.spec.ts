@@ -74,6 +74,8 @@ const navigation = {
 interface DisplaySettings {
   terminalFontSize: number;
   composerFontSize: number;
+  touchScrollSensitivity: number;
+  twoFingerScrollSensitivity: number;
   revision: string;
 }
 
@@ -145,6 +147,16 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
         return;
       }
 
+      const contentType = route.request().headers()["content-type"];
+      if (contentType !== "application/json") {
+        await route.fulfill({
+          status: 415,
+          contentType: "text/plain",
+          body: "Expected request with `Content-Type: application/json`",
+        });
+        return;
+      }
+
       const body = route.request().postDataJSON() as DisplaySettingsPut;
       harness.putBodies.push(body);
       if (harness.delayNextPut) {
@@ -164,6 +176,8 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
       harness.settings = {
         terminalFontSize: body.terminalFontSize,
         composerFontSize: body.composerFontSize,
+        touchScrollSensitivity: body.touchScrollSensitivity,
+        twoFingerScrollSensitivity: body.twoFingerScrollSensitivity,
         revision: `rev-${revisionNumber + 1}`,
       };
       await route.fulfill({ json: harness.settings });
@@ -202,7 +216,13 @@ async function connectAndOpenDisplaySettings(page: Page) {
 
 test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 즉시 적용한다", async ({ page }) => {
   const harness: DisplaySettingsHarness = {
-    settings: { terminalFontSize: 18, composerFontSize: 20, revision: "rev-1" },
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
     claimLeaseIds: ["lease-1"],
     claimRequests: 0,
     getRequests: 0,
@@ -249,19 +269,29 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       expectedRevision: "rev-1",
       terminalFontSize: 22,
       composerFontSize: 20,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
     },
     {
       leaseId: "lease-1",
       expectedRevision: "rev-2",
       terminalFontSize: 22,
       composerFontSize: 24,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
     },
   ]);
 });
 
 test("저장 중 drawer를 다시 열어도 pending 상태와 최신 저장값을 잃지 않는다", async ({ page }) => {
   const harness: DisplaySettingsHarness = {
-    settings: { terminalFontSize: 18, composerFontSize: 20, revision: "rev-1" },
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
     claimLeaseIds: ["lease-1"],
     claimRequests: 0,
     getRequests: 0,
@@ -288,7 +318,13 @@ test("저장 중 drawer를 다시 열어도 pending 상태와 최신 저장값�
 
 test("저장 중 lease가 바뀌면 새 controller에서 PC 값을 다시 읽는다", async ({ page }) => {
   const harness: DisplaySettingsHarness = {
-    settings: { terminalFontSize: 18, composerFontSize: 20, revision: "rev-1" },
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
     claimLeaseIds: ["lease-1", "lease-2"],
     claimRequests: 0,
     getRequests: 0,
@@ -323,7 +359,13 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
   page,
 }) => {
   const harness: DisplaySettingsHarness = {
-    settings: { terminalFontSize: 18, composerFontSize: 20, revision: "rev-1" },
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
     claimLeaseIds: ["lease-1"],
     claimRequests: 0,
     getRequests: 0,
@@ -334,7 +376,13 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
   await installRemoteMocks(page, harness);
   await connectAndOpenDisplaySettings(page);
 
-  harness.settings = { terminalFontSize: 19, composerFontSize: 26, revision: "rev-2" };
+  harness.settings = {
+    terminalFontSize: 19,
+    composerFontSize: 26,
+    touchScrollSensitivity: 1,
+    twoFingerScrollSensitivity: 5,
+    revision: "rev-2",
+  };
   const getsBeforeConflict = harness.getRequests;
   await page.locator("#remoteTerminalFontSize").fill("22");
   await page.locator("#remoteComposerFontSize").click();
@@ -345,6 +393,8 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
     expectedRevision: "rev-1",
     terminalFontSize: 22,
     composerFontSize: 20,
+    touchScrollSensitivity: 1,
+    twoFingerScrollSensitivity: 5,
   });
   await expect.poll(() => harness.getRequests).toBeGreaterThan(getsBeforeConflict);
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");

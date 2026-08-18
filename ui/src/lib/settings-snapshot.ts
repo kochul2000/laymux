@@ -218,6 +218,7 @@ export async function collectSettingsSnapshot(
     issueReporter: { ...settingsState.issueReporter },
     fileExplorer: { ...settingsState.fileExplorer },
     viewer: { ...settingsState.viewer },
+    github: { ...settingsState.github },
     remote: { ...settingsState.remote },
     syncCwdDefaults: { ...settingsState.syncCwdDefaults },
     docks: dockState.docks.map((dock) => ({
