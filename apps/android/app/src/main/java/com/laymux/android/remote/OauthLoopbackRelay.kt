@@ -115,7 +115,8 @@ class OauthLoopbackRelay(
         writeResponse(
             socket,
             200,
-            "Sign-in received. Return to the Laymux app to finish connecting it to your PC.",
+            "Sign-in received. Returning you to the Laymux app to finish — " +
+                "if it does not come forward, switch back to it manually.",
         )
         stop()
         onCallback(requestTarget)

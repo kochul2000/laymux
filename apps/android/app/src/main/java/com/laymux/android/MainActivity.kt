@@ -734,8 +734,26 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             if (remoteLifecycleActive) {
                 dispatchOauthRelayEvent("onCallback", pathAndQuery)
             } else {
+                // The OS browser is frontmost with the "return to the app"
+                // page. Park the callback and pull this task back to the
+                // front so the forward runs without the user pressing Back;
+                // onStart flushes the parked callback. Best-effort — a denied
+                // background-activity launch just leaves the manual Back path.
                 pendingOauthCallback = pathAndQuery
+                bringTaskToForeground()
             }
+        }
+    }
+
+    private fun bringTaskToForeground() {
+        try {
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK,
+                )
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
         }
     }
 
