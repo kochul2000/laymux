@@ -115,12 +115,16 @@
                 android:text="@string/pairing_connect" />
         </LinearLayout>
 
+        <!-- 16dp side margins match the remote section's inner padding so this
+             button and the connect button inside the card share one width. -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pairing_scan_button"
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
             android:layout_marginTop="12dp"
+            android:layout_marginEnd="16dp"
             android:text="@string/pairing_scan" />
 
         <com.google.android.material.button.MaterialButton
@@ -128,7 +132,9 @@
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
             android:layout_marginTop="4dp"
+            android:layout_marginEnd="16dp"
             android:text="@string/pairing_cancel" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
