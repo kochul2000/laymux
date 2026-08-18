@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="laymux_background">#1e1e2e</color>
+    <color name="laymux_surface">#242438</color>
+    <color name="laymux_surface_variant">#303047</color>
+    <color name="laymux_primary">#89b4fa</color>
+    <color name="laymux_on_primary">#11111b</color>
+    <color name="laymux_on_surface">#e6e6f0</color>
+    <color name="laymux_on_surface_variant">#b8b8cc</color>
+    <color name="laymux_error">#f38ba8</color>
+    <color name="laymux_notice">#a6e3a1</color>
     <color name="laymux_navigation_bar">#181825</color>
     <color name="laymux_icon_background">#000000</color>
 </resources>

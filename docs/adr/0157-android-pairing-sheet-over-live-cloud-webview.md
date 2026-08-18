@@ -1,6 +1,6 @@
 # 0157. Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다
 
-- Status: Accepted
+- Status: Superseded by [0178](0178-android-pairing-native-material-bottom-sheet.md)
 - Date: 2026-08-15
 - Source: 사용자 요구("웹뷰를 배경에 깔고", "완전히 분리된 화면", "동작은 완전 그대로면서 시각적인 트릭") · [architecture/api-contracts.md §13.0](../architecture/api-contracts.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
 - Extends: [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)의 Cloud/pairing WebView 분리와 표시 전환 규칙

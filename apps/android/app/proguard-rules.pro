@@ -1,5 +1,9 @@
-# NativeBridge methods are annotated with @JavascriptInterface and are retained
-# by the Android Gradle Plugin's default WebView keep rules.
--keepclassmembers class com.laymux.android.web.NativeBridge {
+# Only Cloud account selection and authenticated Remote transport remain exposed
+# to JavaScript. Pairing actions are native Material UI callbacks (ADR-0178).
+-keepclassmembers class com.laymux.android.web.CloudBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+-keepclassmembers class com.laymux.android.web.RemoteBridge {
     @android.webkit.JavascriptInterface <methods>;
 }

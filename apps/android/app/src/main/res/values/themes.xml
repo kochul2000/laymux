@@ -1,12 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Laymux" parent="Theme.AppCompat.NoActionBar">
+    <style name="Theme.Laymux" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowBackground">@color/laymux_background</item>
-        <item name="android:colorAccent">#89b4fa</item>
+        <item name="colorPrimary">@color/laymux_primary</item>
+        <item name="colorOnPrimary">@color/laymux_on_primary</item>
+        <item name="colorSurface">@color/laymux_surface</item>
+        <item name="colorOnSurface">@color/laymux_on_surface</item>
+        <item name="colorOnSurfaceVariant">@color/laymux_on_surface_variant</item>
+        <item name="colorError">@color/laymux_error</item>
+        <item name="android:colorAccent">@color/laymux_primary</item>
         <item name="android:statusBarColor">@color/laymux_background</item>
         <item name="android:navigationBarColor">@color/laymux_navigation_bar</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="bottomSheetDialogTheme">@style/ThemeOverlay.Laymux.BottomSheetDialog</item>
+    </style>
+
+    <style name="ThemeOverlay.Laymux.BottomSheetDialog" parent="ThemeOverlay.Material3.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.Laymux.BottomSheet.Modal</item>
+    </style>
+
+    <style name="Widget.Laymux.BottomSheet.Modal" parent="Widget.Material3.BottomSheet.Modal">
+        <item name="backgroundTint">@color/laymux_surface</item>
     </style>
 </resources>

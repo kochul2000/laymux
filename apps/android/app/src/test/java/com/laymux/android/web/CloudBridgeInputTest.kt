@@ -8,13 +8,21 @@ import org.junit.Test
 
 class CloudBridgeInputTest {
     @Test
-    fun cloudJavascriptBridgeExposesOnlyLoginAndInstanceSelection() {
+    fun cloudJavascriptBridgeExposesOnlyLoginInstanceSelectionAndSettingsEntry() {
         val exposed = CloudBridge::class.java.declaredMethods
             .filter { it.getAnnotation(JavascriptInterface::class.java) != null }
             .map { it.name }
             .toSet()
 
-        assertEquals(setOf("signInWithGoogle", "selectInstance", "selectInstanceRoute"), exposed)
+        assertEquals(
+            setOf(
+                "signInWithGoogle",
+                "selectInstance",
+                "selectInstanceRoute",
+                "openConnectionSettings",
+            ),
+            exposed,
+        )
     }
 
     @Test

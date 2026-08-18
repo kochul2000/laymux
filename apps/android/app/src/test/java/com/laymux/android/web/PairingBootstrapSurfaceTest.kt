@@ -7,80 +7,85 @@ import org.junit.Test
 
 class PairingBootstrapSurfaceTest {
     @Test
-    fun pairingEntryContainsOnlyTheSecureOverlayAndBottomSheet() {
-        val html = asset("index.html").readText()
+    fun pairingUsesNativeMaterialBottomSheetInsteadOfApkWebAssets() {
+        val source = source("java/com/laymux/android/pairing/PairingBottomSheet.kt").readText()
+        val dependencies = projectFile("build.gradle.kts").readText()
 
-        assertFalse(html.contains(">Lx</div>"))
-        assertTrue(html.contains("class=\"connection-stage\""))
-        assertTrue(html.contains("id=\"dismissLayer\""))
-        assertTrue(html.contains("id=\"connectionSheet\""))
-        assertTrue(html.contains("class=\"sheet-handle\""))
-        assertTrue(html.contains("class=\"status-heading\""))
-        assertTrue(html.contains("class=\"primary-actions\""))
-        assertTrue(html.contains("class=\"connection-settings\""))
-        assertFalse(html.contains("class=\"dashboard-scene\""))
-        assertFalse(html.contains("id=\"sceneDeviceName\""))
-        assertFalse(html.contains("logo.svg"))
-        assertFalse(html.contains("class=\"app-header\""))
-        assertFalse(html.contains("class=\"security-note\""))
+        assertTrue(source.contains("BottomSheetDialog"))
+        assertTrue(source.contains("BottomSheetBehavior"))
+        assertTrue(dependencies.contains("com.google.android.material:material:"))
+        assertTrue(assetCandidates("index.html").none(File::exists))
+        assertTrue(assetCandidates("app.js").none(File::exists))
+        assertTrue(assetCandidates("styles.css").none(File::exists))
     }
 
     @Test
-    fun pairingDocumentKeepsItsPageBackgroundTransparent() {
-        val styles = asset("styles.css").readText()
+    fun nativeSheetKeepsOnlyConnectionActionsAndDoesNotEmbedSettingsOrWebView() {
+        val layout = source("res/layout/pairing_bottom_sheet.xml").readText()
 
-        assertTrue(styles.contains("background: transparent"))
-        assertFalse(styles.contains(".dashboard-scene"))
-        assertFalse(styles.contains(".scene-device"))
+        assertTrue(layout.contains("pairing_connect_button"))
+        assertTrue(layout.contains("pairing_scan_button"))
+        assertTrue(layout.contains("pairing_cancel_button"))
+        assertFalse(layout.contains("pairing_settings_button"))
+        assertFalse(layout.contains("pairing_settings_content"))
+        assertFalse(layout.contains("WebView"))
     }
 
     @Test
-    fun blockedBiometricFlowPointsToTheProtectionSetting() {
-        val html = asset("index.html").readText()
-        val script = asset("app.js").readText()
+    fun connectionSettingsUseASeparateNativeMaterialDialog() {
+        val dialogSource = source(
+            "java/com/laymux/android/pairing/ConnectionSettingsDialog.kt",
+        ).readText()
+        val layout = source("res/layout/connection_settings_dialog.xml").readText()
 
-        assertTrue(html.contains("id=\"connectionSettings\""))
-        assertTrue(
-            script.contains(
-                "status.biometricRequired === true && status.biometricAvailable === false",
-            ),
-        )
-        assertTrue(script.contains("보호 설정 열기"))
-        assertTrue(script.contains("connectionSettings.open = true"))
-        assertTrue(script.contains("QR 스캔을 계속하려면"))
-        assertTrue(script.contains("biometricToggle.focus()"))
+        assertTrue(dialogSource.contains("MaterialAlertDialogBuilder"))
+        assertTrue(layout.contains("connection_settings_biometric_switch"))
+        assertTrue(layout.contains("connection_settings_pairing_actions"))
+        assertFalse(layout.contains("pairing_connect_button"))
+        assertFalse(layout.contains("WebView"))
     }
 
-    /**
-     * While a secure session is being opened the user must be able to abort
-     * (connect button turns into cancel), but re-scanning the pairing QR would
-     * race the in-flight establishment, so that button locks instead.
-     */
     @Test
-    fun connectingStateSwapsConnectForCancelAndLocksRescan() {
-        val script = asset("app.js").readText()
+    fun remoteWebViewClientHasNoPairingBootstrapOrigin() {
+        val source = source(
+            "java/com/laymux/android/web/LocalContentWebViewClient.kt",
+        ).readText()
 
-        // The scan button doubles as the protection-settings opener while
-        // biometrics are blocked, so the connecting lock must exempt that state.
-        assertTrue(script.contains("scanButton.disabled = remoteConnecting && !biometricBlocked;"))
-        assertTrue(script.contains("? \"연결 취소\""))
-        assertTrue(script.contains("nativeBridge.cancelRemoteConnection();"))
-        // Cancel stays tappable even when biometrics are unavailable.
-        assertTrue(
-            script.contains("!remoteConnecting && biometricRequired && !biometricAvailable"),
-        )
-        assertFalse(script.contains("보안 세션 여는 중…"))
-
-        val styles = asset("styles.css").readText()
-        assertTrue(styles.contains(".primary.is-cancel"))
+        assertFalse(source.contains("APP_ASSET_HOST"))
+        assertFalse(source.contains("ASSET_PATH"))
+        assertFalse(source.contains("const val START_URL"))
     }
 
-    private fun asset(name: String): File {
+    @Test
+    fun remoteBridgeResourcesAndOutputAreBoundToTheInstalledDocumentGeneration() {
+        val activity = source("java/com/laymux/android/MainActivity.kt").readText()
+        val bridge = source("java/com/laymux/android/web/RemoteBridge.kt").readText()
+
+        assertTrue(bridge.contains("private val documentGeneration: Long"))
+        assertTrue(activity.contains("RemoteBridge(this@MainActivity, documentGeneration)"))
+        assertTrue(activity.contains("loadRemoteResource(documentGeneration, path)"))
+        assertTrue(activity.contains("remoteBridgeActionsEnabled(documentGeneration)"))
+        assertTrue(activity.contains("replaceSecureWebView()"))
+        assertTrue(activity.contains("fun cancelOauthRelay(documentGeneration: Long)"))
+    }
+
+    private fun projectFile(relative: String): File {
+        val candidates = listOf(File(relative), File("app", relative))
+        return candidates.firstOrNull(File::isFile)
+            ?: error("Android project file not found: $relative")
+    }
+
+    private fun source(relative: String): File {
         val candidates = listOf(
-            File("src/main/assets", name),
-            File("app/src/main/assets", name),
+            File("src/main", relative),
+            File("app/src/main", relative),
         )
         return candidates.firstOrNull(File::isFile)
-            ?: error("Android bootstrap asset not found: $name")
+            ?: error("Android source not found: $relative")
     }
+
+    private fun assetCandidates(name: String): List<File> = listOf(
+        File("src/main/assets", name),
+        File("app/src/main/assets", name),
+    )
 }

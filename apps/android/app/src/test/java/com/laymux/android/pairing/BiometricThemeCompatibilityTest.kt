@@ -15,9 +15,8 @@ class BiometricThemeCompatibilityTest {
 
         assertTrue(
             "androidx.biometric on API 28 opens an AppCompatDialog",
-            themes.contains(
-                "<style name=\"Theme.Laymux\" parent=\"Theme.AppCompat.NoActionBar\">",
-            ),
+            themes.contains("<style name=\"Theme.Laymux\" parent=\"Theme.Material3.Dark.NoActionBar\">") &&
+                !themes.contains("parent=\"android:style/"),
         )
     }
 }
