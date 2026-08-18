@@ -480,6 +480,8 @@ mod tests {
 
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
         assert!(html.contains("id=\"remoteComposerFontSize\""));
+        assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
+        assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
         assert!(html.contains("/remote/v1/display-settings"));
         assert!(html.contains("method: \"PUT\""));
         assert!(html.contains("body: JSON.stringify({"));

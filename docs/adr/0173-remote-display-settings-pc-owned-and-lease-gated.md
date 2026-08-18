@@ -41,3 +41,7 @@ Remote 화면의 기존 기기 로컬 Display 선택은 브라우저별 chrome �
 - Remote 화면에서 크기를 바꾸면 현재 terminal grid가 다시 fit되어 active lease로 PTY resize가 한 번 발생할 수 있다. 이는 글자 크기 변경에 필요한 surface-local reflow이며 terminal contents나 desktop renderer 설정을 공유하지 않는다.
 - 새 외부 계약과 Android inner allowlist를 함께 유지해야 한다. 자동 검증은 설정 기본값/범위/round-trip, terminal appearance override, Direct route gate 배치, PUT lease 거절과 owner handoff drain, revision 충돌 시 409·재조회, Android exact method/path 허용, Remote page의 조회·수정·즉시 적용, PC Settings 분리를 포함한다.
 - 향후 font family나 다른 Remote 표시 설정을 공유하려면 민감 정보가 섞이지 않는 projection과 lease 요구를 유지하면서 이 ADR의 범위를 새 ADR로 확장한다.
+
+## 개정 (2026-08-18, ADR-0177)
+
+- 이 projection·PUT 계약을 폰트 크기 두 값에서 넓혀 터치 드래그 민감도 두 값(`touchScrollSensitivity` 한 손가락 기본 1, `twoFingerScrollSensitivity` 두 손가락 기본 5, 각 0.1~20)을 포함한다([ADR-0177](0177-remote-two-finger-touch-scroll-sensitivity.md)). lease·revision·CAS·즉시 적용 규칙은 그대로다. 민감도는 폰에서 쓰는 값이라 Remote drawer 편집이 자연스럽고, 폰트 크기와 같은 "민감 정보 없는 좁은 projection" 원칙에 부합한다. 폰트 크기와 달리 xterm 옵션이 아니라 `adoptTouchScrollSensitivity` 페이지 지역 상태로 흡수해 저장 즉시 반영한다.

@@ -15,6 +15,10 @@
         const drawerSettingsView = $("drawerSettingsView");
         const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
         const remoteComposerFontSizeInput = $("remoteComposerFontSize");
+        const remoteTouchScrollSensitivityInput = $("remoteTouchScrollSensitivity");
+        const remoteTwoFingerScrollSensitivityInput = $(
+          "remoteTwoFingerScrollSensitivity",
+        );
         const remoteDisplaySettingsStatus = $("remoteDisplaySettingsStatus");
         const pcUpdateStatusElement = $("pcUpdateStatus");
         const pcUpdateNotes = $("pcUpdateNotes");
@@ -756,6 +760,8 @@
             !remoteDisplaySettingsPending;
           remoteTerminalFontSizeInput.disabled = !editable;
           remoteComposerFontSizeInput.disabled = !editable;
+          remoteTouchScrollSensitivityInput.disabled = !editable;
+          remoteTwoFingerScrollSensitivityInput.disabled = !editable;
           remoteDisplaySettingsStatus.textContent =
             message ||
             (leaseId
@@ -770,11 +776,25 @@
           const normalized = {
             terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize, 14),
             composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize, 16),
+            touchScrollSensitivity: normalizeScrollSensitivity(
+              settings?.touchScrollSensitivity,
+              defaultAppearance.touchScrollSensitivity,
+            ),
+            twoFingerScrollSensitivity: normalizeScrollSensitivity(
+              settings?.twoFingerScrollSensitivity,
+              defaultAppearance.twoFingerScrollSensitivity,
+            ),
             revision: typeof settings?.revision === "string" ? settings.revision : "",
           };
           remoteDisplaySettings = normalized;
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
+          remoteTouchScrollSensitivityInput.value = String(
+            normalized.touchScrollSensitivity,
+          );
+          remoteTwoFingerScrollSensitivityInput.value = String(
+            normalized.twoFingerScrollSensitivity,
+          );
           document.documentElement.style.setProperty(
             "--remote-composer-font-size",
             `${normalized.composerFontSize}px`,
@@ -784,13 +804,23 @@
               info.appearance = {
                 ...info.appearance,
                 fontSize: normalized.terminalFontSize,
+                touchScrollSensitivity: normalized.touchScrollSensitivity,
+                twoFingerScrollSensitivity: normalized.twoFingerScrollSensitivity,
               };
             }
           }
           const appearance = activeTerminalId && terminalInfoById.get(activeTerminalId)?.appearance
             ? terminalInfoById.get(activeTerminalId).appearance
-            : { ...defaultAppearance, fontSize: normalized.terminalFontSize };
+            : {
+                ...defaultAppearance,
+                fontSize: normalized.terminalFontSize,
+                touchScrollSensitivity: normalized.touchScrollSensitivity,
+                twoFingerScrollSensitivity: normalized.twoFingerScrollSensitivity,
+              };
           applyTerminalAppearance(appearance);
+          // The drag multipliers live in module state, not the xterm option
+          // bundle, so adopt them here for immediate effect on the open surface.
+          adoptTouchScrollSensitivity(appearance);
           scheduleTerminalFit();
         }
 
@@ -836,6 +866,16 @@
             remoteComposerFontSizeInput.value,
             remoteDisplaySettings?.composerFontSize || 16,
           );
+          const touchScrollSensitivityValue = normalizeScrollSensitivity(
+            remoteTouchScrollSensitivityInput.value,
+            remoteDisplaySettings?.touchScrollSensitivity ??
+              defaultAppearance.touchScrollSensitivity,
+          );
+          const twoFingerScrollSensitivityValue = normalizeScrollSensitivity(
+            remoteTwoFingerScrollSensitivityInput.value,
+            remoteDisplaySettings?.twoFingerScrollSensitivity ??
+              defaultAppearance.twoFingerScrollSensitivity,
+          );
           remoteDisplaySettingsPending = true;
           updateRemoteDisplaySettingsControls("Saving...");
           let reloadAfterConflict = false;
@@ -848,6 +888,8 @@
                 expectedRevision,
                 terminalFontSize,
                 composerFontSize,
+                touchScrollSensitivity: touchScrollSensitivityValue,
+                twoFingerScrollSensitivity: twoFingerScrollSensitivityValue,
               }),
             });
             if (revision !== remoteDisplaySettingsRevision || leaseId !== selectedLeaseId) return;
@@ -7598,6 +7640,12 @@
           saveRemoteDisplaySettings().catch(() => {});
         });
         remoteComposerFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteTouchScrollSensitivityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteTwoFingerScrollSensitivityInput.addEventListener("change", () => {
           saveRemoteDisplaySettings().catch(() => {});
         });
         checkPcUpdateButton.addEventListener("click", () => {
