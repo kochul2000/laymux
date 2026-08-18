@@ -1489,7 +1489,31 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    fun connectRemote() {
+    /**
+     * Whether an expired-in-background session can be re-opened in place
+     * (biometric re-auth on the Remote surface) instead of dropping to the
+     * dashboard: a PC is still selected, its pairing is confirmed, and — for
+     * the biometric policy — a biometric is available.
+     */
+    private fun canReauthenticateExpiredRemote(): Boolean {
+        val instanceId = selectedCloudInstanceId ?: return false
+        val confirmed = try {
+            vault.loadMetadata().firstOrNull { it.instanceId == instanceId }
+                ?.confirmedAtEpochSeconds != null
+        } catch (_: Exception) {
+            false
+        }
+        if (!confirmed) return false
+        val policy = try {
+            vault.protectionPolicy()
+        } catch (_: Exception) {
+            return false
+        }
+        return policy != PairingProtectionPolicy.BIOMETRIC ||
+            biometricAvailability() == BiometricAvailability.AVAILABLE
+    }
+
+    fun connectRemote(reauthFallback: (() -> Unit)? = null) {
         if (scanInFlight || hasPendingCryptoOperation() || remoteOpeningSession != null) {
             notifyPairingChanged(error = busyOperationMessage())
             return
@@ -1501,28 +1525,33 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         val expectedInstanceId = selectedCloudInstanceId
         if (expectedInstanceId == null) {
             notifyPairingChanged(error = "Cloud 대시보드에서 연결할 PC를 선택하세요.")
+            reauthFallback?.invoke()
             return
         }
         val metadata = try {
             vault.loadMetadata().firstOrNull { it.instanceId == expectedInstanceId }
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
+            reauthFallback?.invoke()
             return
         }
         if (metadata?.confirmedAtEpochSeconds == null) {
             notifyPairingChanged(error = "먼저 데스크톱과 페어링을 확인하세요.")
+            reauthFallback?.invoke()
             return
         }
         val policy = try {
             vault.protectionPolicy()
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
+            reauthFallback?.invoke()
             return
         }
         if (policy == PairingProtectionPolicy.BIOMETRIC) {
             val availability = biometricAvailability()
             if (availability != BiometricAvailability.AVAILABLE) {
                 notifyPairingChanged(error = requireNotNull(availability.userMessage))
+                reauthFallback?.invoke()
                 return
             }
         }
@@ -1530,9 +1559,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             vault.prepareDecryption(expectedInstanceId)
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
+            reauthFallback?.invoke()
             return
         } ?: run {
             notifyPairingChanged(error = "먼저 페어링하세요.")
+            reauthFallback?.invoke()
             return
         }
         // Checked before the generation bumps: rejecting afterwards would strand
@@ -1549,7 +1580,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         remoteConnecting = true
         notifyPairingChanged(notice = "보안 세션을 준비하고 있습니다.")
         if (pending.policy == PairingProtectionPolicy.KEYSTORE_ONLY) {
-            completeRemoteConnection(pending, pending.cipher, connectionGeneration)
+            completeRemoteConnection(pending, pending.cipher, connectionGeneration, reauthFallback)
             return
         }
 
@@ -1567,7 +1598,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         pendingDecryption = null
                         pendingDecryptionPurpose = null
                         if (current != null && purpose == DecryptionPurpose.CONNECT) {
-                            completeRemoteConnection(current, cipher, connectionGeneration)
+                            completeRemoteConnection(
+                                current,
+                                cipher,
+                                connectionGeneration,
+                                reauthFallback,
+                            )
                         }
                     },
                     onError = { message ->
@@ -1577,6 +1613,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                         if (remoteConnectionGeneration.get() == connectionGeneration) {
                             remoteConnecting = false
                             notifyPairingChanged(error = message)
+                            reauthFallback?.invoke()
                         }
                     },
                 )
@@ -1587,6 +1624,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 if (remoteConnectionGeneration.get() == connectionGeneration) {
                     remoteConnecting = false
                     notifyPairingChanged(error = pairingOperationError(error))
+                    reauthFallback?.invoke()
                 }
             }
         }
@@ -1596,6 +1634,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         pending: PendingPairingDecryption,
         authorizedCipher: Cipher,
         connectionGeneration: Long,
+        reauthFallback: (() -> Unit)? = null,
     ) {
         if (remoteConnectionGeneration.get() != connectionGeneration || !remoteLifecycleActive) {
             pending.close()
@@ -1607,6 +1646,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             pending.close()
             remoteConnecting = false
             notifyPairingChanged(error = pairingOperationError(error))
+            reauthFallback?.invoke()
             return
         }
         try {
@@ -1680,6 +1720,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                             hideRemoteLoadingOverlay()
                             if (error !is RemoteConnectionCancelledException) {
                                 notifyPairingChanged(error = remoteErrorMessage(error))
+                                reauthFallback?.invoke()
                             }
                         },
                     )
@@ -1690,6 +1731,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             remoteConnecting = false
             hideRemoteLoadingOverlay()
             notifyPairingChanged(error = "보안 연결 작업을 시작하지 못했습니다.")
+            reauthFallback?.invoke()
         }
     }
 
@@ -2125,9 +2167,19 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         remoteBackgroundExpiry?.cancel(false)
         remoteBackgroundExpiry = null
         if (!session.resumeFromBackground()) {
+            // Session key expired in the background. Instead of dropping to the
+            // dashboard, keep the selected PC and re-open the secure session in
+            // place: connectRemote() re-decrypts the seed (biometric prompt),
+            // re-establishes, and showRemoteSurface() reattaches via the desktop
+            // checkpoint. A canceled/failed re-auth falls back to the dashboard.
             closeRemoteSession()
-            showCloudDashboard()
-            showCloudMessage("15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
+            if (canReauthenticateExpiredRemote()) {
+                showCloudMessage("보안 세션이 잠겨 다시 인증이 필요합니다.")
+                connectRemote(reauthFallback = { showCloudDashboard() })
+            } else {
+                showCloudDashboard()
+                showCloudMessage("15분 동안 사용하지 않아 보안 세션이 잠겼습니다.")
+            }
             return
         }
         val connectionGeneration = remoteConnectionGeneration.incrementAndGet()
