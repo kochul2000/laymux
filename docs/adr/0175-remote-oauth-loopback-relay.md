@@ -1,6 +1,6 @@
 # 0175. Remote OAuth loopback relay — 폰에서 연 설치형 OAuth 로그인을 PC 리스너로 중계
 
-- Status: Accepted
+- Status: Proposed
 - Date: 2026-08-18
 - Source: 사용자 요구("이 링크를 리모트로 접속한 laymux 앱에서는 동작이 되지를 않아 … 이 방법을 laymux 안드로이드 앱이 가능하게 만들 수는 없는 거니?") · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Extends: ADR-0015(원격 상태 소유권/lease), ADR-0162(외부 링크는 OS 브라우저), ADR-0170(Android E2E allowlist)
@@ -16,11 +16,11 @@
 **Remote 가 열려는 auth URL 의 `redirect_uri` 에서 파싱한 단 하나의 loopback 포트·경로만, 짧은 TTL 의 1회용 세션으로 등록해 GET 한 번을 중계한다.**
 
 - 데스크톱: `POST /remote/v1/oauth-relay/begin` — body `{authUrl, leaseId}`. auth URL 은 https 필수, `redirect_uri` 는 `http://localhost|127.0.0.1|[::1]:{port≥1024}` 만 수용. 포트·경로를 단일 슬롯 세션(uuid, TTL 10분)으로 저장하고 `{sessionId, port, expiresInSeconds}` 반환. 새 begin 은 이전 세션을 대체한다.
-- 데스크톱: `POST /remote/v1/oauth-relay/forward` — body `{sessionId, pathAndQuery, leaseId}`. 세션을 **요청 전에 소비**(1회용)하고, pathAndQuery 가 등록된 callback 경로와 정확히 일치(+선택적 `?query`)할 때만 `http://127.0.0.1:{port}{pathAndQuery}` 로 redirect 미추적 GET(connect 3s/total 10s, 응답 64KB 캡)을 보내 `{status, contentType, body}` 를 돌려준다.
+- 데스크톱: `POST /remote/v1/oauth-relay/forward` — body `{sessionId, pathAndQuery, leaseId}`. 세션을 **요청 전에 소비**(1회용)하고, pathAndQuery 가 등록된 callback 경로와 정확히 일치(+선택적 `?query`)할 때만 등록된 loopback 호스트(redirect 의 주소 패밀리 보존: `127.0.0.1` 또는 `[::1]`)로 redirect 미추적 GET(connect 3s/total 10s)을 보내 `{status, contentType, body}` 를 돌려준다. 응답 본문은 스트리밍으로 읽으며 64KB 에서 읽기 자체를 중단한다 — 전체 수신 후 자르는 방식은 상한이 메모리를 못 지킨다.
 - 두 라우트 모두 기존 remote guard(토큰/IP/Origin 또는 릴레이 `TunnelAuthorized`) 뒤 + **active controller lease** 필수. Android E2E exact allowlist 에도 이 두 POST 만 추가.
 - Remote 페이지: 터미널 링크가 loopback `redirect_uri` 를 가진 https OAuth URL 이고 lease 를 쥐고 있으면 일반 열기 대신 릴레이 플로우로 진입한다. 터미널 출력은 신뢰할 수 없는 텍스트이므로 탭만으로는 아무것도 시작하지 않는다 — 대상 호스트·포트를 설명하는 확인 모달을 먼저 띄우고, 사용자가 "Start sign-in" 을 눌러야 `begin` 과 브라우저 오픈이 일어난다.
-  - Android 앱: 네이티브 `beginOauthRelay(sessionId, port, expectedPath, authUrl)` 가 폰의 `127.0.0.1:{port}` 에 1회용 리스너(수명 10분, loopback 바인딩)를 열고 OS 브라우저로 auth URL 을 연다. redirect 가 도착하면 경로가 등록 경로와 일치하는 첫 요청만 WebView JS 로 전달하고(그 외는 로컬 404/409), JS 가 `forward` 로 PC 에 중계한 뒤 응답을 네이티브로 되돌려 브라우저에 그대로 서빙하고 리스너를 닫는다. Content-Type 은 `type/subtype` 토큰으로 정규화해 헤더 주입을 차단한다.
-  - 일반 브라우저 remote: 폰 localhost 에 리스너를 둘 수 없으므로, 로그인 후 주소창에 남은 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달을 띄워 같은 `forward` 를 태운다.
+  - Android 앱: 네이티브 `beginOauthRelay(sessionId, port, expectedPath, authUrl)` 가 폰의 `127.0.0.1:{port}` 에 1회용 리스너를 열고 OS 브라우저로 auth URL 을 연다. 수명은 시작 시각 기준 **절대 deadline 10분** — 비일치 요청이 반복돼도 연장되지 않는다. redirect 가 도착하면 경로가 등록 경로와 일치하는 첫 요청에 즉시 "앱으로 돌아가라" 정적 페이지를 응답하고 리스너를 닫는다(그 외 요청은 로컬 404/409/400). **PC 로의 forward 는 브라우저가 아니라 앱 복귀 후에 일어난다**: OS 브라우저가 전면인 동안 MainActivity 는 stopped 상태라 E2E 세션이 suspend 되고 새 RPC 가 거부되므로(ADR-0146), 콜백은 네이티브에 보관했다가 onStart 에서 Remote 문서로 전달하고, Remote 문서는 세션 재개 레이스를 흡수하기 위해 backoff 재시도 후 `forward` 를 호출한다.
+  - 일반 브라우저 remote: 폰 localhost 에 리스너를 둘 수 없으므로, 로그인 후 주소창에 남은 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달을 띄워 같은 `forward` 를 태운다. 로그인 창은 Start 클릭의 transient activation 안에서 **동기적으로 빈 창을 먼저 열고**(`opener` 분리) `begin` 성공 후 그 창을 auth URL 로 이동시킨다 — `await` 뒤의 `window.open` 은 Safari 류에서 팝업 차단된다.
 
 ## Alternatives Considered
 

@@ -563,11 +563,7 @@ mod tests {
         let response =
             check_remote_base_access(&settings, "192.168.1.10:1".parse().unwrap()).unwrap();
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
-        assert!(check_remote_base_access(
-            &settings,
-            "100.100.10.20:1".parse().unwrap()
-        )
-        .is_none());
+        assert!(check_remote_base_access(&settings, "100.100.10.20:1".parse().unwrap()).is_none());
     }
 
     #[test]
@@ -787,11 +783,7 @@ mod tests {
             ),
             AndroidTailscaleE2eDecision::NotAndroidE2e
         ));
-        assert!(check_remote_base_access(
-            &settings,
-            "127.0.0.1:43100".parse().unwrap(),
-        )
-        .is_none());
+        assert!(check_remote_base_access(&settings, "127.0.0.1:43100".parse().unwrap(),).is_none());
         assert!(remote_token_matches(
             request.headers(),
             request.uri(),

@@ -1044,7 +1044,9 @@ async fn tunnel_presence_payload(cloud_access_mode: CloudAccessMode) -> Value {
     let tailscale_url = get_remote_host_candidates()
         .await
         .ok()
-        .and_then(|candidates| tailscale_direct_url_from_candidates(&candidates, automation_port()));
+        .and_then(|candidates| {
+            tailscale_direct_url_from_candidates(&candidates, automation_port())
+        });
     tunnel_presence_payload_value(cloud_access_mode, tailscale_url)
 }
 
@@ -1087,10 +1089,7 @@ fn cloud_stream_allowed(mode: CloudAccessMode, payload: &StreamOpenPayload) -> b
     )
 }
 
-fn tailscale_direct_url_from_candidates(
-    candidates: &[HostCandidate],
-    port: u16,
-) -> Option<String> {
+fn tailscale_direct_url_from_candidates(candidates: &[HostCandidate], port: u16) -> Option<String> {
     let host = candidates
         .iter()
         .find(|candidate| candidate.kind == "tailscale")?
@@ -3192,7 +3191,10 @@ mod tests {
         assert_eq!(error.frame_type, FRAME_STREAM_ERROR);
         assert_eq!(error_code(&error), Some("cloud_remote_policy_denied"));
         assert_eq!(
-            error.payload.as_ref().and_then(|value| value.get("retryable")),
+            error
+                .payload
+                .as_ref()
+                .and_then(|value| value.get("retryable")),
             Some(&Value::Bool(false))
         );
         assert!(active_streams.is_empty());

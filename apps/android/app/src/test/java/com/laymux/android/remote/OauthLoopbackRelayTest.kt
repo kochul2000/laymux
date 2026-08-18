@@ -27,21 +27,19 @@ class OauthLoopbackRelayTest {
 
     private fun freePort(): Int = ServerSocket(0).use { it.localPort }
 
-    private data class Callback(val requestId: String, val pathAndQuery: String)
-
     private fun startRelay(
         port: Int,
         expectedPath: String = "/",
-        callbacks: LinkedBlockingQueue<Callback> = LinkedBlockingQueue(),
+        lifetimeMs: Long = 60_000,
+        callbacks: LinkedBlockingQueue<String> = LinkedBlockingQueue(),
         errors: LinkedBlockingQueue<String> = LinkedBlockingQueue(),
-    ): Triple<OauthLoopbackRelay, LinkedBlockingQueue<Callback>, LinkedBlockingQueue<String>> {
+    ): Triple<OauthLoopbackRelay, LinkedBlockingQueue<String>, LinkedBlockingQueue<String>> {
         val started = OauthLoopbackRelay(
             port = port,
             expectedPath = expectedPath,
-            onCallback = { requestId, pathAndQuery ->
-                callbacks.add(Callback(requestId, pathAndQuery))
-            },
+            onCallback = { pathAndQuery -> callbacks.add(pathAndQuery) },
             onError = { message -> errors.add(message) },
+            lifetimeMs = lifetimeMs,
         )
         assertTrue("relay should bind $port", started.start())
         relay = started
@@ -58,33 +56,31 @@ class OauthLoopbackRelayTest {
         return socket to BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
     }
 
+    private fun connectionRefused(port: Int): Boolean = try {
+        Socket(InetAddress.getLoopbackAddress(), port).close()
+        false
+    } catch (_: ConnectException) {
+        true
+    }
+
     @Test
-    fun `matching callback is handed off and completed response reaches the browser`() {
+    fun `matching callback answers the browser immediately and hands off the target`() {
         val port = freePort()
-        val (started, callbacks, _) = startRelay(port)
+        val (_, callbacks, _) = startRelay(port)
 
         val (socket, reader) = request(port, "GET /?code=4%2Fabc&scope=openid HTTP/1.1")
-        val callback = callbacks.poll(5, TimeUnit.SECONDS)
-        assertNotNull("callback should be delivered", callback)
-        assertEquals("/?code=4%2Fabc&scope=openid", callback!!.pathAndQuery)
-
-        started.complete(callback.requestId, 200, "text/plain", "done")
-
-        val statusLine = reader.readLine()
-        assertEquals("HTTP/1.1 200 OK", statusLine)
+        // The browser is answered right away — the forward to the PC happens
+        // later, after the user returns to the app (ADR-0146).
+        assertEquals("HTTP/1.1 200 OK", reader.readLine())
         var line = reader.readLine()
         while (!line.isNullOrEmpty()) line = reader.readLine()
-        assertEquals("done", reader.readLine())
+        assertTrue(reader.readLine()!!.contains("Return to the Laymux app"))
         socket.close()
 
-        // Completing the one callback shuts the listener down.
-        var refused = false
-        try {
-            Socket(InetAddress.getLoopbackAddress(), port).close()
-        } catch (_: ConnectException) {
-            refused = true
-        }
-        assertTrue("listener should be closed after completion", refused)
+        assertEquals("/?code=4%2Fabc&scope=openid", callbacks.poll(5, TimeUnit.SECONDS))
+
+        // The one callback shuts the listener down.
+        assertTrue("listener should be closed after the callback", connectionRefused(port))
     }
 
     @Test
@@ -99,28 +95,9 @@ class OauthLoopbackRelayTest {
 
         // The relay keeps listening for the real callback afterwards.
         val (second, secondReader) = request(port, "GET /cb?code=x HTTP/1.1")
-        val callback = callbacks.poll(5, TimeUnit.SECONDS)
-        assertNotNull(callback)
-        assertEquals("/cb?code=x", callback!!.pathAndQuery)
-        relay?.complete(callback.requestId, 200, "text/plain", "ok")
         assertEquals("HTTP/1.1 200 OK", secondReader.readLine())
         second.close()
-    }
-
-    @Test
-    fun `second matching request while pending is rejected as already delivered`() {
-        val port = freePort()
-        val (_, callbacks, _) = startRelay(port)
-
-        val (first, _) = request(port, "GET /?code=first HTTP/1.1")
-        val callback = callbacks.poll(5, TimeUnit.SECONDS)
-        assertNotNull(callback)
-
-        val (second, secondReader) = request(port, "GET /?code=second HTTP/1.1")
-        assertEquals("HTTP/1.1 409 Status", secondReader.readLine())
-        second.close()
-        assertNull(callbacks.poll(300, TimeUnit.MILLISECONDS))
-        first.close()
+        assertEquals("/cb?code=x", callbacks.poll(5, TimeUnit.SECONDS))
     }
 
     @Test
@@ -139,10 +116,35 @@ class OauthLoopbackRelayTest {
             val blocked = OauthLoopbackRelay(
                 port = taken.localPort,
                 expectedPath = "/",
-                onCallback = { _, _ -> },
+                onCallback = { },
                 onError = { },
             )
             assertEquals(false, blocked.start())
         }
+    }
+
+    @Test
+    fun `unrelated requests do not extend the absolute lifetime`() {
+        val port = freePort()
+        val (_, callbacks, errors) = startRelay(port, expectedPath = "/cb", lifetimeMs = 900)
+
+        // Keep poking the listener with non-matching requests past the
+        // deadline; each accept must not restart the lifetime window.
+        val deadline = System.currentTimeMillis() + 2_500
+        var refused = false
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                val (socket, reader) = request(port, "GET /other HTTP/1.1")
+                reader.readLine()
+                socket.close()
+            } catch (_: Exception) {
+                refused = true
+                break
+            }
+            Thread.sleep(150)
+        }
+        assertTrue("listener should die at its absolute deadline", refused)
+        assertNotNull("expiry should be reported", errors.poll(5, TimeUnit.SECONDS))
+        assertNull(callbacks.poll(100, TimeUnit.MILLISECONDS))
     }
 }

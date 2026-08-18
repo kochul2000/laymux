@@ -152,6 +152,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     @Volatile private var remoteConnecting = false
     @Volatile private var remoteLeaseId: String? = null
     private var oauthRelay: OauthLoopbackRelay? = null
+    private var pendingOauthCallback: String? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
@@ -668,6 +669,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
      * back to the Remote document, which forwards it to the PC listener over
      * the authenticated transport. Every parameter is Remote-document input,
      * so it is re-validated here like the other bridge entry points.
+     *
+     * The redirect arrives while the OS browser is frontmost — this activity
+     * is stopped and the E2E session is suspended, so new RPCs are refused
+     * (ADR-0146). The callback is therefore parked in [pendingOauthCallback]
+     * and delivered to the Remote document on the next onStart; the browser
+     * already got its "return to the app" page from the listener.
      */
     fun beginOauthRelay(sessionId: String, portValue: String, expectedPath: String, authUrl: String) {
         if (!validBridgeId(sessionId)) return
@@ -685,9 +692,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             val relay = OauthLoopbackRelay(
                 port = port,
                 expectedPath = expectedPath,
-                onCallback = { requestId, pathAndQuery ->
-                    dispatchOauthRelayEvent("onCallback", requestId, pathAndQuery)
-                },
+                onCallback = { pathAndQuery -> deliverOauthCallback(pathAndQuery) },
                 onError = { message -> dispatchOauthRelayEvent("onError", message) },
             )
             if (!relay.start()) {
@@ -703,35 +708,27 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    /** Serve the PC tool's forwarded response to the waiting phone browser. */
-    fun completeOauthRelay(requestId: String, statusValue: String, contentType: String, body: String) {
-        if (!validBridgeId(requestId)) return
-        val status = statusValue.toIntOrNull()?.coerceIn(100, 599) ?: 502
-        val relay = oauthRelay ?: return
-        relay.complete(
-            requestId,
-            status,
-            sanitizedOauthRelayContentType(contentType),
-            body.take(MAX_OAUTH_RELAY_BODY_CHARS),
-        )
-        oauthRelay = null
-    }
-
     fun cancelOauthRelay() {
         oauthRelay?.stop()
         oauthRelay = null
+        pendingOauthCallback = null
     }
 
-    /**
-     * The value is written into a raw HTTP header by the relay, so anything
-     * that is not a plain `type/subtype` token collapses to text/plain —
-     * never a header-injection vector.
-     */
-    private fun sanitizedOauthRelayContentType(value: String): String {
-        val trimmed = value.substringBefore(';').trim()
-        val valid = trimmed.length in 3..100 && trimmed.count { it == '/' } == 1 &&
-            trimmed.all { it.isLetterOrDigit() || it == '/' || it == '-' || it == '+' || it == '.' }
-        return if (valid) trimmed else "text/plain"
+    private fun deliverOauthCallback(pathAndQuery: String) {
+        runOnUiThread {
+            oauthRelay = null
+            if (remoteLifecycleActive) {
+                dispatchOauthRelayEvent("onCallback", pathAndQuery)
+            } else {
+                pendingOauthCallback = pathAndQuery
+            }
+        }
+    }
+
+    private fun flushPendingOauthCallback() {
+        val pathAndQuery = pendingOauthCallback ?: return
+        pendingOauthCallback = null
+        dispatchOauthRelayEvent("onCallback", pathAndQuery)
     }
 
     private fun dispatchOauthRelayEvent(method: String, vararg arguments: String) {
@@ -2176,6 +2173,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         super.onStart()
         remoteLifecycleActive = true
         resumeRemoteSessionAfterBackground()
+        // A sign-in redirect caught while the OS browser was frontmost waits
+        // here: the E2E session resumes above, and the Remote document
+        // retries the forward if the transport needs another moment.
+        flushPendingOauthCallback()
         if (::webView.isInitialized) {
             if (remoteSession == null &&
                 webView.url?.startsWith(
@@ -2234,6 +2235,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     override fun onDestroy() {
         oauthRelay?.stop()
         oauthRelay = null
+        pendingOauthCallback = null
         policyDialog?.dismiss()
         policyDialog = null
         biometricPromptGate.cancelPending()
@@ -2276,9 +2278,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val MAX_REMOTE_HTTP_BODY_CHARS = 256 * 1024
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
-
-        /** Matches the desktop relay's MAX_FORWARD_RESPONSE_BYTES (ADR-0175). */
-        private const val MAX_OAUTH_RELAY_BODY_CHARS = 64 * 1024
     }
 
     private enum class DecryptionPurpose {

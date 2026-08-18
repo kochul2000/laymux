@@ -43,16 +43,6 @@ class RemoteBridge(private val activity: MainActivity) {
     }
 
     @JavascriptInterface
-    fun completeOauthRelay(requestId: String?, status: String?, contentType: String?, body: String?) {
-        activity.completeOauthRelay(
-            requestId ?: return,
-            status ?: return,
-            contentType ?: return,
-            body ?: return,
-        )
-    }
-
-    @JavascriptInterface
     fun cancelOauthRelay() {
         activity.cancelOauthRelay()
     }

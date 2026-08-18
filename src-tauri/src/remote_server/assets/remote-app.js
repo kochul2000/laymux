@@ -2084,6 +2084,16 @@
           const url = oauthRelayPendingUrl;
           if (!url || oauthRelaySession) return;
           const redirect = parseOauthLoopbackRedirect(url);
+          const native = nativeOauthRelayAvailable();
+          // Open the window inside the click's transient activation: strict
+          // browsers (Safari) refuse a window.open issued after the await
+          // below. Opened blank, detached from this page, navigated once the
+          // relay session exists.
+          let popup = null;
+          if (!native) {
+            popup = window.open("", "_blank");
+            if (popup) popup.opener = null;
+          }
           oauthRelayStartButton.hidden = true;
           setOauthRelayStatus("Registering the sign-in relay with the PC...");
           let session;
@@ -2094,6 +2104,7 @@
               body: JSON.stringify({ authUrl: url.href, leaseId }),
             });
           } catch (error) {
+            if (popup) popup.close();
             setOauthRelayStatus(error.message || String(error), true);
             // Leave the pending URL so the user can retry from the button.
             oauthRelayStartButton.hidden = false;
@@ -2104,11 +2115,13 @@
             port: session.port,
             path: redirect.path,
           };
-          if (nativeOauthRelayAvailable()) {
+          if (native) {
             // Native binds the phone's loopback port, opens the OS browser,
-            // and calls window.laymuxOauthRelay.onCallback with the redirect.
+            // and parks the redirect until this app is foreground again —
+            // then window.laymuxOauthRelay.onCallback forwards it.
             oauthRelayHint.textContent =
-              "Finish signing in with the browser that just opened. The result returns to the PC automatically.";
+              "Finish signing in with the browser that just opened, then " +
+              "return to this app — the result is delivered to the PC here.";
             setOauthRelayStatus("Waiting for the sign-in to finish...");
             window.LaymuxNative.beginOauthRelay(
               session.sessionId,
@@ -2126,7 +2139,12 @@
             "localhost page — copy that page's full address and paste it below.";
           oauthRelayManualRow.hidden = false;
           setOauthRelayStatus("Waiting for the pasted callback address...");
-          openExternalRemoteUrl(url);
+          if (popup) {
+            popup.location.href = url.href;
+          } else {
+            // Popup blocked despite the sync open: best-effort direct open.
+            openExternalRemoteUrl(url);
+          }
         }
 
         async function forwardOauthCallback(pathAndQuery) {
@@ -2134,7 +2152,7 @@
           if (!session || oauthRelayForwarding) return null;
           oauthRelayForwarding = true;
           try {
-            return await remoteFetch("/remote/v1/oauth-relay/forward", {
+            const result = await remoteFetch("/remote/v1/oauth-relay/forward", {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
@@ -2143,9 +2161,18 @@
                 leaseId,
               }),
             });
+            oauthRelaySession = null;
+            return result;
+          } catch (error) {
+            // A server answer means the one-shot session is spent; a pure
+            // transport failure (E2E session still resuming after the OS
+            // browser) leaves it intact so the caller can retry.
+            if (error && typeof error.status === "number") {
+              oauthRelaySession = null;
+            }
+            throw error;
           } finally {
             oauthRelayForwarding = false;
-            oauthRelaySession = null;
           }
         }
 
@@ -2184,39 +2211,38 @@
           }
         }
 
-        // Native (Android) hands the captured loopback redirect back through
-        // this surface, then serves our forward result to the phone browser.
+        // Native (Android) parks the captured loopback redirect while the OS
+        // browser is frontmost and hands it here on the next foreground; the
+        // browser already got its "return to the app" page. The E2E session
+        // may still be resuming at that moment, so transport failures retry
+        // with backoff before giving up.
         window.laymuxOauthRelay = {
-          onCallback(requestId, pathAndQuery) {
+          onCallback(pathAndQuery) {
             (async () => {
-              let status = 502;
-              let contentType = "text/plain";
-              let body = "OAuth relay forward failed.";
-              try {
-                setOauthRelayStatus("Forwarding the callback to the PC...");
-                const result = await forwardOauthCallback(String(pathAndQuery));
-                if (result) {
-                  status = Number(result.status) || 502;
-                  contentType = String(result.contentType || "text/html");
-                  body = String(result.body ?? "");
-                  setOauthRelayStatus(
-                    `Done — the PC tool answered ${status}. You can close this.`,
+              setOauthRelayStatus("Forwarding the sign-in result to the PC...");
+              for (let attempt = 0; attempt < 4; attempt += 1) {
+                try {
+                  const result = await forwardOauthCallback(String(pathAndQuery));
+                  if (result) {
+                    setOauthRelayStatus(
+                      `Done — the PC tool answered ${result.status}. You can close this.`,
+                    );
+                  }
+                  return;
+                } catch (error) {
+                  if (error && typeof error.status === "number") {
+                    setOauthRelayStatus(error.message || String(error), true);
+                    return;
+                  }
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, 1000 * (attempt + 1)),
                   );
                 }
-              } catch (error) {
-                setOauthRelayStatus(error.message || String(error), true);
-                body = String(error.message || error);
               }
-              if (
-                typeof window.LaymuxNative?.completeOauthRelay === "function"
-              ) {
-                window.LaymuxNative.completeOauthRelay(
-                  String(requestId),
-                  String(status),
-                  contentType,
-                  body,
-                );
-              }
+              setOauthRelayStatus(
+                "Could not reach the PC to deliver the sign-in result.",
+                true,
+              );
             })();
           },
           onError(message) {

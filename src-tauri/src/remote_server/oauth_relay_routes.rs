@@ -39,6 +39,9 @@ use super::{internal_error, json_error};
 /// targets.
 struct OauthRelaySession {
     id: String,
+    /// Loopback host literal preserved from the redirect_uri ("127.0.0.1"
+    /// or "[::1]") — an IPv6-only CLI listener is unreachable via 127.0.0.1.
+    host: String,
     port: u16,
     callback_path: String,
     expires_at: Instant,
@@ -85,8 +88,10 @@ fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
 }
 
 /// Extract the loopback listener a valid installed-app auth URL redirects
-/// to. Returns `(port, callback_path)` or a user-facing rejection reason.
-fn parse_loopback_redirect(auth_url: &str) -> Result<(u16, String), String> {
+/// to. Returns `(host, port, callback_path)` or a user-facing rejection
+/// reason. The host keeps the redirect's address family: "localhost" and
+/// IPv4 loopback forward to 127.0.0.1, IPv6 loopback to [::1].
+fn parse_loopback_redirect(auth_url: &str) -> Result<(String, u16, String), String> {
     if auth_url.len() > MAX_AUTH_URL_LEN {
         return Err("auth URL is too long".into());
     }
@@ -103,22 +108,21 @@ fn parse_loopback_redirect(auth_url: &str) -> Result<(u16, String), String> {
     if redirect.scheme() != "http" {
         return Err("redirect_uri is not a loopback http URL".into());
     }
-    let loopback = match redirect.host() {
-        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        Some(Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
+    let host = match redirect.host() {
+        Some(Host::Domain(domain)) if domain.eq_ignore_ascii_case("localhost") => {
+            "127.0.0.1".to_string()
+        }
+        Some(Host::Ipv4(ip)) if ip.is_loopback() => "127.0.0.1".to_string(),
+        Some(Host::Ipv6(ip)) if ip.is_loopback() => "[::1]".to_string(),
+        _ => return Err("redirect_uri does not point at localhost".into()),
     };
-    if !loopback {
-        return Err("redirect_uri does not point at localhost".into());
-    }
     let port = redirect.port().ok_or("redirect_uri has no explicit port")?;
     // Never let a crafted URL steer the relay at a privileged service; real
     // OAuth CLI listeners always bind ephemeral high ports.
     if port < 1024 {
         return Err("redirect_uri port is below 1024".into());
     }
-    Ok((port, redirect.path().to_string()))
+    Ok((host, port, redirect.path().to_string()))
 }
 
 /// Lease-gated core of `begin`, separated from the axum handler so tests can
@@ -133,7 +137,7 @@ fn begin_session(
 ) -> Result<serde_json::Value, Response> {
     require_active_lease(app_state, lease_id)?;
 
-    let (port, callback_path) = parse_loopback_redirect(auth_url)
+    let (host, port, callback_path) = parse_loopback_redirect(auth_url)
         .map_err(|reason| json_error(StatusCode::BAD_REQUEST, &reason))?;
 
     let session_id = Uuid::new_v4().to_string();
@@ -142,6 +146,7 @@ fn begin_session(
         .map_err(internal_error_response)?;
     *slot = Some(OauthRelaySession {
         id: session_id.clone(),
+        host,
         port,
         callback_path,
         expires_at: Instant::now() + SESSION_TTL,
@@ -164,7 +169,7 @@ fn take_forward_target(
     session_id: &str,
     path_and_query: &str,
     lease_id: Option<&str>,
-) -> Result<(u16, String), Response> {
+) -> Result<(String, u16, String), Response> {
     require_active_lease(app_state, lease_id)?;
 
     let mut slot = session_store()
@@ -193,7 +198,7 @@ fn take_forward_target(
     drop(slot);
 
     validate_path_and_query(path_and_query, &session.callback_path)?;
-    Ok((session.port, path_and_query.to_string()))
+    Ok((session.host, session.port, path_and_query.to_string()))
 }
 
 fn internal_error_response(err: impl std::fmt::Display) -> Response {
@@ -252,7 +257,7 @@ pub(super) async fn remote_oauth_relay_forward(
         .lease_id
         .as_deref()
         .or_else(|| lease_id_from_headers(&headers));
-    let (port, path_and_query) = match take_forward_target(
+    let (host, port, path_and_query) = match take_forward_target(
         &server.app_state,
         &body.session_id,
         &body.path_and_query,
@@ -261,14 +266,14 @@ pub(super) async fn remote_oauth_relay_forward(
         Ok(target) => target,
         Err(response) => return response,
     };
-    forward_to_loopback(port, &path_and_query).await
+    forward_to_loopback(&host, port, &path_and_query).await
 }
 
 /// A timeout is mandatory like `cloud::pairing::build_pair_client`: a
 /// listener that accepts but never answers must not pin the phone's forward
 /// request forever. Redirects stay unfollowed so the response the tool
 /// serves is exactly what travels back — the relay never crawls anywhere.
-async fn forward_to_loopback(port: u16, path_and_query: &str) -> Response {
+async fn forward_to_loopback(host: &str, port: u16, path_and_query: &str) -> Response {
     let client = match reqwest::Client::builder()
         .timeout(FORWARD_TIMEOUT)
         .connect_timeout(FORWARD_CONNECT_TIMEOUT)
@@ -279,7 +284,7 @@ async fn forward_to_loopback(port: u16, path_and_query: &str) -> Response {
         Err(err) => return internal_error(err),
     };
 
-    let target = format!("http://127.0.0.1:{port}{path_and_query}");
+    let target = format!("http://{host}:{port}{path_and_query}");
     let response = match client.get(&target).send().await {
         Ok(response) => response,
         Err(err) => {
@@ -301,11 +306,25 @@ async fn forward_to_loopback(port: u16, path_and_query: &str) -> Response {
         .and_then(|value| value.to_str().ok())
         .unwrap_or("text/html")
         .to_string();
-    let mut body = match response.bytes().await {
-        Ok(bytes) => bytes.to_vec(),
-        Err(_) => Vec::new(),
-    };
-    body.truncate(MAX_FORWARD_RESPONSE_BYTES);
+    // Stream with the cap applied while reading: collecting the whole body
+    // first would let a hostile local service allocate unbounded memory for
+    // the duration of the forward timeout.
+    let mut response = response;
+    let mut body: Vec<u8> = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = MAX_FORWARD_RESPONSE_BYTES - body.len();
+                if chunk.len() >= remaining {
+                    body.extend_from_slice(&chunk[..remaining]);
+                    break;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => break,
+        }
+    }
 
     Json(serde_json::json!({
         "status": status,
@@ -343,6 +362,7 @@ mod tests {
     fn set_session(id: &str, port: u16, callback_path: &str, expires_at: Instant) {
         *session_store().lock_or_err().unwrap() = Some(OauthRelaySession {
             id: id.into(),
+            host: "127.0.0.1".into(),
             port,
             callback_path: callback_path.into(),
             expires_at,
@@ -355,7 +375,8 @@ mod tests {
 
     #[test]
     fn parses_loopback_redirect_without_path() {
-        let (port, path) = parse_loopback_redirect(GOOGLE_AUTH_URL).unwrap();
+        let (host, port, path) = parse_loopback_redirect(GOOGLE_AUTH_URL).unwrap();
+        assert_eq!(host, "127.0.0.1");
         assert_eq!(port, 63742);
         assert_eq!(path, "/");
     }
@@ -363,9 +384,19 @@ mod tests {
     #[test]
     fn parses_loopback_redirect_with_encoded_path() {
         let url = "https://example.com/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A8484%2Fpair%2Fcallback&state=abc";
-        let (port, path) = parse_loopback_redirect(url).unwrap();
+        let (host, port, path) = parse_loopback_redirect(url).unwrap();
+        assert_eq!(host, "127.0.0.1");
         assert_eq!(port, 8484);
         assert_eq!(path, "/pair/callback");
+    }
+
+    #[test]
+    fn preserves_ipv6_loopback_address_family() {
+        let url = "https://example.com/a?redirect_uri=http://[::1]:9443/cb";
+        let (host, port, path) = parse_loopback_redirect(url).unwrap();
+        assert_eq!(host, "[::1]");
+        assert_eq!(port, 9443);
+        assert_eq!(path, "/cb");
     }
 
     #[test]
@@ -437,8 +468,9 @@ mod tests {
             take_forward_target(&state, "session-2", "/?code=x", Some("lease-1")).unwrap_err();
         assert_eq!(err.status(), StatusCode::CONFLICT);
 
-        let (port, path) =
+        let (host, port, path) =
             take_forward_target(&state, "session-1", "/?code=x", Some("lease-1")).unwrap();
+        assert_eq!(host, "127.0.0.1");
         assert_eq!(port, 60000);
         assert_eq!(path, "/?code=x");
 
@@ -504,14 +536,14 @@ mod tests {
         let session_id = begin["sessionId"].as_str().unwrap().to_string();
         assert_eq!(begin["port"].as_u64().unwrap(), u64::from(port));
 
-        let (target_port, path_and_query) = take_forward_target(
+        let (target_host, target_port, path_and_query) = take_forward_target(
             &state,
             &session_id,
             "/?code=4%2Fauth-code&scope=openid",
             Some("lease-1"),
         )
         .unwrap();
-        let response = forward_to_loopback(target_port, &path_and_query).await;
+        let response = forward_to_loopback(&target_host, target_port, &path_and_query).await;
         assert_eq!(response.status(), StatusCode::OK);
         let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
             .await

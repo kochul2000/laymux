@@ -1384,9 +1384,9 @@ Remote drawer의 File viewer는 host file path 입력, 명시적 `From host`, `O
 | Endpoint | Method | 용도 |
 |---|---|---|
 | `/remote/v1/oauth-relay/begin` | POST | body `{authUrl, leaseId}`. `redirect_uri` 에서 파싱한 loopback 포트(≥1024)·경로를 단일 슬롯 1회용 세션(TTL 10분)으로 등록. `{sessionId, port, expiresInSeconds}` 반환. 새 begin 은 이전 세션 대체 |
-| `/remote/v1/oauth-relay/forward` | POST | body `{sessionId, pathAndQuery, leaseId}`. 세션을 요청 전에 소비하고, 등록 경로와 정확히 일치(+`?query`)하는 pathAndQuery 만 `http://127.0.0.1:{port}` 로 redirect 미추적 GET(3s/10s timeout, 64KB 캡). `{status, contentType, body}` 반환 |
+| `/remote/v1/oauth-relay/forward` | POST | body `{sessionId, pathAndQuery, leaseId}`. 세션을 요청 전에 소비하고, 등록 경로와 정확히 일치(+`?query`)하는 pathAndQuery 만 등록된 loopback 호스트(`127.0.0.1` 또는 `[::1]`, redirect 주소 패밀리 보존)로 redirect 미추적 GET(3s/10s timeout, 스트리밍 64KB 캡). `{status, contentType, body}` 반환 |
 
-두 라우트 모두 기존 remote guard + active controller lease(body `leaseId` 또는 `X-Laymux-Remote-Lease`) 필수이며 Android E2E exact allowlist 에 이 두 POST 만 추가돼 있다. 범용 localhost 프록시가 되지 않도록 forward 대상 포트·경로는 오직 begin 시점의 auth URL 이 결정하고, 검증 실패·만료·id 불일치는 모두 `409`/`400` 으로 fail closed 한다. Android 앱은 네이티브 `beginOauthRelay` 가 폰 loopback 에 1회용 리스너(10분)를 열어 redirect 를 받아 JS→`forward` 로 중계하고 응답을 브라우저에 그대로 서빙한다. 일반 브라우저 Remote 는 로그인 후 주소창의 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달로 같은 `forward` 를 태운다.
+두 라우트 모두 기존 remote guard + active controller lease(body `leaseId` 또는 `X-Laymux-Remote-Lease`) 필수이며 Android E2E exact allowlist 에 이 두 POST 만 추가돼 있다. 범용 localhost 프록시가 되지 않도록 forward 대상 호스트·포트·경로는 오직 begin 시점의 auth URL 이 결정하고, 검증 실패·만료·id 불일치는 모두 `409`/`400` 으로 fail closed 한다. Android 앱은 네이티브 `beginOauthRelay` 가 폰 loopback 에 1회용 리스너(절대 deadline 10분, 비일치 요청으로 연장 불가)를 열고, redirect 도착 즉시 브라우저에 "앱으로 돌아가라" 정적 페이지를 응답한 뒤 콜백을 보관한다 — OS 브라우저 전면 동안 E2E 세션이 suspend 라 새 RPC 가 거부되므로(ADR-0146) `forward` 는 앱 복귀(onStart) 후 Remote 문서가 backoff 재시도로 수행한다. 일반 브라우저 Remote 는 Start 클릭 시 동기로 연 빈 창을 begin 후 auth URL 로 이동시키고(팝업 차단 회피), 로그인 후 주소창의 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달로 같은 `forward` 를 태운다.
 
 ### 13.4 Terminal Control
 

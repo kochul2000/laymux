@@ -7,8 +7,6 @@ import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
@@ -17,84 +15,81 @@ import kotlin.concurrent.thread
  *
  * A desktop CLI runs the OAuth "installed app" flow and listens on the PC's
  * `localhost:{port}`. The provider, however, redirects the *phone's* browser
- * to `localhost:{port}` — this listener catches that redirect on the phone,
- * hands the path+query to the Remote document (which forwards it to the PC
- * over the authenticated transport), and serves the PC tool's response back
- * to the browser.
+ * to `localhost:{port}` — this listener catches that redirect on the phone
+ * and hands the path+query to [onCallback].
+ *
+ * The browser gets an immediate static "return to the app" page: while the
+ * OS browser is frontmost this activity is stopped and the E2E session is
+ * suspended (ADR-0146 stops new RPCs in the background), so the forward to
+ * the PC happens only after the user returns to the app. Holding the socket
+ * until then would just leave the browser spinning.
  *
  * One relay serves exactly one callback: the first request matching
- * [expectedPath] is handed off, everything else (favicon probes, retries) is
- * answered locally without touching the PC. The listener binds loopback only
- * and dies after [LIFETIME_MS] — it is never a lingering open port.
+ * [expectedPath] shuts the listener down; everything else (favicon probes,
+ * retries) is answered locally without touching the PC. The listener binds
+ * loopback only and dies at an absolute deadline [lifetimeMs] after start —
+ * repeated unrelated requests must not be able to keep the port open, so the
+ * deadline never resets.
  */
 class OauthLoopbackRelay(
     private val port: Int,
     private val expectedPath: String,
-    private val onCallback: (requestId: String, pathAndQuery: String) -> Unit,
+    private val onCallback: (pathAndQuery: String) -> Unit,
     private val onError: (message: String) -> Unit,
+    private val lifetimeMs: Long = DEFAULT_LIFETIME_MS,
 ) {
     private var serverSocket: ServerSocket? = null
     private val closed = AtomicBoolean(false)
     private val callbackTaken = AtomicBoolean(false)
-    private val pending = ConcurrentHashMap<String, Socket>()
+    private var deadlineAtMs: Long = 0L
 
     fun start(): Boolean {
         val socket = try {
             ServerSocket().apply {
-                soTimeout = LIFETIME_MS
                 bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port), BACKLOG)
             }
         } catch (_: IOException) {
             return false
         }
+        deadlineAtMs = System.currentTimeMillis() + lifetimeMs
         serverSocket = socket
         thread(name = "oauth-relay-$port", isDaemon = true) { acceptLoop(socket) }
         return true
     }
 
-    /** Serve the PC tool's response to the browser connection [requestId] and shut down. */
-    fun complete(requestId: String, status: Int, contentType: String, body: String) {
-        val socket = pending.remove(requestId) ?: return
-        writeResponse(socket, status, contentType, body)
-        stop()
-    }
-
     fun stop() {
         if (!closed.compareAndSet(false, true)) return
-        try {
-            serverSocket?.close()
-        } catch (_: IOException) {
-        }
-        for (socket in pending.values) {
-            closeQuietly(socket)
-        }
-        pending.clear()
+        closeQuietly()
     }
 
     private fun acceptLoop(server: ServerSocket) {
         while (!closed.get()) {
+            val remainingMs = deadlineAtMs - System.currentTimeMillis()
+            if (remainingMs <= 0) {
+                expire()
+                return
+            }
+            // soTimeout bounds one accept() wait; computing it from the
+            // absolute deadline each round is what makes the lifetime a hard
+            // ceiling instead of an idle timeout.
+            server.soTimeout = remainingMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val socket = try {
                 server.accept()
             } catch (_: IOException) {
-                // Closed by stop(), or the lifetime soTimeout elapsed. Either
-                // way this relay is done; only the timeout is worth surfacing.
-                if (closed.compareAndSet(false, true)) {
-                    onError("Sign-in timed out before the browser returned.")
-                    stopAfterTimeout(server)
-                }
+                // Closed by stop(), or this round's soTimeout fired.
+                if (!closed.get() && System.currentTimeMillis() >= deadlineAtMs) expire()
                 return
             }
             handleConnection(socket)
         }
-        closeQuietly(server)
+        closeQuietly()
     }
 
-    private fun stopAfterTimeout(server: ServerSocket) {
-        closeQuietly(server)
-        for (socket in pending.values) {
-            closeQuietly(socket)
+    private fun expire() {
+        if (closed.compareAndSet(false, true)) {
+            onError("Sign-in timed out before the browser returned.")
         }
-        pending.clear()
+        closeQuietly()
     }
 
     private fun handleConnection(socket: Socket) {
@@ -105,21 +100,25 @@ class OauthLoopbackRelay(
             null
         }
         if (requestTarget == null) {
-            writeResponse(socket, 400, "text/plain", "Bad request.")
+            writeResponse(socket, 400, "Bad request.")
             return
         }
         val pathOnly = requestTarget.substringBefore('?')
         if (pathOnly != expectedPath) {
-            writeResponse(socket, 404, "text/plain", "Not found.")
+            writeResponse(socket, 404, "Not found.")
             return
         }
         if (!callbackTaken.compareAndSet(false, true)) {
-            writeResponse(socket, 409, "text/plain", "The sign-in callback was already delivered.")
+            writeResponse(socket, 409, "The sign-in callback was already delivered.")
             return
         }
-        val requestId = UUID.randomUUID().toString()
-        pending[requestId] = socket
-        onCallback(requestId, requestTarget)
+        writeResponse(
+            socket,
+            200,
+            "Sign-in received. Return to the Laymux app to finish connecting it to your PC.",
+        )
+        stop()
+        onCallback(requestTarget)
     }
 
     /** Parse `GET <target> HTTP/1.1` from the request line; null for anything else. */
@@ -143,12 +142,12 @@ class OauthLoopbackRelay(
         return buffer.toString()
     }
 
-    private fun writeResponse(socket: Socket, status: Int, contentType: String, body: String) {
+    private fun writeResponse(socket: Socket, status: Int, body: String) {
         try {
-            val payload = body.toByteArray(StandardCharsets.UTF_8)
+            val payload = "<html><body>$body</body></html>".toByteArray(StandardCharsets.UTF_8)
             val statusText = if (status == 200) "OK" else "Status"
             val header = "HTTP/1.1 $status $statusText\r\n" +
-                "content-type: $contentType; charset=utf-8\r\n" +
+                "content-type: text/html; charset=utf-8\r\n" +
                 "content-length: ${payload.size}\r\n" +
                 "connection: close\r\n\r\n"
             socket.getOutputStream().apply {
@@ -158,27 +157,23 @@ class OauthLoopbackRelay(
             }
         } catch (_: IOException) {
         } finally {
-            closeQuietly(socket)
+            try {
+                socket.close()
+            } catch (_: IOException) {
+            }
         }
     }
 
-    private fun closeQuietly(socket: Socket) {
+    private fun closeQuietly() {
         try {
-            socket.close()
-        } catch (_: IOException) {
-        }
-    }
-
-    private fun closeQuietly(server: ServerSocket) {
-        try {
-            server.close()
+            serverSocket?.close()
         } catch (_: IOException) {
         }
     }
 
     private companion object {
         /** Matches the desktop session TTL — a stale relay is pure attack surface. */
-        const val LIFETIME_MS = 10 * 60 * 1000
+        const val DEFAULT_LIFETIME_MS = 10 * 60 * 1000L
         const val REQUEST_READ_TIMEOUT_MS = 5_000
         const val BACKLOG = 4
         /** Matches the desktop `MAX_PATH_AND_QUERY_LEN`. */
