@@ -365,6 +365,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
+        | (&Method::GET, "/remote/v1/update")
         | (&Method::GET, "/remote/v1/terminals")
         | (&Method::GET, "/remote/v1/file-viewer/status")
         | (&Method::POST, "/remote/v1/session/claim")
@@ -377,6 +378,8 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/file-viewer/render")
         | (&Method::POST, "/remote/v1/file-viewer/path-link")
         | (&Method::POST, "/remote/v1/notifications/mark-all-read")
+        | (&Method::POST, "/remote/v1/update/check")
+        | (&Method::POST, "/remote/v1/update/install")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
         (&Method::PUT, "/remote/v1/display-settings") => true,
         (&Method::GET, _) => terminal_read_path(path),
@@ -576,6 +579,12 @@ mod tests {
         assert!(http_path_allowed(&Method::GET, "/remote/v1/terminals"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/navigation"));
         assert!(http_path_allowed(&Method::GET, "/remote/v1/layouts"));
+        assert!(http_path_allowed(&Method::GET, "/remote/v1/update"));
+        assert!(http_path_allowed(&Method::POST, "/remote/v1/update/check"));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/update/install"
+        ));
         assert!(http_path_allowed(
             &Method::GET,
             "/remote/v1/display-settings"

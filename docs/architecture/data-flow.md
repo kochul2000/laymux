@@ -1215,6 +1215,28 @@ Grok은 Claude와 같이 레지스트리 밖 headless PTY probe가 `grok --trust
 
 Claude와 Codex는 `UsagePresentation` 하나를 공유한다. 따라서 meter 색(`settings.usage.colors`)·terminal font·responsive density·compact row·footer·layout override는 provider별 코드가 아닌 공통 컴포넌트가 소유한다. Grok Usage도 같은 표시 컴포넌트를 쓴다.
 
+## 10.6 PC 업데이트
+
+Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 소유한다([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)). debug build는 아래 흐름을 시작하지 않는다.
+
+```text
+[앱 시작 + 5초 / 이후 6시간 / desktop·Automation·Remote 수동 확인]
+    → GitHub latest Release의 latest.json 조회
+    → UpdateManager snapshot 갱신
+    → app-update-status-changed event
+       ├─ GridEditToolbar: 새 버전이 있을 때만 action 표시
+       └─ Remote Settings: 60초 poll + 새 버전 표시점
+
+[desktop 확인 대화상자 / Automation 호출 / active Remote lease의 install]
+    → operation=downloading으로 요청 수락·호출자에게 즉시 응답
+    → GitHub latest를 다시 확인
+    → artifact download + 고정 public key 서명 검증
+    → operation=installing
+    → installer 적용 + 프로세스 restart
+```
+
+확인·다운로드·설치는 동시에 하나만 수행한다. 확인 실패는 이미 발견한 `availableVersion`을 지우지 않고 `lastError`만 남긴다. Remote install은 active controller lease의 mutation permit을 요청 수락 시점에만 요구한다. 수락된 뒤의 서명 검증·설치는 lease 만료나 재시작에 따른 연결 종료와 독립적으로 완주한다. Android E2E wrapper가 이 API를 호출하더라도 업데이트되는 대상은 PC이고 APK 자체 업데이트 흐름은 없다.
+
 ---
 
 ## 11. 전체 데이터 흐름 요약

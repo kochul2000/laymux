@@ -4,6 +4,7 @@ pub mod activity_order;
 pub mod activity_reconcile;
 pub mod android_e2e;
 pub mod android_pairing;
+pub mod app_update;
 pub mod automation_server;
 #[cfg(test)]
 mod build_metadata;
@@ -73,6 +74,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let app_state = Arc::new(state::AppState::new());
 
@@ -228,6 +230,8 @@ pub fn run() {
                 tracing::warn!("sleep inhibitor watchdog unavailable; will retry on next request");
             }
 
+            app_update::start_periodic_checks(app.handle().clone(), app_state.app_update.clone());
+
             app.manage(app_state);
             Ok(())
         })
@@ -324,6 +328,9 @@ pub fn run() {
             commands::cloud_connect_start,
             commands::cloud_disconnect,
             commands::set_sleep_inhibit,
+            commands::get_app_update_status,
+            commands::check_app_update,
+            commands::install_app_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

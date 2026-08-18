@@ -192,6 +192,17 @@
                 <span class="nav-toggle-desc">Row under the header</span>
               </label>
               </section>
+              <section id="pcUpdateSection" class="nav-section" aria-label="Laymux update">
+              <h2 class="nav-section-title">Laymux update</h2>
+              <div class="pc-update-panel">
+                <div id="pcUpdateStatus" class="nav-settings-status">Checking PC update status...</div>
+                <div class="pc-update-actions">
+                  <button id="checkPcUpdate" type="button">Check now</button>
+                  <button id="installPcUpdate" class="primary" type="button" hidden disabled>Install &amp; restart PC</button>
+                </div>
+                <div id="pcUpdateNotes" class="pc-update-notes" hidden></div>
+              </div>
+              </section>
               <!-- Installing drops the address bar (ADR-0091), but every browser
                    buries that path in its own menu. The offer lives here, not over
                    the terminal, and only appears while it can be acted on

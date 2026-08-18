@@ -81,6 +81,13 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 주입하고 APK signer certificate를 고정 SHA-256 fingerprint와 대조한 뒤 APK와 checksum을 첨부한다
 ([ADR-0152](../adr/0152-android-cross-store-signing-and-release.md)).
 
+Windows·Linux 데스크톱 release는 GitHub Releases의 `latest.json`을 Tauri updater endpoint로 사용한다.
+release workflow가 두 플랫폼 bundle과 updater artifact를 만들고 GitHub Actions secret의 private key로
+서명하며, 앱은 대응 public key를 고정해 검증된 artifact만 설치한다. 프로세스 전역 `UpdateManager`가
+시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
+같은 snapshot을 읽는다. Android APK 자체 업데이트는 이 경로의 대상이 아니다
+([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)).
+
 ---
 
 ## 3. 레이아웃 구조
@@ -104,7 +111,7 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 
 `GridEditToolbar` 와 `StatusLine` 은 dock 격자 바깥에 있는 **위젯 슬롯 영역**이다([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). StatusLine 은 격자 다음 형제로 렌더되므로 BottomDock 보다 아래에 창 전체 폭으로 놓이며, dock 의 분할·포커스·리사이즈 계약을 상속하지 않는다. 표시 여부는 `widgets.statusLine.enabled` 가 정한다.
 
-`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0114](../adr/0114-sleep-prevention-mode.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다. 그 오른쪽 끝의 창 버튼(최소화·최대화·닫기)은 상단 바의 다른 모든 점유자보다 우선하며 어떤 창 폭에서도 온전히 남는다 — 좌·우 크롬 클러스터가 화면 가장자리에서 먼 쪽부터 잘려 자리를 내준다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)).
+`GridEditToolbar` 우측 클러스터에는 위젯이 아닌 액션 버튼도 놓인다 — 파일 뷰어, 절전 방지 토글([ADR-0114](../adr/0114-sleep-prevention-mode.md)), 새 release가 있을 때만 나타나는 업데이트 action([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)), Remote Access, 설정. 위젯은 알리고 이 버튼들은 동작시킨다. 그 오른쪽 끝의 창 버튼(최소화·최대화·닫기)은 상단 바의 다른 모든 점유자보다 우선하며 어떤 창 폭에서도 온전히 남는다 — 좌·우 크롬 클러스터가 화면 가장자리에서 먼 쪽부터 잘려 자리를 내준다([ADR-0123](../adr/0123-top-bar-window-controls-outrank-everything.md)).
 
 원격 클라이언트는 이 두 표면을 header 아래 한 줄 스트립으로 접어 미러한다([ADR-0124](../adr/0124-remote-widget-strip-mirrors-desktop.md)). 데스크톱이 그리고 있는 위젯만 나타나고 배치·값은 모두 데스크톱이 소유하며, 원격은 `/remote/v1/widgets` 가 준 표시 모델을 그리기만 한다.
 
