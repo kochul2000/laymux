@@ -358,7 +358,8 @@ pub(super) fn parse_font_token(file_name: &str) -> Option<&str> {
 }
 
 fn compress_gzip(data: &[u8]) -> Option<Bytes> {
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let mut encoder =
+        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
     if encoder.write_all(data).is_err() {
         return None;
     }

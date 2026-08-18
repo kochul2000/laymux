@@ -16,8 +16,7 @@ impl Registry {
 
     pub(super) fn replace_sessions_for_pairing(&mut self, instance_id: &str, revision: u64) {
         self.sessions.retain(|_, session| {
-            let replace =
-                session.instance_id == instance_id && session.pairing_revision == revision;
+            let replace = session.instance_id == instance_id && session.pairing_revision == revision;
             if replace {
                 session.revoked.store(true, Ordering::Release);
             }

@@ -4,10 +4,10 @@ mod validation;
 
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-pub(crate) use state::test_output_cipher_pair;
 pub use state::AndroidE2eState;
 pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eSession};
+#[cfg(test)]
+pub(crate) use state::test_output_cipher_pair;
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
 /// desktop↔Android 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이

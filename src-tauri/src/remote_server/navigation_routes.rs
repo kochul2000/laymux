@@ -244,7 +244,15 @@ pub(super) async fn remote_workspace_create(
         None => return json_error(StatusCode::BAD_REQUEST, "layout not found"),
     };
 
-    match frontend_bridge_json(&server, "action", "workspaces", "add", params).await {
+    match frontend_bridge_json(
+        &server,
+        "action",
+        "workspaces",
+        "add",
+        params,
+    )
+    .await
+    {
         Ok(data) => {
             emit_workspace_state_changed(
                 &server,
@@ -733,10 +741,7 @@ mod tests {
 
         let (name, params) = workspace_create_params(&layouts, 2, "split").unwrap();
         assert_eq!(name, "Three Pane 3");
-        assert_eq!(
-            params,
-            serde_json::json!({ "name": "Three Pane 3", "layoutId": "split" })
-        );
+        assert_eq!(params, serde_json::json!({ "name": "Three Pane 3", "layoutId": "split" }));
         assert!(workspace_create_params(&layouts, 2, "missing").is_none());
     }
 }
