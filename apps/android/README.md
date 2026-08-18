@@ -2,8 +2,8 @@
 
 기존 Laymux Cloud landing/dashboard에서 로그인하고 자기 PC를 선택한 뒤, 사용자 PC에 설치된
 Laymux가 제공하는 Remote UI를 실행하는 얇은 E2E wrapper다. Cloud WebView에는 Google login과
-instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스캔, Android Keystore,
-생체 인증과 암호화 transport를 담당한다. APK에는 pairing/bootstrap HTML만 포함한다. Remote
+instance 선택·연결 설정 진입 bridge만 있고, 네이티브 Material pairing sheet와 Kotlin 계층이 QR 스캔, Android Keystore,
+생체 인증과 암호화 transport를 담당한다. APK에는 pairing용 웹 문서를 포함하지 않는다. Remote
 문서·자산은 PC Laymux에서 E2E로 받아 검증한 뒤 WebView 전용 synthetic HTTPS origin에 제공한다.
 설계 정본은 [ADR-0144](../../docs/adr/0144-android-signed-hybrid-client-e2e-foundation.md),
 [ADR-0145](../../docs/adr/0145-android-pairing-authenticated-one-time-ack.md)와
@@ -13,6 +13,8 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 [ADR-0159](../../docs/adr/0159-android-e2e-websocket-output-transport.md),
 [ADR-0160](../../docs/adr/0160-android-e2e-tailscale-direct-transport.md),
 [ADR-0163](../../docs/adr/0163-android-foreground-preserves-remote-document.md),
+[ADR-0178](../../docs/adr/0178-android-pairing-native-material-bottom-sheet.md),
+[ADR-0179](../../docs/adr/0179-android-connection-settings-from-dashboard-menu.md),
 [Remote UI API §13.0](../../docs/architecture/api-contracts.md)을 본다.
 
 현재 범위는 다음과 같다.
@@ -20,12 +22,13 @@ instance 선택 bridge만 있고, 별도 secure WebView/Kotlin 계층이 QR 스�
 - 기존 Cloud landing/dashboard와 HttpOnly account session
 - Android Credential Manager의 Sign in with Google ID token + Cloud session-bound single-use nonce 검증
 - dashboard에서 선택한 PC instance와 저장/스캔한 E2E pairing instance 일치 검증
-- instance별 다중 pairing 저장·자동 선택과 pairing manager의 목록·개별 삭제
+- instance별 다중 pairing 저장·자동 선택과 dashboard `…` 연결 설정의 개별 확인·삭제
 - 5분 뒤 만료되는 `laymux://pair/v2` QR 검증
 - 32바이트 pairing seed의 AES-256-GCM wrapping 저장
 - 기본 auth-per-use 강한 생체 인증과 경고가 있는 명시적 Keystore-only opt-out
-- exact Cloud HTTPS origin만 허용하는 account WebView와 APK bootstrap/AEAD PC 자산만 허용하는 secure WebView의 분리
-- PC 선택 뒤 실제 Cloud dashboard는 하위 WebView로 유지하고, 입력·접근성·Cloud bridge가 비활성인 상태에서 secure WebView의 투명 overlay와 bottom sheet만 위에 표시
+- exact Cloud HTTPS origin만 허용하는 account WebView와 AEAD PC 자산만 허용하는 secure WebView의 분리
+- PC 선택 뒤 실제 Cloud dashboard는 하위 WebView로 유지하고, 입력·접근성·Cloud bridge가 비활성인 상태에서 연결 action 전용 네이티브 Material pairing bottom sheet를 위에 표시
+- Android dashboard의 PC별 `…` 메뉴에서 별도 native 연결 설정 dialog로 진입
 - relay를 통과하는 상호 HMAC scan ACK와 동일 nonce 재시도
 - PC별 pending/confirmed 상태 확인·교체·보호 검증·삭제 UI
 - 생체 승인 뒤 사용 중에는 유지되고 foreground/background 모두 15분 비활성 시 폐기되는 방향별 HKDF/AES-256-GCM session key
@@ -102,10 +105,18 @@ endpoint로 POST한다. 성공 응답의 bounded HttpOnly cookie만 Android cook
 .\gradlew.bat :app:connectedDebugAndroidTest
 ```
 
+debug APK에서 네이티브 pairing sheet나 연결 설정 dialog만 결정적으로 띄워 gesture·back·접근성과 스크린샷을
+검증하려면 다음 intent extra를 사용한다. release 빌드는 이 값을 무시한다.
+
+```powershell
+adb shell am start -n com.laymux.android/.MainActivity --ez laymux.previewPairingSheet true
+adb shell am start -n com.laymux.android/.MainActivity --ez laymux.previewConnectionSettings true
+```
+
 앱은 생체 인증을 기본으로 켠다. PIN·패턴 fallback 없이 QR 키를 저장하거나 사용할 때마다 강한
 생체 인증을 요구한다. 강한 생체 인증을 쓸 수 없는 기기는 보호된 pairing을 막으며, 사용자가
 경고를 확인해 설정을 끈 경우에만 앱 전용 Android Keystore 키만 사용한다. 이 상태에서는 pairing
-화면이 연결 설정을 자동으로 펼치고 `보호 설정 열기` 동작과 opt-out 절차를 표시한다. 보호 설정을
+화면의 `보호 설정 열기`가 dashboard와 분리된 native 연결 설정 dialog로 이동해 opt-out 절차를 표시한다. 보호 설정을
 바꾸거나 생체 등록 정보가 변경되면 기존 키를 재포장하지 않고 다시 pairing해야 한다. API 28의
 `androidx.biometric`도 내부 AppCompat dialog를 사용하므로 Activity theme은 AppCompat 계열을 유지한다.
 

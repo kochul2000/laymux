@@ -30,4 +30,10 @@ class CloudBridge(private val activity: MainActivity) {
         }
         activity.runOnUiThread { activity.selectCloudInstance(instanceId, directUrl) }
     }
+
+    @JavascriptInterface
+    fun openConnectionSettings(instanceId: String) {
+        if (!CloudBridgeInput.isValidInstanceId(instanceId)) return
+        activity.runOnUiThread { activity.openConnectionSettings(instanceId) }
+    }
 }

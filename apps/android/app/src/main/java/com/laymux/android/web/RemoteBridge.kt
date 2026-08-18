@@ -4,30 +4,33 @@ import android.webkit.JavascriptInterface
 import com.laymux.android.MainActivity
 
 /** PC-provided Remote documents receive transport access, never pairing-vault authority. */
-class RemoteBridge(private val activity: MainActivity) {
+class RemoteBridge(
+    private val activity: MainActivity,
+    private val documentGeneration: Long,
+) {
     @JavascriptInterface
     fun setRemoteLease(leaseId: String?) {
-        activity.setRemoteLease(leaseId)
+        activity.setRemoteLease(documentGeneration, leaseId)
     }
 
     @JavascriptInterface
     fun requestRemoteHttp(requestId: String, method: String, path: String, bodyJson: String?) {
-        activity.requestRemoteHttp(requestId, method, path, bodyJson)
+        activity.requestRemoteHttp(documentGeneration, requestId, method, path, bodyJson)
     }
 
     @JavascriptInterface
     fun cancelRemoteHttp(requestId: String) {
-        activity.cancelRemoteHttp(requestId)
+        activity.cancelRemoteHttp(documentGeneration, requestId)
     }
 
     @JavascriptInterface
     fun disconnectRemote() {
-        activity.runOnUiThread(activity::disconnectRemote)
+        activity.disconnectRemoteFromWeb(documentGeneration)
     }
 
     @JavascriptInterface
     fun openExternalUrl(url: String?) {
-        activity.openExternalUrl(url ?: return)
+        activity.openExternalUrl(documentGeneration, url ?: return)
     }
 
     // OAuth loopback relay (ADR-0175): catch the provider's localhost
@@ -35,6 +38,7 @@ class RemoteBridge(private val activity: MainActivity) {
     @JavascriptInterface
     fun beginOauthRelay(sessionId: String?, port: String?, expectedPath: String?, authUrl: String?) {
         activity.beginOauthRelay(
+            documentGeneration,
             sessionId ?: return,
             port ?: return,
             expectedPath ?: return,
@@ -44,7 +48,7 @@ class RemoteBridge(private val activity: MainActivity) {
 
     @JavascriptInterface
     fun cancelOauthRelay() {
-        activity.cancelOauthRelay()
+        activity.cancelOauthRelay(documentGeneration)
     }
 }
 

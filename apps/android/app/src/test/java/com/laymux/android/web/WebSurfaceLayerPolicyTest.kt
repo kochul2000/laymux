@@ -6,14 +6,15 @@ import org.junit.Test
 
 class WebSurfaceLayerPolicyTest {
     @Test
-    fun pairingKeepsCloudVisibleButInertBelowTheSecureSurface() {
+    fun pairingKeepsCloudVisibleButInertBelowTheNativeSheet() {
         val layers = WebSurfaceLayerPolicy.forSurface(VisibleWebSurface.PAIRING)
 
         assertTrue(layers.cloudVisible)
-        assertTrue(layers.secureVisible)
+        assertFalse(layers.secureVisible)
         assertFalse(layers.cloudInteractive)
         assertFalse(layers.cloudAccessible)
         assertFalse(layers.cloudBridgeEnabled)
+        assertFalse(layers.remoteBridgeEnabled)
     }
 
     @Test
@@ -25,6 +26,7 @@ class WebSurfaceLayerPolicyTest {
         assertTrue(layers.cloudInteractive)
         assertTrue(layers.cloudAccessible)
         assertTrue(layers.cloudBridgeEnabled)
+        assertFalse(layers.remoteBridgeEnabled)
     }
 
     @Test
@@ -36,5 +38,18 @@ class WebSurfaceLayerPolicyTest {
         assertFalse(layers.cloudInteractive)
         assertFalse(layers.cloudAccessible)
         assertFalse(layers.cloudBridgeEnabled)
+        assertTrue(layers.remoteBridgeEnabled)
+    }
+
+    @Test
+    fun connectionSettingsKeepDashboardVisibleButBlockBothBridges() {
+        val layers = WebSurfaceLayerPolicy.forSurface(VisibleWebSurface.CONNECTION_SETTINGS)
+
+        assertTrue(layers.cloudVisible)
+        assertFalse(layers.secureVisible)
+        assertFalse(layers.cloudInteractive)
+        assertFalse(layers.cloudAccessible)
+        assertFalse(layers.cloudBridgeEnabled)
+        assertFalse(layers.remoteBridgeEnabled)
     }
 }

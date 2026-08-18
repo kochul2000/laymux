@@ -119,6 +119,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.android.material:material:1.14.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
 
     testImplementation("junit:junit:4.13.2")

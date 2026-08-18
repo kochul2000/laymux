@@ -174,7 +174,7 @@ ADR 이 필요한 대표 기준:
 | [0154](0154-android-multi-instance-pairing-vault.md) | Android pairing vault는 instance별 레코드와 정책별 공유 wrapping key를 사용한다 (0149 정정, 0145·0146 확장) | Accepted |
 | [0155](0155-android-background-remote-lease-grace.md) | Android E2E Remote의 설정 가능한 백그라운드 controller lease 유예 | Proposed |
 | [0156](0156-grok-first-class-agent.md) | Grok Build는 Claude·Codex와 같은 1급 에이전트다 (0009·0102·0104·0118·0120·0125·0134·0147 확장) | Accepted |
-| [0157](0157-android-pairing-sheet-over-live-cloud-webview.md) | Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다 (0149 확장) | Accepted |
+| [0157](0157-android-pairing-sheet-over-live-cloud-webview.md) | Android pairing sheet는 비활성 Cloud WebView 위의 secure overlay다 (0149 확장) | Superseded by 0178 |
 | [0158](0158-activity-aware-single-pane-clear.md) | 단일 pane 실제 클리어는 activity handler가 소유하고 Alt+L로 실행한다 (0137 일부 대체, 0113·0121 재적용) | Accepted |
 | [0159](0159-android-e2e-websocket-output-transport.md) | Android E2E 터미널 출력은 스트림별 AEAD WebSocket으로 전송한다 (0146·0150 일부 대체, 0149 확장) | Accepted |
 | [0160](0160-android-e2e-tailscale-direct-transport.md) | Android E2E는 Tailscale Direct를 우선 전송 경로로 사용한다 (0139·0146·0149·0159 확장) | Proposed |
@@ -195,6 +195,8 @@ ADR 이 필요한 대표 기준:
 | [0175](0175-remote-oauth-loopback-relay.md) | 폰에서 연 설치형 OAuth 로그인의 loopback redirect를 1회용 세션으로 PC 리스너에 중계한다 | Proposed |
 | [0176](0176-dev-android-pairing-payload-injection.md) | dev 빌드 한정으로 페어링 payload 를 MCP 로 노출하고 debug 앱 딥링크로 주입한다 | Proposed |
 | [0177](0177-remote-two-finger-touch-scroll-sensitivity.md) | Remote 터치 스크롤 민감도를 한 손가락·두 손가락으로 분리한다(두 손가락 기본 5) | Proposed |
+| [0178](0178-android-pairing-native-material-bottom-sheet.md) | Android pairing은 네이티브 Material bottom sheet가 소유한다 (0157 대체) | Accepted |
+| [0179](0179-android-connection-settings-from-dashboard-menu.md) | Android 연결 설정은 Cloud 대시보드의 PC 메뉴에서 진입한다 (0178 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

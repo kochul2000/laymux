@@ -19,7 +19,7 @@ class RemoteSurfaceResumePolicyTest {
     fun missingOrForeignDocumentReloadsFromTheAuthenticatedRemoteOrigin() {
         val unsafeUrls = listOf(
             null,
-            LocalContentWebViewClient.START_URL,
+            "https://appassets.androidplatform.net/assets/index.html",
             "http://remote.laymux.invalid/remote/",
             "https://remote.laymux.invalid:443/remote/",
             "https://user@remote.laymux.invalid/remote/",

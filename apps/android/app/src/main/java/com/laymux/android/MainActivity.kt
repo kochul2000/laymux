@@ -29,7 +29,6 @@ import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
@@ -44,6 +43,9 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.laymux.android.pairing.BiometricAvailability
 import com.laymux.android.pairing.BiometricGate
+import com.laymux.android.pairing.ConnectionSettingsActions
+import com.laymux.android.pairing.ConnectionSettingsDialog
+import com.laymux.android.pairing.ConnectionSettingsState
 import com.laymux.android.pairing.PairingAckClient
 import com.laymux.android.pairing.PairingAckException
 import com.laymux.android.pairing.PairingAckSession
@@ -51,6 +53,10 @@ import com.laymux.android.pairing.PairingHandshake
 import com.laymux.android.pairing.PairingKeyInvalidatedException
 import com.laymux.android.pairing.PairingPayload
 import com.laymux.android.pairing.PairingProtectionPolicy
+import com.laymux.android.pairing.PairingBottomSheet
+import com.laymux.android.pairing.PairingSheetActions
+import com.laymux.android.pairing.PairingSheetItem
+import com.laymux.android.pairing.PairingSheetState
 import com.laymux.android.pairing.PairingVault
 import com.laymux.android.pairing.PendingPairingDecryption
 import com.laymux.android.pairing.ResumeGatedRunner
@@ -71,9 +77,9 @@ import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.web.LocalContentWebViewClient
-import com.laymux.android.web.NativeBridge
 import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
+import com.laymux.android.web.RemoteDocumentAuthority
 import com.laymux.android.web.RemoteLoadProgress
 import com.laymux.android.web.RemoteResourceCache
 import com.laymux.android.web.RemoteResourceResponse
@@ -115,11 +121,17 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         val reply: JavaScriptReplyProxy,
     )
 
+    private data class PendingOauthCallback(
+        val documentGeneration: Long,
+        val pathAndQuery: String,
+    )
+
     private lateinit var webView: WebView
     private lateinit var cloudWebView: WebView
+    private lateinit var root: FrameLayout
     private lateinit var vault: PairingVault
-    private lateinit var bridge: NativeBridge
-    private lateinit var remoteBridge: RemoteBridge
+    private lateinit var pairingSheet: PairingBottomSheet
+    private lateinit var connectionSettingsDialog: ConnectionSettingsDialog
     private lateinit var cloudBridge: CloudBridge
     private lateinit var cloudNavigation: CloudNavigationPolicy
     private lateinit var credentialManager: CredentialManager
@@ -143,16 +155,19 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var policyDialog: AlertDialog? = null
     private var selectedCloudInstanceId: String? = null
     private var selectedTailscaleUrl: String? = null
+    private var connectionSettingsInstanceId: String? = null
     @Volatile private var cloudFallbackActive = false
-    private var localWebSurface = LocalWebSurface.PAIRING
-    private var visibleWebSurface = VisibleWebSurface.CLOUD
+    @Volatile private var visibleWebSurface = VisibleWebSurface.CLOUD
+    private var debugPairingPreviewActive = false
+    private var debugConnectionSettingsPreviewActive = false
     private var googleSignInInFlight = false
     @Volatile private var remoteSession: RemoteSession? = null
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
     @Volatile private var remoteLeaseId: String? = null
     private var oauthRelay: OauthLoopbackRelay? = null
-    private var pendingOauthCallback: String? = null
+    private var oauthRelayDocumentGeneration: Long? = null
+    private var pendingOauthCallback: PendingOauthCallback? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
@@ -165,14 +180,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
     private val remoteConnectionGeneration = AtomicLong()
+    private val remoteDocumentAuthority = RemoteDocumentAuthority()
+    private var secureWebViewGeneration = 0L
     @Volatile private var remoteLifecycleActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vault = PairingVault(this)
         biometricGate = BiometricGate(this)
-        bridge = NativeBridge(this, vault)
-        remoteBridge = RemoteBridge(this)
         cloudBridge = CloudBridge(this)
         cloudNavigation = CloudNavigationPolicy(getString(R.string.laymux_cloud_base_url))
         credentialManager = CredentialManager.create(this)
@@ -183,10 +198,51 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 .enableAutoZoom()
                 .build(),
         )
+        pairingSheet = PairingBottomSheet(
+            this,
+            object : PairingSheetActions {
+                override fun scanPairingQr() = startPairingScan()
+
+                override fun openConnectionSettings(instanceId: String) =
+                    showConnectionSettings(instanceId)
+
+                override fun connectRemote() = this@MainActivity.connectRemote()
+
+                override fun cancelRemoteConnection() =
+                    this@MainActivity.cancelRemoteConnection()
+
+                override fun disconnectRemote() = this@MainActivity.disconnectRemote()
+
+                override fun dismissPairing() = showCloudDashboard()
+            },
+        )
+        connectionSettingsDialog = ConnectionSettingsDialog(
+            this,
+            object : ConnectionSettingsActions {
+                override fun setBiometricRequired(required: Boolean) {
+                    this@MainActivity.setBiometricRequired(required)
+                }
+
+                override fun verifyPairingProtection(instanceId: String) {
+                    this@MainActivity.verifyPairingProtection(instanceId)
+                }
+
+                override fun retryPairingConfirmation(instanceId: String) {
+                    this@MainActivity.retryPairingConfirmation(instanceId)
+                }
+
+                override fun forgetPairing(instanceId: String) {
+                    this@MainActivity.forgetPairing(instanceId)
+                }
+
+                override fun dismissConnectionSettings() =
+                    this@MainActivity.dismissConnectionSettings()
+            },
+        )
         webView = createWebView()
         cloudWebView = createCloudWebView()
         remoteLoadingOverlay = createRemoteLoadingOverlay()
-        val root = FrameLayout(this).apply {
+        root = FrameLayout(this).apply {
             addView(
                 cloudWebView,
                 FrameLayout.LayoutParams(
@@ -213,7 +269,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         applySystemBarInsets(root)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         installRemoteBackGuard()
-        webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
         // Only on a genuine cold start: a recreation (density/locale change,
         // process restore) redelivers the same VIEW intent, and replaying the
@@ -221,6 +276,29 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         // from the already-confirmed desktop, and tear the pairing down.
         if (savedInstanceState == null) {
             handleDebugPairingIntent(intent)
+            showDebugNativeSurfacePreviewIfRequested()
+        }
+    }
+
+    /** Debug-only deterministic surface for emulator screenshot/accessibility checks. */
+    private fun showDebugNativeSurfacePreviewIfRequested() {
+        val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (!debugBuild) return
+        when {
+            intent.getBooleanExtra(DEBUG_CONNECTION_SETTINGS_PREVIEW, false) -> {
+                debugConnectionSettingsPreviewActive = true
+                connectionSettingsInstanceId = DEBUG_PAIRING_INSTANCE_ID
+                applyWebSurfaceLayers(VisibleWebSurface.CONNECTION_SETTINGS)
+                connectionSettingsDialog.show(
+                    connectionSettingsState(DEBUG_PAIRING_INSTANCE_ID),
+                )
+            }
+            intent.getBooleanExtra(DEBUG_PAIRING_SHEET_PREVIEW, false) -> {
+                debugPairingPreviewActive = true
+                selectedCloudInstanceId = DEBUG_PAIRING_INSTANCE_ID
+                applyWebSurfaceLayers(VisibleWebSurface.PAIRING)
+                pairingSheet.show(pairingSheetState())
+            }
         }
     }
 
@@ -285,12 +363,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(): WebView {
-        val assetLoader = WebViewAssetLoader.Builder()
-            .addPathHandler(
-                LocalContentWebViewClient.ASSET_PATH,
-                WebViewAssetLoader.AssetsPathHandler(this),
-            )
-            .build()
+        val documentGeneration = remoteDocumentAuthority.installFreshDocument()
+        secureWebViewGeneration = documentGeneration
         return WebView(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
@@ -305,11 +379,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             settings.cacheMode = WebSettings.LOAD_NO_CACHE
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             webViewClient = LocalContentWebViewClient(
-                assetLoader,
-                ::loadRemoteResource,
-                ::onRemoteDocumentLoaded,
+                { path -> loadRemoteResource(documentGeneration, path) },
+                { onRemoteDocumentLoaded(documentGeneration) },
             )
-            addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
+            addJavascriptInterface(
+                RemoteBridge(this@MainActivity, documentGeneration),
+                NATIVE_BRIDGE_NAME,
+            )
             if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) &&
                 WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)
             ) {
@@ -318,7 +394,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     REMOTE_OUTPUT_BRIDGE_NAME,
                     setOf(REMOTE_WRAPPER_ORIGIN),
                 ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                    if (isMainFrame && sourceOrigin == Uri.parse(REMOTE_WRAPPER_ORIGIN)) {
+                    if (remoteBridgeActionsEnabled(documentGeneration) &&
+                        isMainFrame && sourceOrigin == Uri.parse(REMOTE_WRAPPER_ORIGIN)
+                    ) {
                         stringWebMessagePayload(
                             message.type,
                             WebMessageCompat.TYPE_STRING,
@@ -511,34 +589,66 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun showCloudDashboard() {
         closeRemoteSession()
+        debugPairingPreviewActive = false
+        debugConnectionSettingsPreviewActive = false
         selectedCloudInstanceId = null
         selectedTailscaleUrl = null
+        connectionSettingsInstanceId = null
         cloudFallbackActive = false
         if (!::cloudWebView.isInitialized || isDestroyed) return
+        if (::pairingSheet.isInitialized) pairingSheet.dismiss()
+        if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
         cloudWebView.loadUrl(cloudNavigation.dashboardUrl)
     }
 
     private fun showPairingSurface() {
-        if (!::webView.isInitialized || isDestroyed) return
-        installLocalBridge(LocalWebSurface.PAIRING)
+        if (!::pairingSheet.isInitialized || isDestroyed) return
         applyWebSurfaceLayers(VisibleWebSurface.PAIRING)
-        webView.loadUrl(LocalContentWebViewClient.START_URL)
+        pairingSheet.show(pairingSheetState())
+    }
+
+    fun openConnectionSettings(instanceId: String) {
+        if (!cloudBridgeActionsEnabled()) return
+        showConnectionSettings(instanceId)
+    }
+
+    private fun showConnectionSettings(instanceId: String) {
+        if (!::connectionSettingsDialog.isInitialized || isDestroyed) return
+        if (::pairingSheet.isInitialized) pairingSheet.dismiss()
+        connectionSettingsInstanceId = instanceId
+        applyWebSurfaceLayers(VisibleWebSurface.CONNECTION_SETTINGS)
+        connectionSettingsDialog.show(connectionSettingsState(instanceId))
+    }
+
+    fun dismissConnectionSettings() {
+        if (visibleWebSurface != VisibleWebSurface.CONNECTION_SETTINGS) return
+        debugConnectionSettingsPreviewActive = false
+        connectionSettingsInstanceId = null
+        applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
     }
 
     private fun showRemoteSurface() {
         if (!::webView.isInitialized || isDestroyed) return
-        installLocalBridge(LocalWebSurface.REMOTE)
+        if (!remoteDocumentAuthority.authorize(secureWebViewGeneration)) {
+            closeRemoteSession()
+            showCloudDashboard()
+            return
+        }
+        pairingSheet.dismiss()
+        connectionSettingsDialog.dismiss()
+        connectionSettingsInstanceId = null
         applyWebSurfaceLayers(VisibleWebSurface.REMOTE)
-        // The old document keeps rendering until the Remote page paints, so the
-        // overlay is the only signal that assets are crossing the relay.
+        // The fresh secure WebView stays below this overlay until the authenticated
+        // Remote document and its assets finish crossing the relay.
         remoteLoadProgress = RemoteLoadProgress()
         remoteLoadingStatus.text = remoteLoadProgress.statusText()
         remoteLoadingOverlay.visibility = View.VISIBLE
         webView.loadUrl(LocalContentWebViewClient.REMOTE_START_URL)
     }
 
-    private fun onRemoteDocumentLoaded() {
+    private fun onRemoteDocumentLoaded(documentGeneration: Long) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
         remoteLoadingOverlay.visibility = View.GONE
         // The Remote page's first Keyboard tap can only raise the IME when the
         // WebView already holds view focus at that moment.
@@ -554,7 +664,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     ) {
         if (!::webView.isInitialized || isDestroyed) return
         val action = RemoteSurfaceResumePolicy.action(
-            remoteSurfaceInstalled = localWebSurface == LocalWebSurface.REMOTE,
+            remoteSurfaceInstalled = webView.url?.startsWith(
+                "https://${LocalContentWebViewClient.REMOTE_WRAPPER_HOST}/",
+            ) == true,
             currentUrl = webView.url,
         )
         if (action == RemoteSurfaceResumeAction.RELOAD_DOCUMENT) {
@@ -587,6 +699,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun applyWebSurfaceLayers(surface: VisibleWebSurface) {
+        if (surface != VisibleWebSurface.REMOTE) {
+            revokeRemoteDocument()
+            if (visibleWebSurface == VisibleWebSurface.REMOTE) replaceSecureWebView()
+        }
         val layers = WebSurfaceLayerPolicy.forSurface(surface)
         visibleWebSurface = surface
         if (surface != VisibleWebSurface.REMOTE) {
@@ -606,8 +722,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         } else {
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
+        if (!layers.cloudInteractive) cloudWebView.clearFocus()
         if (layers.secureVisible) {
-            cloudWebView.clearFocus()
             webView.bringToFront()
             webView.requestFocus()
             // bringToFront reorders the WebView past the loading overlay, which
@@ -616,17 +732,44 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
+    private fun revokeRemoteDocument() {
+        remoteDocumentAuthority.revoke()
+        oauthRelay?.stop()
+        oauthRelay = null
+        oauthRelayDocumentGeneration = null
+        pendingOauthCallback = null
+    }
+
+    private fun replaceSecureWebView() {
+        if (!::root.isInitialized || !::webView.isInitialized || isDestroyed) return
+        val previous = webView
+        val replacement = createWebView().apply {
+            visibility = View.GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        root.removeView(previous)
+        previous.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
+        previous.stopLoading()
+        previous.destroy()
+        webView = replacement
+        root.addView(
+            replacement,
+            1,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+
     private fun cloudBridgeActionsEnabled(): Boolean =
         WebSurfaceLayerPolicy.forSurface(visibleWebSurface).cloudBridgeEnabled
 
-    private fun installLocalBridge(surface: LocalWebSurface) {
-        webView.removeJavascriptInterface(NATIVE_BRIDGE_NAME)
-        when (surface) {
-            LocalWebSurface.PAIRING -> webView.addJavascriptInterface(bridge, NATIVE_BRIDGE_NAME)
-            LocalWebSurface.REMOTE -> webView.addJavascriptInterface(remoteBridge, NATIVE_BRIDGE_NAME)
-        }
-        localWebSurface = surface
-    }
+    private fun remoteBridgeActionsEnabled(documentGeneration: Long): Boolean =
+        remoteDocumentAuthority.allows(
+            documentGeneration,
+            WebSurfaceLayerPolicy.forSurface(visibleWebSurface).remoteBridgeEnabled,
+        )
 
     private fun showCloudMessage(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
@@ -645,7 +788,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun remoteSessionExpiresAt(): Long? = remoteSession?.expiresAtEpochSeconds
 
-    fun setRemoteLease(leaseId: String?) {
+    fun setRemoteLease(documentGeneration: Long, leaseId: String?) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
         remoteLeaseId = leaseId?.takeIf { it.isNotBlank() }
     }
 
@@ -654,10 +798,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
      * support and its navigation allowlist rejects every off-origin URL. Native starts the OS
      * browser instead, after re-validating the terminal-controlled URL.
      */
-    fun openExternalUrl(rawUrl: String) {
+    fun openExternalUrl(documentGeneration: Long, rawUrl: String) {
         val url = ExternalUrlPolicy.browsableUrl(rawUrl) ?: return
         runOnUiThread {
-            if (localWebSurface != LocalWebSurface.REMOTE) return@runOnUiThread
+            if (!remoteBridgeActionsEnabled(documentGeneration)) return@runOnUiThread
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -683,7 +827,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
      * and delivered to the Remote document on the next onStart; the browser
      * already got its "return to the app" page from the listener.
      */
-    fun beginOauthRelay(sessionId: String, portValue: String, expectedPath: String, authUrl: String) {
+    fun beginOauthRelay(
+        documentGeneration: Long,
+        sessionId: String,
+        portValue: String,
+        expectedPath: String,
+        authUrl: String,
+    ) {
         if (!validBridgeId(sessionId)) return
         val port = portValue.toIntOrNull() ?: return
         if (port < 1024 || port > 65535) return
@@ -694,52 +844,68 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         val url = ExternalUrlPolicy.browsableUrl(authUrl) ?: return
         runOnUiThread {
-            if (localWebSurface != LocalWebSurface.REMOTE) return@runOnUiThread
+            if (!remoteBridgeActionsEnabled(documentGeneration)) return@runOnUiThread
             oauthRelay?.stop()
+            oauthRelayDocumentGeneration = documentGeneration
             val relay = OauthLoopbackRelay(
                 port = port,
                 expectedPath = expectedPath,
-                onCallback = { pathAndQuery -> deliverOauthCallback(pathAndQuery) },
-                onError = { message -> dispatchOauthRelayEvent("onError", message) },
+                onCallback = { pathAndQuery ->
+                    deliverOauthCallback(documentGeneration, pathAndQuery)
+                },
+                onError = { message ->
+                    dispatchOauthRelayEvent(documentGeneration, "onError", message)
+                },
             )
             if (!relay.start()) {
                 oauthRelay = null
+                oauthRelayDocumentGeneration = null
                 dispatchOauthRelayEvent(
+                    documentGeneration,
                     "onError",
                     "Could not open the sign-in relay port on this device.",
                 )
                 return@runOnUiThread
             }
             oauthRelay = relay
-            openExternalUrl(url)
+            openExternalUrl(documentGeneration, url)
         }
     }
 
-    fun cancelOauthRelay() {
+    fun cancelOauthRelay(documentGeneration: Long) {
         // Called from the WebView JS bridge thread. The relay fields are
         // otherwise touched only on the UI thread (beginOauthRelay,
         // deliverOauthCallback, flushPendingOauthCallback, onDestroy), so hop
         // there to avoid racing a parked-callback delivery/flush. stop() is
         // itself AtomicBoolean-safe; the field writes are the race.
         runOnUiThread {
+            if (!remoteBridgeActionsEnabled(documentGeneration)) return@runOnUiThread
+            if (oauthRelayDocumentGeneration != documentGeneration) return@runOnUiThread
             oauthRelay?.stop()
             oauthRelay = null
+            oauthRelayDocumentGeneration = null
             pendingOauthCallback = null
         }
     }
 
-    private fun deliverOauthCallback(pathAndQuery: String) {
+    private fun deliverOauthCallback(documentGeneration: Long, pathAndQuery: String) {
         runOnUiThread {
+            if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                oauthRelayDocumentGeneration != documentGeneration
+            ) {
+                return@runOnUiThread
+            }
             oauthRelay = null
+            oauthRelayDocumentGeneration = null
             if (remoteLifecycleActive) {
-                dispatchOauthRelayEvent("onCallback", pathAndQuery)
+                dispatchOauthRelayEvent(documentGeneration, "onCallback", pathAndQuery)
             } else {
                 // The OS browser is frontmost with the "return to the app"
                 // page. Park the callback and pull this task back to the
                 // front so the forward runs without the user pressing Back;
                 // onStart flushes the parked callback. Best-effort — a denied
                 // background-activity launch just leaves the manual Back path.
-                pendingOauthCallback = pathAndQuery
+                pendingOauthCallback = PendingOauthCallback(documentGeneration, pathAndQuery)
                 bringTaskToForeground()
             }
         }
@@ -758,15 +924,27 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun flushPendingOauthCallback() {
-        val pathAndQuery = pendingOauthCallback ?: return
+        val callback = pendingOauthCallback ?: return
         pendingOauthCallback = null
-        dispatchOauthRelayEvent("onCallback", pathAndQuery)
+        dispatchOauthRelayEvent(
+            callback.documentGeneration,
+            "onCallback",
+            callback.pathAndQuery,
+        )
     }
 
-    private fun dispatchOauthRelayEvent(method: String, vararg arguments: String) {
+    private fun dispatchOauthRelayEvent(
+        documentGeneration: Long,
+        method: String,
+        vararg arguments: String,
+    ) {
         val encodedArguments = arguments.joinToString(",") { JSONObject.quote(it) }
         runOnUiThread {
-            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            if (!::webView.isInitialized || isDestroyed ||
+                !remoteBridgeActionsEnabled(documentGeneration)
+            ) {
+                return@runOnUiThread
+            }
             webView.evaluateJavascript(
                 "window.laymuxOauthRelay?.$method($encodedArguments);",
                 null,
@@ -1521,7 +1699,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    private fun loadRemoteResource(path: String): RemoteResourceResponse? {
+    private fun loadRemoteResource(
+        documentGeneration: Long,
+        path: String,
+    ): RemoteResourceResponse? {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return null
         if (path.length > MAX_REMOTE_PATH_LENGTH) return null
         val session = remoteSession ?: return null
         if (!remoteLifecycleActive || session.isExpired()) return null
@@ -1531,11 +1713,20 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         val future = try {
             remoteExecutor.submit<RemoteResourceResponse?> {
-                if (!remoteLifecycleActive || remoteSession !== session) return@submit null
+                if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                    !remoteLifecycleActive || remoteSession !== session
+                ) {
+                    return@submit null
+                }
                 val response = e2eRemoteClient.rpc(
                     session,
                     JSONObject().put("kind", "resource").put("path", path),
                 )
+                if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                    remoteSession !== session
+                ) {
+                    return@submit null
+                }
                 if (response.optString("kind") == "error") {
                     val status = response.optInt("status", 500).coerceIn(400, 599)
                     return@submit RemoteResourceResponse.error(
@@ -1555,6 +1746,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         updateRemoteLoadProgress { it.fetching(path) }
         return try {
             val resource = future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (!remoteBridgeActionsEnabled(documentGeneration) || remoteSession !== session) {
+                return null
+            }
             updateRemoteLoadProgress {
                 if (resource != null) it.fetched(resource.body.size) else it.fetchFailed()
             }
@@ -1581,11 +1775,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun requestRemoteHttp(
+        documentGeneration: Long,
         requestId: String,
         method: String,
         path: String,
         bodyJson: String?,
     ) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
         if (!validBridgeId(requestId) || path.length > MAX_REMOTE_PATH_LENGTH ||
             (bodyJson?.length ?: 0) > MAX_REMOTE_HTTP_BODY_CHARS
         ) {
@@ -1667,7 +1863,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
-    fun cancelRemoteHttp(requestId: String) {
+    fun cancelRemoteHttp(documentGeneration: Long, requestId: String) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
         if (validBridgeId(requestId)) {
             remoteHttpRequests.cancel(requestId)
             remoteHttpResumeTracker.cancel(requestId)
@@ -1995,6 +2192,12 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         showCloudDashboard()
     }
 
+    fun disconnectRemoteFromWeb(documentGeneration: Long) {
+        runOnUiThread {
+            if (remoteBridgeActionsEnabled(documentGeneration)) disconnectRemote()
+        }
+    }
+
     /**
      * Aborts an in-progress connection: the biometric/handshake phase on the
      * pairing surface and the resource-streaming phase behind the loading
@@ -2017,7 +2220,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         closeRemoteSession()
         hideRemoteLoadingOverlay()
-        if (localWebSurface == LocalWebSurface.REMOTE) {
+        if (visibleWebSurface == VisibleWebSurface.REMOTE) {
             showPairingSurface()
         }
         notifyPairingChanged(notice = "보안 세션 연결을 취소했습니다.")
@@ -2200,12 +2403,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun hasPendingCryptoOperation(): Boolean =
         pendingPairing != null || pendingDecryption != null || pairingAckInFlight || remoteConnecting
 
-    /**
-     * The pairing page clears its error and notice lines the moment a button is
-     * tapped, so a guard that returns without a status update leaves a screen
-     * with no text and a permanently disabled button. Every guarded entry point
-     * says which operation still owns the pairing state instead.
-     */
+    /** Native pairing surfaces restore disabled actions from each published state update. */
     private fun busyOperationMessage(): String = when {
         scanInFlight -> "QR 스캔이 진행 중입니다."
         pendingPairing != null || pendingDecryption != null ->
@@ -2226,15 +2424,128 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         notice: String? = null,
     ) {
         runOnUiThread {
-            if (!::webView.isInitialized || isDestroyed ||
-                localWebSurface != LocalWebSurface.PAIRING
-            ) {
-                return@runOnUiThread
+            if (isDestroyed) return@runOnUiThread
+            when (visibleWebSurface) {
+                VisibleWebSurface.PAIRING -> if (::pairingSheet.isInitialized) {
+                    pairingSheet.render(pairingSheetState(error, notice))
+                }
+                VisibleWebSurface.CONNECTION_SETTINGS -> {
+                    val instanceId = connectionSettingsInstanceId ?: return@runOnUiThread
+                    if (::connectionSettingsDialog.isInitialized) {
+                        connectionSettingsDialog.render(
+                            connectionSettingsState(instanceId, error, notice),
+                        )
+                    }
+                }
+                VisibleWebSurface.CLOUD,
+                VisibleWebSurface.REMOTE,
+                -> Unit
             }
-            val status = JSONObject.quote(bridge.statusJson(error, notice))
-            webView.evaluateJavascript(
-                "if (window.laymuxNative) window.laymuxNative.onPairingChanged($status);",
-                null,
+        }
+    }
+
+    private fun connectionSettingsState(
+        instanceId: String,
+        error: String? = null,
+        notice: String? = null,
+    ): ConnectionSettingsState {
+        if (debugConnectionSettingsPreviewActive) {
+            return ConnectionSettingsState(
+                instanceId = DEBUG_PAIRING_INSTANCE_ID,
+                pairing = PairingSheetItem(
+                    endpoint = "https://app.laymux.com/",
+                    instanceId = DEBUG_PAIRING_INSTANCE_ID,
+                    confirmedAtEpochSeconds = 1L,
+                    label = "미리보기 PC",
+                ),
+                protectionPolicy = PairingProtectionPolicy.KEYSTORE_ONLY,
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+                error = error,
+                notice = notice,
+            )
+        }
+        return try {
+            val pairing = vault.loadMetadata()
+                .firstOrNull { it.instanceId == instanceId }
+                ?.let { metadata ->
+                    PairingSheetItem(
+                        endpoint = metadata.endpoint,
+                        instanceId = metadata.instanceId,
+                        confirmedAtEpochSeconds = metadata.confirmedAtEpochSeconds,
+                        label = metadata.label,
+                    )
+                }
+            ConnectionSettingsState(
+                instanceId = instanceId,
+                pairing = pairing,
+                protectionPolicy = vault.protectionPolicy(),
+                biometricAvailability = biometricAvailability(),
+                error = error,
+                notice = notice,
+            )
+        } catch (_: Exception) {
+            ConnectionSettingsState(
+                instanceId = instanceId,
+                pairing = null,
+                protectionPolicy = PairingProtectionPolicy.BIOMETRIC,
+                biometricAvailability = biometricAvailability(),
+                error = error ?: "이 PC의 연결 설정을 읽지 못했습니다.",
+                notice = notice,
+            )
+        }
+    }
+
+    private fun pairingSheetState(
+        error: String? = null,
+        notice: String? = null,
+    ): PairingSheetState {
+        if (debugPairingPreviewActive) {
+            return PairingSheetState(
+                selectedInstanceId = DEBUG_PAIRING_INSTANCE_ID,
+                pairings = listOf(
+                    PairingSheetItem(
+                        endpoint = "https://app.laymux.com/",
+                        instanceId = DEBUG_PAIRING_INSTANCE_ID,
+                        confirmedAtEpochSeconds = 1L,
+                        label = "미리보기 PC",
+                    ),
+                ),
+                protectionPolicy = PairingProtectionPolicy.KEYSTORE_ONLY,
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+                remoteConnected = false,
+                remoteConnecting = false,
+                error = error,
+                notice = notice,
+            )
+        }
+        return try {
+            PairingSheetState(
+                selectedInstanceId = selectedCloudInstanceId,
+                pairings = vault.loadMetadata().map { metadata ->
+                    PairingSheetItem(
+                        endpoint = metadata.endpoint,
+                        instanceId = metadata.instanceId,
+                        confirmedAtEpochSeconds = metadata.confirmedAtEpochSeconds,
+                        label = metadata.label,
+                    )
+                },
+                protectionPolicy = vault.protectionPolicy(),
+                biometricAvailability = biometricAvailability(),
+                remoteConnected = remoteConnected(),
+                remoteConnecting = remoteConnecting(),
+                error = error,
+                notice = notice,
+            )
+        } catch (_: Exception) {
+            PairingSheetState(
+                selectedInstanceId = selectedCloudInstanceId,
+                pairings = emptyList(),
+                protectionPolicy = PairingProtectionPolicy.BIOMETRIC,
+                biometricAvailability = biometricAvailability(),
+                remoteConnected = false,
+                remoteConnecting = remoteConnecting(),
+                error = error ?: "저장된 페어링 정보를 읽지 못했습니다.",
+                notice = notice,
             )
         }
     }
@@ -2303,9 +2614,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onDestroy() {
-        oauthRelay?.stop()
-        oauthRelay = null
-        pendingOauthCallback = null
+        revokeRemoteDocument()
+        if (::pairingSheet.isInitialized) pairingSheet.dismiss()
+        if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
         policyDialog?.dismiss()
         policyDialog = null
         biometricPromptGate.cancelPending()
@@ -2348,17 +2659,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val MAX_REMOTE_HTTP_BODY_CHARS = 256 * 1024
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
+        private const val DEBUG_PAIRING_SHEET_PREVIEW = "laymux.previewPairingSheet"
+        private const val DEBUG_CONNECTION_SETTINGS_PREVIEW =
+            "laymux.previewConnectionSettings"
+        private const val DEBUG_PAIRING_INSTANCE_ID = "preview-desktop"
     }
 
     private enum class DecryptionPurpose {
         VERIFY,
         CONFIRM,
         CONNECT,
-    }
-
-    private enum class LocalWebSurface {
-        PAIRING,
-        REMOTE,
     }
 
     private class RemoteOperationException(

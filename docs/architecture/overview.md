@@ -38,12 +38,13 @@ GTK3 개발·런타임 라이브러리는 Tauri/WebKitGTK의 기존 Linux prereq
 재사용한다. Windows dependency에는 Linux backend feature를 전달하지 않는다.
 
 Android 앱은 Cargo/Tauri workspace 구성원이 아니다. Cloud WebView는 기존 Laymux Cloud의
-landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택만 좁은 native bridge에
+landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC 선택·연결 설정 진입만 좁은 native bridge에
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
 Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에는 E2E bridge를 설치하지 않는다.
-별도 secure WebView와 Kotlin 계층이 QR·Keystore·암호화 transport를 소유한다. APK에는 pairing과
-보안 session을 여는 최소 bootstrap만 포함하며, terminal·workspace·입출력 표면은 사용자 PC에
-설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
+연결 실행용 네이티브 Material bottom sheet와 dashboard `…`에서 여는 별도 설정 dialog가
+QR·Keystore·pairing 상태를 소유하고, 별도 secure
+WebView는 암호화 transport로 검증한 PC Remote 문서만 표시한다. APK에는 terminal·workspace·입출력
+표면을 포함하지 않으며, 이 기능은 사용자 PC에 설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
 Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공한다.
 WebView의 API 요청은 native HTTP bridge가 기존 AEAD RPC로 암호화하고, terminal output은 native가
 소유한 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge로 browser와 같은 Remote v1
