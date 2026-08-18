@@ -1222,6 +1222,7 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 ```text
 [앱 시작 + 5초 / 이후 6시간 / desktop·Automation·Remote 수동 확인]
     → GitHub latest Release의 latest.json 조회
+    → manifest x.y.z와 download URL의 GitHub tag v?x.y.z가 일치하는지 검증
     → UpdateManager snapshot 갱신
     → app-update-status-changed event
        ├─ GridEditToolbar: 새 버전이 있을 때만 action 표시
@@ -1230,12 +1231,13 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 [desktop 확인 대화상자 / Automation 호출 / active Remote lease의 install]
     → operation=downloading으로 요청 수락·호출자에게 즉시 응답
     → GitHub latest를 다시 확인
+    → 같은 x.y.z 버전인지 재검증
     → artifact download + 고정 public key 서명 검증
     → operation=installing
     → installer 적용 + 프로세스 restart
 ```
 
-확인·다운로드·설치는 동시에 하나만 수행한다. 확인 실패는 이미 발견한 `availableVersion`을 지우지 않고 `lastError`만 남긴다. Remote install은 active controller lease의 mutation permit을 요청 수락 시점에만 요구한다. 수락된 뒤의 서명 검증·설치는 lease 만료나 재시작에 따른 연결 종료와 독립적으로 완주한다. Android E2E wrapper가 이 API를 호출하더라도 업데이트되는 대상은 PC이고 APK 자체 업데이트 흐름은 없다.
+확인·다운로드·설치는 동시에 하나만 수행한다. 확인 실패는 이미 발견한 `availableVersion`을 지우지 않고 `lastError`만 남긴다. `release.published` CI는 GitHub 발행 뒤에 시작되므로 잘못 지정된 latest를 사전에 막을 수 없다. 따라서 앱은 updater manifest의 `x.y.z`와 download URL의 GitHub Release tag `v?x.y.z`가 일치하지 않으면 무시하며, 설치 직전 latest가 사용자가 승인한 버전과 달라져도 설치하지 않는다. Remote install은 active controller lease의 mutation permit을 요청 수락 시점에만 요구한다. 수락된 뒤의 서명 검증·설치는 lease 만료나 재시작에 따른 연결 종료와 독립적으로 완주한다. Android E2E wrapper가 이 API를 호출하더라도 업데이트되는 대상은 PC이고 APK 자체 업데이트 흐름은 없다.
 
 ---
 

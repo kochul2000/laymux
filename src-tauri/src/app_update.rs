@@ -10,8 +10,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
+use url::Url;
 
-use crate::constants::EVENT_APP_UPDATE_STATUS_CHANGED;
+use crate::constants::{
+    EVENT_APP_UPDATE_STATUS_CHANGED, GITHUB_UPDATE_HOST, GITHUB_UPDATE_OWNER,
+    GITHUB_UPDATE_REPOSITORY,
+};
 use crate::lock_ext::MutexExt;
 
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -163,6 +167,73 @@ struct AvailableUpdate {
     published_at: Option<String>,
 }
 
+fn is_stable_release_version(version: &str) -> bool {
+    let mut parts = version.split('.');
+    for _ in 0..3 {
+        let Some(part) = parts.next() else {
+            return false;
+        };
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+    }
+    parts.next().is_none()
+}
+
+fn github_release_version(download_url: &Url) -> Option<&str> {
+    if download_url.scheme() != "https"
+        || download_url.host_str() != Some(GITHUB_UPDATE_HOST)
+        || download_url.port().is_some()
+        || !download_url.username().is_empty()
+        || download_url.password().is_some()
+    {
+        return None;
+    }
+
+    let mut segments = download_url.path_segments()?;
+    if segments.next() != Some(GITHUB_UPDATE_OWNER)
+        || segments.next() != Some(GITHUB_UPDATE_REPOSITORY)
+        || segments.next() != Some("releases")
+        || segments.next() != Some("download")
+    {
+        return None;
+    }
+    let tag = segments.next()?;
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    let asset = segments.next()?;
+    if asset.is_empty() || !is_stable_release_version(version) {
+        return None;
+    }
+    Some(version)
+}
+
+fn validate_release_candidate(version: &str, download_url: &Url) -> Result<(), String> {
+    if !is_stable_release_version(version) {
+        return Err(format!("release version '{version}' is not stable x.y.z"));
+    }
+    let tag_version = github_release_version(download_url).ok_or_else(|| {
+        "release download URL does not contain a stable Laymux version tag".to_string()
+    })?;
+    if tag_version != version {
+        return Err(format!(
+            "release tag version {tag_version} does not match manifest version {version}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_install_candidate(expected: &str, candidate: &str) -> Result<(), String> {
+    if !is_stable_release_version(candidate) {
+        return Err(format!("release version '{candidate}' is not stable x.y.z"));
+    }
+    if candidate != expected {
+        return Err(format!(
+            "the available update changed from {expected} to {candidate}; check again"
+        ));
+    }
+    Ok(())
+}
+
 pub async fn check_now(
     app: &AppHandle,
     manager: &Arc<UpdateManager>,
@@ -179,10 +250,20 @@ pub async fn check_now(
     .await;
 
     let status = match result {
-        Ok(update) => manager.finish_check(update.map(|update| AvailableUpdate {
-            version: update.version,
-            notes: update.body,
-            published_at: update.date.map(|date| date.to_string()),
+        Ok(update) => manager.finish_check(update.and_then(|update| {
+            if let Err(error) = validate_release_candidate(&update.version, &update.download_url) {
+                tracing::warn!(
+                    version = %update.version,
+                    %error,
+                    "ignoring application update outside the stable release contract"
+                );
+                return None;
+            }
+            Some(AvailableUpdate {
+                version: update.version,
+                notes: update.body,
+                published_at: update.date.map(|date| date.to_string()),
+            })
         }))?,
         Err(error) => manager.fail_operation(error)?,
     };
@@ -197,10 +278,14 @@ pub fn schedule_install(
     manager: Arc<UpdateManager>,
 ) -> Result<UpdateStatus, String> {
     let accepted = manager.begin_install()?;
+    let expected_version = accepted
+        .available_version
+        .clone()
+        .ok_or_else(|| "there is no pending update".to_string())?;
     publish(&app, &accepted);
 
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = install_and_restart(&app, &manager).await {
+        if let Err(error) = install_and_restart(&app, &manager, &expected_version).await {
             tracing::error!(%error, "application update failed");
             match manager.fail_operation(error) {
                 Ok(status) => publish(&app, &status),
@@ -211,7 +296,11 @@ pub fn schedule_install(
     Ok(accepted)
 }
 
-async fn install_and_restart(app: &AppHandle, manager: &Arc<UpdateManager>) -> Result<(), String> {
+async fn install_and_restart(
+    app: &AppHandle,
+    manager: &Arc<UpdateManager>,
+    expected_version: &str,
+) -> Result<(), String> {
     // Re-check immediately before download so a withdrawn or superseded GitHub
     // release is never installed from stale in-memory metadata.
     let update = app
@@ -221,6 +310,8 @@ async fn install_and_restart(app: &AppHandle, manager: &Arc<UpdateManager>) -> R
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "the pending update is no longer available".to_string())?;
+    validate_release_candidate(&update.version, &update.download_url)?;
+    validate_install_candidate(expected_version, &update.version)?;
 
     let progress_manager = Arc::clone(manager);
     let progress_app = app.clone();
@@ -352,6 +443,70 @@ mod tests {
         assert_eq!(
             manager.mark_installing().unwrap().operation,
             UpdateOperation::Installing
+        );
+    }
+
+    #[test]
+    fn stable_release_versions_are_exactly_three_numeric_components() {
+        for version in ["0.10.14", "1.2.3", "2026.8.18"] {
+            assert!(
+                is_stable_release_version(version),
+                "{version} must be stable"
+            );
+        }
+        for version in [
+            "v1.2.3",
+            "1.2",
+            "1.2.3.4",
+            "1.2.3-nightly",
+            "1.2.3+build",
+            "1.2.x",
+            " 1.2.3",
+            "1.2.3 ",
+        ] {
+            assert!(
+                !is_stable_release_version(version),
+                "{version} must be ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn install_recheck_requires_the_same_stable_version() {
+        assert!(validate_install_candidate("1.2.3", "1.2.3").is_ok());
+        assert_eq!(
+            validate_install_candidate("1.2.3", "1.2.4").unwrap_err(),
+            "the available update changed from 1.2.3 to 1.2.4; check again"
+        );
+        assert_eq!(
+            validate_install_candidate("1.2.3", "1.2.4-nightly").unwrap_err(),
+            "release version '1.2.4-nightly' is not stable x.y.z"
+        );
+    }
+
+    #[test]
+    fn stable_release_candidate_requires_a_matching_github_tag() {
+        let stable = url::Url::parse(
+            "https://github.com/kochul2000/laymux/releases/download/v1.2.3/Laymux.exe",
+        )
+        .unwrap();
+        let nightly = url::Url::parse(
+            "https://github.com/kochul2000/laymux/releases/download/nightly/Laymux.exe",
+        )
+        .unwrap();
+        let mismatched = url::Url::parse(
+            "https://github.com/kochul2000/laymux/releases/download/v1.2.4/Laymux.exe",
+        )
+        .unwrap();
+
+        assert!(validate_release_candidate("1.2.3", &stable).is_ok());
+        assert_eq!(
+            validate_release_candidate("1.2.3", &nightly).unwrap_err(),
+            "release download URL does not contain a stable Laymux version tag"
+        );
+        assert_eq!(
+            validate_release_candidate("1.2.3", &mismatched).unwrap_err(),
+            "release tag version 1.2.4 does not match manifest version 1.2.3"
         );
     }
 }

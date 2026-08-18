@@ -11,13 +11,15 @@ Windows·Linux 사용자가 새 버전을 알기 위해 GitHub Releases를 직�
 
 프로세스 자기 교체는 일반 UI 동작보다 신뢰 경계가 크다. 릴리스 서버나 다운로드가 변조되어도 임의 바이너리를 실행해서는 안 되며, Remote의 읽기 권한만 가진 클라이언트가 PC 재시작을 유발해서도 안 된다. 반대로 설치를 시작한 직후 updater가 프로세스를 재시작하면 요청 연결과 controller lease가 끊기므로, 이미 승인된 설치를 lease 수명에 묶어 중간 취소하는 것도 안전하지 않다.
 
+현재 release workflow는 GitHub의 `release.published` event 뒤에 실행된다. 사람이 stable 형식이 아닌 Release를 실수로 latest로 발행했을 때 CI가 실패할 수는 있지만, workflow가 시작될 때는 이미 발행과 latest 지정이 끝났으므로 이를 사전에 거부하는 gate로 사용할 수 없다. 릴리스 생성 자체를 수동 workflow로 옮기지 않는 한 배포 주체의 실수에 대비한 클라이언트 검증이 필요하다.
+
 범위는 GitHub Releases로 배포하는 Windows·Linux Tauri 앱의 stable 최신 버전 확인, 사용자에게 알림, 서명된 설치 및 재시작이다. Android APK/AAB 자체 업데이트, prerelease·복수 채널, delta update, 자동 무인 설치, rollback은 비목표다. Android 앱이 PC 소유 Remote 문서를 통해 **PC** 업데이트를 조작하는 것은 Remote 계약의 일부로 범위에 포함한다.
 
 ## Decision
 
 **Windows·Linux Laymux는 GitHub의 최신 stable Release 메타데이터를 확인하고, 바이너리에 고정한 Tauri updater 공개키로 검증된 artifact만 사용자 승인 뒤 설치·재시작한다.**
 
-- release workflow는 Windows x86_64와 Linux x86_64 bundle 및 `latest.json` updater artifact를 생성하며 GitHub Release의 `prerelease` 상태를 그대로 보존한다. 앱에는 대응하는 public key와 `https://github.com/kochul2000/laymux/releases/latest/download/latest.json` endpoint를 고정하고, GitHub의 latest Release 지정을 stable 채널의 단일 진실원으로 삼는다. 앱은 태그나 버전 문자열로 채널을 다시 분류하지 않는다. updater private key는 GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`로만 주입하며 저장소에 넣지 않는다. HTTPS 전송과 별개로 Tauri 서명 검증은 필수이며 검증 실패 artifact는 설치하지 않는다.
+- release workflow는 Windows x86_64와 Linux x86_64 bundle 및 `latest.json` updater artifact를 생성하며 GitHub Release의 `prerelease` 상태를 그대로 보존한다. 앱에는 대응하는 public key와 `https://github.com/kochul2000/laymux/releases/latest/download/latest.json` endpoint를 고정하고, GitHub의 latest Release 지정을 stable 채널의 단일 진실원으로 삼는다. 앱은 별도 nightly 채널을 추론하지 않지만, 사람의 latest 지정 실수에 대한 최종 안전장치로 updater manifest의 `version`이 정확히 세 개의 숫자 성분(`x.y.z`)인지, download URL의 GitHub Release tag가 저장소의 기존 관례인 `v?x.y.z`인지, 두 버전이 같은지 검증한다. 하나라도 어긋나면 업데이트 없음으로 취급한다. 설치 직전 재확인한 후보도 같은 계약을 만족하면서 사용자가 승인한 버전과 정확히 같아야 한다. updater private key는 GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`로만 주입하며 저장소에 넣지 않는다. HTTPS 전송과 별개로 Tauri 서명 검증은 필수이며 검증 실패 artifact는 설치하지 않는다.
 - 프로세스 전역 `UpdateManager`가 current/available version, release notes/date, operation(`idle|checking|downloading|installing`), progress, 마지막 확인 시각, 오류의 단일 진실원이다. 동시에 하나의 확인 또는 설치만 진행하며 모든 표면은 같은 snapshot을 읽는다.
 - release build는 시작 5초 뒤 확인하고 이후 6시간마다 다시 확인한다. 사용자는 데스크톱 상단 업데이트 버튼, Automation API, Remote Settings에서 즉시 확인할 수 있다. debug build는 개발 실행 파일을 release artifact로 바꾸지 않도록 self-update를 비활성화한다.
 - 데스크톱은 업데이트가 있을 때만 상단 action을 표시한다. 설치를 누르면 대상 버전과 재시작을 확인받고, 다운로드·설치 진행 상태를 공통 event로 갱신한다.
@@ -30,7 +32,8 @@ Windows·Linux 사용자가 새 버전을 알기 위해 GitHub Releases를 직�
 
 - **GitHub Releases 페이지 링크만 연다.** 배포 인프라는 단순하지만 앱/Remote에서 최신 여부와 진행 상태를 알 수 없고 사용자가 PC에서 수동 설치해야 하므로 요구를 충족하지 못한다.
 - **GitHub API를 직접 호출하고 asset을 실행한다.** 채널 선택은 유연하지만 업데이트 메타데이터·플랫폼 asset 선택·서명 검증·installer 실행을 독자 계약으로 다시 구현해야 한다. Tauri의 mandatory signature updater와 표준 `latest.json`을 사용한다.
-- **앱이 `x.y.z` 버전 문자열만 stable로 판정한다.** GitHub가 이미 latest/prerelease 상태를 소유하는데 앱이 별도 규칙을 두면 두 진실원이 생긴다. 정상 Release를 latest로 지정하지 않은 운영 의도도 버전 문자열만으로는 알 수 없으므로 채널 선택은 GitHub Release 메타데이터에 맡긴다.
+- **`release.published` CI가 잘못된 latest 발행을 거부한다.** 이 event는 발행이 완료된 뒤 발생하므로 workflow 실패가 Release 발행이나 latest 지정을 원자적으로 되돌릴 수 없다. 완전한 사전 gate가 필요해지면 릴리스 생성 자체를 검증된 `workflow_dispatch` 입력 뒤에 수행하는 별도 배포 절차로 전환한다.
+- **GitHub latest/prerelease 상태만 신뢰하고 앱은 버전과 tag를 검증하지 않는다.** 평상시 채널 선택에는 충분하지만 수동 Release 발행 실수가 즉시 모든 PC의 updater 입력이 된다. 클라이언트의 좁은 `x.y.z` manifest + `v?x.y.z` tag 일치 검증은 별도 채널을 선택하지 않고 명백히 잘못된 stable Release만 거절하므로 방어선으로 유지한다.
 - **서명 없이 HTTPS와 GitHub 계정만 신뢰한다.** release asset 또는 배포 경로 침해가 바로 코드 실행으로 이어진다. 앱에 고정한 별도 updater key로 artifact provenance를 검증한다.
 - **Remote install도 인증만 요구한다.** observer가 앱 재시작을 유발할 수 있어 기존 Remote mutation 경계보다 권한이 넓어진다. 상태/확인은 읽기 수준으로 두되 설치는 active lease로 제한한다.
 - **install 전체 시간 동안 lease를 유지해야 한다.** 다운로드 중 모바일 네트워크 전환이나 프로세스 재시작 때문에 정상 업데이트가 실패하거나 반쯤 적용될 수 있다. 권한은 수락 시 고정하고 이후 작업은 독립적으로 완주한다.
