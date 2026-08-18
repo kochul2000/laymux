@@ -1624,6 +1624,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 if (remoteConnectionGeneration.get() == connectionGeneration) {
                     remoteConnecting = false
                     notifyPairingChanged(error = pairingOperationError(error))
+                    reauthFallback?.invoke()
                 }
             }
         }
