@@ -462,6 +462,12 @@
           };
         }
 
+        function remoteHeaders(overrides) {
+          const headers = new Headers(authHeaders());
+          new Headers(overrides || {}).forEach((value, name) => headers.set(name, value));
+          return headers;
+        }
+
         let nextAndroidHttpRequestId = 0;
         const androidHttpDocumentId = (() => {
           const bytes = new Uint8Array(8);
@@ -734,7 +740,10 @@
           if (androidE2eMode) return androidRemoteFetch(path, options);
           const response = await fetch(path, {
             ...options,
-            headers: { ...authHeaders(), ...(options.headers || {}) },
+            // Header names are case-insensitive. Object spread is not: combining
+            // `content-type` with `Content-Type` makes Chromium send a comma-joined
+            // value that axum's strict JSON extractor rejects with HTTP 415.
+            headers: remoteHeaders(options.headers),
           });
           if (!response.ok) {
             const body = await response.json().catch(() => ({}));

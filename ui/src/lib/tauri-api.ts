@@ -1100,6 +1100,7 @@ export interface Settings {
   issueReporter: IssueReporterSettings;
   fileExplorer: FileExplorerSettings;
   viewer?: ViewerSettings;
+  github?: GithubSettings;
   remote?: RemoteSettings;
 }
 

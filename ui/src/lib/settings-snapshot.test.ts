@@ -45,6 +45,7 @@ describe("settings snapshot", () => {
       maxOutputCacheKB: 512,
     });
     useSettingsStore.getState().setPaneClear({ shellCommand: "cls", busyPolicy: "interrupt" });
+    useSettingsStore.getState().setGithub({ fontSize: 17 });
 
     const snapshot = await collectSettingsSnapshot();
 
@@ -60,6 +61,9 @@ describe("settings snapshot", () => {
       maxOutputCacheKB: 512,
     });
     expect(snapshot.paneClear).toMatchObject({ shellCommand: "cls", busyPolicy: "interrupt" });
+    expect(snapshot.github).toMatchObject({
+      fontSize: 17,
+    });
     expect(snapshot.workspaces).toHaveLength(1);
     expect(snapshot.layouts).toHaveLength(1);
     expect(snapshot.docks).toHaveLength(4);
@@ -76,6 +80,10 @@ describe("settings snapshot", () => {
       interruptRounds: 3,
       settleMs: 250,
     };
+    snapshot.github = {
+      ...useSettingsStore.getState().github,
+      fontSize: 19,
+    };
 
     applySettingsSnapshot(snapshot, { includeStructural: false });
 
@@ -85,6 +93,7 @@ describe("settings snapshot", () => {
       stabilizeInteractiveCursor: false,
     });
     expect(useSettingsStore.getState().paneClear).toEqual(snapshot.paneClear);
+    expect(useSettingsStore.getState().github.fontSize).toBe(19);
   });
 
   it("saves before applying so a persistence failure leaves runtime state unchanged", async () => {
