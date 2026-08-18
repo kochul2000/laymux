@@ -2013,8 +2013,10 @@
         const oauthRelayCallbackInput = document.getElementById("oauthRelayCallback");
         const oauthRelayStatus = document.getElementById("oauthRelayStatus");
         const oauthRelayForwardButton = document.getElementById("oauthRelayForward");
+        const oauthRelayStartButton = document.getElementById("oauthRelayStart");
         const oauthRelayCloseButton = document.getElementById("oauthRelayClose");
         let oauthRelaySession = null; // { sessionId, port, path }
+        let oauthRelayPendingUrl = null; // URL awaiting the user's explicit start
         let oauthRelayForwarding = false;
 
         // Returns the desktop loopback listener a valid installed-app OAuth
@@ -2045,6 +2047,7 @@
         function closeOauthRelayModal() {
           oauthRelayScrim.hidden = true;
           oauthRelaySession = null;
+          oauthRelayPendingUrl = null;
           oauthRelayForwarding = false;
           oauthRelayCallbackInput.value = "";
           if (typeof window.LaymuxNative?.cancelOauthRelay === "function") {
@@ -2052,10 +2055,36 @@
           }
         }
 
-        async function startOauthRelay(url) {
+        function nativeOauthRelayAvailable() {
+          return (
+            androidE2eMode &&
+            typeof window.LaymuxNative?.beginOauthRelay === "function"
+          );
+        }
+
+        // Terminal links are untrusted text, so tapping one never starts the
+        // relay by itself: this only explains what the link wants to do and
+        // waits for the user's explicit start.
+        function startOauthRelay(url) {
           const redirect = parseOauthLoopbackRedirect(url);
+          oauthRelayPendingUrl = url;
+          oauthRelaySession = null;
+          oauthRelayCallbackInput.value = "";
           oauthRelayScrim.hidden = false;
           oauthRelayManualRow.hidden = true;
+          oauthRelayStartButton.hidden = false;
+          const target = `${url.hostname} sign-in that returns its code to the PC's localhost:${redirect.port} listener.`;
+          oauthRelayHint.textContent = nativeOauthRelayAvailable()
+            ? `This link is a ${target} Start sign-in in the browser and the result returns to the PC automatically.`
+            : `This link is a ${target} After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.`;
+          setOauthRelayStatus("");
+        }
+
+        async function beginOauthRelayFlow() {
+          const url = oauthRelayPendingUrl;
+          if (!url || oauthRelaySession) return;
+          const redirect = parseOauthLoopbackRedirect(url);
+          oauthRelayStartButton.hidden = true;
           setOauthRelayStatus("Registering the sign-in relay with the PC...");
           let session;
           try {
@@ -2066,6 +2095,8 @@
             });
           } catch (error) {
             setOauthRelayStatus(error.message || String(error), true);
+            // Leave the pending URL so the user can retry from the button.
+            oauthRelayStartButton.hidden = false;
             return;
           }
           oauthRelaySession = {
@@ -2073,10 +2104,7 @@
             port: session.port,
             path: redirect.path,
           };
-          if (
-            androidE2eMode &&
-            typeof window.LaymuxNative?.beginOauthRelay === "function"
-          ) {
+          if (nativeOauthRelayAvailable()) {
             // Native binds the phone's loopback port, opens the OS browser,
             // and calls window.laymuxOauthRelay.onCallback with the redirect.
             oauthRelayHint.textContent =
@@ -2198,6 +2226,9 @@
 
         oauthRelayForwardButton.addEventListener("click", () => {
           forwardPastedOauthCallback();
+        });
+        oauthRelayStartButton.addEventListener("click", () => {
+          beginOauthRelayFlow();
         });
         oauthRelayCloseButton.addEventListener("click", closeOauthRelayModal);
         // --- end OAuth loopback relay ---------------------------------------

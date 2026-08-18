@@ -1379,7 +1379,7 @@ Remote drawer의 File viewer는 host file path 입력, 명시적 `From host`, `O
 
 ### 13.3.2 OAuth Loopback Relay
 
-데스크톱 CLI 의 OAuth "installed app" 플로우(`redirect_uri=http://localhost:{port}`)를 Remote 기기에서 완주시키는 중계다([ADR-0175](../adr/0175-remote-oauth-loopback-relay.md)). Remote 페이지가 열려는 터미널 링크가 loopback `redirect_uri` 를 가진 https auth URL 이고 active lease 를 쥐고 있을 때만 진입한다.
+데스크톱 CLI 의 OAuth "installed app" 플로우(`redirect_uri=http://localhost:{port}`)를 Remote 기기에서 완주시키는 중계다([ADR-0175](../adr/0175-remote-oauth-loopback-relay.md)). Remote 페이지가 열려는 터미널 링크가 loopback `redirect_uri` 를 가진 https auth URL 이고 active lease 를 쥐고 있을 때만 진입하며, 탭 시에는 대상 호스트·포트를 설명하는 확인 모달만 뜨고 사용자가 명시적으로 시작해야 `begin` 이 호출된다.
 
 | Endpoint | Method | 용도 |
 |---|---|---|
