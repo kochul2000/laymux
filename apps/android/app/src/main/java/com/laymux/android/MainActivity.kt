@@ -212,6 +212,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         installRemoteBackGuard()
         webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
+        handleDebugPairingIntent(intent)
     }
 
     /**
@@ -662,24 +663,34 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun selectedCloudInstanceId(): String? = selectedCloudInstanceId
 
-    fun startPairingScan() {
+    /**
+     * Shared entry gate for accepting a new pairing payload — from the QR
+     * scanner or the debug deep link. Null means the attempt was refused and
+     * the pairing status already carries the reason.
+     */
+    private fun preparePairingPolicy(): PairingProtectionPolicy? {
         if (scanInFlight || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
-            return
+            return null
         }
         val policy = try {
             vault.protectionPolicy()
         } catch (_: Exception) {
             notifyPairingChanged(error = "키 보호 설정을 읽지 못했습니다.")
-            return
+            return null
         }
         if (policy == PairingProtectionPolicy.BIOMETRIC) {
             val availability = biometricAvailability()
             if (availability != BiometricAvailability.AVAILABLE) {
                 notifyPairingChanged(error = requireNotNull(availability.userMessage))
-                return
+                return null
             }
         }
+        return policy
+    }
+
+    fun startPairingScan() {
+        val policy = preparePairingPolicy() ?: return
 
         scanInFlight = true
         scanTask = scanner.startScan()
@@ -693,27 +704,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     notifyPairingChanged(error = "QR에서 페어링 정보를 읽지 못했습니다.")
                     return@addOnSuccessListener
                 }
-                try {
-                    val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
-                    val payload = PairingPayload.parse(raw, allowLoopbackHttp = debugBuild)
-                    val expectedInstanceId = selectedCloudInstanceId
-                    if (!CloudBridgeInput.matchesSelectedInstance(
-                            expectedInstanceId,
-                            payload.instanceId,
-                        )
-                    ) {
-                        payload.close()
-                        notifyPairingChanged(error = "선택한 PC가 아닌 QR입니다. 선택한 PC의 QR을 스캔하세요.")
-                        return@addOnSuccessListener
-                    }
-                    saveScannedPairing(payload, policy)
-                } catch (error: IllegalArgumentException) {
-                    notifyPairingChanged(
-                        error = error.message ?: "지원하지 않는 페어링 QR입니다.",
-                    )
-                } catch (error: Exception) {
-                    notifyPairingChanged(error = pairingOperationError(error))
-                }
+                acceptPairingPayload(raw, policy)
             }
             .addOnCanceledListener {
                 scanInFlight = false
@@ -729,6 +720,54 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                     ),
                 )
             }
+    }
+
+    /** Validate and persist one pairing payload string (scanner or debug deep link). */
+    private fun acceptPairingPayload(raw: String, policy: PairingProtectionPolicy) {
+        try {
+            val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+            val payload = PairingPayload.parse(raw, allowLoopbackHttp = debugBuild)
+            val expectedInstanceId = selectedCloudInstanceId
+            if (!CloudBridgeInput.matchesSelectedInstance(
+                    expectedInstanceId,
+                    payload.instanceId,
+                )
+            ) {
+                payload.close()
+                notifyPairingChanged(error = "선택한 PC가 아닌 QR입니다. 선택한 PC의 QR을 스캔하세요.")
+                return
+            }
+            saveScannedPairing(payload, policy)
+        } catch (error: IllegalArgumentException) {
+            notifyPairingChanged(
+                error = error.message ?: "지원하지 않는 페어링 QR입니다.",
+            )
+        } catch (error: Exception) {
+            notifyPairingChanged(error = pairingOperationError(error))
+        }
+    }
+
+    /**
+     * Debug-only camera bypass (emulators have no usable scanner): the desktop
+     * dev MCP tool `create_android_pairing_payload` returns the QR text, and
+     * `adb shell am start -a android.intent.action.VIEW -d "<payload>"`
+     * delivers it here. The intent-filter exists only in the debug manifest
+     * overlay, and this guard keeps the path inert even if a release build
+     * somehow receives the intent.
+     */
+    private fun handleDebugPairingIntent(intent: Intent?) {
+        val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (!debugBuild) return
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val data = intent.data ?: return
+        if (data.scheme != "laymux" || data.host != "pair") return
+        val policy = preparePairingPolicy() ?: return
+        acceptPairingPayload(data.toString(), policy)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDebugPairingIntent(intent)
     }
 
     private fun saveScannedPairing(
