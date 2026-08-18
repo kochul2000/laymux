@@ -346,6 +346,7 @@
           scrollSensitivity: 1,
           fastScrollSensitivity: 5,
           touchScrollSensitivity: 1,
+          twoFingerScrollSensitivity: 5,
           theme: Object.freeze({
             background: "#0C0C0C",
             foreground: "#F0F0F0",
@@ -2046,17 +2047,26 @@
               appearance.touchScrollSensitivity,
               defaultAppearance.touchScrollSensitivity
             ),
+            twoFingerScrollSensitivity: normalizeScrollSensitivity(
+              appearance.twoFingerScrollSensitivity,
+              defaultAppearance.twoFingerScrollSensitivity
+            ),
             theme: { ...defaultAppearance.theme, ...(appearance.theme || {}) },
           };
         }
 
         // Finger-drag scrollback is converted from pixels to lines by this page,
-        // not by xterm, so its multiplier lives beside the gesture state instead
-        // of in the terminal options bundle.
+        // not by xterm, so its multipliers live beside the gesture state instead
+        // of in the terminal options bundle. One- and two-finger drags carry
+        // separate factors so a two-finger swipe can cover more per drag.
         let touchScrollSensitivity = defaultAppearance.touchScrollSensitivity;
+        let twoFingerScrollSensitivity =
+          defaultAppearance.twoFingerScrollSensitivity;
 
         function adoptTouchScrollSensitivity(appearance = {}) {
-          touchScrollSensitivity = normalizeAppearance(appearance).touchScrollSensitivity;
+          const normalized = normalizeAppearance(appearance);
+          touchScrollSensitivity = normalized.touchScrollSensitivity;
+          twoFingerScrollSensitivity = normalized.twoFingerScrollSensitivity;
         }
 
         // xterm throws on a non-positive sensitivity, so an older desktop that
@@ -2883,13 +2893,18 @@
           return { x, y };
         }
 
-        function scrollTouchTerminal(term, deltaY, gesture = touchGesture) {
+        function scrollTouchTerminal(
+          term,
+          deltaY,
+          sensitivity = touchScrollSensitivity,
+          gesture = touchGesture,
+        ) {
           if (!gesture || typeof term.scrollLines !== "function") return;
           const metrics = terminalMetrics(term);
           if (!metrics) return;
           // The remainder carries the sub-cell leftover, so the multiplier is
           // applied to the raw finger delta once and never re-applied to it.
-          gesture.scrollRemainderPx += -deltaY * touchScrollSensitivity;
+          gesture.scrollRemainderPx += -deltaY * sensitivity;
           const exactLines = gesture.scrollRemainderPx / metrics.cellHeight;
           const wholeLines = exactLines < 0 ? Math.ceil(exactLines) : Math.floor(exactLines);
           if (wholeLines === 0) return;
@@ -2915,7 +2930,7 @@
 
         function routeOneFingerScroll(term, deltaY, point) {
           if (isNormalScrollbackMode(term)) {
-            scrollTouchTerminal(term, deltaY);
+            scrollTouchTerminal(term, deltaY, touchScrollSensitivity);
           } else {
             sendTerminalAppScroll(term, deltaY, point);
           }
@@ -2923,8 +2938,10 @@
 
         function routeTwoFingerScroll(term, deltaY, point) {
           if (isNormalScrollbackMode(term)) {
-            scrollTouchTerminal(term, deltaY);
+            scrollTouchTerminal(term, deltaY, twoFingerScrollSensitivity);
           } else {
+            // TUI (mouse-tracking) mode routes to the synthesized wheel path,
+            // which follows xterm's own scrollSensitivity, not this multiplier.
             sendTerminalAppScroll(term, deltaY, point);
           }
         }
