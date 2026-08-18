@@ -1999,6 +1999,10 @@
       .oauth-relay-status.error {
         color: var(--danger);
       }
+      .oauth-relay-status.success {
+        color: var(--green);
+        font-weight: 600;
+      }
       .oauth-relay-actions {
         display: flex;
         justify-content: flex-end;
