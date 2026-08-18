@@ -64,10 +64,11 @@ jobs:
           releaseName: ${{ github.event.release.name }}
           releaseBody: ${{ github.event.release.body }}
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ github.event.release.prerelease }}
           args: --target ${{ matrix.target }}
 
   android:
+    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     env:
       ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}

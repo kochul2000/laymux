@@ -29,6 +29,8 @@ describe("desktop updater release contract", () => {
     );
 
     expect(workflow).toContain("max-parallel: 1");
+    expect(workflow).toContain("prerelease: ${{ github.event.release.prerelease }}");
+    expect(workflow.match(/if: github\.event\.release\.prerelease == false/g)).toHaveLength(1);
     expect(workflow).toContain("target: x86_64-pc-windows-msvc");
     expect(workflow).toContain("target: x86_64-unknown-linux-gnu");
     expect(workflow).toContain(
