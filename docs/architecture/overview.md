@@ -82,9 +82,10 @@ Google Play가 사용자에게 전달하는 최종 APK는 같은 인증서를 �
 ([ADR-0152](../adr/0152-android-cross-store-signing-and-release.md)).
 
 Windows·Linux 데스크톱 release는 GitHub Releases의 `latest.json`을 Tauri updater endpoint로 사용한다.
-release workflow가 두 플랫폼 bundle과 updater artifact를 만들고 GitHub Actions secret의 private key로
-서명하며, 앱은 대응 public key를 고정해 검증된 artifact만 설치한다. 프로세스 전역 `UpdateManager`가
-시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
+release workflow는 main 계보와 stable tag/app version을 검증한 뒤 draft Release에 두 플랫폼 bundle과
+updater artifact를 만들고 GitHub Actions secret의 private key로 서명한다. 모든 필수 platform job이
+성공한 뒤에만 publish/latest로 승격하며, 앱은 대응 public key를 고정해 검증된 artifact만 설치한다.
+프로세스 전역 `UpdateManager`가 시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
 같은 snapshot을 읽는다. Android APK 자체 업데이트는 이 경로의 대상이 아니다
 ([ADR-0174](../adr/0174-github-signed-desktop-self-update.md)).
 

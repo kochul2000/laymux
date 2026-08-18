@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State as AxumState};
-use axum::http::StatusCode;
+use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
@@ -351,7 +351,7 @@ pub async fn update_install(AxumState(state): AxumState<ServerState>) -> impl In
 }
 
 fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> Response {
-    match result {
+    let mut response = match result {
         Ok(status) => Json(status).into_response(),
         Err(error) if error.contains("already running") || error.contains("pending update") => {
             (StatusCode::CONFLICT, Json(err_json(&error))).into_response()
@@ -360,7 +360,11 @@ fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> R
             (StatusCode::NOT_IMPLEMENTED, Json(err_json(&error))).into_response()
         }
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err_json(&error))).into_response(),
-    }
+    };
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 // ---- Backend-only handlers ----
@@ -742,6 +746,15 @@ mod tests {
         assert_eq!(memos[0]["content"], "a");
         assert_eq!(memos[1]["key"], "mike");
         assert_eq!(memos[2]["key"], "zeta");
+    }
+
+    #[test]
+    fn update_responses_are_never_cached() {
+        let response = update_response(Ok(crate::app_update::UpdateStatus::default()));
+        assert_eq!(
+            response.headers().get(axum::http::header::CACHE_CONTROL),
+            Some(&axum::http::HeaderValue::from_static("no-store"))
+        );
     }
 
     #[test]

@@ -22,17 +22,26 @@ describe("desktop updater release contract", () => {
     expect(config.plugins?.updater?.pubkey?.length).toBeGreaterThan(100);
   });
 
-  it("signs serialized Windows and Linux updater artifacts without embedding a private key", async () => {
+  it("publishes signed desktop artifacts only after a validated draft release succeeds", async () => {
     const workflow = await readFile(
       path.join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
       "utf8",
     );
 
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).not.toContain("types: [published]");
+    expect(workflow).toContain("git merge-base --is-ancestor");
+    expect(workflow).toContain("gh release create");
+    expect(workflow).toContain("releaseDraft: true");
+    expect(workflow.match(/needs: prepare/g)).toHaveLength(2);
+    expect(workflow).toContain("ref: ${{ needs.prepare.outputs.commit_sha }}");
+    expect(workflow).toContain("needs: [prepare, build, android]");
+    expect(workflow).toContain("make_latest");
     expect(workflow).toContain("max-parallel: 1");
-    expect(workflow).toContain("prerelease: ${{ github.event.release.prerelease }}");
-    expect(workflow.match(/if: github\.event\.release\.prerelease == false/g)).toHaveLength(1);
     expect(workflow).toContain("target: x86_64-pc-windows-msvc");
     expect(workflow).toContain("target: x86_64-unknown-linux-gnu");
+    expect(workflow).toMatch(/tauri-apps\/tauri-action@[0-9a-f]{40}/);
+    expect(workflow).not.toContain("tauri-apps/tauri-action@v0");
     expect(workflow).toContain(
       "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
     );
