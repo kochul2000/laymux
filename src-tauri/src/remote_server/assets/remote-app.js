@@ -2335,14 +2335,14 @@
                     );
                     return;
                   }
-                  // Null means the session was already consumed locally by an
-                  // in-flight attempt; a prior send reached the PC.
-                  if (sent) {
-                    setOauthRelayStatus(
-                      "Done — the sign-in was delivered to the PC. You can close this.",
-                    );
-                    return;
-                  }
+                  // Null means the session was already consumed/cleared: a
+                  // prior send reached the PC (delivered), or the relay was
+                  // closed. Never leave the status stuck on "Forwarding...".
+                  setOauthRelayStatus(
+                    sent
+                      ? "Done — the sign-in was delivered to the PC. You can close this."
+                      : "The sign-in relay is no longer active. You can close this.",
+                  );
                   return;
                 } catch (error) {
                   if (error && typeof error.status === "number") {
