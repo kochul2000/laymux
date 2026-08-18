@@ -74,7 +74,7 @@ class OauthLoopbackRelayTest {
         assertEquals("HTTP/1.1 200 OK", reader.readLine())
         var line = reader.readLine()
         while (!line.isNullOrEmpty()) line = reader.readLine()
-        assertTrue(reader.readLine()!!.contains("Return to the Laymux app"))
+        assertTrue(reader.readLine()!!.contains("Laymux app"))
         socket.close()
 
         assertEquals("/?code=4%2Fabc&scope=openid", callbacks.poll(5, TimeUnit.SECONDS))

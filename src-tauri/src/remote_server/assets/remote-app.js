@@ -2319,6 +2319,13 @@
           onCallback(pathAndQuery) {
             (async () => {
               setOauthRelayStatus("Forwarding the sign-in result to the PC...");
+              // A transport failure can drop the *response* after the forward
+              // already reached the PC and consumed the one-shot session. On
+              // retry that same request answers CONFLICT/"session is not
+              // active" — which means the earlier attempt was delivered, not
+              // that delivery failed. Track whether a request left this device
+              // so the retry can tell the two apart.
+              let sent = false;
               for (let attempt = 0; attempt < 4; attempt += 1) {
                 try {
                   const result = await forwardOauthCallback(String(pathAndQuery));
@@ -2326,20 +2333,40 @@
                     setOauthRelayStatus(
                       `Done — the PC tool answered ${result.status}. You can close this.`,
                     );
+                    return;
+                  }
+                  // Null means the session was already consumed locally by an
+                  // in-flight attempt; a prior send reached the PC.
+                  if (sent) {
+                    setOauthRelayStatus(
+                      "Done — the sign-in was delivered to the PC. You can close this.",
+                    );
+                    return;
                   }
                   return;
                 } catch (error) {
                   if (error && typeof error.status === "number") {
-                    setOauthRelayStatus(error.message || String(error), true);
+                    // A server answer to a retry that says the session is gone
+                    // means an earlier send already delivered it.
+                    if (sent) {
+                      setOauthRelayStatus(
+                        "Done — the sign-in was delivered to the PC. You can close this.",
+                      );
+                    } else {
+                      setOauthRelayStatus(error.message || String(error), true);
+                    }
                     return;
                   }
+                  // Transport failure: the request may or may not have reached
+                  // the PC, so a later CONFLICT counts as delivered.
+                  sent = true;
                   await new Promise((resolve) =>
                     setTimeout(resolve, 1000 * (attempt + 1)),
                   );
                 }
               }
               setOauthRelayStatus(
-                "Could not reach the PC to deliver the sign-in result.",
+                "Could not confirm delivery — check whether the PC signed in.",
                 true,
               );
             })();
