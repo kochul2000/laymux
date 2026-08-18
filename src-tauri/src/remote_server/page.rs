@@ -409,6 +409,7 @@ mod tests {
             .next()
             .unwrap();
         assert!(settings_view.contains("id=\"displaySection\""));
+        assert!(settings_view.contains("id=\"pcUpdateSection\""));
         assert!(settings_view.contains("id=\"installSection\""));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
@@ -488,6 +489,23 @@ mod tests {
         assert!(html.contains("--remote-composer-font-size"));
         assert!(html.contains("applyTerminalAppearance(appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
+    }
+
+    #[test]
+    fn remote_page_reports_and_starts_pc_updates() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"pcUpdateStatus\""));
+        assert!(html.contains("id=\"checkPcUpdate\""));
+        assert!(html.contains("id=\"installPcUpdate\""));
+        assert!(html.contains("/remote/v1/update/check"));
+        assert!(html.contains("/remote/v1/update/install"));
+        assert!(html.contains("body: JSON.stringify({ leaseId: selectedLeaseId })"));
+        assert!(html.contains(
+            "installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId"
+        ));
+        assert!(html.contains("drawerSettingsButton.classList.toggle(\"update-available\""));
+        assert!(html.contains("delay ?? (busy ? 1000 : 60000)"));
     }
 
     /// A button that cannot install anything is worse than no button, so every
