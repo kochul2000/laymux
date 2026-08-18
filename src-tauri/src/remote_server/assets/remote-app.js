@@ -2459,7 +2459,7 @@
             })();
           },
           onError(message) {
-            setOauthRelayStatus(String(message), true);
+            setOauthRelayStatus(String(message), "error");
           },
         };
 
