@@ -14,6 +14,10 @@ $requiredWorkflowTokens = @(
     "ANDROID_GOOGLE_WEB_CLIENT_ID",
     "git merge-base --is-ancestor",
     "fetch-depth: 0",
+    'release_json="$(gh api --method POST',
+    'release_id="$(jq -er ''.id'' <<<"$release_json")"',
+    '--arg tag "$RELEASE_TAG"',
+    'select(.tag_name == $tag)',
     ":app:testDebugUnitTest",
     ":app:assembleRelease",
     "apksigner verify --verbose --print-certs",
@@ -44,6 +48,10 @@ foreach ($token in $requiredGradleTokens) {
 
 if ($workflow.Contains("bundleRelease")) {
     throw "GitHub APK workflow must not sign Play AAB with the app signing key"
+}
+
+if ($workflow.Contains('gh release create') -or $workflow.Contains('/releases/tags/$RELEASE_TAG')) {
+    throw "draft release identity must come from the create response, not a tag lookup"
 }
 
 Write-Output "Android release workflow contract passed"
