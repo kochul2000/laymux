@@ -111,6 +111,29 @@ describe("buildRemoteWidgetSnapshot", () => {
     expect(snapshot.items.map((item) => item.id)).toEqual(["known"]);
   });
 
+  it("derives Grok weekly elapsed the same way the desktop widget does", async () => {
+    vi.mocked(getGrokUsageSnapshot).mockResolvedValue({
+      configDir: "",
+      status: { type: "ready" },
+      rows: [{ key: "weekly", percent: 66, remaining: null, reset: "August 20, 16:13" }],
+      capturedAtMs: NOW.getTime(),
+      nextQueryAtMs: null,
+      rawScreen: null,
+    });
+    placeWidgets({
+      topBar: { left: [widget("g", "grokUsage", { display: "both" })], right: [] },
+    });
+
+    const [item] = (await buildRemoteWidgetSnapshot(new Date(2026, 7, 17, 4, 13))).items;
+
+    if (item.kind !== "usage") throw new Error("expected a usage item");
+    expect(item.unavailable).toBeNull();
+    expect(item.rows).toEqual([
+      expect.objectContaining({ key: "weekly", percent: 66, elapsed: 50 }),
+    ]);
+    expect(item.title).toContain("50% elapsed");
+  });
+
   it("hands the remote finished row text and the account's own colours", async () => {
     placeWidgets({
       topBar: { left: [widget("u", "claudeUsage", { display: "both", barWidth: 30 })], right: [] },

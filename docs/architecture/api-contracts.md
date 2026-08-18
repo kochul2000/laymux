@@ -209,7 +209,7 @@ Codex UsageView의 현재 rate-limit 원천은 `codex app-server`의 로컬 stdi
 
 `visibleRows`는 같은 provider의 사용량을 그리는 **모든 표면**(UsageView pane 과 상태 위젯)이 공유하는 표시 선택이다. Claude는 session/weekAll/weekModel, Codex는 weekly/sparkWeekly, Grok는 weekly/credits/payg를 쓴다. UI는 마지막 행의 해제를 막고, 비어 있거나 잘못된 값은 provider별 기본값으로 정규화한다([ADR-0103](../adr/0103-usage-view-visible-rows.md), [ADR-0167](../adr/0167-grok-usage-drops-legacy-monthly.md)).
 
-**`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`, Grok `#c084fc`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 두 에이전트 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 두 브랜드색과 떨어져 있다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
+**`usage.<agent>.colors` 는 에이전트마다 따로 소유한다**([ADR-0105](../adr/0105-widget-slots-and-status-line.md)). 한 status line 에 두 provider 의 막대가 나란히 놓이면 색이 유일한 구분 수단이므로 공통 팔레트로는 읽을 수 없다. 기본값은 각 에이전트가 앱의 다른 곳에서 이미 쓰는 색을 그대로 가져온다 — Claude `#d97757`, Codex `#10a37f`, Grok `#c084fc`(워크스페이스 선택기의 에이전트 표기색과 같은 값). elapsed 는 provider 중립이라 Claude·Codex·Grok 모두 노랑 `#f9e2af` 를 기본값으로 쓰며, 바로 위에 놓이는 consumed 막대와 혼동되지 않을 만큼 브랜드색과 떨어져 있다. Grok은 weekly 행만 창이 있어 elapsed를 그린다. **기본값이 같을 뿐 CSS 토큰에 묶여 있지 않다** — 사용자가 Views → 사용량에서 에이전트별로 바꿀 수 있고, 테마 전환으로는 바뀌지 않는다.
 
 ### 상태 위젯 배치 (widgets)
 

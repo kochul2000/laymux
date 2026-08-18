@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useGrokUsageSnapshot } from "@/hooks/useGrokUsageSnapshot";
+import { useNowTick } from "@/hooks/useUsageSnapshot";
 import { useSettingsStore } from "@/stores/settings-store";
 import { buildGrokUsageRows, selectVisibleRows } from "@/lib/usage-rows";
 import { grokUsageStatusMessage } from "@/lib/usage-status";
@@ -7,15 +8,18 @@ import { UsageWidgetBody } from "./UsageWidgetBody";
 import { readBarHeight, readBarWidth, readDisplay, readElapsedHeight } from "./widget-options";
 import type { WidgetComponentProps } from "./types";
 
+const TICK_MS = 30_000;
+
 export function GrokUsageWidget({ instance, dragRegion }: WidgetComponentProps) {
   const configDir =
     typeof instance.options.configDir === "string" ? instance.options.configDir : "";
+  const now = useNowTick(TICK_MS);
   const { snapshot, error } = useGrokUsageSnapshot(`widget-${instance.id}`, configDir);
   const visibleRows = useSettingsStore((s) => s.usage.grok.visibleRows);
   const colors = useSettingsStore((s) => s.usage.grok.colors);
   const rows = useMemo(
-    () => selectVisibleRows(buildGrokUsageRows(snapshot.rows), visibleRows),
-    [snapshot.rows, visibleRows],
+    () => selectVisibleRows(buildGrokUsageRows(snapshot.rows, now), visibleRows),
+    [snapshot.rows, now, visibleRows],
   );
 
   return (
