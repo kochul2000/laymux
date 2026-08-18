@@ -659,6 +659,7 @@ struct TogglePaneHiddenParam {
 }
 
 const DEV_ONLY_TOOLS: &[&str] = &[
+    "create_android_pairing_payload",
     "set_app_theme",
     "update_profile",
     "set_profile_defaults",
@@ -3185,6 +3186,28 @@ impl McpHandler {
             .await
     }
 
+    /// Dev-only: create an Android pairing session and return the QR payload
+    /// text (`laymux://pair/v2?...`) so an emulator without a camera can be
+    /// paired by injecting it as a deep link:
+    /// `adb shell am start -a android.intent.action.VIEW -d "<payload>"`.
+    /// The payload carries the pairing secret; the backing function refuses
+    /// to run in release builds.
+    #[tool]
+    async fn create_android_pairing_payload(&self) -> Result<CallToolResult, ErrorData> {
+        match crate::android_pairing::create_with_payload(self.state.app_state.clone()).await {
+            Ok((qr, payload)) => Ok(CallToolResult::success(vec![Content::text(
+                serde_json::to_string_pretty(&json!({
+                    "payload": &*payload,
+                    "status": qr.status,
+                }))
+                .unwrap_or_default(),
+            )])),
+            Err(error) => Ok(CallToolResult::error(vec![Content::text(
+                error.to_string(),
+            )])),
+        }
+    }
+
     /// Dev-only: toggle the notification panel.
     #[tool]
     async fn toggle_notification_panel(&self) -> Result<CallToolResult, ErrorData> {
@@ -4895,6 +4918,13 @@ mod tests {
         .unwrap();
         assert_eq!(update.patch["appearance"]["themeId"], "dracula");
         assert_eq!(update.expected_revision.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn android_pairing_payload_is_registered_as_dev_only() {
+        let router = McpHandler::tool_router();
+        assert!(router.has_route("create_android_pairing_payload"));
+        assert!(DEV_ONLY_TOOLS.contains(&"create_android_pairing_payload"));
     }
 
     #[test]
