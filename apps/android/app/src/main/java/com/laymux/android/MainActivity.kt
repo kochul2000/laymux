@@ -212,7 +212,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         installRemoteBackGuard()
         webView.loadUrl(LocalContentWebViewClient.START_URL)
         cloudWebView.loadUrl(cloudNavigation.startUrl)
-        handleDebugPairingIntent(intent)
+        // Only on a genuine cold start: a recreation (density/locale change,
+        // process restore) redelivers the same VIEW intent, and replaying the
+        // payload would overwrite the vault with a fresh nonce, get a 409
+        // from the already-confirmed desktop, and tear the pairing down.
+        if (savedInstanceState == null) {
+            handleDebugPairingIntent(intent)
+        }
     }
 
     /**
