@@ -73,7 +73,12 @@ jobs:
             }
           fi
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          existing_release_id="$(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq -rs --arg tag "$RELEASE_TAG" \
+                '[.[][] | select(.tag_name == $tag)] | first | .id // empty'
+          )"
+          if [[ -n "$existing_release_id" ]]; then
             echo "Release already exists: $RELEASE_TAG" >&2
             exit 1
           fi
@@ -82,13 +87,15 @@ jobs:
             exit 1
           fi
 
-          create_args=("$RELEASE_TAG" --draft --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes)
-          if [[ "$PRERELEASE" == "true" ]]; then
-            create_args+=(--prerelease)
-          fi
-          gh release create "${create_args[@]}"
-
-          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.id')"
+          release_json="$(gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$RELEASE_TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="$RELEASE_TAG" \
+            -F draft=true \
+            -F prerelease="$PRERELEASE" \
+            -F generate_release_notes=true)"
+          release_id="$(jq -er '.id' <<<"$release_json")"
           echo "release_id=$release_id" >>"$GITHUB_OUTPUT"
           echo "tag=$RELEASE_TAG" >>"$GITHUB_OUTPUT"
           echo "prerelease=$PRERELEASE" >>"$GITHUB_OUTPUT"

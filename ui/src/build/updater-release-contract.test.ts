@@ -31,7 +31,12 @@ describe("desktop updater release contract", () => {
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).not.toContain("types: [published]");
     expect(workflow).toContain("git merge-base --is-ancestor");
-    expect(workflow).toContain("gh release create");
+    expect(workflow).toContain('release_json="$(gh api --method POST');
+    expect(workflow).toContain('release_id="$(jq -er \'.id\' <<<"$release_json")"');
+    expect(workflow).toContain('--arg tag "$RELEASE_TAG"');
+    expect(workflow).toContain("select(.tag_name == $tag)");
+    expect(workflow).not.toContain("gh release create");
+    expect(workflow).not.toContain('/releases/tags/$RELEASE_TAG');
     expect(workflow).toContain("releaseDraft: true");
     expect(workflow.match(/needs: prepare/g)).toHaveLength(2);
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.commit_sha }}");
