@@ -221,15 +221,17 @@ class PairingBottomSheet(
     // DISCONNECT keep the default filled primary.
     private fun renderConnectEmphasis(bound: Views, action: PairingConnectAction) {
         if (action == PairingConnectAction.CANCEL) {
+            // Stateful CSLs so a momentarily-disabled CANCEL button dims like the
+            // default filled button does, instead of staying fully opaque.
             bound.connectButton.backgroundTintList = AppCompatResources.getColorStateList(
                 activity,
-                R.color.laymux_surface_variant,
+                R.color.pairing_connect_cancel_bg,
             )
             bound.connectButton.setTextColor(
                 requireNotNull(
                     AppCompatResources.getColorStateList(
                         activity,
-                        R.color.laymux_on_surface_variant,
+                        R.color.pairing_rescan_text,
                     ),
                 ),
             )

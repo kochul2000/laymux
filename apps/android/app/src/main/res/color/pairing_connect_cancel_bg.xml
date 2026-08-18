@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tonal (neutral) fill for the "연결 취소" state of the connect button.
+     Disabled dims the container so a mid-tap disable reads like the default
+     filled button's disabled state instead of staying fully opaque. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:state_enabled="false"
+        android:alpha="0.12"
+        android:color="@color/laymux_surface_variant" />
+    <item android:color="@color/laymux_surface_variant" />
+</selector>
