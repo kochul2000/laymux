@@ -1381,6 +1381,17 @@ Remote drawer의 File viewer는 host file path 입력, 명시적 `From host`, `O
 
 새 탭은 반드시 사용자의 button/일반 Enter action에서 `window.open("/remote/viewer/")`으로 먼저 연다. IME 조합 중 Enter와 legacy `keyCode=229`는 제출하지 않고, host path 입력은 모바일 키보드가 대소문자를 바꾸지 않도록 자동 대문자화를 끈다. child가 exact same-origin `laymux:file-viewer-ready` 메시지를 보내면 opener는 해당 `Window` 객체가 자신이 연 pending child인지 확인하고, token·lease·fileViewerToken과 클릭 때 스냅샷한 `source="path"`/path를 `laymux:file-viewer-session` 메시지로 한 번 전달한다. child URL(query/fragment)·bootstrap DOM·localStorage/sessionStorage·문서 제목에는 token·lease·capability·path를 기록하지 않는다. 제목은 일반적인 `Laymux File Viewer`로 유지하고 path는 본문에만 표시한다. child는 exact origin과 `event.source === window.opener`를 확인해 최초 한 세션만 받고 즉시 opener 참조를 끊는다. 비동기 MCP/desktop viewer 변경은 Remote 입력을 자동 갱신하거나 popup을 만들지 않으며, 사용자가 `From host`를 다시 눌러 명시적으로 가져온다.
 
+### 13.3.2 OAuth Loopback Relay
+
+데스크톱 CLI 의 OAuth "installed app" 플로우(`redirect_uri=http://localhost:{port}`)를 Remote 기기에서 완주시키는 중계다([ADR-0175](../adr/0175-remote-oauth-loopback-relay.md)). Remote 페이지가 열려는 터미널 링크가 loopback `redirect_uri` 를 가진 https auth URL 이고 active lease 를 쥐고 있을 때만 진입하며, 탭 시에는 대상 호스트·포트를 설명하는 확인 모달만 뜨고 사용자가 명시적으로 시작해야 `begin` 이 호출된다.
+
+| Endpoint | Method | 용도 |
+|---|---|---|
+| `/remote/v1/oauth-relay/begin` | POST | body `{authUrl, leaseId}`. `redirect_uri` 에서 파싱한 loopback 포트(≥1024)·경로를 단일 슬롯 1회용 세션(TTL 10분)으로 등록. `{sessionId, port, expiresInSeconds}` 반환. 새 begin 은 이전 세션 대체 |
+| `/remote/v1/oauth-relay/forward` | POST | body `{sessionId, pathAndQuery, leaseId}`. 세션을 요청 전에 소비하고, 등록 경로와 정확히 일치(+`?query`)하는 pathAndQuery 만 등록된 loopback 호스트(`127.0.0.1` 또는 `[::1]`, redirect 주소 패밀리 보존)로 redirect 미추적 GET(3s/10s timeout, 스트리밍 64KB 캡). `{status, contentType, body}` 반환 |
+
+두 라우트 모두 기존 remote guard + active controller lease(body `leaseId` 또는 `X-Laymux-Remote-Lease`) 필수이며 Android E2E exact allowlist 에 이 두 POST 만 추가돼 있다. 범용 localhost 프록시가 되지 않도록 forward 대상 호스트·포트·경로는 오직 begin 시점의 auth URL 이 결정하고, 검증 실패·만료·id 불일치는 모두 `409`/`400` 으로 fail closed 한다. Android 앱은 네이티브 `beginOauthRelay` 가 폰 loopback 에 1회용 리스너(절대 deadline 10분, 비일치 요청으로 연장 불가)를 열고, redirect 도착 즉시 브라우저에 "앱으로 돌아가라" 정적 페이지를 응답한 뒤 콜백을 보관한다 — OS 브라우저 전면 동안 E2E 세션이 suspend 라 새 RPC 가 거부되므로(ADR-0146) `forward` 는 앱 복귀(onStart) 후 Remote 문서가 backoff 재시도로 수행한다. 일반 브라우저 Remote 는 Start 클릭 시 동기로 연 빈 창을 begin 후 auth URL 로 이동시키고(팝업 차단 회피), 로그인 후 주소창의 `http://localhost:{port}/...` 전체를 붙여넣는 수동 폴백 모달로 같은 `forward` 를 태운다.
+
 ### 13.4 Terminal Control
 
 Remote terminal control은 상태 소유권을 세 범주로 나눈다([ADR-0015](../adr/0015-remote-terminal-state-ownership.md)).

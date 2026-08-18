@@ -2075,22 +2075,288 @@
           try {
             const url = new URL(uri);
             if (url.protocol !== "http:" && url.protocol !== "https:") return;
-            // The Android wrapper WebView disables multiple windows, so
-            // `window.open` cannot surface a link there. Hand the already
-            // scheme-checked URL to native, which re-validates it and starts
-            // the OS browser. Older APKs without the bridge method keep the
-            // previous no-op instead of navigating the Remote document away.
-            if (androidE2eMode) {
-              if (typeof window.LaymuxNative?.openExternalUrl === "function") {
-                window.LaymuxNative.openExternalUrl(url.href);
-              }
+            // An installed-app OAuth link redirects to the *desktop's*
+            // loopback listener; opened plainly from this device the code
+            // would land on the phone's localhost and die. Route it through
+            // the relay (ADR-0175) — controller lease required, because the
+            // forward drives the PC.
+            if (leaseId && parseOauthLoopbackRedirect(url)) {
+              startOauthRelay(url);
               return;
             }
-            window.open(url.href, "_blank", "noopener,noreferrer");
+            openExternalRemoteUrl(url);
           } catch (_) {
             // Ignore malformed terminal-controlled links.
           }
         }
+
+        function openExternalRemoteUrl(url) {
+          // The Android wrapper WebView disables multiple windows, so
+          // `window.open` cannot surface a link there. Hand the already
+          // scheme-checked URL to native, which re-validates it and starts
+          // the OS browser. Older APKs without the bridge method keep the
+          // previous no-op instead of navigating the Remote document away.
+          if (androidE2eMode) {
+            if (typeof window.LaymuxNative?.openExternalUrl === "function") {
+              window.LaymuxNative.openExternalUrl(url.href);
+            }
+            return;
+          }
+          window.open(url.href, "_blank", "noopener,noreferrer");
+        }
+
+        // --- OAuth loopback relay (ADR-0175) -------------------------------
+        const oauthRelayScrim = document.getElementById("oauthRelayScrim");
+        const oauthRelayHint = document.getElementById("oauthRelayHint");
+        const oauthRelayManualRow = document.getElementById("oauthRelayManualRow");
+        const oauthRelayCallbackInput = document.getElementById("oauthRelayCallback");
+        const oauthRelayStatus = document.getElementById("oauthRelayStatus");
+        const oauthRelayForwardButton = document.getElementById("oauthRelayForward");
+        const oauthRelayStartButton = document.getElementById("oauthRelayStart");
+        const oauthRelayCloseButton = document.getElementById("oauthRelayClose");
+        let oauthRelaySession = null; // { sessionId, port, path }
+        let oauthRelayPendingUrl = null; // URL awaiting the user's explicit start
+        let oauthRelayForwarding = false;
+
+        // Returns the desktop loopback listener a valid installed-app OAuth
+        // URL redirects to, or null when the link is anything else.
+        function parseOauthLoopbackRedirect(url) {
+          if (url.protocol !== "https:") return null;
+          const redirect = url.searchParams.get("redirect_uri");
+          if (!redirect) return null;
+          try {
+            const target = new URL(redirect);
+            const host = target.hostname.toLowerCase();
+            const loopback =
+              host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+            if (target.protocol !== "http:" || !loopback || !target.port) {
+              return null;
+            }
+            return { port: Number(target.port), path: target.pathname };
+          } catch (_) {
+            return null;
+          }
+        }
+
+        function setOauthRelayStatus(message, error = false) {
+          oauthRelayStatus.textContent = message;
+          oauthRelayStatus.classList.toggle("error", error);
+        }
+
+        function closeOauthRelayModal() {
+          oauthRelayScrim.hidden = true;
+          oauthRelaySession = null;
+          oauthRelayPendingUrl = null;
+          oauthRelayForwarding = false;
+          oauthRelayCallbackInput.value = "";
+          if (typeof window.LaymuxNative?.cancelOauthRelay === "function") {
+            window.LaymuxNative.cancelOauthRelay();
+          }
+        }
+
+        function nativeOauthRelayAvailable() {
+          return (
+            androidE2eMode &&
+            typeof window.LaymuxNative?.beginOauthRelay === "function"
+          );
+        }
+
+        // Terminal links are untrusted text, so tapping one never starts the
+        // relay by itself: this only explains what the link wants to do and
+        // waits for the user's explicit start.
+        function startOauthRelay(url) {
+          const redirect = parseOauthLoopbackRedirect(url);
+          oauthRelayPendingUrl = url;
+          oauthRelaySession = null;
+          oauthRelayCallbackInput.value = "";
+          oauthRelayScrim.hidden = false;
+          oauthRelayManualRow.hidden = true;
+          oauthRelayStartButton.hidden = false;
+          const target = `${url.hostname} sign-in that returns its code to the PC's localhost:${redirect.port} listener.`;
+          oauthRelayHint.textContent = nativeOauthRelayAvailable()
+            ? `This link is a ${target} Start sign-in in the browser and the result returns to the PC automatically.`
+            : `This link is a ${target} After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.`;
+          setOauthRelayStatus("");
+        }
+
+        async function beginOauthRelayFlow() {
+          const url = oauthRelayPendingUrl;
+          if (!url || oauthRelaySession) return;
+          const redirect = parseOauthLoopbackRedirect(url);
+          const native = nativeOauthRelayAvailable();
+          // Open the window inside the click's transient activation: strict
+          // browsers (Safari) refuse a window.open issued after the await
+          // below. Opened blank, detached from this page, navigated once the
+          // relay session exists.
+          let popup = null;
+          if (!native) {
+            popup = window.open("", "_blank");
+            if (popup) popup.opener = null;
+          }
+          oauthRelayStartButton.hidden = true;
+          setOauthRelayStatus("Registering the sign-in relay with the PC...");
+          let session;
+          try {
+            session = await remoteFetch("/remote/v1/oauth-relay/begin", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ authUrl: url.href, leaseId }),
+            });
+          } catch (error) {
+            if (popup) popup.close();
+            setOauthRelayStatus(error.message || String(error), true);
+            // Leave the pending URL so the user can retry from the button.
+            oauthRelayStartButton.hidden = false;
+            return;
+          }
+          oauthRelaySession = {
+            sessionId: session.sessionId,
+            port: session.port,
+            path: redirect.path,
+          };
+          if (native) {
+            // Native binds the phone's loopback port, opens the OS browser,
+            // and parks the redirect until this app is foreground again —
+            // then window.laymuxOauthRelay.onCallback forwards it.
+            oauthRelayHint.textContent =
+              "Finish signing in with the browser that just opened, then " +
+              "return to this app — the result is delivered to the PC here.";
+            setOauthRelayStatus("Waiting for the sign-in to finish...");
+            window.LaymuxNative.beginOauthRelay(
+              session.sessionId,
+              String(session.port),
+              redirect.path,
+              url.href,
+            );
+            return;
+          }
+          // Plain browser: nothing can listen on this device's localhost.
+          // The redirect still lands in the address bar — the user copies it
+          // back here and the desktop replays it.
+          oauthRelayHint.textContent =
+            "Sign in with the tab that just opened. It ends on an unreachable " +
+            "localhost page — copy that page's full address and paste it below.";
+          oauthRelayManualRow.hidden = false;
+          setOauthRelayStatus("Waiting for the pasted callback address...");
+          if (popup) {
+            popup.location.href = url.href;
+          } else {
+            // Popup blocked despite the sync open: best-effort direct open.
+            openExternalRemoteUrl(url);
+          }
+        }
+
+        async function forwardOauthCallback(pathAndQuery) {
+          const session = oauthRelaySession;
+          if (!session || oauthRelayForwarding) return null;
+          oauthRelayForwarding = true;
+          try {
+            const result = await remoteFetch("/remote/v1/oauth-relay/forward", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                sessionId: session.sessionId,
+                pathAndQuery,
+                leaseId,
+              }),
+            });
+            oauthRelaySession = null;
+            return result;
+          } catch (error) {
+            // A server answer means the one-shot session is spent; a pure
+            // transport failure (E2E session still resuming after the OS
+            // browser) leaves it intact so the caller can retry.
+            if (error && typeof error.status === "number") {
+              oauthRelaySession = null;
+            }
+            throw error;
+          } finally {
+            oauthRelayForwarding = false;
+          }
+        }
+
+        async function forwardPastedOauthCallback() {
+          const session = oauthRelaySession;
+          if (!session) return;
+          let pathAndQuery = null;
+          try {
+            const pasted = new URL(oauthRelayCallbackInput.value.trim());
+            const host = pasted.hostname.toLowerCase();
+            if (
+              (host === "localhost" || host === "127.0.0.1") &&
+              Number(pasted.port) === session.port
+            ) {
+              pathAndQuery = pasted.pathname + pasted.search;
+            }
+          } catch (_) {
+            // Falls through to the error below.
+          }
+          if (!pathAndQuery) {
+            setOauthRelayStatus(
+              `The pasted address must start with http://localhost:${session.port}`,
+              true,
+            );
+            return;
+          }
+          setOauthRelayStatus("Forwarding the callback to the PC...");
+          try {
+            const result = await forwardOauthCallback(pathAndQuery);
+            if (!result) return;
+            setOauthRelayStatus(
+              `Done — the PC tool answered ${result.status}. You can close this.`,
+            );
+          } catch (error) {
+            setOauthRelayStatus(error.message || String(error), true);
+          }
+        }
+
+        // Native (Android) parks the captured loopback redirect while the OS
+        // browser is frontmost and hands it here on the next foreground; the
+        // browser already got its "return to the app" page. The E2E session
+        // may still be resuming at that moment, so transport failures retry
+        // with backoff before giving up.
+        window.laymuxOauthRelay = {
+          onCallback(pathAndQuery) {
+            (async () => {
+              setOauthRelayStatus("Forwarding the sign-in result to the PC...");
+              for (let attempt = 0; attempt < 4; attempt += 1) {
+                try {
+                  const result = await forwardOauthCallback(String(pathAndQuery));
+                  if (result) {
+                    setOauthRelayStatus(
+                      `Done — the PC tool answered ${result.status}. You can close this.`,
+                    );
+                  }
+                  return;
+                } catch (error) {
+                  if (error && typeof error.status === "number") {
+                    setOauthRelayStatus(error.message || String(error), true);
+                    return;
+                  }
+                  await new Promise((resolve) =>
+                    setTimeout(resolve, 1000 * (attempt + 1)),
+                  );
+                }
+              }
+              setOauthRelayStatus(
+                "Could not reach the PC to deliver the sign-in result.",
+                true,
+              );
+            })();
+          },
+          onError(message) {
+            setOauthRelayStatus(String(message), true);
+          },
+        };
+
+        oauthRelayForwardButton.addEventListener("click", () => {
+          forwardPastedOauthCallback();
+        });
+        oauthRelayStartButton.addEventListener("click", () => {
+          beginOauthRelayFlow();
+        });
+        oauthRelayCloseButton.addEventListener("click", closeOauthRelayModal);
+        // --- end OAuth loopback relay ---------------------------------------
 
         // Equivalent to desktop's `(?<!\w)#(\d+)\b`, without regex
         // lookbehind so older iOS WebKit can parse the Remote page.

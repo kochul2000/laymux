@@ -66,6 +66,7 @@ import com.laymux.android.remote.E2eTransportException
 import com.laymux.android.remote.E2eTransportFailureKind
 import com.laymux.android.remote.E2eTransportKind
 import com.laymux.android.remote.E2eTransportPolicy
+import com.laymux.android.remote.OauthLoopbackRelay
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
@@ -150,6 +151,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     @Volatile private var remoteOpeningSession: RemoteSession? = null
     @Volatile private var remoteConnecting = false
     @Volatile private var remoteLeaseId: String? = null
+    private var oauthRelay: OauthLoopbackRelay? = null
+    private var pendingOauthCallback: String? = null
     private var remoteBackgroundExpiry: ScheduledFuture<*>? = null
     private val remoteOutputStreams = ConcurrentHashMap<String, E2eOutputSocket>()
     private val remoteOutputEntries = ConcurrentHashMap<String, RemoteOutputBridgeEntry>()
@@ -664,6 +667,92 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             } catch (_: ActivityNotFoundException) {
                 showCloudMessage("링크를 열 브라우저를 찾지 못했습니다.")
             }
+        }
+    }
+
+    /**
+     * OAuth loopback relay (ADR-0175): bind the phone's `localhost:{port}`,
+     * open the OS browser on the auth URL, and hand the provider's redirect
+     * back to the Remote document, which forwards it to the PC listener over
+     * the authenticated transport. Every parameter is Remote-document input,
+     * so it is re-validated here like the other bridge entry points.
+     *
+     * The redirect arrives while the OS browser is frontmost — this activity
+     * is stopped and the E2E session is suspended, so new RPCs are refused
+     * (ADR-0146). The callback is therefore parked in [pendingOauthCallback]
+     * and delivered to the Remote document on the next onStart; the browser
+     * already got its "return to the app" page from the listener.
+     */
+    fun beginOauthRelay(sessionId: String, portValue: String, expectedPath: String, authUrl: String) {
+        if (!validBridgeId(sessionId)) return
+        val port = portValue.toIntOrNull() ?: return
+        if (port < 1024 || port > 65535) return
+        if (expectedPath.isEmpty() || expectedPath.length > MAX_REMOTE_PATH_LENGTH ||
+            !expectedPath.startsWith('/')
+        ) {
+            return
+        }
+        val url = ExternalUrlPolicy.browsableUrl(authUrl) ?: return
+        runOnUiThread {
+            if (localWebSurface != LocalWebSurface.REMOTE) return@runOnUiThread
+            oauthRelay?.stop()
+            val relay = OauthLoopbackRelay(
+                port = port,
+                expectedPath = expectedPath,
+                onCallback = { pathAndQuery -> deliverOauthCallback(pathAndQuery) },
+                onError = { message -> dispatchOauthRelayEvent("onError", message) },
+            )
+            if (!relay.start()) {
+                oauthRelay = null
+                dispatchOauthRelayEvent(
+                    "onError",
+                    "Could not open the sign-in relay port on this device.",
+                )
+                return@runOnUiThread
+            }
+            oauthRelay = relay
+            openExternalUrl(url)
+        }
+    }
+
+    fun cancelOauthRelay() {
+        // Called from the WebView JS bridge thread. The relay fields are
+        // otherwise touched only on the UI thread (beginOauthRelay,
+        // deliverOauthCallback, flushPendingOauthCallback, onDestroy), so hop
+        // there to avoid racing a parked-callback delivery/flush. stop() is
+        // itself AtomicBoolean-safe; the field writes are the race.
+        runOnUiThread {
+            oauthRelay?.stop()
+            oauthRelay = null
+            pendingOauthCallback = null
+        }
+    }
+
+    private fun deliverOauthCallback(pathAndQuery: String) {
+        runOnUiThread {
+            oauthRelay = null
+            if (remoteLifecycleActive) {
+                dispatchOauthRelayEvent("onCallback", pathAndQuery)
+            } else {
+                pendingOauthCallback = pathAndQuery
+            }
+        }
+    }
+
+    private fun flushPendingOauthCallback() {
+        val pathAndQuery = pendingOauthCallback ?: return
+        pendingOauthCallback = null
+        dispatchOauthRelayEvent("onCallback", pathAndQuery)
+    }
+
+    private fun dispatchOauthRelayEvent(method: String, vararg arguments: String) {
+        val encodedArguments = arguments.joinToString(",") { JSONObject.quote(it) }
+        runOnUiThread {
+            if (!::webView.isInitialized || isDestroyed) return@runOnUiThread
+            webView.evaluateJavascript(
+                "window.laymuxOauthRelay?.$method($encodedArguments);",
+                null,
+            )
         }
     }
 
@@ -2136,6 +2225,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         super.onStart()
         remoteLifecycleActive = true
         resumeRemoteSessionAfterBackground()
+        // A sign-in redirect caught while the OS browser was frontmost waits
+        // here: the E2E session resumes above, and the Remote document
+        // retries the forward if the transport needs another moment.
+        flushPendingOauthCallback()
         if (::webView.isInitialized) {
             if (remoteSession == null &&
                 webView.url?.startsWith(
@@ -2192,6 +2285,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onDestroy() {
+        oauthRelay?.stop()
+        oauthRelay = null
+        pendingOauthCallback = null
         policyDialog?.dismiss()
         policyDialog = null
         biometricPromptGate.cancelPending()

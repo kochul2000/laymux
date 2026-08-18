@@ -266,6 +266,32 @@
         </button>
       </footer>
     </div>
+    <!-- OAuth loopback relay (ADR-0175). Shown when a terminal link is an
+         installed-app OAuth flow: the provider redirects to the desktop's
+         localhost listener, so the redirect is relayed back to the PC. -->
+    <div id="oauthRelayScrim" class="oauth-relay-scrim" hidden>
+      <div class="oauth-relay-dialog" role="dialog" aria-modal="true" aria-labelledby="oauthRelayTitle">
+        <div id="oauthRelayTitle" class="oauth-relay-title">Sign-in relay</div>
+        <div id="oauthRelayHint" class="oauth-relay-hint"></div>
+        <div id="oauthRelayManualRow" class="oauth-relay-manual" hidden>
+          <input
+            id="oauthRelayCallback"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-label="Callback address from the browser"
+            placeholder="http://localhost:PORT/?code=..."
+          />
+          <button id="oauthRelayForward" class="primary" type="button">Forward to PC</button>
+        </div>
+        <div id="oauthRelayStatus" class="oauth-relay-status"></div>
+        <div class="oauth-relay-actions">
+          <button id="oauthRelayStart" class="primary" type="button" hidden>Start sign-in</button>
+          <button id="oauthRelayClose" type="button">Close</button>
+        </div>
+      </div>
+    </div>
     <script src="{{ASSET:xterm.js}}"></script>
     <!-- Shared cell-width provider (issue #538). Generated from
          ui/src/lib/terminal-unicode-width.ts so the remote client wraps at the

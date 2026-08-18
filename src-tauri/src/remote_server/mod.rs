@@ -12,6 +12,7 @@ mod lease;
 mod navigation;
 mod navigation_routes;
 mod navigation_step_routes;
+mod oauth_relay_routes;
 mod page;
 mod page_assets;
 mod pwa;
