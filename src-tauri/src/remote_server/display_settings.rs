@@ -7,18 +7,23 @@ use serde_json::json;
 
 use crate::automation_server::settings_bridge::{apply_settings_patch, get_settings_snapshot};
 use crate::automation_server::ServerState;
+use crate::constants::{DEFAULT_FAST_SCROLL_SENSITIVITY, DEFAULT_SCROLL_SENSITIVITY};
 use crate::settings::contract::settings_revision;
-use crate::settings::models::{Settings, REMOTE_FONT_SIZE_MAX, REMOTE_FONT_SIZE_MIN};
+use crate::settings::models::{
+    clamp_scroll_sensitivity, Settings, REMOTE_FONT_SIZE_MAX, REMOTE_FONT_SIZE_MIN,
+};
 use crate::state::AppState;
 
 use super::lease::{begin_remote_lease_mutation, RemoteLeaseMutationPermit};
 use super::routes::REMOTE_LEASE_HEADER;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RemoteDisplaySettingsResponse {
     terminal_font_size: u16,
     composer_font_size: u16,
+    touch_scroll_sensitivity: f32,
+    two_finger_scroll_sensitivity: f32,
     revision: String,
 }
 
@@ -32,6 +37,14 @@ impl From<&Settings> for RemoteDisplaySettingsResponse {
             composer_font_size: remote
                 .composer_font_size
                 .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
+            touch_scroll_sensitivity: clamp_scroll_sensitivity(
+                remote.touch_scroll_sensitivity,
+                DEFAULT_SCROLL_SENSITIVITY,
+            ),
+            two_finger_scroll_sensitivity: clamp_scroll_sensitivity(
+                remote.two_finger_scroll_sensitivity,
+                DEFAULT_FAST_SCROLL_SENSITIVITY,
+            ),
             revision: settings_revision(settings),
         }
     }
@@ -42,6 +55,8 @@ impl From<&Settings> for RemoteDisplaySettingsResponse {
 pub(super) struct UpdateRemoteDisplaySettingsRequest {
     terminal_font_size: u16,
     composer_font_size: u16,
+    touch_scroll_sensitivity: f32,
+    two_finger_scroll_sensitivity: f32,
     lease_id: Option<String>,
     expected_revision: String,
 }
@@ -72,6 +87,8 @@ pub(super) async fn update_remote_display_settings(
         "remote": {
             "terminalFontSize": body.terminal_font_size,
             "composerFontSize": body.composer_font_size,
+            "touchScrollSensitivity": body.touch_scroll_sensitivity,
+            "twoFingerScrollSensitivity": body.two_finger_scroll_sensitivity,
         }
     });
     match apply_settings_patch(&server, &patch, Some(&body.expected_revision)).await {
@@ -115,16 +132,30 @@ mod tests {
         let mut settings = Settings::default();
         settings.remote.terminal_font_size = 0;
         settings.remote.composer_font_size = u16::MAX;
+        // Out-of-band and non-finite touch values normalize like the
+        // appearance payload: positive-out-of-range clamps, others fall back.
+        settings.remote.touch_scroll_sensitivity = 0.0;
+        settings.remote.two_finger_scroll_sensitivity = 1000.0;
 
         let response = RemoteDisplaySettingsResponse::from(&settings);
 
         assert_eq!(response.terminal_font_size, REMOTE_FONT_SIZE_MIN);
         assert_eq!(response.composer_font_size, REMOTE_FONT_SIZE_MAX);
         assert_eq!(
+            response.touch_scroll_sensitivity,
+            DEFAULT_SCROLL_SENSITIVITY
+        );
+        assert_eq!(
+            response.two_finger_scroll_sensitivity,
+            crate::constants::MAX_SCROLL_SENSITIVITY
+        );
+        assert_eq!(
             serde_json::to_value(response).unwrap(),
             json!({
                 "terminalFontSize": 6,
                 "composerFontSize": 72,
+                "touchScrollSensitivity": DEFAULT_SCROLL_SENSITIVITY,
+                "twoFingerScrollSensitivity": crate::constants::MAX_SCROLL_SENSITIVITY,
                 "revision": settings_revision(&settings),
             })
         );
@@ -144,6 +175,8 @@ mod tests {
         let missing = UpdateRemoteDisplaySettingsRequest {
             terminal_font_size: 14,
             composer_font_size: 16,
+            touch_scroll_sensitivity: 1.0,
+            two_finger_scroll_sensitivity: 5.0,
             lease_id: None,
             expected_revision: "revision-1".into(),
         };
