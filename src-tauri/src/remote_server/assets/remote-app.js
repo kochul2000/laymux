@@ -2138,10 +2138,104 @@
           }
         }
 
-        function setOauthRelayStatus(message, error = false) {
-          oauthRelayStatus.textContent = message;
-          oauthRelayStatus.classList.toggle("error", error);
+        // Relay-scoped i18n (ko/en). The Remote page has no shared i18n yet;
+        // this covers only the strings this feature adds. Language follows the
+        // phone locale with the same ko*→ko rule the desktop uses, since the
+        // relay UI is shown on the phone.
+        const OAUTH_RELAY_LANG = (navigator.language || "en")
+          .toLowerCase()
+          .startsWith("ko")
+          ? "ko"
+          : "en";
+        const OAUTH_RELAY_STRINGS = {
+          en: {
+            title: "Sign-in relay",
+            hintNative:
+              "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. Start sign-in in the browser and the result returns to the PC automatically.",
+            hintBrowser:
+              "This link is a {host} sign-in that returns its code to the PC's localhost:{port} listener. After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.",
+            registering: "Registering the sign-in relay with the PC...",
+            waitingNative:
+              "Finish signing in with the browser that just opened, then return to this app — the result is delivered to the PC here.",
+            waitingSignin: "Waiting for the sign-in to finish...",
+            startedBrowser:
+              "Sign in with the tab that just opened. It ends on an unreachable localhost page — copy that page's full address and paste it below.",
+            waitingPaste: "Waiting for the pasted callback address...",
+            pasteInvalid:
+              "The pasted address must start with http://localhost:{port}",
+            forwardingPaste: "Forwarding the callback to the PC...",
+            forwarding: "Forwarding the sign-in result to the PC...",
+            successAnswered:
+              "✓ Signed in — the PC tool answered {status}. You can close this.",
+            successDelivered:
+              "✓ Signed in — the sign-in was delivered to the PC. You can close this.",
+            inactive: "The sign-in relay is no longer active. You can close this.",
+            couldNotConfirm:
+              "Could not confirm delivery — check whether the PC signed in.",
+            btnStart: "Start sign-in",
+            btnForward: "Forward to PC",
+            btnClose: "Close",
+            ariaCallback: "Callback address from the browser",
+          },
+          ko: {
+            title: "로그인 중계",
+            hintNative:
+              "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 브라우저에서 로그인하면 결과가 PC로 자동 전달됩니다.",
+            hintBrowser:
+              "이 링크는 {host} 로그인으로, 코드를 PC의 localhost:{port} 리스너로 돌려보냅니다. 로그인 후 브라우저는 열리지 않는 localhost 페이지에서 끝나므로, 그 주소 전체를 복사해 아래에 붙여넣으세요.",
+            registering: "PC에 로그인 중계를 등록하는 중...",
+            waitingNative:
+              "방금 열린 브라우저에서 로그인을 마친 뒤 이 앱으로 돌아오세요. 결과는 여기서 PC로 전달됩니다.",
+            waitingSignin: "로그인이 끝나기를 기다리는 중...",
+            startedBrowser:
+              "방금 열린 탭에서 로그인하세요. 열리지 않는 localhost 페이지에서 끝나면 그 주소 전체를 복사해 아래에 붙여넣으세요.",
+            waitingPaste: "붙여넣은 콜백 주소를 기다리는 중...",
+            pasteInvalid:
+              "붙여넣은 주소는 http://localhost:{port} 로 시작해야 합니다",
+            forwardingPaste: "콜백을 PC로 전달하는 중...",
+            forwarding: "로그인 결과를 PC로 전달하는 중...",
+            successAnswered:
+              "✓ 로그인 성공 — PC 도구가 {status}로 응답했습니다. 이 창을 닫아도 됩니다.",
+            successDelivered:
+              "✓ 로그인 성공 — PC로 전달됐습니다. 이 창을 닫아도 됩니다.",
+            inactive: "로그인 중계가 더 이상 활성 상태가 아닙니다. 이 창을 닫아도 됩니다.",
+            couldNotConfirm:
+              "전달을 확인하지 못했습니다 — PC에서 로그인됐는지 확인하세요.",
+            btnStart: "로그인 시작",
+            btnForward: "PC로 전달",
+            btnClose: "닫기",
+            ariaCallback: "브라우저에서 받은 콜백 주소",
+          },
+        };
+        function tRelay(key, params) {
+          const table =
+            OAUTH_RELAY_STRINGS[OAUTH_RELAY_LANG] || OAUTH_RELAY_STRINGS.en;
+          let text = table[key] ?? OAUTH_RELAY_STRINGS.en[key] ?? key;
+          if (params) {
+            for (const name of Object.keys(params)) {
+              text = text.split(`{${name}}`).join(params[name]);
+            }
+          }
+          return text;
         }
+
+        // kind: "error" | "success" | "" (neutral). Success is styled distinctly
+        // so a completed sign-in reads as a clear win, not just another line.
+        function setOauthRelayStatus(message, kind = "") {
+          oauthRelayStatus.textContent = message;
+          oauthRelayStatus.classList.toggle("error", kind === "error");
+          oauthRelayStatus.classList.toggle("success", kind === "success");
+        }
+
+        // Static labels the modal ships in English — localized once here.
+        (function localizeOauthRelayChrome() {
+          const title = document.getElementById("oauthRelayTitle");
+          if (title) title.textContent = tRelay("title");
+          oauthRelayStartButton.textContent = tRelay("btnStart");
+          oauthRelayForwardButton.textContent = tRelay("btnForward");
+          oauthRelayCloseButton.textContent = tRelay("btnClose");
+          oauthRelayCallbackInput.setAttribute("aria-label", tRelay("ariaCallback"));
+        })();
 
         function closeOauthRelayModal() {
           oauthRelayScrim.hidden = true;
@@ -2172,10 +2266,10 @@
           oauthRelayScrim.hidden = false;
           oauthRelayManualRow.hidden = true;
           oauthRelayStartButton.hidden = false;
-          const target = `${url.hostname} sign-in that returns its code to the PC's localhost:${redirect.port} listener.`;
-          oauthRelayHint.textContent = nativeOauthRelayAvailable()
-            ? `This link is a ${target} Start sign-in in the browser and the result returns to the PC automatically.`
-            : `This link is a ${target} After signing in, the browser ends on an unreachable localhost page — copy that page's full address and paste it back here.`;
+          oauthRelayHint.textContent = tRelay(
+            nativeOauthRelayAvailable() ? "hintNative" : "hintBrowser",
+            { host: url.hostname, port: redirect.port },
+          );
           setOauthRelayStatus("");
         }
 
@@ -2194,7 +2288,7 @@
             if (popup) popup.opener = null;
           }
           oauthRelayStartButton.hidden = true;
-          setOauthRelayStatus("Registering the sign-in relay with the PC...");
+          setOauthRelayStatus(tRelay("registering"));
           let session;
           try {
             session = await remoteFetch("/remote/v1/oauth-relay/begin", {
@@ -2204,7 +2298,7 @@
             });
           } catch (error) {
             if (popup) popup.close();
-            setOauthRelayStatus(error.message || String(error), true);
+            setOauthRelayStatus(error.message || String(error), "error");
             // Leave the pending URL so the user can retry from the button.
             oauthRelayStartButton.hidden = false;
             return;
@@ -2218,10 +2312,8 @@
             // Native binds the phone's loopback port, opens the OS browser,
             // and parks the redirect until this app is foreground again —
             // then window.laymuxOauthRelay.onCallback forwards it.
-            oauthRelayHint.textContent =
-              "Finish signing in with the browser that just opened, then " +
-              "return to this app — the result is delivered to the PC here.";
-            setOauthRelayStatus("Waiting for the sign-in to finish...");
+            oauthRelayHint.textContent = tRelay("waitingNative");
+            setOauthRelayStatus(tRelay("waitingSignin"));
             window.LaymuxNative.beginOauthRelay(
               session.sessionId,
               String(session.port),
@@ -2233,11 +2325,9 @@
           // Plain browser: nothing can listen on this device's localhost.
           // The redirect still lands in the address bar — the user copies it
           // back here and the desktop replays it.
-          oauthRelayHint.textContent =
-            "Sign in with the tab that just opened. It ends on an unreachable " +
-            "localhost page — copy that page's full address and paste it below.";
+          oauthRelayHint.textContent = tRelay("startedBrowser");
           oauthRelayManualRow.hidden = false;
-          setOauthRelayStatus("Waiting for the pasted callback address...");
+          setOauthRelayStatus(tRelay("waitingPaste"));
           if (popup) {
             popup.location.href = url.href;
           } else {
@@ -2293,20 +2383,21 @@
           }
           if (!pathAndQuery) {
             setOauthRelayStatus(
-              `The pasted address must start with http://localhost:${session.port}`,
-              true,
+              tRelay("pasteInvalid", { port: session.port }),
+              "error",
             );
             return;
           }
-          setOauthRelayStatus("Forwarding the callback to the PC...");
+          setOauthRelayStatus(tRelay("forwardingPaste"));
           try {
             const result = await forwardOauthCallback(pathAndQuery);
             if (!result) return;
             setOauthRelayStatus(
-              `Done — the PC tool answered ${result.status}. You can close this.`,
+              tRelay("successAnswered", { status: result.status }),
+              "success",
             );
           } catch (error) {
-            setOauthRelayStatus(error.message || String(error), true);
+            setOauthRelayStatus(error.message || String(error), "error");
           }
         }
 
@@ -2318,7 +2409,7 @@
         window.laymuxOauthRelay = {
           onCallback(pathAndQuery) {
             (async () => {
-              setOauthRelayStatus("Forwarding the sign-in result to the PC...");
+              setOauthRelayStatus(tRelay("forwarding"));
               // A transport failure can drop the *response* after the forward
               // already reached the PC and consumed the one-shot session. On
               // retry that same request answers CONFLICT/"session is not
@@ -2331,29 +2422,28 @@
                   const result = await forwardOauthCallback(String(pathAndQuery));
                   if (result) {
                     setOauthRelayStatus(
-                      `Done — the PC tool answered ${result.status}. You can close this.`,
+                      tRelay("successAnswered", { status: result.status }),
+                      "success",
                     );
                     return;
                   }
                   // Null means the session was already consumed/cleared: a
                   // prior send reached the PC (delivered), or the relay was
                   // closed. Never leave the status stuck on "Forwarding...".
-                  setOauthRelayStatus(
-                    sent
-                      ? "Done — the sign-in was delivered to the PC. You can close this."
-                      : "The sign-in relay is no longer active. You can close this.",
-                  );
+                  if (sent) {
+                    setOauthRelayStatus(tRelay("successDelivered"), "success");
+                  } else {
+                    setOauthRelayStatus(tRelay("inactive"));
+                  }
                   return;
                 } catch (error) {
                   if (error && typeof error.status === "number") {
                     // A server answer to a retry that says the session is gone
                     // means an earlier send already delivered it.
                     if (sent) {
-                      setOauthRelayStatus(
-                        "Done — the sign-in was delivered to the PC. You can close this.",
-                      );
+                      setOauthRelayStatus(tRelay("successDelivered"), "success");
                     } else {
-                      setOauthRelayStatus(error.message || String(error), true);
+                      setOauthRelayStatus(error.message || String(error), "error");
                     }
                     return;
                   }
@@ -2365,14 +2455,11 @@
                   );
                 }
               }
-              setOauthRelayStatus(
-                "Could not confirm delivery — check whether the PC signed in.",
-                true,
-              );
+              setOauthRelayStatus(tRelay("couldNotConfirm"), "error");
             })();
           },
           onError(message) {
-            setOauthRelayStatus(String(message), true);
+            setOauthRelayStatus(String(message), "error");
           },
         };
 

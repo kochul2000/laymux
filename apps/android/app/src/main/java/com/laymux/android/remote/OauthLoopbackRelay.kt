@@ -112,10 +112,14 @@ class OauthLoopbackRelay(
             writeResponse(socket, 409, "The sign-in callback was already delivered.")
             return
         }
+        // Shown briefly in the OS browser before the app is pulled forward.
+        // The browser locale is unknown here, so serve both languages.
         writeResponse(
             socket,
             200,
-            "Sign-in received. Returning you to the Laymux app to finish — " +
+            "로그인을 받았습니다. Laymux 앱으로 돌아가 마무리합니다 — " +
+                "앱이 자동으로 뜨지 않으면 직접 전환하세요. / " +
+                "Sign-in received. Returning you to the Laymux app to finish — " +
                 "if it does not come forward, switch back to it manually.",
         )
         stop()
