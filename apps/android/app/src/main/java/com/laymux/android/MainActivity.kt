@@ -716,9 +716,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun cancelOauthRelay() {
-        oauthRelay?.stop()
-        oauthRelay = null
-        pendingOauthCallback = null
+        // Called from the WebView JS bridge thread. The relay fields are
+        // otherwise touched only on the UI thread (beginOauthRelay,
+        // deliverOauthCallback, flushPendingOauthCallback, onDestroy), so hop
+        // there to avoid racing a parked-callback delivery/flush. stop() is
+        // itself AtomicBoolean-safe; the field writes are the race.
+        runOnUiThread {
+            oauthRelay?.stop()
+            oauthRelay = null
+            pendingOauthCallback = null
+        }
     }
 
     private fun deliverOauthCallback(pathAndQuery: String) {
