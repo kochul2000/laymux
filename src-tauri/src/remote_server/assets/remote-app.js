@@ -4825,10 +4825,10 @@
             "aria-expanded",
             String(hiddenWorkspaceShelfOpen),
           );
-          hiddenWorkspaceToggle.setAttribute(
-            "aria-label",
-            `${hiddenWorkspaceShelfOpen ? "Close" : "Open"} hidden workspaces (${hiddenWorkspaceCount})`,
-          );
+          const label =
+            `${hiddenWorkspaceShelfOpen ? "Close" : "Open"} hidden workspaces (${hiddenWorkspaceCount})`;
+          hiddenWorkspaceToggle.setAttribute("aria-label", label);
+          hiddenWorkspaceToggle.title = label;
         }
 
         function renderHiddenWorkspaceShelf(workspaces) {
@@ -4838,7 +4838,6 @@
             drawerView !== "workspace" || hiddenWorkspaceCount === 0;
           hiddenWorkspaceBadge.hidden = hiddenWorkspaceCount === 0;
           hiddenWorkspaceBadge.textContent = countBadgeText(hiddenWorkspaceCount);
-          hiddenWorkspaceToggle.title = `Hidden workspaces (${hiddenWorkspaceCount})`;
           if (hiddenWorkspaceCount === 0) {
             setHiddenWorkspaceShelfOpen(false);
             return;

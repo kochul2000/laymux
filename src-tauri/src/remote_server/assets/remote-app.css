@@ -515,9 +515,11 @@
       }
       .drawer-heading {
         display: flex;
+        flex: 1 1 auto;
         min-width: 0;
         align-items: center;
         gap: 4px;
+        overflow: hidden;
       }
       .drawer-header-button {
         width: 28px;
@@ -545,6 +547,10 @@
         pointer-events: none;
       }
       .drawer-title {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         color: var(--text-primary);
         font-size: var(--fs-md);
         font-weight: 650;
@@ -1553,6 +1559,31 @@
           min-height: 64px;
           margin: 0;
           padding: 6px 8px;
+        }
+      }
+      @media (max-width: 240px) {
+        .drawer-header {
+          padding-right: 1px;
+          padding-left: 1px;
+        }
+        .drawer-heading {
+          display: none;
+        }
+        .drawer-header-actions {
+          width: 100%;
+          min-width: 0;
+          justify-content: space-between;
+          gap: 0;
+        }
+        .drawer-header-button,
+        .desktop-mode-button {
+          width: 24px;
+          min-width: 24px;
+          padding-right: 0;
+          padding-left: 0;
+        }
+        .desktop-mode-button {
+          font-size: var(--fs-xs);
         }
       }
       @supports (height: 100dvh) {

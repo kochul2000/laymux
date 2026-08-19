@@ -17,6 +17,7 @@ ADR-0153은 Remote drawer가 숨긴 workspace를 별도 보관함에서 복원�
 
 - trigger는 숨긴 workspace가 있을 때 workspace home에서만 표시하고, 0개이거나 다른 drawer subview에서는 숨긴다.
 - 아이콘에는 현재 숨긴 개수 badge를 겹쳐 표시한다. 접근성 이름과 title에는 숨긴 개수와 open/close 동작을 텍스트로 제공하고, `aria-expanded`와 shelf 연결은 유지한다.
+- 240px 이하의 극단적으로 좁은 viewport에서는 장식적인 drawer title을 숨기고 공통 header control을 24px로 압축해, 로컬 앱의 `PC` action까지 포함한 모든 action을 한 행 안에 유지한다.
 - shelf의 위치, 항목 정렬, 복원 후 진입/복원만 수행하는 두 action, 성공 뒤 navigation snapshot 재조회는 ADR-0153의 계약을 그대로 따른다.
 - 숨김 상태와 개수는 navigation snapshot에서 계산하며 Remote 전용 영속 상태를 추가하지 않는다.
 

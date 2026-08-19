@@ -675,6 +675,36 @@ test.describe("remote mobile layout", () => {
       "aria-label",
       "Open hidden workspaces (1)",
     );
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "title",
+      "Open hidden workspaces (1)",
+    );
+
+    // Keep the worst-case header compact at the repo's narrowest mobile
+    // viewport: local-app mode also exposes the PC button.
+    await page.locator("#desktopModeDrawer").evaluate((button) => {
+      button.hidden = false;
+    });
+    await page.setViewportSize({ width: 180, height: 844 });
+    await expect(page.locator("#drawerTitle")).toBeHidden();
+    const narrowHeader = await page.locator(".drawer-header").evaluate((header) => {
+      const actions = header.querySelector<HTMLElement>(".drawer-header-actions");
+      if (!actions) throw new Error("drawer header actions are missing");
+      const headerRect = header.getBoundingClientRect();
+      const actionRect = actions.getBoundingClientRect();
+      return {
+        actionLeft: actionRect.left,
+        actionRight: actionRect.right,
+        headerClientWidth: header.clientWidth,
+        headerLeft: headerRect.left,
+        headerRight: headerRect.right,
+        headerScrollWidth: header.scrollWidth,
+      };
+    });
+    expect(narrowHeader.headerScrollWidth).toBe(narrowHeader.headerClientWidth);
+    expect(narrowHeader.actionLeft).toBeGreaterThanOrEqual(narrowHeader.headerLeft);
+    expect(narrowHeader.actionRight).toBeLessThanOrEqual(narrowHeader.headerRight);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/workspaces/ws-b/visibility",
       body: { hidden: true, leaseId: "lease-1" },
@@ -683,6 +713,10 @@ test.describe("remote mobile layout", () => {
     await page.locator("#hiddenWorkspaceToggle").click();
     await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
       "aria-label",
+      "Close hidden workspaces (1)",
+    );
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "title",
       "Close hidden workspaces (1)",
     );
     await expect(page.locator("#hiddenWorkspaceShelf")).toBeVisible();
