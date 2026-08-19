@@ -18,6 +18,7 @@ class BridgeSurfaceTest {
                 "setRemoteLease",
                 "disconnectRemote",
                 "openExternalUrl",
+                "supportsOutputHistoryBudget",
             ),
             javascriptMethods(RemoteBridge::class.java),
         )

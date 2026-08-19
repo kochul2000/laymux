@@ -24,11 +24,12 @@ internal class E2eOutputCipher(
     private var closed = false
 
     @Synchronized
-    fun encryptOpen(terminalId: String, leaseId: String): ByteArray {
+    fun encryptOpen(terminalId: String, leaseId: String, historyKib: Int = 0): ByteArray {
         check(!closed)
         val json = JSONObject()
             .put("terminalId", terminalId)
             .put("leaseId", leaseId)
+            .apply { if (historyKib > 0) put("historyKib", historyKib) }
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
         val plaintext = ByteArray(1 + json.size)

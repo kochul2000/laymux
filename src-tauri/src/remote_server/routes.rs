@@ -121,6 +121,19 @@ struct TerminalResizeRequest {
 #[serde(rename_all = "camelCase")]
 struct RemoteQuery {
     lease_id: Option<String>,
+    /// Scroll-top history expansion: the attach screen budget this client asks
+    /// for, in KiB. Only raises the owner-configured budget (ADR-0182). Kept as
+    /// a string so an unparsable value degrades to the owner budget instead of
+    /// rejecting the whole attach — the same fail-open the Cloud tunnel uses.
+    history_kib: Option<String>,
+}
+
+impl RemoteQuery {
+    fn history_kib(&self) -> Option<u32> {
+        self.history_kib
+            .as_deref()
+            .and_then(|value| value.parse::<u32>().ok())
+    }
 }
 
 pub fn build_router(state: ServerState) -> Router<ServerState> {
@@ -799,6 +812,7 @@ async fn remote_terminal_output_ws(
     Query(query): Query<RemoteQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let history_kib = query.history_kib();
     let Some(lease_id) = query.lease_id.filter(|value| !value.is_empty()) else {
         return json_error(StatusCode::CONFLICT, "remote controller lease is required");
     };
@@ -810,7 +824,7 @@ async fn remote_terminal_output_ws(
         Err(err) => return internal_error(err),
     };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
-    let snapshot_max_bytes = super::effective_snapshot_max_bytes(&settings);
+    let snapshot_max_bytes = super::effective_attach_snapshot_max_bytes(&settings, history_kib);
 
     ws.on_upgrade(move |socket| {
         stream_terminal_output(
@@ -1034,7 +1048,7 @@ mod tests {
         attempt_claim, claim_input_busy_response, complete_handoff_claim_attempt,
         exact_resize_unavailable_response, terminal_control_response, terminal_size_is_positive,
         ClaimAttempt, ClaimRequest, ClaimResponse, RemoteControlLease, RemoteControlState,
-        TerminalResizeRequest,
+        RemoteQuery, TerminalResizeRequest,
     };
     use crate::lock_ext::MutexExt;
     use crate::settings::models::RemoteSettings;
@@ -1122,6 +1136,61 @@ mod tests {
         assert!(!terminal_size_is_positive(80, 0));
         assert!(!terminal_size_is_positive(0, 0));
         assert!(terminal_size_is_positive(80, 24));
+    }
+
+    #[test]
+    fn output_attach_query_carries_an_optional_history_budget() {
+        let parse = |query: &str| {
+            let uri: axum::http::Uri = format!("http://remote/output?{query}").parse().unwrap();
+            axum::extract::Query::<RemoteQuery>::try_from_uri(&uri).map(|query| query.0)
+        };
+
+        assert_eq!(parse("leaseId=lease-1").unwrap().history_kib(), None);
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=256")
+                .unwrap()
+                .history_kib(),
+            Some(256)
+        );
+        // Fail-open: an unparsable budget attaches at the owner's own budget
+        // instead of rejecting the upgrade and killing the terminal view.
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=huge")
+                .unwrap()
+                .history_kib(),
+            None
+        );
+        assert_eq!(
+            parse("leaseId=lease-1&historyKib=-8")
+                .unwrap()
+                .history_kib(),
+            None
+        );
+
+        // The attach budget the output route hands to the checkpoint request is
+        // exactly this query value applied to the owner's setting.
+        let settings = RemoteSettings {
+            snapshot_max_kib: 4,
+            ..enabled_settings()
+        };
+        assert_eq!(
+            crate::remote_server::effective_attach_snapshot_max_bytes(
+                &settings,
+                parse("leaseId=lease-1&historyKib=256")
+                    .unwrap()
+                    .history_kib()
+            ),
+            256 * 1024
+        );
+        assert_eq!(
+            crate::remote_server::effective_attach_snapshot_max_bytes(
+                &settings,
+                parse("leaseId=lease-1&historyKib=huge")
+                    .unwrap()
+                    .history_kib()
+            ),
+            4 * 1024
+        );
     }
 
     #[test]

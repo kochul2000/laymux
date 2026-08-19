@@ -8,6 +8,14 @@ class RemoteBridge(
     private val activity: MainActivity,
     private val documentGeneration: Long,
 ) {
+    /**
+     * Feature probe for scroll-top history expansion (ADR-0182). A Remote page
+     * only adds `historyKib` to its output open record when this answers true,
+     * because older connectors reject an open record with unknown fields.
+     */
+    @JavascriptInterface
+    fun supportsOutputHistoryBudget(): Boolean = true
+
     @JavascriptInterface
     fun setRemoteLease(leaseId: String?) {
         activity.setRemoteLease(documentGeneration, leaseId)

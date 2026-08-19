@@ -99,7 +99,7 @@
         // Composer recall feature toggles (issues #504 / #505). Only the on/off
         // boolean is surface-local in localStorage — the past-input text itself
         // is kept in a runtime Map and never persisted (see composerHistory*).
-        // ADR-0181 is the narrow exception: selected text files and long pastes
+        // ADR-0182 is the narrow exception: selected text files and long pastes
         // become bounded host-cache files only when the user attaches/pastes them.
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
@@ -177,6 +177,20 @@
         let socket = null;
         let outputReconnectTimer = null;
         let outputReconnectAttempt = 0;
+        // Scroll-top history expansion (ADR-0182). `outputHistoryKib` is the
+        // attach screen budget this client currently asks the desktop for; it
+        // belongs to `outputHistoryTerminalId` only and resets on a pane switch.
+        let outputHistoryKib = 0;
+        let outputHistoryTerminalId = null;
+        let outputHistoryExhausted = false;
+        let historyExpansion = null;
+        // Serialized size of the screen checkpoint the surface currently shows.
+        // A deeper budget must produce a bigger one, or there is nothing older.
+        let outputSnapshotBytes = 0;
+        let nextHistoryExpansionId = 0;
+        let lastTerminalViewportY = 0;
+        let restoringTerminalViewport = false;
+        let lastTerminalUserScrollAt = 0;
         let transientConnectionNoticeTimer = null;
         let transientConnectionNoticeVisible = false;
         let heartbeatInterrupted = false;
@@ -337,6 +351,28 @@
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
         const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
         const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
+        // Scroll-top history expansion budget (KiB). Each request asks for a
+        // multiple of the screen the page already holds, floored so the very
+        // first step is worth a re-attach and capped at the desktop's supported
+        // ceiling for one checkpoint (ADR-0182).
+        const HISTORY_EXPANSION_MIN_KIB = 64;
+        const HISTORY_EXPANSION_MAX_KIB = 1024;
+        const HISTORY_EXPANSION_GROWTH = 4;
+        // A checkpoint stops one whole line short of its budget at most, so this
+        // much slack still counts as "the budget was the limit".
+        const HISTORY_EXPANSION_BUDGET_SLACK_BYTES = 8 * 1024;
+        const HISTORY_EXPANSION_BUSY_STATUS = "Loading earlier output…";
+        // How long a scroll gesture keeps vouching for viewport movement.
+        const TERMINAL_USER_SCROLL_WINDOW_MS = 1500;
+        // Automatic transport recovery keeps the expanded budget while the
+        // socket still opens, so a blip does not throw away paged-in history.
+        // After this many consecutive failures to open it falls back to the
+        // owner budget: a flaky link must not re-drive a 1 MiB checkpoint
+        // serialization on the desktop every few seconds.
+        const HISTORY_EXPANSION_MAX_FAILED_OPENS = 2;
+        // A history attach that never produces a snapshot (dropped socket, host
+        // busy) must not wedge the next request behind an in-flight marker.
+        const HISTORY_EXPANSION_TIMEOUT_MS = 20000;
 
         const remoteVisualViewport = window.visualViewport;
 
@@ -623,6 +659,17 @@
           });
         }
 
+        // Connectors that predate scroll-top history expansion reject an open
+        // record carrying unknown fields, so the budget only goes to a bridge
+        // that advertises it (ADR-0182).
+        function androidOutputHistorySupported() {
+          try {
+            return window.LaymuxNative?.supportsOutputHistoryBudget?.() === true;
+          } catch (_error) {
+            return false;
+          }
+        }
+
         class AndroidE2eOutputSocket {
           constructor(url) {
             this.binaryType = "arraybuffer";
@@ -642,6 +689,8 @@
               const encodedTerminalId = parsed.pathname.slice(prefix.length, -suffix.length);
               this.terminalId = decodeURIComponent(encodedTerminalId);
               this.leaseId = parsed.searchParams.get("leaseId") || "";
+              const historyKib = Number.parseInt(parsed.searchParams.get("historyKib") || "", 10);
+              this.historyKib = Number.isSafeInteger(historyKib) && historyKib > 0 ? historyKib : 0;
               if (!this.terminalId || !this.leaseId) {
                 throw new Error("Remote output identity is missing.");
               }
@@ -652,12 +701,16 @@
               setTimeout(() => {
                 if (this.readyState !== 0) return;
                 try {
-                  window.LaymuxOutputTransport.postMessage(JSON.stringify({
+                  const open = {
                     type: "open",
                     streamId: this.streamId,
                     terminalId: this.terminalId,
                     leaseId: this.leaseId,
-                  }));
+                  };
+                  if (this.historyKib > 0 && androidOutputHistorySupported()) {
+                    open.historyKib = this.historyKib;
+                  }
+                  window.LaymuxOutputTransport.postMessage(JSON.stringify(open));
                 } catch (error) {
                   this.fail(error instanceof Error ? error.message : String(error));
                 }
@@ -1993,6 +2046,12 @@
             stopInputFlush();
             stopResizeFlush();
             scrollToBottomButton.hidden = true;
+            // The isolated socket can no longer answer a pending history
+            // request, and the pane this switch lands on may never reach
+            // `openOutput` (a queued pane the desktop refuses to open) — so the
+            // budget restarts here, not there.
+            cancelHistoryExpansion();
+            resetHistoryExpansion(nextId);
           }
           activeTerminalId = nextId;
           loadActiveGithubRepo(nextId, nextId ? terminalInfoById.get(nextId)?.cwd : null);
@@ -2859,6 +2918,17 @@
           updateKeyBarControls();
         }
 
+        // Scroll gestures are the only evidence that the user, and not output,
+        // moved the viewport. xterm does not expose its own `isUserScrolling`,
+        // so the page stamps the gestures it already routes itself.
+        function markTerminalUserScroll() {
+          lastTerminalUserScrollAt = Date.now();
+        }
+
+        function terminalScrollIsUserDriven() {
+          return Date.now() - lastTerminalUserScrollAt <= TERMINAL_USER_SCROLL_WINDOW_MS;
+        }
+
         function isTerminalScrolledUp(term) {
           const activeBuffer = term?.buffer?.active;
           if (!activeBuffer) return false;
@@ -2880,8 +2950,18 @@
           // viewport. Establish a deterministic baseline, then restore a recovery
           // attach's surface-local scroll offset in the same synchronous task so
           // the intermediate tail position is never painted.
-          term.scrollToBottom();
-          if (distanceFromBottom > 0) term.scrollLines(-distanceFromBottom);
+          //
+          // The scroll this drives is not a user reaching the top: a pane whose
+          // whole scrollback fits the restored offset would otherwise land on
+          // row 0 and ask the desktop for history nobody requested.
+          restoringTerminalViewport = true;
+          try {
+            term.scrollToBottom();
+            if (distanceFromBottom > 0) term.scrollLines(-distanceFromBottom);
+          } finally {
+            restoringTerminalViewport = false;
+            lastTerminalViewportY = term?.buffer?.active?.viewportY ?? 0;
+          }
         }
 
         function updateScrollToBottomButton(term = terminal) {
@@ -3140,6 +3220,11 @@
           if (wholeLines === 0) return;
           term.scrollLines(wholeLines);
           updateSelectionHandles(term);
+          if (wholeLines < 0) markTerminalUserScroll();
+          // Dragging further up while already at row 0 moves nothing, so this
+          // is the only signal that the user wants older output than the
+          // attached screen carries.
+          if (wholeLines < 0) requestOlderTerminalHistory();
         }
 
         function sendTerminalCursorScroll(
@@ -3799,6 +3884,30 @@
             true
           );
           terminalHost.addEventListener("paste", handleDirectTerminalPaste, true);
+          // Mouse wheel at row 0: xterm swallows the event without scrolling,
+          // so ask for older history from here instead of from onScroll.
+          terminalHost.addEventListener(
+            "wheel",
+            (event) => {
+              if (event.deltaY >= 0 || !isNormalScrollbackMode(terminal)) return;
+              markTerminalUserScroll();
+              requestOlderTerminalHistory();
+            },
+            { passive: true }
+          );
+          // xterm scrolls the viewport itself on Shift+PageUp, so that scroll
+          // surfaces only as `onScroll`. Stamp the key that caused it. Plain
+          // PageUp and Home go to the PTY instead and must not vouch for
+          // anything. A pointer press is deliberately not a vouch: a selection
+          // drag auto-scrolls to row 0 too, and replacing the screen under a
+          // drag in progress would destroy the selection being made.
+          terminalHost.addEventListener(
+            "keydown",
+            (event) => {
+              if (event.shiftKey && event.key === "PageUp") markTerminalUserScroll();
+            },
+            true
+          );
           installSelectionHandles(terminal);
           installTouchSelectionBridge(terminal);
           installCompositionCellLayout(terminal);
@@ -3833,6 +3942,18 @@
             updateSelectionHandles(terminal);
             updateScrollToBottomButton(terminal);
             scheduleCropTransform();
+            // Only a viewport that *arrives* at row 0 under a gesture counts as
+            // reaching the top. Snapshot replay and a pane with no scrollback
+            // both sit at row 0 without the user asking for anything, and a
+            // flood that fills the scrollback pushes a parked viewport down to
+            // row 0 on its own. Pulling further up is the gesture handlers'
+            // signal, not this one.
+            const viewportY = terminal.buffer?.active?.viewportY ?? 0;
+            const previousViewportY = lastTerminalViewportY;
+            lastTerminalViewportY = viewportY;
+            if (viewportY === 0 && previousViewportY > 0 && terminalScrollIsUserDriven()) {
+              requestOlderTerminalHistory();
+            }
           });
           terminal.onCursorMove?.(() => updateCropTransform());
           terminal.onRender?.(() => scheduleCropTransform());
@@ -5959,6 +6080,167 @@
           return androidE2eMode ? new AndroidE2eOutputSocket(url) : new WebSocket(url);
         }
 
+        function resetHistoryExpansion(terminalId) {
+          outputHistoryTerminalId = terminalId;
+          outputHistoryKib = 0;
+          outputHistoryExhausted = false;
+          outputSnapshotBytes = 0;
+          lastTerminalViewportY = 0;
+          // A gesture made on the previous pane must not vouch for a row-0
+          // arrival that this pane's own attach fit produces.
+          lastTerminalUserScrollAt = 0;
+        }
+
+        // The desktop budget is `max(owner setting, request)`, and the page
+        // never learns the owner setting. Deriving the next request from the
+        // screen the page actually holds keeps the request above that unknown
+        // floor: a checkpoint of N bytes came from a budget of at least N, so
+        // asking for a multiple of N always widens it until the supported
+        // ceiling. A fixed ladder would silently no-op for every owner whose
+        // `snapshotMaxKib` already sits above its first rung.
+        // Returns the request to make, or why there is none: `atCeiling` means
+        // the desktop may still hold older output that this client cannot ask
+        // for, which is a different thing to tell the user than "the screen did
+        // not grow, so there is nothing older".
+        function nextHistoryExpansion() {
+          const currentKib = Math.ceil(outputSnapshotBytes / 1024);
+          const derivedKib = Math.max(
+            HISTORY_EXPANSION_MIN_KIB,
+            currentKib * HISTORY_EXPANSION_GROWTH
+          );
+          const kib = Math.min(HISTORY_EXPANSION_MAX_KIB, derivedKib);
+          if (kib > outputHistoryKib) return { kib, atCeiling: false };
+          // The ceiling only hides history when the budget was the binding
+          // limit. A checkpoint that came back well under the budget that asked
+          // for it means the desktop, not this client, ran out of scrollback.
+          const budgetWasBinding =
+            outputSnapshotBytes + HISTORY_EXPANSION_BUDGET_SLACK_BYTES >= outputHistoryKib * 1024;
+          return {
+            kib: null,
+            atCeiling: derivedKib > HISTORY_EXPANSION_MAX_KIB && budgetWasBinding,
+          };
+        }
+
+        function finishHistoryExpansion() {
+          if (!historyExpansion) return null;
+          clearTimeout(historyExpansion.timer);
+          const request = historyExpansion;
+          historyExpansion = null;
+          return request;
+        }
+
+        // Releases a pending request that its own attach can no longer answer
+        // (superseded attach, early return, timeout) without deciding anything
+        // about how much history exists. The budget rolls back with it: no
+        // screen ever arrived at the raised budget, so leaving it raised would
+        // make the next pull compute the same request, find it not greater, and
+        // declare the pane exhausted on transport evidence.
+        function cancelHistoryExpansion() {
+          const request = finishHistoryExpansion();
+          if (!request) return;
+          outputHistoryKib = request.previousKib;
+          // Only the expansion's own busy line may be cleared. A failure that
+          // closed the socket has already put its message on the status bar.
+          if (statusTextEl.textContent === HISTORY_EXPANSION_BUSY_STATUS) {
+            restoreStatusAfterHistoryExpansion();
+          }
+        }
+
+        // Settles the pending expansion once its replacement screen is on the
+        // surface. The comparison is on serialized snapshot bytes, not on
+        // buffer rows: the replay runs at the checkpoint geometry and the fit
+        // that follows reflows it, so row counts across the two attaches are
+        // not comparable. A snapshot that is no bigger than the one it replaces
+        // means the desktop has nothing older to give at this budget.
+        function settleHistoryExpansion(terminalId, requestId, snapshotBytes) {
+          // Only the attach this request started may settle it. A racing
+          // reconnect attaches at the pre-expansion budget, so letting its
+          // snapshot answer would mark the pane exhausted on false evidence.
+          if (!historyExpansion || historyExpansion.id !== requestId) return;
+          if (historyExpansion.terminalId !== terminalId) return;
+          const request = finishHistoryExpansion();
+          if (snapshotBytes > request.baselineSnapshotBytes) {
+            restoreStatusAfterHistoryExpansion();
+            return;
+          }
+          outputHistoryExhausted = true;
+          reportHistoryExpansionLimit("No earlier output is available.");
+        }
+
+        // A transport interruption notice outranks anything this feature has to
+        // say: it is describing the connection the user is waiting on.
+        // Every "this is as far back as it goes" message goes through here so a
+        // visible interruption notice — which describes the connection the user
+        // is waiting on — is never replaced by a scrollback verdict.
+        function reportHistoryExpansionLimit(message) {
+          if (transientConnectionNoticeVisible) return;
+          setStatus(message, false, true);
+        }
+
+        function restoreStatusAfterHistoryExpansion() {
+          // A *visible* interruption notice outranks anything this feature has to
+          // say, and its own recovery message replaces it. A notice that is only
+          // scheduled has printed nothing yet, so the busy line must still go.
+          if (transientConnectionNoticeVisible) return;
+          setStatus(activeTerminalTitle() || "Connected.");
+        }
+
+        // Scrolling above the attached screen asks the desktop for a deeper
+        // screen checkpoint and replays it at the same distance from the live
+        // tail, so the rows the user was reading stay put and older rows appear
+        // above them (ADR-0182).
+        function requestOlderTerminalHistory() {
+          const term = terminal;
+          if (!term || !leaseId || !activeTerminalId || historyExpansion) return;
+          // A connector that predates the history budget would drop the field
+          // and re-attach at the same budget for nothing.
+          if (androidE2eMode && !androidOutputHistorySupported()) return;
+          // While the transport is visibly down, a re-attach cannot land and its
+          // busy line would bury the reconnection notice the user is reading.
+          if (transientConnectionNoticeVisible) return;
+          // Reset/replay and viewport restoration move the viewport on their
+          // own. Only scrolls the user caused may ask for more history.
+          if (terminalReplayDepth > 0 || restoringTerminalViewport) return;
+          if (renderedTerminalId !== activeTerminalId) return;
+          if (outputHistoryTerminalId !== activeTerminalId) resetHistoryExpansion(activeTerminalId);
+          if (outputHistoryExhausted) return;
+          // Alternate-buffer and mouse-reporting apps own the screen: the same
+          // predicate that decides whether a gesture scrolls the scrollback at
+          // all decides whether more of it may be requested.
+          if (!isNormalScrollbackMode(term)) return;
+          const buffer = term.buffer && term.buffer.active;
+          if (!buffer) return;
+          if ((buffer.viewportY ?? 0) > 0) return;
+          const { kib: nextKib, atCeiling } = nextHistoryExpansion();
+          if (nextKib === null) {
+            outputHistoryExhausted = true;
+            reportHistoryExpansionLimit(
+              atCeiling
+                ? "Earlier output is beyond what Remote can load."
+                : "No earlier output is available."
+            );
+            return;
+          }
+          const terminalId = activeTerminalId;
+          const requestId = ++nextHistoryExpansionId;
+          historyExpansion = {
+            id: requestId,
+            terminalId,
+            kib: nextKib,
+            previousKib: outputHistoryKib,
+            baselineSnapshotBytes: outputSnapshotBytes,
+            timer: setTimeout(() => {
+              if (historyExpansion && historyExpansion.id === requestId) cancelHistoryExpansion();
+            }, HISTORY_EXPANSION_TIMEOUT_MS),
+          };
+          setBusyStatus(HISTORY_EXPANSION_BUSY_STATUS);
+          openOutput(terminalId, {
+            reconnect: true,
+            historyKib: nextKib,
+            historyRequestId: requestId,
+          });
+        }
+
         function outputReconnectDelayMs(attempt) {
           return Math.min(
             OUTPUT_RECONNECT_MAX_DELAY_MS,
@@ -5980,6 +6262,22 @@
         }
 
         async function openOutput(terminalId, options = {}) {
+          const historyRequestId = Number.isSafeInteger(options.historyRequestId)
+            ? options.historyRequestId
+            : null;
+          // Any attach that is not this request's own supersedes it: that
+          // snapshot arrives at the pre-expansion budget and must not be read
+          // as evidence about how much history the desktop still has.
+          if (historyExpansion && historyExpansion.id !== historyRequestId) {
+            cancelHistoryExpansion();
+          }
+          // Every path out of this function below releases the request it owns;
+          // only a delivered snapshot may settle it.
+          const releaseOwnHistoryExpansion = () => {
+            if (historyExpansion && historyExpansion.id === historyRequestId) {
+              cancelHistoryExpansion();
+            }
+          };
           const terminalInfo = terminalInfoById.get(terminalId);
           ensureRemoteFont(terminalInfo && terminalInfo.appearance);
           const term = ensureTerminal(terminalInfo && terminalInfo.appearance);
@@ -5996,7 +6294,10 @@
           } finally {
             attachGeometryHolds -= 1;
           }
-          if (leaseId !== settleLeaseId || activeTerminalId !== terminalId) return;
+          if (leaseId !== settleLeaseId || activeTerminalId !== terminalId) {
+            releaseOwnHistoryExpansion();
+            return;
+          }
           const reconnecting = options.reconnect === true;
           // Transport recovery restores bytes and geometry only. It must not
           // turn a dismissed mobile keyboard back into an active input surface.
@@ -6005,9 +6306,36 @@
           const preserveViewportOnOpen = reconnecting || options.preserveViewport === true;
           const outputLeaseId = leaseId;
           if (!outputLeaseId) {
+            cancelHistoryExpansion();
             setStatus("Remote control is not active.", true);
             return;
           }
+          // A history attach whose request was cancelled while it waited above
+          // (a reconnect timer that fired inside the settle await) must not
+          // re-raise the budget it no longer owns. The chrome settle held this
+          // surface's geometry publishing for its whole duration, so hand the
+          // fit back before dropping out.
+          if (historyRequestId !== null && historyExpansion?.id !== historyRequestId) {
+            scheduleTerminalFit(true);
+            return;
+          }
+          // A pane switch starts over at the desktop's own budget, and so does a
+          // user-directed re-attach of the same pane — it lands at the live tail
+          // anyway. Only automatic recovery keeps the history already paged in,
+          // and only while the socket still opens.
+          if (outputHistoryTerminalId !== terminalId) resetHistoryExpansion(terminalId);
+          if (Number.isSafeInteger(options.historyKib)) {
+            outputHistoryKib = options.historyKib;
+          } else if (
+            !reconnecting ||
+            outputReconnectAttempt >= HISTORY_EXPANSION_MAX_FAILED_OPENS
+          ) {
+            outputHistoryKib = 0;
+            // The owner budget is a fresh start: whatever "nothing older" meant
+            // at the raised budget no longer applies.
+            outputHistoryExhausted = false;
+          }
+          const historyKib = outputHistoryKib;
           stopSocket(!reconnecting);
           if (!reconnecting) {
             stopInputFlush();
@@ -6049,6 +6377,7 @@
                 scheduleOutputReconnect(terminalId, outputLeaseId);
               }
             }
+            releaseOwnHistoryExpansion();
             return;
           }
           if (
@@ -6056,10 +6385,12 @@
             outputLeaseId !== leaseId ||
             activeTerminalId !== terminalId
           ) {
+            releaseOwnHistoryExpansion();
             return;
           }
           lastResizeKey = `${terminalId}:${attachCols}x${attachRows}`;
-          const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}`;
+          const historyQuery = historyKib > 0 ? `&historyKib=${historyKib}` : "";
+          const url = `${wsBaseUrl()}/remote/v1/terminals/${encodeURIComponent(terminalId)}/output?leaseId=${encodeURIComponent(outputLeaseId)}&token=${encodeURIComponent(token())}${historyQuery}`;
           const outputSocket = createOutputSocket(url);
           let outputTerminalMissing = false;
           // Keep the previous surface visible until the replacement snapshot
@@ -6182,6 +6513,14 @@
                 updateScrollToBottomButton(term);
                 if (!reconnecting && currentInputMode() === "composer") {
                   offsetComposerForActiveAgent();
+                }
+                // An unsequenced host has no screen checkpoint and ignores the
+                // history budget, so this surface can never page older output.
+                const askedForHistory = historyExpansion?.id === historyRequestId;
+                releaseOwnHistoryExpansion();
+                outputHistoryExhausted = true;
+                if (askedForHistory) {
+                  reportHistoryExpansionLimit("No earlier output is available.");
                 }
               }
               if (outputAttachGeometryGeneration === outputGeneration) {
@@ -6333,6 +6672,8 @@
                 if (!reconnecting && currentInputMode() === "composer") {
                   offsetComposerForActiveAgent();
                 }
+                settleHistoryExpansion(terminalId, historyRequestId, header.byteLength);
+                outputSnapshotBytes = header.byteLength;
                 if (outputAttachGeometryGeneration === outputGeneration) {
                   outputAttachGeometryGeneration = null;
                 }
@@ -6408,6 +6749,9 @@
           outputSocket.onclose = () => {
             if (socket === outputSocket) {
               socket = null;
+              // A socket that dies before its snapshot cannot answer the
+              // history request it was opened for.
+              releaseOwnHistoryExpansion();
               if (outputAttachGeometryGeneration === outputGeneration) {
                 outputAttachGeometryGeneration = null;
               }
@@ -8202,6 +8546,10 @@
           cancelComposerSubmissions();
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();
+          // The next session must attach at the desktop's own budget, and a
+          // pending request from this one can never be answered.
+          finishHistoryExpansion();
+          resetHistoryExpansion(null);
           leaseId = null;
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
