@@ -1295,6 +1295,10 @@ async fn handle_stream_open(
                 .await;
                 return;
             };
+            // Scroll-top history expansion is optional: a malformed or missing
+            // value simply attaches at the owner-configured budget (ADR-0182).
+            let history_kib = query_param(payload.query.as_deref(), "historyKib")
+                .and_then(|value| value.parse::<u32>().ok());
             let (shutdown_tx, shutdown_rx) = watch::channel(false);
             let task_id = allocate_task_id(next_task_id);
             let task_stream_id = frame.stream_id.clone();
@@ -1307,8 +1311,11 @@ async fn handle_stream_open(
                     task_state,
                     output_checkpoint_bridge,
                     task_stream_id.clone(),
-                    terminal_id,
-                    lease_id,
+                    TunnelOutputAttach {
+                        terminal_id,
+                        lease_id,
+                        history_kib,
+                    },
                     shutdown_rx,
                 )
                 .await;
@@ -1769,9 +1776,14 @@ async fn stream_android_e2e_output_over_tunnel(task: AndroidE2eOutputTask) {
         prepared,
         input,
         shutdown,
-        move |terminal_id| async move {
-            terminal_output_subscription(&attach_state, output_checkpoint_bridge, &terminal_id)
-                .await
+        move |terminal_id, history_kib| async move {
+            terminal_output_subscription(
+                &attach_state,
+                output_checkpoint_bridge,
+                &terminal_id,
+                history_kib,
+            )
+            .await
         },
         move |record| {
             let outbound_tx = send_outbound.clone();
@@ -1787,15 +1799,27 @@ async fn stream_android_e2e_output_over_tunnel(task: AndroidE2eOutputTask) {
     .await;
 }
 
+/// What one relayed output stream attaches to: the terminal, the controller
+/// lease that authorizes it, and the optional scroll-top history budget.
+struct TunnelOutputAttach {
+    terminal_id: String,
+    lease_id: String,
+    history_kib: Option<u32>,
+}
+
 async fn stream_terminal_output_over_tunnel(
     outbound_tx: OutboundSender,
     app_state: Arc<AppState>,
     output_checkpoint_bridge: OutputCheckpointBridge,
     stream_id: String,
-    terminal_id: String,
-    lease_id: String,
+    attach: TunnelOutputAttach,
     mut shutdown: watch::Receiver<bool>,
 ) {
+    let TunnelOutputAttach {
+        terminal_id,
+        lease_id,
+        history_kib,
+    } = attach;
     let timeout_seconds = remote_output_timeout_seconds(&app_state);
     match remote_server::active_lease_matches_with_timeout(
         &app_state,
@@ -1827,8 +1851,12 @@ async fn stream_terminal_output_over_tunnel(
         }
     }
 
-    let subscription =
-        terminal_output_subscription(&app_state, output_checkpoint_bridge, &terminal_id);
+    let subscription = terminal_output_subscription(
+        &app_state,
+        output_checkpoint_bridge,
+        &terminal_id,
+        history_kib,
+    );
     let subscribed = match prepare_terminal_output_after_checkpoint(
         &app_state,
         &lease_id,
@@ -2007,6 +2035,7 @@ async fn stream_terminal_output_over_tunnel(
 
 async fn terminal_output_subscription_with<F, Fut>(
     app_state: &Arc<AppState>,
+    history_kib: Option<u32>,
     attach: F,
 ) -> Result<TerminalOutputSubscribedAttachment, remote_server::RenderCheckpointAttachError>
 where
@@ -2020,7 +2049,8 @@ where
 {
     let settings = remote_server::effective_remote_settings(app_state)
         .map_err(remote_server::RenderCheckpointAttachError::fatal)?;
-    let snapshot_max_bytes = remote_server::effective_snapshot_max_bytes(&settings);
+    let snapshot_max_bytes =
+        remote_server::effective_attach_snapshot_max_bytes(&settings, history_kib);
     attach(snapshot_max_bytes).await
 }
 
@@ -2028,6 +2058,7 @@ async fn terminal_output_subscription(
     app_state: &Arc<AppState>,
     _output_checkpoint_bridge: OutputCheckpointBridge,
     terminal_id: &str,
+    history_kib: Option<u32>,
 ) -> Result<TerminalOutputSubscribedAttachment, remote_server::RenderCheckpointAttachError> {
     #[cfg(not(test))]
     {
@@ -2035,19 +2066,23 @@ async fn terminal_output_subscription(
             app_state: Arc::clone(app_state),
             app_handle: _output_checkpoint_bridge,
         };
-        terminal_output_subscription_with(app_state, move |snapshot_max_bytes| async move {
-            remote_server::attach_and_subscribe_render_checkpoint(
-                &server,
-                terminal_id,
-                snapshot_max_bytes,
-            )
-            .await
-        })
+        terminal_output_subscription_with(
+            app_state,
+            history_kib,
+            move |snapshot_max_bytes| async move {
+                remote_server::attach_and_subscribe_render_checkpoint(
+                    &server,
+                    terminal_id,
+                    snapshot_max_bytes,
+                )
+                .await
+            },
+        )
         .await
     }
     #[cfg(test)]
     {
-        terminal_output_subscription_with(app_state, |snapshot_max_bytes| async move {
+        terminal_output_subscription_with(app_state, history_kib, |snapshot_max_bytes| async move {
             crate::terminal_output::attach_and_subscribe_terminal_output(
                 &app_state.terminal_protocol_states,
                 terminal_id,
@@ -2541,8 +2576,11 @@ mod tests {
             state,
             OutputCheckpointBridge,
             "srv-output".into(),
-            "term-1".into(),
-            lease_id.into(),
+            TunnelOutputAttach {
+                terminal_id: "term-1".into(),
+                lease_id: lease_id.into(),
+                history_kib: None,
+            },
             shutdown_rx,
         ));
         (rx, shutdown_tx, join)
@@ -2688,6 +2726,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cloud_attach_raises_its_checkpoint_budget_for_a_history_request() {
+        let state = state_with_terminal_output_and_lease("lease-1");
+
+        let observe = |history_kib: Option<u32>| {
+            let state = Arc::clone(&state);
+            async move {
+                let observed = Arc::new(std::sync::Mutex::new(0usize));
+                let sink = Arc::clone(&observed);
+                let _ = terminal_output_subscription_with(&state, history_kib, move |budget| {
+                    *sink.lock().unwrap() = budget;
+                    std::future::ready(Err(remote_server::RenderCheckpointAttachError::fatal(
+                        "stop after the budget is chosen",
+                    )))
+                })
+                .await;
+                // Bind before the await point ends so the guard is dropped here,
+                // not held across the closure boundary.
+                let budget = *observed.lock().unwrap();
+                budget
+            }
+        };
+
+        let owner_budget = observe(None).await;
+        assert!(owner_budget > 0);
+        assert_eq!(observe(Some(256)).await, 256 * 1024);
+        // A request below the owner budget never shrinks the attach screen.
+        assert_eq!(observe(Some(1)).await, owner_budget);
+    }
+
+    #[tokio::test]
     async fn cloud_subscription_uses_screen_checkpoint_and_offsets_live_sequence() {
         let state = state_with_terminal_output_and_lease("lease-1");
         let target = crate::terminal_output::terminal_render_checkpoint_target(
@@ -2698,7 +2766,7 @@ mod tests {
         let checkpoint_data = "\x1b[2J\x1b[HCHECKPOINT";
         let attach_state = Arc::clone(&state);
 
-        let mut subscribed = terminal_output_subscription_with(&state, move |snapshot_max_bytes| {
+        let mut subscribed = terminal_output_subscription_with(&state, None, move |snapshot_max_bytes| {
             assert!(snapshot_max_bytes >= checkpoint_data.len());
             async move {
                 crate::terminal_output::attach_and_subscribe_terminal_output_from_render_checkpoint(

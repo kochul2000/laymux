@@ -86,6 +86,7 @@ import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteDocumentAuthority
 import com.laymux.android.web.RemoteLoadProgress
+import com.laymux.android.web.RemoteOutputOpen
 import com.laymux.android.web.RemoteResourceCache
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.RemoteSurfaceResumeAction
@@ -2025,12 +2026,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (!validBridgeId(streamId)) return
         when (message.optString("type")) {
             "open" -> {
-                if (!jsonHasExactKeys(message, setOf("type", "streamId", "terminalId", "leaseId"))) {
+                if (!RemoteOutputOpen.hasAcceptedKeys(message)) {
                     emitOutputBridgeClose(replyProxy, streamId, "Invalid output request.", true)
                     return
                 }
                 val terminalId = message.optString("terminalId")
                 val leaseId = message.optString("leaseId")
+                val historyKib = RemoteOutputOpen.historyKib(message)
                 val session = remoteSession
                 if (!validRemoteIdentifier(terminalId) || !validRemoteIdentifier(leaseId) ||
                     session == null || !remoteLifecycleActive
@@ -2065,6 +2067,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                                 session,
                                 outputHttpClient,
                                 this,
+                                historyKib,
                             )
                             socket = created
                             if (!remoteOutputEntryIsCurrent(streamId, entry, session)

@@ -31,8 +31,8 @@ use crate::terminal_output::{
 
 use super::{
     active_lease_matches_with_timeout, attach_and_subscribe_render_checkpoint,
-    effective_remote_settings, effective_snapshot_max_bytes, get_remote_control_status, json_error,
-    RenderCheckpointAttachError,
+    effective_attach_snapshot_max_bytes, effective_remote_settings, get_remote_control_status,
+    json_error, RenderCheckpointAttachError,
 };
 
 pub(crate) const ANDROID_E2E_OUTPUT_PATH: &str = "/remote/v1/e2e/output";
@@ -65,6 +65,10 @@ pub(crate) struct PreparedAndroidE2eOutput {
 struct AndroidE2eOutputOpen {
     terminal_id: String,
     lease_id: String,
+    /// Scroll-top history expansion budget in KiB, absent on a normal attach
+    /// and on connector builds that predate it (ADR-0182).
+    #[serde(default)]
+    history_kib: Option<u32>,
 }
 
 pub(crate) async fn remote_android_e2e_output_ws(
@@ -134,10 +138,10 @@ async fn stream_local_android_e2e_output(
         prepared,
         input_rx,
         shutdown_rx,
-        move |terminal_id| async move {
+        move |terminal_id, history_kib| async move {
             let settings = effective_remote_settings(&attach_server.app_state)
                 .map_err(RenderCheckpointAttachError::fatal)?;
-            let snapshot_max_bytes = effective_snapshot_max_bytes(&settings);
+            let snapshot_max_bytes = effective_attach_snapshot_max_bytes(&settings, history_kib);
             attach_and_subscribe_render_checkpoint(&attach_server, &terminal_id, snapshot_max_bytes)
                 .await
         },
@@ -245,7 +249,7 @@ pub(crate) async fn stream_android_e2e_output<F, Fut, A, AttachFuture>(
 ) where
     F: FnMut(Vec<u8>) -> Fut,
     Fut: Future<Output = Result<(), AppError>>,
-    A: FnOnce(String) -> AttachFuture,
+    A: FnOnce(String, Option<u32>) -> AttachFuture,
     AttachFuture:
         Future<Output = Result<TerminalOutputSubscribedAttachment, RenderCheckpointAttachError>>,
 {
@@ -282,7 +286,7 @@ pub(crate) async fn stream_android_e2e_output<F, Fut, A, AttachFuture>(
     {
         return;
     }
-    let attach = attach(open.terminal_id.clone());
+    let attach = attach(open.terminal_id.clone(), open.history_kib);
     tokio::pin!(attach);
     let subscribed = loop {
         tokio::select! {
@@ -494,6 +498,24 @@ mod tests {
     }
 
     #[test]
+    fn open_record_history_budget_is_optional_and_still_rejects_unknown_fields() {
+        let legacy: AndroidE2eOutputOpen =
+            serde_json::from_str(r#"{"terminalId":"terminal-1","leaseId":"lease-1"}"#).unwrap();
+        assert_eq!(legacy.history_kib, None);
+
+        let expanded: AndroidE2eOutputOpen = serde_json::from_str(
+            r#"{"terminalId":"terminal-1","leaseId":"lease-1","historyKib":256}"#,
+        )
+        .unwrap();
+        assert_eq!(expanded.history_kib, Some(256));
+
+        assert!(serde_json::from_str::<AndroidE2eOutputOpen>(
+            r#"{"terminalId":"terminal-1","leaseId":"lease-1","debug":true}"#
+        )
+        .is_err());
+    }
+
+    #[test]
     fn connector_local_route_keeps_routing_fields_canonical() {
         assert!(parse_local_android_e2e_output_route(Some(
             "instanceId=desktop%2D7&sessionId=UFFSU1RVVldYWVpbXF1eXw&streamNonce=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&token=local"
@@ -538,7 +560,7 @@ mod tests {
             prepared,
             input_rx,
             shutdown_rx,
-            move |_| async move {
+            move |_, _| async move {
                 let _ = attach_started_tx.send(());
                 let _probe = AttachDropProbe(attach_drop_probe);
                 pending::<Result<TerminalOutputSubscribedAttachment, RenderCheckpointAttachError>>()
@@ -618,7 +640,7 @@ mod tests {
             prepared,
             input_rx,
             shutdown_rx,
-            move |terminal_id| async move {
+            move |terminal_id, _history_kib| async move {
                 crate::terminal_output::attach_and_subscribe_terminal_output(
                     &attach_state.terminal_protocol_states,
                     &terminal_id,

@@ -118,6 +118,26 @@ pub(crate) fn effective_snapshot_max_bytes(settings: &RemoteSettings) -> usize {
         * 1024
 }
 
+/// Attach snapshot byte budget when the client asks for more scrollback than
+/// the owner's default budget carries (scroll-top history expansion). A request
+/// can only raise the budget inside the supported range: it never lowers the
+/// owner-configured floor and never exceeds `MAX_REMOTE_SNAPSHOT_MAX_KIB`.
+pub(crate) fn effective_attach_snapshot_max_bytes(
+    settings: &RemoteSettings,
+    requested_history_kib: Option<u32>,
+) -> usize {
+    let configured = effective_snapshot_max_bytes(settings);
+    let Some(requested_kib) = requested_history_kib else {
+        return configured;
+    };
+    let requested = requested_kib.clamp(
+        crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
+        crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB,
+    ) as usize
+        * 1024;
+    configured.max(requested)
+}
+
 pub(crate) fn update_persistent_remote_settings(
     app_state: &AppState,
     app_handle: &AppHandle,
@@ -503,6 +523,41 @@ mod tests {
         .unwrap();
 
         assert_eq!(observed, (true, true));
+    }
+
+    #[test]
+    fn history_expansion_only_raises_the_owner_budget_inside_the_supported_range() {
+        let settings = RemoteSettings {
+            snapshot_max_kib: 8,
+            ..RemoteSettings::default()
+        };
+
+        assert_eq!(
+            effective_attach_snapshot_max_bytes(&settings, None),
+            8 * 1024
+        );
+        // A request below the owner's budget can never shrink the attach screen.
+        assert_eq!(
+            effective_attach_snapshot_max_bytes(&settings, Some(1)),
+            8 * 1024
+        );
+        assert_eq!(
+            effective_attach_snapshot_max_bytes(&settings, Some(256)),
+            256 * 1024
+        );
+        // The Android connector mirrors this ceiling in its own constant
+        // (`MainActivity.MAX_OUTPUT_HISTORY_KIB`) to reject nonsense before it
+        // reaches the wire. Raising it here means raising it there too.
+        assert_eq!(crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB, 1024);
+        // Hand-crafted requests clamp to the supported ceiling.
+        assert_eq!(
+            effective_attach_snapshot_max_bytes(&settings, Some(u32::MAX)),
+            crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB as usize * 1024
+        );
+        assert_eq!(
+            effective_attach_snapshot_max_bytes(&settings, Some(0)),
+            8 * 1024
+        );
     }
 
     #[test]
