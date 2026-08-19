@@ -648,16 +648,43 @@ test.describe("remote mobile layout", () => {
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
 
+    await expect(page.locator("#workspaceSection > .workspace-section-heading")).toHaveCount(0);
+    await expect(page.locator(".drawer-header-actions > #hiddenWorkspaceToggle")).toBeAttached();
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
     await page.locator('[data-workspace-visibility="ws-b"]').click();
     await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
-    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveText("Hidden 1");
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle svg")).toHaveCount(1);
+    await expect(page.locator("#hiddenWorkspaceBadge")).toHaveText("1");
+    const hiddenControlStyles = await page.locator("#hiddenWorkspaceToggle").evaluate((toggle) => {
+      const badge = toggle.querySelector<HTMLElement>("#hiddenWorkspaceBadge");
+      if (!badge) throw new Error("hidden workspace badge is missing");
+      const toggleStyle = getComputedStyle(toggle);
+      const badgeStyle = getComputedStyle(badge);
+      return {
+        badgeBackground: badgeStyle.backgroundColor,
+        badgeFontSize: badgeStyle.fontSize,
+        badgeHeight: badgeStyle.height,
+        toggleColor: toggleStyle.color,
+      };
+    });
+    expect(hiddenControlStyles.badgeBackground).toBe(hiddenControlStyles.toggleColor);
+    expect(hiddenControlStyles.badgeFontSize).toBe("8px");
+    expect(hiddenControlStyles.badgeHeight).toBe("12px");
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "aria-label",
+      "Open hidden workspaces (1)",
+    );
     expect(controls.visibilityRequests.at(-1)).toEqual({
       path: "/remote/v1/workspaces/ws-b/visibility",
       body: { hidden: true, leaseId: "lease-1" },
     });
 
     await page.locator("#hiddenWorkspaceToggle").click();
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
+      "aria-label",
+      "Close hidden workspaces (1)",
+    );
     await expect(page.locator("#hiddenWorkspaceShelf")).toBeVisible();
     await expect(page.locator('[data-hidden-workspace="ws-b"]')).toContainText("Beta");
     await page.locator('[data-hidden-workspace-restore="ws-b"]').click();
