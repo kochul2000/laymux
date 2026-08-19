@@ -88,6 +88,7 @@ import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
 import com.laymux.android.web.VisibleWebSurface
 import com.laymux.android.web.WebSurfaceLayerPolicy
+import com.laymux.android.web.scheduleRemoteInputFocus
 import com.laymux.android.web.stringWebMessagePayload
 import com.laymux.android.web.CloudBridge
 import com.laymux.android.web.CloudBridgeInput
@@ -661,11 +662,21 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun onRemoteDocumentLoaded(documentGeneration: Long) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
         remoteLoadingOverlay.visibility = View.GONE
-        // The Remote page's first Keyboard tap can only raise the IME when the
-        // WebView already holds view focus at that moment.
-        if (visibleWebSurface == VisibleWebSurface.REMOTE && ::webView.isInitialized) {
-            webView.requestFocus()
-        }
+        // Let the overlay visibility/layout change settle before restoring the
+        // touch-derived WebView focus used to create its editable InputConnection.
+        // Recheck the document identity inside the posted turn: the user can leave
+        // Remote while the callback is queued, replacing this secure WebView.
+        val loadedWebView = webView
+        scheduleRemoteInputFocus(
+            post = loadedWebView::post,
+            canFocus = {
+                !isDestroyed &&
+                    visibleWebSurface == VisibleWebSurface.REMOTE &&
+                    webView === loadedWebView &&
+                    remoteBridgeActionsEnabled(documentGeneration)
+            },
+            requestFocusFromTouch = loadedWebView::requestFocusFromTouch,
+        )
     }
 
     private fun resumeRemoteSurfaceAfterBackground(

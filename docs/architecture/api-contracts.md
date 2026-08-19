@@ -1222,6 +1222,8 @@ pairing manager는 연결용 native Material bottom sheet와 관리용 native Ma
 
 Remote 전면 surface gate는 bridge 권한의 필요조건일 뿐 충분조건이 아니다. APK는 Remote에서 Cloud·pairing으로 나갈 때 secure WebView를 폐기하고 새 문서 세대를 설치한다. 다음 session은 그 새 세대만 승인하며 JavaScript interface, encrypted resource loader와 binary output listener는 호출을 만든 문서 세대가 현재 설치·승인 세대와 모두 일치할 때만 동작한다. 따라서 이전 PC 문서의 지연 callback이나 in-flight resource 요청은 다음 PC session에 도달하지 않는다.
 
+Android secure WebView는 인증된 Remote 문서 로드가 끝나 로딩 overlay를 내린 다음 UI turn에 touch 기반 view focus를 복원한다. 이 지연 callback은 실행 직전에 Remote 전면 surface·secure WebView identity·문서 세대를 다시 검증한다. native view focus만 준비하고 DOM editor를 자동 focus하거나 IME를 열지는 않으며, 첫 `Keyboard` 사용자 gesture가 composer textarea의 유효한 InputConnection을 만들 수 있게 한다.
+
 Android가 입력받는 초기 QR 계약은 다음 한 줄 URI다.
 
 ```text
