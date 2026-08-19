@@ -112,6 +112,10 @@ kotlin {
 
 dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.camera:camera-camera2:1.6.1")
+    implementation("androidx.camera:camera-lifecycle:1.6.1")
+    implementation("androidx.camera:camera-mlkit-vision:1.6.1")
+    implementation("androidx.camera:camera-view:1.6.1")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.credentials:credentials:1.6.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.6.0")
@@ -119,6 +123,8 @@ dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.2.0")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.android.gms:play-services-base:18.10.0")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("com.google.android.material:material:1.14.0")
     implementation("com.squareup.okhttp3:okhttp:5.3.0")
 

@@ -81,6 +81,19 @@
             tools:text="연결 안내"
             tools:visibility="visible" />
 
+        <ProgressBar
+            android:id="@+id/pairing_scanner_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:indeterminate="true"
+            android:max="100"
+            android:progressTint="@color/laymux_primary"
+            android:visibility="gone"
+            tools:progress="42"
+            tools:visibility="visible" />
+
         <LinearLayout
             android:id="@+id/pairing_remote_section"
             android:layout_width="match_parent"

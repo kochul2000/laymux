@@ -4,6 +4,7 @@ import android.content.res.ColorStateList
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.fragment.app.FragmentActivity
@@ -31,6 +32,7 @@ class PairingBottomSheet(
         val description: TextView,
         val error: TextView,
         val notice: TextView,
+        val scannerProgress: ProgressBar,
         val remoteSection: View,
         val connectButton: MaterialButton,
         val defaultConnectBackgroundTint: ColorStateList?,
@@ -92,6 +94,7 @@ class PairingBottomSheet(
 
         renderStatus(bound, state, presentation)
         renderMessages(bound, state)
+        renderScannerProgress(bound, state)
         renderRemote(bound, presentation)
         renderScan(bound, state, presentation)
     }
@@ -111,6 +114,7 @@ class PairingBottomSheet(
             description = content.findViewById(R.id.pairing_state_description),
             error = content.findViewById(R.id.pairing_error),
             notice = content.findViewById(R.id.pairing_notice),
+            scannerProgress = content.findViewById(R.id.pairing_scanner_progress),
             remoteSection = content.findViewById(R.id.pairing_remote_section),
             connectButton = connectButton,
             defaultConnectBackgroundTint = connectButton.backgroundTintList,
@@ -187,6 +191,15 @@ class PairingBottomSheet(
     private fun showText(view: TextView, value: String?) {
         view.text = value.orEmpty()
         view.visibility = if (value.isNullOrBlank()) View.GONE else View.VISIBLE
+    }
+
+    private fun renderScannerProgress(bound: Views, state: PairingSheetState) {
+        bound.scannerProgress.visibility = View.GONE
+        if (!state.scannerProgressVisible) return
+        val percent = state.scannerProgressPercent
+        bound.scannerProgress.isIndeterminate = percent == null
+        if (percent != null) bound.scannerProgress.progress = percent.coerceIn(0, 100)
+        bound.scannerProgress.visibility = View.VISIBLE
     }
 
     private fun renderRemote(bound: Views, presentation: PairingSheetPresentation) {

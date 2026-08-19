@@ -11,4 +11,5 @@
     <color name="laymux_notice">#a6e3a1</color>
     <color name="laymux_navigation_bar">#181825</color>
     <color name="laymux_icon_background">#000000</color>
+    <color name="laymux_scanner_overlay">#1e1e2ecc</color>
 </resources>

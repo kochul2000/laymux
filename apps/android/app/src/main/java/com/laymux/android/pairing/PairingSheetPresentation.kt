@@ -16,6 +16,9 @@ data class PairingSheetState(
     val remoteConnecting: Boolean,
     val error: String?,
     val notice: String?,
+    val scannerBusy: Boolean = false,
+    val scannerProgressVisible: Boolean = false,
+    val scannerProgressPercent: Int? = null,
 )
 
 enum class PairingStatusKind {
@@ -115,6 +118,6 @@ fun presentPairingSheet(state: PairingSheetState): PairingSheetPresentation {
         } else {
             PairingScanEmphasis.PRIMARY
         },
-        scanEnabled = !state.remoteConnecting || biometricBlocked,
+        scanEnabled = (!state.remoteConnecting || biometricBlocked) && !state.scannerBusy,
     )
 }

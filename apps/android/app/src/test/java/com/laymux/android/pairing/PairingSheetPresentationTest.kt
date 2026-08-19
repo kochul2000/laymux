@@ -52,10 +52,25 @@ class PairingSheetPresentationTest {
         assertFalse(presentation.scanEnabled)
     }
 
+    @Test
+    fun scannerPreparationKeepsTheScanActionDisabledAcrossRenders() {
+        val presentation = presentPairingSheet(
+            state(
+                pairings = emptyList(),
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+                scannerBusy = true,
+            ),
+        )
+
+        assertEquals(PairingScanAction.SCAN, presentation.scanAction)
+        assertFalse(presentation.scanEnabled)
+    }
+
     private fun state(
         pairings: List<PairingSheetItem>,
         biometricAvailability: BiometricAvailability,
         remoteConnecting: Boolean = false,
+        scannerBusy: Boolean = false,
     ): PairingSheetState = PairingSheetState(
         selectedInstanceId = "desktop-a",
         pairings = pairings,
@@ -63,6 +78,9 @@ class PairingSheetPresentationTest {
         biometricAvailability = biometricAvailability,
         remoteConnected = false,
         remoteConnecting = remoteConnecting,
+        scannerBusy = scannerBusy,
+        scannerProgressVisible = scannerBusy,
+        scannerProgressPercent = null,
         error = null,
         notice = null,
     )

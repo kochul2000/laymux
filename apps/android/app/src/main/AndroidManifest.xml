@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -23,6 +28,9 @@
              의도적으로 제외 — 회전에는 안 바뀌고, 디스플레이 전환처럼 실제로
              바뀌는 경우엔 onCreate에서 잡아둔 dp 계산이 낡으므로 재생성이
              맞다. -->
+        <activity
+            android:name=".pairing.BundledQrScannerActivity"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

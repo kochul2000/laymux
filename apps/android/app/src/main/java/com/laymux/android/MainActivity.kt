@@ -1,10 +1,13 @@
 package com.laymux.android
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
@@ -23,6 +26,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.credentials.CustomCredential
@@ -36,6 +40,11 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.google.android.gms.common.moduleinstall.InstallStatusListener
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallClient
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate
 import com.google.android.gms.tasks.Task
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -46,17 +55,21 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.laymux.android.pairing.BiometricAvailability
 import com.laymux.android.pairing.BiometricGate
+import com.laymux.android.pairing.BundledQrScannerActivity
 import com.laymux.android.pairing.ConnectionSettingsActions
 import com.laymux.android.pairing.ConnectionSettingsDialog
 import com.laymux.android.pairing.ConnectionSettingsState
 import com.laymux.android.pairing.PairingAckClient
 import com.laymux.android.pairing.PairingAckException
 import com.laymux.android.pairing.PairingAckSession
+import com.laymux.android.pairing.PairingBottomSheet
 import com.laymux.android.pairing.PairingHandshake
 import com.laymux.android.pairing.PairingKeyInvalidatedException
 import com.laymux.android.pairing.PairingPayload
 import com.laymux.android.pairing.PairingProtectionPolicy
-import com.laymux.android.pairing.PairingBottomSheet
+import com.laymux.android.pairing.PairingScannerCommand
+import com.laymux.android.pairing.PairingScannerFlow
+import com.laymux.android.pairing.PairingScannerStage
 import com.laymux.android.pairing.PairingSheetActions
 import com.laymux.android.pairing.PairingSheetItem
 import com.laymux.android.pairing.PairingSheetState
@@ -64,6 +77,7 @@ import com.laymux.android.pairing.PairingVault
 import com.laymux.android.pairing.PendingPairingDecryption
 import com.laymux.android.pairing.ResumeGatedRunner
 import com.laymux.android.pairing.pairingScannerFailureMessage
+import com.laymux.android.pairing.pairingScannerProgressPercent
 import com.laymux.android.remote.E2eProtocolException
 import com.laymux.android.remote.E2eOutputSocket
 import com.laymux.android.remote.E2eOutputSocketCallbacks
@@ -145,6 +159,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var credentialManager: CredentialManager
     private val cloudAuthClient = CloudAuthClient()
     private lateinit var scanner: GmsBarcodeScanner
+    private lateinit var moduleInstallClient: ModuleInstallClient
     private lateinit var biometricGate: BiometricGate
     private val pairingAckClient = PairingAckClient()
     private val e2eRemoteClient = E2eRemoteClient()
@@ -152,8 +167,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val pairingExecutor = Executors.newSingleThreadExecutor()
     private val remoteExecutor = Executors.newSingleThreadScheduledExecutor()
     private val biometricPromptGate = ResumeGatedRunner()
+    private val scannerFlow = PairingScannerFlow()
     private var scanTask: Task<Barcode>? = null
-    private var scanInFlight = false
+    private var pendingScannerPolicy: PairingProtectionPolicy? = null
+    private var primaryScannerGeneration: Long? = null
+    private var cameraPermissionGeneration: Long? = null
+    private var bundledScannerGeneration: Long? = null
+    private var scannerModuleListener: InstallStatusListener? = null
+    private var scannerProgressVisible = false
+    private var scannerProgressPercent: Int? = null
     private var pairingAckInFlight = false
     private var activePairingAckSession: PairingAckSession? = null
     private var pendingPairing: PairingPayload? = null
@@ -203,6 +225,25 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         )
     }
 
+    private val cameraPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val generation = cameraPermissionGeneration ?: return@registerForActivityResult
+        cameraPermissionGeneration = null
+        executeScannerCommand(
+            generation,
+            scannerFlow.onCameraPermissionResult(generation, granted),
+        )
+    }
+
+    private val bundledScannerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val generation = bundledScannerGeneration ?: return@registerForActivityResult
+        bundledScannerGeneration = null
+        handleBundledScannerResult(generation, result.resultCode, result.data)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         vault = PairingVault(this)
@@ -217,6 +258,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 .enableAutoZoom()
                 .build(),
         )
+        moduleInstallClient = ModuleInstall.getClient(this)
         pairingSheet = PairingBottomSheet(
             this,
             object : PairingSheetActions {
@@ -651,6 +693,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun showCloudDashboard() {
+        cancelPairingScannerAttempt()
         closeRemoteSession()
         debugPairingPreviewActive = false
         debugConnectionSettingsPreviewActive = false
@@ -1033,7 +1076,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
      * the pairing status already carries the reason.
      */
     private fun preparePairingPolicy(): PairingProtectionPolicy? {
-        if (scanInFlight || hasPendingCryptoOperation()) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
             return null
         }
@@ -1055,35 +1098,256 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     fun startPairingScan() {
         val policy = preparePairingPolicy() ?: return
+        pendingScannerPolicy = policy
+        val start = scannerFlow.start()
+        executeScannerCommand(start.generation, start.command)
+    }
 
-        scanInFlight = true
-        scanTask = scanner.startScan()
-            .addOnSuccessListener { barcode ->
-                scanInFlight = false
-                // The scanned string carries the pairing seed, so the task that
-                // owns the barcode must not outlive this callback.
-                scanTask = null
-                val raw = barcode.rawValue
-                if (raw == null) {
-                    notifyPairingChanged(error = "QR에서 페어링 정보를 읽지 못했습니다.")
-                    return@addOnSuccessListener
-                }
-                acceptPairingPayload(raw, policy)
-            }
-            .addOnCanceledListener {
-                scanInFlight = false
-                scanTask = null
-                notifyPairingChanged(error = "QR 스캔을 취소했습니다.")
-            }
-            .addOnFailureListener { error ->
-                scanInFlight = false
-                scanTask = null
+    private fun executeScannerCommand(
+        generation: Long,
+        command: PairingScannerCommand,
+    ) {
+        if (generation != scannerFlow.generation) return
+        when (command) {
+            PairingScannerCommand.NONE -> Unit
+            PairingScannerCommand.CHECK_MODULE -> checkScannerModule(generation)
+            PairingScannerCommand.INSTALL_MODULE -> installScannerModule(generation)
+            PairingScannerCommand.LAUNCH_PRIMARY -> launchPrimaryScanner(generation)
+            PairingScannerCommand.REQUEST_CAMERA_PERMISSION ->
+                requestBundledScannerPermission(generation)
+            PairingScannerCommand.LAUNCH_BUNDLED -> launchBundledScanner(generation)
+            PairingScannerCommand.PERMISSION_DENIED -> {
+                takePendingScannerPolicy(generation)
                 notifyPairingChanged(
-                    error = pairingScannerFailureMessage(
-                        (error as? MlKitException)?.errorCode,
+                    error = getString(R.string.pairing_scanner_camera_permission_denied),
+                )
+            }
+        }
+    }
+
+    private fun checkScannerModule(generation: Long) {
+        scannerProgressVisible = true
+        scannerProgressPercent = null
+        notifyPairingChanged(notice = getString(R.string.pairing_scanner_checking))
+        moduleInstallClient.areModulesAvailable(scanner)
+            .addOnSuccessListener { response ->
+                executeScannerCommand(
+                    generation,
+                    scannerFlow.onModuleAvailability(
+                        generation,
+                        response.areModulesAvailable(),
                     ),
                 )
             }
+            .addOnFailureListener {
+                executeScannerCommand(
+                    generation,
+                    scannerFlow.onModuleCheckFailure(generation),
+                )
+            }
+    }
+
+    private fun installScannerModule(generation: Long) {
+        clearScannerModuleListener()
+        scannerProgressVisible = true
+        scannerProgressPercent = null
+        notifyPairingChanged(notice = getString(R.string.pairing_scanner_installing))
+        val listener = object : InstallStatusListener {
+            override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
+                if (!scannerFlow.isCurrent(generation) ||
+                    scannerFlow.stage != PairingScannerStage.INSTALLING_MODULE
+                ) {
+                    clearScannerModuleListener(this)
+                    return
+                }
+                update.progressInfo?.let { progress ->
+                    pairingScannerProgressPercent(
+                        progress.bytesDownloaded,
+                        progress.totalBytesToDownload,
+                    )?.let { percent ->
+                        scannerProgressPercent = percent
+                        notifyPairingChanged(
+                            notice = getString(
+                                R.string.pairing_scanner_installing_percent,
+                                percent,
+                            ),
+                        )
+                    }
+                }
+                when (update.installState) {
+                    ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> {
+                        clearScannerModuleListener(this)
+                        executeScannerCommand(
+                            generation,
+                            scannerFlow.onModuleInstallFinished(generation, succeeded = true),
+                        )
+                    }
+                    ModuleInstallStatusUpdate.InstallState.STATE_CANCELED,
+                    ModuleInstallStatusUpdate.InstallState.STATE_FAILED,
+                    -> {
+                        clearScannerModuleListener(this)
+                        executeScannerCommand(
+                            generation,
+                            scannerFlow.onModuleInstallFinished(generation, succeeded = false),
+                        )
+                    }
+                }
+            }
+        }
+        scannerModuleListener = listener
+        val request = ModuleInstallRequest.newBuilder()
+            .addApi(scanner)
+            .setListener(listener)
+            .build()
+        moduleInstallClient.installModules(request)
+            .addOnSuccessListener { response ->
+                executeScannerCommand(
+                    generation,
+                    scannerFlow.onModuleInstallAccepted(
+                        generation,
+                        response.areModulesAlreadyInstalled(),
+                    ),
+                )
+            }
+            .addOnFailureListener {
+                executeScannerCommand(
+                    generation,
+                    scannerFlow.onModuleInstallFinished(generation, succeeded = false),
+                )
+            }
+    }
+
+    private fun launchPrimaryScanner(generation: Long) {
+        clearScannerModuleListener()
+        scannerProgressVisible = false
+        scannerProgressPercent = null
+        notifyPairingChanged()
+        primaryScannerGeneration = generation
+        scanTask = scanner.startScan()
+            .addOnSuccessListener { barcode -> handlePrimaryScannerSuccess(generation, barcode) }
+            .addOnCanceledListener { handlePrimaryScannerCanceled(generation) }
+            .addOnFailureListener { error -> handlePrimaryScannerFailure(generation, error) }
+    }
+
+    private fun handlePrimaryScannerSuccess(generation: Long, barcode: Barcode) {
+        if (!scannerFlow.complete(generation)) return
+        scanTask = null
+        primaryScannerGeneration = null
+        val completedPolicy = takePendingScannerPolicy(generation) ?: return
+        val raw = barcode.rawValue
+        if (raw == null) {
+            notifyPairingChanged(error = "QR에서 페어링 정보를 읽지 못했습니다.")
+            return
+        }
+        acceptPairingPayload(raw, completedPolicy)
+    }
+
+    private fun handlePrimaryScannerCanceled(generation: Long) {
+        if (!scannerFlow.complete(generation)) return
+        scanTask = null
+        primaryScannerGeneration = null
+        takePendingScannerPolicy(generation)
+        notifyPairingChanged(error = "QR 스캔을 취소했습니다.")
+    }
+
+    private fun handlePrimaryScannerFailure(generation: Long, error: Exception?) {
+        scanTask = null
+        primaryScannerGeneration = null
+        val errorCode = (error as? MlKitException)?.errorCode
+        if (errorCode == MlKitException.CODE_SCANNER_TASK_IN_PROGRESS) {
+            if (scannerFlow.complete(generation)) {
+                takePendingScannerPolicy(generation)
+                notifyPairingChanged(error = pairingScannerFailureMessage(errorCode))
+            }
+            return
+        }
+        executeScannerCommand(
+            generation,
+            scannerFlow.onPrimaryFailure(generation),
+        )
+    }
+
+    private fun requestBundledScannerPermission(generation: Long) {
+        clearScannerModuleListener()
+        scannerProgressVisible = false
+        scannerProgressPercent = null
+        notifyPairingChanged(notice = getString(R.string.pairing_scanner_fallback))
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            executeScannerCommand(
+                generation,
+                scannerFlow.onCameraPermissionResult(generation, granted = true),
+            )
+            return
+        }
+        cameraPermissionGeneration = generation
+        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    private fun launchBundledScanner(generation: Long) {
+        bundledScannerGeneration = generation
+        try {
+            bundledScannerLauncher.launch(Intent(this, BundledQrScannerActivity::class.java))
+        } catch (_: Exception) {
+            bundledScannerGeneration = null
+            if (scannerFlow.complete(generation)) {
+                takePendingScannerPolicy(generation)
+                notifyPairingChanged(error = getString(R.string.bundled_scanner_camera_error))
+            }
+        }
+    }
+
+    private fun handleBundledScannerResult(
+        generation: Long,
+        resultCode: Int,
+        data: Intent?,
+    ) {
+        if (!scannerFlow.complete(generation)) return
+        val completedPolicy = takePendingScannerPolicy(generation) ?: return
+        val raw = data?.getStringExtra(BundledQrScannerActivity.EXTRA_PAIRING_PAYLOAD)
+        data?.removeExtra(BundledQrScannerActivity.EXTRA_PAIRING_PAYLOAD)
+        when {
+            resultCode == Activity.RESULT_OK && raw != null ->
+                acceptPairingPayload(raw, completedPolicy)
+            resultCode == Activity.RESULT_CANCELED ->
+                notifyPairingChanged(error = "QR 스캔을 취소했습니다.")
+            else -> notifyPairingChanged(
+                error = data?.getStringExtra(BundledQrScannerActivity.EXTRA_ERROR_MESSAGE)
+                    ?: getString(R.string.bundled_scanner_analysis_error),
+            )
+        }
+    }
+
+    private fun takePendingScannerPolicy(generation: Long): PairingProtectionPolicy? {
+        if (generation != scannerFlow.generation) return null
+        clearScannerModuleListener()
+        scanTask = null
+        primaryScannerGeneration = null
+        cameraPermissionGeneration = null
+        bundledScannerGeneration = null
+        scannerProgressVisible = false
+        scannerProgressPercent = null
+        return pendingScannerPolicy.also { pendingScannerPolicy = null }
+    }
+
+    private fun clearScannerModuleListener(expected: InstallStatusListener? = null) {
+        val listener = scannerModuleListener ?: return
+        if (expected != null && listener !== expected) return
+        scannerModuleListener = null
+        if (::moduleInstallClient.isInitialized) moduleInstallClient.unregisterListener(listener)
+    }
+
+    private fun cancelPairingScannerAttempt() {
+        clearScannerModuleListener()
+        scannerFlow.cancel()
+        scanTask = null
+        pendingScannerPolicy = null
+        primaryScannerGeneration = null
+        cameraPermissionGeneration = null
+        bundledScannerGeneration = null
+        scannerProgressVisible = false
+        scannerProgressPercent = null
     }
 
     /** Validate and persist one pairing payload string (scanner or debug deep link). */
@@ -1321,7 +1585,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun setBiometricRequired(required: Boolean) {
-        if (scanInFlight || hasPendingCryptoOperation() || policyDialog != null) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation() || policyDialog != null) {
             notifyPairingChanged(error = "진행 중인 작업이 끝난 뒤 키 보호 설정을 바꾸세요.")
             return
         }
@@ -1408,7 +1672,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun verifyPairingProtection(instanceId: String) {
-        if (scanInFlight || hasPendingCryptoOperation()) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
             return
         }
@@ -1479,7 +1743,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun retryPairingConfirmation(instanceId: String) {
-        if (scanInFlight || hasPendingCryptoOperation()) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = busyOperationMessage())
             return
         }
@@ -1587,7 +1851,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun connectRemote(reauthFallback: (() -> Unit)? = null) {
-        if (scanInFlight || hasPendingCryptoOperation() || remoteOpeningSession != null) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation() || remoteOpeningSession != null) {
             notifyPairingChanged(error = busyOperationMessage())
             return
         }
@@ -2513,7 +2777,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     fun forgetPairing(instanceId: String) {
-        if (scanInFlight || hasPendingCryptoOperation()) {
+        if (scannerFlow.isBusy || hasPendingCryptoOperation()) {
             notifyPairingChanged(error = "진행 중인 작업이 끝난 뒤 페어링을 해제하세요.")
             return
         }
@@ -2532,7 +2796,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     /** Native pairing surfaces restore disabled actions from each published state update. */
     private fun busyOperationMessage(): String = when {
-        scanInFlight -> "QR 스캔이 진행 중입니다."
+        scannerFlow.isBusy -> "QR 스캔이 진행 중입니다."
         pendingPairing != null || pendingDecryption != null ->
             "생체 인증을 마치거나 취소한 뒤 다시 시도하세요."
         pairingAckInFlight -> "데스크톱 페어링 확인을 진행하고 있습니다."
@@ -2643,6 +2907,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 remoteConnecting = false,
                 error = error,
                 notice = notice,
+                scannerBusy = scannerFlow.isBusy,
+                scannerProgressVisible = scannerProgressVisible,
+                scannerProgressPercent = scannerProgressPercent,
             )
         }
         return try {
@@ -2662,6 +2929,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 remoteConnecting = remoteConnecting(),
                 error = error,
                 notice = notice,
+                scannerBusy = scannerFlow.isBusy,
+                scannerProgressVisible = scannerProgressVisible,
+                scannerProgressPercent = scannerProgressPercent,
             )
         } catch (_: Exception) {
             PairingSheetState(
@@ -2673,6 +2943,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 remoteConnecting = remoteConnecting(),
                 error = error ?: "저장된 페어링 정보를 읽지 못했습니다.",
                 notice = notice,
+                scannerBusy = scannerFlow.isBusy,
+                scannerProgressVisible = scannerProgressVisible,
+                scannerProgressPercent = scannerProgressPercent,
             )
         }
     }
@@ -2700,12 +2973,21 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onPostResume() {
         super.onPostResume()
-        // The scanner runs in its own activity. Its listeners clear `scanTask`,
-        // so a completed task still parked here means they never ran and the
-        // in-flight flag would block every later scan with no way back.
-        if (scanInFlight && scanTask?.isComplete == true) {
-            scanInFlight = false
-            scanTask = null
+        // A completed Google scanner task whose listener never ran must not
+        // hold the coordinator forever. The generation guard makes its later
+        // callback stale after the bundled fallback takes over.
+        val scannerGeneration = primaryScannerGeneration
+        val completedScanTask = scanTask
+        if (scannerGeneration != null &&
+            scannerFlow.stage == PairingScannerStage.PRIMARY &&
+            completedScanTask?.isComplete == true
+        ) {
+            when {
+                completedScanTask.isCanceled -> handlePrimaryScannerCanceled(scannerGeneration)
+                completedScanTask.isSuccessful ->
+                    handlePrimaryScannerSuccess(scannerGeneration, completedScanTask.result)
+                else -> handlePrimaryScannerFailure(scannerGeneration, completedScanTask.exception)
+            }
         }
         // Drained after the FragmentManager dispatched resume: BiometricPrompt
         // commits a fragment transaction and needs a RESUMED host.
@@ -2752,7 +3034,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         cloudJsDialogs?.dismissActive()
         cloudJsDialogs = null
         biometricPromptGate.cancelPending()
-        scanTask = null
+        cancelPairingScannerAttempt()
         if (::biometricGate.isInitialized) biometricGate.cancel()
         pendingPairing?.close()
         pendingPairing = null
