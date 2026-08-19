@@ -33,6 +33,8 @@
         const connectionPanel = document.querySelector(".connection-panel");
         const connectionHint = document.querySelector(".connection-hint");
         const statusEl = $("status");
+        const statusSpinnerEl = $("statusSpinner");
+        const statusTextEl = $("statusText");
         const terminalHost = $("terminal");
         const terminalSizer = $("terminalSizer");
         const scrollToBottomButton = $("scrollToBottom");
@@ -127,6 +129,19 @@
         const AUTO_CONNECT_RETRY_MAX_MS = 15000;
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
+        const STATUS_SPINNER_FRAME_MS = 100;
+        const STATUS_SPINNER_FRAMES = Object.freeze([
+          "⠋",
+          "⠙",
+          "⠹",
+          "⠸",
+          "⠼",
+          "⠴",
+          "⠦",
+          "⠧",
+          "⠇",
+          "⠏",
+        ]);
         const REMOTE_FONT_SIZE_MIN = 6;
         const REMOTE_FONT_SIZE_MAX = 72;
         let leaseId = null;
@@ -153,6 +168,8 @@
         let transientConnectionNoticeVisible = false;
         let heartbeatInterrupted = false;
         let outputInterrupted = false;
+        let statusSpinnerTimer = null;
+        let statusSpinnerFrame = 0;
         let activeTerminalId = null;
         let activeGithubRepoBase = null;
         let githubRepoRequestRevision = 0;
@@ -375,10 +392,48 @@
           })
         });
 
-        function setStatus(message, error = false, warning = false) {
-          statusEl.textContent = message;
+        function stopStatusSpinner() {
+          if (statusSpinnerTimer) {
+            clearInterval(statusSpinnerTimer);
+            statusSpinnerTimer = null;
+          }
+          statusSpinnerFrame = 0;
+          statusSpinnerEl.textContent = "";
+          statusSpinnerEl.hidden = true;
+        }
+
+        function startStatusSpinner() {
+          stopStatusSpinner();
+          statusSpinnerEl.hidden = false;
+          if (
+            typeof matchMedia === "function" &&
+            matchMedia("(prefers-reduced-motion: reduce)").matches
+          ) {
+            statusSpinnerEl.textContent = "⠿";
+            return;
+          }
+          statusSpinnerEl.textContent = STATUS_SPINNER_FRAMES[statusSpinnerFrame];
+          statusSpinnerTimer = setInterval(() => {
+            statusSpinnerFrame = (statusSpinnerFrame + 1) % STATUS_SPINNER_FRAMES.length;
+            statusSpinnerEl.textContent = STATUS_SPINNER_FRAMES[statusSpinnerFrame];
+          }, STATUS_SPINNER_FRAME_MS);
+        }
+
+        function renderStatus(message, error, warning, busy) {
+          statusTextEl.textContent = message;
           statusEl.classList.toggle("error", error);
           statusEl.classList.toggle("warning", warning);
+          statusEl.setAttribute("aria-busy", busy ? "true" : "false");
+          if (busy) startStatusSpinner();
+          else stopStatusSpinner();
+        }
+
+        function setStatus(message, error = false, warning = false) {
+          renderStatus(message, error, warning, false);
+        }
+
+        function setBusyStatus(message, error = false, warning = false) {
+          renderStatus(message, error, warning, true);
         }
 
         function hasTransientConnectionInterruption() {
@@ -393,7 +448,7 @@
             transientConnectionNoticeTimer = null;
             if (!leaseId || !hasTransientConnectionInterruption()) return;
             transientConnectionNoticeVisible = true;
-            setStatus("Connection interrupted. Reconnecting...", false, true);
+            setBusyStatus("Connection interrupted. Reconnecting…", false, true);
           }, TRANSIENT_CONNECTION_NOTICE_DELAY_MS);
         }
 
@@ -5391,6 +5446,7 @@
           if (!leaseId || !layoutId) return;
           const selectedLeaseId = leaseId;
           newWorkspaceButton.disabled = true;
+          setBusyStatus("Creating workspace…");
           try {
             await remoteFetch("/remote/v1/workspaces", {
               method: "POST",
@@ -5456,7 +5512,7 @@
 
         async function switchWorkspace(workspaceId) {
           if (!leaseId || !workspaceId) return;
-          setStatus("Switching workspace...");
+          setBusyStatus("Switching workspace…");
           await activateWorkspace(workspaceId);
           // Prefer the pane the user last stayed on in this workspace (issue
           // #508). preferredTerminal only restores it when the remembered
@@ -5545,7 +5601,7 @@
 
         async function markAllNotificationsRead() {
           if (!leaseId) return;
-          setStatus("Marking notifications read...");
+          setBusyStatus("Marking notifications read…");
           await remoteFetch("/remote/v1/notifications/mark-all-read", {
             method: "POST",
             body: JSON.stringify({ leaseId }),
@@ -5556,7 +5612,7 @@
 
         async function clearNotifications() {
           if (!leaseId) return;
-          setStatus("Clearing notifications...");
+          setBusyStatus("Clearing notifications…");
           await remoteFetch("/remote/v1/notifications", {
             method: "DELETE",
             body: JSON.stringify({ leaseId }),
@@ -5567,7 +5623,7 @@
 
         async function openNotification(notification) {
           if (!leaseId || !notification) return;
-          setStatus("Opening notification...");
+          setBusyStatus("Opening notification…");
           if (notification.terminalId) {
             try {
               await focusTerminalOnHost(notification.terminalId);
@@ -5644,7 +5700,7 @@
             return true;
           }
           const selectionRevision = terminalSelectionRevision;
-          setStatus("Opening the pane on the desktop...");
+          setBusyStatus("Opening the pane on the desktop…");
           const opened = await openTerminalOnHost(terminalId, selectionRevision);
           if (selectionRevision !== terminalSelectionRevision || activeTerminalId !== terminalId) return false;
           if (!opened) {
@@ -5778,7 +5834,7 @@
             ) {
               outputAttachGeometryGeneration = null;
               if (err.status === 404) {
-                setStatus("Terminal session ended. Refreshing navigation...", true);
+                setBusyStatus("Terminal session ended. Refreshing navigation…", true);
                 loadNavigation(null, { focusInput: false }).catch((loadError) =>
                   setStatus(`Refresh failed: ${loadError.message}`, true)
                 );
@@ -6117,7 +6173,7 @@
             const payload = String(event.data);
             if (payload === "terminal session not found") {
               outputTerminalMissing = true;
-              setStatus("Terminal session ended. Refreshing navigation...", true);
+              setBusyStatus("Terminal session ended. Refreshing navigation…", true);
               outputSocket.close();
               return;
             }
@@ -6198,7 +6254,7 @@
               if (now + retryAfterMs >= reservationExpiresAt) {
                 throw new Error("Remote control claim reservation expired.");
               }
-              setStatus("Waiting for the current terminal input to finish...");
+              setBusyStatus("Waiting for input…");
               await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
             }
           }
@@ -6314,15 +6370,15 @@
           // winner as stale — so both failed and the page waited for a backoff retry.
           // Whoever is already trying will report the outcome (issue #561).
           if (claimInFlight) {
-            if (!auto) setStatus("Claiming remote control...");
+            if (!auto) setBusyStatus("Claiming remote control…");
             return;
           }
           claimInFlight = true;
           const attemptRevision = ++claimAttemptRevision;
           connectButton.disabled = true;
           if (!androidE2eMode) localStorage.setItem(tokenKey, token());
-          setStatus(
-            auto ? "Reconnecting..." : "Claiming remote control...",
+          setBusyStatus(
+            auto ? "Reconnecting…" : "Claiming remote control…",
             false,
             auto,
           );
@@ -6380,7 +6436,7 @@
               scheduleAutoConnectRetry();
               // Transient (offline, relay still down): keep the reason visible but
               // do not paint it as a failure the user has to act on.
-              setStatus(`Reconnecting... ${err.message}`, false, true);
+              setBusyStatus(`Reconnecting… ${err.message}`, false, true);
               return;
             }
             setStatus(err.message, true);
@@ -6468,7 +6524,7 @@
           event.preventDefault();
           event.stopImmediatePropagation();
           if (!leaseId || !activeTerminalId || !composerReady) {
-            setStatus("Terminal input is not ready. Reconnecting...", false, true);
+            setStatus("Terminal input is not ready.", false, true);
             return;
           }
           const text = event.clipboardData?.getData("text/plain") || "";
@@ -7611,7 +7667,7 @@
             // wait now returns `transitioning: true` and keeps this intent armed,
             // but avoiding that round trip remains the fastest recovery path.
             setConnectionHint("Reconnecting...", false);
-            setStatus("Reconnecting...", false, true);
+            setBusyStatus("Reconnecting…", false, true);
             // Leaves the navigation menu as the user had it: this is not a state that
             // needs their attention.
             maybeAutoConnect();
@@ -7693,7 +7749,10 @@
         drawerSettingsButton.addEventListener("click", () => openDrawerSubview("settings"));
         connectButton.addEventListener("click", () => connect().catch((err) => setStatus(err.message, true)));
         exitButton.addEventListener("click", () => exitRemote());
-        refreshButton.addEventListener("click", () => loadNavigation().catch((err) => setStatus(err.message, true)));
+        refreshButton.addEventListener("click", () => {
+          setBusyStatus("Refreshing…");
+          loadNavigation().catch((err) => setStatus(err.message, true));
+        });
         fileViewerPathInput.addEventListener("input", () => {
           fileViewerPathRevision += 1;
           renderFileViewerState();

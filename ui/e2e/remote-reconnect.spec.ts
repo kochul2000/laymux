@@ -91,6 +91,7 @@ const navigation = {
 };
 
 type RemoteMockOptions = {
+  claimDelayMs?: number;
   heartbeatTimeoutSeconds?: number;
   heartbeatFailures?: number;
   heartbeatFailureStatus?: number;
@@ -125,6 +126,9 @@ async function installRemoteMocks(page: Page, options: RemoteMockOptions = {}) {
     const url = new URL(route.request().url());
     if (url.pathname === "/remote/v1/session/claim") {
       state.claimRequests += 1;
+      if (options.claimDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.claimDelayMs));
+      }
       if (state.claimRequests > 1 && state.claimTransitionConflictsRemaining > 0) {
         state.claimTransitionConflictsRemaining -= 1;
         await route.fulfill({
@@ -225,12 +229,12 @@ async function instrumentRemotePage(page: Page) {
       target.__remoteTerm = this;
       return originalReset.call(this);
     };
-    const status = document.getElementById("status");
-    if (status) {
-      target.__remoteStatusHistory.push(status.textContent || "");
+    const statusText = document.getElementById("statusText");
+    if (statusText) {
+      target.__remoteStatusHistory.push(statusText.textContent || "");
       new MutationObserver(() => {
-        target.__remoteStatusHistory.push(status.textContent || "");
-      }).observe(status, { childList: true, subtree: true, characterData: true });
+        target.__remoteStatusHistory.push(statusText.textContent || "");
+      }).observe(statusText, { childList: true, subtree: true, characterData: true });
     }
   });
 }
@@ -265,6 +269,68 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
   }, lines);
 }
 
+test("a pending top-bar action shows and then clears its text spinner", async ({ page }) => {
+  await installRemoteMocks(page, { claimDelayMs: 600 });
+  await instrumentRemotePage(page);
+
+  await page.locator("#connect").click();
+
+  const status = page.locator("#status");
+  const spinner = page.locator("#statusSpinner");
+  await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
+  await expect(status).toHaveAttribute("aria-busy", "true");
+  await expect(spinner).toBeVisible();
+  await expect(spinner).toHaveText(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+
+  await expect(page.locator("#statusText")).toHaveText("Main · Pane 1");
+  await expect(status).toHaveAttribute("aria-busy", "false");
+  await expect(spinner).toBeHidden();
+});
+
+test("reduced motion keeps the pending marker static", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installRemoteMocks(page, { claimDelayMs: 600 });
+  await instrumentRemotePage(page);
+
+  await page.locator("#connect").click();
+
+  const spinner = page.locator("#statusSpinner");
+  await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
+  await expect(spinner).toBeVisible();
+  await expect(spinner).toHaveText("⠿");
+  await page.waitForTimeout(150);
+  await expect(spinner).toHaveText("⠿");
+});
+
+test("a disconnected paste reports a static warning instead of endless reconnect activity", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.inputMode", "direct");
+  });
+  await installRemoteMocks(page);
+  await instrumentRemotePage(page);
+
+  await page.locator("#connect").click();
+  await expect(page.locator("#statusText")).toHaveText("Main · Pane 1");
+  await page.locator("#exit").evaluate((element: HTMLButtonElement) => element.click());
+  await expect(page.locator("#statusText")).toHaveText("Exited remote control.");
+
+  await page.locator("#terminal").evaluate((element) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/plain", "ignored");
+    element.dispatchEvent(
+      new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }),
+    );
+  });
+
+  const status = page.locator("#status");
+  await expect(page.locator("#statusText")).toHaveText("Terminal input is not ready.");
+  await expect(status).toHaveClass(/warning/);
+  await expect(status).toHaveAttribute("aria-busy", "false");
+  await expect(page.locator("#statusSpinner")).toBeHidden();
+});
+
 test("a short output drop reconnects without status noise or an early terminal reset", async ({
   page,
 }) => {
@@ -282,7 +348,7 @@ test("a short output drop reconnects without status noise or an early terminal r
   expect(await resetCount(page)).toBe(1);
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
   await expect.poll(() => resetCount(page)).toBe(2);
-  expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting...");
+  expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting…");
 });
 
 test("an output reconnect preserves a scrolled-up viewport", async ({ page }) => {
@@ -389,5 +455,5 @@ test("one failed heartbeat is retried before the delayed interruption notice", a
   await expect.poll(() => remote.heartbeatRequests, { timeout: 5000 }).toBeGreaterThanOrEqual(2);
 
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
-  expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting...");
+  expect(await statusHistory(page)).not.toContain("Connection interrupted. Reconnecting…");
 });
