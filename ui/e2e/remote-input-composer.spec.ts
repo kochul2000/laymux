@@ -1532,7 +1532,7 @@ for (const [agent, expectedOffset] of [
   ["Codex", 4],
   ["Grok", 2],
 ] as const) {
-  test(`agent composer offset is opt-in and uses ${agent}'s input height`, async ({ page }) => {
+  test(`agent composer offset defaults on and uses ${agent}'s input height`, async ({ page }) => {
     await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
     await connect(page);
 
@@ -1554,28 +1554,15 @@ for (const [agent, expectedOffset] of [
           return mock.__mockTerminal?.scrollCalls ?? [];
         }),
       )
-      .toEqual([]);
+      .toEqual([Number.POSITIVE_INFINITY, -expectedOffset]);
 
     await page.locator("#keyBarToggle").click();
     await page.locator("#keyBarSettings").click();
     const toggle = page.locator("#composerAgentScrollOffsetToggle");
-    await expect(toggle).not.toBeChecked();
-    await toggle.check();
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const mock = window as typeof window & {
-            __mockTerminal?: { scrollCalls: number[] };
-          };
-          return mock.__mockTerminal?.scrollCalls ?? [];
-        }),
-      )
-      .toEqual([Number.POSITIVE_INFINITY, -expectedOffset]);
-    await expect
-      .poll(() =>
-        page.evaluate(() => localStorage.getItem("laymux.remote.composerAgentScrollOffset")),
-      )
-      .toBe("1");
+    await expect(toggle).toBeChecked();
+    await expect(page.locator(`#composerAgentScrollOffset${agent}`)).toHaveValue(
+      String(expectedOffset),
+    );
   });
 }
 
@@ -1592,7 +1579,10 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
 
   await page.locator("#keyBarToggle").click();
   await page.locator("#keyBarSettings").click();
-  await page.locator("#composerAgentScrollOffsetToggle").check();
+  await expect(page.locator("#composerAgentScrollOffsetToggle")).toBeChecked();
+  const codexLines = page.locator("#composerAgentScrollOffsetCodex");
+  await codexLines.fill("6");
+  await codexLines.press("Enter");
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -1602,5 +1592,10 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
         return mock.__mockTerminal?.scrollCalls ?? [];
       }),
     )
-    .toEqual([Number.POSITIVE_INFINITY, -4]);
+    .toEqual([Number.POSITIVE_INFINITY, -6]);
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("laymux.remote.composerAgentScrollOffsetLines")),
+    )
+    .toBe('{"Claude":3,"Codex":6,"Grok":2}');
 });
