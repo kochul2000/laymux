@@ -76,6 +76,7 @@ import com.laymux.android.remote.OauthLoopbackRelay
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
+import com.laymux.android.web.JsDialogChromeClient
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
@@ -153,6 +154,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var pendingDecryption: PendingPairingDecryption? = null
     private var pendingDecryptionPurpose: DecryptionPurpose? = null
     private var policyDialog: AlertDialog? = null
+    private var remoteJsDialogs: JsDialogChromeClient? = null
+    private var cloudJsDialogs: JsDialogChromeClient? = null
     private var selectedCloudInstanceId: String? = null
     private var selectedTailscaleUrl: String? = null
     private var connectionSettingsInstanceId: String? = null
@@ -382,6 +385,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 { path -> loadRemoteResource(documentGeneration, path) },
                 { onRemoteDocumentLoaded(documentGeneration) },
             )
+            webChromeClient = JsDialogChromeClient(this@MainActivity).also {
+                remoteJsDialogs?.dismissActive()
+                remoteJsDialogs = it
+            }
             addJavascriptInterface(
                 RemoteBridge(this@MainActivity, documentGeneration),
                 NATIVE_BRIDGE_NAME,
@@ -420,6 +427,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         settings.mediaPlaybackRequiresUserGesture = true
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         webViewClient = CloudWebViewClient(cloudNavigation)
+        webChromeClient = JsDialogChromeClient(this@MainActivity).also {
+            cloudJsDialogs?.dismissActive()
+            cloudJsDialogs = it
+        }
         addJavascriptInterface(cloudBridge, CLOUD_BRIDGE_NAME)
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
@@ -2671,6 +2682,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
         policyDialog?.dismiss()
         policyDialog = null
+        remoteJsDialogs?.dismissActive()
+        remoteJsDialogs = null
+        cloudJsDialogs?.dismissActive()
+        cloudJsDialogs = null
         biometricPromptGate.cancelPending()
         scanTask = null
         if (::biometricGate.isInitialized) biometricGate.cancel()
