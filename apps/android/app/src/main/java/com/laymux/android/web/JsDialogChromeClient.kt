@@ -2,7 +2,9 @@ package com.laymux.android.web
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.net.Uri
 import android.webkit.JsResult
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 
@@ -13,7 +15,10 @@ import android.webkit.WebView
  * One instance serves one WebView — WebView pauses page JS while a JS dialog
  * is pending, so at most one dialog is active per instance.
  */
-class JsDialogChromeClient(private val activity: Activity) : WebChromeClient() {
+class JsDialogChromeClient(
+    private val activity: Activity,
+    private val showFileChooser: ((ValueCallback<Array<Uri>>, FileChooserParams) -> Unit)? = null,
+) : WebChromeClient() {
     private var activeDialog: AlertDialog? = null
 
     override fun onJsAlert(
@@ -29,6 +34,19 @@ class JsDialogChromeClient(private val activity: Activity) : WebChromeClient() {
         message: String?,
         result: JsResult,
     ): Boolean = show(message, result, withCancel = true)
+
+    override fun onShowFileChooser(
+        webView: WebView?,
+        filePathCallback: ValueCallback<Array<Uri>>,
+        fileChooserParams: FileChooserParams,
+    ): Boolean {
+        if (activity.isFinishing || activity.isDestroyed || showFileChooser == null) {
+            filePathCallback.onReceiveValue(null)
+            return true
+        }
+        showFileChooser.invoke(filePathCallback, fileChooserParams)
+        return true
+    }
 
     /** Dismiss a pending dialog so a destroyed activity does not leak its window. */
     fun dismissActive() {

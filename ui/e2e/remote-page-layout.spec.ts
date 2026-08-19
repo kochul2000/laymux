@@ -211,7 +211,7 @@ test.describe("remote mobile layout", () => {
         minWidth: getComputedStyle(button).minWidth,
       })),
     );
-    expect(footerButtons).toHaveLength(3);
+    expect(footerButtons).toHaveLength(4);
     const widths = footerButtons.map(({ width }) => width);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1);
     expect(footerButtons.every(({ minWidth }) => minWidth === "0px")).toBe(true);

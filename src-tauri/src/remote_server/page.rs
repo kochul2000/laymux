@@ -1125,6 +1125,23 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_html_contains_terminal_file_attachments() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"attachFile\""));
+        assert!(html.contains("id=\"attachmentInput\""));
+        assert!(html.contains("accept=\"image/*,text/*,"));
+        assert!(html.contains("/attachments`"));
+        assert!(html.contains("REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024"));
+        assert!(html.contains("REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024"));
+        assert!(html.contains("function attachRemoteFiles(files, options = {})"));
+        assert!(html.contains("new File([text], \"pasted-text.txt\""));
+        assert!(html.contains("composerInput.addEventListener(\"paste\""));
+        assert!(html.contains("snapshot.mode === \"composer\""));
+        assert!(html.contains("const insertion = paths.join(\" \");"));
+    }
+
+    #[test]
     fn remote_page_html_contains_composer_recall_history_and_autocomplete() {
         let html = remote_client_source();
 

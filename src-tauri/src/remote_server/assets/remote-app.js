@@ -71,6 +71,8 @@
         const openFileViewerButton = $("openFileViewer");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
+        const attachmentButton = $("attachFile");
+        const attachmentInput = $("attachmentInput");
         const composerSendButton = $("composerSend");
         const coarsePointer =
           typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
@@ -97,6 +99,8 @@
         // Composer recall feature toggles (issues #504 / #505). Only the on/off
         // boolean is surface-local in localStorage — the past-input text itself
         // is kept in a runtime Map and never persisted (see composerHistory*).
+        // ADR-0181 is the narrow exception: selected text files and long pastes
+        // become bounded host-cache files only when the user attaches/pastes them.
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
         // A visual-only Remote preference: when Composer opens for one of the
@@ -150,6 +154,9 @@
         ]);
         const REMOTE_FONT_SIZE_MIN = 6;
         const REMOTE_FONT_SIZE_MAX = 72;
+        const REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
+        const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
+        const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
         let remoteDisplaySettings = null;
         let remoteDisplaySettingsLoading = false;
@@ -292,6 +299,11 @@
         let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
+        let attachmentUploadInFlight = false;
+        let attachmentUploadAttempt = null;
+        let attachmentChooserRevision = 0;
+        let pendingAttachmentChooser = null;
+        const attachmentChooserRetryTimers = new Set();
         // Tab recall popup (issue #504) UI state: open flag + highlighted row.
         let composerHistoryOpen = false;
         let composerHistoryIndex = 0;
@@ -1856,14 +1868,29 @@
           // stays disabled (not hidden — the footer buttons must not shift
           // under the finger that just tapped Keyboard).
           const canCommit = Boolean(
-            canEdit && composerReady && draft && !draft.inFlight && !composerCollapsed,
+            canEdit &&
+              composerReady &&
+              draft &&
+              !draft.inFlight &&
+              !composerCollapsed &&
+              !attachmentUploadInFlight,
           );
-          composerInput.disabled = !canEdit;
+          composerInput.disabled = !canEdit || attachmentUploadInFlight;
           terminalComposer.dataset.canSend = canCommit ? "true" : "false";
           // Send button belongs to the mobile layout in composer mode; the
           // desktop layout relies on Enter. Disabled until a commit is possible.
           composerSendButton.hidden = !(mobileLayout && composerMode);
           composerSendButton.disabled = !canCommit;
+          const canAttach = Boolean(
+            leaseId && activeTerminalId && composerReady && !attachmentUploadInFlight,
+          );
+          attachmentButton.disabled = !canAttach;
+          attachmentInput.disabled = !canAttach;
+          attachmentButton.classList.toggle("busy", attachmentUploadInFlight);
+          attachmentButton.setAttribute(
+            "aria-busy",
+            attachmentUploadInFlight ? "true" : "false",
+          );
         }
 
         function focusCurrentInputSurface() {
@@ -6645,6 +6672,262 @@
           });
         }
 
+        function attachmentSelectionSnapshot() {
+          const terminalId = activeTerminalId;
+          if (!terminalId || !leaseId) return null;
+          const draft = composerDraft(terminalId);
+          return {
+            terminalId,
+            leaseId,
+            mode: currentInputMode(),
+            revision: draft?.revision ?? 0,
+            text: draft?.text ?? "",
+            selectionStart: composerInput.selectionStart ?? draft?.text.length ?? 0,
+            selectionEnd: composerInput.selectionEnd ?? draft?.text.length ?? 0,
+          };
+        }
+
+        function clearAttachmentChooserRetryTimers() {
+          for (const timer of attachmentChooserRetryTimers) window.clearTimeout(timer);
+          attachmentChooserRetryTimers.clear();
+        }
+
+        function invalidateAttachmentChooser() {
+          attachmentChooserRevision += 1;
+          pendingAttachmentChooser = null;
+          clearAttachmentChooserRetryTimers();
+          attachmentInput.value = "";
+        }
+
+        function beginAttachmentChooser() {
+          invalidateAttachmentChooser();
+          const snapshot = attachmentSelectionSnapshot();
+          if (!snapshot) return null;
+          const chooser = {
+            revision: attachmentChooserRevision,
+            snapshot,
+          };
+          pendingAttachmentChooser = chooser;
+          return chooser;
+        }
+
+        function attachmentChooserIsCurrent(chooser) {
+          return (
+            chooser &&
+            pendingAttachmentChooser === chooser &&
+            chooser.revision === attachmentChooserRevision &&
+            chooser.snapshot.terminalId === activeTerminalId &&
+            chooser.snapshot.leaseId === leaseId
+          );
+        }
+
+        function formatAttachmentPath(path) {
+          const normalized = String(path || "");
+          if (!/\s/.test(normalized)) return normalized;
+          return `"${normalized.replaceAll('"', '\\"')}"`;
+        }
+
+        function insertComposerAttachmentText(snapshot, insertion) {
+          const draft = composerDraft(snapshot.terminalId);
+          if (!draft) return;
+          const snapshotStillCurrent =
+            draft.revision === snapshot.revision && draft.text === snapshot.text;
+          const start = snapshotStillCurrent
+            ? Math.max(0, Math.min(snapshot.selectionStart, draft.text.length))
+            : draft.text.length;
+          const end = snapshotStillCurrent
+            ? Math.max(start, Math.min(snapshot.selectionEnd, draft.text.length))
+            : draft.text.length;
+          const before = draft.text.slice(0, start);
+          const after = draft.text.slice(end);
+          const leadingSpace = before && !/\s$/.test(before) ? " " : "";
+          const trailingSpace = after && !/^\s/.test(after) ? " " : "";
+          draft.text = `${before}${leadingSpace}${insertion}${trailingSpace}${after}`;
+          draft.revision += 1;
+          if (activeTerminalId === snapshot.terminalId) {
+            resetComposerSuggestions();
+            renderInputSurface();
+            const caret = before.length + leadingSpace.length + insertion.length;
+            composerInput.setSelectionRange(caret, caret);
+          }
+        }
+
+        function blobBase64(blob) {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () =>
+              reject(reader.error || new Error("Attachment could not be read."));
+            reader.onload = () => {
+              const result = String(reader.result || "");
+              const separator = result.indexOf(",");
+              if (separator < 0) {
+                reject(new Error("Attachment encoding failed."));
+                return;
+              }
+              resolve(result.slice(separator + 1));
+            };
+            reader.readAsDataURL(blob);
+          });
+        }
+
+        async function uploadRemoteAttachment(snapshot, file, signal) {
+          if (file.size > REMOTE_ATTACHMENT_MAX_BYTES) {
+            throw new Error(`${file.name} exceeds the 1 MiB attachment limit.`);
+          }
+          const data = await blobBase64(file);
+          return remoteFetch(
+            `/remote/v1/terminals/${encodeURIComponent(snapshot.terminalId)}/attachments`,
+            {
+              method: "POST",
+              signal,
+              body: JSON.stringify({
+                leaseId: snapshot.leaseId,
+                fileName: file.name || "attachment.txt",
+                mimeType: file.type || "application/octet-stream",
+                data,
+              }),
+            },
+          );
+        }
+
+        async function attachRemoteFiles(files, options = {}) {
+          const snapshot = options.snapshot || attachmentSelectionSnapshot();
+          if (
+            !snapshot ||
+            !composerReady ||
+            attachmentUploadInFlight ||
+            files.length === 0
+          ) {
+            return false;
+          }
+          const attempt = {
+            token: Symbol("attachment-upload"),
+            abortController: new AbortController(),
+          };
+          attachmentUploadAttempt = attempt;
+          attachmentUploadInFlight = true;
+          updateComposerControls();
+          setBusyStatus(
+            files.length === 1
+              ? `Attaching ${files[0].name}…`
+              : `Attaching ${files.length} files…`,
+          );
+          try {
+            const paths = [];
+            for (const file of files) {
+              const response = await uploadRemoteAttachment(
+                snapshot,
+                file,
+                attempt.abortController.signal,
+              );
+              if (attachmentUploadAttempt?.token !== attempt.token) return false;
+              paths.push(formatAttachmentPath(response.path));
+            }
+            if (
+              snapshot.terminalId !== activeTerminalId ||
+              snapshot.leaseId !== leaseId
+            ) {
+              throw new Error("Terminal changed while the attachment was uploading.");
+            }
+            const insertion = paths.join(" ");
+            if (snapshot.mode === "composer") {
+              insertComposerAttachmentText(snapshot, insertion);
+            } else {
+              await writeTerminalInput(
+                snapshot.terminalId,
+                snapshot.leaseId,
+                insertion,
+                false,
+                attempt.abortController.signal,
+              );
+              if (attachmentUploadAttempt?.token !== attempt.token) return false;
+            }
+            setStatus(
+              files.length === 1
+                ? `Attached ${files[0].name}.`
+                : `Attached ${files.length} files.`,
+            );
+            return true;
+          } catch (error) {
+            if (
+              attachmentUploadAttempt?.token !== attempt.token ||
+              error?.name === "AbortError"
+            ) {
+              return false;
+            }
+            if (
+              options.fallbackText &&
+              snapshot.terminalId === activeTerminalId &&
+              snapshot.leaseId === leaseId
+            ) {
+              try {
+                if (snapshot.mode === "composer") {
+                  insertComposerAttachmentText(snapshot, options.fallbackText);
+                } else {
+                  await writeTerminalInput(
+                    snapshot.terminalId,
+                    snapshot.leaseId,
+                    options.fallbackText,
+                    false,
+                    attempt.abortController.signal,
+                  );
+                  if (attachmentUploadAttempt?.token !== attempt.token) return false;
+                }
+                setStatus(
+                  `Attachment conversion failed; pasted the original text. ${error.message || error}`,
+                  false,
+                  true,
+                );
+                return false;
+              } catch (fallbackError) {
+                if (
+                  attachmentUploadAttempt?.token !== attempt.token ||
+                  fallbackError?.name === "AbortError"
+                ) {
+                  return false;
+                }
+                setStatus(`Paste failed: ${fallbackError.message || fallbackError}`, true);
+                return false;
+              }
+            }
+            setStatus(`Attachment failed: ${error.message || error}`, true);
+            return false;
+          } finally {
+            if (attachmentUploadAttempt?.token === attempt.token) {
+              attachmentUploadAttempt = null;
+              attachmentUploadInFlight = false;
+              attachmentInput.value = "";
+              updateComposerControls();
+              focusCurrentInputSurface();
+            }
+          }
+        }
+
+        function cancelAttachmentUpload() {
+          const attempt = attachmentUploadAttempt;
+          if (!attempt) return;
+          attachmentUploadAttempt = null;
+          attachmentUploadInFlight = false;
+          attempt.abortController.abort();
+          attachmentInput.value = "";
+          updateComposerControls();
+        }
+
+        function longTextAttachmentFile(text) {
+          return new File([text], "pasted-text.txt", { type: "text/plain" });
+        }
+
+        function shouldConvertLongTextToAttachment(text) {
+          return (
+            attachmentTextByteLength(text) >
+            REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES
+          );
+        }
+
+        function attachmentTextByteLength(text) {
+          return attachmentTextEncoder.encode(text).byteLength;
+        }
+
         function cancelComposerSubmissions() {
           for (const draft of composerDraftByTerminalId.values()) {
             draft.inFlight?.abortController?.abort();
@@ -6716,6 +6999,33 @@
           if (!text) return;
           const terminalId = activeTerminalId;
           const activeLeaseId = leaseId;
+          if (shouldConvertLongTextToAttachment(text)) {
+            if (attachmentTextByteLength(text) > REMOTE_ATTACHMENT_MAX_BYTES) {
+              setStatus("Pasted text exceeds the 1 MiB attachment limit.", true);
+              return;
+            }
+            if (attachmentUploadInFlight) {
+              setStatus(
+                "A long paste was rejected because an attachment upload is already in progress.",
+                false,
+                true,
+              );
+              return;
+            }
+            void attachRemoteFiles([longTextAttachmentFile(text)], {
+              snapshot: {
+                terminalId,
+                leaseId: activeLeaseId,
+                mode: "direct",
+                revision: 0,
+                text: "",
+                selectionStart: 0,
+                selectionEnd: 0,
+              },
+              fallbackText: text,
+            });
+            return;
+          }
           writeTerminalInput(terminalId, activeLeaseId, text, false).catch((err) =>
             setStatus(`Paste failed: ${err.message || err}`, true)
           );
@@ -7791,9 +8101,13 @@
           // when the connection has already failed and no lease remains.
           disarmAutoConnect();
           const currentLease = leaseId;
-          if (currentLease) await releaseLease(currentLease).catch(() => {});
           disconnect(false);
+          const exitRevision = claimAttemptRevision;
           stopWidgetPolling();
+          if (currentLease) await releaseLease(currentLease).catch(() => {});
+          // A manual reconnect supersedes this Exit while the old lease drains.
+          // Never let its late continuation close or relabel the new surface.
+          if (claimAttemptRevision !== exitRevision || leaseId) return;
           // Android's former Close button released this same lease and then
           // closed the native Remote surface. Exit is now the single path.
           if (androidE2eMode) {
@@ -7827,13 +8141,15 @@
           stashResumeTokenForUnload();
           clearPathLinkSelection();
           const currentLease = leaseId;
-          if (!currentLease) return;
           if (androidE2eMode) {
             // Native performs the encrypted background transition. It reads
             // the current desktop setting atomically with retain/release, so
             // pagehide never makes a stale policy decision.
             return;
           }
+          invalidateAttachmentChooser();
+          cancelAttachmentUpload();
+          if (!currentLease) return;
           const path = `/remote/v1/session/release?token=${encodeURIComponent(token())}`;
           const payload = JSON.stringify({ leaseId: currentLease });
           let sent = false;
@@ -7860,9 +8176,12 @@
 
         async function requestDesktopMode() {
           const currentLease = leaseId;
+          let transitionRevision = null;
           if (currentLease) {
-            await releaseLease(currentLease).catch(() => {});
             disconnect(false);
+            transitionRevision = claimAttemptRevision;
+            await releaseLease(currentLease).catch(() => {});
+            if (claimAttemptRevision !== transitionRevision || leaseId) return;
           }
           if (androidE2eMode) {
             window.LaymuxNative.disconnectRemote();
@@ -7873,6 +8192,8 @@
 
         function disconnect(clearStatus = true) {
           claimAttemptRevision += 1;
+          invalidateAttachmentChooser();
+          cancelAttachmentUpload();
           stopSocket();
           stopHeartbeat();
           stopInputFlush();
@@ -8152,6 +8473,53 @@
               : `${paneLabel} included in pane navigation.`
           );
         });
+        keepInputSurfaceFocus(attachmentButton);
+        attachmentButton.addEventListener("click", () => {
+          if (attachmentButton.disabled) return;
+          if (!beginAttachmentChooser()) return;
+          attachmentInput.click();
+        });
+        function uploadSelectedAttachmentFiles(chooser) {
+          const files = Array.from(attachmentInput.files || []);
+          if (files.length === 0) return false;
+          if (!chooser || !attachmentChooserIsCurrent(chooser)) {
+            if (pendingAttachmentChooser === chooser) invalidateAttachmentChooser();
+            attachmentInput.value = "";
+            return false;
+          }
+          pendingAttachmentChooser = null;
+          clearAttachmentChooserRetryTimers();
+          void attachRemoteFiles(files, { snapshot: chooser.snapshot });
+          return true;
+        }
+        attachmentInput.addEventListener("change", () => {
+          if (!uploadSelectedAttachmentFiles(pendingAttachmentChooser) && pendingAttachmentChooser) {
+            invalidateAttachmentChooser();
+          }
+        });
+        window.addEventListener("focus", () => {
+          // Some older Android System WebView builds populate FileList after
+          // the system picker returns but omit the input's change event.
+          // The chooser identity pins retries to the lease and terminal that
+          // opened it, so a late FileList can never cross a reconnect boundary.
+          const chooser = pendingAttachmentChooser;
+          if (!chooser) return;
+          clearAttachmentChooserRetryTimers();
+          for (const delay of [0, 250]) {
+            const timer = window.setTimeout(() => {
+              attachmentChooserRetryTimers.delete(timer);
+              if (!attachmentChooserIsCurrent(chooser)) {
+                if (pendingAttachmentChooser === chooser) invalidateAttachmentChooser();
+                return;
+              }
+              const uploaded = uploadSelectedAttachmentFiles(chooser);
+              if (!uploaded && delay === 250 && pendingAttachmentChooser === chooser) {
+                invalidateAttachmentChooser();
+              }
+            }, delay);
+            attachmentChooserRetryTimers.add(timer);
+          }
+        });
         inputModeToggleButton.addEventListener("click", () => {
           setInputMode(currentInputMode() === "composer" ? "direct" : "composer");
         });
@@ -8168,6 +8536,37 @@
           if (composerAutocompleteIndex !== -1) composerAutocompleteIndex = -1;
           updateComposerControls();
           renderComposerSuggestions();
+        });
+        composerInput.addEventListener("paste", (event) => {
+          if (currentInputMode() !== "composer") return;
+          const text = event.clipboardData?.getData("text/plain") || "";
+          if (!text || !shouldConvertLongTextToAttachment(text)) return;
+          if (attachmentTextByteLength(text) > REMOTE_ATTACHMENT_MAX_BYTES) {
+            setStatus(
+              "Pasted text exceeds the 1 MiB attachment limit and was kept in the composer.",
+              false,
+              true,
+            );
+            return;
+          }
+          if (attachmentUploadInFlight) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            setStatus(
+              "A long paste was rejected because an attachment upload is already in progress.",
+              false,
+              true,
+            );
+            return;
+          }
+          const snapshot = attachmentSelectionSnapshot();
+          if (!snapshot || !composerReady) return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          void attachRemoteFiles([longTextAttachmentFile(text)], {
+            snapshot,
+            fallbackText: text,
+          });
         });
         composerInput.addEventListener("compositionstart", () => {
           composerIsComposing = true;
@@ -8388,6 +8787,7 @@
         });
         window.addEventListener("beforeunload", () => {
           if (pcUpdatePollTimer) clearTimeout(pcUpdatePollTimer);
+          cancelAttachmentUpload();
           stopSocket();
           stopHeartbeat();
           stopInputFlush();

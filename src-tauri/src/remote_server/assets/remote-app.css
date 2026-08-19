@@ -168,6 +168,21 @@
         cursor: default;
         opacity: 0.4;
       }
+      .attachment-button {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary);
+      }
+      .attachment-button:hover:not(:disabled) {
+        border-color: var(--accent-50);
+        background: var(--hover-bg);
+        color: var(--accent);
+      }
+      .attachment-button.busy {
+        color: var(--accent);
+      }
       main {
         position: relative;
         display: grid;
@@ -1549,6 +1564,9 @@
         /* Send joins the equal split — its base flex: 0 0 auto outranks the
            rule above and would collapse against width: 0, clipping the icon. */
         footer .composer-send {
+          flex: 1 1 0;
+        }
+        footer .attachment-button {
           flex: 1 1 0;
         }
         .terminal-composer {

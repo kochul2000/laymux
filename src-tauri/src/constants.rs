@@ -240,6 +240,19 @@ pub const REMOTE_OWNER_TRANSITION_TIMEOUT_MS: u64 = 750;
 /// API, including bracketed-paste markers and an optional submit CR.
 pub const TERMINAL_STRUCTURED_INPUT_MAX_BYTES: usize = 1024 * 1024;
 
+/// Maximum decoded image/text payload accepted by one Remote terminal attachment.
+/// One MiB remains below the Android E2E RPC envelope after both base64 layers.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_BYTES: usize = 1024 * 1024;
+/// Maximum regular-file bytes retained in the app-owned Remote attachment cache.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+/// Maximum regular-file count retained in the Remote attachment cache. This
+/// also bounds zero-byte attachments and the cost of cache scans.
+pub const REMOTE_TERMINAL_ATTACHMENT_CACHE_MAX_FILES: usize = 1024;
+/// JSON envelope bound for one base64-encoded Remote terminal attachment.
+pub const REMOTE_TERMINAL_ATTACHMENT_REQUEST_MAX_BYTES: usize = 1536 * 1024;
+/// Startup cleanup age for Remote attachment cache files.
+pub const REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS: u64 = 7;
+
 /// Delay suggested to a Remote client when a Local human-input operation is
 /// already draining ahead of its claim reservation.
 pub const REMOTE_CLAIM_RETRY_AFTER_MS: u64 = 25;

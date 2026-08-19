@@ -4,6 +4,7 @@ mod android_e2e_routes;
 mod android_pairing_routes;
 mod appearance;
 mod assets;
+mod attachments;
 mod auth;
 mod display_settings;
 mod font_assets;
@@ -43,6 +44,7 @@ pub(crate) use android_e2e_output::{
     unix_time_seconds, PreparedAndroidE2eOutput, ANDROID_E2E_OUTPUT_PATH,
     E2E_OUTPUT_MAX_ENCRYPTED_RECORD_BYTES, E2E_OUTPUT_OPEN_RECORD_LIMIT,
 };
+pub(crate) use attachments::cleanup_stale_attachments;
 pub(crate) use auth::TunnelAuthorized;
 pub(crate) use lease::{
     active_lease_matches_with_timeout, begin_human_control_operation, HumanControlOrigin,
