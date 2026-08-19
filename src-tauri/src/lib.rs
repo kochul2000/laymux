@@ -121,6 +121,20 @@ pub fn run() {
                 }
             }
 
+            // Remote image/text uploads are app-owned cache files. Keep the same
+            // bounded retention window as desktop smart-paste images (ADR-0181).
+            match remote_server::cleanup_stale_attachments(
+                constants::REMOTE_TERMINAL_ATTACHMENT_MAX_AGE_DAYS,
+            ) {
+                Ok(removed) if removed > 0 => {
+                    tracing::info!(removed, "Pruned stale Remote terminal attachments");
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    tracing::warn!(%error, "Remote terminal attachment cleanup failed");
+                }
+            }
+
             // Clean up old MCP show_image temp files (older than 7 days)
             {
                 let removed = automation_server::mcp::cleanup_mcp_image_cache(7);

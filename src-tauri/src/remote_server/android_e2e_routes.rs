@@ -412,7 +412,11 @@ fn terminal_control_path(path: &str) -> bool {
     let Some((terminal_id, action)) = rest.rsplit_once('/') else {
         return false;
     };
-    valid_remote_identifier(terminal_id) && matches!(action, "focus" | "write" | "input" | "resize")
+    valid_remote_identifier(terminal_id)
+        && matches!(
+            action,
+            "focus" | "write" | "input" | "resize" | "attachments"
+        )
 }
 
 fn notification_read_path(path: &str) -> bool {
@@ -623,6 +627,10 @@ mod tests {
         assert!(http_path_allowed(
             &Method::POST,
             "/remote/v1/terminals/term-1/input"
+        ));
+        assert!(http_path_allowed(
+            &Method::POST,
+            "/remote/v1/terminals/term-1/attachments"
         ));
         assert!(!http_path_allowed(
             &Method::POST,

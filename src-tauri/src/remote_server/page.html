@@ -270,6 +270,12 @@
         <button id="ctrlC" disabled>Ctrl+C</button>
         <button id="focusTerminal" disabled>Keyboard</button>
         <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
+        <button id="attachFile" class="attachment-button" type="button" disabled aria-label="Attach image or text file" title="Attach image or text file">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7L9 17.4a2 2 0 0 1-2.8-2.8l8.5-8.5"/>
+          </svg>
+        </button>
+        <input id="attachmentInput" class="sr-only" type="file" accept="image/*,text/*,.md,.markdown,.json,.jsonl,.yaml,.yml,.toml,.xml,.csv,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.kt,.kts,.c,.h,.cpp,.hpp,.cc,.cs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.css,.scss,.html,.htm,.ini,.conf,.cfg,.env" multiple tabindex="-1" aria-hidden="true" />
         <div id="terminalMeta" class="status-hint grow">No terminal selected.</div>
         <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
           <svg data-icon="paper-plane" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.47 20.21 19.91 4.09 3.8 10.53l3.75 3.77 9.14-6.99-6.99 9.14 3.77 3.76Z"/></svg>

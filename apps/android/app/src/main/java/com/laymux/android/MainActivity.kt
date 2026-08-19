@@ -13,6 +13,8 @@ import android.view.Gravity
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebSettings
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.widget.Button
 import android.widget.FrameLayout
@@ -20,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.credentials.CustomCredential
@@ -76,6 +79,7 @@ import com.laymux.android.remote.OauthLoopbackRelay
 import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
+import com.laymux.android.remote.remoteHttpBodyWithinLimit
 import com.laymux.android.web.JsDialogChromeClient
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.RemoteBackGuard
@@ -86,6 +90,7 @@ import com.laymux.android.web.RemoteResourceCache
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
+import com.laymux.android.web.SinglePendingResult
 import com.laymux.android.web.VisibleWebSurface
 import com.laymux.android.web.WebSurfaceLayerPolicy
 import com.laymux.android.web.scheduleRemoteInputFocus
@@ -157,6 +162,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var policyDialog: AlertDialog? = null
     private var remoteJsDialogs: JsDialogChromeClient? = null
     private var cloudJsDialogs: JsDialogChromeClient? = null
+    private val pendingFileChooser = SinglePendingResult<Array<Uri>>()
     private var selectedCloudInstanceId: String? = null
     private var selectedTailscaleUrl: String? = null
     private var connectionSettingsInstanceId: String? = null
@@ -187,6 +193,14 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val remoteDocumentAuthority = RemoteDocumentAuthority()
     private var secureWebViewGeneration = 0L
     @Volatile private var remoteLifecycleActive = false
+
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        pendingFileChooser.complete(
+            WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data),
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -367,6 +381,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(): WebView {
+        // A replacement Remote document must never receive the result for a
+        // chooser opened by the document it superseded.
+        cancelPendingFileChooser()
         val documentGeneration = remoteDocumentAuthority.installFreshDocument()
         secureWebViewGeneration = documentGeneration
         return WebView(this).apply {
@@ -386,7 +403,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 { path -> loadRemoteResource(documentGeneration, path) },
                 { onRemoteDocumentLoaded(documentGeneration) },
             )
-            webChromeClient = JsDialogChromeClient(this@MainActivity).also {
+            webChromeClient = JsDialogChromeClient(
+                this@MainActivity,
+                ::showWebFileChooser,
+            ).also {
                 remoteJsDialogs?.dismissActive()
                 remoteJsDialogs = it
             }
@@ -415,6 +435,33 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
     }
 
+    private fun showWebFileChooser(
+        callback: ValueCallback<Array<Uri>>,
+        params: WebChromeClient.FileChooserParams,
+    ) {
+        cancelPendingFileChooser()
+        if (isFinishing || isDestroyed) {
+            callback.onReceiveValue(null)
+            return
+        }
+        val intent = try {
+            params.createIntent().addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: ActivityNotFoundException) {
+            callback.onReceiveValue(null)
+            return
+        }
+        pendingFileChooser.replace(callback::onReceiveValue)
+        try {
+            fileChooserLauncher.launch(intent)
+        } catch (_: ActivityNotFoundException) {
+            pendingFileChooser.cancel()
+        }
+    }
+
+    private fun cancelPendingFileChooser() {
+        pendingFileChooser.cancel()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun createCloudWebView(): WebView = WebView(this).apply {
         settings.javaScriptEnabled = true
@@ -428,7 +475,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         settings.mediaPlaybackRequiresUserGesture = true
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         webViewClient = CloudWebViewClient(cloudNavigation)
-        webChromeClient = JsDialogChromeClient(this@MainActivity).also {
+        webChromeClient = JsDialogChromeClient(
+            this@MainActivity,
+            ::showWebFileChooser,
+        ).also {
             cloudJsDialogs?.dismissActive()
             cloudJsDialogs = it
         }
@@ -1847,7 +1897,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     ) {
         if (!remoteBridgeActionsEnabled(documentGeneration)) return
         if (!validBridgeId(requestId) || path.length > MAX_REMOTE_PATH_LENGTH ||
-            (bodyJson?.length ?: 0) > MAX_REMOTE_HTTP_BODY_CHARS
+            !remoteHttpBodyWithinLimit(bodyJson)
         ) {
             emitHttpError(requestId, "Invalid Remote request.")
             return
@@ -2689,6 +2739,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     override fun onDestroy() {
         revokeRemoteDocument()
+        cancelPendingFileChooser()
         if (::pairingSheet.isInitialized) pairingSheet.dismiss()
         if (::connectionSettingsDialog.isInitialized) connectionSettingsDialog.dismiss()
         policyDialog?.dismiss()
@@ -2734,7 +2785,6 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val OUTPUT_BRIDGE_CLOSE: Byte = 3
         private const val REMOTE_RESOURCE_TIMEOUT_SECONDS = 20L
         private const val MAX_REMOTE_PATH_LENGTH = 2_048
-        private const val MAX_REMOTE_HTTP_BODY_CHARS = 256 * 1024
         private const val MAX_REMOTE_IDENTIFIER_LENGTH = 128
         private const val MAX_BRIDGE_ID_LENGTH = 64
         private const val DEBUG_PAIRING_SHEET_PREVIEW = "laymux.previewPairingSheet"

@@ -29,6 +29,7 @@ use super::assets::{
     remote_addon_fit_js, remote_font, remote_unicode_provider_js, remote_web_links_addon_js,
     remote_xterm_css, remote_xterm_js,
 };
+use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
 use super::display_settings::{remote_display_settings, update_remote_display_settings};
 use super::font_assets::FONT_ROUTE_PATH;
@@ -211,6 +212,12 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         .route(
             "/remote/v1/terminals/{id}/input",
             post(remote_terminal_input),
+        )
+        .route(
+            "/remote/v1/terminals/{id}/attachments",
+            post(remote_terminal_attachment).layer(DefaultBodyLimit::max(
+                crate::constants::REMOTE_TERMINAL_ATTACHMENT_REQUEST_MAX_BYTES,
+            )),
         )
         .route(
             "/remote/v1/terminals/{id}/resize",
@@ -1010,7 +1017,7 @@ fn terminal_control_response(result: Result<(), String>) -> Response {
     }
 }
 
-fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
+pub(super) fn lease_id_from_headers(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(REMOTE_LEASE_HEADER)
         .and_then(|value| value.to_str().ok())
