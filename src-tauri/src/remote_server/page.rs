@@ -289,17 +289,20 @@ mod tests {
         assert!(html.contains("if (!Number.isFinite(parsed) || parsed <= 0) return fallback;"));
     }
 
-    /// Finger-drag scrollback is this page's own pixel→line conversion, so its
-    /// multiplier is applied to the raw delta and never handed to xterm as an
-    /// option (xterm rejects unknown option keys).
+    /// Finger-drag scrolling is this page's own pixel→line conversion, so the
+    /// active gesture's multiplier is applied to the raw delta and never handed
+    /// to xterm as an option (xterm rejects unknown option keys).
     #[test]
     fn remote_page_html_scales_finger_drag_scrollback() {
         let html = remote_client_source();
-        assert!(html.contains("gesture.scrollRemainderPx += -deltaY * touchScrollSensitivity;"));
+        assert!(html.contains("gesture.scrollRemainderPx += -deltaY * sensitivity;"));
+        assert!(
+            html.contains("sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);")
+        );
         assert!(html.contains("function adoptTouchScrollSensitivity(appearance = {}) {"));
         // Both the first terminal and every later appearance update adopt it.
         assert!(html.contains("adoptTouchScrollSensitivity(appearance);"));
-        assert!(!html.contains("touchScrollSensitivity: normalized.touchScrollSensitivity"));
+        assert!(!html.contains("term.options.touchScrollSensitivity"));
     }
 
     /// ADR-0133: every PTY geometry change is a window-size event a
@@ -659,9 +662,15 @@ mod tests {
         assert!(html.contains("function installTouchSelectionBridge(term)"));
         assert!(html.contains("function installSelectionHandles(term)"));
         assert!(html.contains("function isNormalScrollbackMode(term)"));
+        assert!(html.contains("function hasMouseTracking(term)"));
+        assert!(html.contains("function isAlternateBufferCursorInput(term, data)"));
+        assert!(html.contains("function consumeTouchScrollLines("));
         assert!(html.contains("function routeOneFingerScroll(term, deltaY, point)"));
         assert!(html.contains("function routeTwoFingerScroll(term, deltaY, point)"));
         assert!(html.contains("function sendTerminalAppScroll(term, deltaY, point)"));
+        assert!(html.contains("function sendTerminalCursorScroll("));
+        assert!(html.contains("enqueueDiscreteInput(sequence, Math.abs(wholeLines));"));
+        assert!(html.contains("if (isAlternateBufferCursorInput(terminal, data))"));
         assert!(html.contains("function handleTouchTap(term, element, point)"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));

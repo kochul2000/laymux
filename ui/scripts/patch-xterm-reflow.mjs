@@ -140,8 +140,10 @@ const moduleMouseReportPatched =
   "if(h===void 0||u===void 0||u>4)return!1;for(let c=0;c<p;c++)if(!e.coreMouseService.triggerMouseEvent({col:a.col,row:a.row,x:a.x,y:a.y,button:u,action:h,ctrl:l.ctrlKey,alt:l.altKey,shift:l.shiftKey}))return!1;return!0";
 const moduleAltBufferWheelOriginal =
   'if(e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr)===0)return this.cancel(l,!0);let h=b.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(l.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(h,!0),this.cancel(l,!0)';
-const moduleAltBufferWheelPatched =
+const moduleAltBufferWheelConcatenated =
   'let h=e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(h===0)return this.cancel(l,!0);let c=b.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(l.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(c.repeat(Math.abs(h)),!0),this.cancel(l,!0)';
+const moduleAltBufferWheelPatched =
+  'let h=e.coreMouseService.consumeWheelEvent(l,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(h===0)return this.cancel(l,!0);let c=b.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(l.deltaY<0?"A":"B");for(let d=0;d<Math.abs(h);d++)this.coreService.triggerDataEvent(c,!0);return this.cancel(l,!0)';
 
 const commonJsMouseReportCountOriginal = "let s,r;switch(t.overrideType||t.type)";
 const commonJsMouseReportCountPatched = "let s,r,n=1;switch(t.overrideType||t.type)";
@@ -155,8 +157,10 @@ const commonJsMouseReportPatched =
   "if(void 0===r||void 0===s||s>4)return!1;for(let o=0;o<n;o++)if(!e.coreMouseService.triggerMouseEvent({col:i.col,row:i.row,x:i.x,y:i.y,button:s,action:r,ctrl:t.ctrlKey,alt:t.altKey,shift:t.shiftKey}))return!1;return!0";
 const commonJsAltBufferWheelOriginal =
   'if(0===e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr))return this.cancel(t,!0);const i=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(i,!0),this.cancel(t,!0)';
-const commonJsAltBufferWheelPatched =
+const commonJsAltBufferWheelConcatenated =
   'const i=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===i)return this.cancel(t,!0);const s=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");return this.coreService.triggerDataEvent(s.repeat(Math.abs(i)),!0),this.cancel(t,!0)';
+const commonJsAltBufferWheelPatched =
+  'const i=e.coreMouseService.consumeWheelEvent(t,e._renderService?.dimensions?.device?.cell?.height,e._coreBrowserService?.dpr);if(0===i)return this.cancel(t,!0);const s=E.C0.ESC+(this.coreService.decPrivateModes.applicationCursorKeys?"O":"[")+(t.deltaY<0?"A":"B");for(let r=0;r<Math.abs(i);r++)this.coreService.triggerDataEvent(s,!0);return this.cancel(t,!0)';
 
 // xterm 6.0.0's 229 textarea-diff timer only checks `_isComposing`. A main-thread
 // stall lets compositionend run first, so the delayed diff sees a finished
@@ -201,6 +205,7 @@ const moduleWheelPatches = [
     name: "alternate-buffer wheel repetition",
     originalText: moduleAltBufferWheelOriginal,
     patchedText: moduleAltBufferWheelPatched,
+    upgradeTexts: [moduleAltBufferWheelConcatenated],
   },
 ];
 
@@ -229,18 +234,26 @@ const commonJsWheelPatches = [
     name: "alternate-buffer wheel repetition",
     originalText: commonJsAltBufferWheelOriginal,
     patchedText: commonJsAltBufferWheelPatched,
+    upgradeTexts: [commonJsAltBufferWheelConcatenated],
   },
 ];
 
 async function patchBundle(target, replacements) {
   const source = await readFile(target, "utf8");
   let next = source;
-  for (const { name, originalText, patchedText, acceptedTexts = [] } of replacements) {
+  for (const {
+    name,
+    originalText,
+    patchedText,
+    acceptedTexts = [],
+    upgradeTexts = [],
+  } of replacements) {
     if (next.includes(patchedText) || acceptedTexts.some((text) => next.includes(text))) continue;
-    if (!next.includes(originalText)) {
+    const matchedOriginal = [originalText, ...upgradeTexts].find((text) => next.includes(text));
+    if (!matchedOriginal) {
       throw new Error(`Unsupported @xterm/xterm bundle: ${name} patch target not found`);
     }
-    next = next.replace(originalText, patchedText);
+    next = next.replace(matchedOriginal, patchedText);
   }
 
   if (next !== source) {
@@ -326,7 +339,10 @@ await patchBundle(moduleTarget, [
     name: "textarea diff skip while sending",
     originalText: moduleTextareaDiffSkipSending,
     patchedText: moduleTextareaDiffSkipSendingPatched,
-    acceptedTexts: [moduleTextareaDiffSkipSendingPatched, moduleTextareaDiffSkipSendingWhileSending],
+    acceptedTexts: [
+      moduleTextareaDiffSkipSendingPatched,
+      moduleTextareaDiffSkipSendingWhileSending,
+    ],
   },
   {
     name: "textarea diff skip upgrade from sending flag",
@@ -412,7 +428,10 @@ await patchBundle(commonJsTarget, [
     name: "textarea diff skip while sending",
     originalText: commonJsTextareaDiffSkipSending,
     patchedText: commonJsTextareaDiffSkipSendingPatched,
-    acceptedTexts: [commonJsTextareaDiffSkipSendingPatched, commonJsTextareaDiffSkipSendingWhileSending],
+    acceptedTexts: [
+      commonJsTextareaDiffSkipSendingPatched,
+      commonJsTextareaDiffSkipSendingWhileSending,
+    ],
   },
   {
     name: "textarea diff skip upgrade from sending flag",
@@ -426,7 +445,10 @@ await patchBundle(remoteCommonJsTarget, [
     name: "textarea diff skip while sending",
     originalText: commonJsTextareaDiffSkipSending,
     patchedText: commonJsTextareaDiffSkipSendingPatched,
-    acceptedTexts: [commonJsTextareaDiffSkipSendingPatched, commonJsTextareaDiffSkipSendingWhileSending],
+    acceptedTexts: [
+      commonJsTextareaDiffSkipSendingPatched,
+      commonJsTextareaDiffSkipSendingWhileSending,
+    ],
   },
   {
     name: "textarea diff skip upgrade from sending flag",
