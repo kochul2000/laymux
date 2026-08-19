@@ -48,6 +48,7 @@
         const newWorkspaceButton = $("newWorkspace");
         const newWorkspacePanel = $("newWorkspacePanel");
         const hiddenWorkspaceToggle = $("hiddenWorkspaceToggle");
+        const hiddenWorkspaceBadge = $("hiddenWorkspaceBadge");
         const hiddenWorkspaceShelf = $("hiddenWorkspaceShelf");
         const workspaceListEl = $("workspaceList");
         const dockSection = $("dockSection");
@@ -290,6 +291,7 @@
         let pcUpdateStatus = null;
         let pcUpdatePollTimer = null;
         let pcUpdateRequestInFlight = false;
+        let hiddenWorkspaceCount = 0;
         let hiddenWorkspaceShelfOpen = false;
         let touchGesture = null;
         let touchPointers = new Map();
@@ -4300,6 +4302,8 @@
                     : "Remote";
           drawerBackButton.hidden = nextView === "workspace";
           newWorkspaceButton.hidden = nextView !== "workspace";
+          hiddenWorkspaceToggle.hidden =
+            nextView !== "workspace" || hiddenWorkspaceCount === 0;
           drawerNotificationsButton.hidden = nextView !== "workspace";
           drawerConnectionButton.hidden = nextView !== "workspace";
           drawerSettingsButton.hidden = nextView !== "workspace";
@@ -4815,27 +4819,30 @@
 
         function setHiddenWorkspaceShelfOpen(open) {
           hiddenWorkspaceShelfOpen =
-            Boolean(open) && !hiddenWorkspaceToggle.hidden;
+            Boolean(open) && hiddenWorkspaceCount > 0;
           hiddenWorkspaceShelf.hidden = !hiddenWorkspaceShelfOpen;
           hiddenWorkspaceToggle.setAttribute(
             "aria-expanded",
             String(hiddenWorkspaceShelfOpen),
           );
+          const label =
+            `${hiddenWorkspaceShelfOpen ? "Close" : "Open"} hidden workspaces (${hiddenWorkspaceCount})`;
+          hiddenWorkspaceToggle.setAttribute("aria-label", label);
+          hiddenWorkspaceToggle.title = label;
         }
 
         function renderHiddenWorkspaceShelf(workspaces) {
           hiddenWorkspaceShelf.innerHTML = "";
-          hiddenWorkspaceToggle.hidden = workspaces.length === 0;
-          hiddenWorkspaceToggle.textContent = `Hidden ${workspaces.length}`;
-          if (workspaces.length === 0) {
+          hiddenWorkspaceCount = workspaces.length;
+          hiddenWorkspaceToggle.hidden =
+            drawerView !== "workspace" || hiddenWorkspaceCount === 0;
+          hiddenWorkspaceBadge.hidden = hiddenWorkspaceCount === 0;
+          hiddenWorkspaceBadge.textContent = countBadgeText(hiddenWorkspaceCount);
+          if (hiddenWorkspaceCount === 0) {
             setHiddenWorkspaceShelfOpen(false);
             return;
           }
-          hiddenWorkspaceShelf.hidden = !hiddenWorkspaceShelfOpen;
-          hiddenWorkspaceToggle.setAttribute(
-            "aria-expanded",
-            String(hiddenWorkspaceShelfOpen),
-          );
+          setHiddenWorkspaceShelfOpen(hiddenWorkspaceShelfOpen);
 
           workspaces.forEach((workspace) => {
             const row = document.createElement("div");
