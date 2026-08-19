@@ -99,6 +99,10 @@
         // is kept in a runtime Map and never persisted (see composerHistory*).
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
+        // A visual-only Remote preference: when Composer opens for one of the
+        // supported coding agents, leave its input footer in view by scrolling
+        // the terminal viewport up by that agent's fixed footer height.
+        const composerAgentScrollOffsetKey = "laymux.remote.composerAgentScrollOffset";
         // Which terminals share one recall bucket (ADR-0055). Only the scope
         // choice is stored here; the recalled text stays in memory.
         const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
@@ -266,12 +270,23 @@
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
         const COMPOSER_HISTORY_SCOPES = ["global", "workspace", "pane"];
         const DEFAULT_COMPOSER_HISTORY_SCOPE = "global";
+        // These are deliberately line counts rather than pixels: xterm owns the
+        // cell geometry, and this must remain a surface-local scroll only (it
+        // must not resize the PTY; ADR-0038).
+        const COMPOSER_AGENT_SCROLL_OFFSETS = Object.freeze({
+          Claude: 3,
+          Codex: 4,
+          Grok: 2,
+        });
         let preferredInputMode = loadPreferredInputMode();
         // Feature on/off toggles are configuration (not content), so they are
         // the only composer-recall state allowed in localStorage. Default on to
         // match the desktop composer and stay non-destructive.
         let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
         let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
+        let composerAgentScrollOffsetEnabled = loadComposerOptInToggle(
+          composerAgentScrollOffsetKey,
+        );
         let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
@@ -1505,6 +1520,17 @@
           }
         }
 
+        // New layout affordances are opt-in so existing Remote sessions retain
+        // their exact viewport position until the person using the phone asks
+        // for the extra composer space.
+        function loadComposerOptInToggle(key) {
+          try {
+            return localStorage.getItem(key) === "1";
+          } catch (_) {
+            return false;
+          }
+        }
+
         function saveComposerToggle(key, enabled) {
           try {
             localStorage.setItem(key, enabled ? "1" : "0");
@@ -1881,6 +1907,7 @@
           if (activeTerminalId) inputModeByTerminalId.set(activeTerminalId, mode);
           if (options.persist !== false) savePreferredInputMode(mode);
           renderInputSurface({ focus: options.focus !== false });
+          if (mode === "composer") offsetComposerForActiveAgent();
         }
 
         function setActiveTerminal(nextTerminalId) {
@@ -5381,6 +5408,47 @@
           return null;
         }
 
+        function activeComposerAgentScrollOffset() {
+          const activity = paneByTerminalId(navigationState, activeTerminalId)?.activity;
+          if (activity?.type !== "interactiveApp") return null;
+          const lines = COMPOSER_AGENT_SCROLL_OFFSETS[activity.name];
+          return Number.isInteger(lines) ? lines : null;
+        }
+
+        // This is intentionally a one-time viewport adjustment at a user-visible
+        // Composer transition or its initial user-directed snapshot attach. It
+        // does not alter terminal geometry or output state, and automatic
+        // reconnect/navigation refreshes never re-apply it, so a person's later
+        // scroll position remains theirs.
+        function offsetComposerForActiveAgent() {
+          if (
+            !composerAgentScrollOffsetEnabled ||
+            currentInputMode() !== "composer" ||
+            composerCollapsed ||
+            !terminal
+          ) {
+            return;
+          }
+          const terminalId = activeTerminalId;
+          const lines = activeComposerAgentScrollOffset();
+          if (lines == null) return;
+          requestAnimationFrame(() => {
+            if (
+              !composerAgentScrollOffsetEnabled ||
+              currentInputMode() !== "composer" ||
+              composerCollapsed ||
+              !terminal ||
+              activeTerminalId !== terminalId ||
+              activeComposerAgentScrollOffset() !== lines
+            ) {
+              return;
+            }
+            terminal.scrollToBottom();
+            terminal.scrollLines(-lines);
+            updateScrollToBottomButton(terminal);
+          });
+        }
+
         // Pane summaries carry the same title/profile/cwd fields as terminal
         // infos, so a queued pane still gets a real header instead of a raw id.
         function terminalMetaLabel(data, terminalId) {
@@ -6034,6 +6102,9 @@
                 renderedTerminalId = terminalId;
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
+                if (!reconnecting && currentInputMode() === "composer") {
+                  offsetComposerForActiveAgent();
+                }
               }
               if (outputAttachGeometryGeneration === outputGeneration) {
                 outputAttachGeometryGeneration = null;
@@ -6181,6 +6252,9 @@
                 // from that tail instead of discarding a scrolled-up viewport.
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
+                if (!reconnecting && currentInputMode() === "composer") {
+                  offsetComposerForActiveAgent();
+                }
                 if (outputAttachGeometryGeneration === outputGeneration) {
                   outputAttachGeometryGeneration = null;
                 }
@@ -7344,6 +7418,17 @@
               composerAutocompleteEnabled = checked;
               saveComposerToggle(composerAutocompleteKey, checked);
               renderComposerSuggestions();
+            }
+          );
+          makeToggle(
+            "composerAgentScrollOffsetToggle",
+            "Keep agent input visible",
+            "Claude, Codex, and Grok only",
+            composerAgentScrollOffsetEnabled,
+            (checked) => {
+              composerAgentScrollOffsetEnabled = checked;
+              saveComposerToggle(composerAgentScrollOffsetKey, checked);
+              if (checked) offsetComposerForActiveAgent();
             }
           );
         }
