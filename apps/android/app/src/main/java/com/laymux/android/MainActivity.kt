@@ -36,6 +36,11 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.google.android.gms.common.moduleinstall.InstallStatusListener
+import com.google.android.gms.common.moduleinstall.ModuleInstall
+import com.google.android.gms.common.moduleinstall.ModuleInstallClient
+import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
+import com.google.android.gms.common.moduleinstall.ModuleInstallStatusUpdate
 import com.google.android.gms.tasks.Task
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -145,6 +150,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var credentialManager: CredentialManager
     private val cloudAuthClient = CloudAuthClient()
     private lateinit var scanner: GmsBarcodeScanner
+    private lateinit var scannerModuleInstaller: ModuleInstallClient
     private lateinit var biometricGate: BiometricGate
     private val pairingAckClient = PairingAckClient()
     private val e2eRemoteClient = E2eRemoteClient()
@@ -154,6 +160,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private val biometricPromptGate = ResumeGatedRunner()
     private var scanTask: Task<Barcode>? = null
     private var scanInFlight = false
+    private var scannerModuleListener: InstallStatusListener? = null
     private var pairingAckInFlight = false
     private var activePairingAckSession: PairingAckSession? = null
     private var pendingPairing: PairingPayload? = null
@@ -217,6 +224,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 .enableAutoZoom()
                 .build(),
         )
+        scannerModuleInstaller = ModuleInstall.getClient(this)
         pairingSheet = PairingBottomSheet(
             this,
             object : PairingSheetActions {
@@ -1057,6 +1065,61 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         val policy = preparePairingPolicy() ?: return
 
         scanInFlight = true
+        notifyPairingChanged(notice = "Google QR 스캐너를 준비하고 있습니다.")
+        val listener = object : InstallStatusListener {
+            override fun onInstallStatusUpdated(update: ModuleInstallStatusUpdate) {
+                if (scannerModuleListener !== this || !scanInFlight) return
+                when (update.installState) {
+                    ModuleInstallStatusUpdate.InstallState.STATE_COMPLETED -> {
+                        clearScannerModuleListener(this)
+                        launchPairingScanner(policy)
+                    }
+                    ModuleInstallStatusUpdate.InstallState.STATE_DOWNLOAD_PAUSED,
+                    ModuleInstallStatusUpdate.InstallState.STATE_CANCELED,
+                    ModuleInstallStatusUpdate.InstallState.STATE_FAILED,
+                    -> failScannerModuleInstall(this)
+                }
+            }
+        }
+        scannerModuleListener = listener
+        val request = ModuleInstallRequest.newBuilder()
+            .addApi(scanner)
+            .setListener(listener)
+            .build()
+        scannerModuleInstaller.installModules(request)
+            .addOnSuccessListener { response ->
+                if (scannerModuleListener !== listener || !scanInFlight) {
+                    return@addOnSuccessListener
+                }
+                if (response.areModulesAlreadyInstalled()) {
+                    clearScannerModuleListener(listener)
+                    launchPairingScanner(policy)
+                }
+            }
+            .addOnFailureListener { failScannerModuleInstall(listener) }
+    }
+
+    private fun failScannerModuleInstall(expected: InstallStatusListener) {
+        if (scannerModuleListener !== expected || !scanInFlight) return
+        clearScannerModuleListener(expected)
+        scanInFlight = false
+        if (!isDestroyed) notifyPairingChanged(error = pairingScannerFailureMessage(null))
+    }
+
+    private fun clearScannerModuleListener(expected: InstallStatusListener? = null) {
+        val listener = scannerModuleListener ?: return
+        if (expected != null && listener !== expected) return
+        scannerModuleListener = null
+        scannerModuleInstaller.unregisterListener(listener)
+    }
+
+    private fun launchPairingScanner(policy: PairingProtectionPolicy) {
+        if (!scanInFlight || isDestroyed || isFinishing ||
+            visibleWebSurface != VisibleWebSurface.PAIRING
+        ) {
+            scanInFlight = false
+            return
+        }
         scanTask = scanner.startScan()
             .addOnSuccessListener { barcode ->
                 scanInFlight = false
@@ -2718,6 +2781,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     override fun onStop() {
+        if (scannerModuleListener != null) {
+            scanInFlight = false
+            clearScannerModuleListener()
+        }
         remoteLifecycleActive = false
         suspendRemoteSessionForBackground()
         // A prompt deferred here would otherwise surface hours later, out of
