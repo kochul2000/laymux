@@ -125,7 +125,10 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
       }),
     );
 
-    expect(data.join("")).toBe("\x1b[B".repeat(5));
+    // Keep every row as its own input emission. On Windows, sending one
+    // concatenated chunk lets ConPTY collapse repeated cursor input into one
+    // console key event, and Codex's transcript pager then advances one row.
+    expect(data).toEqual(Array(5).fill("\x1b[B"));
   });
 
   it("accumulates a fractional multiplier until it reaches one application row", async () => {

@@ -1098,6 +1098,247 @@ test.describe("remote mobile layout", () => {
     await flickKey(-32, 0, "\x1bOD");
   });
 
+  test("keeps accelerated alternate-buffer scrolling as discrete replay-safe writes", async ({
+    page,
+  }) => {
+    const writes: string[] = [];
+    let outputSocket: WebSocketRoute | null = null;
+    await page.addInitScript(() => {
+      type ScrollTestWindow = Window & {
+        __twoFingerTerminal?: unknown;
+        __holdScrollReplay?: boolean;
+        __scrollReplayParsed?: boolean;
+        __releaseScrollReplay?: () => void;
+      };
+      let capturedConstructor: typeof window.Terminal | undefined;
+      Object.defineProperty(window, "Terminal", {
+        configurable: true,
+        get: () => capturedConstructor,
+        set: (TerminalConstructor: typeof window.Terminal) => {
+          capturedConstructor = class extends TerminalConstructor {
+            constructor(options?: ConstructorParameters<typeof TerminalConstructor>[0]) {
+              super(options);
+              Object.defineProperty(window, "__twoFingerTerminal", {
+                configurable: true,
+                value: this,
+              });
+            }
+
+            write(data: string | Uint8Array, callback?: () => void) {
+              super.write(data, () => {
+                const state = window as ScrollTestWindow;
+                if (state.__holdScrollReplay && data instanceof Uint8Array) {
+                  state.__scrollReplayParsed = true;
+                  state.__releaseScrollReplay = () => callback?.();
+                  return;
+                }
+                callback?.();
+              });
+            }
+          };
+        },
+      });
+    });
+    await installRemoteClientRoutes(page);
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [
+              {
+                id: "term-1",
+                title: "Codex",
+                appearance: {
+                  scrollSensitivity: 1,
+                  fastScrollSensitivity: 5,
+                  touchScrollSensitivity: 1,
+                  twoFingerScrollSensitivity: 5,
+                },
+              },
+            ],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      if (url.pathname === "/remote/v1/terminals/term-1/write") {
+        const body = route.request().postDataJSON() as { data: string };
+        writes.push(body.data);
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, (socket) => {
+      outputSocket = socket;
+    });
+
+    const cdp = await page.context().newCDPSession(page);
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect(page.locator("#focusTerminal")).toBeEnabled();
+
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          const terminal = (
+            window as Window & {
+              __twoFingerTerminal?: { write(data: string, callback: () => void): void };
+            }
+          ).__twoFingerTerminal;
+          terminal?.write("\x1b[?1049h\x1b[?1007h", resolve);
+        }),
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as Window & {
+                __twoFingerTerminal?: { buffer?: { active?: { type?: string } } };
+              }
+            ).__twoFingerTerminal?.buffer?.active?.type,
+        ),
+      )
+      .toBe("alternate");
+
+    const screenBox = await page.locator(".xterm-screen").boundingBox();
+    expect(screenBox).not.toBeNull();
+    const geometry = await page.evaluate(() => {
+      const terminal = (
+        window as Window & {
+          __twoFingerTerminal?: { cols?: number; rows?: number };
+        }
+      ).__twoFingerTerminal;
+      return { cols: terminal?.cols, rows: terminal?.rows };
+    });
+    const cols = geometry?.cols || 80;
+    const rows = geometry?.rows || 24;
+    const cellHeight = screenBox!.height / rows;
+    const centerX = screenBox!.x + screenBox!.width / 2;
+    const startY = screenBox!.y + screenBox!.height / 2;
+    const points = (y: number) => [
+      { x: centerX - 12, y, id: 1 },
+      { x: centerX + 12, y, id: 2 },
+    ];
+
+    const dragOneCell = async () => {
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: points(startY),
+      });
+      await cdp.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: points(startY - cellHeight),
+      });
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+
+    const scrollOptions = await page.evaluate(() => {
+      const terminal = (
+        window as Window & {
+          __twoFingerTerminal?: {
+            options?: { fastScrollModifier?: string; fastScrollSensitivity?: number };
+          };
+        }
+      ).__twoFingerTerminal;
+      return {
+        modifier: terminal?.options?.fastScrollModifier,
+        sensitivity: terminal?.options?.fastScrollSensitivity,
+      };
+    });
+    expect(scrollOptions).toEqual({ modifier: "alt", sensitivity: 5 });
+    await page.locator(".xterm").evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent("wheel", {
+          altKey: true,
+          bubbles: true,
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      );
+    });
+    await expect.poll(() => writes).toEqual(Array(5).fill("\x1b[B"));
+    writes.length = 0;
+
+    await dragOneCell();
+    await expect.poll(() => writes).toEqual(Array(5).fill("\x1b[B"));
+    writes.length = 0;
+
+    await expect.poll(() => outputSocket).not.toBeNull();
+    await page.evaluate(() => {
+      const state = window as Window & {
+        __holdScrollReplay?: boolean;
+        __scrollReplayParsed?: boolean;
+      };
+      state.__holdScrollReplay = true;
+      state.__scrollReplayParsed = false;
+    });
+    const snapshot = Buffer.from("\x1b[?1049h\x1b[?1007h");
+    outputSocket!.send(
+      JSON.stringify({
+        type: "terminal.output",
+        version: 1,
+        phase: "snapshot",
+        seqStart: 0,
+        seqEnd: snapshot.byteLength,
+        byteLength: snapshot.byteLength,
+        state: {
+          version: 1,
+          generation: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: snapshot.byteLength,
+          sourceStartSeq: 0,
+          sourceSeq: snapshot.byteLength,
+          snapshotKind: "screen",
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+          geometry: { revision: 0, cols, rows },
+        },
+      }),
+    );
+    outputSocket!.send(snapshot);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => (window as Window & { __scrollReplayParsed?: boolean }).__scrollReplayParsed,
+        ),
+      )
+      .toBe(true);
+
+    await dragOneCell();
+    await page.evaluate(() => {
+      const state = window as Window & {
+        __holdScrollReplay?: boolean;
+        __releaseScrollReplay?: () => void;
+      };
+      state.__holdScrollReplay = false;
+      const release = state.__releaseScrollReplay;
+      state.__releaseScrollReplay = undefined;
+      release?.();
+    });
+    await page.locator("#ctrlC").click();
+    await expect.poll(() => writes.includes("\x03")).toBe(true);
+    expect(writes).toEqual(["\x03"]);
+  });
+
   test("copies a selection when mouseup lands outside the terminal", async ({ page }) => {
     await page.addInitScript(() => {
       class MockTerminal {

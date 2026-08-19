@@ -40,8 +40,10 @@ const commonJsWheelAccumulator =
   "this._wheelPartialScroll+=r,r=Math.floor(Math.abs(this._wheelPartialScroll))";
 const moduleMouseReportRepetition = "for(let c=0;c<p;c++)";
 const commonJsMouseReportRepetition = "for(let o=0;o<n;o++)";
-const moduleAltBufferRepetition = "c.repeat(Math.abs(h))";
-const commonJsAltBufferRepetition = "s.repeat(Math.abs(i))";
+const moduleAltBufferRepetition =
+  "for(let d=0;d<Math.abs(h);d++)this.coreService.triggerDataEvent(c,!0)";
+const commonJsAltBufferRepetition =
+  "for(let r=0;r<Math.abs(i);r++)this.coreService.triggerDataEvent(s,!0)";
 const moduleTextareaDiffSkipSending =
   "_handleAnyTextareaChanges(){let t=this._textarea.value,s=this._compositionEpoch||0;setTimeout(()=>{if(s===(this._compositionEpoch||0)&&!this._isComposing&&!this._isSendingComposition){let e=this._textarea.value";
 const commonJsTextareaDiffSkipSending =

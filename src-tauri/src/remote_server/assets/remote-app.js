@@ -232,6 +232,8 @@
         let cropTransformFrame = null;
         let lastResizeKey = "";
         let pendingInput = "";
+        let pendingInputTerminalId = null;
+        let pendingInputLeaseId = null;
         let inputFlushTimer = null;
         let inputWriteChain = Promise.resolve();
         let terminalSelectionRevision = 0;
@@ -2891,15 +2893,24 @@
           return point;
         }
 
-        function shouldForceTouchSelection(term) {
+        function hasMouseTracking(term) {
           const mouseTrackingMode = term && term.modes && term.modes.mouseTrackingMode;
           return Boolean(mouseTrackingMode && mouseTrackingMode !== "none");
         }
 
+        function shouldForceTouchSelection(term) {
+          return hasMouseTracking(term);
+        }
+
         function isNormalScrollbackMode(term) {
           const bufferType = term && term.buffer && term.buffer.active && term.buffer.active.type;
-          const mouseTrackingMode = term && term.modes && term.modes.mouseTrackingMode;
-          return bufferType === "normal" && (!mouseTrackingMode || mouseTrackingMode === "none");
+          return bufferType === "normal" && !hasMouseTracking(term);
+        }
+
+        function isAlternateBufferCursorInput(term, data) {
+          const bufferType = term && term.buffer && term.buffer.active && term.buffer.active.type;
+          if (bufferType !== "alternate" || hasMouseTracking(term)) return false;
+          return data === "\x1b[A" || data === "\x1b[B" || data === "\x1bOA" || data === "\x1bOB";
         }
 
         function touchSelectionMouseEvent(
@@ -2999,24 +3010,55 @@
           return { x, y };
         }
 
+        function consumeTouchScrollLines(
+          term,
+          deltaY,
+          sensitivity = touchScrollSensitivity,
+          gesture = touchGesture,
+        ) {
+          if (!gesture) return 0;
+          const metrics = terminalMetrics(term);
+          if (!metrics) return 0;
+          // The remainder carries the sub-cell leftover, so the multiplier is
+          // applied to the raw finger delta once and never re-applied to it.
+          gesture.scrollRemainderPx += -deltaY * sensitivity;
+          const exactLines = gesture.scrollRemainderPx / metrics.cellHeight;
+          const wholeLines = exactLines < 0 ? Math.ceil(exactLines) : Math.floor(exactLines);
+          gesture.scrollRemainderPx -= wholeLines * metrics.cellHeight;
+          return wholeLines;
+        }
+
         function scrollTouchTerminal(
           term,
           deltaY,
           sensitivity = touchScrollSensitivity,
           gesture = touchGesture,
         ) {
-          if (!gesture || typeof term.scrollLines !== "function") return;
-          const metrics = terminalMetrics(term);
-          if (!metrics) return;
-          // The remainder carries the sub-cell leftover, so the multiplier is
-          // applied to the raw finger delta once and never re-applied to it.
-          gesture.scrollRemainderPx += -deltaY * sensitivity;
-          const exactLines = gesture.scrollRemainderPx / metrics.cellHeight;
-          const wholeLines = exactLines < 0 ? Math.ceil(exactLines) : Math.floor(exactLines);
+          if (typeof term.scrollLines !== "function") return;
+          const wholeLines = consumeTouchScrollLines(term, deltaY, sensitivity, gesture);
           if (wholeLines === 0) return;
           term.scrollLines(wholeLines);
-          gesture.scrollRemainderPx -= wholeLines * metrics.cellHeight;
           updateSelectionHandles(term);
+        }
+
+        function sendTerminalCursorScroll(
+          term,
+          deltaY,
+          sensitivity = touchScrollSensitivity,
+          gesture = touchGesture,
+        ) {
+          if (terminalReplayDepth > 0) return;
+          const wholeLines = consumeTouchScrollLines(term, deltaY, sensitivity, gesture);
+          if (wholeLines === 0) return;
+          const applicationCursor = Boolean(
+            term && term.modes && term.modes.applicationCursorKeysMode,
+          );
+          const sequence =
+            "\x1b" + (applicationCursor ? "O" : "[") + (wholeLines < 0 ? "A" : "B");
+          // Keep each row as its own PTY write. ConPTY can collapse a run of
+          // identical cursor sequences from one write into one console event,
+          // which makes Codex's transcript pager advance only one row.
+          enqueueDiscreteInput(sequence, Math.abs(wholeLines));
         }
 
         function sendTerminalAppScroll(term, deltaY, point) {
@@ -3037,6 +3079,8 @@
         function routeOneFingerScroll(term, deltaY, point) {
           if (isNormalScrollbackMode(term)) {
             scrollTouchTerminal(term, deltaY, touchScrollSensitivity);
+          } else if (!hasMouseTracking(term)) {
+            sendTerminalCursorScroll(term, deltaY, touchScrollSensitivity);
           } else {
             sendTerminalAppScroll(term, deltaY, point);
           }
@@ -3045,9 +3089,12 @@
         function routeTwoFingerScroll(term, deltaY, point) {
           if (isNormalScrollbackMode(term)) {
             scrollTouchTerminal(term, deltaY, twoFingerScrollSensitivity);
+          } else if (!hasMouseTracking(term)) {
+            sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);
           } else {
-            // TUI (mouse-tracking) mode routes to the synthesized wheel path,
-            // which follows xterm's own scrollSensitivity, not this multiplier.
+            // Mouse-tracking TUI mode routes to the synthesized wheel path,
+            // which follows xterm's own scrollSensitivity. Alternate-buffer
+            // cursor fallback above keeps the touch gesture's own multiplier.
             sendTerminalAppScroll(term, deltaY, point);
           }
         }
@@ -3662,6 +3709,10 @@
             // all onData while a replay write is in flight and forward only
             // genuine user input.
             if (terminalReplayDepth > 0) return;
+            if (isAlternateBufferCursorInput(terminal, data)) {
+              enqueueDiscreteInput(data);
+              return;
+            }
             enqueueInput(data);
           });
           terminal.onResize(({ cols, rows }) => {
@@ -3749,6 +3800,8 @@
             inputFlushTimer = null;
           }
           pendingInput = "";
+          pendingInputTerminalId = null;
+          pendingInputLeaseId = null;
         }
 
         function stopResizeFlush() {
@@ -6536,29 +6589,60 @@
           );
         }
 
+        function queueInputWrite(data, inputTerminalId, inputLeaseId) {
+          inputWriteChain = inputWriteChain
+            .catch(() => {})
+            .then(() => {
+              if (inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) return;
+              return writeToTerminal(inputTerminalId, inputLeaseId, data);
+            })
+            .catch((err) => setStatus(err.message, true));
+        }
+
+        function flushPendingInput() {
+          if (inputFlushTimer) {
+            clearTimeout(inputFlushTimer);
+            inputFlushTimer = null;
+          }
+          const dataToSend = pendingInput;
+          const inputTerminalId = pendingInputTerminalId;
+          const inputLeaseId = pendingInputLeaseId;
+          pendingInput = "";
+          pendingInputTerminalId = null;
+          pendingInputLeaseId = null;
+          if (!dataToSend || !inputTerminalId || !inputLeaseId) return;
+          queueInputWrite(dataToSend, inputTerminalId, inputLeaseId);
+        }
+
         function enqueueInput(data) {
           if (!leaseId || !activeTerminalId) return;
+          if (
+            pendingInput &&
+            (pendingInputTerminalId !== activeTerminalId || pendingInputLeaseId !== leaseId)
+          ) {
+            flushPendingInput();
+          }
+          pendingInputTerminalId = activeTerminalId;
+          pendingInputLeaseId = leaseId;
+          pendingInput += data;
+          if (!inputFlushTimer) inputFlushTimer = setTimeout(flushPendingInput, 12);
+        }
+
+        function enqueueDiscreteInput(data, repeat = 1) {
+          if (
+            terminalReplayDepth > 0 ||
+            !leaseId ||
+            !activeTerminalId ||
+            !data ||
+            repeat < 1
+          ) {
+            return;
+          }
+          flushPendingInput();
           const inputTerminalId = activeTerminalId;
           const inputLeaseId = leaseId;
-          pendingInput += data;
-          if (!inputFlushTimer) {
-            inputFlushTimer = setTimeout(() => {
-              inputFlushTimer = null;
-              const dataToSend = pendingInput;
-              pendingInput = "";
-              if (!dataToSend || inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) {
-                return;
-              }
-              inputWriteChain = inputWriteChain
-                .catch(() => {})
-                .then(() => {
-                  if (inputTerminalId !== activeTerminalId || inputLeaseId !== leaseId) {
-                    return;
-                  }
-                  return writeToTerminal(inputTerminalId, inputLeaseId, dataToSend);
-                })
-                .catch((err) => setStatus(err.message, true));
-            }, 12);
+          for (let index = 0; index < repeat; index += 1) {
+            queueInputWrite(data, inputTerminalId, inputLeaseId);
           }
         }
 
