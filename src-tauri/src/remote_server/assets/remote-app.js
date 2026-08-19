@@ -99,6 +99,11 @@
         // is kept in a runtime Map and never persisted (see composerHistory*).
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
+        // A visual-only Remote preference: when Composer opens for one of the
+        // supported coding agents, leave its input footer in view by scrolling
+        // the terminal viewport up by that agent's fixed footer height.
+        const composerAgentScrollOffsetKey = "laymux.remote.composerAgentScrollOffset";
+        const composerAgentScrollOffsetLinesKey = "laymux.remote.composerAgentScrollOffsetLines";
         // Which terminals share one recall bucket (ADR-0055). Only the scope
         // choice is stored here; the recalled text stays in memory.
         const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
@@ -266,12 +271,24 @@
         const DEFAULT_COMPOSER_AUTOCOMPLETE_ITEMS = 8;
         const COMPOSER_HISTORY_SCOPES = ["global", "workspace", "pane"];
         const DEFAULT_COMPOSER_HISTORY_SCOPE = "global";
+        // These are deliberately line counts rather than pixels: xterm owns the
+        // cell geometry, and this must remain a surface-local scroll only (it
+        // must not resize the PTY; ADR-0038).
+        const DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS = Object.freeze({
+          Claude: 3,
+          Codex: 4,
+          Grok: 2,
+        });
+        const COMPOSER_AGENT_SCROLL_OFFSET_MIN = 0;
+        const COMPOSER_AGENT_SCROLL_OFFSET_MAX = 24;
         let preferredInputMode = loadPreferredInputMode();
         // Feature on/off toggles are configuration (not content), so they are
         // the only composer-recall state allowed in localStorage. Default on to
         // match the desktop composer and stay non-destructive.
         let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
         let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
+        let composerAgentScrollOffsetEnabled = loadComposerToggle(composerAgentScrollOffsetKey);
+        let composerAgentScrollOffsets = loadComposerAgentScrollOffsets();
         let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
@@ -1505,6 +1522,60 @@
           }
         }
 
+        function normalizeComposerAgentScrollOffset(value, fallback) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return fallback;
+          return Math.max(
+            COMPOSER_AGENT_SCROLL_OFFSET_MIN,
+            Math.min(COMPOSER_AGENT_SCROLL_OFFSET_MAX, Math.round(parsed)),
+          );
+        }
+
+        function loadComposerAgentScrollOffsets() {
+          try {
+            const stored = JSON.parse(localStorage.getItem(composerAgentScrollOffsetLinesKey) || "{}");
+            return Object.fromEntries(
+              Object.entries(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS).map(([agent, fallback]) => [
+                agent,
+                normalizeComposerAgentScrollOffset(stored?.[agent], fallback),
+              ]),
+            );
+          } catch (_) {
+            return { ...DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS };
+          }
+        }
+
+        function saveComposerAgentScrollOffsets() {
+          try {
+            localStorage.setItem(
+              composerAgentScrollOffsetLinesKey,
+              JSON.stringify(composerAgentScrollOffsets),
+            );
+          } catch (_) {}
+        }
+
+        function setComposerAgentScrollOffset(agent, value) {
+          const fallback = DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[agent];
+          if (!Number.isInteger(fallback)) return fallback;
+          const next = normalizeComposerAgentScrollOffset(value, fallback);
+          composerAgentScrollOffsets = { ...composerAgentScrollOffsets, [agent]: next };
+          saveComposerAgentScrollOffsets();
+          return next;
+        }
+
+        function composerAgentScrollOffset(agent) {
+          const fallback = DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[agent];
+          if (!Number.isInteger(fallback)) return null;
+          return normalizeComposerAgentScrollOffset(composerAgentScrollOffsets[agent], fallback);
+        }
+
+        function composerAgentScrollOffsetEntries() {
+          return Object.keys(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS).map((agent) => [
+            agent,
+            composerAgentScrollOffset(agent),
+          ]);
+        }
+
         function saveComposerToggle(key, enabled) {
           try {
             localStorage.setItem(key, enabled ? "1" : "0");
@@ -1881,6 +1952,7 @@
           if (activeTerminalId) inputModeByTerminalId.set(activeTerminalId, mode);
           if (options.persist !== false) savePreferredInputMode(mode);
           renderInputSurface({ focus: options.focus !== false });
+          if (mode === "composer") offsetComposerForActiveAgent();
         }
 
         function setActiveTerminal(nextTerminalId) {
@@ -5381,6 +5453,53 @@
           return null;
         }
 
+        function activeComposerAgentScrollOffset() {
+          const agent = activeComposerAgentName();
+          return agent ? composerAgentScrollOffset(agent) : null;
+        }
+
+        function activeComposerAgentName() {
+          const activity = paneByTerminalId(navigationState, activeTerminalId)?.activity;
+          if (activity?.type !== "interactiveApp") return null;
+          return Number.isInteger(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[activity.name])
+            ? activity.name
+            : null;
+        }
+
+        // This is intentionally a one-time viewport adjustment at a user-visible
+        // Composer transition or its initial user-directed snapshot attach. It
+        // does not alter terminal geometry or output state, and automatic
+        // reconnect/navigation refreshes never re-apply it, so a person's later
+        // scroll position remains theirs.
+        function offsetComposerForActiveAgent() {
+          if (
+            !composerAgentScrollOffsetEnabled ||
+            currentInputMode() !== "composer" ||
+            composerCollapsed ||
+            !terminal
+          ) {
+            return;
+          }
+          const terminalId = activeTerminalId;
+          const lines = activeComposerAgentScrollOffset();
+          if (lines == null) return;
+          requestAnimationFrame(() => {
+            if (
+              !composerAgentScrollOffsetEnabled ||
+              currentInputMode() !== "composer" ||
+              composerCollapsed ||
+              !terminal ||
+              activeTerminalId !== terminalId ||
+              activeComposerAgentScrollOffset() !== lines
+            ) {
+              return;
+            }
+            terminal.scrollToBottom();
+            terminal.scrollLines(-lines);
+            updateScrollToBottomButton(terminal);
+          });
+        }
+
         // Pane summaries carry the same title/profile/cwd fields as terminal
         // infos, so a queued pane still gets a real header instead of a raw id.
         function terminalMetaLabel(data, terminalId) {
@@ -6034,6 +6153,9 @@
                 renderedTerminalId = terminalId;
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
+                if (!reconnecting && currentInputMode() === "composer") {
+                  offsetComposerForActiveAgent();
+                }
               }
               if (outputAttachGeometryGeneration === outputGeneration) {
                 outputAttachGeometryGeneration = null;
@@ -6181,6 +6303,9 @@
                 // from that tail instead of discarding a scrolled-up viewport.
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
+                if (!reconnecting && currentInputMode() === "composer") {
+                  offsetComposerForActiveAgent();
+                }
                 if (outputAttachGeometryGeneration === outputGeneration) {
                   outputAttachGeometryGeneration = null;
                 }
@@ -7346,6 +7471,46 @@
               renderComposerSuggestions();
             }
           );
+          makeToggle(
+            "composerAgentScrollOffsetToggle",
+            "Keep agent input visible",
+            "Claude, Codex, and Grok",
+            composerAgentScrollOffsetEnabled,
+            (checked) => {
+              composerAgentScrollOffsetEnabled = checked;
+              saveComposerToggle(composerAgentScrollOffsetKey, checked);
+              if (checked) offsetComposerForActiveAgent();
+            }
+          );
+          for (const [agent, lines] of composerAgentScrollOffsetEntries()) {
+            const row = document.createElement("label");
+            row.className = "key-set-row";
+            const name = document.createElement("span");
+            name.className = "key-set-name";
+            name.textContent = `${agent} input lines`;
+            const input = document.createElement("input");
+            input.type = "number";
+            input.className = "key-set-select";
+            input.id = `composerAgentScrollOffset${agent}`;
+            input.min = String(COMPOSER_AGENT_SCROLL_OFFSET_MIN);
+            input.max = String(COMPOSER_AGENT_SCROLL_OFFSET_MAX);
+            input.step = "1";
+            input.inputMode = "numeric";
+            input.value = String(lines);
+            input.disabled = !composerAgentScrollOffsetEnabled;
+            input.setAttribute("aria-label", `${agent} Composer input lines`);
+            input.addEventListener("click", (event) => event.stopPropagation());
+            input.addEventListener("change", (event) => {
+              event.stopPropagation();
+              const next = setComposerAgentScrollOffset(agent, input.value);
+              input.value = String(next);
+              if (composerAgentScrollOffsetEnabled && activeComposerAgentName() === agent) {
+                offsetComposerForActiveAgent();
+              }
+            });
+            row.append(name, input);
+            keyPopoverBody.append(row);
+          }
         }
 
         function renderKeyPopover() {

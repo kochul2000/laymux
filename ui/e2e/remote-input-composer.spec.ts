@@ -269,8 +269,13 @@ async function installBrowserMocks(
         blur() {
           this.textarea?.blur();
         }
-        scrollLines(_amount: number) {}
-        scrollToBottom() {}
+        scrollCalls: number[] = [];
+        scrollLines(amount: number) {
+          this.scrollCalls.push(amount);
+        }
+        scrollToBottom() {
+          this.scrollCalls.push(Number.POSITIVE_INFINITY);
+        }
         emitData(data: string) {
           this.dataListener?.(data);
         }
@@ -408,6 +413,7 @@ async function installRemotePage(
     coarse: boolean;
     localApp?: boolean;
     storedMode?: "direct" | "composer";
+    activeAgent?: "Claude" | "Codex" | "Grok";
     holdInputs?: boolean;
     holdTerminalFocus?: boolean;
     legacyOutput?: boolean;
@@ -462,7 +468,15 @@ async function installRemotePage(
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
-      await route.fulfill({ json: navigation });
+      const navigationWithActivity = structuredClone(navigation);
+      if (options.activeAgent) {
+        const updateActivity = (items: typeof panes) => {
+          items[0].activity = { type: "interactiveApp", name: options.activeAgent };
+        };
+        updateActivity(navigationWithActivity.activeWorkspace.panes);
+        updateActivity(navigationWithActivity.workspaces[0].panes);
+      }
+      await route.fulfill({ json: navigationWithActivity });
       return;
     }
     if (url.pathname.endsWith("/input")) {
@@ -1511,4 +1525,90 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
   // ...and typing a prefix no longer shows the autocomplete dropdown.
   await editor.fill("ec");
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
+});
+
+for (const [agent, expectedOffset] of [
+  ["Claude", 3],
+  ["Codex", 4],
+  ["Grok", 2],
+] as const) {
+  test(`agent composer offset defaults on and uses ${agent}'s input height`, async ({ page }) => {
+    await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
+    await connect(page);
+
+    // Attaching the terminal can restore its normal viewport. Isolate the
+    // composer transition so this assertion only observes the new option.
+    await page.evaluate(() => {
+      const mock = window as typeof window & {
+        __mockTerminal?: { scrollCalls: number[] };
+      };
+      mock.__mockTerminal?.scrollCalls.splice(0);
+    });
+    await enterComposerMode(page);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const mock = window as typeof window & {
+            __mockTerminal?: { scrollCalls: number[] };
+          };
+          return mock.__mockTerminal?.scrollCalls ?? [];
+        }),
+      )
+      .toEqual([Number.POSITIVE_INFINITY, -expectedOffset]);
+
+    await page.locator("#keyBarToggle").click();
+    await page.locator("#keyBarSettings").click();
+    const toggle = page.locator("#composerAgentScrollOffsetToggle");
+    await expect(toggle).toBeChecked();
+    await expect(page.locator(`#composerAgentScrollOffset${agent}`)).toHaveValue(
+      String(expectedOffset),
+    );
+  });
+}
+
+test("mobile Composer exposes the agent offset option", async ({ page }) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  await page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: { scrollCalls: number[] };
+    };
+    mock.__mockTerminal?.scrollCalls.splice(0);
+  });
+
+  await page.locator("#keyBarToggle").click();
+  await page.locator("#keyBarSettings").click();
+  await expect(page.locator("#composerAgentScrollOffsetToggle")).toBeChecked();
+  const claudeLines = page.locator("#composerAgentScrollOffsetClaude");
+  await claudeLines.fill("6");
+  await claudeLines.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const mock = window as typeof window & {
+          __mockTerminal?: { scrollCalls: number[] };
+        };
+        return mock.__mockTerminal?.scrollCalls ?? [];
+      }),
+    )
+    .toEqual([]);
+  const codexLines = page.locator("#composerAgentScrollOffsetCodex");
+  await codexLines.fill("6");
+  await codexLines.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const mock = window as typeof window & {
+          __mockTerminal?: { scrollCalls: number[] };
+        };
+        return mock.__mockTerminal?.scrollCalls ?? [];
+      }),
+    )
+    .toEqual([Number.POSITIVE_INFINITY, -6]);
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("laymux.remote.composerAgentScrollOffsetLines")),
+    )
+    .toBe('{"Claude":6,"Codex":6,"Grok":2}');
 });
