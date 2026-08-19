@@ -712,9 +712,12 @@ mod tests {
             .expect("Remote status CSS must exist");
         assert!(!status_css.contains("text-overflow: ellipsis;"));
         assert!(html.contains("function setStatus(message, error = false, warning = false)"));
+        assert!(html.contains("function setBusyStatus(message, error = false, warning = false)"));
+        assert!(html.contains("id=\"statusSpinner\""));
+        assert!(html.contains("statusEl.setAttribute(\"aria-busy\", busy ? \"true\" : \"false\");"));
         assert!(html.contains("statusEl.classList.toggle(\"warning\", warning);"));
         assert!(
-            html.contains("setStatus(\"Connection interrupted. Reconnecting...\", false, true);")
+            html.contains("setBusyStatus(\"Connection interrupted. Reconnecting…\", false, true);")
         );
         assert!(html.contains(".input-mode-toggle {"));
         assert!(html.contains("width: var(--header-control-height);"));

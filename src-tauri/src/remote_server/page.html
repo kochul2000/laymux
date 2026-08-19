@@ -40,7 +40,9 @@
         <button id="copyPaneId" class="copy-pane-button" type="button" hidden aria-label="Copy pane identifier" title="Copy pane identifier (lx:pane:...)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" stroke-linecap="round"/></svg>
         </button>
-        <div id="status" class="status">Enter the remote token, then connect.</div>
+        <div id="status" class="status" aria-busy="false">
+          <span id="statusSpinner" class="status-spinner" aria-hidden="true" hidden></span><span id="statusText">Enter the remote token, then connect.</span>
+        </div>
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <svg data-icon="circle-minus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
         </button>
