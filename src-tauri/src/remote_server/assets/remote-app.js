@@ -5454,9 +5454,16 @@
         }
 
         function activeComposerAgentScrollOffset() {
+          const agent = activeComposerAgentName();
+          return agent ? composerAgentScrollOffset(agent) : null;
+        }
+
+        function activeComposerAgentName() {
           const activity = paneByTerminalId(navigationState, activeTerminalId)?.activity;
           if (activity?.type !== "interactiveApp") return null;
-          return composerAgentScrollOffset(activity.name);
+          return Number.isInteger(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[activity.name])
+            ? activity.name
+            : null;
         }
 
         // This is intentionally a one-time viewport adjustment at a user-visible
@@ -7497,7 +7504,9 @@
               event.stopPropagation();
               const next = setComposerAgentScrollOffset(agent, input.value);
               input.value = String(next);
-              if (composerAgentScrollOffsetEnabled) offsetComposerForActiveAgent();
+              if (composerAgentScrollOffsetEnabled && activeComposerAgentName() === agent) {
+                offsetComposerForActiveAgent();
+              }
             });
             row.append(name, input);
             keyPopoverBody.append(row);

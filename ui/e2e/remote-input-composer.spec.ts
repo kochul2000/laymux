@@ -1580,6 +1580,19 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
   await page.locator("#keyBarToggle").click();
   await page.locator("#keyBarSettings").click();
   await expect(page.locator("#composerAgentScrollOffsetToggle")).toBeChecked();
+  const claudeLines = page.locator("#composerAgentScrollOffsetClaude");
+  await claudeLines.fill("6");
+  await claudeLines.press("Enter");
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const mock = window as typeof window & {
+          __mockTerminal?: { scrollCalls: number[] };
+        };
+        return mock.__mockTerminal?.scrollCalls ?? [];
+      }),
+    )
+    .toEqual([]);
   const codexLines = page.locator("#composerAgentScrollOffsetCodex");
   await codexLines.fill("6");
   await codexLines.press("Enter");
@@ -1597,5 +1610,5 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
     .poll(() =>
       page.evaluate(() => localStorage.getItem("laymux.remote.composerAgentScrollOffsetLines")),
     )
-    .toBe('{"Claude":3,"Codex":6,"Grok":2}');
+    .toBe('{"Claude":6,"Codex":6,"Grok":2}');
 });
