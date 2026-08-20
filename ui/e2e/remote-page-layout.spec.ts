@@ -211,14 +211,14 @@ test.describe("remote mobile layout", () => {
         minWidth: getComputedStyle(button).minWidth,
       })),
     );
-    expect(footerButtons).toHaveLength(4);
+    expect(footerButtons).toHaveLength(3);
     const widths = footerButtons.map(({ width }) => width);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1);
-    expect(footerButtons.every(({ minWidth }) => minWidth === "0px")).toBe(true);
+    expect(footerButtons.every(({ minWidth }) => minWidth === "54px")).toBe(true);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 
     await page.setViewportSize({ width: 180, height: 844 });
-    const narrowFooter = await footer.evaluate((element) => ({
+    const narrowFooter = await footer.locator("#mainActionRow").evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       buttonWidths: Array.from(
@@ -226,7 +226,7 @@ test.describe("remote mobile layout", () => {
         (button) => button.getBoundingClientRect().width,
       ),
     }));
-    expect(narrowFooter.scrollWidth).toBe(narrowFooter.clientWidth);
+    expect(narrowFooter.scrollWidth).toBeGreaterThan(narrowFooter.clientWidth);
     expect(
       Math.max(...narrowFooter.buttonWidths) - Math.min(...narrowFooter.buttonWidths),
     ).toBeLessThan(0.1);
@@ -263,7 +263,7 @@ test.describe("remote mobile layout", () => {
       overflowX: getComputedStyle(row).overflowX,
       scrollbarWidth: getComputedStyle(row).scrollbarWidth,
       webkitScrollbarDisplay: getComputedStyle(row, "::-webkit-scrollbar").display,
-      settingsInsideRow: row.firstElementChild?.id === "keyBarSettings",
+      settingsInsideRow: row.querySelector("#keyBarSettings") !== null,
       buttonRows: new Set(Array.from(row.children, (child) => (child as HTMLElement).offsetTop))
         .size,
     }));
@@ -272,19 +272,11 @@ test.describe("remote mobile layout", () => {
     expect(overflow.overflowX).toBe("auto");
     expect(overflow.scrollbarWidth).toBe("none");
     expect(overflow.webkitScrollbarDisplay).toBe("none");
-    expect(overflow.settingsInsideRow).toBe(true);
+    expect(overflow.settingsInsideRow).toBe(false);
     expect(overflow.buttonRows).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 
-    const settingsMovement = await keyRow.evaluate((row) => {
-      const settings = row.querySelector<HTMLElement>("#keyBarSettings")!;
-      const before = settings.getBoundingClientRect().x;
-      row.scrollLeft = row.scrollWidth;
-      const after = settings.getBoundingClientRect().x;
-      row.scrollLeft = 0;
-      return { before, after };
-    });
-    expect(settingsMovement.after).toBeLessThan(settingsMovement.before);
+    await expect(page.locator("#drawerSettingsButton")).toHaveCount(1);
   });
 
   test("keeps the key-bar height stable across empty and populated states", async ({ page }) => {
@@ -516,6 +508,7 @@ test.describe("remote mobile layout", () => {
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
     await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
 
+    await page.locator("#keyBarToggle").click();
     const [exclusionBox, composerToggleBox] = await Promise.all([
       exclusion.boundingBox(),
       page.locator("#inputModeToggle").boundingBox(),
@@ -525,7 +518,6 @@ test.describe("remote mobile layout", () => {
     expect(exclusionBox!.height).toBe(26);
     expect(composerToggleBox!.height).toBe(26);
 
-    await page.locator("#keyBarToggle").click();
     await page.locator('[data-key="navNext"]').click();
     await expect.poll(() => spatialBodies.length).toBe(1);
     expect(spatialBodies[0].excludedPaneIds).toEqual([]);
@@ -898,12 +890,12 @@ test.describe("remote mobile layout", () => {
         );
     await expect.poll(renderedKeyIds).toEqual(["tab", "enter"]);
 
-    await page.locator("#keyBarSettings").click();
-    await expect(page.locator("#keyPopoverBody")).toContainText("Key order");
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator("#inputLayoutEditor")).toContainText("Key order");
     await page.locator(".key-chip").filter({ hasText: "Esc" }).click();
     await expect.poll(renderedKeyIds).toEqual(["tab", "enter", "esc"]);
 
-    const orderSection = page.locator("#keyPopoverBody > .key-order-section");
+    const orderSection = page.locator("#inputLayoutEditor > .key-order-section");
     await expect(orderSection).toHaveCount(1);
     expect(
       await orderSection.evaluate((section) => section === section.parentElement?.lastElementChild),
@@ -951,7 +943,7 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
 
-    await page.locator("#keyBarSettings").click();
+    await page.locator("#drawerSettingsButton").click();
     await page.locator('.key-order-chip[data-order-key="enter"]').click();
     await expect(page.locator(".key-order-actions")).toBeVisible();
     await page.getByRole("button", { name: "Move Enter to start" }).click();

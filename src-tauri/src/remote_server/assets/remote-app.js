@@ -89,6 +89,8 @@
         const attachmentButton = $("attachFile");
         const attachmentInput = $("attachmentInput");
         const composerSendButton = $("composerSend");
+        const mainActionRow = $("mainActionRow");
+        const inputLayoutEditor = $("inputLayoutEditor");
         const coarsePointer =
           typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
         const inputModeToggleButton = $("inputModeToggle");
@@ -103,11 +105,12 @@
         const spatialExclusionButton = $("spatialExclusion");
         const keyBar = $("keyBar");
         const keyBarToggleButton = $("keyBarToggle");
-        const keyBarSettingsButton = $("keyBarSettings");
         const keyRowEl = $("keyRow");
         const keyFlickHint = $("keyFlickHint");
-        const keyPopover = $("keyPopover");
-        const keyPopoverBody = $("keyPopoverBody");
+        // ADR-0186 moves the former key-bar popover into the persistent drawer
+        // Settings recovery path. Keep the renderer's neutral body name while
+        // the presentation is no longer a popover.
+        const keyPopoverBody = inputLayoutEditor;
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
@@ -439,9 +442,11 @@
         // changes the surrounding desktop layout rather than releasing a lease.
         desktopModeHeaderButton.hidden = !localAppMode;
         desktopModeDrawerButton.hidden = !localAppMode;
-        // Layout naming (canonical, ADR-0036):
-        //   desktop layout — Enter sends, Shift+Enter newline, no Send button.
-        //   mobile layout  — Enter is a newline, the Send button sends.
+        // Layout naming (canonical Enter gesture, ADR-0036/0186):
+        //   desktop layout — Enter sends, Shift+Enter inserts a newline.
+        //   mobile layout  — Enter inserts a newline; the Send action submits.
+        // The configurable Send action is visible in either layout whenever
+        // Composer mode is active; this flag decides only the Enter gesture.
         // Rule: mobile layout when the pointer is coarse (touch device) OR when
         // the page is the PC app's embedded mobile view (localApp=1) — if it
         // looks like mobile, it behaves like mobile. A default; a settings
@@ -2259,9 +2264,6 @@
           );
           composerInput.disabled = !canEdit || attachmentUploadInFlight;
           terminalComposer.dataset.canSend = canCommit ? "true" : "false";
-          // Send button belongs to the mobile layout in composer mode; the
-          // desktop layout relies on Enter. Disabled until a commit is possible.
-          composerSendButton.hidden = !(mobileLayout && composerMode);
           composerSendButton.disabled = !canCommit;
           const canAttach = Boolean(
             leaseId && activeTerminalId && composerReady && !attachmentUploadInFlight,
@@ -2273,6 +2275,7 @@
             "aria-busy",
             attachmentUploadInFlight ? "true" : "false",
           );
+          syncInputActionVisibility();
         }
 
         function focusCurrentInputSurface() {
@@ -4855,7 +4858,7 @@
             nextView !== "workspace" || hiddenWorkspaceCount === 0;
           drawerNotificationsButton.hidden = nextView !== "workspace";
           drawerConnectionButton.hidden = nextView !== "workspace";
-          drawerSettingsButton.hidden = nextView !== "workspace";
+          drawerSettingsButton.hidden = nextView !== "workspace" && nextView !== "connection";
         }
 
         function drawerEntryButton(view) {
@@ -4870,6 +4873,7 @@
           setDrawerView(view);
           drawerBackButton.focus();
           if (view === "settings") {
+            renderKeyPopover();
             loadPcUpdateStatus().catch(() => {});
             if (leaseId) loadRemoteDisplaySettings().catch(() => {});
           }
@@ -7823,6 +7827,7 @@
           "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
+        const KEY_ID_SET = new Set(KEY_ORDER);
         const KEY_SETS = [
           { id: "step", name: "Pane/Alert nav", desc: "Flick pad · P↑P↓ pane · N←N→ alerts", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
           { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
@@ -7830,11 +7835,43 @@
           { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z"] },
           { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
+        const INPUT_ACTION_ZONES = ["main", "expanded", "hidden"];
+        const FIXED_INPUT_ACTION_IDS = [
+          "ctrl-c",
+          "keyboard",
+          "keys",
+          "send",
+          "composer",
+          "attachment",
+        ];
+        const INPUT_ACTION_LABELS = {
+          "ctrl-c": "Ctrl+C",
+          keyboard: "Keyboard",
+          keys: "Keys",
+          send: "Send",
+          composer: "Composer",
+          attachment: "Attach file",
+        };
+        const softInputActionId = (keyId) => `soft:${keyId}`;
+        const softKeyIdFromAction = (actionId) =>
+          typeof actionId === "string" && actionId.startsWith("soft:")
+            ? actionId.slice(5)
+            : "";
+        const ALL_INPUT_ACTION_IDS = [
+          ...FIXED_INPUT_ACTION_IDS,
+          ...KEY_ORDER.map(softInputActionId),
+        ];
         const DEFAULT_KEYBAR = {
-          visible: false,
+          expanded: false,
           sets: ["step", "nav"],
           custom: [],
+          usedCustom: [],
           order: KEY_ORDER,
+          zones: {
+            main: ["ctrl-c", "keyboard", "keys", "send"],
+            expanded: ["composer", ...KEY_ORDER.map(softInputActionId)],
+            hidden: ["attachment"],
+          },
         };
         // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
         // spatial pane step (Ctrl+Alt+Up/Down territory), horizontal = alert
@@ -7847,34 +7884,122 @@
         };
         const KEY_FLICK_THRESHOLD_PX = 18;
         const KEY_ORDER_HOLD_MS = 180;
-        let keyPopoverOpen = false;
         let selectedOrderKeyId = "";
 
+        function defaultInputZones(softOrder = KEY_ORDER) {
+          const normalizedSoftOrder = [
+            ...new Set([
+              ...softOrder.filter((id) => KEY_ID_SET.has(id)),
+              ...KEY_ORDER,
+            ]),
+          ];
+          return {
+            main: [...DEFAULT_KEYBAR.zones.main],
+            expanded: ["composer", ...normalizedSoftOrder.map(softInputActionId)],
+            hidden: [...DEFAULT_KEYBAR.zones.hidden],
+          };
+        }
+
+        function projectSoftKeyOrderFromZones(zones) {
+          const seen = new Set();
+          const projected = [];
+          for (const zone of INPUT_ACTION_ZONES) {
+            for (const actionId of zones[zone]) {
+              const keyId = softKeyIdFromAction(actionId);
+              if (!KEY_ID_SET.has(keyId) || seen.has(keyId)) continue;
+              seen.add(keyId);
+              projected.push(keyId);
+            }
+          }
+          for (const keyId of KEY_ORDER) {
+            if (seen.has(keyId)) continue;
+            seen.add(keyId);
+            projected.push(keyId);
+          }
+          return projected;
+        }
+
+        function normalizeInputLayoutConfig(raw) {
+          const value = raw && typeof raw === "object" ? raw : {};
+          const savedOrder = Array.isArray(value.order)
+            ? value.order.filter((id) => KEY_ID_SET.has(id))
+            : [];
+          const order = [...new Set([...savedOrder, ...KEY_ORDER])];
+          const defaults = defaultInputZones(order);
+          const zones = { main: [], expanded: [], hidden: [] };
+          const seen = new Set();
+          const rawZones = value.zones && typeof value.zones === "object" ? value.zones : {};
+          const rawZoneValues = INPUT_ACTION_ZONES.flatMap((zone) =>
+            Array.isArray(rawZones[zone]) ? rawZones[zone] : [],
+          );
+          const rawZonesValid =
+            INPUT_ACTION_ZONES.every((zone) => Array.isArray(rawZones[zone])) &&
+            rawZoneValues.every(
+              (actionId) =>
+                typeof actionId === "string" && ALL_INPUT_ACTION_IDS.includes(actionId),
+            ) &&
+            new Set(rawZoneValues).size === rawZoneValues.length &&
+            !rawZones.expanded.includes("keys");
+
+          for (const zone of INPUT_ACTION_ZONES) {
+            const candidates = rawZonesValid ? rawZones[zone] : [];
+            for (const actionId of candidates) {
+              if (
+                typeof actionId !== "string" ||
+                !ALL_INPUT_ACTION_IDS.includes(actionId) ||
+                seen.has(actionId)
+              ) {
+                continue;
+              }
+              // Keys is the one structural toggle: it may be present in the
+              // main row or hidden, never inside the row it opens.
+              const targetZone = actionId === "keys" && zone === "expanded" ? "main" : zone;
+              zones[targetZone].push(actionId);
+              seen.add(actionId);
+            }
+          }
+          for (const zone of INPUT_ACTION_ZONES) {
+            for (const actionId of defaults[zone]) {
+              if (seen.has(actionId)) continue;
+              zones[zone].push(actionId);
+              seen.add(actionId);
+            }
+          }
+
+          const knownSetIds = new Set(KEY_SETS.map((set) => set.id));
+          const sets =
+            Array.isArray(value.sets) && value.sets.every((id) => knownSetIds.has(id))
+              ? [...new Set(value.sets)]
+              : [...DEFAULT_KEYBAR.sets];
+          const custom = Array.isArray(value.custom)
+            ? [...new Set(value.custom.filter((id) => KEY_ID_SET.has(id)))]
+            : [];
+          const usedCustom = Array.isArray(value.usedCustom)
+            ? [...new Set(value.usedCustom.filter((id) => KEY_ID_SET.has(id)))]
+            : [...custom];
+          const expanded =
+            typeof value.expanded === "boolean"
+              ? value.expanded
+              : typeof value.visible === "boolean"
+                ? value.visible
+                : DEFAULT_KEYBAR.expanded;
+          return {
+            expanded: expanded && zones.main.includes("keys"),
+            sets,
+            custom,
+            usedCustom,
+            order: projectSoftKeyOrderFromZones(zones),
+            zones,
+          };
+        }
+
         function loadKeyBarConfig() {
-          const defaultConfig = () => ({
-            visible: false,
-            sets: [...DEFAULT_KEYBAR.sets],
-            custom: [],
-            order: [...DEFAULT_KEYBAR.order],
-          });
           try {
-            const raw = JSON.parse(localStorage.getItem(keyBarKey) || "null");
-            if (!raw || typeof raw !== "object") return defaultConfig();
-            const savedOrder = Array.isArray(raw.order)
-              ? raw.order.filter((id) => KEY_DEFS[id])
-              : [];
-            return {
-              visible: Boolean(raw.visible),
-              sets: Array.isArray(raw.sets)
-                ? [...new Set(raw.sets.filter((id) => KEY_SETS.some((s) => s.id === id)))]
-                : [...DEFAULT_KEYBAR.sets],
-              custom: Array.isArray(raw.custom)
-                ? [...new Set(raw.custom.filter((id) => KEY_DEFS[id]))]
-                : [],
-              order: [...new Set([...savedOrder, ...KEY_ORDER])],
-            };
+            return normalizeInputLayoutConfig(
+              JSON.parse(localStorage.getItem(keyBarKey) || "null"),
+            );
           } catch (_) {
-            return defaultConfig();
+            return normalizeInputLayoutConfig(null);
           }
         }
 
@@ -7898,14 +8023,51 @@
           return keyBarConfig.order.filter((id) => enabled.has(id));
         }
 
+        function resolvePlacedKeyIds() {
+          return ["main", "expanded"].flatMap(resolvePlacedKeyIdsInZone);
+        }
+
+        function resolvePlacedKeyIdsInZone(zone) {
+          if (zone !== "main" && zone !== "expanded") return [];
+          const enabled = new Set(resolveKeyIds());
+          return keyBarConfig.zones[zone]
+            .map(softKeyIdFromAction)
+            .filter((id) => id && enabled.has(id));
+        }
+
+        function syncKeyOrderProjection() {
+          keyBarConfig.order = projectSoftKeyOrderFromZones(keyBarConfig.zones);
+        }
+
         function commitKeyOrder(order) {
           keyBarConfig.order = order;
+          const rank = new Map(order.map((id, index) => [softInputActionId(id), index]));
+          for (const zone of INPUT_ACTION_ZONES) {
+            const fixedPositions = keyBarConfig.zones[zone]
+              .map((actionId, index) => ({ actionId, index }))
+              .filter(({ actionId }) => !softKeyIdFromAction(actionId));
+            const soft = keyBarConfig.zones[zone]
+              .filter((actionId) => softKeyIdFromAction(actionId))
+              .sort((left, right) => (rank.get(left) ?? 0) - (rank.get(right) ?? 0));
+            const merged = [...soft];
+            for (const { actionId, index } of fixedPositions) {
+              merged.splice(Math.min(index, merged.length), 0, actionId);
+            }
+            keyBarConfig.zones[zone] = merged;
+          }
+          syncKeyOrderProjection();
           saveKeyBarConfig();
-          renderKeyRow();
+          renderInputActionRows();
         }
 
         function reorderKey(id, targetId, afterTarget) {
           if (id === targetId) return;
+          if (
+            inputActionZone(softInputActionId(id)) !==
+            inputActionZone(softInputActionId(targetId))
+          ) {
+            return;
+          }
           const order = keyBarConfig.order.filter((keyId) => keyId !== id);
           const targetIndex = order.indexOf(targetId);
           if (targetIndex < 0) return;
@@ -7914,7 +8076,9 @@
         }
 
         function moveKey(id, offset) {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIdsInZone(
+            inputActionZone(softInputActionId(id)),
+          );
           const index = visibleIds.indexOf(id);
           const targetIndex = index + offset;
           if (index < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
@@ -7929,7 +8093,9 @@
         }
 
         function moveKeyToEdge(id, toStart) {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIdsInZone(
+            inputActionZone(softInputActionId(id)),
+          );
           const index = visibleIds.indexOf(id);
           if (index < 0) return;
           const targetId = toStart ? visibleIds[0] : visibleIds[visibleIds.length - 1];
@@ -7944,11 +8110,13 @@
 
         function appendKeyToVisibleEnd(id, visibleIds) {
           if (visibleIds.includes(id) || visibleIds.length === 0) return;
-          const order = keyBarConfig.order.filter((keyId) => keyId !== id);
-          const lastVisibleIndex = order.indexOf(visibleIds[visibleIds.length - 1]);
-          if (lastVisibleIndex < 0) return;
-          order.splice(lastVisibleIndex + 1, 0, id);
-          keyBarConfig.order = order;
+          // ADR-0040 puts a newly selected custom key at the end of the
+          // visible Keys row. Preserve a user-selected main/hidden zone;
+          // only reorder the default expanded placement.
+          if (inputActionZone(softInputActionId(id)) === "expanded") {
+            moveInputAction(softInputActionId(id), "expanded", false);
+          }
+          syncKeyOrderProjection();
         }
 
         function keySequence(def) {
@@ -8083,7 +8251,9 @@
           const connected = Boolean(leaseId);
           const unread = unreadNotificationCount();
           if (!keyRowEl) return;
-          for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
+          for (const btn of document.querySelectorAll(
+            "#mainActionRow button.key-btn, #keyRow button.key-btn",
+          )) {
             const def = KEY_DEFS[btn.dataset.key] || {};
             if (def.nav || def.navFlick) {
               // Nav step keys need only a lease (they can navigate away from a
@@ -8101,7 +8271,9 @@
         // (flick pad or an alert key) so the count shows once, not per key.
         function updateNavKeyBadge(unread) {
           let assigned = false;
-          for (const btn of keyRowEl.querySelectorAll("button.key-btn")) {
+          for (const btn of document.querySelectorAll(
+            "#mainActionRow button.key-btn, #keyRow button.key-btn",
+          )) {
             const def = KEY_DEFS[btn.dataset.key] || {};
             let badge = btn.querySelector(".key-nav-badge");
             if (!def.navBadge) continue;
@@ -8119,50 +8291,174 @@
           }
         }
 
-        function renderKeyRow() {
-          hideKeyFlickHint();
-          for (const item of keyRowEl.querySelectorAll(".key-btn, .key-row-empty")) {
-            item.remove();
-          }
-          const ids = resolveKeyIds();
-          if (ids.length === 0) {
-            const empty = document.createElement("div");
-            empty.className = "key-row-empty";
-            empty.textContent = "No keys selected — tap ⚙ to choose.";
-            keyRowEl.append(empty);
+        function inputActionZone(actionId) {
+          return (
+            INPUT_ACTION_ZONES.find((zone) => keyBarConfig.zones[zone].includes(actionId)) ||
+            "hidden"
+          );
+        }
+
+        function moveInputAction(actionId, zone, commit = true) {
+          if (!ALL_INPUT_ACTION_IDS.includes(actionId) || !INPUT_ACTION_ZONES.includes(zone)) {
             return;
           }
-          for (const id of ids) {
-            const def = KEY_DEFS[id];
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className = "key-btn";
-            btn.dataset.key = id;
-            btn.textContent = def.label;
-            btn.title = def.label;
-            if (def.hint) btn.title = def.hint;
-            if (def.flick) {
-              btn.classList.add("key-flick-btn");
-              btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
-              btn.title = "Flick up, right, down, or left";
-              installDirectionalFlick(btn);
-            } else if (def.navFlick) {
-              btn.classList.add("key-flick-btn");
-              btn.setAttribute(
-                "aria-label",
-                "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert"
-              );
-              btn.title = "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert";
-              installDirectionalFlick(btn, (direction) => {
-                const target = NAV_FLICK_TARGETS[direction];
-                if (target) enqueueNavStep(btn, target[0], target[1]);
-              });
-            } else {
-              installSoftKey(btn, id);
-            }
-            keyRowEl.append(btn);
+          if (actionId === "keys" && zone === "expanded") zone = "main";
+          for (const candidate of INPUT_ACTION_ZONES) {
+            keyBarConfig.zones[candidate] = keyBarConfig.zones[candidate].filter(
+              (id) => id !== actionId,
+            );
           }
+          keyBarConfig.zones[zone].push(actionId);
+          if (actionId === "keys" && zone === "hidden") {
+            keyBarConfig.expanded = false;
+          }
+          syncKeyOrderProjection();
+          if (!commit) return;
+          saveKeyBarConfig();
+          renderInputActionRows();
+          renderInputSettingsPreservingScroll();
+          scheduleTerminalFit();
+        }
+
+        function moveInputActionBy(actionId, offset) {
+          const zone = inputActionZone(actionId);
+          const actions = keyBarConfig.zones[zone];
+          const enabled = enabledInputActionIds();
+          const visible = actions.filter((id) => enabled.has(id));
+          const visibleIndex = visible.indexOf(actionId);
+          const targetVisibleIndex = visibleIndex + offset;
+          if (
+            visibleIndex < 0 ||
+            targetVisibleIndex < 0 ||
+            targetVisibleIndex >= visible.length
+          ) {
+            return;
+          }
+          const index = actions.indexOf(actionId);
+          const target = actions.indexOf(visible[targetVisibleIndex]);
+          [actions[index], actions[target]] = [actions[target], actions[index]];
+          syncKeyOrderProjection();
+          saveKeyBarConfig();
+          renderInputActionRows();
+          renderInputSettingsPreservingScroll();
+        }
+
+        function enabledInputActionIds() {
+          return new Set([
+            ...FIXED_INPUT_ACTION_IDS,
+            ...resolveKeyIds().map(softInputActionId),
+          ]);
+        }
+
+        function inputActionLabel(actionId) {
+          const keyId = softKeyIdFromAction(actionId);
+          return keyId ? KEY_DEFS[keyId]?.label || keyId : INPUT_ACTION_LABELS[actionId] || actionId;
+        }
+
+        function fixedInputActionElement(actionId) {
+          return {
+            "ctrl-c": ctrlCButton,
+            keyboard: focusTerminalButton,
+            keys: keyBarToggleButton,
+            send: composerSendButton,
+            composer: inputModeToggleButton,
+            attachment: attachmentButton,
+          }[actionId];
+        }
+
+        function createSoftKeyButton(id) {
+          const def = KEY_DEFS[id];
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "key-btn";
+          btn.dataset.key = id;
+          btn.dataset.inputAction = softInputActionId(id);
+          btn.textContent = def.label;
+          btn.title = def.hint || def.label;
+          if (def.flick) {
+            btn.classList.add("key-flick-btn");
+            btn.setAttribute("aria-label", "Flick for arrow key: up, right, down, or left");
+            btn.title = "Flick up, right, down, or left";
+            installDirectionalFlick(btn);
+          } else if (def.navFlick) {
+            btn.classList.add("key-flick-btn");
+            btn.setAttribute(
+              "aria-label",
+              "Flick to navigate: up/down previous/next pane, left/right recent/oldest alert",
+            );
+            btn.title = "Flick: ↑ prev pane · ↓ next pane · ← recent alert · → oldest alert";
+            installDirectionalFlick(btn, (direction) => {
+              const target = NAV_FLICK_TARGETS[direction];
+              if (target) enqueueNavStep(btn, target[0], target[1]);
+            });
+          } else {
+            installSoftKey(btn, id);
+          }
+          return btn;
+        }
+
+        function syncExpandedRowEmptyState() {
+          const enabled = enabledInputActionIds();
+          const composerMode = currentInputMode() === "composer";
+          const hasVisibleAction = keyBarConfig.zones.expanded.some(
+            (actionId) =>
+              enabled.has(actionId) && (actionId !== "send" || composerMode),
+          );
+          const current = keyRowEl.querySelector(":scope > .key-row-empty");
+          if (hasVisibleAction) {
+            current?.remove();
+            return;
+          }
+          if (current) return;
+          const empty = document.createElement("div");
+          empty.className = "key-row-empty";
+          empty.textContent = "No actions in the Keys row. Open Remote Settings to restore them.";
+          keyRowEl.append(empty);
+        }
+
+        function syncInputActionVisibility() {
+          if (!keyBarConfig) return;
+          const composerMode = currentInputMode() === "composer";
+          for (const actionId of FIXED_INPUT_ACTION_IDS) {
+            const element = fixedInputActionElement(actionId);
+            const placed = inputActionZone(actionId) !== "hidden";
+            element.hidden = !placed || (actionId === "send" && !composerMode);
+          }
+          const keysVisible = inputActionZone("keys") === "main";
+          if (!keysVisible && keyBarConfig.expanded) {
+            keyBarConfig.expanded = false;
+            saveKeyBarConfig();
+          }
+          keyBar.hidden = !keysVisible || !keyBarConfig.expanded;
+          keyBarToggleButton.classList.toggle("active", !keyBar.hidden);
+          keyBarToggleButton.setAttribute("aria-pressed", keyBar.hidden ? "false" : "true");
+          syncExpandedRowEmptyState();
+        }
+
+        function renderInputActionRows() {
+          hideKeyFlickHint();
+          for (const item of document.querySelectorAll(
+            "#mainActionRow .key-btn, #keyRow .key-btn, #keyRow .key-row-empty",
+          )) {
+            item.remove();
+          }
+          const enabled = enabledInputActionIds();
+          for (const zone of ["main", "expanded"]) {
+            const container = zone === "main" ? mainActionRow : keyRowEl;
+            for (const actionId of keyBarConfig.zones[zone]) {
+              if (!enabled.has(actionId)) continue;
+              const keyId = softKeyIdFromAction(actionId);
+              const element = keyId ? createSoftKeyButton(keyId) : fixedInputActionElement(actionId);
+              element.dataset.inputAction = actionId;
+              container.append(element);
+            }
+          }
+          syncInputActionVisibility();
           updateKeyBarControls();
+        }
+
+        function renderKeyRow() {
+          renderInputActionRows();
         }
 
         function clearKeyOrderDropMarkers() {
@@ -8171,9 +8467,21 @@
           }
         }
 
+        function inputSettingsScrollSurface() {
+          return keyPopoverBody.closest(".drawer-view") || keyPopoverBody;
+        }
+
+        function renderInputSettingsPreservingScroll() {
+          const scrollSurface = inputSettingsScrollSurface();
+          const scrollTop = scrollSurface.scrollTop;
+          renderKeyPopover();
+          scrollSurface.scrollTop = scrollTop;
+        }
+
         function installKeyOrderDrag(chip, id) {
           let gesture = null;
           let suppressClick = false;
+          const sourceZone = chip.dataset.orderZone;
 
           const releaseCapture = (pointerId) => {
             if (chip.hasPointerCapture(pointerId)) chip.releasePointerCapture(pointerId);
@@ -8218,7 +8526,8 @@
             const target = document
               .elementFromPoint(event.clientX, event.clientY)
               ?.closest(".key-order-chip");
-            const targetId = target?.dataset.orderKey || "";
+            const targetId =
+              target?.dataset.orderZone === sourceZone ? target.dataset.orderKey || "" : "";
             gesture.targetId = targetId === id ? "" : targetId;
             gesture.afterTarget = false;
             if (gesture.targetId) {
@@ -8226,9 +8535,10 @@
               gesture.afterTarget = event.clientX >= rect.left + rect.width / 2;
               target.classList.add(gesture.afterTarget ? "drop-after" : "drop-before");
             }
-            const popoverRect = keyPopoverBody.getBoundingClientRect();
-            if (event.clientY < popoverRect.top + 28) keyPopoverBody.scrollTop -= 10;
-            if (event.clientY > popoverRect.bottom - 28) keyPopoverBody.scrollTop += 10;
+            const scrollSurface = inputSettingsScrollSurface();
+            const surfaceRect = scrollSurface.getBoundingClientRect();
+            if (event.clientY < surfaceRect.top + 28) scrollSurface.scrollTop -= 10;
+            if (event.clientY > surfaceRect.bottom - 28) scrollSurface.scrollTop += 10;
           });
 
           const finishDrag = (event, shouldCommit) => {
@@ -8244,10 +8554,11 @@
             event.stopPropagation();
             suppressClick = true;
             if (shouldCommit && completed.targetId) {
-              const scrollTop = keyPopoverBody.scrollTop;
+              const scrollSurface = inputSettingsScrollSurface();
+              const scrollTop = scrollSurface.scrollTop;
               reorderKey(id, completed.targetId, completed.afterTarget);
               renderKeyPopover();
-              keyPopoverBody.scrollTop = scrollTop;
+              scrollSurface.scrollTop = scrollTop;
             }
           };
 
@@ -8260,16 +8571,17 @@
               event.preventDefault();
               return;
             }
-            const scrollTop = keyPopoverBody.scrollTop;
+            const scrollSurface = inputSettingsScrollSurface();
+            const scrollTop = scrollSurface.scrollTop;
             selectedOrderKeyId = selectedOrderKeyId === id ? "" : id;
             renderKeyPopover();
-            keyPopoverBody.scrollTop = scrollTop;
+            scrollSurface.scrollTop = scrollTop;
           });
           chip.addEventListener("contextmenu", (event) => event.preventDefault());
         }
 
         function renderKeyOrderSection() {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIds();
           if (!visibleIds.includes(selectedOrderKeyId)) selectedOrderKeyId = "";
           const section = document.createElement("section");
           section.className = "key-order-section";
@@ -8295,18 +8607,30 @@
           const grid = document.createElement("div");
           grid.className = "key-order-grid";
           grid.setAttribute("aria-label", "Current key order");
-          for (const id of visibleIds) {
-            const def = KEY_DEFS[id];
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "key-chip key-order-chip";
-            chip.dataset.orderKey = id;
-            chip.textContent = def.label;
-            chip.title = `${def.hint || def.label} — hold and drag to reorder`;
-            chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
-            chip.classList.toggle("selected", selectedOrderKeyId === id);
-            installKeyOrderDrag(chip, id);
-            grid.append(chip);
+          for (const zone of ["main", "expanded"]) {
+            const zoneIds = resolvePlacedKeyIdsInZone(zone);
+            if (zoneIds.length === 0) continue;
+            const zoneLabel = document.createElement("div");
+            zoneLabel.className = "key-order-zone-label";
+            zoneLabel.id = zone === "main" ? "keyOrderZoneMain" : "keyOrderZoneExpanded";
+            zoneLabel.dataset.orderZoneLabel = zone;
+            zoneLabel.textContent = zone === "main" ? "Main row" : "Keys row";
+            grid.append(zoneLabel);
+            for (const id of zoneIds) {
+              const def = KEY_DEFS[id];
+              const chip = document.createElement("button");
+              chip.type = "button";
+              chip.className = "key-chip key-order-chip";
+              chip.dataset.orderKey = id;
+              chip.dataset.orderZone = zone;
+              chip.textContent = def.label;
+              chip.title = `${def.hint || def.label} — hold and drag to reorder`;
+              chip.setAttribute("aria-describedby", zoneLabel.id);
+              chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
+              chip.classList.toggle("selected", selectedOrderKeyId === id);
+              installKeyOrderDrag(chip, id);
+              grid.append(chip);
+            }
           }
           if (visibleIds.length === 0) {
             const empty = document.createElement("div");
@@ -8323,7 +8647,9 @@
           keyPopoverBody.append(section);
 
           if (!selectedOrderKeyId) return;
-          const selectedIndex = visibleIds.indexOf(selectedOrderKeyId);
+          const selectedZone = inputActionZone(softInputActionId(selectedOrderKeyId));
+          const selectedZoneIds = resolvePlacedKeyIdsInZone(selectedZone);
+          const selectedIndex = selectedZoneIds.indexOf(selectedOrderKeyId);
           const def = KEY_DEFS[selectedOrderKeyId];
           const accessibleName = def.hint || def.label;
           const actions = document.createElement("div");
@@ -8331,13 +8657,13 @@
           actions.setAttribute("aria-label", "Selected key order actions");
           const selected = document.createElement("span");
           selected.className = "key-order-selected";
-          selected.textContent = `Selected: ${def.label}`;
+          selected.textContent = `Selected: ${def.label} (${selectedZone === "main" ? "Main row" : "Keys row"})`;
           actions.append(selected);
           const actionDefs = [
             ["First", `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
             ["←", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
-            ["→", `Move ${accessibleName} right`, selectedIndex === visibleIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
-            ["Last", `Move ${accessibleName} to end`, selectedIndex === visibleIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
+            ["→", `Move ${accessibleName} right`, selectedIndex === selectedZoneIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
+            ["Last", `Move ${accessibleName} to end`, selectedIndex === selectedZoneIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
           ];
           for (const [label, ariaLabel, disabled, action] of actionDefs) {
             const button = document.createElement("button");
@@ -8348,20 +8674,95 @@
             button.disabled = disabled;
             button.addEventListener("click", (event) => {
               event.stopPropagation();
-              const scrollTop = keyPopoverBody.scrollTop;
+              const scrollSurface = inputSettingsScrollSurface();
+              const scrollTop = scrollSurface.scrollTop;
               action();
               renderKeyPopover();
-              keyPopoverBody.scrollTop = scrollTop;
+              scrollSurface.scrollTop = scrollTop;
             });
             actions.append(button);
           }
           section.append(actions);
         }
 
-        // Composer recall feature toggles (issues #504 / #505). They live in the
-        // existing key-set popover — the Remote surface's settings home — and
-        // reuse its .key-set-row checkbox layout. Only the on/off booleans are
-        // persisted (surface-local localStorage); the recall text is never.
+        function resetInputActionLayout() {
+          keyBarConfig.expanded = false;
+          keyBarConfig.order = [...KEY_ORDER];
+          keyBarConfig.zones = defaultInputZones();
+          saveKeyBarConfig();
+          renderInputActionRows();
+          renderKeyPopover();
+          scheduleTerminalFit();
+        }
+
+        function renderInputLayoutSection() {
+          const heading = document.createElement("div");
+          heading.className = "input-layout-heading";
+          const title = document.createElement("div");
+          title.className = "key-popover-title";
+          title.textContent = "Action placement";
+          const reset = document.createElement("button");
+          reset.type = "button";
+          reset.className = "key-order-reset";
+          reset.textContent = "Reset";
+          reset.setAttribute("aria-label", "Reset input action layout");
+          reset.addEventListener("click", resetInputActionLayout);
+          heading.append(title, reset);
+          keyPopoverBody.append(heading);
+
+          const enabled = enabledInputActionIds();
+          for (const zone of INPUT_ACTION_ZONES) {
+            const actionIds = keyBarConfig.zones[zone].filter((actionId) => enabled.has(actionId));
+            for (const [index, actionId] of actionIds.entries()) {
+              const row = document.createElement("div");
+              row.className = "input-layout-row";
+              row.dataset.layoutAction = actionId;
+
+              const name = document.createElement("span");
+              name.className = "input-layout-name";
+              const label = inputActionLabel(actionId);
+              name.textContent = label;
+
+              const select = document.createElement("select");
+              select.className = "input-layout-zone";
+              select.setAttribute("aria-label", `Place ${label}`);
+              const choices = actionId === "keys" ? ["main", "hidden"] : INPUT_ACTION_ZONES;
+              for (const choice of choices) {
+                const option = document.createElement("option");
+                option.value = choice;
+                option.textContent =
+                  choice === "main" ? "Main" : choice === "expanded" ? "Keys" : "Hidden";
+                select.append(option);
+              }
+              select.value = zone;
+              select.addEventListener("change", () => moveInputAction(actionId, select.value));
+
+              const controls = document.createElement("span");
+              controls.className = "input-layout-order";
+              for (const [text, offset, disabled] of [
+                ["↑", -1, index === 0],
+                ["↓", 1, index === actionIds.length - 1],
+              ]) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = text;
+                button.disabled = disabled;
+                button.setAttribute(
+                  "aria-label",
+                  `${offset < 0 ? "Move" : "Move"} ${label} ${offset < 0 ? "earlier" : "later"}`,
+                );
+                button.addEventListener("click", () => moveInputActionBy(actionId, offset));
+                controls.append(button);
+              }
+              row.append(name, select, controls);
+              keyPopoverBody.append(row);
+            }
+          }
+        }
+
+        // Composer recall feature toggles (issues #504 / #505) share the Remote
+        // drawer Settings surface with the input layout. Only the on/off
+        // booleans are persisted; the recall text itself remains runtime-only.
         function renderComposerPopoverSection() {
           const title = document.createElement("div");
           title.className = "key-popover-title";
@@ -8379,10 +8780,11 @@
             cb.addEventListener("click", (event) => event.stopPropagation());
             cb.addEventListener("change", (event) => {
               event.stopPropagation();
-              const scrollTop = keyPopoverBody.scrollTop;
+              const scrollSurface = inputSettingsScrollSurface();
+              const scrollTop = scrollSurface.scrollTop;
               onChange(cb.checked);
               renderKeyPopover();
-              keyPopoverBody.scrollTop = scrollTop;
+              scrollSurface.scrollTop = scrollTop;
             });
             const name = document.createElement("span");
             name.className = "key-set-name";
@@ -8498,6 +8900,7 @@
 
         function renderKeyPopover() {
           keyPopoverBody.textContent = "";
+          renderInputLayoutSection();
           renderComposerPopoverSection();
           const setsTitle = document.createElement("div");
           setsTitle.className = "key-popover-title";
@@ -8512,7 +8915,8 @@
             cb.addEventListener("click", (event) => event.stopPropagation());
             cb.addEventListener("change", (event) => {
               event.stopPropagation();
-              const scrollTop = keyPopoverBody.scrollTop;
+              const scrollSurface = inputSettingsScrollSurface();
+              const scrollTop = scrollSurface.scrollTop;
               if (cb.checked) {
                 if (!keyBarConfig.sets.includes(set.id)) keyBarConfig.sets.push(set.id);
               } else {
@@ -8521,7 +8925,7 @@
               saveKeyBarConfig();
               renderKeyRow();
               renderKeyPopover();
-              keyPopoverBody.scrollTop = scrollTop;
+              scrollSurface.scrollTop = scrollTop;
             });
             const name = document.createElement("span");
             name.className = "key-set-name";
@@ -8547,18 +8951,22 @@
             chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
             chip.addEventListener("click", (event) => {
               event.stopPropagation();
-              const scrollTop = keyPopoverBody.scrollTop;
+              const scrollSurface = inputSettingsScrollSurface();
+              const scrollTop = scrollSurface.scrollTop;
               const visibleIds = resolveKeyIds();
               if (keyBarConfig.custom.includes(id)) {
                 keyBarConfig.custom = keyBarConfig.custom.filter((k) => k !== id);
               } else {
                 keyBarConfig.custom.push(id);
-                appendKeyToVisibleEnd(id, visibleIds);
+                if (!keyBarConfig.usedCustom.includes(id)) {
+                  keyBarConfig.usedCustom.push(id);
+                  appendKeyToVisibleEnd(id, visibleIds);
+                }
               }
               saveKeyBarConfig();
               renderKeyRow();
               renderKeyPopover();
-              keyPopoverBody.scrollTop = scrollTop;
+              scrollSurface.scrollTop = scrollTop;
             });
             grid.append(chip);
           }
@@ -8566,20 +8974,9 @@
           renderKeyOrderSection();
         }
 
-        function setKeyPopoverOpen(open) {
-          keyPopoverOpen = open;
-          keyPopover.hidden = !open;
-          keyBarSettingsButton.classList.toggle("open", open);
-          keyBarSettingsButton.setAttribute("aria-expanded", open ? "true" : "false");
-          if (open) renderKeyPopover();
-        }
-
         function setKeyBarVisible(visible, persist = true) {
-          keyBarConfig.visible = visible;
-          keyBar.hidden = !visible;
-          keyBarToggleButton.classList.toggle("active", visible);
-          keyBarToggleButton.setAttribute("aria-pressed", visible ? "true" : "false");
-          if (!visible) setKeyPopoverOpen(false);
+          keyBarConfig.expanded = Boolean(visible) && inputActionZone("keys") === "main";
+          syncInputActionVisibility();
           if (persist) saveKeyBarConfig();
           scheduleTerminalFit();
         }
@@ -8946,7 +9343,8 @@
         setNavigationOpen(!(autoConnectArmed() || (autoConnectMode && (androidE2eMode || token()))));
         renderInputSurface();
         renderKeyRow();
-        setKeyBarVisible(keyBarConfig.visible, false);
+        setKeyBarVisible(keyBarConfig.expanded, false);
+        renderKeyPopover();
         // The markup ships checked; the stored choice is what actually holds
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.
@@ -9446,16 +9844,6 @@
         // drop the keyboard (#482) — showing keys should keep the keyboard up.
         keepInputSurfaceFocus(keyBarToggleButton);
         keyBarToggleButton.addEventListener("click", () => setKeyBarVisible(keyBar.hidden));
-        keyBarSettingsButton.addEventListener("click", (event) => {
-          event.stopPropagation();
-          setKeyPopoverOpen(!keyPopoverOpen);
-        });
-        // Dismiss the key-set popover on any outside tap.
-        document.addEventListener("click", (event) => {
-          if (!keyPopoverOpen) return;
-          if (keyPopover.contains(event.target) || keyBarSettingsButton.contains(event.target)) return;
-          setKeyPopoverOpen(false);
-        });
         // Auto-claim on load when autoConnect=1 is present. This is NOT gated on
         // localAppMode so the cloud dashboard flow (external browser) also grabs
         // control on connect — one fewer click. The remote-control enable toggle

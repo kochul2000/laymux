@@ -111,6 +111,21 @@
       footer {
         border-top: 1px solid var(--border);
       }
+      .input-action-row {
+        display: flex;
+        min-width: 0;
+        max-width: 100%;
+        flex: 0 1 auto;
+        align-items: center;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .input-action-row::-webkit-scrollbar {
+        display: none;
+      }
       label {
         display: flex;
         align-items: center;
@@ -326,8 +341,8 @@
         flex: 0 0 auto;
         align-items: center;
         justify-content: center;
-        width: var(--header-control-height);
-        height: var(--header-control-height);
+        width: 34px;
+        height: var(--key-bar-control-height);
         padding: 0;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -765,6 +780,51 @@
       }
       .nav-settings-status.error {
         color: var(--danger);
+      }
+      .input-layout-editor {
+        min-width: 0;
+        padding: 0 8px 10px;
+      }
+      .input-layout-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .input-layout-heading .key-popover-title {
+        margin: 0;
+      }
+      .input-layout-row {
+        display: grid;
+        grid-template-columns: minmax(72px, 1fr) minmax(72px, auto) auto;
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 2px;
+        border-bottom: 1px solid var(--border);
+      }
+      .input-layout-name {
+        min-width: 0;
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .input-layout-zone {
+        min-width: 72px;
+        padding: 3px 4px;
+        color: var(--text);
+        background: var(--panel-2);
+      }
+      .input-layout-order {
+        display: inline-flex;
+        gap: 3px;
+      }
+      .input-layout-order button {
+        width: 25px;
+        height: 25px;
+        padding: 0;
       }
       .drawer-header-button {
         position: relative;
@@ -1561,6 +1621,14 @@
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        footer .input-action-row {
+          flex: 1 1 auto;
+        }
+        footer .input-action-row > button {
+          width: auto;
+          min-width: 54px;
+          flex: 1 0 54px;
+        }
         /* Send joins the equal split — its base flex: 0 0 auto outranks the
            rule above and would collapse against width: 0, clipping the icon. */
         footer .composer-send {
@@ -1672,24 +1740,6 @@
         padding: 5px 6px;
         border-top: 1px solid var(--border);
         background: var(--panel);
-      }
-      .key-bar-settings {
-        width: 30px;
-        height: var(--key-bar-control-height);
-        display: inline-flex;
-        flex: 0 0 auto;
-        align-items: center;
-        justify-content: center;
-        padding: 0;
-        color: var(--text-secondary);
-        font-size: 14px;
-      }
-      .key-bar-settings:hover {
-        background: var(--hover-bg);
-      }
-      .key-bar-settings.open {
-        border-color: var(--accent-50);
-        color: var(--accent);
       }
       .key-row {
         display: flex;
@@ -1823,26 +1873,6 @@
         border-color: var(--accent-50);
         color: var(--accent);
       }
-      .key-popover {
-        position: absolute;
-        left: 6px;
-        bottom: calc(100% + 6px);
-        z-index: 40;
-        width: min(340px, calc(100vw - 24px));
-        max-height: min(60vh, 440px);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        background: var(--panel);
-        box-shadow: 0 12px 32px #00000073;
-      }
-      .key-popover-scroll {
-        min-height: 0;
-        overflow-y: auto;
-        padding: 8px 10px 10px;
-      }
       .key-popover-title {
         margin: 10px 0 4px;
         color: var(--muted);
@@ -1945,6 +1975,17 @@
         gap: 5px;
         padding-top: 6px;
         user-select: none;
+      }
+      .key-order-zone-label {
+        flex: 0 0 100%;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-order-zone-label[data-order-zone-label="expanded"] {
+        border-top: 1px solid var(--border);
+        margin-top: 2px;
+        padding-top: 5px;
       }
       .key-order-chip {
         position: relative;

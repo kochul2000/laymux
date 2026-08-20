@@ -552,6 +552,24 @@ async function dispatchTerminalPaste(page: Page, text: string) {
   }, text);
 }
 
+async function clickInputModeToggle(page: Page) {
+  const toggle = page.locator("#inputModeToggle");
+  if (!(await toggle.isVisible())) {
+    await page.locator("#keyBarToggle").click();
+  }
+  await toggle.click();
+}
+
+async function openRemoteSettings(page: Page) {
+  const navigationToggle = page.locator("#navToggle");
+  const settings = page.locator("#drawerSettingsButton");
+  if ((await navigationToggle.getAttribute("aria-expanded")) !== "true") {
+    await navigationToggle.click();
+  }
+  await settings.click();
+  await expect(page.locator("#drawerSettingsView")).toBeVisible();
+}
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
@@ -561,7 +579,7 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   const toggle = page.locator("#inputModeToggle");
   await expect(composer).toBeHidden();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
-  await toggle.click();
+  await clickInputModeToggle(page);
   await expect(composer).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect
@@ -608,7 +626,7 @@ test("coarse pointer defaults to Composer and a saved Direct preference wins", a
   await expect(page.locator("#terminalComposer")).toBeHidden();
   await expect(page.locator("#inputModeToggle")).toHaveAttribute("aria-pressed", "false");
 
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
 });
@@ -627,7 +645,7 @@ test("terminal switches preserve isolated mode and draft state without persisten
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
   await expect(editor).toHaveValue("");
   await editor.fill("draft two");
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeHidden();
 
   await selectTerminal(page, "C:\\one");
@@ -636,7 +654,7 @@ test("terminal switches preserve isolated mode and draft state without persisten
 
   await selectTerminal(page, "C:\\two");
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(editor).toHaveValue("draft two");
   expect(
     await page.evaluate(() => Object.keys(localStorage).filter((key) => key.includes("Draft"))),
@@ -658,6 +676,18 @@ test("a terminal switch isolates the old socket and readiness before delayed hos
   await expect(page.locator("#terminalMeta")).toContainText("Shell 2");
   await expect.poll(() => remote.focuses.length).toBe(1);
   expect(remote.focuses[0].terminalId).toBe("terminal-2");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            window as Window & {
+              __mockSockets: Array<{ url: string; closed: boolean }>;
+            }
+          ).__mockSockets.length,
+      ),
+    )
+    .toBe(2);
 
   const sockets = await page.evaluate(() =>
     (
@@ -691,12 +721,13 @@ test("fine-pointer Composer sends on Enter and keeps Shift+Enter as a newline", 
 }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
 
   const editor = page.locator("#composerInput");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
-  // Desktop layout has no visible Send button — Enter is the send gesture.
-  await expect(page.locator("#composerSend")).toBeHidden();
+  // Send is a configurable action and remains available in Composer on every
+  // layout; desktop Enter continues to provide the keyboard gesture too.
+  await expect(page.locator("#composerSend")).toBeVisible();
 
   // The desktop keydown guards: Enter mid-composition (isComposing) and the
   // soft-keyboard keyCode 229 variant never submit.
@@ -833,10 +864,10 @@ test("legacy unsequenced output remains visible but Composer and direct paste fa
 
   await page.locator("#composerInput").fill("preserved draft");
   await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await dispatchTerminalPaste(page, "must not send");
   expect(remote.inputs).toHaveLength(0);
-  await expect(page.locator("#status")).toHaveText("Terminal input is not ready. Reconnecting...");
+  await expect(page.locator("#status")).toHaveText("Terminal input is not ready.");
 });
 
 test("a malformed output frame stays fail-closed after a delayed snapshot write completes", async ({
@@ -1135,7 +1166,7 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
     "xterm-helper-textarea",
   );
 
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   expect(
     await page.evaluate(
       () =>
@@ -1246,8 +1277,8 @@ test("explicit mode switches reset a collapsed Composer editor", async ({ page }
 
   // Direct and back to Composer: the mode switch must reveal the editor
   // instead of leaving composer mode with no visible input surface.
-  await page.locator("#inputModeToggle").click();
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
   await expect(page.locator("#composerInput")).toBeFocused();
 });
@@ -1303,7 +1334,7 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
 
 async function enterComposerMode(page: Page) {
   // Desktop layout (fine pointer) defaults to Direct; switch to Composer.
-  await page.locator("#inputModeToggle").click();
+  await clickInputModeToggle(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
 }
 
@@ -1492,7 +1523,7 @@ test("recall history is in-memory only and never written to any persistent store
   expect(dump.local).not.toContain(secret);
 });
 
-test("the popover toggles disable the recall popup and autocomplete", async ({ page }) => {
+test("the Remote Settings toggles disable the recall popup and autocomplete", async ({ page }) => {
   const remote = await installRemotePage(page, { coarse: false, width: 1280 });
   await connect(page);
   await enterComposerMode(page);
@@ -1501,9 +1532,8 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
   await sendComposerLine(page, remote, editor, "echo one", 1);
   await sendComposerLine(page, remote, editor, "echo two", 2);
 
-  // Open the key-set popover where the composer toggles live.
-  await page.locator("#keyBarToggle").click();
-  await page.locator("#keyBarSettings").click();
+  // Open Remote Settings where the composer toggles live.
+  await openRemoteSettings(page);
   await expect(page.locator("#composerHistoryPopupToggle")).toBeChecked();
   await expect(page.locator("#composerAutocompleteToggle")).toBeChecked();
   await page.locator("#composerHistoryPopupToggle").uncheck();
@@ -1515,8 +1545,8 @@ test("the popover toggles disable the recall popup and autocomplete", async ({ p
     .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerAutocomplete")))
     .toBe("0");
 
-  // Dismiss the popover, back to the editor.
-  await page.locator("#terminal").click({ position: { x: 5, y: 5 } });
+  // Close the drawer, back to the editor.
+  await page.locator("#navToggle").click();
   await editor.focus();
 
   // Tab no longer opens the recall popup...
@@ -1556,8 +1586,7 @@ for (const [agent, expectedOffset] of [
       )
       .toEqual([Number.POSITIVE_INFINITY, -expectedOffset]);
 
-    await page.locator("#keyBarToggle").click();
-    await page.locator("#keyBarSettings").click();
+    await openRemoteSettings(page);
     const toggle = page.locator("#composerAgentScrollOffsetToggle");
     await expect(toggle).toBeChecked();
     await expect(page.locator(`#composerAgentScrollOffset${agent}`)).toHaveValue(
@@ -1577,8 +1606,7 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
     mock.__mockTerminal?.scrollCalls.splice(0);
   });
 
-  await page.locator("#keyBarToggle").click();
-  await page.locator("#keyBarSettings").click();
+  await openRemoteSettings(page);
   await expect(page.locator("#composerAgentScrollOffsetToggle")).toBeChecked();
   const claudeLines = page.locator("#composerAgentScrollOffsetClaude");
   await claudeLines.fill("6");
