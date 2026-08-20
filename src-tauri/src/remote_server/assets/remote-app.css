@@ -319,14 +319,36 @@
       .status::-webkit-scrollbar {
         display: none;
       }
+      /* Drawn, not typed. A Braille text spinner (⠋⠙⠹…) puts its ink in the
+         left or the right column of the cell depending on the frame, so the
+         glyph visibly wobbles sideways — and Consolas has no Braille block at
+         all, so every platform falls back to a different symbol font whose
+         advance no longer matches the reserved cell. A ring owns its own box. */
       .status-spinner {
         display: inline-block;
-        width: 1ch;
+        width: 10px;
+        height: 10px;
         margin-right: 1ch;
-        text-align: center;
+        vertical-align: middle;
+        border: 1.5px solid currentColor;
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: status-spinner-spin 0.7s linear infinite;
       }
       .status-spinner[hidden] {
         display: none;
+      }
+      @keyframes status-spinner-spin {
+        to {
+          transform: rotate(1turn);
+        }
+      }
+      /* Reduced motion keeps the marker, drops the movement: a closed ring. */
+      @media (prefers-reduced-motion: reduce) {
+        .status-spinner {
+          animation: none;
+          border-top-color: currentColor;
+        }
       }
       .status.error {
         color: var(--danger);
