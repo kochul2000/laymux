@@ -3,6 +3,7 @@ package com.laymux.android
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ContentResolver
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -942,9 +943,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = contentResolver
+        // Every ContentResolver call here can throw beyond IOException — OEM providers raise
+        // SecurityException and IllegalArgumentException too. An escape would leave the entry
+        // stuck at IS_PENDING=1, invisible to every app and impossible for the user to find
+        // or delete, with no message explaining why. So each call fails into a reported error.
         val uri = try {
             resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        } catch (_: IllegalArgumentException) {
+        } catch (_: RuntimeException) {
             null
         }
         if (uri == null) {
@@ -955,16 +960,40 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             resolver.openOutputStream(uri)?.use { stream -> stream.write(bytes) } != null
         } catch (_: IOException) {
             false
+        } catch (_: RuntimeException) {
+            false
         }
         if (!written) {
-            resolver.delete(uri, null, null)
+            discardPendingDownload(resolver, uri)
             runOnUiThread { showCloudMessage("파일을 저장하지 못했습니다.") }
             return
         }
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)
-        resolver.update(uri, values, null, null)
+        val published = try {
+            resolver.update(uri, values, null, null) > 0
+        } catch (_: RuntimeException) {
+            false
+        }
+        if (!published) {
+            // The bytes are on disk but the entry never became visible. Removing it is the
+            // only outcome the user can act on — a hidden file they cannot see or delete is
+            // worse than no file.
+            discardPendingDownload(resolver, uri)
+            runOnUiThread { showCloudMessage("저장한 파일을 공개하지 못했습니다.") }
+            return
+        }
         runOnUiThread { showCloudMessage("$displayName 을(를) 다운로드에 저장했습니다.") }
+    }
+
+    /** Best-effort cleanup of a still-pending Downloads entry; never throws. */
+    private fun discardPendingDownload(resolver: ContentResolver, uri: Uri) {
+        try {
+            resolver.delete(uri, null, null)
+        } catch (_: RuntimeException) {
+            // Nothing further to try: the entry stays pending and invisible, and the caller
+            // already reports the failure to the user.
+        }
     }
 
     /**
