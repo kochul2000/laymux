@@ -36,6 +36,18 @@ const ASSETS = [
   "remote-app.css",
 ] as const;
 
+/**
+ * The served document policy, from the same `page-csp.txt` the Rust route
+ * compiles in. Mocked responses carry it so the suite exercises the page under
+ * the policy production ships — a directive that blocks the client fails here
+ * rather than on a phone.
+ */
+export function remoteClientCsp(origin: string): string {
+  const template = readFileSync(`${remoteRoot}page-csp.txt`, "utf8").trimEnd();
+  const { host } = new URL(origin);
+  return template.replace("__WS_SOURCES__", ` ws://${host} wss://${host}`);
+}
+
 /** The shell with every `{{ASSET:...}}` pointing at `/remote/vendor/<name>`. */
 export function remoteClientPageHtml(): string {
   let html = readFileSync(`${remoteRoot}page.html`, "utf8");
@@ -55,6 +67,7 @@ export async function fulfillRemoteClientAsset(route: Route, pathname: string): 
     await route.fulfill({
       body: remoteClientPageHtml(),
       contentType: "text/html; charset=utf-8",
+      headers: { "content-security-policy": remoteClientCsp(route.request().url()) },
     });
     return true;
   }
@@ -73,7 +86,11 @@ export async function installRemoteClientRoutes(
   origin = "http://remote.test",
 ): Promise<void> {
   await page.route(`${origin}/remote/`, (route) =>
-    route.fulfill({ body: remoteClientPageHtml(), contentType: "text/html; charset=utf-8" }),
+    route.fulfill({
+      body: remoteClientPageHtml(),
+      contentType: "text/html; charset=utf-8",
+      headers: { "content-security-policy": remoteClientCsp(origin) },
+    }),
   );
   for (const asset of ASSETS) {
     await page.route(`${origin}/remote/vendor/${asset}`, (route) =>
