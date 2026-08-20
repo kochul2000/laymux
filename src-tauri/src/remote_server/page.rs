@@ -497,10 +497,21 @@ mod tests {
             .unwrap();
         assert!(workspace_view.contains("id=\"workspaceSection\""));
         assert!(workspace_view.contains("id=\"dockSection\""));
+        assert!(!workspace_view.contains("id=\"hiddenWorkspaceShelf\""));
         assert!(!workspace_view.contains("id=\"notificationSection\""));
         assert!(!workspace_view.contains("class=\"connection-panel\""));
         assert!(!workspace_view.contains("id=\"displaySection\""));
         assert!(!workspace_view.contains(">Workspaces</h2>"));
+
+        let hidden_view = html
+            .split("<div id=\"drawerHiddenView\"")
+            .nth(1)
+            .expect("the hidden-workspace drawer view is present")
+            .split("</div><!-- /drawerHiddenView -->")
+            .next()
+            .unwrap();
+        assert!(hidden_view.contains("id=\"hiddenWorkspaceSection\""));
+        assert!(hidden_view.contains("id=\"hiddenWorkspaceShelf\""));
 
         let notifications_view = html
             .split("<div id=\"drawerNotificationsView\"")
@@ -535,6 +546,9 @@ mod tests {
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
         assert!(html.contains("id=\"drawerSettingsButton\""));
+        assert!(!html.contains("id=\"hiddenWorkspaceBadge\""));
+        assert!(!html.contains("id=\"notificationBadge\""));
+        assert!(html.contains("status-indicator"));
         assert!(html.contains("id=\"drawerBack\""));
         assert!(!html.contains("id=\"navClose\""));
         assert!(!html.contains("class=\"drawer-close\""));
@@ -890,7 +904,7 @@ mod tests {
         assert!(html.contains("id=\"notificationSection\""));
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"notificationPanel\""));
-        assert!(html.contains("id=\"notificationBadge\""));
+        assert!(!html.contains("id=\"notificationBadge\""));
         assert!(html.contains("renderNotificationPanel(data.notifications || []"));
         assert!(html.contains("/remote/v1/notifications/mark-all-read"));
         assert!(
