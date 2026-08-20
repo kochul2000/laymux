@@ -49,6 +49,10 @@ Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTT
 WebView의 API 요청은 native HTTP bridge가 기존 AEAD RPC로 암호화하고, terminal output은 native가
 소유한 stream별 AEAD WebSocket과 origin 제한 binary WebMessage bridge로 browser와 같은 Remote v1
 text-header/binary-body 계약을 전달한다. key와 ciphertext는 JavaScript에 노출하지 않는다.
+PC 소유 Remote main document가 4xx/5xx로 응답하거나 E2E session이 없어 문서를 제공할 수 없으면
+Android native가 실패 문서를 렌더링하지 않고 session을 닫은 뒤 Cloud dashboard로 복귀한다. 하위
+자원 실패는 main document 실패와 구분해 Remote 표면을 자동 종료하지 않는다. background 전환이나
+stale document로 취소된 fetch도 unavailable 응답과 구분해 session·document를 보존한다.
 pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
 읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.

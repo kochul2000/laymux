@@ -99,6 +99,7 @@ import com.laymux.android.web.RemoteDownloadPolicy
 import com.laymux.android.web.RemoteLoadProgress
 import com.laymux.android.web.RemoteOutputOpen
 import com.laymux.android.web.RemoteResourceCache
+import com.laymux.android.web.RemoteResourceLoadResult
 import com.laymux.android.web.RemoteResourceResponse
 import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
@@ -418,6 +419,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             webViewClient = LocalContentWebViewClient(
                 { path -> loadRemoteResource(documentGeneration, path) },
                 { onRemoteDocumentLoaded(documentGeneration) },
+                { onRemoteMainDocumentUnavailable(documentGeneration) },
             )
             webChromeClient = JsDialogChromeClient(
                 this@MainActivity,
@@ -743,6 +745,16 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             },
             requestFocusFromTouch = loadedWebView::requestFocusFromTouch,
         )
+    }
+
+    private fun onRemoteMainDocumentUnavailable(documentGeneration: Long) {
+        runOnUiThread {
+            if (!remoteLifecycleActive || !remoteBridgeActionsEnabled(documentGeneration)) {
+                return@runOnUiThread
+            }
+            showCloudDashboard()
+            showCloudMessage("PC 원격 화면을 불러올 수 없어 대시보드로 돌아왔습니다.")
+        }
     }
 
     private fun resumeRemoteSurfaceAfterBackground(
@@ -1981,64 +1993,85 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun loadRemoteResource(
         documentGeneration: Long,
         path: String,
-    ): RemoteResourceResponse? {
-        if (!remoteBridgeActionsEnabled(documentGeneration)) return null
-        if (path.length > MAX_REMOTE_PATH_LENGTH) return null
-        val session = remoteSession ?: return null
-        if (!remoteLifecycleActive || session.isExpired()) return null
+    ): RemoteResourceLoadResult {
+        if (!remoteBridgeActionsEnabled(documentGeneration) || !remoteLifecycleActive) {
+            return RemoteResourceLoadResult.Cancelled
+        }
+        if (path.length > MAX_REMOTE_PATH_LENGTH) return RemoteResourceLoadResult.Unavailable
+        val session = remoteSession ?: return RemoteResourceLoadResult.Unavailable
+        if (session.isExpired()) return RemoteResourceLoadResult.Unavailable
         remoteResourceCache.get(session.instanceId, path)?.let { cached ->
             updateRemoteLoadProgress(RemoteLoadProgress::cacheHit)
-            return cached
+            return RemoteResourceLoadResult.Response(cached)
         }
         val future = try {
-            remoteExecutor.submit<RemoteResourceResponse?> {
+            remoteExecutor.submit<RemoteResourceLoadResult> {
                 if (!remoteBridgeActionsEnabled(documentGeneration) ||
                     !remoteLifecycleActive || remoteSession !== session
                 ) {
-                    return@submit null
+                    return@submit RemoteResourceLoadResult.Cancelled
                 }
                 val response = e2eRemoteClient.rpc(
                     session,
                     JSONObject().put("kind", "resource").put("path", path),
                 )
                 if (!remoteBridgeActionsEnabled(documentGeneration) ||
-                    remoteSession !== session
+                    !remoteLifecycleActive || remoteSession !== session
                 ) {
-                    return@submit null
+                    return@submit RemoteResourceLoadResult.Cancelled
                 }
                 if (response.optString("kind") == "error") {
                     val status = response.optInt("status", 500).coerceIn(400, 599)
-                    return@submit RemoteResourceResponse.error(
-                        status,
-                        response.optString("error", "Remote resource failed"),
+                    return@submit RemoteResourceLoadResult.Response(
+                        RemoteResourceResponse.error(
+                            status,
+                            response.optString("error", "Remote resource failed"),
+                        ),
                     )
                 }
-                RemoteResourceResponse.parse(response).also { resource ->
+                val resource = RemoteResourceResponse.parse(response).also { parsed ->
                     // put() keeps only responses the desktop explicitly marked
                     // cacheable; everything else passes through untouched.
-                    remoteResourceCache.put(session.instanceId, path, resource)
+                    remoteResourceCache.put(session.instanceId, path, parsed)
                 }
+                RemoteResourceLoadResult.Response(resource)
             }
         } catch (_: RejectedExecutionException) {
-            return null
+            return RemoteResourceLoadResult.Unavailable
         }
         updateRemoteLoadProgress { it.fetching(path) }
         return try {
-            val resource = future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            if (!remoteBridgeActionsEnabled(documentGeneration) || remoteSession !== session) {
-                return null
+            val result = future.get(REMOTE_RESOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                !remoteLifecycleActive || remoteSession !== session
+            ) {
+                return RemoteResourceLoadResult.Cancelled
             }
             updateRemoteLoadProgress {
-                if (resource != null) it.fetched(resource.body.size) else it.fetchFailed()
+                if (result is RemoteResourceLoadResult.Response) {
+                    it.fetched(result.value.body.size)
+                } else {
+                    it.fetchFailed()
+                }
             }
-            resource
+            result
         } catch (error: ExecutionException) {
             updateRemoteLoadProgress(RemoteLoadProgress::fetchFailed)
+            if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                !remoteLifecycleActive || remoteSession !== session
+            ) {
+                return RemoteResourceLoadResult.Cancelled
+            }
             handleRemoteFailure(error.cause ?: error, session)
-            null
+            RemoteResourceLoadResult.Unavailable
         } catch (error: TimeoutException) {
             future.cancel(true)
             updateRemoteLoadProgress(RemoteLoadProgress::fetchFailed)
+            if (!remoteBridgeActionsEnabled(documentGeneration) ||
+                !remoteLifecycleActive || remoteSession !== session
+            ) {
+                return RemoteResourceLoadResult.Cancelled
+            }
             handleRemoteFailure(
                 E2eTransportException(
                     "Remote UI resource request timed out.",
@@ -2046,10 +2079,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 ),
                 session,
             )
-            null
+            RemoteResourceLoadResult.Unavailable
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()
-            null
+            RemoteResourceLoadResult.Cancelled
         }
     }
 
