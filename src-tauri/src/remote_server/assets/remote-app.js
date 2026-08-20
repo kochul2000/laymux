@@ -9,6 +9,7 @@
         const drawerConnectionButton = $("drawerConnectionButton");
         const drawerSettingsButton = $("drawerSettingsButton");
         const drawerWorkspaceView = $("drawerWorkspaceView");
+        const drawerHiddenView = $("drawerHiddenView");
         const drawerNotificationsView = $("drawerNotificationsView");
         const drawerCreateView = $("drawerCreateView");
         const drawerConnectionView = $("drawerConnectionView");
@@ -45,10 +46,10 @@
         const composerHistoryList = $("composerHistoryList");
         const composerAutocompleteList = $("composerAutocompleteList");
         const workspaceSection = $("workspaceSection");
+        const hiddenWorkspaceSection = $("hiddenWorkspaceSection");
         const newWorkspaceButton = $("newWorkspace");
         const newWorkspacePanel = $("newWorkspacePanel");
         const hiddenWorkspaceToggle = $("hiddenWorkspaceToggle");
-        const hiddenWorkspaceBadge = $("hiddenWorkspaceBadge");
         const hiddenWorkspaceShelf = $("hiddenWorkspaceShelf");
         const workspaceListEl = $("workspaceList");
         const dockSection = $("dockSection");
@@ -57,7 +58,6 @@
         const dockPanel = $("dockPanel");
         const dockListEl = $("dockList");
         const notificationSection = $("notificationSection");
-        const notificationBadge = $("notificationBadge");
         const notificationListEl = $("notificationList");
         const markAllNotificationsReadButton = $("markAllNotificationsRead");
         const clearNotificationsButton = $("clearNotifications");
@@ -365,7 +365,6 @@
         let pcUpdatePollTimer = null;
         let pcUpdateRequestInFlight = false;
         let hiddenWorkspaceCount = 0;
-        let hiddenWorkspaceShelfOpen = false;
         let touchGesture = null;
         let touchPointers = new Map();
         let lastTouchTap = { time: 0, x: 0, y: 0, count: 0 };
@@ -2412,6 +2411,7 @@
           if (connectionPanel) connectionPanel.classList.toggle("connected", connected);
           if (connected) setConnectionHint("Connect first to load workspaces and control the active terminal.", false);
           workspaceSection.classList.toggle("locked", !connected);
+          hiddenWorkspaceSection.classList.toggle("locked", !connected);
           newWorkspaceButton.disabled = !connected;
           // The create subview is lease-gated like its entry button: losing
           // control while it is open falls back to the workspace list.
@@ -4738,9 +4738,16 @@
         }
 
         function renderNotificationPanel(notifications, unreadCount) {
-          const badgeCount = Number(unreadCount) || 0;
-          notificationBadge.hidden = badgeCount <= 0;
-          if (badgeCount > 0) fillCountBadge(notificationBadge, badgeCount);
+          const badgeCount = Math.max(0, Number(unreadCount) || 0);
+          const hasUnread = badgeCount > 0;
+          drawerNotificationsButton.classList.toggle("status-indicator", hasUnread);
+          const notificationLabel = hasUnread
+            ? `Open notifications (${badgeCount} unread)`
+            : "Open notifications";
+          drawerNotificationsButton.setAttribute("aria-label", notificationLabel);
+          drawerNotificationsButton.title = hasUnread
+            ? `Notifications (${badgeCount} unread)`
+            : "Notifications";
           notificationListEl.innerHTML = "";
           if (!notifications.length) {
             emptyNav(notificationListEl, "No notifications.");
@@ -4833,11 +4840,16 @@
         }
 
         function setDrawerView(view) {
-          const nextView = ["workspace", "notifications", "create", "connection", "settings"].includes(view)
+          const requestedView = ["workspace", "hidden", "notifications", "create", "connection", "settings"].includes(view)
             ? view
             : "workspace";
+          const nextView =
+            requestedView === "hidden" && hiddenWorkspaceCount === 0
+              ? "workspace"
+              : requestedView;
           drawerView = nextView;
           drawerWorkspaceView.hidden = nextView !== "workspace";
+          drawerHiddenView.hidden = nextView !== "hidden";
           drawerNotificationsView.hidden = nextView !== "notifications";
           drawerCreateView.hidden = nextView !== "create";
           drawerConnectionView.hidden = nextView !== "connection";
@@ -4845,13 +4857,15 @@
           drawerTitle.textContent =
             nextView === "connection"
               ? "Connection"
-              : nextView === "notifications"
-                ? "Notifications"
-                : nextView === "create"
-                  ? "New workspace"
-                  : nextView === "settings"
-                    ? "Settings"
-                    : "Remote";
+              : nextView === "hidden"
+                ? "Hidden workspaces"
+                : nextView === "notifications"
+                  ? "Notifications"
+                  : nextView === "create"
+                    ? "New workspace"
+                    : nextView === "settings"
+                      ? "Settings"
+                      : "Remote";
           drawerBackButton.hidden = nextView === "workspace";
           newWorkspaceButton.hidden = nextView !== "workspace";
           hiddenWorkspaceToggle.hidden =
@@ -4862,6 +4876,7 @@
         }
 
         function drawerEntryButton(view) {
+          if (view === "hidden") return hiddenWorkspaceToggle;
           if (view === "notifications") return drawerNotificationsButton;
           if (view === "create") return newWorkspaceButton;
           if (view === "connection") return drawerConnectionButton;
@@ -5370,34 +5385,25 @@
           return `<svg width="${size}" height="${size}" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="7" cy="7" r="1.7" stroke="currentColor" stroke-width="1.2"/>${slash}</svg>`;
         }
 
-        function setHiddenWorkspaceShelfOpen(open) {
-          hiddenWorkspaceShelfOpen =
-            Boolean(open) && hiddenWorkspaceCount > 0;
-          hiddenWorkspaceShelf.hidden = !hiddenWorkspaceShelfOpen;
-          hiddenWorkspaceToggle.setAttribute(
-            "aria-expanded",
-            String(hiddenWorkspaceShelfOpen),
-          );
-          const label =
-            `${hiddenWorkspaceShelfOpen ? "Close" : "Open"} hidden workspaces (${hiddenWorkspaceCount})`;
-          hiddenWorkspaceToggle.setAttribute("aria-label", label);
-          hiddenWorkspaceToggle.title = label;
-        }
-
         function renderHiddenWorkspaceShelf(workspaces) {
           hiddenWorkspaceShelf.innerHTML = "";
           hiddenWorkspaceCount = workspaces.length;
           hiddenWorkspaceToggle.hidden =
             drawerView !== "workspace" || hiddenWorkspaceCount === 0;
-          hiddenWorkspaceBadge.hidden = hiddenWorkspaceCount === 0;
-          hiddenWorkspaceBadge.textContent = countBadgeText(hiddenWorkspaceCount);
+          hiddenWorkspaceToggle.classList.toggle(
+            "status-indicator",
+            hiddenWorkspaceCount > 0,
+          );
+          const label = `Open hidden workspaces (${hiddenWorkspaceCount})`;
+          hiddenWorkspaceToggle.setAttribute("aria-label", label);
+          hiddenWorkspaceToggle.title = label;
           if (hiddenWorkspaceCount === 0) {
-            setHiddenWorkspaceShelfOpen(false);
+            emptyNav(hiddenWorkspaceShelf, "No hidden workspaces.");
+            if (drawerView === "hidden") setDrawerView("workspace");
             return;
           }
-          setHiddenWorkspaceShelfOpen(hiddenWorkspaceShelfOpen);
 
-          workspaces.forEach((workspace) => {
+          workspaces.forEach((workspace, index) => {
             const row = document.createElement("div");
             row.className = "hidden-workspace-row";
             row.dataset.hiddenWorkspace = workspace.id;
@@ -5440,7 +5446,31 @@
               event.stopPropagation();
               restore.disabled = true;
               try {
+                const adjacentWorkspace =
+                  workspaces[index + 1] || workspaces[index - 1] || null;
                 await setWorkspaceVisibility(workspace.id, false);
+                if (drawerView === "hidden") {
+                  const adjacentRestore = Array.from(
+                    hiddenWorkspaceShelf.querySelectorAll(
+                      "[data-hidden-workspace-restore]",
+                    ),
+                  ).find(
+                    (button) =>
+                      button.dataset.hiddenWorkspaceRestore ===
+                      adjacentWorkspace?.id,
+                  );
+                  (adjacentRestore || drawerBackButton).focus();
+                } else if (drawerView === "workspace") {
+                  const restoredVisibility = Array.from(
+                    workspaceListEl.querySelectorAll(
+                      "[data-workspace-visibility]",
+                    ),
+                  ).find(
+                    (button) =>
+                      button.dataset.workspaceVisibility === workspace.id,
+                  );
+                  (restoredVisibility || newWorkspaceButton).focus();
+                }
               } catch (err) {
                 setStatus(err.message || String(err), true);
               } finally {
@@ -9376,7 +9406,7 @@
           setNavigationOpen(open);
         });
         hiddenWorkspaceToggle.addEventListener("click", () => {
-          setHiddenWorkspaceShelfOpen(!hiddenWorkspaceShelfOpen);
+          openDrawerSubview("hidden");
         });
         newWorkspaceButton.addEventListener("click", () => {
           // A drawer subview like notifications/connection/settings — the

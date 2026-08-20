@@ -10,6 +10,10 @@ import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./rem
 async function routeRemoteWithWorkspaces(
   page: Page,
   spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }>,
+  options: {
+    includeGamma?: boolean;
+    initialHiddenWorkspaceIds?: string[];
+  } = {},
 ): Promise<{
   setWorkspaceDisplay: (
     display: Partial<{
@@ -23,6 +27,7 @@ async function routeRemoteWithWorkspaces(
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
+  setNotifications: (notifications: Array<Record<string, unknown>>, unreadCount: number) => void;
 }> {
   let workspaceDisplay = {
     minimap: false,
@@ -35,9 +40,11 @@ async function routeRemoteWithWorkspaces(
     path: string;
     body: { hidden: boolean; leaseId: string };
   }> = [];
-  const hiddenWorkspaceIds = new Set<string>();
+  const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
   const hiddenPaneIds = new Set<string>();
   const outputAttachments: string[] = [];
+  let notifications: Array<Record<string, unknown>> = [];
+  let unreadNotificationCount = 0;
   let visibilityFallbackWorkspaceId: string | null = null;
   const paneA1 = {
     id: "p-a1",
@@ -137,9 +144,28 @@ async function routeRemoteWithWorkspaces(
               collapsed: hiddenWorkspaceIds.has("ws-b"),
               panes: [paneWithVisibility(paneB1)],
             },
+            ...(options.includeGamma
+              ? [
+                  {
+                    id: "ws-c",
+                    name: "Gamma",
+                    isActive: false,
+                    terminalPaneCount: 0,
+                    selectorSummary: {
+                      terminalCount: 0,
+                      lastCommand: null,
+                      latestNotification: null,
+                    },
+                    hidden: hiddenWorkspaceIds.has("ws-c"),
+                    collapsed: hiddenWorkspaceIds.has("ws-c"),
+                    panes: [],
+                  },
+                ]
+              : []),
           ],
           docks: [],
-          notifications: [],
+          notifications,
+          unreadNotificationCount,
           workspaceSelector: {
             display: workspaceDisplay,
             pathEllipsis: "start",
@@ -183,6 +209,10 @@ async function routeRemoteWithWorkspaces(
     visibilityRequests,
     setVisibilityFallbackWorkspaceId(workspaceId) {
       visibilityFallbackWorkspaceId = workspaceId;
+    },
+    setNotifications(nextNotifications, unreadCount) {
+      notifications = nextNotifications;
+      unreadNotificationCount = unreadCount;
     },
     setWorkspaceDisplay(display) {
       workspaceDisplay = { ...workspaceDisplay, ...display };
@@ -394,6 +424,7 @@ test.describe("remote mobile layout", () => {
     await page.locator("#navToggle").click();
     await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
     await expect(page.locator("#workspaceSection")).toBeVisible();
+    await expect(page.locator("#drawerHiddenView")).toBeHidden();
     await expect(page.locator("#workspaceSection .nav-section-title")).toHaveCount(0);
     await expect(page.locator("#notificationSection")).toBeHidden();
     await expect(page.locator("#drawerConnectionView")).toBeHidden();
@@ -632,7 +663,9 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".workspace-status-line")).toContainText("✓");
   });
 
-  test("mirrors the PC hidden workspace shelf and pane eye controls", async ({ page }) => {
+  test("opens hidden workspaces as a drawer page and mirrors pane eye controls", async ({
+    page,
+  }) => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
     const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
 
@@ -647,22 +680,8 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator('[data-workspace-item="ws-b"]')).toHaveCount(0);
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
     await expect(page.locator("#hiddenWorkspaceToggle svg")).toHaveCount(1);
-    await expect(page.locator("#hiddenWorkspaceBadge")).toHaveText("1");
-    const hiddenControlStyles = await page.locator("#hiddenWorkspaceToggle").evaluate((toggle) => {
-      const badge = toggle.querySelector<HTMLElement>("#hiddenWorkspaceBadge");
-      if (!badge) throw new Error("hidden workspace badge is missing");
-      const toggleStyle = getComputedStyle(toggle);
-      const badgeStyle = getComputedStyle(badge);
-      return {
-        badgeBackground: badgeStyle.backgroundColor,
-        badgeFontSize: badgeStyle.fontSize,
-        badgeHeight: badgeStyle.height,
-        toggleColor: toggleStyle.color,
-      };
-    });
-    expect(hiddenControlStyles.badgeBackground).toBe(hiddenControlStyles.toggleColor);
-    expect(hiddenControlStyles.badgeFontSize).toBe("8px");
-    expect(hiddenControlStyles.badgeHeight).toBe("12px");
+    await expect(page.locator("#hiddenWorkspaceBadge")).toHaveCount(0);
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveClass(/status-indicator/);
     await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
       "aria-label",
       "Open hidden workspaces (1)",
@@ -703,19 +722,21 @@ test.describe("remote mobile layout", () => {
     });
 
     await page.locator("#hiddenWorkspaceToggle").click();
-    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
-      "aria-label",
-      "Close hidden workspaces (1)",
-    );
-    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveAttribute(
-      "title",
-      "Close hidden workspaces (1)",
-    );
+    await expect(page.locator("#drawerHiddenView")).toBeVisible();
+    await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
+    await expect(page.locator("#drawerTitle")).toHaveText("Hidden workspaces");
+    await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#hiddenWorkspaceShelf")).toBeVisible();
     await expect(page.locator('[data-hidden-workspace="ws-b"]')).toContainText("Beta");
+
+    await page.locator("#drawerBack").click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeFocused();
+    await page.locator("#hiddenWorkspaceToggle").click();
     await page.locator('[data-hidden-workspace-restore="ws-b"]').click();
     await expect(page.locator('[data-workspace-item="ws-b"]')).toBeVisible();
     await expect(page.locator("#hiddenWorkspaceToggle")).toBeHidden();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
 
     const paneToggle = page.locator('[data-pane-visibility="p-a2"]');
     await paneToggle.click();
@@ -729,6 +750,99 @@ test.describe("remote mobile layout", () => {
     await paneToggle.click();
     await expect(page.locator('[data-pane-row="p-a2"]')).not.toHaveClass(/hidden-item/);
     await expect(paneToggle).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("keeps keyboard focus after partial and final hidden workspace restores", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    await routeRemoteWithWorkspaces(page, spatialBodies, {
+      includeGamma: true,
+      initialHiddenWorkspaceIds: ["ws-b", "ws-c"],
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    await page.locator("#hiddenWorkspaceToggle").click();
+
+    await page.locator('[data-hidden-workspace-restore="ws-b"]').click();
+    await expect(page.locator('[data-hidden-workspace-restore="ws-c"]')).toBeFocused();
+
+    await page.locator('[data-hidden-workspace-restore="ws-c"]').click();
+    await expect(page.locator("#drawerWorkspaceView")).toBeVisible();
+    await expect(page.locator('[data-workspace-visibility="ws-c"]')).toBeFocused();
+  });
+
+  test("uses settings-sized dots for hidden and notification status", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setNotifications(
+      [
+        {
+          id: "notice-1",
+          workspaceId: "ws-a",
+          workspaceName: "Alpha",
+          terminalId: "term-a1",
+          message: "Ready",
+          level: "success",
+          isRead: false,
+          createdAt: Date.now(),
+        },
+      ],
+      1,
+    );
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+    await page.locator('[data-workspace-visibility="ws-b"]').click();
+
+    await expect(page.locator("#hiddenWorkspaceToggle")).toBeVisible();
+    await expect(page.locator("#hiddenWorkspaceToggle")).toHaveClass(/status-indicator/);
+    await expect(page.locator("#notificationBadge")).toHaveCount(0);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveClass(/status-indicator/);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications (1 unread)",
+    );
+
+    const dotStyles = await page.evaluate(() => {
+      const settings = document.querySelector<HTMLElement>("#drawerSettingsButton");
+      const hidden = document.querySelector<HTMLElement>("#hiddenWorkspaceToggle");
+      const notifications = document.querySelector<HTMLElement>("#drawerNotificationsButton");
+      if (!settings || !hidden || !notifications) throw new Error("drawer controls are missing");
+      settings.classList.add("update-available");
+      const readDot = (element: HTMLElement) => {
+        const style = getComputedStyle(element, "::after");
+        return {
+          width: style.width,
+          height: style.height,
+          right: style.right,
+          top: style.top,
+          background: style.backgroundColor,
+        };
+      };
+      return {
+        settings: readDot(settings),
+        hidden: readDot(hidden),
+        notifications: readDot(notifications),
+        hiddenColor: getComputedStyle(hidden).color,
+        notificationColor: getComputedStyle(notifications).color,
+      };
+    });
+    expect(dotStyles.hidden).toEqual(dotStyles.settings);
+    expect(dotStyles.notifications).toEqual(dotStyles.settings);
+    expect(dotStyles.hidden.width).toBe("5px");
+    expect(dotStyles.hidden.height).toBe("5px");
+    expect(dotStyles.hiddenColor).toBe(dotStyles.notificationColor);
+
+    controls.setNotifications([], 0);
+    await expect(page.locator("#drawerNotificationsButton")).not.toHaveClass(/status-indicator/);
+    await expect(page.locator("#drawerNotificationsButton")).toHaveAttribute(
+      "aria-label",
+      "Open notifications",
+    );
   });
 
   test("reattaches output when the host hides an active workspace beyond a stale snapshot", async ({

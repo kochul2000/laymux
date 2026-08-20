@@ -71,13 +71,11 @@
                 <button id="newWorkspace" class="drawer-header-button" type="button" aria-label="New workspace" title="New workspace" disabled>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
                 </button>
-                <button id="hiddenWorkspaceToggle" class="drawer-header-button hidden-workspace-toggle" type="button" aria-label="Open hidden workspaces (0)" title="Hidden workspaces" aria-expanded="false" aria-controls="hiddenWorkspaceShelf" hidden>
+                <button id="hiddenWorkspaceToggle" class="drawer-header-button hidden-workspace-toggle" type="button" aria-label="Open hidden workspaces (0)" title="Open hidden workspaces (0)" aria-controls="drawerHiddenView" hidden>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="7" cy="7" r="1.7" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 11.5l9-9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-                  <span id="hiddenWorkspaceBadge" class="workspace-count-badge hidden-workspace-badge" hidden>0</span>
                 </button>
                 <button id="drawerNotificationsButton" class="drawer-header-button drawer-notification-button" type="button" aria-label="Open notifications" title="Notifications" disabled>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
-                  <span id="notificationBadge" class="workspace-count-badge drawer-notification-badge" hidden>0</span>
                 </button>
                 <button id="drawerConnectionButton" class="drawer-header-button" type="button" aria-label="Open connection" title="Connection">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0V8ZM12 17v4"/></svg>
@@ -105,12 +103,6 @@
               </div>
               </section>
               <section id="workspaceSection" class="nav-section locked">
-              <div
-                id="hiddenWorkspaceShelf"
-                class="hidden-workspace-shelf"
-                aria-label="Hidden workspaces"
-                hidden
-              ></div>
               <div id="workspaceList" class="nav-list"></div>
               </section>
               <section id="dockSection" class="nav-section locked">
@@ -123,6 +115,11 @@
               </div>
               </section>
             </div><!-- /drawerWorkspaceView -->
+            <div id="drawerHiddenView" class="drawer-view" hidden>
+              <section id="hiddenWorkspaceSection" class="nav-section locked" aria-label="Hidden workspaces">
+                <div id="hiddenWorkspaceShelf" class="hidden-workspace-shelf"></div>
+              </section>
+            </div><!-- /drawerHiddenView -->
             <div id="drawerNotificationsView" class="drawer-view drawer-notifications-view" hidden>
               <section id="notificationSection" class="nav-section locked" aria-label="Notifications">
                 <div id="notificationPanel" class="notification-panel">

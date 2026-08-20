@@ -1,6 +1,6 @@
 # 0180. Remote 숨김 workspace 보관함은 상단 개수 아이콘으로 연다
 
-- Status: Accepted
+- Status: Superseded by [0187](0187-remote-drawer-status-dots-and-hidden-subview.md)
 - Date: 2026-08-19
 - Source: 사용자 요구(2026-08-19), [ADR-0153](0153-remote-hidden-item-visibility-controls.md), [overview.md §3.2](../architecture/overview.md#32-workspacearea), [api-contracts.md §13.3](../architecture/api-contracts.md#133-navigation-metadata)
 - Amends: [ADR-0153](0153-remote-hidden-item-visibility-controls.md)의 Remote workspace 보관함 trigger 표현
