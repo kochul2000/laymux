@@ -729,7 +729,8 @@ mod tests {
             html.contains("setBusyStatus(\"Connection interrupted. Reconnecting…\", false, true);")
         );
         assert!(html.contains(".input-mode-toggle {"));
-        assert!(html.contains("width: var(--header-control-height);"));
+        assert!(html.contains("width: 34px;"));
+        assert!(html.contains("height: var(--key-bar-control-height);"));
         assert!(!html.contains("id=\"inputModeLabel\""));
         assert!(html
             .contains("inputModeToggleButton.setAttribute(\"aria-label\", inputModeActionLabel);"));
@@ -863,16 +864,20 @@ mod tests {
     #[test]
     fn remote_page_html_contains_soft_key_toolbar() {
         let html = remote_client_source();
-        // Markup: toolbar row, footer toggle, and the settings popover.
+        // Markup: toolbar row, footer toggle, and the drawer Settings editor.
         assert!(html.contains("id=\"keyBar\""));
         assert!(html.contains("id=\"keyBarToggle\""));
-        assert!(html.contains("id=\"keyBarSettings\""));
-        assert!(html.contains("id=\"keyPopover\""));
+        assert!(!html.contains("id=\"keyBarSettings\""));
+        assert!(!html.contains("id=\"keyPopover\""));
+        assert!(html.contains("id=\"inputLayoutEditor\""));
         assert!(html.contains("id=\"keyRow\""));
-        assert!(html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Special key buttons\">\n          <button id=\"keyBarSettings\""));
+        assert!(
+            html.contains("id=\"keyRow\" class=\"key-row\" role=\"group\" aria-label=\"Keys row\"")
+        );
         // Config is client-only UI state persisted to localStorage (ADR-0028).
         assert!(html.contains("laymux.remote.keybar"));
         assert!(html.contains("const DEFAULT_KEYBAR = {"));
+        assert!(html.contains("expanded: false,"));
         assert!(html.contains("sets: [\"step\", \"nav\"],"));
         assert!(html.contains("order: KEY_ORDER,"));
         // Predefined sets are selectable and a custom palette exists.
@@ -938,7 +943,25 @@ mod tests {
         assert!(html.contains("f1: { label: \"F1\", seq: \"\\x1bOP\" }"));
         // Toggle visibility drives the hidden attribute + persistence.
         assert!(html.contains("function setKeyBarVisible(visible, persist = true)"));
-        assert!(html.contains("keyBar.hidden = !visible;"));
+        assert!(html.contains("keyBar.hidden = !keysVisible || !keyBarConfig.expanded;"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_three_zone_input_layout_settings() {
+        let html = remote_client_source();
+
+        assert!(html.contains("id=\"mainActionRow\""));
+        assert!(html.contains("id=\"inputLayoutEditor\""));
+        assert!(html.contains("Input bar"));
+        assert!(html.contains("const INPUT_ACTION_ZONES = [\"main\", \"expanded\", \"hidden\"]"));
+        assert!(html.contains("main: [\"ctrl-c\", \"keyboard\", \"keys\", \"send\"]"));
+        assert!(html.contains("hidden: [\"attachment\"]"));
+        assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
+        assert!(html.contains("function moveInputAction(actionId, zone, commit = true)"));
+        assert!(html.contains("function renderInputActionRows()"));
+        assert!(html.contains("keyBarConfig.expanded = false;"));
+        assert!(!html.contains("id=\"keyBarSettings\""));
+        assert!(!html.contains("id=\"keyPopover\""));
     }
 
     #[test]
@@ -1057,7 +1080,7 @@ mod tests {
         assert!(html.contains("id=\"terminalComposer\""));
         assert!(html.contains("id=\"composerInput\""));
         assert!(!html.contains("id=\"composerInsert\""));
-        // A dedicated Send button is the touch-device send affordance.
+        // A configurable Send action is available whenever Composer is active.
         assert!(html.contains("id=\"composerSend\""));
         assert!(html.contains("class=\"composer-send\""));
         assert!(html.contains(
@@ -1104,7 +1127,9 @@ mod tests {
             "if (event.isComposing || composerIsComposing || event.keyCode === 229) return;"
         ));
         assert!(html.contains("composerSendButton.addEventListener(\"click\""));
-        assert!(html.contains("composerSendButton.hidden = !(mobileLayout && composerMode)"));
+        assert!(
+            html.contains("element.hidden = !placed || (actionId === \"send\" && !composerMode);")
+        );
         assert!(html.contains("matchMedia(\"(pointer: coarse)\").matches"));
 
         // Composer actions stay closed until a valid V1 snapshot header/state +

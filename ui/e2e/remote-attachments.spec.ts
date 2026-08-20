@@ -27,6 +27,7 @@ async function openRemote(
     stallFirstAttachment?: boolean;
     stallFirstTerminalInput?: boolean;
     stallRelease?: boolean;
+    attachmentZone?: "main" | "expanded";
   } = {},
 ): Promise<{
   attachments: AttachmentRequest[];
@@ -57,9 +58,24 @@ async function openRemote(
     releaseLeaseRequest = resolve;
   });
 
-  await page.addInitScript((mode) => {
-    localStorage.setItem("laymux.remote.inputMode", mode);
-  }, inputMode);
+  await page.addInitScript(
+    ({ mode, attachmentZone }) => {
+      localStorage.setItem("laymux.remote.inputMode", mode);
+      if (attachmentZone) {
+        localStorage.setItem(
+          "laymux.remote.keybar",
+          JSON.stringify({
+            zones: {
+              main: attachmentZone === "main" ? ["attachment"] : [],
+              expanded: attachmentZone === "expanded" ? ["attachment"] : [],
+              hidden: [],
+            },
+          }),
+        );
+      }
+    },
+    { mode: inputMode, attachmentZone: options.attachmentZone },
+  );
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -181,6 +197,20 @@ async function openRemote(
 }
 
 test.describe("remote terminal attachments", () => {
+  test("opens the file chooser after Attach file is moved to the main row", async ({ page }) => {
+    const { attachments } = await openRemote(page, "composer", { attachmentZone: "main" });
+    await expect(page.locator("#mainActionRow > #attachFile")).toBeVisible();
+
+    await chooseAttachmentFiles(page, {
+      name: "moved.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("moved attachment", "utf8"),
+    });
+
+    await expect.poll(() => attachments.length).toBe(1);
+    await expect(page.locator("#composerInput")).toHaveValue("C:\\Temp\\remote-1-moved.txt");
+  });
+
   test("uploads selected image and text files and inserts their host paths into the composer", async ({
     page,
   }) => {
