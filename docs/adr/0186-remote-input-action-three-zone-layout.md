@@ -1,4 +1,4 @@
-# 0183. Remote 입력 action은 기기별 3-zone 배치를 사용한다
+# 0186. Remote 입력 action은 기기별 3-zone 배치를 사용한다
 
 - Status: Accepted
 - Date: 2026-08-20

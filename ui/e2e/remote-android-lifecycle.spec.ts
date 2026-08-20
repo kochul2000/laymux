@@ -64,6 +64,8 @@ type AndroidLifecycleState = {
   holdNextNavigation: boolean;
   navigationRequests: number;
   outputOpens: number;
+  renderRequests: number;
+  savedFiles: Array<{ name: string; mediaType: string; base64: string }>;
   leases: Array<string | null>;
 };
 
@@ -77,6 +79,7 @@ type AndroidLifecycleWindow = typeof window & {
     ) => void;
     cancelRemoteHttp: (requestId: string) => void;
     setRemoteLease: (leaseId: string | null) => void;
+    saveRemoteFile: (name: string, mediaType: string, base64: string) => void;
     disconnectRemote: () => void;
   };
   LaymuxOutputTransport: {
@@ -106,6 +109,8 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         holdNextNavigation: false,
         navigationRequests: 0,
         outputOpens: 0,
+        renderRequests: 0,
+        savedFiles: [],
         leases: [],
       };
       target.__androidLifecycleState = state;
@@ -180,12 +185,30 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
               active: true,
               leaseId: "lease-1",
               resumeToken: "resume-1",
+              fileViewerToken: "viewer-1",
               heartbeatTimeoutSeconds: 45,
             };
           }
           if (path === "/remote/v1/session/heartbeat") {
             state.heartbeatRequests += 1;
             body = { active: true, leaseId: "lease-1" };
+          }
+          if (path === "/remote/v1/file-viewer/download") {
+            body = {
+              name: "notes.txt",
+              mediaType: "text/plain",
+              base64: "aG9zdCB0ZXh0",
+              size: 10,
+            };
+          }
+          if (path === "/remote/v1/file-viewer/render") {
+            state.renderRequests += 1;
+            body = {
+              kind: "text",
+              path: "C:\\work\\notes.txt",
+              content: "host text in the wrapper",
+              truncated: false,
+            };
           }
           if (path === "/remote/v1/navigation") {
             state.navigationRequests += 1;
@@ -207,6 +230,9 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         },
         setRemoteLease(leaseId) {
           state.leases.push(leaseId);
+        },
+        saveRemoteFile(name, mediaType, base64) {
+          state.savedFiles.push({ name, mediaType, base64 });
         },
         disconnectRemote() {},
       };
@@ -317,4 +343,55 @@ test("Android foreground delivers a resumed claim before rejecting stale request
   expect((await state()).claimRequests).toBe(1);
   expect((await state()).cancelledRequests).toBe(0);
   expect((await state()).leases).toContain("lease-1");
+});
+
+test("the Android wrapper gets the file viewer, rendered in the Remote document", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+
+  // The section used to be hidden here: the wrapper WebView has no second
+  // window, so the old new-tab viewer could never work (ADR-0184).
+  await page.locator("#navToggle").click();
+  await expect(page.locator("#fileViewerSection")).toBeVisible();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toHaveText("host text in the wrapper");
+  expect((await state()).renderRequests).toBe(1);
+
+  await page.locator("#fileViewerClose").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+});
+
+test("the Android wrapper saves a download through native, not the browser path", async ({
+  page,
+}) => {
+  await installAndroidRemote(page);
+  const state = () =>
+    page.evaluate(() => (window as AndroidLifecycleWindow).__androidLifecycleState);
+  await expect.poll(async () => (await state()).outputOpens).toBe(1);
+
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  // The WebView has no download handler, so `<a download>` would be a silent
+  // no-op: the bytes have to reach native (ADR-0185).
+  let downloads = 0;
+  page.on("download", () => {
+    downloads += 1;
+  });
+  await page.locator("#fileViewerDownload").click();
+
+  await expect(page.locator("#fileViewerMessage")).toHaveText("Saved notes.txt to Downloads.");
+  expect((await state()).savedFiles).toEqual([
+    { name: "notes.txt", mediaType: "text/plain", base64: "aG9zdCB0ZXh0" },
+  ]);
+  expect(downloads).toBe(0);
 });

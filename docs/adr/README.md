@@ -58,7 +58,7 @@ ADR 이 필요한 대표 기준:
 | [0038](0038-remote-height-shrink-surface-crop.md) | Remote 높이 축소는 surface-local crop — normal buffer rows 축소를 PTY에 전파하지 않음 (0015 확장) | Accepted |
 | [0039](0039-remote-spatial-notification-step-navigation.md) | Remote 공간순서·알림순서 스텝 내비게이션은 데스크톱 프론트엔드가 계산 (0018/0019/0020/0028 확장) | Accepted |
 | [0040](0040-remote-soft-key-user-order.md) | Remote 소프트 키는 사용자가 정한 순서를 유지한다 (0028 확장) | Accepted |
-| [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md) |
+| [0041](0041-remote-served-file-viewer.md) | Remote FileViewer는 lease-gated API와 자격 증명 없는 새 탭으로 제공 | Superseded by [0044](0044-remote-file-viewer-explicit-host-path.md), [0184](0184-remote-file-viewer-in-page-overlay.md) |
 | [0042](0042-remote-file-viewer-secret-capability.md) | Remote FileViewer는 lease-bound 비밀 capability로 호스트 파일을 읽음 (0041 권한·응답 정정) | Accepted |
 | [0043](0043-global-terminal-ready-startup-slot.md) | 터미널 시작은 앱 전역 준비 완료 슬롯으로 직렬화한다 | Accepted |
 | [0044](0044-remote-file-viewer-explicit-host-path.md) | Remote FileViewer의 호스트 경로 반영은 명시적 action으로만 수행 | Accepted |
@@ -200,7 +200,10 @@ ADR 이 필요한 대표 기준:
 | [0180](0180-remote-hidden-workspace-header-icon.md) | Remote 숨김 workspace 보관함은 상단 개수 아이콘으로 연다 (0153 정정) | Accepted |
 | [0181](0181-remote-terminal-file-attachments.md) | Remote 터미널 첨부는 bounded 호스트 임시 파일과 기존 structured input을 사용한다 | Proposed |
 | [0182](0182-remote-scroll-top-history-expansion.md) | Remote 스크롤 최상단은 더 깊은 screen checkpoint를 요청해 이전 출력을 받아온다 (0069 확장) | Accepted |
-| [0183](0183-remote-input-action-three-zone-layout.md) | Remote 입력 action은 기기별 기본행·Keys 확장행·숨김 3-zone 배치를 사용한다 (0028·0040 확장, 0036 일부 정정) | Accepted |
+| [0183](0183-remote-page-content-security-policy.md) | Remote 셸 문서에도 CSP 를 적용하고 WebSocket source 는 검증된 Host 만 반영한다 | Proposed |
+| [0184](0184-remote-file-viewer-in-page-overlay.md) | Remote FileViewer 는 새 탭이 아니라 Remote 문서 안 오버레이로 렌더한다 (0041 새 탭 결정 대체) | Proposed |
+| [0185](0185-remote-file-viewer-download.md) | Remote FileViewer 다운로드는 전용 bytes 엔드포인트로 받고 안드로이드는 네이티브가 저장한다 | Proposed |
+| [0186](0186-remote-input-action-three-zone-layout.md) | Remote 입력 action은 기기별 기본행·Keys 확장행·숨김 3-zone 배치를 사용한다 (0028·0040 확장, 0036 일부 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

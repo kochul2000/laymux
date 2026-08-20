@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./tauri-api", () => ({
   readFileForViewer: vi.fn(),
+  readFileForDownload: vi.fn(),
   statPaths: vi.fn(),
 }));
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { readFileForViewer, statPaths } from "./tauri-api";
+import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
 import { handleRemoteFileViewerRequest } from "./remote-file-viewer";
 
 function registerTerminal(cwd?: string) {
@@ -304,5 +305,57 @@ describe("Remote FileViewer render payload", () => {
     });
 
     expect(result.data).toMatchObject({ kind: "archive", format: "zip", totalEntries: 1 });
+  });
+});
+
+describe("Remote FileViewer download payload", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("document 종류도 sanitize된 preview가 아니라 원본 바이트를 내려준다", async () => {
+    // ADR-0185: `render` replaces an HTML/Markdown source with a preview
+    // document, so a download built from that payload would save the wrong
+    // bytes. The download path must never touch the viewer classifier.
+    vi.mocked(readFileForDownload).mockResolvedValue({
+      name: "notes.html",
+      mediaType: "text/html",
+      base64: "PGgxPnNvdXJjZTwvaDE+",
+      size: 20,
+    });
+
+    const result = await handleRemoteFileViewerRequest("download", {
+      path: "C:\\work\\notes.html",
+      maxBytes: 1024,
+    });
+
+    expect(readFileForViewer).not.toHaveBeenCalled();
+    expect(readFileForDownload).toHaveBeenCalledWith("C:\\work\\notes.html", 1024);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        path: "C:\\work\\notes.html",
+        name: "notes.html",
+        mediaType: "text/html",
+        base64: "PGgxPnNvdXJjZTwvaDE+",
+        size: 20,
+      },
+    });
+  });
+
+  it("경로와 maxBytes를 검증하고 실패는 error로 내려간다", async () => {
+    expect(await handleRemoteFileViewerRequest("download", { path: "  ", maxBytes: 1024 })).toEqual(
+      { success: false, error: "path is required" },
+    );
+    expect(
+      await handleRemoteFileViewerRequest("download", { path: "C:\\a.txt", maxBytes: 0 }),
+    ).toEqual({ success: false, error: "maxBytes must be a positive integer" });
+
+    vi.mocked(readFileForDownload).mockRejectedValue(
+      new Error("File exceeds the 8388608 byte viewer limit"),
+    );
+    expect(
+      await handleRemoteFileViewerRequest("download", { path: "C:\\big.bin", maxBytes: 1024 }),
+    ).toEqual({ success: false, error: "File exceeds the 8388608 byte viewer limit" });
   });
 });

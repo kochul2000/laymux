@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::OnceLock;
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::header;
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use crate::automation_server::ServerState;
@@ -63,8 +63,8 @@ pub(crate) async fn remote_page(
     // for revalidation — without no-store, browsers heuristically cache it and
     // users need a hard refresh after every update. The heavy app bundle and
     // vendor assets it references are immutable hashed URLs (ADR-0169) instead.
-    if super::page_assets::accepts_gzip(req.headers()) {
-        return (
+    let response = if super::page_assets::accepts_gzip(req.headers()) {
+        (
             [
                 (header::CACHE_CONTROL, "no-store"),
                 (header::CONTENT_TYPE, "text/html; charset=utf-8"),
@@ -73,16 +73,133 @@ pub(crate) async fn remote_page(
             ],
             remote_page_gzip().to_vec(),
         )
-            .into_response();
+            .into_response()
+    } else {
+        (
+            [
+                (header::CACHE_CONTROL, "no-store"),
+                (header::VARY, "Accept-Encoding"),
+            ],
+            Html(remote_page_html()),
+        )
+            .into_response()
+    };
+    secure_page_response(response, req.headers())
+}
+
+/// The document policy, with `__WS_SOURCES__` resolved per request. Kept in its
+/// own file because `ui/e2e/remote-client-assets.ts` serves the mocked page
+/// under the same policy — one text file, no cross-language drift.
+const REMOTE_PAGE_CSP_TEMPLATE: &str = include_str!("page-csp.txt");
+
+const WS_SOURCES_PLACEHOLDER: &str = "__WS_SOURCES__";
+
+/// The document carries the policy the Remote viewer document already had
+/// (ADR-0041), so host file bytes are never rendered by a document without one.
+/// `script-src 'self'` is the boundary that matters: the shell has no inline
+/// script, no inline handler and no `eval`, so it costs nothing.
+///
+/// `style-src` keeps `'unsafe-inline'` because xterm's DOM renderer appends
+/// generated `<style>` elements for cell dimensions, theme and decorations.
+/// Dropping it blanks the terminal, and CSS-only injection needs an HTML sink
+/// this page does not have — every rendered file goes into a sandboxed iframe.
+pub(super) fn secure_page_response(
+    mut response: Response,
+    request_headers: &HeaderMap,
+) -> Response {
+    let policy = REMOTE_PAGE_CSP_TEMPLATE.trim_end().replace(
+        WS_SOURCES_PLACEHOLDER,
+        &websocket_csp_sources(request_headers),
+    );
+    let headers = response.headers_mut();
+    // Fail closed. `is_bare_authority` should make an unencodable value
+    // impossible, but "the validator let something through" must not be the one
+    // case that ships the document with no policy at all — fall back to the
+    // template's own WebSocket-less form, which is a compile-time constant.
+    let value = HeaderValue::from_str(&policy)
+        .or_else(|_| {
+            HeaderValue::from_str(
+                &REMOTE_PAGE_CSP_TEMPLATE
+                    .trim_end()
+                    .replace(WS_SOURCES_PLACEHOLDER, ""),
+            )
+        })
+        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
+    headers.insert(header::CONTENT_SECURITY_POLICY, value);
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    response
+}
+
+/// CSP3 has `'self'` cover same-origin `ws:`/`wss:`, but Safari shipped
+/// releases where it does not, and the output socket is the whole product. The
+/// `Host` authority is client-controlled, so it is echoed only when it matches
+/// the bare `host[:port]` grammar; anything else drops the WebSocket sources
+/// rather than letting a crafted header widen the policy.
+fn websocket_csp_sources(request_headers: &HeaderMap) -> String {
+    let Some(authority) = request_headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return String::new();
+    };
+    if !is_bare_authority(authority) {
+        return String::new();
     }
-    (
-        [
-            (header::CACHE_CONTROL, "no-store"),
-            (header::VARY, "Accept-Encoding"),
-        ],
-        Html(remote_page_html()),
-    )
-        .into_response()
+    format!(" ws://{authority} wss://{authority}")
+}
+
+fn is_bare_authority(value: &str) -> bool {
+    if value.is_empty() || value.len() > 255 {
+        return false;
+    }
+    let (host, port) = if let Some(rest) = value.strip_prefix('[') {
+        // IPv6 literals keep their brackets: `[::1]` or `[::1]:19281`.
+        let Some((inside, tail)) = rest.split_once(']') else {
+            return false;
+        };
+        if !inside
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() || ch == ':' || ch == '.')
+        {
+            return false;
+        }
+        match tail {
+            "" => (inside, None),
+            _ => match tail.strip_prefix(':') {
+                Some(port) => (inside, Some(port)),
+                None => return false,
+            },
+        }
+    } else {
+        let (host, port) = match value.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (value, None),
+        };
+        if !host.chars().all(is_authority_host_char) {
+            return false;
+        }
+        (host, port)
+    };
+    if host.is_empty() {
+        return false;
+    }
+    match port {
+        None => true,
+        Some(port) => {
+            !port.is_empty() && port.len() <= 5 && port.chars().all(|ch| ch.is_ascii_digit())
+        }
+    }
+}
+
+fn is_authority_host_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '.' || ch == '-'
 }
 
 /// The committed shell references assets as `{{ASSET:<logical name>}}`; the
@@ -795,7 +912,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_contains_file_viewer_new_tab_handshake() {
+    fn remote_page_html_contains_in_page_file_viewer() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
         assert!(html.contains(
@@ -811,14 +928,66 @@ mod tests {
         assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
         assert!(html.contains("let fileViewerPathRevision = 0;"));
         assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
-        assert!(html.contains("/remote/viewer/"));
-        assert!(html.contains("laymux:file-viewer-ready"));
-        assert!(html.contains("laymux:file-viewer-session"));
-        assert!(html.contains("event.origin !== window.location.origin"));
-        assert!(html.contains("fileViewerToken: session.fileViewerToken"));
         assert!(html.contains("event.isComposing ||"));
         assert!(html.contains("event.keyCode === 229 ||"));
-        assert!(!html.contains("/remote/viewer/?token="));
+        // The viewer renders in this document (ADR-0184): no second tab, so no
+        // `window.open`, no credential handshake, and no viewer bootstrap route.
+        assert!(html.contains("id=\"fileViewerOverlay\""));
+        assert!(html.contains("function openFileViewerOverlay(path)"));
+        assert!(html.contains("function closeFileViewer()"));
+        assert!(html.contains("body: JSON.stringify({ source: \"path\", path }),"));
+        assert!(!html.contains("/remote/viewer/"));
+        assert!(!html.contains("window.open(\"/remote/viewer/\""));
+        assert!(!html.contains("laymux:file-viewer-ready"));
+        assert!(!html.contains("laymux:file-viewer-session"));
+        assert!(!html.contains("Popup blocked. Allow popups and try again."));
+        // The Android wrapper has no second window, which is why the section was
+        // hidden there. In-page rendering removes the reason.
+        assert!(!html.contains("fileViewerSection.hidden = true;"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_keeps_the_sandboxed_preview_boundary() {
+        let html = remote_client_source();
+        // Same origin as the old tab (ADR-0041), so the boundary that matters is
+        // the empty sandbox: no allow-scripts, no allow-same-origin.
+        assert!(html.contains("id=\"fileViewerPreview\""));
+        assert!(html.contains("sandbox=\"\""));
+        assert!(html.contains("fileViewerPreviewElement.setAttribute(\"sandbox\", \"\");"));
+        assert!(html.contains("fileViewerPreviewElement.srcdoc = payload.previewDocument;"));
+        // Images stay a decoded `data:` URL and text stays textContent — neither
+        // path may become HTML in this document.
+        assert!(html.contains("/^data:image\\//i.test(payload.dataUrl || \"\")"));
+        assert!(html.contains("fileViewerTextElement.textContent = payload.content || \"\";"));
+        assert!(!html.contains("fileViewerTextElement.innerHTML"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_download_asks_for_bytes_not_the_rendered_payload() {
+        let html = remote_client_source();
+        assert!(html.contains("id=\"fileViewerDownload\""));
+        assert!(html.contains("function downloadCurrentFileViewerFile()"));
+        // Its own endpoint (ADR-0185): `render` hands back a sanitized preview
+        // for HTML/Markdown and no bytes at all for binary or archive kinds.
+        assert!(html.contains("/remote/v1/file-viewer/download"));
+        assert!(html.contains("function saveDownloadInBrowser(payload)"));
+        assert!(html.contains("anchor.download = payload.name;"));
+        // The wrapper WebView has no download handler, so a browser-style save
+        // is a silent no-op there and must not be attempted.
+        assert!(html.contains("window.LaymuxNative?.saveRemoteFile"));
+        assert!(html.contains("This app version cannot save files. Update the app."));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_zoom_is_transient_display_state() {
+        let html = remote_client_source();
+        assert!(html.contains("const FILE_VIEWER_ZOOM_STEP = 0.25;"));
+        assert!(html.contains("function handleFileViewerPointerDown(event)"));
+        assert!(html.contains("fileViewerPointers.size === 2"));
+        assert!(html.contains("function handleFileViewerWheel(event)"));
+        assert!(html.contains("{ passive: false }"));
+        // Zoom is per-view state, never a setting: nothing persists it.
+        assert!(!html.contains("laymux.remote.fileViewerZoom"));
     }
 
     #[test]
@@ -841,7 +1010,7 @@ mod tests {
         assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
-        assert!(html.contains("openFileViewerTab(press.path)"));
+        assert!(html.contains("openFileViewerOverlay(press.path)"));
         assert!(html.contains("clearPathLinkSelection()"));
     }
 
@@ -957,6 +1126,9 @@ mod tests {
         assert!(html.contains("main: [\"ctrl-c\", \"keyboard\", \"keys\", \"send\"]"));
         assert!(html.contains("hidden: [\"attachment\"]"));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
+        assert!(html.contains("const KEY_ID_SET = new Set(KEY_ORDER);"));
+        assert!(html.contains("value.order.filter((id) => KEY_ID_SET.has(id))"));
+        assert!(!html.contains("value.order.filter((id) => KEY_DEFS[id])"));
         assert!(html.contains("function projectSoftKeyOrderFromZones(zones)"));
         assert!(html.contains("function syncKeyOrderProjection()"));
         assert!(html.contains("function resolvePlacedKeyIdsInZone(zone)"));
@@ -1657,5 +1829,128 @@ mod tests {
         let html = remote_client_source();
         assert!(html.contains("if (autoConnectMode && (androidE2eMode || token())) {"));
         assert!(!html.contains("if (localAppMode && autoConnectMode && token())"));
+    }
+
+    fn host_headers(host: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_str(host).unwrap());
+        headers
+    }
+
+    fn page_policy(host: &str) -> String {
+        let response =
+            secure_page_response(Html("<!doctype html>").into_response(), &host_headers(host));
+        response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .expect("the Remote page must carry a CSP")
+            .to_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    #[test]
+    fn remote_page_locks_the_document_down_to_its_own_origin() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert!(policy.contains("default-src 'none'"));
+        assert!(policy.contains("script-src 'self'"));
+        assert!(policy.contains("object-src 'none'"));
+        assert!(policy.contains("base-uri 'none'"));
+        assert!(policy.contains("frame-ancestors 'none'"));
+        // The manifest and the PWA icons are what make the installed client
+        // possible (ADR-0091); blocking them would silently un-install it.
+        assert!(policy.contains("manifest-src 'self'"));
+        assert!(policy.contains("img-src 'self' data:"));
+    }
+
+    #[test]
+    fn remote_page_never_allows_inline_or_evaluated_script() {
+        let policy = page_policy("100.64.0.2:19281");
+        let script_src = policy
+            .split("script-src ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("script-src must be present");
+        assert!(!script_src.contains("unsafe-inline"));
+        assert!(!script_src.contains("unsafe-eval"));
+        // xterm's DOM renderer appends generated <style> elements, so style is
+        // the one directive that stays permissive. Keep that explicit.
+        assert!(policy.contains("style-src 'self' 'unsafe-inline'"));
+    }
+
+    #[test]
+    fn remote_page_allows_its_own_output_socket() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert!(policy.contains("connect-src 'self' ws://100.64.0.2:19281 wss://100.64.0.2:19281;"));
+    }
+
+    #[test]
+    fn remote_page_keeps_a_bracketed_ipv6_host_intact() {
+        let policy = page_policy("[::1]:19281");
+        assert!(policy.contains("connect-src 'self' ws://[::1]:19281 wss://[::1]:19281;"));
+    }
+
+    #[test]
+    fn remote_page_drops_websocket_sources_for_a_crafted_host() {
+        // Host is client-controlled: a header carrying its own directives must
+        // narrow the policy, never widen it.
+        for host in [
+            "evil.example; script-src *",
+            "evil.example ws://evil.example",
+            "user@evil.example",
+            "evil.example:notaport",
+            "evil.example:",
+            "'self'",
+        ] {
+            let policy = page_policy(host);
+            assert!(
+                policy.contains("connect-src 'self';"),
+                "host {host:?} must not reach the policy: {policy}"
+            );
+            assert!(
+                !policy.contains("ws://") && !policy.contains("wss://"),
+                "host {host:?} leaked a socket source into {policy}"
+            );
+        }
+    }
+
+    #[test]
+    fn remote_page_drops_websocket_sources_without_a_host() {
+        let response =
+            secure_page_response(Html("<!doctype html>").into_response(), &HeaderMap::new());
+        let policy = response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(policy.contains("connect-src 'self';"));
+    }
+
+    #[test]
+    fn remote_page_sends_the_document_hardening_headers() {
+        let response = secure_page_response(
+            Html("<!doctype html>").into_response(),
+            &host_headers("laymux.local"),
+        );
+        assert_eq!(
+            response.headers().get(header::REFERRER_POLICY).unwrap(),
+            "no-referrer"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(header::X_CONTENT_TYPE_OPTIONS)
+                .unwrap(),
+            "nosniff"
+        );
+    }
+
+    #[test]
+    fn remote_page_csp_template_carries_the_websocket_placeholder() {
+        // ui/e2e/remote-client-assets.ts resolves the same placeholder so the
+        // Playwright suite runs under the served policy.
+        assert!(REMOTE_PAGE_CSP_TEMPLATE.contains(WS_SOURCES_PLACEHOLDER));
+        assert!(!REMOTE_PAGE_CSP_TEMPLATE.trim_end().ends_with(';'));
     }
 }

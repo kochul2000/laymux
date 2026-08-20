@@ -995,6 +995,18 @@ export type FileViewerContent =
     }
   | { kind: "binary"; size: number };
 
+/**
+ * A whole file for download. Hand-mirrored from the Rust `FileDownloadContent`
+ * struct (`commands/file_viewer.rs`).
+ */
+export type FileDownloadContent = {
+  /** File name only — never the host path. */
+  name: string;
+  mediaType: string;
+  base64: string;
+  size: number;
+};
+
 export type {
   AppearanceSettings,
   PasteSettings,
@@ -1291,6 +1303,17 @@ export async function readFileForViewer(
   maxBytes?: number,
 ): Promise<FileViewerContent> {
   return invoke("read_file_for_viewer", { path, maxBytes: maxBytes ?? null });
+}
+
+/**
+ * Read a whole file for handing to the user (ADR-0185). Rejects rather than
+ * truncating: a partial save is a corrupt file.
+ */
+export async function readFileForDownload(
+  path: string,
+  maxBytes?: number,
+): Promise<FileDownloadContent> {
+  return invoke("read_file_for_download", { path, maxBytes: maxBytes ?? null });
 }
 
 /** Update whether a terminal sends CWD changes to other terminals. */

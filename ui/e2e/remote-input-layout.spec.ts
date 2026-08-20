@@ -141,6 +141,46 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#composerSend")).toBeHidden();
   });
 
+  test("rejects prototype names from legacy soft-key storage", async ({ page }) => {
+    await page.addInitScript((key) => {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          expanded: true,
+          sets: [],
+          custom: ["constructor", "__proto__"],
+          usedCustom: ["constructor", "__proto__"],
+          order: ["constructor", "__proto__"],
+        }),
+      );
+    }, STORAGE_KEY);
+    await openMarkup(page);
+
+    await expect(
+      page.locator('[data-input-action="soft:constructor"], [data-input-action="soft:__proto__"]'),
+    ).toHaveCount(0);
+    await expect(page.locator("#keyRow > .key-btn")).toHaveCount(0);
+
+    await page.locator("#keyBarToggle").click();
+    await expect
+      .poll(() =>
+        page.evaluate((key) => {
+          const stored = JSON.parse(localStorage.getItem(key) || "{}");
+          return {
+            custom: stored.custom,
+            usedCustom: stored.usedCustom,
+            invalidOrder: stored.order?.filter((id: string) =>
+              ["constructor", "__proto__"].includes(id),
+            ),
+            invalidZones: Object.values(stored.zones || {})
+              .flat()
+              .filter((id) => ["soft:constructor", "soft:__proto__"].includes(String(id))),
+          };
+        }, STORAGE_KEY),
+      )
+      .toEqual({ custom: [], usedCustom: [], invalidOrder: [], invalidZones: [] });
+  });
+
   test("keeps zone ownership while sets and custom keys only control activation", async ({
     page,
   }) => {

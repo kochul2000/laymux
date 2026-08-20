@@ -332,6 +332,80 @@ pub fn read_file_for_viewer(
 /// read. Bound the read itself when a remote caller supplies a limit, keeping
 /// the desktop's existing unbounded behavior otherwise (`convertFileSrc` cannot
 /// handle WSL UNC paths, so inlining is the only option there).
+/// A whole file, for handing to the user rather than displaying (ADR-0185).
+///
+/// Deliberately not a `FileViewerContent` variant: classification decides what
+/// a file *is* so the viewer can render it, while a download does not care —
+/// every kind comes back as the same bytes. Keeping them apart also keeps the
+/// display path from ever growing a "here are the raw bytes too" branch.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDownloadContent {
+    /// File name only, for the client's save dialog. Never the host path.
+    pub name: String,
+    pub media_type: String,
+    pub base64: String,
+    pub size: usize,
+}
+
+/// Read a whole file for download, bounded by `max_bytes`.
+///
+/// A truncated download is a corrupt file, so this errors instead of returning a
+/// partial body — the caller maps that to 413 and tells the user the file is too
+/// large for the Remote surface.
+#[tauri::command]
+pub fn read_file_for_download(
+    path: String,
+    max_bytes: Option<usize>,
+) -> Result<FileDownloadContent, String> {
+    let resolved = path_utils::resolve_address_path_following_symlinks(&path, None);
+    let file_path = std::path::Path::new(&resolved);
+    let name = file_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if name.is_empty() {
+        return Err("Cannot download a path without a file name".to_string());
+    }
+    let ext = file_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| format!(".{}", value.to_lowercase()))
+        .unwrap_or_default();
+    let bytes = read_bounded_binary(&resolved, max_bytes, "file")?;
+    Ok(FileDownloadContent {
+        name: name.to_string(),
+        media_type: download_media_type(&ext).to_string(),
+        size: bytes.len(),
+        base64: base64_encode(&bytes),
+    })
+}
+
+/// Only the types the client needs to hand the OS a sensible default app.
+/// Anything else is a byte stream, which is honest and lets the OS decide.
+fn download_media_type(ext: &str) -> &'static str {
+    match ext {
+        ".png" => "image/png",
+        ".jpg" | ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".svg" => "image/svg+xml",
+        ".webp" => "image/webp",
+        ".bmp" => "image/bmp",
+        ".ico" => "image/x-icon",
+        ".avif" => "image/avif",
+        ".pdf" => "application/pdf",
+        ".zip" => "application/zip",
+        ".gz" | ".tgz" => "application/gzip",
+        ".tar" => "application/x-tar",
+        ".json" => "application/json",
+        ".csv" => "text/csv",
+        ".html" | ".htm" => "text/html",
+        ".md" => "text/markdown",
+        ".txt" | ".log" => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
 fn read_bounded_binary(
     resolved: &str,
     max_bytes: Option<usize>,
@@ -583,5 +657,100 @@ mod tests {
             }
             let _ = std::fs::remove_file(&path);
         }
+    }
+
+    /// The download payload is hand-mirrored in `ui/src/lib/tauri-api.ts` too, so
+    /// its wire keys are pinned for the same reason as the viewer union above.
+    #[test]
+    fn download_content_serializes_with_the_key_names_the_frontend_reads() {
+        let value = serde_json::to_value(FileDownloadContent {
+            name: "notes.md".into(),
+            media_type: "text/markdown".into(),
+            base64: "eA".into(),
+            size: 1,
+        })
+        .expect("serialize");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["base64", "mediaType", "name", "size"]);
+    }
+
+    #[test]
+    fn read_file_for_download_returns_the_whole_file_and_its_name_only() {
+        let path = temp_path("download.md");
+        std::fs::write(&path, b"# host notes").expect("write file");
+        let content = read_file_for_download(path.to_string_lossy().into_owned(), Some(1024))
+            .expect("download");
+        let expected_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .expect("file name");
+        assert_eq!(content.name, expected_name);
+        assert_eq!(content.media_type, "text/markdown");
+        assert_eq!(content.size, 12);
+        assert_eq!(base64_decode_to_string(&content.base64), "# host notes");
+        // The host path is the caller's input, never part of the response the
+        // client hands to a save dialog.
+        assert!(!content.name.contains(std::path::MAIN_SEPARATOR));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_file_for_download_gives_a_binary_kind_its_bytes() {
+        // `read_file_for_viewer` answers `Binary { size }` here — no bytes at
+        // all — which is exactly why download cannot reuse that path.
+        let path = temp_path("download.bin");
+        std::fs::write(&path, [0_u8, 1, 2, 255]).expect("write file");
+        let content = read_file_for_download(path.to_string_lossy().into_owned(), Some(1024))
+            .expect("download");
+        assert_eq!(content.media_type, "application/octet-stream");
+        assert_eq!(content.size, 4);
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn read_file_for_download_refuses_a_file_over_the_limit_instead_of_truncating() {
+        let path = temp_path("download_big.bin");
+        std::fs::write(&path, vec![b'a'; 64]).expect("write file");
+        let error = read_file_for_download(path.to_string_lossy().into_owned(), Some(16))
+            .expect_err("must refuse");
+        // A truncated download is a corrupt file, so this is an error, not a
+        // shorter body.
+        assert!(error.contains("16 byte"), "unexpected error: {error}");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn download_media_types_cover_what_the_client_hands_the_os() {
+        assert_eq!(download_media_type(".png"), "image/png");
+        assert_eq!(download_media_type(".pdf"), "application/pdf");
+        assert_eq!(download_media_type(".md"), "text/markdown");
+        assert_eq!(download_media_type(".unknown"), "application/octet-stream");
+        assert_eq!(download_media_type(""), "application/octet-stream");
+    }
+
+    fn base64_decode_to_string(encoded: &str) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut buffer = 0_u32;
+        let mut bits = 0_u32;
+        let mut bytes = Vec::new();
+        for symbol in encoded.bytes().filter(|byte| *byte != b'=') {
+            let index = ALPHABET
+                .iter()
+                .position(|candidate| *candidate == symbol)
+                .expect("base64 symbol") as u32;
+            buffer = (buffer << 6) | index;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                bytes.push((buffer >> bits) as u8);
+            }
+        }
+        String::from_utf8(bytes).expect("utf8")
     }
 }
