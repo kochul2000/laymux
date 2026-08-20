@@ -19,7 +19,7 @@ ADR-0028/0040의 Remote 키바 설정은 `Keys`가 연 소프트키만 선택하
 **Remote 입력 action은 `main`(기본행), `expanded`(Keys 확장행), `hidden`의 기기별 3-zone 배치를 하나의 surface-local 상태로 저장하고, Remote drawer의 Settings에서 편집한다.**
 
 - `laymux.remote.keybar`의 `zones`가 action의 배치와 각 행 안 순서의 단일 진실원이다. 고정 action ID는 `ctrl-c`, `keyboard`, `keys`, `send`, `composer`, `attachment`이고 일반 소프트키는 안정된 `soft:<key-id>` ID를 사용한다.
-- `sets`와 `custom`은 활성 일반 소프트키 집합만 결정한다. `zones`는 비활성 소프트키의 zone을 보존하며 다시 활성화해도 main/hidden 선택을 바꾸지 않는다. 기존 전체 소프트키 `order`와 새 custom 키를 활성 Keys 행 끝에 붙이는 ADR-0040 규칙은 유지하되 zone 소유권을 만들지 않는다.
+- `sets`와 `custom`은 활성 일반 소프트키 집합만 결정한다. `zones`는 비활성 소프트키의 zone과 행내 순서를 보존하며 다시 활성화해도 사용자가 정한 배치를 바꾸지 않는다. 기존 전체 소프트키 `order`는 `zones`에서 매번 재계산하는 ADR-0040 호환 projection으로만 유지하며 zone이나 행내 순서의 독립 소유권을 만들지 않는다. custom 키는 최초 선택 때만 ADR-0040대로 활성 Keys 행 끝에 붙이고, 비활성화 후 재활성화할 때는 보존된 zone과 순서를 복구한다.
 - 권장 기본값은 기본행 `Ctrl+C · Keyboard · Keys · Send`, Keys 확장행 `Composer 전환 · 기존 기본 특수키 배열`이며 첨부는 숨김이다. 기존 기본 특수키 배열은 `step`과 `nav` 세트의 기존 `KEY_ORDER` 결과다.
 - `Keys`는 구조 토글이므로 기본행 또는 숨김만 허용하고 확장행에는 둘 수 없다. Keys를 숨기면 확장 열림 상태를 즉시 `false`로 저장하고 행을 닫지만, 확장행 action과 순서는 변경하지 않는다. Keys를 기본행에 복구하면 보존된 구성을 다시 열 수 있다.
 - `Send`는 배치 설정을 보존하되 Composer mode에서만 렌더한다. desktop/mobile layout 모두 같은 표시 규칙을 쓰며 ADR-0036의 Enter gesture 분류는 유지한다. 즉 desktop layout은 Enter 전송도 유지하면서 명시적 Send action을 함께 보여 줄 수 있다.

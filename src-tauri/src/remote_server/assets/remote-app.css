@@ -1976,6 +1976,17 @@
         padding-top: 6px;
         user-select: none;
       }
+      .key-order-zone-label {
+        flex: 0 0 100%;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .key-order-zone-label[data-order-zone-label="expanded"] {
+        border-top: 1px solid var(--border);
+        margin-top: 2px;
+        padding-top: 5px;
+      }
       .key-order-chip {
         position: relative;
         touch-action: none;

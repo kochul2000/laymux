@@ -170,4 +170,183 @@ test.describe("Remote input action layout", () => {
     await customEnter().click();
     await expect(page.locator('#mainActionRow > [data-input-action="soft:enter"]')).toHaveCount(1);
   });
+
+  test("updates the Keys-row empty state when Send becomes visible in Composer", async ({
+    page,
+  }) => {
+    await page.addInitScript((key) => {
+      localStorage.setItem("laymux.remote.inputMode", "direct");
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          expanded: true,
+          sets: [],
+          custom: [],
+          zones: {
+            main: ["keys", "composer"],
+            expanded: ["send"],
+            hidden: ["ctrl-c", "keyboard", "attachment"],
+          },
+        }),
+      );
+    }, STORAGE_KEY);
+    await openMarkup(page);
+
+    const emptyState = page.locator("#keyRow > .key-row-empty");
+    await expect(page.locator("#keyBar")).toBeVisible();
+    await expect(page.locator("#keyRow > #composerSend")).toBeHidden();
+    await expect(emptyState).toBeVisible();
+
+    await page.locator("#mainActionRow > #inputModeToggle").click();
+    await expect(page.locator("#keyRow > #composerSend")).toBeVisible();
+    await expect(emptyState).toHaveCount(0);
+
+    await page.locator("#mainActionRow > #inputModeToggle").click();
+    await expect(page.locator("#keyRow > #composerSend")).toBeHidden();
+    await expect(emptyState).toBeVisible();
+  });
+
+  test("projects Action placement soft-key order into Key order and reload", async ({ page }) => {
+    const renderedSoftKeys = () =>
+      page.evaluate(() =>
+        ["mainActionRow", "keyRow"].flatMap((rowId) =>
+          [...document.querySelectorAll(`#${rowId} > .key-btn`)].map(
+            (button) => (button as HTMLElement).dataset.key,
+          ),
+        ),
+      );
+    const keyOrderChips = () =>
+      page
+        .locator("#inputLayoutEditor .key-order-chip")
+        .evaluateAll((chips) => chips.map((chip) => (chip as HTMLElement).dataset.orderKey));
+    const customEnter = () =>
+      page.locator(".key-chip-grid").getByRole("button", { name: "⏎", exact: true });
+
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Move Tab earlier").click();
+    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
+    expect((await renderedSoftKeys()).indexOf("tab")).toBeLessThan(
+      (await renderedSoftKeys()).indexOf("esc"),
+    );
+    await page.getByLabel("Place Tab").selectOption("main");
+    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
+    await expect(page.locator('#mainActionRow > [data-input-action="soft:tab"]')).toHaveCount(1);
+
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#drawerSettingsButton").click();
+    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
+
+    await customEnter().click();
+    await page.getByLabel("Move ⏎ earlier").click();
+    const configuredOrder = await renderedSoftKeys();
+    await customEnter().click();
+    await expect(page.locator('[data-input-action="soft:enter"]')).toHaveCount(0);
+    await customEnter().click();
+    await expect.poll(renderedSoftKeys).toEqual(configuredOrder);
+    await expect.poll(keyOrderChips).toEqual(configuredOrder);
+
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await page.locator("#drawerSettingsButton").click();
+    await expect.poll(renderedSoftKeys).toEqual(configuredOrder);
+    await expect.poll(keyOrderChips).toEqual(configuredOrder);
+  });
+
+  test("limits legacy Key order controls to the selected action row", async ({ page }) => {
+    await page.addInitScript((key) => {
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          expanded: true,
+          sets: [],
+          custom: ["tab", "enter", "esc", "stab"],
+          usedCustom: ["tab", "enter", "esc", "stab"],
+          zones: {
+            main: ["ctrl-c", "keyboard", "keys", "send", "soft:tab", "soft:enter"],
+            expanded: ["composer", "soft:esc", "soft:stab"],
+            hidden: ["attachment"],
+          },
+        }),
+      );
+    }, STORAGE_KEY);
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    const tab = page.locator('.key-order-chip[data-order-key="tab"]');
+    const enter = page.locator('.key-order-chip[data-order-key="enter"]');
+    const esc = page.locator('.key-order-chip[data-order-key="esc"]');
+    await expect(tab).toHaveAttribute("data-order-zone", "main");
+    await expect(tab).toHaveAttribute("aria-describedby", "keyOrderZoneMain");
+    await expect(esc).toHaveAttribute("data-order-zone", "expanded");
+    await expect(esc).toHaveAttribute("aria-describedby", "keyOrderZoneExpanded");
+
+    await enter.click();
+    await expect(page.getByRole("button", { name: "Move Enter left" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Move Enter right" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Move Enter to end" })).toBeDisabled();
+
+    await esc.click();
+    await expect(page.getByRole("button", { name: "Move Esc to start" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Move Esc left" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Move Esc right" })).toBeEnabled();
+
+    await enter.scrollIntoViewIfNeeded();
+    await esc.scrollIntoViewIfNeeded();
+    const enterBox = await enter.boundingBox();
+    const escBox = await esc.boundingBox();
+    expect(enterBox).not.toBeNull();
+    expect(escBox).not.toBeNull();
+    await page.mouse.move(enterBox!.x + enterBox!.width / 2, enterBox!.y + enterBox!.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(250);
+    await page.mouse.move(escBox!.x + 2, escBox!.y + escBox!.height / 2, { steps: 4 });
+    await expect(esc).not.toHaveClass(/drop-before|drop-after/);
+    await page.mouse.up();
+
+    await expect
+      .poll(() =>
+        page
+          .locator("#mainActionRow > .key-btn")
+          .evaluateAll((buttons) => buttons.map((button) => (button as HTMLElement).dataset.key)),
+      )
+      .toEqual(["tab", "enter"]);
+    await expect
+      .poll(() =>
+        page
+          .locator("#keyRow > .key-btn")
+          .evaluateAll((buttons) => buttons.map((button) => (button as HTMLElement).dataset.key)),
+      )
+      .toEqual(["esc", "stab"]);
+    await expect
+      .poll(() =>
+        page
+          .locator(".key-order-chip")
+          .evaluateAll((chips) => chips.map((chip) => (chip as HTMLElement).dataset.orderKey)),
+      )
+      .toEqual(["tab", "enter", "esc", "stab"]);
+  });
+
+  test("preserves the Settings scroll position while placement changes rerender", async ({
+    page,
+  }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    const settingsView = page.locator("#drawerSettingsView");
+    await page.getByLabel("Place Attach file").scrollIntoViewIfNeeded();
+    expect(await settingsView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await page.getByLabel("Place Attach file").selectOption("expanded");
+    await expect
+      .poll(() => settingsView.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+
+    await page.getByLabel("Move Attach file earlier").scrollIntoViewIfNeeded();
+    expect(await settingsView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await page.getByLabel("Move Attach file earlier").click();
+    await expect
+      .poll(() => settingsView.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+  });
 });

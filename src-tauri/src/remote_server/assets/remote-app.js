@@ -7535,6 +7535,7 @@
           expanded: false,
           sets: ["step", "nav"],
           custom: [],
+          usedCustom: [],
           order: KEY_ORDER,
           zones: {
             main: ["ctrl-c", "keyboard", "keys", "send"],
@@ -7567,6 +7568,25 @@
             expanded: ["composer", ...normalizedSoftOrder.map(softInputActionId)],
             hidden: [...DEFAULT_KEYBAR.zones.hidden],
           };
+        }
+
+        function projectSoftKeyOrderFromZones(zones) {
+          const seen = new Set();
+          const projected = [];
+          for (const zone of INPUT_ACTION_ZONES) {
+            for (const actionId of zones[zone]) {
+              const keyId = softKeyIdFromAction(actionId);
+              if (!KEY_DEFS[keyId] || seen.has(keyId)) continue;
+              seen.add(keyId);
+              projected.push(keyId);
+            }
+          }
+          for (const keyId of KEY_ORDER) {
+            if (seen.has(keyId)) continue;
+            seen.add(keyId);
+            projected.push(keyId);
+          }
+          return projected;
         }
 
         function normalizeInputLayoutConfig(raw) {
@@ -7624,6 +7644,9 @@
           const custom = Array.isArray(value.custom)
             ? [...new Set(value.custom.filter((id) => KEY_DEFS[id]))]
             : [];
+          const usedCustom = Array.isArray(value.usedCustom)
+            ? [...new Set(value.usedCustom.filter((id) => KEY_DEFS[id]))]
+            : [...custom];
           const expanded =
             typeof value.expanded === "boolean"
               ? value.expanded
@@ -7634,7 +7657,8 @@
             expanded: expanded && zones.main.includes("keys"),
             sets,
             custom,
-            order,
+            usedCustom,
+            order: projectSoftKeyOrderFromZones(zones),
             zones,
           };
         }
@@ -7669,6 +7693,22 @@
           return keyBarConfig.order.filter((id) => enabled.has(id));
         }
 
+        function resolvePlacedKeyIds() {
+          return ["main", "expanded"].flatMap(resolvePlacedKeyIdsInZone);
+        }
+
+        function resolvePlacedKeyIdsInZone(zone) {
+          if (zone !== "main" && zone !== "expanded") return [];
+          const enabled = new Set(resolveKeyIds());
+          return keyBarConfig.zones[zone]
+            .map(softKeyIdFromAction)
+            .filter((id) => id && enabled.has(id));
+        }
+
+        function syncKeyOrderProjection() {
+          keyBarConfig.order = projectSoftKeyOrderFromZones(keyBarConfig.zones);
+        }
+
         function commitKeyOrder(order) {
           keyBarConfig.order = order;
           const rank = new Map(order.map((id, index) => [softInputActionId(id), index]));
@@ -7685,12 +7725,19 @@
             }
             keyBarConfig.zones[zone] = merged;
           }
+          syncKeyOrderProjection();
           saveKeyBarConfig();
           renderInputActionRows();
         }
 
         function reorderKey(id, targetId, afterTarget) {
           if (id === targetId) return;
+          if (
+            inputActionZone(softInputActionId(id)) !==
+            inputActionZone(softInputActionId(targetId))
+          ) {
+            return;
+          }
           const order = keyBarConfig.order.filter((keyId) => keyId !== id);
           const targetIndex = order.indexOf(targetId);
           if (targetIndex < 0) return;
@@ -7699,7 +7746,9 @@
         }
 
         function moveKey(id, offset) {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIdsInZone(
+            inputActionZone(softInputActionId(id)),
+          );
           const index = visibleIds.indexOf(id);
           const targetIndex = index + offset;
           if (index < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
@@ -7714,7 +7763,9 @@
         }
 
         function moveKeyToEdge(id, toStart) {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIdsInZone(
+            inputActionZone(softInputActionId(id)),
+          );
           const index = visibleIds.indexOf(id);
           if (index < 0) return;
           const targetId = toStart ? visibleIds[0] : visibleIds[visibleIds.length - 1];
@@ -7729,17 +7780,13 @@
 
         function appendKeyToVisibleEnd(id, visibleIds) {
           if (visibleIds.includes(id) || visibleIds.length === 0) return;
-          const order = keyBarConfig.order.filter((keyId) => keyId !== id);
-          const lastVisibleIndex = order.indexOf(visibleIds[visibleIds.length - 1]);
-          if (lastVisibleIndex < 0) return;
-          order.splice(lastVisibleIndex + 1, 0, id);
-          keyBarConfig.order = order;
           // ADR-0040 puts a newly selected custom key at the end of the
           // visible Keys row. Preserve a user-selected main/hidden zone;
           // only reorder the default expanded placement.
           if (inputActionZone(softInputActionId(id)) === "expanded") {
             moveInputAction(softInputActionId(id), "expanded", false);
           }
+          syncKeyOrderProjection();
         }
 
         function keySequence(def) {
@@ -7935,10 +7982,11 @@
           if (actionId === "keys" && zone === "hidden") {
             keyBarConfig.expanded = false;
           }
+          syncKeyOrderProjection();
           if (!commit) return;
           saveKeyBarConfig();
           renderInputActionRows();
-          renderKeyPopover();
+          renderInputSettingsPreservingScroll();
           scheduleTerminalFit();
         }
 
@@ -7959,9 +8007,10 @@
           const index = actions.indexOf(actionId);
           const target = actions.indexOf(visible[targetVisibleIndex]);
           [actions[index], actions[target]] = [actions[target], actions[index]];
+          syncKeyOrderProjection();
           saveKeyBarConfig();
           renderInputActionRows();
-          renderKeyPopover();
+          renderInputSettingsPreservingScroll();
         }
 
         function enabledInputActionIds() {
@@ -8018,6 +8067,25 @@
           return btn;
         }
 
+        function syncExpandedRowEmptyState() {
+          const enabled = enabledInputActionIds();
+          const composerMode = currentInputMode() === "composer";
+          const hasVisibleAction = keyBarConfig.zones.expanded.some(
+            (actionId) =>
+              enabled.has(actionId) && (actionId !== "send" || composerMode),
+          );
+          const current = keyRowEl.querySelector(":scope > .key-row-empty");
+          if (hasVisibleAction) {
+            current?.remove();
+            return;
+          }
+          if (current) return;
+          const empty = document.createElement("div");
+          empty.className = "key-row-empty";
+          empty.textContent = "No actions in the Keys row. Open Remote Settings to restore them.";
+          keyRowEl.append(empty);
+        }
+
         function syncInputActionVisibility() {
           if (!keyBarConfig) return;
           const composerMode = currentInputMode() === "composer";
@@ -8034,6 +8102,7 @@
           keyBar.hidden = !keysVisible || !keyBarConfig.expanded;
           keyBarToggleButton.classList.toggle("active", !keyBar.hidden);
           keyBarToggleButton.setAttribute("aria-pressed", keyBar.hidden ? "false" : "true");
+          syncExpandedRowEmptyState();
         }
 
         function renderInputActionRows() {
@@ -8054,16 +8123,6 @@
               container.append(element);
             }
           }
-          if (
-            !keyBarConfig.zones.expanded.some(
-              (actionId) => enabled.has(actionId) && actionId !== "send",
-            )
-          ) {
-            const empty = document.createElement("div");
-            empty.className = "key-row-empty";
-            empty.textContent = "No actions in the Keys row. Open Remote Settings to restore them.";
-            keyRowEl.append(empty);
-          }
           syncInputActionVisibility();
           updateKeyBarControls();
         }
@@ -8082,9 +8141,17 @@
           return keyPopoverBody.closest(".drawer-view") || keyPopoverBody;
         }
 
+        function renderInputSettingsPreservingScroll() {
+          const scrollSurface = inputSettingsScrollSurface();
+          const scrollTop = scrollSurface.scrollTop;
+          renderKeyPopover();
+          scrollSurface.scrollTop = scrollTop;
+        }
+
         function installKeyOrderDrag(chip, id) {
           let gesture = null;
           let suppressClick = false;
+          const sourceZone = chip.dataset.orderZone;
 
           const releaseCapture = (pointerId) => {
             if (chip.hasPointerCapture(pointerId)) chip.releasePointerCapture(pointerId);
@@ -8129,7 +8196,8 @@
             const target = document
               .elementFromPoint(event.clientX, event.clientY)
               ?.closest(".key-order-chip");
-            const targetId = target?.dataset.orderKey || "";
+            const targetId =
+              target?.dataset.orderZone === sourceZone ? target.dataset.orderKey || "" : "";
             gesture.targetId = targetId === id ? "" : targetId;
             gesture.afterTarget = false;
             if (gesture.targetId) {
@@ -8183,7 +8251,7 @@
         }
 
         function renderKeyOrderSection() {
-          const visibleIds = resolveKeyIds();
+          const visibleIds = resolvePlacedKeyIds();
           if (!visibleIds.includes(selectedOrderKeyId)) selectedOrderKeyId = "";
           const section = document.createElement("section");
           section.className = "key-order-section";
@@ -8209,18 +8277,30 @@
           const grid = document.createElement("div");
           grid.className = "key-order-grid";
           grid.setAttribute("aria-label", "Current key order");
-          for (const id of visibleIds) {
-            const def = KEY_DEFS[id];
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "key-chip key-order-chip";
-            chip.dataset.orderKey = id;
-            chip.textContent = def.label;
-            chip.title = `${def.hint || def.label} — hold and drag to reorder`;
-            chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
-            chip.classList.toggle("selected", selectedOrderKeyId === id);
-            installKeyOrderDrag(chip, id);
-            grid.append(chip);
+          for (const zone of ["main", "expanded"]) {
+            const zoneIds = resolvePlacedKeyIdsInZone(zone);
+            if (zoneIds.length === 0) continue;
+            const zoneLabel = document.createElement("div");
+            zoneLabel.className = "key-order-zone-label";
+            zoneLabel.id = zone === "main" ? "keyOrderZoneMain" : "keyOrderZoneExpanded";
+            zoneLabel.dataset.orderZoneLabel = zone;
+            zoneLabel.textContent = zone === "main" ? "Main row" : "Keys row";
+            grid.append(zoneLabel);
+            for (const id of zoneIds) {
+              const def = KEY_DEFS[id];
+              const chip = document.createElement("button");
+              chip.type = "button";
+              chip.className = "key-chip key-order-chip";
+              chip.dataset.orderKey = id;
+              chip.dataset.orderZone = zone;
+              chip.textContent = def.label;
+              chip.title = `${def.hint || def.label} — hold and drag to reorder`;
+              chip.setAttribute("aria-describedby", zoneLabel.id);
+              chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
+              chip.classList.toggle("selected", selectedOrderKeyId === id);
+              installKeyOrderDrag(chip, id);
+              grid.append(chip);
+            }
           }
           if (visibleIds.length === 0) {
             const empty = document.createElement("div");
@@ -8237,7 +8317,9 @@
           keyPopoverBody.append(section);
 
           if (!selectedOrderKeyId) return;
-          const selectedIndex = visibleIds.indexOf(selectedOrderKeyId);
+          const selectedZone = inputActionZone(softInputActionId(selectedOrderKeyId));
+          const selectedZoneIds = resolvePlacedKeyIdsInZone(selectedZone);
+          const selectedIndex = selectedZoneIds.indexOf(selectedOrderKeyId);
           const def = KEY_DEFS[selectedOrderKeyId];
           const accessibleName = def.hint || def.label;
           const actions = document.createElement("div");
@@ -8245,13 +8327,13 @@
           actions.setAttribute("aria-label", "Selected key order actions");
           const selected = document.createElement("span");
           selected.className = "key-order-selected";
-          selected.textContent = `Selected: ${def.label}`;
+          selected.textContent = `Selected: ${def.label} (${selectedZone === "main" ? "Main row" : "Keys row"})`;
           actions.append(selected);
           const actionDefs = [
             ["First", `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
             ["←", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
-            ["→", `Move ${accessibleName} right`, selectedIndex === visibleIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
-            ["Last", `Move ${accessibleName} to end`, selectedIndex === visibleIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
+            ["→", `Move ${accessibleName} right`, selectedIndex === selectedZoneIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
+            ["Last", `Move ${accessibleName} to end`, selectedIndex === selectedZoneIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
           ];
           for (const [label, ariaLabel, disabled, action] of actionDefs) {
             const button = document.createElement("button");
@@ -8546,7 +8628,10 @@
                 keyBarConfig.custom = keyBarConfig.custom.filter((k) => k !== id);
               } else {
                 keyBarConfig.custom.push(id);
-                appendKeyToVisibleEnd(id, visibleIds);
+                if (!keyBarConfig.usedCustom.includes(id)) {
+                  keyBarConfig.usedCustom.push(id);
+                  appendKeyToVisibleEnd(id, visibleIds);
+                }
               }
               saveKeyBarConfig();
               renderKeyRow();

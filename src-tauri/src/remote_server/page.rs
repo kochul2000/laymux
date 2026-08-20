@@ -957,8 +957,16 @@ mod tests {
         assert!(html.contains("main: [\"ctrl-c\", \"keyboard\", \"keys\", \"send\"]"));
         assert!(html.contains("hidden: [\"attachment\"]"));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
+        assert!(html.contains("function projectSoftKeyOrderFromZones(zones)"));
+        assert!(html.contains("function syncKeyOrderProjection()"));
+        assert!(html.contains("function resolvePlacedKeyIdsInZone(zone)"));
         assert!(html.contains("function moveInputAction(actionId, zone, commit = true)"));
+        assert!(html.contains("function renderInputSettingsPreservingScroll()"));
         assert!(html.contains("function renderInputActionRows()"));
+        assert!(html.contains("function syncExpandedRowEmptyState()"));
+        assert!(html.contains("actionId !== \"send\" || composerMode"));
+        assert!(html.contains("chip.dataset.orderZone = zone;"));
+        assert!(html.contains("target?.dataset.orderZone === sourceZone"));
         assert!(html.contains("keyBarConfig.expanded = false;"));
         assert!(!html.contains("id=\"keyBarSettings\""));
         assert!(!html.contains("id=\"keyPopover\""));
