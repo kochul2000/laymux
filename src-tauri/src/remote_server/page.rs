@@ -962,6 +962,22 @@ mod tests {
     }
 
     #[test]
+    fn remote_page_file_viewer_download_asks_for_bytes_not_the_rendered_payload() {
+        let html = remote_client_source();
+        assert!(html.contains("id=\"fileViewerDownload\""));
+        assert!(html.contains("function downloadCurrentFileViewerFile()"));
+        // Its own endpoint (ADR-0185): `render` hands back a sanitized preview
+        // for HTML/Markdown and no bytes at all for binary or archive kinds.
+        assert!(html.contains("/remote/v1/file-viewer/download"));
+        assert!(html.contains("function saveDownloadInBrowser(payload)"));
+        assert!(html.contains("anchor.download = payload.name;"));
+        // The wrapper WebView has no download handler, so a browser-style save
+        // is a silent no-op there and must not be attempted.
+        assert!(html.contains("window.LaymuxNative?.saveRemoteFile"));
+        assert!(html.contains("This app version cannot save files. Update the app."));
+    }
+
+    #[test]
     fn remote_page_file_viewer_zoom_is_transient_display_state() {
         let html = remote_client_source();
         assert!(html.contains("const FILE_VIEWER_ZOOM_STEP = 0.25;"));

@@ -41,6 +41,22 @@ class RemoteBridge(
         activity.openExternalUrl(documentGeneration, url ?: return)
     }
 
+    /**
+     * Save a host file the Remote FileViewer downloaded (ADR-0185). The secure
+     * WebView has no download handler, so a browser-style `<a download>` is a
+     * silent no-op here; native writes the bytes to the shared Downloads
+     * collection instead.
+     */
+    @JavascriptInterface
+    fun saveRemoteFile(name: String?, mediaType: String?, base64: String?) {
+        activity.saveRemoteFile(
+            documentGeneration,
+            name ?: return,
+            mediaType.orEmpty(),
+            base64 ?: return,
+        )
+    }
+
     // OAuth loopback relay (ADR-0175): catch the provider's localhost
     // redirect on this device and hand it back to the Remote document.
     @JavascriptInterface

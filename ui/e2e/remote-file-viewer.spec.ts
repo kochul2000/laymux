@@ -7,11 +7,16 @@ const PNG_DATA_URL =
 
 async function installRemoteViewerMocks(
   context: BrowserContext,
-  options: { statusDelayMs?: number; renderDelayMs?: number } = {},
+  options: { statusDelayMs?: number; renderDelayMs?: number; downloadStatus?: number } = {},
 ) {
   const renderRequests: Array<{
     url: string;
     authorization: string | null;
+    lease: string | null;
+    fileViewerCapability: string | null;
+    body: Record<string, unknown>;
+  }> = [];
+  const downloadRequests: Array<{
     lease: string | null;
     fileViewerCapability: string | null;
     body: Record<string, unknown>;
@@ -67,6 +72,32 @@ async function installRemoteViewerMocks(
       resolveFirstStatusResponse = null;
       return;
     }
+    if (url.pathname === "/remote/v1/file-viewer/download") {
+      const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
+      downloadRequests.push({
+        lease: await request.headerValue("x-laymux-remote-lease"),
+        fileViewerCapability: await request.headerValue("x-laymux-remote-file-viewer"),
+        body,
+      });
+      if (options.downloadStatus) {
+        return route.fulfill({
+          status: options.downloadStatus,
+          json: { error: "File exceeds the 8388608 byte viewer limit" },
+        });
+      }
+      const path = String(body.path || "");
+      const name = path.split(/[\\/]/).pop() || "download";
+      return route.fulfill({
+        json: {
+          path,
+          name,
+          mediaType: "text/html",
+          // "<h1>host source</h1>" — the source, not the sanitized preview.
+          base64: "PGgxPmhvc3Qgc291cmNlPC9oMT4=",
+          size: 20,
+        },
+      });
+    }
     if (url.pathname === "/remote/v1/file-viewer/render") {
       const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
       renderRequests.push({
@@ -110,6 +141,7 @@ async function installRemoteViewerMocks(
 
   return {
     renderRequests,
+    downloadRequests,
     firstStatusResponse,
     statusRequestCount: () => statusRequestCount,
   };
@@ -316,4 +348,48 @@ test("keeps the file viewer drawer usable at mobile width", async ({ context, pa
     scrollWidth: element.scrollWidth,
   }));
   expect(header.scrollWidth).toBe(header.clientWidth);
+});
+
+test("downloads the host bytes, not the rendered preview", async ({ context, page }) => {
+  const { downloadRequests } = await installRemoteViewerMocks(context);
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  // An HTML file is the case that matters: `render` replaces its source with a
+  // sanitized preview document, so a save built from the overlay would write
+  // the wrong bytes.
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#fileViewerDownload").click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toBe("notes.html");
+  expect(downloadRequests).toEqual([
+    {
+      lease: "lease-481",
+      fileViewerCapability: "viewer-481",
+      body: { path: "C:\\work\\notes.html" },
+    },
+  ]);
+});
+
+test("a download failure is reported without closing the viewer", async ({ context, page }) => {
+  await installRemoteViewerMocks(context, { downloadStatus: 413 });
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\huge.bin");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  await page.locator("#fileViewerDownload").click();
+  await expect(page.locator("#fileViewerMessage")).toHaveText(
+    "File exceeds the 8388608 byte viewer limit",
+  );
+  await expect(page.locator("#fileViewerMessage")).toHaveClass(/error/);
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  // The button has to come back, not stay stuck on "Saving...".
+  await expect(page.locator("#fileViewerDownload")).toBeEnabled();
+  await expect(page.locator("#fileViewerDownload")).toHaveText("Download");
 });
