@@ -1,4 +1,4 @@
-import { readFileForViewer, statPaths } from "./tauri-api";
+import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
 import {
   decidePathLinkAction,
@@ -97,6 +97,22 @@ export async function handleRemoteFileViewerRequest(
       return err(
         `Path link validation failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+  if (method === "download") {
+    const maxBytes = params.maxBytes;
+    if (!Number.isSafeInteger(maxBytes) || (maxBytes as number) <= 0) {
+      return err("maxBytes must be a positive integer");
+    }
+    const path = normalizeViewerPath(typeof params.path === "string" ? params.path : "");
+    if (!path) return err("path is required");
+    try {
+      // Raw bytes, not a rendered payload: a download of an HTML or Markdown
+      // file must be the source the host holds, never the sanitized preview
+      // document that `render` returns in its place.
+      return ok({ path, ...(await readFileForDownload(path, maxBytes as number)) });
+    } catch (error) {
+      return err(error instanceof Error ? error.message : String(error));
     }
   }
   if (method !== "render") return err(`Unknown method: fileViewer.${method}`);

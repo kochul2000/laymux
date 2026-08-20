@@ -27,6 +27,13 @@ pub(super) struct FileViewerRenderRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct FileViewerDownloadRequest {
+    path: String,
+    lease_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct FileViewerPathLinkRequest {
     terminal_id: String,
     selection: String,
@@ -77,6 +84,40 @@ pub(super) async fn remote_file_viewer_render(
         Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
     };
     file_viewer_bridge_response(&server, &authorization, "render", params).await
+}
+
+pub(super) async fn remote_file_viewer_download(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<FileViewerDownloadRequest>,
+) -> Response {
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    let authorization = match file_viewer_authorization(
+        &server.app_state,
+        lease_id,
+        file_viewer_capability_from_headers(&headers),
+    ) {
+        Ok(authorization) => authorization,
+        Err(response) => return response,
+    };
+
+    let path = body.path.trim();
+    if path.is_empty() {
+        return json_error(StatusCode::BAD_REQUEST, "path is required");
+    }
+    file_viewer_bridge_response(
+        &server,
+        &authorization,
+        "download",
+        json!({
+            "path": path,
+            "maxBytes": MAX_REMOTE_FILE_VIEWER_BYTES,
+        }),
+    )
+    .await
 }
 
 pub(super) async fn remote_file_viewer_path_link(

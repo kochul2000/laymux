@@ -2056,6 +2056,7 @@
         gap: 4px;
       }
       .file-viewer-zoom button,
+      .file-viewer-download,
       .file-viewer-close {
         min-width: 26px;
         height: 24px;
@@ -2068,8 +2069,13 @@
         line-height: 1;
       }
       .file-viewer-zoom button:hover,
+      .file-viewer-download:hover,
       .file-viewer-close:hover {
         background: var(--hover-bg);
+      }
+      .file-viewer-download[disabled] {
+        color: var(--muted);
+        opacity: 0.6;
       }
       .file-viewer-zoom-level {
         min-width: 40px;

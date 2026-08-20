@@ -376,6 +376,7 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/workspaces")
         | (&Method::POST, "/remote/v1/workspaces/active")
         | (&Method::POST, "/remote/v1/file-viewer/render")
+        | (&Method::POST, "/remote/v1/file-viewer/download")
         | (&Method::POST, "/remote/v1/file-viewer/path-link")
         | (&Method::POST, "/remote/v1/oauth-relay/begin")
         | (&Method::POST, "/remote/v1/oauth-relay/forward")

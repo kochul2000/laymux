@@ -3,10 +3,14 @@ package com.laymux.android
 import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.net.Uri
+import android.provider.MediaStore
+import android.util.Base64
+import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Gravity
@@ -90,6 +94,7 @@ import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.RemoteBackGuard
 import com.laymux.android.web.RemoteBridge
 import com.laymux.android.web.RemoteDocumentAuthority
+import com.laymux.android.web.RemoteDownloadPolicy
 import com.laymux.android.web.RemoteLoadProgress
 import com.laymux.android.web.RemoteOutputOpen
 import com.laymux.android.web.RemoteResourceCache
@@ -117,6 +122,7 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicLong
+import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
@@ -893,6 +899,72 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 showCloudMessage("링크를 열 브라우저를 찾지 못했습니다.")
             }
         }
+    }
+
+    /**
+     * Save a file the Remote FileViewer downloaded (ADR-0185).
+     *
+     * The secure WebView has no download handler, so the browser's `<a download>` path is a
+     * silent no-op here. Native writes the bytes into the shared Downloads collection, which
+     * needs no runtime permission — but only from Android 10, where `MediaStore.Downloads`
+     * appeared. Older devices are told instead of being handed a silent failure.
+     */
+    fun saveRemoteFile(
+        documentGeneration: Long,
+        name: String,
+        mediaType: String,
+        base64: String,
+    ) {
+        if (!remoteBridgeActionsEnabled(documentGeneration)) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            runOnUiThread { showCloudMessage("파일 저장은 Android 10 이상에서 지원됩니다.") }
+            return
+        }
+        val bytes = try {
+            Base64.decode(base64, Base64.DEFAULT)
+        } catch (_: IllegalArgumentException) {
+            runOnUiThread { showCloudMessage("파일 데이터를 해석하지 못했습니다.") }
+            return
+        }
+        if (!RemoteDownloadPolicy.isWithinBound(bytes.size)) {
+            runOnUiThread { showCloudMessage("파일이 전송 한도를 넘었습니다.") }
+            return
+        }
+        val displayName = RemoteDownloadPolicy.safeDisplayName(name)
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, displayName)
+            put(
+                MediaStore.Downloads.MIME_TYPE,
+                mediaType.ifBlank { "application/octet-stream" },
+            )
+            // IS_PENDING keeps the entry invisible to other apps until the bytes are all
+            // there, so a failed write never leaves a truncated file behind.
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val resolver = contentResolver
+        val uri = try {
+            resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+        if (uri == null) {
+            runOnUiThread { showCloudMessage("저장 위치를 만들지 못했습니다.") }
+            return
+        }
+        val written = try {
+            resolver.openOutputStream(uri)?.use { stream -> stream.write(bytes) } != null
+        } catch (_: IOException) {
+            false
+        }
+        if (!written) {
+            resolver.delete(uri, null, null)
+            runOnUiThread { showCloudMessage("파일을 저장하지 못했습니다.") }
+            return
+        }
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        runOnUiThread { showCloudMessage("$displayName 을(를) 다운로드에 저장했습니다.") }
     }
 
     /**

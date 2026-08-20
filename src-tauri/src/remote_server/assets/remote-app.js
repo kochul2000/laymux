@@ -77,6 +77,7 @@
         const fileViewerZoomInButton = $("fileViewerZoomIn");
         const fileViewerZoomResetButton = $("fileViewerZoomReset");
         const fileViewerCloseButton = $("fileViewerClose");
+        const fileViewerDownloadButton = $("fileViewerDownload");
         const fileViewerBodyElement = $("fileViewerBody");
         const fileViewerMessageElement = $("fileViewerMessage");
         const fileViewerTextElement = $("fileViewerText");
@@ -252,6 +253,8 @@
         let fileViewerStatusRequestRevision = 0;
         let fileViewerPathRevision = 0;
         let fileViewerRequestRevision = 0;
+        let fileViewerPath = null;
+        let fileViewerDownloadInFlight = false;
         let fileViewerKind = null;
         let fileViewerZoom = 1;
         let fileViewerPinch = null;
@@ -1434,6 +1437,9 @@
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = "";
           fileViewerTitleElement.title = "";
+          fileViewerPath = null;
+          fileViewerDownloadInFlight = false;
+          applyFileViewerDownloadState();
           focusCurrentInputSurface();
         }
 
@@ -1448,6 +1454,9 @@
           fileViewerZoomElement.hidden = true;
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
+          fileViewerPath = path;
+          fileViewerDownloadInFlight = false;
+          applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
           setFileViewerMessage("Loading file…");
           remoteFetch("/remote/v1/file-viewer/render", {
@@ -1476,6 +1485,101 @@
                 true,
               );
             });
+        }
+
+        // Download goes to its own endpoint, never to whatever the overlay is
+        // showing (ADR-0185): `render` replaces an HTML/Markdown source with a
+        // sanitized preview document, and returns no bytes at all for binary or
+        // archive kinds. A save has to be the file the host holds.
+        function base64ToBytes(base64) {
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+          }
+          return bytes;
+        }
+
+        function saveDownloadInBrowser(payload) {
+          const blob = new Blob([base64ToBytes(payload.base64)], {
+            type: payload.mediaType || "application/octet-stream",
+          });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = payload.name;
+          anchor.rel = "noopener";
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          // Revoking synchronously can cancel the save the click just started.
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }
+
+        function downloadCurrentFileViewerFile() {
+          const path = fileViewerPath;
+          if (!leaseId || !fileViewerToken || !path || fileViewerDownloadInFlight) return;
+          // The wrapper WebView has no download handler of its own, so a browser
+          // save silently does nothing there. Refuse rather than pretend.
+          const nativeSave =
+            androidE2eMode && typeof window.LaymuxNative?.saveRemoteFile === "function"
+              ? window.LaymuxNative.saveRemoteFile
+              : null;
+          if (androidE2eMode && !nativeSave) {
+            setFileViewerMessage("This app version cannot save files. Update the app.", true);
+            return;
+          }
+          const requestRevision = fileViewerRequestRevision;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          fileViewerDownloadInFlight = true;
+          applyFileViewerDownloadState();
+          remoteFetch("/remote/v1/file-viewer/download", {
+            method: "POST",
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestFileViewerToken,
+            },
+            body: JSON.stringify({ path }),
+          })
+            .then((payload) => {
+              if (
+                requestRevision !== fileViewerRequestRevision ||
+                leaseId !== requestLeaseId ||
+                fileViewerToken !== requestFileViewerToken
+              ) {
+                return;
+              }
+              if (!payload || typeof payload.base64 !== "string" || typeof payload.name !== "string") {
+                throw new Error("Download response was not usable");
+              }
+              if (nativeSave) {
+                nativeSave(payload.name, payload.mediaType || "", payload.base64);
+                setFileViewerMessage(`Saved ${payload.name} to Downloads.`);
+                return;
+              }
+              saveDownloadInBrowser(payload);
+            })
+            .catch((error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              setFileViewerMessage(
+                error instanceof Error ? error.message : String(error),
+                true,
+              );
+            })
+            .finally(() => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              fileViewerDownloadInFlight = false;
+              applyFileViewerDownloadState();
+            });
+        }
+
+        function applyFileViewerDownloadState() {
+          fileViewerDownloadButton.disabled =
+            fileViewerDownloadInFlight || !fileViewerPath || !leaseId || !fileViewerToken;
+          fileViewerDownloadButton.textContent = fileViewerDownloadInFlight
+            ? "Saving..."
+            : "Download";
         }
 
         function fileViewerPinchDistance(pointers) {
@@ -8927,6 +9031,7 @@
           if (path) openFileViewerOverlay(path);
         });
         fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
         // dismiss the file they are reading.

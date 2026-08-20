@@ -312,6 +312,7 @@ pub fn run() {
             commands::save_window_geometry,
             commands::load_window_geometry,
             commands::read_file_for_viewer,
+            commands::read_file_for_download,
             commands::list_directory,
             commands::stat_path,
             commands::stat_paths,

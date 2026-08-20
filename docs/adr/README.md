@@ -202,6 +202,7 @@ ADR 이 필요한 대표 기준:
 | [0182](0182-remote-scroll-top-history-expansion.md) | Remote 스크롤 최상단은 더 깊은 screen checkpoint를 요청해 이전 출력을 받아온다 (0069 확장) | Accepted |
 | [0183](0183-remote-page-content-security-policy.md) | Remote 셸 문서에도 CSP 를 적용하고 WebSocket source 는 검증된 Host 만 반영한다 | Proposed |
 | [0184](0184-remote-file-viewer-in-page-overlay.md) | Remote FileViewer 는 새 탭이 아니라 Remote 문서 안 오버레이로 렌더한다 (0041 새 탭 결정 대체) | Proposed |
+| [0185](0185-remote-file-viewer-download.md) | Remote FileViewer 다운로드는 전용 bytes 엔드포인트로 받고 안드로이드는 네이티브가 저장한다 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
