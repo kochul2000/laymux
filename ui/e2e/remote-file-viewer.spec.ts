@@ -1,12 +1,13 @@
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { fileURLToPath } from "node:url";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
+/** 1x1 PNG, so the image branch renders a real decodable bitmap. */
+const PNG_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
 
 async function installRemoteViewerMocks(
   context: BrowserContext,
-  options: { statusDelayMs?: number } = {},
+  options: { statusDelayMs?: number; renderDelayMs?: number } = {},
 ) {
   const renderRequests: Array<{
     url: string;
@@ -25,22 +26,6 @@ async function installRemoteViewerMocks(
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
-    if (url.pathname === "/remote/viewer/") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.html`,
-        contentType: "text/html; charset=utf-8",
-        headers: {
-          "content-security-policy":
-            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'none'",
-        },
-      });
-    }
-    if (url.pathname === "/remote/viewer/viewer.js") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.js`,
-        contentType: "text/javascript; charset=utf-8",
-      });
-    }
     if (url.pathname === "/remote/v1/session/claim") {
       return route.fulfill({
         json: {
@@ -83,17 +68,35 @@ async function installRemoteViewerMocks(
       return;
     }
     if (url.pathname === "/remote/v1/file-viewer/render") {
+      const body = JSON.parse(request.postData() || "{}") as Record<string, unknown>;
       renderRequests.push({
         url: request.url(),
         authorization: await request.headerValue("authorization"),
         lease: await request.headerValue("x-laymux-remote-lease"),
         fileViewerCapability: await request.headerValue("x-laymux-remote-file-viewer"),
-        body: JSON.parse(request.postData() || "{}") as Record<string, unknown>,
+        body,
       });
+      if (options.renderDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, options.renderDelayMs));
+      }
+      const path = String(body.path || "");
+      if (path.endsWith(".png")) {
+        return route.fulfill({
+          json: { kind: "image", path, dataUrl: PNG_DATA_URL, size: 68 },
+        });
+      }
+      if (path.endsWith(".txt")) {
+        return route.fulfill({
+          json: { kind: "text", path, content: "plain host text", truncated: false },
+        });
+      }
+      if (path.endsWith(".bin")) {
+        return route.fulfill({ json: { kind: "binary", path, size: 4096 } });
+      }
       return route.fulfill({
         json: {
           kind: "text",
-          path: "C:\\work\\notes.html",
+          path,
           content: "<h1>served from the Laymux host</h1>",
           truncated: false,
           previewKind: "html",
@@ -112,41 +115,48 @@ async function installRemoteViewerMocks(
   };
 }
 
-test("opens a lease-gated host file in a credential-free new tab", async ({ context, page }) => {
-  const { renderRequests, firstStatusResponse, statusRequestCount } =
-    await installRemoteViewerMocks(context);
+async function connectRemote(page: import("@playwright/test").Page) {
   await page.goto("http://remote.test/remote/");
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
   await expect(page.locator("#exit")).toBeEnabled();
+}
+
+test("renders a lease-gated host file in this document, not a second tab", async ({
+  context,
+  page,
+}) => {
+  const { renderRequests, firstStatusResponse, statusRequestCount } =
+    await installRemoteViewerMocks(context);
+  await connectRemote(page);
 
   await page.locator("#navToggle").click();
   await page.waitForTimeout(100);
   expect(statusRequestCount()).toBe(0);
   await expect(page.locator("#fileViewerPath")).toHaveValue("");
-  await expect(page.locator("#fileViewerSection button")).toHaveCount(2);
   await expect(page.locator("#pullHostFileViewerPath")).toHaveText("From host");
   await page.locator("#pullHostFileViewerPath").click();
   await firstStatusResponse;
   await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\current.md");
-  await expect(page.locator("#openFileViewer")).toHaveText("Open viewer");
-  await expect(page.locator("#openCurrentFileViewer")).toHaveCount(0);
-  await expect(page.locator("#refreshFileViewer")).toHaveCount(0);
   await page.locator("#fileViewerPath").fill("C:\\work\\notes.html");
 
-  const popupPromise = page.waitForEvent("popup");
+  // A popup would be the old contract; the overlay must appear without one.
+  let popups = 0;
+  page.on("popup", () => {
+    popups += 1;
+  });
   await page.locator("#openFileViewer").click();
-  const popup = await popupPromise;
 
-  await expect(popup.frameLocator("#preview").locator("h1")).toHaveText(
+  const overlay = page.locator("#fileViewerOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work\\notes.html");
+  await expect(page.frameLocator("#fileViewerPreview").locator("h1")).toHaveText(
     "served from the Laymux host",
   );
-  await expect(popup).toHaveTitle("Laymux File Viewer");
-  expect(await popup.locator("body").getAttribute("data-hacked")).toBeNull();
-  expect(popup.url()).toBe("http://remote.test/remote/viewer/");
-  expect(popup.url()).not.toContain("remote-secret");
-  expect(popup.url()).not.toContain("lease-481");
-  expect(popup.url()).not.toContain("notes.html");
+  // The sandboxed iframe is the boundary, same origin either way (ADR-0041).
+  expect(await page.locator("body").getAttribute("data-hacked")).toBeNull();
+  expect(popups).toBe(0);
+  expect(page.url()).toBe("http://remote.test/remote/");
   expect(renderRequests).toEqual([
     {
       url: "http://remote.test/remote/v1/file-viewer/render",
@@ -158,12 +168,93 @@ test("opens a lease-gated host file in a credential-free new tab", async ({ cont
   ]);
 });
 
+test("Escape closes the viewer instead of reaching the terminal", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+
+  const overlay = page.locator("#fileViewerOverlay");
+  await expect(overlay).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toHaveText("plain host text");
+
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeHidden();
+  // Closing must not leave the previous file behind for the next open.
+  await expect(page.locator("#fileViewerText")).toHaveText("");
+  await expect(page.locator("#fileViewerTitle")).toHaveText("");
+});
+
+test("the backdrop closes the viewer but the file itself does not", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#openFileViewer").click();
+
+  const overlay = page.locator("#fileViewerOverlay");
+  await expect(overlay).toBeVisible();
+  await page.locator("#fileViewerText").click();
+  await expect(overlay).toBeVisible();
+
+  // Click the padding strip of the scrim, outside the dialog box.
+  await overlay.click({ position: { x: 2, y: 2 } });
+  await expect(overlay).toBeHidden();
+});
+
+test("zoom applies to an image and resets between files", async ({ context, page }) => {
+  await installRemoteViewerMocks(context);
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\shot.png");
+  await page.locator("#openFileViewer").click();
+
+  await expect(page.locator("#fileViewerImage")).toBeVisible();
+  await expect(page.locator("#fileViewerZoom")).toBeVisible();
+  await expect(page.locator("#fileViewerZoomLevel")).toHaveText("100%");
+
+  await page.locator("#fileViewerZoomIn").click();
+  await expect(page.locator("#fileViewerZoomLevel")).toHaveText("125%");
+  // Real width, not a transform, so the scroll container can reach the parts
+  // the zoom pushed off screen.
+  await expect(page.locator("#fileViewerBody")).toHaveAttribute(
+    "style",
+    /--file-viewer-image-width: 125%/,
+  );
+
+  await page.locator("#fileViewerZoomReset").click();
+  await expect(page.locator("#fileViewerZoomLevel")).toHaveText("100%");
+
+  await page.locator("#fileViewerClose").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\blob.bin");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerBinary")).toHaveText(
+    "Binary or unsupported file · 4.00 KiB",
+  );
+  // A binary placeholder has nothing to zoom.
+  await expect(page.locator("#fileViewerZoom")).toBeHidden();
+});
+
+test("a stale render never lands in the overlay of a newer file", async ({ context, page }) => {
+  await installRemoteViewerMocks(context, { renderDelayMs: 300 });
+  await connectRemote(page);
+  await page.locator("#navToggle").click();
+  await page.locator("#fileViewerPath").fill("C:\\work\\first.txt");
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+
+  await page.locator("#fileViewerClose").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  await page.waitForTimeout(400);
+  // The in-flight response for the closed file must not reopen anything.
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  await expect(page.locator("#fileViewerText")).toHaveText("");
+});
+
 test("keeps a newer edit when a host path request finishes", async ({ context, page }) => {
   const { firstStatusResponse } = await installRemoteViewerMocks(context, { statusDelayMs: 200 });
-  await page.goto("http://remote.test/remote/");
-  await page.locator("#token").fill("remote-secret");
-  await page.locator("#connect").click();
-  await expect(page.locator("#exit")).toBeEnabled();
+  await connectRemote(page);
   await page.locator("#navToggle").click();
 
   await page.locator("#fileViewerPath").fill("C:\\work\\draft.txt");
@@ -179,20 +270,11 @@ test("keeps a newer edit when a host path request finishes", async ({ context, p
 });
 
 test("does not open a path while IME is committing Enter", async ({ context, page }) => {
-  await installRemoteViewerMocks(context);
-  await page.goto("http://remote.test/remote/");
-  await page.locator("#token").fill("remote-secret");
-  await page.locator("#connect").click();
+  const { renderRequests } = await installRemoteViewerMocks(context);
+  await connectRemote(page);
   await page.locator("#navToggle").click();
   const input = page.locator("#fileViewerPath");
   await input.fill("C:\\work\\한글.md");
-  await page.evaluate(() => {
-    (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls = 0;
-    window.open = () => {
-      (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls! += 1;
-      return null;
-    };
-  });
 
   await input.dispatchEvent("keydown", { key: "Enter", code: "Enter", isComposing: true });
   await input.evaluate((element) => {
@@ -201,19 +283,14 @@ test("does not open a path while IME is committing Enter", async ({ context, pag
     element.dispatchEvent(event);
   });
 
-  expect(
-    await page.evaluate(
-      () => (window as Window & { fileViewerOpenCalls?: number }).fileViewerOpenCalls,
-    ),
-  ).toBe(0);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+  expect(renderRequests).toEqual([]);
 });
 
 test("keeps the file viewer drawer usable at mobile width", async ({ context, page }) => {
   await installRemoteViewerMocks(context);
   await page.setViewportSize({ width: 320, height: 640 });
-  await page.goto("http://remote.test/remote/");
-  await page.locator("#token").fill("remote-secret");
-  await page.locator("#connect").click();
+  await connectRemote(page);
   await page.locator("#navToggle").click();
   await page
     .locator("#fileViewerPath")
@@ -228,4 +305,15 @@ test("keeps the file viewer drawer usable at mobile width", async ({ context, pa
   expect(panel.scrollWidth).toBe(panel.clientWidth);
   expect(panel.inputWidth).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+
+  await page.locator("#openFileViewer").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  // The overlay is the reading surface on a phone: it must not push the page
+  // sideways, and the header must stay on one line.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
+  const header = await page.locator(".file-viewer-header").evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(header.scrollWidth).toBe(header.clientWidth);
 });

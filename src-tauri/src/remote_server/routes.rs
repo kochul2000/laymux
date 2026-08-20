@@ -56,7 +56,6 @@ use super::page_assets::remote_hashed_asset;
 use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROUTE_PATH};
 use super::terminal_info::remote_terminal_infos;
 use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
-use super::viewer_page::{remote_viewer_javascript, remote_viewer_page};
 use super::viewer_routes::{
     remote_file_viewer_path_link, remote_file_viewer_render, remote_file_viewer_status,
 };
@@ -301,8 +300,6 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
         // vendor assets.
         .route(MANIFEST_ROUTE_PATH, get(remote_manifest))
         .route(ICON_ROUTE_PATH, get(remote_pwa_icon))
-        .route("/remote/viewer/", get(remote_viewer_page))
-        .route("/remote/viewer/viewer.js", get(remote_viewer_javascript))
         .merge(api_routes)
 }
 

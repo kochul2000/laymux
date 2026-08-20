@@ -2005,6 +2005,122 @@
         background: var(--hover-bg);
       }
 
+      /* Host file viewer (ADR-0184). Fills the surface rather than centring a
+         card: a file is read, and on a phone a centred dialog wastes the rows
+         that reading needs. */
+      .file-viewer-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        padding: 8px;
+        background: #0000008c;
+      }
+      .file-viewer-dialog {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: var(--bg-base);
+        overflow: hidden;
+      }
+      .file-viewer-header {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-surface);
+      }
+      .file-viewer-title {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        /* The tail of a host path identifies the file; the drive letter does
+           not. Keep the end visible when it overflows. */
+        direction: rtl;
+        text-align: left;
+      }
+      .file-viewer-zoom {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 4px;
+      }
+      .file-viewer-zoom button,
+      .file-viewer-close {
+        min-width: 26px;
+        height: 24px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+        color: var(--text);
+        font-size: var(--fs-sm);
+        line-height: 1;
+      }
+      .file-viewer-zoom button:hover,
+      .file-viewer-close:hover {
+        background: var(--hover-bg);
+      }
+      .file-viewer-zoom-level {
+        min-width: 40px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        text-align: center;
+      }
+      .file-viewer-body {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        /* Pinch zoom is handled by the client, so the browser must not claim
+           the gesture and zoom the whole page instead. */
+        touch-action: pan-x pan-y;
+      }
+      .file-viewer-message,
+      .file-viewer-binary {
+        padding: 14px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
+      }
+      .file-viewer-message.error {
+        color: var(--danger);
+      }
+      .file-viewer-text {
+        margin: 0;
+        padding: 12px;
+        min-width: min-content;
+        font-size: var(--file-viewer-text-size, var(--fs-md));
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .file-viewer-image {
+        display: block;
+        margin: 0 auto;
+        padding: 12px;
+        width: var(--file-viewer-image-width, auto);
+        max-width: var(--file-viewer-image-max-width, 100%);
+        height: auto;
+      }
+      .file-viewer-preview {
+        display: block;
+        width: 100%;
+        height: 100%;
+        min-height: 320px;
+        border: 0;
+        background: var(--bg-surface);
+      }
+
       /* OAuth loopback relay (ADR-0175) */
       .oauth-relay-scrim {
         position: fixed;

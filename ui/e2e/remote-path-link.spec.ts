@@ -1,8 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { fileURLToPath } from "node:url";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
-
-const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
 // The drawer renders pane rows from `workspaces[].panes`, so the fixture has
 // to carry the same panes there as in `activeWorkspace`.
@@ -184,18 +181,6 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
     const request = route.request();
     const url = new URL(request.url());
     if (await fulfillRemoteClientAsset(route, url.pathname)) return;
-    if (url.pathname === "/remote/viewer/") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.html`,
-        contentType: "text/html; charset=utf-8",
-      });
-    }
-    if (url.pathname === "/remote/viewer/viewer.js") {
-      return route.fulfill({
-        path: `${remoteRoot}viewer_page.js`,
-        contentType: "text/javascript; charset=utf-8",
-      });
-    }
     if (url.pathname === "/remote/v1/session/claim") {
       return route.fulfill({
         json: {
@@ -352,19 +337,20 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
 
   const box = await decoration.boundingBox();
   expect(box).not.toBeNull();
-  const popupPromise = page.waitForEvent("popup");
   await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
-  const popup = await popupPromise;
 
-  await expect(popup.locator("#text")).toContainText("fn main() {}");
-  expect(popup.url()).toBe("http://remote.test/remote/viewer/");
+  // The link opens the in-page viewer (ADR-0184), not a second tab.
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerText")).toContainText("fn main() {}");
+  await expect(page.locator("#fileViewerTitle")).toHaveText("C:\\work\\src\\main.rs");
   await expect
     .poll(() => renderRequests)
     .toEqual([{ source: "path", path: "C:\\work\\src\\main.rs" }]);
 
   // A resize/reflow while the stat bridge is pending must cancel the old
   // validation and re-run it against the current xterm selection geometry.
-  await popup.close();
+  await page.locator("#fileViewerClose").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
   const resizeHold = holdNextPathLink();
   await page.evaluate(() => {
     const term = (window as CapturedTerminalWindow).__remoteTerm;

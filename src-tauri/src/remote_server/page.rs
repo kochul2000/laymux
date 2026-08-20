@@ -911,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_contains_file_viewer_new_tab_handshake() {
+    fn remote_page_html_contains_in_page_file_viewer() {
         let html = remote_client_source();
         assert!(html.contains("id=\"fileViewerSection\""));
         assert!(html.contains(
@@ -927,14 +927,50 @@ mod tests {
         assert!(html.contains("let fileViewerStatusRequestRevision = 0;"));
         assert!(html.contains("let fileViewerPathRevision = 0;"));
         assert!(!html.contains("refreshFileViewerStatus().catch(() => {});"));
-        assert!(html.contains("/remote/viewer/"));
-        assert!(html.contains("laymux:file-viewer-ready"));
-        assert!(html.contains("laymux:file-viewer-session"));
-        assert!(html.contains("event.origin !== window.location.origin"));
-        assert!(html.contains("fileViewerToken: session.fileViewerToken"));
         assert!(html.contains("event.isComposing ||"));
         assert!(html.contains("event.keyCode === 229 ||"));
-        assert!(!html.contains("/remote/viewer/?token="));
+        // The viewer renders in this document (ADR-0184): no second tab, so no
+        // `window.open`, no credential handshake, and no viewer bootstrap route.
+        assert!(html.contains("id=\"fileViewerOverlay\""));
+        assert!(html.contains("function openFileViewerOverlay(path)"));
+        assert!(html.contains("function closeFileViewer()"));
+        assert!(html.contains("body: JSON.stringify({ source: \"path\", path }),"));
+        assert!(!html.contains("/remote/viewer/"));
+        assert!(!html.contains("window.open(\"/remote/viewer/\""));
+        assert!(!html.contains("laymux:file-viewer-ready"));
+        assert!(!html.contains("laymux:file-viewer-session"));
+        assert!(!html.contains("Popup blocked. Allow popups and try again."));
+        // The Android wrapper has no second window, which is why the section was
+        // hidden there. In-page rendering removes the reason.
+        assert!(!html.contains("fileViewerSection.hidden = true;"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_keeps_the_sandboxed_preview_boundary() {
+        let html = remote_client_source();
+        // Same origin as the old tab (ADR-0041), so the boundary that matters is
+        // the empty sandbox: no allow-scripts, no allow-same-origin.
+        assert!(html.contains("id=\"fileViewerPreview\""));
+        assert!(html.contains("sandbox=\"\""));
+        assert!(html.contains("fileViewerPreviewElement.setAttribute(\"sandbox\", \"\");"));
+        assert!(html.contains("fileViewerPreviewElement.srcdoc = payload.previewDocument;"));
+        // Images stay a decoded `data:` URL and text stays textContent — neither
+        // path may become HTML in this document.
+        assert!(html.contains("/^data:image\\//i.test(payload.dataUrl || \"\")"));
+        assert!(html.contains("fileViewerTextElement.textContent = payload.content || \"\";"));
+        assert!(!html.contains("fileViewerTextElement.innerHTML"));
+    }
+
+    #[test]
+    fn remote_page_file_viewer_zoom_is_transient_display_state() {
+        let html = remote_client_source();
+        assert!(html.contains("const FILE_VIEWER_ZOOM_STEP = 0.25;"));
+        assert!(html.contains("function handleFileViewerPointerDown(event)"));
+        assert!(html.contains("fileViewerPointers.size === 2"));
+        assert!(html.contains("function handleFileViewerWheel(event)"));
+        assert!(html.contains("{ passive: false }"));
+        // Zoom is per-view state, never a setting: nothing persists it.
+        assert!(!html.contains("laymux.remote.fileViewerZoom"));
     }
 
     #[test]
@@ -957,7 +993,7 @@ mod tests {
         assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
-        assert!(html.contains("openFileViewerTab(press.path)"));
+        assert!(html.contains("openFileViewerOverlay(press.path)"));
         assert!(html.contains("clearPathLinkSelection()"));
     }
 

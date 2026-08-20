@@ -282,6 +282,43 @@
         </button>
       </footer>
     </div>
+    <!-- File viewer (ADR-0184). Renders in this document instead of a second
+         tab: `window.open` is unavailable in the Android wrapper and unreliable
+         in an installed PWA. The sandboxed iframe below is the security
+         boundary that the separate tab never provided — same origin either way
+         (ADR-0041) — so sanitized HTML/Markdown still runs script-less. -->
+    <div id="fileViewerOverlay" class="file-viewer-overlay" hidden>
+      <div
+        class="file-viewer-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Host file viewer"
+      >
+        <header class="file-viewer-header">
+          <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
+          <div id="fileViewerZoom" class="file-viewer-zoom" hidden>
+            <button id="fileViewerZoomOut" type="button" aria-label="Zoom out">−</button>
+            <span id="fileViewerZoomLevel" class="file-viewer-zoom-level">100%</span>
+            <button id="fileViewerZoomIn" type="button" aria-label="Zoom in">+</button>
+            <button id="fileViewerZoomReset" type="button" aria-label="Reset zoom">Reset</button>
+          </div>
+          <button id="fileViewerClose" class="file-viewer-close" type="button" aria-label="Close the file viewer">✕</button>
+        </header>
+        <div id="fileViewerBody" class="file-viewer-body">
+          <div id="fileViewerMessage" class="file-viewer-message">Loading file…</div>
+          <pre id="fileViewerText" class="file-viewer-text" hidden></pre>
+          <img id="fileViewerImage" class="file-viewer-image" alt="Host file preview" hidden />
+          <iframe
+            id="fileViewerPreview"
+            class="file-viewer-preview"
+            title="Safe file preview"
+            sandbox=""
+            hidden
+          ></iframe>
+          <div id="fileViewerBinary" class="file-viewer-binary" hidden></div>
+        </div>
+      </div>
+    </div>
     <!-- OAuth loopback relay (ADR-0175). Shown when a terminal link is an
          installed-app OAuth flow: the provider redirects to the desktop's
          localhost listener, so the redirect is relayed back to the PC. -->
