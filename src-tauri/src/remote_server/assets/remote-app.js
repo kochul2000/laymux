@@ -157,19 +157,6 @@
         const AUTO_CONNECT_RETRY_MAX_MS = 15000;
         const HEARTBEAT_RETRY_DELAY_MS = 1000;
         const TRANSIENT_CONNECTION_NOTICE_DELAY_MS = 2000;
-        const STATUS_SPINNER_FRAME_MS = 100;
-        const STATUS_SPINNER_FRAMES = Object.freeze([
-          "⠋",
-          "⠙",
-          "⠹",
-          "⠸",
-          "⠼",
-          "⠴",
-          "⠦",
-          "⠧",
-          "⠇",
-          "⠏",
-        ]);
         // The viewer keeps its own zoom: transient display state, never a
         // setting — there is no "default zoom" for looking at one file.
         const FILE_VIEWER_ZOOM_STEP = 0.25;
@@ -219,8 +206,6 @@
         let transientConnectionNoticeVisible = false;
         let heartbeatInterrupted = false;
         let outputInterrupted = false;
-        let statusSpinnerTimer = null;
-        let statusSpinnerFrame = 0;
         let activeTerminalId = null;
         let activeGithubRepoBase = null;
         let githubRepoRequestRevision = 0;
@@ -489,31 +474,11 @@
           })
         });
 
-        function stopStatusSpinner() {
-          if (statusSpinnerTimer) {
-            clearInterval(statusSpinnerTimer);
-            statusSpinnerTimer = null;
-          }
-          statusSpinnerFrame = 0;
-          statusSpinnerEl.textContent = "";
-          statusSpinnerEl.hidden = true;
-        }
-
-        function startStatusSpinner() {
-          stopStatusSpinner();
-          statusSpinnerEl.hidden = false;
-          if (
-            typeof matchMedia === "function" &&
-            matchMedia("(prefers-reduced-motion: reduce)").matches
-          ) {
-            statusSpinnerEl.textContent = "⠿";
-            return;
-          }
-          statusSpinnerEl.textContent = STATUS_SPINNER_FRAMES[statusSpinnerFrame];
-          statusSpinnerTimer = setInterval(() => {
-            statusSpinnerFrame = (statusSpinnerFrame + 1) % STATUS_SPINNER_FRAMES.length;
-            statusSpinnerEl.textContent = STATUS_SPINNER_FRAMES[statusSpinnerFrame];
-          }, STATUS_SPINNER_FRAME_MS);
+        // The spinner is a CSS ring (.status-spinner): the animation and the
+        // reduced-motion fallback both live in the stylesheet, so busy state is
+        // one attribute toggle here.
+        function setStatusSpinnerVisible(visible) {
+          statusSpinnerEl.hidden = !visible;
         }
 
         function renderStatus(message, error, warning, busy) {
@@ -521,8 +486,7 @@
           statusEl.classList.toggle("error", error);
           statusEl.classList.toggle("warning", warning);
           statusEl.setAttribute("aria-busy", busy ? "true" : "false");
-          if (busy) startStatusSpinner();
-          else stopStatusSpinner();
+          setStatusSpinnerVisible(busy);
         }
 
         function setStatus(message, error = false, warning = false) {

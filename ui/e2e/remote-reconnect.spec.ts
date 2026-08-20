@@ -269,7 +269,11 @@ async function scrollRemoteViewportUp(page: Page, lines: number) {
   }, lines);
 }
 
-test("a pending top-bar action shows and then clears its text spinner", async ({ page }) => {
+function spinnerAnimationName(spinner: Locator) {
+  return spinner.evaluate((el) => getComputedStyle(el).animationName);
+}
+
+test("a pending top-bar action shows and then clears its spinner", async ({ page }) => {
   await installRemoteMocks(page, { claimDelayMs: 600 });
   await instrumentRemotePage(page);
 
@@ -280,7 +284,9 @@ test("a pending top-bar action shows and then clears its text spinner", async ({
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(status).toHaveAttribute("aria-busy", "true");
   await expect(spinner).toBeVisible();
-  await expect(spinner).toHaveText(/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]$/);
+  // The marker is a drawn ring, not a glyph: it carries no text at any frame.
+  await expect(spinner).toHaveText("");
+  expect(await spinnerAnimationName(spinner)).toBe("status-spinner-spin");
 
   await expect(page.locator("#statusText")).toHaveText("Main · Pane 1");
   await expect(status).toHaveAttribute("aria-busy", "false");
@@ -297,9 +303,22 @@ test("reduced motion keeps the pending marker static", async ({ page }) => {
   const spinner = page.locator("#statusSpinner");
   await expect(page.locator("#statusText")).toHaveText("Claiming remote control…");
   await expect(spinner).toBeVisible();
-  await expect(spinner).toHaveText("⠿");
-  await page.waitForTimeout(150);
-  await expect(spinner).toHaveText("⠿");
+  expect(await spinnerAnimationName(spinner)).toBe("none");
+  // Static marker, but still a marker: the ring closes instead of spinning.
+  const borders = await spinner.evaluate((el) => {
+    const style = getComputedStyle(el);
+    return {
+      top: style.borderTopColor,
+      right: style.borderRightColor,
+      rightStyle: style.borderRightStyle,
+      width: style.width,
+      height: style.height,
+    };
+  });
+  expect(borders.top).toBe(borders.right);
+  expect(borders.rightStyle).toBe("solid");
+  expect(borders.width).toBe("10px");
+  expect(borders.height).toBe("10px");
 });
 
 test("a disconnected paste reports a static warning instead of endless reconnect activity", async ({
