@@ -112,9 +112,20 @@ pub(super) fn secure_page_response(
         &websocket_csp_sources(request_headers),
     );
     let headers = response.headers_mut();
-    if let Ok(value) = HeaderValue::from_str(&policy) {
-        headers.insert(header::CONTENT_SECURITY_POLICY, value);
-    }
+    // Fail closed. `is_bare_authority` should make an unencodable value
+    // impossible, but "the validator let something through" must not be the one
+    // case that ships the document with no policy at all — fall back to the
+    // template's own WebSocket-less form, which is a compile-time constant.
+    let value = HeaderValue::from_str(&policy)
+        .or_else(|_| {
+            HeaderValue::from_str(
+                &REMOTE_PAGE_CSP_TEMPLATE
+                    .trim_end()
+                    .replace(WS_SOURCES_PLACEHOLDER, ""),
+            )
+        })
+        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
+    headers.insert(header::CONTENT_SECURITY_POLICY, value);
     headers.insert(
         header::REFERRER_POLICY,
         HeaderValue::from_static("no-referrer"),
