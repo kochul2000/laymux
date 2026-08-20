@@ -452,8 +452,6 @@ fn resource_path_allowed(path: &str) -> bool {
             | "/remote/vendor/addon-fit.js"
             | "/remote/vendor/addon-web-links.js"
             | "/remote/manifest.webmanifest"
-            | "/remote/viewer/"
-            | "/remote/viewer/viewer.js"
     ) {
         return true;
     }

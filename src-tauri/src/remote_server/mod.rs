@@ -21,7 +21,6 @@ mod render_checkpoint;
 mod routes;
 mod terminal_info;
 mod update_routes;
-mod viewer_page;
 mod viewer_routes;
 mod widget_routes;
 

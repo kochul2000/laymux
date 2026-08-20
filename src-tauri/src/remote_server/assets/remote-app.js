@@ -69,6 +69,20 @@
         const fileViewerPathInput = $("fileViewerPath");
         const pullHostFileViewerPathButton = $("pullHostFileViewerPath");
         const openFileViewerButton = $("openFileViewer");
+        const fileViewerOverlayElement = $("fileViewerOverlay");
+        const fileViewerTitleElement = $("fileViewerTitle");
+        const fileViewerZoomElement = $("fileViewerZoom");
+        const fileViewerZoomLevelElement = $("fileViewerZoomLevel");
+        const fileViewerZoomOutButton = $("fileViewerZoomOut");
+        const fileViewerZoomInButton = $("fileViewerZoomIn");
+        const fileViewerZoomResetButton = $("fileViewerZoomReset");
+        const fileViewerCloseButton = $("fileViewerClose");
+        const fileViewerBodyElement = $("fileViewerBody");
+        const fileViewerMessageElement = $("fileViewerMessage");
+        const fileViewerTextElement = $("fileViewerText");
+        const fileViewerImageElement = $("fileViewerImage");
+        const fileViewerPreviewElement = $("fileViewerPreview");
+        const fileViewerBinaryElement = $("fileViewerBinary");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
         const attachmentButton = $("attachFile");
@@ -152,6 +166,12 @@
           "⠇",
           "⠏",
         ]);
+        // The viewer keeps its own zoom: transient display state, never a
+        // setting — there is no "default zoom" for looking at one file.
+        const FILE_VIEWER_ZOOM_STEP = 0.25;
+        const FILE_VIEWER_ZOOM_MIN = 0.25;
+        const FILE_VIEWER_ZOOM_MAX = 5;
+        const FILE_VIEWER_TEXT_BASE_PX = 13;
         const REMOTE_FONT_SIZE_MIN = 6;
         const REMOTE_FONT_SIZE_MAX = 72;
         const REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
@@ -231,7 +251,11 @@
         let fileViewerStatusInFlight = false;
         let fileViewerStatusRequestRevision = 0;
         let fileViewerPathRevision = 0;
-        const pendingFileViewerWindows = new Map();
+        let fileViewerRequestRevision = 0;
+        let fileViewerKind = null;
+        let fileViewerZoom = 1;
+        let fileViewerPinch = null;
+        const fileViewerPointers = new Map();
         const REMOTE_PATH_LINK_MAX_SELECTION_LENGTH = 1024;
         const PATH_LINK_CLICK_SLOP_PX = 4;
         const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;
@@ -412,9 +436,6 @@
         // changes the surrounding desktop layout rather than releasing a lease.
         desktopModeHeaderButton.hidden = !localAppMode;
         desktopModeDrawerButton.hidden = !localAppMode;
-        if (androidE2eMode) {
-          fileViewerSection.hidden = true;
-        }
         // Layout naming (canonical, ADR-0036):
         //   desktop layout — Enter sends, Shift+Enter newline, no Send button.
         //   mobile layout  — Enter is a newline, the Send button sends.
@@ -1256,47 +1277,251 @@
           }
         }
 
-        function openFileViewerTab(path) {
-          if (!leaseId || !fileViewerToken) return;
-          const viewerWindow = window.open("/remote/viewer/", "_blank");
-          if (!viewerWindow) {
-            renderFileViewerState("Popup blocked. Allow popups and try again.", true);
-            return;
-          }
-          const timeoutId = setTimeout(() => pendingFileViewerWindows.delete(viewerWindow), 30000);
-          pendingFileViewerWindows.set(viewerWindow, {
-            path,
-            token: token(),
-            leaseId,
-            fileViewerToken,
-            timeoutId,
-          });
-        }
-
-        function handleFileViewerReady(event) {
-          if (event.origin !== window.location.origin || !event.data || event.data.type !== "laymux:file-viewer-ready") {
-            return;
-          }
-          const session = pendingFileViewerWindows.get(event.source);
-          if (!session) return;
-          pendingFileViewerWindows.delete(event.source);
-          clearTimeout(session.timeoutId);
-          event.source.postMessage(
-            {
-              type: "laymux:file-viewer-session",
-              token: session.token,
-              leaseId: session.leaseId,
-              fileViewerToken: session.fileViewerToken,
-              source: "path",
-              path: session.path,
-            },
-            window.location.origin,
+        // The viewer renders in this document (ADR-0184). The render API is the
+        // same one the separate tab called; what goes away is `window.open` and
+        // the postMessage handshake that carried credentials to a second
+        // document — the Android wrapper has no second window at all, and an
+        // installed PWA loses the opener relationship the handshake needed.
+        function fileViewerZoomStep(zoom, direction) {
+          const next = zoom + direction * FILE_VIEWER_ZOOM_STEP;
+          return Math.min(
+            FILE_VIEWER_ZOOM_MAX,
+            Math.max(FILE_VIEWER_ZOOM_MIN, Math.round(next * 100) / 100),
           );
         }
 
-        function clearPendingFileViewerWindows() {
-          for (const session of pendingFileViewerWindows.values()) clearTimeout(session.timeoutId);
-          pendingFileViewerWindows.clear();
+        function applyFileViewerZoom() {
+          const percent = Math.round(fileViewerZoom * 100);
+          fileViewerZoomLevelElement.textContent = `${percent}%`;
+          if (fileViewerKind === "image") {
+            // Real width, not a transform: a scaled element keeps its original
+            // box, so the scroll container would never let the user reach the
+            // parts a zoom just pushed off screen.
+            fileViewerBodyElement.style.setProperty(
+              "--file-viewer-image-width",
+              `${percent}%`,
+            );
+            fileViewerBodyElement.style.setProperty(
+              "--file-viewer-image-max-width",
+              fileViewerZoom > 1 ? "none" : "100%",
+            );
+            return;
+          }
+          if (fileViewerKind === "text") {
+            fileViewerBodyElement.style.setProperty(
+              "--file-viewer-text-size",
+              `${(FILE_VIEWER_TEXT_BASE_PX * fileViewerZoom).toFixed(2)}px`,
+            );
+          }
+        }
+
+        function resetFileViewerZoom() {
+          fileViewerZoom = 1;
+          fileViewerBodyElement.style.removeProperty("--file-viewer-image-width");
+          fileViewerBodyElement.style.removeProperty("--file-viewer-image-max-width");
+          fileViewerBodyElement.style.removeProperty("--file-viewer-text-size");
+          fileViewerZoomLevelElement.textContent = "100%";
+        }
+
+        function adjustFileViewerZoom(direction) {
+          if (!fileViewerZoomable()) return;
+          fileViewerZoom = fileViewerZoomStep(fileViewerZoom, direction);
+          applyFileViewerZoom();
+        }
+
+        function scaleFileViewerZoom(ratio) {
+          if (!fileViewerZoomable()) return;
+          fileViewerZoom = Math.min(
+            FILE_VIEWER_ZOOM_MAX,
+            Math.max(FILE_VIEWER_ZOOM_MIN, fileViewerZoom * ratio),
+          );
+          applyFileViewerZoom();
+        }
+
+        function fileViewerZoomable() {
+          return fileViewerKind === "image" || fileViewerKind === "text";
+        }
+
+        function hideFileViewerContent() {
+          fileViewerTextElement.hidden = true;
+          fileViewerImageElement.hidden = true;
+          fileViewerPreviewElement.hidden = true;
+          fileViewerBinaryElement.hidden = true;
+          fileViewerImageElement.removeAttribute("src");
+          fileViewerPreviewElement.removeAttribute("srcdoc");
+          fileViewerTextElement.textContent = "";
+          fileViewerBinaryElement.textContent = "";
+        }
+
+        function setFileViewerMessage(message, isError = false) {
+          fileViewerMessageElement.textContent = message;
+          fileViewerMessageElement.classList.toggle("error", isError);
+          fileViewerMessageElement.hidden = false;
+        }
+
+        function formatFileViewerBytes(value) {
+          if (!Number.isFinite(value) || value < 0) return "Unknown size";
+          if (value < 1024) return `${value} B`;
+          const units = ["KiB", "MiB", "GiB"];
+          let size = value / 1024;
+          let unit = units[0];
+          for (let index = 1; index < units.length && size >= 1024; index += 1) {
+            size /= 1024;
+            unit = units[index];
+          }
+          return `${size.toFixed(size >= 10 ? 1 : 2)} ${unit}`;
+        }
+
+        function renderFileViewerPayload(payload) {
+          hideFileViewerContent();
+          fileViewerMessageElement.hidden = true;
+          fileViewerKind = null;
+          resetFileViewerZoom();
+
+          if (payload.kind === "text" && payload.previewDocument) {
+            // `sandbox=""` is the boundary: no allow-scripts, no
+            // allow-same-origin, so a sanitizer miss still cannot run.
+            fileViewerPreviewElement.setAttribute("sandbox", "");
+            fileViewerPreviewElement.srcdoc = payload.previewDocument;
+            fileViewerPreviewElement.hidden = false;
+            if (payload.truncated) {
+              setFileViewerMessage("Preview truncated at the Remote viewer limit.");
+            }
+          } else if (payload.kind === "text") {
+            fileViewerKind = "text";
+            fileViewerTextElement.textContent = payload.content || "";
+            fileViewerTextElement.hidden = false;
+            if (payload.truncated) {
+              setFileViewerMessage("Preview truncated at the Remote viewer limit.");
+            }
+          } else if (
+            payload.kind === "image" &&
+            /^data:image\//i.test(payload.dataUrl || "")
+          ) {
+            fileViewerKind = "image";
+            fileViewerImageElement.src = payload.dataUrl;
+            fileViewerImageElement.hidden = false;
+          } else if (payload.kind === "binary") {
+            fileViewerBinaryElement.textContent = `Binary or unsupported file · ${formatFileViewerBytes(payload.size)}`;
+            fileViewerBinaryElement.hidden = false;
+          } else if (payload.kind === "pdf") {
+            // PDF and archive are classified by the shared desktop command, so
+            // they reach Remote too. Remote deliberately does not render them
+            // (ADR-0109): say what the file is instead of failing.
+            fileViewerBinaryElement.textContent =
+              "PDF · open this file in the desktop viewer to read it.";
+            fileViewerBinaryElement.hidden = false;
+          } else if (payload.kind === "archive") {
+            const count = Number.isFinite(payload.totalEntries)
+              ? payload.totalEntries
+              : (payload.entries || []).length;
+            const suffix = count === 1 ? "entry" : "entries";
+            fileViewerBinaryElement.textContent = `Archive (${payload.format || "unknown"}) · ${count} ${suffix} · open this file in the desktop viewer to browse it.`;
+            fileViewerBinaryElement.hidden = false;
+          } else {
+            throw new Error("Unsupported viewer response");
+          }
+          fileViewerZoomElement.hidden = !fileViewerZoomable();
+        }
+
+        function closeFileViewer() {
+          fileViewerRequestRevision += 1;
+          fileViewerOverlayElement.hidden = true;
+          fileViewerKind = null;
+          fileViewerPinch = null;
+          hideFileViewerContent();
+          resetFileViewerZoom();
+          fileViewerZoomElement.hidden = true;
+          fileViewerTitleElement.textContent = "";
+          fileViewerTitleElement.title = "";
+          focusCurrentInputSurface();
+        }
+
+        function openFileViewerOverlay(path) {
+          if (!leaseId || !fileViewerToken || !path) return;
+          const requestRevision = ++fileViewerRequestRevision;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          hideFileViewerContent();
+          resetFileViewerZoom();
+          fileViewerKind = null;
+          fileViewerZoomElement.hidden = true;
+          fileViewerTitleElement.textContent = path;
+          fileViewerTitleElement.title = path;
+          fileViewerOverlayElement.hidden = false;
+          setFileViewerMessage("Loading file…");
+          remoteFetch("/remote/v1/file-viewer/render", {
+            method: "POST",
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestFileViewerToken,
+            },
+            body: JSON.stringify({ source: "path", path }),
+          })
+            .then((payload) => {
+              if (
+                requestRevision !== fileViewerRequestRevision ||
+                leaseId !== requestLeaseId ||
+                fileViewerToken !== requestFileViewerToken
+              ) {
+                return;
+              }
+              renderFileViewerPayload(payload);
+            })
+            .catch((error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              hideFileViewerContent();
+              setFileViewerMessage(
+                error instanceof Error ? error.message : String(error),
+                true,
+              );
+            });
+        }
+
+        function fileViewerPinchDistance(pointers) {
+          const [first, second] = pointers;
+          return Math.hypot(first.x - second.x, first.y - second.y);
+        }
+
+        function handleFileViewerPointerDown(event) {
+          if (!fileViewerZoomable()) return;
+          fileViewerPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (fileViewerPointers.size === 2) {
+            fileViewerPinch = {
+              distance: fileViewerPinchDistance([...fileViewerPointers.values()]),
+              zoom: fileViewerZoom,
+            };
+          }
+        }
+
+        function handleFileViewerPointerMove(event) {
+          if (!fileViewerPointers.has(event.pointerId)) return;
+          fileViewerPointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (fileViewerPointers.size !== 2 || !fileViewerPinch) return;
+          const distance = fileViewerPinchDistance([...fileViewerPointers.values()]);
+          if (fileViewerPinch.distance <= 0) return;
+          event.preventDefault();
+          fileViewerZoom = Math.min(
+            FILE_VIEWER_ZOOM_MAX,
+            Math.max(
+              FILE_VIEWER_ZOOM_MIN,
+              fileViewerPinch.zoom * (distance / fileViewerPinch.distance),
+            ),
+          );
+          applyFileViewerZoom();
+        }
+
+        function handleFileViewerPointerRelease(event) {
+          fileViewerPointers.delete(event.pointerId);
+          if (fileViewerPointers.size < 2) fileViewerPinch = null;
+        }
+
+        function handleFileViewerWheel(event) {
+          if (!event.ctrlKey || !fileViewerZoomable()) return;
+          // Ctrl+Wheel is page zoom by default, so this must claim the event to
+          // zoom the file instead — same contract as the desktop viewer.
+          event.preventDefault();
+          scaleFileViewerZoom(event.deltaY < 0 ? 1 + FILE_VIEWER_ZOOM_STEP : 1 / (1 + FILE_VIEWER_ZOOM_STEP));
         }
 
         function disposePathLinkDecorations() {
@@ -1548,7 +1773,7 @@
           ) {
             return;
           }
-          openFileViewerTab(press.path);
+          openFileViewerOverlay(press.path);
         }
 
         function handlePathLinkPointerCancel(event) {
@@ -2104,7 +2329,7 @@
             fileViewerStatusRequestRevision += 1;
             fileViewerPathRevision += 1;
             fileViewerPathInput.value = "";
-            clearPendingFileViewerWindows();
+            closeFileViewer();
           }
           renderFileViewerState();
         }
@@ -8553,7 +8778,7 @@
           leaseId = null;
           if (androidE2eMode) window.LaymuxNative.setRemoteLease(null);
           fileViewerToken = null;
-          clearPendingFileViewerWindows();
+          closeFileViewer();
           setActiveTerminal(null);
           setConnected(false);
           if (navigationState) renderNavigation(navigationState);
@@ -8695,17 +8920,48 @@
             openFileViewerButton.disabled
           ) return;
           event.preventDefault();
-          openFileViewerTab(fileViewerPathInput.value.trim());
+          openFileViewerOverlay(fileViewerPathInput.value.trim());
         });
         openFileViewerButton.addEventListener("click", () => {
           const path = fileViewerPathInput.value.trim();
-          if (path) openFileViewerTab(path);
+          if (path) openFileViewerOverlay(path);
         });
+        fileViewerCloseButton.addEventListener("click", closeFileViewer);
+        // Capture phase, and the event stops here: Escape otherwise reaches the
+        // terminal and is written to the PTY as ESC while the user only meant to
+        // dismiss the file they are reading.
+        window.addEventListener(
+          "keydown",
+          (event) => {
+            if (fileViewerOverlayElement.hidden || event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            closeFileViewer();
+          },
+          true,
+        );
+        fileViewerOverlayElement.addEventListener("click", (event) => {
+          // Only the backdrop itself closes; a click inside the dialog is the
+          // user reading, selecting or scrolling the file.
+          if (event.target === fileViewerOverlayElement) closeFileViewer();
+        });
+        fileViewerZoomOutButton.addEventListener("click", () => adjustFileViewerZoom(-1));
+        fileViewerZoomInButton.addEventListener("click", () => adjustFileViewerZoom(1));
+        fileViewerZoomResetButton.addEventListener("click", () => {
+          resetFileViewerZoom();
+          applyFileViewerZoom();
+        });
+        fileViewerBodyElement.addEventListener("pointerdown", handleFileViewerPointerDown);
+        fileViewerBodyElement.addEventListener("pointermove", handleFileViewerPointerMove);
+        fileViewerBodyElement.addEventListener("pointerup", handleFileViewerPointerRelease);
+        fileViewerBodyElement.addEventListener("pointercancel", handleFileViewerPointerRelease);
+        // Not passive: the pinch and Ctrl+Wheel paths both call preventDefault
+        // to stop the browser zooming the page instead of the file.
+        fileViewerBodyElement.addEventListener("wheel", handleFileViewerWheel, { passive: false });
         terminalHost.addEventListener("pointerdown", handlePathLinkPointerDown, true);
         terminalHost.addEventListener("mousemove", handlePathLinkMouseMove);
         window.addEventListener("pointerup", handlePathLinkPointerUp, true);
         window.addEventListener("pointercancel", handlePathLinkPointerCancel, true);
-        window.addEventListener("message", handleFileViewerReady);
         // xterm completes a mouse selection from a document-level mouseup handler.
         // Listen at the same boundary so releasing an outside-terminal drag still
         // schedules the copy after every listener for this event has run.
@@ -9146,8 +9402,7 @@
           terminalHost.removeEventListener("mousemove", handlePathLinkMouseMove);
           window.removeEventListener("pointerup", handlePathLinkPointerUp, true);
           window.removeEventListener("pointercancel", handlePathLinkPointerCancel, true);
-          window.removeEventListener("message", handleFileViewerReady);
           clearPathLinkSelection();
-          clearPendingFileViewerWindows();
+          closeFileViewer();
         });
       })();
