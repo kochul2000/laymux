@@ -49,7 +49,13 @@ pub(super) async fn remote_update_install(
 fn update_response(result: Result<app_update::UpdateStatus, String>) -> Response {
     match result {
         Ok(status) => ([(header::CACHE_CONTROL, "no-store")], Json(status)).into_response(),
-        Err(error) if error.contains("already running") || error.contains("pending update") => {
+        Err(error)
+            if error.contains("already running")
+                || error.contains("pending update")
+                // A channel switch between check and install is a client-state
+                // conflict, not a server fault (ADR-0189).
+                || error.contains(app_update::UPDATE_CHANNEL_CHANGED_ERROR) =>
+        {
             json_error(StatusCode::CONFLICT, &error)
         }
         Err(error) if error.contains("disabled in development") => {

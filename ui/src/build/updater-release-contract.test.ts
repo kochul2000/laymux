@@ -70,8 +70,14 @@ describe("desktop updater release contract", () => {
     // Both channels gate on the Android job rather than tolerating a skip.
     expect(workflow).not.toContain("needs.android.result == 'skipped'");
     expect(workflow).not.toContain("needs.prepare.outputs.prerelease == 'false'");
-    // Prerelease tags must satisfy the client's beta contract.
-    expect(workflow).toContain("-beta\\.[1-9][0-9]*$");
+    // The tag grammar has one owner (the shared encoder); the workflow only
+    // pairs the tag with the dispatched channel and checks both version files.
+    expect(workflow).toContain("scripts/release/android-version-code.mjs");
     expect(workflow).toContain("src-tauri/Cargo.toml version");
+    // Neither channel may be a 404, and the branch is written through the API
+    // rather than a clone that would carry a credential into it.
+    expect(workflow).toContain("--seed-stable true");
+    expect(workflow).toContain("git/blobs");
+    expect(workflow).not.toContain("x-access-token:$GH_TOKEN@github.com");
   });
 });

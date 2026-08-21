@@ -333,6 +333,9 @@ fn try_spawn_terminal_reaper(job: TerminalTeardownJob) -> Result<(), TerminalTea
 
 impl AppState {
     pub fn new() -> Self {
+        // One read for every settings-derived initializer below: two reads would
+        // re-run validation and could observe different snapshots of the same file.
+        let settings = crate::settings::load_settings();
         Self {
             terminals: Arc::new(Mutex::new(HashMap::new())),
             sync_groups: Mutex::new(HashMap::new()),
@@ -352,7 +355,7 @@ impl AppState {
             notifications: Arc::new(Mutex::new(Vec::new())),
             notification_counter: AtomicU64::new(1),
             remote_access: Mutex::new(crate::remote_server::RemoteAccessRuntimeState::new(
-                crate::settings::load_settings().remote,
+                settings.remote.clone(),
             )),
             remote_control: Mutex::new(crate::remote_server::RemoteControlState::default()),
             cloud_tunnel: Mutex::new(None),
@@ -366,7 +369,7 @@ impl AppState {
             grok_usage_probe: Arc::new(crate::grok_usage_probe::GrokUsageProbe::new()),
             sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
             app_update: Arc::new(crate::app_update::UpdateManager::new(
-                crate::app_update::current_channel(),
+                crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
             )),
         }
     }

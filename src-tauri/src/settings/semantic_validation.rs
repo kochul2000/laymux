@@ -916,6 +916,28 @@ mod tests {
     }
 
     #[test]
+    fn update_channel_accepts_only_the_two_channels() {
+        let mut settings = Settings::default();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        settings.update.channel = "beta".into();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        // A hand-edited channel is rejected on write. It is still tolerated on
+        // read (resolving to stable at runtime), which is why the field is a
+        // String rather than an enum (ADR-0189).
+        settings.update.channel = "nightly".into();
+        let issues = validate_settings(&settings);
+        assert!(issues
+            .iter()
+            .any(|issue| issue.path == "/update/channel" && issue.code == "invalid_value"));
+    }
+
+    #[test]
     fn unsafe_agent_launch_commands_are_reported_per_agent() {
         let mut settings = Settings::default();
         settings.claude.command = "claude; rm -rf /".into();

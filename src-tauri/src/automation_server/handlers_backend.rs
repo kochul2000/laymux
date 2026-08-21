@@ -39,15 +39,15 @@ pub async fn api_docs() -> impl IntoResponse {
             },
             {
                 "method": "GET", "path": "/api/v1/update",
-                "description": "Read the process-global desktop update status. Update artifacts come from the latest GitHub Release and are signature-verified before installation."
+                "description": "Read the process-global desktop update status, including the release channel this install follows (`channel`: stable|beta). Artifacts come from the release the channel manifest names and are signature-verified before installation."
             },
             {
                 "method": "POST", "path": "/api/v1/update/check",
-                "description": "Check the configured GitHub Release endpoint now. Concurrent checks collapse into the running operation."
+                "description": "Check the current channel manifest now. The channel comes from settings.json `update.channel`; concurrent checks collapse into the running operation."
             },
             {
                 "method": "POST", "path": "/api/v1/update/install",
-                "description": "Schedule download, signature verification, installation, and process restart for the known update. Returns before the process exits."
+                "description": "Schedule download, signature verification, installation, and process restart for the known update. Returns before the process exits. Refused with 409 if the channel changed since the update was found."
             },
             {
                 "method": "GET", "path": "/api/v1/docs",
@@ -353,7 +353,13 @@ pub async fn update_install(AxumState(state): AxumState<ServerState>) -> impl In
 fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> Response {
     let mut response = match result {
         Ok(status) => Json(status).into_response(),
-        Err(error) if error.contains("already running") || error.contains("pending update") => {
+        Err(error)
+            if error.contains("already running")
+                || error.contains("pending update")
+                // A channel switch between check and install is a client-state
+                // conflict, not a server fault (ADR-0189).
+                || error.contains(crate::app_update::UPDATE_CHANNEL_CHANGED_ERROR) =>
+        {
             (StatusCode::CONFLICT, Json(err_json(&error))).into_response()
         }
         Err(error) if error.contains("disabled in development") => {

@@ -373,8 +373,7 @@
       "updateChannelDesc": "이 PC 가 따라갈 릴리스 계열입니다. 베타는 정식보다 먼저 나오는 테스트 릴리스를 받습니다.",
       "updateChannelStable": "정식",
       "updateChannelBeta": "베타(테스트 빌드)",
-      "updateChannelBetaWarning": "베타는 안정성이 보장되지 않습니다. 정식으로 되돌려도 정식이 설치된 버전을 넘어설 때까지는 업데이트가 없습니다.",
-      "updateChannelCurrent": "현재 따라가는 채널: {{channel}}"
+      "updateChannelBetaWarning": "베타는 안정성이 보장되지 않습니다. 정식으로 되돌려도 정식이 설치된 버전을 넘어설 때까지는 업데이트가 없습니다."
     },
     "remote": {
       "title": "원격",

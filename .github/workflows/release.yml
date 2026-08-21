@@ -56,20 +56,26 @@ jobs:
             exit 1
           }
 
-          # Both channels now feed a client updater, so both tags must satisfy
-          # the client's tag<->version contract (ADR-0189).
+          # Both channels now feed a client updater, so both tags must satisfy the
+          # client's tag<->version contract (ADR-0189). The tag *form* is checked
+          # once, by the shared encoder below — duplicating the grammar here would
+          # let the two copies drift. This only pairs the tag with the channel the
+          # dispatcher asked for.
           version="${RELEASE_TAG#v}"
-          if [[ "$PRERELEASE" == "true" ]]; then
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]] || {
-              echo "Prerelease tag must be vX.Y.Z-beta.N: $RELEASE_TAG" >&2
-              exit 1
-            }
-          else
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-              echo "Stable release tag must be vX.Y.Z or X.Y.Z: $RELEASE_TAG" >&2
-              exit 1
-            }
-          fi
+          case "$version" in
+            *-beta.*)
+              [[ "$PRERELEASE" == "true" ]] || {
+                echo "A -beta.N tag must be dispatched as a prerelease: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+            *)
+              [[ "$PRERELEASE" == "false" ]] || {
+                echo "A prerelease must use a vX.Y.Z-beta.N tag: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+          esac
 
           # tauri.conf.json owns the version the updater compares against;
           # Cargo.toml owns the version every status surface reports. A release
@@ -349,43 +355,80 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The channel branch is a workflow-owned deployment artifact with no
-          # source history. Work on a separate clone so the release checkout is
-          # never mixed into it.
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY##*/}"
           channels="$RUNNER_TEMP/channels"
-          git clone --no-checkout --depth 1 --filter=blob:none \
-            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$channels"
-          git -C "$channels" config user.name "github-actions[bot]"
-          git -C "$channels" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git -C "$channels" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-            git -C "$channels" fetch --no-tags --depth 1 origin "$BRANCH"
-            git -C "$channels" checkout -B "$BRANCH" "origin/$BRANCH"
-          else
-            git -C "$channels" checkout --orphan "$BRANCH"
-            git -C "$channels" rm -rq --cached . 2>/dev/null || true
+          mkdir -p "$channels"
+
+          # Read the branch through the API rather than cloning: the channel
+          # branch holds only these two files, and a clone would put the source
+          # tree and a credential into the deployment working copy.
+          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq '.object.sha' 2>/dev/null || true)"
+          if [[ -n "$branch_sha" ]]; then
+            for file in desktop-stable.json desktop-beta.json; do
+              gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" \
+                --jq '.content' 2>/dev/null | base64 -d >"$channels/$file" || rm -f "$channels/$file"
+            done
+          fi
+
+          # Bootstrap: neither channel may be a 404, so a missing stable file is
+          # seeded from the current stable release before anything else. Without
+          # this, a repo whose first publish is a beta leaves every default
+          # (stable) install failing its update check until the next release.
+          if [[ ! -s "$channels/desktop-stable.json" ]]; then
+            seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+            [[ -n "$seed_tag" ]] || { echo "No stable release to seed the channel branch from" >&2; exit 1; }
+            seed_manifest="$RUNNER_TEMP/seed-latest.json"
+            gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
+            node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
+              --tag "$seed_tag" --prerelease false --seed-stable true \
+              --manifest "$seed_manifest" --channel-dir "$channels" \
+              --owner "$owner" --repo "$repo"
+            echo "seeded channel files from stable release $seed_tag"
           fi
 
           manifest="$RUNNER_TEMP/latest.json"
           gh release download "$RELEASE_TAG" --pattern latest.json --output "$manifest" --clobber
 
-          # Validation, the beta >= stable invariant and the write plan live in
-          # the script so they are unit tested rather than discovered in a
-          # release. Both files land in one commit: a partial update would
-          # expose beta < stable.
+          # Validation, the forward-only invariants and the write plan live in the
+          # script so they are unit tested rather than discovered in a release.
           written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
             --tag "$RELEASE_TAG" \
             --prerelease "$PRERELEASE" \
             --manifest "$manifest" \
             --channel-dir "$channels" \
-            --owner "${GITHUB_REPOSITORY%%/*}" \
-            --repo "${GITHUB_REPOSITORY##*/}")"
-          printf 'updated channel files:\n%s\n' "$written"
+            --owner "$owner" \
+            --repo "$repo")"
+          printf 'channel files to publish:\n%s\n' "${written:-<none>}"
 
-          cd "$channels"
-          git add -- desktop-stable.json desktop-beta.json 2>/dev/null || git add -- desktop-beta.json
-          if git diff --cached --quiet; then
-            echo "channel manifests already up to date"
-            exit 0
+          # One commit carries both files: a partial update would expose
+          # beta < stable. The tree lists exactly the channel files, so the
+          # branch never accumulates source history.
+          entries=""
+          for file in desktop-stable.json desktop-beta.json; do
+            [[ -s "$channels/$file" ]] || continue
+            blob_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" \
+              -f content="$(base64 -w0 <"$channels/$file")" -f encoding=base64 --jq '.sha')"
+            entries="$entries{\"path\":\"$file\",\"mode\":\"100644\",\"type\":\"blob\",\"sha\":\"$blob_sha\"},"
+          done
+          [[ -n "$entries" ]] || { echo "No channel files to publish" >&2; exit 1; }
+          tree_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/trees" \
+            --input - --jq '.sha' <<<"{\"tree\":[${entries%,}]}")"
+
+          if [[ -n "$branch_sha" ]]; then
+            current_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$branch_sha" --jq '.tree.sha')"
+            if [[ "$current_tree" == "$tree_sha" ]]; then
+              echo "channel manifests already up to date"
+              exit 0
+            fi
+            commit_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" \
+              --input - --jq '.sha' <<<"{\"message\":\"release: $RELEASE_TAG channel manifests\",\"tree\":\"$tree_sha\",\"parents\":[\"$branch_sha\"]}")"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" \
+              -f sha="$commit_sha" >/dev/null
+          else
+            commit_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" \
+              --input - --jq '.sha' <<<"{\"message\":\"release: $RELEASE_TAG channel manifests\",\"tree\":\"$tree_sha\",\"parents\":[]}")"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$BRANCH" -f sha="$commit_sha" >/dev/null
           fi
-          git commit -m "release: $RELEASE_TAG channel manifests"
-          git push origin "HEAD:$BRANCH"
+          echo "published channel manifests as $commit_sha"

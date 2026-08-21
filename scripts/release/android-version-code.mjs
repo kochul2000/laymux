@@ -36,7 +36,7 @@ const STABLE_SLOT = 9;
 export function androidReleaseVersion(tag) {
   const parsed = parseReleaseVersion(tag);
   const slot = parsed.beta === null ? STABLE_SLOT : parsed.beta;
-  if (slot >= STABLE_SLOT && parsed.beta !== null) {
+  if (parsed.beta !== null && parsed.beta >= STABLE_SLOT) {
     throw new Error(
       `beta 슬롯은 1..${STABLE_SLOT - 1} 이어야 한다(정식이 ${STABLE_SLOT} 을 쓴다): ${parsed.version}`,
     );

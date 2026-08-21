@@ -22,6 +22,11 @@ use crate::lock_ext::MutexExt;
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
 
+/// A channel switch between check and install is a client-state conflict, not a
+/// server fault. HTTP surfaces classify on this prefix so the caller gets the
+/// same status code as "there is no pending update".
+pub const UPDATE_CHANNEL_CHANGED_ERROR: &str = "the update channel changed";
+
 /// Release channel this install follows (ADR-0189).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -157,7 +162,9 @@ impl UpdateManager {
             status.published_at = None;
         }
         status.operation = UpdateOperation::Checking;
-        status.last_error = None;
+        // `last_error` is not cleared here. A check that ends up abandoned would
+        // otherwise erase the record of the last real failure without replacing
+        // it; `finish_check` clears it once there is an answer.
         Ok(true)
     }
 
@@ -181,12 +188,21 @@ impl UpdateManager {
         Ok(status.clone())
     }
 
-    /// End a check without recording a result or an error. Used when the
-    /// channel changed mid-flight, which is neither an answer nor a failure.
-    fn abandon_check(&self) -> Result<UpdateStatus, String> {
+    /// End a check whose channel changed while it was in flight. That is neither
+    /// an answer nor a failure, so no error is recorded — but the snapshot must
+    /// already describe the channel the user switched to, and the candidate the
+    /// old channel produced must be gone. Otherwise every surface keeps offering
+    /// a build from the series the user just left, and installing it is refused.
+    fn abandon_check(&self, channel: UpdateChannel) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
         if status.operation == UpdateOperation::Checking {
             status.operation = UpdateOperation::Idle;
+        }
+        if status.channel != channel {
+            status.channel = channel;
+            status.available_version = None;
+            status.notes = None;
+            status.published_at = None;
         }
         Ok(status.clone())
     }
@@ -215,7 +231,7 @@ impl UpdateManager {
         }
         if status.channel != channel {
             return Err(format!(
-                "the update channel changed to {}; check again",
+                "{UPDATE_CHANNEL_CHANGED_ERROR} to {}; check again",
                 channel.as_str()
             ));
         }
@@ -372,13 +388,40 @@ fn validate_install_candidate(
     Ok(())
 }
 
+/// A channel switch mid-flight costs one extra round trip, not the six-hour wait
+/// until the next periodic check. The bound keeps a user flipping the setting
+/// from spinning the network.
+const CHANNEL_SWITCH_RETRIES: usize = 1;
+
 pub async fn check_now(
     app: &AppHandle,
     manager: &Arc<UpdateManager>,
 ) -> Result<UpdateStatus, String> {
+    for attempt in 0..=CHANNEL_SWITCH_RETRIES {
+        match check_channel_once(app, manager).await? {
+            CheckOutcome::Settled(status) => return Ok(status),
+            CheckOutcome::ChannelSwitched(status) => {
+                if attempt == CHANNEL_SWITCH_RETRIES {
+                    return Ok(status);
+                }
+            }
+        }
+    }
+    manager.snapshot()
+}
+
+enum CheckOutcome {
+    Settled(UpdateStatus),
+    ChannelSwitched(UpdateStatus),
+}
+
+async fn check_channel_once(
+    app: &AppHandle,
+    manager: &Arc<UpdateManager>,
+) -> Result<CheckOutcome, String> {
     let channel = current_channel();
     if !manager.begin_check(channel)? {
-        return manager.snapshot();
+        return Ok(CheckOutcome::Settled(manager.snapshot()?));
     }
     publish_snapshot(app, manager);
 
@@ -395,9 +438,9 @@ pub async fn check_now(
             channel = channel.as_str(),
             "discarding an update check whose channel changed while it was in flight"
         );
-        let status = manager.abandon_check()?;
+        let status = manager.abandon_check(current_channel())?;
         publish(app, &status);
-        return Ok(status);
+        return Ok(CheckOutcome::ChannelSwitched(status));
     }
 
     let status = match result {
@@ -422,7 +465,7 @@ pub async fn check_now(
         Err(error) => manager.fail_operation(error)?,
     };
     publish(app, &status);
-    Ok(status)
+    Ok(CheckOutcome::Settled(status))
 }
 
 /// Build an updater pinned to this channel's manifest. The endpoint in
@@ -787,7 +830,7 @@ mod tests {
             .unwrap();
 
         assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
-        let abandoned = manager.abandon_check().unwrap();
+        let abandoned = manager.abandon_check(UpdateChannel::Stable).unwrap();
         assert_eq!(abandoned.operation, UpdateOperation::Idle);
         assert_eq!(abandoned.available_version.as_deref(), Some("0.11.0"));
         assert_eq!(abandoned.last_error, None);

@@ -37,7 +37,10 @@ const REQUIRED_PLATFORMS = ["windows-x86_64", "linux-x86_64"];
  * @param {{tag: string, owner: string, repo: string}} context
  * @returns {{version: string}}
  */
-export function validateChannelManifest(manifest, { tag, owner, repo }) {
+export function validateChannelManifest(
+  manifest,
+  { tag, owner, repo, channel },
+) {
   if (!manifest || typeof manifest !== "object") {
     throw new Error("매니페스트가 객체가 아니다");
   }
@@ -45,6 +48,13 @@ export function validateChannelManifest(manifest, { tag, owner, repo }) {
   if (manifest.version !== expected.version) {
     throw new Error(
       `매니페스트 버전 ${manifest.version} 이 태그 ${tag} 의 버전 ${expected.version} 과 다르다`,
+    );
+  }
+  // stable 파일을 읽는 클라이언트는 prerelease 접미사를 거절하므로, 잘못
+  // 들어가면 오류도 후보도 없이 채널이 멈춘다. 여기서 구조적으로 막는다.
+  if (channel === "stable" && expected.beta !== null) {
+    throw new Error(
+      `stable 채널 파일에는 x.y.z 만 올릴 수 있다: ${expected.version}`,
     );
   }
 
@@ -81,7 +91,12 @@ export function validateChannelManifest(manifest, { tag, owner, repo }) {
  * @param {{version: string, prerelease: boolean, currentBetaVersion: string|null}} input
  * @returns {string[]} 갱신할 파일명
  */
-export function planChannelWrites({ version, prerelease, currentBetaVersion }) {
+export function planChannelWrites({
+  version,
+  prerelease,
+  currentBetaVersion,
+  currentStableVersion,
+}) {
   const released = parseReleaseVersion(version).version;
   if (prerelease) {
     if (
@@ -92,7 +107,31 @@ export function planChannelWrites({ version, prerelease, currentBetaVersion }) {
         `prerelease ${released} 가 현재 beta 채널 ${currentBetaVersion} 을 후퇴시킨다`,
       );
     }
+    if (!currentStableVersion) {
+      // stable 파일이 없는 채로 beta 만 커밋하면 기본 채널이 404 가 되어
+      // 모든 설치본이 다음 정식 릴리스까지 확인 오류만 본다. 부트스트랩은
+      // 호출자가 현재 정식 매니페스트로 먼저 시딩해야 한다.
+      throw new Error(
+        `stable 채널 파일이 없다. prerelease 발행 전에 현재 정식 매니페스트로 시딩해야 한다`,
+      );
+    }
     return [BETA_CHANNEL_FILE];
+  }
+
+  // stable 도 전진만 허용한다. 버전을 되돌린 재발행이나 옛 릴리스로 job 을
+  // 재실행하면 채널이 조용히 후퇴하고, 클라이언트는 다운그레이드를 제안하지
+  // 않으므로 그 시점부터 stable 사용자가 정지한다.
+  if (currentStableVersion) {
+    const ordering = compareReleaseVersions(released, currentStableVersion);
+    if (ordering < 0) {
+      throw new Error(
+        `stable ${released} 가 현재 stable 채널 ${currentStableVersion} 을 후퇴시킨다`,
+      );
+    }
+    if (ordering === 0) {
+      // 같은 릴리스로 job 을 다시 돌리는 것은 안전한 no-op 이어야 한다.
+      return [];
+    }
   }
 
   const writes = [STABLE_CHANNEL_FILE];
@@ -135,28 +174,55 @@ function parseArgs(argv) {
 
 function main(argv) {
   const args = parseArgs(argv);
-  const required = ["tag", "manifest", "channel-dir"];
+  // `prerelease` is required, not defaulted: a missing or misspelled flag would
+  // otherwise silently take the stable path and overwrite the stable channel.
+  const required = ["tag", "manifest", "channel-dir", "prerelease"];
   for (const key of required) {
     if (!args[key]) {
       console.error(
-        `사용: node scripts/release/channel-manifest.mjs --tag <tag> --prerelease <bool> --manifest <path> --channel-dir <dir> [--owner o --repo r]`,
+        `사용: node scripts/release/channel-manifest.mjs --tag <tag> --prerelease <true|false> --manifest <path> --channel-dir <dir> [--owner o --repo r] [--seed-stable]`,
       );
       process.exit(2);
     }
+  }
+  if (args.prerelease !== "true" && args.prerelease !== "false") {
+    console.error(
+      `--prerelease 는 true 또는 false 여야 한다: ${args.prerelease}`,
+    );
+    process.exit(2);
   }
   const owner = args.owner ?? "kochul2000";
   const repo = args.repo ?? "laymux";
   const prerelease = args.prerelease === "true";
   const channelDir = args["channel-dir"];
+  // Bootstrap: write the current stable manifest into both channel files so
+  // neither channel is ever a 404 (ADR-0189).
+  const seedStable = args["seed-stable"] === "true";
 
   const manifest = JSON.parse(fs.readFileSync(args.manifest, "utf8"));
   const { version } = validateChannelManifest(manifest, {
     tag: args.tag,
     owner,
     repo,
+    channel: prerelease ? "beta" : "stable",
   });
   const currentBetaVersion = readChannelVersion(channelDir, BETA_CHANNEL_FILE);
-  const writes = planChannelWrites({ version, prerelease, currentBetaVersion });
+  const currentStableVersion = readChannelVersion(
+    channelDir,
+    STABLE_CHANNEL_FILE,
+  );
+  if (seedStable && prerelease) {
+    console.error("--seed-stable 은 정식 매니페스트로만 쓸 수 있다");
+    process.exit(2);
+  }
+  // Seeding ignores the missing stable file (that is the point) but still must
+  // not pull a beta channel that is already ahead back to stable.
+  const writes = planChannelWrites({
+    version,
+    prerelease,
+    currentBetaVersion,
+    currentStableVersion: seedStable ? null : currentStableVersion,
+  });
 
   const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
   for (const file of writes) {

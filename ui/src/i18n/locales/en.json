@@ -373,8 +373,7 @@
       "updateChannelDesc": "Which releases this machine follows. Beta receives the test series that lands before a stable release.",
       "updateChannelStable": "Stable",
       "updateChannelBeta": "Beta (test builds)",
-      "updateChannelBetaWarning": "Beta builds are not guaranteed to be stable. Switching back to Stable brings no update until a stable release passes your installed version.",
-      "updateChannelCurrent": "Now following: {{channel}}"
+      "updateChannelBetaWarning": "Beta builds are not guaranteed to be stable. Switching back to Stable brings no update until a stable release passes your installed version."
     },
     "remote": {
       "title": "Remote",

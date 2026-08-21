@@ -26,7 +26,7 @@ $requiredWorkflowTokens = @(
     # ADR-0189: both channels feed a client updater, so both tags are checked
     # against the client contract and the versionCode encoding has one owner.
     'scripts/release/android-version-code.mjs "$RELEASE_TAG"',
-    "-beta\.[1-9][0-9]*",
+    "*-beta.*)",
     "src-tauri/Cargo.toml version",
     "scripts/release/channel-manifest.mjs",
     "release-channels"
@@ -71,6 +71,21 @@ if ($workflow.Contains("needs.android.result == 'skipped'")) {
 }
 if (-not $workflow.Contains('--bundles')) {
     throw "prerelease desktop builds must limit bundles (rpm/deb reject semver prereleases)"
+}
+
+# ADR-0189: the channel branch is written through the API, never a clone that
+# would carry a credential and the source tree into the deployment branch.
+if ($workflow.Contains('x-access-token:$GH_TOKEN@github.com')) {
+    throw "the channel job must not embed the token in a clone URL"
+}
+if (-not $workflow.Contains('--seed-stable true')) {
+    throw "the channel job must seed a missing stable manifest so neither channel 404s"
+}
+
+# The release-contract scripts are only a gate if something runs them.
+& node (Join-Path $repoRoot "scripts/tests/release-channels.test.mjs")
+if ($LASTEXITCODE -ne 0) {
+    throw "release channel script tests failed"
 }
 
 $updater = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "src-tauri/tauri.conf.json")

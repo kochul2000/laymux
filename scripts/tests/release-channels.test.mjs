@@ -297,6 +297,7 @@ check(
       version: "0.11.0-beta.1",
       prerelease: true,
       currentBetaVersion: "0.10.18",
+      currentStableVersion: "0.10.18",
     });
     return writes.length === 1 && writes[0] === "desktop-beta.json";
   })(),
@@ -309,6 +310,7 @@ check(
       version: "0.11.0",
       prerelease: false,
       currentBetaVersion: "0.11.0-beta.3",
+      currentStableVersion: "0.10.18",
     });
     return (
       writes.length === 2 &&
@@ -325,6 +327,7 @@ check(
       version: "0.10.19",
       prerelease: false,
       currentBetaVersion: "0.11.0-beta.2",
+      currentStableVersion: "0.10.18",
     });
     return writes.length === 1 && writes[0] === "desktop-stable.json";
   })(),
@@ -337,6 +340,7 @@ check(
       version: "0.11.0",
       prerelease: false,
       currentBetaVersion: null,
+      currentStableVersion: "0.10.18",
     });
     return writes.length === 2;
   })(),
@@ -349,8 +353,71 @@ throws(
       version: "0.11.0-beta.1",
       prerelease: true,
       currentBetaVersion: "0.11.0-beta.3",
+      currentStableVersion: "0.10.18",
     }),
   "후퇴",
+);
+
+check(
+  "prerelease 는 beta 파일만 갱신한다 (stable 존재)",
+  (() => {
+    const writes = planChannelWrites({
+      version: "0.11.0-beta.1",
+      prerelease: true,
+      currentBetaVersion: "0.10.18",
+      currentStableVersion: "0.10.18",
+    });
+    return writes.length === 1 && writes[0] === "desktop-beta.json";
+  })(),
+);
+
+throws(
+  "stable 파일이 없으면 prerelease 발행을 거절한다",
+  () =>
+    planChannelWrites({
+      version: "0.11.0-beta.1",
+      prerelease: true,
+      currentBetaVersion: "0.10.18",
+      currentStableVersion: null,
+    }),
+  "시딩",
+);
+
+throws(
+  "낮은 stable 재발행은 stable 채널을 후퇴시키지 못한다",
+  () =>
+    planChannelWrites({
+      version: "0.10.18",
+      prerelease: false,
+      currentBetaVersion: null,
+      currentStableVersion: "0.10.19",
+    }),
+  "후퇴",
+);
+
+check(
+  "같은 stable 재실행은 no-op",
+  (() => {
+    const writes = planChannelWrites({
+      version: "0.10.19",
+      prerelease: false,
+      currentBetaVersion: "0.10.19",
+      currentStableVersion: "0.10.19",
+    });
+    return writes.length === 0;
+  })(),
+);
+
+throws(
+  "stable 채널 파일에 beta 매니페스트는 거절",
+  () =>
+    validateChannelManifest(manifestFor("v0.11.0-beta.1", "0.11.0-beta.1"), {
+      tag: "v0.11.0-beta.1",
+      owner: OWNER,
+      repo: REPO,
+      channel: "stable",
+    }),
+  "stable 채널 파일",
 );
 
 if (failures > 0) {
