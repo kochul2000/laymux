@@ -1,6 +1,6 @@
 # 0189. IME 조합 관측은 candidate에 순서대로 병합하고 consumed keypress를 취소한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-21
 - Source: 사용자 보고(Windows WebView2 → WSL Codex에서 `하면 ` 입력이 간헐적으로 `하면 면`이 됨), [architecture/data-flow.md §8.14](../architecture/data-flow.md), [ADR-0093](0093-xterm-composition-keypress-reconciliation-owner.md), [ADR-0062](0062-composition-commit-keypress-race.md)
 - Amends: [ADR-0093](0093-xterm-composition-keypress-reconciliation-owner.md)
@@ -17,10 +17,10 @@ Windows WebView2가 마지막 조합 음절 뒤 구분자를 `input(" ")`으로 
 
 ## Decision
 
-**권위 textarea candidate를 accumulator로 삼되 첫 candidate anchor 전 관측은 ordered prefix로 보존하고 이후 관측은 하나씩 병합하며, helper가 소비한 legacy keypress는 CoreBrowserTerminal이 기본 DOM 삽입까지 강제 취소한다.**
+**권위 textarea candidate를 accumulator로 삼되 첫 candidate anchor 전 관측은 기존 shortest-merge prefix로 모으고 이후 관측은 하나씩 병합하며, helper가 소비한 legacy keypress는 CoreBrowserTerminal이 기본 DOM 삽입까지 강제 취소한다.**
 
 - generation record는 미리 합친 `observed` 문자열 대신 순서 있는 `observations` 목록을 소유한다. input과 keypress는 pending generation에 자기 문자열을 그대로 append한다.
-- finalizer는 캡처 범위에서 textarea candidate를 먼저 읽는다. candidate에 이미 포함된 첫 관측이 정렬 기준을 만들 때까지 unmatched 관측은 기존 merge 규칙의 ordered prefix로 보존하고, 기준이 생기면 그 prefix를 candidate 앞쪽에 병합한 뒤 나머지 `observations`를 하나씩 양방향 포함·suffix-prefix 최장 overlap 함수에 fold한다. 기준 뒤의 양방향 overlap 동률은 accumulator 뒤쪽을 선택한다. 끝까지 기준이 없으면 ordered prefix 전체를 기존처럼 candidate 앞에 병합한다. candidate에 이미 따로 존재하는 공백과 음절은 각 관측 단계에서 각각 흡수돼 출처 경계를 잃지 않으며, anchor가 없는 여러 keypress도 prefix 안에서 기존 순서를 보존한다.
+- finalizer는 캡처 범위에서 textarea candidate를 먼저 읽는다. candidate에 이미 포함된 첫 관측이 정렬 기준을 만들 때까지 unmatched 관측은 도착 순서대로 기존 양방향 포함·suffix-prefix 최장 overlap 함수에 넣어 shortest-merge prefix로 모으고, 기준이 생기면 그 prefix를 candidate와 병합한 뒤 나머지 `observations`를 하나씩 같은 함수에 fold한다. 기준 뒤의 양방향 overlap 동률은 accumulator 뒤쪽을 선택한다. 끝까지 기준이 없으면 prefix 전체를 기존처럼 candidate와 병합한다. 이 규칙은 비중첩 단문자 keypress `"a"`, `"b"`의 기존 `"ab"` 결과를 보존하지만, 겹치는 다문자 관측이나 의도적 반복 occurrence의 엄격한 시간 순서는 보장하지 않는다. 그 한계는 ADR-0093의 shortest-merge 계약에서 그대로 이어진다.
 - `CompositionHelper.keypress(text)`가 `true`를 반환하면 CoreBrowserTerminal은 `cancel(event, true)`를 호출한다. 이는 보류한 keypress의 `preventDefault`와 propagation 취소를 같은 xterm 입력 경계에서 수행한다. pending generation이 없어 helper가 `false`를 반환한 ordinary keypress는 기존 즉시 전송과 기본 이벤트 정책을 유지한다.
 - TerminalView에 외부 시간창·문자열 guard를 추가하지 않는다. candidate, generation, 관측과 keypress 이벤트를 가진 xterm CompositionHelper/CoreBrowserTerminal이 계속 단일 소유자다.
 - postinstall exact patch는 pristine xterm과 기존 ADR-0093 patch 설치본을 모두 새 형태로 올리고, ESM/CJS 어느 한쪽에서 target이 다르면 설치를 실패시킨다.
@@ -37,6 +37,6 @@ Windows WebView2가 마지막 조합 음절 뒤 구분자를 `input(" ")`으로 
 
 - separator 직후 확정 음절이 legacy keypress로 재전파되어도 candidate의 기존 음절·공백이 중복되지 않고 PTY에는 `"면 "`이 한 번만 전달된다.
 - 각 generation은 하나의 merged 문자열 대신 짧은 관측 배열을 timer가 끝날 때까지 보유한다. 수명은 기존 deferred finalizer 창과 같고, 정상 IME commit의 이벤트 수가 작아 메모리 비용은 제한적이다.
-- ADR-0093의 “관측끼리 먼저 merge” 순서는 이 결정으로 정정된다. CompositionHelper 단일 소유권과 shortest ordered merge 함수 자체는 유지한다.
+- ADR-0093의 “관측끼리 먼저 merge” 순서는 이 결정으로 정정된다. CompositionHelper 단일 소유권과 shortest bidirectional merge 함수 자체는 유지한다.
 - pinned xterm minified ESM/CJS exact patch의 유지 대상이 늘어난다. xterm 상향 시 upstream이 candidate-first fold와 consumed keypress 취소를 동등하게 보장하는지 확인해야 한다.
 - 실제 Windows WebView2의 전체 DOM 이벤트 trace와 출력 폭주별 재현률은 여전히 #666의 실기 검증 대상이다. 이번 회귀 테스트는 사용자 결과와 일치하는 xterm 입력 경로 및 최종 `onData` 바이트를 결정적으로 고정한다.
