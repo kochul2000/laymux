@@ -335,9 +335,24 @@ pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 /// `terminal.pathLinkMaxLength` setting.
 pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
 
-/// Maximum non-overlapping path candidates validated for one desktop/Remote
-/// terminal selection. The frontend applies the same cap before this command.
-pub const MAX_PATH_LINK_CANDIDATES: usize = 16;
+/// Maximum lines accepted from one Remote terminal selection, matching the
+/// desktop selection parser's line cap (ADR-0148).
+pub const MAX_REMOTE_PATH_LINK_SELECTION_LINES: usize = 8;
+
+/// Maximum paths accepted by one `stat_paths` batch. A selection contributes at
+/// most 16 candidates (ADR-0148), while a Remote idle screen scan can carry a
+/// whole viewport worth of paths (ADR-0188); this is the ceiling on filesystem
+/// lookups one batch may perform, not the selection candidate cap.
+pub const MAX_PATH_LINK_CANDIDATES: usize = 64;
+
+/// Maximum terminal rows the Remote idle scan may send as one screen, and the
+/// candidate cap applied to it. Beyond these the scan drops the tail rather
+/// than abandoning the screen (ADR-0188).
+pub const MAX_REMOTE_PATH_LINK_SCREEN_LINES: usize = 64;
+
+/// Maximum Unicode scalar count accepted across all lines of one Remote idle
+/// screen scan request.
+pub const MAX_REMOTE_PATH_LINK_SCREEN_CHARS: usize = 8192;
 
 /// Maximum Unicode scalar count accepted for the terminal id attached to a
 /// Remote path-link validation request. Runtime terminal ids are much shorter;

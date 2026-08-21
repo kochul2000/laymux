@@ -170,12 +170,16 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
     release: ReturnType<typeof deferred>;
     resumed: ReturnType<typeof deferred>;
   };
-  let nextPathLinkHold: PathLinkHold | null = null;
-  const holdNextPathLink = (): PathLinkHold => {
-    const hold = { started: deferred(), release: deferred(), resumed: deferred() };
+  let nextPathLinkHold: (PathLinkHold & { mode: string }) | null = null;
+  // ADR-0188: the page also fires `screen` scans when output settles, so a hold
+  // has to name the trigger it waits for or an idle scan could consume it.
+  const holdNextPathLink = (mode = "selection"): PathLinkHold => {
+    const hold = { started: deferred(), release: deferred(), resumed: deferred(), mode };
     nextPathLinkHold = hold;
     return hold;
   };
+  const selectionRequests = () =>
+    pathLinkRequests.filter((entry) => entry.body.mode === "selection");
 
   await context.route("http://remote.test/remote/**", async (route) => {
     const request = route.request();
@@ -218,9 +222,9 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
         capability: await request.headerValue("x-laymux-remote-file-viewer"),
         body,
       });
-      const hold = nextPathLinkHold;
-      nextPathLinkHold = null;
+      const hold = nextPathLinkHold?.mode === body.mode ? nextPathLinkHold : null;
       if (hold) {
+        nextPathLinkHold = null;
         hold.started.resolve();
         await hold.release.promise;
         hold.resumed.resolve();
@@ -326,12 +330,12 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   const decoration = page.locator(".remote-path-link-decoration");
   await expect(decoration).toBeVisible();
   await expect(decoration).toHaveCSS("border-bottom-style", "solid");
-  expect(pathLinkRequests).toEqual([
+  expect(selectionRequests()).toEqual([
     {
       authorization: "Bearer remote-secret",
       lease: "lease-path-link",
       capability: "viewer-path-link",
-      body: { terminalId: "terminal-1", selection: "src/main.rs" },
+      body: { terminalId: "terminal-1", mode: "selection", lines: ["src/main.rs"] },
     },
   ]);
 
@@ -362,7 +366,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
     const term = (window as CapturedTerminalWindow).__remoteTerm;
     if (term && term.cols > 20) term.resize(term.cols - 1, term.rows);
   });
-  await expect.poll(() => pathLinkRequests.length).toBe(3);
+  await expect.poll(() => selectionRequests().length).toBe(3);
   await expect(decoration).toBeVisible();
   resizeHold.release.resolve();
   await resizeHold.resumed.promise;
@@ -385,7 +389,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
       page.evaluate(() => (window as CapturedTerminalWindow).__remoteTerm?.getSelection() || ""),
     )
     .toBe("src/main.rs");
-  await expect.poll(() => pathLinkRequests.length, { timeout: 5_000 }).toBe(4);
+  await expect.poll(() => selectionRequests().length, { timeout: 5_000 }).toBe(4);
   await terminalSwitchHold.started.promise;
   await page.locator("#navToggle").click();
   await page.locator(".workspace-pane-row").nth(1).click();

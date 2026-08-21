@@ -9,6 +9,9 @@ import {
   isWithinPathLengthLimit,
   decidePathLinkAction,
   mapSelectionToPathRange,
+  extractPathCandidateAtOffset,
+  extractPathCandidatesFromScreen,
+  mapLineCandidateToPathRange,
 } from "./path-link-detect";
 
 describe("isPathLinkCwdCurrent", () => {
@@ -443,5 +446,125 @@ describe("mapSelectionToPathRange", () => {
     expect(r.bufferLine).toBe(8); // y 7 → 8
     expect(r.startCol).toBe(4); // (3+0)+1, 토큰 인덱스 0
     expect(r.endCol).toBe(13); // 3 + len(10) - 1 = 12, +1 = 13
+  });
+});
+
+describe("extractPathCandidateAtOffset (ADR-0188 point 트리거)", () => {
+  const limits = { maxPathLength: 256 };
+
+  it("offset을 덮는 maximal token 하나만 원문 범위와 함께 낸다", () => {
+    // "build failed: ui/src/lib/foo.ts:12:3 (see log)"
+    const line = "build failed: ui/src/lib/foo.ts:12:3 (see log)";
+    expect(extractPathCandidateAtOffset(line, 20, limits)).toEqual({
+      text: "ui/src/lib/foo.ts",
+      lineIndex: 0,
+      startIndex: 14,
+      endIndex: 31,
+    });
+  });
+
+  it("이웃 토큰이나 토큰 내부 basename은 후보로 만들지 않는다", () => {
+    const line = "diff ui/src/App.tsx ui/src/App.test.tsx";
+    // 첫 토큰 안의 offset → 첫 토큰만.
+    expect(extractPathCandidateAtOffset(line, 6, limits)?.text).toBe("ui/src/App.tsx");
+    // 두 번째 토큰 안의 offset → 두 번째 토큰만.
+    expect(extractPathCandidateAtOffset(line, 25, limits)?.text).toBe("ui/src/App.test.tsx");
+  });
+
+  it("공백·경계 위 offset이나 범위 밖 offset은 후보가 없다", () => {
+    const line = "a  ui/src/App.tsx";
+    expect(extractPathCandidateAtOffset(line, 1, limits)).toBeNull();
+    expect(extractPathCandidateAtOffset(line, 999, limits)).toBeNull();
+    expect(extractPathCandidateAtOffset("", 0, limits)).toBeNull();
+    expect(extractPathCandidateAtOffset(line, -1, limits)).toBeNull();
+  });
+
+  it("포인터로 지목한 토큰은 슬래시·확장자 없는 맨이름도 받는다", () => {
+    expect(extractPathCandidateAtOffset("cd laymux 로 이동", 4, limits)?.text).toBe("laymux");
+  });
+
+  it("URL 스킴은 제외하고, 후보 길이 상한을 넘으면 버린다", () => {
+    expect(extractPathCandidateAtOffset("see https://a.dev/x now", 8, limits)).toBeNull();
+    expect(extractPathCandidateAtOffset("aaaa/bbbb", 2, { maxPathLength: 4 })).toBeNull();
+  });
+
+  it("따옴표·괄호와 grep 꼬리를 떼고 시작 offset을 보정한다", () => {
+    const line = 'log ("src/main.rs:42:5")';
+    expect(extractPathCandidateAtOffset(line, 8, limits)).toEqual({
+      text: "src/main.rs",
+      lineIndex: 0,
+      startIndex: 6,
+      endIndex: 17,
+    });
+  });
+});
+
+describe("extractPathCandidatesFromScreen (ADR-0188 screen 트리거)", () => {
+  const limits = {
+    maxLines: 64,
+    maxChars: 8192,
+    maxCandidates: 64,
+    maxPathLength: 256,
+  };
+
+  it("화면 여러 줄의 strong candidate를 읽기 순서로 모은다", () => {
+    expect(
+      extractPathCandidatesFromScreen(["edit ui/src/App.tsx now", "", "cat Cargo.toml"], limits),
+    ).toEqual([
+      { text: "ui/src/App.tsx", lineIndex: 0, startIndex: 5, endIndex: 19 },
+      { text: "Cargo.toml", lineIndex: 2, startIndex: 4, endIndex: 14 },
+    ]);
+  });
+
+  it("지목되지 않은 화면에서는 맨이름을 후보로 만들지 않는다", () => {
+    expect(extractPathCandidatesFromScreen(["cd laymux and build v3"], limits)).toEqual([]);
+  });
+
+  it("후보 상한을 넘으면 앞쪽만 남기고 자른다(부분 결과 허용)", () => {
+    const line = Array.from({ length: 5 }, (_, i) => `a${i}.txt`).join(" ");
+    const candidates = extractPathCandidatesFromScreen([line, line], {
+      ...limits,
+      maxCandidates: 6,
+    });
+    expect(candidates).toHaveLength(6);
+    expect(candidates[5]).toEqual({ text: "a0.txt", lineIndex: 1, startIndex: 0, endIndex: 6 });
+  });
+
+  it("줄 수·총 문자 수 상한을 넘긴 뒤쪽 줄은 버린다", () => {
+    const rows = ["a/1.txt", "a/2.txt", "a/3.txt"];
+    expect(
+      extractPathCandidatesFromScreen(rows, { ...limits, maxLines: 2 }).map((c) => c.lineIndex),
+    ).toEqual([0, 1]);
+    expect(
+      extractPathCandidatesFromScreen(rows, { ...limits, maxChars: 14 }).map((c) => c.lineIndex),
+    ).toEqual([0, 1]);
+  });
+});
+
+describe("mapLineCandidateToPathRange (ADR-0188)", () => {
+  const candidate = { text: "가/a.txt", lineIndex: 0, startIndex: 2, endIndex: 9 };
+
+  it("셀 정보가 있으면 와이드 문자를 셀 단위로 보정한다", () => {
+    // "x가 가/a.txt" — 앞의 한글 1개(2셀)와 후보 안의 한글 1개(2셀).
+    const cells = [
+      { chars: "x", width: 1 },
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      { chars: " ", width: 1 },
+      { chars: "가", width: 2 },
+      { chars: "", width: 0 },
+      ...[..."/a.txt"].map((chars) => ({ chars, width: 1 })),
+    ];
+    expect(
+      mapLineCandidateToPathRange(12, { ...candidate, startIndex: 3, endIndex: 10 }, cells),
+    ).toEqual({ bufferLine: 12, startCol: 5, endCol: 12 });
+  });
+
+  it("셀 정보가 없으면 UTF-16 offset을 1-based 컬럼으로 쓴다", () => {
+    expect(mapLineCandidateToPathRange(3, candidate)).toEqual({
+      bufferLine: 3,
+      startCol: 3,
+      endCol: 9,
+    });
   });
 });

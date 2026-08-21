@@ -77,13 +77,34 @@ const mockScrollLines = vi.fn((lines: number) => {
     Math.min(mockBufferActive.baseY, mockBufferActive.viewportY + lines),
   );
 });
+/**
+ * ADR-0188 point 트리거용 라인 fixture. `setMockBufferLine` 로 채운 텍스트를
+ * 실제 xterm 처럼 셀 단위로 돌려준다(모두 1셀 폭 문자로 가정).
+ */
+type MockBufferLine = {
+  length: number;
+  getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
+};
+let mockBufferLineText: string | null = null;
+function setMockBufferLine(text: string | null): void {
+  mockBufferLineText = text;
+}
+function mockBufferLine(): MockBufferLine | undefined {
+  const text = mockBufferLineText;
+  if (text === null) return undefined;
+  return {
+    length: text.length,
+    getCell: (x: number) =>
+      x < text.length ? { getChars: () => text[x], getWidth: () => 1 } : undefined,
+  };
+}
 const mockBufferActive: {
   cursorX: number;
   cursorY: number;
   baseY: number;
   viewportY: number;
   length: number;
-  getLine(index: number): undefined;
+  getLine(index: number): MockBufferLine | undefined;
   // Real xterm reports which buffer is live. Composer passthrough keys off it.
   type: "normal" | "alternate";
 } = {
@@ -92,7 +113,7 @@ const mockBufferActive: {
   baseY: 0,
   viewportY: 0,
   length: 1,
-  getLine: () => undefined,
+  getLine: () => mockBufferLine(),
   type: "normal",
 };
 const mockOnScroll = vi.fn((handler: () => void) => {
@@ -293,6 +314,15 @@ vi.mock("@xterm/xterm", () => ({
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
     private readonly userInputListeners = new Set<() => void>();
     _core = {
+      // ADR-0188 point 트리거는 xterm 코어의 좌표 변환을 쓴다. 셀 폭 10px,
+      // 셀 높이 20px 로 두어 clientX/clientY 를 1-based 셀로 옮긴다.
+      _mouseService: {
+        getCoords: (event: MouseEvent): [number, number] => [
+          Math.floor(event.clientX / 10) + 1,
+          Math.floor(event.clientY / 20) + 1,
+        ],
+      },
+      screenElement: null,
       coreService: {
         // The field both renderers gate the cursor on. Real xterm owns it and
         // DECTCEM writes it; issue #598 suppresses through it, so the mock must
@@ -322,11 +352,32 @@ vi.mock("@xterm/xterm", () => ({
     getSelectionPosition = mockGetSelectionPosition;
     clearSelection = mockClearSelection;
     registerMarker = vi.fn(() => ({ dispose: vi.fn() }));
-    registerDecoration = vi.fn(() => ({
-      element: document.createElement("div"),
-      onRender: vi.fn(),
-      dispose: vi.fn(),
-    }));
+    // The path-link hit test reads the decoration's real rect and requires the
+    // element to be connected, so the mock attaches it and derives the rect from
+    // the cell geometry the mock `_mouseService` uses (10px x 20px cells).
+    registerDecoration = vi.fn((options?: { x?: number; width?: number }) => {
+      const element = document.createElement("div");
+      const x = options?.x ?? 0;
+      const width = options?.width ?? 1;
+      element.getBoundingClientRect = () =>
+        ({
+          x: x * 10,
+          y: 0,
+          left: x * 10,
+          right: (x + width) * 10,
+          top: 0,
+          bottom: 20,
+          width: width * 10,
+          height: 20,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      document.body.appendChild(element);
+      return {
+        element,
+        onRender: vi.fn(),
+        dispose: vi.fn(() => element.remove()),
+      };
+    });
     refresh = mockRefresh;
     // Passes itself so a test can tell *which* terminals were cleared, not just
     // how many calls happened (issue #571).
@@ -723,6 +774,7 @@ describe("TerminalView", () => {
     mockBufferActive.baseY = 0;
     mockBufferActive.viewportY = 0;
     mockBufferActive.type = "normal";
+    setMockBufferLine(null);
     mockGetRemoteControlStatus.mockResolvedValue({
       active: false,
       leaseId: null,
@@ -6576,6 +6628,173 @@ describe("TerminalView", () => {
 
     expect(outer).not.toHaveClass("terminal-path-link-clickable");
     window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 6 }));
+  });
+
+  // -- ADR-0188: 포인터 지점(point) 트리거 — hover dwell 과 이동 없는 클릭 --
+
+  it("validates the token under a stopped pointer once (hover dwell)", async () => {
+    // 화면: "cat C:\work\src\main.ts" — 토큰은 셀 5~23.
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-hover-dwell" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-dwell");
+    // clientX 100 → 셀 11(토큰 안), clientY 0 → 뷰포트 첫 행.
+    outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    // dwell 이 끝나기 전에는 조회가 없다.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(mockStatPaths).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+    expect(outer).toHaveClass("terminal-path-link-clickable");
+  });
+
+  it("does not validate while the pointer keeps moving", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-hover-moving" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-moving");
+    for (const clientX of [60, 80, 100, 120]) {
+      outer.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX, clientY: 0 }));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      });
+    }
+    expect(mockStatPaths).not.toHaveBeenCalled();
+  });
+
+  it("does not validate on hover while a selection drag is in progress", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+
+    render(<TerminalView instanceId="t-path-hover-drag" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-hover-drag");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 11, clientX: 100, clientY: 0 }),
+    );
+    // buttons=1 → 누른 상태의 이동은 dwell 을 잡지 않는다.
+    outer.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 110, clientY: 0, buttons: 1 }),
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+
+    expect(mockStatPaths).not.toHaveBeenCalled();
+    window.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: 11 }));
+  });
+
+  it("validates the clicked token once and does not open it on that click", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-click-detect" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-click-detect");
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 12, clientX: 100, clientY: 0 }),
+    );
+    outer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 0 }));
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 12, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    expect(mockStatPaths).toHaveBeenCalledWith([String.raw`C:\work\src\main.ts`]);
+    // 발견은 열기가 아니다 — 아직 밑줄이 없던 문구의 클릭은 viewer 를 열지 않는다.
+    const { useFileViewerStore } = await import("@/stores/file-viewer-store");
+    expect(useFileViewerStore.getState().open).toBe(false);
+  });
+
+  it("opens the file on a click that lands on an already verified underline", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue("");
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-click-open" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-click-open");
+    // 1st click: discovery only.
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 21, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 21, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
+    const { useFileViewerStore } = await import("@/stores/file-viewer-store");
+    expect(useFileViewerStore.getState().open).toBe(false);
+
+    // 2nd click on the same spot: the verified target is captured on mousedown
+    // and opened on mouseup.
+    outer.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 22, clientX: 100, clientY: 0 }),
+    );
+    outer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, clientX: 100, clientY: 0 }));
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 22, clientX: 100, clientY: 0 }),
+    );
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 100, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(useFileViewerStore.getState().open).toBe(true);
+    });
+    expect(useFileViewerStore.getState().path).toBe(String.raw`C:\work\src\main.ts`);
+    // The second click reuses the verified target instead of re-parsing it.
+    expect(mockStatPaths).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a drag on the selection path instead of the point path", async () => {
+    setMockBufferLine(String.raw`cat C:\work\src\main.ts`);
+    mockGetSelection.mockReturnValue(String.raw`C:\work\src\main.ts`);
+    mockGetSelectionPosition.mockReturnValue({
+      start: { x: 4, y: 0 },
+      end: { x: 23, y: 0 },
+    });
+    mockStatPaths.mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    render(<TerminalView instanceId="t-path-drag-selection" profile="PowerShell" syncGroup="" />);
+
+    const outer = screen.getByTestId("terminal-view-t-path-drag-selection");
+    outer.dispatchEvent(
+      // 컬럼 4 는 "cat" 뒤 공백이다. point 분기를 타면 후보가 없어 stat 0회가
+      // 되므로, 아래 1회 단정이 두 분기를 실제로 구별한다.
+      new PointerEvent("pointerdown", { bubbles: true, pointerId: 13, clientX: 30, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointermove", { bubbles: true, pointerId: 13, clientX: 200, clientY: 0 }),
+    );
+    window.dispatchEvent(
+      new PointerEvent("pointerup", { bubbles: true, pointerId: 13, clientX: 200, clientY: 0 }),
+    );
+    mockOnSelectionChange.mock.calls[0][0]();
+    window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, clientX: 200, clientY: 0 }));
+
+    await vi.waitFor(() => {
+      expect(mockStatPaths).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("does not validate a path after the pointer selection gesture is cancelled", async () => {

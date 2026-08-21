@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
-import { createPathLinkController } from "./path-link-provider";
+import { createPathLinkController, type VerifiedPathSelection } from "./path-link-provider";
 
 /**
  * 데코레이션 기반 컨트롤러 테스트용 mock terminal.
@@ -51,12 +51,13 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 3,
         startCol: 5,
         endCol: 20,
         absPath: "/proj/src/a.ts",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -85,6 +86,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
         startCol: 1,
         endCol: 10,
         absPath: "/proj/a.ts",
+        token: "tok",
         isDirectory: false,
       },
       "viewer",
@@ -98,6 +100,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
         startCol: 1,
         endCol: 10,
         absPath: "/proj/src",
+        token: "tok",
         isDirectory: true,
       },
       "changeDir",
@@ -119,6 +122,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       startCol: 1,
       endCol: 10,
       absPath: "/proj/a.ts",
+      token: "tok",
       isDirectory: false,
     };
     ctrl.activate(file, "osOpen");
@@ -127,7 +131,7 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
     ctrl.activate(file, "osReveal");
     expect(onOsAction).toHaveBeenCalledWith("/proj/a.ts", "reveal");
 
-    const dir = { ...file, absPath: "/proj/src", isDirectory: true };
+    const dir = { ...file, absPath: "/proj/src", token: "tok", isDirectory: true };
     ctrl.activate(dir, "osOpen");
     expect(onOsAction).toHaveBeenCalledWith("/proj/src", "open");
 
@@ -144,12 +148,13 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onOsAction: vi.fn(),
     });
     expect(ctrl.getHit(20, 25)).toBeNull(); // 검증 없음
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 1,
         startCol: 1,
         endCol: 4,
         absPath: "/x",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -172,12 +177,13 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onOsAction: vi.fn(),
     });
     expect(ctrl.getHit(20, 25)).toBeNull();
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 1,
         startCol: 1,
         endCol: 4,
         absPath: "/x",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -194,12 +200,13 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 1,
         startCol: 1,
         endCol: 4,
         absPath: "/x",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -213,12 +220,13 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 2,
         startCol: 1,
         endCol: 5,
         absPath: "/x",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -235,21 +243,23 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 2,
         startCol: 1,
         endCol: 5,
         absPath: "/a",
+        token: "tok",
         isDirectory: false,
       },
     ]);
-    ctrl.setVerifiedSelections([
+    ctrl.setVerifiedSelections("selection", [
       {
         bufferLine: 7,
         startCol: 3,
         endCol: 9,
         absPath: "/b",
+        token: "tok",
         isDirectory: false,
       },
     ]);
@@ -264,9 +274,9 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onChangeDir: vi.fn(),
       onOsAction: vi.fn(),
     });
-    ctrl.setVerifiedSelections([
-      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", isDirectory: false },
-      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", isDirectory: true },
+    ctrl.setVerifiedSelections("selection", [
+      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", token: "tok", isDirectory: false },
+      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", token: "tok", isDirectory: true },
     ]);
     t.elements[0].getBoundingClientRect = () =>
       ({ left: 10, right: 40, top: 10, bottom: 20 }) as DOMRect;
@@ -287,12 +297,199 @@ describe("createPathLinkController (선택 기반·데코레이션)", () => {
       onOsAction: vi.fn(),
     });
 
-    ctrl.setVerifiedSelections([
-      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", isDirectory: false },
-      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", isDirectory: false },
+    ctrl.setVerifiedSelections("selection", [
+      { bufferLine: 1, startCol: 1, endCol: 4, absPath: "/a", token: "tok", isDirectory: false },
+      { bufferLine: 2, startCol: 6, endCol: 9, absPath: "/b", token: "tok", isDirectory: false },
     ]);
 
     expect(t.terminal.registerMarker).toHaveBeenCalledTimes(2);
     expect(t.terminal.registerDecoration).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("createPathLinkController scope 소유 (ADR-0188)", () => {
+  const sel = (over: Partial<VerifiedPathSelection> = {}): VerifiedPathSelection => ({
+    bufferLine: 1,
+    startCol: 1,
+    endCol: 5,
+    absPath: "/proj/a.ts",
+    token: "a.ts",
+    isDirectory: false,
+    ...over,
+  });
+
+  it("한 scope 교체는 다른 scope 의 밑줄을 건드리지 않는다", () => {
+    const t = makeTerminal();
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+
+    ctrl.setVerifiedSelections("screen", [sel({ absPath: "/proj/screen.ts" })]);
+    ctrl.setVerifiedSelections("point", [sel({ absPath: "/proj/point.ts", bufferLine: 2 })]);
+    expect(ctrl.getCurrent().map((s) => s.absPath)).toEqual(["/proj/point.ts", "/proj/screen.ts"]);
+
+    ctrl.setVerifiedSelections("point", []);
+    expect(ctrl.getCurrent().map((s) => s.absPath)).toEqual(["/proj/screen.ts"]);
+    expect(ctrl.getCurrent("point")).toEqual([]);
+  });
+
+  it("clear(scope) 는 그 scope 만, clear() 는 전부 비운다", () => {
+    const t = makeTerminal();
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("selection", [sel()]);
+    ctrl.setVerifiedSelections("screen", [sel({ bufferLine: 4 })]);
+
+    ctrl.clear("selection");
+    expect(ctrl.getCurrent()).toHaveLength(1);
+    expect(t.decorationDispose).toHaveBeenCalledTimes(1);
+
+    ctrl.clear();
+    expect(ctrl.getCurrent()).toEqual([]);
+    expect(t.decorationDispose).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createPathLinkController.revalidate (ADR-0188)", () => {
+  const lineOf = (text: string) => ({
+    length: text.length,
+    getCell: (x: number) => ({ getChars: () => text[x] ?? "", getWidth: () => 1 }),
+  });
+
+  /**
+   * `markerLine` 은 xterm 마커가 보고할 현재 라인이다. scrollback trim 으로
+   * 저장된 bufferLine 이 밀려도 마커는 따라 움직이므로, 재검사는 마커를
+   * 신뢰해야 한다 — 그 분기를 타려면 mock 마커가 line/isDisposed 를 내야 한다.
+   */
+  function makeBufferTerminal(lines: Record<number, string>, markerLine?: number) {
+    const base = makeTerminal();
+    if (markerLine !== undefined) {
+      (base.terminal as unknown as { registerMarker: unknown }).registerMarker = vi.fn(() => ({
+        line: markerLine,
+        isDisposed: false,
+        dispose: vi.fn(),
+      }));
+    }
+    (base.terminal as unknown as { buffer: unknown }).buffer = {
+      active: {
+        baseY: 0,
+        cursorY: 0,
+        getLine: (y: number) => (lines[y] === undefined ? undefined : lineOf(lines[y])),
+      },
+    };
+    return base;
+  }
+
+  it("밑줄 아래 원문이 그대로면 유지한다", () => {
+    const t = makeBufferTerminal({ 2: "cat src/a.ts done" });
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("point", [
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 12,
+        absPath: "/proj/src/a.ts",
+        token: "src/a.ts",
+        isDirectory: false,
+      },
+    ]);
+    expect(ctrl.revalidate()).toBe(0);
+    expect(ctrl.getCurrent()).toHaveLength(1);
+  });
+
+  it("화면 재출력으로 텍스트가 바뀌면 그 항목을 폐기한다", () => {
+    const t = makeBufferTerminal({ 2: "cat other.txt   " });
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("screen", [
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 12,
+        absPath: "/proj/src/a.ts",
+        token: "src/a.ts",
+        isDirectory: false,
+      },
+    ]);
+    expect(ctrl.revalidate()).toBe(1);
+    expect(ctrl.getCurrent()).toEqual([]);
+    expect(t.decorationDispose).toHaveBeenCalled();
+  });
+
+  it("버퍼 밖으로 밀린 라인은 폐기한다", () => {
+    const t = makeBufferTerminal({});
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("point", [
+      {
+        bufferLine: 9,
+        startCol: 1,
+        endCol: 4,
+        absPath: "/proj/a.ts",
+        token: "a.ts",
+        isDirectory: false,
+      },
+    ]);
+    expect(ctrl.revalidate()).toBe(1);
+  });
+  it("scrollback trim 으로 밀린 줄은 마커의 현재 라인으로 재검사한다", () => {
+    // 저장된 bufferLine(3 → 0-based 2)에는 다른 내용이, 마커가 가리키는
+    // 현재 라인(0)에는 원문이 있다. 마커를 신뢰해야 살아남는다.
+    const t = makeBufferTerminal({ 0: "cat src/a.ts done", 2: "unrelated output" }, 0);
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("point", [
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 12,
+        absPath: "/proj/src/a.ts",
+        token: "src/a.ts",
+        isDirectory: false,
+      },
+    ]);
+
+    expect(ctrl.revalidate()).toBe(0);
+    expect(ctrl.getCurrent()).toHaveLength(1);
+  });
+
+  it("마커가 가리키는 줄의 원문이 바뀌었으면 폐기한다", () => {
+    const t = makeBufferTerminal({ 0: "unrelated output", 2: "cat src/a.ts done" }, 0);
+    const ctrl = createPathLinkController(t.terminal, {
+      onOpenPath: vi.fn(),
+      onChangeDir: vi.fn(),
+      onOsAction: vi.fn(),
+    });
+    ctrl.setVerifiedSelections("point", [
+      {
+        bufferLine: 3,
+        startCol: 5,
+        endCol: 12,
+        absPath: "/proj/src/a.ts",
+        token: "src/a.ts",
+        isDirectory: false,
+      },
+    ]);
+
+    expect(ctrl.revalidate()).toBe(1);
+    expect(ctrl.getCurrent()).toEqual([]);
   });
 });

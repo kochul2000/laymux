@@ -77,8 +77,11 @@ pub fn wsl_terminal_targets(
 /// the user runs `wsl --set-default`, so a short cache is safe. Negative
 /// results are cached too, otherwise a machine with no WSL installed would
 /// spawn a doomed `wsl.exe` every cycle.
+/// Also used by the path-link batch (`stat_paths`, ADR-0188): its ambient
+/// triggers (hover dwell, Remote idle screen scan) fire far more often than a
+/// drag did, and each POSIX-looking candidate would otherwise pay the probe.
 #[cfg(windows)]
-fn default_distro_cached(timeout: Duration) -> Option<String> {
+pub(crate) fn default_distro_cached(timeout: Duration) -> Option<String> {
     static CACHE: std::sync::Mutex<Option<(Instant, Option<String>)>> = std::sync::Mutex::new(None);
 
     if let Ok(guard) = CACHE.lock_or_err() {
