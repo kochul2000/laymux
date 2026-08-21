@@ -1,7 +1,10 @@
 /**
- * 터미널에서 사용자가 *선택(드래그)* 한 (상대/절대) 파일·디렉토리 경로에
- * 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파하는
- * 컨트롤러 (issue #363, 선택 기반).
+ * 터미널에서 발견한 (상대/절대) 파일·디렉토리 경로에 밑줄을 긋고, 클릭하면
+ * 파일은 viewer 로 열고 디렉토리는 cwd 로 전파하는 컨트롤러 (issue #363).
+ *
+ * 발견 트리거는 세 가지이며 각각 자기 scope 의 밑줄만 소유한다(ADR-0188):
+ * `selection`(드래그 선택), `point`(hover dwell·클릭·Remote 탭),
+ * `screen`(Remote 유휴 화면 스캔).
  *
  * ## 왜 ILinkProvider 가 아니라 데코레이션인가
  * xterm 의 ILinkProvider/Linkifier 는 **마우스 이동(mousemove) 시점에만**
@@ -15,6 +18,15 @@
 
 import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
 import type { PathLinkClickAction } from "./path-link-os-open";
+import { readLineCells, reconstructLine } from "./terminal-cell-map";
+
+/**
+ * 검증된 링크의 소유 scope(ADR-0188). 세 트리거는 서로의 밑줄을 건드리지 않고
+ * 자기 scope 만 교체·해제하며, hit-test 만 전체를 함께 본다.
+ */
+export type PathLinkScope = "selection" | "point" | "screen";
+
+const PATH_LINK_SCOPES: readonly PathLinkScope[] = ["selection", "point", "screen"];
 
 /** 검증된 선택 경로의 버퍼 범위 + 메타. */
 export interface VerifiedPathSelection {
@@ -28,6 +40,11 @@ export interface VerifiedPathSelection {
   absPath: string;
   /** 디렉토리면 true(클릭 시 cwd 전파), 파일이면 false(viewer). */
   isDirectory: boolean;
+  /**
+   * 밑줄 아래의 원문 토큰. 화면 재출력으로 그 자리 텍스트가 바뀌었는지
+   * `revalidate()` 가 이 값으로 판정한다(ADR-0188).
+   */
+  token: string;
 }
 
 /** 호스트 OS 위임 모드(백엔드 `open_in_os` 의 `mode` 인자와 같은 값). */
@@ -46,12 +63,20 @@ export interface PathLinkControllerDeps {
 }
 
 export interface PathLinkController {
-  /** 검증된 선택 범위들을 저장하고 각각 밑줄 데코레이션을 그린다. */
-  setVerifiedSelections: (selections: VerifiedPathSelection[]) => void;
-  /** 저장 상태와 데코레이션을 비운다(선택 해제/변경 시). */
-  clear: () => void;
-  /** 현재 검증 상태(테스트/디버그용). */
-  getCurrent: () => readonly VerifiedPathSelection[];
+  /**
+   * 한 scope 의 검증 범위를 교체하고 각각 밑줄 데코레이션을 그린다. 다른
+   * scope 의 밑줄은 건드리지 않는다.
+   */
+  setVerifiedSelections: (scope: PathLinkScope, selections: VerifiedPathSelection[]) => void;
+  /** scope 하나(또는 생략 시 전부)의 상태와 데코레이션을 비운다. */
+  clear: (scope?: PathLinkScope) => void;
+  /** 현재 검증 상태(테스트/디버그용). scope 를 주면 그 scope 만. */
+  getCurrent: (scope?: PathLinkScope) => readonly VerifiedPathSelection[];
+  /**
+   * 밑줄 아래 원문이 그 자리에 남아 있는지 다시 확인하고, 화면 재출력으로
+   * 텍스트가 바뀐 항목을 폐기한다. 폐기한 개수를 돌려준다(ADR-0188).
+   */
+  revalidate: () => number;
   /** viewport 좌표 아래의 검증 경로와 사각형. 없으면 null. */
   getHit: (
     clientX: number,
@@ -65,6 +90,33 @@ export interface PathLinkController {
 }
 
 /**
+ * 밑줄이 덮은 셀에 아직 같은 토큰이 있는지 확인한다(ADR-0188).
+ *
+ * 저장된 `bufferLine` 은 scrollback trim 으로 밀릴 수 있으므로, 마커가 살아
+ * 있으면 마커의 현재 라인을 신뢰한다(마커는 xterm 이 따라 움직여 준다).
+ * 라인을 읽을 수 없거나 시작 컬럼의 문자열이 달라졌으면 폐기 대상이다.
+ */
+function tokenStillAtRange(
+  terminal: Terminal,
+  entry: { selection: VerifiedPathSelection; marker?: IMarker },
+): boolean {
+  try {
+    const markerLine = entry.marker && !entry.marker.isDisposed ? entry.marker.line : undefined;
+    const absoluteLine = markerLine ?? entry.selection.bufferLine - 1;
+    const line = terminal.buffer.active.getLine(absoluteLine);
+    if (!line) return false;
+    const { text, columns } = reconstructLine(readLineCells(line));
+    const offset = columns.indexOf(entry.selection.startCol);
+    if (offset < 0) return false;
+    return text.slice(offset, offset + entry.selection.token.length) === entry.selection.token;
+  } catch {
+    // 버퍼 접근이 실패하면 표시를 유지한다 — 읽지 못한 것을 근거로 지우면
+    // 정상 밑줄이 사라진다.
+    return true;
+  }
+}
+
+/**
  * 선택 기반 path-link 컨트롤러를 만든다. 검증된 선택이 설정되면 그 범위에
  * 밑줄 데코레이션을 그리고, 데코레이션 요소 클릭을 파일/디렉토리에 따라
  * onOpenPath/onChangeDir 로 라우팅한다.
@@ -73,19 +125,22 @@ export function createPathLinkController(
   terminal: Terminal,
   deps: PathLinkControllerDeps,
 ): PathLinkController {
-  let current: VerifiedPathSelection[] = [];
-  let entries: Array<{
+  type Entry = {
     selection: VerifiedPathSelection;
     decoration?: IDecoration;
     marker?: IMarker;
-  }> = [];
+  };
+  const scopes: Record<PathLinkScope, Entry[]> = { selection: [], point: [], screen: [] };
+  const allEntries = () => PATH_LINK_SCOPES.flatMap((scope) => scopes[scope]);
 
-  const disposeDecorations = () => {
-    for (const entry of entries) {
-      entry.decoration?.dispose();
-      entry.marker?.dispose();
-    }
-    entries = [];
+  const disposeEntry = (entry: Entry) => {
+    entry.decoration?.dispose();
+    entry.marker?.dispose();
+  };
+
+  const disposeScope = (scope: PathLinkScope) => {
+    for (const entry of scopes[scope]) disposeEntry(entry);
+    scopes[scope] = [];
   };
 
   const styleEl = (el: HTMLElement) => {
@@ -98,13 +153,12 @@ export function createPathLinkController(
   };
 
   return {
-    setVerifiedSelections: (selections: VerifiedPathSelection[]) => {
-      disposeDecorations();
-      current = [...selections];
+    setVerifiedSelections: (scope: PathLinkScope, selections: VerifiedPathSelection[]) => {
+      disposeScope(scope);
 
       for (const sel of selections) {
-        const entry: (typeof entries)[number] = { selection: sel };
-        entries.push(entry);
+        const entry: Entry = { selection: sel };
+        scopes[scope].push(entry);
         // 한 데코레이션 실패가 나머지 검증 경로의 밑줄·클릭을 막지 않는다.
         try {
           // registerMarker(offset) 는 커서 절대 라인 기준 상대 오프셋에 마커를 단다.
@@ -133,13 +187,31 @@ export function createPathLinkController(
         }
       }
     },
-    clear: () => {
-      current = [];
-      disposeDecorations();
+    clear: (scope?: PathLinkScope) => {
+      if (scope) {
+        disposeScope(scope);
+        return;
+      }
+      for (const each of PATH_LINK_SCOPES) disposeScope(each);
     },
-    getCurrent: () => current,
+    getCurrent: (scope?: PathLinkScope) =>
+      (scope ? scopes[scope] : allEntries()).map((entry) => entry.selection),
+    revalidate: () => {
+      // 출력마다 불리는 경로다. 표시 중인 링크가 없으면 버퍼도 읽지 않는다.
+      if (!PATH_LINK_SCOPES.some((scope) => scopes[scope].length > 0)) return 0;
+      let dropped = 0;
+      for (const scope of PATH_LINK_SCOPES) {
+        scopes[scope] = scopes[scope].filter((entry) => {
+          if (tokenStillAtRange(terminal, entry)) return true;
+          disposeEntry(entry);
+          dropped += 1;
+          return false;
+        });
+      }
+      return dropped;
+    },
     getHit: (clientX: number, clientY: number) => {
-      for (const entry of entries) {
+      for (const entry of allEntries()) {
         const element = entry.decoration?.element;
         if (!element?.isConnected) continue;
         const rect = element.getBoundingClientRect();

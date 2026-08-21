@@ -8,8 +8,10 @@ use serde_json::{json, Value};
 use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
 use crate::constants::{
-    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_PATH_LINK_SELECTION_CHARS,
-    MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS, REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
+    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_PATH_LINK_SCREEN_CHARS,
+    MAX_REMOTE_PATH_LINK_SCREEN_LINES, MAX_REMOTE_PATH_LINK_SELECTION_CHARS,
+    MAX_REMOTE_PATH_LINK_SELECTION_LINES, MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS,
+    REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
 };
 use crate::state::AppState;
 
@@ -32,12 +34,25 @@ pub(super) struct FileViewerDownloadRequest {
     lease_id: Option<String>,
 }
 
+/// One Remote path-link discovery request (ADR-0188). `mode` selects the
+/// trigger contract: `selection` (drag), `point` (tap/click — `caret` names the
+/// token) or `screen` (idle viewport scan). `lines` is the text scope; the
+/// desktop parser owns token cleanup so the text is never trimmed here.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct FileViewerPathLinkRequest {
     terminal_id: String,
-    selection: String,
+    mode: String,
+    lines: Vec<String>,
+    caret: Option<FileViewerPathLinkCaret>,
     lease_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FileViewerPathLinkCaret {
+    line_index: usize,
+    index: usize,
 }
 
 struct FileViewerAuthorization {
@@ -194,19 +209,64 @@ fn path_link_params(body: FileViewerPathLinkRequest) -> Result<Value, &'static s
     if terminal_id.chars().count() > MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS {
         return Err("terminalId exceeds the 256 character limit");
     }
-    if body.selection.is_empty() {
-        return Err("selection is required");
+    if !matches!(body.mode.as_str(), "selection" | "point" | "screen") {
+        return Err("mode must be 'selection', 'point' or 'screen'");
     }
-    if body.selection.chars().count() > MAX_REMOTE_PATH_LINK_SELECTION_CHARS {
-        return Err("selection exceeds the 4096 character limit");
+    if body.lines.is_empty() || body.lines.iter().all(String::is_empty) {
+        return Err("lines is required");
     }
 
-    Ok(json!({
+    // Per-trigger bounds (ADR-0188). The screen scan is the only mode allowed a
+    // whole viewport, and a caret only means something for a single line.
+    let (max_lines, max_chars) = match body.mode.as_str() {
+        "screen" => (
+            MAX_REMOTE_PATH_LINK_SCREEN_LINES,
+            MAX_REMOTE_PATH_LINK_SCREEN_CHARS,
+        ),
+        "point" => (1, MAX_REMOTE_PATH_LINK_SELECTION_CHARS),
+        _ => (
+            MAX_REMOTE_PATH_LINK_SELECTION_LINES,
+            MAX_REMOTE_PATH_LINK_SELECTION_CHARS,
+        ),
+    };
+    if body.lines.len() > max_lines {
+        return Err("lines exceeds the line limit for this mode");
+    }
+    let chars: usize = body.lines.iter().map(|line| line.chars().count()).sum();
+    if chars > max_chars {
+        return Err("lines exceeds the character limit for this mode");
+    }
+
+    let caret = match (body.mode.as_str(), body.caret) {
+        ("point", Some(caret)) => {
+            let line = body
+                .lines
+                .get(caret.line_index)
+                .ok_or("caret.lineIndex is out of range")?;
+            // The caret is a UTF-16 offset produced by the page's own cell map;
+            // it must land inside the line it names or the parser would resolve
+            // a token the user never pointed at.
+            if caret.index >= line.encode_utf16().count() {
+                return Err("caret.index is out of range");
+            }
+            Some(json!({ "lineIndex": caret.line_index, "index": caret.index }))
+        }
+        ("point", None) => return Err("caret is required when mode is 'point'"),
+        (_, Some(_)) => return Err("caret is only valid when mode is 'point'"),
+        (_, None) => None,
+    };
+
+    let mut params = json!({
         "terminalId": terminal_id,
-        // Do not trim this value: the shared desktop parser owns token cleanup
-        // and needs the exact selected text for parity with TerminalView.
-        "selection": body.selection,
-    }))
+        "mode": body.mode,
+        // Do not trim these values: the shared desktop parser owns token cleanup
+        // and needs the exact rendered text for parity with TerminalView.
+        "lines": body.lines,
+    });
+    if let Some(caret) = caret {
+        params["caret"] = caret;
+    }
+    Ok(params)
 }
 
 async fn file_viewer_bridge_response(
@@ -275,9 +335,20 @@ mod tests {
     }
 
     fn path_link_request(terminal_id: &str, selection: &str) -> FileViewerPathLinkRequest {
+        path_link_mode_request(terminal_id, "selection", vec![selection.to_owned()], None)
+    }
+
+    fn path_link_mode_request(
+        terminal_id: &str,
+        mode: &str,
+        lines: Vec<String>,
+        caret: Option<(usize, usize)>,
+    ) -> FileViewerPathLinkRequest {
         FileViewerPathLinkRequest {
             terminal_id: terminal_id.into(),
-            selection: selection.into(),
+            mode: mode.into(),
+            lines,
+            caret: caret.map(|(line_index, index)| FileViewerPathLinkCaret { line_index, index }),
             lease_id: None,
         }
     }
@@ -318,7 +389,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(params["terminalId"], "terminal-1");
-        assert_eq!(params["selection"], "  (\"ui/src/main.ts:42:5\")  ");
+        assert_eq!(params["mode"], "selection");
+        assert_eq!(params["lines"][0], "  (\"ui/src/main.ts:42:5\")  ");
+        assert!(params.get("caret").is_none());
         assert!(params.get("cwd").is_none());
         assert!(params.get("path").is_none());
     }
@@ -331,7 +404,7 @@ mod tests {
         );
         assert_eq!(
             path_link_params(path_link_request("terminal-1", "")).unwrap_err(),
-            "selection is required"
+            "lines is required"
         );
         assert!(path_link_params(path_link_request(&"t".repeat(256), "src/main.rs")).is_ok());
         assert_eq!(
@@ -341,7 +414,148 @@ mod tests {
         assert!(path_link_params(path_link_request("terminal-1", &"가".repeat(4096))).is_ok());
         assert_eq!(
             path_link_params(path_link_request("terminal-1", &"가".repeat(4097))).unwrap_err(),
-            "selection exceeds the 4096 character limit"
+            "lines exceeds the character limit for this mode"
+        );
+    }
+
+    #[test]
+    fn path_link_rejects_an_unknown_trigger_mode() {
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "hover",
+                vec!["src/main.rs".into()],
+                None,
+            ))
+            .unwrap_err(),
+            "mode must be 'selection', 'point' or 'screen'"
+        );
+    }
+
+    #[test]
+    fn path_link_point_requires_a_caret_inside_a_single_line() {
+        let params = path_link_params(path_link_mode_request(
+            "terminal-1",
+            "point",
+            vec!["cat ui/src/main.ts".into()],
+            Some((0, 6)),
+        ))
+        .unwrap();
+        assert_eq!(params["mode"], "point");
+        assert_eq!(params["caret"]["lineIndex"], 0);
+        assert_eq!(params["caret"]["index"], 6);
+
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "point",
+                vec!["cat ui/src/main.ts".into()],
+                None,
+            ))
+            .unwrap_err(),
+            "caret is required when mode is 'point'"
+        );
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "point",
+                vec!["cat".into()],
+                Some((0, 3)),
+            ))
+            .unwrap_err(),
+            "caret.index is out of range"
+        );
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "point",
+                vec!["cat".into()],
+                Some((1, 0)),
+            ))
+            .unwrap_err(),
+            "caret.lineIndex is out of range"
+        );
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "point",
+                vec!["a".into(), "b".into()],
+                Some((0, 0)),
+            ))
+            .unwrap_err(),
+            "lines exceeds the line limit for this mode"
+        );
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "selection",
+                vec!["src/main.rs".into()],
+                Some((0, 0)),
+            ))
+            .unwrap_err(),
+            "caret is only valid when mode is 'point'"
+        );
+    }
+
+    #[test]
+    fn path_link_screen_accepts_a_viewport_and_bounds_it() {
+        let rows = vec![String::from("cat src/a.ts"); MAX_REMOTE_PATH_LINK_SCREEN_LINES];
+        let params =
+            path_link_params(path_link_mode_request("terminal-1", "screen", rows, None)).unwrap();
+        assert_eq!(params["mode"], "screen");
+        assert_eq!(
+            params["lines"].as_array().map(Vec::len),
+            Some(MAX_REMOTE_PATH_LINK_SCREEN_LINES)
+        );
+
+        let too_many = vec![String::from("a"); MAX_REMOTE_PATH_LINK_SCREEN_LINES + 1];
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "screen",
+                too_many,
+                None
+            ))
+            .unwrap_err(),
+            "lines exceeds the line limit for this mode"
+        );
+
+        let too_wide = vec![
+            "가".repeat(MAX_REMOTE_PATH_LINK_SCREEN_CHARS / 2 + 1),
+            "가".repeat(MAX_REMOTE_PATH_LINK_SCREEN_CHARS / 2),
+        ];
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "screen",
+                too_wide,
+                None
+            ))
+            .unwrap_err(),
+            "lines exceeds the character limit for this mode"
+        );
+    }
+
+    #[test]
+    fn path_link_selection_keeps_the_eight_line_cap() {
+        let rows = vec![String::from("src/a.ts"); MAX_REMOTE_PATH_LINK_SELECTION_LINES];
+        assert!(path_link_params(path_link_mode_request(
+            "terminal-1",
+            "selection",
+            rows,
+            None
+        ))
+        .is_ok());
+        let too_many = vec![String::from("src/a.ts"); MAX_REMOTE_PATH_LINK_SELECTION_LINES + 1];
+        assert_eq!(
+            path_link_params(path_link_mode_request(
+                "terminal-1",
+                "selection",
+                too_many,
+                None
+            ))
+            .unwrap_err(),
+            "lines exceeds the line limit for this mode"
         );
     }
 

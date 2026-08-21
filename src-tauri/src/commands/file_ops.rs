@@ -50,6 +50,10 @@ pub fn stat_paths_inner(
         )));
     }
 
+    // Resolving the default distro once per batch (rather than per path inside
+    // `resolve_address_path`) keeps the WSL lookup out of the loop; the lookup
+    // itself is cached in `get_default_wsl_distro` because ADR-0188's ambient
+    // triggers call this batch far more often than a drag did.
     #[cfg(windows)]
     let inferred_distro = wsl_distro.map(str::to_owned).or_else(|| {
         paths
@@ -82,7 +86,19 @@ pub fn stat_paths_inner(
         .collect())
 }
 
-#[tauri::command]
+/// `async` is load-bearing, not decoration (ADR-0188).
+///
+/// A plain `#[tauri::command]` on a sync function is `ExecutionContext::Blocking`
+/// in `tauri-macros`: the body runs inline on the thread handling the IPC, which
+/// is the app's main/event-loop thread. This body does up to
+/// `MAX_PATH_LINK_CANDIDATES` `fs::metadata` calls and can resolve the default
+/// WSL distribution, so a stale UNC/network path or a cold `wsl.exe` probe would
+/// stall the window itself. `#[tauri::command(async)]` on a sync function
+/// selects the `sync_threadpool` kind, which runs it on the async runtime
+/// instead. The path-link triggers make this call frequent enough that the
+/// distinction is user-visible; `stat_paths_source_stays_off_the_main_thread`
+/// keeps it from being dropped by a later edit.
+#[tauri::command(async)]
 pub fn stat_paths(paths: Vec<String>, wsl_distro: Option<String>) -> Result<Vec<PathInfo>, String> {
     stat_paths_inner(&paths, wsl_distro.as_deref()).map_err(Into::into)
 }
@@ -305,6 +321,32 @@ mod tests {
     fn stat_paths_rejects_an_unbounded_batch() {
         let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES + 1];
         assert!(stat_paths_inner(&paths, None).is_err());
+    }
+
+    /// The blocking-vs-threadpool choice is invisible at runtime — a main-thread
+    /// stall looks like a laggy window, not a failing test — so the attribute
+    /// itself is the contract (ADR-0188).
+    #[test]
+    fn stat_paths_source_stays_off_the_main_thread() {
+        let source = include_str!("file_ops.rs");
+        assert!(
+            source.contains("#[tauri::command(async)]\npub fn stat_paths("),
+            "stat_paths must stay `#[tauri::command(async)]`: a plain command runs \
+             its fs metadata batch and wsl.exe probe on the main thread"
+        );
+    }
+
+    /// ADR-0188 raised this ceiling so a Remote idle screen scan fits in one
+    /// batch. It is the maximum filesystem lookups one batch may perform, not
+    /// the 16-candidate selection cap.
+    #[test]
+    fn stat_paths_batch_ceiling_fits_a_remote_screen_scan() {
+        assert_eq!(crate::constants::MAX_PATH_LINK_CANDIDATES, 64);
+        let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES];
+        assert_eq!(
+            stat_paths_inner(&paths, None).expect("bounded batch").len(),
+            crate::constants::MAX_PATH_LINK_CANDIDATES
+        );
     }
 
     #[test]

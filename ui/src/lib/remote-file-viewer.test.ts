@@ -36,7 +36,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: '("ui/src/main.ts:42:5")',
+      mode: "selection",
+      lines: ['("ui/src/main.ts:42:5")'],
     });
 
     expect(statPaths).toHaveBeenCalledWith(["C:\\work\\ui\\src\\main.ts"]);
@@ -63,7 +64,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
 
     expect(statPaths).toHaveBeenCalledWith(["D:\\PycharmProjects\\laymux\\src\\main.rs"]);
@@ -79,7 +81,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "/D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html:17",
+      mode: "selection",
+      lines: ["/D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html:17"],
     });
 
     const path = "D:/PycharmProjects/laymux-dev/apps/android/app/src/main/assets/index.html";
@@ -102,7 +105,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src",
+      mode: "selection",
+      lines: ["src"],
     });
 
     expect(result).toEqual({ success: true, data: { valid: false } });
@@ -114,13 +118,15 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const disabled = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
 
     useSettingsStore.getState().setTerminal({ pathLinkEnabled: true, pathLinkMaxLength: 8 });
     const tooLong = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
 
     expect(disabled).toEqual({ success: true, data: { valid: false } });
@@ -133,15 +139,18 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const url = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "https://example.com/a.ts",
+      mode: "selection",
+      lines: ["https://example.com/a.ts"],
     });
     const noTerminal = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-missing",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
     const noCwd = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
 
     expect(url).toEqual({ success: true, data: { valid: false } });
@@ -159,7 +168,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "diff ui/src/App.tsx against ui/src/App.test.tsx",
+      mode: "selection",
+      lines: ["diff ui/src/App.tsx against ui/src/App.test.tsx"],
     });
 
     expect(statPaths).toHaveBeenCalledWith([
@@ -199,7 +209,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/a.ts src/a.ts src/dir/",
+      mode: "selection",
+      lines: ["src/a.ts src/a.ts src/dir/"],
     });
 
     expect(statPaths).toHaveBeenCalledWith(["/work/src/a.ts", "/work/src/dir/"]);
@@ -210,6 +221,107 @@ describe("Remote FileViewer path-link bridge", () => {
         matches: [{ token: "src/a.ts" }, { token: "src/a.ts" }],
       },
     });
+  });
+
+  it("point 모드는 caret 이 가리키는 토큰 하나만 검증한다 (ADR-0188)", async () => {
+    registerTerminal("/work");
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: false }]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "point",
+      lines: ["diff src/a.ts src/b.ts"],
+      caret: { lineIndex: 0, index: 7 },
+    });
+
+    expect(statPaths).toHaveBeenCalledWith(["/work/src/a.ts"]);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          { token: "src/a.ts", path: "/work/src/a.ts", lineIndex: 0, startIndex: 5, endIndex: 13 },
+        ],
+      },
+    });
+  });
+
+  it("point 모드의 caret 이 없거나 범위를 벗어나면 조회하지 않는다", async () => {
+    registerTerminal("/work");
+
+    const missing = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "point",
+      lines: ["src/a.ts"],
+    });
+    const outOfRange = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "point",
+      lines: ["src/a.ts"],
+      caret: { lineIndex: 3, index: 0 },
+    });
+    const onWhitespace = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "point",
+      lines: ["a src/a.ts"],
+      caret: { lineIndex: 0, index: 1 },
+    });
+
+    expect(missing).toEqual({ success: true, data: { valid: false } });
+    expect(outOfRange).toEqual({ success: true, data: { valid: false } });
+    expect(onWhitespace).toEqual({ success: true, data: { valid: false } });
+    expect(statPaths).not.toHaveBeenCalled();
+  });
+
+  it("screen 모드는 화면 여러 줄의 strong candidate 를 한 배치로 검증한다 (ADR-0188)", async () => {
+    registerTerminal("/work");
+    vi.mocked(statPaths).mockResolvedValue([
+      { exists: true, isDirectory: false },
+      { exists: true, isDirectory: false },
+    ]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "screen",
+      lines: ["edit src/a.ts now", "cd laymux", "cat Cargo.toml"],
+    });
+
+    expect(statPaths).toHaveBeenCalledWith(["/work/src/a.ts", "/work/Cargo.toml"]);
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          { token: "src/a.ts", lineIndex: 0 },
+          { token: "Cargo.toml", lineIndex: 2 },
+        ],
+      },
+    });
+  });
+
+  it("알 수 없는 mode 나 잘못된 lines 는 fail-closed 다", async () => {
+    registerTerminal("/work");
+
+    const badMode = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "hover",
+      lines: ["src/main.rs"],
+    });
+    const badLines = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "selection",
+      lines: "src/main.rs",
+    });
+    const emptyLines = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "selection",
+      lines: [],
+    });
+
+    expect(badMode).toEqual({ success: true, data: { valid: false } });
+    expect(badLines).toEqual({ success: true, data: { valid: false } });
+    expect(emptyLines).toEqual({ success: true, data: { valid: false } });
+    expect(statPaths).not.toHaveBeenCalled();
   });
 
   it("stat 대기 중 terminal CWD가 바뀌면 이전 CWD의 결과를 폐기한다", async () => {
@@ -224,7 +336,8 @@ describe("Remote FileViewer path-link bridge", () => {
 
     const pending = handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
-      selection: "src/main.rs",
+      mode: "selection",
+      lines: ["src/main.rs"],
     });
     useTerminalStore.getState().updateInstanceInfo("terminal-1", { cwd: "/work/b" });
     resolveStat([{ exists: true, isDirectory: false }]);
