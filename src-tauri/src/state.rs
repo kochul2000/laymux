@@ -365,7 +365,9 @@ impl AppState {
             usage_probe: Arc::new(crate::usage_probe::UsageProbe::new()),
             grok_usage_probe: Arc::new(crate::grok_usage_probe::GrokUsageProbe::new()),
             sleep_inhibitor: Arc::new(crate::power::SleepInhibitor::new()),
-            app_update: Arc::new(crate::app_update::UpdateManager::default()),
+            app_update: Arc::new(crate::app_update::UpdateManager::new(
+                crate::app_update::current_channel(),
+            )),
         }
     }
 }

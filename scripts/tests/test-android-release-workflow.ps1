@@ -22,7 +22,14 @@ $requiredWorkflowTokens = @(
     ":app:assembleRelease",
     "apksigner verify --verbose --print-certs",
     "sha256sum",
-    "gh release upload"
+    "gh release upload",
+    # ADR-0189: both channels feed a client updater, so both tags are checked
+    # against the client contract and the versionCode encoding has one owner.
+    'scripts/release/android-version-code.mjs "$RELEASE_TAG"',
+    "-beta\.[1-9][0-9]*",
+    "src-tauri/Cargo.toml version",
+    "scripts/release/channel-manifest.mjs",
+    "release-channels"
 )
 foreach ($token in $requiredWorkflowTokens) {
     if (-not $workflow.Contains($token)) {
@@ -52,6 +59,23 @@ if ($workflow.Contains("bundleRelease")) {
 
 if ($workflow.Contains('gh release create') -or $workflow.Contains('/releases/tags/$RELEASE_TAG')) {
     throw "draft release identity must come from the create response, not a tag lookup"
+}
+
+# ADR-0189: the Android job must run for prereleases too, and publish must gate
+# on it rather than tolerate a skip.
+if ($workflow.Contains("needs.prepare.outputs.prerelease == 'false'")) {
+    throw "Android job must not be limited to stable releases"
+}
+if ($workflow.Contains("needs.android.result == 'skipped'")) {
+    throw "publish must require the Android job, not tolerate a skipped one"
+}
+if (-not $workflow.Contains('--bundles')) {
+    throw "prerelease desktop builds must limit bundles (rpm/deb reject semver prereleases)"
+}
+
+$updater = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "src-tauri/tauri.conf.json")
+if ($updater.Contains("releases/latest/download/latest.json")) {
+    throw "the static updater endpoint must be the stable channel manifest (ADR-0189)"
 }
 
 Write-Output "Android release workflow contract passed"

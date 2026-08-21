@@ -178,6 +178,18 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/update",
+        description: "따라갈 릴리스 채널 설정입니다(ADR-0189).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/update/channel",
+        description: "업데이트를 받아올 채널입니다. stable 은 정식 릴리스만, beta 는 정식보다 먼저 나오는 테스트 릴리스까지 받습니다(기본 \"stable\"). beta 는 안정성이 보장되지 않으며, 한번 올라간 뒤 stable 로 되돌려도 정식이 그 버전을 넘어설 때까지는 업데이트가 없습니다. 채널을 바꾸면 즉시 한 번 확인합니다.",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/workspaceSelector",
         description: "workspace selector 표시·정렬·숨김 터미널 정리 설정입니다.",
         sensitive: false,

@@ -391,6 +391,26 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     expect(snapshot?.keepAwake).toBe(false);
   });
 
+  it("round-trips the update channel", async () => {
+    applySettingsSnapshot(
+      { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().update).toEqual({ channel: "beta" });
+    expect((await collectSettingsSnapshot()).update?.channel).toBe("beta");
+  });
+
+  it("resolves an unknown update channel to stable instead of persisting it", async () => {
+    applySettingsSnapshot(
+      { update: { channel: "nightly" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().update).toEqual({ channel: "stable" });
+    expect((await collectSettingsSnapshot()).update?.channel).toBe("stable");
+  });
+
   it("falls back to off for a hand-edited value instead of reading it for truthiness", async () => {
     applySettingsSnapshot(
       { power: { keepAwake: "true", keepAwakeWhenBusy: 1 } } as unknown as Parameters<

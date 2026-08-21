@@ -56,22 +56,39 @@ jobs:
             exit 1
           }
 
-          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-            echo "Release tag contains unsupported characters: $RELEASE_TAG" >&2
-            exit 1
-          }
-          if [[ "$PRERELEASE" != "true" ]]; then
-            version="${RELEASE_TAG#v}"
+          # Both channels now feed a client updater, so both tags must satisfy
+          # the client's tag<->version contract (ADR-0189).
+          version="${RELEASE_TAG#v}"
+          if [[ "$PRERELEASE" == "true" ]]; then
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]] || {
+              echo "Prerelease tag must be vX.Y.Z-beta.N: $RELEASE_TAG" >&2
+              exit 1
+            }
+          else
             [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
               echo "Stable release tag must be vX.Y.Z or X.Y.Z: $RELEASE_TAG" >&2
               exit 1
             }
-            app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
-            [[ "$version" == "$app_version" ]] || {
-              echo "Stable release tag $version does not match app version $app_version" >&2
-              exit 1
-            }
           fi
+
+          # tauri.conf.json owns the version the updater compares against;
+          # Cargo.toml owns the version every status surface reports. A release
+          # where they disagree ships an app whose displayed version is not the
+          # one it compares with.
+          app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          [[ "$version" == "$app_version" ]] || {
+            echo "Release tag $version does not match app version $app_version" >&2
+            exit 1
+          }
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          [[ "$version" == "$crate_version" ]] || {
+            echo "Release tag $version does not match src-tauri/Cargo.toml version $crate_version" >&2
+            exit 1
+          }
+
+          # Reject a version the Android versionCode encoding cannot carry
+          # before any artifact is built.
+          node scripts/release/android-version-code.mjs "$RELEASE_TAG"
 
           existing_release_id="$(
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
@@ -112,8 +129,13 @@ jobs:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            # RPM `Version` cannot contain `-` and deb version ordering does not
+            # match semver prerelease ordering, so a beta build is limited to the
+            # bundles whose version rules accept `x.y.z-beta.N` (ADR-0189).
+            prerelease_bundles: nsis,updater
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            prerelease_bundles: appimage,updater
 
     runs-on: ${{ matrix.platform }}
 
@@ -162,11 +184,12 @@ jobs:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: ${{ needs.prepare.outputs.prerelease }}
-          args: --target ${{ matrix.target }}
+          args: >-
+            --target ${{ matrix.target }}
+            ${{ needs.prepare.outputs.prerelease == 'true' && format('--bundles {0}', matrix.prerelease_bundles) || '' }}
 
   android:
     needs: prepare
-    if: needs.prepare.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     env:
       ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}
@@ -214,21 +237,13 @@ jobs:
             [[ -n "${!name}" ]] || { echo "Missing release input: $name" >&2; exit 1; }
           done
 
-          version="${RELEASE_TAG#v}"
-          [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
-            echo "Android release tag must be a stable semantic version: $RELEASE_TAG" >&2
-            exit 1
-          }
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
-          (( major < 2100 && minor < 1000 && patch < 1000 )) || {
-            echo "Release version cannot be encoded as Android versionCode" >&2
-            exit 1
-          }
-          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
-          (( version_code > 0 && version_code <= 2100000000 )) || {
-            echo "Android versionCode is out of range: $version_code" >&2
+          # versionName/versionCode come from the shared encoder so the bounds
+          # and the beta slot layout have one owner and unit tests (ADR-0189).
+          encoded="$(node scripts/release/android-version-code.mjs "$RELEASE_TAG")"
+          version="$(printf '%s\n' "$encoded" | sed -n 's/^versionName=//p')"
+          version_code="$(printf '%s\n' "$encoded" | sed -n 's/^versionCode=//p')"
+          [[ -n "$version" && -n "$version_code" ]] || {
+            echo "Android version encoding produced no output for $RELEASE_TAG" >&2
             exit 1
           }
 
@@ -288,11 +303,9 @@ jobs:
         run: rm -f -- "${LAYMUX_ANDROID_APP_SIGNING_STORE_FILE:-$RUNNER_TEMP/laymux-android-app-signing.jks}"
 
   publish:
+    # Both channels gate on every required job. A beta that ships the desktop
+    # ahead of its APK strands phones on a compat version bump (ADR-0189).
     needs: [prepare, build, android]
-    if: >-
-      always() &&
-      needs.build.result == 'success' &&
-      (needs.android.result == 'success' || needs.android.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Publish complete release
@@ -308,3 +321,71 @@ jobs:
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
               -F draft=false -F prerelease=false -f make_latest=true
           fi
+
+  channels:
+    # The channel manifest, not GitHub's `latest` pointer, is what the app reads
+    # (ADR-0189). Runs only after the release is fully published so a channel can
+    # never point at a draft or an incomplete artifact set.
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+      - name: Update channel manifests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          # The channel branch is a workflow-owned deployment artifact with no
+          # source history. Work on a separate clone so the release checkout is
+          # never mixed into it.
+          channels="$RUNNER_TEMP/channels"
+          git clone --no-checkout --depth 1 --filter=blob:none \
+            "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$channels"
+          git -C "$channels" config user.name "github-actions[bot]"
+          git -C "$channels" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git -C "$channels" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            git -C "$channels" fetch --no-tags --depth 1 origin "$BRANCH"
+            git -C "$channels" checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            git -C "$channels" checkout --orphan "$BRANCH"
+            git -C "$channels" rm -rq --cached . 2>/dev/null || true
+          fi
+
+          manifest="$RUNNER_TEMP/latest.json"
+          gh release download "$RELEASE_TAG" --pattern latest.json --output "$manifest" --clobber
+
+          # Validation, the beta >= stable invariant and the write plan live in
+          # the script so they are unit tested rather than discovered in a
+          # release. Both files land in one commit: a partial update would
+          # expose beta < stable.
+          written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
+            --tag "$RELEASE_TAG" \
+            --prerelease "$PRERELEASE" \
+            --manifest "$manifest" \
+            --channel-dir "$channels" \
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --repo "${GITHUB_REPOSITORY##*/}")"
+          printf 'updated channel files:\n%s\n' "$written"
+
+          cd "$channels"
+          git add -- desktop-stable.json desktop-beta.json 2>/dev/null || git add -- desktop-beta.json
+          if git diff --cached --quiet; then
+            echo "channel manifests already up to date"
+            exit 0
+          fi
+          git commit -m "release: $RELEASE_TAG channel manifests"
+          git push origin "HEAD:$BRANCH"

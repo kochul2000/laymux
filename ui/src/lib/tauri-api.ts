@@ -1102,6 +1102,8 @@ export interface Settings {
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
+  /** Release channel this install follows (ADR-0189). */
+  update?: import("@/stores/settings-store").UpdateSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex?: CodexSettings;
@@ -1805,8 +1807,12 @@ export async function setSleepInhibit(enabled: boolean): Promise<boolean> {
 
 export type AppUpdateOperation = "idle" | "checking" | "downloading" | "installing";
 
+export type AppUpdateChannel = "stable" | "beta";
+
 export interface AppUpdateStatus {
   enabled: boolean;
+  /** Release channel the backend used for the last check (ADR-0189). */
+  channel: AppUpdateChannel;
   currentVersion: string;
   availableVersion: string | null;
   notes: string | null;

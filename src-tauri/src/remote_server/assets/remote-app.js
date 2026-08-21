@@ -1084,6 +1084,8 @@
           const total = Number(status?.totalBytes) || 0;
           const downloaded = Number(status?.downloadedBytes) || 0;
           const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
+          // The channel is the PC's setting; Remote only reports it (ADR-0189).
+          const betaChannelNote = status?.channel === "beta" ? " Following the beta channel." : "";
           const defaultMessage = !status
             ? "Update status unavailable."
             : !status.enabled
@@ -1095,8 +1097,8 @@
                   : operation === "installing"
                     ? "Installing update; the PC will restart..."
                     : availableVersion
-                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).`
-                      : `Laymux ${status.currentVersion} is up to date.`;
+                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).${betaChannelNote}`
+                      : `Laymux ${status.currentVersion} is up to date.${betaChannelNote}`;
           pcUpdateStatusElement.textContent = message || status?.lastError || defaultMessage;
           pcUpdateStatusElement.classList.toggle("error", isError || Boolean(status?.lastError));
           drawerSettingsButton.classList.toggle("update-available", Boolean(availableVersion));

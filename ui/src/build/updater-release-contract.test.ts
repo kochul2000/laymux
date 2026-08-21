@@ -6,7 +6,7 @@ const UI_ROOT = process.cwd();
 const REPOSITORY_ROOT = path.resolve(UI_ROOT, "..");
 
 describe("desktop updater release contract", () => {
-  it("pins the GitHub endpoint and public verification key", async () => {
+  it("pins the stable channel manifest and public verification key", async () => {
     const config = JSON.parse(
       await readFile(path.join(REPOSITORY_ROOT, "src-tauri/tauri.conf.json"), "utf8"),
     ) as {
@@ -15,8 +15,11 @@ describe("desktop updater release contract", () => {
     };
 
     expect(config.bundle?.createUpdaterArtifacts).toBe(true);
+    // The static endpoint is the stable channel manifest; the channel decides at
+    // runtime (ADR-0189). Leaving the old `releases/latest` value here would
+    // make the config disagree with what a channel-aware build actually reads.
     expect(config.plugins?.updater?.endpoints).toEqual([
-      "https://github.com/kochul2000/laymux/releases/latest/download/latest.json",
+      "https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-stable.json",
     ]);
     expect(config.plugins?.updater?.pubkey).toMatch(/^[A-Za-z0-9+/]+=*$/);
     expect(config.plugins?.updater?.pubkey?.length).toBeGreaterThan(100);
@@ -36,9 +39,9 @@ describe("desktop updater release contract", () => {
     expect(workflow).toContain('--arg tag "$RELEASE_TAG"');
     expect(workflow).toContain("select(.tag_name == $tag)");
     expect(workflow).not.toContain("gh release create");
-    expect(workflow).not.toContain('/releases/tags/$RELEASE_TAG');
+    expect(workflow).not.toContain("/releases/tags/$RELEASE_TAG");
     expect(workflow).toContain("releaseDraft: true");
-    expect(workflow.match(/needs: prepare/g)).toHaveLength(2);
+    expect(workflow.match(/needs: prepare$/gm)).toHaveLength(2);
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.commit_sha }}");
     expect(workflow).toContain("needs: [prepare, build, android]");
     expect(workflow).toContain("make_latest");
@@ -51,5 +54,24 @@ describe("desktop updater release contract", () => {
       "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
     );
     expect(workflow).not.toMatch(/TAURI_SIGNING_PRIVATE_KEY:\s*[A-Za-z0-9+/]{40}/);
+  });
+
+  it("publishes channel manifests only from a fully published release", async () => {
+    const workflow = await readFile(
+      path.join(REPOSITORY_ROOT, ".github/workflows/release.yml"),
+      "utf8",
+    );
+
+    // The channel branch is what the app reads, so it must never be written
+    // from a draft or a partial artifact set (ADR-0189).
+    expect(workflow).toContain("needs: [prepare, publish]");
+    expect(workflow).toContain("scripts/release/channel-manifest.mjs");
+    expect(workflow).toContain("BRANCH: release-channels");
+    // Both channels gate on the Android job rather than tolerating a skip.
+    expect(workflow).not.toContain("needs.android.result == 'skipped'");
+    expect(workflow).not.toContain("needs.prepare.outputs.prerelease == 'false'");
+    // Prerelease tags must satisfy the client's beta contract.
+    expect(workflow).toContain("-beta\\.[1-9][0-9]*$");
+    expect(workflow).toContain("src-tauri/Cargo.toml version");
   });
 });

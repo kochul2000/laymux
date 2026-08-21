@@ -14,12 +14,59 @@ use url::Url;
 
 use crate::constants::{
     EVENT_APP_UPDATE_STATUS_CHANGED, GITHUB_UPDATE_HOST, GITHUB_UPDATE_OWNER,
-    GITHUB_UPDATE_REPOSITORY,
+    GITHUB_UPDATE_REPOSITORY, UPDATE_CHANNEL_BETA, UPDATE_CHANNEL_MANIFEST_BRANCH,
+    UPDATE_CHANNEL_MANIFEST_HOST, UPDATE_CHANNEL_STABLE,
 };
 use crate::lock_ext::MutexExt;
 
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
+
+/// Release channel this install follows (ADR-0189).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateChannel {
+    Stable,
+    Beta,
+}
+
+impl UpdateChannel {
+    /// Unknown values resolve to stable: a misread channel must never move a
+    /// machine onto the less-verified series.
+    pub fn from_settings_value(raw: &str) -> Self {
+        if raw == UPDATE_CHANNEL_BETA {
+            Self::Beta
+        } else {
+            Self::Stable
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Stable => UPDATE_CHANNEL_STABLE,
+            Self::Beta => UPDATE_CHANNEL_BETA,
+        }
+    }
+
+    /// The channel manifest is the single source of truth for "what is newest
+    /// here"; GitHub has no stable alias for the latest prerelease.
+    fn manifest_url(self) -> String {
+        format!(
+            "https://{host}/{owner}/{repo}/{branch}/desktop-{channel}.json",
+            host = UPDATE_CHANNEL_MANIFEST_HOST,
+            owner = GITHUB_UPDATE_OWNER,
+            repo = GITHUB_UPDATE_REPOSITORY,
+            branch = UPDATE_CHANNEL_MANIFEST_BRANCH,
+            channel = self.as_str(),
+        )
+    }
+}
+
+/// The channel the settings file currently names. Disk is the source of truth,
+/// so an unsaved UI draft does not steer an update check.
+pub fn current_channel() -> UpdateChannel {
+    UpdateChannel::from_settings_value(&crate::settings::load_settings().update.channel)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +81,7 @@ pub enum UpdateOperation {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     pub enabled: bool,
+    pub channel: UpdateChannel,
     pub current_version: String,
     pub available_version: Option<String>,
     pub notes: Option<String>,
@@ -50,6 +98,7 @@ impl Default for UpdateStatus {
         Self {
             // A dev binary must never replace itself with a release artifact.
             enabled: !cfg!(debug_assertions),
+            channel: UpdateChannel::Stable,
             current_version: env!("CARGO_PKG_VERSION").to_string(),
             available_version: None,
             notes: None,
@@ -76,17 +125,36 @@ impl Default for UpdateManager {
 }
 
 impl UpdateManager {
+    /// Seeded with the channel the settings file names so every surface reads
+    /// the right channel before the first check completes.
+    pub fn new(channel: UpdateChannel) -> Self {
+        Self {
+            status: Mutex::new(UpdateStatus {
+                channel,
+                ..UpdateStatus::default()
+            }),
+        }
+    }
+
     pub fn snapshot(&self) -> Result<UpdateStatus, String> {
         Ok(self.status.lock_or_err()?.clone())
     }
 
-    fn begin_check(&self) -> Result<bool, String> {
+    /// Adopt `channel` for this check. A candidate found on another channel is
+    /// discarded here rather than left to be installed from the wrong series.
+    fn begin_check(&self, channel: UpdateChannel) -> Result<bool, String> {
         let mut status = self.status.lock_or_err()?;
         if !status.enabled {
             return Err("updates are disabled in development builds".into());
         }
         if status.operation != UpdateOperation::Idle {
             return Ok(false);
+        }
+        if status.channel != channel {
+            status.channel = channel;
+            status.available_version = None;
+            status.notes = None;
+            status.published_at = None;
         }
         status.operation = UpdateOperation::Checking;
         status.last_error = None;
@@ -113,6 +181,16 @@ impl UpdateManager {
         Ok(status.clone())
     }
 
+    /// End a check without recording a result or an error. Used when the
+    /// channel changed mid-flight, which is neither an answer nor a failure.
+    fn abandon_check(&self) -> Result<UpdateStatus, String> {
+        let mut status = self.status.lock_or_err()?;
+        if status.operation == UpdateOperation::Checking {
+            status.operation = UpdateOperation::Idle;
+        }
+        Ok(status.clone())
+    }
+
     fn fail_operation(&self, message: String) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
         status.operation = UpdateOperation::Idle;
@@ -120,7 +198,11 @@ impl UpdateManager {
         Ok(status.clone())
     }
 
-    fn begin_install(&self) -> Result<UpdateStatus, String> {
+    /// `channel` is the channel the settings file names right now. The pending
+    /// candidate belongs to the channel recorded in the snapshot, so a channel
+    /// switch between check and install must force a re-check instead of
+    /// installing a build from the series the user just left.
+    fn begin_install(&self, channel: UpdateChannel) -> Result<UpdateStatus, String> {
         let mut status = self.status.lock_or_err()?;
         if !status.enabled {
             return Err("updates are disabled in development builds".into());
@@ -130,6 +212,12 @@ impl UpdateManager {
         }
         if status.available_version.is_none() {
             return Err("there is no pending update".into());
+        }
+        if status.channel != channel {
+            return Err(format!(
+                "the update channel changed to {}; check again",
+                channel.as_str()
+            ));
         }
         status.operation = UpdateOperation::Downloading;
         status.downloaded_bytes = 0;
@@ -180,7 +268,43 @@ fn is_stable_release_version(version: &str) -> bool {
     parts.next().is_none()
 }
 
-fn github_release_version(download_url: &Url) -> Option<&str> {
+/// `x.y.z-beta.N` with `N >= 1` and no leading zero. Widening the channel must
+/// not widen into arbitrary prerelease labels, so `alpha`/`rc`/build metadata
+/// stay rejected (ADR-0189).
+fn is_beta_release_version(version: &str) -> bool {
+    let Some((core, suffix)) = version.split_once('-') else {
+        return false;
+    };
+    if !is_stable_release_version(core) {
+        return false;
+    }
+    let Some(slot) = suffix.strip_prefix("beta.") else {
+        return false;
+    };
+    if slot.is_empty() || slot.starts_with('0') {
+        return false;
+    }
+    slot.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// Which manifest versions the given channel accepts.
+fn is_channel_release_version(channel: UpdateChannel, version: &str) -> bool {
+    match channel {
+        UpdateChannel::Stable => is_stable_release_version(version),
+        UpdateChannel::Beta => {
+            is_stable_release_version(version) || is_beta_release_version(version)
+        }
+    }
+}
+
+fn channel_version_shape(channel: UpdateChannel) -> &'static str {
+    match channel {
+        UpdateChannel::Stable => "x.y.z",
+        UpdateChannel::Beta => "x.y.z or x.y.z-beta.N",
+    }
+}
+
+fn github_release_version(channel: UpdateChannel, download_url: &Url) -> Option<&str> {
     if download_url.scheme() != "https"
         || download_url.host_str() != Some(GITHUB_UPDATE_HOST)
         || download_url.port().is_some()
@@ -201,18 +325,25 @@ fn github_release_version(download_url: &Url) -> Option<&str> {
     let tag = segments.next()?;
     let version = tag.strip_prefix('v').unwrap_or(tag);
     let asset = segments.next()?;
-    if asset.is_empty() || !is_stable_release_version(version) {
+    if asset.is_empty() || !is_channel_release_version(channel, version) {
         return None;
     }
     Some(version)
 }
 
-fn validate_release_candidate(version: &str, download_url: &Url) -> Result<(), String> {
-    if !is_stable_release_version(version) {
-        return Err(format!("release version '{version}' is not stable x.y.z"));
+fn validate_release_candidate(
+    channel: UpdateChannel,
+    version: &str,
+    download_url: &Url,
+) -> Result<(), String> {
+    if !is_channel_release_version(channel, version) {
+        return Err(format!(
+            "release version '{version}' is not {}",
+            channel_version_shape(channel)
+        ));
     }
-    let tag_version = github_release_version(download_url).ok_or_else(|| {
-        "release download URL does not contain a stable Laymux version tag".to_string()
+    let tag_version = github_release_version(channel, download_url).ok_or_else(|| {
+        "release download URL does not contain a Laymux version tag for this channel".to_string()
     })?;
     if tag_version != version {
         return Err(format!(
@@ -222,9 +353,16 @@ fn validate_release_candidate(version: &str, download_url: &Url) -> Result<(), S
     Ok(())
 }
 
-fn validate_install_candidate(expected: &str, candidate: &str) -> Result<(), String> {
-    if !is_stable_release_version(candidate) {
-        return Err(format!("release version '{candidate}' is not stable x.y.z"));
+fn validate_install_candidate(
+    channel: UpdateChannel,
+    expected: &str,
+    candidate: &str,
+) -> Result<(), String> {
+    if !is_channel_release_version(channel, candidate) {
+        return Err(format!(
+            "release version '{candidate}' is not {}",
+            channel_version_shape(channel)
+        ));
     }
     if candidate != expected {
         return Err(format!(
@@ -238,24 +376,40 @@ pub async fn check_now(
     app: &AppHandle,
     manager: &Arc<UpdateManager>,
 ) -> Result<UpdateStatus, String> {
-    if !manager.begin_check()? {
+    let channel = current_channel();
+    if !manager.begin_check(channel)? {
         return manager.snapshot();
     }
     publish_snapshot(app, manager);
 
-    let result = async {
-        let updater = app.updater().map_err(|error| error.to_string())?;
-        updater.check().await.map_err(|error| error.to_string())
+    let result = match channel_updater(app, channel) {
+        Ok(updater) => updater.check().await.map_err(|error| error.to_string()),
+        Err(error) => Err(error),
+    };
+
+    // The request left with the channel read above. If the user switched
+    // channels while it was in flight, its answer describes a series this
+    // install no longer follows, so it must not become a candidate.
+    if current_channel() != channel {
+        tracing::info!(
+            channel = channel.as_str(),
+            "discarding an update check whose channel changed while it was in flight"
+        );
+        let status = manager.abandon_check()?;
+        publish(app, &status);
+        return Ok(status);
     }
-    .await;
 
     let status = match result {
         Ok(update) => manager.finish_check(update.and_then(|update| {
-            if let Err(error) = validate_release_candidate(&update.version, &update.download_url) {
+            if let Err(error) =
+                validate_release_candidate(channel, &update.version, &update.download_url)
+            {
                 tracing::warn!(
                     version = %update.version,
+                    channel = channel.as_str(),
                     %error,
-                    "ignoring application update outside the stable release contract"
+                    "ignoring application update outside this channel's release contract"
                 );
                 return None;
             }
@@ -271,13 +425,28 @@ pub async fn check_now(
     Ok(status)
 }
 
+/// Build an updater pinned to this channel's manifest. The endpoint in
+/// `tauri.conf.json` is only the stable default; the channel decides at runtime.
+fn channel_updater(
+    app: &AppHandle,
+    channel: UpdateChannel,
+) -> Result<tauri_plugin_updater::Updater, String> {
+    let endpoint = Url::parse(&channel.manifest_url()).map_err(|error| error.to_string())?;
+    app.updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|error| error.to_string())?
+        .build()
+        .map_err(|error| error.to_string())
+}
+
 /// Accept an install request and return before the HTTP/IPC caller is severed
 /// by the installer and process restart.
 pub fn schedule_install(
     app: AppHandle,
     manager: Arc<UpdateManager>,
 ) -> Result<UpdateStatus, String> {
-    let accepted = manager.begin_install()?;
+    let accepted = manager.begin_install(current_channel())?;
+    let channel = accepted.channel;
     let expected_version = accepted
         .available_version
         .clone()
@@ -285,7 +454,7 @@ pub fn schedule_install(
     publish(&app, &accepted);
 
     tauri::async_runtime::spawn(async move {
-        if let Err(error) = install_and_restart(&app, &manager, &expected_version).await {
+        if let Err(error) = install_and_restart(&app, &manager, channel, &expected_version).await {
             tracing::error!(%error, "application update failed");
             match manager.fail_operation(error) {
                 Ok(status) => publish(&app, &status),
@@ -299,19 +468,20 @@ pub fn schedule_install(
 async fn install_and_restart(
     app: &AppHandle,
     manager: &Arc<UpdateManager>,
+    channel: UpdateChannel,
     expected_version: &str,
 ) -> Result<(), String> {
     // Re-check immediately before download so a withdrawn or superseded GitHub
-    // release is never installed from stale in-memory metadata.
-    let update = app
-        .updater()
-        .map_err(|error| error.to_string())?
+    // release is never installed from stale in-memory metadata. The channel is
+    // the one accepted at request time: an accepted install completes on the
+    // series the user approved even if the setting changes meanwhile (ADR-0174).
+    let update = channel_updater(app, channel)?
         .check()
         .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "the pending update is no longer available".to_string())?;
-    validate_release_candidate(&update.version, &update.download_url)?;
-    validate_install_candidate(expected_version, &update.version)?;
+    validate_release_candidate(channel, &update.version, &update.download_url)?;
+    validate_install_candidate(channel, expected_version, &update.version)?;
 
     let progress_manager = Arc::clone(manager);
     let progress_app = app.clone();
@@ -385,10 +555,17 @@ mod tests {
         manager
     }
 
+    fn download_url(tag: &str) -> url::Url {
+        url::Url::parse(&format!(
+            "https://github.com/kochul2000/laymux/releases/download/{tag}/Laymux.exe"
+        ))
+        .unwrap()
+    }
+
     #[test]
     fn available_update_survives_a_failed_refresh() {
         let manager = enabled_manager();
-        assert!(manager.begin_check().unwrap());
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
         manager
             .finish_check(Some(AvailableUpdate {
                 version: "0.11.0".into(),
@@ -397,7 +574,7 @@ mod tests {
             }))
             .unwrap();
 
-        assert!(manager.begin_check().unwrap());
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
         let failed = manager.fail_operation("offline".into()).unwrap();
 
         assert_eq!(failed.available_version.as_deref(), Some("0.11.0"));
@@ -409,12 +586,12 @@ mod tests {
     fn install_requires_known_update_and_serializes_operations() {
         let manager = enabled_manager();
         assert_eq!(
-            manager.begin_install().unwrap_err(),
+            manager.begin_install(UpdateChannel::Stable).unwrap_err(),
             "there is no pending update"
         );
 
-        assert!(manager.begin_check().unwrap());
-        assert!(!manager.begin_check().unwrap());
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
+        assert!(!manager.begin_check(UpdateChannel::Stable).unwrap());
         manager
             .finish_check(Some(AvailableUpdate {
                 version: "0.11.0".into(),
@@ -423,10 +600,10 @@ mod tests {
             }))
             .unwrap();
 
-        let accepted = manager.begin_install().unwrap();
+        let accepted = manager.begin_install(UpdateChannel::Stable).unwrap();
         assert_eq!(accepted.operation, UpdateOperation::Downloading);
         assert_eq!(
-            manager.begin_install().unwrap_err(),
+            manager.begin_install(UpdateChannel::Stable).unwrap_err(),
             "another update operation is already running"
         );
     }
@@ -435,7 +612,7 @@ mod tests {
     fn progress_is_saturating_and_download_finish_enters_installing() {
         let manager = enabled_manager();
         manager.status.lock().unwrap().available_version = Some("0.11.0".into());
-        manager.begin_install().unwrap();
+        manager.begin_install(UpdateChannel::Stable).unwrap();
 
         let progress = manager.update_download_progress(25, Some(100)).unwrap();
         assert_eq!(progress.downloaded_bytes, 25);
@@ -473,14 +650,15 @@ mod tests {
 
     #[test]
     fn install_recheck_requires_the_same_stable_version() {
-        assert!(validate_install_candidate("1.2.3", "1.2.3").is_ok());
+        assert!(validate_install_candidate(UpdateChannel::Stable, "1.2.3", "1.2.3").is_ok());
         assert_eq!(
-            validate_install_candidate("1.2.3", "1.2.4").unwrap_err(),
+            validate_install_candidate(UpdateChannel::Stable, "1.2.3", "1.2.4").unwrap_err(),
             "the available update changed from 1.2.3 to 1.2.4; check again"
         );
         assert_eq!(
-            validate_install_candidate("1.2.3", "1.2.4-nightly").unwrap_err(),
-            "release version '1.2.4-nightly' is not stable x.y.z"
+            validate_install_candidate(UpdateChannel::Stable, "1.2.3", "1.2.4-nightly")
+                .unwrap_err(),
+            "release version '1.2.4-nightly' is not x.y.z"
         );
     }
 
@@ -499,14 +677,171 @@ mod tests {
         )
         .unwrap();
 
-        assert!(validate_release_candidate("1.2.3", &stable).is_ok());
+        assert!(validate_release_candidate(UpdateChannel::Stable, "1.2.3", &stable).is_ok());
         assert_eq!(
-            validate_release_candidate("1.2.3", &nightly).unwrap_err(),
-            "release download URL does not contain a stable Laymux version tag"
+            validate_release_candidate(UpdateChannel::Stable, "1.2.3", &nightly).unwrap_err(),
+            "release download URL does not contain a Laymux version tag for this channel"
         );
         assert_eq!(
-            validate_release_candidate("1.2.3", &mismatched).unwrap_err(),
+            validate_release_candidate(UpdateChannel::Stable, "1.2.3", &mismatched).unwrap_err(),
             "release tag version 1.2.4 does not match manifest version 1.2.3"
         );
+    }
+
+    #[test]
+    fn beta_channel_accepts_only_beta_dot_n_prereleases() {
+        for version in ["1.2.3", "1.2.3-beta.1", "1.2.3-beta.12"] {
+            assert!(
+                is_channel_release_version(UpdateChannel::Beta, version),
+                "{version} must be accepted on beta"
+            );
+        }
+        for version in [
+            "1.2.3-alpha.1",
+            "1.2.3-rc.1",
+            "1.2.3-nightly",
+            "1.2.3-beta",
+            "1.2.3-beta.0",
+            "1.2.3-beta.01",
+            "1.2.3-beta.1.2",
+            "1.2.3-beta.1+build",
+            "1.2.3+build",
+            "v1.2.3-beta.1",
+        ] {
+            assert!(
+                !is_channel_release_version(UpdateChannel::Beta, version),
+                "{version} must be ignored on beta"
+            );
+        }
+    }
+
+    #[test]
+    fn stable_channel_never_accepts_a_prerelease() {
+        assert!(!is_channel_release_version(
+            UpdateChannel::Stable,
+            "1.2.3-beta.1"
+        ));
+        assert_eq!(
+            validate_release_candidate(
+                UpdateChannel::Stable,
+                "1.2.3-beta.1",
+                &download_url("v1.2.3-beta.1")
+            )
+            .unwrap_err(),
+            "release version '1.2.3-beta.1' is not x.y.z"
+        );
+    }
+
+    #[test]
+    fn beta_candidate_requires_a_matching_beta_tag() {
+        assert!(validate_release_candidate(
+            UpdateChannel::Beta,
+            "1.2.3-beta.2",
+            &download_url("v1.2.3-beta.2")
+        )
+        .is_ok());
+        assert_eq!(
+            validate_release_candidate(
+                UpdateChannel::Beta,
+                "1.2.3-beta.2",
+                &download_url("v1.2.3-beta.3")
+            )
+            .unwrap_err(),
+            "release tag version 1.2.3-beta.3 does not match manifest version 1.2.3-beta.2"
+        );
+        assert_eq!(
+            validate_release_candidate(UpdateChannel::Beta, "1.2.3-beta.2", &download_url("beta"))
+                .unwrap_err(),
+            "release download URL does not contain a Laymux version tag for this channel"
+        );
+    }
+
+    #[test]
+    fn a_channel_switch_drops_the_pending_candidate() {
+        let manager = enabled_manager();
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
+        manager
+            .finish_check(Some(AvailableUpdate {
+                version: "0.11.0".into(),
+                notes: None,
+                published_at: None,
+            }))
+            .unwrap();
+
+        assert!(manager.begin_check(UpdateChannel::Beta).unwrap());
+        let switched = manager.snapshot().unwrap();
+        assert_eq!(switched.channel, UpdateChannel::Beta);
+        assert_eq!(switched.available_version, None);
+    }
+
+    #[test]
+    fn abandoning_a_check_keeps_the_previous_candidate() {
+        let manager = enabled_manager();
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
+        manager
+            .finish_check(Some(AvailableUpdate {
+                version: "0.11.0".into(),
+                notes: None,
+                published_at: None,
+            }))
+            .unwrap();
+
+        assert!(manager.begin_check(UpdateChannel::Stable).unwrap());
+        let abandoned = manager.abandon_check().unwrap();
+        assert_eq!(abandoned.operation, UpdateOperation::Idle);
+        assert_eq!(abandoned.available_version.as_deref(), Some("0.11.0"));
+        assert_eq!(abandoned.last_error, None);
+    }
+
+    #[test]
+    fn install_is_refused_after_the_channel_changed() {
+        let manager = enabled_manager();
+        assert!(manager.begin_check(UpdateChannel::Beta).unwrap());
+        manager
+            .finish_check(Some(AvailableUpdate {
+                version: "0.11.0-beta.1".into(),
+                notes: None,
+                published_at: None,
+            }))
+            .unwrap();
+
+        assert_eq!(
+            manager.begin_install(UpdateChannel::Stable).unwrap_err(),
+            "the update channel changed to stable; check again"
+        );
+        assert_eq!(
+            manager
+                .begin_install(UpdateChannel::Beta)
+                .unwrap()
+                .operation,
+            UpdateOperation::Downloading
+        );
+    }
+
+    #[test]
+    fn channel_manifest_urls_are_pinned_per_channel() {
+        assert_eq!(
+            UpdateChannel::Stable.manifest_url(),
+            "https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-stable.json"
+        );
+        assert_eq!(
+            UpdateChannel::Beta.manifest_url(),
+            "https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-beta.json"
+        );
+    }
+
+    #[test]
+    fn unknown_channel_values_resolve_to_stable() {
+        assert_eq!(
+            UpdateChannel::from_settings_value("beta"),
+            UpdateChannel::Beta
+        );
+        for raw in ["stable", "", "nightly", "Beta", "BETA"] {
+            assert_eq!(
+                UpdateChannel::from_settings_value(raw),
+                UpdateChannel::Stable,
+                "{raw} must resolve to stable"
+            );
+        }
     }
 }

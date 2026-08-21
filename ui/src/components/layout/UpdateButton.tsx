@@ -51,7 +51,10 @@ export function UpdateButton() {
       return percent === null ? "Downloading update" : `Downloading update (${percent}%)`;
     }
     if (error) return `Update ${status.availableVersion} — ${error}`;
-    return `Update ${status.availableVersion} available — click to install and restart`;
+    // Name the channel on beta: the same button offers a test build there, and
+    // the version string alone does not say which series it came from.
+    const channelNote = status.channel === "beta" ? " (beta channel)" : "";
+    return `Update ${status.availableVersion}${channelNote} available — click to install and restart`;
   }, [error, percent, status]);
 
   const handleInstall = useCallback(() => {
