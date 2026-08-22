@@ -2176,7 +2176,7 @@ dependencies = [
 
 [[package]]
 name = "laymux"
-version = "0.10.18"
+version = "0.11.1-beta.1"
 dependencies = [
  "aes-gcm",
  "axum",

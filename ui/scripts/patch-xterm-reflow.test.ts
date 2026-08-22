@@ -22,11 +22,25 @@ const commonJsCompositionKeypressOwner =
   "keypress(e){return this._queueCompositionObservation(e)}input(e){return this._queueCompositionObservation(e)}";
 const compositionGenerationFinalizer =
   "_flushCompositionGeneration(t){if(t.done)return;for(;this._pendingCompositionGenerations.length>0;)";
+const compositionObservationList = "observations:[]";
+const compositionCandidateFirstFold =
+  'let n=r,o="",l=!1;for(const t of e.observations)l?n=this._mergeCompositionData(n,t,!0):n.includes(t)?(o&&(n=this._mergeCompositionData(n,o)),l=!0):o=this._mergeCompositionData(t,o);l||!o||(n=this._mergeCompositionData(n,o))';
+const compositionAnchoredTieOrder = "i>s||o&&i===s?t+e.substring(i):e+t.substring(s)";
+const staleMergedObservationState = 'observed:""';
+const staleMergedObservationQueue = "e.observed=this._mergeCompositionData(t,e.observed)";
 const compositionBoundaryOwner = "compositionstart(){this._boundPendingComposition()";
 const moduleCompositionKeypressHandoff =
-  "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0)";
+  "this._compositionHelper.keypress(i)?this.cancel(e,!0):this.coreService.triggerDataEvent(i,!0)";
 const commonJsCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(t)?this.cancel(e,!0):this.coreService.triggerDataEvent(t,!0)";
+const moduleCompositionKeypressWithoutDefaultCancel =
+  "this._compositionHelper.keypress(i)||this.coreService.triggerDataEvent(i,!0)";
+const commonJsCompositionKeypressWithoutDefaultCancel =
   "this._compositionHelper.keypress(t)||this.coreService.triggerDataEvent(t,!0)";
+const moduleDuplicatedCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(i)||this._compositionHelper.keypress(i)?this.cancel(e,!0)";
+const commonJsDuplicatedCompositionKeypressHandoff =
+  "this._compositionHelper.keypress(t)||this._compositionHelper.keypress(t)?this.cancel(e,!0)";
 const moduleCompositionInputHandoff = "if(this._compositionHelper.input(i))";
 const commonJsCompositionInputHandoff = "if(this._compositionHelper.input(t))";
 const staleSingleGenerationState = "_pendingKeypressData";
@@ -86,14 +100,28 @@ describe("pinned xterm bundle patches", () => {
     expect(commonJsSource).toContain(commonJsCompositionKeypressOwner);
     expect(moduleSource).toContain(compositionGenerationFinalizer);
     expect(commonJsSource).toContain(compositionGenerationFinalizer);
+    expect(moduleSource).toContain(compositionObservationList);
+    expect(commonJsSource).toContain(compositionObservationList);
+    expect(moduleSource).toContain(compositionCandidateFirstFold);
+    expect(commonJsSource).toContain(compositionCandidateFirstFold);
+    expect(moduleSource).toContain(compositionAnchoredTieOrder);
+    expect(commonJsSource).toContain(compositionAnchoredTieOrder);
     expect(moduleSource).toContain(compositionBoundaryOwner);
     expect(commonJsSource).toContain(compositionBoundaryOwner);
     expect(moduleSource).toContain(moduleCompositionKeypressHandoff);
     expect(commonJsSource).toContain(commonJsCompositionKeypressHandoff);
+    expect(moduleSource).not.toContain(moduleCompositionKeypressWithoutDefaultCancel);
+    expect(commonJsSource).not.toContain(commonJsCompositionKeypressWithoutDefaultCancel);
+    expect(moduleSource).not.toContain(moduleDuplicatedCompositionKeypressHandoff);
+    expect(commonJsSource).not.toContain(commonJsDuplicatedCompositionKeypressHandoff);
     expect(moduleSource).toContain(moduleCompositionInputHandoff);
     expect(commonJsSource).toContain(commonJsCompositionInputHandoff);
     expect(moduleSource).not.toContain(staleSingleGenerationState);
     expect(commonJsSource).not.toContain(staleSingleGenerationState);
+    expect(moduleSource).not.toContain(staleMergedObservationState);
+    expect(commonJsSource).not.toContain(staleMergedObservationState);
+    expect(moduleSource).not.toContain(staleMergedObservationQueue);
+    expect(commonJsSource).not.toContain(staleMergedObservationQueue);
     expect(moduleSource).not.toContain(moduleUnreconciledKeypressSend);
     expect(commonJsSource).not.toContain(commonJsUnreconciledKeypressSend);
   });

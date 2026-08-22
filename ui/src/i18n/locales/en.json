@@ -105,7 +105,9 @@
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
       "deleteProfile": "Delete profile",
-      "widgets": "Widgets"
+      "widgets": "Widgets",
+      "groupGeneral": "General",
+      "update": "Updates"
     },
     "save": {
       "save": "Save",
@@ -759,6 +761,35 @@
       "configDirsDesc": "CLAUDE_CONFIG_DIR paths to monitor alongside the default, which is always included",
       "configDirPlaceholder": "/home/me/.claude-personal",
       "addConfigDir": "Add account"
+    },
+    "update": {
+      "title": "Updates",
+      "groupVersion": "Version",
+      "groupChannel": "Channel",
+      "groupCheck": "Check for updates",
+      "currentVersion": "Current version",
+      "channelStable": "Stable",
+      "channelBeta": "Beta",
+      "releasePage": "Release page",
+      "openCurrentRelease": "Open this release",
+      "openReleases": "All releases",
+      "openReleaseNotes": "Open release page",
+      "channel": "Release channel",
+      "channelDesc": "Which releases this machine follows. Saving checks right away.",
+      "channelBetaWarning": "Beta builds are not guaranteed to be stable. Switching back to Stable brings no update until a stable release passes your installed version.",
+      "checkNow": "Check now",
+      "checkNowDesc": "The app also checks on startup and every 6 hours.",
+      "checking": "Checking…",
+      "checkedAt": "Last checked: {{at}}",
+      "neverChecked": "Not checked yet",
+      "upToDate": "You are on the latest version.",
+      "availableVersion": "{{version}} available",
+      "publishedAt": "Released: {{at}}",
+      "install": "Install and restart",
+      "installing": "Installing…",
+      "installConfirm": "Install Laymux {{version}} and restart now?",
+      "disabledInDev": "Self-update is disabled in development builds.",
+      "manualCheck": "Refresh"
     }
   },
   "workspace": {

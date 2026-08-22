@@ -2,10 +2,15 @@ import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
 import {
   decidePathLinkAction,
+  extractPathCandidateAtOffset,
+  extractPathCandidatesFromScreen,
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
   joinCwdPath,
+  pathPointLimits,
+  pathScreenLimits,
   pathSelectionLimits,
+  type PathSelectionCandidate,
 } from "./path-link-detect";
 import {
   documentPreviewKind,
@@ -25,6 +30,49 @@ export interface RemoteFileViewerBridgeResult {
 const ok = (data: unknown): RemoteFileViewerBridgeResult => ({ success: true, data });
 const err = (error: string): RemoteFileViewerBridgeResult => ({ success: false, error });
 
+/** Remote path-link 발견 트리거(ADR-0188). 서버가 이미 검사하지만 fail-closed 로 다시 본다. */
+type RemotePathLinkMode = "selection" | "point" | "screen";
+
+function remotePathLinkMode(value: unknown): RemotePathLinkMode | null {
+  return value === "selection" || value === "point" || value === "screen" ? value : null;
+}
+
+function remotePathLinkLines(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  return value.every((line) => typeof line === "string") ? (value as string[]) : null;
+}
+
+/**
+ * 트리거별 후보 추출(ADR-0188). 문법은 데스크톱과 같은 파서를 쓰고, 트리거마다
+ * 범위와 상한만 다르다 — `point` 는 caret 이 가리키는 토큰 하나, `screen` 은
+ * 화면의 strong candidate, `selection` 은 기존 bounded maximal-munch.
+ */
+function resolveRemotePathLinkCandidates(
+  mode: RemotePathLinkMode,
+  lines: string[],
+  caret: unknown,
+  maxPathLength: number,
+): PathSelectionCandidate[] {
+  if (mode === "screen") {
+    return extractPathCandidatesFromScreen(lines, pathScreenLimits(maxPathLength));
+  }
+  if (mode === "point") {
+    const position = caret as { lineIndex?: unknown; index?: unknown } | null;
+    const lineIndex = position?.lineIndex;
+    const index = position?.index;
+    if (!Number.isSafeInteger(lineIndex) || !Number.isSafeInteger(index)) return [];
+    const line = lines[lineIndex as number];
+    if (line === undefined) return [];
+    const candidate = extractPathCandidateAtOffset(
+      line,
+      index as number,
+      pathPointLimits(maxPathLength),
+    );
+    return candidate ? [{ ...candidate, lineIndex: lineIndex as number }] : [];
+  }
+  return extractPathCandidatesFromSelection(lines.join("\n"), pathSelectionLimits(maxPathLength));
+}
+
 /** Resolve Remote FileViewer queries against the desktop store and safe renderer. */
 export async function handleRemoteFileViewerRequest(
   method: string,
@@ -37,16 +85,19 @@ export async function handleRemoteFileViewerRequest(
   }
   if (method === "pathLink") {
     const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";
-    const selection = typeof params.selection === "string" ? params.selection : "";
+    const mode = remotePathLinkMode(params.mode);
+    const lines = remotePathLinkLines(params.lines);
     const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
     const settings = useSettingsStore.getState().terminal;
-    if (!terminal || !settings.pathLinkEnabled) {
+    if (!terminal || !settings.pathLinkEnabled || !mode || !lines) {
       return ok({ valid: false });
     }
 
-    const candidates = extractPathCandidatesFromSelection(
-      selection,
-      pathSelectionLimits(settings.pathLinkMaxLength),
+    const candidates = resolveRemotePathLinkCandidates(
+      mode,
+      lines,
+      params.caret,
+      settings.pathLinkMaxLength,
     );
     if (candidates.length === 0) return ok({ valid: false });
 

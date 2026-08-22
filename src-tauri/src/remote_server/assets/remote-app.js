@@ -248,13 +248,24 @@
         let fileViewerPinch = null;
         const fileViewerPointers = new Map();
         const REMOTE_PATH_LINK_MAX_SELECTION_LENGTH = 1024;
+        const REMOTE_PATH_LINK_MAX_SELECTION_LINES = 8;
+        const REMOTE_PATH_LINK_MAX_SELECTION_MATCHES = 16;
+        // ADR-0188 screen trigger: one viewport, bounded rows/chars/candidates.
+        const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;
+        const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;
+        const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;
+        const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;
         const PATH_LINK_CLICK_SLOP_PX = 4;
         const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;
-        let pathLinkSelectionRevision = 0;
+        // Each discovery trigger owns its own underlines, revision and request
+        // so one never retires anothers result (ADR-0188).
+        const PATH_LINK_SCOPES = ["selection", "point", "screen"];
+        let pathLinkScopes = { selection: [], point: [], screen: [] };
+        let pathLinkRevisions = { selection: 0, point: 0, screen: 0 };
+        let pathLinkAborts = { selection: null, point: null, screen: null };
         let pathLinkEvaluationTimer = null;
-        let pathLinkAbortController = null;
-        let pathLinkCurrent = [];
-        let pathLinkDecorations = [];
+        let pathLinkIdleScanTimer = null;
+        let pathLinkLastScreenSignature = null;
         let pathLinkPress = null;
         let terminal = null;
         // The xterm instance is reused across disconnects and pane switches.
@@ -1073,6 +1084,8 @@
           const total = Number(status?.totalBytes) || 0;
           const downloaded = Number(status?.downloadedBytes) || 0;
           const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
+          // The channel is the PC's setting; Remote only reports it (ADR-0190).
+          const betaChannelNote = status?.channel === "beta" ? " Following the beta channel." : "";
           const defaultMessage = !status
             ? "Update status unavailable."
             : !status.enabled
@@ -1084,8 +1097,8 @@
                   : operation === "installing"
                     ? "Installing update; the PC will restart..."
                     : availableVersion
-                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).`
-                      : `Laymux ${status.currentVersion} is up to date.`;
+                      ? `Laymux ${availableVersion} is available (current ${status.currentVersion}).${betaChannelNote}`
+                      : `Laymux ${status.currentVersion} is up to date.${betaChannelNote}`;
           pcUpdateStatusElement.textContent = message || status?.lastError || defaultMessage;
           pcUpdateStatusElement.classList.toggle("error", isError || Boolean(status?.lastError));
           drawerSettingsButton.classList.toggle("update-available", Boolean(availableVersion));
@@ -1596,8 +1609,19 @@
           scaleFileViewerZoom(event.deltaY < 0 ? 1 + FILE_VIEWER_ZOOM_STEP : 1 / (1 + FILE_VIEWER_ZOOM_STEP));
         }
 
-        function disposePathLinkDecorations() {
-          for (const entry of pathLinkDecorations) {
+        function pathLinkEntries() {
+          return PATH_LINK_SCOPES.flatMap((scope) => pathLinkScopes[scope]);
+        }
+
+        function updatePathLinkClickableState() {
+          terminalHost.classList.toggle(
+            "remote-path-link-clickable",
+            pathLinkEntries().length > 0
+          );
+        }
+
+        function disposePathLinkScope(scope) {
+          for (const entry of pathLinkScopes[scope]) {
             try {
               entry.decoration?.dispose?.();
             } catch (_) {}
@@ -1605,36 +1629,78 @@
               entry.marker?.dispose?.();
             } catch (_) {}
           }
-          pathLinkDecorations = [];
+          pathLinkScopes[scope] = [];
+        }
+
+        function abortPathLinkScope(scope) {
+          pathLinkRevisions[scope] += 1;
+          const controller = pathLinkAborts[scope];
+          if (controller) {
+            controller.abort();
+            pathLinkAborts[scope] = null;
+          }
+        }
+
+        // Drop one trigger's underlines and in-flight request, leaving the other
+        // triggers alone (ADR-0188 scope ownership).
+        function clearPathLinkScope(scope) {
+          abortPathLinkScope(scope);
+          disposePathLinkScope(scope);
+          // A press in flight keeps its own validated path, terminal and lease.
+          // Output arriving mid-tap must not swallow the tap the user already
+          // started on an underline; the pointerup check still gates it.
+          updatePathLinkClickableState();
         }
 
         function clearPathLinkVisuals() {
-          pathLinkCurrent = [];
+          for (const scope of PATH_LINK_SCOPES) disposePathLinkScope(scope);
           pathLinkPress = null;
           terminalHost.classList.remove("remote-path-link-clickable");
-          disposePathLinkDecorations();
         }
 
+        // Full reset: terminal/lease switch, disconnect, xterm reset — every
+        // scope's coordinates become meaningless at once.
         function clearPathLinkSelection() {
-          pathLinkSelectionRevision += 1;
+          for (const scope of PATH_LINK_SCOPES) abortPathLinkScope(scope);
           if (pathLinkEvaluationTimer !== null) {
             clearTimeout(pathLinkEvaluationTimer);
             pathLinkEvaluationTimer = null;
           }
-          if (pathLinkAbortController) {
-            pathLinkAbortController.abort();
-            pathLinkAbortController = null;
+          if (pathLinkIdleScanTimer !== null) {
+            clearTimeout(pathLinkIdleScanTimer);
+            pathLinkIdleScanTimer = null;
           }
+          pathLinkLastScreenSignature = null;
           clearPathLinkVisuals();
         }
 
         function schedulePathLinkSelectionEvaluation(delay = PATH_LINK_SELECTION_DEBOUNCE_MS) {
-          clearPathLinkSelection();
+          // A new selection invalidates the selection underlines and the point
+          // underline (never two underlines over one spot), but not the idle
+          // screen scan's result.
+          clearPathLinkScope("selection");
+          clearPathLinkScope("point");
+          if (pathLinkEvaluationTimer !== null) {
+            clearTimeout(pathLinkEvaluationTimer);
+            pathLinkEvaluationTimer = null;
+          }
           if (!terminal?.hasSelection?.()) return;
           pathLinkEvaluationTimer = setTimeout(() => {
             pathLinkEvaluationTimer = null;
             evaluatePathLinkSelection();
           }, delay);
+        }
+
+        // The screen scan owns "output stopped" (ADR-0188): every write pushes
+        // the timer out and retires the previous screen underlines, so a scan
+        // only happens on a screen that stayed still.
+        function schedulePathLinkIdleScan() {
+          clearPathLinkScope("screen");
+          if (pathLinkIdleScanTimer !== null) clearTimeout(pathLinkIdleScanTimer);
+          pathLinkIdleScanTimer = setTimeout(() => {
+            pathLinkIdleScanTimer = null;
+            evaluatePathLinkScreen();
+          }, REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS);
         }
 
         function mapRemotePathLinkRange(position, match) {
@@ -1668,9 +1734,27 @@
           };
         }
 
-        function setVerifiedPathLinks(selections) {
-          disposePathLinkDecorations();
-          pathLinkCurrent = [];
+        // Line-scoped modes (`point`, `screen`) carry whole-line offsets, so the
+        // token must still sit on those cells. No string fallback here: if the
+        // line moved under the request, drawing anything would mislabel it.
+        function mapRemoteLinePathRange(bufferLine, match) {
+          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
+          if (!line) return null;
+          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
+          const startOffset = match.startIndex;
+          const endOffset = match.endIndex - 1;
+          if (
+            text.slice(startOffset, endOffset + 1) !== match.token ||
+            columns[startOffset] === undefined ||
+            endColumns[endOffset] === undefined
+          ) {
+            return null;
+          }
+          return { bufferLine, startCol: columns[startOffset], endCol: endColumns[endOffset] };
+        }
+
+        function setVerifiedPathLinks(scope, selections) {
+          disposePathLinkScope(scope);
           const term = terminal;
           if (!term) {
             clearPathLinkVisuals();
@@ -1693,8 +1777,7 @@
                 width: Math.max(1, selection.endCol - selection.startCol + 1),
               });
               if (!decoration) throw new Error("xterm decoration is unavailable");
-              pathLinkDecorations.push({ selection, marker, decoration });
-              pathLinkCurrent.push(selection);
+              pathLinkScopes[scope].push({ selection, marker, decoration });
               const styleDecoration = (element) => {
                 element.classList.add("remote-path-link-decoration");
               };
@@ -1707,9 +1790,7 @@
               console.warn("[remotePathLink] decoration failed:", error);
             }
           }
-          if (pathLinkCurrent.length > 0) {
-            terminalHost.classList.add("remote-path-link-clickable");
-          }
+          updatePathLinkClickableState();
         }
 
         function evaluatePathLinkSelection() {
@@ -1717,22 +1798,23 @@
             clearTimeout(pathLinkEvaluationTimer);
             pathLinkEvaluationTimer = null;
           }
-          if (pathLinkAbortController) pathLinkAbortController.abort();
-          pathLinkAbortController = null;
           const term = terminal;
           const requestTerminalId = activeTerminalId;
           const requestLeaseId = leaseId;
           const requestFileViewerToken = fileViewerToken;
-          const revision = ++pathLinkSelectionRevision;
-          clearPathLinkVisuals();
+          abortPathLinkScope("selection");
+          const revision = pathLinkRevisions.selection;
+          disposePathLinkScope("selection");
+          updatePathLinkClickableState();
           if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
 
           const selection = term.getSelection();
           if (!selection || selection.length > REMOTE_PATH_LINK_MAX_SELECTION_LENGTH) return;
           if (!term.getSelectionPosition?.()) return;
           const selectionLines = selection.split(/\r?\n/);
+          if (selectionLines.length > REMOTE_PATH_LINK_MAX_SELECTION_LINES) return;
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
-          pathLinkAbortController = abortController;
+          pathLinkAborts.selection = abortController;
 
           remoteFetch("/remote/v1/file-viewer/path-link", {
             method: "POST",
@@ -1741,12 +1823,16 @@
               "x-laymux-remote-lease": requestLeaseId,
               "x-laymux-remote-file-viewer": requestFileViewerToken,
             },
-            body: JSON.stringify({ terminalId: requestTerminalId, selection }),
+            body: JSON.stringify({
+              terminalId: requestTerminalId,
+              mode: "selection",
+              lines: selectionLines,
+            }),
           })
             .then((data) => {
               const currentPosition = term.getSelectionPosition?.();
               if (
-                revision !== pathLinkSelectionRevision ||
+                revision !== pathLinkRevisions.selection ||
                 activeTerminalId !== requestTerminalId ||
                 leaseId !== requestLeaseId ||
                 fileViewerToken !== requestFileViewerToken ||
@@ -1757,53 +1843,273 @@
                 return;
               }
               if (data.valid !== true || !Array.isArray(data.matches)) {
-                clearPathLinkVisuals();
+                clearPathLinkScope("selection");
                 return;
               }
-              if (data.matches.length === 0 || data.matches.length > 16) {
-                clearPathLinkVisuals();
+              if (data.matches.length === 0 || data.matches.length > REMOTE_PATH_LINK_MAX_SELECTION_MATCHES) {
+                clearPathLinkScope("selection");
                 return;
               }
               const matches = data.matches.filter((match) =>
-                match &&
-                typeof match.token === "string" &&
-                match.token &&
-                typeof match.path === "string" &&
-                match.path &&
-                Number.isSafeInteger(match.lineIndex) &&
-                match.lineIndex >= 0 &&
-                match.lineIndex < selectionLines.length &&
-                Number.isSafeInteger(match.startIndex) &&
-                Number.isSafeInteger(match.endIndex) &&
-                match.startIndex >= 0 &&
-                match.endIndex > match.startIndex &&
-                selectionLines[match.lineIndex]?.slice(match.startIndex, match.endIndex) === match.token
+                isValidPathLinkMatch(match, selectionLines)
               );
               if (matches.length === 0) {
-                clearPathLinkVisuals();
+                clearPathLinkScope("selection");
                 return;
               }
               // Resize/reflow and scrollback trim can move a still-identical
               // selection while the bridge performs its filesystem stat. Use
               // the live xterm coordinates, never the pre-request snapshot.
-              setVerifiedPathLinks(matches.map((match) => ({
+              setVerifiedPathLinks("selection", matches.map((match) => ({
                 ...mapRemotePathLinkRange(currentPosition, match),
                 terminalId: requestTerminalId,
                 leaseId: requestLeaseId,
                 fileViewerToken: requestFileViewerToken,
+                // The literal the underline covers: output can repaint the row in
+                // place, and only the text tells us the link went stale.
+                token: match.token,
                 path: match.path,
               })));
             })
             .catch(() => {
-              if (revision === pathLinkSelectionRevision) clearPathLinkVisuals();
+              if (revision === pathLinkRevisions.selection) clearPathLinkScope("selection");
             })
             .finally(() => {
-              if (pathLinkAbortController === abortController) pathLinkAbortController = null;
+              if (pathLinkAborts.selection === abortController) pathLinkAborts.selection = null;
             });
         }
 
+        function isValidPathLinkMatch(match, lines) {
+          return Boolean(
+            match &&
+            typeof match.token === "string" &&
+            match.token &&
+            typeof match.path === "string" &&
+            match.path &&
+            Number.isSafeInteger(match.lineIndex) &&
+            match.lineIndex >= 0 &&
+            match.lineIndex < lines.length &&
+            Number.isSafeInteger(match.startIndex) &&
+            Number.isSafeInteger(match.endIndex) &&
+            match.startIndex >= 0 &&
+            match.endIndex > match.startIndex &&
+            lines[match.lineIndex]?.slice(match.startIndex, match.endIndex) === match.token
+          );
+        }
+
+        // Shared request path for the line-scoped triggers. `baseLine` is the
+        // 0-based absolute buffer line that `lines[0]` was read from, so a later
+        // scroll cannot shift the mapping (a scrollback trim is caught by the
+        // per-match text check in `mapRemoteLinePathRange`).
+        function requestLineScopedPathLinks(scope, baseLine, lines, caret, maxMatches) {
+          const term = terminal;
+          const requestTerminalId = activeTerminalId;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          abortPathLinkScope(scope);
+          const revision = pathLinkRevisions[scope];
+          if (!term || !requestTerminalId || !requestLeaseId || !requestFileViewerToken) return;
+          const body = { terminalId: requestTerminalId, mode: scope, lines };
+          if (caret) body.caret = caret;
+          const abortController = typeof AbortController === "function" ? new AbortController() : null;
+          pathLinkAborts[scope] = abortController;
+
+          remoteFetch("/remote/v1/file-viewer/path-link", {
+            method: "POST",
+            signal: abortController?.signal,
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestFileViewerToken,
+            },
+            body: JSON.stringify(body),
+          })
+            .then((data) => {
+              if (
+                revision !== pathLinkRevisions[scope] ||
+                activeTerminalId !== requestTerminalId ||
+                leaseId !== requestLeaseId ||
+                fileViewerToken !== requestFileViewerToken ||
+                terminal !== term
+              ) {
+                return;
+              }
+              if (
+                data.valid !== true ||
+                !Array.isArray(data.matches) ||
+                data.matches.length === 0 ||
+                data.matches.length > maxMatches
+              ) {
+                clearPathLinkScope(scope);
+                return;
+              }
+              const selections = [];
+              for (const match of data.matches) {
+                if (!isValidPathLinkMatch(match, lines)) continue;
+                const range = mapRemoteLinePathRange(baseLine + match.lineIndex + 1, match);
+                if (!range) continue;
+                selections.push({
+                  ...range,
+                  terminalId: requestTerminalId,
+                  leaseId: requestLeaseId,
+                  fileViewerToken: requestFileViewerToken,
+                  // The literal the underline covers: output can repaint the row in
+                  // place, and only the text tells us the link went stale.
+                  token: match.token,
+                  path: match.path,
+                });
+              }
+              if (selections.length === 0) {
+                clearPathLinkScope(scope);
+                return;
+              }
+              setVerifiedPathLinks(scope, selections);
+            })
+            .catch(() => {
+              if (revision === pathLinkRevisions[scope]) clearPathLinkScope(scope);
+            })
+            .finally(() => {
+              if (pathLinkAborts[scope] === abortController) pathLinkAborts[scope] = null;
+            });
+        }
+
+        // A tap (or a desktop-mode click) on plain text: validate just the token
+        // under that cell. The tap that follows on the underline opens it.
+        function queuePathLinkPointEvaluation(point) {
+          // xterm finalizes selection in its document mouseup, and that clears
+          // the point scope. Run after that task so the underline survives.
+          setTimeout(() => evaluatePathLinkPoint(point), 0);
+        }
+
+        function evaluatePathLinkPoint(point) {
+          clearPathLinkScope("point");
+          const term = terminal;
+          if (!term || !activeTerminalId || !leaseId || !fileViewerToken) return;
+          // A live selection owns discovery. A double-click's second release
+          // arrives after the word selection exists, and two underlines over
+          // one cell is what scope ownership forbids (ADR-0188).
+          if (term.hasSelection?.()) return;
+          // Already underlined: that spot has a click target, nothing to parse.
+          if (pathLinkAtPoint(point.clientX, point.clientY)) return;
+          const coords = touchCellCoords(term, point);
+          if (!coords) return;
+          const line = term.buffer?.active?.getLine?.(coords.y);
+          if (!line) return;
+          const { text, columns, endColumns } = reconstructRemoteLinkLine(line);
+          const column = coords.x + 1;
+          let caretIndex = -1;
+          for (let offset = 0; offset < columns.length; offset += 1) {
+            if (columns[offset] <= column && column <= endColumns[offset]) {
+              caretIndex = offset;
+              break;
+            }
+          }
+          if (caretIndex < 0) return;
+          const lineText = text.replace(/\s+$/, "");
+          if (!lineText || caretIndex >= lineText.length) return;
+          requestLineScopedPathLinks(
+            "point",
+            coords.y,
+            [lineText],
+            { lineIndex: 0, index: caretIndex },
+            1
+          );
+        }
+
+        function readPathLinkScreenLines(term) {
+          const buffer = term.buffer?.active;
+          if (!buffer) return null;
+          const baseLine = buffer.viewportY || 0;
+          const rows = Math.min(term.rows || 0, REMOTE_PATH_LINK_MAX_SCREEN_LINES);
+          if (rows <= 0) return null;
+          const lines = [];
+          let chars = 0;
+          for (let row = 0; row < rows; row += 1) {
+            const line = buffer.getLine?.(baseLine + row);
+            const text = line ? reconstructRemoteLinkLine(line).text.replace(/\s+$/, "") : "";
+            chars += text.length;
+            if (chars > REMOTE_PATH_LINK_MAX_SCREEN_CHARS) break;
+            lines.push(text);
+          }
+          return lines.some((text) => text.length > 0) ? { baseLine, lines } : null;
+        }
+
+        function evaluatePathLinkScreen() {
+          clearPathLinkScope("screen");
+          const term = terminal;
+          if (!term || !activeTerminalId || !leaseId || !fileViewerToken) return;
+          // A live selection owns discovery while it exists.
+          if (term.hasSelection?.()) return;
+          const screen = readPathLinkScreenLines(term);
+          if (!screen) return;
+          const signature = `${screen.baseLine}\n${screen.lines.join("\n")}`;
+          // Writes that leave the visible text identical (cursor moves, repaints
+          // of the same frame) must not re-run the filesystem batch.
+          // ...but only while the previous scan's underlines are still on
+          // screen: the idle scheduler retires them before this runs, so an
+          // unconditional skip would drop the display until the screen changed.
+          if (signature === pathLinkLastScreenSignature && pathLinkScopes.screen.length > 0) {
+            return;
+          }
+          pathLinkLastScreenSignature = signature;
+          requestLineScopedPathLinks(
+            "screen",
+            screen.baseLine,
+            screen.lines,
+            null,
+            REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES
+          );
+        }
+
+        /**
+         * Drop underlines whose text no longer sits on those cells (ADR-0188,
+         * the desktop `revalidate()` contract). An app repainting a row in
+         * place leaves the marker — and the decoration — alive, so a tap would
+         * open a path the screen no longer shows. Returns before touching the
+         * buffer when nothing is drawn.
+         */
+        function revalidatePathLinkScopes() {
+          if (!PATH_LINK_SCOPES.some((scope) => pathLinkScopes[scope].length > 0)) return;
+          if (!terminal) return;
+          let dropped = 0;
+          for (const scope of PATH_LINK_SCOPES) {
+            const kept = [];
+            for (const entry of pathLinkScopes[scope]) {
+              if (pathLinkEntryStillOnScreen(entry)) {
+                kept.push(entry);
+                continue;
+              }
+              try {
+                entry.decoration?.dispose?.();
+              } catch (_) {}
+              try {
+                entry.marker?.dispose?.();
+              } catch (_) {}
+              dropped += 1;
+            }
+            pathLinkScopes[scope] = kept;
+          }
+          if (dropped > 0) updatePathLinkClickableState();
+        }
+
+        /**
+         * The marker is the live line number (xterm moves it as the scrollback
+         * trims), so it wins over the line the range was created from.
+         */
+        function pathLinkEntryStillOnScreen(entry) {
+          const markerLine =
+            entry.marker && entry.marker.isDisposed !== true ? entry.marker.line : undefined;
+          const bufferLine =
+            typeof markerLine === "number" ? markerLine + 1 : entry.selection.bufferLine;
+          const line = terminal?.buffer?.active?.getLine?.(bufferLine - 1);
+          if (!line) return false;
+          const { text, columns } = reconstructRemoteLinkLine(line);
+          const offset = columns.indexOf(entry.selection.startCol);
+          if (offset < 0) return false;
+          return text.slice(offset, offset + entry.selection.token.length) === entry.selection.token;
+        }
+
         function pathLinkAtPoint(clientX, clientY) {
-          for (const entry of pathLinkDecorations) {
+          for (const entry of pathLinkEntries()) {
             const element = entry.decoration?.element;
             if (!element || !element.isConnected) continue;
             const rect = element.getBoundingClientRect();
@@ -1821,9 +2127,12 @@
           pathLinkPress = null;
           if (event.button !== 0 || event.isPrimary === false) return;
           const current = pathLinkAtPoint(event.clientX, event.clientY);
-          if (!current) return;
+          // Remember the press even off an underline: a mouse click on plain
+          // text is a `point` trigger (touch goes through handleTouchTap).
           pathLinkPress = {
-            ...current,
+            ...(current || {}),
+            onLink: current !== null,
+            pointerType: event.pointerType,
             pointerId: event.pointerId,
             clientX: event.clientX,
             clientY: event.clientY,
@@ -1837,8 +2146,15 @@
           const moved =
             Math.abs(event.clientX - press.clientX) > PATH_LINK_CLICK_SLOP_PX ||
             Math.abs(event.clientY - press.clientY) > PATH_LINK_CLICK_SLOP_PX;
+          if (moved) return;
+          if (!press.onLink) {
+            // Touch taps are routed by handleTouchTap so a link activation or a
+            // multi-tap selection is not also parsed as a point trigger.
+            if (press.pointerType === "touch" || press.pointerType === "pen") return;
+            queuePathLinkPointEvaluation({ clientX: event.clientX, clientY: event.clientY });
+            return;
+          }
           if (
-            moved ||
             activeTerminalId !== press.terminalId ||
             leaseId !== press.leaseId ||
             fileViewerToken !== press.fileViewerToken
@@ -3658,6 +3974,9 @@
             updateTerminalControls();
             updateSelectionHandles(term);
           }
+          // ADR-0188: a tap on plain text is a discovery trigger. An underlined
+          // path is opened by handlePathLinkPointerUp before we get here.
+          queuePathLinkPointEvaluation(point);
         }
 
         function selectionRange(start, end, cols) {
@@ -4223,6 +4542,10 @@
           });
           terminal.onResize(({ cols, rows }) => {
             schedulePathLinkSelectionEvaluation();
+            // Reflow moves every cell: the previous screen scan is void and its
+            // signature must not suppress the rescan (ADR-0188).
+            pathLinkLastScreenSignature = null;
+            schedulePathLinkIdleScan();
             queueResize(cols, rows);
           });
           terminal.onSelectionChange(() => {
@@ -4238,6 +4561,8 @@
             updateSelectionHandles(terminal);
             updateScrollToBottomButton(terminal);
             scheduleCropTransform();
+            // A new viewport is a new screen to scan once it settles (ADR-0188).
+            schedulePathLinkIdleScan();
             // Only a viewport that *arrives* at row 0 under a gesture counts as
             // reaching the top. Snapshot replay and a pane with no scrollback
             // both sit at row 0 without the user asking for anything, and a
@@ -4257,6 +4582,9 @@
           // must re-fit so full-screen apps get the real surface rows.
           terminal.buffer?.onBufferChange?.(() => {
             schedulePathLinkSelectionEvaluation();
+            // Alternate-buffer switches replace the visible screen wholesale.
+            pathLinkLastScreenSignature = null;
+            schedulePathLinkIdleScan();
             scheduleTerminalFit(Boolean(activeTerminalId));
           });
           if ("ResizeObserver" in window) {
@@ -6768,6 +7096,12 @@
                     term.write(payload, () => {
                       if (guardInput) terminalReplayDepth -= 1;
                       scheduleTerminalRefresh();
+                      // ADR-0188: output invalidates the screen underlines and
+                      // pushes the idle scan out; a still screen gets one scan.
+                      // The other scopes survive output, so their text is
+                      // re-checked rather than trusted.
+                      revalidatePathLinkScopes();
+                      schedulePathLinkIdleScan();
                       resolve();
                     });
                   } catch (_err) {

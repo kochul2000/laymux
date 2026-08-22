@@ -34,6 +34,7 @@ import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path
 import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
 import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
+import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/path-link-point";
 import {
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
@@ -1443,10 +1444,12 @@ export function TerminalView({
       ),
     );
 
-    // Issue #363 (선택 기반): 사용자가 *선택(드래그)* 한 파일/디렉토리 경로에
-    // 밑줄을 긋고, 클릭하면 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다.
-    // 기존의 "hover 줄 전체 토큰 stat" 방식을 제거했다(느리고 Windows 에서 동작
-    // 안 함). 검증(트림/판별 + cwd 조합 + stat_path)은 pointer release의 최종 선택에
+    // Issue #363: 터미널에서 발견한 파일/디렉토리 경로에 밑줄을 긋고, 클릭하면
+    // 파일은 viewer 로 열고 디렉토리는 cwd 로 전파한다. 발견 트리거는 드래그
+    // 선택(`selection`)과 포인터 지점(`point`: hover dwell·이동 없는 클릭)이며
+    // 후자는 포인터 아래 토큰 하나만 조회한다(ADR-0188). 과거의 "hover 줄 전체
+    // 토큰 stat" 을 되살리는 것이 아니다 — 그 방식은 트리거당 조회량이 무제한
+    // 이어서 느렸다. 선택 트리거의 검증은 pointer release 의 최종 선택에
     // **gesture당 1회만** 수행하고, 검증되면 데코레이션으로 밑줄을 직접 그린다
     // (xterm linkifier hover 에 의존하면 검증 후 마우스를 나갔다 돌아와야 켜지는
     // 문제가 있어 데코레이션 방식으로 전환 — path-link-provider 주석 참고).
@@ -1506,11 +1509,92 @@ export function TerminalView({
       wrapperRef.current?.classList.toggle("terminal-path-link-clickable", active);
     };
 
-    // 검증된 선택을 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통 경로.
+    // 검증된 링크를 비우고(있으면) 밑줄 데코레이션을 거둔다. 선택 해제/변경 공통
+    // 경로. 새 선택은 point 밑줄도 무효화한다 — 같은 지점에 두 밑줄이 겹치지
+    // 않게 하는 ADR-0188 규칙이다.
     const clearPathLinkSelection = () => {
       setPathLinkCursor(false);
       pathLinkHint.hide();
       pathLink.clear();
+    };
+
+    // ADR-0188 `point` 트리거. hover dwell 과 이동 없는 클릭이 공유하며, 포인터
+    // 아래 maximal token 하나만 조회한다(트리거당 stat_paths 1건). 검증 로직은
+    // path-link-point.ts 가 소유하고 여기서는 xterm·스토어·IPC 만 주입한다.
+    const pathLinkPoint = createPathLinkPointEvaluator({
+      getSettings: () => {
+        const terminalSettings = useSettingsStore.getState().terminal;
+        return {
+          enabled: terminalSettings.pathLinkEnabled,
+          maxPathLength: terminalSettings.pathLinkMaxLength,
+        };
+      },
+      getCwd: () => cwdRef.current,
+      resolveCell: (clientX, clientY) => {
+        const t = terminalRef.current;
+        if (!t) return null;
+        // getCoords 는 clientX/clientY 와 대상 엘리먼트의 rect 만 읽으므로
+        // (xterm `getCoordsRelativeToElement`) 좌표만 담은 객체로 충분하다.
+        // 실제 MouseEvent 가 없는 dwell 타이머에서도 같은 변환을 쓰려면 필요하다.
+        const coords = getClickCellCoords(t, { clientX, clientY } as MouseEvent);
+        if (!coords) return null;
+        const [col, viewportRow] = coords;
+        const viewportY = t.buffer.active.viewportY ?? 0;
+        return { col, absoluteLine: viewportY + viewportRow - 1 };
+      },
+      readLine: (absoluteLine) => {
+        const t = terminalRef.current;
+        const line = t?.buffer.active.getLine(absoluteLine);
+        return line ? readLineCells(line) : null;
+      },
+      statPaths,
+      isVerifiedAt: (clientX, clientY) => pathLink.getHit(clientX, clientY) !== null,
+      apply: (selections) => {
+        pathLink.setVerifiedSelections("point", selections);
+        // 밑줄이 켜졌으면 포인터는 (dwell 이든 클릭이든) 그 위에 있다. 커서를
+        // 먼저 켜 두고, 어긋난 드문 경우는 다음 mousemove 의 hit-test 가 고친다.
+        if (selections.length > 0) setPathLinkCursor(true);
+      },
+    });
+
+    // hover dwell: 포인터가 멈춰 있어야 평가한다. 움직이면 타이머를 다시 잡고,
+    // 버튼이 눌린 동안(선택 drag)에는 아예 잡지 않는다(ADR-0165 유지).
+    let pathLinkHoverTimer: number | undefined;
+    let pathLinkHoverPoint: { x: number; y: number } | null = null;
+    const cancelPathLinkHoverDwell = () => {
+      if (pathLinkHoverTimer !== undefined) {
+        window.clearTimeout(pathLinkHoverTimer);
+        pathLinkHoverTimer = undefined;
+      }
+      pathLinkHoverPoint = null;
+    };
+    const schedulePathLinkHoverDwell = (event: MouseEvent, overExistingLink: boolean) => {
+      // 이미 밑줄 위면 클릭 대상이 있다. 드래그 중에는 조회하지 않는다.
+      if (overExistingLink || event.buttons !== 0) {
+        cancelPathLinkHoverDwell();
+        return;
+      }
+      // click slop 안의 이동은 "멈춰 있다"로 본다. 매 이동마다 타이머를 다시
+      // 잡으면 트랙패드 미세 드리프트로 1px 씩 흔들리는 포인터는 영원히
+      // dwell 에 도달하지 못한다.
+      const anchor = pathLinkHoverPoint;
+      if (
+        anchor &&
+        pathLinkHoverTimer !== undefined &&
+        Math.abs(event.clientX - anchor.x) <= PATH_LINK_CLICK_SLOP &&
+        Math.abs(event.clientY - anchor.y) <= PATH_LINK_CLICK_SLOP
+      ) {
+        return;
+      }
+      cancelPathLinkHoverDwell();
+      pathLinkHoverPoint = { x: event.clientX, y: event.clientY };
+      pathLinkHoverTimer = window.setTimeout(() => {
+        pathLinkHoverTimer = undefined;
+        const point = pathLinkHoverPoint;
+        pathLinkHoverPoint = null;
+        if (!point) return;
+        void pathLinkPoint.evaluateAt(point.x, point.y);
+      }, PATH_LINK_HOVER_DWELL_MS);
     };
 
     // 선택 drag의 mouseup 처리까지 끝난 뒤 1회 호출되는 검증 흐름.
@@ -1557,6 +1641,7 @@ export function TerminalView({
           {
             absPath,
             statIndex,
+            token: candidate.text,
             range: mapSelectionCandidateToPathRange(pos, candidate, lineCells),
           },
         ];
@@ -1581,6 +1666,7 @@ export function TerminalView({
               {
                 ...item.range,
                 absPath: item.absPath,
+                token: item.token,
                 isDirectory: action === "changeDir",
               },
             ];
@@ -1596,7 +1682,7 @@ export function TerminalView({
           // mousemove 의 hitTest 가 곧바로 교정한다(데코 rect 는 다음 프레임에야
           // 준비돼 여기서 hitTest 해도 신뢰할 수 없다).
           setPathLinkCursor(true);
-          pathLink.setVerifiedSelections(verified);
+          pathLink.setVerifiedSelections("selection", verified);
         })
         .catch(() => {
           if (seq !== pathLinkSelectionSeq) return;
@@ -2600,6 +2686,14 @@ export function TerminalView({
       scheduleShadowCursorSync();
     });
     const writeParsedDisposable = terminal.onWriteParsed(() => {
+      // ADR-0188: 화면 재출력은 밑줄 아래 텍스트를 바꿀 수 있다. 남아 있는
+      // 링크의 원문을 다시 확인해 어긋난 것만 거둔다(항목이 없으면 즉시 반환).
+      const droppedPathLinks = pathLink.revalidate();
+      // 출력이 왔으면 이전 음성 결과("여긴 파일 아님")도 더 이상 못 믿는다 —
+      // memo 만 잊고 진행 중 조회는 살린다. 여기서 revision 까지 올리면 출력이
+      // 잦은 pane 에서 hover 결과가 매번 폐기돼 밑줄이 영원히 안 켜진다.
+      pathLinkPoint.forget();
+      if (droppedPathLinks > 0) setPathLinkCursor(false);
       if (compositionPreviewRef.current.active) {
         // The shadow cursor stays frozen for the composition, but the *text* the
         // app just echoed is a fact, and it is the only thing that knows where an
@@ -3001,8 +3095,13 @@ export function TerminalView({
         : null;
       if (rect && hintKey) pathLinkHint.show(rect, i18n.t(hintKey, { ns: "common" }));
       else pathLinkHint.hide();
+      // ADR-0188: 포인터가 멈추면 그 지점 하나를 검증한다(밑줄 위면 생략).
+      schedulePathLinkHoverDwell(e, inside);
     };
-    const handleMouseLeave = () => pathLinkHint.hide();
+    const handleMouseLeave = () => {
+      cancelPathLinkHoverDwell();
+      pathLinkHint.hide();
+    };
     outerEl?.addEventListener("keydown", handleKeyDown);
     outerEl?.addEventListener("mousemove", handleMouseMove);
     outerEl?.addEventListener("mouseleave", handleMouseLeave);
@@ -3104,7 +3203,16 @@ export function TerminalView({
     const finalizePointerSelection = () => {
       const gesture = retirePointerSelectionGesture();
       if (!gesture) return;
-      if (gesture.moved || gesture.selectionChanged) evaluatePathLinkSelection();
+      if (gesture.moved) {
+        // 드래그 → 최종 선택을 gesture 당 1회 검증한다(ADR-0165).
+        evaluatePathLinkSelection();
+      } else {
+        // 이동 없는 클릭 → 그 지점 하나를 검증한다(ADR-0188). 밑줄 위 클릭은
+        // pathLinkClick 이 이미 열기로 처리했고 evaluator 가 재파싱하지 않는다.
+        // 클릭이 선택을 지웠으면 onSelectionChange 가 stale 링크를 이미 거뒀다.
+        cancelPathLinkHoverDwell();
+        void pathLinkPoint.evaluateAt(gesture.startX, gesture.startY);
+      }
       if (useSettingsStore.getState().terminal.copyOnSelect) runTerminalCopy(terminal);
     };
     const handlePointerSelectionUp = (event: PointerEvent) => {
@@ -3131,7 +3239,9 @@ export function TerminalView({
       if (pointerSelectionGesture) pointerSelectionGesture.selectionChanged = true;
       // Issue #363/#ADR-0165: 선택 변경에서는 stale 링크와 진행 중인 검증만
       // 무효화한다. 후보 파싱과 filesystem stat은 gesture 완료 뒤에만 한다.
+      // ADR-0188: 새 선택은 point 밑줄과 그 재조회 memo 도 무효화한다.
       pathLinkSelectionSeq += 1;
+      pathLinkPoint.invalidate();
       clearPathLinkSelection();
     });
 
@@ -3150,6 +3260,9 @@ export function TerminalView({
     // later unrelated release parse paths or copy a disposed terminal.
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
+      // 누르는 동안에는 hover dwell 을 돌리지 않는다 — 이 gesture 의 결과
+      // (드래그면 selection, 클릭이면 point)가 검증을 소유한다.
+      cancelPathLinkHoverDwell();
       retirePointerSelectionGesture();
       // Invalidate an earlier async stat immediately, but leave its verified
       // decoration through mousedown so an ordinary path-link click can still
@@ -5920,6 +6033,7 @@ export function TerminalView({
       idleDetector.dispose();
       resizeObserver.disconnect();
       outerContainer?.removeEventListener("contextmenu", handleContextMenu);
+      cancelPathLinkHoverDwell();
       outerEl?.removeEventListener("keydown", handleKeyDown);
       outerEl?.removeEventListener("mousemove", handleMouseMove);
       outerEl?.removeEventListener("mouseleave", handleMouseLeave);

@@ -289,6 +289,38 @@ mod tests {
         assert!(lock_memo_gate(&gate).is_err());
     }
 
+    // ── 업데이트 채널 (ADR-0190) ──
+
+    #[test]
+    fn unknown_update_channel_loads_without_recovery_and_resolves_to_stable() {
+        // The channel is a String, not an enum, so a hand-edited value does not
+        // drop the whole settings tree into partial recovery. The runtime folds
+        // it to stable instead (ADR-0190).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        fs::write(
+            &path,
+            r#"{
+              "language": "en",
+              "defaultProfile": "WSL",
+              "update": { "channel": "nightly" }
+            }"#,
+        )
+        .unwrap();
+
+        let result = load_settings_validated_from(&path);
+        let settings = match &result {
+            SettingsLoadResult::Ok { settings, .. } => settings,
+            SettingsLoadResult::Repaired { settings, .. } => settings,
+            other => panic!("expected Ok or Repaired, got {other:?}"),
+        };
+        assert_eq!(settings.update.channel, "nightly");
+        assert_eq!(
+            crate::app_update::UpdateChannel::from_settings_value(&settings.update.channel),
+            crate::app_update::UpdateChannel::Stable
+        );
+    }
+
     // ── 타입 오류 부분 복구 (issue #701, ADR-0119) ──
 
     #[test]

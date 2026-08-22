@@ -6,10 +6,10 @@ use crate::constants::{
     PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PASTE_PATH_SEPARATORS,
     PROFILE_ANTIALIASING_MODES, PROFILE_BELL_STYLES, PROFILE_CLOSE_ON_EXIT_VALUES,
     PROFILE_CURSOR_SHAPES, SETTINGS_LANGUAGES, TERMINAL_ACTIVITY_WIDGET_SCOPES,
-    TERMINAL_SCROLLBAR_STYLES, USAGE_WIDGET_BAR_HEIGHT_MAX, USAGE_WIDGET_BAR_HEIGHT_MIN,
-    USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN, USAGE_WIDGET_DISPLAY_MODES,
-    WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES, WIDGET_TYPES,
-    WORKSPACE_LAST_INPUT_MODES, WORKSPACE_SORT_ORDERS,
+    TERMINAL_SCROLLBAR_STYLES, UPDATE_CHANNELS, USAGE_WIDGET_BAR_HEIGHT_MAX,
+    USAGE_WIDGET_BAR_HEIGHT_MIN, USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN,
+    USAGE_WIDGET_DISPLAY_MODES, WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES,
+    WIDGET_TYPES, WORKSPACE_LAST_INPUT_MODES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -59,6 +59,12 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
         "/notifications/dismiss",
         &settings.notifications.dismiss,
         NOTIFICATION_DISMISS_MODES,
+    );
+    enum_value(
+        &mut issues,
+        "/update/channel",
+        &settings.update.channel,
+        UPDATE_CHANNELS,
     );
     enum_value(
         &mut issues,
@@ -923,6 +929,28 @@ mod tests {
         assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
+    }
+
+    #[test]
+    fn update_channel_accepts_only_the_two_channels() {
+        let mut settings = Settings::default();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        settings.update.channel = "beta".into();
+        assert!(validate_settings(&settings)
+            .iter()
+            .all(|issue| issue.path != "/update/channel"));
+
+        // A hand-edited channel is rejected on write. It is still tolerated on
+        // read (resolving to stable at runtime), which is why the field is a
+        // String rather than an enum (ADR-0190).
+        settings.update.channel = "nightly".into();
+        let issues = validate_settings(&settings);
+        assert!(issues
+            .iter()
+            .any(|issue| issue.path == "/update/channel" && issue.code == "invalid_value"));
     }
 
     #[test]

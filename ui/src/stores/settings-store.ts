@@ -305,6 +305,31 @@ export interface NotificationSettings {
  */
 export type PowerSettings = SleepPreventionAxes;
 
+/** Release channels this install can follow (ADR-0190). Order is display order. */
+export const UPDATE_CHANNELS = ["stable", "beta"] as const;
+export type UpdateChannel = (typeof UPDATE_CHANNELS)[number];
+
+/**
+ * Which release channel this install follows (ADR-0190). `beta` receives the
+ * test series that lands before a stable release.
+ */
+export interface UpdateSettings {
+  channel: UpdateChannel;
+}
+
+/**
+ * An unknown channel resolves to stable, matching the backend: a misread value
+ * must never move a machine onto the less-verified series.
+ */
+export function normalizeUpdateSettings(raw: Partial<UpdateSettings> | undefined): UpdateSettings {
+  const channel = raw?.channel;
+  return {
+    channel: UPDATE_CHANNELS.includes(channel as UpdateChannel)
+      ? (channel as UpdateChannel)
+      : "stable",
+  };
+}
+
 /** Which elements to display in WorkspaceSelectorView pane rows. */
 export interface WorkspaceDisplaySettings {
   minimap: boolean;
@@ -334,7 +359,7 @@ export interface WorkspaceSelectorSettings {
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
 
-/** Last submitted input layout in WorkspaceSelectorView (ADR-0188). */
+/** Last submitted input layout in WorkspaceSelectorView (ADR-0191). */
 export type WorkspaceLastInputMode = "perPane" | "workspaceLatest";
 
 export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
@@ -530,6 +555,7 @@ interface SettingsState {
   dock: DockSettings;
   notifications: NotificationSettings;
   power: PowerSettings;
+  update: UpdateSettings;
   workspaceSelector: WorkspaceSelectorSettings;
   claude: ClaudeSettings;
   codex: CodexSettings;
@@ -554,6 +580,7 @@ interface SettingsState {
   setDock: (data: Partial<DockSettings>) => void;
   setNotifications: (data: Partial<NotificationSettings>) => void;
   setPower: (data: Partial<PowerSettings>) => void;
+  setUpdate: (data: Partial<UpdateSettings>) => void;
   setWorkspaceSelector: (data: Partial<WorkspaceSelectorSettings>) => void;
   setClaude: (data: Partial<ClaudeSettings>) => void;
   setCodex: (data: Partial<CodexSettings>) => void;
@@ -622,6 +649,7 @@ interface SettingsState {
         | "dock"
         | "notifications"
         | "power"
+        | "update"
         | "workspaceSelector"
         | "claude"
         | "codex"
@@ -881,6 +909,8 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 };
 
 export const DEFAULT_POWER: PowerSettings = { ...DEFAULT_SLEEP_PREVENTION_AXES };
+
+export const DEFAULT_UPDATE: UpdateSettings = { channel: "stable" };
 
 /** App-exit behavior defaults (issue #451). Interrupt is opt-in (off). */
 export const DEFAULT_EXIT: ExitSettings = {
@@ -1287,6 +1317,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   dock: { ...DEFAULT_DOCK },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   power: { ...DEFAULT_POWER },
+  update: { ...DEFAULT_UPDATE },
   workspaceSelector: {
     ...DEFAULT_WORKSPACE_SELECTOR,
     display: { ...DEFAULT_WORKSPACE_SELECTOR.display },
@@ -1359,6 +1390,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setPower: (data) =>
     set((state) => ({
       power: { ...state.power, ...data },
+    })),
+
+  setUpdate: (data) =>
+    set((state) => ({
+      update: { ...state.update, ...data },
     })),
 
   setWorkspaceSelector: (data) =>
@@ -1674,6 +1710,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // is not literally `true` stays off rather than acquiring an inhibitor
     // nobody asked for (ADR-0116).
     const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
+    // Same fail-safe as the backend: an unknown channel resolves to stable
+    // rather than showing an empty control (ADR-0190).
+    const update = data.update ? normalizeUpdateSettings(data.update) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
     const validLastInputModes: WorkspaceLastInputMode[] = ["perPane", "workspaceLatest"];
@@ -1789,6 +1828,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       dock: _rawDock,
       notifications: _rawNotifications,
       power: _rawPower,
+      update: _rawUpdate,
       workspaceSelector: _rawWorkspaceSelector,
       paneClear: _rawPaneClear,
       remote: _rawRemote,
@@ -1818,6 +1858,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       ...(dock ? { dock } : {}),
       ...(notifications ? { notifications } : {}),
       ...(power ? { power } : {}),
+      ...(update ? { update } : {}),
       ...(workspaceSelector ? { workspaceSelector } : {}),
       ...(claude ? { claude } : {}),
       ...(codex ? { codex } : {}),

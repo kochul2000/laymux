@@ -1011,21 +1011,65 @@ mod tests {
         assert!(html.contains("function evaluatePathLinkSelection()"));
         assert!(html.contains("function schedulePathLinkSelectionEvaluation("));
         assert!(html.contains("const PATH_LINK_SELECTION_DEBOUNCE_MS = 100;"));
-        assert!(html.contains("pathLinkAbortController.abort();"));
         assert!(html.contains("const currentPosition = term.getSelectionPosition?.();"));
         assert!(html.contains("data.valid !== true || !Array.isArray(data.matches)"));
-        assert!(html.contains("data.matches.length === 0 || data.matches.length > 16"));
+        assert!(html.contains("data.matches.length > REMOTE_PATH_LINK_MAX_SELECTION_MATCHES"));
         assert!(html.contains("slice(match.startIndex, match.endIndex) === match.token"));
         assert!(
             html.contains("const { text, columns, endColumns } = reconstructRemoteLinkLine(line);")
         );
         assert!(html.contains("text.slice(startOffset, endOffset + 1) === match.token"));
         assert!(html.contains("endCol: endColumns[endOffset]"));
-        assert!(html.contains("setVerifiedPathLinks(matches.map((match) => ({"));
+        assert!(html.contains("setVerifiedPathLinks(\"selection\", matches.map((match) => ({"));
         assert!(html.contains("pathLinkAtPoint(event.clientX, event.clientY)"));
         assert!(html.contains("remote-path-link-decoration"));
         assert!(html.contains("openFileViewerOverlay(press.path)"));
         assert!(html.contains("clearPathLinkSelection()"));
+        assert!(html.contains("mode: \"selection\","));
+    }
+
+    /// ADR-0188: the tap/click (`point`) and idle-screen (`screen`) triggers are
+    /// part of the page contract, each bounded to one batch per trigger.
+    #[test]
+    fn remote_page_html_contains_point_and_idle_screen_path_link_triggers() {
+        let html = remote_client_source();
+        assert!(html.contains("const PATH_LINK_SCOPES = [\"selection\", \"point\", \"screen\"];"));
+        assert!(html.contains("const REMOTE_PATH_LINK_IDLE_SCAN_DELAY_MS = 500;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_LINES = 64;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CHARS = 8192;"));
+        assert!(html.contains("const REMOTE_PATH_LINK_MAX_SCREEN_CANDIDATES = 64;"));
+        assert!(html.contains("function evaluatePathLinkPoint(point)"));
+        assert!(html.contains("function evaluatePathLinkScreen()"));
+        assert!(html.contains("function schedulePathLinkIdleScan()"));
+        assert!(html.contains("function requestLineScopedPathLinks("));
+        assert!(html.contains("function mapRemoteLinePathRange(bufferLine, match)"));
+        assert!(html.contains("queuePathLinkPointEvaluation(point)"));
+        // Output pushes the idle scan out instead of scanning mid-stream.
+        assert!(html.contains("schedulePathLinkIdleScan();"));
+        // An unchanged screen must not re-run the filesystem batch — but the
+        // skip only holds while the previous scan is still drawn, otherwise the
+        // idle scheduler's retire would drop the display for good.
+        assert!(html.contains(
+            "if (signature === pathLinkLastScreenSignature && pathLinkScopes.screen.length > 0)"
+        ));
+        // A live selection owns discovery, for the screen scan and for a tap.
+        assert_eq!(
+            html.matches("if (term.hasSelection?.()) return;").count(),
+            2
+        );
+        // Output can repaint a row in place: the surviving scopes are re-checked
+        // against their stored token instead of being trusted.
+        assert!(html.contains("function revalidatePathLinkScopes()"));
+        assert!(html.contains("function pathLinkEntryStillOnScreen(entry)"));
+        assert!(html.contains(
+            "revalidatePathLinkScopes();
+                      schedulePathLinkIdleScan();"
+        ));
+        assert_eq!(html.matches("token: match.token,").count(), 2);
+        assert!(
+            html.contains("caret: { lineIndex: 0, index: caretIndex }")
+                || html.contains("{ lineIndex: 0, index: caretIndex }")
+        );
     }
 
     #[test]

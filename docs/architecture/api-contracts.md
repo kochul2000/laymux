@@ -540,6 +540,31 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
   - **watchdog**: 프론트는 변화만 보고하므로 `keepAwake` 를 켠 채 두면 재확인 기회가 없다. 30초(`constants.rs` 의 `SLEEP_INHIBIT_WATCHDOG_INTERVAL`) 주기 스레드가 `reconcile()` 을 돌려 죽은 억제와 **한 번도 성공하지 못한 획득**을 모두 다시 시도한다(`SleepInhibitor::revalidate`). 앱 setup 에서 기동하고 `set_sleep_inhibit` 도 매번 `ensure_watchdog()` 을 호출한다(멱등) — 한쪽에만 묶으면 spawn 실패가 세션 내내 복구되지 않는다. 아무것도 원하지 않고 잡은 것도 없으면 no-op 이며, `Weak` 참조라 앱이 사라지면 스스로 끝난다.
   - 그 외 플랫폼은 `enabled=true` 요청에 에러를 반환한다.
 
+### 업데이트 채널 설정
+
+이 설치본이 따라갈 릴리스 계열을 정한다([ADR-0190](../adr/0190-update-release-channels.md), [ADR-0174](../adr/0174-github-signed-desktop-self-update.md) 확장).
+
+```jsonc
+{
+  "update": {
+    // "stable" = 정식 릴리스만, "beta" = 정식보다 먼저 나오는 테스트 릴리스까지
+    "channel": "stable"
+  }
+}
+```
+
+- **채널 선택의 SoT 는 디스크의 `settings.json`** 이다. `app_update::current_channel()` 이 확인마다 `load_settings()` 로 다시 읽으므로 저장되지 않은 Settings 초안은 확인에 반영되지 않는다. applyMode 는 `live`.
+- **알 수 없는 값은 stable 로 해석한다.** 필드는 `String`(`UpdateSettings`)이라 손으로 넣은 값이 설정 전체를 부분 복구로 떨어뜨리지 않고, 저장 경로에서는 `semantic_validation` 의 `enum_value` 가 `/update/channel` 을 거절한다. 프론트도 같은 규칙(`normalizeUpdateSettings`)을 쓴다 — 오독이 사용자를 테스트 계열로 올리는 방향으로 기울지 않아야 한다.
+- **채널을 바꾸는 표면은 데스크톱 Settings ▸ 일반 ▸ 업데이트(`nav-update` → `update-channel-select`)와 Automation 일반 설정 patch 뿐이다.** Remote 는 host 설정 쓰기 표면이 아니므로(`/remote/v1/display-settings` 는 기기-로컬 4필드 전용) 채널을 바꾸지 않고, `/remote/v1/update` snapshot 의 `channel` 을 읽어 표시만 한다. beta 를 고르면 그 자리에서 경고를 띄운다(`update-channel-beta-warning`).
+- **채널 매니페스트가 "지금 최신"의 SoT 다.** 앱은 `https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-<channel>.json` 을 확인 시점에 `updater_builder().endpoints()` 로 주입한다(`app_update::channel_updater`). `tauri.conf.json` 의 정적 endpoint 는 stable 채널 파일과 같은 값이며, 채널을 아는 빌드에서는 런타임 주입이 항상 우선한다. GitHub 의 `latest` 지정과 `latest.json` asset 은 채널을 모르는 구버전 앱의 업데이트 경로로 계속 유지한다.
+- **버전 계약은 채널별로 다르다.** stable 채널은 매니페스트 `version` 이 정확히 `x.y.z`, beta 채널은 `x.y.z` 또는 `x.y.z-beta.N`(`N >= 1`, 선행 0 금지)만 받는다. `alpha`·`rc`·build metadata 는 두 채널 모두 거절한다. download URL 의 tag(`v?<version>`)와 매니페스트 버전이 같아야 한다는 대조는 그대로다.
+- **채널 전환의 경계는 install 수락 시점이다.** `begin_check(channel)` 은 채널이 바뀌면 이전 후보를 지우고, 확인이 끝난 시점에 채널이 또 바뀌었으면 결과를 버린다(`abandon_check` — 답도 실패도 아니므로 `lastError` 를 남기지 않는다). `begin_install(current_channel())` 은 후보가 속한 채널과 현재 채널이 다르면 거절한다. 반대로 수락된 설치는 수락 시점 채널로 완주한다(ADR-0174).
+- **채널을 바꿔 저장하면 즉시 1회 확인한다.** `handleSave` 가 `persistSession()` 이후에 `check_app_update` 를 부른다 — 주기 확인은 6시간 뒤이고, 백엔드는 이 저장이 쓴 파일을 읽는다.
+- **다운그레이드는 제안하지 않는다.** updater 기본 semver 비교를 유지하므로 beta → stable 로 되돌린 사용자는 정식이 자기 버전을 넘어설 때까지 업데이트가 없다. 이는 오류가 아니라 정상 상태다.
+- **beta 는 deb/rpm 설치본에서 거절된다**(`unsupported_channel_install`). updater 는 `{os}-{arch}-{installer}` 가 없으면 맨 `{os}-{arch}`(AppImage) 로 폴백하므로, 그대로 두면 설치 단계에서 형식 오류가 난다. 확인·설치 둘 다 이유를 담은 오류로 거절한다.
+- **업데이트 화면(`UpdateSection`)이 버전·채널·동작을 한자리에 모은다.** 현재 버전과 채널(`update-current-version`·`update-current-channel`), 채널 선택, 수동 확인(`update-check-btn`)과 마지막 확인 시각(`update-checked-at`), 발견된 버전의 릴리스 시각(`update-published-at`)·노트·설치(`update-install-btn`), GitHub 릴리스 페이지 링크를 제공한다. 채널은 다른 설정처럼 draft 라 저장해야 적용되고, 확인·설치는 설정이 아니라 action 이므로 즉시 실행된다. 상단 바 action 은 업데이트가 있을 때만 나타나는 설치 전용 버튼이라 수동 확인 수단이 되지 못했다 — 그 공백을 이 화면이 메운다.
+- **설정 초기화도 재확인을 건다.** `reset_settings` 는 디스크에 기본값을 쓰고 프론트는 페이지를 다시 로드할 뿐이라 설정 적용 경로를 타지 않는다. 커맨드가 `app_update::schedule_channel_recheck` 로 직접 재확인을 걸어, 프로세스 전역 매니저가 옛 채널과 후보를 들고 있지 않게 한다.
+
 ### 종료 시 동작(kill-on-exit) 설정
 
 앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 힌트는 사용자 가시 기록으로 스크롤백 캐시에 남는다. 자동 복원에 쓰는 식별자는 이 텍스트를 파싱하지 않고 같은 저장 시점에 Claude session metadata 또는 Codex rollout metadata에서 별도로 조회한다(위 agent 설정, [data-flow.md §13](./data-flow.md#13-session-persistence--cache)).
@@ -800,8 +825,8 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 + 응답 프로세스·빌드 신원(`instance`) |
 | GET | `/api/v1/diagnostics/frontend` | Rust terminal-output v3 상태 + 마지막 프론트엔드 vitals 합성 (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
-| GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회 (`Cache-Control: no-store`) |
-| POST | `/api/v1/update/check` | GitHub latest Release 즉시 확인. 실행 중인 작업이 있으면 그 snapshot 반환 |
+| GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회. 따라가는 채널(`channel`: `stable` 또는 `beta`)을 함께 실어 보낸다(ADR-0190) (`Cache-Control: no-store`) |
+| POST | `/api/v1/update/check` | 현재 채널 매니페스트 즉시 확인. 실행 중인 작업이 있으면 그 snapshot 반환 |
 | POST | `/api/v1/update/install` | 발견된 update 다운로드·서명 검증·설치·재시작 예약. 프로세스 종료 전에 수락 snapshot 반환 |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
 | GET | `/api/v1/workspaces/active` | 활성 워크스페이스 |
@@ -1345,9 +1370,9 @@ Remote drawer 본문은 workspace 기본 화면과 Hidden workspaces·Notificati
 
 `/remote/v1/navigation`은 bearer token과 IP/Origin gate를 통과해야 하며 lease는 요구하지 않는다. 응답의 `workspaces`는 PC WebView `WorkspaceSelectorView`와 같은 `workspaceSelector.sortOrder`/`workspaceDisplayOrder` 규칙으로 정렬된 `{id,name,isActive,hidden,collapsed,paneCount,terminalPaneCount,liveTerminalCount,unreadCount,panes,selectorSummary}` 요약이다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). ADR-0018의 remote payload 호환성과 focused remote surface를 위해 숨김 워크스페이스와 숨김 pane도 제거하지 않고 `hidden`/`collapsed` 플래그로 전달한다. 다만 desktop selector는 ADR-0033 이후 숨김 행을 DOM 목록에서 필터하고 별도 보관함에서 복원하므로, remote의 `collapsed`는 remote 전용 표시 계약이지 desktop DOM 접힘 모델과의 1:1 일치를 뜻하지 않는다. 현재 active workspace는 전환 중인 raw snapshot에서도 `collapsed=false`로 유지해 현재 터미널 문맥을 잃지 않는다. `workspaces[].panes`는 선택 여부와 무관하게 모든 workspace에서 채운다. 각 pane 요약은 `{id,location,workspaceId,paneIndex,paneNumber,viewType,terminalId,terminalLive,title,profile,cwd,branch,activity,outputActive,commandRunning,lastCommand,lastExitCode,lastCommandAt,activityMessage,selectorDisplay,selectorStatus,isFocused,unreadCount,hidden,collapsed,x,y,w,h}` 형태이며, `unreadCount`는 terminal pane에만 부여하고 non-terminal pane은 항상 `0`이다. `selectorDisplay`는 frontend가 PC와 같은 formatter와 현재 path ellipsis로 계산한 `{environment,activity:{label,color},cwd}`이고, `selectorStatus`는 같은 activity handler 및 현재 Claude/Codex 상태 문구 설정으로 계산한 `{icon,color,text?}`다. Remote는 이 표시값을 재판정하지 않는다. `selectorSummary`는 `{branch,cwd,terminalCount,lastCommand,latestNotification}`이고 `lastCommand`에는 `{command,timestamp,status}`가 들어간다. 모든 `workspaces[].panes`와 `activeWorkspace.panes`는 PC selector와 동일하게 `paneNumber` 오름차순으로 정렬하며 `paneIndex`는 정렬 후 위치가 아니라 원본 `WorkspacePane[]` 인덱스를 유지한다. `docks[]`는 workspace 목록과 섞지 않는 앱 전역 요약이며, `docks[].panes`는 `location="dock"`과 `workspaceId=null`을 사용해 workspace 소속 pane이 아님을 명확히 한다. Dock pane의 `unreadCount`는 workspace filter 없이 `terminalId` 기준으로만 계산하고, dock pane의 `isFocused`는 terminal store의 focus flag가 아니라 desktop dock focus SoT인 `focusedDock`/`focusedDockPaneId`에서 계산한다. `visible=false` dock은 remote page의 dock panel에서 렌더하지 않고 preferred terminal 후보에서도 제외한다. 즉 `preferredTerminalId` short-circuit과 fallback 모두 active workspace pane terminal 또는 visible dock pane terminal만 메인 출력으로 열 수 있다. 다만 `terminalLive`는 진입 조건이 아니다([ADR-0138](../adr/0138-remote-opens-queued-panes-on-entry.md)) — workspace lazy mount와 직렬 startup slot([ADR-0127](../adr/0127-terminal-startup-slot-follows-eligibility.md)) 때문에 아직 데스크톱에서 열리지 않은 pane은 정상 상태에서도 `terminalLive=false`이므로, `terminalId`가 있는 pane은 모두 선택 가능하고 live는 후보 자격이 아니라 동순위 tie-breaker다. Remote 폴백 순서는 focused pane → active workspace live pane → active workspace 미시작 pane → visible dock live pane → visible dock 미시작 pane이며, 셋 다 없을 때(= terminal pane 자체가 없을 때)만 열 터미널이 없다고 표시한다. 최상위 `workspaceSelector`는 remote drawer가 PC selector의 표시 토글/경로 ellipsis와 맞출 수 있게 하는 현재 selector 설정이며, `unreadNotificationCount`는 전체 unread 수다. `terminals`는 `/remote/v1/terminals` 항목에 frontend bridge의 `workspaceId`, `paneNumber`, `activity`, `selectorDisplay`, `selectorStatus`, `isFocused` 등 탐색·표시에 필요한 메타데이터를 병합한 목록이다.
 
-ADR-0188에 따라 위 `selectorDisplay` shape에는 runtime-only `{lastInput:string|null,lastInputAt:number|null}`이 additive로 포함된다. frontend bridge가 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt`에서 최신 값과 timestamp를 계산하며 Remote JavaScript는 provider 출력이나 prompt를 역파싱하지 않는다. 최상위 `workspaceSelector.lastInputMode`는 `"perPane" | "workspaceLatest"`이고 누락·유효하지 않은 값의 기본은 `"perPane"`이다. 기존 `selectorSummary`는 Automation/Remote payload 호환성을 위해 유지한다.
+ADR-0191에 따라 위 `selectorDisplay` shape에는 runtime-only `{lastInput:string|null,lastInputAt:number|null}`이 additive로 포함된다. frontend bridge가 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt`에서 최신 값과 timestamp를 계산하며 Remote JavaScript는 provider 출력이나 prompt를 역파싱하지 않는다. 최상위 `workspaceSelector.lastInputMode`는 `"perPane" | "workspaceLatest"`이고 누락·유효하지 않은 값의 기본은 `"perPane"`이다. 기존 `selectorSummary`는 Automation/Remote payload 호환성을 위해 유지한다.
 
-Remote drawer는 PC selector의 `display.minimap/environment/activity/path/result`, `pathEllipsis`, `lastInputMode`를 직접 gate로 사용한다. 기본 `perPane`은 각 terminal pane의 첫째 줄에 환경·activity·경로·결과를, 둘째 줄에 `selectorDisplay.lastInput`을 표시한다. `workspaceLatest`는 pane을 한 줄로 줄이고 non-hidden terminal pane의 `selectorDisplay.lastInputAt` 중 최신 입력 하나를 workspace pane 목록 아래 한 줄에 표시한다. 과거의 마지막 명령/최신 unread 알림 통합 상태 행은 빈 placeholder까지 어느 모드에서도 복원하지 않는다([ADR-0188](../adr/0188-workspace-pane-last-input-second-line.md)). 열린 drawer의 정보는 2초 주기로 다시 읽으며 drawer close, disconnect, document hidden에서 폴을 멈춘다. 선택 revision이나 lease가 달라진 늦은 응답은 적용하지 않는다.
+Remote drawer는 PC selector의 `display.minimap/environment/activity/path/result`, `pathEllipsis`, `lastInputMode`를 직접 gate로 사용한다. 기본 `perPane`은 각 terminal pane의 첫째 줄에 환경·activity·경로·결과를, 둘째 줄에 `selectorDisplay.lastInput`을 표시한다. `workspaceLatest`는 pane을 한 줄로 줄이고 non-hidden terminal pane의 `selectorDisplay.lastInputAt` 중 최신 입력 하나를 workspace pane 목록 아래 한 줄에 표시한다. 과거의 마지막 명령/최신 unread 알림 통합 상태 행은 빈 placeholder까지 어느 모드에서도 복원하지 않는다([ADR-0191](../adr/0191-workspace-pane-last-input-second-line.md)). 열린 drawer의 정보는 2초 주기로 다시 읽으며 drawer close, disconnect, document hidden에서 폴을 멈춘다. 선택 revision이나 lease가 달라진 늦은 응답은 적용하지 않는다.
 
 Remote page는 같은 HTML 문서 생명주기에서 사용자가 마지막으로 선택해 attach한 `terminalId`를 메모리 hint로 유지한다. release, disconnect, 또는 서버가 확정한 lease 상실 뒤 사용자가 다시 연결하면 이 hint를 focused pane fallback보다 먼저 검토하되, 최신 navigation snapshot에서 active workspace의 live terminal 또는 visible dock의 live terminal인 경우에만 복원한다. terminal이 종료·삭제되었거나 inactive workspace/hidden dock으로 이동했으면 위 폴백 순서를 그대로 사용한다. 기억된 hint에만 live 요구가 남는 이유는, 재접속 시 이미 종료된 terminal을 사용자가 요청하지 않았는데 다시 시작해버리지 않기 위해서다 — 사용자가 방금 탭해서 진입한 pane은 반대로 열리는 동안 pinned로 고정해, 대기 중 실행되는 navigation 재조회가 다른 pane으로 표류하지 않게 한다([ADR-0138](../adr/0138-remote-opens-queued-panes-on-entry.md)). 이 hint는 surface-local 편의 상태이므로 `localStorage`/`sessionStorage`에 저장하지 않는다. Android의 in-place foreground transport 복구는 같은 문서 생명주기이므로 hint를 보존하고, 혼합 버전·origin 불일치 fallback reload에서만 host navigation 상태로 다시 선택한다.
 
@@ -1426,9 +1451,9 @@ PC updater도 Remote enabled + transport/auth gate 뒤에 좁은 계약으로 �
 
 | Endpoint | Method | 권한·동작 |
 |---|---|---|
-| `/remote/v1/update` | GET | 기존 Remote 인증 gate, lease 불필요. 현재/가용 버전·notes/date·operation/progress/check/error snapshot |
-| `/remote/v1/update/check` | POST | 같은 인증 gate, lease 불필요. GitHub latest 즉시 확인 |
-| `/remote/v1/update/install` | POST | 같은 인증 gate + active controller `leaseId`. 다운로드·검증·설치·재시작을 예약하고 즉시 응답 |
+| `/remote/v1/update` | GET | 기존 Remote 인증 gate, lease 불필요. 채널·현재/가용 버전·notes/date·operation/progress/check/error snapshot. 채널은 표시 전용이며 Remote 는 바꾸지 못한다(ADR-0190) |
+| `/remote/v1/update/check` | POST | 같은 인증 gate, lease 불필요. PC 가 따라가는 채널의 매니페스트 즉시 확인 |
+| `/remote/v1/update/install` | POST | 같은 인증 gate + active controller `leaseId`. 다운로드·검증·설치·재시작을 예약하고 즉시 응답. 후보를 찾은 채널이 현재 채널과 다르면 409 |
 
 Android E2E inner exact allowlist에도 위 GET/POST 세 조합만 추가한다. 이는 Android 앱을 업데이트하는 API가 아니라 연결된 PC updater를 같은 PC 소유 Remote 문서에서 조작하는 API다. debug build는 세 endpoint에서 상태 조회만 가능하고 check/install은 `501`로 거절한다.
 

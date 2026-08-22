@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/tauri-api", () => ({
   saveSettings: vi.fn().mockResolvedValue(undefined),
+  checkAppUpdate: vi.fn().mockResolvedValue(undefined),
   getTerminalCwds: vi.fn().mockResolvedValue({}),
   getClaudeSessionIds: vi.fn().mockResolvedValue({}),
   getCodexSessionIds: vi.fn().mockResolvedValue({}),
@@ -9,6 +10,7 @@ vi.mock("@/lib/tauri-api", () => ({
 }));
 
 import {
+  checkAppUpdate,
   getClaudeSessionIds,
   getCodexSessionIds,
   getGrokSessionIds,
@@ -389,6 +391,43 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
     const snapshot = (await collectSettingsSnapshot()).power;
     expect(snapshot?.keepAwakeWhenBusy).toBe(true);
     expect(snapshot?.keepAwake).toBe(false);
+  });
+
+  it("round-trips the update channel", async () => {
+    applySettingsSnapshot(
+      { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().update).toEqual({ channel: "beta" });
+    expect((await collectSettingsSnapshot()).update?.channel).toBe("beta");
+  });
+
+  it("checks for updates when an applied snapshot changes the channel", async () => {
+    // Automation/MCP patches and settings.json hot-reload arrive here, not via
+    // the Settings save button (ADR-0190).
+    applySettingsSnapshot(
+      { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+    expect(checkAppUpdate).toHaveBeenCalledTimes(1);
+
+    vi.mocked(checkAppUpdate).mockClear();
+    applySettingsSnapshot(
+      { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+    expect(checkAppUpdate).not.toHaveBeenCalled();
+  });
+
+  it("resolves an unknown update channel to stable instead of persisting it", async () => {
+    applySettingsSnapshot(
+      { update: { channel: "nightly" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
+      { includeStructural: false },
+    );
+
+    expect(useSettingsStore.getState().update).toEqual({ channel: "stable" });
+    expect((await collectSettingsSnapshot()).update?.channel).toBe("stable");
   });
 
   it("falls back to off for a hand-edited value instead of reading it for truthiness", async () => {

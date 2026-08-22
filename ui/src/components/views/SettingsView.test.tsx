@@ -45,10 +45,27 @@ let mockCloudStatus = {
   lastError: null as string | null,
 };
 
+const DEFAULT_APP_UPDATE_STATUS = {
+  enabled: true,
+  channel: "stable" as const,
+  currentVersion: "0.11.0",
+  availableVersion: null as string | null,
+  notes: null as string | null,
+  publishedAt: null as string | null,
+  operation: "idle" as const,
+  downloadedBytes: 0,
+  totalBytes: null as number | null,
+  checkedAtMs: 1787385976087,
+  lastError: null as string | null,
+};
+let mockAppUpdateStatus: typeof DEFAULT_APP_UPDATE_STATUS & { channel: string } =
+  DEFAULT_APP_UPDATE_STATUS;
+
 describe("SettingsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCloudStatus = { connected: false, instanceId: null, lastError: null };
+    mockAppUpdateStatus = DEFAULT_APP_UPDATE_STATUS;
     mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "list_system_monospace_fonts") {
         return Promise.resolve(["Cascadia Mono", "Fira Code", "Consolas"]);
@@ -67,6 +84,13 @@ describe("SettingsView", () => {
         const runtimeEnabled = Boolean(args?.enabled);
         const runtimeToken = typeof args?.authToken === "string" ? args.authToken : "";
         return Promise.resolve(remoteAccessStatus(runtimeEnabled, runtimeToken));
+      }
+      if (
+        cmd === "get_app_update_status" ||
+        cmd === "check_app_update" ||
+        cmd === "install_app_update"
+      ) {
+        return Promise.resolve(mockAppUpdateStatus);
       }
       if (cmd === "get_cloud_status") {
         return Promise.resolve(mockCloudStatus);
@@ -241,6 +265,97 @@ describe("SettingsView", () => {
         keepAwake: true,
         keepAwakeWhenBusy: true,
       });
+    });
+  });
+
+  describe("Updates section", () => {
+    it("shows the current version, its channel, and the release links", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("update-current-version")).toHaveTextContent("0.11.0"),
+      );
+      expect(screen.getByTestId("update-current-channel")).toBeInTheDocument();
+      expect(screen.getByTestId("update-open-current-release")).toBeInTheDocument();
+      expect(screen.getByTestId("update-open-releases")).toBeInTheDocument();
+    });
+
+    it("saves the chosen channel and warns while beta is selected", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      expect(screen.getByTestId("update-channel-select")).toHaveValue("stable");
+      expect(screen.queryByTestId("update-channel-beta-warning")).not.toBeInTheDocument();
+
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      expect(screen.getByTestId("update-channel-beta-warning")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().update).toEqual({ channel: "beta" });
+    });
+
+    it("checks for updates right after a channel switch is saved", async () => {
+      // The periodic check is six hours away, and the backend reads the channel
+      // from the file this save just wrote (ADR-0190).
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
+    });
+
+    it("does not check for updates when the channel did not change", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      await user.click(screen.getByTestId("keep-awake-when-busy-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(persistSession).toHaveBeenCalled());
+      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
+    });
+
+    it("checks on demand and reports being up to date", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() => expect(screen.getByTestId("update-up-to-date")).toBeInTheDocument());
+
+      await user.click(screen.getByTestId("update-check-btn"));
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
+      expect(screen.getByTestId("update-checked-at")).toBeInTheDocument();
+    });
+
+    it("shows the pending version with its release time and offers the install", async () => {
+      mockAppUpdateStatus = {
+        ...mockAppUpdateStatus,
+        availableVersion: "0.11.1-beta.1",
+        channel: "beta",
+        notes: "beta notes",
+        publishedAt: "2026-08-22T07:45:00.000Z",
+      };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      await waitFor(() =>
+        expect(screen.getByTestId("update-available")).toHaveTextContent("0.11.1-beta.1"),
+      );
+      expect(screen.getByTestId("update-published-at")).toBeInTheDocument();
+      expect(screen.getByTestId("update-notes")).toHaveTextContent("beta notes");
+
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      await user.click(screen.getByTestId("update-install-btn"));
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("install_app_update"));
     });
   });
 

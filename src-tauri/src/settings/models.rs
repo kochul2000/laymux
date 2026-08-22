@@ -1348,6 +1348,30 @@ pub struct PowerSettings {
     pub keep_awake_when_busy: bool,
 }
 
+/// Which release channel this install follows (ADR-0190).
+///
+/// The field is a plain string rather than an enum so an unknown value read from
+/// disk resolves to stable at runtime instead of dropping the whole settings
+/// tree into partial recovery. Writes are rejected by semantic validation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    #[serde(default = "default_update_channel")]
+    pub channel: String,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            channel: default_update_channel(),
+        }
+    }
+}
+
+fn default_update_channel() -> String {
+    crate::constants::UPDATE_CHANNEL_STABLE.to_string()
+}
+
 /// Which elements to display in WorkspaceSelectorView pane rows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -2051,6 +2075,8 @@ pub struct Settings {
     #[serde(default)]
     pub power: PowerSettings,
     #[serde(default)]
+    pub update: UpdateSettings,
+    #[serde(default)]
     pub workspace_selector: WorkspaceSelectorSettings,
     #[serde(default)]
     pub claude: ClaudeSettings,
@@ -2160,6 +2186,7 @@ impl Default for Settings {
             dock: DockSettings::default(),
             notifications: NotificationSettings::default(),
             power: PowerSettings::default(),
+            update: UpdateSettings::default(),
             workspace_selector: WorkspaceSelectorSettings::default(),
             claude: ClaudeSettings::default(),
             codex: CodexSettings::default(),

@@ -33,6 +33,11 @@ pub const EVENT_APP_UPDATE_STATUS_CHANGED: &str = "app-update-status-changed";
 pub const GITHUB_UPDATE_HOST: &str = "github.com";
 pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
+/// Channel manifests live on a workflow-owned orphan branch; the raw host serves
+/// them as the single source of truth for "what is newest on this channel"
+/// (ADR-0190). GitHub has no stable alias for the latest prerelease.
+pub const UPDATE_CHANNEL_MANIFEST_BRANCH: &str = "release-channels";
+pub const UPDATE_CHANNEL_MANIFEST_HOST: &str = "raw.githubusercontent.com";
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
 /// viewed over a remote session. The UI uses it to auto-open the Remote Access
@@ -153,6 +158,10 @@ pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
 pub const WORKSPACE_LAST_INPUT_MODES: &[&str] = &["perPane", "workspaceLatest"];
+/// Update channels a build can follow (ADR-0190). Order is display order.
+pub const UPDATE_CHANNELS: &[&str] = &[UPDATE_CHANNEL_STABLE, UPDATE_CHANNEL_BETA];
+pub const UPDATE_CHANNEL_STABLE: &str = "stable";
+pub const UPDATE_CHANNEL_BETA: &str = "beta";
 pub const PROFILE_CURSOR_SHAPES: &[&str] = &[
     "bar",
     "underscore",
@@ -336,9 +345,24 @@ pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 /// `terminal.pathLinkMaxLength` setting.
 pub const MAX_REMOTE_PATH_LINK_SELECTION_CHARS: usize = 4096;
 
-/// Maximum non-overlapping path candidates validated for one desktop/Remote
-/// terminal selection. The frontend applies the same cap before this command.
-pub const MAX_PATH_LINK_CANDIDATES: usize = 16;
+/// Maximum lines accepted from one Remote terminal selection, matching the
+/// desktop selection parser's line cap (ADR-0148).
+pub const MAX_REMOTE_PATH_LINK_SELECTION_LINES: usize = 8;
+
+/// Maximum paths accepted by one `stat_paths` batch. A selection contributes at
+/// most 16 candidates (ADR-0148), while a Remote idle screen scan can carry a
+/// whole viewport worth of paths (ADR-0188); this is the ceiling on filesystem
+/// lookups one batch may perform, not the selection candidate cap.
+pub const MAX_PATH_LINK_CANDIDATES: usize = 64;
+
+/// Maximum terminal rows the Remote idle scan may send as one screen, and the
+/// candidate cap applied to it. Beyond these the scan drops the tail rather
+/// than abandoning the screen (ADR-0188).
+pub const MAX_REMOTE_PATH_LINK_SCREEN_LINES: usize = 64;
+
+/// Maximum Unicode scalar count accepted across all lines of one Remote idle
+/// screen scan request.
+pub const MAX_REMOTE_PATH_LINK_SCREEN_CHARS: usize = 8192;
 
 /// Maximum Unicode scalar count accepted for the terminal id attached to a
 /// Remote path-link validation request. Runtime terminal ids are much shorter;

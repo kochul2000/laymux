@@ -1,4 +1,4 @@
-# 0188. Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다
+# 0191. Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다
 
 - Status: Accepted
 - Date: 2026-08-21

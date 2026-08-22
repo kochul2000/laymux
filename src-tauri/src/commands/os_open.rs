@@ -111,6 +111,32 @@ pub struct OsOpenPlan {
     pub arg: OsOpenArg,
 }
 
+/// Rewrite a Windows-shaped path to backslash separators.
+///
+/// `explorer.exe` does not accept forward slashes: handed `E:/dir` it silently
+/// opens the default shell folder (Documents) instead of the target — the same
+/// failure mode as a misquoted `/select,`, verified on Windows 11. Terminal
+/// output routinely carries the POSIX form: an agent printing `/E:/dir` becomes
+/// `E:/dir` once the path-link trim drops the leading slash, and
+/// `resolve_address_path` returns an already-Windows path verbatim (its other
+/// callers go through `std::fs`, which accepts both separators). This is
+/// therefore the last place that can normalize it.
+///
+/// Only drive (`X:`) and UNC (`\\`, `//`) shapes are rewritten. A leftover
+/// POSIX path — resolution fell through because no WSL distro was found — is
+/// left alone: rewriting cannot make it open, and keeping it verbatim keeps the
+/// path the user selected recognizable.
+#[cfg(target_os = "windows")]
+fn to_windows_separators(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let is_drive = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let is_unc = path.starts_with("\\\\") || path.starts_with("//");
+    if !is_drive && !is_unc {
+        return path.to_string();
+    }
+    path.replace('/', "\\")
+}
+
 /// Build the invocation for an already-resolved **host** path.
 ///
 /// `Reveal` uses `/select,` on Windows; when the target has no parent (drive
@@ -122,6 +148,8 @@ pub fn plan_for_resolved(mode: OsOpenMode, resolved: &str) -> OsOpenPlan {
 
     #[cfg(target_os = "windows")]
     {
+        // explorer.exe reads only backslash separators (see `to_windows_separators`).
+        let target = to_windows_separators(&target);
         let arg = match mode {
             OsOpenMode::Open => OsOpenArg::Escaped(target),
             OsOpenMode::Reveal => match parent_dir(&target) {
@@ -351,6 +379,60 @@ mod tests {
             assert_eq!(
                 plan_os_open("/home/u/a.txt", Some("Ubuntu"), OsOpenMode::Reveal).arg,
                 OsOpenArg::Raw("/select,\"\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt\"".into())
+            );
+        }
+
+        #[test]
+        fn open_rewrites_forward_slashes_for_a_drive_path() {
+            // The reported failure (a terminal-printed `/E:/…` path): explorer
+            // opened the Documents folder instead of the target because the
+            // argument kept its forward slashes.
+            let plan = plan_for_resolved(OsOpenMode::Open, "E:/Desktop/work/rec");
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Escaped("E:\\Desktop\\work\\rec".into())
+            );
+        }
+
+        #[test]
+        fn reveal_rewrites_forward_slashes_inside_the_raw_command_line() {
+            let plan = plan_for_resolved(OsOpenMode::Reveal, "E:/Desktop/work/rec");
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Raw("/select,\"E:\\Desktop\\work\\rec\"".into())
+            );
+        }
+
+        #[test]
+        fn open_rewrites_a_forward_slash_unc_path() {
+            let plan = plan_for_resolved(OsOpenMode::Open, "//wsl.localhost/Ubuntu/home/u/a.txt");
+            assert_eq!(
+                plan.arg,
+                OsOpenArg::Escaped("\\\\wsl.localhost\\Ubuntu\\home\\u\\a.txt".into())
+            );
+        }
+
+        #[test]
+        fn open_keeps_a_leftover_posix_path_verbatim() {
+            // Resolution fell through (no WSL distro found). Backslashes would
+            // not make it open, so the selected path stays recognizable.
+            let plan = plan_for_resolved(OsOpenMode::Open, "/home/u/a.txt");
+            assert_eq!(plan.arg, OsOpenArg::Escaped("/home/u/a.txt".into()));
+        }
+
+        #[test]
+        fn a_drive_root_keeps_its_separator_as_a_backslash() {
+            assert_eq!(
+                plan_for_resolved(OsOpenMode::Open, "E:/").arg,
+                OsOpenArg::Escaped("E:\\".into())
+            );
+        }
+
+        #[test]
+        fn plan_carries_the_rewrite_through_the_resolution_step() {
+            assert_eq!(
+                plan_os_open("E:/Desktop/work/rec", None, OsOpenMode::Open).arg,
+                OsOpenArg::Escaped("E:\\Desktop\\work\\rec".into())
             );
         }
     }
