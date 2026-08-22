@@ -1,31 +1,23 @@
 {
-  "version": "0.11.0",
+  "version": "0.11.1-beta.1",
   "notes": "",
-  "pub_date": "2026-08-22T07:45:20.826Z",
+  "pub_date": "2026-08-22T09:20:21.630Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVFHYUhML01LYUgzUE9DUTQvSzltYjdqS0tuQjBsQTRiU3IzakdlVktkMlZ3QXhMay8rdU52REVNT3g4K3ZKTjZHcktXZjVSNUs0RDhkdW80dEZKb2dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0MTE2CWZpbGU6TGF5bXV4XzAuMTEuMF94NjQtc2V0dXAuZXhlCmRad0hsd1VmSDdsVlhsWDM3bVFycVl1ck9iM2YrWEMwOHlvdmFhQkg3RVhySGw1WTlObkMvU3Nkbjkvei9wblJpQThpeEV6QnhHR0RCLzdKbTU4M0RBPT0K",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux_0.11.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dWYyNU96SmVGWmRvR0FSblFNdm1pUGFxbXgza3BGWEYzbDFNY2Jhb2loRlRKNVNqNkYvMS9HR2ljazhKWENlT2gvV205WE1UbVFHTjJ4NEZrQkthb1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg5ODc1CWZpbGU6TGF5bXV4XzAuMTEuMS1iZXRhLjFfeDY0LXNldHVwLmV4ZQp3YUlXcVJwOGNHeDVzV2NSMTBlaVUxK2dlOU9RTUJ4WDFlS280WVo1UWFvRWZac2hjSCt0RGQyaFQrbVgrZXRLak1wcGFZTUhPa3dMU1E4dzduTHhEQT09Cg==",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.1-beta.1/Laymux_0.11.1-beta.1_x64-setup.exe"
     },
     "windows-x86_64-nsis": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVFHYUhML01LYUgzUE9DUTQvSzltYjdqS0tuQjBsQTRiU3IzakdlVktkMlZ3QXhMay8rdU52REVNT3g4K3ZKTjZHcktXZjVSNUs0RDhkdW80dEZKb2dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0MTE2CWZpbGU6TGF5bXV4XzAuMTEuMF94NjQtc2V0dXAuZXhlCmRad0hsd1VmSDdsVlhsWDM3bVFycVl1ck9iM2YrWEMwOHlvdmFhQkg3RVhySGw1WTlObkMvU3Nkbjkvei9wblJpQThpeEV6QnhHR0RCLzdKbTU4M0RBPT0K",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux_0.11.0_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dWYyNU96SmVGWmRvR0FSblFNdm1pUGFxbXgza3BGWEYzbDFNY2Jhb2loRlRKNVNqNkYvMS9HR2ljazhKWENlT2gvV205WE1UbVFHTjJ4NEZrQkthb1FrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg5ODc1CWZpbGU6TGF5bXV4XzAuMTEuMS1iZXRhLjFfeDY0LXNldHVwLmV4ZQp3YUlXcVJwOGNHeDVzV2NSMTBlaVUxK2dlOU9RTUJ4WDFlS280WVo1UWFvRWZac2hjSCt0RGQyaFQrbVgrZXRLak1wcGFZTUhPa3dMU1E4dzduTHhEQT09Cg==",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.1-beta.1/Laymux_0.11.1-beta.1_x64-setup.exe"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVhpaHZMeUVQZVRMb1JmTThVY3FoOWJrYlZOME1ZK3dRTjVGU2JSZ01BV090MHFjRXJvampUc3BCL3o0UWdoOTNXckNqZ25DaUJkR1F1RVI5WG5jTHdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0NzE0CWZpbGU6TGF5bXV4XzAuMTEuMF9hbWQ2NC5BcHBJbWFnZQpCRlY1Y3V5N0sySVJtanZpLzUxMUN4LzFEVk9vT0ZlMmtRYkQ4L2N6SU1tZi9CTHR1alhKZmRYQ2l1anZBVTlpcWFzbXA1Tm5mQXY0UWxPWlFuUVJEdz09Cg==",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux_0.11.0_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVp6TVRmb3BXOW1LRWcyMVN4TWNzZHJsTUR3SVNhSkhxZVkxOHdPWjN2ZGthTXlzLzVYVHpQVUp2V0gvM2NFN3A0Tk03Skd3RnltMWlFL0Q5cTIzNndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MzkwNDE2CWZpbGU6TGF5bXV4XzAuMTEuMS1iZXRhLjFfYW1kNjQuQXBwSW1hZ2UKM3hDVmU5VWMwSU9EbUZEK3pWU09lcVJKL1ladjVBeGxUTkdWL1h3Uy9UVmltNGVpSDVIUjh0Y1FySXlCbHhiZHVJMitoclE0L202czNuN0hmMlg5REE9PQo=",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.1-beta.1/Laymux_0.11.1-beta.1_amd64.AppImage"
     },
     "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVhpaHZMeUVQZVRMb1JmTThVY3FoOWJrYlZOME1ZK3dRTjVGU2JSZ01BV090MHFjRXJvampUc3BCL3o0UWdoOTNXckNqZ25DaUJkR1F1RVI5WG5jTHdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0NzE0CWZpbGU6TGF5bXV4XzAuMTEuMF9hbWQ2NC5BcHBJbWFnZQpCRlY1Y3V5N0sySVJtanZpLzUxMUN4LzFEVk9vT0ZlMmtRYkQ4L2N6SU1tZi9CTHR1alhKZmRYQ2l1anZBVTlpcWFzbXA1Tm5mQXY0UWxPWlFuUVJEdz09Cg==",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux_0.11.0_amd64.AppImage"
-    },
-    "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVptVGVQYkVBWTBlWktscmVpaWVUc3g1SkdhZFFIWDRvZFZUb2JUTHZPeU9Oc3ZITzdldkk0RU9pdUQ1cG1wNXUyU2RiTE9rTnpydUp3RTQ0QTY5bVFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0NzE0CWZpbGU6TGF5bXV4XzAuMTEuMF9hbWQ2NC5kZWIKakIwSFVRVFhPbXlST2IwVmVHZWs1VDN5ZjhKc0o5Mzl6QldWZThYZkFJNkRmQitDeWFVb0xOa2lxWHZvN1pYY0Nod20rRW9qWi91cDNrQzcvNG1lQVE9PQo=",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux_0.11.0_amd64.deb"
-    },
-    "linux-x86_64-rpm": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dWN6dXZmV09FYUlNN2xxcXV1MXZGeHU2VDlIejZoVDIxTWNMaFhrYVdiME5UT0t6ZXBibUJYaTFWc21taDFSUGQvZTdjb1p5elN6V2NPZUFWaTRuaWdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3Mzg0NzE0CWZpbGU6TGF5bXV4LTAuMTEuMC0xLng4Nl82NC5ycG0KS21DNXJ0K1hGc241RFpycFp2Q3dqSmxnVEcxVmZGUy9Fd08xdG5jNEh1Z0d6WHZsVzZweGtxY3FDZzdSaHlpMUtaL2t1TU5IRFQ3V3hQbVRyVEwzQ1E9PQo=",
-      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.0/Laymux-0.11.0-1.x86_64.rpm"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVScXFLSnNDdVc4dVp6TVRmb3BXOW1LRWcyMVN4TWNzZHJsTUR3SVNhSkhxZVkxOHdPWjN2ZGthTXlzLzVYVHpQVUp2V0gvM2NFN3A0Tk03Skd3RnltMWlFL0Q5cTIzNndBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg3MzkwNDE2CWZpbGU6TGF5bXV4XzAuMTEuMS1iZXRhLjFfYW1kNjQuQXBwSW1hZ2UKM3hDVmU5VWMwSU9EbUZEK3pWU09lcVJKL1ladjVBeGxUTkdWL1h3Uy9UVmltNGVpSDVIUjh0Y1FySXlCbHhiZHVJMitoclE0L202czNuN0hmMlg5REE9PQo=",
+      "url": "https://github.com/kochul2000/laymux/releases/download/v0.11.1-beta.1/Laymux_0.11.1-beta.1_amd64.AppImage"
     }
   }
 }
