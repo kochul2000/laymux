@@ -391,7 +391,7 @@ jobs:
             --manifest "$seed_manifest" --channel-dir "$channels" \
             --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
 
-          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+          bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
             "$channels" "$BRANCH" "seed channel manifests from $seed_tag"
 
   publish:
@@ -472,5 +472,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY##*/}")"
           printf 'channel files to publish:\n%s\n' "${written:-<none>}"
 
-          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+          bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
             "$channels" "$BRANCH" "release: $RELEASE_TAG channel manifests"

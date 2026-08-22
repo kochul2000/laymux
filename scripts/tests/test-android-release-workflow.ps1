@@ -101,6 +101,24 @@ if (-not $workflow.Contains('if gh api "repos/$GITHUB_REPOSITORY/contents/deskto
     throw "the bootstrap seeding guard must test the gh api exit status"
 }
 
+# The channel publisher had the same trap inside it: a 404 body became the parent
+# commit sha. It also died with exit 126 when checked out as 100644, and that
+# failure lands *after* publish — the release goes latest with a stale channel.
+$publisher = Join-Path $repoRoot "scripts/release/publish-channel-commit.sh"
+$publisherSource = Get-Content -Raw -Encoding utf8 $publisher
+if ($publisherSource -match '(?m)branch_sha="\$\(gh api [^\n]*\|\| true\)"') {
+    throw "publish-channel-commit.sh must branch on gh api exit status, not captured output"
+}
+$mode = (& git -C $repoRoot ls-files -s -- scripts/release/publish-channel-commit.sh) -split '\s+' | Select-Object -First 1
+if ($mode -ne "100755") {
+    throw "publish-channel-commit.sh must be executable in git (found $mode)"
+}
+foreach ($call in ($workflow -split "`n" | Where-Object { $_ -match 'publish-channel-commit\.sh' })) {
+    if ($call -notmatch 'bash\s+"\$GITHUB_WORKSPACE') {
+        throw "the channel publisher must be invoked via bash so the file mode cannot break it: $($call.Trim())"
+    }
+}
+
 # The release-contract scripts are only a gate if something runs them.
 & node (Join-Path $repoRoot "scripts/tests/release-channels.test.mjs")
 if ($LASTEXITCODE -ne 0) {
