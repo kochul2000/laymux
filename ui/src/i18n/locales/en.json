@@ -771,7 +771,7 @@
       "openReleases": "All releases",
       "openReleaseNotes": "Open release page",
       "channel": "Release channel",
-      "channelDesc": "Which releases this machine follows. Beta receives the test series that lands before a stable release. Saving checks once right away.",
+      "channelDesc": "Which releases this machine follows. Saving checks right away.",
       "channelBetaWarning": "Beta builds are not guaranteed to be stable. Switching back to Stable brings no update until a stable release passes your installed version.",
       "checkNow": "Check now",
       "checkNowDesc": "The app also checks on startup and every 6 hours.",
@@ -784,7 +784,8 @@
       "install": "Install and restart",
       "installing": "Installing…",
       "installConfirm": "Install Laymux {{version}} and restart now?",
-      "disabledInDev": "Self-update is disabled in development builds."
+      "disabledInDev": "Self-update is disabled in development builds.",
+      "manualCheck": "Manual check"
     }
   },
   "workspace": {

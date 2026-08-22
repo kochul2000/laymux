@@ -413,7 +413,7 @@ function UpdateSection() {
       </SubGroup>
 
       <SubGroup title={t("update.groupCheck")}>
-        <SettingRow label={t("update.checkNow")} desc={t("update.checkNowDesc")}>
+        <SettingRow label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -445,7 +445,7 @@ function UpdateSection() {
           </p>
         )}
 
-        {available ? (
+        {status?.enabled === false ? null : available ? (
           <div
             data-testid="update-available"
             className="mt-1 rounded p-3"
