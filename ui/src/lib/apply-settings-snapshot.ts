@@ -24,7 +24,7 @@ export function applySettingsSnapshot(
   const sViewOrder = rawSettings.viewOrder;
   // Automation/MCP settings patches and settings.json hot-reload land here, so
   // this is where a channel switch from anywhere but the Settings save button
-  // becomes observable (ADR-0189).
+  // becomes observable (ADR-0190).
   const previousUpdateChannel = useSettingsStore.getState().update.channel;
 
   useSettingsStore.getState().loadFromSettings({

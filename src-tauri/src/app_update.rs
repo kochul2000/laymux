@@ -27,7 +27,7 @@ const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
 /// same status code as "there is no pending update".
 pub const UPDATE_CHANNEL_CHANGED_ERROR: &str = "the update channel changed";
 
-/// Release channel this install follows (ADR-0189).
+/// Release channel this install follows (ADR-0190).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum UpdateChannel {
@@ -286,7 +286,7 @@ fn is_stable_release_version(version: &str) -> bool {
 
 /// `x.y.z-beta.N` with `N >= 1` and no leading zero. Widening the channel must
 /// not widen into arbitrary prerelease labels, so `alpha`/`rc`/build metadata
-/// stay rejected (ADR-0189).
+/// stay rejected (ADR-0190).
 fn is_beta_release_version(version: &str) -> bool {
     let Some((core, suffix)) = version.split_once('-') else {
         return false;
@@ -395,7 +395,7 @@ const CHANNEL_SWITCH_RETRIES: usize = 1;
 
 /// Why this install cannot follow `channel`, if it cannot.
 ///
-/// beta ships only NSIS and AppImage (ADR-0189), and the updater falls back from
+/// beta ships only NSIS and AppImage (ADR-0190), and the updater falls back from
 /// `{os}-{arch}-{installer}` to the bare `{os}-{arch}` entry when the specific one
 /// is missing. On a deb/rpm install that fallback hands AppImage bytes to the deb
 /// or rpm installer, which fails at install time with an opaque format error. The
@@ -932,7 +932,7 @@ mod tests {
         // The updater falls back from `{os}-{arch}-{installer}` to the bare
         // `{os}-{arch}` entry, so a deb/rpm install on beta would be handed the
         // AppImage and fail inside the installer. Stable ships every format, so
-        // it is never refused (ADR-0189).
+        // it is never refused (ADR-0190).
         assert_eq!(unsupported_channel_install(UpdateChannel::Stable), None);
         match tauri::utils::platform::bundle_type() {
             Some(tauri::utils::config::BundleType::Deb) => {

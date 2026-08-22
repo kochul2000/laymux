@@ -60,7 +60,7 @@ export function UpdateButton() {
   const handleInstall = useCallback(() => {
     if (!status?.availableVersion || status.operation !== "idle") return;
     // Consent is given here, so the channel has to be visible here — not only in
-    // the tooltip that led to the click (ADR-0189).
+    // the tooltip that led to the click (ADR-0190).
     const channelNote = status.channel === "beta" ? " from the beta channel" : "";
     if (!window.confirm(`Install Laymux ${status.availableVersion}${channelNote} and restart now?`))
       return;

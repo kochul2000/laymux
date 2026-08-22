@@ -35,7 +35,7 @@ pub const GITHUB_UPDATE_OWNER: &str = "kochul2000";
 pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
 /// Channel manifests live on a workflow-owned orphan branch; the raw host serves
 /// them as the single source of truth for "what is newest on this channel"
-/// (ADR-0189). GitHub has no stable alias for the latest prerelease.
+/// (ADR-0190). GitHub has no stable alias for the latest prerelease.
 pub const UPDATE_CHANNEL_MANIFEST_BRANCH: &str = "release-channels";
 pub const UPDATE_CHANNEL_MANIFEST_HOST: &str = "raw.githubusercontent.com";
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
@@ -157,7 +157,7 @@ pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semic
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
-/// Update channels a build can follow (ADR-0189). Order is display order.
+/// Update channels a build can follow (ADR-0190). Order is display order.
 pub const UPDATE_CHANNELS: &[&str] = &[UPDATE_CHANNEL_STABLE, UPDATE_CHANNEL_BETA];
 pub const UPDATE_CHANNEL_STABLE: &str = "stable";
 pub const UPDATE_CHANNEL_BETA: &str = "beta";

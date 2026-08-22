@@ -179,7 +179,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/update",
-        description: "따라갈 릴리스 채널 설정입니다(ADR-0189).",
+        description: "따라갈 릴리스 채널 설정입니다(ADR-0190).",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

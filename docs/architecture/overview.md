@@ -97,7 +97,7 @@ NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 데�
 artifact만 설치한다. `releases/latest/download/latest.json`은 채널을 모르는 구버전 앱 경로로 유지한다.
 프로세스 전역 `UpdateManager`가 채널·시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
 같은 snapshot을 읽는다. Android는 beta APK까지 발행하되 앱 자체 업데이트는 이 경로의 대상이 아니다
-([ADR-0174](../adr/0174-github-signed-desktop-self-update.md), [ADR-0189](../adr/0189-update-release-channels.md)).
+([ADR-0174](../adr/0174-github-signed-desktop-self-update.md), [ADR-0190](../adr/0190-update-release-channels.md)).
 
 ---
 

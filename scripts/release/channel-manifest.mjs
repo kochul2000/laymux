@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 채널 매니페스트 검증과 쓰기 계획 (ADR-0189).
+// 채널 매니페스트 검증과 쓰기 계획 (ADR-0190).
 //
 // 채널 파일은 `release-channels` 브랜치의 `desktop-stable.json`·`desktop-beta.json`
 // 이며 각 파일은 해당 채널 최신 릴리스의 Tauri updater manifest 전문이다.
@@ -202,7 +202,7 @@ function main(argv) {
   const prerelease = args.prerelease === "true";
   const channelDir = args["channel-dir"];
   // Bootstrap: write the current stable manifest into both channel files so
-  // neither channel is ever a 404 (ADR-0189).
+  // neither channel is ever a 404 (ADR-0190).
   const seedStable = args["seed-stable"] === "true";
 
   const manifest = JSON.parse(fs.readFileSync(args.manifest, "utf8"));

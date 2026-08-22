@@ -357,7 +357,7 @@ fn update_response(result: Result<crate::app_update::UpdateStatus, String>) -> R
             if error.contains("already running")
                 || error.contains("pending update")
                 // A channel switch between check and install is a client-state
-                // conflict, not a server fault (ADR-0189).
+                // conflict, not a server fault (ADR-0190).
                 || error.contains(crate::app_update::UPDATE_CHANNEL_CHANGED_ERROR) =>
         {
             (StatusCode::CONFLICT, Json(err_json(&error))).into_response()

@@ -1348,7 +1348,7 @@ pub struct PowerSettings {
     pub keep_awake_when_busy: bool,
 }
 
-/// Which release channel this install follows (ADR-0189).
+/// Which release channel this install follows (ADR-0190).
 ///
 /// The field is a plain string rather than an enum so an unknown value read from
 /// disk resolves to stable at runtime instead of dropping the whole settings

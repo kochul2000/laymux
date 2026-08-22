@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Android versionName/versionCode 인코딩 (ADR-0189).
+// Android versionName/versionCode 인코딩 (ADR-0190).
 //
 //   versionCode = (major*1_000_000 + minor*1_000 + patch) * 10 + slot
 //   slot: beta N -> N (1..8), stable -> 9

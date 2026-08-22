@@ -262,7 +262,7 @@ describe("SettingsView", () => {
 
     it("checks for updates right after a channel switch is saved", async () => {
       // The periodic check is six hours away, and the backend reads the channel
-      // from the file this save just wrote (ADR-0189).
+      // from the file this save just wrote (ADR-0190).
       const user = userEvent.setup();
       render(<SettingsView />);
 

@@ -16,7 +16,7 @@ describe("desktop updater release contract", () => {
 
     expect(config.bundle?.createUpdaterArtifacts).toBe(true);
     // The static endpoint is the stable channel manifest; the channel decides at
-    // runtime (ADR-0189). Leaving the old `releases/latest` value here would
+    // runtime (ADR-0190). Leaving the old `releases/latest` value here would
     // make the config disagree with what a channel-aware build actually reads.
     expect(config.plugins?.updater?.endpoints).toEqual([
       "https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-stable.json",
@@ -64,7 +64,7 @@ describe("desktop updater release contract", () => {
     );
 
     // The channel branch is what the app reads, so it must never be written
-    // from a draft or a partial artifact set (ADR-0189).
+    // from a draft or a partial artifact set (ADR-0190).
     expect(workflow).toContain("needs: [prepare, publish]");
     expect(workflow).toContain("scripts/release/channel-manifest.mjs");
     expect(workflow).toContain("BRANCH: release-channels");

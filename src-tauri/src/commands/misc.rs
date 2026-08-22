@@ -159,7 +159,7 @@ pub fn reset_settings(
     // Reset can move the update channel (back to stable) without the frontend
     // settings-apply path ever running — the recovery modal reloads the page.
     // The process-global updater would otherwise keep the old channel and its
-    // candidate until the next periodic check (ADR-0189).
+    // candidate until the next periodic check (ADR-0190).
     crate::app_update::schedule_channel_recheck(app.clone(), state.app_update.clone());
     let change = crate::remote_server::update_persistent_remote_settings(
         &state,

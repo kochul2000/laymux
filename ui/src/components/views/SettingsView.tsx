@@ -5652,7 +5652,7 @@ export function SettingsView() {
         }
         // A channel switch has to be answered now: the periodic check is six
         // hours away, and the backend reads the channel from the file this save
-        // just wrote (ADR-0189). Failures stay in the update status.
+        // just wrote (ADR-0190). Failures stay in the update status.
         if (nextUpdateChannel !== previousUpdateChannel) {
           void checkAppUpdate().catch(() => {});
         }

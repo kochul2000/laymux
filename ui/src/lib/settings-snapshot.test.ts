@@ -405,7 +405,7 @@ describe("settings snapshot — save/load round trip does not drop sections", ()
 
   it("checks for updates when an applied snapshot changes the channel", async () => {
     // Automation/MCP patches and settings.json hot-reload arrive here, not via
-    // the Settings save button (ADR-0189).
+    // the Settings save button (ADR-0190).
     applySettingsSnapshot(
       { update: { channel: "beta" } } as unknown as Parameters<typeof applySettingsSnapshot>[0],
       { includeStructural: false },

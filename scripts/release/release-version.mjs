@@ -1,4 +1,4 @@
-// 릴리스 버전 문자열 계약 (ADR-0189).
+// 릴리스 버전 문자열 계약 (ADR-0190).
 //
 // stable 은 `x.y.z`, beta 는 `x.y.z-beta.N` 만 허용한다. 다른 prerelease 라벨과
 // build metadata 를 받지 않는 이유는 채널을 넓히는 것이 임의 문자열 수용으로
@@ -60,7 +60,7 @@ export function compareReleaseVersions(a, b) {
  *
  * exit 0 이면 candidate 가 current 보다 크다. 릴리스 전진성을 **게시 전에**
  * 확인하는 데 쓴다 — 채널 파일을 쓰는 시점에야 후퇴를 잡으면 이미 낮은 버전이
- * latest 로 공개되고 Android 는 그것을 업그레이드로 받는다 (ADR-0189).
+ * latest 로 공개되고 Android 는 그것을 업그레이드로 받는다 (ADR-0190).
  */
 function main(argv) {
   const index = argv.indexOf("--newer");

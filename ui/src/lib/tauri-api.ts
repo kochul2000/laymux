@@ -1102,7 +1102,7 @@ export interface Settings {
   dock: import("@/stores/settings-store").DockSettings;
   notifications: import("@/stores/settings-store").NotificationSettings;
   power?: import("@/stores/settings-store").PowerSettings;
-  /** Release channel this install follows (ADR-0189). */
+  /** Release channel this install follows (ADR-0190). */
   update?: import("@/stores/settings-store").UpdateSettings;
   workspaceSelector: import("@/stores/settings-store").WorkspaceSelectorSettings;
   claude: ClaudeSettings;
@@ -1811,7 +1811,7 @@ export type AppUpdateChannel = "stable" | "beta";
 
 export interface AppUpdateStatus {
   enabled: boolean;
-  /** Release channel the backend used for the last check (ADR-0189). */
+  /** Release channel the backend used for the last check (ADR-0190). */
   channel: AppUpdateChannel;
   currentVersion: string;
   availableVersion: string | null;

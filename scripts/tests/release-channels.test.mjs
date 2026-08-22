@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/release/*.mjs 회귀 테스트 (ADR-0189). 실행: node scripts/tests/release-channels.test.mjs
+// scripts/release/*.mjs 회귀 테스트 (ADR-0190). 실행: node scripts/tests/release-channels.test.mjs
 
 import {
   androidReleaseVersion,

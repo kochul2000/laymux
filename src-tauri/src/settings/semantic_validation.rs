@@ -929,7 +929,7 @@ mod tests {
 
         // A hand-edited channel is rejected on write. It is still tolerated on
         // read (resolving to stable at runtime), which is why the field is a
-        // String rather than an enum (ADR-0189).
+        // String rather than an enum (ADR-0190).
         settings.update.channel = "nightly".into();
         let issues = validate_settings(&settings);
         assert!(issues

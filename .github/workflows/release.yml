@@ -57,7 +57,7 @@ jobs:
           }
 
           # Both channels now feed a client updater, so both tags must satisfy the
-          # client's tag<->version contract (ADR-0189). The tag *form* is checked
+          # client's tag<->version contract (ADR-0190). The tag *form* is checked
           # once, by the shared encoder below — duplicating the grammar here would
           # let the two copies drift. This only pairs the tag with the channel the
           # dispatcher asked for.
@@ -101,7 +101,7 @@ jobs:
           # channel would already be latest by the time it was refused: the legacy
           # endpoint would serve it, and Android would take it as an upgrade
           # because the new versionCode scheme is numerically larger than the
-          # legacy one (ADR-0189).
+          # legacy one (ADR-0190).
           channel_version() {
             gh api "repos/$GITHUB_REPOSITORY/contents/desktop-$1.json?ref=release-channels" \
               --jq '.content' 2>/dev/null | base64 -d | jq -r '.version' 2>/dev/null || true
@@ -160,7 +160,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             # RPM `Version` cannot contain `-` and deb version ordering does not
             # match semver prerelease ordering, so a beta build is limited to the
-            # bundles whose version rules accept `x.y.z-beta.N` (ADR-0189).
+            # bundles whose version rules accept `x.y.z-beta.N` (ADR-0190).
             prerelease_bundles: nsis,updater
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -267,7 +267,7 @@ jobs:
           done
 
           # versionName/versionCode come from the shared encoder so the bounds
-          # and the beta slot layout have one owner and unit tests (ADR-0189).
+          # and the beta slot layout have one owner and unit tests (ADR-0190).
           encoded="$(node scripts/release/android-version-code.mjs "$RELEASE_TAG")"
           version="$(printf '%s\n' "$encoded" | sed -n 's/^versionName=//p')"
           version_code="$(printf '%s\n' "$encoded" | sed -n 's/^versionCode=//p')"
@@ -333,7 +333,7 @@ jobs:
 
   channel_bootstrap:
     # The channel branch must already hold a valid manifest for both channels
-    # *before* anything is published (ADR-0189). A channel-aware build that goes
+    # *before* anything is published (ADR-0190). A channel-aware build that goes
     # latest first would send every upgraded install to a 404 for as long as the
     # downstream job took — or forever, if it failed.
     needs: prepare
@@ -388,7 +388,7 @@ jobs:
 
   publish:
     # Both channels gate on every required job. A beta that ships the desktop
-    # ahead of its APK strands phones on a compat version bump (ADR-0189).
+    # ahead of its APK strands phones on a compat version bump (ADR-0190).
     needs: [prepare, build, android, channel_bootstrap]
     runs-on: ubuntu-latest
     steps:
@@ -408,7 +408,7 @@ jobs:
 
   channels:
     # The channel manifest, not GitHub's `latest` pointer, is what the app reads
-    # (ADR-0189). Runs only after the release is fully published so a channel can
+    # (ADR-0190). Runs only after the release is fully published so a channel can
     # never point at a draft or an incomplete artifact set.
     needs: [prepare, publish]
     runs-on: ubuntu-latest

@@ -53,7 +53,7 @@ fn update_response(result: Result<app_update::UpdateStatus, String>) -> Response
             if error.contains("already running")
                 || error.contains("pending update")
                 // A channel switch between check and install is a client-state
-                // conflict, not a server fault (ADR-0189).
+                // conflict, not a server fault (ADR-0190).
                 || error.contains(app_update::UPDATE_CHANNEL_CHANGED_ERROR) =>
         {
             json_error(StatusCode::CONFLICT, &error)

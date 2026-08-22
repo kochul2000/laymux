@@ -305,12 +305,12 @@ export interface NotificationSettings {
  */
 export type PowerSettings = SleepPreventionAxes;
 
-/** Release channels this install can follow (ADR-0189). Order is display order. */
+/** Release channels this install can follow (ADR-0190). Order is display order. */
 export const UPDATE_CHANNELS = ["stable", "beta"] as const;
 export type UpdateChannel = (typeof UPDATE_CHANNELS)[number];
 
 /**
- * Which release channel this install follows (ADR-0189). `beta` receives the
+ * Which release channel this install follows (ADR-0190). `beta` receives the
  * test series that lands before a stable release.
  */
 export interface UpdateSettings {
@@ -1705,7 +1705,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     // nobody asked for (ADR-0116).
     const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
     // Same fail-safe as the backend: an unknown channel resolves to stable
-    // rather than showing an empty control (ADR-0189).
+    // rather than showing an empty control (ADR-0190).
     const update = data.update ? normalizeUpdateSettings(data.update) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];

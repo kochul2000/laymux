@@ -1084,7 +1084,7 @@
           const total = Number(status?.totalBytes) || 0;
           const downloaded = Number(status?.downloadedBytes) || 0;
           const percent = total > 0 ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
-          // The channel is the PC's setting; Remote only reports it (ADR-0189).
+          // The channel is the PC's setting; Remote only reports it (ADR-0190).
           const betaChannelNote = status?.channel === "beta" ? " Following the beta channel." : "";
           const defaultMessage = !status
             ? "Update status unavailable."

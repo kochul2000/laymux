@@ -542,7 +542,7 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 
 ### 업데이트 채널 설정
 
-이 설치본이 따라갈 릴리스 계열을 정한다([ADR-0189](../adr/0189-update-release-channels.md), [ADR-0174](../adr/0174-github-signed-desktop-self-update.md) 확장).
+이 설치본이 따라갈 릴리스 계열을 정한다([ADR-0190](../adr/0190-update-release-channels.md), [ADR-0174](../adr/0174-github-signed-desktop-self-update.md) 확장).
 
 ```jsonc
 {
@@ -824,7 +824,7 @@ Bearer 토큰(`key`) 필드는 없다 — 인증은 IP allowlist 미들웨어가
 | GET | `/api/v1/docs` | API 자기 설명 (전체 엔드포인트, 파라미터, 사용법을 JSON으로 반환) |
 | GET | `/api/v1/health` | 헬스체크 + 응답 프로세스·빌드 신원(`instance`) |
 | GET | `/api/v1/diagnostics/frontend` | Rust terminal-output v3 상태 + 마지막 프론트엔드 vitals 합성 (브리지 미경유 — 프론트가 멈춘 동안에도 답한다) |
-| GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회. 따라가는 채널(`channel`: `stable` 또는 `beta`)을 함께 실어 보낸다(ADR-0189) (`Cache-Control: no-store`) |
+| GET | `/api/v1/update` | PC updater 공통 상태 snapshot 조회. 따라가는 채널(`channel`: `stable` 또는 `beta`)을 함께 실어 보낸다(ADR-0190) (`Cache-Control: no-store`) |
 | POST | `/api/v1/update/check` | 현재 채널 매니페스트 즉시 확인. 실행 중인 작업이 있으면 그 snapshot 반환 |
 | POST | `/api/v1/update/install` | 발견된 update 다운로드·서명 검증·설치·재시작 예약. 프로세스 종료 전에 수락 snapshot 반환 |
 | GET | `/api/v1/workspaces` | 워크스페이스 목록 |
@@ -1448,7 +1448,7 @@ PC updater도 Remote enabled + transport/auth gate 뒤에 좁은 계약으로 �
 
 | Endpoint | Method | 권한·동작 |
 |---|---|---|
-| `/remote/v1/update` | GET | 기존 Remote 인증 gate, lease 불필요. 채널·현재/가용 버전·notes/date·operation/progress/check/error snapshot. 채널은 표시 전용이며 Remote 는 바꾸지 못한다(ADR-0189) |
+| `/remote/v1/update` | GET | 기존 Remote 인증 gate, lease 불필요. 채널·현재/가용 버전·notes/date·operation/progress/check/error snapshot. 채널은 표시 전용이며 Remote 는 바꾸지 못한다(ADR-0190) |
 | `/remote/v1/update/check` | POST | 같은 인증 gate, lease 불필요. PC 가 따라가는 채널의 매니페스트 즉시 확인 |
 | `/remote/v1/update/install` | POST | 같은 인증 gate + active controller `leaseId`. 다운로드·검증·설치·재시작을 예약하고 즉시 응답. 후보를 찾은 채널이 현재 채널과 다르면 409 |
 
