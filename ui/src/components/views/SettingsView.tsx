@@ -43,6 +43,11 @@ import {
   getCloudStatus,
   loadSettings,
   checkAppUpdate,
+  getAppUpdateStatus,
+  installAppUpdate,
+  onAppUpdateStatusChanged,
+  openExternal,
+  type AppUpdateStatus,
   getRemoteAccessStatus,
   setRemoteRuntimeAccess,
   type CloudStatus,
@@ -246,6 +251,275 @@ function useMonospacedFonts() {
     };
   }, []);
   return installed;
+}
+
+/** Where the update section links out to. The updater itself pins these in Rust. */
+const RELEASES_URL = "https://github.com/kochul2000/laymux/releases";
+const RELEASE_TAG_URL = (version: string) => `${RELEASES_URL}/tag/v${version}`;
+
+function formatUpdateTimestamp(value: number | string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+/**
+ * Version, channel, and the update actions in one place (ADR-0190).
+ *
+ * The channel is a settings draft like every other field here — it lands on
+ * Save, and saving triggers a check because the backend reads the channel from
+ * the file. Check and install are actions, not settings, so they run at once.
+ */
+function UpdateSection() {
+  const { t } = useTranslation("settings");
+  const storeUpdate = useSettingsStore((s) => s.update);
+  const setUpdate = useSettingsStore((s) => s.setUpdate);
+  const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
+
+  const [status, setStatus] = useState<AppUpdateStatus | null>(null);
+  const [requestError, setRequestError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+
+    void getAppUpdateStatus()
+      .then((snapshot) => {
+        if (!cancelled) setStatus(snapshot);
+      })
+      .catch(() => {});
+    void onAppUpdateStatusChanged((snapshot) => {
+      if (!cancelled) setStatus(snapshot);
+    })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unlisten = stop;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const busy = status !== null && status.operation !== "idle";
+  const available = status?.availableVersion ?? null;
+  const error = requestError ?? status?.lastError ?? null;
+  const checkedAt = formatUpdateTimestamp(status?.checkedAtMs);
+  const publishedAt = formatUpdateTimestamp(status?.publishedAt);
+
+  const runCheck = useCallback(() => {
+    setRequestError(null);
+    void checkAppUpdate()
+      .then(setStatus)
+      .catch((reason: unknown) => {
+        setRequestError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, []);
+
+  const runInstall = useCallback(() => {
+    if (!available) return;
+    if (!window.confirm(t("update.installConfirm", { version: available }))) return;
+    setRequestError(null);
+    void installAppUpdate()
+      .then(setStatus)
+      .catch((reason: unknown) => {
+        setRequestError(reason instanceof Error ? reason.message : String(reason));
+      });
+  }, [available, t]);
+
+  const actionBtnStyle: React.CSSProperties = {
+    color: "var(--accent)",
+    background: "transparent",
+    border: "1px solid var(--border)",
+    cursor: "pointer",
+  };
+
+  return (
+    <div>
+      <SectionTitle>{t("update.title")}</SectionTitle>
+
+      <SubGroup title={t("update.groupVersion")}>
+        <SettingRow label={t("update.currentVersion")}>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              data-testid="update-current-version"
+              className="text-[13px]"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {status?.currentVersion ?? "—"}
+            </span>
+            <span
+              data-testid="update-current-channel"
+              className="rounded px-1.5 py-0.5 text-[11px]"
+              style={{ color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+            >
+              {status?.channel === "beta" ? t("update.channelBeta") : t("update.channelStable")}
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("update.releasePage")}>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              data-testid="update-open-current-release"
+              className="hover-bg rounded px-2 py-1 text-[11px]"
+              style={actionBtnStyle}
+              disabled={!status?.currentVersion}
+              onClick={() => {
+                if (status?.currentVersion)
+                  void openExternal(RELEASE_TAG_URL(status.currentVersion));
+              }}
+            >
+              {t("update.openCurrentRelease")}
+            </button>
+            <button
+              type="button"
+              data-testid="update-open-releases"
+              className="hover-bg rounded px-2 py-1 text-[11px]"
+              style={actionBtnStyle}
+              onClick={() => void openExternal(RELEASES_URL)}
+            >
+              {t("update.openReleases")}
+            </button>
+          </div>
+        </SettingRow>
+      </SubGroup>
+
+      <SubGroup title={t("update.groupChannel")}>
+        <SettingRow label={t("update.channel")} desc={t("update.channelDesc")}>
+          <FocusSelect
+            data-testid="update-channel-select"
+            className={inputCls}
+            value={update.channel}
+            onChange={(e) => setDraftUpdate({ channel: e.target.value as UpdateChannel })}
+          >
+            <option value="stable">{t("update.channelStable")}</option>
+            <option value="beta">{t("update.channelBeta")}</option>
+          </FocusSelect>
+        </SettingRow>
+        {update.channel === "beta" && (
+          <p
+            data-testid="update-channel-beta-warning"
+            className="text-[11px]"
+            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+          >
+            {t("update.channelBetaWarning")}
+          </p>
+        )}
+      </SubGroup>
+
+      <SubGroup title={t("update.groupCheck")}>
+        <SettingRow label={t("update.checkNow")} desc={t("update.checkNowDesc")}>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              data-testid="update-check-btn"
+              className="hover-bg rounded px-3 py-1.5 text-xs"
+              style={actionBtnStyle}
+              disabled={busy || !status?.enabled}
+              onClick={runCheck}
+            >
+              {status?.operation === "checking" ? t("update.checking") : t("update.checkNow")}
+            </button>
+            <span
+              data-testid="update-checked-at"
+              className="text-[11px]"
+              style={{ color: "var(--text-secondary)" }}
+            >
+              {checkedAt ? t("update.checkedAt", { at: checkedAt }) : t("update.neverChecked")}
+            </span>
+          </div>
+        </SettingRow>
+
+        {status && !status.enabled && (
+          <p
+            data-testid="update-disabled-note"
+            className="text-[11px]"
+            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
+          >
+            {t("update.disabledInDev")}
+          </p>
+        )}
+
+        {available ? (
+          <div
+            data-testid="update-available"
+            className="mt-1 rounded p-3"
+            style={{ border: "1px solid var(--border)" }}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>
+                {t("update.availableVersion", { version: available })}
+              </span>
+              {publishedAt && (
+                <span
+                  data-testid="update-published-at"
+                  className="text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {t("update.publishedAt", { at: publishedAt })}
+                </span>
+              )}
+            </div>
+            {status?.notes && (
+              <pre
+                data-testid="update-notes"
+                className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                {status.notes}
+              </pre>
+            )}
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                data-testid="update-install-btn"
+                className="hover-bg rounded px-3 py-1.5 text-xs"
+                style={actionBtnStyle}
+                disabled={busy}
+                onClick={runInstall}
+              >
+                {status?.operation === "downloading" || status?.operation === "installing"
+                  ? t("update.installing")
+                  : t("update.install")}
+              </button>
+              <button
+                type="button"
+                data-testid="update-open-available-release"
+                className="hover-bg rounded px-2 py-1 text-[11px]"
+                style={actionBtnStyle}
+                onClick={() => void openExternal(RELEASE_TAG_URL(available))}
+              >
+                {t("update.openReleaseNotes")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p
+            data-testid="update-up-to-date"
+            className="text-[11px]"
+            style={{ color: "var(--text-secondary)", margin: "0 0 8px" }}
+          >
+            {t("update.upToDate")}
+          </p>
+        )}
+
+        {error && (
+          <p
+            data-testid="update-error"
+            className="text-[11px]"
+            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+          >
+            {error}
+          </p>
+        )}
+      </SubGroup>
+    </div>
+  );
 }
 
 const LANGUAGE_OPTIONS: LanguageSetting[] = ["system", "ko", "en"];
@@ -1901,8 +2175,6 @@ function InterfaceSection() {
   const setNotifications = useSettingsStore((s) => s.setNotifications);
   const storePower = useSettingsStore((s) => s.power);
   const setPower = useSettingsStore((s) => s.setPower);
-  const storeUpdate = useSettingsStore((s) => s.update);
-  const setUpdate = useSettingsStore((s) => s.setUpdate);
 
   const [controlBar, setDraftControlBar] = useDraft("controlBar", storeControlBar, (v) =>
     setControlBar(v),
@@ -1914,7 +2186,6 @@ function InterfaceSection() {
     (v) => setNotifications(v),
   );
   const [power, setDraftPower] = useDraft("power", storePower, (v) => setPower(v));
-  const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
   const updateControlBar = (partial: Partial<typeof controlBar>) =>
     setDraftControlBar((prev) => ({ ...prev, ...partial }));
   const updateDock = (partial: Partial<typeof dock>) =>
@@ -2023,29 +2294,6 @@ function InterfaceSection() {
           checked={power.keepAwakeWhenBusy}
           onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwakeWhenBusy: v }))}
         />
-      </SubGroup>
-
-      <SubGroup title={t("interface.groupUpdate")}>
-        <SettingRow label={t("interface.updateChannel")} desc={t("interface.updateChannelDesc")}>
-          <FocusSelect
-            data-testid="update-channel-select"
-            className={inputCls}
-            value={update.channel}
-            onChange={(e) => setDraftUpdate({ channel: e.target.value as UpdateChannel })}
-          >
-            <option value="stable">{t("interface.updateChannelStable")}</option>
-            <option value="beta">{t("interface.updateChannelBeta")}</option>
-          </FocusSelect>
-        </SettingRow>
-        {update.channel === "beta" && (
-          <p
-            data-testid="update-channel-beta-warning"
-            className="text-[11px]"
-            style={{ color: "var(--claude)", margin: "0 0 8px" }}
-          >
-            {t("interface.updateChannelBetaWarning")}
-          </p>
-        )}
       </SubGroup>
     </div>
   );
@@ -5721,8 +5969,8 @@ export function SettingsView() {
             {t("nav.openJson")}
           </button>
 
-          {/* Appearance */}
-          <NavGroupHeader label={t("nav.groupAppearance")} />
+          {/* General */}
+          <NavGroupHeader label={t("nav.groupGeneral")} />
           <button
             className="w-full px-4 py-2 text-left text-[13px]"
             style={navBtnStyle("startup")}
@@ -5741,6 +5989,16 @@ export function SettingsView() {
             onMouseLeave={() => setNavHover(null)}
           >
             {t("nav.appFont")}
+          </button>
+          <button
+            data-testid="nav-update"
+            className="w-full px-4 py-2 text-left text-[13px]"
+            style={navBtnStyle("update")}
+            onClick={() => setActiveNav("update")}
+            onMouseEnter={() => setNavHover("update")}
+            onMouseLeave={() => setNavHover(null)}
+          >
+            {t("nav.update")}
           </button>
 
           {/* Terminal */}
@@ -6008,6 +6266,7 @@ export function SettingsView() {
           <div className="p-4 pb-14" style={{ maxWidth: 720 }}>
             {activeNav === "startup" && <StartupSection />}
             {activeNav === "font" && <FontSection />}
+            {activeNav === "update" && <UpdateSection />}
             {activeNav === "defaults" && <DefaultsSection />}
             {activeNav.startsWith("profile-") && (
               <ProfileSection key={activeNav} profileIndex={parseInt(activeNav.split("-")[1])} />
