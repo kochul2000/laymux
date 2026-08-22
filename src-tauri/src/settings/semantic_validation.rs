@@ -9,7 +9,7 @@ use crate::constants::{
     TERMINAL_SCROLLBAR_STYLES, UPDATE_CHANNELS, USAGE_WIDGET_BAR_HEIGHT_MAX,
     USAGE_WIDGET_BAR_HEIGHT_MIN, USAGE_WIDGET_BAR_WIDTH_MAX, USAGE_WIDGET_BAR_WIDTH_MIN,
     USAGE_WIDGET_DISPLAY_MODES, WIDGET_FONT_SIZE_MAX, WIDGET_FONT_SIZE_MIN, WIDGET_OVERFLOW_MODES,
-    WIDGET_TYPES, WORKSPACE_SORT_ORDERS,
+    WIDGET_TYPES, WORKSPACE_LAST_INPUT_MODES, WORKSPACE_SORT_ORDERS,
 };
 
 use super::contract::SettingsIssue;
@@ -71,6 +71,12 @@ pub fn validate_settings(settings: &Settings) -> Vec<SettingsIssue> {
         "/workspaceSelector/sortOrder",
         &settings.workspace_selector.sort_order,
         WORKSPACE_SORT_ORDERS,
+    );
+    enum_value(
+        &mut issues,
+        "/workspaceSelector/lastInputMode",
+        &settings.workspace_selector.last_input_mode,
+        WORKSPACE_LAST_INPUT_MODES,
     );
 
     validate_font(&mut issues, "/appearance/font", &settings.appearance.font);
@@ -890,6 +896,16 @@ mod tests {
             .iter()
             .any(|issue| issue.path.ends_with("ScrollSensitivity")
                 || issue.path.ends_with("/scrollSensitivity")));
+    }
+
+    #[test]
+    fn invalid_workspace_last_input_mode_is_reported() {
+        let mut settings = Settings::default();
+        settings.workspace_selector.last_input_mode = "raw-output".into();
+        let issues = validate_settings(&settings);
+        assert!(issues
+            .iter()
+            .any(|issue| issue.path == "/workspaceSelector/lastInputMode"));
     }
 
     #[test]

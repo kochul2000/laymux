@@ -5112,6 +5112,38 @@
           return selector && selector.pathEllipsis === "end" ? "end" : "start";
         }
 
+        function workspaceLastInputMode() {
+          const selector = navigationState && navigationState.workspaceSelector;
+          return selector && selector.lastInputMode === "workspaceLatest"
+            ? "workspaceLatest"
+            : "perPane";
+        }
+
+        function paneLastInputEntry(pane) {
+          const selectorDisplay = pane.selectorDisplay || {};
+          const text = selectorDisplay.lastInput || pane.lastCommand || "";
+          if (!text) return null;
+          const timestamp = Number(
+            selectorDisplay.lastInputAt ?? pane.lastCommandAt ?? 0,
+          );
+          return {
+            text,
+            timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+          };
+        }
+
+        function latestWorkspaceInput(panes) {
+          let latest = null;
+          panes.forEach((pane) => {
+            if (pane.hidden === true || !isTerminalPane(pane)) return;
+            const candidate = paneLastInputEntry(pane);
+            if (candidate && (!latest || candidate.timestamp > latest.timestamp)) {
+              latest = candidate;
+            }
+          });
+          return latest;
+        }
+
         function emptyNav(container, text) {
           container.innerHTML = "";
           const item = document.createElement("div");
@@ -5893,6 +5925,15 @@
             panes.forEach((pane) => {
               paneList.append(renderPaneRow(pane, panes, workspace.isActive));
             });
+            if (workspaceLastInputMode() === "workspaceLatest") {
+              const latestInput = latestWorkspaceInput(panes);
+              const inputLine = document.createElement("div");
+              inputLine.className = "workspace-last-input";
+              inputLine.dataset.workspaceLastInput = workspace.id;
+              inputLine.textContent = latestInput ? latestInput.text : "\u00a0";
+              inputLine.title = latestInput ? latestInput.text : "";
+              paneList.append(inputLine);
+            }
           } else {
             const summary = document.createElement("div");
             summary.className = "workspace-summary-line";
@@ -5900,56 +5941,7 @@
             content.append(summary);
           }
 
-          content.append(renderWorkspaceStatusLine(workspace));
-
           return item;
-        }
-
-        function selectorRelativeTime(timestamp) {
-          const diff = Date.now() - Number(timestamp || 0);
-          if (diff < 60000) return "방금";
-          if (diff < 3600000) return `${Math.floor(diff / 60000)}분 전`;
-          return `${Math.floor(diff / 3600000)}시간 전`;
-        }
-
-        function truncateSelectorText(value, maxLength) {
-          const text = String(value || "").trim();
-          return text.length <= maxLength ? text : `${text.slice(0, maxLength - 1)}…`;
-        }
-
-        function renderWorkspaceStatusLine(workspace) {
-          const line = document.createElement("div");
-          line.className = "workspace-status-line";
-          const summary = workspace.selectorSummary || {};
-          const lastCommand = summary.lastCommand;
-          if (lastCommand) {
-            const status = lastCommand.status || {};
-            const icon = document.createElement("span");
-            icon.className = "workspace-command-status";
-            icon.textContent = status.icon || "";
-            if (status.color) icon.style.color = status.color;
-            line.append(icon);
-
-            const text = document.createElement("span");
-            text.className = "workspace-status-text";
-            text.textContent = truncateSelectorText(
-              status.text || lastCommand.command,
-              status.text ? 50 : 30
-            );
-            line.append(text);
-
-            const time = document.createElement("span");
-            time.className = "workspace-status-time";
-            time.textContent = `· ${selectorRelativeTime(lastCommand.timestamp)}`;
-            line.append(time);
-          } else if (summary.latestNotification) {
-            const notification = document.createElement("span");
-            const level = notificationLevelClass(summary.latestNotification.level);
-            notification.className = `workspace-status-notification ${level}`;
-            notification.textContent = `“${summary.latestNotification.message || ""}”`;
-            line.append(notification);
-          }
-          return line;
         }
 
         function applyWorkspaceSkipState(button, workspaceId) {
@@ -6001,6 +5993,7 @@
 
         function renderPaneRow(pane, panes, workspaceActive) {
           const isTerminal = isTerminalPane(pane);
+          const perPaneInput = workspaceLastInputMode() === "perPane";
           const isActive = Boolean(
             isTerminal && pane.terminalId === activeTerminalId,
           );
@@ -6014,7 +6007,7 @@
             canSelectTerminal ? "button" : "div",
           );
           if (canSelectTerminal) row.type = "button";
-          row.className = `workspace-pane-row${isActive ? " active" : ""}${paneHidden ? " hidden-item" : ""}`;
+          row.className = `workspace-pane-row${!perPaneInput ? " compact" : ""}${isActive ? " active" : ""}${paneHidden ? " hidden-item" : ""}`;
           row.dataset.paneRow = pane.id;
           if (canSelectTerminal) {
             row.addEventListener("click", (event) => {
@@ -6036,6 +6029,9 @@
 
           const main = document.createElement("div");
           main.className = "pane-row-main";
+          const primary = document.createElement("div");
+          primary.className = "pane-row-primary";
+          main.append(primary);
           row.append(main);
           entry.append(row);
 
@@ -6046,7 +6042,7 @@
               env.className = "pane-env";
               env.textContent =
                 selectorDisplay.environment || shortLabel(pane.profile || pane.title || "TerminalView");
-              main.append(env);
+              primary.append(env);
             }
 
             const computedActivity = selectorDisplay.activity || null;
@@ -6060,14 +6056,14 @@
               if (computedActivity && computedActivity.color) {
                 activityEl.style.color = computedActivity.color;
               }
-              main.append(activityEl);
+              primary.append(activityEl);
             }
 
             if (display.path && pane.branch) {
               const branch = document.createElement("span");
               branch.className = "pane-branch";
               branch.textContent = pane.branch;
-              main.append(branch);
+              primary.append(branch);
             }
 
             if (display.path && pane.cwd) {
@@ -6078,7 +6074,7 @@
                 path.style.direction = "rtl";
                 path.style.textAlign = "left";
               }
-              main.append(path);
+              primary.append(path);
             }
 
             if (display.result && pane.selectorStatus && pane.selectorStatus.icon) {
@@ -6087,18 +6083,27 @@
               status.textContent = pane.selectorStatus.icon;
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
               status.title = pane.selectorStatus.text || pane.lastCommand || "";
-              main.append(status);
+              primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
               unread.className = "pane-notification-dot";
               unread.setAttribute("aria-label", "Unread notification");
-              main.append(unread);
+              primary.append(unread);
+            }
+
+            if (perPaneInput) {
+              const lastInput = document.createElement("div");
+              lastInput.className = "pane-last-input";
+              lastInput.dataset.paneLastInput = pane.id;
+              lastInput.textContent = selectorDisplay.lastInput || pane.lastCommand || "\u00a0";
+              lastInput.title = selectorDisplay.lastInput || pane.lastCommand || "";
+              main.append(lastInput);
             }
           } else {
             const label = document.createElement("span");
             label.className = "pane-view-label";
             label.textContent = shortLabel(pane.viewType);
-            main.append(label);
+            primary.append(label);
           }
 
           const visibility = document.createElement("button");

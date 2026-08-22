@@ -191,7 +191,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/workspaceSelector",
-        description: "workspace selector 표시·정렬·숨김 터미널 정리 설정입니다.",
+        description: "workspace selector 표시·마지막 입력 배치·정렬·숨김 터미널 정리 설정입니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },

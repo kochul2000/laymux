@@ -3280,6 +3280,8 @@ describe("spatial pane numbers (issue #256)", () => {
       activityMessage: "Implementing",
       lastCommand: "codex",
       lastCommandAt: 10,
+      lastUserInput: "워크스페이스 표시를 두 줄로 바꿔줘",
+      lastUserInputAt: 20,
       cwd: "/home/codex/laymux",
     });
     useSettingsStore.getState().setCodex({
@@ -3308,6 +3310,8 @@ describe("spatial pane numbers (issue #256)", () => {
       environment: "WSL",
       activity: { label: "Codex", color: "var(--codex)" },
       cwd: "~/laymux",
+      lastInput: "워크스페이스 표시를 두 줄로 바꿔줘",
+      lastInputAt: 20,
     });
   });
 

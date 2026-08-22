@@ -208,6 +208,7 @@ ADR 이 필요한 대표 기준:
 | [0188](0188-path-link-ambient-detection-triggers.md) | path-link 은 선택 외에도 포인터 지점(hover dwell·클릭·탭)과 Remote 유휴 화면에서 발견한다 (0165·0148·0045 확장) | Proposed |
 | [0189](0189-ime-candidate-first-observation-fold.md) | IME 조합 관측은 candidate에 순서대로 병합하고 consumed keypress를 취소한다 (0093 정정) | Accepted |
 | [0190](0190-update-release-channels.md) | 업데이트는 stable·beta 두 채널을 가지며 채널 매니페스트가 최신 릴리스의 단일 진실원이다 (0174 확장·정정) | Proposed |
+| [0191](0191-workspace-pane-last-input-second-line.md) | Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다 (0151 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

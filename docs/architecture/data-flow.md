@@ -843,10 +843,8 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 │   workspace 전용 보관함 전개) │
 ├───────────────────────────────┤
 │ 🔵 프로젝트A              [2] │  ← 이름 + 읽지 않은 배지 + 알림 링
-│    feature/login · ~/dev/proj │  ← 브랜치(초록) · CWD(회색) 한 줄
-│    :3000  :8080               │  ← 리스닝 포트(시안, 활성 WS만)
-│    ✓ npm test · 3분 전        │  ← 마지막 명령 + 결과 + 시간
-│    "빌드 완료"                │  ← 최신 알림(레벨별 색상)
+│ ▤ PS Codex feature · ~/proj ⏳│  ← pane 환경·activity·경로·결과
+│      selector를 2줄로 바꿔줘  │  ← 해당 pane의 마지막 제출 입력
 ├───────────────────────────────┤
 │    main · ~/dev/api           │  ← 비활성: 이름+브랜치+CWD만
 └───────────────────────────────┘
@@ -873,7 +871,7 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 
 WorkspaceSelectorView에서 각 Pane(쉘) 요약 행의 왼쪽에 소형 레이아웃 미니맵을 표시한다.
 
-Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible workspace의 같은 pane 정보와 마지막 상태 한 줄을 표시한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md)). pane 번호·workspace 요약·명령 상태는 frontend bridge가 PC selector의 계산 함수와 현재 설정으로 만든 표시 모델이며 Remote JavaScript가 provider 상태를 다시 계산하지 않는다. 한 번도 mount되지 않은 inactive terminal pane도 양쪽이 같은 persisted profile/lastCwd placeholder projection을 사용한다. hidden workspace는 평상시 목록에서 빼고 상단 crossed-eye action으로 들어가는 `Hidden workspaces` 하위 화면의 workspace-only 목록에 둔다. action은 정확한 개수 badge 대신 Settings 업데이트와 같은 작은 상태 점을 사용하되 exact 개수는 접근성 이름과 title에 남긴다([ADR-0187](../adr/0187-remote-drawer-status-dots-and-hidden-subview.md)). Remote의 workspace/pane eye action은 toggle이 아니라 목표 `hidden` 값을 lease-gated API로 보내며 PC의 `setWorkspaceHiddenWithFallback`/`setPaneHidden` 소유자를 호출한다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md)). drawer가 열린 동안 2초마다 snapshot을 다시 읽어 activity·명령 결과·알림·표시 토글 변경을 따라가고, 닫힘·disconnect·document hidden에서는 폴을 멈춘다.
+Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible workspace의 같은 pane 정보를 현재 `workspaceSelector.lastInputMode`에 맞춰 표시한다([ADR-0151](../adr/0151-remote-workspace-selector-information-parity.md), [ADR-0191](../adr/0191-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 pane별 2줄, `workspaceLatest`는 pane별 메타데이터 한 줄과 workspace별 최신 제출 입력 한 줄이다. 환경·activity·경로·명령 상태와 마지막 제출 입력은 frontend bridge가 PC selector의 계산 함수와 현재 설정으로 만든 표시 모델이며 Remote JavaScript가 provider 상태를 다시 계산하지 않는다. 과거의 최신 명령/알림 통합 상태 행은 두지 않는다. 한 번도 mount되지 않은 inactive terminal pane도 양쪽이 같은 persisted profile/lastCwd placeholder projection을 사용한다. hidden workspace는 평상시 목록에서 빼고 상단 crossed-eye action으로 들어가는 `Hidden workspaces` 하위 화면의 workspace-only 목록에 둔다. action은 정확한 개수 badge 대신 Settings 업데이트와 같은 작은 상태 점을 사용하되 exact 개수는 접근성 이름과 title에 남긴다([ADR-0187](../adr/0187-remote-drawer-status-dots-and-hidden-subview.md)). Remote의 workspace/pane eye action은 toggle이 아니라 목표 `hidden` 값을 lease-gated API로 보내며 PC의 `setWorkspaceHiddenWithFallback`/`setPaneHidden` 소유자를 호출한다([ADR-0153](../adr/0153-remote-hidden-item-visibility-controls.md)). drawer가 열린 동안 2초마다 snapshot을 다시 읽어 activity·명령 결과·알림·표시 토글 변경을 따라가고, 닫힘·disconnect·document hidden에서는 폴을 멈춘다.
 
 #### 목적
 
@@ -922,16 +920,16 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 
 ### 탭 표시 정보
 
-| 항목                | 데이터 소스                           | 표시 조건                  |
-| ------------------- | ------------------------------------- | -------------------------- |
-| Workspace 이름      | 사용자 지정                           | 항상                       |
-| git branch          | OSC 133E 감지 또는 `.git/HEAD` watch  | 있을 때                    |
-| working directory   | OSC 7 감지                            | 있을 때 (브랜치와 같은 줄) |
-| 리스닝 포트         | 주기적 `ss -tlnp` / `netstat` 조회    | 활성 워크스페이스만        |
-| 마지막 명령 + 결과  | OSC 133 E/D → `lx set-command-status` | 있을 때                    |
-| 최신 알림 텍스트    | OSC 9/99/777 또는 `lx notify`         | 읽지 않은 알림 있을 때     |
-| 읽지 않은 알림 배지 | 알림 시스템                           | 카운트 > 0                 |
-| 알림 링 (테두리)    | 알림 발생 시                          | 읽지 않은 알림 있을 때     |
+| 항목                | 데이터 소스                          | 표시 조건                  |
+| ------------------- | ------------------------------------ | -------------------------- |
+| Workspace 이름      | 사용자 지정                          | 항상                       |
+| git branch          | OSC 133E 감지 또는 `.git/HEAD` watch | 있을 때                    |
+| working directory   | OSC 7 감지                           | 있을 때 (브랜치와 같은 줄) |
+| 리스닝 포트         | 주기적 `ss -tlnp` / `netstat` 조회   | 활성 워크스페이스만        |
+| pane 결과 아이콘    | OSC 133 E/D + activity handler       | 결과 표시 설정이 켜질 때   |
+| pane 마지막 입력    | 제출 입력 또는 OSC 133 명령          | terminal pane 둘째 줄      |
+| 읽지 않은 알림 배지 | 알림 시스템                          | 카운트 > 0                 |
+| 알림 링 (테두리)    | 알림 발생 시                         | 읽지 않은 알림 있을 때     |
 
 ### 마지막 명령 표시 (Activity-Aware Computation)
 
@@ -979,11 +977,11 @@ working 스피너 문자 목록(`✶✻✽✢` + `◐◑`(U+25D0/25D1) + Braille
 - 계산 함수는 원시 상태 + activity 타입을 입력받아 최종 표시를 도출한다. activity 타입이 추가되면 계산 함수에 분기만 추가한다.
 - 앱 전용 분기 로직은 [api-contracts.md](./api-contracts.md) §15.6(앱 전용 편의 코드 격리)에 따라 격리된 모듈에 구현하고, 계산 함수에서 import하여 사용한다.
 
-명령 텍스트는 최대 30자로 truncate, 시간은 상대 시간(방금, N분 전, N시간 전)으로 표시.
+결과 아이콘은 pane 첫째 줄에 표시한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0191](../adr/0191-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
 
 #### 출력 기반 메시지 추출 (Codex 대화 · Claude recap)
 
-`statusMessage`(=`activityMessage`)는 타이틀뿐 아니라 TerminalView 의 16KB rolling 출력 버퍼에서 직접 추출한 텍스트로도 채워진다. 추출기는 모두 `activity-detection.ts` 에 있으며 TerminalView 의 출력 콜백에서 현재 activity 분기에 따라 호출된다. Codex 분기는 `detectCodexConversationMessageFromOutput` 로 assistant bullet(`• …`) 라인을 골라 surfacing 하고, `nextCodexMessage && current.activityMessage !== nextCodexMessage` dedup 으로 같은 메시지 재기록을 막는다.
+`statusMessage`(=`activityMessage`)는 타이틀뿐 아니라 TerminalView 의 16KB rolling 출력 버퍼에서 직접 추출한 텍스트로도 채워진다. 추출기는 모두 `activity-detection.ts` 에 있으며 TerminalView 의 출력 콜백에서 현재 activity 분기에 따라 호출된다. Codex 분기는 `detectCodexConversationMessageFromOutput` 로 assistant bullet(`• …`) 라인을 골라 surfacing 하고, `nextCodexMessage && current.activityMessage !== nextCodexMessage` dedup 으로 같은 메시지 재기록을 막는다. 이 출력 기반 문자열은 activity 상태 계산과 알림 문맥에 남지만 마지막 입력 표시에는 사용하지 않는다. `perPane`의 둘째 줄과 `workspaceLatest`의 workspace 입력 줄은 입력 경로가 기록한 마지막 제출 입력만 사용하므로 assistant 스트리밍 토큰이 selector 문구를 갱신하지 않는다([ADR-0191](../adr/0191-workspace-pane-last-input-second-line.md)).
 
 Claude 분기는 unfocused 세션 복귀 시(또는 `/recap`) 스크롤백에 출력되는 한 줄 요약을 `detectClaudeRecapFromOutput` 로 추출한다. 시그니처는 `※ recap: <요약> (disable recaps in /config)` — `※` 는 U+203B(REFERENCE MARK). 요약의 끝은 **명시적 종료자가 있어야만** 인정한다: 접미 힌트(`(disable recaps in /config)`) 또는 박스 드로잉 라인(`─` 3회+ 연속). EOF 폴백은 의도적으로 없다 — 스트리밍 중 잘린 미완성 recap 이 surfacing 되는 것을 막는 게이트다(#306 리뷰). recap 은 alt-screen 에서 CUP/CUF 커서 이스케이프로 여러 행에 wrap 되어 그려지므로, 단순 SGR 제거가 아니라 `stripAnsi`(CUP→`\n`, CUF(N)→N 칸 공백)로 정규화한 뒤 공백 런을 한 칸으로 접어 원래 한 줄로 복원한다. 버퍼에 여러 recap 이 누적되면 **마지막(최신)** 것을 취한다. surfacing 은 Codex 대화 메시지와 동일하게 `activityMessage` 경유이며(`ClaudeActivityHandler.computeStatusMessage` 의 `bullet` 경로), input-pending 모달이 떠 있는 동안(`CLAUDE_INPUT_PENDING_MARKER`)에는 recap 으로 덮어쓰지 않는다. 별도 notification 은 발생시키지 않는다.
 

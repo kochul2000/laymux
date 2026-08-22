@@ -23,6 +23,9 @@ export interface TerminalInstance {
   lastCommand?: string;
   lastExitCode?: number;
   lastCommandAt?: number;
+  /** Latest user text submitted to this terminal; runtime-only and never persisted. */
+  lastUserInput?: string;
+  lastUserInputAt?: number;
   /** Detected terminal activity state. */
   activity?: TerminalActivityInfo;
   /**
@@ -76,6 +79,8 @@ interface TerminalStoreState {
         | "lastCommand"
         | "lastExitCode"
         | "lastCommandAt"
+        | "lastUserInput"
+        | "lastUserInputAt"
         | "activity"
         | "activitySequence"
         | "outputActive"

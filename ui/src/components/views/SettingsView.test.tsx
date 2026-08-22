@@ -3040,6 +3040,21 @@ describe("SettingsView", () => {
       expect(env.checked).toBe(true);
     });
 
+    it("defaults the last input layout to per-pane and saves workspace-latest mode", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const select = screen.getByTestId("workspace-last-input-mode-select") as HTMLSelectElement;
+      expect(select.value).toBe("perPane");
+
+      await user.selectOptions(select, "workspaceLatest");
+      expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+    });
+
     it("toggling a checkbox and saving updates store", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);

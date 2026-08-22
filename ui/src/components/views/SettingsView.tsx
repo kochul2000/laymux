@@ -3152,6 +3152,22 @@ function WorkspacesSection() {
       <SectionTitle>{t("workspaces.title")}</SectionTitle>
 
       <SubGroup title={t("workspaces.groupDisplay")}>
+        <SettingRow label={t("workspaces.lastInputMode")} desc={t("workspaces.lastInputModeDesc")}>
+          <FocusSelect
+            data-testid="workspace-last-input-mode-select"
+            className={inputCls}
+            value={wsSelector.lastInputMode}
+            onChange={(e) =>
+              updateWsSelector({
+                lastInputMode: e.target.value as "perPane" | "workspaceLatest",
+              })
+            }
+          >
+            <option value="perPane">{t("workspaces.lastInputPerPane")}</option>
+            <option value="workspaceLatest">{t("workspaces.lastInputWorkspaceLatest")}</option>
+          </FocusSelect>
+        </SettingRow>
+
         {displayItems.map((item, i) => (
           <div key={item.key} className={`flex items-start gap-3 py-1${i > 0 ? " mt-2" : ""}`}>
             <div className="w-36 shrink-0 pt-1">

@@ -114,6 +114,7 @@ import { createLinuxImeCandidateGuard } from "@/lib/linux-ime-candidate-guard";
 import { readPendingCompositionSend } from "@/lib/xterm-pending-composition";
 import { installNativeCursorSuppression } from "@/lib/native-cursor-suppression";
 import { createOsInputSourceChordGuard } from "@/lib/os-input-source-chord";
+import { createDirectInputCapture, normalizeSubmittedInput } from "@/lib/terminal-last-input";
 import {
   createTerminalFocusOwnership,
   type TerminalFocusOwnership,
@@ -854,6 +855,13 @@ export function TerminalView({
     dismissTerminalResponseNotification(instanceId);
     writeTerminalInput(instanceId, started.submission.text, true)
       .then(() => {
+        const lastUserInput = normalizeSubmittedInput(started.submission.text);
+        if (lastUserInput) {
+          useTerminalStore.getState().updateInstanceInfo(started.submission.terminalId, {
+            lastUserInput,
+            lastUserInputAt: Date.now(),
+          });
+        }
         pushComposerHistory(
           resolveComposerHistoryKey(started.submission.terminalId),
           started.submission.text,
@@ -3361,6 +3369,7 @@ export function TerminalView({
     // CoreService signal identifies delayed IME commits exactly; capture events
     // additionally cover focus reports that xterm emits without wasUserInput.
     // Without the internal signal, ambiguous live-write data stays human.
+    const directInputCapture = createDirectInputCapture();
     terminal.onData((data) => {
       trace("terminal-onData", {
         bytes: data.length,
@@ -3391,10 +3400,19 @@ export function TerminalView({
       }
       if (route === "human") {
         if (!localTerminalControlAllowed()) return;
+        const submittedInputs = directInputCapture.push(data);
         const byteLength = textEncoder.encode(data).length;
         const attempt = beginTerminalInputDelivery(instanceId, byteLength);
         void writeToTerminal(instanceId, data).then(
-          () => settleTerminalInputDelivery(attempt, "succeeded"),
+          () => {
+            settleTerminalInputDelivery(attempt, "succeeded");
+            const lastUserInput = submittedInputs.at(-1);
+            if (!lastUserInput) return;
+            useTerminalStore.getState().updateInstanceInfo(instanceId, {
+              lastUserInput,
+              lastUserInputAt: Date.now(),
+            });
+          },
           (error: unknown) => {
             if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
             trace("terminal-human-input-write-failed", {
