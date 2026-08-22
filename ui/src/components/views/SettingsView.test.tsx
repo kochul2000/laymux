@@ -244,6 +244,48 @@ describe("SettingsView", () => {
     });
   });
 
+  describe("Update channel", () => {
+    it("saves the chosen channel and warns while beta is selected", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      expect(screen.getByTestId("update-channel-select")).toHaveValue("stable");
+      expect(screen.queryByTestId("update-channel-beta-warning")).not.toBeInTheDocument();
+
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      expect(screen.getByTestId("update-channel-beta-warning")).toBeInTheDocument();
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().update).toEqual({ channel: "beta" });
+    });
+
+    it("checks for updates right after a channel switch is saved", async () => {
+      // The periodic check is six hours away, and the backend reads the channel
+      // from the file this save just wrote (ADR-0190).
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      await user.selectOptions(screen.getByTestId("update-channel-select"), "beta");
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
+    });
+
+    it("does not check for updates when the channel did not change", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-interface"));
+      await user.click(screen.getByTestId("keep-awake-when-busy-toggle"));
+      await user.click(screen.getByTestId("save-settings-btn"));
+
+      await waitFor(() => expect(persistSession).toHaveBeenCalled());
+      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
+    });
+  });
+
   describe("GitHub section", () => {
     it("shows defaults and saves edits to the store", async () => {
       const user = userEvent.setup();

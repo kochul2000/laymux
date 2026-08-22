@@ -35,12 +35,14 @@ import {
   type GrokUsageVisibleRow,
   type Keybinding,
   type LanguageSetting,
+  type UpdateChannel,
 } from "@/stores/settings-store";
 import {
   cloudConnectStart,
   cloudDisconnect,
   getCloudStatus,
   loadSettings,
+  checkAppUpdate,
   getRemoteAccessStatus,
   setRemoteRuntimeAccess,
   type CloudStatus,
@@ -1899,6 +1901,8 @@ function InterfaceSection() {
   const setNotifications = useSettingsStore((s) => s.setNotifications);
   const storePower = useSettingsStore((s) => s.power);
   const setPower = useSettingsStore((s) => s.setPower);
+  const storeUpdate = useSettingsStore((s) => s.update);
+  const setUpdate = useSettingsStore((s) => s.setUpdate);
 
   const [controlBar, setDraftControlBar] = useDraft("controlBar", storeControlBar, (v) =>
     setControlBar(v),
@@ -1910,6 +1914,7 @@ function InterfaceSection() {
     (v) => setNotifications(v),
   );
   const [power, setDraftPower] = useDraft("power", storePower, (v) => setPower(v));
+  const [update, setDraftUpdate] = useDraft("update", storeUpdate, (v) => setUpdate(v));
   const updateControlBar = (partial: Partial<typeof controlBar>) =>
     setDraftControlBar((prev) => ({ ...prev, ...partial }));
   const updateDock = (partial: Partial<typeof dock>) =>
@@ -2018,6 +2023,29 @@ function InterfaceSection() {
           checked={power.keepAwakeWhenBusy}
           onChange={(v) => setDraftPower((prev) => ({ ...prev, keepAwakeWhenBusy: v }))}
         />
+      </SubGroup>
+
+      <SubGroup title={t("interface.groupUpdate")}>
+        <SettingRow label={t("interface.updateChannel")} desc={t("interface.updateChannelDesc")}>
+          <FocusSelect
+            data-testid="update-channel-select"
+            className={inputCls}
+            value={update.channel}
+            onChange={(e) => setDraftUpdate({ channel: e.target.value as UpdateChannel })}
+          >
+            <option value="stable">{t("interface.updateChannelStable")}</option>
+            <option value="beta">{t("interface.updateChannelBeta")}</option>
+          </FocusSelect>
+        </SettingRow>
+        {update.channel === "beta" && (
+          <p
+            data-testid="update-channel-beta-warning"
+            className="text-[11px]"
+            style={{ color: "var(--claude)", margin: "0 0 8px" }}
+          >
+            {t("interface.updateChannelBetaWarning")}
+          </p>
+        )}
       </SubGroup>
     </div>
   );
@@ -5608,9 +5636,11 @@ export function SettingsView() {
   const handleSave = () => {
     const shouldReconcileRemote = dirtySetRef.current.has("remoteConnection");
     const previousRemoteEnabled = useSettingsStore.getState().remote.enabled;
+    const previousUpdateChannel = useSettingsStore.getState().update.channel;
     // Flush all draft states to store first
     for (const fn of flushMapRef.current.values()) fn();
     const nextRemoteEnabled = useSettingsStore.getState().remote.enabled;
+    const nextUpdateChannel = useSettingsStore.getState().update.channel;
     draftValuesRef.current.clear();
     dirtySetRef.current.clear();
     setDirty(false);
@@ -5619,6 +5649,12 @@ export function SettingsView() {
       .then(async () => {
         if (shouldReconcileRemote) {
           await reconcileRemoteAccessAfterRemoteSave(previousRemoteEnabled, nextRemoteEnabled);
+        }
+        // A channel switch has to be answered now: the periodic check is six
+        // hours away, and the backend reads the channel from the file this save
+        // just wrote (ADR-0190). Failures stay in the update status.
+        if (nextUpdateChannel !== previousUpdateChannel) {
+          void checkAppUpdate().catch(() => {});
         }
         setSaveLabel("Saved!");
         saveTimerRef.current = setTimeout(() => setSaveLabel("Save"), 1500);

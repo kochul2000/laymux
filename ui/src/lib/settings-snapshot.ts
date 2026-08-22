@@ -205,6 +205,7 @@ export async function collectSettingsSnapshot(
     dock: { ...settingsState.dock },
     notifications: { ...settingsState.notifications },
     power: { ...settingsState.power },
+    update: { ...settingsState.update },
     workspaceSelector: {
       ...settingsState.workspaceSelector,
       display: { ...settingsState.workspaceSelector.display },

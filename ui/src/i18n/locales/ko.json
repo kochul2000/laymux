@@ -367,7 +367,13 @@
       "keepAwake": "항상 재우지 않기",
       "keepAwakeDesc": "시스템이 절전 모드로 들어가지 않게 합니다. 상단 바 버튼과 같은 스위치입니다. 화면 절전은 평소대로 동작합니다.",
       "keepAwakeWhenBusy": "실행 중일 때 재우지 않기",
-      "keepAwakeWhenBusyDesc": "실행 중인 터미널이 하나라도 있으면 시스템 절전을 막습니다. 모두 끝나면 다시 평소대로 잠듭니다."
+      "keepAwakeWhenBusyDesc": "실행 중인 터미널이 하나라도 있으면 시스템 절전을 막습니다. 모두 끝나면 다시 평소대로 잠듭니다.",
+      "groupUpdate": "업데이트",
+      "updateChannel": "릴리스 채널",
+      "updateChannelDesc": "이 PC 가 따라갈 릴리스 계열입니다. 베타는 정식보다 먼저 나오는 테스트 릴리스를 받습니다.",
+      "updateChannelStable": "정식",
+      "updateChannelBeta": "베타(테스트 빌드)",
+      "updateChannelBetaWarning": "베타는 안정성이 보장되지 않습니다. 정식으로 되돌려도 정식이 설치된 버전을 넘어설 때까지는 업데이트가 없습니다."
     },
     "remote": {
       "title": "원격",

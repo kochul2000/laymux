@@ -56,19 +56,65 @@ jobs:
             exit 1
           }
 
-          [[ "$RELEASE_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-            echo "Release tag contains unsupported characters: $RELEASE_TAG" >&2
+          # Both channels now feed a client updater, so both tags must satisfy the
+          # client's tag<->version contract (ADR-0190). The tag *form* is checked
+          # once, by the shared encoder below — duplicating the grammar here would
+          # let the two copies drift. This only pairs the tag with the channel the
+          # dispatcher asked for.
+          version="${RELEASE_TAG#v}"
+          case "$version" in
+            *-beta.*)
+              [[ "$PRERELEASE" == "true" ]] || {
+                echo "A -beta.N tag must be dispatched as a prerelease: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+            *)
+              [[ "$PRERELEASE" == "false" ]] || {
+                echo "A prerelease must use a vX.Y.Z-beta.N tag: $RELEASE_TAG" >&2
+                exit 1
+              }
+              ;;
+          esac
+
+          # tauri.conf.json owns the version the updater compares against;
+          # Cargo.toml owns the version every status surface reports. A release
+          # where they disagree ships an app whose displayed version is not the
+          # one it compares with.
+          app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          [[ "$version" == "$app_version" ]] || {
+            echo "Release tag $version does not match app version $app_version" >&2
             exit 1
           }
-          if [[ "$PRERELEASE" != "true" ]]; then
-            version="${RELEASE_TAG#v}"
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-              echo "Stable release tag must be vX.Y.Z or X.Y.Z: $RELEASE_TAG" >&2
-              exit 1
-            }
-            app_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
-            [[ "$version" == "$app_version" ]] || {
-              echo "Stable release tag $version does not match app version $app_version" >&2
+          crate_version="$(sed -n 's/^version = "\(.*\)"$/\1/p' src-tauri/Cargo.toml | head -n 1)"
+          [[ "$version" == "$crate_version" ]] || {
+            echo "Release tag $version does not match src-tauri/Cargo.toml version $crate_version" >&2
+            exit 1
+          }
+
+          # Reject a version the Android versionCode encoding cannot carry
+          # before any artifact is built.
+          node scripts/release/android-version-code.mjs "$RELEASE_TAG"
+
+          # Channel forwardness is checked *before* anything is published. If the
+          # only check lived in the channel job, a version lower than the current
+          # channel would already be latest by the time it was refused: the legacy
+          # endpoint would serve it, and Android would take it as an upgrade
+          # because the new versionCode scheme is numerically larger than the
+          # legacy one (ADR-0190).
+          channel_version() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/desktop-$1.json?ref=release-channels" \
+              --jq '.content' 2>/dev/null | base64 -d | jq -r '.version' 2>/dev/null || true
+          }
+          if [[ "$PRERELEASE" == "true" ]]; then
+            current_channel_version="$(channel_version beta)"
+          else
+            current_channel_version="$(channel_version stable)"
+          fi
+          if [[ -n "$current_channel_version" && "$current_channel_version" != "null" ]]; then
+            node scripts/release/release-version.mjs \
+              --newer "$version" --than "$current_channel_version" || {
+              echo "Release $version does not move its channel forward from $current_channel_version" >&2
               exit 1
             }
           fi
@@ -112,8 +158,13 @@ jobs:
         include:
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            # RPM `Version` cannot contain `-` and deb version ordering does not
+            # match semver prerelease ordering, so a beta build is limited to the
+            # bundles whose version rules accept `x.y.z-beta.N` (ADR-0190).
+            prerelease_bundles: nsis,updater
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            prerelease_bundles: appimage,updater
 
     runs-on: ${{ matrix.platform }}
 
@@ -162,11 +213,12 @@ jobs:
           tagName: ${{ needs.prepare.outputs.tag }}
           releaseDraft: true
           prerelease: ${{ needs.prepare.outputs.prerelease }}
-          args: --target ${{ matrix.target }}
+          args: >-
+            --target ${{ matrix.target }}
+            ${{ needs.prepare.outputs.prerelease == 'true' && format('--bundles {0}', matrix.prerelease_bundles) || '' }}
 
   android:
     needs: prepare
-    if: needs.prepare.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     env:
       ANDROID_APP_SIGNING_CERT_SHA256: ${{ vars.ANDROID_APP_SIGNING_CERT_SHA256 }}
@@ -214,21 +266,13 @@ jobs:
             [[ -n "${!name}" ]] || { echo "Missing release input: $name" >&2; exit 1; }
           done
 
-          version="${RELEASE_TAG#v}"
-          [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || {
-            echo "Android release tag must be a stable semantic version: $RELEASE_TAG" >&2
-            exit 1
-          }
-          major="${BASH_REMATCH[1]}"
-          minor="${BASH_REMATCH[2]}"
-          patch="${BASH_REMATCH[3]}"
-          (( major < 2100 && minor < 1000 && patch < 1000 )) || {
-            echo "Release version cannot be encoded as Android versionCode" >&2
-            exit 1
-          }
-          version_code=$((10#$major * 1000000 + 10#$minor * 1000 + 10#$patch))
-          (( version_code > 0 && version_code <= 2100000000 )) || {
-            echo "Android versionCode is out of range: $version_code" >&2
+          # versionName/versionCode come from the shared encoder so the bounds
+          # and the beta slot layout have one owner and unit tests (ADR-0190).
+          encoded="$(node scripts/release/android-version-code.mjs "$RELEASE_TAG")"
+          version="$(printf '%s\n' "$encoded" | sed -n 's/^versionName=//p')"
+          version_code="$(printf '%s\n' "$encoded" | sed -n 's/^versionCode=//p')"
+          [[ -n "$version" && -n "$version_code" ]] || {
+            echo "Android version encoding produced no output for $RELEASE_TAG" >&2
             exit 1
           }
 
@@ -287,12 +331,65 @@ jobs:
         shell: bash
         run: rm -f -- "${LAYMUX_ANDROID_APP_SIGNING_STORE_FILE:-$RUNNER_TEMP/laymux-android-app-signing.jks}"
 
+  channel_bootstrap:
+    # The channel branch must already hold a valid manifest for both channels
+    # *before* anything is published (ADR-0190). A channel-aware build that goes
+    # latest first would send every upgraded install to a 404 for as long as the
+    # downstream job took — or forever, if it failed.
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+      - name: Seed the channel branch if it is missing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          stable_present="$(gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" --jq '.sha' 2>/dev/null || true)"
+          if [[ -n "$stable_present" ]]; then
+            echo "channel branch already seeded"
+            exit 0
+          fi
+
+          # Seed from the release that is currently latest: that is what the
+          # stable channel means right now, and it keeps beta valid too.
+          seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+          [[ -n "$seed_tag" && "$seed_tag" != "null" ]] || {
+            echo "No stable release to seed the channel branch from" >&2
+            exit 1
+          }
+
+          channels="$RUNNER_TEMP/channels"
+          mkdir -p "$channels"
+          gh api "repos/$GITHUB_REPOSITORY/contents/desktop-beta.json?ref=$BRANCH" \
+            --jq '.content' 2>/dev/null | base64 -d >"$channels/desktop-beta.json" || rm -f "$channels/desktop-beta.json"
+
+          seed_manifest="$RUNNER_TEMP/seed-latest.json"
+          gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
+          node scripts/release/channel-manifest.mjs \
+            --tag "$seed_tag" --prerelease false --seed-stable true \
+            --manifest "$seed_manifest" --channel-dir "$channels" \
+            --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
+
+          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "seed channel manifests from $seed_tag"
+
   publish:
-    needs: [prepare, build, android]
-    if: >-
-      always() &&
-      needs.build.result == 'success' &&
-      (needs.android.result == 'success' || needs.android.result == 'skipped')
+    # Both channels gate on every required job. A beta that ships the desktop
+    # ahead of its APK strands phones on a compat version bump (ADR-0190).
+    needs: [prepare, build, android, channel_bootstrap]
     runs-on: ubuntu-latest
     steps:
       - name: Publish complete release
@@ -308,3 +405,60 @@ jobs:
             gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
               -F draft=false -F prerelease=false -f make_latest=true
           fi
+
+  channels:
+    # The channel manifest, not GitHub's `latest` pointer, is what the app reads
+    # (ADR-0190). Runs only after the release is fully published so a channel can
+    # never point at a draft or an incomplete artifact set.
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+
+      - name: Update channel manifests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          channels="$RUNNER_TEMP/channels"
+          mkdir -p "$channels"
+
+          # Read the branch through the API rather than cloning: the channel
+          # branch holds only these two files, and a clone would put the source
+          # tree and a credential into the deployment working copy. The branch is
+          # guaranteed to exist by the bootstrap job that gates publish.
+          for file in desktop-stable.json desktop-beta.json; do
+            gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" \
+              --jq '.content' 2>/dev/null | base64 -d >"$channels/$file" || rm -f "$channels/$file"
+          done
+
+          manifest="$RUNNER_TEMP/latest.json"
+          gh release download "$RELEASE_TAG" --pattern latest.json --output "$manifest" --clobber
+
+          # Validation, the forward-only invariants and the write plan live in the
+          # script so they are unit tested rather than discovered in a release.
+          written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
+            --tag "$RELEASE_TAG" \
+            --prerelease "$PRERELEASE" \
+            --manifest "$manifest" \
+            --channel-dir "$channels" \
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --repo "${GITHUB_REPOSITORY##*/}")"
+          printf 'channel files to publish:\n%s\n' "${written:-<none>}"
+
+          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "release: $RELEASE_TAG channel manifests"
