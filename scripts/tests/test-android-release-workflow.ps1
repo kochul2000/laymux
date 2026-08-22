@@ -91,6 +91,16 @@ if (-not $workflow.Contains('publish-channel-commit.sh')) {
     throw "channel commits must go through the shared API publisher"
 }
 
+# `gh api` prints the error body to stdout on a 404 without applying --jq, so a
+# missing channel file reads as a non-empty value. Probing by output made the
+# bootstrap job pass without seeding anything (run 32559427438).
+if ($workflow -match '(?m)^\s*\w+="\$\(gh api [^\n]*contents/[^\n]*--jq[^\n]*\|\| true\)"') {
+    throw "channel file probes must branch on gh api exit status, not captured output"
+}
+if (-not $workflow.Contains('if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1; then')) {
+    throw "the bootstrap seeding guard must test the gh api exit status"
+}
+
 # The release-contract scripts are only a gate if something runs them.
 & node (Join-Path $repoRoot "scripts/tests/release-channels.test.mjs")
 if ($LASTEXITCODE -ne 0) {
