@@ -99,14 +99,6 @@ export function planChannelWrites({
 }) {
   const released = parseReleaseVersion(version).version;
   if (prerelease) {
-    if (
-      currentBetaVersion &&
-      compareReleaseVersions(released, currentBetaVersion) <= 0
-    ) {
-      throw new Error(
-        `prerelease ${released} 가 현재 beta 채널 ${currentBetaVersion} 을 후퇴시킨다`,
-      );
-    }
     if (!currentStableVersion) {
       // stable 파일이 없는 채로 beta 만 커밋하면 기본 채널이 404 가 되어
       // 모든 설치본이 다음 정식 릴리스까지 확인 오류만 본다. 부트스트랩은
@@ -114,6 +106,20 @@ export function planChannelWrites({
       throw new Error(
         `stable 채널 파일이 없다. prerelease 발행 전에 현재 정식 매니페스트로 시딩해야 한다`,
       );
+    }
+    if (currentBetaVersion) {
+      const ordering = compareReleaseVersions(released, currentBetaVersion);
+      if (ordering < 0) {
+        throw new Error(
+          `prerelease ${released} 가 현재 beta 채널 ${currentBetaVersion} 을 후퇴시킨다`,
+        );
+      }
+      if (ordering === 0) {
+        // 같은 릴리스로 job 을 다시 돌리는 것은 멱등이어야 한다. ref 갱신은
+        // 성공했는데 응답이 유실돼 job 이 실패한 경우, 재실행이 여기서 또
+        // 막히면 workflow 를 정상 완료시킬 방법이 없다.
+        return [];
+      }
     }
     return [BETA_CHANNEL_FILE];
   }

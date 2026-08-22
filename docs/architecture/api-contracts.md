@@ -561,6 +561,8 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 - **채널 전환의 경계는 install 수락 시점이다.** `begin_check(channel)` 은 채널이 바뀌면 이전 후보를 지우고, 확인이 끝난 시점에 채널이 또 바뀌었으면 결과를 버린다(`abandon_check` — 답도 실패도 아니므로 `lastError` 를 남기지 않는다). `begin_install(current_channel())` 은 후보가 속한 채널과 현재 채널이 다르면 거절한다. 반대로 수락된 설치는 수락 시점 채널로 완주한다(ADR-0174).
 - **채널을 바꿔 저장하면 즉시 1회 확인한다.** `handleSave` 가 `persistSession()` 이후에 `check_app_update` 를 부른다 — 주기 확인은 6시간 뒤이고, 백엔드는 이 저장이 쓴 파일을 읽는다.
 - **다운그레이드는 제안하지 않는다.** updater 기본 semver 비교를 유지하므로 beta → stable 로 되돌린 사용자는 정식이 자기 버전을 넘어설 때까지 업데이트가 없다. 이는 오류가 아니라 정상 상태다.
+- **beta 는 deb/rpm 설치본에서 거절된다**(`unsupported_channel_install`). updater 는 `{os}-{arch}-{installer}` 가 없으면 맨 `{os}-{arch}`(AppImage) 로 폴백하므로, 그대로 두면 설치 단계에서 형식 오류가 난다. 확인·설치 둘 다 이유를 담은 오류로 거절한다.
+- **설정 초기화도 재확인을 건다.** `reset_settings` 는 디스크에 기본값을 쓰고 프론트는 페이지를 다시 로드할 뿐이라 설정 적용 경로를 타지 않는다. 커맨드가 `app_update::schedule_channel_recheck` 로 직접 재확인을 걸어, 프로세스 전역 매니저가 옛 채널과 후보를 들고 있지 않게 한다.
 
 ### 종료 시 동작(kill-on-exit) 설정
 

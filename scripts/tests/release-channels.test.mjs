@@ -420,6 +420,19 @@ throws(
   "stable 채널 파일",
 );
 
+check(
+  "같은 beta 재실행은 no-op",
+  (() => {
+    const writes = planChannelWrites({
+      version: "0.11.0-beta.3",
+      prerelease: true,
+      currentBetaVersion: "0.11.0-beta.3",
+      currentStableVersion: "0.10.18",
+    });
+    return writes.length === 0;
+  })(),
+);
+
 if (failures > 0) {
   console.error(`\n${failures} 개 실패`);
   process.exit(1);

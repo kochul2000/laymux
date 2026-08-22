@@ -81,6 +81,15 @@ if ($workflow.Contains('x-access-token:$GH_TOKEN@github.com')) {
 if (-not $workflow.Contains('--seed-stable true')) {
     throw "the channel job must seed a missing stable manifest so neither channel 404s"
 }
+if (-not $workflow.Contains('needs: [prepare, build, android, channel_bootstrap]')) {
+    throw "publish must wait for the channel branch to be seeded"
+}
+if (-not $workflow.Contains('release-version.mjs')) {
+    throw "channel forwardness must be checked before publish"
+}
+if (-not $workflow.Contains('publish-channel-commit.sh')) {
+    throw "channel commits must go through the shared API publisher"
+}
 
 # The release-contract scripts are only a gate if something runs them.
 & node (Join-Path $repoRoot "scripts/tests/release-channels.test.mjs")

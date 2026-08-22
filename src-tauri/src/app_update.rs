@@ -393,6 +393,29 @@ fn validate_install_candidate(
 /// from spinning the network.
 const CHANNEL_SWITCH_RETRIES: usize = 1;
 
+/// Why this install cannot follow `channel`, if it cannot.
+///
+/// beta ships only NSIS and AppImage (ADR-0189), and the updater falls back from
+/// `{os}-{arch}-{installer}` to the bare `{os}-{arch}` entry when the specific one
+/// is missing. On a deb/rpm install that fallback hands AppImage bytes to the deb
+/// or rpm installer, which fails at install time with an opaque format error. The
+/// honest answer is to refuse the channel at check time and say why.
+fn unsupported_channel_install(channel: UpdateChannel) -> Option<String> {
+    use tauri::utils::config::BundleType;
+
+    if channel != UpdateChannel::Beta {
+        return None;
+    }
+    let installer = match tauri::utils::platform::bundle_type() {
+        Some(BundleType::Deb) => "deb",
+        Some(BundleType::Rpm) => "rpm",
+        _ => return None,
+    };
+    Some(format!(
+        "the beta channel does not ship {installer} packages; use the AppImage build or switch back to the stable channel"
+    ))
+}
+
 pub async fn check_now(
     app: &AppHandle,
     manager: &Arc<UpdateManager>,
@@ -424,6 +447,12 @@ async fn check_channel_once(
         return Ok(CheckOutcome::Settled(manager.snapshot()?));
     }
     publish_snapshot(app, manager);
+
+    if let Some(reason) = unsupported_channel_install(channel) {
+        let status = manager.fail_operation(reason)?;
+        publish(app, &status);
+        return Ok(CheckOutcome::Settled(status));
+    }
 
     let result = match channel_updater(app, channel) {
         Ok(updater) => updater.check().await.map_err(|error| error.to_string()),
@@ -488,8 +517,14 @@ pub fn schedule_install(
     app: AppHandle,
     manager: Arc<UpdateManager>,
 ) -> Result<UpdateStatus, String> {
-    let accepted = manager.begin_install(current_channel())?;
-    let channel = accepted.channel;
+    let channel = current_channel();
+    // Refuse before accepting: a candidate found before the channel or the
+    // install format made it unreachable must not start a download that can only
+    // end in a format error.
+    if let Some(reason) = unsupported_channel_install(channel) {
+        return Err(reason);
+    }
+    let accepted = manager.begin_install(channel)?;
     let expected_version = accepted
         .available_version
         .clone()
@@ -547,6 +582,25 @@ async fn install_and_restart(
         .map_err(|error| error.to_string())?;
 
     app.restart();
+}
+
+/// Re-read the channel from disk and check once, without waiting for the six-hour
+/// cycle. Used by settings paths that rewrite `settings.json` behind the frontend
+/// (settings reset), where the process-global manager would otherwise keep the
+/// old channel and its candidate.
+pub fn schedule_channel_recheck(app: AppHandle, manager: Arc<UpdateManager>) {
+    if !manager
+        .snapshot()
+        .map(|status| status.enabled)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = check_now(&app, &manager).await {
+            tracing::warn!(%error, "update check after a settings change failed");
+        }
+    });
 }
 
 pub fn start_periodic_checks(app: AppHandle, manager: Arc<UpdateManager>) {
@@ -871,6 +925,27 @@ mod tests {
             UpdateChannel::Beta.manifest_url(),
             "https://raw.githubusercontent.com/kochul2000/laymux/release-channels/desktop-beta.json"
         );
+    }
+
+    #[test]
+    fn beta_is_refused_on_install_formats_it_does_not_ship() {
+        // The updater falls back from `{os}-{arch}-{installer}` to the bare
+        // `{os}-{arch}` entry, so a deb/rpm install on beta would be handed the
+        // AppImage and fail inside the installer. Stable ships every format, so
+        // it is never refused (ADR-0189).
+        assert_eq!(unsupported_channel_install(UpdateChannel::Stable), None);
+        match tauri::utils::platform::bundle_type() {
+            Some(tauri::utils::config::BundleType::Deb) => {
+                assert!(unsupported_channel_install(UpdateChannel::Beta)
+                    .is_some_and(|reason| reason.contains("deb")));
+            }
+            Some(tauri::utils::config::BundleType::Rpm) => {
+                assert!(unsupported_channel_install(UpdateChannel::Beta)
+                    .is_some_and(|reason| reason.contains("rpm")));
+            }
+            // NSIS, AppImage and the unbundled test binary all follow beta.
+            _ => assert_eq!(unsupported_channel_install(UpdateChannel::Beta), None),
+        }
     }
 
     #[test]

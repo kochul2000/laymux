@@ -96,6 +96,29 @@ jobs:
           # before any artifact is built.
           node scripts/release/android-version-code.mjs "$RELEASE_TAG"
 
+          # Channel forwardness is checked *before* anything is published. If the
+          # only check lived in the channel job, a version lower than the current
+          # channel would already be latest by the time it was refused: the legacy
+          # endpoint would serve it, and Android would take it as an upgrade
+          # because the new versionCode scheme is numerically larger than the
+          # legacy one (ADR-0189).
+          channel_version() {
+            gh api "repos/$GITHUB_REPOSITORY/contents/desktop-$1.json?ref=release-channels" \
+              --jq '.content' 2>/dev/null | base64 -d | jq -r '.version' 2>/dev/null || true
+          }
+          if [[ "$PRERELEASE" == "true" ]]; then
+            current_channel_version="$(channel_version beta)"
+          else
+            current_channel_version="$(channel_version stable)"
+          fi
+          if [[ -n "$current_channel_version" && "$current_channel_version" != "null" ]]; then
+            node scripts/release/release-version.mjs \
+              --newer "$version" --than "$current_channel_version" || {
+              echo "Release $version does not move its channel forward from $current_channel_version" >&2
+              exit 1
+            }
+          fi
+
           existing_release_id="$(
             gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
               jq -rs --arg tag "$RELEASE_TAG" \
@@ -308,10 +331,65 @@ jobs:
         shell: bash
         run: rm -f -- "${LAYMUX_ANDROID_APP_SIGNING_STORE_FILE:-$RUNNER_TEMP/laymux-android-app-signing.jks}"
 
+  channel_bootstrap:
+    # The channel branch must already hold a valid manifest for both channels
+    # *before* anything is published (ADR-0189). A channel-aware build that goes
+    # latest first would send every upgraded install to a 404 for as long as the
+    # downstream job took — or forever, if it failed.
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-channels
+      cancel-in-progress: false
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit_sha }}
+
+      - name: Seed the channel branch if it is missing
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: release-channels
+        run: |
+          set -euo pipefail
+
+          stable_present="$(gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" --jq '.sha' 2>/dev/null || true)"
+          if [[ -n "$stable_present" ]]; then
+            echo "channel branch already seeded"
+            exit 0
+          fi
+
+          # Seed from the release that is currently latest: that is what the
+          # stable channel means right now, and it keeps beta valid too.
+          seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+          [[ -n "$seed_tag" && "$seed_tag" != "null" ]] || {
+            echo "No stable release to seed the channel branch from" >&2
+            exit 1
+          }
+
+          channels="$RUNNER_TEMP/channels"
+          mkdir -p "$channels"
+          gh api "repos/$GITHUB_REPOSITORY/contents/desktop-beta.json?ref=$BRANCH" \
+            --jq '.content' 2>/dev/null | base64 -d >"$channels/desktop-beta.json" || rm -f "$channels/desktop-beta.json"
+
+          seed_manifest="$RUNNER_TEMP/seed-latest.json"
+          gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
+          node scripts/release/channel-manifest.mjs \
+            --tag "$seed_tag" --prerelease false --seed-stable true \
+            --manifest "$seed_manifest" --channel-dir "$channels" \
+            --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
+
+          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "seed channel manifests from $seed_tag"
+
   publish:
     # Both channels gate on every required job. A beta that ships the desktop
     # ahead of its APK strands phones on a compat version bump (ADR-0189).
-    needs: [prepare, build, android]
+    needs: [prepare, build, android, channel_bootstrap]
     runs-on: ubuntu-latest
     steps:
       - name: Publish complete release
@@ -345,6 +423,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit_sha }}
 
+
       - name: Update channel manifests
         shell: bash
         env:
@@ -355,37 +434,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY##*/}"
           channels="$RUNNER_TEMP/channels"
           mkdir -p "$channels"
 
           # Read the branch through the API rather than cloning: the channel
           # branch holds only these two files, and a clone would put the source
-          # tree and a credential into the deployment working copy.
-          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$BRANCH" --jq '.object.sha' 2>/dev/null || true)"
-          if [[ -n "$branch_sha" ]]; then
-            for file in desktop-stable.json desktop-beta.json; do
-              gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" \
-                --jq '.content' 2>/dev/null | base64 -d >"$channels/$file" || rm -f "$channels/$file"
-            done
-          fi
-
-          # Bootstrap: neither channel may be a 404, so a missing stable file is
-          # seeded from the current stable release before anything else. Without
-          # this, a repo whose first publish is a beta leaves every default
-          # (stable) install failing its update check until the next release.
-          if [[ ! -s "$channels/desktop-stable.json" ]]; then
-            seed_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
-            [[ -n "$seed_tag" ]] || { echo "No stable release to seed the channel branch from" >&2; exit 1; }
-            seed_manifest="$RUNNER_TEMP/seed-latest.json"
-            gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
-            node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
-              --tag "$seed_tag" --prerelease false --seed-stable true \
-              --manifest "$seed_manifest" --channel-dir "$channels" \
-              --owner "$owner" --repo "$repo"
-            echo "seeded channel files from stable release $seed_tag"
-          fi
+          # tree and a credential into the deployment working copy. The branch is
+          # guaranteed to exist by the bootstrap job that gates publish.
+          for file in desktop-stable.json desktop-beta.json; do
+            gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" \
+              --jq '.content' 2>/dev/null | base64 -d >"$channels/$file" || rm -f "$channels/$file"
+          done
 
           manifest="$RUNNER_TEMP/latest.json"
           gh release download "$RELEASE_TAG" --pattern latest.json --output "$manifest" --clobber
@@ -397,38 +456,9 @@ jobs:
             --prerelease "$PRERELEASE" \
             --manifest "$manifest" \
             --channel-dir "$channels" \
-            --owner "$owner" \
-            --repo "$repo")"
+            --owner "${GITHUB_REPOSITORY%%/*}" \
+            --repo "${GITHUB_REPOSITORY##*/}")"
           printf 'channel files to publish:\n%s\n' "${written:-<none>}"
 
-          # One commit carries both files: a partial update would expose
-          # beta < stable. The tree lists exactly the channel files, so the
-          # branch never accumulates source history.
-          entries=""
-          for file in desktop-stable.json desktop-beta.json; do
-            [[ -s "$channels/$file" ]] || continue
-            blob_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" \
-              -f content="$(base64 -w0 <"$channels/$file")" -f encoding=base64 --jq '.sha')"
-            entries="$entries{\"path\":\"$file\",\"mode\":\"100644\",\"type\":\"blob\",\"sha\":\"$blob_sha\"},"
-          done
-          [[ -n "$entries" ]] || { echo "No channel files to publish" >&2; exit 1; }
-          tree_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/trees" \
-            --input - --jq '.sha' <<<"{\"tree\":[${entries%,}]}")"
-
-          if [[ -n "$branch_sha" ]]; then
-            current_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$branch_sha" --jq '.tree.sha')"
-            if [[ "$current_tree" == "$tree_sha" ]]; then
-              echo "channel manifests already up to date"
-              exit 0
-            fi
-            commit_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" \
-              --input - --jq '.sha' <<<"{\"message\":\"release: $RELEASE_TAG channel manifests\",\"tree\":\"$tree_sha\",\"parents\":[\"$branch_sha\"]}")"
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/heads/$BRANCH" \
-              -f sha="$commit_sha" >/dev/null
-          else
-            commit_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/commits" \
-              --input - --jq '.sha' <<<"{\"message\":\"release: $RELEASE_TAG channel manifests\",\"tree\":\"$tree_sha\",\"parents\":[]}")"
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              -f ref="refs/heads/$BRANCH" -f sha="$commit_sha" >/dev/null
-          fi
-          echo "published channel manifests as $commit_sha"
+          "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
+            "$channels" "$BRANCH" "release: $RELEASE_TAG channel manifests"

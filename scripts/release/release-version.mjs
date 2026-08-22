@@ -5,6 +5,8 @@
 // 번지지 않게 하기 위해서다. 클라이언트(`src-tauri/src/app_update.rs`)가 같은
 // 계약을 독립적으로 다시 검사한다.
 
+import { pathToFileURL } from "node:url";
+
 const RELEASE_VERSION_PATTERN =
   /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-beta\.([1-9][0-9]*))?$/;
 
@@ -51,4 +53,41 @@ export function compareReleaseVersions(a, b) {
   if (left.beta === null) return 1;
   if (right.beta === null) return -1;
   return left.beta - right.beta;
+}
+
+/**
+ * CLI: `node scripts/release/release-version.mjs --newer <candidate> --than <current>`
+ *
+ * exit 0 이면 candidate 가 current 보다 크다. 릴리스 전진성을 **게시 전에**
+ * 확인하는 데 쓴다 — 채널 파일을 쓰는 시점에야 후퇴를 잡으면 이미 낮은 버전이
+ * latest 로 공개되고 Android 는 그것을 업그레이드로 받는다 (ADR-0189).
+ */
+function main(argv) {
+  const index = argv.indexOf("--newer");
+  const thanIndex = argv.indexOf("--than");
+  if (index < 0 || thanIndex < 0) {
+    console.error(
+      "사용: node scripts/release/release-version.mjs --newer <candidate> --than <current>",
+    );
+    process.exit(2);
+  }
+  const candidate = argv[index + 1];
+  const current = argv[thanIndex + 1];
+  if (compareReleaseVersions(candidate, current) > 0) {
+    process.exit(0);
+  }
+  console.error(`${candidate} 는 ${current} 보다 나중 버전이 아니다`);
+  process.exit(1);
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
 }

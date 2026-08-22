@@ -41,9 +41,10 @@ describe("desktop updater release contract", () => {
     expect(workflow).not.toContain("gh release create");
     expect(workflow).not.toContain("/releases/tags/$RELEASE_TAG");
     expect(workflow).toContain("releaseDraft: true");
-    expect(workflow.match(/needs: prepare$/gm)).toHaveLength(2);
+    // build, android and the channel bootstrap all fan out from prepare.
+    expect(workflow.match(/needs: prepare$/gm)).toHaveLength(3);
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.commit_sha }}");
-    expect(workflow).toContain("needs: [prepare, build, android]");
+    expect(workflow).toContain("needs: [prepare, build, android, channel_bootstrap]");
     expect(workflow).toContain("make_latest");
     expect(workflow).toContain("max-parallel: 1");
     expect(workflow).toContain("target: x86_64-pc-windows-msvc");
@@ -74,10 +75,14 @@ describe("desktop updater release contract", () => {
     // pairs the tag with the dispatched channel and checks both version files.
     expect(workflow).toContain("scripts/release/android-version-code.mjs");
     expect(workflow).toContain("src-tauri/Cargo.toml version");
-    // Neither channel may be a 404, and the branch is written through the API
-    // rather than a clone that would carry a credential into it.
+    // Neither channel may be a 404 by the time a channel-aware build is latest,
+    // so seeding gates publish instead of trailing it.
     expect(workflow).toContain("--seed-stable true");
-    expect(workflow).toContain("git/blobs");
+    expect(workflow).toContain("needs: [prepare, build, android, channel_bootstrap]");
+    // Forwardness is refused before publish, not after the release went latest.
+    expect(workflow).toContain("release-version.mjs");
+    // The branch is written through the API, never a clone carrying a credential.
+    expect(workflow).toContain("publish-channel-commit.sh");
     expect(workflow).not.toContain("x-access-token:$GH_TOKEN@github.com");
   });
 });
