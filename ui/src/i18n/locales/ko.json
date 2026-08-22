@@ -105,7 +105,9 @@
       "keybindings": "키 바인딩",
       "profileDefaults": "기본값",
       "deleteProfile": "프로필 삭제",
-      "widgets": "위젯"
+      "widgets": "위젯",
+      "groupGeneral": "일반",
+      "update": "업데이트"
     },
     "save": {
       "save": "저장",
@@ -367,13 +369,7 @@
       "keepAwake": "항상 재우지 않기",
       "keepAwakeDesc": "시스템이 절전 모드로 들어가지 않게 합니다. 상단 바 버튼과 같은 스위치입니다. 화면 절전은 평소대로 동작합니다.",
       "keepAwakeWhenBusy": "실행 중일 때 재우지 않기",
-      "keepAwakeWhenBusyDesc": "실행 중인 터미널이 하나라도 있으면 시스템 절전을 막습니다. 모두 끝나면 다시 평소대로 잠듭니다.",
-      "groupUpdate": "업데이트",
-      "updateChannel": "릴리스 채널",
-      "updateChannelDesc": "이 PC 가 따라갈 릴리스 계열입니다. 베타는 정식보다 먼저 나오는 테스트 릴리스를 받습니다.",
-      "updateChannelStable": "정식",
-      "updateChannelBeta": "베타(테스트 빌드)",
-      "updateChannelBetaWarning": "베타는 안정성이 보장되지 않습니다. 정식으로 되돌려도 정식이 설치된 버전을 넘어설 때까지는 업데이트가 없습니다."
+      "keepAwakeWhenBusyDesc": "실행 중인 터미널이 하나라도 있으면 시스템 절전을 막습니다. 모두 끝나면 다시 평소대로 잠듭니다."
     },
     "remote": {
       "title": "원격",
@@ -761,6 +757,35 @@
       "configDirsDesc": "함께 모니터링할 CLAUDE_CONFIG_DIR 경로. 기본 계정은 항상 포함된다",
       "configDirPlaceholder": "/home/me/.claude-personal",
       "addConfigDir": "계정 추가"
+    },
+    "update": {
+      "title": "업데이트",
+      "groupVersion": "버전",
+      "groupChannel": "채널",
+      "groupCheck": "업데이트 확인",
+      "currentVersion": "현재 버전",
+      "channelStable": "정식",
+      "channelBeta": "베타",
+      "releasePage": "릴리스 페이지",
+      "openCurrentRelease": "이 버전 릴리스 열기",
+      "openReleases": "전체 릴리스 목록",
+      "openReleaseNotes": "릴리스 페이지 열기",
+      "channel": "릴리스 채널",
+      "channelDesc": "이 PC 가 따라갈 릴리스 계열입니다. 저장하면 바로 확인합니다.",
+      "channelBetaWarning": "베타는 안정성이 보장되지 않습니다. 정식으로 되돌려도 정식이 설치된 버전을 넘어설 때까지는 업데이트가 없습니다.",
+      "checkNow": "지금 확인",
+      "checkNowDesc": "앱은 시작 직후와 6시간마다 자동으로 확인합니다.",
+      "checking": "확인 중…",
+      "checkedAt": "마지막 확인: {{at}}",
+      "neverChecked": "아직 확인한 적 없음",
+      "upToDate": "최신 버전입니다.",
+      "availableVersion": "{{version}} 사용 가능",
+      "publishedAt": "릴리스: {{at}}",
+      "install": "설치하고 재시작",
+      "installing": "설치 중…",
+      "installConfirm": "Laymux {{version}} 을 설치하고 지금 재시작할까요?",
+      "disabledInDev": "개발 빌드에서는 자동 업데이트가 꺼져 있습니다.",
+      "manualCheck": "새로고침"
     }
   },
   "workspace": {
