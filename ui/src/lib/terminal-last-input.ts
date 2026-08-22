@@ -80,7 +80,7 @@ export function createDirectInputCapture(): DirectInputCapture {
   return {
     push(data: string) {
       const submitted: string[] = [];
-      for (let index = 0; index < data.length; ) {
+      for (let index = 0; index < data.length;) {
         const rest = data.slice(index);
         const csi = rest.match(/^\x1b\[([0-9;?]*)([A-Za-z~])/u);
         if (csi) {

@@ -920,16 +920,16 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 
 ### 탭 표시 정보
 
-| 항목                | 데이터 소스                           | 표시 조건                  |
-| ------------------- | ------------------------------------- | -------------------------- |
-| Workspace 이름      | 사용자 지정                           | 항상                       |
-| git branch          | OSC 133E 감지 또는 `.git/HEAD` watch  | 있을 때                    |
-| working directory   | OSC 7 감지                            | 있을 때 (브랜치와 같은 줄) |
-| 리스닝 포트         | 주기적 `ss -tlnp` / `netstat` 조회    | 활성 워크스페이스만        |
-| pane 결과 아이콘    | OSC 133 E/D + activity handler        | 결과 표시 설정이 켜질 때   |
-| pane 마지막 입력    | 제출 입력 또는 OSC 133 명령           | terminal pane 둘째 줄      |
-| 읽지 않은 알림 배지 | 알림 시스템                           | 카운트 > 0                 |
-| 알림 링 (테두리)    | 알림 발생 시                          | 읽지 않은 알림 있을 때     |
+| 항목                | 데이터 소스                          | 표시 조건                  |
+| ------------------- | ------------------------------------ | -------------------------- |
+| Workspace 이름      | 사용자 지정                          | 항상                       |
+| git branch          | OSC 133E 감지 또는 `.git/HEAD` watch | 있을 때                    |
+| working directory   | OSC 7 감지                           | 있을 때 (브랜치와 같은 줄) |
+| 리스닝 포트         | 주기적 `ss -tlnp` / `netstat` 조회   | 활성 워크스페이스만        |
+| pane 결과 아이콘    | OSC 133 E/D + activity handler       | 결과 표시 설정이 켜질 때   |
+| pane 마지막 입력    | 제출 입력 또는 OSC 133 명령          | terminal pane 둘째 줄      |
+| 읽지 않은 알림 배지 | 알림 시스템                          | 카운트 > 0                 |
+| 알림 링 (테두리)    | 알림 발생 시                         | 읽지 않은 알림 있을 때     |
 
 ### 마지막 명령 표시 (Activity-Aware Computation)
 
