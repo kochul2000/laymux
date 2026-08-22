@@ -71,6 +71,7 @@
   --transition-fast: 0.1s;
   --transition-list-collapse: 0.18s;
   --pane-row-max-h: 28px;
+  --workspace-terminal-pane-row-max-h: 36px;
   --workspace-count-badge-size: 14px;
   --workspace-count-badge-px: 3px;
   --hidden-shelf-max-height: 44%;
@@ -468,6 +469,12 @@
       opacity var(--transition-list-collapse) ease,
       transform var(--transition-list-collapse) ease,
       margin var(--transition-list-collapse) ease;
+  }
+  .workspace-terminal-pane-row-two-line {
+    max-height: var(--workspace-terminal-pane-row-max-h);
+  }
+  .workspace-terminal-pane-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
   }
   .workspace-pane-row-collapsed {
     max-height: 0;

@@ -8,6 +8,7 @@ import {
   type ActivityStatusMessageMode,
   type RawTerminalState,
 } from "./activity-handler";
+import { selectTerminalLastInput } from "./terminal-last-input";
 
 export interface LastCommandInfo {
   command: string;
@@ -29,6 +30,8 @@ export interface TerminalSummaryInfo {
   lastCommand: string | undefined;
   lastExitCode: number | undefined;
   lastCommandAt: number | undefined;
+  lastUserInput: string | undefined;
+  lastUserInputAt: number | undefined;
   activity: TerminalActivityInfo | undefined;
   outputActive: boolean;
   hasUnreadNotification: boolean;
@@ -187,6 +190,8 @@ export function computeWorkspaceSummary(
       lastCommand: t.lastCommand,
       lastExitCode: t.lastExitCode,
       lastCommandAt: t.lastCommandAt,
+      lastUserInput: t.lastUserInput,
+      lastUserInputAt: t.lastUserInputAt,
       activity: t.activity,
       outputActive: t.outputActive ?? false,
       hasUnreadNotification: notifications.some((n) => n.terminalId === t.id && n.readAt === null),
@@ -215,6 +220,8 @@ export function computeWorkspaceSummaryFromBackend(
     lastCommand: s.lastCommand ?? undefined,
     lastExitCode: s.lastExitCode ?? undefined,
     lastCommandAt: s.lastCommandAt ?? undefined,
+    lastUserInput: undefined,
+    lastUserInputAt: undefined,
     activity: s.activity as TerminalActivityInfo,
     outputActive: false, // outputActive is driven by frontend DEC 2026 events, not backend
     hasUnreadNotification: s.unreadNotificationCount > 0,
@@ -274,6 +281,11 @@ export function computeWorkspaceSummaryFromBackend(
     terminalCount: backendSummaries.length,
     terminalSummaries,
   };
+}
+
+/** Latest text the user submitted in this pane, whether shell command or agent prompt. */
+export function getTerminalLastInput(terminal: TerminalSummaryInfo): string | undefined {
+  return selectTerminalLastInput(terminal);
 }
 
 /**

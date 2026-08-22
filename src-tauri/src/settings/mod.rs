@@ -699,6 +699,29 @@ mod tests {
     }
 
     #[test]
+    fn workspace_selector_last_input_mode_defaults_to_per_pane() {
+        let settings: Settings = serde_json::from_str(r#"{ "workspaceSelector": {} }"#).unwrap();
+        assert_eq!(settings.workspace_selector.last_input_mode, "perPane");
+    }
+
+    #[test]
+    fn workspace_selector_last_input_mode_round_trip() {
+        let json = r#"{
+          "workspaceSelector": {
+            "lastInputMode": "workspaceLatest"
+          }
+        }"#;
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            settings.workspace_selector.last_input_mode,
+            "workspaceLatest"
+        );
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        assert!(serialized.contains("\"lastInputMode\":\"workspaceLatest\""));
+    }
+
+    #[test]
     fn migrate_cmd_profile_to_powershell_in_workspace_panes() {
         let mut settings = Settings {
             workspaces: vec![Workspace {

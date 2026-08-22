@@ -24,6 +24,7 @@ async function routeRemoteWithWorkspaces(
       result: boolean;
     }>,
   ) => void;
+  setLastInputMode: (mode: "perPane" | "workspaceLatest") => void;
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
@@ -36,6 +37,7 @@ async function routeRemoteWithWorkspaces(
     path: true,
     result: true,
   };
+  let lastInputMode: "perPane" | "workspaceLatest" = "perPane";
   const visibilityRequests: Array<{
     path: string;
     body: { hidden: boolean; leaseId: string };
@@ -57,7 +59,7 @@ async function routeRemoteWithWorkspaces(
     y: 0,
     w: 0.5,
     h: 1,
-    selectorDisplay: { environment: "A1" },
+    selectorDisplay: { environment: "A1", lastInput: "older pane input", lastInputAt: 10 },
   };
   const paneA2 = {
     id: "p-a2",
@@ -70,7 +72,7 @@ async function routeRemoteWithWorkspaces(
     y: 0,
     w: 0.5,
     h: 1,
-    selectorDisplay: { environment: "A2" },
+    selectorDisplay: { environment: "A2", lastInput: "newest pane input", lastInputAt: 20 },
   };
   const paneB1 = {
     id: "p-b1",
@@ -88,6 +90,8 @@ async function routeRemoteWithWorkspaces(
       environment: "PS",
       activity: { label: "running", color: "var(--yellow)" },
       cwd: "~/work/beta",
+      lastInput: "npm test",
+      lastInputAt: 15,
     },
   };
 
@@ -169,6 +173,7 @@ async function routeRemoteWithWorkspaces(
           workspaceSelector: {
             display: workspaceDisplay,
             pathEllipsis: "start",
+            lastInputMode,
           },
         },
       });
@@ -216,6 +221,9 @@ async function routeRemoteWithWorkspaces(
     },
     setWorkspaceDisplay(display) {
       workspaceDisplay = { ...workspaceDisplay, ...display };
+    },
+    setLastInputMode(mode) {
+      lastInputMode = mode;
     },
   };
 }
@@ -643,7 +651,7 @@ test.describe("remote mobile layout", () => {
     await expect(page.locator("#spatialExclusion")).toHaveAttribute("aria-pressed", "false");
   });
 
-  test("shows inactive pane status and the same bottom summary without selecting it", async ({
+  test("shows inactive pane status and last input without a bottom aggregate row", async ({
     page,
   }) => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
@@ -659,8 +667,31 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".pane-activity")).toHaveText("running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
     await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
-    await expect(beta.locator(".workspace-status-line")).toContainText("npm test");
-    await expect(beta.locator(".workspace-status-line")).toContainText("✓");
+    await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
+    await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
+  });
+
+  test("uses compact pane rows and one newest input line in workspaceLatest mode", async ({
+    page,
+  }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setLastInputMode("workspaceLatest");
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await page.locator("#navToggle").click();
+
+    const alpha = page.locator(".workspace-item", { hasText: "Alpha" });
+    await expect(alpha.locator(".pane-last-input")).toHaveCount(0);
+    await expect(alpha.locator(".workspace-pane-row.compact")).toHaveCount(2);
+    await expect(alpha.locator(".workspace-last-input")).toHaveText("newest pane input");
+    expect((await alpha.locator(".workspace-pane-row.compact").first().boundingBox())?.height).toBe(
+      18,
+    );
+
+    await alpha.locator('[data-pane-visibility="p-a2"]').click();
+    await expect(alpha.locator(".workspace-last-input")).toHaveText("older pane input");
   });
 
   test("opens hidden workspaces as a drawer page and mirrors pane eye controls", async ({

@@ -152,6 +152,7 @@ pub const PASTE_PATH_SEPARATORS: &[&str] = &["space", "newline", "comma", "semic
 pub const CONTROL_BAR_MODES: &[&str] = &["hover", "pinned", "minimized"];
 pub const NOTIFICATION_DISMISS_MODES: &[&str] = &["workspace", "paneFocus", "manual"];
 pub const WORKSPACE_SORT_ORDERS: &[&str] = &["manual", "notification"];
+pub const WORKSPACE_LAST_INPUT_MODES: &[&str] = &["perPane", "workspaceLatest"];
 pub const PROFILE_CURSOR_SHAPES: &[&str] = &[
     "bar",
     "underscore",

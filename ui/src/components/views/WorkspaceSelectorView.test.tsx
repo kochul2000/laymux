@@ -328,7 +328,7 @@ describe("WorkspaceSelectorView", () => {
     });
   });
 
-  it("shows latest notification text", async () => {
+  it("keeps the notification badge without restoring the removed aggregate text", async () => {
     useWorkspaceStore.setState({
       workspaces: [
         {
@@ -362,8 +362,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Build done/)).toBeInTheDocument();
+      expect(screen.getByTestId("unread-badge-ws-default")).toHaveTextContent("1");
     });
+    expect(screen.queryByText(/Build done/)).not.toBeInTheDocument();
   });
 
   it("activates the workspace and syncs backend read state on click (#365)", async () => {
@@ -599,8 +600,121 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✓");
     });
+  });
+
+  it("renders the latest submitted user input on the pane second line", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastCommand: "codex",
+      lastCommandAt: 10,
+      lastUserInput: "이 사용자의 마지막 질문을 보여줘",
+      lastUserInputAt: 20,
+      activity: { type: "interactiveApp", name: "Codex" },
+      activityMessage: "스트리밍 중인 assistant 토큰",
+    });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pane-last-input-terminal-p1")).toHaveTextContent(
+        "이 사용자의 마지막 질문을 보여줘",
+      );
+    });
+    expect(screen.getByTestId("pane-row-p1")).toHaveClass(
+      "workspace-terminal-pane-row",
+      "workspace-terminal-pane-row-two-line",
+    );
+    expect(screen.queryByText("스트리밍 중인 assistant 토큰")).not.toBeInTheDocument();
+  });
+
+  it("moves only the newest visible pane input to one workspace line in workspaceLatest mode", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-default",
+          name: "Default",
+          panes: [
+            {
+              id: "p1",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "p2",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "WSL" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p1",
+      profile: "PowerShell",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-p2",
+      profile: "WSL",
+      syncGroup: "Default",
+      workspaceId: "ws-default",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p1", {
+      lastUserInput: "older pane input",
+      lastUserInputAt: 10,
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-p2", {
+      lastUserInput: "newest pane input",
+      lastUserInputAt: 20,
+    });
+    useSettingsStore.getState().setWorkspaceSelector({ lastInputMode: "workspaceLatest" });
+
+    render(<WorkspaceSelectorView />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("workspace-last-input-ws-default")).toHaveTextContent(
+        "newest pane input",
+      );
+    });
+    expect(screen.queryByTestId("pane-last-input-terminal-p1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pane-last-input-terminal-p2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("pane-row-p1")).not.toHaveClass(
+      "workspace-terminal-pane-row-two-line",
+    );
   });
 
   it("displays last command with failure indicator", async () => {
@@ -639,7 +753,7 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm build/)).toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✗");
     });
   });
 
@@ -677,7 +791,7 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("—");
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("—");
     });
   });
 
@@ -718,7 +832,7 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✗");
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✗");
     });
   });
 
@@ -1160,17 +1274,16 @@ describe("WorkspaceSelectorView", () => {
       // Should show workspace terminal's command, not dock's
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
       expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
-      expect(screen.getByTestId("cmd-status-ws-default")).toHaveTextContent("✓");
+      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✓");
     });
   });
 
-  it("workspace items always render 3 rows even without data", () => {
+  it("does not render the workspace-level aggregate status row", () => {
     render(<WorkspaceSelectorView />);
     const item = screen.getByTestId("workspace-item-ws-default");
-    // Should have row-1, row-2, row-3
     expect(item.querySelector("[data-testid='ws-row-1-ws-default']")).toBeInTheDocument();
     expect(item.querySelector("[data-testid='ws-row-2-ws-default']")).toBeInTheDocument();
-    expect(item.querySelector("[data-testid='ws-row-3-ws-default']")).toBeInTheDocument();
+    expect(item.querySelector("[data-testid='ws-row-3-ws-default']")).not.toBeInTheDocument();
   });
 
   it("workspace index number has shortcut tooltip", () => {

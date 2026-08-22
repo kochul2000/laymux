@@ -322,6 +322,8 @@ export interface WorkspaceSelectorSettings {
   sortOrder: WorkspaceSortOrder;
   /** Path ellipsis direction. "start" (default) shows the end of the path, "end" shows the beginning. */
   pathEllipsis: PathEllipsisMode;
+  /** Last submitted input layout: per terminal pane or one latest line per workspace. */
+  lastInputMode: WorkspaceLastInputMode;
   /**
    * Seconds a pane/workspace must stay hidden before its terminal (PTY)
    * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
@@ -331,6 +333,9 @@ export interface WorkspaceSelectorSettings {
 
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
+
+/** Last submitted input layout in WorkspaceSelectorView (ADR-0188). */
+export type WorkspaceLastInputMode = "perPane" | "workspaceLatest";
 
 export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";
 export type {
@@ -896,6 +901,7 @@ export const DEFAULT_WORKSPACE_SELECTOR: WorkspaceSelectorSettings = {
   display: { ...DEFAULT_WORKSPACE_DISPLAY },
   sortOrder: "manual",
   pathEllipsis: "start",
+  lastInputMode: "perPane",
   hiddenAutoCloseSeconds: 0,
 };
 
@@ -1670,6 +1676,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     const power = data.power ? normalizeSleepPreventionAxes(data.power) : undefined;
     // Ensure workspaceSelector settings (incl. nested display) have all fields
     const validSortOrders: WorkspaceSortOrder[] = ["manual", "notification"];
+    const validLastInputModes: WorkspaceLastInputMode[] = ["perPane", "workspaceLatest"];
     const workspaceSelector = data.workspaceSelector
       ? {
           ...DEFAULT_WORKSPACE_SELECTOR,
@@ -1678,6 +1685,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           sortOrder: validSortOrders.includes(data.workspaceSelector.sortOrder)
             ? data.workspaceSelector.sortOrder
             : DEFAULT_WORKSPACE_SELECTOR.sortOrder,
+          lastInputMode: validLastInputModes.includes(data.workspaceSelector.lastInputMode)
+            ? data.workspaceSelector.lastInputMode
+            : DEFAULT_WORKSPACE_SELECTOR.lastInputMode,
         }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)

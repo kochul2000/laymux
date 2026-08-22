@@ -205,6 +205,7 @@ ADR 이 필요한 대표 기준:
 | [0185](0185-remote-file-viewer-download.md) | Remote FileViewer 다운로드는 전용 bytes 엔드포인트로 받고 안드로이드는 네이티브가 저장한다 | Proposed |
 | [0186](0186-remote-input-action-three-zone-layout.md) | Remote 입력 action은 기기별 기본행·Keys 확장행·숨김 3-zone 배치를 사용한다 (0028·0040 확장, 0036 일부 정정) | Accepted |
 | [0187](0187-remote-drawer-status-dots-and-hidden-subview.md) | Remote drawer 상태 표시는 작은 점으로 통일하고 숨김 workspace는 하위 화면에서 연다 (0180 대체, 0153 정정) | Accepted |
+| [0188](0188-workspace-pane-last-input-second-line.md) | Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다 (0151 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

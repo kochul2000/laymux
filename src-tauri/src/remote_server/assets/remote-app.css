@@ -1287,8 +1287,6 @@
       .dock-terminal-row {
         width: 100%;
         min-width: 0;
-        min-height: 18px;
-        max-height: 18px;
         display: flex;
         align-items: center;
         gap: 6px;
@@ -1309,6 +1307,23 @@
           opacity 160ms ease,
           transform 160ms ease,
           margin 160ms ease;
+      }
+      .workspace-pane-row {
+        min-height: 36px;
+        max-height: 36px;
+        align-items: flex-start;
+      }
+      .workspace-pane-row.compact {
+        min-height: 18px;
+        max-height: 18px;
+        align-items: center;
+      }
+      .workspace-pane-entry:not(:last-child) > .workspace-pane-row {
+        border-bottom: 1px solid var(--border);
+      }
+      .dock-terminal-row {
+        min-height: 18px;
+        max-height: 18px;
       }
       .workspace-pane-row:hover:not(:disabled),
       .dock-terminal-row:hover:not(:disabled) {
@@ -1344,6 +1359,7 @@
         flex: 0 0 auto;
         width: 18px;
         height: 12px;
+        margin-top: 2px;
         opacity: 0.5;
       }
       .workspace-pane-row.active .pane-minimap {
@@ -1355,6 +1371,46 @@
         flex: 1 1 auto;
         align-items: center;
         gap: 4px;
+      }
+      .workspace-pane-row .pane-row-main {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1px;
+      }
+      .workspace-pane-row.compact .pane-row-main {
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+      }
+      .workspace-pane-row.compact .pane-minimap {
+        margin-top: 0;
+      }
+      .pane-row-primary {
+        display: flex;
+        min-width: 0;
+        width: 100%;
+        align-items: center;
+        gap: 4px;
+      }
+      .pane-last-input {
+        min-width: 0;
+        min-height: 14px;
+        overflow: hidden;
+        color: var(--text-secondary);
+        opacity: 0.68;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .workspace-last-input {
+        min-width: 0;
+        min-height: 18px;
+        padding-left: 18px;
+        overflow: hidden;
+        color: var(--text-secondary);
+        font-size: var(--fs-sm);
+        opacity: 0.68;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .pane-env {
         flex: 0 0 auto;
@@ -1443,38 +1499,6 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .workspace-status-line {
-        min-height: 18px;
-        margin-top: 2px;
-        padding-left: 18px;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        color: var(--text-secondary);
-        font-size: 12px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .workspace-status-text {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .workspace-status-time {
-        flex: 0 0 auto;
-        opacity: 0.4;
-      }
-      .workspace-status-notification {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        font-style: italic;
-      }
-      .workspace-status-notification.error { color: var(--red); }
-      .workspace-status-notification.success { color: var(--green); }
-      .workspace-status-notification.warning { color: var(--yellow); }
-      .workspace-status-notification.info { color: var(--accent); }
       .nav-empty {
         margin: 0 8px 7px;
         padding: 7px 8px;

@@ -1708,7 +1708,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_mirrors_all_workspace_panes_status_and_bottom_summary() {
+    fn remote_page_mirrors_workspace_last_input_modes_without_old_bottom_summary() {
         let html = remote_client_source();
         let list_start = html.find("function renderWorkspaceList").unwrap();
         let item_start = html.find("function renderWorkspaceItem").unwrap();
@@ -1724,10 +1724,14 @@ mod tests {
         assert!(render_pane.contains("pane.selectorDisplay"));
         assert!(render_pane.contains("pane-command-status"));
         assert!(render_pane.contains("paneMinimapElement(panes, pane.id)"));
+        assert!(render_pane.contains("pane-last-input"));
+        assert!(render_pane.contains("selectorDisplay.lastInput"));
+        assert!(render_item.contains("workspaceLastInputMode"));
+        assert!(render_item.contains("latestWorkspaceInput"));
+        assert!(render_item.contains("workspace-last-input"));
         assert!(render_item.contains("workspace.selectorSummary"));
-        assert!(render_item.contains("workspace-status-line"));
-        assert!(render_item.contains("lastCommand"));
-        assert!(render_item.contains("latestNotification"));
+        assert!(!render_item.contains("workspace-status-line"));
+        assert!(!render_item.contains("renderWorkspaceStatusLine"));
     }
 
     #[test]
