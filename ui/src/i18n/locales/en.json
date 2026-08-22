@@ -785,7 +785,7 @@
       "installing": "Installing…",
       "installConfirm": "Install Laymux {{version}} and restart now?",
       "disabledInDev": "Self-update is disabled in development builds.",
-      "manualCheck": "Manual check"
+      "manualCheck": "Refresh"
     }
   },
   "workspace": {

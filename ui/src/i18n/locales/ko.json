@@ -785,7 +785,7 @@
       "installing": "설치 중…",
       "installConfirm": "Laymux {{version}} 을 설치하고 지금 재시작할까요?",
       "disabledInDev": "개발 빌드에서는 자동 업데이트가 꺼져 있습니다.",
-      "manualCheck": "수동 확인"
+      "manualCheck": "새로고침"
     }
   },
   "workspace": {
