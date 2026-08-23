@@ -80,7 +80,7 @@ export function createDirectInputCapture(): DirectInputCapture {
   return {
     push(data: string) {
       const submitted: string[] = [];
-      for (let index = 0; index < data.length;) {
+      for (let index = 0; index < data.length; ) {
         const rest = data.slice(index);
         const csi = rest.match(/^\x1b\[([0-9;?]*)([A-Za-z~])/u);
         if (csi) {
@@ -89,8 +89,8 @@ export function createDirectInputCapture(): DirectInputCapture {
           const amount = Math.max(1, Number.parseInt(params, 10) || 1);
           if (final === "D") cursor = Math.max(0, cursor - amount);
           else if (final === "C") cursor = Math.min(value.length, cursor + amount);
-          else if (final === "H" || params === "1") cursor = 0;
-          else if (final === "F" || params === "4") cursor = value.length;
+          else if (final === "H" || (final === "~" && params === "1")) cursor = 0;
+          else if (final === "F" || (final === "~" && params === "4")) cursor = value.length;
           else if (final === "~" && params === "3" && cursor < value.length) {
             value = value.slice(0, cursor) + value.slice(cursor + 1);
           }

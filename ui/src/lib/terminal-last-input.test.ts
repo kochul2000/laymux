@@ -27,6 +27,16 @@ describe("terminal last input", () => {
     expect(capture.push("abc\u001b[D\u001b[DZ\r")).toEqual(["aZbc"]);
   });
 
+  it("moves the cursor for Home/End keys only, not for same-parameter sequences", () => {
+    const capture = createDirectInputCapture();
+
+    // xterm/VT220 Home (CSI 1 ~) and End (CSI 4 ~) jump within the edited line.
+    expect(capture.push("bc\u001b[1~a\u001b[4~d\r")).toEqual(["abcd"]);
+    // A bare parameter of 1 or 4 on another final byte is not Home/End: cursor
+    // up (CSI 1 A) and erase-in-line (CSI 4 K) must leave the cursor alone.
+    expect(capture.push("ab\u001b[1Ac\u001b[4Kd\r")).toEqual(["abcd"]);
+  });
+
   it("chooses the newest shell command or agent input", () => {
     expect(
       selectTerminalLastInput({
