@@ -55,7 +55,26 @@ import { getTerminalSerializeMap } from "@/lib/terminal-serialize-registry";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useDockStore } from "@/stores/dock-store";
-import { useTerminalStore } from "@/stores/terminal-store";
+import { useTerminalStore, type TerminalActivityInfo } from "@/stores/terminal-store";
+
+/** Register a terminal instance the way a mounted TerminalView would. */
+function registerLiveTerminal(
+  terminalId: string,
+  activity: TerminalActivityInfo,
+  options: { sessionReady?: boolean } = {},
+): void {
+  const store = useTerminalStore.getState();
+  store.registerInstance({
+    id: terminalId,
+    profile: "PowerShell",
+    syncGroup: "ws-1",
+    workspaceId: "ws-1",
+  });
+  store.updateInstanceInfo(terminalId, {
+    sessionReady: options.sessionReady ?? true,
+    activity,
+  });
+}
 
 describe("persistSession", () => {
   beforeEach(() => {
@@ -580,6 +599,87 @@ describe("persistSession", () => {
       .panes[0].view;
     expect(savedView).not.toHaveProperty("lastClaudeSession");
     expect(savedView).not.toHaveProperty("lastCodexSession");
+  });
+
+  it("drops a stale agent session when the live pane is back to the shell", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    // No provider lists the pane: the agent exited and the detectors dropped it.
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView).not.toHaveProperty("lastClaudeSession");
+  });
+
+  it("keeps a stale agent session for a pane with no live terminal this run", async () => {
+    const wsState = useWorkspaceStore.getState();
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("stale-claude-session");
+  });
+
+  it("keeps a stale agent session while the pane activity still reports an agent", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    // Detection race: activity already says Claude, the PID attribution has not
+    // caught up yet. Dropping a usable resume id here would be the worse bug.
+    registerLiveTerminal(`terminal-${paneId}`, { type: "interactiveApp", name: "Claude" });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("stale-claude-session");
+  });
+
+  it("keeps a stale agent session while the pane session is not ready yet", async () => {
+    const wsState = useWorkspaceStore.getState();
+    const paneId = wsState.workspaces[0].panes[0].id;
+    wsState.setPaneView(0, {
+      type: "TerminalView",
+      lastClaudeSession: "stale-claude-session",
+    });
+    registerLiveTerminal(`terminal-${paneId}`, { type: "shell" }, { sessionReady: false });
+
+    await persistSession();
+
+    const savedView = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0].workspaces[0]
+      .panes[0].view;
+    expect(savedView.lastClaudeSession).toBe("stale-claude-session");
+  });
+
+  it("drops a stale agent session on a live dock pane back to the shell", async () => {
+    const dockState = useDockStore.getState();
+    const dockPaneId = dockState.getDock("left")!.panes[0].id;
+    dockState.setDockPaneView("left", dockPaneId, {
+      type: "TerminalView",
+      lastCodexSession: "stale-codex-session",
+    });
+    registerLiveTerminal(`terminal-${dockPaneId}`, { type: "shell" });
+
+    await persistSession();
+
+    const savedArg = (saveSettings as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const leftDock = savedArg.docks.find((d: { position: string }) => d.position === "left");
+    expect(leftDock.panes[0].view).not.toHaveProperty("lastCodexSession");
   });
 
   it("keeps collecting Codex attribution while restore is disabled", async () => {
