@@ -2568,6 +2568,20 @@
           }
         }
 
+        // A soft keyboard only opens inside the gesture that asked for it, and
+        // these restorations land several awaits later (attach: claim →
+        // navigation → chrome settle → pre-attach resize → socket open; an
+        // attachment upload: chooser → POST). On a coarse pointer such a focus
+        // leaves DOM focus without an IME, which is exactly the state the
+        // Keyboard button reads as "the keyboard is up" — so its next tap
+        // dismisses instead of raising (ADR-0196). Touch devices therefore let
+        // the first real gesture own the focus; fine pointers keep typing
+        // straight after Connect.
+        function focusInputSurfaceAfterAwait() {
+          if (coarsePointer) return;
+          focusCurrentInputSurface();
+        }
+
         function inputSurfaceFocused() {
           if (currentInputMode() === "direct") {
             return Boolean(terminal?.textarea) && document.activeElement === terminal.textarea;
@@ -7368,7 +7382,7 @@
                 `Connected to ${terminalId}`;
               clearTransientConnectionNotice("output", attachTitle);
               if (!reconnecting) setStatus(attachTitle);
-              if (focusInputOnOpen) focusCurrentInputSurface();
+              if (focusInputOnOpen) focusInputSurfaceAfterAwait();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
           };
@@ -7908,7 +7922,7 @@
               attachmentUploadInFlight = false;
               attachmentInput.value = "";
               updateComposerControls();
-              focusCurrentInputSurface();
+              focusInputSurfaceAfterAwait();
             }
           }
         }

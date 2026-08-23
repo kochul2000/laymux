@@ -1152,6 +1152,9 @@ test("Composer keeps xterm unfocused and hides its inactive application cursor",
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  // Attach leaves the focus alone on a touch device (ADR-0196), so raise the
+  // editor the way a person does before asserting the composer's cursor policy.
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   expect(
     await page.evaluate(
@@ -1210,6 +1213,59 @@ test("Direct-input xterm textarea opts out of browser autofill (issue #503)", as
     .toBe("off");
 });
 
+// A soft keyboard only opens inside the gesture that asked for it, and attach
+// finishes several awaits after the tap that started it. Focusing there would
+// leave DOM focus without an IME — and the Keyboard button reads DOM focus as
+// "the keyboard is up", so its first tap would dismiss instead of raise
+// (ADR-0196).
+test("coarse-pointer attach leaves the input focus for the first Keyboard tap (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  const composer = page.locator("#terminalComposer");
+  const editor = page.locator("#composerInput");
+
+  await expect(composer).toBeVisible();
+  await expect(editor).toBeEnabled();
+  await expect(editor).not.toBeFocused();
+
+  // One tap raises: the editor stays open and takes focus inside the gesture.
+  await page.locator("#focusTerminal").click();
+  await expect(composer).toBeVisible();
+  await expect(editor).toBeFocused();
+});
+
+test("coarse-pointer Direct attach also leaves the focus for the first Keyboard tap (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, storedMode: "direct" });
+  await connect(page);
+
+  const activeClassName = () => page.evaluate(() => document.activeElement?.className ?? "");
+  expect(await activeClassName()).not.toContain("xterm-helper-textarea");
+
+  await page.locator("#focusTerminal").click();
+  await expect.poll(activeClassName).toContain("xterm-helper-textarea");
+});
+
+test("fine-pointer attach keeps focusing the composer at connect (ADR-0196)", async ({ page }) => {
+  await installRemotePage(page, { coarse: false, width: 1280, storedMode: "composer" });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
+// The axis is the pointer, not the layout: the PC app's embedded mobile view is
+// a mobile layout driven by a hardware keyboard, so it keeps its attach focus.
+test("PC-app embedded mobile view keeps its attach focus (ADR-0196)", async ({ page }) => {
+  await installRemotePage(page, { coarse: false, localApp: true, storedMode: "composer" });
+  await connect(page);
+
+  await expect(page.locator("#composerInput")).toBeFocused();
+});
+
 test("Keyboard button collapses and restores the Composer editor with the soft keyboard", async ({
   page,
 }) => {
@@ -1220,8 +1276,10 @@ test("Keyboard button collapses and restores the Composer editor with the soft k
   const editor = page.locator("#composerInput");
   const keyboardButton = page.locator("#focusTerminal");
 
-  // Connect focuses the composer editor; the first toggle dismisses the
-  // keyboard and collapses the editor pane with it.
+  // The first tap raises the keyboard (attach left the focus alone, ADR-0196);
+  // the next one dismisses it and collapses the editor pane with it.
+  await expect(editor).not.toBeFocused();
+  await keyboardButton.click();
   await expect(editor).toBeFocused();
   await expect(composer).toBeVisible();
   await editor.fill("draft survives collapse");
@@ -1246,6 +1304,8 @@ test("reconnect keeps a collapsed Composer editor collapsed and unfocused", asyn
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  // Raise, then dismiss: only a keyboard the user actually opened can collapse.
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
@@ -1271,6 +1331,7 @@ test("explicit mode switches reset a collapsed Composer editor", async ({ page }
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
+  await page.locator("#focusTerminal").click();
   await expect(page.locator("#composerInput")).toBeFocused();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
@@ -1289,8 +1350,10 @@ test("special keys cancel the mousedown focus-theft default so the soft keyboard
   await installRemotePage(page, { coarse: true });
   await connect(page);
 
-  // Composer mode connects with the editor focused (mobile keyboard raised).
+  // The Keyboard tap is what raises the mobile keyboard (ADR-0196); from here
+  // on the editor holds focus and must keep it through every special key.
   const editor = page.locator("#composerInput");
+  await page.locator("#focusTerminal").click();
   await expect(editor).toBeFocused();
   await page.locator("#keyBarToggle").click();
 
