@@ -9,9 +9,6 @@
       "pasteConfirm": "The text to paste is {{bytes}} bytes. Do you want to continue?",
       "pathLinkHintFile": "Click: viewer · Ctrl: open on this PC · Ctrl+Shift: show location",
       "pathLinkHintDir": "Click: go to folder · Ctrl: open in file manager · Ctrl+Shift: show location",
-      "osOpenConfirm": "Open this file with its associated app on this PC. Depending on the extension, that app may run it straight away.\n\n{{path}}\n\nContinue?",
-      "osOpenConfirmExecutable": "Warning: opening this extension runs it on this PC or changes the system (executable, script, installer, registry, …).\n\n{{path}}\n\nContinue?",
-      "osOpenFailed": "Failed to open in the OS: {{message}}",
       "scrollToBottom": "Scroll to bottom",
       "composerEditor": "Terminal input draft",
       "composerPlaceholder": "Type, then Enter to send · Shift+Enter for a newline",
@@ -21,6 +18,19 @@
       "outputStoppedTitle": "Terminal output stopped",
       "outputStoppedDescription": "Close and recreate this pane to continue.",
       "restart": "Restart terminal"
+    },
+    "osHandoff": {
+      "confirm": "Open this file with its associated app on this PC. Depending on the extension, that app may run it straight away.\n\n{{path}}\n\nContinue?",
+      "confirmExecutable": "Warning: opening this extension runs it on this PC or changes the system (executable, script, installer, registry, …).\n\n{{path}}\n\nContinue?",
+      "failed": "Failed to open in the OS: {{message}}",
+      "open": "Open on this PC",
+      "openTitle": "Open with the associated app on this PC (same as Ctrl+click on a terminal path link)",
+      "reveal": "Show location",
+      "revealTitle": "Show this file in the OS file manager (same as Ctrl+Shift+click on a terminal path link)",
+      "noPreviewPrompt": "No in-app preview for this file. Open it with an app on this PC."
+    },
+    "viewer": {
+      "binaryFile": "Binary file ({{size}} KB)"
     },
     "remoteControl": {
       "title": "Remote control active",
@@ -314,7 +324,7 @@
       "pathLinkOsOpen": "Ctrl+click opens in the OS",
       "pathLinkOsOpenDesc": "Ctrl+click an underlined path to open it on this PC (file association, or the file manager for folders); Ctrl+Shift+click shows it in the file manager. WSL paths open on this PC too.",
       "pathLinkOsOpenConfirm": "Always confirm before opening in the OS",
-      "pathLinkOsOpenConfirmDesc": "Ask every time a file is opened with its associated app. When off, only risky extensions (executables, scripts) still ask. Showing a location and opening a folder never ask.",
+      "pathLinkOsOpenConfirmDesc": "Ask every time a file is opened with its associated app. When off, only risky extensions (executables, scripts) still ask. Showing a location and opening a folder never ask. Applies to the file viewer buttons as well, not just Ctrl+click.",
       "scrollSensitivity": "Wheel Scroll Sensitivity",
       "scrollSensitivityDesc": "Multiplier for how far one mouse wheel notch scrolls. 1 is the default; higher scrolls further (0.1-20). The Remote surface has its own value in Remote settings.",
       "fastScrollSensitivity": "Fast Scroll Sensitivity",

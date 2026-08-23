@@ -9,9 +9,6 @@
       "pasteConfirm": "붙여넣을 텍스트가 {{bytes}}바이트입니다. 계속하시겠습니까?",
       "pathLinkHintFile": "클릭: 뷰어 · Ctrl: 이 PC에서 열기 · Ctrl+Shift: 위치 보기",
       "pathLinkHintDir": "클릭: 이 폴더로 이동 · Ctrl: 탐색기에서 열기 · Ctrl+Shift: 위치 보기",
-      "osOpenConfirm": "이 파일을 이 PC의 연결 프로그램으로 엽니다. 확장자에 따라 프로그램이 곧바로 실행될 수 있습니다.\n\n{{path}}\n\n계속하시겠습니까?",
-      "osOpenConfirmExecutable": "경고: 이 확장자는 열면 이 PC에서 실행되거나 시스템이 변경됩니다(실행 파일·스크립트·설치 관리자·레지스트리 등).\n\n{{path}}\n\n계속하시겠습니까?",
-      "osOpenFailed": "OS에서 열지 못했습니다: {{message}}",
       "scrollToBottom": "맨 아래로 이동",
       "composerEditor": "터미널 입력 초안",
       "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
@@ -21,6 +18,19 @@
       "outputStoppedTitle": "터미널 출력이 중지되었습니다",
       "outputStoppedDescription": "계속하려면 이 pane을 닫고 다시 생성하세요.",
       "restart": "터미널 재시작"
+    },
+    "osHandoff": {
+      "confirm": "이 파일을 이 PC의 연결 프로그램으로 엽니다. 확장자에 따라 프로그램이 곧바로 실행될 수 있습니다.\n\n{{path}}\n\n계속하시겠습니까?",
+      "confirmExecutable": "경고: 이 확장자는 열면 이 PC에서 실행되거나 시스템이 변경됩니다(실행 파일·스크립트·설치 관리자·레지스트리 등).\n\n{{path}}\n\n계속하시겠습니까?",
+      "failed": "OS에서 열지 못했습니다: {{message}}",
+      "open": "이 PC에서 열기",
+      "openTitle": "이 PC의 연결 프로그램으로 엽니다 (터미널 경로 링크의 Ctrl+클릭과 같음)",
+      "reveal": "위치 보기",
+      "revealTitle": "OS 파일 관리자에서 이 파일의 위치를 엽니다 (터미널 경로 링크의 Ctrl+Shift+클릭과 같음)",
+      "noPreviewPrompt": "앱 안에서 미리 볼 수 없는 파일입니다. 이 PC의 프로그램으로 열어 보세요."
+    },
+    "viewer": {
+      "binaryFile": "바이너리 파일 ({{size}} KB)"
     },
     "remoteControl": {
       "title": "원격 제어 중",
@@ -314,7 +324,7 @@
       "pathLinkOsOpen": "Ctrl 클릭으로 OS에서 열기",
       "pathLinkOsOpenDesc": "밑줄 위에서 Ctrl+클릭하면 이 PC의 연결 프로그램(폴더는 파일 관리자)으로 열고, Ctrl+Shift+클릭하면 파일 관리자에서 위치를 보여줍니다. WSL 경로도 이 PC 기준으로 열립니다.",
       "pathLinkOsOpenConfirm": "OS에서 열기 전에 항상 확인",
-      "pathLinkOsOpenConfirmDesc": "파일을 연결 프로그램으로 열 때마다 확인합니다. 끄면 실행 파일·스크립트 등 위험한 확장자만 확인합니다. 위치 보여주기와 폴더 열기는 확인하지 않습니다.",
+      "pathLinkOsOpenConfirmDesc": "파일을 연결 프로그램으로 열 때마다 확인합니다. 끄면 실행 파일·스크립트 등 위험한 확장자만 확인합니다. 위치 보여주기와 폴더 열기는 확인하지 않습니다. Ctrl+클릭뿐 아니라 파일 뷰어의 버튼에도 같이 적용됩니다.",
       "scrollSensitivity": "휠 스크롤 민감도",
       "scrollSensitivityDesc": "마우스 휠을 한 번 굴릴 때 스크롤하는 양의 배율입니다. 1이 기본이고, 값이 클수록 더 많이 스크롤합니다(0.1~20). 리모트 화면은 리모트 설정에서 따로 정합니다.",
       "fastScrollSensitivity": "빠른 스크롤 민감도",
