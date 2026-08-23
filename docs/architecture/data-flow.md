@@ -1355,6 +1355,7 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
     │     └─ state DB/rollout header로 top-level interactive thread 검증
     │        → provider는 활성이나 정확한 ID를 증명하지 못하면 terminalId: null
     │        → null 귀속은 해당 pane의 lastClaudeSession/lastCodexSession/lastGrokSession을 모두 제거
+    │        → 어떤 provider도 주장하지 않는 live terminal(= agent를 종료해 shell로 돌아온 pane)도 모두 제거
     ├─ 1. exit.interruptTerminals이면 실행 중인 terminal에 Ctrl+C를 보내 agent 종료 출력을 기다림
     ├─ 2. 모든 TerminalView의 SerializeAddon.serialize({ excludeAltBuffer: true, excludeModes: true })
     │     → cache/terminal-output/{paneId}.dat 저장
@@ -1367,6 +1368,14 @@ Windows·Linux release의 업데이트 상태는 Rust `UpdateManager`가 단독 
 ```
 
 Windows host의 WSL terminal은 host process tree에 `wsl.exe`만 보이므로 native PID 귀속을 적용하지 않는다. `TerminalSession`이 소유한 distro를 결정한 뒤 bounded `wsl.exe --exec sh` probe가 해당 distro의 `/proc` 환경을 읽고, rcfile에서 상속된 `LX_TERMINAL_ID`로 pane과 top-level Claude/Codex/Grok Linux PID를 직접 연결한다. provider가 중첩됐으면 전체 Claude/Codex/Grok 후보 중 유일한 최상위 agent만 활성 provider이며, provider별로 각각 최상위를 고르지 않는다. Claude는 `<HOME>/.claude/sessions/<pid>.json`을 `\\wsl.localhost\<distro>` 경로로 읽는다. Codex는 live WAL SQLite를 Windows에서 열지 않고, 선택된 Linux PID의 `/proc/<pid>/fd` 중 `CODEX_HOME/sessions` 아래 rollout symlink만 수집해 header를 검증한다. Codex subagent·exec rollout은 제외하고 top-level ID가 하나일 때만 귀속한다. Grok는 guest 프로세스의 `GROK_HOME`(없으면 guest `HOME/.grok`)에서 `active_sessions.json`의 PID 일치를 읽고, 그 PID의 유효 UUID가 정확히 하나이며 `summary.json`이 존재하고 mtime이 age 게이트를 통과할 때만 귀속한다. Grok에는 rollout 필터가 없다. 명시 distro 파싱 실패는 default distro로 fallback하지 않고, default 조회와 모든 distro probe는 하나의 3초 deadline 안에서 끝난다. native·WSL 결과 병합 뒤 session ID 충돌도 전부 `null` 처리한다. distro·probe·provider 저장소 중 하나라도 증명할 수 없으면 CWD나 최신 파일로 추정하지 않고 `null`로 fail-closed한다([ADR-0120](../adr/0120-wsl-agent-session-attribution.md), [ADR-0156](../adr/0156-grok-first-class-agent.md)).
+
+**agent를 종료한 pane은 shell로 복원한다**([ADR-0195](../adr/0195-agent-session-cleared-on-shell-return.md)). 백엔드 귀속 맵의 키는 detector가 아직 추적하는 pane에서만 나오므로, agent를 정상 종료해 shell로 돌아온 pane은 세 맵 모두에서 사라진다. 이때 이전 실행의 세션 id를 그대로 두면 다음 기동이 사용자가 이미 종료한 agent를 resume한다. 판정 소유자는 `applyTerminalSessionFields` 한 곳이고, 입력은 `TerminalRuntimeAttribution`(백엔드 cwd·3개 귀속 맵 + live terminal 집합)이다.
+
+- live 집합의 SoT는 프론트엔드 `terminal-store` 인스턴스다(id는 `terminal-<paneId>`). `sessionReady === false`는 제외한다.
+- live인데 어떤 provider도 주장하지 않으면 세 세션 필드를 모두 삭제한다 — 그 pane은 지금 shell이다.
+- activity가 `interactiveApp`/`Claude`·`Codex`·`Grok`인 pane은 live 집합에서 빼서 값을 보존한다(detector 경쟁 = agent가 방금 시작).
+- live terminal이 없는 pane(다른 워크스페이스, 이번 실행에서 미기동)은 증명 기회를 받지 못했으므로 기존 값을 보존한다.
+- `includeRuntimeStructuralState: false`(설정 비교 경로)는 live 집합을 비워 런타임 상태를 읽지 않는 계약을 유지한다.
 
 ### 13.5 시작 시퀀스
 

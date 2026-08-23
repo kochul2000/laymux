@@ -9,6 +9,7 @@ import {
 } from "@/lib/tauri-api";
 import { useDockStore } from "@/stores/dock-store";
 import { useSettingsStore } from "@/stores/settings-store";
+import { useTerminalStore } from "@/stores/terminal-store";
 import { useWorkspaceStore } from "@/stores/workspace-store";
 import {
   applySettingsSnapshot,
@@ -30,14 +31,29 @@ interface CollectSettingsSnapshotOptions {
 
 type SavedTerminalView = { type: string; [key: string]: unknown };
 
+/** Runtime state that decides the persisted `lastCwd` / `last*Session` fields. */
+interface TerminalRuntimeAttribution {
+  backendCwds: Record<string, string>;
+  claudeSessionIds: Record<string, string | null>;
+  codexSessionIds: Record<string, string | null>;
+  grokSessionIds: Record<string, string | null>;
+  /**
+   * Terminals with a live PTY session in this run that no agent claims.
+   *
+   * The backend session maps only carry the panes the agent detectors still
+   * track, so a pane that quit its agent back to the shell drops out of every
+   * map. Without this set the pane keeps the id it was resumed with and the
+   * next start relaunches an agent the user already quit (ADR-0195).
+   */
+  liveShellTerminalIds: ReadonlySet<string>;
+}
+
 function applyTerminalSessionFields(
   view: SavedTerminalView,
   terminalId: string,
-  backendCwds: Record<string, string>,
-  claudeSessionIds: Record<string, string | null>,
-  codexSessionIds: Record<string, string | null>,
-  grokSessionIds: Record<string, string | null>,
+  runtime: TerminalRuntimeAttribution,
 ): SavedTerminalView {
+  const { backendCwds, claudeSessionIds, codexSessionIds, grokSessionIds } = runtime;
   const savedView = { ...view };
   const cwd = backendCwds[terminalId];
   if (cwd) savedView.lastCwd = cwd;
@@ -53,7 +69,12 @@ function applyTerminalSessionFields(
     (claudeActive && !claudeSession) ||
     (codexActive && !codexSession) ||
     (grokActive && !grokSession);
-  if (activeCount > 1 || unproven) {
+  // Live pane, no provider claims it → it is a shell pane now, so any id from
+  // an earlier run is stale. Panes with no live terminal (another workspace,
+  // never started this run) keep theirs — they were never given a chance to
+  // prove anything.
+  const staleAfterAgentExit = activeCount === 0 && runtime.liveShellTerminalIds.has(terminalId);
+  if (activeCount > 1 || unproven || staleAfterAgentExit) {
     delete savedView.lastClaudeSession;
     delete savedView.lastCodexSession;
     delete savedView.lastGrokSession;
@@ -71,6 +92,30 @@ function applyTerminalSessionFields(
     delete savedView.lastCodexSession;
   }
   return savedView;
+}
+
+/** Agent names the activity detectors report for `interactiveApp` panes. */
+const AGENT_ACTIVITY_NAMES = new Set(["Claude", "Codex", "Grok"]);
+
+/**
+ * Live terminals that are not currently showing an agent.
+ *
+ * A pane whose activity still says "Claude"/"Codex"/"Grok" is excluded even
+ * when the backend session maps do not list it: that contradiction is a
+ * detection race (the agent just started), and dropping a usable resume id is
+ * worse than carrying it one more save.
+ */
+function collectLiveShellTerminalIds(): ReadonlySet<string> {
+  const live = new Set<string>();
+  for (const instance of useTerminalStore.getState().instances) {
+    if (instance.sessionReady === false) continue;
+    const activity = instance.activity;
+    if (activity?.type === "interactiveApp" && AGENT_ACTIVITY_NAMES.has(activity.name ?? "")) {
+      continue;
+    }
+    live.add(instance.id);
+  }
+  return live;
 }
 
 /** Collect the current settings-owned state from every frontend store. */
@@ -92,6 +137,16 @@ export async function collectSettingsSnapshot(
           getCodexSessionIds(codexMaxAge).catch(() => ({}) as Record<string, string | null>),
           getGrokSessionIds(grokMaxAge).catch(() => ({}) as Record<string, string | null>),
         ]);
+  const runtime: TerminalRuntimeAttribution = {
+    backendCwds,
+    claudeSessionIds,
+    codexSessionIds,
+    grokSessionIds,
+    liveShellTerminalIds:
+      options.includeRuntimeStructuralState === false
+        ? new Set<string>()
+        : collectLiveShellTerminalIds(),
+  };
 
   return {
     language: settingsState.language,
@@ -176,10 +231,7 @@ export async function collectSettingsSnapshot(
             ? applyTerminalSessionFields(
                 pane.view as SavedTerminalView,
                 toTerminalId(pane.id),
-                backendCwds,
-                claudeSessionIds,
-                codexSessionIds,
-                grokSessionIds,
+                runtime,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {
@@ -234,10 +286,7 @@ export async function collectSettingsSnapshot(
             ? applyTerminalSessionFields(
                 pane.view as SavedTerminalView,
                 toTerminalId(pane.id),
-                backendCwds,
-                claudeSessionIds,
-                codexSessionIds,
-                grokSessionIds,
+                runtime,
               )
             : ({ ...pane.view } as SavedTerminalView);
         return {
