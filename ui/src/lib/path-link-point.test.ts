@@ -204,6 +204,72 @@ describe("createPathLinkPointEvaluator (ADR-0188 point 트리거)", () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
+  it("공백이 든 절대경로는 확장 후보를 한 배치로 stat 하고 존재하는 최장 후보만 적용한다 (ADR-0191)", async () => {
+    // "run G:/a b/x.exe end" — 포인터는 "b/x.exe" 토큰 위(컬럼 12).
+    const byPath = new Map([
+      ["/proj/b/x.exe", { exists: false, isDirectory: false }],
+      ["G:/a b/x.exe", { exists: true, isDirectory: false }],
+      ["G:/a b/x.exe end", { exists: false, isDirectory: false }],
+    ]);
+    const statPaths = vi.fn(async (paths: string[]) =>
+      paths.map((path) => byPath.get(path) ?? { exists: false, isDirectory: false }),
+    );
+    const apply = vi.fn();
+    const evaluator = createPathLinkPointEvaluator({
+      getSettings: () => ({ enabled: true, maxPathLength: 256 }),
+      getCwd: () => "/proj",
+      resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
+      readLine: () => asciiCells("run G:/a b/x.exe end"),
+      statPaths,
+      isVerifiedAt: () => false,
+      apply,
+    });
+
+    await evaluator.evaluateAt(12, 4);
+
+    // 후보 3개(포인터 토큰 + 확장 접두 2개)가 배치 1회로 나간다.
+    expect(statPaths).toHaveBeenCalledTimes(1);
+    expect(statPaths).toHaveBeenCalledWith(["/proj/b/x.exe", "G:/a b/x.exe", "G:/a b/x.exe end"]);
+    // 존재하는 후보 중 가장 긴 것 하나만 밑줄이 된다.
+    expect(apply).toHaveBeenCalledWith([
+      {
+        bufferLine: 5,
+        startCol: 5,
+        endCol: 16,
+        absPath: "G:/a b/x.exe",
+        token: "G:/a b/x.exe",
+        isDirectory: false,
+      },
+    ]);
+  });
+
+  it("존재하는 접두 디렉토리와 전체 경로가 겹치면 긴 쪽이 이긴다", async () => {
+    const byPath = new Map([
+      ["G:/my dir", { exists: true, isDirectory: true }],
+      ["G:/my dir name", { exists: true, isDirectory: true }],
+    ]);
+    const statPaths = vi.fn(async (paths: string[]) =>
+      paths.map((path) => byPath.get(path) ?? { exists: false, isDirectory: false }),
+    );
+    const apply = vi.fn();
+    const evaluator = createPathLinkPointEvaluator({
+      getSettings: () => ({ enabled: true, maxPathLength: 256 }),
+      getCwd: () => "/proj",
+      resolveCell: (clientX, clientY) => ({ col: clientX, absoluteLine: clientY }),
+      readLine: () => asciiCells("G:/my dir name"),
+      statPaths,
+      isVerifiedAt: () => false,
+      apply,
+    });
+
+    await evaluator.evaluateAt(8, 4); // "dir" 토큰 위
+
+    expect(apply).toHaveBeenCalledWith([
+      expect.objectContaining({ absPath: "G:/my dir name", isDirectory: true }),
+    ]);
+    expect(apply.mock.calls[0][0]).toHaveLength(1);
+  });
+
   it("한글이 앞에 있으면 밑줄을 셀 기준으로 보정한다", async () => {
     const h = harness("");
     const evaluator = createPathLinkPointEvaluator({
