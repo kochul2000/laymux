@@ -213,6 +213,7 @@ ADR 이 필요한 대표 기준:
 | [0193](0193-viewer-os-handoff-buttons.md) | FileViewer 는 OS 열기·위치 보기를 버튼으로 노출하고 확인 정책을 트리거와 분리한다 (0100 확장) | Proposed |
 | [0194](0194-workspace-pane-last-input-second-line.md) | Workspace selector는 마지막 사용자 입력 표시 모드를 제공한다 (0151 정정) | Accepted |
 | [0195](0195-agent-session-cleared-on-shell-return.md) | agent 를 종료한 pane 은 shell 로 복원한다 — live pane 에 주장자가 없으면 세션 id 삭제 (0120 확장) | Accepted |
+| [0196](0196-remote-coarse-pointer-attach-defers-input-focus.md) | 터치 기기의 Remote attach 는 입력 surface focus 를 선점하지 않는다 (0036 축 구분) | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
