@@ -1,6 +1,6 @@
 # 0196. 터치 기기의 Remote attach 는 입력 surface focus 를 선점하지 않는다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-23
 - Source: 사용자 실기 신고("리모트 최초 진입 시 컴포저가 켜져 있어도 입력이 안 되고, Keyboard 버튼을 껐다 켜야 입력된다"); [architecture/api-contracts.md §13](../architecture/api-contracts.md) Remote 입력 상태 전이 계약 — 정정 대상 문장("입력 포커스는 … 사용자가 시작한 진입만 변경한다")은 PR [#744](https://github.com/kochul2000/laymux/pull/744) 가 도입했다; PR [#882](https://github.com/kochul2000/laymux/pull/882)(APK 가 native view focus 만 복원하고 DOM editor 자동 focus·IME 열기를 하지 않는다는 계약)
 - 선행 수정: PR [#848](https://github.com/kochul2000/laymux/pull/848)(`52522414`)이 **부팅 autoConnect 한 경로만** `focusInput: false` 로 막았다(에뮬레이터+CDP 계측으로 확정). 이 ADR 은 같은 원인을 pointer 축의 일반 규칙으로 승격한다.
@@ -49,5 +49,5 @@ Remote 입력 상태 전이 계약은 지금까지 "입력 포커스는 Connect�
 - headless 브라우저는 IME 를 관측할 수 없으므로 e2e 는 IME 자체가 아니라 그 전제 상태를 고정한다 — coarse 진입에서 입력 surface 가 focus 되지 않고, `Keyboard` 첫 탭이 editor 를 접는 대신 focus 를 잡는다. fine pointer 의 attach-focus 유지도 같은 층에서 회귀로 고정한다.
 - 재기준화 대상은 coarse pointer 로 도는 시나리오뿐이다 — `matchMedia("(pointer: coarse)")` 를 참으로 주입하는 스펙과 `hasTouch`/`isMobile` describe 가 그것이다. fine pointer 시나리오는 손대지 않고 attach-focus 유지 회귀로 남긴다. e2e 는 최초 attach 와 pane 전환 attach 를 덮고, gesture 창 안의 경로(파일 뷰어 닫기 등)는 이전 커버리지를 그대로 쓴다.
 - `api-contracts.md` §13 의 입력 포커스 문장을 pointer 축으로 정정한다. APK 의 PR #882 계약(native view focus 만 복원)과 페이지 계약이 이제 서로 어긋나지 않는다.
-- 승인 전제: headless 는 IME 를 못 보므로, 실기(에뮬·폰)에서 첫 탭에 IME 가 실제로 올라오는지 확인한 뒤 이 ADR 을 Accepted 로 전환한다.
+- 후속 검증 의무: headless 는 IME 를 못 보므로, 실기(에뮬·폰)에서 수동 Connect 진입과 pane 전환 뒤 첫 탭에 IME 가 올라오는지 #848 이 쓴 계측(진입 직후 `activeElement`, `mInputShown`)으로 확인한다. 그 계측이 다른 원인을 드러내면 새 ADR 로 기록한다.
 - 재검토 조건: 브라우저가 user activation 없이 IME 를 열 수 있는 신뢰할 수 있는 표준 경로를 제공하거나, 터치 기기 + 하드웨어 키보드 조합을 안정적으로 감지할 수 있게 되는 경우.
