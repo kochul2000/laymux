@@ -299,6 +299,70 @@ describe("Remote FileViewer path-link bridge", () => {
     });
   });
 
+  it("point 모드는 공백이 든 절대경로의 확장 접두를 한 배치로 검증하고 최장 후보만 낸다 (ADR-0191)", async () => {
+    registerTerminal("/work");
+    const byPath = new Map([
+      ["/work/b/x.exe", { exists: false, isDirectory: false }],
+      ["G:/a b/x.exe", { exists: true, isDirectory: false }],
+      ["G:/a b/x.exe now", { exists: false, isDirectory: false }],
+    ]);
+    vi.mocked(statPaths).mockImplementation(async (paths: string[]) =>
+      paths.map((path) => byPath.get(path) ?? { exists: false, isDirectory: false }),
+    );
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "point",
+      lines: ["run G:/a b/x.exe now"],
+      caret: { lineIndex: 0, index: 11 },
+    });
+
+    expect(statPaths).toHaveBeenCalledTimes(1);
+    expect(statPaths).toHaveBeenCalledWith(["/work/b/x.exe", "G:/a b/x.exe", "G:/a b/x.exe now"]);
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          {
+            token: "G:/a b/x.exe",
+            path: "G:/a b/x.exe",
+            lineIndex: 0,
+            startIndex: 4,
+            endIndex: 16,
+          },
+        ],
+      },
+    });
+  });
+
+  it("screen 모드도 공백 확장 후보를 찾아 존재하는 파일만 낸다 (ADR-0191)", async () => {
+    registerTerminal("/work");
+    const byPath = new Map([
+      ["G:/내 드라이브", { exists: true, isDirectory: true }],
+      ["G:/내 드라이브/Advisor/setup.exe", { exists: true, isDirectory: false }],
+    ]);
+    vi.mocked(statPaths).mockImplementation(async (paths: string[]) =>
+      paths.map((path) => byPath.get(path) ?? { exists: false, isDirectory: false }),
+    );
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "screen",
+      lines: ["다운로드: G:/내 드라이브/Advisor/setup.exe 완료"],
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        valid: true,
+        matches: [{ token: "G:/내 드라이브/Advisor/setup.exe", lineIndex: 0, startIndex: 6 }],
+      },
+    });
+    const matches = (result.data as { matches: Array<{ token: string }> }).matches;
+    expect(matches).toHaveLength(1);
+  });
+
   it("알 수 없는 mode 나 잘못된 lines 는 fail-closed 다", async () => {
     registerTerminal("/work");
 
