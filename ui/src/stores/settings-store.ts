@@ -359,7 +359,7 @@ export interface WorkspaceSelectorSettings {
 /** Workspace sort order: "manual" = user-defined drag-drop order, "notification" = most recent notification first. */
 export type WorkspaceSortOrder = "manual" | "notification";
 
-/** Last submitted input layout in WorkspaceSelectorView (ADR-0191). */
+/** Last submitted input layout in WorkspaceSelectorView (ADR-0194). */
 export type WorkspaceLastInputMode = "perPane" | "workspaceLatest";
 
 export type { ExitSettings, IssueReporterSettings, MemoSettings } from "../lib/tauri-api";

@@ -3,10 +3,10 @@
  *
  * 트리거는 세 가지 — 데스크톱의 hover dwell, 이동 없는 클릭, Remote 의 단일 탭
  * (Remote 는 host bridge 를 거쳐 같은 파서를 쓴다). 어느 쪽이든 **포인터 아래
- * maximal token 하나**만 후보로 만들어 트리거당 `stat_paths` 를 정확히 1건으로
- * 묶는다. 과거 hover 발견이 제거된 이유는 트리거가 아니라 "줄 전체 토큰마다
- * 조회"였다(ADR-0148 Context) — 그 실패 모드를 다시 만들지 않는 것이 이 모듈의
- * 계약이다.
+ * 지점을 덮는 상수 개 후보**(maximal token 1 + 공백 확장 접두 ≤ 8, ADR-0191)만
+ * 만들어 트리거당 `stat_paths` 를 정확히 배치 1건으로 묶는다. 과거 hover 발견이
+ * 제거된 이유는 트리거가 아니라 "줄 전체 토큰마다 조회"였다(ADR-0148 Context)
+ * — 그 실패 모드를 다시 만들지 않는 것이 이 모듈의 계약이다.
  *
  * 부수효과(밑줄 그리기·설정 읽기·버퍼 읽기·IPC)는 전부 주입받아 단위 테스트로
  * 덮는다. `TerminalView` 는 배선만 한다.
@@ -14,10 +14,11 @@
 
 import {
   decidePathLinkAction,
-  extractPathCandidateAtOffset,
+  extractPathCandidatesAtOffset,
   joinCwdPath,
   mapLineCandidateToPathRange,
   pathPointLimits,
+  resolveOverlappingRanges,
 } from "./path-link-detect";
 import type { VerifiedPathSelection } from "./path-link-provider";
 import { reconstructLine, type CellInfo } from "./terminal-cell-map";
@@ -37,7 +38,7 @@ export interface PathLinkPointDeps {
   resolveCell: (clientX: number, clientY: number) => { col: number; absoluteLine: number } | null;
   /** 0-based 절대 버퍼 라인의 셀. 없으면 null. */
   readLine: (absoluteLine: number) => CellInfo[] | null;
-  /** bounded batch stat(여기서는 항상 1건). */
+  /** bounded batch stat(트리거당 배치 1건, 후보 상수 개 — ADR-0191). */
   statPaths: (paths: string[]) => Promise<Array<{ exists: boolean; isDirectory: boolean }>>;
   /** 이미 검증된 밑줄 위인지 — 그러면 재평가하지 않는다. */
   isVerifiedAt: (clientX: number, clientY: number) => boolean;
@@ -46,7 +47,7 @@ export interface PathLinkPointDeps {
 }
 
 export interface PathLinkPointEvaluator {
-  /** 그 지점을 평가한다. 조회는 최대 1건이고, 조건에 걸리면 0건이다. */
+  /** 그 지점을 평가한다. stat 배치는 최대 1건이고, 조건에 걸리면 0건이다. */
   evaluateAt: (clientX: number, clientY: number) => Promise<void>;
   /**
    * 진행 중 결과와 재조회 방지 memo 를 폐기한다. 선택 발생처럼 이 지점의
@@ -128,25 +129,41 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
         clearPoint();
         return;
       }
-      const candidate = extractPathCandidateAtOffset(
+      const candidates = extractPathCandidatesAtOffset(
         text,
         offset,
         pathPointLimits(settings.maxPathLength),
       );
-      if (!candidate) {
+      if (candidates.length === 0) {
         clearPoint();
         return;
       }
       const cwd = deps.getCwd();
-      const absPath = joinCwdPath(cwd, candidate.text);
-      if (!absPath) {
+      const uniquePaths: string[] = [];
+      const pathIndexes = new Map<string, number>();
+      const pending = candidates.flatMap((candidate) => {
+        const absPath = joinCwdPath(cwd, candidate.text);
+        if (!absPath) return [];
+        let statIndex = pathIndexes.get(absPath);
+        if (statIndex === undefined) {
+          statIndex = uniquePaths.length;
+          pathIndexes.set(absPath, statIndex);
+          uniquePaths.push(absPath);
+        }
+        return [{ candidate, absPath, statIndex }];
+      });
+      if (pending.length === 0) {
         clearPoint();
         return;
       }
 
-      const key = `${cwd ?? ""}\u0000${cell.absoluteLine}\u0000${candidate.startIndex}\u0000${candidate.text}`;
-      // 구분자는 반드시 \u0000 **이스케이프**로 쓴다 — 생 NUL 바이트를 소스에 박으면
-      // git 이 이 파일을 바이너리로 분류해 diff·grep 이 죽는다.
+      const key = `${cwd ?? ""}\u0000${cell.absoluteLine}\u0000${pending
+        .map(({ candidate }) => `${candidate.startIndex}\u0000${candidate.text}`)
+        .join("\u0001")}`;
+      // 구분자는 반드시 \u0000/\u0001 **이스케이프**로 쓴다 — 생 제어 바이트를
+      // 소스에 박으면 git 이 이 파일을 바이너리로 분류해 diff·grep 이 죽는다.
+      // 키에 후보 집합 전체가 들어가므로 줄 꼬리가 바뀌어 확장 후보(ADR-0191)가
+      // 달라지면 재평가된다.
       // 조회가 끝난 지점(성공·실패)과 지금 조회 중인 지점 둘 다 재조회를 막는다.
       // pendingKey 가 없으면 느린 stat 이 도는 동안 dwell 이 같은 토큰에 대해
       // 300ms 마다 새 배치를 계속 만든다.
@@ -157,7 +174,7 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
 
       let infos: Array<{ exists: boolean; isDirectory: boolean }>;
       try {
-        infos = await deps.statPaths([absPath]);
+        infos = await deps.statPaths(uniquePaths);
       } catch {
         if (pendingKey === key) pendingKey = null;
         if (seq === revision) clearPoint();
@@ -169,22 +186,33 @@ export function createPathLinkPointEvaluator(deps: PathLinkPointDeps): PathLinkP
       // `isPathLinkCwdCurrent` 가드와 같은 이유).
       if (seq !== revision || deps.getCwd() !== cwd) return;
 
-      const info = infos[0];
-      const action = info ? decidePathLinkAction(info) : "none";
       // 성공이든 실패든 이 지점은 평가가 끝났다 — 같은 지점 재조회를 막는다.
       evaluatedKey = key;
-      if (action === "none") {
+      const verified = pending.flatMap(({ candidate, absPath, statIndex }) => {
+        const info = infos[statIndex];
+        const action = info ? decidePathLinkAction(info) : "none";
+        if (action === "none") return [];
+        return [{ candidate, absPath, isDirectory: action === "changeDir" }];
+      });
+      // 지점을 덮는 후보들은 서로 겹치므로 존재하는 것 중 가장 긴 하나만
+      // 남는다(ADR-0191 longest-existing-wins).
+      const resolved = resolveOverlappingRanges(verified, ({ candidate }) => ({
+        line: candidate.lineIndex,
+        start: candidate.startIndex,
+        end: candidate.endIndex,
+      }));
+      if (resolved.length === 0) {
         deps.apply([]);
         return;
       }
-      deps.apply([
-        {
+      deps.apply(
+        resolved.map(({ candidate, absPath, isDirectory }) => ({
           ...mapLineCandidateToPathRange(cell.absoluteLine + 1, candidate, cells),
           absPath,
           token: candidate.text,
-          isDirectory: action === "changeDir",
-        },
-      ]);
+          isDirectory,
+        })),
+      );
     },
   };
 }

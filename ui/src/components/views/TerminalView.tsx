@@ -42,6 +42,7 @@ import {
   decidePathLinkAction,
   mapSelectionCandidateToPathRange,
   pathSelectionLimits,
+  resolveOverlappingRanges,
 } from "@/lib/path-link-detect";
 import { readLineCells } from "@/lib/terminal-cell-map";
 import { useFileViewerStore } from "@/stores/file-viewer-store";
@@ -1658,7 +1659,7 @@ export function TerminalView({
             clearPathLinkSelection();
             return;
           }
-          const verified = pending.flatMap<VerifiedPathSelection>((item) => {
+          const existing = pending.flatMap<VerifiedPathSelection>((item) => {
             const info = infos[item.statIndex];
             const action = info ? decidePathLinkAction(info) : "none";
             if (action === "none") return [];
@@ -1671,6 +1672,13 @@ export function TerminalView({
               },
             ];
           });
+          // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은
+          // 줄의 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+          const verified = resolveOverlappingRanges(existing, (item) => ({
+            line: item.bufferLine,
+            start: item.startCol,
+            end: item.endCol + 1,
+          }));
           if (verified.length === 0) {
             clearPathLinkSelection();
             return;

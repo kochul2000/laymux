@@ -2,7 +2,7 @@ import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
 import {
   decidePathLinkAction,
-  extractPathCandidateAtOffset,
+  extractPathCandidatesAtOffset,
   extractPathCandidatesFromScreen,
   extractPathCandidatesFromSelection,
   isPathLinkCwdCurrent,
@@ -10,6 +10,7 @@ import {
   pathPointLimits,
   pathScreenLimits,
   pathSelectionLimits,
+  resolveOverlappingRanges,
   type PathSelectionCandidate,
 } from "./path-link-detect";
 import {
@@ -63,12 +64,9 @@ function resolveRemotePathLinkCandidates(
     if (!Number.isSafeInteger(lineIndex) || !Number.isSafeInteger(index)) return [];
     const line = lines[lineIndex as number];
     if (line === undefined) return [];
-    const candidate = extractPathCandidateAtOffset(
-      line,
-      index as number,
-      pathPointLimits(maxPathLength),
+    return extractPathCandidatesAtOffset(line, index as number, pathPointLimits(maxPathLength)).map(
+      (candidate) => ({ ...candidate, lineIndex: lineIndex as number }),
     );
-    return candidate ? [{ ...candidate, lineIndex: lineIndex as number }] : [];
   }
   return extractPathCandidatesFromSelection(lines.join("\n"), pathSelectionLimits(maxPathLength));
 }
@@ -130,19 +128,23 @@ export async function handleRemoteFileViewerRequest(
       ) {
         return ok({ valid: false });
       }
-      const matches = pending.flatMap(({ candidate, path, statIndex }) => {
+      const linkable = pending.filter(({ statIndex }) => {
         const info = infos[statIndex];
-        if (!info || decidePathLinkAction(info) !== "openFile") return [];
-        return [
-          {
-            token: candidate.text,
-            path,
-            lineIndex: candidate.lineIndex,
-            startIndex: candidate.startIndex,
-            endIndex: candidate.endIndex,
-          },
-        ];
+        return Boolean(info) && decidePathLinkAction(info) === "openFile";
       });
+      // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은 줄의
+      // 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
+      const matches = resolveOverlappingRanges(linkable, ({ candidate }) => ({
+        line: candidate.lineIndex,
+        start: candidate.startIndex,
+        end: candidate.endIndex,
+      })).map(({ candidate, path }) => ({
+        token: candidate.text,
+        path,
+        lineIndex: candidate.lineIndex,
+        startIndex: candidate.startIndex,
+        endIndex: candidate.endIndex,
+      }));
       return matches.length > 0 ? ok({ valid: true, matches }) : ok({ valid: false });
     } catch (error) {
       return err(

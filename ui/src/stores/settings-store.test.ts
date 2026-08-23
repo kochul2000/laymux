@@ -955,7 +955,7 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
-  // workspaceSelector.lastInputMode (ADR-0191)
+  // workspaceSelector.lastInputMode (ADR-0194)
   it("defaults lastInputMode to perPane", () => {
     expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
   });
