@@ -56,6 +56,8 @@ import {
   type GithubSettings,
   type RemoteSettings,
 } from "@/lib/tauri-api";
+import { Button } from "@/components/ui/Button";
+import { ExternalLinkIcon } from "@/components/ui/icons";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import {
   GITHUB_FONT_SIZE_MAX,
@@ -307,6 +309,17 @@ function UpdateSection() {
   const busy = status !== null && status.operation !== "idle";
   const available = status?.availableVersion ?? null;
   const error = requestError ?? status?.lastError ?? null;
+  // Why the manual check cannot run right now, as the sentence to show on the
+  // button itself; null when it can run. The dev-build gate is enforced in Rust
+  // (a debug binary must never replace itself with a release artifact), so the
+  // UI only has to explain it.
+  const checkDisabledReason = !status
+    ? t("update.loadingStatus")
+    : !status.enabled
+      ? t("update.disabledInDev")
+      : busy
+        ? t("update.busy")
+        : null;
   const checkedAt = formatUpdateTimestamp(status?.checkedAtMs);
   const publishedAt = formatUpdateTimestamp(status?.publishedAt);
 
@@ -329,13 +342,6 @@ function UpdateSection() {
         setRequestError(reason instanceof Error ? reason.message : String(reason));
       });
   }, [available, t]);
-
-  const actionBtnStyle: React.CSSProperties = {
-    color: "var(--accent)",
-    background: "transparent",
-    border: "1px solid var(--border)",
-    cursor: "pointer",
-  };
 
   return (
     <div>
@@ -363,28 +369,26 @@ function UpdateSection() {
 
         <SettingRow label={t("update.releasePage")}>
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
+            <Button
               data-testid="update-open-current-release"
-              className="hover-bg rounded px-2 py-1 text-[11px]"
-              style={actionBtnStyle}
+              icon={<ExternalLinkIcon />}
               disabled={!status?.currentVersion}
+              title={t("update.opensInBrowser")}
               onClick={() => {
                 if (status?.currentVersion)
                   void openExternal(RELEASE_TAG_URL(status.currentVersion));
               }}
             >
               {t("update.openCurrentRelease")}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               data-testid="update-open-releases"
-              className="hover-bg rounded px-2 py-1 text-[11px]"
-              style={actionBtnStyle}
+              icon={<ExternalLinkIcon />}
+              title={t("update.opensInBrowser")}
               onClick={() => void openExternal(RELEASES_URL)}
             >
               {t("update.openReleases")}
-            </button>
+            </Button>
           </div>
         </SettingRow>
       </SubGroup>
@@ -415,16 +419,18 @@ function UpdateSection() {
       <SubGroup title={t("update.groupCheck")}>
         <SettingRow label={t("update.manualCheck")} desc={t("update.checkNowDesc")}>
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
+            <Button
+              variant="primary"
               data-testid="update-check-btn"
-              className="hover-bg rounded px-3 py-1.5 text-xs"
-              style={actionBtnStyle}
-              disabled={busy || !status?.enabled}
+              disabled={checkDisabledReason !== null}
+              // A disabled button has to say why it is disabled where the
+              // pointer already is. The dev-build gate is the common case and
+              // its explanation used to live only in a paragraph below.
+              title={checkDisabledReason ?? undefined}
               onClick={runCheck}
             >
               {status?.operation === "checking" ? t("update.checking") : t("update.checkNow")}
-            </button>
+            </Button>
             <span
               data-testid="update-checked-at"
               className="text-[11px]"
@@ -475,27 +481,25 @@ function UpdateSection() {
               </pre>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 data-testid="update-install-btn"
-                className="hover-bg rounded px-3 py-1.5 text-xs"
-                style={actionBtnStyle}
                 disabled={busy}
+                title={busy ? t("update.busy") : undefined}
                 onClick={runInstall}
               >
                 {status?.operation === "downloading" || status?.operation === "installing"
                   ? t("update.installing")
                   : t("update.install")}
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
                 data-testid="update-open-available-release"
-                className="hover-bg rounded px-2 py-1 text-[11px]"
-                style={actionBtnStyle}
+                icon={<ExternalLinkIcon />}
+                title={t("update.opensInBrowser")}
                 onClick={() => void openExternal(RELEASE_TAG_URL(available))}
               >
                 {t("update.openReleaseNotes")}
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
