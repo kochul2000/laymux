@@ -7,11 +7,12 @@
  * 여기서는 순수한 상태 기계만 돌린다. `TerminalView` 는 배선만 한다.
  */
 
+import { needsOsHandoffConfirm } from "./os-handoff";
 import type { PathLinkClickAction } from "./path-link-os-open";
 import {
   decidePathLinkClickAction,
   isOsHandoffAction,
-  needsOsOpenConfirm,
+  osHandoffModeForAction,
 } from "./path-link-os-open";
 
 /** 드래그로 간주할 이동 거리(px). 이 이상 움직이면 재선택 의도로 본다. */
@@ -113,10 +114,11 @@ export function createPathLinkClickHandlers<T extends PathLinkClickTarget>(
         return;
       }
 
-      if (isOsHandoffAction(current.action)) {
+      const mode = osHandoffModeForAction(current.action);
+      if (mode) {
         const settings = deps.getSettings();
-        const mustConfirm = needsOsOpenConfirm({
-          action: current.action,
+        const mustConfirm = needsOsHandoffConfirm({
+          mode,
           path: current.target.absPath,
           isDirectory: current.target.isDirectory,
           confirmAlways: settings.confirmAlways,

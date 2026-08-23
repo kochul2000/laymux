@@ -166,6 +166,64 @@
     background: var(--accent-20);
   }
 
+  /* Real buttons for surfaces that ask the user to *do* something
+     (ADR-0192). Before this, action buttons were assembled inline per call
+     site — accent-coloured text with a hairline border, no disabled
+     affordance — so a disabled button looked exactly like an enabled one and
+     the click that did nothing read as a bug. The variants live here rather
+     than in inline styles because hover and :disabled belong in CSS. */
+  .ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-sizing: border-box;
+    min-height: 26px;
+    padding: 0 10px;
+    border-radius: var(--radius-md);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background var(--transition-fast) ease,
+      border-color var(--transition-fast) ease,
+      opacity var(--transition-fast) ease;
+  }
+
+  .ui-btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  /* Pressed feedback. A settings action can take a moment to answer, so the
+     click itself has to be visible before the result is. */
+  .ui-btn:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  .ui-btn-primary {
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--bg-base);
+  }
+
+  .ui-btn-primary:not(:disabled):hover {
+    background: var(--accent-50);
+  }
+
+  .ui-btn-secondary {
+    border: 1px solid var(--border);
+    background: var(--bg-base);
+    color: var(--text-primary);
+  }
+
+  .ui-btn-secondary:not(:disabled):hover {
+    background: var(--hover-bg-strong);
+    border-color: var(--accent-50);
+  }
+
   /* Per-row eye buttons (workspace-eye, pane-eye). Needs its
      own hover affordance so the user can tell the tiny 11px icon is the
      click target. Padding + negative margin adds a hit area + hover

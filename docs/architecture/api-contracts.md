@@ -1834,6 +1834,9 @@ pub fn get_terminal_summaries_inner(
 
 ### 15.3 공유 컴포넌트
 
+- **액션 버튼은 `components/ui/Button`으로 그린다**([ADR-0192](../adr/0192-standard-action-button-and-disabled-affordance.md)). `variant`는 `primary`(그 화면이 권하는 단 하나의 동작 — 채워진 accent 배경)와 `secondary`(나머지 전부) 둘이며, 변종·hover·`:active`·`:disabled`는 `index.css`의 `.ui-btn`/`.ui-btn-primary`/`.ui-btn-secondary`가 소유한다. 인라인 스타일에 `cursor: "pointer"`를 쓰지 않는다 — 그렇게 쓰면 `disabled`에서도 클릭 가능해 보인다.
+- **비활성 컨트롤은 이유를 포인터 자리에서 말한다.** 비활성으로 만드는 쪽이 i18n 이유 문자열을 함께 계산해 `title`로 준다(예: 업데이트 확인 버튼의 상태 미도착·dev 빌드 게이트·진행 중 3갈래). 별도 문단의 설명은 유지하되 유일한 통로로 쓰지 않으며, 이유를 만들 수 없는 컨트롤은 비활성이 아니라 숨긴다.
+- **앱을 떠나는 버튼은 external-link 아이콘을 단다.** OS 브라우저로 클릭을 넘기는 버튼은 `ExternalLinkIcon`과 "브라우저에서 엽니다" `title`을 함께 쓴다. 아이콘은 아이콘 폰트·패키지 없이 `components/ui/icons.tsx`의 인라인 SVG(`stroke="currentColor"`)로 두어 버튼 색과 비활성 투명도를 상속한다.
 - 재사용 가능한 UI 요소(Modal, FormControls, Separator 등)는 `components/ui/`에 배치한다.
 - **3곳 이상** 동일 패턴이 반복되면 공통 컴포넌트로 추출한다.
 - 새 View 추가 시 기존 공유 컴포넌트를 우선 검토하고, 없으면 인라인으로 작성 후 반복이 확인되면 추출한다.
