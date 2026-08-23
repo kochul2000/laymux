@@ -194,7 +194,9 @@ describe("extractPathCandidatesFromSelection", () => {
       .filter((text) => text.includes(" "));
     expect(texts).toHaveLength(PATH_LINK_MAX_SPACE_EXTENSIONS);
     expect(texts[0]).toBe("C:/base w0");
-    expect(texts[texts.length - 1]).toBe(`C:/base ${words.slice(0, PATH_LINK_MAX_SPACE_EXTENSIONS).join(" ")}`);
+    expect(texts[texts.length - 1]).toBe(
+      `C:/base ${words.slice(0, PATH_LINK_MAX_SPACE_EXTENSIONS).join(" ")}`,
+    );
   });
 
   it("확장 접두는 기본 후보의 all-or-nothing 상한에 걸리지 않는다", () => {
@@ -519,9 +521,9 @@ describe("extractPathCandidatesAtOffset (ADR-0188 point 트리거)", () => {
   });
 
   it("포인터로 지목한 토큰은 슬래시·확장자 없는 맨이름도 받는다", () => {
-    expect(extractPathCandidatesAtOffset("cd laymux 로 이동", 4, limits).map((c) => c.text)).toEqual(
-      ["laymux"],
-    );
+    expect(
+      extractPathCandidatesAtOffset("cd laymux 로 이동", 4, limits).map((c) => c.text),
+    ).toEqual(["laymux"]);
   });
 
   it("URL 스킴은 제외하고, 후보 길이 상한을 넘으면 버린다", () => {
@@ -572,9 +574,9 @@ describe("extractPathCandidatesAtOffset (ADR-0188 point 트리거)", () => {
   });
 
   it("상대경로는 앵커가 아니고, 탭 간격은 확장을 끊는다", () => {
-    expect(
-      extractPathCandidatesAtOffset("src/my file.txt", 8, limits).map((c) => c.text),
-    ).toEqual(["file.txt"]);
+    expect(extractPathCandidatesAtOffset("src/my file.txt", 8, limits).map((c) => c.text)).toEqual([
+      "file.txt",
+    ]);
     expect(extractPathCandidatesAtOffset("C:/a\tb.txt", 6, limits).map((c) => c.text)).toEqual([
       "b.txt",
     ]);

@@ -324,7 +324,13 @@ describe("Remote FileViewer path-link bridge", () => {
       data: {
         valid: true,
         matches: [
-          { token: "G:/a b/x.exe", path: "G:/a b/x.exe", lineIndex: 0, startIndex: 4, endIndex: 16 },
+          {
+            token: "G:/a b/x.exe",
+            path: "G:/a b/x.exe",
+            lineIndex: 0,
+            startIndex: 4,
+            endIndex: 16,
+          },
         ],
       },
     });
