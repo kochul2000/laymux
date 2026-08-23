@@ -7,6 +7,11 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
 
+const mockShellOpen = vi.fn().mockResolvedValue(undefined);
+vi.mock("@tauri-apps/plugin-shell", () => ({
+  open: (...args: unknown[]) => mockShellOpen(...args),
+}));
+
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
@@ -333,6 +338,42 @@ describe("SettingsView", () => {
       await user.click(screen.getByTestId("update-check-btn"));
       await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("check_app_update"));
       expect(screen.getByTestId("update-checked-at")).toBeInTheDocument();
+    });
+
+    it("says on the button itself why a dev build cannot check", async () => {
+      // The gate lives in Rust (a debug binary must not replace itself with a
+      // release artifact). The complaint it produced was a UI one: the button
+      // looked enabled, so a click that legitimately did nothing read as a bug.
+      mockAppUpdateStatus = { ...mockAppUpdateStatus, enabled: false };
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      const check = await waitFor(() => screen.getByTestId("update-check-btn"));
+      expect(check).toBeDisabled();
+      expect(check).toHaveAttribute("title", "Self-update is disabled in development builds.");
+      expect(screen.getByTestId("update-disabled-note")).toBeInTheDocument();
+
+      await user.click(check);
+      expect(mockInvoke).not.toHaveBeenCalledWith("check_app_update");
+    });
+
+    it("marks the buttons that leave the app for the browser", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+
+      await user.click(screen.getByTestId("nav-update"));
+      const openCurrent = await waitFor(() => screen.getByTestId("update-open-current-release"));
+      expect(openCurrent.querySelector("svg")).not.toBeNull();
+      expect(openCurrent).toHaveAttribute("title", "Opens in your browser");
+      expect(screen.getByTestId("update-open-releases").querySelector("svg")).not.toBeNull();
+
+      await user.click(openCurrent);
+      await waitFor(() =>
+        expect(mockShellOpen).toHaveBeenCalledWith(
+          "https://github.com/kochul2000/laymux/releases/tag/v0.11.0",
+        ),
+      );
     });
 
     it("shows the pending version with its release time and offers the install", async () => {
