@@ -1218,6 +1218,10 @@ test("Direct-input xterm textarea opts out of browser autofill (issue #503)", as
 // leave DOM focus without an IME — and the Keyboard button reads DOM focus as
 // "the keyboard is up", so its first tap would dismiss instead of raise
 // (ADR-0196).
+// These specs drive a coarse pointer through the matchMedia stub and click with
+// a mouse, because a headless browser has no IME to observe: they pin the state
+// the IME depends on (nobody holds the focus until a gesture asks for it), not
+// the keyboard itself. Real-device measurement stays the final word.
 test("coarse-pointer attach leaves the input focus for the first Keyboard tap (ADR-0196)", async ({
   page,
 }) => {
@@ -1226,15 +1230,39 @@ test("coarse-pointer attach leaves the input focus for the first Keyboard tap (A
 
   const composer = page.locator("#terminalComposer");
   const editor = page.locator("#composerInput");
+  const activeTagName = () => page.evaluate(() => document.activeElement?.tagName ?? "");
 
   await expect(composer).toBeVisible();
   await expect(editor).toBeEnabled();
-  await expect(editor).not.toBeFocused();
+  expect(await activeTagName()).toBe("BODY");
+  // A focus arriving late — a microtask or timer behind the snapshot — must not
+  // sneak in either, so re-check once the send affordance has settled.
+  await expect(composer).toHaveAttribute("data-can-send", "true");
+  expect(await activeTagName()).toBe("BODY");
 
   // One tap raises: the editor stays open and takes focus inside the gesture.
   await page.locator("#focusTerminal").click();
   await expect(composer).toBeVisible();
   await expect(editor).toBeFocused();
+});
+
+test("a coarse-pointer terminal switch also leaves the focus alone (ADR-0196)", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true });
+  await connect(page);
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#composerInput")).toBeFocused();
+
+  // Selecting a pane starts an attach that finishes several awaits later, so it
+  // must not hand the focus back behind the user's back either.
+  await selectTerminal(page, "C:\\two");
+  await expect(page.locator("#status")).toHaveText("Main · Pane 2");
+  await expect(page.locator("#composerInput")).not.toBeFocused();
+
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#composerInput")).toBeFocused();
 });
 
 test("coarse-pointer Direct attach also leaves the focus for the first Keyboard tap (ADR-0196)", async ({
