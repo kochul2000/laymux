@@ -1679,14 +1679,27 @@ mod tests {
         assert!(output_stream.contains("terminalOutputGeneration"));
         assert!(output_stream
             .contains("const focusInputOnOpen = !reconnecting && options.focusInput !== false;"));
-        assert!(output_stream.contains("if (focusInputOnOpen) focusCurrentInputSurface();"));
+        assert!(output_stream.contains("if (focusInputOnOpen) focusInputSurfaceAfterAwait();"));
         assert!(output_stream.contains("renderedTerminalId === terminalId"));
         assert!(output_stream.contains("restoreTerminalViewport(term, preservedViewportDistance);"));
         assert_eq!(
-            output_stream.matches("focusCurrentInputSurface();").count(),
+            output_stream
+                .matches("focusInputSurfaceAfterAwait();")
+                .count(),
             1,
             "snapshot completion must not refocus a dismissed input surface"
         );
+        // The attach focus goes through the pointer-gated helper (ADR-0196): a
+        // soft-keyboard device leaves the input focus to the first real gesture,
+        // so an attach that called the ungated helper would strand DOM focus
+        // without an IME and flip the Keyboard button's first tap into a dismiss.
+        assert!(
+            !output_stream.contains("focusCurrentInputSurface();"),
+            "attach must not focus an input surface outside the pointer gate"
+        );
+        assert!(html.contains(
+            "        function focusInputSurfaceAfterAwait() {\n          if (coarsePointer) return;\n          focusCurrentInputSurface();\n        }"
+        ));
         assert!(output_stream.contains("let outputTerminalMissing = false;"));
         assert!(output_stream.contains("payload === \"terminal session not found\""));
         assert!(output_stream.contains("loadNavigation(null, { focusInput: false }).catch"));

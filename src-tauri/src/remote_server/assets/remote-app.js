@@ -2568,6 +2568,20 @@
           }
         }
 
+        // A soft keyboard only opens inside the gesture that asked for it, and
+        // an attach lands many awaits after the tap that started it (claim →
+        // navigation → chrome settle → pre-attach resize → socket open). On a
+        // coarse pointer a focus there leaves DOM focus without an IME, which is
+        // exactly the state the Keyboard button reads as "the keyboard is up" —
+        // so its next tap dismisses instead of raising (ADR-0196, generalizing
+        // the boot autoConnect fix in #848 to every attach). Touch devices let
+        // the first real gesture own the focus; fine pointers keep typing
+        // straight after Connect.
+        function focusInputSurfaceAfterAwait() {
+          if (coarsePointer) return;
+          focusCurrentInputSurface();
+        }
+
         function inputSurfaceFocused() {
           if (currentInputMode() === "direct") {
             return Boolean(terminal?.textarea) && document.activeElement === terminal.textarea;
@@ -7368,7 +7382,7 @@
                 `Connected to ${terminalId}`;
               clearTransientConnectionNotice("output", attachTitle);
               if (!reconnecting) setStatus(attachTitle);
-              if (focusInputOnOpen) focusCurrentInputSurface();
+              if (focusInputOnOpen) focusInputSurfaceAfterAwait();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
           };
@@ -7908,6 +7922,10 @@
               attachmentUploadInFlight = false;
               attachmentInput.value = "";
               updateComposerControls();
+              // Not gated on the pointer (ADR-0196 scopes the gate to attach):
+              // this focus undoes a blur this flow caused itself — the editor is
+              // disabled while the upload is in flight — and it lands one short
+              // same-origin POST after the tap, not a multi-round-trip attach.
               focusCurrentInputSurface();
             }
           }

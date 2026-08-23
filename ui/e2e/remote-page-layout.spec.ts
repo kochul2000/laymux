@@ -1151,9 +1151,11 @@ test.describe("remote mobile layout", () => {
     await page.locator("#connect").click();
     await expect(page.locator("#focusTerminal")).toBeEnabled();
 
-    // Connecting focuses the direct input surface on its own; the Keyboard
-    // button is a focus toggle now, so tapping it here would dismiss it.
+    // Attach leaves the focus alone on a touch device (ADR-0196), so the first
+    // Keyboard tap is what raises the direct input surface. From here the
+    // button is a focus toggle, so tapping it again would dismiss it.
     const helperTextarea = page.locator(".xterm-helper-textarea");
+    await page.locator("#focusTerminal").tap();
     await expect(helperTextarea).toBeFocused();
 
     const fixedCases = [
