@@ -955,6 +955,35 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().workspaceSelector.sortOrder).toBe("manual");
   });
 
+  // workspaceSelector.lastInputMode (ADR-0194)
+  it("defaults lastInputMode to perPane", () => {
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
+  it("setWorkspaceSelector changes lastInputMode", () => {
+    useSettingsStore.getState().setWorkspaceSelector({ lastInputMode: "workspaceLatest" });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+  });
+
+  it("loadFromSettings fills a missing lastInputMode with perPane", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { sortOrder: "manual" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
+  it("loadFromSettings preserves workspaceLatest and rejects invalid lastInputMode values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { lastInputMode: "workspaceLatest" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
+
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { lastInputMode: "raw-output" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
+  });
+
   it("has default automatic mobile mode width threshold", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);

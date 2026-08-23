@@ -1413,6 +1413,9 @@ pub struct WorkspaceSelectorSettings {
     /// Path ellipsis direction. "start" (default) shows the end of the path.
     #[serde(default)]
     pub path_ellipsis: PathEllipsisMode,
+    /// Last submitted input layout: "perPane" (default) | "workspaceLatest".
+    #[serde(default = "default_workspace_last_input_mode")]
+    pub last_input_mode: String,
     /// Seconds a pane/workspace must stay hidden before its terminal (PTY)
     /// is automatically closed to save resources. 0 = disabled. See issue #269.
     #[serde(default)]
@@ -1423,12 +1426,17 @@ fn default_workspace_sort_order() -> String {
     "manual".to_string()
 }
 
+fn default_workspace_last_input_mode() -> String {
+    "perPane".to_string()
+}
+
 impl Default for WorkspaceSelectorSettings {
     fn default() -> Self {
         Self {
             display: WorkspaceDisplaySettings::default(),
             sort_order: default_workspace_sort_order(),
             path_ellipsis: PathEllipsisMode::default(),
+            last_input_mode: default_workspace_last_input_mode(),
             hidden_auto_close_seconds: 0,
         }
     }

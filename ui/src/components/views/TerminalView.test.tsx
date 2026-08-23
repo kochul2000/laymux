@@ -4187,6 +4187,54 @@ describe("TerminalView", () => {
     });
   });
 
+  it("records a completed direct-mode agent input without exposing partial typing", async () => {
+    const terminalId = "t-human-last-input";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("마지막 질", true));
+    await vi.waitFor(() =>
+      expect(mockWriteToTerminal).toHaveBeenCalledWith(terminalId, "마지막 질"),
+    );
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("문\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("마지막 질문");
+    });
+  });
+
+  it("records a completed direct-mode shell command without waiting for OSC 133", async () => {
+    const terminalId = "t-human-last-shell-command";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("npm test", true));
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+
+    act(() => createdTerminals.at(-1)!.emitCoreData("\r", true));
+    await vi.waitFor(() => {
+      expect(
+        useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+          ?.lastUserInput,
+      ).toBe("npm test");
+    });
+  });
+
   it("coalesces rejected human onData alerts while counting every exactly-once attempt", async () => {
     const terminalId = "t-human-write-rejected";
     mockWriteToTerminal.mockRejectedValue(new Error("IPC response lost"));
@@ -14343,6 +14391,10 @@ describe("TerminalView desktop input composer", () => {
 
     expect(mockWriteTerminalInput).toHaveBeenCalledWith("t-composer-send", "한글\nsecond", true);
     await vi.waitFor(() => expect(textarea.value).toBe(""));
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === "t-composer-send")
+        ?.lastUserInput,
+    ).toBe("한글 second");
   });
 
   // Issue #558. In the alternate screen the composer is a keyboard proxy: keys go to

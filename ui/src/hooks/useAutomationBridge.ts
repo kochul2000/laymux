@@ -57,6 +57,7 @@ import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
 import { clearPane, paneClearWaitBudgetMs, resolvePaneClear } from "@/lib/pane-clear";
+import { selectTerminalLastInputEntry } from "@/lib/terminal-last-input";
 
 export interface HandlerResult {
   success: boolean;
@@ -404,10 +405,13 @@ function selectorDisplayForTerminal(
         pathEllipsis,
       )
     : null;
+  const lastInput = selectTerminalLastInputEntry(terminal);
   return {
     environment: shortWorkspaceLabel(terminal.label),
     activity: formatActivity(terminal.activity),
     cwd,
+    lastInput: lastInput?.text ?? null,
+    lastInputAt: lastInput?.timestamp ?? null,
   };
 }
 
