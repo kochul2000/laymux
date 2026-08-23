@@ -17,6 +17,7 @@
  */
 
 import type { Terminal, IDecoration, IMarker } from "@xterm/xterm";
+import type { OsHandoffMode } from "./os-handoff";
 import type { PathLinkClickAction } from "./path-link-os-open";
 import { readLineCells, reconstructLine } from "./terminal-cell-map";
 
@@ -46,9 +47,6 @@ export interface VerifiedPathSelection {
    */
   token: string;
 }
-
-/** 호스트 OS 위임 모드(백엔드 `open_in_os` 의 `mode` 인자와 같은 값). */
-export type OsHandoffMode = "open" | "reveal";
 
 export interface PathLinkControllerDeps {
   /** 검증된 파일 경로 클릭 시 호출 — viewer 로 연다. */

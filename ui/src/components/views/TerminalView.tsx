@@ -31,7 +31,8 @@ import {
   shouldEnableTerminalWebgl,
 } from "@/lib/terminal-view-runtime";
 import { createPathLinkController, type VerifiedPathSelection } from "@/lib/path-link-provider";
-import { pathLinkHintKey, requiresHardConfirm } from "@/lib/path-link-os-open";
+import { pathLinkHintKey } from "@/lib/path-link-os-open";
+import { osHandoffConfirmKey } from "@/lib/os-handoff";
 import { createPathLinkClickHandlers, PATH_LINK_CLICK_SLOP } from "@/lib/path-link-click";
 import { createPathLinkHint } from "@/lib/path-link-hint";
 import { createPathLinkPointEvaluator, PATH_LINK_HOVER_DWELL_MS } from "@/lib/path-link-point";
@@ -1464,7 +1465,7 @@ export function TerminalView({
           useNotificationStore.getState().addNotification({
             terminalId: instanceId,
             workspaceId: resolveWorkspaceId(instanceId),
-            message: i18n.t("terminal.osOpenFailed", { ns: "common", message: String(err) }),
+            message: i18n.t("osHandoff.failed", { ns: "common", message: String(err) }),
             level: "error",
           });
         });
@@ -3130,14 +3131,7 @@ export function TerminalView({
         };
       },
       confirm: ({ path }) =>
-        window.confirm(
-          i18n.t(
-            requiresHardConfirm(path)
-              ? "terminal.osOpenConfirmExecutable"
-              : "terminal.osOpenConfirm",
-            { ns: "common", path },
-          ),
-        ),
+        window.confirm(i18n.t(osHandoffConfirmKey(path), { ns: "common", path })),
       activate: (sel, action) => pathLink.activate(sel, action),
       // mousedown 을 preventDefault 했고 네이티브 대화상자가 포커스를 가져가므로,
       // 진행·취소 어느 쪽이든 터미널 포커스를 되돌려 준다.

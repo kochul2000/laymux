@@ -1,13 +1,14 @@
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { FileViewer } from "./FileViewer";
-import { openExternal, readFileForViewer } from "@/lib/tauri-api";
+import { openExternal, openInOs, readFileForViewer } from "@/lib/tauri-api";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useOverridesStore } from "@/stores/overrides-store";
 import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 
 vi.mock("@/lib/tauri-api", () => ({
   openExternal: vi.fn().mockResolvedValue(undefined),
+  openInOs: vi.fn().mockResolvedValue(undefined),
   readFileForViewer: vi
     .fn()
     .mockResolvedValue({ kind: "text", content: "file content", truncated: false }),
@@ -34,6 +35,8 @@ const baseProps = {
 describe("FileViewer", () => {
   beforeEach(() => {
     vi.mocked(openExternal).mockClear();
+    vi.mocked(openInOs).mockClear();
+    vi.mocked(openInOs).mockResolvedValue(undefined);
     vi.mocked(readFileForViewer).mockClear();
     vi.mocked(readFileForViewer).mockResolvedValue({
       kind: "text",
@@ -309,6 +312,36 @@ describe("FileViewer", () => {
       render(<FileViewer {...baseProps} path="/home/user/blob.bin" />);
     });
     expect(screen.getByTestId("file-viewer-binary")).toHaveTextContent("2.0 KB");
+  });
+
+  it("offers to open a binary file on this PC right where the preview would be", async () => {
+    // The binary fallback is the one content kind with nothing to look at, so the
+    // OS handoff is offered in the content area too, not only in the host header
+    // (ADR-0193).
+    useSettingsStore.setState({
+      terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
+    });
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 2048 });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/blob.bin" />);
+    });
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-open"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/blob.bin", "open");
+
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-reveal"));
+    expect(openInOs).toHaveBeenCalledWith("/home/user/blob.bin", "reveal");
+  });
+
+  it("keeps the confirm gate on the binary content-area open button", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 2048 });
+    await act(async () => {
+      render(<FileViewer {...baseProps} path="/home/user/setup.exe" />);
+    });
+    fireEvent.click(screen.getByTestId("file-viewer-binary-os-open"));
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(openInOs).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("shows an error message when reading fails", async () => {
