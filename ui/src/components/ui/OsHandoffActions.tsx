@@ -3,7 +3,7 @@ import { useOsHandoff } from "@/hooks/useOsHandoff";
 
 /**
  * "이 파일을 이 PC 에서 열기 / 위치 보기" 버튼 한 쌍
- * ([ADR-0191](../../../../docs/adr/0191-viewer-os-handoff-buttons.md)).
+ * ([ADR-0193](../../../../docs/adr/0193-viewer-os-handoff-buttons.md)).
  *
  * 터미널 path-link 의 `Ctrl`(열기) / `Ctrl+Shift`(위치 보기) 클릭과 **같은 두
  * 동작**을 뷰어에서 버튼으로 노출한다. 수정자 클릭은 스스로를 알리지 못하므로

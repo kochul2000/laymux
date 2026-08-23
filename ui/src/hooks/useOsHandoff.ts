@@ -6,7 +6,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 
 /**
  * "이 경로를 호스트 OS 에 넘겨라" 요청 하나의 배선
- * ([ADR-0191](../../../docs/adr/0191-viewer-os-handoff-buttons.md)).
+ * ([ADR-0193](../../../docs/adr/0193-viewer-os-handoff-buttons.md)).
  *
  * 정책(확인 여부·문구 선택)은 `lib/os-handoff.ts` 의 순수 함수가, 실행은 Rust
  * `open_in_os` 가 소유한다. 훅은 그 둘 사이의 세 가지 부수효과만 갖는다 —
@@ -43,7 +43,7 @@ export interface OsHandoffApi {
 }
 
 export function useOsHandoff(): OsHandoffApi {
-  // ADR-0191: 확인 정책은 트리거와 무관한 위험 정책이므로 터미널 path-link 와
+  // ADR-0193: 확인 정책은 트리거와 무관한 위험 정책이므로 터미널 path-link 와
   // 같은 키를 읽는다. 반면 `pathLinkOsOpenEnabled` 는 읽지 않는다 — 그 키는
   // xterm 과 나눠 갖는 수정자 클릭의 소유권 스위치이고, 버튼에는 그 충돌이
   // 없다.

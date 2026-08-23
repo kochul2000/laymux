@@ -1,7 +1,7 @@
 /**
  * 대상을 **호스트 데스크톱(OS)** 에 넘기는 동작의 표면 독립 정책
  * ([ADR-0100](../../../docs/adr/0100-path-link-host-os-open-modifier-contract.md),
- * [ADR-0191](../../../docs/adr/0191-viewer-os-handoff-buttons.md)).
+ * [ADR-0193](../../../docs/adr/0193-viewer-os-handoff-buttons.md)).
  *
  * 트리거는 여러 개다 — 터미널 path-link 의 Ctrl/Ctrl+Shift 클릭과 FileViewer 의
  * 명시적 버튼. 그러나 "실행으로 이어지는 경로는 확인을 받는다"는 위험 정책은

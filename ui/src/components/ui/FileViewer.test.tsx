@@ -317,7 +317,7 @@ describe("FileViewer", () => {
   it("offers to open a binary file on this PC right where the preview would be", async () => {
     // The binary fallback is the one content kind with nothing to look at, so the
     // OS handoff is offered in the content area too, not only in the host header
-    // (ADR-0191).
+    // (ADR-0193).
     useSettingsStore.setState({
       terminal: { ...useSettingsStore.getState().terminal, pathLinkOsOpenConfirm: false },
     });

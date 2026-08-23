@@ -19,7 +19,7 @@ vi.mock("@/components/ui/FileViewer", () => ({
 }));
 
 // The OS handoff buttons call one Tauri command; only that call is mocked so the
-// confirm gate and the mode each button asks for stay under test (ADR-0191).
+// confirm gate and the mode each button asks for stay under test (ADR-0193).
 vi.mock("@/lib/tauri-api", () => ({
   openInOs: vi.fn().mockResolvedValue(undefined),
 }));

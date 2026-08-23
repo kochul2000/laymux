@@ -356,7 +356,7 @@ export function FileViewer({ path, viewerInstanceId, isFocused, bodyStyle }: Fil
     }
 
     if (content.kind === "binary") {
-      // ADR-0191: 미리보기가 없는 바로 그 자리에서 다음 행동을 제시한다. 헤더에
+      // ADR-0193: 미리보기가 없는 바로 그 자리에서 다음 행동을 제시한다. 헤더에
       // 같은 버튼이 있지만, 빈 화면만 보고 "지원 안 되는 파일"로 끝내는 사용자가
       // 그 글리프까지 찾아가지는 않는다.
       return (
