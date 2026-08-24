@@ -565,6 +565,29 @@ OS 절전 진입을 막는 정책이다(issue #727·#733, [ADR-0114](../adr/0114
 - **업데이트 화면(`UpdateSection`)이 버전·채널·동작을 한자리에 모은다.** 현재 버전과 채널(`update-current-version`·`update-current-channel`), 채널 선택, 수동 확인(`update-check-btn`)과 마지막 확인 시각(`update-checked-at`), 발견된 버전의 릴리스 시각(`update-published-at`)·노트·설치(`update-install-btn`), GitHub 릴리스 페이지 링크를 제공한다. 채널은 다른 설정처럼 draft 라 저장해야 적용되고, 확인·설치는 설정이 아니라 action 이므로 즉시 실행된다. 상단 바 action 은 업데이트가 있을 때만 나타나는 설치 전용 버튼이라 수동 확인 수단이 되지 못했다 — 그 공백을 이 화면이 메운다.
 - **설정 초기화도 재확인을 건다.** `reset_settings` 는 디스크에 기본값을 쓰고 프론트는 페이지를 다시 로드할 뿐이라 설정 적용 경로를 타지 않는다. 커맨드가 `app_update::schedule_channel_recheck` 로 직접 재확인을 걸어, 프로세스 전역 매니저가 옛 채널과 후보를 들고 있지 않게 한다.
 
+#### Android 채널 매니페스트
+
+Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가며, 설치는 하지 않고 릴리스 페이지로 넘긴다([ADR-0197](../adr/0197-android-update-channel-release-handoff.md)).
+
+```jsonc
+// release-channels 브랜치의 android-stable.json / android-beta.json
+{
+  "version": "0.11.1",                    // 발행 버전. stable 파일은 x.y.z 만
+  "versionCode": 110019,                  // ADR-0190 인코딩 결과
+  "releaseUrl": "https://github.com/kochul2000/laymux/releases/tag/v0.11.1",
+  "apkUrl": ".../releases/download/v0.11.1/Laymux-Android-0.11.1.apk",
+  "apkSha256Url": ".../Laymux-Android-0.11.1.apk.sha256",
+  "pubDate": "2026-08-24T00:00:00Z"       // 릴리스의 publishedAt
+}
+```
+
+- **내용은 전부 발행 tag 에서 파생한다.** `scripts/release/android-channel-manifest.mjs` 의 `buildAndroidChannelManifest` 가 만들고 `validateAndroidChannelManifest` 가 커밋 전에 검증한다(버전↔tag, versionCode↔인코딩, 세 URL↔저장소·tag·asset 이름, `pubDate` 파싱). 릴리스 job 이 손으로 채우는 필드는 없다.
+- **네 파일이 한 커밋이다.** `planChannelUpdates` 가 계열별로 각자 호출되므로(`planChannelWrites`·`planAndroidChannelWrites`) 데스크톱이 no-op 인 재실행에서도 뒤처진 Android 파일은 전진한다. `publish-channel-commit.sh` 는 트리를 통째로 만들기 때문에 채널 job 은 네 파일을 모두 내려받아야 하고, 부트스트랩 job 은 `desktop-stable.json` 과 `android-stable.json` 이 **모두** 있을 때만 시딩을 건너뛴다.
+- **클라이언트가 다시 검사한다.** `AndroidUpdateManifests.parse` 가 채널별 버전 문법(stable 은 `x.y.z` 만)과 `releaseUrl` 문법(`https://github.com/kochul2000/laymux/releases/tag/` + `v?<version>`, 경로·질의 추가 금지)을 확인하고, 어긋나면 후보 대신 확인 오류를 남긴다. `apkUrl`·`apkSha256Url` 은 이 클라이언트가 읽지 않으므로 없어도 통과한다.
+- **채널 SoT 는 기기-로컬**(`SharedPreferencesUpdateStore`, 기본 stable, 알 수 없는 값은 stable)이며 데스크톱 `settings.json` 을 상속하지 않는다. 채널 변경은 즉시 1회 확인을 트리거하고, 확인 중 채널이 바뀌면 옛 채널의 응답은 버린다.
+- **확인 주기는 6시간**(`UpdateSchedule`), 트리거는 `onStart` 와 설정 섹션의 수동 확인(throttle 무시)뿐이다. 실패는 확인 시각을 갱신하지 않는다. debug 빌드와 파싱 불가 `versionName` 은 비활성이며, 실기 검증은 `LAYMUX_ANDROID_UPDATE_CHECK=1` 빌드와 `laymux.previewUpdateBanner` intent extra 로 한다.
+- **표면은 배너와 연결 설정의 업데이트 섹션**이다(`presentUpdateBanner`·`presentUpdateSection`). 배너는 Remote 표면에서 숨고, 닫기는 그 버전만 침묵하며, 확인 오류는 배너로 올리지 않는다.
+
 ### 종료 시 동작(kill-on-exit) 설정
 
 앱 종료 시 실행 중인 터미널 작업을 정리하는 동작을 제어한다(issue #451, [ADR-0048](../adr/0048-kill-terminals-on-exit.md)). 켜면 창이 닫히는 흐름에서 모든 터미널에 Ctrl+C(ETX, `0x03`)를 여러 번 보낸다. 목적은 (A) cron/agent 등 장기 실행 작업을 우아하게 종료하고, (B) Claude Code·Codex 가 `--resume <session-id>` 힌트를 스크롤백에 출력하도록 유도하는 것이다. 출력된 힌트는 사용자 가시 기록으로 스크롤백 캐시에 남는다. 자동 복원에 쓰는 식별자는 이 텍스트를 파싱하지 않고 같은 저장 시점에 Claude session metadata 또는 Codex rollout metadata에서 별도로 조회한다(위 agent 설정, [data-flow.md §13](./data-flow.md#13-session-persistence--cache)).

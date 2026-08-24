@@ -10,6 +10,10 @@ val laymuxAndroidVersionCode = providers.environmentVariable("LAYMUX_ANDROID_VER
     .orElse("1")
 val laymuxAndroidVersionName = providers.environmentVariable("LAYMUX_ANDROID_VERSION_NAME")
     .orElse("0.1.0")
+// debug 빌드는 업데이트 확인을 하지 않는다(ADR-0197). 실기 검증용 스위치이며
+// release 빌드의 기본 동작은 바꾸지 않는다.
+val laymuxAndroidUpdateCheck = providers.environmentVariable("LAYMUX_ANDROID_UPDATE_CHECK")
+    .orElse("")
 val releaseSigningStoreFile = providers.environmentVariable(
     "LAYMUX_ANDROID_APP_SIGNING_STORE_FILE",
 ).orElse("")
@@ -59,8 +63,13 @@ android {
 
         resValue("string", "laymux_cloud_base_url", laymuxCloudBaseUrl.get())
         resValue("string", "laymux_google_web_client_id", laymuxGoogleWebClientId.get())
+        buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "true")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {
@@ -79,6 +88,15 @@ android {
     }
 
     buildTypes {
+        debug {
+            // 개발 빌드의 versionName 은 릴리스 버전이 아니므로 비교 기준이 없다.
+            // 실기 검증이 필요할 때만 LAYMUX_ANDROID_UPDATE_CHECK=1 로 켠다.
+            buildConfigField(
+                "boolean",
+                "UPDATE_CHECK_ENABLED",
+                if (laymuxAndroidUpdateCheck.get() == "1") "true" else "false",
+            )
+        }
         release {
             if (releaseSigningConfigured) {
                 signingConfig = signingConfigs.getByName("release")

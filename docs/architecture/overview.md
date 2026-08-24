@@ -96,8 +96,16 @@ NSIS·AppImage로 제한한다(RPM `Version`은 `-`를 담을 수 없다). 데�
 갱신한다(stable 발행은 beta 파일을 더 높은 버전으로만 전진시킨다). 앱은 대응 public key를 고정해 검증된
 artifact만 설치한다. `releases/latest/download/latest.json`은 채널을 모르는 구버전 앱 경로로 유지한다.
 프로세스 전역 `UpdateManager`가 채널·시작 후/6시간 주기 확인과 수동 확인·설치 상태를 소유하고 desktop WebView, Automation API, Remote UI가
-같은 snapshot을 읽는다. Android는 beta APK까지 발행하되 앱 자체 업데이트는 이 경로의 대상이 아니다
+같은 snapshot을 읽는다
 ([ADR-0174](../adr/0174-github-signed-desktop-self-update.md), [ADR-0190](../adr/0190-update-release-channels.md)).
+
+Android 앱도 같은 브랜치의 `android-<channel>.json`으로 자기 채널을 따라간다. 이 매니페스트는 Tauri updater
+manifest가 아니라 `version`·`versionCode`·`releaseUrl`·`apkUrl`·`apkSha256Url`·`pubDate`를 담는 별도 스키마이며,
+내용 전부를 발행 tag에서 파생한다(`scripts/release/android-channel-manifest.mjs`). 네 파일은 한 커밋으로 올라가고
+계열별 전진성을 각각 계산하므로 한쪽만 뒤처지지 않으며, 부트스트랩 job은 네 파일이 모두 있을 때만 시딩을 건너뛴다.
+폰이 따라갈 채널은 데스크톱 설정을 상속하지 않는 기기-로컬 값(`SharedPreferencesUpdateStore`)이고, 앱은 후보를
+찾으면 배너와 연결 설정의 업데이트 섹션으로 알린 뒤 GitHub 릴리스 페이지로 넘긴다 — APK 다운로드·설치는 하지 않는다
+(`apps/android/.../update/`, [ADR-0197](../adr/0197-android-update-channel-release-handoff.md)).
 
 ---
 

@@ -1,5 +1,8 @@
 package com.laymux.android.pairing
 
+import com.laymux.android.update.UpdateChannel
+import com.laymux.android.update.UpdateState
+import com.laymux.android.update.UpdateSurface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -64,6 +67,17 @@ class ConnectionSettingsPresentationTest {
         biometricAvailability = biometricAvailability,
         error = null,
         notice = null,
+        update = UpdateState(
+            enabled = true,
+            currentVersion = "0.11.2",
+            channel = UpdateChannel.STABLE,
+            checking = false,
+            lastCheckedAtEpochMillis = null,
+            available = null,
+            dismissedVersion = null,
+            lastError = null,
+            surface = UpdateSurface.OTHER,
+        ),
     )
 
     private fun pairing(confirmed: Boolean): PairingSheetItem = PairingSheetItem(
