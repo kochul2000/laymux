@@ -3087,6 +3087,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         activePairingAckSession?.close()
         activePairingAckSession = null
         closeRemoteSession()
+        // 확인 결과를 옮길 화면이 사라졌으므로 구독을 먼저 끊는다. `runOnMain`
+        // 가드와 겹치지만, 소유권이 여기서 끝난다는 것을 코드로 남긴다.
+        if (::updateController.isInitialized) updateController.onStateChanged = null
         remoteExecutor.shutdownNow()
         pairingExecutor.shutdownNow()
         if (::webView.isInitialized) {

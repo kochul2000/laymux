@@ -35,6 +35,21 @@ class ReleaseVersionTest {
     }
 
     @Test
+    fun `성분 개수가 셋이 아니면 거절한다`() {
+        assertNull(ReleaseVersion.parseOrNull("0.11"))
+        assertNull(ReleaseVersion.parseOrNull("11"))
+        assertNull(ReleaseVersion.parseOrNull("0.11.1.1"))
+        assertNull(ReleaseVersion.parseOrNull("0.11."))
+    }
+
+    @Test
+    fun `beta 라벨에 슬롯 번호가 없으면 거절한다`() {
+        assertNull(ReleaseVersion.parseOrNull("0.11.1-beta"))
+        assertNull(ReleaseVersion.parseOrNull("0.11.1-beta."))
+        assertNull(ReleaseVersion.parseOrNull("0.11.1-beta.x"))
+    }
+
+    @Test
     fun `정식은 같은 버전의 beta 보다 크다`() {
         val stable = requireNotNull(ReleaseVersion.parseOrNull("0.12.0"))
         val beta = requireNotNull(ReleaseVersion.parseOrNull("0.12.0-beta.9"))
