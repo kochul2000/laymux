@@ -989,6 +989,9 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
     expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
     expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
+    expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(55);
+    expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(80);
+    expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(100);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
@@ -1014,6 +1017,9 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
     expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
     expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
+    expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(55);
+    expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(80);
+    expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(100);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });

@@ -474,6 +474,35 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
         u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
     );
+    for (path, value) in [
+        ("/remote/composerIdleOpacity", remote.composer_idle_opacity),
+        (
+            "/remote/composerFocusedOpacity",
+            remote.composer_focused_opacity,
+        ),
+        (
+            "/remote/composerActiveOpacity",
+            remote.composer_active_opacity,
+        ),
+    ] {
+        range_u64(
+            issues,
+            path,
+            u64::from(value),
+            u64::from(crate::settings::models::REMOTE_COMPOSER_OPACITY_MIN),
+            u64::from(crate::settings::models::REMOTE_COMPOSER_OPACITY_MAX),
+        );
+    }
+    if remote.composer_idle_opacity > remote.composer_focused_opacity
+        || remote.composer_focused_opacity > remote.composer_active_opacity
+    {
+        issue(
+            issues,
+            "invalid_value",
+            "/remote/composerOpacity",
+            "Remote Composer opacity는 Idle ≤ Focused ≤ Active 순서여야 합니다.".into(),
+        );
+    }
     range_scroll_sensitivity(
         issues,
         "/remote/scrollSensitivity",
@@ -936,6 +965,34 @@ mod tests {
         assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
         assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
+    }
+
+    #[test]
+    fn remote_composer_opacity_requires_bounded_monotonic_levels() {
+        let mut settings = Settings::default();
+        settings.remote.composer_idle_opacity = 55;
+        settings.remote.composer_focused_opacity = 80;
+        settings.remote.composer_active_opacity = 100;
+        assert!(validate_settings(&settings).iter().all(|issue| {
+            !matches!(
+                issue.path.as_str(),
+                "/remote/composerIdleOpacity"
+                    | "/remote/composerFocusedOpacity"
+                    | "/remote/composerActiveOpacity"
+                    | "/remote/composerOpacity"
+            )
+        }));
+
+        settings.remote.composer_idle_opacity = 10;
+        settings.remote.composer_focused_opacity = 70;
+        settings.remote.composer_active_opacity = 60;
+        let issues = validate_settings(&settings);
+        assert!(issues.iter().any(|issue| {
+            issue.path == "/remote/composerIdleOpacity" && issue.code == "out_of_range"
+        }));
+        assert!(issues.iter().any(|issue| {
+            issue.path == "/remote/composerOpacity" && issue.code == "invalid_value"
+        }));
     }
 
     #[test]

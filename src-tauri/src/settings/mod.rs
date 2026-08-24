@@ -447,6 +447,9 @@ mod tests {
             legacy.remote.cloud_access_mode,
             models::CloudAccessMode::BrowserAndE2e
         );
+        assert_eq!(legacy.remote.composer_idle_opacity, 55);
+        assert_eq!(legacy.remote.composer_focused_opacity, 80);
+        assert_eq!(legacy.remote.composer_active_opacity, 100);
 
         let json = r#"{
           "remote": {

@@ -41,6 +41,9 @@
         --fs-sm: 11px;
         --fs-md: 13px;
         --remote-composer-font-size: 16px;
+        --remote-composer-idle-opacity: 0.55;
+        --remote-composer-focused-opacity: 0.8;
+        --remote-composer-active-opacity: 1;
         --remote-menu-font-size: 13px;
         /* Compact controls in the Remote header share one border-box height. */
         --header-control-height: 26px;
@@ -405,6 +408,19 @@
         padding: 0;
         border-top: 1px solid var(--border);
         background: var(--terminal-bg);
+        opacity: var(--remote-composer-idle-opacity);
+        transition: opacity 140ms ease;
+      }
+      .terminal-composer[data-opacity-state="focused"] {
+        opacity: var(--remote-composer-focused-opacity);
+      }
+      .terminal-composer[data-opacity-state="active"] {
+        opacity: var(--remote-composer-active-opacity);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .terminal-composer {
+          transition: none;
+        }
       }
       /* Tab recall (issue #504) and as-you-type autocomplete (issue #505) lists.
          They float above the editor over the terminal so they never grow the
@@ -462,9 +478,6 @@
         line-height: 1.4;
         outline: none;
         overflow: auto;
-      }
-      .composer-input:disabled {
-        opacity: 0.6;
       }
       .remote-body {
         position: relative;

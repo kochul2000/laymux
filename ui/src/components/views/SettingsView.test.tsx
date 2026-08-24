@@ -2345,11 +2345,23 @@ describe("SettingsView", () => {
       fireEvent.change(screen.getByTestId("remote-settings-menu-font-size-input"), {
         target: { value: "17" },
       });
+      fireEvent.change(screen.getByTestId("remote-settings-composer-idle-opacity-input"), {
+        target: { value: "45" },
+      });
+      fireEvent.change(screen.getByTestId("remote-settings-composer-focused-opacity-input"), {
+        target: { value: "75" },
+      });
+      fireEvent.change(screen.getByTestId("remote-settings-composer-active-opacity-input"), {
+        target: { value: "95" },
+      });
       await user.click(screen.getByTestId("save-settings-btn"));
 
       expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
       expect(useSettingsStore.getState().remote.composerFontSize).toBe(20);
       expect(useSettingsStore.getState().remote.menuFontSize).toBe(17);
+      expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(45);
+      expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(75);
+      expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(95);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {

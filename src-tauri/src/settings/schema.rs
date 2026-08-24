@@ -340,6 +340,24 @@ const ENTRIES: &[MetadataEntry] = &[
         apply_mode: ApplyMode::Live,
     },
     MetadataEntry {
+        path: "/remote/composerIdleOpacity",
+        description: "Remote Composer opacity percent while visible, unfocused, and inactive (20-100, default 55).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/remote/composerFocusedOpacity",
+        description: "Remote Composer opacity percent while focused without active content (20-100, default 80).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
+        path: "/remote/composerActiveOpacity",
+        description: "Remote Composer opacity percent while draft, suggestion, IME, or send activity exists (20-100, default 100).",
+        sensitive: false,
+        apply_mode: ApplyMode::Live,
+    },
+    MetadataEntry {
         path: "/remote/scrollSensitivity",
         description: "원격 브라우저 터미널의 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 다음 attach부터 적용됩니다.",
         sensitive: false,
