@@ -16,6 +16,7 @@
         const drawerSettingsView = $("drawerSettingsView");
         const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
         const remoteComposerFontSizeInput = $("remoteComposerFontSize");
+        const remoteMenuFontSizeInput = $("remoteMenuFontSize");
         const remoteTouchScrollSensitivityInput = $("remoteTouchScrollSensitivity");
         const remoteTwoFingerScrollSensitivityInput = $(
           "remoteTwoFingerScrollSensitivity",
@@ -921,6 +922,7 @@
             !remoteDisplaySettingsPending;
           remoteTerminalFontSizeInput.disabled = !editable;
           remoteComposerFontSizeInput.disabled = !editable;
+          remoteMenuFontSizeInput.disabled = !editable;
           remoteTouchScrollSensitivityInput.disabled = !editable;
           remoteTwoFingerScrollSensitivityInput.disabled = !editable;
           remoteDisplaySettingsStatus.textContent =
@@ -937,6 +939,7 @@
           const normalized = {
             terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize, 14),
             composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize, 16),
+            menuFontSize: normalizeRemoteFontSize(settings?.menuFontSize, 13),
             touchScrollSensitivity: normalizeScrollSensitivity(
               settings?.touchScrollSensitivity,
               defaultAppearance.touchScrollSensitivity,
@@ -950,6 +953,7 @@
           remoteDisplaySettings = normalized;
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
+          remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
           remoteTouchScrollSensitivityInput.value = String(
             normalized.touchScrollSensitivity,
           );
@@ -959,6 +963,10 @@
           document.documentElement.style.setProperty(
             "--remote-composer-font-size",
             `${normalized.composerFontSize}px`,
+          );
+          document.documentElement.style.setProperty(
+            "--remote-menu-font-size",
+            `${normalized.menuFontSize}px`,
           );
           for (const info of terminalInfoById.values()) {
             if (info.appearance) {
@@ -1027,6 +1035,10 @@
             remoteComposerFontSizeInput.value,
             remoteDisplaySettings?.composerFontSize || 16,
           );
+          const menuFontSize = normalizeRemoteFontSize(
+            remoteMenuFontSizeInput.value,
+            remoteDisplaySettings?.menuFontSize || 13,
+          );
           const touchScrollSensitivityValue = normalizeScrollSensitivity(
             remoteTouchScrollSensitivityInput.value,
             remoteDisplaySettings?.touchScrollSensitivity ??
@@ -1049,6 +1061,7 @@
                 expectedRevision,
                 terminalFontSize,
                 composerFontSize,
+                menuFontSize,
                 touchScrollSensitivity: touchScrollSensitivityValue,
                 twoFingerScrollSensitivity: twoFingerScrollSensitivityValue,
               }),
@@ -4965,15 +4978,18 @@
           return value > 999 ? "999+" : String(value);
         }
 
-        function countBadgeFontSize(text) {
-          const sizes = ["10px", "10px", "9.5px", "8.5px", "7.5px"];
-          return sizes[Math.min(text.length, sizes.length - 1)];
+        function countBadgeScale(text) {
+          // Shrink factor over the badge's CSS base size (--count-badge-base)
+          // so longer counts still fit; an inline px here would pin the badge
+          // and defeat the drawer's PC-owned menu font size.
+          const scales = ["1", "1", "0.95", "0.85", "0.75"];
+          return scales[Math.min(text.length, scales.length - 1)];
         }
 
         function fillCountBadge(element, count) {
           const text = countBadgeText(count);
           element.textContent = text;
-          element.style.fontSize = countBadgeFontSize(text);
+          element.style.setProperty("--count-badge-scale", countBadgeScale(text));
         }
 
         function notificationCount() {
@@ -9866,6 +9882,9 @@
           saveRemoteDisplaySettings().catch(() => {});
         });
         remoteComposerFontSizeInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteMenuFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings().catch(() => {});
         });
         remoteTouchScrollSensitivityInput.addEventListener("change", () => {

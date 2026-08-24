@@ -745,6 +745,7 @@ const DEFAULT_REMOTE: RemoteSettings = {
   snapshotMaxKib: 4,
   terminalFontSize: 14,
   composerFontSize: 16,
+  menuFontSize: 13,
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,

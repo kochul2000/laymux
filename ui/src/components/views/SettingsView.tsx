@@ -2309,6 +2309,7 @@ type RemoteDisplaySettings = Pick<
   RemoteSettings,
   | "terminalFontSize"
   | "composerFontSize"
+  | "menuFontSize"
   | "snapshotMaxKib"
   | "serveTerminalFont"
   | "widgets"
@@ -2875,6 +2876,7 @@ function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings 
   return {
     terminalFontSize: remote.terminalFontSize,
     composerFontSize: remote.composerFontSize,
+    menuFontSize: remote.menuFontSize,
     snapshotMaxKib: remote.snapshotMaxKib,
     serveTerminalFont: remote.serveTerminalFont,
     widgets: remote.widgets,
@@ -2890,6 +2892,7 @@ function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDi
     ...remote,
     terminalFontSize: normalizeRemoteFontSize(remote.terminalFontSize, 14),
     composerFontSize: normalizeRemoteFontSize(remote.composerFontSize, 16),
+    menuFontSize: normalizeRemoteFontSize(remote.menuFontSize, 13),
     snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
     scrollSensitivity: normalizeScrollSensitivity(
       remote.scrollSensitivity,
@@ -2965,6 +2968,29 @@ function RemoteDisplaySection() {
               onChange={(event) =>
                 update({
                   composerFontSize: normalizeRemoteFontSize(event.target.value, 16),
+                })
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              px
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow label={t("remote.menuFontSize")} desc={t("remote.menuFontSizeDesc")}>
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-menu-font-size-input"
+              type="number"
+              min={REMOTE_FONT_SIZE_MIN}
+              max={REMOTE_FONT_SIZE_MAX}
+              step={1}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.menuFontSize}
+              onChange={(event) =>
+                update({
+                  menuFontSize: normalizeRemoteFontSize(event.target.value, 13),
                 })
               }
             />

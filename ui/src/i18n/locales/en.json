@@ -404,6 +404,8 @@
       "terminalFontSizeDesc": "Font size used by terminal cells on the Remote screen (6-72 px).",
       "composerFontSize": "Composer Font Size",
       "composerFontSizeDesc": "Font size used by the Remote input composer and its suggestions (6-72 px).",
+      "menuFontSize": "Menu Font Size",
+      "menuFontSizeDesc": "Base font size for the Remote navigation drawer (menu); its smaller text scales along (6-72 px).",
       "snapshotMaxKib": "Screen Checkpoint Scrollback",
       "snapshotMaxKibDesc": "Scrollback budget (KiB) for the screen checkpoint restored on remote attach or terminal switch. The current screen and terminal state may exceed this value.",
       "scrollSensitivity": "Wheel Scroll Sensitivity",

@@ -614,6 +614,7 @@ mod tests {
 
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
         assert!(html.contains("id=\"remoteComposerFontSize\""));
+        assert!(html.contains("id=\"remoteMenuFontSize\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
         assert!(html.contains("/remote/v1/display-settings"));
@@ -622,7 +623,9 @@ mod tests {
         assert!(html.contains("leaseId: selectedLeaseId"));
         assert!(html.contains("terminalFontSize"));
         assert!(html.contains("composerFontSize"));
+        assert!(html.contains("menuFontSize"));
         assert!(html.contains("--remote-composer-font-size"));
+        assert!(html.contains("--remote-menu-font-size"));
         assert!(html.contains("applyTerminalAppearance(appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
     }

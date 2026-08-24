@@ -467,6 +467,13 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
         u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
         u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
     );
+    range_u64(
+        issues,
+        "/remote/menuFontSize",
+        u64::from(remote.menu_font_size),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
+        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
+    );
     range_scroll_sensitivity(
         issues,
         "/remote/scrollSensitivity",

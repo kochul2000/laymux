@@ -404,6 +404,8 @@
       "terminalFontSizeDesc": "원격 화면의 터미널 셀에 사용할 글자 크기입니다(6~72px).",
       "composerFontSize": "입력 컴포저 글자 크기",
       "composerFontSizeDesc": "원격 입력 컴포저와 추천 목록에 사용할 글자 크기입니다(6~72px).",
+      "menuFontSize": "메뉴 글자 크기",
+      "menuFontSizeDesc": "원격 내비게이션 드로어(메뉴)의 기준 글자 크기입니다. 작은 글씨도 비례해 함께 커집니다(6~72px).",
       "snapshotMaxKib": "화면 체크포인트 스크롤백",
       "snapshotMaxKibDesc": "원격 접속·터미널 전환 때 복원할 화면 체크포인트의 스크롤백 예산(KiB)입니다. 현재 화면과 터미널 상태는 이 값보다 클 수 있습니다.",
       "scrollSensitivity": "휠 스크롤 민감도",

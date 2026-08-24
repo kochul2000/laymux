@@ -2,37 +2,37 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { installRemoteClientRoutes } from "./remote-client-assets";
 
+const workspacePane = {
+  id: "pane-1",
+  location: "workspace",
+  workspaceId: "ws-1",
+  paneIndex: 0,
+  paneNumber: 1,
+  viewType: "terminal",
+  terminalId: "terminal-1",
+  terminalLive: true,
+  title: "Shell",
+  profile: "PowerShell",
+  cwd: "C:\\work",
+  branch: "main",
+  activity: { type: "shell" },
+  outputActive: false,
+  commandRunning: true,
+  isFocused: true,
+  unreadCount: 0,
+  hidden: false,
+  collapsed: false,
+  x: 0,
+  y: 0,
+  w: 1,
+  h: 1,
+};
+
 const navigation = {
   activeWorkspace: {
     id: "ws-1",
     name: "Main",
-    panes: [
-      {
-        id: "pane-1",
-        location: "workspace",
-        workspaceId: "ws-1",
-        paneIndex: 0,
-        paneNumber: 1,
-        viewType: "terminal",
-        terminalId: "terminal-1",
-        terminalLive: true,
-        title: "Shell",
-        profile: "PowerShell",
-        cwd: "C:\\work",
-        branch: "main",
-        activity: { type: "shell" },
-        outputActive: false,
-        commandRunning: false,
-        isFocused: true,
-        unreadCount: 0,
-        hidden: false,
-        collapsed: false,
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-      },
-    ],
+    panes: [workspacePane],
   },
   workspaces: [
     {
@@ -45,7 +45,7 @@ const navigation = {
       terminalPaneCount: 1,
       liveTerminalCount: 1,
       unreadCount: 0,
-      panes: [],
+      panes: [workspacePane],
     },
   ],
   docks: [],
@@ -74,6 +74,7 @@ const navigation = {
 interface DisplaySettings {
   terminalFontSize: number;
   composerFontSize: number;
+  menuFontSize: number;
   touchScrollSensitivity: number;
   twoFingerScrollSensitivity: number;
   revision: string;
@@ -176,6 +177,7 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
       harness.settings = {
         terminalFontSize: body.terminalFontSize,
         composerFontSize: body.composerFontSize,
+        menuFontSize: body.menuFontSize,
         touchScrollSensitivity: body.touchScrollSensitivity,
         twoFingerScrollSensitivity: body.twoFingerScrollSensitivity,
         revision: `rev-${revisionNumber + 1}`,
@@ -219,6 +221,7 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
     settings: {
       terminalFontSize: 18,
       composerFontSize: 20,
+      menuFontSize: 15,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -235,15 +238,35 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
 
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("18");
   await expect(page.locator("#remoteComposerFontSize")).toHaveValue("20");
+  await expect(page.locator("#remoteMenuFontSize")).toHaveValue("15");
   await expect
     .poll(() =>
       page.evaluate(() => ({
         terminal: (window as TermWindow).__remoteTerm?.options.fontSize ?? 0,
         composer: getComputedStyle(document.getElementById("composerInput") as HTMLElement)
           .fontSize,
+        menu: getComputedStyle(document.getElementById("navigationPanel") as HTMLElement).fontSize,
+        // The pane row itself is --fs-sm, so the activity pill must derive from
+        // the menu base (15 * 9/13), not from the row's smaller size. The
+        // workspace list renders after the navigation snapshot lands, so a
+        // missing element reports null and the poll retries.
+        paneActivity: ((element) =>
+          element ? Math.round(parseFloat(getComputedStyle(element).fontSize) * 100) / 100 : null)(
+          document.querySelector(".pane-activity"),
+        ),
+        workspaceName: ((element) =>
+          element ? Math.round(parseFloat(getComputedStyle(element).fontSize) * 100) / 100 : null)(
+          document.querySelector(".workspace-name"),
+        ),
       })),
     )
-    .toEqual({ terminal: 18, composer: "20px" });
+    .toEqual({
+      terminal: 18,
+      composer: "20px",
+      menu: "15px",
+      paneActivity: Math.round((15 * 9 * 100) / 13) / 100,
+      workspaceName: Math.round((15 * 14 * 100) / 13) / 100,
+    });
 
   await page.locator("#remoteTerminalFontSize").fill("22");
   await page.locator("#remoteComposerFontSize").click();
@@ -263,12 +286,24 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       ),
     )
     .toBe("24px");
+
+  await page.locator("#remoteMenuFontSize").fill("18");
+  await page.locator("#remoteTerminalFontSize").click();
+  await expect.poll(() => harness.putBodies.length).toBe(3);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => getComputedStyle(document.getElementById("navigationPanel") as HTMLElement).fontSize,
+      ),
+    )
+    .toBe("18px");
   expect(harness.putBodies).toEqual([
     {
       leaseId: "lease-1",
       expectedRevision: "rev-1",
       terminalFontSize: 22,
       composerFontSize: 20,
+      menuFontSize: 15,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
     },
@@ -277,6 +312,16 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       expectedRevision: "rev-2",
       terminalFontSize: 22,
       composerFontSize: 24,
+      menuFontSize: 15,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+    },
+    {
+      leaseId: "lease-1",
+      expectedRevision: "rev-3",
+      terminalFontSize: 22,
+      composerFontSize: 24,
+      menuFontSize: 18,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
     },
@@ -288,6 +333,7 @@ test("저장 중 drawer를 다시 열어도 pending 상태와 최신 저장값�
     settings: {
       terminalFontSize: 18,
       composerFontSize: 20,
+      menuFontSize: 15,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -321,6 +367,7 @@ test("저장 중 lease가 바뀌면 새 controller에서 PC 값을 다시 읽는
     settings: {
       terminalFontSize: 18,
       composerFontSize: 20,
+      menuFontSize: 15,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -362,6 +409,7 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
     settings: {
       terminalFontSize: 18,
       composerFontSize: 20,
+      menuFontSize: 15,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -379,6 +427,7 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
   harness.settings = {
     terminalFontSize: 19,
     composerFontSize: 26,
+    menuFontSize: 17,
     touchScrollSensitivity: 1,
     twoFingerScrollSensitivity: 5,
     revision: "rev-2",
@@ -393,11 +442,13 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
     expectedRevision: "rev-1",
     terminalFontSize: 22,
     composerFontSize: 20,
+    menuFontSize: 15,
     touchScrollSensitivity: 1,
     twoFingerScrollSensitivity: 5,
   });
   await expect.poll(() => harness.getRequests).toBeGreaterThan(getsBeforeConflict);
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");
   await expect(page.locator("#remoteComposerFontSize")).toHaveValue("26");
+  await expect(page.locator("#remoteMenuFontSize")).toHaveValue("17");
   await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Stored on this PC.");
 });

@@ -1811,6 +1811,10 @@ pub struct RemoteSettings {
     /// Text size for the Remote input composer and its suggestions.
     #[serde(default = "default_remote_composer_font_size")]
     pub composer_font_size: u16,
+    /// Base text size for the Remote navigation drawer (menu). The drawer's
+    /// smaller text tiers scale proportionally from this value.
+    #[serde(default = "default_remote_menu_font_size")]
+    pub menu_font_size: u16,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1904,6 +1908,9 @@ pub const REMOTE_FONT_SIZE_MIN: u16 = 6;
 pub const REMOTE_FONT_SIZE_MAX: u16 = 72;
 pub const DEFAULT_REMOTE_TERMINAL_FONT_SIZE: u16 = 14;
 pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 16;
+/// Matches the drawer's historical fixed base (`--fs-md`, 13px), so existing
+/// installs render pixel-identically until the user changes the value.
+pub const DEFAULT_REMOTE_MENU_FONT_SIZE: u16 = 13;
 
 fn default_remote_terminal_font_size() -> u16 {
     DEFAULT_REMOTE_TERMINAL_FONT_SIZE
@@ -1911,6 +1918,10 @@ fn default_remote_terminal_font_size() -> u16 {
 
 fn default_remote_composer_font_size() -> u16 {
     DEFAULT_REMOTE_COMPOSER_FONT_SIZE
+}
+
+fn default_remote_menu_font_size() -> u16 {
+    DEFAULT_REMOTE_MENU_FONT_SIZE
 }
 
 fn default_cloud_auto_reconnect() -> bool {
@@ -1959,6 +1970,7 @@ impl Default for RemoteSettings {
             snapshot_max_kib: default_remote_snapshot_max_kib(),
             terminal_font_size: default_remote_terminal_font_size(),
             composer_font_size: default_remote_composer_font_size(),
+            menu_font_size: default_remote_menu_font_size(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,

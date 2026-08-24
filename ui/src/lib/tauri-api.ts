@@ -1056,6 +1056,8 @@ export interface RemoteSettings {
   terminalFontSize: number;
   /** Remote input composer and suggestion font size in pixels. */
   composerFontSize: number;
+  /** Remote navigation drawer (menu) base font size in pixels. */
+  menuFontSize: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;
