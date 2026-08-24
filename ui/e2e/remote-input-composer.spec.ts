@@ -151,6 +151,7 @@ async function installBrowserMocks(
         buffer = {
           active: {
             type: "normal",
+            baseY: 0,
             viewportY: 0,
             ydisp: 0,
             length: 24,
@@ -188,6 +189,7 @@ async function installBrowserMocks(
         };
         private dataListener: ((data: string) => void) | null = null;
         private resizeListener: ((size: { cols: number; rows: number }) => void) | null = null;
+        private scrollListener: (() => void) | null = null;
         private delayNextWrite = Boolean(delayFirstTerminalWrite);
         private delayedWriteCallback: (() => void) | null = null;
 
@@ -227,7 +229,9 @@ async function installBrowserMocks(
         }
 
         onSelectionChange(_listener: () => void) {}
-        onScroll(_listener: () => void) {}
+        onScroll(listener: () => void) {
+          this.scrollListener = listener;
+        }
         hasSelection() {
           return Boolean(this.selection);
         }
@@ -272,9 +276,24 @@ async function installBrowserMocks(
         scrollCalls: number[] = [];
         scrollLines(amount: number) {
           this.scrollCalls.push(amount);
+          const active = this.buffer.active;
+          active.viewportY = Math.max(0, Math.min(active.baseY, active.viewportY + amount));
+          active.ydisp = active.viewportY;
+          this.scrollListener?.();
         }
         scrollToBottom() {
           this.scrollCalls.push(Number.POSITIVE_INFINITY);
+          const active = this.buffer.active;
+          active.viewportY = active.baseY;
+          active.ydisp = active.baseY;
+          this.scrollListener?.();
+        }
+        setViewport(baseY: number, viewportY: number) {
+          const active = this.buffer.active;
+          active.baseY = Math.max(0, baseY);
+          active.viewportY = Math.max(0, Math.min(active.baseY, viewportY));
+          active.ydisp = active.viewportY;
+          this.scrollListener?.();
         }
         emitData(data: string) {
           this.dataListener?.(data);
@@ -1648,17 +1667,19 @@ test("the Remote Settings toggles disable the recall popup and autocomplete", as
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
 });
 
-for (const [agent, expectedOffset] of [
+for (const [agent, hiddenLines] of [
   ["Claude", 3],
   ["Codex", 4],
   ["Grok", 2],
 ] as const) {
-  test(`agent composer offset defaults on and uses ${agent}'s input height`, async ({ page }) => {
+  test(`Composer hides ${agent}'s unused input area by its configured line count`, async ({
+    page,
+  }) => {
     await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
     await connect(page);
 
     // Attaching the terminal can restore its normal viewport. Isolate the
-    // composer transition so this assertion only observes the new option.
+    // Composer transition so this assertion only observes the automatic hide.
     await page.evaluate(() => {
       const mock = window as typeof window & {
         __mockTerminal?: { scrollCalls: number[] };
@@ -1675,18 +1696,19 @@ for (const [agent, expectedOffset] of [
           return mock.__mockTerminal?.scrollCalls ?? [];
         }),
       )
-      .toEqual([Number.POSITIVE_INFINITY, -expectedOffset]);
+      .toEqual([Number.POSITIVE_INFINITY, -hiddenLines]);
 
     await openRemoteSettings(page);
-    const toggle = page.locator("#composerAgentScrollOffsetToggle");
+    const toggle = page.locator("#composerHideAgentInputToggle");
     await expect(toggle).toBeChecked();
-    await expect(page.locator(`#composerAgentScrollOffset${agent}`)).toHaveValue(
-      String(expectedOffset),
+    await expect(toggle).toHaveAttribute("aria-label", "Hide unused agent input");
+    await expect(page.locator(`#composerHiddenAgentInputLines${agent}`)).toHaveValue(
+      String(hiddenLines),
     );
   });
 }
 
-test("mobile Composer exposes the agent offset option", async ({ page }) => {
+test("mobile Composer describes and configures unused agent input hiding", async ({ page }) => {
   await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
   await connect(page);
   await expect(page.locator("#terminalComposer")).toBeVisible();
@@ -1698,8 +1720,12 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
   });
 
   await openRemoteSettings(page);
-  await expect(page.locator("#composerAgentScrollOffsetToggle")).toBeChecked();
-  const claudeLines = page.locator("#composerAgentScrollOffsetClaude");
+  const toggle = page.locator("#composerHideAgentInputToggle");
+  await expect(toggle).toBeChecked();
+  await expect(toggle.locator("..")).toContainText("Hide unused agent input");
+  await expect(toggle.locator("..")).toContainText("While using Composer");
+  const claudeLines = page.locator("#composerHiddenAgentInputLinesClaude");
+  await expect(claudeLines).toHaveAttribute("aria-label", "Claude input lines to hide");
   await claudeLines.fill("6");
   await claudeLines.press("Enter");
   await expect
@@ -1712,7 +1738,7 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
       }),
     )
     .toEqual([]);
-  const codexLines = page.locator("#composerAgentScrollOffsetCodex");
+  const codexLines = page.locator("#composerHiddenAgentInputLinesCodex");
   await codexLines.fill("6");
   await codexLines.press("Enter");
   await expect
@@ -1727,7 +1753,123 @@ test("mobile Composer exposes the agent offset option", async ({ page }) => {
     .toEqual([Number.POSITIVE_INFINITY, -6]);
   await expect
     .poll(() =>
-      page.evaluate(() => localStorage.getItem("laymux.remote.composerAgentScrollOffsetLines")),
+      page.evaluate(() => localStorage.getItem("laymux.remote.composerHiddenAgentInputLines")),
     )
     .toBe('{"Claude":6,"Codex":6,"Grok":2}');
+});
+
+test("leaving Composer or disabling hiding reveals the active agent input again", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+
+  const scrollCalls = () =>
+    page.evaluate(() => {
+      const mock = window as typeof window & {
+        __mockTerminal?: { scrollCalls: number[] };
+      };
+      return mock.__mockTerminal?.scrollCalls ?? [];
+    });
+  const clearScrollCalls = () =>
+    page.evaluate(() => {
+      const mock = window as typeof window & {
+        __mockTerminal?: { scrollCalls: number[] };
+      };
+      mock.__mockTerminal?.scrollCalls.splice(0);
+    });
+
+  await clearScrollCalls();
+  await clickInputModeToggle(page);
+  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+
+  await clearScrollCalls();
+  await clickInputModeToggle(page);
+  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY, -4]);
+
+  await clearScrollCalls();
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeHidden();
+  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+
+  await clearScrollCalls();
+  await page.locator("#focusTerminal").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY, -4]);
+
+  await clearScrollCalls();
+  await openRemoteSettings(page);
+  await page.locator("#composerHideAgentInputToggle").uncheck();
+  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerHideAgentInput")))
+    .toBe("0");
+});
+
+test("Composer jump-to-bottom stops at the hidden input boundary before the live tail", async ({
+  page,
+}) => {
+  await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
+  await connect(page);
+
+  type ScrollMock = {
+    buffer: { active: { baseY: number; viewportY: number } };
+    scrollCalls: number[];
+    setViewport: (baseY: number, viewportY: number) => void;
+  };
+  const readScrollState = () =>
+    page.evaluate(() => {
+      const mock = (
+        window as typeof window & {
+          __mockTerminal?: ScrollMock;
+        }
+      ).__mockTerminal;
+      return {
+        calls: mock?.scrollCalls ?? [],
+        distance: mock ? mock.buffer.active.baseY - mock.buffer.active.viewportY : -1,
+      };
+    });
+
+  await page.evaluate(() => {
+    const mock = (
+      window as typeof window & {
+        __mockTerminal?: ScrollMock;
+      }
+    ).__mockTerminal;
+    mock?.scrollCalls.splice(0);
+    mock?.setViewport(100, 80);
+  });
+
+  const scrollToBottom = page.locator("#scrollToBottom");
+  await expect(scrollToBottom).toBeVisible();
+
+  await scrollToBottom.click();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+  await expect(scrollToBottom).toBeVisible();
+
+  await scrollToBottom.click();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4, Number.POSITIVE_INFINITY],
+    distance: 0,
+  });
+  await expect(scrollToBottom).toBeHidden();
+
+  await page.evaluate(() => {
+    const mock = (
+      window as typeof window & {
+        __mockTerminal?: ScrollMock;
+      }
+    ).__mockTerminal;
+    mock?.scrollCalls.splice(0);
+    document.querySelector<HTMLTextAreaElement>("#composerInput")?.blur();
+  });
+  await page.locator("#composerInput").focus();
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+  await expect(scrollToBottom).toBeVisible();
 });
