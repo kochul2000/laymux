@@ -950,7 +950,7 @@ mod tests {
         assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath = null)"));
         assert!(html.contains("function closeFileViewer()"));
         assert!(html.contains("body: JSON.stringify({ source: \"path\", path }),"));
-        // Explorer mode (ADR-0197): the directory listing lives in this same
+        // Explorer mode (ADR-0198): the directory listing lives in this same
         // overlay and reaches the host only through the lease+capability route.
         assert!(html.contains("id=\"fileExplorerHeader\""));
         assert!(html.contains("id=\"fileViewerDirectory\""));

@@ -427,7 +427,7 @@ test("selected desktop-valid relative file is underlined and opens Remote FileVi
   await expect(page.locator("#terminal")).not.toHaveClass(/remote-path-link-clickable/);
 });
 
-test("a directory link opens the explorer listing, not the file renderer (ADR-0197)", async ({
+test("a directory link opens the explorer listing, not the file renderer (ADR-0198)", async ({
   context,
   page,
 }) => {

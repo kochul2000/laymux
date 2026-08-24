@@ -11,6 +11,13 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.laymux.android.R
+import com.laymux.android.update.UpdateChannel
+import com.laymux.android.update.UpdateSectionStatus
+import com.laymux.android.update.labelResId
+import com.laymux.android.update.presentUpdateSection
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 interface ConnectionSettingsActions {
     fun setBiometricRequired(required: Boolean)
@@ -18,6 +25,14 @@ interface ConnectionSettingsActions {
     fun retryPairingConfirmation(instanceId: String)
     fun forgetPairing(instanceId: String)
     fun dismissConnectionSettings()
+
+    /** 채널 변경은 즉시 1회 확인을 트리거한다 (ADR-0197). */
+    fun setUpdateChannel(channel: UpdateChannel)
+
+    /** 수동 확인은 주기 throttle 을 무시한다. */
+    fun checkForUpdate()
+
+    fun openReleasePage(url: String)
 }
 
 class ConnectionSettingsDialog(
@@ -38,6 +53,13 @@ class ConnectionSettingsDialog(
         val forget: MaterialButton,
         val biometricSwitch: MaterialSwitch,
         val biometricHint: TextView,
+        val updateCurrentVersion: TextView,
+        val updateStatus: TextView,
+        val updateLastChecked: TextView,
+        val updateBetaSwitch: MaterialSwitch,
+        val updateChannelHint: TextView,
+        val updateCheck: MaterialButton,
+        val updateOpenRelease: MaterialButton,
     )
 
     private var dialog: AlertDialog? = null
@@ -107,6 +129,7 @@ class ConnectionSettingsDialog(
         showText(bound.notice, state.notice)
         renderPairingActions(bound, state, presentation)
         renderProtection(bound, state)
+        renderUpdate(bound, state)
     }
 
     fun dismiss() {
@@ -133,6 +156,13 @@ class ConnectionSettingsDialog(
         forget = content.findViewById(R.id.connection_settings_forget),
         biometricSwitch = content.findViewById(R.id.connection_settings_biometric_switch),
         biometricHint = content.findViewById(R.id.connection_settings_biometric_hint),
+        updateCurrentVersion = content.findViewById(R.id.update_section_current_version),
+        updateStatus = content.findViewById(R.id.update_section_status),
+        updateLastChecked = content.findViewById(R.id.update_section_last_checked),
+        updateBetaSwitch = content.findViewById(R.id.update_section_beta_switch),
+        updateChannelHint = content.findViewById(R.id.update_section_channel_hint),
+        updateCheck = content.findViewById(R.id.update_section_check),
+        updateOpenRelease = content.findViewById(R.id.update_section_open_release),
     )
 
     private fun renderPairingActions(
@@ -194,6 +224,87 @@ class ConnectionSettingsDialog(
                 activity,
                 if (unavailable) R.color.laymux_error else R.color.laymux_on_surface_variant,
             ),
+        )
+    }
+
+    /**
+     * 업데이트 섹션 (ADR-0197). 상태 판정은 [presentUpdateSection] 이 하고 여기는
+     * 문안과 리스너만 붙인다.
+     */
+    private fun renderUpdate(bound: Views, state: ConnectionSettingsState) {
+        val update = presentUpdateSection(state.update)
+        bound.updateCurrentVersion.text = activity.getString(
+            R.string.update_section_current_version,
+            update.currentVersion,
+            activity.getString(update.channel.labelResId()),
+        )
+
+        val statusText = when (update.status) {
+            UpdateSectionStatus.DISABLED -> activity.getString(R.string.update_status_disabled)
+            UpdateSectionStatus.CHECKING -> activity.getString(R.string.update_status_checking)
+            UpdateSectionStatus.AVAILABLE -> activity.getString(
+                R.string.update_status_available,
+                update.availableVersion.orEmpty(),
+            )
+            // 확인 실패를 최신 상태와 같은 표시로 접으면 끊긴 배포 경로를 아무도
+            // 알아차리지 못한다.
+            UpdateSectionStatus.ERROR -> update.lastError
+                ?: activity.getString(R.string.update_status_disabled)
+            UpdateSectionStatus.UP_TO_DATE -> activity.getString(R.string.update_status_up_to_date)
+            UpdateSectionStatus.NEVER_CHECKED ->
+                activity.getString(R.string.update_section_never_checked)
+        }
+        bound.updateStatus.text = statusText
+        bound.updateStatus.setTextColor(
+            ContextCompat.getColor(
+                activity,
+                when (update.status) {
+                    UpdateSectionStatus.AVAILABLE -> R.color.laymux_primary
+                    UpdateSectionStatus.ERROR -> R.color.laymux_error
+                    else -> R.color.laymux_on_surface_variant
+                },
+            ),
+        )
+
+        val lastChecked = update.lastCheckedAtEpochMillis
+        bound.updateLastChecked.visibility = if (lastChecked == null) View.GONE else View.VISIBLE
+        if (lastChecked != null) {
+            bound.updateLastChecked.text = activity.getString(
+                R.string.update_section_last_checked,
+                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(lastChecked)),
+            )
+        }
+
+        bound.updateBetaSwitch.setOnCheckedChangeListener(null)
+        bound.updateBetaSwitch.isChecked = update.channel == UpdateChannel.BETA
+        bound.updateBetaSwitch.isEnabled = update.channelChoiceEnabled
+        bound.updateBetaSwitch.setOnCheckedChangeListener { _, beta ->
+            actions.setUpdateChannel(if (beta) UpdateChannel.BETA else UpdateChannel.STABLE)
+        }
+        bound.updateChannelHint.setText(
+            if (update.betaWarningVisible) {
+                R.string.update_channel_hint_beta
+            } else {
+                R.string.update_channel_hint_stable
+            },
+        )
+        bound.updateChannelHint.setTextColor(
+            ContextCompat.getColor(
+                activity,
+                if (update.betaWarningVisible) {
+                    R.color.laymux_error
+                } else {
+                    R.color.laymux_on_surface_variant
+                },
+            ),
+        )
+
+        bound.updateCheck.isEnabled = update.checkEnabled
+        bound.updateCheck.setOnClickListener { actions.checkForUpdate() }
+        val releaseUrl = update.releaseUrl
+        bound.updateOpenRelease.visibility = if (releaseUrl == null) View.GONE else View.VISIBLE
+        bound.updateOpenRelease.setOnClickListener(
+            if (releaseUrl == null) null else View.OnClickListener { actions.openReleasePage(releaseUrl) },
         )
     }
 

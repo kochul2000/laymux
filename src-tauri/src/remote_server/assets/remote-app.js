@@ -247,7 +247,7 @@
         let fileViewerPath = null;
         let fileViewerDownloadInFlight = false;
         let fileViewerKind = null;
-        // Explorer mode (ADR-0197): the directory the overlay is listing, and
+        // Explorer mode (ADR-0198): the directory the overlay is listing, and
         // the directory a file opened from it returns to. Display state only —
         // never persisted, reset on close and on every disconnect.
         let fileViewerDirectoryPath = null;
@@ -1215,7 +1215,7 @@
           const connected = Boolean(leaseId && fileViewerToken);
           // The header folder button is an entry point, not an action with a
           // recoverable disabled state: without a lease it means nothing, so it
-          // is hidden rather than disabled (ADR-0192, ADR-0197).
+          // is hidden rather than disabled (ADR-0192, ADR-0198).
           fileExplorerHeaderButton.hidden = !connected;
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
@@ -1455,7 +1455,7 @@
           fileViewerPath = path;
           // Back exists only for a file reached through the explorer; every
           // other entry point (drawer path, path-link) has no folder to return
-          // to (ADR-0197).
+          // to (ADR-0198).
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = explorerReturnPath;
           fileViewerBackButton.hidden = !explorerReturnPath;
@@ -1491,7 +1491,7 @@
             });
         }
 
-        // Explorer mode (ADR-0197): the same overlay lists a host directory.
+        // Explorer mode (ADR-0198): the same overlay lists a host directory.
         // `request` is `{ path }` or `{ source: "terminalCwd", terminalId }` —
         // the host bridge resolves the terminal's cwd (home as fallback) and
         // completes every entry's absolute path, so this surface owns no path
@@ -2304,7 +2304,7 @@
             return;
           }
           // A directory link opens as an explorer listing, a file link renders
-          // (ADR-0197). Desktop routes directories to cwd propagation instead,
+          // (ADR-0198). Desktop routes directories to cwd propagation instead,
           // but Remote has no local explorer pane to propagate into.
           if (press.kind === "directory") {
             openFileExplorerOverlay({ path: press.path });
@@ -9941,7 +9941,7 @@
         });
         fileViewerBackButton.addEventListener("click", () => {
           // Back re-requests the listing rather than restoring a cache: the
-          // directory may have changed while the file was open (ADR-0197).
+          // directory may have changed while the file was open (ADR-0198).
           if (fileViewerExplorerReturnPath) {
             openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
           }

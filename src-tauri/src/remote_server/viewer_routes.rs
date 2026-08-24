@@ -55,7 +55,7 @@ pub(super) struct FileViewerPathLinkCaret {
     index: usize,
 }
 
-/// One Remote directory listing request (ADR-0197). Either an explicit host
+/// One Remote directory listing request (ADR-0198). Either an explicit host
 /// `path` or `source:"terminalCwd"` + `terminalId` (the header folder button's
 /// entry point — the bridge resolves the terminal's cwd, home as fallback).
 #[derive(Debug, Deserialize)]

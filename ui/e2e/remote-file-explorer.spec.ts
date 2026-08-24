@@ -2,7 +2,7 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import { fulfillRemoteClientAsset } from "./remote-client-assets";
 
 /**
- * Remote in-overlay file explorer (ADR-0197): the header folder button and the
+ * Remote in-overlay file explorer (ADR-0198): the header folder button and the
  * directory rows drive `/remote/v1/file-viewer/list`, files open through the
  * existing render route, and Back re-requests the listing instead of caching.
  */

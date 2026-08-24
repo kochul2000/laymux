@@ -1,4 +1,4 @@
-# 0197. Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다
+# 0198. Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다
 
 - Status: Proposed
 - Date: 2026-08-24

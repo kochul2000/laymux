@@ -371,7 +371,7 @@ pub const MAX_REMOTE_PATH_LINK_SCREEN_CHARS: usize = 8192;
 pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
 
 /// Maximum entries returned by one Remote FileViewer directory listing
-/// (ADR-0197). Past this the bridge truncates the sorted list and reports
+/// (ADR-0198). Past this the bridge truncates the sorted list and reports
 /// `truncated:true` — partial front-of-list beats failing the whole directory.
 pub const MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES: usize = 1000;
 

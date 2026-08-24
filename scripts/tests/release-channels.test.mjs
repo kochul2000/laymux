@@ -5,10 +5,18 @@ import {
   androidReleaseVersion,
   ANDROID_VERSION_CODE_MAX,
 } from "../release/android-version-code.mjs";
+import { readFileSync } from "node:fs";
+
 import {
+  ALL_CHANNEL_FILES,
+  ANDROID_BETA_CHANNEL_FILE,
+  ANDROID_STABLE_CHANNEL_FILE,
+  buildAndroidChannelManifest,
   compareReleaseVersions,
   parseReleaseVersion,
+  planAndroidChannelWrites,
   planChannelWrites,
+  validateAndroidChannelManifest,
   validateChannelManifest,
 } from "../release/channel-manifest.mjs";
 
@@ -430,6 +438,206 @@ check(
       currentStableVersion: "0.10.18",
     });
     return writes.length === 0;
+  })(),
+);
+
+// ------------------------------------------------ Android 채널 매니페스트
+
+const PUB_DATE = "2026-08-24T00:00:00Z";
+
+function androidManifestFor(tag) {
+  return buildAndroidChannelManifest({
+    tag,
+    owner: OWNER,
+    repo: REPO,
+    pubDate: PUB_DATE,
+  });
+}
+
+check(
+  "Android 매니페스트는 태그에서 버전·코드·URL 을 파생한다",
+  (() => {
+    const manifest = androidManifestFor("v0.11.1");
+    return (
+      manifest.version === "0.11.1" &&
+      manifest.versionCode === 110019 &&
+      manifest.releaseUrl ===
+        `https://github.com/${OWNER}/${REPO}/releases/tag/v0.11.1` &&
+      manifest.apkUrl ===
+        `https://github.com/${OWNER}/${REPO}/releases/download/v0.11.1/Laymux-Android-0.11.1.apk` &&
+      manifest.apkSha256Url === `${manifest.apkUrl}.sha256` &&
+      manifest.pubDate === PUB_DATE
+    );
+  })(),
+);
+
+check(
+  "beta 태그의 Android 매니페스트는 beta 슬롯 코드를 쓴다",
+  (() => {
+    const manifest = androidManifestFor("v0.12.0-beta.3");
+    return (
+      manifest.version === "0.12.0-beta.3" &&
+      manifest.versionCode === 120003 &&
+      manifest.apkUrl.endsWith("/Laymux-Android-0.12.0-beta.3.apk")
+    );
+  })(),
+);
+
+check(
+  "파생한 Android 매니페스트는 자기 검증을 통과한다",
+  (() => {
+    validateAndroidChannelManifest(androidManifestFor("v0.11.1"), {
+      tag: "v0.11.1",
+      owner: OWNER,
+      repo: REPO,
+      channel: "stable",
+    });
+    validateAndroidChannelManifest(androidManifestFor("0.12.0-beta.2"), {
+      tag: "0.12.0-beta.2",
+      owner: OWNER,
+      repo: REPO,
+      channel: "beta",
+    });
+    return true;
+  })(),
+);
+
+throws(
+  "Android stable 채널 파일에 beta 버전은 거절",
+  () =>
+    validateAndroidChannelManifest(androidManifestFor("v0.11.1-beta.1"), {
+      tag: "v0.11.1-beta.1",
+      owner: OWNER,
+      repo: REPO,
+      channel: "stable",
+    }),
+  "stable 채널 파일",
+);
+
+throws(
+  "Android 매니페스트 버전이 태그와 다르면 거절",
+  () =>
+    validateAndroidChannelManifest(androidManifestFor("v0.11.1"), {
+      tag: "v0.11.2",
+      owner: OWNER,
+      repo: REPO,
+      channel: "stable",
+    }),
+  "태그",
+);
+
+throws(
+  "다른 저장소의 릴리스 페이지는 거절",
+  () =>
+    validateAndroidChannelManifest(
+      {
+        ...androidManifestFor("v0.11.1"),
+        releaseUrl: "https://github.com/someone/else/releases/tag/v0.11.1",
+      },
+      { tag: "v0.11.1", owner: OWNER, repo: REPO, channel: "stable" },
+    ),
+  "releaseUrl",
+);
+
+throws(
+  "versionCode 가 인코딩 결과와 다르면 거절",
+  () =>
+    validateAndroidChannelManifest(
+      { ...androidManifestFor("v0.11.1"), versionCode: 110018 },
+      { tag: "v0.11.1", owner: OWNER, repo: REPO, channel: "stable" },
+    ),
+  "versionCode",
+);
+
+throws(
+  "체크섬 URL 이 APK URL 과 짝이 아니면 거절",
+  () =>
+    validateAndroidChannelManifest(
+      {
+        ...androidManifestFor("v0.11.1"),
+        apkSha256Url: `https://github.com/${OWNER}/${REPO}/releases/download/v0.11.1/other.sha256`,
+      },
+      { tag: "v0.11.1", owner: OWNER, repo: REPO, channel: "stable" },
+    ),
+  "apkSha256Url",
+);
+
+throws(
+  "pubDate 가 시각이 아니면 거절",
+  () =>
+    validateAndroidChannelManifest(
+      { ...androidManifestFor("v0.11.1"), pubDate: "어제" },
+      { tag: "v0.11.1", owner: OWNER, repo: REPO, channel: "stable" },
+    ),
+  "pubDate",
+);
+
+check(
+  "Android 쓰기 계획은 데스크톱과 같은 규칙을 쓴다",
+  (() => {
+    const writes = planAndroidChannelWrites({
+      version: "0.12.0",
+      prerelease: false,
+      currentBetaVersion: "0.12.0-beta.4",
+      currentStableVersion: "0.11.1",
+    });
+    return (
+      writes.length === 2 &&
+      writes[0] === ANDROID_STABLE_CHANNEL_FILE &&
+      writes[1] === ANDROID_BETA_CHANNEL_FILE
+    );
+  })(),
+);
+
+check(
+  "Android 계열이 뒤처졌으면 데스크톱 no-op 과 무관하게 전진한다",
+  (() => {
+    // 이 결정 이전에 시딩된 브랜치: 데스크톱은 최신, Android 파일은 없다.
+    const desktop = planChannelWrites({
+      version: "0.11.1",
+      prerelease: false,
+      currentBetaVersion: "0.11.1",
+      currentStableVersion: "0.11.1",
+    });
+    const android = planAndroidChannelWrites({
+      version: "0.11.1",
+      prerelease: false,
+      currentBetaVersion: null,
+      currentStableVersion: null,
+    });
+    return desktop.length === 0 && android.length === 2;
+  })(),
+);
+
+check(
+  "같은 릴리스 재실행은 Android 파일도 no-op",
+  (() => {
+    const writes = planAndroidChannelWrites({
+      version: "0.11.1",
+      prerelease: false,
+      currentBetaVersion: "0.11.1",
+      currentStableVersion: "0.11.1",
+    });
+    return writes.length === 0;
+  })(),
+);
+
+check(
+  "모든 채널 파일 목록은 네 개다",
+  ALL_CHANNEL_FILES.length === 4 &&
+    ALL_CHANNEL_FILES.includes(ANDROID_STABLE_CHANNEL_FILE) &&
+    ALL_CHANNEL_FILES.includes(ANDROID_BETA_CHANNEL_FILE),
+);
+
+check(
+  "발행 스크립트는 모든 채널 파일을 트리에 담는다",
+  (() => {
+    const script = readFileSync(
+      new URL("../release/publish-channel-commit.sh", import.meta.url),
+      "utf8",
+    );
+    // 트리를 통째로 만들므로 목록에서 빠진 파일은 브랜치에서 사라진다.
+    return ALL_CHANNEL_FILES.every((file) => script.includes(file));
   })(),
 );
 

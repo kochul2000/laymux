@@ -118,7 +118,7 @@ describe("Remote FileViewer path-link bridge", () => {
     expect(result).toEqual({ success: true, data: { valid: false } });
   });
 
-  it("디렉터리는 kind:'directory' 링크로 활성화한다 (ADR-0197)", async () => {
+  it("디렉터리는 kind:'directory' 링크로 활성화한다 (ADR-0198)", async () => {
     registerTerminal("/work");
     vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: true }]);
 
@@ -533,7 +533,7 @@ describe("Remote FileViewer render payload", () => {
   });
 });
 
-describe("Remote FileViewer directory listing (ADR-0197)", () => {
+describe("Remote FileViewer directory listing (ADR-0198)", () => {
   beforeEach(() => {
     useTerminalStore.setState(useTerminalStore.getInitialState());
     vi.clearAllMocks();

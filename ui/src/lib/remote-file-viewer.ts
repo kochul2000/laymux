@@ -135,7 +135,7 @@ export async function handleRemoteFileViewerRequest(
       ) {
         return ok({ valid: false });
       }
-      // 파일(openFile)과 디렉터리(changeDir) 모두 링크가 된다(ADR-0197) —
+      // 파일(openFile)과 디렉터리(changeDir) 모두 링크가 된다(ADR-0198) —
       // Remote 는 directory match 를 explorer 열기로 라우팅한다.
       const linkable = pending.filter(({ statIndex }) => {
         const info = infos[statIndex];

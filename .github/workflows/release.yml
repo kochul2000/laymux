@@ -365,7 +365,12 @@ jobs:
           # error body to stdout on a 404 and does not apply --jq to it, so a
           # missing file reads as a non-empty value and would skip the seeding
           # this job exists to do.
-          if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1; then
+          # The condition is "every stable file exists", not "the branch exists":
+          # a branch seeded before the Android channel existed holds no Android
+          # file, and a channel-aware app would then get a 404 from its fixed
+          # endpoint until the next release (ADR-0197).
+          if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1 &&
+            gh api "repos/$GITHUB_REPOSITORY/contents/android-stable.json?ref=$BRANCH" >/dev/null 2>&1; then
             echo "channel branch already seeded"
             exit 0
           fi
@@ -380,15 +385,33 @@ jobs:
 
           channels="$RUNNER_TEMP/channels"
           mkdir -p "$channels"
-          if beta_body="$(gh api "repos/$GITHUB_REPOSITORY/contents/desktop-beta.json?ref=$BRANCH" --jq '.content' 2>/dev/null)"; then
-            printf '%s' "$beta_body" | base64 -d >"$channels/desktop-beta.json"
-          fi
+          # Carry over whatever the branch already holds. The publish step
+          # rebuilds the whole tree, so a file left out here is deleted.
+          for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
+            if body="$(gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" --jq '.content' 2>/dev/null)"; then
+              printf '%s' "$body" | base64 -d >"$channels/$file"
+            fi
+          done
+
+          # An Android manifest pointing at a release page whose APK was never
+          # published is worse than a 404: the phone would send the user to a
+          # release with nothing to install (ADR-0197).
+          # Not `gh ... | grep -q`: with pipefail, grep exiting on the first match
+          # SIGPIPEs gh and the pipeline reports 141 even though the asset is there.
+          seed_version="${seed_tag#v}"
+          seed_assets="$(gh release view "$seed_tag" --json assets --jq '.assets[].name')"
+          grep -qxF "Laymux-Android-$seed_version.apk" <<<"$seed_assets" || {
+            echo "Seed release $seed_tag has no Android APK asset" >&2
+            exit 1
+          }
 
           seed_manifest="$RUNNER_TEMP/seed-latest.json"
           gh release download "$seed_tag" --pattern latest.json --output "$seed_manifest" --clobber
+          seed_published="$(gh release view "$seed_tag" --json publishedAt --jq '.publishedAt')"
           node scripts/release/channel-manifest.mjs \
             --tag "$seed_tag" --prerelease false --seed-stable true \
             --manifest "$seed_manifest" --channel-dir "$channels" \
+            --pub-date "$seed_published" \
             --owner "${GITHUB_REPOSITORY%%/*}" --repo "${GITHUB_REPOSITORY##*/}"
 
           bash "$GITHUB_WORKSPACE/scripts/release/publish-channel-commit.sh" \
@@ -446,12 +469,15 @@ jobs:
           mkdir -p "$channels"
 
           # Read the branch through the API rather than cloning: the channel
-          # branch holds only these two files, and a clone would put the source
+          # branch holds only these four files, and a clone would put the source
           # tree and a credential into the deployment working copy. The branch is
           # guaranteed to exist by the bootstrap job that gates publish.
+          # Every file must be downloaded, not only the ones this release writes:
+          # the publish step rebuilds the whole tree, so a file missing from the
+          # directory is deleted from the branch (ADR-0197).
           # Again: exit status, not output. A 404 body on stdout would be written
           # as if it were a manifest.
-          for file in desktop-stable.json desktop-beta.json; do
+          for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
             rm -f "$channels/$file"
             if body="$(gh api "repos/$GITHUB_REPOSITORY/contents/$file?ref=$BRANCH" --jq '.content' 2>/dev/null)"; then
               printf '%s' "$body" | base64 -d >"$channels/$file"
@@ -463,11 +489,16 @@ jobs:
 
           # Validation, the forward-only invariants and the write plan live in the
           # script so they are unit tested rather than discovered in a release.
+          # The Android manifest records when the release went out, so it comes
+          # from the release itself rather than from the runner clock.
+          published_at="$(gh release view "$RELEASE_TAG" --json publishedAt --jq '.publishedAt')"
+
           written="$(node "$GITHUB_WORKSPACE/scripts/release/channel-manifest.mjs" \
             --tag "$RELEASE_TAG" \
             --prerelease "$PRERELEASE" \
             --manifest "$manifest" \
             --channel-dir "$channels" \
+            --pub-date "$published_at" \
             --owner "${GITHUB_REPOSITORY%%/*}" \
             --repo "${GITHUB_REPOSITORY##*/}")"
           printf 'channel files to publish:\n%s\n' "${written:-<none>}"

@@ -147,5 +147,85 @@
             android:textAppearance="?attr/textAppearanceBodySmall"
             android:textColor="@color/laymux_on_surface_variant"
             tools:text="기본값 · PIN이나 패턴으로 자동 대체하지 않습니다." />
+
+        <!-- 앱 업데이트 (ADR-0197). 앱의 유일한 네이티브 설정 표면이므로 새
+             진입점을 만들지 않고 여기에 붙인다. -->
+        <com.google.android.material.divider.MaterialDivider
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/update_section_title"
+            android:textColor="@color/laymux_on_surface"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/update_section_current_version"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="@color/laymux_on_surface_variant"
+            tools:text="현재 버전 0.11.1" />
+
+        <TextView
+            android:id="@+id/update_section_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            tools:text="새 버전 0.12.0 을 받을 수 있습니다." />
+
+        <TextView
+            android:id="@+id/update_section_last_checked"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="@color/laymux_on_surface_variant"
+            tools:text="마지막 확인 2026-08-24 12:00" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/update_section_beta_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/update_section_beta_switch"
+            android:textColor="@color/laymux_on_surface" />
+
+        <TextView
+            android:id="@+id/update_section_channel_hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textAppearance="?attr/textAppearanceBodySmall"
+            android:textColor="@color/laymux_on_surface_variant"
+            tools:text="베타는 검증 전 빌드입니다." />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/update_section_check"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/update_section_check" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/update_section_open_release"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:text="@string/update_section_open_release" />
+        </LinearLayout>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>
