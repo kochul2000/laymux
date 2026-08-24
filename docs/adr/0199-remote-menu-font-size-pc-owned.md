@@ -1,6 +1,6 @@
 # 0199. Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-24
 - Source: 사용자 요구("remote 에서 메뉴 폰트 크기조정 기능 만들어줘") · [architecture/api-contracts.md §13](../architecture/api-contracts.md) · [ADR-0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) · [ADR-0177](0177-remote-two-finger-touch-scroll-sensitivity.md)
 - Extends: ADR-0173
@@ -20,7 +20,7 @@ ADR-0173 은 Remote 표시 글자 크기(terminal cell, 입력 composer)를 PC�
 - 기본값 13 은 드로어의 기존 본문 기준(`--fs-md`, body 13px)과 같으므로 기존 설치본은 픽셀 단위로 동일하게 렌더된다. 내부 개발 단계 정책에 따라 마이그레이션은 없다.
 - `GET/PUT /remote/v1/display-settings` projection 에 `menuFontSize` 필드를 추가한다. 인증·lease·`expectedRevision` CAS·409 재조회 규칙은 ADR-0173 을 그대로 따르고 확장하지 않는다.
 - 적용 방식은 composer 와 같은 CSS 변수 한 개다: 클라이언트가 `--remote-menu-font-size` 를 문서 루트에 쓰고, 드로어(`.navigation-panel`) 스코프에서 `--fs-md` 는 기준값, `--fs-xs`/`--fs-sm` 은 10/13·11/13 비율 `calc()` 로 재유도한다. 전역 토큰 자체는 바꾸지 않으므로 드로어 밖 표면은 영향받지 않는다.
-- 드로어 안에서 px 로 고정돼 있던 workspace 목록 텍스트(이름·인덱스·활동·요약 등)는 기준값 대비 em 으로 전환해 함께 스케일한다. count 배지는 긴 숫자 축소를 위해 JS 가 인라인 font-size(px)를 쓰던 것을 축소 배율 커스텀 프로퍼티(`--count-badge-scale`)로 바꾸고, 크기의 SoT 는 CSS(`--count-badge-base`)에 남긴다 — 드로어 안에서는 메뉴 기준값을 따르고, 같은 배지 클래스를 쓰는 key bar 는 기존 10px 기본을 유지한다.
+- 드로어 안에서 px 로 고정돼 있던 workspace 목록 텍스트(이름·인덱스·활동·요약 등)는 기준값에 비례하도록 전환해 함께 스케일한다. 패널 기준값을 그대로 상속하는 요소는 em 을 쓰고, 부모가 `--fs-sm` 등 다른 크기를 가진 요소(활동 pill, dock 위치·명령 상태 배지)는 em 이 부모 기준으로 어긋나므로 `calc(var(--remote-menu-font-size) * N / 13)` 로 직접 유도한다. count 배지는 긴 숫자 축소를 위해 JS 가 인라인 font-size(px)를 쓰던 것을 축소 배율 커스텀 프로퍼티(`--count-badge-scale`)로 바꾸고, 크기의 SoT 는 CSS(`--count-badge-base`)에 남긴다 — 드로어 안에서는 메뉴 기준값을 따르고, 같은 배지 클래스를 쓰는 key bar 는 기존 10px 기본을 유지한다.
 - PC Settings ▸ Remote Display 와 Remote 드로어 Display 섹션 양쪽에 같은 값을 노출한다(ADR-0173 의 편집 표면 규칙 그대로).
 
 ## Alternatives Considered
@@ -34,6 +34,6 @@ ADR-0173 은 Remote 표시 글자 크기(terminal cell, 입력 composer)를 PC�
 
 - Direct browser 와 Android E2E 가 같은 PC 설정과 같은 Remote 문서를 쓰므로 메뉴 크기가 경로별로 갈리지 않는다.
 - PUT body 필수 필드가 하나 늘어난다. 클라이언트 페이지는 같은 서버가 서빙하므로 구/신 혼재는 없다(내부 개발 단계, 마이그레이션 없음).
-- 드로어 텍스트가 em·토큰 재유도로 묶였으므로, 이후 드로어에 px 고정 글자 크기를 새로 넣으면 이 결정과 어긋난다 — 드로어 안 신규 텍스트는 토큰 또는 em 을 쓴다.
+- 드로어 텍스트가 토큰 재유도·em·calc 로 묶였으므로, 이후 드로어에 px 고정 글자 크기를 새로 넣으면 이 결정과 어긋난다 — 드로어 안 신규 텍스트는 토큰이나 em 을 쓰되, 부모 font-size 가 패널 기준값이 아닌 자리에서는 menu 변수 기준 calc 를 쓴다.
 - 배지 크기 SoT 가 JS 인라인 px 에서 CSS 커스텀 프로퍼티로 이동했다. 배지 축소 ladder 를 바꿀 때는 JS 배율만 조정하면 된다.
 - 검증: Rust projection/clamp 단위 테스트, page.html 계약 테스트, Playwright e2e(조회·저장·즉시 적용·409 재조회), 데스크톱 SettingsView/스토어 테스트를 같은 PR 에서 확장한다.
