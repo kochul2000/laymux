@@ -43,4 +43,24 @@
     <string name="pairing_retry_confirmation">확인 재시도</string>
     <string name="pairing_verify_protection">키 보호 확인</string>
     <string name="pairing_forget">페어링 삭제</string>
+    <string name="update_banner_title">새 버전 %1$s</string>
+    <string name="update_banner_detail">%1$s · 현재 %2$s · 릴리즈 페이지에서 APK를 받아 설치하세요.</string>
+    <string name="update_banner_open">릴리즈 페이지</string>
+    <string name="update_banner_dismiss">나중에</string>
+    <string name="update_section_title">앱 업데이트</string>
+    <string name="update_section_current_version">현재 버전 %1$s · %2$s</string>
+    <string name="update_section_beta_switch">베타 채널 따라가기</string>
+    <string name="update_section_check">지금 확인</string>
+    <string name="update_section_open_release">릴리즈 페이지 열기</string>
+    <string name="update_section_last_checked">마지막 확인 %1$s</string>
+    <string name="update_section_never_checked">아직 확인하지 않았습니다.</string>
+    <string name="update_channel_stable">정식 채널</string>
+    <string name="update_channel_beta">베타 채널</string>
+    <string name="update_channel_hint_stable">검증된 정식 릴리스만 따라갑니다.</string>
+    <string name="update_channel_hint_beta">검증 전 빌드입니다. 되돌릴 때는 정식 APK를 다시 설치해야 하며, 같은 버전으로 내려가는 설치는 Android가 거부합니다.</string>
+    <string name="update_status_disabled">이 빌드는 업데이트를 확인하지 않습니다.</string>
+    <string name="update_status_checking">확인 중…</string>
+    <string name="update_status_available">새 버전 %1$s 을 받을 수 있습니다.</string>
+    <string name="update_status_up_to_date">최신 버전입니다.</string>
+    <string name="update_open_browser_missing">릴리즈 페이지를 열 브라우저를 찾지 못했습니다.</string>
 </resources>

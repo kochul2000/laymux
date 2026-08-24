@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 채널 파일 두 개를 한 커밋으로 배포 브랜치에 올린다 (ADR-0190).
+# 채널 파일 네 개를 한 커밋으로 배포 브랜치에 올린다 (ADR-0190·ADR-0197).
 #
 # 클론 대신 Git Data API 를 쓰는 이유: 채널 브랜치는 이 파일들만 담는 배포
 # 산출물이고, 클론은 소스 트리와 자격증명을 그 작업본에 남긴다. 트리를 매번
@@ -27,8 +27,11 @@ message="${3:?commit message required}"
 # JSON 이 담겨 "브랜치가 있다"로 오판하고 그 문자열을 commit sha 로 쓴다.
 branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$branch" --jq '.object.sha' 2>/dev/null)" || branch_sha=""
 
+# 트리를 통째로 만들므로 이 목록에서 빠진 파일은 브랜치에서 사라진다. 호출자가
+# 기존 파일을 먼저 채널 디렉터리에 내려놓아야 하고, 새 계열을 추가할 때는
+# 여기와 채널 job 의 다운로드 목록을 함께 넓혀야 한다.
 entries=""
-for file in desktop-stable.json desktop-beta.json; do
+for file in desktop-stable.json desktop-beta.json android-stable.json android-beta.json; do
   [[ -s "$channels/$file" ]] || continue
   blob_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" \
     -f content="$(base64 -w0 <"$channels/$file")" -f encoding=base64 --jq '.sha')"

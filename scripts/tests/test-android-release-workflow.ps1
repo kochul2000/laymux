@@ -97,8 +97,32 @@ if (-not $workflow.Contains('publish-channel-commit.sh')) {
 if ($workflow -match '(?m)^\s*\w+="\$\(gh api [^\n]*contents/[^\n]*--jq[^\n]*\|\| true\)"') {
     throw "channel file probes must branch on gh api exit status, not captured output"
 }
-if (-not $workflow.Contains('if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1; then')) {
+if (-not $workflow.Contains('if gh api "repos/$GITHUB_REPOSITORY/contents/desktop-stable.json?ref=$BRANCH" >/dev/null 2>&1 &&')) {
     throw "the bootstrap seeding guard must test the gh api exit status"
+}
+
+# ADR-0197: the Android channel files ship in the same commit as the desktop
+# ones. The guard is per-file, not per-branch — a branch seeded before the
+# Android channel existed would otherwise 404 for every channel-aware phone.
+if (-not $workflow.Contains('gh api "repos/$GITHUB_REPOSITORY/contents/android-stable.json?ref=$BRANCH" >/dev/null 2>&1; then')) {
+    throw "the bootstrap guard must also require the Android stable manifest"
+}
+$channelPublisher = Get-Content -Raw -Encoding utf8 (
+    Join-Path $repoRoot "scripts/release/publish-channel-commit.sh"
+)
+foreach ($file in @("android-stable.json", "android-beta.json")) {
+    if (-not $workflow.Contains($file)) {
+        throw "the channel jobs must carry $file (the publisher rebuilds the whole tree)"
+    }
+    if (-not $channelPublisher.Contains($file)) {
+        throw "publish-channel-commit.sh must include $file in the tree"
+    }
+}
+if (-not $workflow.Contains('grep -qxF "Laymux-Android-$seed_version.apk"')) {
+    throw "seeding must refuse a release whose Android APK was never published"
+}
+if (-not $workflow.Contains('--pub-date')) {
+    throw "the Android manifest pubDate must come from the release, not the runner clock"
 }
 
 # The channel publisher had the same trap inside it: a 404 body became the parent

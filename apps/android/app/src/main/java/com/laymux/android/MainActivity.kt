@@ -90,6 +90,15 @@ import com.laymux.android.remote.RemoteHttpRequestRegistry
 import com.laymux.android.remote.RemoteHttpResumeTracker
 import com.laymux.android.remote.RemoteSession
 import com.laymux.android.remote.remoteHttpBodyWithinLimit
+import com.laymux.android.update.AppUpdateController
+import com.laymux.android.update.AvailableUpdate
+import com.laymux.android.update.SharedPreferencesUpdateStore
+import com.laymux.android.update.UpdateBannerActions
+import com.laymux.android.update.UpdateBannerView
+import com.laymux.android.update.UpdateChannel
+import com.laymux.android.update.UpdateSchedule
+import com.laymux.android.update.UpdateState
+import com.laymux.android.update.UpdateSurface
 import com.laymux.android.web.JsDialogChromeClient
 import com.laymux.android.web.LocalContentWebViewClient
 import com.laymux.android.web.RemoteBackGuard
@@ -153,6 +162,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private lateinit var vault: PairingVault
     private lateinit var pairingSheet: PairingBottomSheet
     private lateinit var connectionSettingsDialog: ConnectionSettingsDialog
+    private lateinit var updateController: AppUpdateController
+    private lateinit var updateBanner: UpdateBannerView
     private lateinit var cloudBridge: CloudBridge
     private lateinit var cloudNavigation: CloudNavigationPolicy
     private lateinit var credentialManager: CredentialManager
@@ -272,8 +283,32 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
                 override fun dismissConnectionSettings() =
                     this@MainActivity.dismissConnectionSettings()
+
+                override fun setUpdateChannel(channel: UpdateChannel) {
+                    updateController.setChannel(channel)
+                }
+
+                override fun checkForUpdate() {
+                    updateController.check(UpdateSchedule.Trigger.MANUAL)
+                }
+
+                override fun openReleasePage(url: String) {
+                    this@MainActivity.openReleasePage(url)
+                }
             },
         )
+        updateController = AppUpdateController(
+            store = SharedPreferencesUpdateStore(this),
+            currentVersionName = BuildConfig.VERSION_NAME,
+            checkEnabledBuild = BuildConfig.UPDATE_CHECK_ENABLED,
+            // `onDestroy` 가 실행기를 내리므로 그 뒤의 확인 요청은 조용히 버린다.
+            // 앱이 사라진 뒤 도착한 응답도 화면에 반영하지 않는다 (ADR-0197).
+            runOnWorker = { task ->
+                if (!isDestroyed && !remoteExecutor.isShutdown) remoteExecutor.execute(task)
+            },
+            runOnMain = { task -> if (!isDestroyed) runOnUiThread(task) },
+        )
+        updateController.onStateChanged = { state -> renderUpdateState(state) }
         webView = createWebView()
         cloudWebView = createCloudWebView()
         remoteLoadingOverlay = createRemoteLoadingOverlay()
@@ -300,6 +335,33 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 ),
             )
         }
+        updateBanner = UpdateBannerView(
+            this,
+            root,
+            object : UpdateBannerActions {
+                override fun openReleasePage(url: String) {
+                    this@MainActivity.openReleasePage(url)
+                }
+
+                override fun dismissUpdateBanner() {
+                    updateController.dismissAvailable()
+                }
+            },
+        )
+        root.addView(
+            updateBanner.view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP,
+            ).apply {
+                val density = resources.displayMetrics.density
+                val margin = (12 * density).toInt()
+                leftMargin = margin
+                rightMargin = margin
+                topMargin = margin
+            },
+        )
         setContentView(root)
         applySystemBarInsets(root)
         applyWebSurfaceLayers(VisibleWebSurface.CLOUD)
@@ -309,9 +371,44 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         // process restore) redelivers the same VIEW intent, and replaying the
         // payload would overwrite the vault with a fresh nonce, get a 409
         // from the already-confirmed desktop, and tear the pairing down.
+        renderUpdateState(updateController.state())
         if (savedInstanceState == null) {
             handleDebugPairingIntent(intent)
             showDebugNativeSurfacePreviewIfRequested()
+        }
+    }
+
+    /**
+     * 배너와 열려 있는 설정 섹션은 같은 상태의 두 투영이다 (ADR-0197). 한쪽만
+     * 갱신하면 다이얼로그가 옛 후보를 들고 남는다.
+     */
+    private fun renderUpdateState(state: UpdateState) {
+        if (!::updateBanner.isInitialized) return
+        updateBanner.render(state)
+        // Remote 로 가는 전환에서 WebView 가 앞으로 나오므로, 배너는 그 뒤에도
+        // 최상위 자식으로 남아야 다음 복귀에서 가려지지 않는다.
+        if (state.surface != UpdateSurface.REMOTE) updateBanner.view.bringToFront()
+        val instanceId = connectionSettingsInstanceId
+        if (instanceId != null && connectionSettingsDialog.isShowing) {
+            connectionSettingsDialog.render(connectionSettingsState(instanceId))
+        }
+    }
+
+    /**
+     * 릴리스 페이지로 넘기는 것이 이 기능의 종결 동작이다 (ADR-0197). URL 은
+     * 매니페스트 파싱 단계에서 이 저장소의 릴리스 tag 주소로 좁혀졌고, 여기서는
+     * 브라우저로 나가는 형식만 한 번 더 확인한다.
+     */
+    private fun openReleasePage(url: String) {
+        val browsable = ExternalUrlPolicy.browsableUrl(url) ?: return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(browsable)).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            showCloudMessage(getString(R.string.update_open_browser_missing))
         }
     }
 
@@ -319,6 +416,17 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private fun showDebugNativeSurfacePreviewIfRequested() {
         val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
         if (!debugBuild) return
+        // 배너는 확인 결과에 딸린 표시라 네트워크 없이는 재현되지 않는다. 후보를
+        // 주입해 결정적으로 띄운다 (ADR-0197).
+        if (intent.getBooleanExtra(DEBUG_UPDATE_BANNER_PREVIEW, false)) {
+            updateController.injectAvailableForPreview(
+                AvailableUpdate(
+                    version = DEBUG_UPDATE_PREVIEW_VERSION,
+                    releaseUrl = "https://github.com/kochul2000/laymux/releases/tag/v" +
+                        DEBUG_UPDATE_PREVIEW_VERSION,
+                ),
+            )
+        }
         when {
             intent.getBooleanExtra(DEBUG_CONNECTION_SETTINGS_PREVIEW, false) -> {
                 debugConnectionSettingsPreviewActive = true
@@ -829,6 +937,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             // bringToFront reorders the WebView past the loading overlay, which
             // must stay the topmost child or the connect progress never shows.
             remoteLoadingOverlay.bringToFront()
+        }
+        if (::updateController.isInitialized) {
+            updateController.setSurface(
+                if (surface == VisibleWebSurface.REMOTE) {
+                    UpdateSurface.REMOTE
+                } else {
+                    UpdateSurface.OTHER
+                },
+            )
         }
     }
 
@@ -2786,6 +2903,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = BiometricAvailability.AVAILABLE,
                 error = error,
                 notice = notice,
+                update = updateController.state(),
             )
         }
         return try {
@@ -2806,6 +2924,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = biometricAvailability(),
                 error = error,
                 notice = notice,
+                update = updateController.state(),
             )
         } catch (_: Exception) {
             ConnectionSettingsState(
@@ -2815,6 +2934,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 biometricAvailability = biometricAvailability(),
                 error = error ?: "이 PC의 연결 설정을 읽지 못했습니다.",
                 notice = notice,
+                update = updateController.state(),
             )
         }
     }
@@ -2877,6 +2997,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     override fun onStart() {
         super.onStart()
         remoteLifecycleActive = true
+        // 콜드 스타트와 전면 복귀가 유일한 트리거다. 6시간 throttle 은 컨트롤러가
+        // 지키므로 여기서는 조건 없이 부른다 (ADR-0197).
+        updateController.check(UpdateSchedule.Trigger.PERIODIC)
         resumeRemoteSessionAfterBackground()
         // A sign-in redirect caught while the OS browser was frontmost waits
         // here: the E2E session resumes above, and the Remote document
@@ -2995,6 +3118,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         private const val DEBUG_CONNECTION_SETTINGS_PREVIEW =
             "laymux.previewConnectionSettings"
         private const val DEBUG_PAIRING_INSTANCE_ID = "preview-desktop"
+        private const val DEBUG_UPDATE_BANNER_PREVIEW = "laymux.previewUpdateBanner"
+        private const val DEBUG_UPDATE_PREVIEW_VERSION = "9.9.9"
     }
 
     private enum class DecryptionPurpose {
