@@ -2,37 +2,37 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { installRemoteClientRoutes } from "./remote-client-assets";
 
+const workspacePane = {
+  id: "pane-1",
+  location: "workspace",
+  workspaceId: "ws-1",
+  paneIndex: 0,
+  paneNumber: 1,
+  viewType: "terminal",
+  terminalId: "terminal-1",
+  terminalLive: true,
+  title: "Shell",
+  profile: "PowerShell",
+  cwd: "C:\\work",
+  branch: "main",
+  activity: { type: "shell" },
+  outputActive: false,
+  commandRunning: true,
+  isFocused: true,
+  unreadCount: 0,
+  hidden: false,
+  collapsed: false,
+  x: 0,
+  y: 0,
+  w: 1,
+  h: 1,
+};
+
 const navigation = {
   activeWorkspace: {
     id: "ws-1",
     name: "Main",
-    panes: [
-      {
-        id: "pane-1",
-        location: "workspace",
-        workspaceId: "ws-1",
-        paneIndex: 0,
-        paneNumber: 1,
-        viewType: "terminal",
-        terminalId: "terminal-1",
-        terminalLive: true,
-        title: "Shell",
-        profile: "PowerShell",
-        cwd: "C:\\work",
-        branch: "main",
-        activity: { type: "shell" },
-        outputActive: false,
-        commandRunning: false,
-        isFocused: true,
-        unreadCount: 0,
-        hidden: false,
-        collapsed: false,
-        x: 0,
-        y: 0,
-        w: 1,
-        h: 1,
-      },
-    ],
+    panes: [workspacePane],
   },
   workspaces: [
     {
@@ -45,7 +45,7 @@ const navigation = {
       terminalPaneCount: 1,
       liveTerminalCount: 1,
       unreadCount: 0,
-      panes: [],
+      panes: [workspacePane],
     },
   ],
   docks: [],
@@ -246,9 +246,27 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
         composer: getComputedStyle(document.getElementById("composerInput") as HTMLElement)
           .fontSize,
         menu: getComputedStyle(document.getElementById("navigationPanel") as HTMLElement).fontSize,
+        // The pane row itself is --fs-sm, so the activity pill must derive from
+        // the menu base (15 * 9/13), not from the row's smaller size. The
+        // workspace list renders after the navigation snapshot lands, so a
+        // missing element reports null and the poll retries.
+        paneActivity: ((element) =>
+          element ? Math.round(parseFloat(getComputedStyle(element).fontSize) * 100) / 100 : null)(
+          document.querySelector(".pane-activity"),
+        ),
+        workspaceName: ((element) =>
+          element ? Math.round(parseFloat(getComputedStyle(element).fontSize) * 100) / 100 : null)(
+          document.querySelector(".workspace-name"),
+        ),
       })),
     )
-    .toEqual({ terminal: 18, composer: "20px", menu: "15px" });
+    .toEqual({
+      terminal: 18,
+      composer: "20px",
+      menu: "15px",
+      paneActivity: Math.round((15 * 9 * 100) / 13) / 100,
+      workspaceName: Math.round((15 * 14 * 100) / 13) / 100,
+    });
 
   await page.locator("#remoteTerminalFontSize").fill("22");
   await page.locator("#remoteComposerFontSize").click();

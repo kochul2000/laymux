@@ -1283,7 +1283,9 @@
         flex: 0 0 auto;
         min-width: 38px;
         color: var(--accent);
-        font-size: 0.6923em;
+        /* calc, not em: the parent row is --fs-sm (11px), so an em here would
+           shrink below the historical 9px. 9px/13 of the menu base. */
+        font-size: calc(var(--remote-menu-font-size) * 9 / 13);
         font-weight: 700;
         text-transform: uppercase;
       }
@@ -1447,7 +1449,8 @@
         border-radius: var(--radius-sm);
         background: var(--active-bg);
         color: var(--text-secondary);
-        font-size: 0.6923em;
+        /* calc, not em: the parent row is --fs-sm — see .dock-position-badge. */
+        font-size: calc(var(--remote-menu-font-size) * 9 / 13);
         text-align: center;
       }
       .pane-activity.running {
@@ -1494,7 +1497,9 @@
         box-sizing: border-box;
         border: 1.5px solid transparent;
         border-radius: var(--radius-md);
-        font-size: 0.7692em;
+        /* calc, not em: the parent row is --fs-sm — see .dock-position-badge.
+           width/height stay em: they scale from this element's own size. */
+        font-size: calc(var(--remote-menu-font-size) * 10 / 13);
         line-height: 1;
       }
       .pane-command-status.unread {
