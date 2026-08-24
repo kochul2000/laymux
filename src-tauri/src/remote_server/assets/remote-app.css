@@ -509,6 +509,7 @@
       .drawer-header-button,
       .desktop-mode-button,
       .copy-pane-button,
+      .file-explorer-button,
       .spatial-exclusion-button {
         width: 28px;
         height: var(--header-control-height);
@@ -524,10 +525,14 @@
       .drawer-header-button:hover,
       .desktop-mode-button:hover,
       .copy-pane-button:hover,
+      .file-explorer-button:hover,
       .spatial-exclusion-button:hover {
         background: var(--hover-bg);
       }
       .copy-pane-button {
+        color: var(--text-secondary);
+      }
+      .file-explorer-button {
         color: var(--text-secondary);
       }
       .spatial-exclusion-button {
@@ -2183,6 +2188,72 @@
         min-height: 320px;
         border: 0;
         background: var(--bg-surface);
+      }
+      .file-viewer-back {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        min-width: 26px;
+        height: 24px;
+        padding: 0 6px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-base);
+        color: var(--text);
+        line-height: 1;
+      }
+      .file-viewer-back:hover {
+        background: var(--hover-bg);
+      }
+      /* Explorer mode (ADR-0197): a single-panel directory listing inside the
+         same overlay body. Rows are buttons sized for touch. */
+      .file-viewer-directory {
+        display: flex;
+        flex-direction: column;
+        padding: 6px;
+      }
+      .file-viewer-directory-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 44px;
+        padding: 0 10px;
+        border: 0;
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text);
+        font-size: var(--fs-md);
+        text-align: left;
+      }
+      .file-viewer-directory-row:hover {
+        background: var(--hover-bg);
+      }
+      .file-viewer-directory-row.parent {
+        color: var(--muted);
+      }
+      .file-viewer-directory-icon {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        color: var(--text-secondary);
+      }
+      .file-viewer-directory-name {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .file-viewer-directory-size {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .file-viewer-directory-empty {
+        padding: 14px;
+        color: var(--muted);
+        font-size: var(--fs-sm);
       }
 
       /* OAuth loopback relay (ADR-0175) */

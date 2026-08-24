@@ -43,6 +43,9 @@
         <div id="status" class="status" aria-busy="false">
           <span id="statusSpinner" class="status-spinner" aria-hidden="true" hidden></span><span id="statusText">Enter the remote token, then connect.</span>
         </div>
+        <button id="fileExplorerHeader" class="file-explorer-button" type="button" hidden aria-label="Browse host files" title="Browse host files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
         <button id="spatialExclusion" class="spatial-exclusion-button" type="button" hidden aria-label="Exclude this pane from pane navigation" aria-pressed="false" title="Exclude this pane from pane navigation">
           <svg data-icon="circle-minus" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>
         </button>
@@ -294,6 +297,9 @@
         aria-label="Host file viewer"
       >
         <header class="file-viewer-header">
+          <button id="fileViewerBack" class="file-viewer-back" type="button" hidden aria-label="Back to the folder" title="Back to the folder">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
           <div id="fileViewerTitle" class="file-viewer-title" title=""></div>
           <div id="fileViewerZoom" class="file-viewer-zoom" hidden>
             <button id="fileViewerZoomOut" type="button" aria-label="Zoom out">−</button>
@@ -316,6 +322,7 @@
             hidden
           ></iframe>
           <div id="fileViewerBinary" class="file-viewer-binary" hidden></div>
+          <div id="fileViewerDirectory" class="file-viewer-directory" hidden></div>
         </div>
       </div>
     </div>

@@ -84,6 +84,9 @@
         const fileViewerImageElement = $("fileViewerImage");
         const fileViewerPreviewElement = $("fileViewerPreview");
         const fileViewerBinaryElement = $("fileViewerBinary");
+        const fileViewerDirectoryElement = $("fileViewerDirectory");
+        const fileViewerBackButton = $("fileViewerBack");
+        const fileExplorerHeaderButton = $("fileExplorerHeader");
         const focusTerminalButton = $("focusTerminal");
         const ctrlCButton = $("ctrlC");
         const attachmentButton = $("attachFile");
@@ -244,6 +247,11 @@
         let fileViewerPath = null;
         let fileViewerDownloadInFlight = false;
         let fileViewerKind = null;
+        // Explorer mode (ADR-0197): the directory the overlay is listing, and
+        // the directory a file opened from it returns to. Display state only —
+        // never persisted, reset on close and on every disconnect.
+        let fileViewerDirectoryPath = null;
+        let fileViewerExplorerReturnPath = null;
         let fileViewerZoom = 1;
         let fileViewerPinch = null;
         const fileViewerPointers = new Map();
@@ -1205,6 +1213,10 @@
 
         function renderFileViewerState(message = null, isError = false) {
           const connected = Boolean(leaseId && fileViewerToken);
+          // The header folder button is an entry point, not an action with a
+          // recoverable disabled state: without a lease it means nothing, so it
+          // is hidden rather than disabled (ADR-0192, ADR-0197).
+          fileExplorerHeaderButton.hidden = !connected;
           fileViewerSection.classList.toggle("locked", !connected);
           fileViewerPathInput.disabled = !connected;
           pullHostFileViewerPathButton.disabled = !connected || fileViewerStatusInFlight;
@@ -1331,10 +1343,12 @@
           fileViewerImageElement.hidden = true;
           fileViewerPreviewElement.hidden = true;
           fileViewerBinaryElement.hidden = true;
+          fileViewerDirectoryElement.hidden = true;
           fileViewerImageElement.removeAttribute("src");
           fileViewerPreviewElement.removeAttribute("srcdoc");
           fileViewerTextElement.textContent = "";
           fileViewerBinaryElement.textContent = "";
+          fileViewerDirectoryElement.textContent = "";
         }
 
         function setFileViewerMessage(message, isError = false) {
@@ -1412,6 +1426,9 @@
           fileViewerRequestRevision += 1;
           fileViewerOverlayElement.hidden = true;
           fileViewerKind = null;
+          fileViewerDirectoryPath = null;
+          fileViewerExplorerReturnPath = null;
+          fileViewerBackButton.hidden = true;
           fileViewerPinch = null;
           hideFileViewerContent();
           resetFileViewerZoom();
@@ -1424,7 +1441,7 @@
           focusCurrentInputSurface();
         }
 
-        function openFileViewerOverlay(path) {
+        function openFileViewerOverlay(path, explorerReturnPath = null) {
           if (!leaseId || !fileViewerToken || !path) return;
           const requestRevision = ++fileViewerRequestRevision;
           const requestLeaseId = leaseId;
@@ -1436,6 +1453,12 @@
           fileViewerTitleElement.textContent = path;
           fileViewerTitleElement.title = path;
           fileViewerPath = path;
+          // Back exists only for a file reached through the explorer; every
+          // other entry point (drawer path, path-link) has no folder to return
+          // to (ADR-0197).
+          fileViewerDirectoryPath = null;
+          fileViewerExplorerReturnPath = explorerReturnPath;
+          fileViewerBackButton.hidden = !explorerReturnPath;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
@@ -1466,6 +1489,123 @@
                 true,
               );
             });
+        }
+
+        // Explorer mode (ADR-0197): the same overlay lists a host directory.
+        // `request` is `{ path }` or `{ source: "terminalCwd", terminalId }` —
+        // the host bridge resolves the terminal's cwd (home as fallback) and
+        // completes every entry's absolute path, so this surface owns no path
+        // syntax at all.
+        function openFileExplorerOverlay(request) {
+          if (!leaseId || !fileViewerToken || !request) return;
+          const requestRevision = ++fileViewerRequestRevision;
+          const requestLeaseId = leaseId;
+          const requestFileViewerToken = fileViewerToken;
+          hideFileViewerContent();
+          resetFileViewerZoom();
+          fileViewerKind = null;
+          fileViewerZoomElement.hidden = true;
+          fileViewerTitleElement.textContent = request.path || "Host files";
+          fileViewerTitleElement.title = request.path || "";
+          fileViewerPath = null;
+          fileViewerDirectoryPath = null;
+          fileViewerExplorerReturnPath = null;
+          fileViewerBackButton.hidden = true;
+          fileViewerDownloadInFlight = false;
+          applyFileViewerDownloadState();
+          fileViewerOverlayElement.hidden = false;
+          setFileViewerMessage("Loading directory…");
+          remoteFetch("/remote/v1/file-viewer/list", {
+            method: "POST",
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestFileViewerToken,
+            },
+            body: JSON.stringify(request),
+          })
+            .then((payload) => {
+              if (
+                requestRevision !== fileViewerRequestRevision ||
+                leaseId !== requestLeaseId ||
+                fileViewerToken !== requestFileViewerToken
+              ) {
+                return;
+              }
+              renderDirectoryListing(payload);
+            })
+            .catch((error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              hideFileViewerContent();
+              setFileViewerMessage(
+                error instanceof Error ? error.message : String(error),
+                true,
+              );
+            });
+        }
+
+        function renderDirectoryListing(payload) {
+          if (!payload || typeof payload.path !== "string" || !Array.isArray(payload.entries)) {
+            throw new Error("Unsupported directory response");
+          }
+          hideFileViewerContent();
+          fileViewerMessageElement.hidden = true;
+          fileViewerKind = null;
+          resetFileViewerZoom();
+          fileViewerZoomElement.hidden = true;
+          fileViewerDirectoryPath = payload.path;
+          fileViewerTitleElement.textContent = payload.path;
+          fileViewerTitleElement.title = payload.path;
+          if (typeof payload.parent === "string" && payload.parent) {
+            appendDirectoryRow({ name: "..", path: payload.parent, isDirectory: true }, true);
+          }
+          let entryRows = 0;
+          for (const entry of payload.entries) {
+            if (!entry || typeof entry.name !== "string" || typeof entry.path !== "string") continue;
+            appendDirectoryRow(entry, false);
+            entryRows += 1;
+          }
+          if (!entryRows) {
+            const empty = document.createElement("div");
+            empty.className = "file-viewer-directory-empty";
+            empty.textContent = "Empty directory";
+            fileViewerDirectoryElement.appendChild(empty);
+          }
+          fileViewerDirectoryElement.hidden = false;
+          if (payload.truncated) {
+            setFileViewerMessage("Listing truncated at the Remote entry limit.");
+          }
+        }
+
+        function appendDirectoryRow(entry, isParent) {
+          const row = document.createElement("button");
+          row.type = "button";
+          row.className = "file-viewer-directory-row";
+          const icon = document.createElement("span");
+          icon.className = "file-viewer-directory-icon";
+          icon.setAttribute("aria-hidden", "true");
+          icon.innerHTML = entry.isDirectory
+            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>'
+            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+          const name = document.createElement("span");
+          name.className = "file-viewer-directory-name";
+          name.textContent = entry.name;
+          row.appendChild(icon);
+          row.appendChild(name);
+          if (!entry.isDirectory && Number.isFinite(entry.size)) {
+            const size = document.createElement("span");
+            size.className = "file-viewer-directory-size";
+            size.textContent = formatFileViewerBytes(entry.size);
+            row.appendChild(size);
+          }
+          if (isParent) row.classList.add("parent");
+          row.addEventListener("click", () => {
+            if (entry.isDirectory) {
+              openFileExplorerOverlay({ path: entry.path });
+            } else {
+              openFileViewerOverlay(entry.path, fileViewerDirectoryPath);
+            }
+          });
+          fileViewerDirectoryElement.appendChild(row);
         }
 
         // Download goes to its own endpoint, never to whatever the overlay is
@@ -1869,6 +2009,7 @@
                 // place, and only the text tells us the link went stale.
                 token: match.token,
                 path: match.path,
+                kind: match.kind === "directory" ? "directory" : "file",
               })));
             })
             .catch(() => {
@@ -1956,6 +2097,7 @@
                   // place, and only the text tells us the link went stale.
                   token: match.token,
                   path: match.path,
+                  kind: match.kind === "directory" ? "directory" : "file",
                 });
               }
               if (selections.length === 0) {
@@ -2161,7 +2303,14 @@
           ) {
             return;
           }
-          openFileViewerOverlay(press.path);
+          // A directory link opens as an explorer listing, a file link renders
+          // (ADR-0197). Desktop routes directories to cwd propagation instead,
+          // but Remote has no local explorer pane to propagate into.
+          if (press.kind === "directory") {
+            openFileExplorerOverlay({ path: press.path });
+          } else {
+            openFileViewerOverlay(press.path);
+          }
         }
 
         function handlePathLinkPointerCancel(event) {
@@ -9781,6 +9930,22 @@
         });
         fileViewerCloseButton.addEventListener("click", closeFileViewer);
         fileViewerDownloadButton.addEventListener("click", downloadCurrentFileViewerFile);
+        fileExplorerHeaderButton.addEventListener("click", () => {
+          // Open where the user is working. Without an attached terminal the
+          // bridge falls back to the host home directory.
+          openFileExplorerOverlay(
+            activeTerminalId
+              ? { source: "terminalCwd", terminalId: activeTerminalId }
+              : { source: "terminalCwd" },
+          );
+        });
+        fileViewerBackButton.addEventListener("click", () => {
+          // Back re-requests the listing rather than restoring a cache: the
+          // directory may have changed while the file was open (ADR-0197).
+          if (fileViewerExplorerReturnPath) {
+            openFileExplorerOverlay({ path: fileViewerExplorerReturnPath });
+          }
+        });
         // Capture phase, and the event stops here: Escape otherwise reaches the
         // terminal and is written to the PTY as ESC while the user only meant to
         // dismiss the file they are reading.

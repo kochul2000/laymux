@@ -1,5 +1,12 @@
-import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
+import {
+  getHomeDirectory,
+  listDirectory,
+  readFileForDownload,
+  readFileForViewer,
+  statPaths,
+} from "./tauri-api";
 import { normalizeViewerPath } from "./file-viewer";
+import { joinPath, parentPath } from "./file-explorer-parse";
 import {
   decidePathLinkAction,
   extractPathCandidatesAtOffset,
@@ -128,9 +135,11 @@ export async function handleRemoteFileViewerRequest(
       ) {
         return ok({ valid: false });
       }
+      // 파일(openFile)과 디렉터리(changeDir) 모두 링크가 된다(ADR-0197) —
+      // Remote 는 directory match 를 explorer 열기로 라우팅한다.
       const linkable = pending.filter(({ statIndex }) => {
         const info = infos[statIndex];
-        return Boolean(info) && decidePathLinkAction(info) === "openFile";
+        return Boolean(info) && decidePathLinkAction(info) !== "none";
       });
       // 공백 확장 후보(ADR-0191)는 접두끼리 겹친다 — 존재하는 것 중 같은 줄의
       // 겹치는 범위는 가장 긴 것만 남긴다(longest-existing-wins).
@@ -138,9 +147,10 @@ export async function handleRemoteFileViewerRequest(
         line: candidate.lineIndex,
         start: candidate.startIndex,
         end: candidate.endIndex,
-      })).map(({ candidate, path }) => ({
+      })).map(({ candidate, path, statIndex }) => ({
         token: candidate.text,
         path,
+        kind: infos[statIndex].isDirectory ? "directory" : "file",
         lineIndex: candidate.lineIndex,
         startIndex: candidate.startIndex,
         endIndex: candidate.endIndex,
@@ -150,6 +160,50 @@ export async function handleRemoteFileViewerRequest(
       return err(
         `Path link validation failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+  if (method === "list") {
+    const maxEntries = params.maxEntries;
+    if (!Number.isSafeInteger(maxEntries) || (maxEntries as number) <= 0) {
+      return err("maxEntries must be a positive integer");
+    }
+    let path: string;
+    if (params.source === "terminalCwd") {
+      // The folder button opens where the user is working; a missing terminal
+      // id, an unknown terminal or one that has not reported a cwd yet all
+      // fall back to the host home directory.
+      const terminalId = typeof params.terminalId === "string" ? params.terminalId : "";
+      const terminal = useTerminalStore.getState().instances.find((item) => item.id === terminalId);
+      try {
+        path = terminal?.cwd || (await getHomeDirectory());
+      } catch (error) {
+        return err(error instanceof Error ? error.message : String(error));
+      }
+    } else {
+      path = normalizeViewerPath(typeof params.path === "string" ? params.path : "");
+      if (!path) return err("path is required");
+    }
+    try {
+      // list_directory already sorts directories-first, name case-insensitive;
+      // the bridge only bounds the payload and resolves absolute paths so the
+      // Remote client never owns path syntax.
+      const entries = await listDirectory(path);
+      const bounded = entries.slice(0, maxEntries as number);
+      const parent = parentPath(path);
+      return ok({
+        path,
+        parent: parent && parent !== path ? parent : null,
+        entries: bounded.map((entry) => ({
+          name: entry.name,
+          path: joinPath(path, entry.name),
+          isDirectory: entry.isDirectory,
+          isSymlink: entry.isSymlink,
+          size: entry.size,
+        })),
+        truncated: entries.length > bounded.length,
+      });
+    } catch (error) {
+      return err(error instanceof Error ? error.message : String(error));
     }
   }
   if (method === "download") {

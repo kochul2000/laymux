@@ -370,6 +370,11 @@ pub const MAX_REMOTE_PATH_LINK_SCREEN_CHARS: usize = 8192;
 /// through the async frontend bridge.
 pub const MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS: usize = 256;
 
+/// Maximum entries returned by one Remote FileViewer directory listing
+/// (ADR-0197). Past this the bridge truncates the sorted list and reports
+/// `truncated:true` — partial front-of-list beats failing the whole directory.
+pub const MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES: usize = 1000;
+
 /// Secret-capability header required by Remote FileViewer endpoints.
 pub const REMOTE_FILE_VIEWER_CAPABILITY_HEADER: &str = "x-laymux-remote-file-viewer";
 
