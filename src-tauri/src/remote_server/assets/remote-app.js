@@ -17,6 +17,9 @@
         const remoteTerminalFontSizeInput = $("remoteTerminalFontSize");
         const remoteComposerFontSizeInput = $("remoteComposerFontSize");
         const remoteMenuFontSizeInput = $("remoteMenuFontSize");
+        const remoteComposerIdleOpacityInput = $("remoteComposerIdleOpacity");
+        const remoteComposerFocusedOpacityInput = $("remoteComposerFocusedOpacity");
+        const remoteComposerActiveOpacityInput = $("remoteComposerActiveOpacity");
         const remoteTouchScrollSensitivityInput = $("remoteTouchScrollSensitivity");
         const remoteTwoFingerScrollSensitivityInput = $(
           "remoteTwoFingerScrollSensitivity",
@@ -169,6 +172,8 @@
         const FILE_VIEWER_TEXT_BASE_PX = 13;
         const REMOTE_FONT_SIZE_MIN = 6;
         const REMOTE_FONT_SIZE_MAX = 72;
+        const REMOTE_COMPOSER_OPACITY_MIN = 20;
+        const REMOTE_COMPOSER_OPACITY_MAX = 100;
         const REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
@@ -915,6 +920,35 @@
           );
         }
 
+        function normalizeRemoteComposerOpacity(value, fallback) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return fallback;
+          return Math.min(
+            REMOTE_COMPOSER_OPACITY_MAX,
+            Math.max(REMOTE_COMPOSER_OPACITY_MIN, Math.round(parsed / 5) * 5),
+          );
+        }
+
+        function normalizeRemoteComposerOpacities(settings) {
+          const active = normalizeRemoteComposerOpacity(
+            settings?.composerActiveOpacity,
+            100,
+          );
+          const focused = Math.min(
+            normalizeRemoteComposerOpacity(settings?.composerFocusedOpacity, 80),
+            active,
+          );
+          const idle = Math.min(
+            normalizeRemoteComposerOpacity(settings?.composerIdleOpacity, 55),
+            focused,
+          );
+          return {
+            composerIdleOpacity: idle,
+            composerFocusedOpacity: focused,
+            composerActiveOpacity: active,
+          };
+        }
+
         function updateRemoteDisplaySettingsControls(message = null, error = false) {
           const editable =
             Boolean(leaseId) &&
@@ -924,6 +958,9 @@
           remoteTerminalFontSizeInput.disabled = !editable;
           remoteComposerFontSizeInput.disabled = !editable;
           remoteMenuFontSizeInput.disabled = !editable;
+          remoteComposerIdleOpacityInput.disabled = !editable;
+          remoteComposerFocusedOpacityInput.disabled = !editable;
+          remoteComposerActiveOpacityInput.disabled = !editable;
           remoteTouchScrollSensitivityInput.disabled = !editable;
           remoteTwoFingerScrollSensitivityInput.disabled = !editable;
           remoteDisplaySettingsStatus.textContent =
@@ -937,10 +974,12 @@
         }
 
         function applyRemoteDisplaySettings(settings) {
+          const composerOpacities = normalizeRemoteComposerOpacities(settings);
           const normalized = {
             terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize, 14),
             composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize, 16),
             menuFontSize: normalizeRemoteFontSize(settings?.menuFontSize, 13),
+            ...composerOpacities,
             touchScrollSensitivity: normalizeScrollSensitivity(
               settings?.touchScrollSensitivity,
               defaultAppearance.touchScrollSensitivity,
@@ -955,6 +994,11 @@
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
+          remoteComposerIdleOpacityInput.value = String(normalized.composerIdleOpacity);
+          remoteComposerFocusedOpacityInput.value = String(
+            normalized.composerFocusedOpacity,
+          );
+          remoteComposerActiveOpacityInput.value = String(normalized.composerActiveOpacity);
           remoteTouchScrollSensitivityInput.value = String(
             normalized.touchScrollSensitivity,
           );
@@ -969,6 +1013,19 @@
             "--remote-menu-font-size",
             `${normalized.menuFontSize}px`,
           );
+          document.documentElement.style.setProperty(
+            "--remote-composer-idle-opacity",
+            String(normalized.composerIdleOpacity / 100),
+          );
+          document.documentElement.style.setProperty(
+            "--remote-composer-focused-opacity",
+            String(normalized.composerFocusedOpacity / 100),
+          );
+          document.documentElement.style.setProperty(
+            "--remote-composer-active-opacity",
+            String(normalized.composerActiveOpacity / 100),
+          );
+          updateComposerOpacityState();
           for (const info of terminalInfoById.values()) {
             if (info.appearance) {
               info.appearance = {
@@ -1040,6 +1097,11 @@
             remoteMenuFontSizeInput.value,
             remoteDisplaySettings?.menuFontSize || 13,
           );
+          const composerOpacities = normalizeRemoteComposerOpacities({
+            composerIdleOpacity: remoteComposerIdleOpacityInput.value,
+            composerFocusedOpacity: remoteComposerFocusedOpacityInput.value,
+            composerActiveOpacity: remoteComposerActiveOpacityInput.value,
+          });
           const touchScrollSensitivityValue = normalizeScrollSensitivity(
             remoteTouchScrollSensitivityInput.value,
             remoteDisplaySettings?.touchScrollSensitivity ??
@@ -1063,6 +1125,7 @@
                 terminalFontSize,
                 composerFontSize,
                 menuFontSize,
+                ...composerOpacities,
                 touchScrollSensitivity: touchScrollSensitivityValue,
                 twoFingerScrollSensitivity: twoFingerScrollSensitivityValue,
               }),
@@ -2695,6 +2758,26 @@
             }
             composerInput.removeAttribute("aria-activedescendant");
           }
+          updateComposerOpacityState();
+        }
+
+        function composerOpacityState() {
+          if (composerInput.disabled) return "idle";
+          const draft = composerDraft();
+          if (
+            Boolean(draft?.text) ||
+            !composerHistoryList.hidden ||
+            !composerAutocompleteList.hidden ||
+            composerIsComposing ||
+            Boolean(draft?.inFlight)
+          ) {
+            return "active";
+          }
+          return document.activeElement === composerInput ? "focused" : "idle";
+        }
+
+        function updateComposerOpacityState() {
+          terminalComposer.dataset.opacityState = composerOpacityState();
         }
 
         function updateComposerControls() {
@@ -2726,6 +2809,7 @@
             "aria-busy",
             attachmentUploadInFlight ? "true" : "false",
           );
+          updateComposerOpacityState();
           syncInputActionVisibility();
         }
 
@@ -9926,6 +10010,15 @@
         remoteMenuFontSizeInput.addEventListener("change", () => {
           saveRemoteDisplaySettings().catch(() => {});
         });
+        remoteComposerIdleOpacityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteComposerFocusedOpacityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
+        remoteComposerActiveOpacityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings().catch(() => {});
+        });
         remoteTouchScrollSensitivityInput.addEventListener("change", () => {
           saveRemoteDisplaySettings().catch(() => {});
         });
@@ -10256,11 +10349,16 @@
         });
         composerInput.addEventListener("compositionstart", () => {
           composerIsComposing = true;
+          updateComposerOpacityState();
         });
         composerInput.addEventListener("compositionend", () => {
           composerIsComposing = false;
+          updateComposerOpacityState();
         });
-        composerInput.addEventListener("focus", hideActiveAgentInputForComposer);
+        composerInput.addEventListener("focus", () => {
+          hideActiveAgentInputForComposer();
+          updateComposerOpacityState();
+        });
         // Leaving the editor (pane/mode switch, tapping away) closes both lists.
         // Recall items commit on mousedown+preventDefault, so a pick keeps focus
         // and this never fires mid-selection.

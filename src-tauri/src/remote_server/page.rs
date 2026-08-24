@@ -609,12 +609,15 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_edits_pc_owned_terminal_and_composer_font_sizes() {
+    fn remote_page_html_edits_pc_owned_display_settings() {
         let html = remote_client_source();
 
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
         assert!(html.contains("id=\"remoteComposerFontSize\""));
         assert!(html.contains("id=\"remoteMenuFontSize\""));
+        assert!(html.contains("id=\"remoteComposerIdleOpacity\""));
+        assert!(html.contains("id=\"remoteComposerFocusedOpacity\""));
+        assert!(html.contains("id=\"remoteComposerActiveOpacity\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
         assert!(html.contains("/remote/v1/display-settings"));
@@ -624,8 +627,16 @@ mod tests {
         assert!(html.contains("terminalFontSize"));
         assert!(html.contains("composerFontSize"));
         assert!(html.contains("menuFontSize"));
+        assert!(html.contains("composerIdleOpacity"));
+        assert!(html.contains("composerFocusedOpacity"));
+        assert!(html.contains("composerActiveOpacity"));
         assert!(html.contains("--remote-composer-font-size"));
         assert!(html.contains("--remote-menu-font-size"));
+        assert!(html.contains("--remote-composer-idle-opacity"));
+        assert!(html.contains("--remote-composer-focused-opacity"));
+        assert!(html.contains("--remote-composer-active-opacity"));
+        assert!(html.contains("data-opacity-state"));
+        assert!(html.contains("function composerOpacityState()"));
         assert!(html.contains("applyTerminalAppearance(appearance);"));
         assert!(html.contains("scheduleTerminalFit();"));
     }
@@ -1098,7 +1109,10 @@ mod tests {
         assert!(html.contains("function terminalViewportDistanceFromBottom(term)"));
         assert!(html.contains("function restoreTerminalViewport(term, distanceFromBottom)"));
         assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
-        assert!(html.contains("scrollToBottomButton.addEventListener(\"click\", () => {"));
+        assert!(html.contains("function scrollTowardComposerBottom()"));
+        assert!(html.contains(
+            "scrollToBottomButton.addEventListener(\"click\", scrollTowardComposerBottom);"
+        ));
         assert!(html.contains("terminal.scrollToBottom();"));
     }
 
@@ -1557,9 +1571,9 @@ mod tests {
         assert!(html.contains("\"composerHideAgentInputToggle\""));
         assert!(html.contains("\"Hide unused agent input\""));
         assert!(html.contains("function scrollTowardComposerBottom()"));
-        assert!(html.contains(
-            "composerInput.addEventListener(\"focus\", hideActiveAgentInputForComposer);"
-        ));
+        assert!(html.contains("composerInput.addEventListener(\"focus\", () => {"));
+        assert!(html.contains("hideActiveAgentInputForComposer();"));
+        assert!(html.contains("updateComposerOpacityState();"));
         assert!(html.contains("\"composerHistoryPopupToggle\""));
         assert!(html.contains("\"composerAutocompleteToggle\""));
     }

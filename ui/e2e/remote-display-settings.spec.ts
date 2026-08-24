@@ -75,6 +75,9 @@ interface DisplaySettings {
   terminalFontSize: number;
   composerFontSize: number;
   menuFontSize: number;
+  composerIdleOpacity: number;
+  composerFocusedOpacity: number;
+  composerActiveOpacity: number;
   touchScrollSensitivity: number;
   twoFingerScrollSensitivity: number;
   revision: string;
@@ -93,6 +96,8 @@ interface DisplaySettingsHarness {
   putBodies: DisplaySettingsPut[];
   delayNextPut: boolean;
   releasePut: (() => void) | null;
+  delayNextInput?: boolean;
+  releaseInput?: (() => void) | null;
 }
 
 function snapshotFrames(text: string) {
@@ -178,11 +183,24 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
         terminalFontSize: body.terminalFontSize,
         composerFontSize: body.composerFontSize,
         menuFontSize: body.menuFontSize,
+        composerIdleOpacity: body.composerIdleOpacity,
+        composerFocusedOpacity: body.composerFocusedOpacity,
+        composerActiveOpacity: body.composerActiveOpacity,
         touchScrollSensitivity: body.touchScrollSensitivity,
         twoFingerScrollSensitivity: body.twoFingerScrollSensitivity,
         revision: `rev-${revisionNumber + 1}`,
       };
       await route.fulfill({ json: harness.settings });
+      return;
+    }
+    if (url.pathname === "/remote/v1/terminals/terminal-1/input") {
+      if (harness.delayNextInput) {
+        harness.delayNextInput = false;
+        await new Promise<void>((resolve) => {
+          harness.releaseInput = resolve;
+        });
+      }
+      await route.fulfill({ json: {} });
       return;
     }
     await route.fulfill({ json: {} });
@@ -222,6 +240,9 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       terminalFontSize: 18,
       composerFontSize: 20,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -239,6 +260,9 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("18");
   await expect(page.locator("#remoteComposerFontSize")).toHaveValue("20");
   await expect(page.locator("#remoteMenuFontSize")).toHaveValue("15");
+  await expect(page.locator("#remoteComposerIdleOpacity")).toHaveValue("55");
+  await expect(page.locator("#remoteComposerFocusedOpacity")).toHaveValue("80");
+  await expect(page.locator("#remoteComposerActiveOpacity")).toHaveValue("100");
   await expect
     .poll(() =>
       page.evaluate(() => ({
@@ -304,6 +328,9 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       terminalFontSize: 22,
       composerFontSize: 20,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
     },
@@ -313,6 +340,9 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       terminalFontSize: 22,
       composerFontSize: 24,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
     },
@@ -322,6 +352,9 @@ test("PC 소유 표시 크기를 조회·저장하고 현재 Remote surface에 �
       terminalFontSize: 22,
       composerFontSize: 24,
       menuFontSize: 18,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
     },
@@ -334,6 +367,9 @@ test("저장 중 drawer를 다시 열어도 pending 상태와 최신 저장값�
       terminalFontSize: 18,
       composerFontSize: 20,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -368,6 +404,9 @@ test("저장 중 lease가 바뀌면 새 controller에서 PC 값을 다시 읽는
       terminalFontSize: 18,
       composerFontSize: 20,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -410,6 +449,9 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
       terminalFontSize: 18,
       composerFontSize: 20,
       menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
       touchScrollSensitivity: 1,
       twoFingerScrollSensitivity: 5,
       revision: "rev-1",
@@ -428,6 +470,9 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
     terminalFontSize: 19,
     composerFontSize: 26,
     menuFontSize: 17,
+    composerIdleOpacity: 45,
+    composerFocusedOpacity: 75,
+    composerActiveOpacity: 95,
     touchScrollSensitivity: 1,
     twoFingerScrollSensitivity: 5,
     revision: "rev-2",
@@ -443,6 +488,9 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
     terminalFontSize: 22,
     composerFontSize: 20,
     menuFontSize: 15,
+    composerIdleOpacity: 55,
+    composerFocusedOpacity: 80,
+    composerActiveOpacity: 100,
     touchScrollSensitivity: 1,
     twoFingerScrollSensitivity: 5,
   });
@@ -450,5 +498,143 @@ test("PC settings revision이 바뀌면 stale Remote 저장을 거부하고 최�
   await expect(page.locator("#remoteTerminalFontSize")).toHaveValue("19");
   await expect(page.locator("#remoteComposerFontSize")).toHaveValue("26");
   await expect(page.locator("#remoteMenuFontSize")).toHaveValue("17");
+  await expect(page.locator("#remoteComposerIdleOpacity")).toHaveValue("45");
+  await expect(page.locator("#remoteComposerFocusedOpacity")).toHaveValue("75");
+  await expect(page.locator("#remoteComposerActiveOpacity")).toHaveValue("95");
   await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText("Stored on this PC.");
+});
+
+test("Composer opacity follows Idle, Focused, and Active state and saves all three PC values", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.inputMode", "composer");
+  });
+  const harness: DisplaySettingsHarness = {
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
+    claimLeaseIds: ["lease-1"],
+    claimRequests: 0,
+    getRequests: 0,
+    putBodies: [],
+    delayNextPut: false,
+    releasePut: null,
+  };
+  await installRemoteMocks(page, harness);
+  await connectAndOpenDisplaySettings(page);
+
+  const composer = page.locator("#terminalComposer");
+  const input = page.locator("#composerInput");
+  const readAppearance = () =>
+    composer.evaluate((element) => ({
+      state: element.getAttribute("data-opacity-state"),
+      opacity: getComputedStyle(element).opacity,
+    }));
+
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+  await page.locator("#navToggle").click();
+  await input.focus();
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  await input.dispatchEvent("compositionstart");
+  await input.blur();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.dispatchEvent("compositionend");
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+
+  await input.focus();
+  await input.fill("draft");
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.fill("");
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+  await input.blur();
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+
+  const send = page.locator("#composerSend");
+  await input.focus();
+  await expect(send).toBeEnabled();
+  await input.fill("remember this command");
+  await send.click();
+  await expect(input).toHaveValue("");
+  await input.click();
+  await expect(page.locator("#composerHistoryList")).toBeVisible();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.press("Escape");
+  await expect(page.locator("#composerHistoryList")).toBeHidden();
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  harness.delayNextInput = true;
+  await send.click();
+  await expect.poll(() => Boolean(harness.releaseInput)).toBe(true);
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  harness.releaseInput?.();
+  harness.releaseInput = null;
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  await input.fill("draft survives reconnect");
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerConnectionButton").click();
+  await page.locator("#exit").click();
+  await expect(input).toBeDisabled();
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+  await page.locator("#connect").click();
+  await expect(input).toBeEnabled();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.fill("");
+
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerSettingsButton").click();
+  await page.locator("#remoteComposerIdleOpacity").fill("45");
+  await page.locator("#remoteComposerFocusedOpacity").click();
+  await expect.poll(() => harness.putBodies.length).toBe(1);
+  await page.locator("#remoteComposerFocusedOpacity").fill("75");
+  await page.locator("#remoteComposerActiveOpacity").click();
+  await expect.poll(() => harness.putBodies.length).toBe(2);
+  await page.locator("#remoteComposerActiveOpacity").fill("95");
+  await page.locator("#remoteTerminalFontSize").click();
+  await expect.poll(() => harness.putBodies.length).toBe(3);
+  expect(harness.putBodies.at(-1)).toEqual({
+    leaseId: "lease-1",
+    expectedRevision: "rev-3",
+    terminalFontSize: 18,
+    composerFontSize: 20,
+    menuFontSize: 15,
+    composerIdleOpacity: 45,
+    composerFocusedOpacity: 75,
+    composerActiveOpacity: 95,
+    touchScrollSensitivity: 1,
+    twoFingerScrollSensitivity: 5,
+  });
+
+  await page.locator("#remoteComposerIdleOpacity").fill("90");
+  await page.locator("#remoteComposerFocusedOpacity").click();
+  await expect.poll(() => harness.putBodies.length).toBe(4);
+  expect(harness.putBodies.at(-1)).toMatchObject({
+    composerIdleOpacity: 75,
+    composerFocusedOpacity: 75,
+    composerActiveOpacity: 95,
+  });
+  await page.locator("#remoteComposerActiveOpacity").fill("50");
+  await page.locator("#remoteTerminalFontSize").click();
+  await expect.poll(() => harness.putBodies.length).toBe(5);
+  expect(harness.putBodies.at(-1)).toMatchObject({
+    composerIdleOpacity: 50,
+    composerFocusedOpacity: 50,
+    composerActiveOpacity: 50,
+  });
+
+  await page.locator("#navToggle").click();
+  await input.focus();
+  await input.fill("active again");
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "0.5" });
 });

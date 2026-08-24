@@ -1815,6 +1815,15 @@ pub struct RemoteSettings {
     /// smaller text tiers scale proportionally from this value.
     #[serde(default = "default_remote_menu_font_size")]
     pub menu_font_size: u16,
+    /// Opacity percentage for a visible Remote composer without focus or activity.
+    #[serde(default = "default_remote_composer_idle_opacity")]
+    pub composer_idle_opacity: u8,
+    /// Opacity percentage for an empty focused Remote composer.
+    #[serde(default = "default_remote_composer_focused_opacity")]
+    pub composer_focused_opacity: u8,
+    /// Opacity percentage while the Remote composer owns draft/suggestion/IME/send activity.
+    #[serde(default = "default_remote_composer_active_opacity")]
+    pub composer_active_opacity: u8,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1911,6 +1920,11 @@ pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 16;
 /// Matches the drawer's historical fixed base (`--fs-md`, 13px), so existing
 /// installs render pixel-identically until the user changes the value.
 pub const DEFAULT_REMOTE_MENU_FONT_SIZE: u16 = 13;
+pub const REMOTE_COMPOSER_OPACITY_MIN: u8 = 20;
+pub const REMOTE_COMPOSER_OPACITY_MAX: u8 = 100;
+pub const DEFAULT_REMOTE_COMPOSER_IDLE_OPACITY: u8 = 55;
+pub const DEFAULT_REMOTE_COMPOSER_FOCUSED_OPACITY: u8 = 80;
+pub const DEFAULT_REMOTE_COMPOSER_ACTIVE_OPACITY: u8 = 100;
 
 fn default_remote_terminal_font_size() -> u16 {
     DEFAULT_REMOTE_TERMINAL_FONT_SIZE
@@ -1922,6 +1936,18 @@ fn default_remote_composer_font_size() -> u16 {
 
 fn default_remote_menu_font_size() -> u16 {
     DEFAULT_REMOTE_MENU_FONT_SIZE
+}
+
+fn default_remote_composer_idle_opacity() -> u8 {
+    DEFAULT_REMOTE_COMPOSER_IDLE_OPACITY
+}
+
+fn default_remote_composer_focused_opacity() -> u8 {
+    DEFAULT_REMOTE_COMPOSER_FOCUSED_OPACITY
+}
+
+fn default_remote_composer_active_opacity() -> u8 {
+    DEFAULT_REMOTE_COMPOSER_ACTIVE_OPACITY
 }
 
 fn default_cloud_auto_reconnect() -> bool {
@@ -1971,6 +1997,9 @@ impl Default for RemoteSettings {
             terminal_font_size: default_remote_terminal_font_size(),
             composer_font_size: default_remote_composer_font_size(),
             menu_font_size: default_remote_menu_font_size(),
+            composer_idle_opacity: default_remote_composer_idle_opacity(),
+            composer_focused_opacity: default_remote_composer_focused_opacity(),
+            composer_active_opacity: default_remote_composer_active_opacity(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,

@@ -1058,6 +1058,12 @@ export interface RemoteSettings {
   composerFontSize: number;
   /** Remote navigation drawer (menu) base font size in pixels. */
   menuFontSize: number;
+  /** Visible unfocused Remote Composer opacity percentage. */
+  composerIdleOpacity: number;
+  /** Empty focused Remote Composer opacity percentage. */
+  composerFocusedOpacity: number;
+  /** Draft/suggestion/IME/send-active Remote Composer opacity percentage. */
+  composerActiveOpacity: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;

@@ -2310,6 +2310,9 @@ type RemoteDisplaySettings = Pick<
   | "terminalFontSize"
   | "composerFontSize"
   | "menuFontSize"
+  | "composerIdleOpacity"
+  | "composerFocusedOpacity"
+  | "composerActiveOpacity"
   | "snapshotMaxKib"
   | "serveTerminalFont"
   | "widgets"
@@ -2321,11 +2324,41 @@ type RemoteDisplaySettings = Pick<
 type RemoteConnectionSettings = Omit<RemoteSettings, keyof RemoteDisplaySettings>;
 const REMOTE_FONT_SIZE_MIN = 6;
 const REMOTE_FONT_SIZE_MAX = 72;
+const REMOTE_COMPOSER_OPACITY_MIN = 20;
+const REMOTE_COMPOSER_OPACITY_MAX = 100;
 
 function normalizeRemoteFontSize(value: unknown, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(REMOTE_FONT_SIZE_MAX, Math.max(REMOTE_FONT_SIZE_MIN, Math.trunc(parsed)));
+}
+
+function normalizeRemoteComposerOpacity(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(
+    REMOTE_COMPOSER_OPACITY_MAX,
+    Math.max(REMOTE_COMPOSER_OPACITY_MIN, Math.round(parsed / 5) * 5),
+  );
+}
+
+function normalizeRemoteComposerOpacities(
+  remote: Pick<
+    RemoteDisplaySettings,
+    "composerIdleOpacity" | "composerFocusedOpacity" | "composerActiveOpacity"
+  >,
+) {
+  const active = normalizeRemoteComposerOpacity(remote.composerActiveOpacity, 100);
+  const focused = Math.min(
+    normalizeRemoteComposerOpacity(remote.composerFocusedOpacity, 80),
+    active,
+  );
+  const idle = Math.min(normalizeRemoteComposerOpacity(remote.composerIdleOpacity, 55), focused);
+  return {
+    composerIdleOpacity: idle,
+    composerFocusedOpacity: focused,
+    composerActiveOpacity: active,
+  };
 }
 
 type RemoteSectionDraft = RemoteConnectionSettings & {
@@ -2877,6 +2910,9 @@ function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings 
     terminalFontSize: remote.terminalFontSize,
     composerFontSize: remote.composerFontSize,
     menuFontSize: remote.menuFontSize,
+    composerIdleOpacity: remote.composerIdleOpacity,
+    composerFocusedOpacity: remote.composerFocusedOpacity,
+    composerActiveOpacity: remote.composerActiveOpacity,
     snapshotMaxKib: remote.snapshotMaxKib,
     serveTerminalFont: remote.serveTerminalFont,
     widgets: remote.widgets,
@@ -2893,6 +2929,7 @@ function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDi
     terminalFontSize: normalizeRemoteFontSize(remote.terminalFontSize, 14),
     composerFontSize: normalizeRemoteFontSize(remote.composerFontSize, 16),
     menuFontSize: normalizeRemoteFontSize(remote.menuFontSize, 13),
+    ...normalizeRemoteComposerOpacities(remote),
     snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
     scrollSensitivity: normalizeScrollSensitivity(
       remote.scrollSensitivity,
@@ -2925,6 +2962,17 @@ function RemoteDisplaySection() {
   );
   const update = (partial: Partial<RemoteDisplaySettings>) =>
     setDraftRemote((previous) => ({ ...previous, ...partial }));
+  const updateComposerOpacity = (
+    field: "composerIdleOpacity" | "composerFocusedOpacity" | "composerActiveOpacity",
+    value: unknown,
+  ) =>
+    setDraftRemote((previous) => ({
+      ...previous,
+      ...normalizeRemoteComposerOpacities({
+        ...previous,
+        [field]: normalizeRemoteComposerOpacity(value, previous[field]),
+      }),
+    }));
 
   return (
     <div>
@@ -2996,6 +3044,76 @@ function RemoteDisplaySection() {
             />
             <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
               px
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.composerIdleOpacity")}
+          desc={t("remote.composerIdleOpacityDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-composer-idle-opacity-input"
+              type="number"
+              min={REMOTE_COMPOSER_OPACITY_MIN}
+              max={REMOTE_COMPOSER_OPACITY_MAX}
+              step={5}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.composerIdleOpacity}
+              onChange={(event) => updateComposerOpacity("composerIdleOpacity", event.target.value)}
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              %
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.composerFocusedOpacity")}
+          desc={t("remote.composerFocusedOpacityDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-composer-focused-opacity-input"
+              type="number"
+              min={remote.composerIdleOpacity}
+              max={remote.composerActiveOpacity}
+              step={5}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.composerFocusedOpacity}
+              onChange={(event) =>
+                updateComposerOpacity("composerFocusedOpacity", event.target.value)
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              %
+            </span>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("remote.composerActiveOpacity")}
+          desc={t("remote.composerActiveOpacityDesc")}
+        >
+          <div className="flex items-center gap-2">
+            <FocusInput
+              data-testid="remote-settings-composer-active-opacity-input"
+              type="number"
+              min={remote.composerFocusedOpacity}
+              max={REMOTE_COMPOSER_OPACITY_MAX}
+              step={5}
+              className={inputCls}
+              inputStyle={{ width: 110 }}
+              value={remote.composerActiveOpacity}
+              onChange={(event) =>
+                updateComposerOpacity("composerActiveOpacity", event.target.value)
+              }
+            />
+            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
+              %
             </span>
           </div>
         </SettingRow>
