@@ -125,11 +125,11 @@
         // become bounded host-cache files only when the user attaches/pastes them.
         const composerHistoryPopupKey = "laymux.remote.composerHistoryPopup";
         const composerAutocompleteKey = "laymux.remote.composerAutocomplete";
-        // A visual-only Remote preference: when Composer opens for one of the
-        // supported coding agents, leave its input footer in view by scrolling
-        // the terminal viewport up by that agent's fixed footer height.
-        const composerAgentScrollOffsetKey = "laymux.remote.composerAgentScrollOffset";
-        const composerAgentScrollOffsetLinesKey = "laymux.remote.composerAgentScrollOffsetLines";
+        // A visual-only Remote preference: Composer replaces the supported
+        // coding agents' terminal-native input footer. Hide that now-unused
+        // footer by keeping its configured line count below the viewport.
+        const composerHideAgentInputKey = "laymux.remote.composerHideAgentInput";
+        const composerHiddenAgentInputLinesKey = "laymux.remote.composerHiddenAgentInputLines";
         // Which terminals share one recall bucket (ADR-0055). Only the scope
         // choice is stored here; the recalled text stays in memory.
         const composerHistoryScopeStorageKey = "laymux.remote.composerHistoryScope";
@@ -330,21 +330,22 @@
         // These are deliberately line counts rather than pixels: xterm owns the
         // cell geometry, and this must remain a surface-local scroll only (it
         // must not resize the PTY; ADR-0038).
-        const DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS = Object.freeze({
+        const DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES = Object.freeze({
           Claude: 3,
           Codex: 4,
           Grok: 2,
         });
-        const COMPOSER_AGENT_SCROLL_OFFSET_MIN = 0;
-        const COMPOSER_AGENT_SCROLL_OFFSET_MAX = 24;
+        const COMPOSER_HIDDEN_AGENT_INPUT_LINES_MIN = 0;
+        const COMPOSER_HIDDEN_AGENT_INPUT_LINES_MAX = 24;
         let preferredInputMode = loadPreferredInputMode();
         // Feature on/off toggles are configuration (not content), so they are
         // the only composer-recall state allowed in localStorage. Default on to
         // match the desktop composer and stay non-destructive.
         let composerHistoryPopupEnabled = loadComposerToggle(composerHistoryPopupKey);
         let composerAutocompleteEnabled = loadComposerToggle(composerAutocompleteKey);
-        let composerAgentScrollOffsetEnabled = loadComposerToggle(composerAgentScrollOffsetKey);
-        let composerAgentScrollOffsets = loadComposerAgentScrollOffsets();
+        let composerHideAgentInputEnabled = loadComposerToggle(composerHideAgentInputKey);
+        let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
+        let composerAgentInputHideFrame = null;
         let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
@@ -2371,57 +2372,57 @@
           }
         }
 
-        function normalizeComposerAgentScrollOffset(value, fallback) {
+        function normalizeComposerHiddenAgentInputLines(value, fallback) {
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
           return Math.max(
-            COMPOSER_AGENT_SCROLL_OFFSET_MIN,
-            Math.min(COMPOSER_AGENT_SCROLL_OFFSET_MAX, Math.round(parsed)),
+            COMPOSER_HIDDEN_AGENT_INPUT_LINES_MIN,
+            Math.min(COMPOSER_HIDDEN_AGENT_INPUT_LINES_MAX, Math.round(parsed)),
           );
         }
 
-        function loadComposerAgentScrollOffsets() {
+        function loadComposerHiddenAgentInputLines() {
           try {
-            const stored = JSON.parse(localStorage.getItem(composerAgentScrollOffsetLinesKey) || "{}");
+            const stored = JSON.parse(localStorage.getItem(composerHiddenAgentInputLinesKey) || "{}");
             return Object.fromEntries(
-              Object.entries(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS).map(([agent, fallback]) => [
+              Object.entries(DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES).map(([agent, fallback]) => [
                 agent,
-                normalizeComposerAgentScrollOffset(stored?.[agent], fallback),
+                normalizeComposerHiddenAgentInputLines(stored?.[agent], fallback),
               ]),
             );
           } catch (_) {
-            return { ...DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS };
+            return { ...DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES };
           }
         }
 
-        function saveComposerAgentScrollOffsets() {
+        function saveComposerHiddenAgentInputLines() {
           try {
             localStorage.setItem(
-              composerAgentScrollOffsetLinesKey,
-              JSON.stringify(composerAgentScrollOffsets),
+              composerHiddenAgentInputLinesKey,
+              JSON.stringify(composerHiddenAgentInputLines),
             );
           } catch (_) {}
         }
 
-        function setComposerAgentScrollOffset(agent, value) {
-          const fallback = DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[agent];
+        function setComposerHiddenAgentInputLines(agent, value) {
+          const fallback = DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES[agent];
           if (!Number.isInteger(fallback)) return fallback;
-          const next = normalizeComposerAgentScrollOffset(value, fallback);
-          composerAgentScrollOffsets = { ...composerAgentScrollOffsets, [agent]: next };
-          saveComposerAgentScrollOffsets();
+          const next = normalizeComposerHiddenAgentInputLines(value, fallback);
+          composerHiddenAgentInputLines = { ...composerHiddenAgentInputLines, [agent]: next };
+          saveComposerHiddenAgentInputLines();
           return next;
         }
 
-        function composerAgentScrollOffset(agent) {
-          const fallback = DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[agent];
+        function hiddenComposerAgentInputLines(agent) {
+          const fallback = DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES[agent];
           if (!Number.isInteger(fallback)) return null;
-          return normalizeComposerAgentScrollOffset(composerAgentScrollOffsets[agent], fallback);
+          return normalizeComposerHiddenAgentInputLines(composerHiddenAgentInputLines[agent], fallback);
         }
 
-        function composerAgentScrollOffsetEntries() {
-          return Object.keys(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS).map((agent) => [
+        function hiddenComposerAgentInputLineEntries() {
+          return Object.keys(DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES).map((agent) => [
             agent,
-            composerAgentScrollOffset(agent),
+            hiddenComposerAgentInputLines(agent),
           ]);
         }
 
@@ -2774,10 +2775,12 @@
           if (composerCollapsed) {
             composerCollapsed = false;
             renderInputSurface({ focus: true });
+            hideActiveAgentInputForComposer();
           } else if (inputSurfaceFocused()) {
             composerCollapsed = true;
             composerInput.blur();
             renderInputSurface();
+            revealActiveAgentInput();
           } else {
             focusCurrentInputSurface();
           }
@@ -2818,6 +2821,7 @@
 
         function setInputMode(mode, options = {}) {
           if (mode !== "direct" && mode !== "composer") return;
+          const previousMode = currentInputMode();
           preferredInputMode = mode;
           // An explicit mode switch always reveals its input surface; a stale
           // collapse would leave composer mode with no visible editor.
@@ -2828,7 +2832,8 @@
           if (activeTerminalId) inputModeByTerminalId.set(activeTerminalId, mode);
           if (options.persist !== false) savePreferredInputMode(mode);
           renderInputSurface({ focus: options.focus !== false });
-          if (mode === "composer") offsetComposerForActiveAgent();
+          if (mode === "composer") hideActiveAgentInputForComposer();
+          else if (previousMode === "composer") revealActiveAgentInput();
         }
 
         function setActiveTerminal(nextTerminalId) {
@@ -3763,6 +3768,20 @@
 
         function updateScrollToBottomButton(term = terminal) {
           scrollToBottomButton.hidden = !term || !isTerminalScrolledUp(term);
+        }
+
+        function scrollTowardComposerBottom() {
+          if (!terminal) return;
+          const distanceFromBottom = terminalViewportDistanceFromBottom(terminal);
+          const hiddenLines = composerHiddenInputBoundaryLines();
+          terminal.scrollToBottom();
+          // Composer's hidden-input boundary is a surface-local first stop. If
+          // the viewport is already at or beyond that stop, the next click goes
+          // to the real live tail and lets the normal button logic hide it.
+          if (hiddenLines != null && distanceFromBottom > hiddenLines) {
+            terminal.scrollLines(-hiddenLines);
+          }
+          updateScrollToBottomButton(terminal);
         }
 
         function fallbackCopyText(text) {
@@ -6449,49 +6468,68 @@
           return null;
         }
 
-        function activeComposerAgentScrollOffset() {
+        function activeHiddenComposerAgentInputLines() {
           const agent = activeComposerAgentName();
-          return agent ? composerAgentScrollOffset(agent) : null;
+          return agent ? hiddenComposerAgentInputLines(agent) : null;
         }
 
         function activeComposerAgentName() {
           const activity = paneByTerminalId(navigationState, activeTerminalId)?.activity;
           if (activity?.type !== "interactiveApp") return null;
-          return Number.isInteger(DEFAULT_COMPOSER_AGENT_SCROLL_OFFSETS[activity.name])
-            ? activity.name
-            : null;
+          return Number.isInteger(DEFAULT_COMPOSER_HIDDEN_AGENT_INPUT_LINES[activity.name])
+              ? activity.name
+              : null;
         }
 
-        // This is intentionally a one-time viewport adjustment at a user-visible
-        // Composer transition or its initial user-directed snapshot attach. It
-        // does not alter terminal geometry or output state, and automatic
-        // reconnect/navigation refreshes never re-apply it, so a person's later
-        // scroll position remains theirs.
-        function offsetComposerForActiveAgent() {
+        function composerHiddenInputBoundaryLines() {
           if (
-            !composerAgentScrollOffsetEnabled ||
+            !composerHideAgentInputEnabled ||
             currentInputMode() !== "composer" ||
-            composerCollapsed ||
-            !terminal
+            composerCollapsed
           ) {
-            return;
+            return null;
           }
+          const lines = activeHiddenComposerAgentInputLines();
+          return lines != null && lines > 0 ? lines : null;
+        }
+
+        // Apply the hide at a user-visible Composer transition, initial
+        // user-directed snapshot attach, or whenever Composer regains focus.
+        // Composer is the active input surface, so the terminal-native footer
+        // is redundant. Automatic reconnect/navigation refreshes never re-apply
+        // the hide, so a person's later scroll position remains theirs.
+        function hideActiveAgentInputForComposer() {
+          if (!terminal) return;
           const terminalId = activeTerminalId;
-          const lines = activeComposerAgentScrollOffset();
+          const lines = composerHiddenInputBoundaryLines();
           if (lines == null) return;
-          requestAnimationFrame(() => {
+          if (composerAgentInputHideFrame !== null) {
+            cancelAnimationFrame(composerAgentInputHideFrame);
+          }
+          composerAgentInputHideFrame = requestAnimationFrame(() => {
+            composerAgentInputHideFrame = null;
             if (
-              !composerAgentScrollOffsetEnabled ||
-              currentInputMode() !== "composer" ||
-              composerCollapsed ||
               !terminal ||
               activeTerminalId !== terminalId ||
-              activeComposerAgentScrollOffset() !== lines
+              composerHiddenInputBoundaryLines() !== lines
             ) {
               return;
             }
             terminal.scrollToBottom();
-            terminal.scrollLines(-lines);
+            if (lines > 0) terminal.scrollLines(-lines);
+            updateScrollToBottomButton(terminal);
+          });
+        }
+
+        // Direct input needs the agent-native footer, and a collapsed Composer
+        // no longer replaces it. Explicitly return to the live tail when the
+        // automatic hide stops applying.
+        function revealActiveAgentInput() {
+          if (!terminal || !activeComposerAgentName()) return;
+          const terminalId = activeTerminalId;
+          requestAnimationFrame(() => {
+            if (!terminal || activeTerminalId !== terminalId || !activeComposerAgentName()) return;
+            terminal.scrollToBottom();
             updateScrollToBottomButton(terminal);
           });
         }
@@ -7366,7 +7404,7 @@
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
                 if (!reconnecting && currentInputMode() === "composer") {
-                  offsetComposerForActiveAgent();
+                  hideActiveAgentInputForComposer();
                 }
                 // An unsequenced host has no screen checkpoint and ignores the
                 // history budget, so this surface can never page older output.
@@ -7524,7 +7562,7 @@
                 restoreTerminalViewport(term, preservedViewportDistance);
                 updateScrollToBottomButton(term);
                 if (!reconnecting && currentInputMode() === "composer") {
-                  offsetComposerForActiveAgent();
+                  hideActiveAgentInputForComposer();
                 }
                 settleHistoryExpansion(terminalId, historyRequestId, header.byteLength);
                 outputSnapshotBytes = header.byteLength;
@@ -9285,13 +9323,13 @@
           }
         }
 
-        // Composer recall feature toggles (issues #504 / #505) share the Remote
-        // drawer Settings surface with the input layout. Only the on/off
-        // booleans are persisted; the recall text itself remains runtime-only.
+        // Composer settings share the Remote drawer Settings surface with the
+        // input layout. Configuration is persisted surface-locally; input text
+        // itself remains runtime-only except for explicit attachment policy.
         function renderComposerPopoverSection() {
           const title = document.createElement("div");
           title.className = "key-popover-title";
-          title.textContent = "Composer recall";
+          title.textContent = "Composer";
           keyPopoverBody.append(title);
 
           const makeToggle = (id, labelText, descText, enabled, onChange) => {
@@ -9382,40 +9420,41 @@
             }
           );
           makeToggle(
-            "composerAgentScrollOffsetToggle",
-            "Keep agent input visible",
-            "Claude, Codex, and Grok",
-            composerAgentScrollOffsetEnabled,
+            "composerHideAgentInputToggle",
+            "Hide unused agent input",
+            "While using Composer",
+            composerHideAgentInputEnabled,
             (checked) => {
-              composerAgentScrollOffsetEnabled = checked;
-              saveComposerToggle(composerAgentScrollOffsetKey, checked);
-              if (checked) offsetComposerForActiveAgent();
+              composerHideAgentInputEnabled = checked;
+              saveComposerToggle(composerHideAgentInputKey, checked);
+              if (checked) hideActiveAgentInputForComposer();
+              else revealActiveAgentInput();
             }
           );
-          for (const [agent, lines] of composerAgentScrollOffsetEntries()) {
+          for (const [agent, lines] of hiddenComposerAgentInputLineEntries()) {
             const row = document.createElement("label");
             row.className = "key-set-row";
             const name = document.createElement("span");
             name.className = "key-set-name";
-            name.textContent = `${agent} input lines`;
+            name.textContent = `${agent} lines to hide`;
             const input = document.createElement("input");
             input.type = "number";
             input.className = "key-set-select";
-            input.id = `composerAgentScrollOffset${agent}`;
-            input.min = String(COMPOSER_AGENT_SCROLL_OFFSET_MIN);
-            input.max = String(COMPOSER_AGENT_SCROLL_OFFSET_MAX);
+            input.id = `composerHiddenAgentInputLines${agent}`;
+            input.min = String(COMPOSER_HIDDEN_AGENT_INPUT_LINES_MIN);
+            input.max = String(COMPOSER_HIDDEN_AGENT_INPUT_LINES_MAX);
             input.step = "1";
             input.inputMode = "numeric";
             input.value = String(lines);
-            input.disabled = !composerAgentScrollOffsetEnabled;
-            input.setAttribute("aria-label", `${agent} Composer input lines`);
+            input.disabled = !composerHideAgentInputEnabled;
+            input.setAttribute("aria-label", `${agent} input lines to hide`);
             input.addEventListener("click", (event) => event.stopPropagation());
             input.addEventListener("change", (event) => {
               event.stopPropagation();
-              const next = setComposerAgentScrollOffset(agent, input.value);
+              const next = setComposerHiddenAgentInputLines(agent, input.value);
               input.value = String(next);
-              if (composerAgentScrollOffsetEnabled && activeComposerAgentName() === agent) {
-                offsetComposerForActiveAgent();
+              if (composerHideAgentInputEnabled && activeComposerAgentName() === agent) {
+                hideActiveAgentInputForComposer();
               }
             });
             row.append(name, input);
@@ -10014,11 +10053,7 @@
         // schedules the copy after every listener for this event has run.
         document.addEventListener("mouseup", handleSelectionMouseupAfterInteraction);
         keepInputSurfaceFocus(scrollToBottomButton);
-        scrollToBottomButton.addEventListener("click", () => {
-          if (!terminal) return;
-          terminal.scrollToBottom();
-          updateScrollToBottomButton();
-        });
+        scrollToBottomButton.addEventListener("click", scrollTowardComposerBottom);
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
 
@@ -10225,6 +10260,7 @@
         composerInput.addEventListener("compositionend", () => {
           composerIsComposing = false;
         });
+        composerInput.addEventListener("focus", hideActiveAgentInputForComposer);
         // Leaving the editor (pane/mode switch, tapping away) closes both lists.
         // Recall items commit on mousedown+preventDefault, so a pick keeps focus
         // and this never fires mid-selection.

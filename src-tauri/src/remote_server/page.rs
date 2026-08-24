@@ -1553,7 +1553,13 @@ mod tests {
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
         assert!(html.contains("function renderComposerPopoverSection()"));
-        assert!(html.contains("title.textContent = \"Composer recall\";"));
+        assert!(html.contains("title.textContent = \"Composer\";"));
+        assert!(html.contains("\"composerHideAgentInputToggle\""));
+        assert!(html.contains("\"Hide unused agent input\""));
+        assert!(html.contains("function scrollTowardComposerBottom()"));
+        assert!(html.contains(
+            "composerInput.addEventListener(\"focus\", hideActiveAgentInputForComposer);"
+        ));
         assert!(html.contains("\"composerHistoryPopupToggle\""));
         assert!(html.contains("\"composerAutocompleteToggle\""));
     }

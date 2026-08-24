@@ -1956,7 +1956,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      /* Scope picker in the "Composer recall" popover section (ADR-0055). */
+      /* Scope picker in the "Composer" popover section (ADR-0055). */
       .key-set-select {
         flex: 0 0 auto;
         max-width: 56%;
