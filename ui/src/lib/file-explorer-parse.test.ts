@@ -75,6 +75,14 @@ describe("parentPath", () => {
     expect(parentPath("C:\\Users\\me\\project")).toBe("C:\\Users\\me");
   });
 
+  it("returns the drive root itself for a drive root, never the bare separator", () => {
+    // Mirrors parentPath("/") === "/": a caller compares parent !== path to
+    // detect the top. Returning "\" here would make "C:\" claim a parent that
+    // no Windows API can list.
+    expect(parentPath("C:\\")).toBe("C:\\");
+    expect(parentPath("D:\\")).toBe("D:\\");
+  });
+
   it("returns the drive root (with trailing separator) for a file at drive root", () => {
     // "C:\foo.txt"'s parent is the drive root "C:\", not "C:" — the latter is a
     // drive-relative cwd on Windows and would not navigate predictably.

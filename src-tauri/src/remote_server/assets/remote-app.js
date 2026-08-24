@@ -1436,6 +1436,7 @@
           fileViewerTitleElement.textContent = "";
           fileViewerTitleElement.title = "";
           fileViewerPath = null;
+          fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           focusCurrentInputSurface();
@@ -1459,6 +1460,7 @@
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = explorerReturnPath;
           fileViewerBackButton.hidden = !explorerReturnPath;
+          fileViewerDownloadButton.hidden = false;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
@@ -1511,6 +1513,9 @@
           fileViewerDirectoryPath = null;
           fileViewerExplorerReturnPath = null;
           fileViewerBackButton.hidden = true;
+          // Directory mode has nothing to download — hide the affordance
+          // instead of leaving a disabled button (ADR-0198, ADR-0192).
+          fileViewerDownloadButton.hidden = true;
           fileViewerDownloadInFlight = false;
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
@@ -1552,9 +1557,13 @@
           fileViewerKind = null;
           resetFileViewerZoom();
           fileViewerZoomElement.hidden = true;
+          fileViewerDownloadButton.hidden = true;
           fileViewerDirectoryPath = payload.path;
           fileViewerTitleElement.textContent = payload.path;
           fileViewerTitleElement.title = payload.path;
+          // A new listing starts at its top; the previous directory's scroll
+          // offset must not carry over into a shorter or unrelated list.
+          fileViewerBodyElement.scrollTop = 0;
           if (typeof payload.parent === "string" && payload.parent) {
             appendDirectoryRow({ name: "..", path: payload.parent, isDirectory: true }, true);
           }

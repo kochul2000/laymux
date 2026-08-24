@@ -1,6 +1,6 @@
 # 0198. Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-24
 - Source: 사용자 요구("안드로이드도 viewer 기능을 넣자 — 우상단 버튼으로 전체 화면 viewer 진입, 디렉터리 탐색과 파일 열기, 파일 경로 클릭도 이 viewer 사용"), [ADR-0184](0184-remote-file-viewer-in-page-overlay.md), [ADR-0044](0044-remote-file-viewer-explicit-host-path.md), [ADR-0042](0042-remote-file-viewer-secret-capability.md), [ADR-0188](0188-path-link-ambient-detection-triggers.md), [api-contracts.md §13.3.1](../architecture/api-contracts.md)
 - Extends: ADR-0184(인페이지 오버레이), ADR-0044(명시적 host path), ADR-0042(capability 게이트)

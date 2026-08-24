@@ -175,8 +175,9 @@ test("the header folder button appears with the capability and lists the cwd", a
   // A hostile entry name stays text, never markup.
   await expect(rows.nth(5)).toContainText("<img src=x onerror=alert(1)>.txt");
 
-  // Zoom and download are file-mode affordances.
+  // Zoom and download are file-mode affordances — hidden, not disabled.
   await expect(page.locator("#fileViewerZoom")).toBeHidden();
+  await expect(page.locator("#fileViewerDownload")).toBeHidden();
   await expect(page.locator("#fileViewerBack")).toBeHidden();
 
   expect(listRequests).toEqual([
@@ -205,6 +206,8 @@ test("navigates into a directory, opens a file and Back re-requests the listing"
   await page.locator(".file-viewer-directory-row", { hasText: "main.rs" }).click();
   await expect(page.locator("#fileViewerText")).toHaveText("fn main() {}");
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user/repo/main.rs");
+  // File mode brings the download affordance back.
+  await expect(page.locator("#fileViewerDownload")).toBeVisible();
   expect(renderRequests).toEqual([{ source: "path", path: "/home/user/repo/main.rs" }]);
 
   // Back exists only for a file reached through the explorer and re-lists.
@@ -222,7 +225,7 @@ test("navigates into a directory, opens a file and Back re-requests the listing"
   await page.locator(".file-viewer-directory-row.parent").click();
   await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
   // Directory mode has no stale download target.
-  await expect(page.locator("#fileViewerDownload")).toBeDisabled();
+  await expect(page.locator("#fileViewerDownload")).toBeHidden();
 });
 
 test("a file opened outside the explorer has no Back button", async ({ context, page }) => {

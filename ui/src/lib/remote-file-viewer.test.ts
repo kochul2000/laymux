@@ -593,6 +593,15 @@ describe("Remote FileViewer directory listing (ADR-0198)", () => {
       parent: "C:\\",
       entries: [{ path: "C:\\work\\laymux" }],
     });
+
+    // 드라이브 루트: parentPath("C:\\")가 "\" 같은 깨진 경로를 내려주면 ".."
+    // 행이 목록 불가 경로를 가리킨다 — 루트 판정은 parent === path 로 접는다.
+    vi.mocked(listDirectory).mockResolvedValue([dirEntry("work", true)]);
+    const driveRoot = await handleRemoteFileViewerRequest("list", {
+      path: "C:\\",
+      maxEntries: 100,
+    });
+    expect(driveRoot.data).toMatchObject({ path: "C:\\", parent: null });
   });
 
   it("maxEntries를 넘는 목록은 잘라서 truncated로 알린다", async () => {

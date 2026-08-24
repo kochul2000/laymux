@@ -18,6 +18,9 @@ export function parentPath(path: string): string {
   const sep = path.includes("\\") ? "\\" : "/";
   // Remove trailing separator
   const trimmed = path.endsWith(sep) ? path.slice(0, -1) : path;
+  // A drive root ("C:\") is its own parent, like "/" below — returning the
+  // bare separator here would send a Windows caller to the invalid path "\".
+  if (trimmed.endsWith(":")) return trimmed + sep;
   const lastSep = trimmed.lastIndexOf(sep);
   if (lastSep <= 0) return sep; // root
   // Windows drive root: the parent of "C:\foo" is "C:\" (drive root), not "C:"
