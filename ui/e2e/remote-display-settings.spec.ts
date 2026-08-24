@@ -96,6 +96,8 @@ interface DisplaySettingsHarness {
   putBodies: DisplaySettingsPut[];
   delayNextPut: boolean;
   releasePut: (() => void) | null;
+  delayNextInput?: boolean;
+  releaseInput?: (() => void) | null;
 }
 
 function snapshotFrames(text: string) {
@@ -189,6 +191,16 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
         revision: `rev-${revisionNumber + 1}`,
       };
       await route.fulfill({ json: harness.settings });
+      return;
+    }
+    if (url.pathname === "/remote/v1/terminals/terminal-1/input") {
+      if (harness.delayNextInput) {
+        harness.delayNextInput = false;
+        await new Promise<void>((resolve) => {
+          harness.releaseInput = resolve;
+        });
+      }
+      await route.fulfill({ json: {} });
       return;
     }
     await route.fulfill({ json: {} });
@@ -532,12 +544,53 @@ test("Composer opacity follows Idle, Focused, and Active state and saves all thr
   await page.locator("#navToggle").click();
   await input.focus();
   await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  await input.dispatchEvent("compositionstart");
+  await input.blur();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.dispatchEvent("compositionend");
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+
+  await input.focus();
   await input.fill("draft");
   await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
   await input.fill("");
   await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
   await input.blur();
   await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+
+  const send = page.locator("#composerSend");
+  await input.focus();
+  await expect(send).toBeEnabled();
+  await input.fill("remember this command");
+  await send.click();
+  await expect(input).toHaveValue("");
+  await input.click();
+  await expect(page.locator("#composerHistoryList")).toBeVisible();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.press("Escape");
+  await expect(page.locator("#composerHistoryList")).toBeHidden();
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  harness.delayNextInput = true;
+  await send.click();
+  await expect.poll(() => Boolean(harness.releaseInput)).toBe(true);
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  harness.releaseInput?.();
+  harness.releaseInput = null;
+  await expect.poll(readAppearance).toEqual({ state: "focused", opacity: "0.8" });
+
+  await input.fill("draft survives reconnect");
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await page.locator("#navToggle").click();
+  await page.locator("#drawerConnectionButton").click();
+  await page.locator("#exit").click();
+  await expect(input).toBeDisabled();
+  await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
+  await page.locator("#connect").click();
+  await expect(input).toBeEnabled();
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "1" });
+  await input.fill("");
 
   await page.locator("#navToggle").click();
   await page.locator("#drawerSettingsButton").click();
@@ -563,8 +616,25 @@ test("Composer opacity follows Idle, Focused, and Active state and saves all thr
     twoFingerScrollSensitivity: 5,
   });
 
+  await page.locator("#remoteComposerIdleOpacity").fill("90");
+  await page.locator("#remoteComposerFocusedOpacity").click();
+  await expect.poll(() => harness.putBodies.length).toBe(4);
+  expect(harness.putBodies.at(-1)).toMatchObject({
+    composerIdleOpacity: 75,
+    composerFocusedOpacity: 75,
+    composerActiveOpacity: 95,
+  });
+  await page.locator("#remoteComposerActiveOpacity").fill("50");
+  await page.locator("#remoteTerminalFontSize").click();
+  await expect.poll(() => harness.putBodies.length).toBe(5);
+  expect(harness.putBodies.at(-1)).toMatchObject({
+    composerIdleOpacity: 50,
+    composerFocusedOpacity: 50,
+    composerActiveOpacity: 50,
+  });
+
   await page.locator("#navToggle").click();
   await input.focus();
   await input.fill("active again");
-  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "0.95" });
+  await expect.poll(readAppearance).toEqual({ state: "active", opacity: "0.5" });
 });

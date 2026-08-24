@@ -2346,6 +2346,10 @@ describe("SettingsView", () => {
         target: { value: "17" },
       });
       fireEvent.change(screen.getByTestId("remote-settings-composer-idle-opacity-input"), {
+        target: { value: "90" },
+      });
+      expect(screen.getByTestId("remote-settings-composer-idle-opacity-input")).toHaveValue(80);
+      fireEvent.change(screen.getByTestId("remote-settings-composer-idle-opacity-input"), {
         target: { value: "45" },
       });
       fireEvent.change(screen.getByTestId("remote-settings-composer-focused-opacity-input"), {
