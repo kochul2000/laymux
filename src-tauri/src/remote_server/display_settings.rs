@@ -22,6 +22,7 @@ use super::routes::REMOTE_LEASE_HEADER;
 pub(super) struct RemoteDisplaySettingsResponse {
     terminal_font_size: u16,
     composer_font_size: u16,
+    menu_font_size: u16,
     touch_scroll_sensitivity: f32,
     two_finger_scroll_sensitivity: f32,
     revision: String,
@@ -36,6 +37,9 @@ impl From<&Settings> for RemoteDisplaySettingsResponse {
                 .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
             composer_font_size: remote
                 .composer_font_size
+                .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
+            menu_font_size: remote
+                .menu_font_size
                 .clamp(REMOTE_FONT_SIZE_MIN, REMOTE_FONT_SIZE_MAX),
             touch_scroll_sensitivity: clamp_scroll_sensitivity(
                 remote.touch_scroll_sensitivity,
@@ -55,6 +59,7 @@ impl From<&Settings> for RemoteDisplaySettingsResponse {
 pub(super) struct UpdateRemoteDisplaySettingsRequest {
     terminal_font_size: u16,
     composer_font_size: u16,
+    menu_font_size: u16,
     touch_scroll_sensitivity: f32,
     two_finger_scroll_sensitivity: f32,
     lease_id: Option<String>,
@@ -87,6 +92,7 @@ pub(super) async fn update_remote_display_settings(
         "remote": {
             "terminalFontSize": body.terminal_font_size,
             "composerFontSize": body.composer_font_size,
+            "menuFontSize": body.menu_font_size,
             "touchScrollSensitivity": body.touch_scroll_sensitivity,
             "twoFingerScrollSensitivity": body.two_finger_scroll_sensitivity,
         }
@@ -132,6 +138,7 @@ mod tests {
         let mut settings = Settings::default();
         settings.remote.terminal_font_size = 0;
         settings.remote.composer_font_size = u16::MAX;
+        settings.remote.menu_font_size = 4;
         // Out-of-band and non-finite touch values normalize like the
         // appearance payload: positive-out-of-range clamps, others fall back.
         settings.remote.touch_scroll_sensitivity = 0.0;
@@ -141,6 +148,7 @@ mod tests {
 
         assert_eq!(response.terminal_font_size, REMOTE_FONT_SIZE_MIN);
         assert_eq!(response.composer_font_size, REMOTE_FONT_SIZE_MAX);
+        assert_eq!(response.menu_font_size, REMOTE_FONT_SIZE_MIN);
         assert_eq!(
             response.touch_scroll_sensitivity,
             DEFAULT_SCROLL_SENSITIVITY
@@ -154,6 +162,7 @@ mod tests {
             json!({
                 "terminalFontSize": 6,
                 "composerFontSize": 72,
+                "menuFontSize": 6,
                 "touchScrollSensitivity": DEFAULT_SCROLL_SENSITIVITY,
                 "twoFingerScrollSensitivity": crate::constants::MAX_SCROLL_SENSITIVITY,
                 "revision": settings_revision(&settings),
@@ -175,6 +184,7 @@ mod tests {
         let missing = UpdateRemoteDisplaySettingsRequest {
             terminal_font_size: 14,
             composer_font_size: 16,
+            menu_font_size: 13,
             touch_scroll_sensitivity: 1.0,
             two_finger_scroll_sensitivity: 5.0,
             lease_id: None,

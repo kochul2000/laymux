@@ -988,6 +988,7 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
     expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
+    expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
@@ -1012,6 +1013,7 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().remote.snapshotMaxKib).toBe(4);
     expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
     expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
+    expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });

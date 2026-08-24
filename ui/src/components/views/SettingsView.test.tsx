@@ -2342,10 +2342,14 @@ describe("SettingsView", () => {
       fireEvent.change(screen.getByTestId("remote-settings-composer-font-size-input"), {
         target: { value: "20" },
       });
+      fireEvent.change(screen.getByTestId("remote-settings-menu-font-size-input"), {
+        target: { value: "17" },
+      });
       await user.click(screen.getByTestId("save-settings-btn"));
 
       expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
       expect(useSettingsStore.getState().remote.composerFontSize).toBe(20);
+      expect(useSettingsStore.getState().remote.menuFontSize).toBe(17);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {
