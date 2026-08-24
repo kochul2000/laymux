@@ -8,10 +8,10 @@ use serde_json::{json, Value};
 use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
 use crate::constants::{
-    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_PATH_LINK_SCREEN_CHARS,
-    MAX_REMOTE_PATH_LINK_SCREEN_LINES, MAX_REMOTE_PATH_LINK_SELECTION_CHARS,
-    MAX_REMOTE_PATH_LINK_SELECTION_LINES, MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS,
-    REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
+    MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
+    MAX_REMOTE_PATH_LINK_SCREEN_CHARS, MAX_REMOTE_PATH_LINK_SCREEN_LINES,
+    MAX_REMOTE_PATH_LINK_SELECTION_CHARS, MAX_REMOTE_PATH_LINK_SELECTION_LINES,
+    MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS, REMOTE_FILE_VIEWER_CAPABILITY_HEADER,
 };
 use crate::state::AppState;
 
@@ -53,6 +53,18 @@ pub(super) struct FileViewerPathLinkRequest {
 pub(super) struct FileViewerPathLinkCaret {
     line_index: usize,
     index: usize,
+}
+
+/// One Remote directory listing request (ADR-0198). Either an explicit host
+/// `path` or `source:"terminalCwd"` + `terminalId` (the header folder button's
+/// entry point — the bridge resolves the terminal's cwd, home as fallback).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct FileViewerListRequest {
+    source: Option<String>,
+    path: Option<String>,
+    terminal_id: Option<String>,
+    lease_id: Option<String>,
 }
 
 struct FileViewerAuthorization {
@@ -160,6 +172,31 @@ pub(super) async fn remote_file_viewer_path_link(
     file_viewer_bridge_response(&server, &authorization, "pathLink", params).await
 }
 
+pub(super) async fn remote_file_viewer_list(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    Json(body): Json<FileViewerListRequest>,
+) -> Response {
+    let lease_id = body
+        .lease_id
+        .as_deref()
+        .or_else(|| lease_id_from_headers(&headers));
+    let authorization = match file_viewer_authorization(
+        &server.app_state,
+        lease_id,
+        file_viewer_capability_from_headers(&headers),
+    ) {
+        Ok(authorization) => authorization,
+        Err(response) => return response,
+    };
+
+    let params = match list_params(body) {
+        Ok(params) => params,
+        Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
+    };
+    file_viewer_bridge_response(&server, &authorization, "list", params).await
+}
+
 #[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
 fn file_viewer_authorization(
     app_state: &AppState,
@@ -198,6 +235,39 @@ fn render_params(body: FileViewerRenderRequest) -> Result<Value, &'static str> {
             }))
         }
         _ => Err("source must be 'current' or 'path'"),
+    }
+}
+
+fn list_params(body: FileViewerListRequest) -> Result<Value, &'static str> {
+    match body.source.as_deref() {
+        None | Some("path") => {
+            let path = body.path.unwrap_or_default().trim().to_owned();
+            if path.is_empty() {
+                return Err("path is required");
+            }
+            Ok(json!({
+                "source": "path",
+                "path": path,
+                "maxEntries": MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
+            }))
+        }
+        Some("terminalCwd") => {
+            // terminalId is optional: without one (no terminal attached yet) the
+            // bridge falls back to the host home directory.
+            let terminal_id = body.terminal_id.unwrap_or_default().trim().to_owned();
+            if terminal_id.chars().count() > MAX_REMOTE_PATH_LINK_TERMINAL_ID_CHARS {
+                return Err("terminalId exceeds the 256 character limit");
+            }
+            let mut params = json!({
+                "source": "terminalCwd",
+                "maxEntries": MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
+            });
+            if !terminal_id.is_empty() {
+                params["terminalId"] = json!(terminal_id);
+            }
+            Ok(params)
+        }
+        Some(_) => Err("source must be 'path' or 'terminalCwd'"),
     }
 }
 
@@ -377,6 +447,81 @@ mod tests {
         assert_eq!(
             render_params(request("path", Some("  "))).unwrap_err(),
             "path is required when source is 'path'"
+        );
+    }
+
+    fn list_request(
+        source: Option<&str>,
+        path: Option<&str>,
+        terminal_id: Option<&str>,
+    ) -> FileViewerListRequest {
+        FileViewerListRequest {
+            source: source.map(str::to_owned),
+            path: path.map(str::to_owned),
+            terminal_id: terminal_id.map(str::to_owned),
+            lease_id: None,
+        }
+    }
+
+    #[test]
+    fn list_path_is_trimmed_and_entry_bounded() {
+        let params = list_params(list_request(None, Some("  /home/user/src  "), None)).unwrap();
+        assert_eq!(params["source"], "path");
+        assert_eq!(params["path"], "/home/user/src");
+        assert_eq!(params["maxEntries"], MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES);
+
+        let explicit =
+            list_params(list_request(Some("path"), Some("/home/user/src"), None)).unwrap();
+        assert_eq!(explicit["path"], "/home/user/src");
+    }
+
+    #[test]
+    fn list_terminal_cwd_carries_the_terminal_id_only() {
+        let params = list_params(list_request(
+            Some("terminalCwd"),
+            Some("/ignored"),
+            Some("  terminal-1  "),
+        ))
+        .unwrap();
+        assert_eq!(params["source"], "terminalCwd");
+        assert_eq!(params["terminalId"], "terminal-1");
+        assert_eq!(params["maxEntries"], MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES);
+        assert!(params.get("path").is_none());
+
+        // No terminal attached yet: the bridge falls back to the host home.
+        let unattached = list_params(list_request(Some("terminalCwd"), None, None)).unwrap();
+        assert_eq!(unattached["source"], "terminalCwd");
+        assert!(unattached.get("terminalId").is_none());
+    }
+
+    #[test]
+    fn list_rejects_blank_or_oversized_input() {
+        assert_eq!(
+            list_params(list_request(None, Some("  "), None)).unwrap_err(),
+            "path is required"
+        );
+        assert_eq!(
+            list_params(list_request(None, None, None)).unwrap_err(),
+            "path is required"
+        );
+        assert!(list_params(list_request(
+            Some("terminalCwd"),
+            None,
+            Some(&"t".repeat(256))
+        ))
+        .is_ok());
+        assert_eq!(
+            list_params(list_request(
+                Some("terminalCwd"),
+                None,
+                Some(&"t".repeat(257))
+            ))
+            .unwrap_err(),
+            "terminalId exceeds the 256 character limit"
+        );
+        assert_eq!(
+            list_params(list_request(Some("current"), None, None)).unwrap_err(),
+            "source must be 'path' or 'terminalCwd'"
         );
     }
 

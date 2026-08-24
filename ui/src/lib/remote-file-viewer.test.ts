@@ -4,11 +4,19 @@ vi.mock("./tauri-api", () => ({
   readFileForViewer: vi.fn(),
   readFileForDownload: vi.fn(),
   statPaths: vi.fn(),
+  listDirectory: vi.fn(),
+  getHomeDirectory: vi.fn(),
 }));
 
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTerminalStore } from "@/stores/terminal-store";
-import { readFileForDownload, readFileForViewer, statPaths } from "./tauri-api";
+import {
+  getHomeDirectory,
+  listDirectory,
+  readFileForDownload,
+  readFileForViewer,
+  statPaths,
+} from "./tauri-api";
 import { handleRemoteFileViewerRequest } from "./remote-file-viewer";
 
 function registerTerminal(cwd?: string) {
@@ -49,6 +57,7 @@ describe("Remote FileViewer path-link bridge", () => {
           {
             token: "ui/src/main.ts",
             path: "C:\\work\\ui\\src\\main.ts",
+            kind: "file",
             lineIndex: 0,
             startIndex: 2,
             endIndex: 16,
@@ -91,17 +100,14 @@ describe("Remote FileViewer path-link bridge", () => {
       success: true,
       data: {
         valid: true,
-        matches: [{ token: path, path, lineIndex: 0, startIndex: 1, endIndex: 74 }],
+        matches: [{ token: path, path, kind: "file", lineIndex: 0, startIndex: 1, endIndex: 74 }],
       },
     });
   });
 
-  it.each([
-    ["없는 파일", { exists: false, isDirectory: false }],
-    ["디렉터리", { exists: true, isDirectory: true }],
-  ])("%s은 Remote viewer 링크로 활성화하지 않는다", async (_label, info) => {
+  it("없는 경로는 Remote viewer 링크로 활성화하지 않는다", async () => {
     registerTerminal("/work");
-    vi.mocked(statPaths).mockResolvedValue([info]);
+    vi.mocked(statPaths).mockResolvedValue([{ exists: false, isDirectory: false }]);
 
     const result = await handleRemoteFileViewerRequest("pathLink", {
       terminalId: "terminal-1",
@@ -110,6 +116,34 @@ describe("Remote FileViewer path-link bridge", () => {
     });
 
     expect(result).toEqual({ success: true, data: { valid: false } });
+  });
+
+  it("디렉터리는 kind:'directory' 링크로 활성화한다 (ADR-0198)", async () => {
+    registerTerminal("/work");
+    vi.mocked(statPaths).mockResolvedValue([{ exists: true, isDirectory: true }]);
+
+    const result = await handleRemoteFileViewerRequest("pathLink", {
+      terminalId: "terminal-1",
+      mode: "selection",
+      lines: ["src"],
+    });
+
+    expect(result).toEqual({
+      success: true,
+      data: {
+        valid: true,
+        matches: [
+          {
+            token: "src",
+            path: "/work/src",
+            kind: "directory",
+            lineIndex: 0,
+            startIndex: 0,
+            endIndex: 3,
+          },
+        ],
+      },
+    });
   });
 
   it("desktop path-link 설정과 최대 길이를 그대로 적용한다", async () => {
@@ -184,6 +218,7 @@ describe("Remote FileViewer path-link bridge", () => {
           {
             token: "ui/src/App.tsx",
             path: "C:\\work\\ui\\src\\App.tsx",
+            kind: "file",
             lineIndex: 0,
             startIndex: 5,
             endIndex: 19,
@@ -191,6 +226,7 @@ describe("Remote FileViewer path-link bridge", () => {
           {
             token: "ui/src/App.test.tsx",
             path: "C:\\work\\ui\\src\\App.test.tsx",
+            kind: "file",
             lineIndex: 0,
             startIndex: 28,
             endIndex: 47,
@@ -200,7 +236,7 @@ describe("Remote FileViewer path-link bridge", () => {
     });
   });
 
-  it("디렉터리는 Remote 링크에서 제외하고 중복 절대경로는 한 번만 stat한다", async () => {
+  it("파일과 디렉터리를 kind로 구분하고 중복 절대경로는 한 번만 stat한다", async () => {
     registerTerminal("/work");
     vi.mocked(statPaths).mockResolvedValue([
       { exists: true, isDirectory: false },
@@ -218,7 +254,11 @@ describe("Remote FileViewer path-link bridge", () => {
       success: true,
       data: {
         valid: true,
-        matches: [{ token: "src/a.ts" }, { token: "src/a.ts" }],
+        matches: [
+          { token: "src/a.ts", kind: "file" },
+          { token: "src/a.ts", kind: "file" },
+          { token: "src/dir/", kind: "directory" },
+        ],
       },
     });
   });
@@ -240,7 +280,14 @@ describe("Remote FileViewer path-link bridge", () => {
       data: {
         valid: true,
         matches: [
-          { token: "src/a.ts", path: "/work/src/a.ts", lineIndex: 0, startIndex: 5, endIndex: 13 },
+          {
+            token: "src/a.ts",
+            path: "/work/src/a.ts",
+            kind: "file",
+            lineIndex: 0,
+            startIndex: 5,
+            endIndex: 13,
+          },
         ],
       },
     });
@@ -327,6 +374,7 @@ describe("Remote FileViewer path-link bridge", () => {
           {
             token: "G:/a b/x.exe",
             path: "G:/a b/x.exe",
+            kind: "file",
             lineIndex: 0,
             startIndex: 4,
             endIndex: 16,
@@ -482,6 +530,140 @@ describe("Remote FileViewer render payload", () => {
     });
 
     expect(result.data).toMatchObject({ kind: "archive", format: "zip", totalEntries: 1 });
+  });
+});
+
+describe("Remote FileViewer directory listing (ADR-0198)", () => {
+  beforeEach(() => {
+    useTerminalStore.setState(useTerminalStore.getInitialState());
+    vi.clearAllMocks();
+  });
+
+  const dirEntry = (name: string, isDirectory: boolean) => ({
+    name,
+    isDirectory,
+    isSymlink: false,
+    isExecutable: false,
+    size: isDirectory ? 0 : 10,
+  });
+
+  it("절대경로 엔트리와 부모 경로를 완성해 내려준다", async () => {
+    vi.mocked(listDirectory).mockResolvedValue([dirEntry("src", true), dirEntry("a.ts", false)]);
+
+    const result = await handleRemoteFileViewerRequest("list", {
+      source: "path",
+      path: "/work/repo",
+      maxEntries: 100,
+    });
+
+    expect(listDirectory).toHaveBeenCalledWith("/work/repo");
+    expect(result).toEqual({
+      success: true,
+      data: {
+        path: "/work/repo",
+        parent: "/work",
+        entries: [
+          { name: "src", path: "/work/repo/src", isDirectory: true, isSymlink: false, size: 0 },
+          {
+            name: "a.ts",
+            path: "/work/repo/a.ts",
+            isDirectory: false,
+            isSymlink: false,
+            size: 10,
+          },
+        ],
+        truncated: false,
+      },
+    });
+  });
+
+  it("루트는 parent가 null이고 Windows 경로는 구분자를 유지한다", async () => {
+    vi.mocked(listDirectory).mockResolvedValue([dirEntry("Users", true)]);
+
+    const root = await handleRemoteFileViewerRequest("list", { path: "/", maxEntries: 100 });
+    expect(root.data).toMatchObject({ path: "/", parent: null });
+
+    vi.mocked(listDirectory).mockResolvedValue([dirEntry("laymux", true)]);
+    const windows = await handleRemoteFileViewerRequest("list", {
+      path: "C:\\work",
+      maxEntries: 100,
+    });
+    expect(windows.data).toMatchObject({
+      path: "C:\\work",
+      parent: "C:\\",
+      entries: [{ path: "C:\\work\\laymux" }],
+    });
+
+    // 드라이브 루트: parentPath("C:\\")가 "\" 같은 깨진 경로를 내려주면 ".."
+    // 행이 목록 불가 경로를 가리킨다 — 루트 판정은 parent === path 로 접는다.
+    vi.mocked(listDirectory).mockResolvedValue([dirEntry("work", true)]);
+    const driveRoot = await handleRemoteFileViewerRequest("list", {
+      path: "C:\\",
+      maxEntries: 100,
+    });
+    expect(driveRoot.data).toMatchObject({ path: "C:\\", parent: null });
+  });
+
+  it("maxEntries를 넘는 목록은 잘라서 truncated로 알린다", async () => {
+    vi.mocked(listDirectory).mockResolvedValue(
+      Array.from({ length: 5 }, (_, i) => dirEntry(`f${i}`, false)),
+    );
+
+    const result = await handleRemoteFileViewerRequest("list", {
+      path: "/work",
+      maxEntries: 3,
+    });
+
+    expect(result.data).toMatchObject({ truncated: true });
+    expect((result.data as { entries: unknown[] }).entries).toHaveLength(3);
+  });
+
+  it("terminalCwd source는 터미널 cwd에서, 없으면 홈에서 연다", async () => {
+    useTerminalStore.getState().registerInstance({
+      id: "terminal-1",
+      profile: "PowerShell",
+      syncGroup: "main",
+      workspaceId: "workspace-1",
+    });
+    useTerminalStore.getState().updateInstanceInfo("terminal-1", { cwd: "/work/repo" });
+    vi.mocked(listDirectory).mockResolvedValue([]);
+
+    await handleRemoteFileViewerRequest("list", {
+      source: "terminalCwd",
+      terminalId: "terminal-1",
+      maxEntries: 100,
+    });
+    expect(listDirectory).toHaveBeenCalledWith("/work/repo");
+    expect(getHomeDirectory).not.toHaveBeenCalled();
+
+    vi.mocked(getHomeDirectory).mockResolvedValue("/home/user");
+    await handleRemoteFileViewerRequest("list", {
+      source: "terminalCwd",
+      terminalId: "terminal-missing",
+      maxEntries: 100,
+    });
+    expect(getHomeDirectory).toHaveBeenCalled();
+    expect(listDirectory).toHaveBeenLastCalledWith("/home/user");
+
+    // No terminal attached at all: the header button still opens at home.
+    await handleRemoteFileViewerRequest("list", { source: "terminalCwd", maxEntries: 100 });
+    expect(listDirectory).toHaveBeenLastCalledWith("/home/user");
+  });
+
+  it("잘못된 입력과 실패는 error로 내려간다", async () => {
+    expect(await handleRemoteFileViewerRequest("list", { path: "/work" })).toEqual({
+      success: false,
+      error: "maxEntries must be a positive integer",
+    });
+    expect(await handleRemoteFileViewerRequest("list", { path: "  ", maxEntries: 10 })).toEqual({
+      success: false,
+      error: "path is required",
+    });
+    vi.mocked(listDirectory).mockRejectedValue(new Error("Cannot read directory: denied"));
+    expect(await handleRemoteFileViewerRequest("list", { path: "/work", maxEntries: 10 })).toEqual({
+      success: false,
+      error: "Cannot read directory: denied",
+    });
   });
 });
 

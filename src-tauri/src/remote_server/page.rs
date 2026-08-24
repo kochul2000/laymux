@@ -947,9 +947,20 @@ mod tests {
         // The viewer renders in this document (ADR-0184): no second tab, so no
         // `window.open`, no credential handshake, and no viewer bootstrap route.
         assert!(html.contains("id=\"fileViewerOverlay\""));
-        assert!(html.contains("function openFileViewerOverlay(path)"));
+        assert!(html.contains("function openFileViewerOverlay(path, explorerReturnPath = null)"));
         assert!(html.contains("function closeFileViewer()"));
         assert!(html.contains("body: JSON.stringify({ source: \"path\", path }),"));
+        // Explorer mode (ADR-0198): the directory listing lives in this same
+        // overlay and reaches the host only through the lease+capability route.
+        assert!(html.contains("id=\"fileExplorerHeader\""));
+        assert!(html.contains("id=\"fileViewerDirectory\""));
+        assert!(html.contains("id=\"fileViewerBack\""));
+        assert!(html.contains("function openFileExplorerOverlay(request)"));
+        assert!(html.contains("function renderDirectoryListing(payload)"));
+        assert!(html.contains("\"/remote/v1/file-viewer/list\""));
+        // Entry names are text, never markup: a hostile file name must not
+        // become HTML in this document.
+        assert!(html.contains("name.textContent = entry.name;"));
         assert!(!html.contains("/remote/viewer/"));
         assert!(!html.contains("window.open(\"/remote/viewer/\""));
         assert!(!html.contains("laymux:file-viewer-ready"));

@@ -57,8 +57,8 @@ use super::pwa::{remote_manifest, remote_pwa_icon, ICON_ROUTE_PATH, MANIFEST_ROU
 use super::terminal_info::remote_terminal_infos;
 use super::update_routes::{remote_update_check, remote_update_install, remote_update_status};
 use super::viewer_routes::{
-    remote_file_viewer_download, remote_file_viewer_path_link, remote_file_viewer_render,
-    remote_file_viewer_status,
+    remote_file_viewer_download, remote_file_viewer_list, remote_file_viewer_path_link,
+    remote_file_viewer_render, remote_file_viewer_status,
 };
 use super::widget_routes::remote_widgets;
 use super::{internal_error, json_error};
@@ -256,6 +256,7 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             "/remote/v1/file-viewer/path-link",
             post(remote_file_viewer_path_link),
         )
+        .route("/remote/v1/file-viewer/list", post(remote_file_viewer_list))
         // OAuth loopback relay (ADR-0175). Sized for an auth URL / callback
         // query, both bounded well under these caps by the handlers.
         .route(
