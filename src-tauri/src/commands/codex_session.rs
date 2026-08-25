@@ -20,7 +20,7 @@ use self::store::{find_session_from_rollout_paths, CodexSessionStore};
 /// Native terminals use the PTY child tree and Codex diagnostics DB. Windows
 /// WSL terminals use the inherited pane marker and rollout FDs of the exact
 /// Linux process. CWD is deliberately not a fallback: panes commonly share it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_codex_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,

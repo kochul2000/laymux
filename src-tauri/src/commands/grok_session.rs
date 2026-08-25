@@ -126,7 +126,7 @@ fn session_id_for_pid(home: &Path, pid: u32, max_age_hours: Option<u64>) -> Opti
     Some(session_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_grok_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,

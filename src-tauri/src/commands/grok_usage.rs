@@ -33,7 +33,7 @@ fn resolve_spec(config_dir: String) -> Result<WorkerSpec, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn subscribe_grok_usage_probe(
     subscriber_id: String,
     config_dir: String,
@@ -68,7 +68,7 @@ pub fn get_grok_usage_snapshot(
         .map_err(Into::into)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn refresh_grok_usage_probe(
     config_dir: String,
     state: State<Arc<AppState>>,

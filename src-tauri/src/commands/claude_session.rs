@@ -11,7 +11,7 @@ use super::wsl_agent_session::{resolve_wsl_agent_processes, WslAgentProcess, Wsl
 ///
 /// The PTY descendant PID must match `~/.claude/sessions/<pid>.json`.
 /// CWD is never an attribution fallback because multiple panes commonly share it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_claude_session_ids(
     session_max_age_hours: Option<u64>,
     state: State<Arc<AppState>>,

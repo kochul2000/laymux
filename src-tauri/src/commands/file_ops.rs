@@ -21,7 +21,7 @@ pub struct PathInfo {
 /// Never errors on a missing path — a non-existent path simply returns
 /// `{ exists: false, is_directory: false }` so the frontend can show feedback
 /// without treating "not found" as a hard error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn stat_path(path: String, wsl_distro: Option<String>) -> PathInfo {
     let resolved =
         path_utils::resolve_address_path_following_symlinks(&path, wsl_distro.as_deref());
@@ -86,7 +86,7 @@ pub fn stat_paths_inner(
         .collect())
 }
 
-/// `async` is load-bearing, not decoration (ADR-0188).
+/// `async` is load-bearing, not decoration (ADR-0188, generalized by ADR-0202).
 ///
 /// A plain `#[tauri::command]` on a sync function is `ExecutionContext::Blocking`
 /// in `tauri-macros`: the body runs inline on the thread handling the IPC, which
@@ -95,9 +95,8 @@ pub fn stat_paths_inner(
 /// WSL distribution, so a stale UNC/network path or a cold `wsl.exe` probe would
 /// stall the window itself. `#[tauri::command(async)]` on a sync function
 /// selects the `sync_threadpool` kind, which runs it on the async runtime
-/// instead. The path-link triggers make this call frequent enough that the
-/// distinction is user-visible; `stat_paths_source_stays_off_the_main_thread`
-/// keeps it from being dropped by a later edit.
+/// instead. `commands::main_thread_io` holds the whole table and keeps a later
+/// edit from dropping any of them back onto the event loop.
 #[tauri::command(async)]
 pub fn stat_paths(paths: Vec<String>, wsl_distro: Option<String>) -> Result<Vec<PathInfo>, String> {
     stat_paths_inner(&paths, wsl_distro.as_deref()).map_err(Into::into)
@@ -116,7 +115,7 @@ pub fn home_directory() -> Option<String> {
 }
 
 /// Return the current user's home directory path.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_home_directory() -> Result<String, String> {
     home_directory().ok_or_else(|| "Could not determine home directory".to_string())
 }
@@ -133,7 +132,7 @@ pub struct DirEntry {
 }
 
 /// List directory contents and return structured metadata for each entry.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
     // Resolve WSL/Windows paths with the shared inference rule (#282), following
     // WSL symlinks so a linked directory is browsable (#363).
@@ -223,7 +222,7 @@ pub(crate) fn base64_encode(input: &[u8]) -> String {
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_settings_file() -> Result<(), String> {
     let path = crate::settings::settings_path();
     #[cfg(target_os = "windows")]
@@ -321,19 +320,6 @@ mod tests {
     fn stat_paths_rejects_an_unbounded_batch() {
         let paths = vec![String::from("missing"); crate::constants::MAX_PATH_LINK_CANDIDATES + 1];
         assert!(stat_paths_inner(&paths, None).is_err());
-    }
-
-    /// The blocking-vs-threadpool choice is invisible at runtime — a main-thread
-    /// stall looks like a laggy window, not a failing test — so the attribute
-    /// itself is the contract (ADR-0188).
-    #[test]
-    fn stat_paths_source_stays_off_the_main_thread() {
-        let source = include_str!("file_ops.rs");
-        assert!(
-            source.contains("#[tauri::command(async)]\npub fn stat_paths("),
-            "stat_paths must stay `#[tauri::command(async)]`: a plain command runs \
-             its fs metadata batch and wsl.exe probe on the main thread"
-        );
     }
 
     /// ADR-0188 raised this ceiling so a Remote idle screen scan fits in one

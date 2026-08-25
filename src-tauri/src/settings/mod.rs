@@ -16,6 +16,15 @@ use crate::lock_ext::MutexExt;
 
 static MEMO_LOCK: Mutex<()> = Mutex::new(());
 
+/// Serializes every settings.json writer.
+///
+/// Writers are not all on one thread: the cloud pairing/tunnel tasks save from
+/// their own runtime threads, and `save_settings`/`reset_settings` now run on
+/// the Tauri sync threadpool instead of the main thread (ADR-0202). Two
+/// interleaved writers to the same path can leave a torn file, so the write
+/// itself is gated here rather than relying on the main thread to serialize it.
+static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
 fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
     Ok(lock.lock_or_err()?)
 }
@@ -263,19 +272,98 @@ fn save_memo_to(path: &PathBuf, key: &str, content: &str) -> Result<(), String> 
 }
 
 /// Save settings to disk.
+///
+/// The write is serialized against every other writer and lands through a
+/// temporary file, so a concurrent save cannot interleave bytes and a reader
+/// never observes a half-written settings.json (ADR-0202).
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
-    let path = settings_path();
+    save_settings_to(&settings_path(), settings)
+}
+
+/// `save_settings` against an explicit path, so the write contract is testable
+/// without reaching for the real config directory.
+pub(crate) fn save_settings_to(path: &std::path::Path, settings: &Settings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {e}"))?;
     }
     let json =
         serde_json::to_string_pretty(settings).map_err(|e| format!("Serialize error: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("Write error: {e}"))
+    let _guard = SETTINGS_WRITE_LOCK.lock_or_err()?;
+    write_file_atomically(path, json.as_bytes())
+}
+
+/// Write `bytes` to `path` by way of a sibling temporary file.
+///
+/// `fs::rename` replaces an existing destination on both Windows (MoveFileEx
+/// with MOVEFILE_REPLACE_EXISTING) and POSIX, so the destination is either the
+/// old file or the new one — never a truncated prefix of the new one.
+fn write_file_atomically(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, bytes).map_err(|e| format!("Write error: {e}"))?;
+    match fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(format!("Write error: {e}"))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── settings.json 쓰기 (ADR-0202) ──
+
+    /// `save_settings` no longer runs only on the main thread, so the write has
+    /// to survive concurrent writers on its own: whole content, no debris.
+    #[test]
+    fn saving_settings_replaces_the_file_without_leaving_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "stale contents that are longer than the new file").unwrap();
+
+        let settings = Settings::default();
+        save_settings_to(&path, &settings).unwrap();
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        serde_json::from_str::<serde_json::Value>(&written).expect("a whole JSON document");
+        assert!(!path.with_extension("json.tmp").exists());
+    }
+
+    /// Two writers racing on one path may not interleave into a torn document —
+    /// every observer sees one save or the other, never a prefix of both.
+    #[test]
+    fn concurrent_saves_never_leave_a_torn_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+
+        let small = Settings {
+            language: "ko".into(),
+            ..Settings::default()
+        };
+        let defaults = Settings::default();
+        let large = Settings {
+            language: "en".into(),
+            profiles: std::iter::repeat_with(|| defaults.profiles[0].clone())
+                .take(200)
+                .collect(),
+            ..defaults.clone()
+        };
+
+        std::thread::scope(|scope| {
+            for settings in [&small, &large] {
+                scope.spawn(|| {
+                    for _ in 0..20 {
+                        save_settings_to(&path, settings).unwrap();
+                        let read = std::fs::read_to_string(&path).unwrap();
+                        serde_json::from_str::<serde_json::Value>(&read)
+                            .expect("a whole JSON document");
+                    }
+                });
+            }
+        });
+    }
 
     #[test]
     fn memo_serialization_gate_fails_closed_after_poison() {
