@@ -1,6 +1,6 @@
 # 0201. 업데이트 설치기를 부르기 전에 앱이 자기 자식 프로세스를 정리한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-25
 - Source: 사용자 보고(업데이트마다 NSIS `Error opening file for writing: ...\OpenConsole.exe`), [ADR-0174](0174-github-signed-desktop-self-update.md) 확장, [ADR-0066](0066-bundled-conpty-runtime.md)·[ADR-0067](0067-bundled-conpty-output-and-staging-contract.md)·[ADR-0102](0102-claude-usage-probe-headless-pty.md)
 
