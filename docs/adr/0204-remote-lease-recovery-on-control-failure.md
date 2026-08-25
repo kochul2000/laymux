@@ -36,6 +36,7 @@ dev 인스턴스에서 재현·확인했다. claim 직후 `/file-viewer/list` �
 ### 돌아온 탭은 쥔 lease 를 프로브한다
 
 - `visibilitychange`(visible)·`pageshow`·`online` 은 `resumeControlOnReturn()` 을 부른다. `leaseId` 가 없으면 기존대로 `maybeAutoConnect()`, 있으면 **즉시 heartbeat** 를 보내고 실패는 `handleHeartbeatError` 로 넘긴다.
+- **복귀 프로브는 진행 중인 heartbeat 를 은퇴시킨다.** `heartbeat()` 의 self-dedup(`heartbeatInFlight`)은 인터벌에는 맞고 이 경로에는 틀리다 — 탭이 얼 때 날아가 있던 요청은 이미 존재하지 않는 연결에 매달려 있을 수 있고, 그러면 복귀 프로브가 그 요청의 abort timeout(4초)과 retry delay(1초) 뒤로 밀린다. 은퇴시킨 호출은 교체된 abort controller 를 보고 자기 abort 를 보고하지도, 새 flight 의 상태를 지우지도 않는다.
 - 이는 Android transport resume 이 이미 하던 것과 같은 동작이며, "백그라운드에서는 claim 하지 않는다"는 규칙은 그대로다 — 프로브는 자기 lease 의 생존 확인일 뿐 새 claim 이 아니다.
 
 ## Alternatives Considered
@@ -50,8 +51,8 @@ dev 인스턴스에서 재현·확인했다. claim 직후 `/file-viewer/list` �
 
 - 얼린 탭에서 돌아와 폴더 버튼을 눌러도 capability 문구를 보지 않는다. 죽은 lease 는 복귀 즉시(또는 첫 파일 요청에서) 감지돼 평소의 재연결로 이어지고, 새 claim 이 새 capability 를 발급하므로 파일 표면이 다시 살아난다.
 - 실패당 요청이 하나 늘어난다(`/session/status` 1회). 제어 근거 실패에서만 발생하고 성공 경로에는 없다.
-- 복귀 시 heartbeat 1회가 추가된다. 이미 진행 중이면 `heartbeat()` 가 자체적으로 합치므로 중복되지 않는다.
+- 복귀 시 heartbeat 1회가 추가된다. 진행 중이던 요청은 은퇴시키므로 같은 시점에 두 개가 날아 있지 않고, 얼어 있던 동안 매달려 있던 요청이 복구를 5초 뒤로 미루지도 않는다.
 - lease 가 살아 있는데 capability 만 어긋난 경우(서버 회전 직후의 짧은 창)에는 여전히 원래 403 문구가 보인다. 그 상태는 다음 claim 만이 고칠 수 있고, 프로브가 거짓으로 재연결을 시작하는 것보다 정확한 실패가 낫다.
 - path-link 의 ambient 트리거는 죽은 lease 에서 조용히 계속 실패한다. 사용자 눈에는 밑줄이 안 켜지는 것으로만 보이며, 다음 명시적 액션이나 heartbeat 가 상실을 확정한다.
-- 회귀 테스트는 ① capability 403 이 소유권 프로브와 재claim 으로 이어지고 그 문구가 사용자 설명이 되지 않는지, ② 복귀한 탭이 heartbeat 인터벌을 기다리지 않고 쥔 lease 를 프로브하는지를 고정한다(후자는 fake clock 으로 인터벌을 세워 검증한다).
+- 회귀 테스트는 ① capability 403 이 소유권 프로브와 재claim 으로 이어지고 그 문구가 사용자 설명이 되지 않는지, ② 복귀한 탭이 쥔 lease 를 프로브하는지, ③ 그 프로브가 진행 중인 heartbeat 에 막히지 않는지를 고정한다. ①②는 주기 heartbeat 인터벌을 억제한 상태에서 검증한다 — 인터벌을 살려두면 그것이 5초 안에 스스로 죽은 lease 를 발견해 수정 전 클라이언트에서도 통과한다. ③은 응답 없는 heartbeat 를 세워두고 두 번째 프로브가 abort timeout 전에 나가는지를 시간 예산으로 판정한다.
 - 이 결정은 클라이언트 쪽 수명 인식만 바꾼다. 서버의 발급·폐기·이중 검증과 소유권 정책을 바꾸려면 새 ADR 을 쓴다.

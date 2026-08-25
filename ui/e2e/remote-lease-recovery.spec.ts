@@ -25,8 +25,12 @@ const navigation = {
 const CAPABILITY_ERROR = "remote file viewer capability is required or invalid";
 
 type MockOptions = {
-  /** Answer `/file-viewer/list` with the host's capability rejection. */
-  listRejectsWithCapabilityError?: boolean;
+  /** Forget the lease on the first `/file-viewer/list`, the way an owner
+   *  transition does, so that read is rejected on capability grounds. */
+  leaseDiesOnFirstList?: boolean;
+  /** Never answer the first heartbeat, standing in for the request that was in
+   *  flight when the tab froze and whose connection no longer exists. */
+  firstHeartbeatHangs?: boolean;
 };
 
 type MockState = {
@@ -35,10 +39,18 @@ type MockState = {
   statusProbes: number;
   /** Set once the host has forgotten the lease this tab holds. */
   leaseDead: boolean;
+  /** Directory reads the host actually served. */
+  listings: number;
 };
 
 async function installMocks(page: Page, options: MockOptions = {}) {
-  const state: MockState = { claims: 0, heartbeats: 0, statusProbes: 0, leaseDead: false };
+  const state: MockState = {
+    claims: 0,
+    heartbeats: 0,
+    statusProbes: 0,
+    leaseDead: false,
+    listings: 0,
+  };
 
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
@@ -68,6 +80,9 @@ async function installMocks(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === "/remote/v1/session/heartbeat") {
       state.heartbeats += 1;
+      if (options.firstHeartbeatHangs && state.heartbeats === 1) {
+        return new Promise<void>(() => {});
+      }
       if (state.leaseDead) {
         return route.fulfill({
           status: 409,
@@ -80,12 +95,18 @@ async function installMocks(page: Page, options: MockOptions = {}) {
       return route.fulfill({ json: navigation });
     }
     if (url.pathname === "/remote/v1/file-viewer/list") {
-      if (options.listRejectsWithCapabilityError) {
-        // The host forgets the lease at the same moment it rejects the read —
-        // exactly what an owner transition does.
+      if (options.leaseDiesOnFirstList && !state.leaseDead && state.claims === 1) {
+        // The owner transition that forgets the lease is the same event that
+        // revokes the capability, so this read is the one that discovers it.
         state.leaseDead = true;
+      }
+      // The host binds the capability to the current lease: a stale one fails
+      // closed, and only a fresh claim can mint a usable pair.
+      const capability = await route.request().headerValue("x-laymux-remote-file-viewer");
+      if (state.leaseDead || capability !== `viewer-${state.claims}`) {
         return route.fulfill({ status: 403, json: { error: CAPABILITY_ERROR } });
       }
+      state.listings += 1;
       return route.fulfill({
         json: { path: "/home/user", parent: null, entries: [], truncated: false },
       });
@@ -96,7 +117,26 @@ async function installMocks(page: Page, options: MockOptions = {}) {
   return state;
 }
 
+/** The cadence `startHeartbeat` picks: `min(5s, max(1s, timeout / 3))`. */
+const HEARTBEAT_INTERVAL_MS = 5000;
+
+/**
+ * Connect with the periodic heartbeat suppressed.
+ *
+ * Both specs are about *what discovers a dead lease*. Left running, the ordinary
+ * heartbeat interval discovers it on its own within 5s and every assertion below
+ * would also hold on the unfixed client — the specs would pass while testing
+ * nothing. Dropping just that one interval leaves every other timer real, so a
+ * heartbeat that arrives afterwards can only come from an explicit probe.
+ */
 async function connect(page: Page) {
+  await page.addInitScript((intervalMs) => {
+    const original = window.setInterval;
+    window.setInterval = ((handler: TimerHandler, timeout?: number, ...rest: unknown[]) =>
+      timeout === intervalMs
+        ? 0
+        : original(handler, timeout, ...rest)) as typeof window.setInterval;
+  }, HEARTBEAT_INTERVAL_MS);
   await page.goto("http://remote.test/remote/");
   await page.locator("#token").fill("remote-secret");
   await page.locator("#connect").click();
@@ -107,21 +147,35 @@ async function connect(page: Page) {
 test("a capability rejection re-validates the lease instead of reading as a file error", async ({
   page,
 }) => {
-  const state = await installMocks(page, { listRejectsWithCapabilityError: true });
+  const state = await installMocks(page, { leaseDiesOnFirstList: true });
   await connect(page);
   expect(state.claims).toBe(1);
+  const probesAfterConnect = state.statusProbes;
+  const heartbeatsAfterConnect = state.heartbeats;
 
+  // With the interval suppressed, only the failing read itself can start the
+  // recovery.
   await page.locator("#fileExplorerHeader").click();
 
   // The rejection is answered by asking who owns the lease, and the dead lease
   // enters the ordinary reclaim path: a second claim, a fresh capability.
-  await expect.poll(() => state.statusProbes).toBeGreaterThan(0);
+  await expect.poll(() => state.statusProbes).toBeGreaterThan(probesAfterConnect);
   await expect.poll(() => state.claims).toBe(2);
+  expect(state.listings).toBe(0);
+  expect(state.heartbeats).toBe(heartbeatsAfterConnect);
 
-  // The overlay belongs to the loss path now, so the raw host message never
-  // becomes the user's explanation.
+  // The overlay belongs to the loss path, so the raw host message never becomes
+  // the user's explanation and the closed overlay is not left over it.
   await expect(page.locator("#fileViewerMessage")).not.toContainText(CAPABILITY_ERROR);
+  await expect(page.locator("#fileViewerOverlay")).toBeHidden();
+
+  // What recovery has to be worth: the same gesture works on the reclaimed
+  // lease, with the capability that claim minted.
   await expect(page.locator("#fileExplorerHeader")).toBeVisible();
+  await page.locator("#fileExplorerHeader").click();
+  await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+  await expect(page.locator("#fileViewerTitle")).toHaveText("/home/user");
+  expect(state.listings).toBe(1);
 });
 
 test("a returning tab probes the lease it kept without waiting for the heartbeat interval", async ({
@@ -135,13 +189,33 @@ test("a returning tab probes the lease it kept without waiting for the heartbeat
   // page yet — no heartbeat could run.
   state.leaseDead = true;
 
-  // Timers stay stopped for the rest of the spec, so any heartbeat that arrives
-  // can only have come from the visibility resume, never from the 5s interval.
-  await page.clock.install();
+  // With the interval suppressed, a heartbeat can only come from the visibility
+  // resume.
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
 
   await expect.poll(() => state.heartbeats).toBeGreaterThan(heartbeatsAfterConnect);
   // The 409 is a lease answer: control is dropped and re-claimed, which is what
   // makes the file surface work again.
+  await expect.poll(() => state.claims).toBe(2);
+});
+
+test("a resume retires a heartbeat that is still in flight", async ({ page }) => {
+  const state = await installMocks(page, { firstHeartbeatHangs: true });
+  await connect(page);
+  expect(state.heartbeats).toBe(0);
+
+  // The first probe reaches the host and is never answered: this is the stalled
+  // flight a frozen tab leaves behind.
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect.poll(() => state.heartbeats).toBe(1);
+
+  state.leaseDead = true;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+
+  // `heartbeat()` de-duplicates itself, so without retiring the stalled flight
+  // this probe never leaves the page: recovery then waits out that request's own
+  // abort timeout (4s) plus the retry delay (1s). The budget here is what makes
+  // this spec about retiring the flight rather than about recovering eventually.
+  await expect.poll(() => state.heartbeats, { timeout: 1500 }).toBe(2);
   await expect.poll(() => state.claims).toBe(2);
 });

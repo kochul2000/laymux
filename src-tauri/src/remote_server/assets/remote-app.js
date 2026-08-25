@@ -5055,7 +5055,22 @@
             maybeAutoConnect();
             return;
           }
+          supersedeInFlightHeartbeat();
           heartbeat().catch((err) => handleHeartbeatError(err));
+        }
+
+        // `heartbeat()` de-duplicates itself, which is right for the interval and
+        // wrong here: the request that was in flight when the tab froze can be
+        // stalled on a connection that no longer exists, and the resume probe would
+        // then sit behind that request's own timeout. Retire it so this probe is the
+        // one that asks. The retired call sees a different `heartbeatAbortController`
+        // and therefore neither reports its abort nor clears the new flight's state.
+        function supersedeInFlightHeartbeat() {
+          if (!heartbeatInFlight) return;
+          const retired = heartbeatAbortController;
+          heartbeatAbortController = null;
+          heartbeatInFlight = false;
+          if (retired) retired.abort();
         }
 
         function heartbeatTimedOut() {
