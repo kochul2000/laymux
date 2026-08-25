@@ -43,7 +43,7 @@ fn resolve_spec(config_dir: String) -> Result<WorkerSpec, String> {
 ///
 /// Returns whatever snapshot is already known so the view can render a stale
 /// capture instead of an empty frame while the first query runs.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn subscribe_usage_probe(
     subscriber_id: String,
     config_dir: String,

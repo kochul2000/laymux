@@ -197,7 +197,7 @@ pub fn plan_os_open(path: &str, wsl_distro: Option<&str>, mode: OsOpenMode) -> O
 /// never inspected — everything after the spawn is the OS's business (an
 /// unknown extension showing the "How do you want to open this file?" dialog is
 /// the expected behavior, not a failure).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_in_os(path: String, wsl_distro: Option<String>, mode: String) -> Result<(), String> {
     let mode = parse_os_open_mode(&mode)?;
     let plan = plan_os_open(&path, wsl_distro.as_deref(), mode);

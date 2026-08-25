@@ -113,7 +113,7 @@ fn is_monospace(font: &font_kit::font::Font) -> bool {
     glyphs.len() == 2 && (glyphs[0] - glyphs[1]).abs() < 1.0
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
     use font_kit::source::SystemSource;
     let source = SystemSource::new();
@@ -139,17 +139,17 @@ pub fn list_system_monospace_fonts() -> Result<Vec<String>, String> {
     Ok(result)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings() -> Result<crate::settings::Settings, String> {
     Ok(crate::settings::load_settings())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_settings_validated() -> Result<crate::settings::SettingsLoadResult, String> {
     Ok(crate::settings::load_settings_validated())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reset_settings(
     state: State<Arc<AppState>>,
     app: AppHandle,
@@ -183,7 +183,7 @@ pub fn get_settings_path() -> Result<String, String> {
     Ok(crate::settings::settings_path().display().to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_settings(
     settings: crate::settings::Settings,
     state: State<Arc<AppState>>,
@@ -204,12 +204,12 @@ pub fn save_settings(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_memo(key: String) -> Result<String, String> {
     crate::settings::load_memo(&key)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_memo(key: String, content: String) -> Result<(), String> {
     crate::settings::save_memo(&key, &content)
 }
@@ -494,12 +494,12 @@ fn get_repo_url(shell_prefix: &str, repo: Option<&str>) -> Result<String, String
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_listening_ports() -> Vec<crate::port_detect::ListeningPort> {
     crate::port_detect::get_listening_ports()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_git_branch(working_dir: String) -> Option<String> {
     // A pane's stored cwd is in Linux form on Windows (PowerShell → `/mnt/d/…`,
     // WSL → `/home/…`). Convert to a Windows access path before touching the FS,
@@ -514,12 +514,12 @@ pub fn get_git_branch(working_dir: String) -> Option<String> {
 /// (`https://github.com/{owner}/{repo}`), or None when the path is not a
 /// GitHub-backed repo. Used by the frontend to make plain-text `#123`
 /// issue/PR references clickable (issue #439).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_git_remote(path: String) -> Option<String> {
     crate::git_watcher::resolve_github_base_from_working_dir(&path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn send_os_notification(title: String, body: String) -> Result<(), String> {
     // OS notification via the system's built-in mechanism.
     // On Windows, uses tauri notification or powershell toast.
@@ -910,7 +910,7 @@ fn clean_terminal_output_cache_in(
 
 /// Save terminal output to the cache directory.
 /// Accepts a string (xterm.js SerializeAddon output) and writes as UTF-8 bytes.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     save_terminal_output_cache_to(&cache_dir, &pane_id, &data)
@@ -918,14 +918,14 @@ pub fn save_terminal_output_cache(pane_id: String, data: String) -> Result<(), S
 
 /// Load terminal output from the cache directory.
 /// Returns a string (to be written back via terminal.write()).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_terminal_output_cache(pane_id: String) -> Result<String, String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     load_terminal_output_cache_from(&cache_dir, &pane_id)
 }
 
 /// Remove orphaned cache files that don't correspond to any active pane.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clean_terminal_output_cache(active_pane_ids: Vec<String>) -> Result<u32, String> {
     let cache_dir = crate::settings::cache_dir_path().ok_or("Cannot determine cache directory")?;
     clean_terminal_output_cache_in(&cache_dir, &active_pane_ids)
@@ -948,7 +948,7 @@ fn window_geometry_path() -> Result<std::path::PathBuf, String> {
 }
 
 /// Save window geometry to cache.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_window_geometry(
     x: i32,
     y: i32,
@@ -969,7 +969,7 @@ pub fn save_window_geometry(
 }
 
 /// Load window geometry from cache. Returns null if not found.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn load_window_geometry() -> Result<Option<WindowGeometry>, String> {
     let path = match window_geometry_path() {
         Ok(p) => p,

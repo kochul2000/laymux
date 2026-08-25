@@ -214,7 +214,7 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 
 /// Read a file and classify it for the file viewer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_file_for_viewer(
     path: String,
     max_bytes: Option<usize>,
@@ -353,7 +353,7 @@ pub struct FileDownloadContent {
 /// A truncated download is a corrupt file, so this errors instead of returning a
 /// partial body — the caller maps that to 413 and tells the user the file is too
 /// large for the Remote surface.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_file_for_download(
     path: String,
     max_bytes: Option<usize>,
