@@ -381,24 +381,44 @@ impl Default for AppState {
     }
 }
 
-impl Drop for AppState {
-    fn drop(&mut self) {
-        // Probe PTYs are intentionally absent from `pty_handles` (ADR-0102), so
-        // they need their own teardown or the `claude` children outlive the app.
+impl AppState {
+    /// Terminate every child process this app owns.
+    ///
+    /// Shutdown is not the only caller: the self-update installer cannot
+    /// overwrite the bundled ConPTY runtime while a console host spawned for a
+    /// terminal still maps it, so the install path runs the same teardown before
+    /// handing over (ADR-0201). Both paths must clean up the same set, so the
+    /// procedure has one owner.
+    ///
+    /// Probe PTYs are intentionally absent from `pty_handles` (ADR-0102), so
+    /// they need their own teardown or the `claude` children outlive the app.
+    ///
+    /// The registry is drained under the lock and terminated after it is
+    /// released: `terminate()` blocks for as long as a child takes to die, and
+    /// holding the registry for that long would stall every other PTY caller.
+    pub fn terminate_child_processes(&self) {
         if let Err(err) = self.usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "usage probe cleanup during app shutdown failed");
         }
         if let Err(err) = self.grok_usage_probe.shutdown_all() {
             tracing::warn!(error = %err, "grok usage probe cleanup during app shutdown failed");
         }
-        let handles = self
+        let handles: Vec<(String, PtyHandle)> = self
             .pty_handles
-            .get_mut_or_recover_for_discard("dropping PTY handle registry");
-        for (terminal_id, handle) in handles.drain() {
+            .lock_or_recover_for_discard("draining PTY handle registry")
+            .drain()
+            .collect();
+        for (terminal_id, handle) in handles {
             if let Err(err) = handle.terminate() {
                 tracing::warn!(terminal_id, error = %err, "PTY cleanup during app shutdown failed");
             }
         }
+    }
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        self.terminate_child_processes();
     }
 }
 
@@ -415,6 +435,43 @@ mod tests {
         assert!(groups.is_empty());
         let ptys = state.pty_handles.lock().unwrap();
         assert!(ptys.is_empty());
+    }
+
+    /// The update installer runs this teardown without dropping the state
+    /// (ADR-0201), so the registry must be emptied by the call itself and every
+    /// child must be gone when it returns — not left for a `Drop` that the
+    /// installer path never reaches.
+    #[test]
+    #[cfg(windows)]
+    fn terminating_child_processes_empties_the_registry_without_a_drop() {
+        use crate::pty::{spawn_pty, PtyOutputControl};
+        use crate::terminal::{TerminalConfig, TerminalSession};
+
+        let state = AppState::new();
+        let session = TerminalSession::new(
+            "terminate-child-processes".into(),
+            TerminalConfig {
+                profile: "PowerShell".into(),
+                command_line: String::new(),
+                startup_command: String::new(),
+                starting_directory: String::new(),
+                cols: 80,
+                rows: 24,
+                sync_group: "test-group".into(),
+                env: Vec::new(),
+                advertise_true_color: true,
+            },
+        );
+        let handle = spawn_pty(&session, |_| PtyOutputControl::Continue).expect("spawn");
+        state
+            .pty_handles
+            .lock()
+            .unwrap()
+            .insert(session.id.clone(), handle);
+
+        state.terminate_child_processes();
+
+        assert!(state.pty_handles.lock().unwrap().is_empty());
     }
 
     #[test]

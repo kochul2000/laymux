@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
@@ -18,6 +18,7 @@ use crate::constants::{
     UPDATE_CHANNEL_MANIFEST_HOST, UPDATE_CHANNEL_STABLE,
 };
 use crate::lock_ext::MutexExt;
+use crate::state::AppState;
 
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const INITIAL_UPDATE_CHECK_DELAY: Duration = Duration::from_secs(5);
@@ -499,14 +500,21 @@ async fn check_channel_once(
 
 /// Build an updater pinned to this channel's manifest. The endpoint in
 /// `tauri.conf.json` is only the stable default; the channel decides at runtime.
+fn channel_updater_builder(
+    app: &AppHandle,
+    channel: UpdateChannel,
+) -> Result<tauri_plugin_updater::UpdaterBuilder, String> {
+    let endpoint = Url::parse(&channel.manifest_url()).map_err(|error| error.to_string())?;
+    app.updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|error| error.to_string())
+}
+
 fn channel_updater(
     app: &AppHandle,
     channel: UpdateChannel,
 ) -> Result<tauri_plugin_updater::Updater, String> {
-    let endpoint = Url::parse(&channel.manifest_url()).map_err(|error| error.to_string())?;
-    app.updater_builder()
-        .endpoints(vec![endpoint])
-        .map_err(|error| error.to_string())?
+    channel_updater_builder(app, channel)?
         .build()
         .map_err(|error| error.to_string())
 }
@@ -553,7 +561,23 @@ async fn install_and_restart(
     // release is never installed from stale in-memory metadata. The channel is
     // the one accepted at request time: an accepted install completes on the
     // series the user approved even if the setting changes meanwhile (ADR-0174).
-    let update = channel_updater(app, channel)?
+    //
+    // `on_before_exit` is the last moment this process controls: the updater
+    // starts the installer and calls `std::process::exit(0)`, which runs no
+    // destructor, so the terminals this app spawned would otherwise survive it
+    // and keep the files the installer must overwrite (ADR-0201). Blocking here
+    // delays the installer by exactly as long as the teardown needs.
+    let guard_app = app.clone();
+    let update = channel_updater_builder(app, channel)?
+        .on_before_exit(move || match guard_app.try_state::<Arc<AppState>>() {
+            Some(state) => crate::update_install_guard::release_installer_file_locks(&state),
+            // Nothing to tear down without the state, and panicking inside the
+            // hook would abort the process between the download and the
+            // installer — the one moment where losing the update costs the most.
+            None => tracing::warn!("app state is unavailable; installing without a teardown"),
+        })
+        .build()
+        .map_err(|error| error.to_string())?
         .check()
         .await
         .map_err(|error| error.to_string())?

@@ -48,6 +48,7 @@ pub mod terminal;
 mod terminal_env;
 pub mod terminal_output;
 pub mod terminal_protocol;
+pub mod update_install_guard;
 pub mod usage_probe;
 pub mod wsl_liveness;
 pub mod wsl_probe;
