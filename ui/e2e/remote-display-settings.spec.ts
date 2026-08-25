@@ -100,6 +100,11 @@ interface DisplaySettingsHarness {
   releaseInput?: (() => void) | null;
 }
 
+interface RemoteMockOptions {
+  activity?: { type: string; name?: string };
+  snapshotText?: string;
+}
+
 function snapshotFrames(text: string) {
   const payload = Buffer.from(text, "utf8");
   const header = JSON.stringify({
@@ -125,7 +130,17 @@ function snapshotFrames(text: string) {
   return { header, payload };
 }
 
-async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
+async function installRemoteMocks(
+  page: Page,
+  harness: DisplaySettingsHarness,
+  options: RemoteMockOptions = {},
+) {
+  const pane = { ...workspacePane, activity: options.activity ?? workspacePane.activity };
+  const navigationResponse = {
+    ...navigation,
+    activeWorkspace: { ...navigation.activeWorkspace, panes: [pane] },
+    workspaces: navigation.workspaces.map((workspace) => ({ ...workspace, panes: [pane] })),
+  };
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -143,7 +158,7 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
       return;
     }
     if (url.pathname === "/remote/v1/navigation") {
-      await route.fulfill({ json: navigation });
+      await route.fulfill({ json: navigationResponse });
       return;
     }
     if (url.pathname === "/remote/v1/display-settings") {
@@ -207,7 +222,7 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
   });
 
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
-    const snapshot = snapshotFrames("ready\r\n");
+    const snapshot = snapshotFrames(options.snapshotText ?? "ready\r\n");
     socket.send(snapshot.header);
     socket.send(snapshot.payload);
   });
@@ -215,7 +230,10 @@ async function installRemoteMocks(page: Page, harness: DisplaySettingsHarness) {
 
 type TermWindow = typeof window & {
   Terminal: { prototype: { reset: () => void } };
-  __remoteTerm?: { options: { fontSize: number } };
+  __remoteTerm?: {
+    options: { fontSize: number };
+    buffer: { active: { baseY: number; viewportY: number } };
+  };
 };
 
 async function connectAndOpenDisplaySettings(page: Page) {
@@ -534,11 +552,19 @@ test("Composer opacity follows Idle, Focused, and Active state and saves all thr
 
   const composer = page.locator("#terminalComposer");
   const input = page.locator("#composerInput");
+  const terminal = page.locator("#terminal");
   const readAppearance = () =>
     composer.evaluate((element) => ({
       state: element.getAttribute("data-opacity-state"),
       opacity: getComputedStyle(element).opacity,
     }));
+
+  const terminalBox = await terminal.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(terminalBox).not.toBeNull();
+  expect(composerBox).not.toBeNull();
+  expect(composerBox!.y).toBeGreaterThan(terminalBox!.y);
+  expect(composerBox!.y + composerBox!.height).toBeCloseTo(terminalBox!.y + terminalBox!.height, 0);
 
   await expect.poll(readAppearance).toEqual({ state: "idle", opacity: "0.55" });
   await page.locator("#navToggle").click();
@@ -637,4 +663,168 @@ test("Composer opacity follows Idle, Focused, and Active state and saves all thr
   await input.focus();
   await input.fill("active again");
   await expect.poll(readAppearance).toEqual({ state: "active", opacity: "0.5" });
+});
+
+test("overlay Composer는 이미 덮은 agent 입력 줄만큼 viewport를 추가로 올리지 않는다", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.inputMode", "composer");
+  });
+  const harness: DisplaySettingsHarness = {
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
+    claimLeaseIds: ["lease-1"],
+    claimRequests: 0,
+    getRequests: 0,
+    putBodies: [],
+    delayNextPut: false,
+    releasePut: null,
+  };
+  const snapshotText = Array.from(
+    { length: 80 },
+    (_, index) => `OVERLAY-SCROLL-${index + 1}\r\n`,
+  ).join("");
+  await installRemoteMocks(page, harness, {
+    activity: { type: "interactiveApp", name: "Claude" },
+    snapshotText,
+  });
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.evaluate(() => {
+    const target = window as TermWindow;
+    const originalReset = target.Terminal.prototype.reset;
+    target.Terminal.prototype.reset = function resetCapturingInstance() {
+      (window as TermWindow).__remoteTerm = this as never;
+      return originalReset.call(this);
+    };
+  });
+  await page.locator("#connect").click();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+
+  await expect
+    .poll(() => page.evaluate(() => (window as TermWindow).__remoteTerm?.buffer.active.baseY ?? 0))
+    .toBeGreaterThan(0);
+  const viewport = await page.evaluate(() => {
+    const buffer = (window as TermWindow).__remoteTerm!.buffer.active;
+    return { baseY: buffer.baseY, viewportY: buffer.viewportY };
+  });
+  expect(viewport.baseY).toBeGreaterThan(0);
+  expect(viewport.viewportY).toBe(viewport.baseY);
+});
+
+test("Composer 높이가 바뀌면 숨김 경계와 최하단 버튼 위치를 overlay에 맞춘다", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.inputMode", "composer");
+    localStorage.setItem(
+      "laymux.remote.composerHiddenAgentInputLines",
+      JSON.stringify({ Claude: 10 }),
+    );
+  });
+  const harness: DisplaySettingsHarness = {
+    settings: {
+      terminalFontSize: 18,
+      composerFontSize: 20,
+      menuFontSize: 15,
+      composerIdleOpacity: 55,
+      composerFocusedOpacity: 80,
+      composerActiveOpacity: 100,
+      touchScrollSensitivity: 1,
+      twoFingerScrollSensitivity: 5,
+      revision: "rev-1",
+    },
+    claimLeaseIds: ["lease-1"],
+    claimRequests: 0,
+    getRequests: 0,
+    putBodies: [],
+    delayNextPut: false,
+    releasePut: null,
+  };
+  await installRemoteMocks(page, harness, {
+    activity: { type: "interactiveApp", name: "Claude" },
+    snapshotText: Array.from({ length: 80 }, (_, index) => `OVERLAY-RESIZE-${index + 1}\r\n`).join(
+      "",
+    ),
+  });
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.evaluate(() => {
+    const target = window as TermWindow;
+    const originalReset = target.Terminal.prototype.reset;
+    target.Terminal.prototype.reset = function resetCapturingInstance() {
+      (window as TermWindow).__remoteTerm = this as never;
+      return originalReset.call(this);
+    };
+  });
+  await page.locator("#connect").click();
+
+  const readBoundary = () =>
+    page.evaluate(() => {
+      const term = (window as TermWindow).__remoteTerm;
+      if (!term) return null;
+      const buffer = term.buffer.active;
+      const terminalElement = document.querySelector("#terminal")!;
+      const screen = terminalElement.querySelector(".xterm-screen")!;
+      const composer = document.querySelector("#terminalComposer")!;
+      const screenRect = screen.getBoundingClientRect();
+      const composerRect = composer.getBoundingClientRect();
+      const rows = document.querySelectorAll(".xterm-rows > div").length;
+      const overlap = Math.max(
+        0,
+        Math.min(screenRect.bottom, composerRect.bottom) -
+          Math.max(screenRect.top, composerRect.top),
+      );
+      const coveredRows = Math.ceil(overlap / (screenRect.height / rows));
+      return {
+        actual: buffer.baseY - buffer.viewportY,
+        expected: Math.max(0, 10 - coveredRows),
+      };
+    });
+
+  await expect.poll(readBoundary).toEqual({ actual: 6, expected: 6 });
+  const button = page.locator("#scrollToBottom");
+  await expect(button).toBeVisible();
+  const composerBox = await page.locator("#terminalComposer").boundingBox();
+  const buttonBox = await button.boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect(buttonBox).not.toBeNull();
+  expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(composerBox!.y);
+
+  await page.locator("#composerInput").evaluate((element) => {
+    element.style.height = "110px";
+  });
+  await expect
+    .poll(async () => {
+      const boundary = await readBoundary();
+      return (
+        boundary !== null &&
+        boundary.actual === boundary.expected &&
+        boundary.expected > 0 &&
+        boundary.expected < 6
+      );
+    })
+    .toBe(true);
+  const resizedComposerBox = await page.locator("#terminalComposer").boundingBox();
+  const resizedButtonBox = await button.boundingBox();
+  expect(resizedComposerBox).not.toBeNull();
+  expect(resizedButtonBox).not.toBeNull();
+  expect(resizedButtonBox!.y + resizedButtonBox!.height).toBeLessThanOrEqual(resizedComposerBox!.y);
+
+  await button.click();
+  await expect
+    .poll(async () => {
+      const boundary = await readBoundary();
+      return boundary !== null && boundary.actual === 0 && boundary.expected > 0;
+    })
+    .toBe(true);
+  await expect(button).toBeHidden();
 });

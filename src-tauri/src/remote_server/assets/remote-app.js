@@ -288,6 +288,7 @@
         let renderedTerminalId = null;
         let fitAddon = null;
         let resizeObserver = null;
+        let composerResizeObserver = null;
         // Last host geometry adopted by fitTerminal. Height-only shrinks below
         // fittedHostHeight crop the surface instead of refitting (ADR-0038).
         let fittedHostWidth = 0;
@@ -2875,6 +2876,7 @@
           const composerMode = mode === "composer";
           const draft = composerDraft();
           terminalComposer.hidden = !composerMode || composerCollapsed;
+          syncComposerOverlayGeometry();
           inputModeToggleButton.setAttribute("aria-pressed", composerMode ? "true" : "false");
           const inputModeActionLabel = composerMode
             ? "Switch to Direct input"
@@ -4879,6 +4881,11 @@
             resizeObserver = new ResizeObserver(() => fitTerminal());
             resizeObserver.observe(terminalHost);
             if (terminalShell) resizeObserver.observe(terminalShell);
+            composerResizeObserver = new ResizeObserver(() => {
+              syncComposerOverlayGeometry();
+              hideActiveAgentInputForComposer();
+            });
+            composerResizeObserver.observe(terminalComposer);
           } else if (!resizeListenerAttached) {
             window.addEventListener("resize", () => fitTerminal());
             resizeListenerAttached = true;
@@ -6565,6 +6572,31 @@
               : null;
         }
 
+        function syncComposerOverlayGeometry() {
+          const height = terminalComposer.hidden
+            ? 0
+            : terminalComposer.getBoundingClientRect().height;
+          terminalHost.style.setProperty(
+            "--remote-composer-overlay-height",
+            `${Math.max(0, height)}px`
+          );
+        }
+
+        function composerCoveredTerminalLines() {
+          if (!terminal || terminalComposer.hidden) return 0;
+          const metrics = terminalMetrics(terminal);
+          if (!metrics || metrics.cellHeight <= 0) return 0;
+          const composerRect = terminalComposer.getBoundingClientRect();
+          const overlap = Math.max(
+            0,
+            Math.min(metrics.rect.bottom, composerRect.bottom) -
+              Math.max(metrics.rect.top, composerRect.top)
+          );
+          // A partially covered row is no longer useful terminal input UI, so
+          // it counts as covered instead of causing an extra viewport shift.
+          return Math.ceil(overlap / metrics.cellHeight);
+        }
+
         function composerHiddenInputBoundaryLines() {
           if (
             !composerHideAgentInputEnabled ||
@@ -6574,7 +6606,8 @@
             return null;
           }
           const lines = activeHiddenComposerAgentInputLines();
-          return lines != null && lines > 0 ? lines : null;
+          if (lines == null || lines <= 0) return null;
+          return Math.max(0, lines - composerCoveredTerminalLines());
         }
 
         // Apply the hide at a user-visible Composer transition, initial
@@ -6592,11 +6625,14 @@
           }
           composerAgentInputHideFrame = requestAnimationFrame(() => {
             composerAgentInputHideFrame = null;
-            if (
-              !terminal ||
-              activeTerminalId !== terminalId ||
-              composerHiddenInputBoundaryLines() !== lines
-            ) {
+            if (!terminal || activeTerminalId !== terminalId) return;
+            const currentLines = composerHiddenInputBoundaryLines();
+            if (currentLines == null) return;
+            // Font/layout settling can change the number of rows covered
+            // between scheduling and this frame. Re-sample once more instead
+            // of dropping the user-visible Composer transition entirely.
+            if (currentLines !== lines) {
+              hideActiveAgentInputForComposer();
               return;
             }
             terminal.scrollToBottom();
@@ -10567,6 +10603,7 @@
           stopHeartbeat();
           stopInputFlush();
           if (resizeObserver) resizeObserver.disconnect();
+          if (composerResizeObserver) composerResizeObserver.disconnect();
           window.removeEventListener("resize", syncRemoteViewportHeight);
           remoteVisualViewport?.removeEventListener("resize", syncRemoteViewportHeight);
           terminalHost.removeEventListener("pointerdown", handlePathLinkPointerDown, true);

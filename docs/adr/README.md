@@ -220,6 +220,7 @@ ADR 이 필요한 대표 기준:
 | [0200](0200-remote-composer-opacity-state-settings.md) | Remote Composer 투명도는 PC 소유 Idle·Focused·Active 3단계 표시 설정이다 (0173 확장) | Accepted |
 | [0201](0201-update-install-releases-child-file-locks.md) | 업데이트 설치기를 부르기 전에 앱이 자기 자식 프로세스를 정리한다 (0174 확장) | Accepted |
 | [0202](0202-io-commands-off-the-main-thread.md) | I/O(파일시스템·프로세스·시스템 열거)하는 Tauri 커맨드는 `#[tauri::command(async)]` 로 메인 스레드를 벗어난다 (0188 확장) | Proposed |
+| [0203](0203-remote-composer-overlays-terminal-output.md) | Remote Composer는 터미널 출력 위에 겹친다 (0200 배치·geometry 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 
