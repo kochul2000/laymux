@@ -1341,8 +1341,10 @@
             fileViewerPathRevision += 1;
             message = "Host viewer path loaded.";
           } catch (error) {
-            message = error instanceof Error ? error.message : String(error);
-            isError = true;
+            if (!(await fileViewerControlLost(error))) {
+              message = error instanceof Error ? error.message : String(error);
+              isError = true;
+            }
           } finally {
             if (fileViewerStatusRequestRevision === statusRequestRevision) {
               fileViewerStatusInFlight = false;
@@ -1561,7 +1563,11 @@
               }
               renderFileViewerPayload(payload);
             })
-            .catch((error) => {
+            .catch(async (error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              // Control loss owns the screen: the reclaim path closes this
+              // overlay and paints its own notice.
+              if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               hideFileViewerContent();
               setFileViewerMessage(
@@ -1616,7 +1622,11 @@
               }
               renderDirectoryListing(payload);
             })
-            .catch((error) => {
+            .catch(async (error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              // Control loss owns the screen: the reclaim path closes this
+              // overlay and paints its own notice.
+              if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               hideFileViewerContent();
               setFileViewerMessage(
@@ -1768,7 +1778,9 @@
               }
               saveDownloadInBrowser(payload);
             })
-            .catch((error) => {
+            .catch(async (error) => {
+              if (requestRevision !== fileViewerRequestRevision) return;
+              if (await fileViewerControlLost(error)) return;
               if (requestRevision !== fileViewerRequestRevision) return;
               setFileViewerMessage(
                 error instanceof Error ? error.message : String(error),
@@ -4998,6 +5010,52 @@
 
         function isFatalRemoteControlError(err) {
           return err && (err.status === 401 || err.status === 403 || err.status === 409);
+        }
+
+        // A FileViewer request rejected on control grounds is an answer about the
+        // lease, not about the file: the capability is issued per lease and the
+        // server drops it on every owner transition. Showing that raw error leaves
+        // a page that still looks connected and fails every following tap, so probe
+        // ownership and hand a dead lease to the normal reclaim path (ADR-0204).
+        //
+        // The probe is `/session/status`, not a heartbeat: `heartbeat()` resolves
+        // without asking anything when one is already in flight, which would read
+        // as "the lease is fine".
+        async function fileViewerControlLost(error) {
+          if (!leaseId || !isFatalRemoteControlError(error)) return false;
+          const probedLeaseId = leaseId;
+          let status;
+          try {
+            status = await remoteFetch("/remote/v1/session/status");
+          } catch (_) {
+            // Advisory only: when the probe cannot answer, the original error is
+            // still the most honest thing to show.
+            return false;
+          }
+          // A heartbeat or a release already resolved this while we asked.
+          if (leaseId !== probedLeaseId) return true;
+          if (status && status.leaseId === probedLeaseId) return false;
+          // Ownership-wise this is the heartbeat 409 case, not a 401/403 answer:
+          // the lease is gone, but who holds it now is what the next claim asks,
+          // so stay armed instead of disarming the reclaim (ADR-0027, ADR-0037).
+          loseRemoteControl("Control was lost while this tab was away.", {
+            hostTookOver: false,
+          });
+          return true;
+        }
+
+        // Returning with a lease still in hand is not the same as returning with
+        // none. `maybeAutoConnect` only ever claims a *missing* lease, so a lease
+        // that expired while the tab was frozen sits here looking alive until the
+        // heartbeat interval happens to fire again — and every tap in that window
+        // fails on the server. Probe it right away, the way the Android transport
+        // resume already does (ADR-0204).
+        function resumeControlOnReturn() {
+          if (!leaseId) {
+            maybeAutoConnect();
+            return;
+          }
+          heartbeat().catch((err) => handleHeartbeatError(err));
         }
 
         function heartbeatTimedOut() {
@@ -10581,14 +10639,14 @@
         // while the page is already open (online).
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") {
-            maybeAutoConnect();
+            resumeControlOnReturn();
             // The poll skipped every tick while hidden, so the first thing a
             // returning viewer would otherwise see is the capture it left.
             refreshWidgetsNow();
           } else cancelAutoConnectRetry();
         });
-        window.addEventListener("pageshow", () => maybeAutoConnect());
-        window.addEventListener("online", () => maybeAutoConnect());
+        window.addEventListener("pageshow", () => resumeControlOnReturn());
+        window.addEventListener("online", () => resumeControlOnReturn());
         // A bfcache restore resumes this same document: reclaim the stashed
         // capability so it is back in memory only, out of any clone's reach.
         window.addEventListener("pageshow", (event) => {
