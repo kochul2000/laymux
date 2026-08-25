@@ -532,7 +532,7 @@
     max-height: var(--workspace-terminal-pane-row-max-h);
   }
   .workspace-terminal-pane-row:not(:last-child) {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px dotted var(--border);
   }
   .workspace-pane-row-collapsed {
     max-height: 0;
