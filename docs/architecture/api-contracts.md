@@ -1735,6 +1735,8 @@ activity bulk snapshot은 `terminals → output_buffers → per-ring → known a
 
 Android pairing lifecycle mutex는 `AppState` 밖에 있지만 QR 생성과 cloud identity 전환을 직렬화하면서 `remote_access`를 읽을 수 있다. 따라서 다른 `AppState` 락을 잡지 않은 상태에서 이 mutex를 먼저 획득하고, 그 안에서는 위 번호 순서를 그대로 따른다. `AppState` guard를 보유한 채 pairing lifecycle에 진입하는 역방향은 금지한다([ADR-0144](../adr/0144-android-signed-hybrid-client-e2e-foundation.md)).
 
+설정 파일 쓰기 게이트(`settings::SETTINGS_WRITE_LOCK`, `settings::MEMO_LOCK`)도 `AppState` 밖에 있지만 **leaf 락**이다 — 보유한 상태에서 다른 락을 잡지 않고 파일 하나를 쓴 뒤 곧바로 놓는다. 그래서 어느 `AppState` 락 안에서 획득해도 위 번호 순서를 깨지 않으며, 실제 호출자(`save_settings` → `update_persistent_remote_settings`)는 게이트를 놓은 뒤에야 `remote_access` 를 잡는다. leaf 성질이 데드락 자유의 근거이므로, 이 게이트를 보유한 채 `AppState` 락이나 다른 게이트를 잡는 역방향은 금지한다 — 쓰기 대상이 늘어나면 게이트를 추가하지 말고 이 leaf 규칙을 지키는지 먼저 확인한다 (ADR-0202).
+
 terminal-output session 내부에서 둘 이상의 세부 락을 중첩할 때는 `per-terminal protocol gate → session runtime → output ring → desktop flow` 순서를 따른다. retirement처럼 일부 락을 건너뛰는 경로도 남은 락의 상대 순서는 유지한다.
 
 poison recovery도 이 순서를 바꾸지 않는다. discard helper는 역순 획득이나 상위 registry 재진입을 허용하지 않으며, 잠재적으로 blocking인 PTY `terminate()`는 모든 AppState guard를 놓은 뒤 실행한다.
@@ -1810,7 +1812,7 @@ pub fn get_terminal_summaries_inner(
 
 **실행 컨텍스트**: 커맨드 본문이 파일시스템·프로세스 spawn·시스템 자원 열거(폰트·포트 등)에 닿으면 `#[tauri::command(async)]` 로 선언한다. sync 함수에 붙인 plain `#[tauri::command]` 는 `tauri-macros` 에서 `ExecutionContext::Blocking` 이라 본문이 앱의 main/event-loop 스레드에서 인라인 실행되고, 느린 대상(UNC·네트워크 경로, 차가운 `wsl.exe`, `netstat`)이 그대로 창 정지가 된다. `(async)` 는 sync 함수를 `sync_threadpool` 로 보내며 `invoke` 계약은 그대로다. 인메모리 상태만 만지는 커맨드와 터미널 입력/프로토콜 쓰기처럼 IPC 도착 순서가 곧 직렬화인 커맨드는 plain 으로 남긴다. 이 선택은 런타임에 관측되지 않으므로 `commands::main_thread_io` 의 표가 소스에서 어트리뷰트를 고정한다 — 커맨드를 추가·개명하면 표도 갱신한다 (ADR-0202).
 
-**메인 스레드 직렬화에 기대지 않기**: threadpool 로 옮긴 커맨드는 동시에 실행될 수 있다. 같은 파일을 쓰는 경로는 명시적 게이트가 필요하다 — settings.json 은 `SETTINGS_WRITE_LOCK` 으로 직렬화하고 임시 파일 + `fs::rename` 으로 교체한다(§14.3 락 순서 규칙 적용). pane 별 출력 캐시나 창 지오메트리처럼 파일당 writer 가 하나인 경로는 게이트를 두지 않는다.
+**메인 스레드 직렬화에 기대지 않기**: threadpool 로 옮긴 커맨드는 동시에 실행될 수 있다. 같은 파일을 쓰는 경로는 명시적 게이트가 필요하다 — settings.json 은 `SETTINGS_WRITE_LOCK` 으로 직렬화하고 임시 파일 + `fs::rename` 으로 교체한다(이 게이트는 §14.3 의 leaf 락이다 — 보유 중에 다른 락을 잡지 않는다). pane 별 출력 캐시나 창 지오메트리처럼 파일당 writer 가 하나인 경로는 게이트를 두지 않는다.
 
 **`pub use` 재수출**: `commands/mod.rs`는 서브모듈을 `pub use *`로 재수출하여, `lib.rs`의 `generate_handler![]` 매크로가 `commands::function_name`으로 참조할 수 있게 한다. 서브모듈 분할 시에도 외부 인터페이스는 변하지 않는다.
 

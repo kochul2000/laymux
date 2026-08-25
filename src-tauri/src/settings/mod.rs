@@ -23,6 +23,10 @@ static MEMO_LOCK: Mutex<()> = Mutex::new(());
 /// the Tauri sync threadpool instead of the main thread (ADR-0202). Two
 /// interleaved writers to the same path can leave a torn file, so the write
 /// itself is gated here rather than relying on the main thread to serialize it.
+///
+/// This is a leaf lock: nothing else is acquired while it is held, so it takes
+/// no place in the `AppState` lock order (api-contracts.md §14.3). Holding it
+/// across an `AppState` lock is what would break that — do not.
 static SETTINGS_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock_memo_gate(lock: &Mutex<()>) -> Result<std::sync::MutexGuard<'_, ()>, String> {
