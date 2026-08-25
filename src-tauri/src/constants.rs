@@ -38,6 +38,13 @@ pub const GITHUB_UPDATE_REPOSITORY: &str = "laymux";
 /// (ADR-0190). GitHub has no stable alias for the latest prerelease.
 pub const UPDATE_CHANNEL_MANIFEST_BRANCH: &str = "release-channels";
 pub const UPDATE_CHANNEL_MANIFEST_HOST: &str = "raw.githubusercontent.com";
+/// The installer cannot overwrite a file some child process still holds, so the
+/// install path tears its children down and then waits for the bundled runtime
+/// to become writable before handing over (ADR-0201). The ceiling is generous
+/// because exceeding it means the user sees the installer fail; the wait ends as
+/// soon as the files are actually free, so the common case never approaches it.
+pub const UPDATE_INSTALL_LOCK_RELEASE_TIMEOUT_MS: u64 = 10_000;
+pub const UPDATE_INSTALL_LOCK_RELEASE_POLL_MS: u64 = 100;
 /// Fired when the OS remote-desktop (RDP / Terminal Services) session state of
 /// the laymux process flips. Payload is a bool: `true` while the window is being
 /// viewed over a remote session. The UI uses it to auto-open the Remote Access
