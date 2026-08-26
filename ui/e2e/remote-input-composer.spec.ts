@@ -12,10 +12,15 @@ type FocusRequest = {
   respond: () => Promise<void>;
 };
 
+type NavigationRequest = {
+  respond: () => Promise<void>;
+};
+
 type RemoteState = {
   inputs: InputRequest[];
   writes: Array<{ leaseId: string; data: string }>;
   focuses: FocusRequest[];
+  navigations: NavigationRequest[];
   claims: Array<{ clientName?: string; claimReservationId?: string }>;
 };
 
@@ -100,9 +105,12 @@ async function installBrowserMocks(
     coarse: boolean;
     storedMode?: "direct" | "composer";
     legacyOutput?: boolean;
+    delayTerminal1Snapshot?: boolean;
     delayTerminal2Snapshot?: boolean;
     delayFirstTerminalWrite?: boolean;
     deferSocketCloseEvent?: boolean;
+    failTerminalConstruction?: boolean;
+    lateTerminalFocusAfterTouchTap?: boolean;
   },
 ) {
   await page.addInitScript(
@@ -110,9 +118,12 @@ async function installBrowserMocks(
       coarse,
       storedMode,
       legacyOutput,
+      delayTerminal1Snapshot,
       delayTerminal2Snapshot,
       delayFirstTerminalWrite,
       deferSocketCloseEvent,
+      failTerminalConstruction,
+      lateTerminalFocusAfterTouchTap,
     }) => {
       if (storedMode) localStorage.setItem("laymux.remote.inputMode", storedMode);
       else localStorage.removeItem("laymux.remote.inputMode");
@@ -194,6 +205,7 @@ async function installBrowserMocks(
         private delayedWriteCallback: (() => void) | null = null;
 
         constructor(options: Record<string, unknown>) {
+          if (failTerminalConstruction) throw new Error("xterm constructor failed");
           this.options = { ...options };
           Object.defineProperty(window, "__mockTerminal", {
             value: this,
@@ -215,6 +227,18 @@ async function installBrowserMocks(
           screen.append(textarea);
           element.append(screen);
           element.addEventListener("mousedown", () => textarea.focus());
+          if (lateTerminalFocusAfterTouchTap) {
+            // Android can deliver xterm's compatibility focus after the touch
+            // bridge has handled pointerup. Model that late focus theft in the
+            // gesture's next frame so the Composer handoff must outlive one call.
+            element.addEventListener("pointerup", (event) => {
+              if (event.pointerType !== "touch") return;
+              requestAnimationFrame(() => {
+                textarea.dataset.lateTouchFocus = "true";
+                textarea.focus();
+              });
+            });
+          }
           host.append(element);
           this.element = element;
           this.textarea = textarea;
@@ -365,7 +389,12 @@ async function installBrowserMocks(
               );
               return;
             }
-            if (delayTerminal2Snapshot && url.includes("/terminals/terminal-2/output")) return;
+            if (
+              (delayTerminal1Snapshot && url.includes("/terminals/terminal-1/output")) ||
+              (delayTerminal2Snapshot && url.includes("/terminals/terminal-2/output"))
+            ) {
+              return;
+            }
             this.emitSnapshot();
           }, 0);
         }
@@ -435,17 +464,27 @@ async function installRemotePage(
     activeAgent?: "Claude" | "Codex" | "Grok";
     holdInputs?: boolean;
     holdTerminalFocus?: boolean;
+    holdInitialNavigation?: boolean;
     legacyOutput?: boolean;
+    delayTerminal1Snapshot?: boolean;
     delayTerminal2Snapshot?: boolean;
     delayFirstTerminalWrite?: boolean;
     deferSocketCloseEvent?: boolean;
+    failTerminalConstruction?: boolean;
+    lateTerminalFocusAfterTouchTap?: boolean;
     claimBusyResponses?: number;
     claimRetryAfterMs?: number;
     claimReservationTtlMs?: number;
     width?: number;
   },
 ): Promise<RemoteState> {
-  const state: RemoteState = { inputs: [], writes: [], focuses: [], claims: [] };
+  const state: RemoteState = {
+    inputs: [],
+    writes: [],
+    focuses: [],
+    navigations: [],
+    claims: [],
+  };
   let remainingClaimBusyResponses = options.claimBusyResponses ?? 0;
   await page.setViewportSize({ width: options.width ?? 390, height: 844 });
   await installBrowserMocks(page, options);
@@ -494,6 +533,17 @@ async function installRemotePage(
         };
         updateActivity(navigationWithActivity.activeWorkspace.panes);
         updateActivity(navigationWithActivity.workspaces[0].panes);
+      }
+      if (options.holdInitialNavigation && state.navigations.length === 0) {
+        await new Promise<void>((done) => {
+          state.navigations.push({
+            respond: async () => {
+              await route.fulfill({ json: navigationWithActivity });
+              done();
+            },
+          });
+        });
+        return;
       }
       await route.fulfill({ json: navigationWithActivity });
       return;
@@ -589,6 +639,41 @@ async function openRemoteSettings(page: Page) {
   await expect(page.locator("#drawerSettingsView")).toBeVisible();
 }
 
+async function expectedComposerHiddenDistance(page: Page, configuredLines: number) {
+  await expect(page.locator("#terminal .xterm-screen")).toBeVisible();
+  await expect(page.locator("#terminalComposer")).toBeVisible();
+  const hiddenLines = await page.evaluate((lines) => {
+    const mock = window as typeof window & { __mockTerminal?: { rows: number } };
+    const screen = document.querySelector<HTMLElement>("#terminal .xterm-screen");
+    const composer = document.querySelector<HTMLElement>("#terminalComposer");
+    const rows = mock.__mockTerminal?.rows ?? 0;
+    if (!screen || !composer || rows <= 0) return lines;
+    const terminalRect = screen.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    const overlap = Math.max(
+      0,
+      Math.min(terminalRect.bottom, composerRect.bottom) -
+        Math.max(terminalRect.top, composerRect.top),
+    );
+    const cellHeight = terminalRect.height / rows;
+    const coveredLines = cellHeight > 0 ? Math.ceil(overlap / cellHeight) : 0;
+    return Math.max(0, lines - coveredLines);
+  }, configuredLines);
+  return hiddenLines;
+}
+
+async function terminalScrollDistance(page: Page) {
+  return page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: {
+        buffer: { active: { baseY: number; viewportY: number } };
+      };
+    };
+    const active = mock.__mockTerminal?.buffer.active;
+    return active ? active.baseY - active.viewportY : -1;
+  });
+}
+
 test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the preferred mode", async ({
   page,
 }) => {
@@ -608,9 +693,16 @@ test("fine-pointer PC and coarse-pointer mobile can both toggle and persist the 
   const geometry = await page.locator(".terminal-shell").evaluate((shell) => {
     const terminal = shell.querySelector<HTMLElement>("#terminal")!.getBoundingClientRect();
     const editor = shell.querySelector<HTMLElement>("#terminalComposer")!.getBoundingClientRect();
-    return { terminalBottom: terminal.bottom, editorTop: editor.top };
+    return {
+      terminalTop: terminal.top,
+      terminalBottom: terminal.bottom,
+      editorTop: editor.top,
+      editorBottom: editor.bottom,
+    };
   });
-  expect(geometry.terminalBottom).toBeLessThanOrEqual(geometry.editorTop);
+  expect(geometry.editorTop).toBeGreaterThanOrEqual(geometry.terminalTop);
+  expect(geometry.editorTop).toBeLessThan(geometry.terminalBottom);
+  expect(geometry.editorBottom).toBeLessThanOrEqual(geometry.terminalBottom);
 
   // Re-running the static entry simulates a reload: preference survives, drafts do not.
   await page.setContent(remoteClientMarkupWithoutXterm());
@@ -1265,6 +1357,109 @@ test("coarse-pointer attach leaves the input focus for the first Keyboard tap (A
   await expect(editor).toBeFocused();
 });
 
+test.describe("mobile touch Composer focus", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("the first terminal touch survives initial attach and late xterm focus", async ({
+    page,
+  }) => {
+    const remote = await installRemotePage(page, {
+      coarse: true,
+      holdInitialNavigation: true,
+      delayTerminal1Snapshot: true,
+      lateTerminalFocusAfterTouchTap: true,
+    });
+
+    const editor = page.locator("#composerInput");
+    await page.locator("#token").fill("test-token");
+    await page.locator("#connect").click();
+    await expect.poll(() => remote.navigations.length).toBe(1);
+
+    // The lease exists here, but navigation has not established which terminal
+    // owns the draft. An xterm created in this interval is a tappable input
+    // surface with no Composer target — the original cold-entry race.
+    await expect(page.locator("#terminal .xterm")).toHaveCount(0);
+    await expect(editor).toBeDisabled();
+
+    await remote.navigations[0].respond();
+    await expect(page.locator("#status")).toHaveText("Main · Pane 1");
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    await expect(editor).not.toBeFocused();
+    await expect(editor).toBeEnabled();
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
+
+    // The output snapshot is still pending. The first real terminal tap must
+    // nevertheless focus the visible editor, and keep it after xterm's helper
+    // textarea tries to take focus later in the same touch turn.
+    const terminalBox = await page.locator("#terminal .xterm").boundingBox();
+    expect(terminalBox).not.toBeNull();
+    await page.touchscreen.tap(
+      terminalBox!.x + terminalBox!.width / 2,
+      terminalBox!.y + terminalBox!.height / 2,
+    );
+
+    await expect(page.locator(".xterm-helper-textarea")).toHaveAttribute(
+      "data-late-touch-focus",
+      "true",
+    );
+    await expect(editor).toBeFocused();
+    await page.keyboard.type("touch input works");
+    await expect(editor).toHaveValue("touch input works");
+
+    await page.evaluate(() => {
+      const [socket] = (window as Window & { __mockSockets: Array<{ emitSnapshot: () => void }> })
+        .__mockSockets;
+      socket.emitSnapshot();
+    });
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("touch input works");
+  });
+
+  test("reports xterm construction failure through the connect transaction", async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await installRemotePage(page, {
+      coarse: true,
+      failTerminalConstruction: true,
+    });
+
+    await page.locator("#token").fill("test-token");
+    await page.locator("#connect").click();
+
+    await expect(page.locator("#status")).toHaveText("xterm constructor failed");
+    await expect(page.locator("#connect")).toBeEnabled();
+    await expect(page.locator("#terminal .xterm")).toHaveCount(0);
+    expect(pageErrors).not.toContain("xterm constructor failed");
+  });
+
+  test("double and triple terminal taps leave Composer unfocused for selection", async ({
+    page,
+  }) => {
+    await installRemotePage(page, { coarse: true });
+    await connect(page);
+
+    const editor = page.locator("#composerInput");
+    const terminalBox = await page.locator("#terminal .xterm").boundingBox();
+    expect(terminalBox).not.toBeNull();
+    const tapTerminal = () =>
+      page.touchscreen.tap(
+        terminalBox!.x + terminalBox!.width / 2,
+        terminalBox!.y + terminalBox!.height / 2,
+      );
+
+    await tapTerminal();
+    await tapTerminal();
+    await expect(editor).not.toBeFocused();
+
+    await page.waitForTimeout(600);
+    await tapTerminal();
+    await tapTerminal();
+    await tapTerminal();
+    await expect(editor).not.toBeFocused();
+  });
+});
+
 test("a coarse-pointer terminal switch also leaves the focus alone (ADR-0196)", async ({
   page,
 }) => {
@@ -1667,43 +1862,27 @@ test("the Remote Settings toggles disable the recall popup and autocomplete", as
   await expect(page.locator("#composerAutocompleteList")).toBeHidden();
 });
 
-for (const [agent, hiddenLines] of [
+for (const [agent, configuredLines] of [
   ["Claude", 3],
   ["Codex", 4],
   ["Grok", 2],
 ] as const) {
-  test(`Composer hides ${agent}'s unused input area by its configured line count`, async ({
+  test(`Composer subtracts its overlay from ${agent}'s configured hidden input lines`, async ({
     page,
   }) => {
     await installRemotePage(page, { coarse: false, width: 1280, activeAgent: agent });
     await connect(page);
 
-    // Attaching the terminal can restore its normal viewport. Isolate the
-    // Composer transition so this assertion only observes the automatic hide.
-    await page.evaluate(() => {
-      const mock = window as typeof window & {
-        __mockTerminal?: { scrollCalls: number[] };
-      };
-      mock.__mockTerminal?.scrollCalls.splice(0);
-    });
     await enterComposerMode(page);
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const mock = window as typeof window & {
-            __mockTerminal?: { scrollCalls: number[] };
-          };
-          return mock.__mockTerminal?.scrollCalls ?? [];
-        }),
-      )
-      .toEqual([Number.POSITIVE_INFINITY, -hiddenLines]);
+    const expectedDistance = await expectedComposerHiddenDistance(page, configuredLines);
+    await expect.poll(() => terminalScrollDistance(page)).toBe(expectedDistance);
 
     await openRemoteSettings(page);
     const toggle = page.locator("#composerHideAgentInputToggle");
     await expect(toggle).toBeChecked();
     await expect(toggle).toHaveAttribute("aria-label", "Hide unused agent input");
     await expect(page.locator(`#composerHiddenAgentInputLines${agent}`)).toHaveValue(
-      String(hiddenLines),
+      String(configuredLines),
     );
   });
 }
@@ -1711,13 +1890,8 @@ for (const [agent, hiddenLines] of [
 test("mobile Composer describes and configures unused agent input hiding", async ({ page }) => {
   await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
   await connect(page);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await page.evaluate(() => {
-    const mock = window as typeof window & {
-      __mockTerminal?: { scrollCalls: number[] };
-    };
-    mock.__mockTerminal?.scrollCalls.splice(0);
-  });
 
   await openRemoteSettings(page);
   const toggle = page.locator("#composerHideAgentInputToggle");
@@ -1726,8 +1900,18 @@ test("mobile Composer describes and configures unused agent input hiding", async
   await expect(toggle.locator("..")).toContainText("While using Composer");
   const claudeLines = page.locator("#composerHiddenAgentInputLinesClaude");
   await expect(claudeLines).toHaveAttribute("aria-label", "Claude input lines to hide");
+  // Opening the drawer schedules terminal fits. Let those settle, then isolate
+  // the inactive-agent setting change from layout-driven viewport restoration.
+  await page.waitForTimeout(250);
+  const distanceBeforeInactiveChange = await terminalScrollDistance(page);
+  await page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: { scrollCalls: number[] };
+    };
+    mock.__mockTerminal?.scrollCalls.splice(0);
+  });
   await claudeLines.fill("6");
-  await claudeLines.press("Enter");
+  await claudeLines.blur();
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -1738,19 +1922,22 @@ test("mobile Composer describes and configures unused agent input hiding", async
       }),
     )
     .toEqual([]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(distanceBeforeInactiveChange);
+  await page.evaluate(() => {
+    const mock = window as typeof window & {
+      __mockTerminal?: {
+        scrollCalls: number[];
+        setViewport: (baseY: number, viewportY: number) => void;
+      };
+    };
+    mock.__mockTerminal?.setViewport(100, 100);
+    mock.__mockTerminal?.scrollCalls.splice(0);
+  });
   const codexLines = page.locator("#composerHiddenAgentInputLinesCodex");
   await codexLines.fill("6");
-  await codexLines.press("Enter");
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const mock = window as typeof window & {
-          __mockTerminal?: { scrollCalls: number[] };
-        };
-        return mock.__mockTerminal?.scrollCalls ?? [];
-      }),
-    )
-    .toEqual([Number.POSITIVE_INFINITY, -6]);
+  await codexLines.blur();
+  const expectedDistance = await expectedComposerHiddenDistance(page, 6);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedDistance);
   await expect
     .poll(() =>
       page.evaluate(() => localStorage.getItem("laymux.remote.composerHiddenAgentInputLines")),
@@ -1764,43 +1951,24 @@ test("leaving Composer or disabling hiding reveals the active agent input again"
   await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
   await connect(page);
 
-  const scrollCalls = () =>
-    page.evaluate(() => {
-      const mock = window as typeof window & {
-        __mockTerminal?: { scrollCalls: number[] };
-      };
-      return mock.__mockTerminal?.scrollCalls ?? [];
-    });
-  const clearScrollCalls = () =>
-    page.evaluate(() => {
-      const mock = window as typeof window & {
-        __mockTerminal?: { scrollCalls: number[] };
-      };
-      mock.__mockTerminal?.scrollCalls.splice(0);
-    });
-
-  await clearScrollCalls();
   await clickInputModeToggle(page);
-  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
 
-  await clearScrollCalls();
   await clickInputModeToggle(page);
-  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY, -4]);
+  const expectedHiddenDistance = await expectedComposerHiddenDistance(page, 4);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedHiddenDistance);
 
-  await clearScrollCalls();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeHidden();
-  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
 
-  await clearScrollCalls();
   await page.locator("#focusTerminal").click();
   await expect(page.locator("#terminalComposer")).toBeVisible();
-  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY, -4]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(expectedHiddenDistance);
 
-  await clearScrollCalls();
   await openRemoteSettings(page);
   await page.locator("#composerHideAgentInputToggle").uncheck();
-  await expect.poll(scrollCalls).toEqual([Number.POSITIVE_INFINITY]);
+  await expect.poll(() => terminalScrollDistance(page)).toBe(0);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("laymux.remote.composerHideAgentInput")))
     .toBe("0");
@@ -1811,6 +1979,7 @@ test("Composer jump-to-bottom stops at the hidden input boundary before the live
 }) => {
   await installRemotePage(page, { coarse: true, activeAgent: "Codex" });
   await connect(page);
+  await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
 
   type ScrollMock = {
     buffer: { active: { baseY: number; viewportY: number } };
@@ -1830,12 +1999,28 @@ test("Composer jump-to-bottom stops at the hidden input boundary before the live
       };
     });
 
+  // `connect()` reports the selected pane before snapshot replay and the
+  // two-pass fit finish. Establish a settled Composer boundary before this
+  // test starts simulating user-owned viewport movement.
+  await expect
+    .poll(async () => {
+      const { calls } = await readScrollState();
+      return calls.some(
+        (call, index) => call === Number.POSITIVE_INFINITY && calls[index + 1] === -4,
+      );
+    })
+    .toBe(true);
+  await page.waitForTimeout(250);
+
   await page.evaluate(() => {
     const mock = (
       window as typeof window & {
         __mockTerminal?: ScrollMock;
       }
     ).__mockTerminal;
+    document
+      .querySelector("#terminal")
+      ?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     mock?.scrollCalls.splice(0);
     mock?.setViewport(100, 80);
   });
@@ -1864,12 +2049,36 @@ test("Composer jump-to-bottom stops at the hidden input boundary before the live
       }
     ).__mockTerminal;
     mock?.scrollCalls.splice(0);
-    document.querySelector<HTMLTextAreaElement>("#composerInput")?.blur();
+    const composer = document.querySelector<HTMLTextAreaElement>("#composerInput");
+    composer?.blur();
+    composer?.focus();
+    // Keep its hide request pending behind a new fit, then move the viewport.
+    // The button click below owns the final position and must cancel that hide.
+    window.dispatchEvent(new Event("resize"));
+    mock?.setViewport(100, 80);
+    const button = document.querySelector<HTMLButtonElement>("#scrollToBottom");
+    button?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
   });
-  await page.locator("#composerInput").focus();
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({ calls: [], distance: 20 });
+
+  await scrollToBottom.click();
   await expect.poll(readScrollState).toEqual({
     calls: [Number.POSITIVE_INFINITY, -4],
     distance: 4,
   });
   await expect(scrollToBottom).toBeVisible();
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4],
+    distance: 4,
+  });
+
+  await scrollToBottom.click();
+  await page.waitForTimeout(250);
+  await expect.poll(readScrollState).toEqual({
+    calls: [Number.POSITIVE_INFINITY, -4, Number.POSITIVE_INFINITY],
+    distance: 0,
+  });
+  await expect(scrollToBottom).toBeHidden();
 });

@@ -313,8 +313,13 @@ mod tests {
         assert!(html.contains("if (document.visibilityState !== \"visible\") return;"));
         // Three signals for one moment: tab switch, bfcache restore, network back.
         assert!(html.contains("document.addEventListener(\"visibilitychange\", () => {"));
-        assert!(html.contains("window.addEventListener(\"pageshow\", () => maybeAutoConnect());"));
-        assert!(html.contains("window.addEventListener(\"online\", () => maybeAutoConnect());"));
+        assert!(html.contains("function resumeControlOnReturn()"));
+        assert!(
+            html.contains("window.addEventListener(\"pageshow\", () => resumeControlOnReturn());")
+        );
+        assert!(
+            html.contains("window.addEventListener(\"online\", () => resumeControlOnReturn());")
+        );
         // Connecting arms the intent; releasing on purpose withdraws it.
         assert!(html.contains("armAutoConnect();"));
         assert!(html.contains("disarmAutoConnect();"));
@@ -345,6 +350,37 @@ mod tests {
         // remembered pane, and an explicit `null` opts out of it — a reconnect
         // would then land on the focused pane instead of this tab's own.
         assert!(html.contains("await loadNavigation(undefined, {"));
+        let connect_start = html
+            .find("async function connect({ auto = false, focusInput = !auto } = {})")
+            .unwrap();
+        let connect_end = connect_start
+            + html[connect_start..]
+                .find("async function writeToTerminal")
+                .unwrap();
+        let connect = &html[connect_start..connect_end];
+        assert!(
+            !connect.contains("ensureTerminal();"),
+            "xterm must not exist before navigation establishes its terminal owner"
+        );
+        let navigation_start = html.find("async function loadNavigation(").unwrap();
+        let navigation_end = navigation_start
+            + html[navigation_start..]
+                .find("async function activateWorkspace")
+                .unwrap();
+        let navigation = &html[navigation_start..navigation_end];
+        let owner_index = navigation
+            .find("setActiveTerminal(nextTerminalId);")
+            .unwrap();
+        let terminal_index = navigation
+            .find("ensureTerminal(terminalInfo && terminalInfo.appearance);")
+            .unwrap();
+        let attach_index = navigation
+            .find("attachTerminal(activeTerminalId, {")
+            .unwrap();
+        assert!(
+            owner_index < terminal_index && terminal_index < attach_index,
+            "navigation must establish the draft owner before fallible xterm construction and attach"
+        );
         // `focusInput` is the connect() option (default `!auto`); the boot-time
         // autoConnect claim passes false so no gesture-less focus strands DOM
         // focus without a soft keyboard.
@@ -817,6 +853,30 @@ mod tests {
         assert!(html.contains("enqueueDiscreteInput(sequence, Math.abs(wholeLines));"));
         assert!(html.contains("if (isAlternateBufferCursorInput(terminal, data))"));
         assert!(html.contains("function handleTouchTap(term, element, point)"));
+        let touch_tap_start = html
+            .find("function handleTouchTap(term, element, point)")
+            .unwrap();
+        let touch_tap_end = touch_tap_start
+            + html[touch_tap_start..]
+                .find("function selectionRange")
+                .unwrap();
+        let touch_tap = &html[touch_tap_start..touch_tap_end];
+        assert!(touch_tap.contains("focusComposerFromTerminalTap();"));
+        assert!(!touch_tap.contains("focusCurrentInputSurface();"));
+        assert!(!touch_tap.contains("term.blur?.();"));
+        let touch_focus_start = html
+            .find("function focusComposerFromTerminalTap()")
+            .unwrap();
+        let touch_focus_end = touch_focus_start
+            + html[touch_focus_start..]
+                .find("function focusInputSurfaceAfterAwait")
+                .unwrap();
+        let touch_focus = &html[touch_focus_start..touch_focus_end];
+        assert!(touch_focus.contains("focusCurrentInputSurface();"));
+        assert!(touch_focus.contains("requestAnimationFrame(() => {"));
+        assert!(touch_focus.contains("!fileViewerOverlayElement.hidden"));
+        assert!(touch_focus.contains("focusedElement !== terminal?.textarea"));
+        assert!(touch_focus.contains("focusedElement !== document.body"));
         assert!(html.contains("function startTouchSelection(term, element, pointerId)"));
         assert!(html.contains("function extendTouchSelection(term, gesture, point)"));
         assert!(html.contains("function handleSelectionMouseupAfterInteraction()"));
@@ -1110,6 +1170,19 @@ mod tests {
         assert!(html.contains("function restoreTerminalViewport(term, distanceFromBottom)"));
         assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
         assert!(html.contains("function scrollTowardComposerBottom()"));
+        // A pending Composer hide waits for the newest two-pass fit and is
+        // invalidated by any user-owned viewport movement in either direction.
+        assert!(html.contains("let terminalFitRevision = 0;"));
+        assert!(html.contains("let terminalFitSettledRevision = 0;"));
+        assert!(html.contains("function scheduleComposerAgentInputHideFlush()"));
+        assert!(html.contains("if (terminalFitSettledRevision !== terminalFitRevision) return;"));
+        assert!(html.contains("terminalFitSettledRevision = fitRevision;"));
+        assert!(html.contains("viewportInteractionRevision: terminalViewportInteractionRevision"));
+        assert!(html.contains("function markTerminalViewportInteraction()"));
+        assert!(html.contains("markTerminalViewportInteraction();\n          const distanceFromBottom"));
+        assert!(html.contains(
+            "scrollToBottomButton.addEventListener(\"pointerdown\", markTerminalViewportInteraction);"
+        ));
         assert!(html.contains(
             "scrollToBottomButton.addEventListener(\"click\", scrollTowardComposerBottom);"
         ));
