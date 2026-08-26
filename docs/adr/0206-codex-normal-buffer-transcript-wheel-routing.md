@@ -1,4 +1,4 @@
-# 0205. Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다
+# 0206. Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다
 
 - Status: Accepted
 - Date: 2026-08-26
