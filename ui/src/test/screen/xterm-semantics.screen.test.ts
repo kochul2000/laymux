@@ -22,6 +22,7 @@
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
 import { computeCellMetrics, computeHelperAnchorStyle } from "@/lib/ime-anchor";
+import { createCodexTranscriptWheelHandler } from "@/lib/codex-transcript-wheel";
 import { createScreenTerminal } from "./xterm-screen";
 
 function stubMatchMedia() {
@@ -150,6 +151,37 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
     expect(data).toEqual([]);
     wheel();
     expect(data.join("")).toBe("\x1b[B");
+  });
+
+  it("routes normal-buffer Codex transcript wheel input as discrete cursor keys", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isCodexActive: () => true,
+        isLocalControlAllowed: () => true,
+      }),
+    );
+    await writeTerminal(
+      terminal,
+      "\x1b[2J\x1b[H/ T R A N S C R I P T\r\ncontent\r\n\r\n↑/↓ to scroll  pgup/pgdn to page  home/end to jump",
+    );
+    expect(terminal.buffer.active.type).toBe("normal");
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 1,
+      }),
+    );
+
+    expect(data).toEqual(Array(5).fill("\x1b[B"));
+    expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY);
   });
 });
 

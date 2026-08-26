@@ -24,6 +24,7 @@ import {
   normalizeScrollSensitivity,
 } from "@/lib/scroll-sensitivity";
 import { resolveLinkAtCell, isModifierLinkClick } from "@/lib/terminal-link-click";
+import { createCodexTranscriptWheelHandler } from "@/lib/codex-transcript-wheel";
 import {
   _reserveWebglInitDelay,
   isLinuxHost,
@@ -3067,6 +3068,19 @@ export function TerminalView({
 
       return true;
     });
+
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isCodexActive: () => {
+          const activity = useTerminalStore
+            .getState()
+            .instances.find((instance) => instance.id === instanceId)?.activity;
+          return activity?.type === "interactiveApp" && activity.name === "Codex";
+        },
+        isLocalControlAllowed: localTerminalControlAllowed,
+      }),
+    );
 
     // Hide mouse cursor + control bar when user starts typing.
     // Two listeners needed: terminal.onKey for when xterm has focus (normal typing),
