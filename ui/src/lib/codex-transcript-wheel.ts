@@ -1,6 +1,7 @@
 import type { Terminal } from "@xterm/xterm";
 
 const CODEX_TRANSCRIPT_HEADER = "/ T R A N S C R I P T";
+const CODEX_TRANSCRIPT_HEADER_MIN_COLUMNS = 9;
 
 type WheelEventConsumer = {
   consumeWheelEvent(event: WheelEvent, cellHeight?: number, devicePixelRatio?: number): number;
@@ -35,11 +36,15 @@ export function isCodexTranscriptPagerVisible(terminal: Terminal): boolean {
   const buffer = terminal.buffer.active;
   if (buffer.type !== "normal") return false;
 
+  const headerColumns = Math.min(terminal.cols, CODEX_TRANSCRIPT_HEADER.length);
+  if (headerColumns < CODEX_TRANSCRIPT_HEADER_MIN_COLUMNS) return false;
+  const visibleHeader = CODEX_TRANSCRIPT_HEADER.slice(0, headerColumns).trimEnd();
+
   const firstVisibleLine = Math.max(0, buffer.viewportY);
   const visibleLineCount = Math.min(terminal.rows, buffer.length - firstVisibleLine);
   for (let offset = 0; offset < visibleLineCount; offset += 1) {
     const text = buffer.getLine(firstVisibleLine + offset)?.translateToString(true);
-    if (text?.startsWith(CODEX_TRANSCRIPT_HEADER)) return true;
+    if (text?.startsWith(visibleHeader)) return true;
   }
   return false;
 }
