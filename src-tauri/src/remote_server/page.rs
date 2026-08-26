@@ -1617,7 +1617,7 @@ mod tests {
         assert!(html.contains("commitComposerHistoryEntry(historyEntries[composerHistoryIndex]);"));
 
         // Touch path: soft keyboards have no Tab key, so a tap/click on the
-        // empty editor opens the same recall popup. The handler must sit
+        // empty editor can open the same recall popup. The handler must sit
         // OUTSIDE the keydown listener (it is a pointer gesture, not a key).
         let click_block = html
             .find("composerInput.addEventListener(\"click\"")
@@ -1627,11 +1627,23 @@ mod tests {
             "tap-to-open handler must not live inside the keydown listener"
         );
         let click_region = &html[click_block..keydown_start];
-        assert!(click_region.contains("if (composerHistoryOpen) return;"));
+        assert!(click_region.contains("if (dismissVisibleComposerSuggestions()) return;"));
+        assert!(click_region.contains("if (!keyboardWasVisibleBeforeTap) return;"));
         assert!(click_region.contains("if (composerIsComposing) return;"));
         assert!(click_region.contains("const historyEntries = currentComposerHistoryEntries();"));
         assert!(click_region.contains("if (historyEntries.length === 0) return;"));
         assert!(click_region.contains("composerHistoryOpen = true;"));
+
+        // Focus alone is not a soft-keyboard signal. The page tracks a closed
+        // VisualViewport baseline per width/orientation and requires a material
+        // height loss before tap-to-open recall is armed.
+        assert!(html.contains("const SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX = 80;"));
+        assert!(html.contains("function remoteSoftKeyboardVisible()"));
+        assert!(html.contains("return virtualKeyboardHeight > 0;"));
+        assert!(html.contains("remoteViewportClosedHeight - remoteViewportHeight"));
+        assert!(html.contains("function dismissVisibleComposerSuggestions()"));
+        assert!(html.contains("composerInput.addEventListener(\"pointerdown\", () => {"));
+        assert!(html.contains("composerKeyboardVisibleBeforeTap = remoteSoftKeyboardVisible();"));
 
         // Recall lists reset on terminal switch, mode switch, and after a send.
         assert!(html.contains("function resetComposerSuggestions()"));

@@ -372,6 +372,7 @@
         // Enter still sends.
         let composerAutocompleteDismissed = false;
         let composerAutocompleteIndex = -1;
+        let composerKeyboardVisibleBeforeTap = false;
         // Keyboard-button collapse state: in composer mode the editor pane
         // hides and restores together with the soft keyboard.
         let composerCollapsed = false;
@@ -420,12 +421,50 @@
         const HISTORY_EXPANSION_TIMEOUT_MS = 20000;
 
         const remoteVisualViewport = window.visualViewport;
+        const SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX = 80;
+        const SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_RATIO = 0.15;
+        let remoteViewportWidth = 0;
+        let remoteViewportHeight = 0;
+        let remoteViewportClosedHeight = 0;
 
         function syncRemoteViewportHeight() {
           const height = remoteVisualViewport ? remoteVisualViewport.height : window.innerHeight;
-          if (!Number.isFinite(height) || height <= 0) return;
+          const width = remoteVisualViewport ? remoteVisualViewport.width : window.innerWidth;
+          if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(width) || width <= 0) {
+            return;
+          }
+          // The page loads without focusing an editor on coarse-pointer devices,
+          // so the first height is a keyboard-closed baseline. Keep the largest
+          // height seen at this width; changing width resets the baseline so an
+          // orientation change cannot masquerade as an open keyboard.
+          if (Math.abs(width - remoteViewportWidth) > 1) {
+            remoteViewportWidth = width;
+            remoteViewportClosedHeight = height;
+          } else if (height > remoteViewportClosedHeight) {
+            remoteViewportClosedHeight = height;
+          }
+          remoteViewportHeight = height;
           document.documentElement.style.setProperty("--remote-viewport-height", `${Math.round(height)}px`);
           scheduleTerminalFit();
+        }
+
+        // Surface-local keyboard observation for tap recall (ADR-0207). It is
+        // deliberately not persisted or reused as the Keyboard button's state.
+        function remoteSoftKeyboardVisible() {
+          if (!coarsePointer) return false;
+          try {
+            const virtualKeyboardRect = navigator.virtualKeyboard?.boundingRect;
+            if (virtualKeyboardRect) {
+              const virtualKeyboardHeight = Number(virtualKeyboardRect.height);
+              if (Number.isFinite(virtualKeyboardHeight)) return virtualKeyboardHeight > 0;
+            }
+          } catch (_) {}
+          if (remoteViewportClosedHeight <= 0 || remoteViewportHeight <= 0) return false;
+          const minimumShrink = Math.max(
+            SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX,
+            remoteViewportClosedHeight * SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_RATIO,
+          );
+          return remoteViewportClosedHeight - remoteViewportHeight >= minimumShrink;
         }
 
         syncRemoteViewportHeight();
@@ -2657,6 +2696,18 @@
         function dismissComposerAutocomplete() {
           composerAutocompleteDismissed = true;
           composerAutocompleteIndex = -1;
+        }
+
+        function dismissVisibleComposerSuggestions() {
+          const historyVisible =
+            composerHistoryOpen && currentComposerHistoryEntries().length > 0;
+          const autocompleteVisible =
+            !composerAutocompleteDismissed && currentComposerSuggestions().length > 0;
+          if (!historyVisible && !autocompleteVisible) return false;
+          composerHistoryOpen = false;
+          dismissComposerAutocomplete();
+          renderComposerSuggestions();
+          return true;
         }
 
         // Fill the draft (and textarea) from a recall pick without routing
@@ -10588,23 +10639,32 @@
         // Recall items commit on mousedown+preventDefault, so a pick keeps focus
         // and this never fires mid-selection.
         composerInput.addEventListener("blur", () => {
+          composerKeyboardVisibleBeforeTap = false;
           composerHistoryOpen = false;
           dismissComposerAutocomplete();
           renderComposerSuggestions();
         });
-        // Touch path for the #504 recall popup: soft keyboards have no Tab
-        // key, so tapping (or clicking) the EMPTY editor opens the same
-        // history popup the Tab gesture opens on hardware keyboards. A
-        // pointer tap is not a keyboard shortcut, so this stays outside the
-        // keybinding rule (api-contracts §15.5). currentComposerHistoryEntries
-        // already enforces the toggle, the empty draft, and a non-empty
-        // history, so a tap with nothing to recall is a no-op.
+        // Touch path for the #504 recall popup (ADR-0207): the first tap that raises a
+        // closed soft keyboard must leave the editor unobstructed. Only a later
+        // tap while viewport geometry proves the keyboard is already visible
+        // opens history. If either suggestion list is already visible, the tap
+        // is instead a blank-area dismissal. A pointer tap is not a keyboard
+        // shortcut, so this stays outside the keybinding rule
+        // (api-contracts §15.5).
+        composerInput.addEventListener("pointerdown", () => {
+          // Capture before the browser's default focus action can start opening
+          // the keyboard and shrinking VisualViewport during this same gesture.
+          composerKeyboardVisibleBeforeTap = remoteSoftKeyboardVisible();
+        });
         composerInput.addEventListener("click", () => {
-          if (composerHistoryOpen) return;
+          const keyboardWasVisibleBeforeTap = composerKeyboardVisibleBeforeTap;
+          composerKeyboardVisibleBeforeTap = false;
+          if (dismissVisibleComposerSuggestions()) return;
           // Mirror the keydown guard: never surface the popup mid-IME
           // composition (a click can land before the preedit reaches the
           // draft, so the empty-draft check alone is not enough).
           if (composerIsComposing) return;
+          if (!keyboardWasVisibleBeforeTap) return;
           const historyEntries = currentComposerHistoryEntries();
           if (historyEntries.length === 0) return;
           composerHistoryIndex = 0;
