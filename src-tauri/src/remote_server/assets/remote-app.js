@@ -2837,6 +2837,40 @@
           }
         }
 
+        function focusComposerFromTerminalTap() {
+          const tappedTerminalId = activeTerminalId;
+          if (
+            !tappedTerminalId ||
+            currentInputMode() !== "composer" ||
+            !fileViewerOverlayElement.hidden
+          ) {
+            return;
+          }
+
+          // Focus synchronously while pointerup still owns transient user
+          // activation. Android may then deliver xterm's compatibility focus
+          // after this handler, so reconcile once in the immediately following
+          // frame — the outer boundary ADR-0196 permits for gesture focus.
+          focusCurrentInputSurface();
+          requestAnimationFrame(() => {
+            if (
+              activeTerminalId !== tappedTerminalId ||
+              currentInputMode() !== "composer" ||
+              composerCollapsed ||
+              composerInput.disabled ||
+              !fileViewerOverlayElement.hidden
+            ) {
+              return;
+            }
+            const focusedElement = document.activeElement;
+            if (focusedElement === composerInput) return;
+            // Do not steal focus from a viewer/control opened by the same tap.
+            // Only repair xterm's helper focus or the body left by its blur.
+            if (focusedElement !== terminal?.textarea && focusedElement !== document.body) return;
+            focusCurrentInputSurface();
+          });
+        }
+
         // A soft keyboard only opens inside the gesture that asked for it, and
         // an attach lands many awaits after the tap that started it (claim →
         // navigation → chrome settle → pre-attach resize → socket open). On a
@@ -4249,8 +4283,6 @@
         function handleTouchTap(term, element, point) {
           if (currentInputMode() === "direct") {
             term.focus?.();
-          } else {
-            term.blur?.();
           }
           const now = Date.now();
           const isSameTapCluster =
@@ -4279,6 +4311,11 @@
           // ADR-0188: a tap on plain text is a discovery trigger. An underlined
           // path is opened by handlePathLinkPointerUp before we get here.
           queuePathLinkPointEvaluation(point);
+          // The terminal surface is the largest mobile input target. A plain
+          // single tap in Composer mode routes the gesture to the visible
+          // textarea; selection and link gestures keep their existing no-IME
+          // behavior.
+          focusComposerFromTerminalTap();
         }
 
         function selectionRange(start, end, cols) {
@@ -6804,6 +6841,11 @@
           if (activeTerminalId) {
             terminalMetaEl.textContent = terminalMetaLabel(data, activeTerminalId);
             if (options.openOutput !== false) {
+              // Establish the draft owner before xterm exists, but construct it
+              // inside this awaited navigation transaction so constructor/asset
+              // failures still unwind the claim and release its lease.
+              const terminalInfo = terminalInfoById.get(activeTerminalId);
+              ensureTerminal(terminalInfo && terminalInfo.appearance);
               attachTerminal(activeTerminalId, {
                 focusInput: options.focusInput !== false,
                 preserveViewport: options.preserveViewport === true,
@@ -8035,7 +8077,6 @@
             // Memory only — never in storage while the document is alive.
             resumeToken = status.resumeToken || null;
             fileViewerToken = status.fileViewerToken || null;
-            ensureTerminal();
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
             // The terminal list already carries the PC-owned terminal size in

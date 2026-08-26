@@ -297,6 +297,31 @@ test("underlines every path on the visible screen once output stops", async ({ c
   await expect(page.locator("#fileViewerTitle")).toHaveText(HOST_PATH);
 });
 
+test.describe("mobile path-link focus ownership", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
+
+  test("opens an underlined file without focusing Composer behind the viewer", async ({
+    context,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await connectRemote(context, page, ["screen"]);
+
+    const editor = page.locator("#composerInput");
+    const decoration = page.locator(".remote-path-link-decoration");
+    await expect(decoration).toBeVisible({ timeout: 10_000 });
+    await expect(editor).not.toBeFocused();
+
+    const box = await decoration.boundingBox();
+    expect(box).not.toBeNull();
+    await page.touchscreen.tap(box!.x + box!.width / 2, box!.y + box!.height / 2);
+
+    await expect(page.locator("#fileViewerOverlay")).toBeVisible();
+    await expect(page.locator("#fileViewerTitle")).toHaveText(HOST_PATH);
+    await expect(editor).not.toBeFocused();
+  });
+});
+
 test("a click on plain text validates that token only and does not open it", async ({
   context,
   page,

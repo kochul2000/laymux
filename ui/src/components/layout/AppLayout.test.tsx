@@ -23,6 +23,7 @@ vi.mock("@/lib/tauri-api", () => ({
   onTerminalOutputActivity: vi.fn().mockResolvedValue(() => {}),
   getTerminalStates: vi.fn().mockResolvedValue({}),
   getHomeDirectory: vi.fn().mockResolvedValue("/home/mock"),
+  listDirectory: vi.fn().mockResolvedValue([]),
   createTerminalSession: vi.fn().mockResolvedValue("t-mock"),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
   resizeTerminal: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +44,20 @@ vi.mock("@/lib/tauri-api", () => ({
   markNotificationsRead: vi.fn().mockResolvedValue(undefined),
   setSleepInhibit: vi.fn().mockResolvedValue(false),
   onSleepInhibitChanged: vi.fn().mockResolvedValue(() => {}),
+  getAppUpdateStatus: vi.fn().mockResolvedValue({
+    enabled: false,
+    channel: "stable",
+    currentVersion: "0.11.5",
+    availableVersion: null,
+    notes: null,
+    publishedAt: null,
+    operation: "idle",
+    downloadedBytes: 0,
+    totalBytes: null,
+    checkedAtMs: null,
+    lastError: null,
+  }),
+  onAppUpdateStatusChanged: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@/components/views/TerminalView", () => ({

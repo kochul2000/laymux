@@ -250,7 +250,9 @@ async function installLeaseMocks(
  */
 async function connectRemote(page: Page, expectedStatus = "Main · Pane 1") {
   const connect = page.locator("#connect");
-  const status = page.locator("#status");
+  // The wrapper also owns the busy spinner and formatting whitespace; only the
+  // text node is the connection-state contract this helper is waiting for.
+  const status = page.locator("#statusText");
   // Wait for one of the two to become true before deciding: the automatic claim
   // has already landed, or the button is ours to press. Reading `isEnabled` on
   // its own races both ways — the button is briefly disabled while a claim is in
