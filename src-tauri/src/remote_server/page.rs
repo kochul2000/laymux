@@ -1170,6 +1170,19 @@ mod tests {
         assert!(html.contains("function restoreTerminalViewport(term, distanceFromBottom)"));
         assert!(html.contains("function updateScrollToBottomButton(term = terminal)"));
         assert!(html.contains("function scrollTowardComposerBottom()"));
+        // A pending Composer hide waits for the newest two-pass fit and is
+        // invalidated by any user-owned viewport movement in either direction.
+        assert!(html.contains("let terminalFitRevision = 0;"));
+        assert!(html.contains("let terminalFitSettledRevision = 0;"));
+        assert!(html.contains("function scheduleComposerAgentInputHideFlush()"));
+        assert!(html.contains("if (terminalFitSettledRevision !== terminalFitRevision) return;"));
+        assert!(html.contains("terminalFitSettledRevision = fitRevision;"));
+        assert!(html.contains("viewportInteractionRevision: terminalViewportInteractionRevision"));
+        assert!(html.contains("function markTerminalViewportInteraction()"));
+        assert!(html.contains("markTerminalViewportInteraction();\n          const distanceFromBottom"));
+        assert!(html.contains(
+            "scrollToBottomButton.addEventListener(\"pointerdown\", markTerminalViewportInteraction);"
+        ));
         assert!(html.contains(
             "scrollToBottomButton.addEventListener(\"click\", scrollTowardComposerBottom);"
         ));

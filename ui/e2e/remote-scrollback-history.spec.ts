@@ -188,6 +188,7 @@ type TermWindow = typeof window & {
   __remoteTerm?: {
     buffer: { active: { viewportY: number; baseY: number; type: string } };
     scrollLines: (amount: number) => void;
+    write: (data: string, callback?: () => void) => void;
   };
 };
 
@@ -325,7 +326,13 @@ test("an alternate-buffer screen never asks for scrollback it cannot have", asyn
   const attaches: Attach[] = [];
   await installRemoteMocks(
     page,
-    { ownerKib: 4, scrollbackKib: 256, prologue: "\x1b[?1049h" },
+    {
+      ownerKib: 4,
+      scrollbackKib: 256,
+      // Leave real normal-buffer history underneath the alternate screen so
+      // returning to it can emit a genuine row-0 scroll event.
+      prologue: `${"normal-history\r\n".repeat(100)}\x1b[?1049h`,
+    },
     attaches,
   );
   await connectAndCaptureTerminal(page);
@@ -336,6 +343,22 @@ test("an alternate-buffer screen never asks for scrollback it cannot have", asyn
 
   await pullToTop(page);
   await wheelUpOverTerminal(page);
+
+  // The alternate-screen wheel cancels pending viewport automation, but must
+  // not vouch for a later normal-buffer row-0 transition as shell-history
+  // intent. Otherwise the old 1.5s gesture stamp reattaches a checkpoint here.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const term = (window as TermWindow).__remoteTerm;
+        if (!term) return resolve();
+        term.write("\x1b[?1049l", resolve);
+      }),
+  );
+  await expect
+    .poll(() => page.evaluate(() => (window as TermWindow).__remoteTerm?.buffer.active.type ?? ""))
+    .toBe("normal");
+  await page.evaluate(() => (window as TermWindow).__remoteTerm?.scrollLines(-100000));
   await page.waitForTimeout(300);
 
   expect(attaches).toHaveLength(1);

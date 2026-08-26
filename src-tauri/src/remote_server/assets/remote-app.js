@@ -293,6 +293,8 @@
         // fittedHostHeight crop the surface instead of refitting (ADR-0038).
         let fittedHostWidth = 0;
         let fittedHostHeight = 0;
+        let terminalFitRevision = 0;
+        let terminalFitSettledRevision = 0;
         let cropActive = false;
         let resizeListenerAttached = false;
         let resizeTimer = null;
@@ -352,6 +354,8 @@
         let composerHideAgentInputEnabled = loadComposerToggle(composerHideAgentInputKey);
         let composerHiddenAgentInputLines = loadComposerHiddenAgentInputLines();
         let composerAgentInputHideFrame = null;
+        let composerAgentInputHideRequest = null;
+        let terminalViewportInteractionRevision = 0;
         let composerHistoryScope = loadComposerHistoryScope();
         let composerIsComposing = false;
         let composerReady = false;
@@ -3855,8 +3859,22 @@
         // Scroll gestures are the only evidence that the user, and not output,
         // moved the viewport. xterm does not expose its own `isUserScrolling`,
         // so the page stamps the gestures it already routes itself.
+        function cancelComposerAgentInputHide() {
+          composerAgentInputHideRequest = null;
+          if (composerAgentInputHideFrame !== null) {
+            cancelAnimationFrame(composerAgentInputHideFrame);
+            composerAgentInputHideFrame = null;
+          }
+        }
+
+        function markTerminalViewportInteraction() {
+          terminalViewportInteractionRevision += 1;
+          cancelComposerAgentInputHide();
+        }
+
         function markTerminalUserScroll() {
           lastTerminalUserScrollAt = Date.now();
+          markTerminalViewportInteraction();
         }
 
         function terminalScrollIsUserDriven() {
@@ -3904,6 +3922,7 @@
 
         function scrollTowardComposerBottom() {
           if (!terminal) return;
+          markTerminalViewportInteraction();
           const distanceFromBottom = terminalViewportDistanceFromBottom(terminal);
           const hiddenLines = composerHiddenInputBoundaryLines();
           terminal.scrollToBottom();
@@ -4169,6 +4188,7 @@
           term.scrollLines(wholeLines);
           updateSelectionHandles(term);
           if (wholeLines < 0) markTerminalUserScroll();
+          else markTerminalViewportInteraction();
           // Dragging further up while already at row 0 moves nothing, so this
           // is the only signal that the user wants older output than the
           // attached screen carries.
@@ -4838,14 +4858,22 @@
             true
           );
           terminalHost.addEventListener("paste", handleDirectTerminalPaste, true);
+          // Any pointer interaction can become a scrollbar drag or a touch
+          // scroll. A later Composer focus in the same gesture schedules a new
+          // hide request; otherwise this preserves the viewport the user chose.
+          terminalHost.addEventListener("pointerdown", markTerminalViewportInteraction, true);
           // Mouse wheel at row 0: xterm swallows the event without scrolling,
           // so ask for older history from here instead of from onScroll.
           terminalHost.addEventListener(
             "wheel",
             (event) => {
-              if (event.deltaY >= 0 || !isNormalScrollbackMode(terminal)) return;
-              markTerminalUserScroll();
-              requestOlderTerminalHistory();
+              if (event.deltaY === 0) return;
+              if (event.deltaY < 0 && isNormalScrollbackMode(terminal)) {
+                markTerminalUserScroll();
+                requestOlderTerminalHistory();
+              } else {
+                markTerminalViewportInteraction();
+              }
             },
             { passive: true }
           );
@@ -4859,6 +4887,9 @@
             "keydown",
             (event) => {
               if (event.shiftKey && event.key === "PageUp") markTerminalUserScroll();
+              else if (event.shiftKey && event.key === "PageDown") {
+                markTerminalViewportInteraction();
+              }
             },
             true
           );
@@ -4927,7 +4958,10 @@
             scheduleTerminalFit(Boolean(activeTerminalId));
           });
           if ("ResizeObserver" in window) {
-            resizeObserver = new ResizeObserver(() => fitTerminal());
+            resizeObserver = new ResizeObserver(() => {
+              fitTerminal();
+              scheduleComposerAgentInputHideFlush();
+            });
             resizeObserver.observe(terminalHost);
             if (terminalShell) resizeObserver.observe(terminalShell);
             composerResizeObserver = new ResizeObserver(() => {
@@ -4936,7 +4970,10 @@
             });
             composerResizeObserver.observe(terminalComposer);
           } else if (!resizeListenerAttached) {
-            window.addEventListener("resize", () => fitTerminal());
+            window.addEventListener("resize", () => {
+              fitTerminal();
+              scheduleComposerAgentInputHideFlush();
+            });
             resizeListenerAttached = true;
           }
           renderInputSurface();
@@ -4954,6 +4991,7 @@
 
         function stopSocket(resetReconnect = true) {
           terminalOutputGeneration += 1;
+          cancelComposerAgentInputHide();
           outputAttachGeometryGeneration = null;
           stopOutputReconnect(resetReconnect);
           if (resetReconnect) clearTransientConnectionNotice("output");
@@ -6725,36 +6763,66 @@
         // Composer is the active input surface, so the terminal-native footer
         // is redundant. Automatic reconnect/navigation refreshes never re-apply
         // the hide, so a person's later scroll position remains theirs.
-        function hideActiveAgentInputForComposer() {
-          if (!terminal) return;
-          const terminalId = activeTerminalId;
-          const lines = composerHiddenInputBoundaryLines();
-          if (lines == null) return;
-          if (composerAgentInputHideFrame !== null) {
-            cancelAnimationFrame(composerAgentInputHideFrame);
-          }
+        function composerAgentInputHideRequestIsCurrent(request) {
+          return Boolean(
+            request &&
+              terminal === request.terminal &&
+              activeTerminalId === request.terminalId &&
+              leaseId === request.leaseId &&
+              terminalSelectionRevision === request.selectionRevision &&
+              terminalOutputGeneration === request.outputGeneration &&
+              terminalViewportInteractionRevision === request.viewportInteractionRevision
+          );
+        }
+
+        function scheduleComposerAgentInputHideFlush() {
+          if (!composerAgentInputHideRequest || composerAgentInputHideFrame !== null) return;
           composerAgentInputHideFrame = requestAnimationFrame(() => {
             composerAgentInputHideFrame = null;
-            if (!terminal || activeTerminalId !== terminalId) return;
-            const currentLines = composerHiddenInputBoundaryLines();
-            if (currentLines == null) return;
-            // Font/layout settling can change the number of rows covered
-            // between scheduling and this frame. Re-sample once more instead
-            // of dropping the user-visible Composer transition entirely.
-            if (currentLines !== lines) {
-              hideActiveAgentInputForComposer();
+            // scheduleTerminalFit owns a two-pass measurement. Keep the request
+            // pending until the newest scheduled generation finishes; that
+            // final pass calls this flush again.
+            if (terminalFitSettledRevision !== terminalFitRevision) return;
+            const request = composerAgentInputHideRequest;
+            if (!composerAgentInputHideRequestIsCurrent(request)) {
+              if (composerAgentInputHideRequest === request) {
+                composerAgentInputHideRequest = null;
+              }
               return;
             }
-            terminal.scrollToBottom();
-            if (lines > 0) terminal.scrollLines(-lines);
-            updateScrollToBottomButton(terminal);
+            const lines = composerHiddenInputBoundaryLines();
+            if (lines == null) {
+              composerAgentInputHideRequest = null;
+              return;
+            }
+            if (terminalViewportDistanceFromBottom(request.terminal) === lines) {
+              updateScrollToBottomButton(request.terminal);
+              return;
+            }
+            request.terminal.scrollToBottom();
+            if (lines > 0) request.terminal.scrollLines(-lines);
+            updateScrollToBottomButton(request.terminal);
           });
+        }
+
+        function hideActiveAgentInputForComposer() {
+          if (!terminal) return;
+          composerAgentInputHideRequest = {
+            terminal,
+            terminalId: activeTerminalId,
+            leaseId,
+            selectionRevision: terminalSelectionRevision,
+            outputGeneration: terminalOutputGeneration,
+            viewportInteractionRevision: terminalViewportInteractionRevision,
+          };
+          scheduleComposerAgentInputHideFlush();
         }
 
         // Direct input needs the agent-native footer, and a collapsed Composer
         // no longer replaces it. Explicitly return to the live tail when the
         // automatic hide stops applying.
         function revealActiveAgentInput() {
+          cancelComposerAgentInputHide();
           if (!terminal || !activeComposerAgentName()) return;
           const terminalId = activeTerminalId;
           requestAnimationFrame(() => {
@@ -9920,9 +9988,15 @@
 
         function scheduleTerminalFit(sendResize = true) {
           if (!terminal || !fitAddon) return;
+          const fitRevision = ++terminalFitRevision;
           requestAnimationFrame(() => {
             fitTerminal(sendResize);
-            setTimeout(() => fitTerminal(sendResize), 160);
+            setTimeout(() => {
+              fitTerminal(sendResize);
+              if (fitRevision !== terminalFitRevision) return;
+              terminalFitSettledRevision = fitRevision;
+              scheduleComposerAgentInputHideFlush();
+            }, 160);
           });
         }
 
@@ -10296,6 +10370,10 @@
         // schedules the copy after every listener for this event has run.
         document.addEventListener("mouseup", handleSelectionMouseupAfterInteraction);
         keepInputSurfaceFocus(scrollToBottomButton);
+        // Cancel a pending post-fit Composer hide at gesture start. Waiting for
+        // click is too late on browsers that paint a frame between pointerdown
+        // and click: the stale hide could consume this button's first stop.
+        scrollToBottomButton.addEventListener("pointerdown", markTerminalViewportInteraction);
         scrollToBottomButton.addEventListener("click", scrollTowardComposerBottom);
         desktopModeHeaderButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
         desktopModeDrawerButton.addEventListener("click", () => requestDesktopMode().catch((err) => setStatus(err.message, true)));
