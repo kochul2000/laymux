@@ -7,7 +7,6 @@ import type { InputMode } from "@/lib/terminal-input-composer-state";
 
 const labels: TerminalInputComposerLabels = {
   editor: "Terminal input",
-  placeholder: "Type before sending",
   resize: "Resize input area",
   history: "Recent inputs",
   autocomplete: "Input suggestions",
@@ -47,7 +46,6 @@ describe("TerminalInputComposer", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Terminal input" });
     expect(textarea).toHaveValue("draft");
-    expect(textarea).toHaveAttribute("placeholder", "Type before sending");
     // The editor is the whole surface — no separate action button steals space.
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByTestId("composer")).toHaveAttribute("data-can-send", "true");
