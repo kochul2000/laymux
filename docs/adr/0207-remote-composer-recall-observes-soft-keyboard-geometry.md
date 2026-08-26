@@ -1,6 +1,6 @@
 # 0207. Remote Composer 탭 recall은 소프트 키보드 geometry를 관측한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-26
 - Source: 사용자 요구("컴포저 포커스는 남았지만 키보드가 내려간 상태에서 키보드를 올리려고 탭하면 추천이 뜨지 않아야 한다", "추천이 열린 상태에서 빈 영역을 탭하면 닫혀야 한다"); [ADR-0196](0196-remote-coarse-pointer-attach-defers-input-focus.md); [data-flow §8.8](../architecture/data-flow.md); [api-contracts §13](../architecture/api-contracts.md)
 - 관계: ADR-0196의 attach focus 정책은 유지하고, 그 ADR이 수용한 "DOM focus는 남고 IME만 닫힌 상태를 구별하지 못한다"는 한계와 `VirtualKeyboard` 단독 도입 기각 범위를 **혼합 geometry 판정으로 확장·정정**한다.

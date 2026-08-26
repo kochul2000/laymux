@@ -111,6 +111,7 @@ async function installBrowserMocks(
     deferSocketCloseEvent?: boolean;
     failTerminalConstruction?: boolean;
     lateTerminalFocusAfterTouchTap?: boolean;
+    virtualKeyboardHeight?: number;
   },
 ) {
   await page.addInitScript(
@@ -124,6 +125,7 @@ async function installBrowserMocks(
       deferSocketCloseEvent,
       failTerminalConstruction,
       lateTerminalFocusAfterTouchTap,
+      virtualKeyboardHeight,
     }) => {
       if (storedMode) localStorage.setItem("laymux.remote.inputMode", storedMode);
       else localStorage.removeItem("laymux.remote.inputMode");
@@ -147,6 +149,13 @@ async function installBrowserMocks(
           };
         },
       });
+
+      if (virtualKeyboardHeight !== undefined) {
+        Object.defineProperty(navigator, "virtualKeyboard", {
+          configurable: true,
+          value: { boundingRect: { height: virtualKeyboardHeight } },
+        });
+      }
 
       class MockTerminal {
         options: Record<string, unknown>;
@@ -472,6 +481,7 @@ async function installRemotePage(
     deferSocketCloseEvent?: boolean;
     failTerminalConstruction?: boolean;
     lateTerminalFocusAfterTouchTap?: boolean;
+    virtualKeyboardHeight?: number;
     claimBusyResponses?: number;
     claimRetryAfterMs?: number;
     claimReservationTtlMs?: number;
@@ -1770,6 +1780,39 @@ test("an empty-editor tap opens recall only with the keyboard up and a blank tap
   await editor.click();
   await expect(list).toBeHidden();
   await editor.dispatchEvent("compositionend");
+  await editor.click();
+  await expect(list).toBeVisible();
+});
+
+test("VirtualKeyboard geometry is authoritative over the viewport fallback", async ({ page }) => {
+  const remote = await installRemotePage(page, {
+    coarse: true,
+    virtualKeyboardHeight: 0,
+  });
+  await connect(page);
+  const editor = page.locator("#composerInput");
+  const list = page.locator("#composerHistoryList");
+
+  await editor.fill("echo one");
+  await page.locator("#composerSend").click();
+  await expect.poll(() => remote.inputs.length).toBe(1);
+  await expect(editor).toHaveValue("");
+
+  // A supported VirtualKeyboard API reporting zero is an explicit closed
+  // signal, even while another height-only viewport change exceeds fallback
+  // thresholds.
+  await page.setViewportSize({ width: 390, height: 500 });
+  await editor.click();
+  await expect(list).toBeHidden();
+
+  await page.evaluate(() => {
+    const keyboard = (
+      navigator as Navigator & {
+        virtualKeyboard: { boundingRect: { height: number } };
+      }
+    ).virtualKeyboard;
+    keyboard.boundingRect.height = 280;
+  });
   await editor.click();
   await expect(list).toBeVisible();
 });

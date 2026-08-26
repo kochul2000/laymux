@@ -452,10 +452,13 @@
         // deliberately not persisted or reused as the Keyboard button's state.
         function remoteSoftKeyboardVisible() {
           if (!coarsePointer) return false;
-          const virtualKeyboardHeight = Number(
-            navigator.virtualKeyboard?.boundingRect?.height || 0,
-          );
-          if (Number.isFinite(virtualKeyboardHeight) && virtualKeyboardHeight > 0) return true;
+          try {
+            const virtualKeyboardRect = navigator.virtualKeyboard?.boundingRect;
+            if (virtualKeyboardRect) {
+              const virtualKeyboardHeight = Number(virtualKeyboardRect.height);
+              if (Number.isFinite(virtualKeyboardHeight)) return virtualKeyboardHeight > 0;
+            }
+          } catch (_) {}
           if (remoteViewportClosedHeight <= 0 || remoteViewportHeight <= 0) return false;
           const minimumShrink = Math.max(
             SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX,

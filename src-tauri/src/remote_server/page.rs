@@ -1639,6 +1639,7 @@ mod tests {
         // height loss before tap-to-open recall is armed.
         assert!(html.contains("const SOFT_KEYBOARD_MIN_VIEWPORT_SHRINK_PX = 80;"));
         assert!(html.contains("function remoteSoftKeyboardVisible()"));
+        assert!(html.contains("return virtualKeyboardHeight > 0;"));
         assert!(html.contains("remoteViewportClosedHeight - remoteViewportHeight"));
         assert!(html.contains("function dismissVisibleComposerSuggestions()"));
         assert!(html.contains("composerInput.addEventListener(\"pointerdown\", () => {"));
