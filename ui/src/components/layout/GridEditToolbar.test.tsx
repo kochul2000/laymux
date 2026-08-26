@@ -33,10 +33,16 @@ describe("GridEditToolbar", () => {
 
   it("renders dock toggle buttons for all 4 positions", () => {
     render(<GridEditToolbar />);
-    expect(screen.getByTestId("dock-toggle-top")).toBeInTheDocument();
-    expect(screen.getByTestId("dock-toggle-bottom")).toBeInTheDocument();
-    expect(screen.getByTestId("dock-toggle-left")).toBeInTheDocument();
-    expect(screen.getByTestId("dock-toggle-right")).toBeInTheDocument();
+    expect(screen.getByTestId("dock-toggle-top").querySelector(".lucide-panel-top")).toBeVisible();
+    expect(
+      screen.getByTestId("dock-toggle-bottom").querySelector(".lucide-panel-bottom"),
+    ).toBeVisible();
+    expect(
+      screen.getByTestId("dock-toggle-left").querySelector(".lucide-panel-left"),
+    ).toBeVisible();
+    expect(
+      screen.getByTestId("dock-toggle-right").querySelector(".lucide-panel-right"),
+    ).toBeVisible();
   });
 
   it("toggles left dock visibility on click", async () => {
@@ -67,10 +73,11 @@ describe("GridEditToolbar", () => {
     expect(screen.getByTestId("file-viewer-btn")).toBeInTheDocument();
   });
 
-  it("renders the file viewer button with the Document glyph", () => {
+  it("renders the file viewer button with the Lucide file-search icon", () => {
     render(<GridEditToolbar />);
-    // Regression for #366: the glyph escape was a literal "E8A5" string.
-    expect(screen.getByTestId("file-viewer-btn").textContent).toBe("");
+    expect(
+      screen.getByTestId("file-viewer-btn").querySelector(".lucide-file-search"),
+    ).toBeInTheDocument();
   });
 
   it("opens the empty file viewer on click", async () => {

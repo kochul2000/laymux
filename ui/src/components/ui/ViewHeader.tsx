@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
+import { EllipsisIcon } from "@/components/ui/icons";
 
 interface ViewHeaderProps {
   /** 헤더 제목. 지정하면 통일된 스타일(--text-secondary, --fs-sm, 600)로 렌더링. */
@@ -67,11 +68,7 @@ export function ViewHeader({
             }}
             title="Expand control bar"
           >
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-              <circle cx="3" cy="6" r="1" />
-              <circle cx="6" cy="6" r="1" />
-              <circle cx="9" cy="6" r="1" />
-            </svg>
+            <EllipsisIcon size={12} />
           </button>
         )}
       </div>

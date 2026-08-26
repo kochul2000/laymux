@@ -57,7 +57,7 @@ import {
   type RemoteSettings,
 } from "@/lib/tauri-api";
 import { Button } from "@/components/ui/Button";
-import { ExternalLinkIcon } from "@/components/ui/icons";
+import { ExternalLinkIcon, PlusIcon, XIcon } from "@/components/ui/icons";
 import type { SyncCwdConfig } from "@/lib/sync-cwd-config";
 import {
   GITHUB_FONT_SIZE_MAX,
@@ -5836,7 +5836,7 @@ function KeybindingsSection() {
                 }}
                 title={t("common.remove")}
               >
-                ✕
+                <XIcon size={12} />
               </button>
             </div>
           </div>
@@ -6362,6 +6362,8 @@ export function SettingsView() {
             <button
               data-testid="add-profile-btn"
               onClick={handleAddProfile}
+              title={t("nav.addProfile")}
+              aria-label={t("nav.addProfile")}
               className="text-xs"
               style={{
                 color: "var(--accent)",
@@ -6370,7 +6372,7 @@ export function SettingsView() {
                 cursor: "pointer",
               }}
             >
-              +
+              <PlusIcon />
             </button>
           </div>
 
@@ -6413,7 +6415,7 @@ export function SettingsView() {
                   }}
                   title={t("nav.deleteProfile")}
                 >
-                  ✕
+                  <XIcon size={12} />
                 </button>
               </div>
             );

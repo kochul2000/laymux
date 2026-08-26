@@ -27,7 +27,11 @@ export function TerminalActivityWidget({ instance, dragRegion }: WidgetComponent
         total: counted.length,
       })}
     >
-      <span style={{ color: busy > 0 ? "var(--accent)" : "var(--text-muted)" }}>●</span>
+      <span
+        aria-hidden="true"
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ background: busy > 0 ? "var(--accent)" : "var(--text-muted)" }}
+      />
       <span data-testid={`widget-terminal-activity-${instance.id}-count`}>
         {busy}
         <WidgetLabel>{` / ${counted.length}`}</WidgetLabel>

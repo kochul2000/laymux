@@ -39,6 +39,7 @@ import { useTerminalStartupStore } from "@/stores/terminal-startup-store";
 import { TerminalView } from "@/components/views/TerminalView";
 import { PaneLoadingPlaceholder } from "@/components/ui/PaneLoadingPlaceholder";
 import { OsHandoffActions } from "@/components/ui/OsHandoffActions";
+import { ZoomInIcon, ZoomOutIcon } from "@/components/ui/icons";
 
 /**
  * Shared file-viewer body. The single rendering mechanism behind every entry
@@ -699,7 +700,7 @@ function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: num
         className="hover-bg-strong rounded px-1.5 py-1 text-xs"
         style={zoomButtonStyle}
       >
-        −
+        <ZoomOutIcon />
       </button>
       <span
         className="px-1 text-xs"
@@ -717,7 +718,7 @@ function ImageZoomControls({ zoom, onZoom }: { zoom: number; onZoom: (delta: num
         className="hover-bg-strong rounded px-1.5 py-1 text-xs"
         style={zoomButtonStyle}
       >
-        +
+        <ZoomInIcon />
       </button>
     </>
   );

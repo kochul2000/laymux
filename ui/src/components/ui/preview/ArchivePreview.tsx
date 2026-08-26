@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ArchiveEntry } from "@/lib/tauri-api";
 import { formatBytes, pluralize } from "@/lib/preview/format";
 import { PreviewNotice } from "./PreviewNotice";
+import { ChevronDownIcon, FolderIcon } from "@/components/ui/icons";
 
 type SortKey = "name" | "size";
 
@@ -77,12 +78,14 @@ export function ArchivePreview({
             <tr>
               <th style={headerStyle}>
                 <button type="button" style={sortButtonStyle} onClick={() => setSortKey("name")}>
-                  {`Name${sortKey === "name" ? " ▾" : ""}`}
+                  <span>Name</span>
+                  {sortKey === "name" && <ChevronDownIcon size={12} />}
                 </button>
               </th>
               <th style={{ ...headerStyle, textAlign: "right" }}>
                 <button type="button" style={sortButtonStyle} onClick={() => setSortKey("size")}>
-                  {`Size${sortKey === "size" ? " ▾" : ""}`}
+                  <span>Size</span>
+                  {sortKey === "size" && <ChevronDownIcon size={12} />}
                 </button>
               </th>
               <th style={{ ...headerStyle, textAlign: "right" }}>Packed</th>
@@ -98,8 +101,15 @@ export function ArchivePreview({
                 data-testid="archive-preview-row"
               >
                 <td style={{ ...cellStyle, overflowWrap: "anywhere" }}>
-                  <span style={{ color: "var(--text-muted)", userSelect: "none" }}>
-                    {entry.isDirectory ? "▸ " : "  "}
+                  <span
+                    style={{
+                      color: "var(--text-muted)",
+                      display: "inline-flex",
+                      width: 14,
+                      userSelect: "none",
+                    }}
+                  >
+                    {entry.isDirectory && <FolderIcon size={12} />}
                   </span>
                   <span style={{ color: entry.isDirectory ? "var(--accent)" : undefined }}>
                     {entry.name}
@@ -146,10 +156,13 @@ const headerStyle: React.CSSProperties = {
 };
 
 const sortButtonStyle: React.CSSProperties = {
+  alignItems: "center",
   background: "transparent",
   border: "none",
   color: "inherit",
   cursor: "pointer",
+  display: "inline-flex",
   font: "inherit",
+  gap: 2,
   padding: 0,
 };

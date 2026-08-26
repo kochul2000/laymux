@@ -113,6 +113,7 @@
       "github": "GitHub",
       "keybindings": "Keybindings",
       "profileDefaults": "Defaults",
+      "addProfile": "Add profile",
       "deleteProfile": "Delete profile",
       "widgets": "Widgets",
       "groupGeneral": "General",
@@ -813,6 +814,12 @@
     }
   },
   "workspace": {
+    "commandStatus": {
+      "working": "Command running",
+      "success": "Command succeeded",
+      "failure": "Command failed",
+      "idle": "No command result"
+    },
     "newWorkspace": "New Workspace",
     "workspaces": "Workspaces",
     "notifications": "Notifications",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { clipboardWriteText } from "@/lib/tauri-api";
 import { formatPaneIdentifier } from "@/lib/pane-numbers";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
+import { CheckIcon } from "@/components/ui/icons";
 
 /**
  * Small badge showing a pane's spatial reading-order number (issue #256).
@@ -81,7 +82,7 @@ export function PaneNumberBadge({
 
   const content = copied ? (
     <span data-testid="pane-number-badge-copied" aria-hidden>
-      ✓
+      <CheckIcon size={11} strokeWidth={2.5} />
     </span>
   ) : (
     number

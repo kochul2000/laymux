@@ -9,6 +9,7 @@ import {
   type RawTerminalState,
 } from "./activity-handler";
 import { selectTerminalLastInput } from "./terminal-last-input";
+import type { StatusIconGlyph } from "./activity-markers";
 
 export interface LastCommandInfo {
   command: string;
@@ -407,7 +408,7 @@ export function formatActivity(activity: TerminalActivityInfo | undefined): {
 }
 
 export interface CommandStatus {
-  icon: string; // "⏳" | "✓" | "✗" | "—"
+  icon: StatusIconGlyph;
   color: string; // CSS color value
   text?: string; // display text override (e.g., Claude activity message)
 }
