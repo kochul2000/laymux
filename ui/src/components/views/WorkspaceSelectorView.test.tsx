@@ -650,6 +650,8 @@ describe("WorkspaceSelectorView", () => {
       "workspace-terminal-pane-row",
       "workspace-terminal-pane-row-two-line",
     );
+    // 마지막 입력은 pane 행에서 눈으로 먼저 잡히는 정보라 굵게 그린다.
+    expect(screen.getByTestId("pane-last-input-terminal-p1")).toHaveClass("font-bold");
     expect(screen.queryByText("스트리밍 중인 assistant 토큰")).not.toBeInTheDocument();
   });
 

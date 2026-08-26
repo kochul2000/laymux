@@ -1358,9 +1358,6 @@
         max-height: 18px;
         align-items: center;
       }
-      .workspace-pane-entry:not(:last-child) > .workspace-pane-row {
-        border-bottom: 1px solid var(--border);
-      }
       .dock-terminal-row {
         min-height: 18px;
         max-height: 18px;
@@ -1437,6 +1434,7 @@
         min-height: 14px;
         overflow: hidden;
         color: var(--text-secondary);
+        font-weight: 700;
         opacity: 0.68;
         text-overflow: ellipsis;
         white-space: nowrap;
