@@ -628,7 +628,7 @@ function WorkspaceItem({
                               {lastInputMode === "perPane" && (
                                 <div
                                   data-testid={`pane-last-input-${ts.id}`}
-                                  className="min-w-0 truncate"
+                                  className="min-w-0 truncate font-bold"
                                   title={lastInput}
                                   style={{
                                     minHeight: "1rem",

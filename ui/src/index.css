@@ -531,9 +531,6 @@
   .workspace-terminal-pane-row-two-line {
     max-height: var(--workspace-terminal-pane-row-max-h);
   }
-  .workspace-terminal-pane-row:not(:last-child) {
-    border-bottom: 1px dotted var(--border);
-  }
   .workspace-pane-row-collapsed {
     max-height: 0;
     opacity: 0;
