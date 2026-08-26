@@ -216,8 +216,13 @@ const POLL_QUIET_MS = 7000;
  */
 async function openDrawerSettings(page: Page) {
   if (await page.locator("#widgetStripToggle").isVisible()) return;
+  const navigationToggle = page.locator("#navToggle");
   const settings = page.locator("#drawerSettingsButton");
-  if (!(await settings.isVisible())) await page.locator("#navToggle").click();
+  // A closed drawer remains in the DOM, so its settings button can satisfy
+  // `isVisible()` even while CSS has translated it outside the viewport.
+  if ((await navigationToggle.getAttribute("aria-expanded")) !== "true") {
+    await navigationToggle.click();
+  }
   await settings.click();
 }
 

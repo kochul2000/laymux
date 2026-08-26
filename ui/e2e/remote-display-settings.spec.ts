@@ -712,14 +712,13 @@ test("overlay Composer는 이미 덮은 agent 입력 줄만큼 viewport를 추�
   await expect(page.locator("#terminalComposer")).toBeVisible();
 
   await expect
-    .poll(() => page.evaluate(() => (window as TermWindow).__remoteTerm?.buffer.active.baseY ?? 0))
-    .toBeGreaterThan(0);
-  const viewport = await page.evaluate(() => {
-    const buffer = (window as TermWindow).__remoteTerm!.buffer.active;
-    return { baseY: buffer.baseY, viewportY: buffer.viewportY };
-  });
-  expect(viewport.baseY).toBeGreaterThan(0);
-  expect(viewport.viewportY).toBe(viewport.baseY);
+    .poll(() =>
+      page.evaluate(() => {
+        const buffer = (window as TermWindow).__remoteTerm?.buffer.active;
+        return Boolean(buffer && buffer.baseY > 0 && buffer.viewportY === buffer.baseY);
+      }),
+    )
+    .toBe(true);
 });
 
 test("Composer 높이가 바뀌면 숨김 경계와 최하단 버튼 위치를 overlay에 맞춘다", async ({ page }) => {
@@ -766,6 +765,20 @@ test("Composer 높이가 바뀌면 숨김 경계와 최하단 버튼 위치를 o
     };
   });
   await page.locator("#connect").click();
+  await expect
+    .poll(() => page.evaluate(() => Boolean((window as TermWindow).__remoteTerm)))
+    .toBe(true);
+  // Make the hide request and queue a newer fit in the same task. The boundary
+  // must wait for that newest generation instead of sampling first-pass metrics.
+  await page.evaluate(() => {
+    const term = (window as TermWindow).__remoteTerm;
+    const composer = document.querySelector<HTMLTextAreaElement>("#composerInput");
+    if (!term || !composer) return;
+    composer.blur();
+    composer.focus();
+    term.options.fontSize += 1;
+    window.dispatchEvent(new Event("resize"));
+  });
 
   const readBoundary = () =>
     page.evaluate(() => {

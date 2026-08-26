@@ -1097,6 +1097,81 @@ test.describe("remote mobile layout", () => {
     await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
   });
 
+  test("routes the first real xterm touch to Composer before snapshot readiness", async ({
+    page,
+  }) => {
+    let outputSocket: WebSocketRoute | null = null;
+    await installRemoteClientRoutes(page);
+    await page.route("http://remote.test/remote/v1/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/remote/v1/session/claim") {
+        await route.fulfill({ json: { leaseId: "lease-1", heartbeatTimeoutSeconds: 45 } });
+        return;
+      }
+      if (url.pathname === "/remote/v1/navigation") {
+        await route.fulfill({
+          json: {
+            terminals: [{ id: "term-1", title: "Shell", appearance: {} }],
+            activeWorkspace: {
+              focusedPaneNumber: 1,
+              panes: [
+                {
+                  paneNumber: 1,
+                  terminalId: "term-1",
+                  terminalLive: true,
+                  viewType: "TerminalView",
+                },
+              ],
+            },
+            workspaces: [],
+            docks: [],
+            notifications: [],
+          },
+        });
+        return;
+      }
+      await route.fulfill({ json: {} });
+    });
+    await page.routeWebSocket(/\/remote\/v1\/terminals\/term-1\/output/, (socket) => {
+      outputSocket = socket;
+    });
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    const editor = page.locator("#composerInput");
+    await expect(page.locator("#terminal .xterm")).toBeVisible();
+    await expect(editor).toBeEnabled();
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "false");
+    await expect.poll(() => outputSocket).not.toBeNull();
+
+    await page.locator("#terminal .xterm").tap();
+    await expect(editor).toBeFocused();
+    await page.keyboard.type("real xterm touch");
+    await expect(editor).toHaveValue("real xterm touch");
+
+    outputSocket!.send(
+      JSON.stringify({
+        type: "terminal.output",
+        version: 1,
+        phase: "snapshot",
+        seqStart: 0,
+        seqEnd: 0,
+        byteLength: 0,
+        state: {
+          version: 1,
+          snapshotStartSeq: 0,
+          snapshotSeq: 0,
+          protocolRevision: 0,
+          modes: { bracketedPaste: false },
+        },
+      }),
+    );
+    outputSocket!.send(Buffer.alloc(0));
+    await expect(page.locator("#terminalComposer")).toHaveAttribute("data-can-send", "true");
+    await expect(editor).toBeFocused();
+    await expect(editor).toHaveValue("real xterm touch");
+  });
+
   test("keeps terminal keyboard focus while sending every soft-key sequence", async ({ page }) => {
     const writes: string[] = [];
     let outputSocket: WebSocketRoute | null = null;
