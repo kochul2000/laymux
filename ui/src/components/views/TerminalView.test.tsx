@@ -84,6 +84,7 @@ const mockScrollLines = vi.fn((lines: number) => {
 type MockBufferLine = {
   length: number;
   getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
+  translateToString(trimRight?: boolean): string;
 };
 let mockBufferLineText: string | null = null;
 function setMockBufferLine(text: string | null): void {
@@ -96,6 +97,7 @@ function mockBufferLine(): MockBufferLine | undefined {
     length: text.length,
     getCell: (x: number) =>
       x < text.length ? { getChars: () => text[x], getWidth: () => 1 } : undefined,
+    translateToString: (trimRight = false) => (trimRight ? text.trimEnd() : text),
   };
 }
 const mockBufferActive: {
@@ -129,9 +131,15 @@ type MockTerminalInstance = {
 const createdTerminals: MockTerminalInstance[] = [];
 const mockModes = { synchronizedOutputMode: false };
 let capturedKeyHandler: ((e: KeyboardEvent) => boolean) | null = null;
+let capturedWheelHandler: ((e: WheelEvent) => boolean) | null = null;
 const mockAttachCustomKeyEventHandler = vi.fn((handler: (e: KeyboardEvent) => boolean) => {
   capturedKeyHandler = handler;
 });
+const mockAttachCustomWheelEventHandler = vi.fn((handler: (e: WheelEvent) => boolean) => {
+  capturedWheelHandler = handler;
+});
+const mockConsumeWheelEvent = vi.fn(() => 1);
+const mockTerminalInput = vi.fn();
 function completeMockWrite(_: string | Uint8Array, callback?: () => void): void {
   callback?.();
 }
@@ -312,6 +320,8 @@ vi.mock("@xterm/xterm", () => ({
     scrollToBottom = mockScrollToBottom;
     scrollLines = mockScrollLines;
     attachCustomKeyEventHandler = mockAttachCustomKeyEventHandler;
+    attachCustomWheelEventHandler = mockAttachCustomWheelEventHandler;
+    input = mockTerminalInput;
     private readonly userInputListeners = new Set<() => void>();
     _core = {
       // ADR-0188 point 트리거는 xterm 코어의 좌표 변환을 쓴다. 셀 폭 10px,
@@ -323,6 +333,13 @@ vi.mock("@xterm/xterm", () => ({
         ],
       },
       screenElement: null,
+      coreMouseService: {
+        consumeWheelEvent: mockConsumeWheelEvent,
+      },
+      _renderService: {
+        dimensions: { device: { cell: { height: 20 } } },
+      },
+      _coreBrowserService: { dpr: 1 },
       coreService: {
         // The field both renderers gate the cursor on. Real xterm owns it and
         // DECTCEM writes it; issue #598 suppresses through it, so the mock must
@@ -752,6 +769,7 @@ describe("TerminalView", () => {
     localStorage.clear();
     clearRuntimeComposerState();
     capturedKeyHandler = null;
+    capturedWheelHandler = null;
     capturedLinkHandler = null;
     capturedIndentedLinkHandler = null;
     createdTerminals.length = 0;
@@ -9627,6 +9645,45 @@ describe("TerminalView", () => {
       expect(term.options.scrollSensitivity).toBe(5);
       expect(term.options.fastScrollSensitivity).toBe(8);
     });
+  });
+
+  it("routes wheel rows to a visible normal-buffer Codex transcript pager", async () => {
+    const terminalId = "t-codex-transcript-wheel";
+    setMockBufferLine("/ T R A N S C R I P T / / / / / /");
+    mockConsumeWheelEvent.mockReturnValueOnce(3);
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForLocalTerminalControl();
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, {
+        activity: { type: "interactiveApp", name: "Codex" },
+      });
+    });
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaMode: WheelEvent.DOM_DELTA_LINE,
+      deltaY: 1,
+    });
+
+    expect(capturedWheelHandler).not.toBeNull();
+    expect(capturedWheelHandler?.(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(mockConsumeWheelEvent).toHaveBeenCalledWith(event, 20, 1);
+    expect(mockTerminalInput.mock.calls).toEqual(Array(3).fill(["\x1b[B", true]));
+
+    act(() => {
+      useTerminalStore.getState().updateInstanceInfo(terminalId, { activity: { type: "shell" } });
+    });
+    expect(
+      capturedWheelHandler?.(
+        new WheelEvent("wheel", {
+          cancelable: true,
+          deltaMode: WheelEvent.DOM_DELTA_LINE,
+          deltaY: 1,
+        }),
+      ),
+    ).toBe(true);
+    expect(mockTerminalInput).toHaveBeenCalledTimes(3);
   });
 
   // -- URL link click (issue #29) --

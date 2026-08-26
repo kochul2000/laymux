@@ -223,6 +223,7 @@ ADR 이 필요한 대표 기준:
 | [0203](0203-remote-composer-overlays-terminal-output.md) | Remote Composer는 터미널 출력 위에 겹친다 (0200 배치·geometry 정정) | Accepted |
 | [0204](0204-remote-lease-recovery-on-control-failure.md) | 제어 근거로 거절된 Remote 요청은 lease 를 재검증하고, 돌아온 탭은 쥔 lease 를 즉시 프로브한다 (0042·0037 확장) | Proposed |
 | [0205](0205-lucide-application-icon-source.md) | 범용 애플리케이션 아이콘은 Lucide를 단일 출처로 사용한다 (0192 부분 대체) | Accepted |
+| [0206](0206-codex-normal-buffer-transcript-wheel-routing.md) | Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다 (0142 확장) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -22,6 +22,7 @@
 import { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
 import { computeCellMetrics, computeHelperAnchorStyle } from "@/lib/ime-anchor";
+import { createCodexTranscriptWheelHandler } from "@/lib/codex-transcript-wheel";
 import { createScreenTerminal } from "./xterm-screen";
 
 function stubMatchMedia() {
@@ -47,7 +48,11 @@ function writeTerminal(terminal: Terminal, data: string): Promise<void> {
 
 const mountedWheelTerminals: Terminal[] = [];
 
-function mountWheelTerminal(options: { scrollSensitivity: number; fastScrollSensitivity: number }) {
+function mountWheelTerminal(options: {
+  scrollSensitivity: number;
+  fastScrollSensitivity: number;
+  cols?: number;
+}) {
   stubMatchMedia();
   const host = document.createElement("div");
   Object.defineProperty(host, "clientWidth", { value: 800, configurable: true });
@@ -55,9 +60,10 @@ function mountWheelTerminal(options: { scrollSensitivity: number; fastScrollSens
   document.body.appendChild(host);
   const terminal = new Terminal({
     allowProposedApi: true,
-    cols: 40,
+    cols: options.cols ?? 40,
     rows: 6,
-    ...options,
+    scrollSensitivity: options.scrollSensitivity,
+    fastScrollSensitivity: options.fastScrollSensitivity,
   });
   terminal.open(host);
   const screenElement = terminal.element!.querySelector<HTMLElement>(".xterm-screen")!;
@@ -150,6 +156,67 @@ describe("wheel sensitivity in application-owned terminal modes", () => {
     expect(data).toEqual([]);
     wheel();
     expect(data.join("")).toBe("\x1b[B");
+  });
+
+  it("routes normal-buffer Codex transcript wheel input as discrete cursor keys", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isCodexActive: () => true,
+        isLocalControlAllowed: () => true,
+      }),
+    );
+    await writeTerminal(
+      terminal,
+      "\x1b[2J\x1b[H/ T R A N S C R I P T\r\ncontent\r\n\r\n↑/↓ to scroll  pgup/pgdn to page  home/end to jump",
+    );
+    expect(terminal.buffer.active.type).toBe("normal");
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: 1,
+      }),
+    );
+
+    expect(data).toEqual(Array(5).fill("\x1b[B"));
+    expect(terminal.buffer.active.viewportY).toBe(terminal.buffer.active.baseY);
+  });
+
+  it("recognizes the Codex transcript header clipped by a narrow pane", async () => {
+    const terminal = mountWheelTerminal({
+      cols: 12,
+      scrollSensitivity: 1,
+      fastScrollSensitivity: 5,
+    });
+    const data: string[] = [];
+    terminal.onData((chunk) => data.push(chunk));
+    terminal.attachCustomWheelEventHandler(
+      createCodexTranscriptWheelHandler({
+        terminal,
+        isCodexActive: () => true,
+        isLocalControlAllowed: () => true,
+      }),
+    );
+    // Ratatui clips the 21-column header to the pane width instead of wrapping it.
+    await writeTerminal(terminal, "\x1b[2J\x1b[H/ T R A N S");
+
+    terminal.element!.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaMode: WheelEvent.DOM_DELTA_LINE,
+        deltaY: -1,
+      }),
+    );
+
+    expect(data).toEqual(["\x1b[A"]);
   });
 });
 
