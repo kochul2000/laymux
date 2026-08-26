@@ -11,7 +11,6 @@
       "pathLinkHintDir": "클릭: 이 폴더로 이동 · Ctrl: 탐색기에서 열기 · Ctrl+Shift: 위치 보기",
       "scrollToBottom": "맨 아래로 이동",
       "composerEditor": "터미널 입력 초안",
-      "composerPlaceholder": "입력 후 Enter 전송 · Shift+Enter 줄바꿈",
       "composerResize": "입력 영역 크기 조절 (위 경계 드래그)",
       "composerHistory": "최근 입력",
       "composerAutocomplete": "입력 추천",

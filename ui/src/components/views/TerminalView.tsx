@@ -6684,7 +6684,6 @@ export function TerminalView({
         text={composerDraft.text}
         labels={{
           editor: t("terminal.composerEditor"),
-          placeholder: t("terminal.composerPlaceholder"),
           resize: t("terminal.composerResize"),
           history: t("terminal.composerHistory"),
           autocomplete: t("terminal.composerAutocomplete"),

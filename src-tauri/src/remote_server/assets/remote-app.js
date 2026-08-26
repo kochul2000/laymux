@@ -463,9 +463,6 @@
         // looks like mobile, it behaves like mobile. A default; a settings
         // override can come later.
         const mobileLayout = coarsePointer || localAppMode;
-        composerInput.placeholder = mobileLayout
-          ? "Enter for a newline · tap Send to submit"
-          : "Enter to send · Shift+Enter for a newline";
 
         const defaultAppearance = Object.freeze({
           fontFamily: "'Cascadia Mono', 'Cascadia Mono', 'Consolas', monospace",

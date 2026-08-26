@@ -19,7 +19,6 @@ import {
 
 export interface TerminalInputComposerLabels {
   editor: string;
-  placeholder: string;
   resize: string;
   /** Accessible name for the Tab-triggered past-input recall list (issue #504). */
   history: string;
@@ -539,7 +538,6 @@ export function TerminalInputComposer({
         data-testid={childTestId("textarea")}
         aria-label={labels.editor}
         value={text}
-        placeholder={labels.placeholder}
         disabled={disabled}
         autoFocus={autoFocus && !disabled}
         aria-expanded={historyVisible || autocompleteVisible}
