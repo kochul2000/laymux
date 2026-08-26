@@ -1691,7 +1691,7 @@ test("Tab on an empty draft opens the newest-first recall popup and Enter fills 
   expect(remote.inputs).toHaveLength(3);
 });
 
-test("tapping the empty editor opens the recall popup — soft keyboards have no Tab key (#504)", async ({
+test("an empty-editor tap opens recall only with the keyboard up and a blank tap dismisses suggestions (#504)", async ({
   page,
 }) => {
   const remote = await installRemotePage(page, { coarse: true });
@@ -1713,10 +1713,36 @@ test("tapping the empty editor opens the recall popup — soft keyboards have no
   await expect.poll(() => remote.inputs.length).toBe(2);
   await expect(editor).toHaveValue("");
 
-  // A tap on the empty editor opens the same newest-first popup Tab opens.
+  // DOM focus is not evidence that the soft keyboard is visible. The first
+  // tap only raises the keyboard, so it must not cover the editor with recall.
+  await editor.click();
+  await expect(editor).toBeFocused();
+  await expect(list).toBeHidden();
+
+  // Model the VisualViewport shrink arriving between pointer-down and click as
+  // the first tap raises the keyboard. The decision is based on gesture-start
+  // geometry, so this click still must not open recall.
+  await editor.dispatchEvent("pointerdown");
+  await page.setViewportSize({ width: 390, height: 500 });
+  await editor.dispatchEvent("click");
+  await expect(list).toBeHidden();
+
+  // A later tap starts with the keyboard visible and may now open the same
+  // newest-first popup Tab opens.
   await editor.click();
   await expect(list).toBeVisible();
   await expect(list.locator('[role="option"]')).toHaveText(["echo two", "echo one"]);
+
+  // A blank tap in the editor dismisses the visible list without changing or
+  // sending the draft.
+  await editor.click();
+  await expect(list).toBeHidden();
+  await expect(editor).toHaveValue("");
+  expect(remote.inputs).toHaveLength(2);
+
+  // Open it again to verify the existing touch-friendly pick path.
+  await editor.click();
+  await expect(list).toBeVisible();
 
   // Entries commit on mousedown (touch-friendly): fills the draft, no send.
   await list.locator('[role="option"]').nth(1).dispatchEvent("mousedown");
@@ -1728,6 +1754,14 @@ test("tapping the empty editor opens the recall popup — soft keyboards have no
   // owns the non-empty draft, and only while typing).
   await editor.click();
   await expect(list).toBeHidden();
+
+  // A blank tap dismisses the as-you-type list too, while preserving text.
+  await editor.fill("echo");
+  const autocomplete = page.locator("#composerAutocompleteList");
+  await expect(autocomplete).toBeVisible();
+  await editor.click();
+  await expect(autocomplete).toBeHidden();
+  await expect(editor).toHaveValue("echo");
 
   // A tap mid-IME composition never opens the popup, even on an empty draft;
   // it opens again once composition ends.
