@@ -936,7 +936,7 @@ Remote drawer도 선택된 workspace만 축약하지 않고 모든 visible works
 
 ### 마지막 명령 표시 (Activity-Aware Computation)
 
-표시 항목(아이콘, 색상, 텍스트)은 **원시 상태를 변경하지 않고**, activity 타입을 추가 입력으로 받아 계산 함수에서 분기하여 도출한다.
+표시 항목(아이콘, 색상, 텍스트)은 **원시 상태를 변경하지 않고**, activity 타입을 추가 입력으로 받아 계산 함수에서 분기하여 도출한다. 아래 표의 `⏳`·`✓`·`✗`·`—`는 계산·Automation/Remote projection이 유지하는 호환 식별자다. 데스크톱 React는 이 문자를 직접 표시하지 않고 `CommandStatusIcon`에서 각각 Lucide `Hourglass`·`Check`·`X`·`Minus`로 렌더링한다([ADR-0205](../adr/0205-lucide-application-icon-source.md)).
 
 #### 기본 (셸, activity = none)
 
@@ -980,7 +980,7 @@ working 스피너 문자 목록(`✶✻✽✢` + `◐◑`(U+25D0/25D1) + Braille
 - 계산 함수는 원시 상태 + activity 타입을 입력받아 최종 표시를 도출한다. activity 타입이 추가되면 계산 함수에 분기만 추가한다.
 - 앱 전용 분기 로직은 [api-contracts.md](./api-contracts.md) §15.6(앱 전용 편의 코드 격리)에 따라 격리된 모듈에 구현하고, 계산 함수에서 import하여 사용한다.
 
-결과 아이콘은 pane 첫째 줄에 표시한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
+결과 아이콘은 pane 첫째 줄에 Lucide SVG로 표시하고 상태 색상과 읽지 않은 알림 링은 기존 배지가 소유한다. 마지막 입력 표시는 `workspaceSelector.lastInputMode`가 소유한다([ADR-0194](../adr/0194-workspace-pane-last-input-second-line.md)). 기본 `perPane`은 각 terminal pane 둘째 줄에 그 pane의 입력을 표시한다. `workspaceLatest`는 terminal pane을 첫째 줄만 있는 높이로 줄이고, visible terminal pane 중 가장 최근 입력 하나를 pane 목록 아래 별도 한 줄에 표시한다. 두 모드 모두 `lastUserInput/lastUserInputAt`과 `lastCommand/lastCommandAt` 중 더 최신인 비어 있지 않은 제출 문자열을 선택하고 공백을 한 칸으로 접은 뒤 최대 50자로 truncate한다. Composer는 structured input 성공 뒤 snapshot을 기록하며 Direct는 human `onData`의 bounded line editor가 CR/LF 제출을 본 뒤 기록한다. 이 상태는 메모리 전용이고 세션에 영속하지 않는다. 과거처럼 workspace 전체의 마지막 명령·상대 시간·최신 알림 텍스트를 섞던 통합 상태 행은 어느 모드에서도 렌더하지 않는다.
 
 #### 출력 기반 메시지 추출 (Codex 대화 · Claude recap)
 

@@ -24,6 +24,7 @@ import {
 } from "@/lib/widget-placement";
 import { findWidgetDefinition } from "./registry";
 import type { WidgetEnv } from "./types";
+import { EllipsisIcon } from "@/components/ui/icons";
 
 /** Width reserved for the "more" affordance while anything is still collapsed. */
 const OVERFLOW_INDICATOR_WIDTH = 18;
@@ -108,7 +109,7 @@ export function WidgetSlot({
       aria-expanded={expanded}
       onClick={() => setOpenedFor(expanded ? null : collapsedSignature)}
     >
-      ⋯
+      <EllipsisIcon size={12} />
     </button>
   );
 

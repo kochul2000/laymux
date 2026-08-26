@@ -9,6 +9,7 @@ import {
   type CSSProperties,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDownIcon } from "@/components/ui/icons";
 import i18n from "@/i18n";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -6663,19 +6664,7 @@ export function TerminalView({
               setShowScrollToBottom(false);
             }}
           >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="butt"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="m5 8.5 7 7 7-7" />
-            </svg>
+            <ChevronDownIcon size={24} strokeWidth={3} />
           </button>
         )}
       </div>

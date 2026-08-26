@@ -31,6 +31,7 @@
     "github-markdown-css": "^5.9.0",
     "html2canvas": "^1.4.1",
     "i18next": "^26.3.1",
+    "lucide-react": "^1.33.0",
     "marked": "^18.0.7",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

@@ -9,6 +9,21 @@ import { PaneControlContext, type PaneInputModeToggle } from "./PaneControlConte
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
+import {
+  ColumnsIcon,
+  DownloadIcon,
+  EllipsisIcon,
+  EraserIcon,
+  EyeIcon,
+  EyeOffIcon,
+  KeyboardIcon,
+  PencilIcon,
+  PinIcon,
+  RefreshIcon,
+  RowsIcon,
+  UploadIcon,
+  XIcon,
+} from "@/components/ui/icons";
 
 /**
  * 컨트롤 바 표시 모드. 각 모드는 독립적이며 서브 상태를 갖지 않는다.
@@ -146,40 +161,7 @@ function InputModeToggleBtn({ toggle }: { toggle: PaneInputModeToggle }) {
           : "Direct input — switch to Composer (Ctrl+Alt+M)"
       }
     >
-      {composer ? (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M13.5 8.5l2.5 2.5"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      ) : (
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <rect
-            x="2.5"
-            y="6"
-            width="19"
-            height="12"
-            rx="2"
-            stroke="currentColor"
-            strokeWidth="1.8"
-          />
-          <path
-            d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-          />
-        </svg>
-      )}
+      {composer ? <PencilIcon /> : <KeyboardIcon />}
     </BarBtn>
   );
 }
@@ -197,22 +179,7 @@ function PropagateCwdOnceBtn({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       title={`Propagate CWD once${keys ? ` (${keys})` : ""}`}
     >
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-        <path d="M7 2v6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-        <path
-          d="M4 5l3-3 3 3Z"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinejoin="round"
-          fill="currentColor"
-        />
-        <path
-          d="M3 9.5a4 4 0 1 0 8 0"
-          stroke="currentColor"
-          strokeWidth="1.2"
-          strokeLinecap="round"
-        />
-      </svg>
+      <UploadIcon />
     </BarBtn>
   );
 }
@@ -409,27 +376,7 @@ function BarContent({
                     active={isOn}
                     style={isOn ? undefined : { opacity: 0.4 }}
                   >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path
-                        d="M4 5l3-3 3 3Z"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinejoin="round"
-                        fill={isOn ? "currentColor" : "none"}
-                      />
-                      <path
-                        d="M7 5v5"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d="M3 12h8"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                    <UploadIcon />
                   </BarBtn>
                 </>
               );
@@ -446,27 +393,7 @@ function BarContent({
                   active={isOn}
                   style={isOn ? undefined : { opacity: 0.4 }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path
-                      d="M4 7l3 3 3-3Z"
-                      stroke="currentColor"
-                      strokeWidth="1.2"
-                      strokeLinejoin="round"
-                      fill={isOn ? "currentColor" : "none"}
-                    />
-                    <path
-                      d="M7 2v5"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M3 12h8"
-                      stroke="currentColor"
-                      strokeWidth="1.2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
+                  <DownloadIcon />
                 </BarBtn>
               );
             })()}
@@ -477,50 +404,12 @@ function BarContent({
               onClick={actions.onSplitH}
               title="Split horizontal"
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect
-                  x="1"
-                  y="1"
-                  width="12"
-                  height="5"
-                  rx="1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                />
-                <rect
-                  x="1"
-                  y="8"
-                  width="12"
-                  height="5"
-                  rx="1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                />
-              </svg>
+              <RowsIcon />
             </BarBtn>
           )}
           {actions.onSplitV && (
             <BarBtn testId="pane-control-split-v" onClick={actions.onSplitV} title="Split vertical">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect
-                  x="1"
-                  y="1"
-                  width="5"
-                  height="12"
-                  rx="1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                />
-                <rect
-                  x="8"
-                  y="1"
-                  width="5"
-                  height="12"
-                  rx="1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                />
-              </svg>
+              <ColumnsIcon />
             </BarBtn>
           )}
           {onToggleHidden && (
@@ -530,33 +419,7 @@ function BarContent({
               title={paneHidden ? "Show in workspace list" : "Hide from workspace list"}
               active={paneHidden}
             >
-              {paneHidden ? (
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="7" cy="7" r="1.7" stroke="currentColor" strokeWidth="1.2" />
-                  <path
-                    d="M2.5 11.5l9-9"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="7" cy="7" r="1.7" stroke="currentColor" strokeWidth="1.2" />
-                </svg>
-              )}
+              {paneHidden ? <EyeOffIcon /> : <EyeIcon />}
             </BarBtn>
           )}
           {currentView.type === "TerminalView" && actions.onRestart && (
@@ -566,40 +429,12 @@ function BarContent({
               title="Restart view"
               danger
             >
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path
-                  d="M10.5 6.5A4.5 4.5 0 1 1 9.2 3.3"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M9.2 1.8v2.1h2.1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <RefreshIcon size={13} />
             </BarBtn>
           )}
           {actions.onClear && (
             <BarBtn testId="pane-control-clear" onClick={actions.onClear} title="Clear view" danger>
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <path
-                  d="M5 3l5 5-3 3-5-5z"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinejoin="round"
-                />
-                <path d="M2 11h9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-                <path
-                  d="M5 3l2.5-1"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <EraserIcon size={13} />
             </BarBtn>
           )}
           {actions.onDelete && (
@@ -609,14 +444,7 @@ function BarContent({
               title="Delete pane"
               danger
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path
-                  d="M3 3l6 6M9 3l-6 6"
-                  stroke="currentColor"
-                  strokeWidth="1.4"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <XIcon size={12} />
             </BarBtn>
           )}
 
@@ -631,18 +459,7 @@ function BarContent({
           title={mode === "pinned" ? "Unpin" : "Pin"}
           active={mode === "pinned"}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M4.5 3L5 5.5h2L7.5 3"
-              stroke="currentColor"
-              strokeWidth="1.1"
-              strokeLinejoin="round"
-              fill={mode === "pinned" ? "currentColor" : "none"}
-            />
-            <path d="M6 1.5V3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            <path d="M3.5 5.5h5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-            <path d="M6 5.5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
+          <PinIcon size={12} />
         </BarBtn>
       )}
       {showMinimize && (
@@ -651,11 +468,7 @@ function BarContent({
           onClick={() => onSetMode("minimized")}
           title="Minimize"
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <circle cx="3" cy="6" r="1" />
-            <circle cx="6" cy="6" r="1" />
-            <circle cx="9" cy="6" r="1" />
-          </svg>
+          <EllipsisIcon size={12} />
         </BarBtn>
       )}
     </div>
@@ -790,11 +603,7 @@ function NarrowControlAnchor({
         }}
         title="Pane controls"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <circle cx="3" cy="6" r="1" />
-          <circle cx="6" cy="6" r="1" />
-          <circle cx="9" cy="6" r="1" />
-        </svg>
+        <EllipsisIcon size={12} />
       </button>
     </div>
   );
@@ -823,11 +632,7 @@ function MinimizedButton({ onExpand }: { onExpand: () => void }) {
         }}
         title="Expand control bar"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <circle cx="3" cy="6" r="1" />
-          <circle cx="6" cy="6" r="1" />
-          <circle cx="9" cy="6" r="1" />
-        </svg>
+        <EllipsisIcon size={12} />
       </button>
     </div>
   );

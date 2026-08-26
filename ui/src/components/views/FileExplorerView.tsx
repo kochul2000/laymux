@@ -23,6 +23,14 @@ import {
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  FileIcon,
+  FolderIcon,
+  FolderUpIcon,
+  LinkIcon,
+} from "@/components/ui/icons";
 
 export interface FileExplorerViewProps {
   instanceId: string;
@@ -690,7 +698,7 @@ export function FileExplorerView({
           data-testid="file-explorer-back"
           title="Back (Alt+Left)"
         >
-          ←
+          <ArrowLeftIcon />
         </button>
         <button
           onClick={goForward}
@@ -703,7 +711,7 @@ export function FileExplorerView({
           data-testid="file-explorer-forward"
           title="Forward (Alt+Right)"
         >
-          →
+          <ArrowRightIcon />
         </button>
         {addressEditing ? (
           <input
@@ -795,14 +803,19 @@ export function FileExplorerView({
               onClick={(e) => handleItemClick(i, e)}
               onDoubleClick={() => handleItemDoubleClick(i)}
             >
-              <span className="truncate text-xs">
-                {entry.name === ".."
-                  ? "📁 .."
-                  : entry.isDirectory
-                    ? `📁 ${entry.name}/`
-                    : entry.isSymlink
-                      ? `🔗 ${entry.name}`
-                      : `📄 ${entry.name}`}
+              <span className="flex min-w-0 items-center gap-1 text-xs">
+                {entry.name === ".." ? (
+                  <FolderUpIcon size={13} />
+                ) : entry.isDirectory ? (
+                  <FolderIcon size={13} />
+                ) : entry.isSymlink ? (
+                  <LinkIcon size={13} />
+                ) : (
+                  <FileIcon size={13} />
+                )}
+                <span className="truncate">
+                  {entry.name === ".." ? ".." : entry.isDirectory ? `${entry.name}/` : entry.name}
+                </span>
               </span>
             </div>
           ))

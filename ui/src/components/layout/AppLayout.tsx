@@ -23,6 +23,7 @@ import { useHiddenItemsCoordinator } from "@/hooks/useHiddenItemsCoordinator";
 import { useTerminalStartupCoordinator } from "@/hooks/useTerminalStartupCoordinator";
 import { useSleepPrevention } from "@/hooks/useSleepPrevention";
 import { focusDockPane } from "@/lib/workspace-transition";
+import { XIcon } from "@/components/ui/icons";
 
 function ModalOverlay({
   testIdPrefix,
@@ -88,7 +89,7 @@ function ModalOverlay({
             }}
             title="Close"
           >
-            &#10005;
+            <XIcon />
           </button>
         </div>
         {children}

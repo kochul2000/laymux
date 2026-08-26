@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useOsHandoff } from "@/hooks/useOsHandoff";
+import { ExternalLinkIcon, FolderOpenIcon } from "@/components/ui/icons";
 
 /**
  * "이 파일을 이 PC 에서 열기 / 위치 보기" 버튼 한 쌍
@@ -30,7 +31,7 @@ export function OsHandoffActions({ path, variant, testIdPrefix }: OsHandoffActio
 
   const isCta = variant === "cta";
   const buttonClass = isCta
-    ? "hover-bg-strong rounded px-3 py-1.5 text-xs"
+    ? "hover-bg-strong inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs"
     : "hover-bg-strong flex h-6 items-center justify-center rounded px-2 text-xs";
 
   return (
@@ -50,7 +51,8 @@ export function OsHandoffActions({ path, variant, testIdPrefix }: OsHandoffActio
           aria-label={t("osHandoff.open")}
           data-testid={`${testIdPrefix}-open`}
         >
-          {isCta ? t("osHandoff.open") : "↗"}
+          <ExternalLinkIcon />
+          {isCta && <span>{t("osHandoff.open")}</span>}
         </button>
         <button
           type="button"
@@ -66,7 +68,8 @@ export function OsHandoffActions({ path, variant, testIdPrefix }: OsHandoffActio
           aria-label={t("osHandoff.reveal")}
           data-testid={`${testIdPrefix}-reveal`}
         >
-          {isCta ? t("osHandoff.reveal") : "🗀"}
+          <FolderOpenIcon size={12} />
+          {isCta && <span>{t("osHandoff.reveal")}</span>}
         </button>
       </div>
       {failure && (

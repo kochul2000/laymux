@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 // ship a stale client (ADR-0169). The build stamps the source hashes into the
 // artifact banner; this test recomputes them.
 const ASSETS_DIR = path.resolve(__dirname, "../../../src-tauri/src/remote_server/assets");
+const PAGE_PATH = path.resolve(ASSETS_DIR, "../page.html");
 
 const sourceHash = (file: string): string =>
   createHash("sha256")
@@ -28,5 +29,13 @@ describe("remote page bundle", () => {
   it("artifacts carry the do-not-edit banner", () => {
     const js = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8");
     expect(js.startsWith("// GENERATED FILE - DO NOT EDIT.")).toBe(true);
+  });
+
+  it("uses vector icons for the remote file viewer controls", () => {
+    const page = readFileSync(PAGE_PATH, "utf8");
+
+    for (const id of ["fileViewerZoomOut", "fileViewerZoomIn", "fileViewerClose"]) {
+      expect(page).toMatch(new RegExp(`<button id="${id}"[^>]*>\\s*<svg\\b`));
+    }
   });
 });

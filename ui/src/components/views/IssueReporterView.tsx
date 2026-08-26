@@ -5,6 +5,7 @@ import { inputStyle } from "@/components/ui/form-control-styles";
 import { ViewShell } from "@/components/ui/ViewShell";
 import { ViewHeader } from "@/components/ui/ViewHeader";
 import { ViewBody } from "@/components/ui/ViewBody";
+import { CameraIcon, CheckIcon, ImageIcon } from "@/components/ui/icons";
 import { openExternal } from "@/lib/tauri-api";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -157,25 +158,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               className="flex flex-1 cursor-pointer items-center gap-1 text-left"
               style={{ background: "transparent", border: "none" }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect
-                  x="1"
-                  y="2"
-                  width="12"
-                  height="10"
-                  rx="1.5"
-                  stroke="var(--green)"
-                  strokeWidth="1.2"
-                />
-                <circle cx="5" cy="6" r="1.5" stroke="var(--green)" strokeWidth="1" />
-                <path
-                  d="M3 11l3-3 2 1.5 3-4"
-                  stroke="var(--green)"
-                  strokeWidth="1"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <ImageIcon style={{ color: "var(--green)" }} />
               <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
                 Screenshot captured
               </span>
@@ -197,9 +180,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
               borderRadius: "var(--radius-md)",
             }}
           >
-            <span style={{ fontFamily: "'Segoe Fluent Icons', 'Segoe MDL2 Assets'" }}>
-              {"\uE722"}
-            </span>{" "}
+            <CameraIcon size={12} />
             Capture
           </button>
         </div>
@@ -323,7 +304,7 @@ export function IssueReporterView({ isFocused }: IssueReporterViewProps) {
 
           {issueNumber !== null && resultMsg && state === "idle" && (
             <span className="truncate text-[11px]" style={{ color: "var(--green)" }}>
-              ✓
+              <CheckIcon size={12} />
             </span>
           )}
           {state === "error" && (

@@ -8,6 +8,7 @@ import { FileExplorerView } from "@/components/views/FileExplorerView";
 import { FocusInput } from "@/components/ui/FormControls";
 import { resolveViewer, viewerInstanceId } from "@/lib/file-viewer";
 import { parentPath } from "@/lib/file-explorer-parse";
+import { MaximizeIcon, RestoreIcon, XIcon } from "@/components/ui/icons";
 
 /**
  * The single global floating file viewer (#277 / #279). It is rendered once at
@@ -211,7 +212,7 @@ export function FileViewerOverlay() {
             title={maximized ? "Restore" : "Maximize (fill window)"}
             data-testid="file-viewer-overlay-maximize"
           >
-            {maximized ? "🗗" : "🗖"}
+            {maximized ? <RestoreIcon /> : <MaximizeIcon />}
           </button>
           <button
             onClick={closeFileViewer}
@@ -220,7 +221,7 @@ export function FileViewerOverlay() {
             title="Close (Esc)"
             data-testid="file-viewer-overlay-close"
           >
-            &#10005;
+            <XIcon />
           </button>
         </div>
         <div

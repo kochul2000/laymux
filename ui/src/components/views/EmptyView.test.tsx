@@ -133,9 +133,9 @@ describe("EmptyView", () => {
 
   it("shows drag handle on each card", () => {
     render(<EmptyView />);
-    // Each card has a ⠿ drag handle
-    const handles = screen.getAllByText("⠿");
+    const handles = screen.getAllByTestId("empty-view-drag-handle");
     expect(handles.length).toBeGreaterThan(0);
+    expect(handles.every((handle) => handle.querySelector("svg") !== null)).toBe(true);
   });
 
   it("shows memo option button", () => {
@@ -176,7 +176,7 @@ describe("EmptyView", () => {
       render(<EmptyView />);
       expect(screen.getByTestId("empty-view-memo")).toBeInTheDocument();
       await waitFor(() => {
-        expect(screen.queryAllByText("⠿")).toHaveLength(0);
+        expect(screen.queryAllByTestId("empty-view-drag-handle")).toHaveLength(0);
         expect(screen.queryByText(/Press number key to quick-select/)).not.toBeInTheDocument();
       });
       // Title still shown because the pane is tall enough.

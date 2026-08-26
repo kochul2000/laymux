@@ -600,7 +600,11 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✓");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      const icon = badge.querySelector('[data-status-icon="success"]');
+      expect(icon).toBeInTheDocument();
+      expect(icon).toHaveAttribute("aria-label", "Command succeeded");
+      expect(badge).not.toHaveTextContent("✓");
     });
   });
 
@@ -755,7 +759,9 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/npm build/)).toBeInTheDocument();
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✗");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✗");
     });
   });
 
@@ -793,7 +799,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("—");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("—");
     });
   });
 
@@ -834,7 +842,9 @@ describe("WorkspaceSelectorView", () => {
 
     await waitFor(() => {
       // Universal 4-state: exitCode≠0 → ✗ regardless of activity
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✗");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="failure"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✗");
     });
   });
 
@@ -1276,7 +1286,9 @@ describe("WorkspaceSelectorView", () => {
       // Should show workspace terminal's command, not dock's
       expect(screen.getByText(/npm test/)).toBeInTheDocument();
       expect(screen.queryByText(/cargo build/)).not.toBeInTheDocument();
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("✓");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="success"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("✓");
     });
   });
 
@@ -1487,7 +1499,9 @@ describe("WorkspaceSelectorView", () => {
     render(<WorkspaceSelectorView />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("pane-cmd-badge-terminal-p1")).toHaveTextContent("⏳");
+      const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
+      expect(badge.querySelector('[data-status-icon="working"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("⏳");
     });
   });
 
@@ -1526,7 +1540,8 @@ describe("WorkspaceSelectorView", () => {
     await waitFor(() => {
       const badge = screen.getByTestId("pane-cmd-badge-terminal-p1");
       expect(badge).toBeInTheDocument();
-      expect(badge).toHaveTextContent("—");
+      expect(badge.querySelector('[data-status-icon="idle"]')).toBeInTheDocument();
+      expect(badge).not.toHaveTextContent("—");
       expect(badge.style.border).toContain("var(--accent)");
     });
   });

@@ -6,6 +6,7 @@ import {
   type JsonNode,
 } from "@/lib/preview/json-tree";
 import { PreviewNotice } from "./PreviewNotice";
+import { ChevronDownIcon, ChevronRightIcon } from "@/components/ui/icons";
 
 /** Depth expanded on open — enough to see a config file's shape at a glance. */
 const DEFAULT_EXPAND_DEPTH = 2;
@@ -129,7 +130,13 @@ function JsonNodeRow({
         <span
           style={{ color: "var(--text-muted)", width: 12, flex: "0 0 auto", userSelect: "none" }}
         >
-          {isContainer && children.length > 0 ? (isOpen ? "▾" : "▸") : ""}
+          {isContainer && children.length > 0 ? (
+            isOpen ? (
+              <ChevronDownIcon size={12} />
+            ) : (
+              <ChevronRightIcon size={12} />
+            )
+          ) : null}
         </span>
         {node.key !== undefined && (
           <span style={{ color: "var(--accent)" }}>{`${node.key}: `}</span>

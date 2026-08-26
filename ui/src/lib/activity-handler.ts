@@ -1,5 +1,5 @@
 import type { TerminalActivityInfo } from "@/stores/terminal-store";
-import { STATUS_ICON_WORKING } from "./activity-markers";
+import { STATUS_ICON_WORKING, type StatusIconGlyph } from "./activity-markers";
 import { ShellActivityHandler } from "./shell-activity-handler";
 import { ClaudeActivityHandler } from "./claude-activity-handler";
 import { CodexActivityHandler } from "./codex-activity-handler";
@@ -9,7 +9,7 @@ import { GrokActivityHandler, isGrokTitle } from "./grok-activity-handler";
 export { STATUS_ICON_WORKING };
 
 export interface StatusResult {
-  icon: string;
+  icon: StatusIconGlyph;
   color: string;
 }
 

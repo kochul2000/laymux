@@ -40,6 +40,19 @@ import { switchActiveWorkspace } from "@/lib/workspace-transition";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
+import { CommandStatusIcon } from "@/components/ui/CommandStatusIcon";
+import { getCommandStatusIconKind } from "@/lib/command-status-icon";
+import {
+  BroomIcon,
+  CopyPlusIcon,
+  EllipsisVerticalIcon,
+  EyeIcon,
+  ListFilterIcon,
+  ListIcon,
+  PencilIcon,
+  PlusIcon,
+  XIcon,
+} from "@/components/ui/icons";
 
 /** 섹션 소제목 라벨 (uppercase, 작은 폰트, 반투명) */
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -99,21 +112,6 @@ interface DragContext {
 }
 
 type HiddenUndoItem = { id: string; name: string; paneIds: string[]; nonce: number };
-
-/** Eye icon (visible state) — 11x11 */
-function EyeIcon({ size = 11 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 11 11" fill="none">
-      <path
-        d="M1 5.5C1 5.5 3 2 5.5 2C8 2 10 5.5 10 5.5C10 5.5 8 9 5.5 9C3 9 1 5.5 1 5.5Z"
-        stroke="currentColor"
-        strokeWidth="1"
-        strokeLinejoin="round"
-      />
-      <circle cx="5.5" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1" />
-    </svg>
-  );
-}
 
 function WorkspaceItem({
   ws,
@@ -304,20 +302,7 @@ function WorkspaceItem({
                     }}
                     title={t("item.clearTerminals")}
                   >
-                    {/* Broom: the workspace's terminals get swept, the panes stay. */}
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                      {/* Upright, not angled: a diagonal handle plus a triangular
-                          head reads as a checkmark at this size. The handle
-                          overlaps the head so the two never separate. */}
-                      <path
-                        d="M5.5 1.3V5.6"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                        strokeLinecap="round"
-                      />
-                      {/* Filled flared head — a 1px outline blurs into a blob at 11px. */}
-                      <path d="M4.1 5.1H6.9L8.7 9.6H2.3z" fill="currentColor" />
-                    </svg>
+                    <BroomIcon size={11} />
                   </button>
                 )}
                 <button
@@ -334,26 +319,7 @@ function WorkspaceItem({
                   }}
                   title={t("item.duplicateWorkspace")}
                 >
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                    <rect
-                      x="0.5"
-                      y="2.5"
-                      width="7"
-                      height="7"
-                      rx="1"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                    />
-                    <rect
-                      x="3"
-                      y="0.5"
-                      width="7"
-                      height="7"
-                      rx="1"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                    />
-                  </svg>
+                  <CopyPlusIcon size={11} />
                 </button>
                 <button
                   data-testid={`workspace-rename-${ws.id}`}
@@ -369,14 +335,7 @@ function WorkspaceItem({
                   }}
                   title={t("item.renameWorkspace")}
                 >
-                  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                    <path
-                      d="M7.5 1.5l2 2-6 6H1.5v-2z"
-                      stroke="currentColor"
-                      strokeWidth="1"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  <PencilIcon size={11} />
                 </button>
                 {canClose && (
                   <button
@@ -393,14 +352,7 @@ function WorkspaceItem({
                     }}
                     title={t("item.closeWorkspace")}
                   >
-                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-                      <path
-                        d="M2.5 2.5l6 6M8.5 2.5l-6 6"
-                        stroke="currentColor"
-                        strokeWidth="1.2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
+                    <XIcon size={11} />
                   </button>
                 )}
               </>
@@ -605,7 +557,12 @@ function WorkspaceItem({
                                       transition: "border-color 200ms ease",
                                     }}
                                   >
-                                    {tCmdStatus.icon}
+                                    <CommandStatusIcon
+                                      status={tCmdStatus.icon}
+                                      label={t(
+                                        `commandStatus.${getCommandStatusIconKind(tCmdStatus.icon)}`,
+                                      )}
+                                    />
                                   </span>
                                 ) : (
                                   // Rendered as a standalone ExitFade (not a ternary branch) so the
@@ -897,11 +854,7 @@ function LayoutCard({
           }}
           title={t("layout.options")}
         >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <circle cx="6" cy="2.5" r="1.2" />
-            <circle cx="6" cy="6" r="1.2" />
-            <circle cx="6" cy="9.5" r="1.2" />
-          </svg>
+          <EllipsisVerticalIcon size={12} />
         </button>
       )}
 
@@ -1022,14 +975,7 @@ function ExportNewLayoutRow({ onExport }: { onExport: (name: string) => void }) 
         title={t("layout.exportNewTitle")}
       >
         <span className="ml-0.5 flex shrink-0 items-center justify-center" style={{ width: 24 }}>
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M6 1.5v9M1.5 6h9"
-              stroke="currentColor"
-              strokeWidth="1.4"
-              strokeLinecap="round"
-            />
-          </svg>
+          <PlusIcon size={12} />
         </span>
         <span className="truncate text-[11px] font-medium">{t("layout.exportNew")}</span>
       </button>
@@ -1338,21 +1284,11 @@ export function WorkspaceSelectorView() {
               workspaceSortOrder === "manual" ? t("sort.manualTitle") : t("sort.notificationTitle")
             }
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              {workspaceSortOrder === "manual" ? (
-                <>
-                  <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="4.25" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="7.5" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                </>
-              ) : (
-                <>
-                  <rect x="1" y="1" width="8" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="4.25" width="6" height="1.5" rx="0.5" fill="currentColor" />
-                  <rect x="1" y="7.5" width="4" height="1.5" rx="0.5" fill="currentColor" />
-                </>
-              )}
-            </svg>
+            {workspaceSortOrder === "manual" ? (
+              <ListIcon size={10} />
+            ) : (
+              <ListFilterIcon size={10} />
+            )}
             {workspaceSortOrder === "manual" ? t("sort.manual") : t("sort.notification")}
           </button>
         </span>
