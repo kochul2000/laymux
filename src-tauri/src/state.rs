@@ -65,6 +65,11 @@ use crate::terminal_output::SharedTerminalProtocolStates;
 /// The Android pairing lifecycle mutex is outside `AppState`, but unlike those
 /// isolated registries it may nest `remote_access`: acquire it before every
 /// `AppState` lock and never enter it while holding one (ADR-0144).
+/// The Android E2E session registry is another external predecessor. Its
+/// authorization-commit path may briefly nest `remote_access` then
+/// `remote_control`, so the complete relative order is pairing lifecycle ->
+/// Android E2E registry -> `remote_access` -> `remote_control`. Never enter the
+/// E2E registry while an ordered `AppState` lock is held (ADR-0208).
 ///
 /// ## Poison policy
 ///
@@ -152,8 +157,11 @@ pub struct AppState {
     /// Runtime cloud relay connection status. Pairing/tunnel workers update this state.
     pub cloud: Mutex<crate::cloud::CloudStatus>,
     /// Memory-only Android E2E challenges and data sessions (ADR-0146).
-    /// Its registry mutex is held only to insert/remove/clone one session Arc;
-    /// per-session async locks are never acquired while the registry is held.
+    /// Usually the registry is held only to insert/remove/clone one session
+    /// Arc. The claim authorization commit is the narrow exception: under the
+    /// pairing lifecycle predecessor it retains the registry through the
+    /// ordered `remote_access` -> `remote_control` mutation (ADR-0208).
+    /// Per-session async locks are never acquired while the registry is held.
     pub android_e2e: crate::android_e2e::AndroidE2eState,
     /// Process-global per-terminal lock table serializing `write_input` /
     /// `execute_command` on the same terminal (#314). Living on the shared

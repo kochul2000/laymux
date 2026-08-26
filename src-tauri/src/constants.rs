@@ -347,6 +347,15 @@ pub const REMOTE_RENDER_CHECKPOINT_ABSOLUTE_MAX_BYTES: usize = 1024 * 1024;
 /// source cap stays deliberately small and is enforced before image reads.
 pub const MAX_REMOTE_FILE_VIEWER_BYTES: usize = 8 * 1024 * 1024;
 
+/// Android E2E FileViewer source cap. Base64-bearing render/download payloads
+/// must still fit the route-scoped inner JSON limit and the 4 MiB encrypted
+/// plaintext envelope (ADR-0208).
+pub const MAX_ANDROID_E2E_FILE_VIEWER_BYTES: usize = 2 * 1024 * 1024;
+/// Maximum serialized inner JSON response for Android E2E FileViewer RPCs.
+/// This is enforced in the frontend before the Tauri IPC response is built
+/// and again at the Rust dispatcher boundary.
+pub const MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES: usize = 3 * 1024 * 1024;
+
 /// Maximum Unicode scalar count accepted from one Remote terminal selection
 /// before the desktop path-link parser runs. This matches the maximum valid
 /// `terminal.pathLinkMaxLength` setting.

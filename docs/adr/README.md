@@ -225,6 +225,7 @@ ADR 이 필요한 대표 기준:
 | [0205](0205-lucide-application-icon-source.md) | 범용 애플리케이션 아이콘은 Lucide를 단일 출처로 사용한다 (0192 부분 대체) | Accepted |
 | [0206](0206-codex-normal-buffer-transcript-wheel-routing.md) | Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다 (0142 확장) | Accepted |
 | [0207](0207-remote-composer-recall-observes-soft-keyboard-geometry.md) | Remote Composer 탭 recall은 소프트 키보드 geometry를 관측한다 (0196 확장·정정) | Accepted |
+| [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Proposed |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -52,6 +52,18 @@ class RemoteDownloadPolicyTest {
 
     @Test
     fun `bounds the payload at the Remote transfer limit`() {
+        assertEquals(2 * 1024 * 1024, RemoteDownloadPolicy.MAX_DOWNLOAD_BYTES)
+        assertEquals(2_796_204, RemoteDownloadPolicy.MAX_ENCODED_DOWNLOAD_CHARS)
+        assertTrue(
+            RemoteDownloadPolicy.isEncodedPayloadWithinBound(
+                RemoteDownloadPolicy.MAX_ENCODED_DOWNLOAD_CHARS,
+            ),
+        )
+        assertFalse(
+            RemoteDownloadPolicy.isEncodedPayloadWithinBound(
+                RemoteDownloadPolicy.MAX_ENCODED_DOWNLOAD_CHARS + 1,
+            ),
+        )
         assertTrue(RemoteDownloadPolicy.isWithinBound(0))
         assertTrue(RemoteDownloadPolicy.isWithinBound(RemoteDownloadPolicy.MAX_DOWNLOAD_BYTES))
         assertFalse(RemoteDownloadPolicy.isWithinBound(RemoteDownloadPolicy.MAX_DOWNLOAD_BYTES + 1))

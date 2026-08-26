@@ -52,7 +52,10 @@ import {
   focusWorkspacePane,
   switchActiveWorkspace,
 } from "@/lib/workspace-transition";
-import { handleRemoteFileViewerRequest } from "@/lib/remote-file-viewer";
+import {
+  boundRemoteFileViewerResult,
+  handleRemoteFileViewerRequest,
+} from "@/lib/remote-file-viewer";
 import * as navigationActions from "@/lib/navigation-actions";
 import { allLiveTerminalOutputV3Diagnostics } from "@/lib/terminal-output-v3-diagnostics";
 import { clearWorkspace } from "@/lib/workspace-clear";
@@ -1381,7 +1384,8 @@ export async function handleAsyncAutomationRequest(
     }
   }
   if (request.target === "fileViewer") {
-    return handleRemoteFileViewerRequest(request.method, request.params);
+    const result = await handleRemoteFileViewerRequest(request.method, request.params);
+    return boundRemoteFileViewerResult(result, request.params.maxResponseBytes, request.requestId);
   }
   if (request.target === "settings" && request.method === "getSnapshot") {
     try {

@@ -133,7 +133,11 @@ pub struct DirEntry {
 
 /// List directory contents and return structured metadata for each entry.
 #[tauri::command(async)]
-pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<DirEntry>, String> {
+pub fn list_directory(
+    path: String,
+    wsl_distro: Option<String>,
+    max_entries: Option<usize>,
+) -> Result<Vec<DirEntry>, String> {
     // Resolve WSL/Windows paths with the shared inference rule (#282), following
     // WSL symlinks so a linked directory is browsable (#363).
     let resolved =
@@ -142,7 +146,7 @@ pub fn list_directory(path: String, wsl_distro: Option<String>) -> Result<Vec<Di
     let entries = std::fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
 
     let mut result = Vec::new();
-    for entry in entries {
+    for entry in entries.take(max_entries.unwrap_or(usize::MAX)) {
         let entry = match entry {
             Ok(e) => e,
             Err(_) => continue, // skip unreadable entries
@@ -266,6 +270,23 @@ mod tests {
             std::path::Path::new(&home).exists(),
             "resolved home dir should exist: {home}"
         );
+    }
+
+    #[test]
+    fn list_directory_stops_before_scanning_past_the_requested_bound() {
+        let dir = tempfile::tempdir().expect("temp directory");
+        for index in 0..5 {
+            std::fs::write(dir.path().join(format!("entry-{index}.txt")), b"x")
+                .expect("write directory entry");
+        }
+
+        let bounded = list_directory(dir.path().to_string_lossy().into_owned(), None, Some(2))
+            .expect("bounded listing");
+        let unbounded = list_directory(dir.path().to_string_lossy().into_owned(), None, None)
+            .expect("unbounded listing");
+
+        assert_eq!(bounded.len(), 2);
+        assert_eq!(unbounded.len(), 5);
     }
 
     #[test]

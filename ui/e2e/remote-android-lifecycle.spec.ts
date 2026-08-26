@@ -59,6 +59,7 @@ type AndroidLifecycleState = {
   cancelledRequests: number;
   claimRequests: number;
   heartbeatRequests: number;
+  fileViewerRequests: Array<{ method: string; path: string; body: unknown }>;
   heldRequestId: string | null;
   holdNextClaim: boolean;
   holdNextNavigation: boolean;
@@ -104,6 +105,7 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
         cancelledRequests: 0,
         claimRequests: 0,
         heartbeatRequests: 0,
+        fileViewerRequests: [],
         heldRequestId: null,
         holdNextClaim: holdInitialClaim,
         holdNextNavigation: false,
@@ -171,7 +173,14 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
       };
 
       target.LaymuxNative = {
-        requestRemoteHttp(requestId, _method, path) {
+        requestRemoteHttp(requestId, method, path, bodyJson) {
+          if (path.startsWith("/remote/v1/file-viewer/")) {
+            state.fileViewerRequests.push({
+              method,
+              path,
+              body: bodyJson ? JSON.parse(bodyJson) : null,
+            });
+          }
           let body: unknown = {};
           if (path === "/remote/v1/session/status") body = { active: false };
           if (path === "/remote/v1/session/claim") {
@@ -200,6 +209,9 @@ async function installAndroidRemote(page: Page, options: { holdInitialClaim?: bo
               base64: "aG9zdCB0ZXh0",
               size: 10,
             };
+          }
+          if (path === "/remote/v1/file-viewer/status") {
+            body = { open: true, path: "C:\\work\\notes.txt" };
           }
           if (path === "/remote/v1/file-viewer/render") {
             state.renderRequests += 1;
@@ -357,12 +369,43 @@ test("the Android wrapper gets the file viewer, rendered in the Remote document"
   // window, so the old new-tab viewer could never work (ADR-0184).
   await page.locator("#navToggle").click();
   await expect(page.locator("#fileViewerSection")).toBeVisible();
-  await page.locator("#fileViewerPath").fill("C:\\work\\notes.txt");
+  await page.locator("#pullHostFileViewerPath").click();
+  await expect(page.locator("#fileViewerPath")).toHaveValue("C:\\work\\notes.txt");
+  expect(
+    (await state()).fileViewerRequests.find(
+      (request) => request.path === "/remote/v1/file-viewer/status",
+    ),
+  ).toEqual({
+    method: "POST",
+    path: "/remote/v1/file-viewer/status",
+    body: {
+      fileViewerAuthorization: {
+        leaseId: "lease-1",
+        fileViewerToken: "viewer-1",
+      },
+    },
+  });
   await page.locator("#openFileViewer").click();
 
   await expect(page.locator("#fileViewerOverlay")).toBeVisible();
   await expect(page.locator("#fileViewerText")).toHaveText("host text in the wrapper");
   expect((await state()).renderRequests).toBe(1);
+  expect(
+    (await state()).fileViewerRequests.find(
+      (request) => request.path === "/remote/v1/file-viewer/render",
+    ),
+  ).toEqual({
+    method: "POST",
+    path: "/remote/v1/file-viewer/render",
+    body: {
+      source: "path",
+      path: "C:\\work\\notes.txt",
+      fileViewerAuthorization: {
+        leaseId: "lease-1",
+        fileViewerToken: "viewer-1",
+      },
+    },
+  });
 
   await page.locator("#fileViewerClose").click();
   await expect(page.locator("#fileViewerOverlay")).toBeHidden();
@@ -393,5 +436,20 @@ test("the Android wrapper saves a download through native, not the browser path"
   expect((await state()).savedFiles).toEqual([
     { name: "notes.txt", mediaType: "text/plain", base64: "aG9zdCB0ZXh0" },
   ]);
+  expect(
+    (await state()).fileViewerRequests.find(
+      (request) => request.path === "/remote/v1/file-viewer/download",
+    ),
+  ).toEqual({
+    method: "POST",
+    path: "/remote/v1/file-viewer/download",
+    body: {
+      path: "C:\\work\\notes.txt",
+      fileViewerAuthorization: {
+        leaseId: "lease-1",
+        fileViewerToken: "viewer-1",
+      },
+    },
+  });
   expect(downloads).toBe(0);
 });

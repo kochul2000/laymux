@@ -17,7 +17,58 @@ import {
   readFileForViewer,
   statPaths,
 } from "./tauri-api";
-import { handleRemoteFileViewerRequest } from "./remote-file-viewer";
+import {
+  boundRemoteFileViewerResult,
+  handleRemoteFileViewerRequest,
+  isJsonValueWithinUtf8Budget,
+} from "./remote-file-viewer";
+
+describe("Remote FileViewer serialized response budget (ADR-0208)", () => {
+  it("counts JSON escaping and UTF-8 without allocating the serialized payload", () => {
+    expect(isJsonValueWithinUtf8Budget("a", 3)).toBe(true); // JSON string: "a"
+    expect(isJsonValueWithinUtf8Budget("a", 2)).toBe(false);
+    expect(isJsonValueWithinUtf8Budget("\0", 8)).toBe(true); // "\\u0000"
+    expect(isJsonValueWithinUtf8Budget("\0", 7)).toBe(false);
+    expect(isJsonValueWithinUtf8Budget("한", 5)).toBe(true); // quotes + 3 UTF-8 bytes
+    expect(isJsonValueWithinUtf8Budget("한", 4)).toBe(false);
+    expect(isJsonValueWithinUtf8Budget("😀", 6)).toBe(true); // quotes + 4 UTF-8 bytes
+    expect(isJsonValueWithinUtf8Budget("😀", 5)).toBe(false);
+  });
+
+  it.each([
+    { nested: [null, true, false, 12.5, "quote\"slash\\line\n", "\ud800"] },
+    { 한글키: "값😀", controls: "\b\t\f\r" },
+    ["plain", undefined, Number.NaN, Number.POSITIVE_INFINITY],
+  ])("matches JSON.stringify's exact UTF-8 byte count", (value) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value)).length;
+
+    expect(isJsonValueWithinUtf8Budget(value, bytes)).toBe(true);
+    expect(isJsonValueWithinUtf8Budget(value, bytes - 1)).toBe(false);
+  });
+
+  it("replaces an escape-expanded payload before the Tauri response IPC", () => {
+    const result = boundRemoteFileViewerResult(
+      { success: true, data: { kind: "text", content: "\0".repeat(32) } },
+      128,
+    );
+
+    expect(result).toEqual({
+      success: false,
+      error: "Remote response exceeds the viewer limit",
+    });
+  });
+
+  it("includes the automation IPC envelope in the pre-serialization budget", () => {
+    const result = { success: true, data: { value: "ok" } };
+    const resultBytes = new TextEncoder().encode(JSON.stringify(result)).length;
+
+    expect(boundRemoteFileViewerResult(result, resultBytes)).toBe(result);
+    expect(boundRemoteFileViewerResult(result, resultBytes, "request-1")).toEqual({
+      success: false,
+      error: "Remote response exceeds the viewer limit",
+    });
+  });
+});
 
 function registerTerminal(cwd?: string) {
   useTerminalStore.getState().registerInstance({
@@ -556,7 +607,7 @@ describe("Remote FileViewer directory listing (ADR-0198)", () => {
       maxEntries: 100,
     });
 
-    expect(listDirectory).toHaveBeenCalledWith("/work/repo");
+    expect(listDirectory).toHaveBeenCalledWith("/work/repo", undefined, 101);
     expect(result).toEqual({
       success: true,
       data: {
@@ -633,7 +684,7 @@ describe("Remote FileViewer directory listing (ADR-0198)", () => {
       terminalId: "terminal-1",
       maxEntries: 100,
     });
-    expect(listDirectory).toHaveBeenCalledWith("/work/repo");
+    expect(listDirectory).toHaveBeenCalledWith("/work/repo", undefined, 101);
     expect(getHomeDirectory).not.toHaveBeenCalled();
 
     vi.mocked(getHomeDirectory).mockResolvedValue("/home/user");
@@ -643,11 +694,11 @@ describe("Remote FileViewer directory listing (ADR-0198)", () => {
       maxEntries: 100,
     });
     expect(getHomeDirectory).toHaveBeenCalled();
-    expect(listDirectory).toHaveBeenLastCalledWith("/home/user");
+    expect(listDirectory).toHaveBeenLastCalledWith("/home/user", undefined, 101);
 
     // No terminal attached at all: the header button still opens at home.
     await handleRemoteFileViewerRequest("list", { source: "terminalCwd", maxEntries: 100 });
-    expect(listDirectory).toHaveBeenLastCalledWith("/home/user");
+    expect(listDirectory).toHaveBeenLastCalledWith("/home/user", undefined, 101);
   });
 
   it("잘못된 입력과 실패는 error로 내려간다", async () => {

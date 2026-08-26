@@ -5,7 +5,9 @@
 //! diff and so on — belongs to the frontend and is decided from the path, so it
 //! deliberately has no counterpart here.
 
-use crate::commands::archive_listing::{archive_format, read_archive_listing, ArchiveEntry};
+use crate::commands::archive_listing::{
+    archive_format, read_archive_listing, read_archive_listing_bounded, ArchiveEntry,
+};
 use crate::commands::file_ops::base64_encode;
 use crate::constants::{DEFAULT_FILE_VIEWER_BYTES, MAX_INLINE_PDF_BYTES};
 use crate::path_utils;
@@ -236,17 +238,28 @@ pub fn read_file_for_viewer(
     // Archives are classified from the whole file name because `.tar.gz` is a
     // pair, not an extension.
     if let Some(format) = archive_format(file_name) {
-        // A file that merely ends in `.zip` may not be one. Listing failure is
-        // not viewer failure: fall through to the binary placeholder so the
-        // user still sees the size and can open it in the host app.
-        if let Ok(listing) = read_archive_listing(&resolved, format) {
-            return Ok(FileViewerContent::Archive {
-                format: listing.format.as_str().to_string(),
-                entries: listing.entries,
-                total_entries: listing.total_entries,
-                total_bytes: listing.total_bytes,
-                truncated: listing.truncated,
-            });
+        // A file that merely ends in `.zip` may not be one. Parse failures fall
+        // through to the binary placeholder; explicit transport/scan limits
+        // remain errors so Remote can answer 413 instead of doing unbounded
+        // work behind a harmless-looking archive suffix.
+        let listing = match max_bytes {
+            Some(limit) => read_archive_listing_bounded(&resolved, format, limit, limit as u64),
+            None => read_archive_listing(&resolved, format),
+        };
+        match listing {
+            Ok(listing) => {
+                return Ok(FileViewerContent::Archive {
+                    format: listing.format.as_str().to_string(),
+                    entries: listing.entries,
+                    total_entries: listing.total_entries,
+                    total_bytes: listing.total_bytes,
+                    truncated: listing.truncated,
+                });
+            }
+            Err(error) if max_bytes.is_some() && error.contains("viewer limit") => {
+                return Err(error);
+            }
+            Err(_) => {}
         }
     }
 
@@ -617,6 +630,18 @@ mod tests {
             }
             other => panic!("expected Archive, got {other:?}"),
         }
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_remote_archive_over_the_requested_source_limit_is_rejected_before_listing() {
+        let path = temp_path("remote_limit.zip");
+        std::fs::write(&path, vec![0_u8; 64]).expect("write oversized archive-shaped file");
+
+        let error = read_file_for_viewer(path.to_string_lossy().into_owned(), Some(16))
+            .expect_err("remote archive source must be bounded before parsing");
+
+        assert_eq!(error, "File exceeds the 16 byte viewer limit");
         let _ = std::fs::remove_file(&path);
     }
 

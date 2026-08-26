@@ -10,8 +10,11 @@ package com.laymux.android.web
  * them, it stores them — so their content is not this object's business.
  */
 object RemoteDownloadPolicy {
-    /** Matches the Remote surface's own transfer bound (`MAX_REMOTE_FILE_VIEWER_BYTES`). */
-    const val MAX_DOWNLOAD_BYTES: Int = 8 * 1024 * 1024
+    /** Matches Android E2E's stricter source bound (`MAX_ANDROID_E2E_FILE_VIEWER_BYTES`). */
+    const val MAX_DOWNLOAD_BYTES: Int = 2 * 1024 * 1024
+
+    /** Largest padded base64 string that can represent the decoded byte bound. */
+    const val MAX_ENCODED_DOWNLOAD_CHARS: Int = ((MAX_DOWNLOAD_BYTES + 2) / 3) * 4
 
     /** Long enough for real file names, short enough to stay under every FS limit. */
     private const val MAX_NAME_LENGTH = 96
@@ -48,6 +51,10 @@ object RemoteDownloadPolicy {
 
     /** True when the decoded payload is within the transfer bound. */
     fun isWithinBound(byteCount: Int): Boolean = byteCount in 0..MAX_DOWNLOAD_BYTES
+
+    /** Reject oversized bridge strings before `Base64.decode` allocates an output buffer. */
+    fun isEncodedPayloadWithinBound(characterCount: Int): Boolean =
+        characterCount in 0..MAX_ENCODED_DOWNLOAD_CHARS
 
     /**
      * Trim the stem, not the extension: a truncated `.png` stops being an image to every

@@ -33,7 +33,8 @@ const REQUEST_PROOF_DOMAIN: &[u8] = b"laymux.android-pair.request.v1";
 const RESPONSE_PROOF_DOMAIN: &[u8] = b"laymux.android-pair.response.v1";
 
 /// Serializes the Android seed lifecycle with cloud identity replacement.
-/// The lock order is this mutex first, then `AppState.remote_access`.
+/// The nested lock order is this mutex, Android E2E registry, then
+/// `AppState.remote_access` -> `AppState.remote_control` (ADR-0208).
 static PAIRING_LIFECYCLE: Mutex<()> = Mutex::new(());
 static PAIRING_REVISION: AtomicU64 = AtomicU64::new(1);
 
@@ -137,9 +138,11 @@ pub async fn get_status() -> Result<AndroidPairingStatus, AppError> {
 
 pub async fn create(state: Arc<AppState>) -> Result<AndroidPairingQr, AppError> {
     tokio::task::spawn_blocking(move || {
-        let (result, _payload) = create_inner(&state)?;
-        state.android_e2e.clear()?;
-        Ok(result)
+        with_lifecycle(|| {
+            let (result, _payload) = create_inner_locked(&state)?;
+            state.android_e2e.clear()?;
+            Ok(result)
+        })
     })
     .await
     .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
@@ -159,9 +162,11 @@ pub async fn create_with_payload(
         ));
     }
     tokio::task::spawn_blocking(move || {
-        let result = create_inner(&state)?;
-        state.android_e2e.clear()?;
-        Ok(result)
+        with_lifecycle(|| {
+            let result = create_inner_locked(&state)?;
+            state.android_e2e.clear()?;
+            Ok(result)
+        })
     })
     .await
     .map_err(|error| AppError::Other(format!("Android pairing create task failed: {error}")))?
@@ -169,9 +174,11 @@ pub async fn create_with_payload(
 
 pub async fn revoke(state: Arc<AppState>) -> Result<AndroidPairingStatus, AppError> {
     tokio::task::spawn_blocking(move || {
-        let result = with_lifecycle(revoke_inner)?;
-        state.android_e2e.clear()?;
-        Ok(result)
+        with_lifecycle(|| {
+            let result = revoke_inner()?;
+            state.android_e2e.clear()?;
+            Ok(result)
+        })
     })
     .await
     .map_err(|error| AppError::Other(format!("Android pairing revoke task failed: {error}")))?
@@ -256,12 +263,12 @@ fn get_status_inner_at(now: u64) -> Result<AndroidPairingStatus, AppError> {
     Ok(status_from_record(&record))
 }
 
-fn create_inner(state: &AppState) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
-    with_lifecycle(|| {
-        let settings =
-            crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
-        create_for_settings(&settings)
-    })
+fn create_inner_locked(
+    state: &AppState,
+) -> Result<(AndroidPairingQr, Zeroizing<String>), AppError> {
+    let settings =
+        crate::remote_server::effective_remote_settings(state).map_err(AppError::Other)?;
+    create_for_settings(&settings)
 }
 
 #[cfg(test)]

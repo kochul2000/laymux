@@ -2184,6 +2184,7 @@ dependencies = [
  "brotli",
  "cargo_metadata",
  "clipboard-win",
+ "crc32fast",
  "flate2",
  "font-kit",
  "futures-util",

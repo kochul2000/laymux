@@ -952,6 +952,34 @@
           return response.json();
         }
 
+        function fileViewerFetch(
+          path,
+          { method = "GET", signal, body = null, leaseId: requestLeaseId, fileViewerToken: requestToken },
+        ) {
+          if (androidE2eMode) {
+            return remoteFetch(path, {
+              method: path === "/remote/v1/file-viewer/status" ? "POST" : method,
+              signal,
+              body: JSON.stringify({
+                ...(body || {}),
+                fileViewerAuthorization: {
+                  leaseId: requestLeaseId,
+                  fileViewerToken: requestToken,
+                },
+              }),
+            });
+          }
+          return remoteFetch(path, {
+            method,
+            signal,
+            headers: {
+              "x-laymux-remote-lease": requestLeaseId,
+              "x-laymux-remote-file-viewer": requestToken,
+            },
+            ...(body === null ? {} : { body: JSON.stringify(body) }),
+          });
+        }
+
         function normalizeRemoteFontSize(value, fallback) {
           const parsed = Number(value);
           if (!Number.isFinite(parsed)) return fallback;
@@ -1362,11 +1390,9 @@
           let isError = false;
           renderFileViewerState();
           try {
-            const data = await remoteFetch("/remote/v1/file-viewer/status", {
-              headers: {
-                "x-laymux-remote-lease": statusLeaseId,
-                "x-laymux-remote-file-viewer": statusFileViewerToken,
-              },
+            const data = await fileViewerFetch("/remote/v1/file-viewer/status", {
+              leaseId: statusLeaseId,
+              fileViewerToken: statusFileViewerToken,
             });
             if (leaseId !== statusLeaseId || fileViewerToken !== statusFileViewerToken) return;
             if (fileViewerPathRevision !== statusPathRevision) {
@@ -1585,13 +1611,11 @@
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
           setFileViewerMessage("Loading file…");
-          remoteFetch("/remote/v1/file-viewer/render", {
+          fileViewerFetch("/remote/v1/file-viewer/render", {
             method: "POST",
-            headers: {
-              "x-laymux-remote-lease": requestLeaseId,
-              "x-laymux-remote-file-viewer": requestFileViewerToken,
-            },
-            body: JSON.stringify({ source: "path", path }),
+            leaseId: requestLeaseId,
+            fileViewerToken: requestFileViewerToken,
+            body: { source: "path", path },
           })
             .then((payload) => {
               if (
@@ -1644,13 +1668,11 @@
           applyFileViewerDownloadState();
           fileViewerOverlayElement.hidden = false;
           setFileViewerMessage("Loading directory…");
-          remoteFetch("/remote/v1/file-viewer/list", {
+          fileViewerFetch("/remote/v1/file-viewer/list", {
             method: "POST",
-            headers: {
-              "x-laymux-remote-lease": requestLeaseId,
-              "x-laymux-remote-file-viewer": requestFileViewerToken,
-            },
-            body: JSON.stringify(request),
+            leaseId: requestLeaseId,
+            fileViewerToken: requestFileViewerToken,
+            body: request,
           })
             .then((payload) => {
               if (
@@ -1792,13 +1814,11 @@
           const requestFileViewerToken = fileViewerToken;
           fileViewerDownloadInFlight = true;
           applyFileViewerDownloadState();
-          remoteFetch("/remote/v1/file-viewer/download", {
+          fileViewerFetch("/remote/v1/file-viewer/download", {
             method: "POST",
-            headers: {
-              "x-laymux-remote-lease": requestLeaseId,
-              "x-laymux-remote-file-viewer": requestFileViewerToken,
-            },
-            body: JSON.stringify({ path }),
+            leaseId: requestLeaseId,
+            fileViewerToken: requestFileViewerToken,
+            body: { path },
           })
             .then((payload) => {
               if (
@@ -2095,18 +2115,16 @@
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts.selection = abortController;
 
-          remoteFetch("/remote/v1/file-viewer/path-link", {
+          fileViewerFetch("/remote/v1/file-viewer/path-link", {
             method: "POST",
             signal: abortController?.signal,
-            headers: {
-              "x-laymux-remote-lease": requestLeaseId,
-              "x-laymux-remote-file-viewer": requestFileViewerToken,
-            },
-            body: JSON.stringify({
+            leaseId: requestLeaseId,
+            fileViewerToken: requestFileViewerToken,
+            body: {
               terminalId: requestTerminalId,
               mode: "selection",
               lines: selectionLines,
-            }),
+            },
           })
             .then((data) => {
               const currentPosition = term.getSelectionPosition?.();
@@ -2194,14 +2212,12 @@
           const abortController = typeof AbortController === "function" ? new AbortController() : null;
           pathLinkAborts[scope] = abortController;
 
-          remoteFetch("/remote/v1/file-viewer/path-link", {
+          fileViewerFetch("/remote/v1/file-viewer/path-link", {
             method: "POST",
             signal: abortController?.signal,
-            headers: {
-              "x-laymux-remote-lease": requestLeaseId,
-              "x-laymux-remote-file-viewer": requestFileViewerToken,
-            },
-            body: JSON.stringify(body),
+            leaseId: requestLeaseId,
+            fileViewerToken: requestFileViewerToken,
+            body,
           })
             .then((data) => {
               if (

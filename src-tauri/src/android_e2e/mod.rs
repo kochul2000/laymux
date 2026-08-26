@@ -3,11 +3,12 @@ mod state;
 mod validation;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-pub use state::AndroidE2eState;
-pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eSession};
 #[cfg(test)]
 pub(crate) use state::test_output_cipher_pair;
+pub use state::AndroidE2eState;
+pub(crate) use state::{AndroidE2eOutputCipher, AndroidE2eRequestContext, AndroidE2eSession};
 
 pub(crate) const PROTOCOL_VERSION: u8 = 1;
 /// desktop↔Android 같은-릴리즈 계약의 호환 번호 (ADR-0172). 비호환 변경이
@@ -28,6 +29,57 @@ pub(crate) const OUTPUT_RECORD_BINARY: u8 = 3;
 pub(crate) const CHALLENGE_RESPONSE_DOMAIN: &[u8] = b"laymux.android-e2e.challenge.response.v1";
 pub(crate) const ESTABLISH_REQUEST_DOMAIN: &[u8] = b"laymux.android-e2e.establish.request.v1";
 pub(crate) const ESTABLISH_RESPONSE_DOMAIN: &[u8] = b"laymux.android-e2e.establish.response.v1";
+
+/// Non-secret authority snapshot attached only to a successful sensitive
+/// inner response. It never crosses the Android E2E wire; the session cache
+/// uses it to decide whether the exact ciphertext may be replayed (ADR-0208).
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct AndroidE2eReplayGuard {
+    lease_id: String,
+    owner_epoch: u64,
+    capability_generation: u64,
+    instance_id: String,
+    session_id: String,
+}
+
+impl AndroidE2eReplayGuard {
+    pub(crate) fn new(
+        lease_id: String,
+        owner_epoch: u64,
+        capability_generation: u64,
+        instance_id: String,
+        session_id: String,
+    ) -> Self {
+        Self {
+            lease_id,
+            owner_epoch,
+            capability_generation,
+            instance_id,
+            session_id,
+        }
+    }
+}
+
+pub(crate) struct AndroidE2eDispatchResult {
+    pub(crate) response: Value,
+    pub(crate) replay_guard: Option<AndroidE2eReplayGuard>,
+}
+
+impl AndroidE2eDispatchResult {
+    pub(crate) fn unguarded(response: Value) -> Self {
+        Self {
+            response,
+            replay_guard: None,
+        }
+    }
+
+    pub(crate) fn guarded(response: Value, replay_guard: AndroidE2eReplayGuard) -> Self {
+        Self {
+            response,
+            replay_guard: Some(replay_guard),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -24,11 +24,11 @@ use super::crypto::{decrypt_output_response, encrypt_output_request};
 use super::validation::{valid_base64url, valid_instance_id};
 use super::{
     field_refs, key_fields, proof_fields_challenge, proof_fields_establish, proof_fields_response,
-    ChallengeRequest, ChallengeResponse, CipherEnvelope, E2eError, EstablishRequest,
-    EstablishResponse, CHALLENGE_ID_BYTES, CHALLENGE_RESPONSE_DOMAIN, CHALLENGE_TTL_SECONDS,
-    CLIENT_SESSION_NONCE_BYTES, ESTABLISH_REQUEST_DOMAIN, ESTABLISH_RESPONSE_DOMAIN,
-    OUTPUT_STREAM_NONCE_BYTES, PROTOCOL_VERSION, SERVER_NONCE_BYTES, SESSION_ID_BYTES,
-    SESSION_INACTIVITY_TIMEOUT_SECONDS,
+    AndroidE2eDispatchResult, AndroidE2eReplayGuard, ChallengeRequest, ChallengeResponse,
+    CipherEnvelope, E2eError, EstablishRequest, EstablishResponse, CHALLENGE_ID_BYTES,
+    CHALLENGE_RESPONSE_DOMAIN, CHALLENGE_TTL_SECONDS, CLIENT_SESSION_NONCE_BYTES,
+    ESTABLISH_REQUEST_DOMAIN, ESTABLISH_RESPONSE_DOMAIN, OUTPUT_STREAM_NONCE_BYTES,
+    PROTOCOL_VERSION, SERVER_NONCE_BYTES, SESSION_ID_BYTES, SESSION_INACTIVITY_TIMEOUT_SECONDS,
 };
 
 const MAX_CHALLENGES: usize = 16;
@@ -75,15 +75,84 @@ pub(crate) struct AndroidE2eSession {
     state: AsyncMutex<SessionState>,
 }
 
+/// Opaque proof that a request came through a concrete, authenticated E2E
+/// session object. Only `AndroidE2eSession::process` mints it after envelope,
+/// sequence and AEAD verification; wire input cannot construct one.
+#[derive(Clone)]
+pub(crate) struct AndroidE2eRequestContext {
+    session: Arc<AndroidE2eSession>,
+}
+
+impl AndroidE2eRequestContext {
+    pub(crate) fn instance_id(&self) -> &str {
+        &self.session.instance_id
+    }
+
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session.session_id
+    }
+
+    pub(crate) fn is_active(&self, now: u64) -> bool {
+        self.session.ensure_active(now).is_ok()
+    }
+}
+
 struct SessionState {
     keys: SessionKeys,
     used_output_nonces: HashSet<String>,
     next_sequence: u64,
     last_request_digest: Option<[u8; 32]>,
-    last_response: Option<CipherEnvelope>,
+    last_response: Option<CachedResponse>,
+}
+
+#[derive(Clone)]
+struct CachedResponse {
+    envelope: CipherEnvelope,
+    replay_guard: Option<AndroidE2eReplayGuard>,
 }
 
 impl AndroidE2eState {
+    #[cfg(test)]
+    pub(crate) fn install_test_request_context(
+        &self,
+        instance_id: &str,
+        session_id: &str,
+        expires_at: u64,
+    ) -> AndroidE2eRequestContext {
+        let keys = derive_session_keys(
+            &[7_u8; 32],
+            &[
+                "pairing",
+                instance_id,
+                "client",
+                "client-session",
+                "server",
+                session_id,
+            ],
+        )
+        .expect("test session keys");
+        let session = Arc::new(AndroidE2eSession {
+            instance_id: instance_id.to_string(),
+            session_id: session_id.to_string(),
+            pairing_revision: crate::android_pairing::pairing_revision(),
+            expires_at: AtomicU64::new(expires_at),
+            revoked: AtomicBool::new(false),
+            state: AsyncMutex::new(SessionState {
+                keys,
+                used_output_nonces: HashSet::new(),
+                next_sequence: 0,
+                last_request_digest: None,
+                last_response: None,
+            }),
+        });
+        self.registry
+            .lock()
+            .expect("test Android E2E registry")
+            .sessions
+            .insert(session_id.to_string(), Arc::clone(&session));
+        AndroidE2eRequestContext { session }
+    }
+
     pub(crate) fn issue_challenge(
         &self,
         request: ChallengeRequest,
@@ -340,6 +409,48 @@ impl AndroidE2eState {
         })
     }
 
+    /// Authorization-grade session check. Unlike dead-lease cleanup's
+    /// conservative helper above, registry failures are errors and an equal
+    /// string identity is insufficient: the exact session object must still
+    /// be the current registry entry (ADR-0208).
+    pub(crate) fn request_context_is_current(
+        &self,
+        context: &AndroidE2eRequestContext,
+        now: u64,
+    ) -> Result<bool, AppError> {
+        let registry = self.registry.lock_or_err()?;
+        Ok(registry
+            .sessions
+            .get(context.session_id())
+            .is_some_and(|session| {
+                Arc::ptr_eq(session, &context.session) && context.is_active(now)
+            }))
+    }
+
+    /// Run a short authorization commit while the exact authenticated session
+    /// remains the registry entry. The caller also holds the pairing lifecycle
+    /// predecessor; establish/revoke follows lifecycle -> registry, so neither
+    /// pairing revision nor session identity can change between this check and
+    /// the caller's owner-state mutation (ADR-0208).
+    pub(crate) fn with_current_request_context<R>(
+        &self,
+        context: &AndroidE2eRequestContext,
+        now: u64,
+        operation: impl FnOnce() -> R,
+    ) -> Result<Option<R>, AppError> {
+        let registry = self.registry.lock_or_err()?;
+        let current = registry
+            .sessions
+            .get(context.session_id())
+            .is_some_and(|session| {
+                Arc::ptr_eq(session, &context.session) && context.is_active(now)
+            });
+        if !current {
+            return Ok(None);
+        }
+        Ok(Some(operation()))
+    }
+
     pub(crate) fn clear(&self) -> Result<(), AppError> {
         let mut registry = self.registry.lock_or_err()?;
         registry.challenges.clear();
@@ -403,16 +514,18 @@ impl AndroidE2eSession {
         Ok(())
     }
 
-    pub(crate) async fn process<C, F, Fut>(
-        &self,
+    pub(crate) async fn process<C, F, Fut, V>(
+        self: &Arc<Self>,
         envelope: CipherEnvelope,
         clock: C,
         dispatch: F,
+        validate_replay_guard: V,
     ) -> Result<CipherEnvelope, E2eError>
     where
         C: FnOnce() -> Result<u64, E2eError>,
-        F: FnOnce(Value) -> Fut,
-        Fut: Future<Output = Result<Value, AppError>>,
+        F: FnOnce(AndroidE2eRequestContext, Value) -> Fut,
+        Fut: Future<Output = Result<AndroidE2eDispatchResult, AppError>>,
+        V: FnOnce(AndroidE2eRequestContext, Value, AndroidE2eReplayGuard) -> Result<(), E2eError>,
     {
         if envelope.version != PROTOCOL_VERSION
             || envelope.instance_id != self.instance_id
@@ -435,7 +548,18 @@ impl AndroidE2eSession {
             if envelope.sequence.checked_add(1) == Some(state.next_sequence)
                 && state.last_request_digest == Some(digest)
             {
-                return state.last_response.clone().ok_or(E2eError::Sequence);
+                let cached = state.last_response.clone().ok_or(E2eError::Sequence)?;
+                if let Some(replay_guard) = cached.replay_guard {
+                    let request = decrypt_plain_request(&state.keys, &envelope)?;
+                    let context = AndroidE2eRequestContext {
+                        session: Arc::clone(self),
+                    };
+                    if validate_replay_guard(context, request, replay_guard).is_err() {
+                        self.revoked.store(true, Ordering::Release);
+                        return Err(E2eError::Invalid);
+                    }
+                }
+                return Ok(cached.envelope);
             }
             return Err(E2eError::Sequence);
         }
@@ -443,27 +567,26 @@ impl AndroidE2eSession {
             return Err(E2eError::Sequence);
         }
 
-        let plaintext = decrypt_request(
-            &state.keys.a2d,
-            &self.instance_id,
-            &self.session_id,
-            envelope.sequence,
-            &envelope.ciphertext,
-        )
-        .map_err(|_| E2eError::Invalid)?;
-        if plaintext.len() > MAX_PLAINTEXT_BYTES {
-            return Err(E2eError::Invalid);
-        }
-        let request: Value = serde_json::from_slice(&plaintext).map_err(|_| E2eError::Invalid)?;
+        let request = decrypt_plain_request(&state.keys, &envelope)?;
         let candidate_expires_at = now
             .checked_add(SESSION_INACTIVITY_TIMEOUT_SECONDS)
             .ok_or_else(|| E2eError::Internal(AppError::Other("E2E expiry overflowed".into())))?;
         if self.is_revoked() {
             return Err(E2eError::Invalid);
         }
-        let response = dispatch(request).await?;
+        let context = AndroidE2eRequestContext {
+            session: Arc::clone(self),
+        };
+        let dispatch_result = dispatch(context.clone(), request).await?;
         if self.is_revoked() {
             return Err(E2eError::Invalid);
+        }
+        if let Some(replay_guard) = dispatch_result.replay_guard.clone() {
+            let request = decrypt_plain_request(&state.keys, &envelope)?;
+            if validate_replay_guard(context, request, replay_guard).is_err() {
+                self.revoked.store(true, Ordering::Release);
+                return Err(E2eError::Invalid);
+            }
         }
         let previous_expires_at = self
             .expires_at
@@ -472,7 +595,7 @@ impl AndroidE2eSession {
         let response_bytes = serde_json::to_vec(&serde_json::json!({
             "version": PROTOCOL_VERSION,
             "expiresAt": refreshed_expires_at,
-            "response": response,
+            "response": dispatch_result.response,
         }))
         .map_err(AppError::from)?;
         if response_bytes.len() > MAX_PLAINTEXT_BYTES {
@@ -498,7 +621,10 @@ impl AndroidE2eSession {
             .checked_add(1)
             .ok_or(E2eError::Sequence)?;
         state.last_request_digest = Some(digest);
-        state.last_response = Some(response_envelope.clone());
+        state.last_response = Some(CachedResponse {
+            envelope: response_envelope.clone(),
+            replay_guard: dispatch_result.replay_guard,
+        });
         Ok(response_envelope)
     }
 
@@ -506,6 +632,21 @@ impl AndroidE2eSession {
         self.revoked.load(Ordering::Acquire)
             || self.pairing_revision != crate::android_pairing::pairing_revision()
     }
+}
+
+fn decrypt_plain_request(keys: &SessionKeys, envelope: &CipherEnvelope) -> Result<Value, E2eError> {
+    let plaintext = decrypt_request(
+        &keys.a2d,
+        &envelope.instance_id,
+        &envelope.session_id,
+        envelope.sequence,
+        &envelope.ciphertext,
+    )
+    .map_err(|_| E2eError::Invalid)?;
+    if plaintext.len() > MAX_PLAINTEXT_BYTES {
+        return Err(E2eError::Invalid);
+    }
+    serde_json::from_slice(&plaintext).map_err(|_| E2eError::Invalid)
 }
 
 pub(crate) struct AndroidE2eOutputCipher {
