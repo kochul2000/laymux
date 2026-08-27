@@ -19,6 +19,7 @@ When updating the npm package versions, refresh these files and the paired
 license files in the same change.
 
 `remote-app.min.{js,css}` also include the tree-shaken Lucide DOM icons from
-`ui/src/remote/remote-icons.js`. The generated banner hashes that source along
-with `remote-app.{js,css}` so an icon-only edit cannot leave the committed
-Remote bundle stale (ADR-0210).
+`ui/src/remote/remote-icons.js`. The generated banner hashes that source and
+the lockfile identity of the `lucide` package along with `remote-app.{js,css}`
+so an icon-only edit or dependency upgrade cannot leave the committed Remote
+bundle stale (ADR-0210).

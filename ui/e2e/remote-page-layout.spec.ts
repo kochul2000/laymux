@@ -666,9 +666,9 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".pane-env")).toHaveText("PS");
     await expect(beta.locator(".pane-activity")).toHaveText("running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
-    await expect(
-      beta.locator('.pane-command-status svg[data-remote-icon-name="Hourglass"]'),
-    ).toHaveCount(1);
+    const commandStatus = beta.getByRole("img", { name: "Building" });
+    await expect(commandStatus).toHaveCount(1);
+    await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
     await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
     await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
   });

@@ -18,11 +18,11 @@ Remote는 브라우저 Direct Mode뿐 아니라 PC가 배포하는 같은 번들
 **Remote의 범용 픽토그램은 vanilla `lucide` named icon만 사용하고, `ui/src/remote/remote-icons.js`가 생성·크기·선 굵기·접근성 기본값과 동적 상태 매핑을 단독 소유한다.**
 
 1. 데스크톱은 `lucide-react`, Remote는 같은 버전의 `lucide` DOM package를 사용한다. Remote 호출부는 SVG path·아이콘 글꼴·유니코드 픽토그램을 직접 소유하지 않는다.
-2. Remote 경계의 기본값은 데스크톱과 같은 `size=14`, `strokeWidth=2`, `currentColor`, `aria-hidden=true`, `focusable=false`, flex 축소 방지다. 표면 geometry가 요구하는 크기·선 굵기만 호출부가 명시적으로 덮어쓴다.
+2. Remote 경계의 기본값은 데스크톱과 같은 `size=14`, `strokeWidth=2`, `currentColor`, `aria-hidden=true`, `focusable=false`, flex 축소 방지다. 표면 geometry가 요구하는 크기·선 굵기만 호출부가 명시적으로 덮어쓴다. 명령 결과처럼 아이콘 자체가 의미를 전달하면 호출부 wrapper가 `role`과 상태 텍스트 `aria-label`을 소유한다.
 3. 정적 셸은 `data-remote-icon` placeholder만 선언하고 end-of-body 앱 번들이 이를 SVG로 hydration한다. 런타임에 생기는 파일/폴더·가시성·입력 모드·이동·widget 아이콘은 `setRemoteIcon` 한 경로로 생성한다. 범용 인라인 `<svg>` 문자열과 문자 픽토그램은 셸 및 앱 소스에 두지 않는다.
 4. pane 명령 상태의 호환 문자열은 그대로 전송하고, Remote 최종 렌더링 경계가 `Hourglass`·`Check`·`X`·`Minus`로 매핑한다. 데이터 계산·wire 계약은 Lucide 이름이나 DOM node를 소유하지 않는다.
 5. named import만 Remote 번들에 포함해 tree-shaking한다. 아이콘은 기존 `remote-app.min.js` 안에 들어가며 새 network route나 CSP source를 만들지 않는다.
-6. ADR-0169의 생성 배너는 `remote-app.{js,css}`뿐 아니라 `remote-icons.js`의 콘텐츠 해시도 기록한다. 아이콘 경계만 바뀐 채 커밋 번들이 오래된 경우에도 드리프트 테스트가 실패해야 한다.
+6. ADR-0169의 생성 배너는 `remote-app.{js,css}`와 `remote-icons.js`의 콘텐츠 해시뿐 아니라 lockfile의 `lucide` package identity도 기록한다. 아이콘 경계나 package 버전만 바뀐 채 커밋 번들이 오래된 경우에도 드리프트 테스트가 실패해야 한다.
 
 ## Alternatives Considered
 

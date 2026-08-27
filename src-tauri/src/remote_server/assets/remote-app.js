@@ -6530,7 +6530,10 @@ import {
               status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
               setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
-              status.title = pane.selectorStatus.text || pane.lastCommand || "";
+              const statusLabel = pane.selectorStatus.text || pane.lastCommand || "Command status";
+              status.setAttribute("role", "img");
+              status.setAttribute("aria-label", statusLabel);
+              status.title = statusLabel;
               primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");

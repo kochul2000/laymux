@@ -11,6 +11,7 @@ const ASSETS_DIR = path.resolve(__dirname, "../../../src-tauri/src/remote_server
 const PAGE_PATH = path.resolve(ASSETS_DIR, "../page.html");
 const APP_SOURCE_PATH = path.resolve(ASSETS_DIR, "remote-app.js");
 const ICON_SOURCE_PATH = path.resolve(__dirname, "./remote-icons.js");
+const PACKAGE_LOCK_PATH = path.resolve(__dirname, "../../package-lock.json");
 
 const sourceHash = (file: string): string =>
   createHash("sha256")
@@ -21,14 +22,29 @@ const sourceHash = (file: string): string =>
 const fileHash = (file: string): string =>
   createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 16);
 
+interface PackageLock {
+  packages: Record<string, { version?: string; resolved?: string; integrity?: string } | undefined>;
+}
+
+const packageInputHash = (lock: PackageLock, packageName: string): string => {
+  const input = lock.packages[`node_modules/${packageName}`];
+  if (!input?.version || !input.integrity) throw new Error(`Missing ${packageName} lock input`);
+  return createHash("sha256")
+    .update(JSON.stringify([input.version, input.resolved, input.integrity]))
+    .digest("hex")
+    .slice(0, 16);
+};
+
 describe("remote page bundle", () => {
   it("committed minified artifacts match the sources", () => {
     const banner = readFileSync(path.join(ASSETS_DIR, "remote-app.min.js"), "utf8").split("\n", 8);
     const stamp = banner.find((line) => line.startsWith("// Source-SHA256:"));
+    const lock = JSON.parse(readFileSync(PACKAGE_LOCK_PATH, "utf8")) as PackageLock;
     expect(stamp).toBe(
       `// Source-SHA256: remote-app.js=${sourceHash("remote-app.js")}` +
         ` remote-app.css=${sourceHash("remote-app.css")}` +
-        ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}`,
+        ` remote-icons.js=${fileHash(ICON_SOURCE_PATH)}` +
+        ` lucide-package=${packageInputHash(lock, "lucide")}`,
     );
   });
 
@@ -77,12 +93,10 @@ describe("remote page bundle", () => {
   });
 
   it("keeps the desktop and Remote Lucide packages on the same icon version", () => {
-    const lock = JSON.parse(
-      readFileSync(path.resolve(__dirname, "../../package-lock.json"), "utf8"),
-    );
+    const lock = JSON.parse(readFileSync(PACKAGE_LOCK_PATH, "utf8")) as PackageLock;
 
-    expect(lock.packages["node_modules/lucide"].version).toBe(
-      lock.packages["node_modules/lucide-react"].version,
+    expect(lock.packages["node_modules/lucide"]?.version).toBe(
+      lock.packages["node_modules/lucide-react"]?.version,
     );
   });
 });
