@@ -6371,7 +6371,7 @@ import {
             paneList.className = "workspace-pane-list";
             content.append(paneList);
             panes.forEach((pane) => {
-              paneList.append(renderPaneRow(pane, panes, workspace.isActive));
+              paneList.append(renderPaneRow(pane, panes));
             });
             if (workspaceLastInputMode() === "workspaceLatest") {
               const latestInput = latestWorkspaceInput(panes);
@@ -6438,7 +6438,7 @@ import {
           return button;
         }
 
-        function renderPaneRow(pane, panes, workspaceActive) {
+        function renderPaneRow(pane, panes) {
           const isTerminal = isTerminalPane(pane);
           const perPaneInput = workspaceLastInputMode() === "perPane";
           const isActive = Boolean(
@@ -6446,7 +6446,7 @@ import {
           );
           const paneHidden = pane.hidden === true;
           const canSelectTerminal = Boolean(
-            workspaceActive && leaseId && isTerminal && !paneHidden,
+            leaseId && isTerminal && !paneHidden,
           );
           const entry = document.createElement("div");
           entry.className = "workspace-pane-entry";

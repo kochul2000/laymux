@@ -36,7 +36,7 @@ import { computePaneNumbers } from "@/lib/pane-numbers";
 import { selectLatestTerminalInput } from "@/lib/terminal-last-input";
 import { deriveHiddenItems, findNextVisibleWorkspaceId } from "@/lib/hidden-items";
 import { setWorkspaceHiddenWithFallback } from "@/lib/hidden-item-actions";
-import { switchActiveWorkspace } from "@/lib/workspace-transition";
+import { focusWorkspacePane, switchActiveWorkspace } from "@/lib/workspace-transition";
 import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
@@ -130,6 +130,7 @@ function WorkspaceItem({
   hiddenPaneIds,
   canHideWorkspace,
   onSelect,
+  onSelectPane,
   onClose,
   onDuplicate,
   onRename,
@@ -153,6 +154,7 @@ function WorkspaceItem({
   hiddenPaneIds: Set<string>;
   canHideWorkspace: boolean;
   onSelect: () => void;
+  onSelectPane: (paneIndex: number, pane: WorkspacePane) => void;
   onClose: () => void;
   onDuplicate: () => void;
   onRename: () => void;
@@ -418,10 +420,15 @@ function WorkspaceItem({
                       const actInfo = formatActivity(ts.activity);
                       const lastInput = getTerminalLastInput(ts);
                       return (
-                        <div
+                        <button
+                          type="button"
                           key={pane.id}
                           data-testid={`pane-row-${pane.id}`}
-                          className={`workspace-pane-row workspace-terminal-pane-row flex gap-1.5 text-[11px] ${
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onSelectPane(paneIndex, pane);
+                          }}
+                          className={`workspace-pane-row workspace-terminal-pane-row flex w-full cursor-pointer gap-1.5 border-0 bg-transparent p-0 text-left text-[11px] ${
                             lastInputMode === "perPane"
                               ? "workspace-terminal-pane-row-two-line items-start"
                               : "items-center"
@@ -600,15 +607,20 @@ function WorkspaceItem({
                               )}
                             </div>
                           </div>
-                        </div>
+                        </button>
                       );
                     }
                     // EmptyView or other view types (IssueReporterView, MemoView, etc.)
                     return (
-                      <div
+                      <button
+                        type="button"
                         key={pane.id}
                         data-testid={`pane-row-${pane.id}`}
-                        className="workspace-pane-row flex items-center gap-1.5 truncate text-[11px]"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onSelectPane(paneIndex, pane);
+                        }}
+                        className="workspace-pane-row flex w-full cursor-pointer items-center gap-1.5 truncate border-0 bg-transparent p-0 text-left text-[11px]"
                         style={{
                           paddingLeft: showMinimap && wsDisplay.minimap ? 0 : 18,
                           ...(isFocusedPane
@@ -644,7 +656,7 @@ function WorkspaceItem({
                             </span>
                           </div>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                   {lastInputMode === "workspaceLatest" && (
@@ -1181,6 +1193,13 @@ export function WorkspaceSelectorView() {
     switchActiveWorkspace(wsId);
   };
 
+  const handleSelectPane = (wsId: string, paneIndex: number, pane: WorkspacePane) => {
+    if (pane.view.type === "TerminalView") {
+      markNotificationsRead([toTerminalId(pane.id)]).catch(() => {});
+    }
+    focusWorkspacePane(wsId, paneIndex);
+  };
+
   const handleCreateWithLayout = (layoutId: string) => {
     const layout = layouts.find((l) => l.id === layoutId);
     const baseName = layout?.name ?? "Workspace";
@@ -1382,6 +1401,7 @@ export function WorkspaceSelectorView() {
                 }) !== null
               }
               onSelect={() => handleSelectWorkspace(ws.id)}
+              onSelectPane={(paneIndex, pane) => handleSelectPane(ws.id, paneIndex, pane)}
               onClose={() => removeWorkspace(ws.id)}
               onDuplicate={() => {
                 const result = duplicateWorkspace(ws.id);
