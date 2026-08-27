@@ -32,7 +32,6 @@ use super::assets::{
 };
 use super::attachments::remote_terminal_attachment;
 use super::auth::remote_guard;
-use super::display_settings::{remote_display_settings, update_remote_display_settings};
 use super::font_assets::FONT_ROUTE_PATH;
 use super::github_repo_routes::remote_terminal_github_repo;
 use super::lease::{
@@ -164,12 +163,6 @@ pub fn build_router(state: ServerState) -> Router<ServerState> {
             post(remote_session_heartbeat),
         )
         .route("/remote/v1/session/release", post(remote_session_release))
-        .route(
-            "/remote/v1/display-settings",
-            get(remote_display_settings)
-                .put(update_remote_display_settings)
-                .layer(DefaultBodyLimit::max(2 * 1024)),
-        )
         .route("/remote/v1/navigation", get(remote_navigation))
         .route("/remote/v1/layouts", get(remote_layouts_list))
         // Lease-free like `navigation`: the strip only reads (ADR-0124).
@@ -909,7 +902,7 @@ async fn remote_terminal_output_ws(
         Err(err) => return internal_error(err),
     };
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
-    let snapshot_max_bytes = super::effective_attach_snapshot_max_bytes(&settings, history_kib);
+    let snapshot_max_bytes = super::effective_attach_snapshot_max_bytes(history_kib);
 
     ws.on_upgrade(move |socket| {
         stream_terminal_output(
@@ -1383,14 +1376,9 @@ mod tests {
         );
 
         // The attach budget the output route hands to the checkpoint request is
-        // exactly this query value applied to the owner's setting.
-        let settings = RemoteSettings {
-            snapshot_max_kib: 4,
-            ..enabled_settings()
-        };
+        // the device value applied above the server fallback.
         assert_eq!(
             crate::remote_server::effective_attach_snapshot_max_bytes(
-                &settings,
                 parse("leaseId=lease-1&historyKib=256")
                     .unwrap()
                     .history_kib()
@@ -1399,7 +1387,6 @@ mod tests {
         );
         assert_eq!(
             crate::remote_server::effective_attach_snapshot_max_bytes(
-                &settings,
                 parse("leaseId=lease-1&historyKib=huge")
                     .unwrap()
                     .history_kib()

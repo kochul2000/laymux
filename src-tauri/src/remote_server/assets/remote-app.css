@@ -493,7 +493,7 @@
         overflow: hidden;
       }
       .navigation-panel {
-        /* PC-owned menu text size (ADR-0199). The drawer's font-size tiers are
+        /* Device-local menu text size (ADR-0209). The drawer's font-size tiers are
            re-derived from the menu base so every row scales together; the
            10/13 and 11/13 ratios keep the default (13px) pixel-identical to
            the global --fs-xs/--fs-sm tokens. */
@@ -1047,7 +1047,7 @@
       .workspace-primary-right {
         flex: 0 0 auto;
       }
-      /* Workspace-list text sizes are em so they follow the drawer's PC-owned
+      /* Workspace-list text sizes are em so they follow the drawer's device-local
          menu base (--remote-menu-font-size, 13px default): NNpx/13. */
       .workspace-index {
         flex: 0 0 auto;

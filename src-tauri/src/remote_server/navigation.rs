@@ -797,15 +797,10 @@ mod tests {
             geometry_capabilities: crate::pty_geometry::production_geometry_capabilities(),
             appearance: RemoteTerminalAppearance {
                 font_family: "Cascadia Mono".into(),
-                font_size: 14,
                 cursor_style: "bar".into(),
                 cursor_width: Some(1),
                 font_assets: None,
                 theme: RemoteTerminalTheme::default(),
-                scroll_sensitivity: crate::constants::DEFAULT_SCROLL_SENSITIVITY,
-                fast_scroll_sensitivity: crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY,
-                touch_scroll_sensitivity: crate::constants::DEFAULT_SCROLL_SENSITIVITY,
-                two_finger_scroll_sensitivity: crate::constants::DEFAULT_FAST_SCROLL_SENSITIVITY,
             },
         }
     }

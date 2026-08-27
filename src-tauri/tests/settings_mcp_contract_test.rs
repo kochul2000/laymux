@@ -272,66 +272,29 @@ fn changing_a_preexisting_invalid_value_to_another_invalid_value_is_rejected() {
 }
 
 #[test]
-fn remote_snapshot_max_kib_outside_range_is_rejected() {
-    let too_small = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 0 } }),
-    );
-    assert!(!too_small.valid);
-    assert!(too_small
-        .errors
-        .iter()
-        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
-
-    let too_large = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 2048 } }),
-    );
-    assert!(!too_large.valid);
-    assert!(too_large
-        .errors
-        .iter()
-        .any(|issue| issue.path == "/remote/snapshotMaxKib"));
-
-    let in_range = prepare_settings_update(
-        &Settings::default(),
-        &json!({ "remote": { "snapshotMaxKib": 64 } }),
-    );
-    assert!(in_range.valid, "errors: {:?}", in_range.errors);
-}
-
-#[test]
-fn remote_snapshot_max_kib_defaults_to_four() {
-    assert_eq!(Settings::default().remote.snapshot_max_kib, 4);
-}
-
-#[test]
-fn remote_display_font_sizes_default_and_validate_as_pc_owned_settings() {
-    let defaults = Settings::default();
-    assert_eq!(defaults.remote.terminal_font_size, 14);
-    assert_eq!(defaults.remote.composer_font_size, 16);
-
-    let valid = prepare_settings_update(
-        &defaults,
-        &json!({ "remote": { "terminalFontSize": 18, "composerFontSize": 20 } }),
-    );
-    assert!(valid.valid, "errors: {:?}", valid.errors);
-    let candidate = valid.candidate.unwrap();
-    assert_eq!(candidate.remote.terminal_font_size, 18);
-    assert_eq!(candidate.remote.composer_font_size, 20);
-
-    for (field, value) in [
-        ("terminalFontSize", 5),
-        ("terminalFontSize", 73),
-        ("composerFontSize", 5),
-        ("composerFontSize", 73),
+fn device_local_remote_display_fields_are_not_pc_settings() {
+    for field in [
+        "snapshotMaxKib",
+        "terminalFontSize",
+        "composerFontSize",
+        "menuFontSize",
+        "composerIdleOpacity",
+        "composerFocusedOpacity",
+        "composerActiveOpacity",
+        "scrollSensitivity",
+        "fastScrollSensitivity",
+        "touchScrollSensitivity",
+        "twoFingerScrollSensitivity",
     ] {
         let mut patch = json!({ "remote": {} });
-        patch["remote"][field] = json!(value);
+        patch["remote"][field] = json!(1);
         let prepared = prepare_settings_update(&Settings::default(), &patch);
-        assert!(!prepared.valid, "{field}={value} must be rejected");
+        assert!(
+            !prepared.valid,
+            "{field} must not be accepted as a PC setting"
+        );
         assert!(prepared.errors.iter().any(|issue| {
-            issue.code == "out_of_range" && issue.path == format!("/remote/{field}")
+            issue.code == "unknown_key" && issue.path == format!("/remote/{field}")
         }));
     }
 }

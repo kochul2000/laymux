@@ -31,8 +31,8 @@ use crate::terminal_output::{
 
 use super::{
     active_lease_matches_with_timeout, attach_and_subscribe_render_checkpoint,
-    effective_attach_snapshot_max_bytes, effective_remote_settings, get_remote_control_status,
-    json_error, RenderCheckpointAttachError,
+    effective_attach_snapshot_max_bytes, get_remote_control_status, json_error,
+    RenderCheckpointAttachError,
 };
 
 pub(crate) const ANDROID_E2E_OUTPUT_PATH: &str = "/remote/v1/e2e/output";
@@ -139,9 +139,7 @@ async fn stream_local_android_e2e_output(
         input_rx,
         shutdown_rx,
         move |terminal_id, history_kib| async move {
-            let settings = effective_remote_settings(&attach_server.app_state)
-                .map_err(RenderCheckpointAttachError::fatal)?;
-            let snapshot_max_bytes = effective_attach_snapshot_max_bytes(&settings, history_kib);
+            let snapshot_max_bytes = effective_attach_snapshot_max_bytes(history_kib);
             attach_and_subscribe_render_checkpoint(&attach_server, &terminal_id, snapshot_max_bytes)
                 .await
         },

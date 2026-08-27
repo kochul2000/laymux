@@ -2,10 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::constants::{
-    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, DEFAULT_REMOTE_SNAPSHOT_MAX_KIB,
-    PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT, PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT,
-    PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN, PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT,
-    WIDGET_FONT_SIZE_DEFAULT,
+    DEFAULT_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, PARSER_ADMISSION_FOCUSED_SHARE_DEFAULT,
+    PARSER_ADMISSION_HIDDEN_SHARE_DEFAULT, PARSER_ADMISSION_SHARE_MAX, PARSER_ADMISSION_SHARE_MIN,
+    PARSER_ADMISSION_VISIBLE_SHARE_DEFAULT, WIDGET_FONT_SIZE_DEFAULT,
 };
 
 /// Color scheme definition (Windows Terminal compatible).
@@ -1802,28 +1801,6 @@ pub struct RemoteSettings {
     /// App window width at or below which the Remote Access modal opens automatically. 0 disables.
     #[serde(default = "default_remote_auto_mobile_mode_min_width")]
     pub auto_mobile_mode_min_width: u32,
-    /// Max KiB of recent output replayed to a remote client on terminal attach.
-    #[serde(default = "default_remote_snapshot_max_kib")]
-    pub snapshot_max_kib: u32,
-    /// Terminal cell font size used only by the Remote surface.
-    #[serde(default = "default_remote_terminal_font_size")]
-    pub terminal_font_size: u16,
-    /// Text size for the Remote input composer and its suggestions.
-    #[serde(default = "default_remote_composer_font_size")]
-    pub composer_font_size: u16,
-    /// Base text size for the Remote navigation drawer (menu). The drawer's
-    /// smaller text tiers scale proportionally from this value.
-    #[serde(default = "default_remote_menu_font_size")]
-    pub menu_font_size: u16,
-    /// Opacity percentage for a visible Remote composer without focus or activity.
-    #[serde(default = "default_remote_composer_idle_opacity")]
-    pub composer_idle_opacity: u8,
-    /// Opacity percentage for an empty focused Remote composer.
-    #[serde(default = "default_remote_composer_focused_opacity")]
-    pub composer_focused_opacity: u8,
-    /// Opacity percentage while the Remote composer owns draft/suggestion/IME/send activity.
-    #[serde(default = "default_remote_composer_active_opacity")]
-    pub composer_active_opacity: u8,
     /// Preferred host for copyable remote URLs. Empty = auto-select the first candidate.
     #[serde(default)]
     pub preferred_host: String,
@@ -1864,27 +1841,6 @@ pub struct RemoteSettings {
     /// on a device where a screen row matters more, and never touches placement.
     #[serde(default = "default_remote_widgets")]
     pub widgets: bool,
-    /// Wheel scroll multiplier for the Remote browser terminal (xterm
-    /// `scrollSensitivity`). Separate from `terminal.scrollSensitivity`: the
-    /// remote client is a different device with its own pointer.
-    #[serde(default = "default_scroll_sensitivity")]
-    pub scroll_sensitivity: f32,
-    /// Remote wheel multiplier while the fast-scroll modifier (Alt) is held
-    /// (xterm `fastScrollSensitivity`).
-    #[serde(default = "default_fast_scroll_sensitivity")]
-    pub fast_scroll_sensitivity: f32,
-    /// Multiplier for **one-finger** finger-drag scrollback on the Remote
-    /// surface. 1 keeps the 1:1 physical scroll the gesture starts out as;
-    /// above 1 the content moves further than the finger. Not an xterm option —
-    /// the Remote page owns this gesture and converts pixels to lines itself.
-    #[serde(default = "default_scroll_sensitivity")]
-    pub touch_scroll_sensitivity: f32,
-    /// Multiplier for **two-finger** finger-drag scrollback on the Remote
-    /// surface. Separate from the one-finger value so a two-finger swipe can
-    /// cover more scrollback per drag; defaults to the fast-scroll factor (5).
-    /// Same pixel→line path as `touch_scroll_sensitivity`, not an xterm option.
-    #[serde(default = "default_fast_scroll_sensitivity")]
-    pub two_finger_scroll_sensitivity: f32,
 }
 
 fn default_remote_bind_address() -> String {
@@ -1907,47 +1863,6 @@ fn default_android_background_lease_seconds() -> u64 {
 
 fn default_remote_auto_mobile_mode_min_width() -> u32 {
     720
-}
-
-fn default_remote_snapshot_max_kib() -> u32 {
-    DEFAULT_REMOTE_SNAPSHOT_MAX_KIB
-}
-
-pub const REMOTE_FONT_SIZE_MIN: u16 = 6;
-pub const REMOTE_FONT_SIZE_MAX: u16 = 72;
-pub const DEFAULT_REMOTE_TERMINAL_FONT_SIZE: u16 = 14;
-pub const DEFAULT_REMOTE_COMPOSER_FONT_SIZE: u16 = 16;
-/// Matches the drawer's historical fixed base (`--fs-md`, 13px), so existing
-/// installs render pixel-identically until the user changes the value.
-pub const DEFAULT_REMOTE_MENU_FONT_SIZE: u16 = 13;
-pub const REMOTE_COMPOSER_OPACITY_MIN: u8 = 20;
-pub const REMOTE_COMPOSER_OPACITY_MAX: u8 = 100;
-pub const DEFAULT_REMOTE_COMPOSER_IDLE_OPACITY: u8 = 55;
-pub const DEFAULT_REMOTE_COMPOSER_FOCUSED_OPACITY: u8 = 80;
-pub const DEFAULT_REMOTE_COMPOSER_ACTIVE_OPACITY: u8 = 100;
-
-fn default_remote_terminal_font_size() -> u16 {
-    DEFAULT_REMOTE_TERMINAL_FONT_SIZE
-}
-
-fn default_remote_composer_font_size() -> u16 {
-    DEFAULT_REMOTE_COMPOSER_FONT_SIZE
-}
-
-fn default_remote_menu_font_size() -> u16 {
-    DEFAULT_REMOTE_MENU_FONT_SIZE
-}
-
-fn default_remote_composer_idle_opacity() -> u8 {
-    DEFAULT_REMOTE_COMPOSER_IDLE_OPACITY
-}
-
-fn default_remote_composer_focused_opacity() -> u8 {
-    DEFAULT_REMOTE_COMPOSER_FOCUSED_OPACITY
-}
-
-fn default_remote_composer_active_opacity() -> u8 {
-    DEFAULT_REMOTE_COMPOSER_ACTIVE_OPACITY
 }
 
 fn default_cloud_auto_reconnect() -> bool {
@@ -1993,13 +1908,6 @@ impl Default for RemoteSettings {
             heartbeat_timeout_seconds: default_remote_heartbeat_timeout_seconds(),
             android_background_lease_seconds: default_android_background_lease_seconds(),
             auto_mobile_mode_min_width: default_remote_auto_mobile_mode_min_width(),
-            snapshot_max_kib: default_remote_snapshot_max_kib(),
-            terminal_font_size: default_remote_terminal_font_size(),
-            composer_font_size: default_remote_composer_font_size(),
-            menu_font_size: default_remote_menu_font_size(),
-            composer_idle_opacity: default_remote_composer_idle_opacity(),
-            composer_focused_opacity: default_remote_composer_focused_opacity(),
-            composer_active_opacity: default_remote_composer_active_opacity(),
             preferred_host: String::new(),
             custom_hosts: Vec::new(),
             cloud_enabled: false,
@@ -2011,10 +1919,6 @@ impl Default for RemoteSettings {
             cloud_access_mode: CloudAccessMode::default(),
             serve_terminal_font: false,
             widgets: default_remote_widgets(),
-            scroll_sensitivity: default_scroll_sensitivity(),
-            fast_scroll_sensitivity: default_fast_scroll_sensitivity(),
-            touch_scroll_sensitivity: default_scroll_sensitivity(),
-            two_finger_scroll_sensitivity: default_fast_scroll_sensitivity(),
         }
     }
 }

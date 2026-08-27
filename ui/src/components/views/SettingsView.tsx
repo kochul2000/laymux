@@ -106,10 +106,7 @@ import {
   LOOPBACK_ALLOWED_IPS,
   normalizeAutoMobileWidth,
   normalizeCustomHosts,
-  normalizeSnapshotMaxKib,
   parseAllowedIps,
-  SNAPSHOT_MAX_KIB_MAX,
-  SNAPSHOT_MAX_KIB_MIN,
   TAILSCALE_ALLOWED_IPS,
 } from "@/lib/remote-hosts";
 import {
@@ -2303,63 +2300,9 @@ function InterfaceSection() {
   );
 }
 
-// -- Sections: Remote Connection / Remote Display --
+// -- Section: Remote Connection and host data policy --
 
-type RemoteDisplaySettings = Pick<
-  RemoteSettings,
-  | "terminalFontSize"
-  | "composerFontSize"
-  | "menuFontSize"
-  | "composerIdleOpacity"
-  | "composerFocusedOpacity"
-  | "composerActiveOpacity"
-  | "snapshotMaxKib"
-  | "serveTerminalFont"
-  | "widgets"
-  | "scrollSensitivity"
-  | "fastScrollSensitivity"
-  | "touchScrollSensitivity"
-  | "twoFingerScrollSensitivity"
->;
-type RemoteConnectionSettings = Omit<RemoteSettings, keyof RemoteDisplaySettings>;
-const REMOTE_FONT_SIZE_MIN = 6;
-const REMOTE_FONT_SIZE_MAX = 72;
-const REMOTE_COMPOSER_OPACITY_MIN = 20;
-const REMOTE_COMPOSER_OPACITY_MAX = 100;
-
-function normalizeRemoteFontSize(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(REMOTE_FONT_SIZE_MAX, Math.max(REMOTE_FONT_SIZE_MIN, Math.trunc(parsed)));
-}
-
-function normalizeRemoteComposerOpacity(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  return Math.min(
-    REMOTE_COMPOSER_OPACITY_MAX,
-    Math.max(REMOTE_COMPOSER_OPACITY_MIN, Math.round(parsed / 5) * 5),
-  );
-}
-
-function normalizeRemoteComposerOpacities(
-  remote: Pick<
-    RemoteDisplaySettings,
-    "composerIdleOpacity" | "composerFocusedOpacity" | "composerActiveOpacity"
-  >,
-) {
-  const active = normalizeRemoteComposerOpacity(remote.composerActiveOpacity, 100);
-  const focused = Math.min(
-    normalizeRemoteComposerOpacity(remote.composerFocusedOpacity, 80),
-    active,
-  );
-  const idle = Math.min(normalizeRemoteComposerOpacity(remote.composerIdleOpacity, 55), focused);
-  return {
-    composerIdleOpacity: idle,
-    composerFocusedOpacity: focused,
-    composerActiveOpacity: active,
-  };
-}
+type RemoteConnectionSettings = RemoteSettings;
 
 type RemoteSectionDraft = RemoteConnectionSettings & {
   allowedIpsText: string;
@@ -2386,6 +2329,8 @@ function toRemoteSectionDraft(remote: RemoteSettings): RemoteSectionDraft {
     cloudServerBaseUrl: remote.cloudServerBaseUrl,
     cloudAutoReconnect: remote.cloudAutoReconnect,
     cloudAccessMode: remote.cloudAccessMode,
+    serveTerminalFont: remote.serveTerminalFont,
+    widgets: remote.widgets,
     allowedIpsText: formatAllowedIps(remote.allowedIps),
     customHostInput: "",
   };
@@ -2901,337 +2846,8 @@ function RemoteConnectionSection() {
           />
         </SettingRow>
       </SubGroup>
-    </div>
-  );
-}
 
-function toRemoteDisplaySettings(remote: RemoteSettings): RemoteDisplaySettings {
-  return {
-    terminalFontSize: remote.terminalFontSize,
-    composerFontSize: remote.composerFontSize,
-    menuFontSize: remote.menuFontSize,
-    composerIdleOpacity: remote.composerIdleOpacity,
-    composerFocusedOpacity: remote.composerFocusedOpacity,
-    composerActiveOpacity: remote.composerActiveOpacity,
-    snapshotMaxKib: remote.snapshotMaxKib,
-    serveTerminalFont: remote.serveTerminalFont,
-    widgets: remote.widgets,
-    scrollSensitivity: remote.scrollSensitivity,
-    fastScrollSensitivity: remote.fastScrollSensitivity,
-    touchScrollSensitivity: remote.touchScrollSensitivity,
-    twoFingerScrollSensitivity: remote.twoFingerScrollSensitivity,
-  };
-}
-
-function normalizeRemoteDisplaySettings(remote: RemoteDisplaySettings): RemoteDisplaySettings {
-  return {
-    ...remote,
-    terminalFontSize: normalizeRemoteFontSize(remote.terminalFontSize, 14),
-    composerFontSize: normalizeRemoteFontSize(remote.composerFontSize, 16),
-    menuFontSize: normalizeRemoteFontSize(remote.menuFontSize, 13),
-    ...normalizeRemoteComposerOpacities(remote),
-    snapshotMaxKib: normalizeSnapshotMaxKib(remote.snapshotMaxKib),
-    scrollSensitivity: normalizeScrollSensitivity(
-      remote.scrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
-    ),
-    fastScrollSensitivity: normalizeScrollSensitivity(
-      remote.fastScrollSensitivity,
-      DEFAULT_FAST_SCROLL_SENSITIVITY,
-    ),
-    touchScrollSensitivity: normalizeScrollSensitivity(
-      remote.touchScrollSensitivity,
-      DEFAULT_SCROLL_SENSITIVITY,
-    ),
-    twoFingerScrollSensitivity: normalizeScrollSensitivity(
-      remote.twoFingerScrollSensitivity,
-      DEFAULT_FAST_SCROLL_SENSITIVITY,
-    ),
-  };
-}
-
-function RemoteDisplaySection() {
-  const { t } = useTranslation("settings");
-  const storeRemote = useSettingsStore((s) => s.remote);
-  const setRemote = useSettingsStore((s) => s.setRemote);
-  const storeDraft = useMemo(() => toRemoteDisplaySettings(storeRemote), [storeRemote]);
-  const [remote, setDraftRemote] = useDraft<RemoteDisplaySettings>(
-    "remoteDisplay",
-    storeDraft,
-    (draft) => setRemote(normalizeRemoteDisplaySettings(draft)),
-  );
-  const update = (partial: Partial<RemoteDisplaySettings>) =>
-    setDraftRemote((previous) => ({ ...previous, ...partial }));
-  const updateComposerOpacity = (
-    field: "composerIdleOpacity" | "composerFocusedOpacity" | "composerActiveOpacity",
-    value: unknown,
-  ) =>
-    setDraftRemote((previous) => ({
-      ...previous,
-      ...normalizeRemoteComposerOpacities({
-        ...previous,
-        [field]: normalizeRemoteComposerOpacity(value, previous[field]),
-      }),
-    }));
-
-  return (
-    <div>
-      <SectionTitle>{t("remote.displayTitle")}</SectionTitle>
-
-      <SubGroup title={t("remote.groupDisplay")}>
-        <SettingRow label={t("remote.terminalFontSize")} desc={t("remote.terminalFontSizeDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-terminal-font-size-input"
-              type="number"
-              min={REMOTE_FONT_SIZE_MIN}
-              max={REMOTE_FONT_SIZE_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.terminalFontSize}
-              onChange={(event) =>
-                update({
-                  terminalFontSize: normalizeRemoteFontSize(event.target.value, 14),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              px
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.composerFontSize")} desc={t("remote.composerFontSizeDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-composer-font-size-input"
-              type="number"
-              min={REMOTE_FONT_SIZE_MIN}
-              max={REMOTE_FONT_SIZE_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.composerFontSize}
-              onChange={(event) =>
-                update({
-                  composerFontSize: normalizeRemoteFontSize(event.target.value, 16),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              px
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.menuFontSize")} desc={t("remote.menuFontSizeDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-menu-font-size-input"
-              type="number"
-              min={REMOTE_FONT_SIZE_MIN}
-              max={REMOTE_FONT_SIZE_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.menuFontSize}
-              onChange={(event) =>
-                update({
-                  menuFontSize: normalizeRemoteFontSize(event.target.value, 13),
-                })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              px
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.composerIdleOpacity")}
-          desc={t("remote.composerIdleOpacityDesc")}
-        >
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-composer-idle-opacity-input"
-              type="number"
-              min={REMOTE_COMPOSER_OPACITY_MIN}
-              max={REMOTE_COMPOSER_OPACITY_MAX}
-              step={5}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.composerIdleOpacity}
-              onChange={(event) => updateComposerOpacity("composerIdleOpacity", event.target.value)}
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              %
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.composerFocusedOpacity")}
-          desc={t("remote.composerFocusedOpacityDesc")}
-        >
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-composer-focused-opacity-input"
-              type="number"
-              min={remote.composerIdleOpacity}
-              max={remote.composerActiveOpacity}
-              step={5}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.composerFocusedOpacity}
-              onChange={(event) =>
-                updateComposerOpacity("composerFocusedOpacity", event.target.value)
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              %
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.composerActiveOpacity")}
-          desc={t("remote.composerActiveOpacityDesc")}
-        >
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-composer-active-opacity-input"
-              type="number"
-              min={remote.composerFocusedOpacity}
-              max={REMOTE_COMPOSER_OPACITY_MAX}
-              step={5}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.composerActiveOpacity}
-              onChange={(event) =>
-                updateComposerOpacity("composerActiveOpacity", event.target.value)
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              %
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.snapshotMaxKib")} desc={t("remote.snapshotMaxKibDesc")}>
-          <div className="flex items-center gap-2">
-            <FocusInput
-              data-testid="remote-settings-snapshot-max-kib-input"
-              type="number"
-              min={SNAPSHOT_MAX_KIB_MIN}
-              max={SNAPSHOT_MAX_KIB_MAX}
-              step={1}
-              className={inputCls}
-              inputStyle={{ width: 110 }}
-              value={remote.snapshotMaxKib}
-              onChange={(event) =>
-                update({ snapshotMaxKib: normalizeSnapshotMaxKib(event.target.value) })
-              }
-            />
-            <span className="text-[11px]" style={{ color: "var(--text-secondary)" }}>
-              KiB
-            </span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label={t("remote.scrollSensitivity")} desc={t("remote.scrollSensitivityDesc")}>
-          <FocusInput
-            data-testid="remote-settings-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.scrollSensitivity}
-            onChange={(event) =>
-              update({
-                scrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.fastScrollSensitivity")}
-          desc={t("remote.fastScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-fast-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.fastScrollSensitivity}
-            onChange={(event) =>
-              update({
-                fastScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_FAST_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.touchScrollSensitivity")}
-          desc={t("remote.touchScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-touch-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.touchScrollSensitivity}
-            onChange={(event) =>
-              update({
-                touchScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
-        <SettingRow
-          label={t("remote.twoFingerScrollSensitivity")}
-          desc={t("remote.twoFingerScrollSensitivityDesc")}
-        >
-          <FocusInput
-            data-testid="remote-settings-two-finger-scroll-sensitivity-input"
-            type="number"
-            min={SCROLL_SENSITIVITY_MIN}
-            max={SCROLL_SENSITIVITY_MAX}
-            step={SCROLL_SENSITIVITY_STEP}
-            className={inputCls}
-            inputStyle={{ width: 110 }}
-            value={remote.twoFingerScrollSensitivity}
-            onChange={(event) =>
-              update({
-                twoFingerScrollSensitivity: normalizeScrollSensitivity(
-                  event.target.value,
-                  DEFAULT_FAST_SCROLL_SENSITIVITY,
-                ),
-              })
-            }
-          />
-        </SettingRow>
-
+      <SubGroup title={t("remote.groupHostData")}>
         <ToggleRow
           label={t("remote.serveTerminalFont")}
           desc={t("remote.serveTerminalFontDesc")}
@@ -3239,7 +2855,6 @@ function RemoteDisplaySection() {
           checked={remote.serveTerminalFont}
           onChange={(value) => update({ serveTerminalFont: value })}
         />
-
         <ToggleRow
           label={t("remote.widgets")}
           desc={t("remote.widgetsDesc")}
@@ -6242,16 +5857,6 @@ export function SettingsView() {
           >
             {t("nav.remoteConnection")}
           </button>
-          <button
-            data-testid="nav-remote-display"
-            className="w-full px-4 py-2 text-left text-[13px]"
-            style={navBtnStyle("remoteDisplay")}
-            onClick={() => setActiveNav("remoteDisplay")}
-            onMouseEnter={() => setNavHover("remoteDisplay")}
-            onMouseLeave={() => setNavHover(null)}
-          >
-            {t("nav.remoteDisplay")}
-          </button>
 
           {/* Agents */}
           <NavGroupHeader label={t("nav.groupAgents")} />
@@ -6444,7 +6049,6 @@ export function SettingsView() {
             {activeNav === "interface" && <InterfaceSection />}
             {activeNav === "workspaceDisplay" && <WorkspacesSection />}
             {activeNav === "remoteConnection" && <RemoteConnectionSection />}
-            {activeNav === "remoteDisplay" && <RemoteDisplaySection />}
             {activeNav === "claude" && <ClaudeSection />}
             {activeNav === "codex" && <CodexSection />}
             {activeNav === "grok" && <GrokSection />}

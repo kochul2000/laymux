@@ -1,6 +1,6 @@
 # 0199. Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다
 
-- Status: Accepted
+- Status: Superseded by [0209](0209-remote-display-preferences-are-device-local.md)
 - Date: 2026-08-24
 - Source: 사용자 요구("remote 에서 메뉴 폰트 크기조정 기능 만들어줘") · [architecture/api-contracts.md §13](../architecture/api-contracts.md) · [ADR-0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) · [ADR-0177](0177-remote-two-finger-touch-scroll-sensitivity.md)
 - Extends: ADR-0173

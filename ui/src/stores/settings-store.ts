@@ -175,8 +175,8 @@ export interface TerminalSettings {
   showScrollToBottomButton: boolean;
   /**
    * Mouse wheel scroll multiplier for this desktop terminal (xterm
-   * `scrollSensitivity`). The Remote surface carries its own value in
-   * `remote.scrollSensitivity`.
+   * `scrollSensitivity`). Remote devices keep their own multiplier in the
+   * served page's device-local storage.
    */
   scrollSensitivity: number;
   /** Wheel multiplier while the fast-scroll modifier (Alt) is held. */
@@ -742,13 +742,6 @@ const DEFAULT_REMOTE: RemoteSettings = {
   heartbeatTimeoutSeconds: 45,
   androidBackgroundLeaseSeconds: 900,
   autoMobileModeMinWidth: 720,
-  snapshotMaxKib: 4,
-  terminalFontSize: 14,
-  composerFontSize: 16,
-  menuFontSize: 13,
-  composerIdleOpacity: 55,
-  composerFocusedOpacity: 80,
-  composerActiveOpacity: 100,
   preferredHost: "",
   customHosts: [],
   cloudEnabled: false,
@@ -760,10 +753,6 @@ const DEFAULT_REMOTE: RemoteSettings = {
   cloudAccessMode: "browserAndE2e",
   serveTerminalFont: false,
   widgets: true,
-  scrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
-  fastScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
-  touchScrollSensitivity: DEFAULT_SCROLL_SENSITIVITY,
-  twoFingerScrollSensitivity: DEFAULT_FAST_SCROLL_SENSITIVITY,
 };
 
 export const DEFAULT_FONT: FontSettings = { face: "Cascadia Mono", size: 14, weight: "normal" };

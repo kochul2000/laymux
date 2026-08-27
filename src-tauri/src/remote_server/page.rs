@@ -429,15 +429,15 @@ mod tests {
         assert!(html.contains("scheduleTerminalFit();"));
     }
 
-    /// The wheel multipliers ride the per-terminal option bundle and are applied
-    /// wherever the font and theme are, both at creation and on a live update.
+    /// Device-local wheel multipliers join the host appearance only when the
+    /// page builds xterm's supported option bundle.
     #[test]
-    fn remote_page_html_applies_the_served_wheel_sensitivities() {
+    fn remote_page_html_applies_the_device_wheel_sensitivities() {
         let html = remote_client_source();
         assert!(html.contains("scrollSensitivity: normalized.scrollSensitivity,"));
         assert!(html.contains("fastScrollSensitivity: normalized.fastScrollSensitivity,"));
-        // An older desktop omits the field and a hand-edited value can be out of
-        // band; xterm throws on a non-positive sensitivity, so both are absorbed.
+        // A hand-edited localStorage value can be out of band; xterm throws on
+        // a non-positive sensitivity, so the page absorbs it before applying.
         assert!(html.contains("function normalizeScrollSensitivity(value, fallback) {"));
         assert!(html.contains("if (!Number.isFinite(parsed) || parsed <= 0) return fallback;"));
     }
@@ -453,7 +453,7 @@ mod tests {
             html.contains("sendTerminalCursorScroll(term, deltaY, twoFingerScrollSensitivity);")
         );
         assert!(html.contains("function adoptTouchScrollSensitivity(appearance = {}) {"));
-        // Both the first terminal and every later appearance update adopt it.
+        // The first terminal and every local display-settings update adopt it.
         assert!(html.contains("adoptTouchScrollSensitivity(appearance);"));
         assert!(!html.contains("term.options.touchScrollSensitivity"));
     }
@@ -645,7 +645,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_page_html_edits_pc_owned_display_settings() {
+    fn remote_page_html_owns_display_settings_in_device_storage() {
         let html = remote_client_source();
 
         assert!(html.contains("id=\"remoteTerminalFontSize\""));
@@ -654,12 +654,14 @@ mod tests {
         assert!(html.contains("id=\"remoteComposerIdleOpacity\""));
         assert!(html.contains("id=\"remoteComposerFocusedOpacity\""));
         assert!(html.contains("id=\"remoteComposerActiveOpacity\""));
+        assert!(html.contains("id=\"remoteSnapshotMaxKib\""));
+        assert!(html.contains("id=\"remoteScrollSensitivity\""));
+        assert!(html.contains("id=\"remoteFastScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTouchScrollSensitivity\""));
         assert!(html.contains("id=\"remoteTwoFingerScrollSensitivity\""));
-        assert!(html.contains("/remote/v1/display-settings"));
-        assert!(html.contains("method: \"PUT\""));
-        assert!(html.contains("body: JSON.stringify({"));
-        assert!(html.contains("leaseId: selectedLeaseId"));
+        assert!(html.contains("laymux.remote.displaySettings"));
+        assert!(!html.contains("/remote/v1/display-settings"));
+        assert!(html.contains("Saved on this device."));
         assert!(html.contains("terminalFontSize"));
         assert!(html.contains("composerFontSize"));
         assert!(html.contains("menuFontSize"));
@@ -1183,7 +1185,9 @@ mod tests {
         assert!(html.contains("terminalFitSettledRevision = fitRevision;"));
         assert!(html.contains("viewportInteractionRevision: terminalViewportInteractionRevision"));
         assert!(html.contains("function markTerminalViewportInteraction()"));
-        assert!(html.contains("markTerminalViewportInteraction();\n          const distanceFromBottom"));
+        assert!(
+            html.contains("markTerminalViewportInteraction();\n          const distanceFromBottom")
+        );
         assert!(html.contains(
             "scrollToBottomButton.addEventListener(\"pointerdown\", markTerminalViewportInteraction);"
         ));

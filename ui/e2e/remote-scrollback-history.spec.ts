@@ -128,7 +128,7 @@ interface Attach {
 }
 
 interface DesktopOptions {
-  /** `remote.snapshotMaxKib` on the desktop: the budget floor a request raises. */
+  /** Server-side fallback floor; the device normally sends its own budget. */
   ownerKib: number;
   /** How much scrollback the terminal actually holds. */
   scrollbackKib: number;
@@ -138,8 +138,8 @@ interface DesktopOptions {
 
 /**
  * Desktop model: the served checkpoint is `min(max(ownerKib, historyKib),
- * scrollbackKib)` — exactly the `max(configured, requested)` clamp the Rust
- * side applies, bounded by what the terminal really holds (ADR-0182).
+ * scrollbackKib)` — the server fallback can only raise a too-small device
+ * request, bounded by what the terminal really holds (ADR-0209).
  */
 async function installRemoteMocks(page: Page, options: DesktopOptions, attaches: Attach[]) {
   let ptyGeometry: Geometry = { cols: 80, rows: 24 };
@@ -240,7 +240,7 @@ test("reaching the top of the scrollback attaches a deeper screen checkpoint", a
   await pullToTop(page);
 
   await expect.poll(() => baseY(page)).toBeGreaterThan(initialBaseY);
-  expect(attaches.map((attach) => attach.historyKib)).toEqual([0, 64]);
+  expect(attaches.map((attach) => attach.historyKib)).toEqual([4, 64]);
   await expect(page.locator("#status")).toHaveText("Main · Pane 1");
 
   // The rows the user was reading stay on screen: the viewport keeps its
@@ -252,16 +252,19 @@ test("reaching the top of the scrollback attaches a deeper screen checkpoint", a
   expect(restored).toBe(initialBaseY);
 });
 
-test("an owner budget above the first request step still expands", async ({ page }) => {
-  // Regression: a fixed 64/256/1024 ladder resolved to the owner's own budget
-  // here, so the re-attach returned the same screen and the pane was declared
-  // exhausted. The request is derived from the screen the page holds instead.
+test("a device budget above the first expansion step still expands", async ({ page }) => {
+  // The expansion is derived from the screen the page holds, so a large
+  // device-local initial budget does not collide with a fixed request ladder.
   const attaches: Attach[] = [];
-  await installRemoteMocks(page, { ownerKib: 64, scrollbackKib: 256 }, attaches);
+  await installRemoteMocks(page, { ownerKib: 4, scrollbackKib: 256 }, attaches);
+  await page.addInitScript(() => {
+    localStorage.setItem("laymux.remote.displaySettings", JSON.stringify({ snapshotMaxKib: 64 }));
+  });
   await connectAndCaptureTerminal(page);
 
   await expect.poll(() => baseY(page)).toBeGreaterThan(0);
   const initialBaseY = await baseY(page);
+  expect(attaches[0].historyKib).toBe(64);
 
   await pullToTop(page);
 
@@ -420,7 +423,7 @@ test("a request that never gets its snapshot is retried, not read as exhaustion"
     attaches.push({ terminalId: "terminal-1", historyKib, close: () => socket.close() });
     // The expansion attach dies before delivering anything: the request is
     // released, and the budget it raised must roll back with it.
-    if (historyKib > 0 && !answerAttach) {
+    if (historyKib > 4 && !answerAttach) {
       socket.close();
       return;
     }
@@ -442,10 +445,10 @@ test("a request that never gets its snapshot is retried, not read as exhaustion"
   // older": the pane must stay expandable.
   await expect(page.locator("#status")).not.toHaveText("No earlier output is available.");
   // The budget rolls back with the cancelled request, so transport recovery
-  // reattaches at the desktop's own budget. Leaving it raised would make the
+  // reattaches at the device's own budget. Leaving it raised would make the
   // next pull recompute the same request and call the pane exhausted.
   await expect.poll(() => attaches.length).toBeGreaterThanOrEqual(3);
-  expect(attaches[2].historyKib).toBe(0);
+  expect(attaches[2].historyKib).toBe(4);
 
   answerAttach = true;
   await expect.poll(() => baseY(page)).toBeGreaterThan(0);
@@ -457,7 +460,7 @@ test("a request that never gets its snapshot is retried, not read as exhaustion"
   await expect(page.locator("#status")).not.toHaveText("No earlier output is available.");
 });
 
-test("re-selecting the same pane starts over at the desktop budget", async ({ page }) => {
+test("re-selecting the same pane starts over at the device budget", async ({ page }) => {
   // A user-directed attach lands at the live tail anyway, so carrying the
   // raised budget into it would only re-drive a big desktop serialization.
   const attaches: Attach[] = [];
@@ -473,10 +476,10 @@ test("re-selecting the same pane starts over at the desktop budget", async ({ pa
   await page.locator(".workspace-item.active .workspace-pane-row").nth(0).click();
 
   await expect.poll(() => attaches.length).toBe(3);
-  expect(attaches[2].historyKib).toBe(0);
+  expect(attaches[2].historyKib).toBe(4);
 });
 
-test("switching panes starts the next terminal at the desktop budget", async ({ page }) => {
+test("switching panes starts the next terminal at the device budget", async ({ page }) => {
   const attaches: Attach[] = [];
   await installRemoteMocks(page, { ownerKib: 4, scrollbackKib: 256 }, attaches);
   await connectAndCaptureTerminal(page);
@@ -490,5 +493,5 @@ test("switching panes starts the next terminal at the desktop budget", async ({ 
   await page.locator(".workspace-item.active .workspace-pane-row").nth(1).click();
 
   await expect.poll(() => attaches.at(-1)?.terminalId).toBe("terminal-2");
-  expect(attaches.at(-1)?.historyKib).toBe(0);
+  expect(attaches.at(-1)?.historyKib).toBe(4);
 });

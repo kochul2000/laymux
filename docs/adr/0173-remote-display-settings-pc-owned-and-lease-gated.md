@@ -1,6 +1,6 @@
 # 0173. Remote 화면 설정은 PC가 소유하고 변경은 controller lease로 제한한다
 
-- Status: Accepted
+- Status: Superseded by [0209](0209-remote-display-preferences-are-device-local.md)
 - Date: 2026-08-17
 - Source: 사용자 요구("PC가 소유하는 settings.remote에 Remote 터미널 화면 글자 크기와 입력 컴포저 글자 크기를 저장", "Remote 화면과 PC Settings 양쪽에서 같은 값을 조회·수정", "Direct/Android E2E 경로 모두 기존 Remote 인증·권한 경계를 유지") · [architecture/api-contracts.md §10·§13](../architecture/api-contracts.md) · [ADR-0013](0013-direct-remote-mode.md) · [ADR-0015](0015-remote-terminal-state-ownership.md) · [ADR-0149](0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md)
 - Extends: ADR-0013, ADR-0015, ADR-0149

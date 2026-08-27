@@ -649,14 +649,10 @@ describe("settings-store", () => {
 
   // -- Wheel scroll sensitivity --
 
-  it("defaults the wheel sensitivities to the xterm defaults", () => {
-    const { terminal, remote } = useSettingsStore.getState();
+  it("defaults the desktop wheel sensitivities to the xterm defaults", () => {
+    const { terminal } = useSettingsStore.getState();
     expect(terminal.scrollSensitivity).toBe(1);
     expect(terminal.fastScrollSensitivity).toBe(5);
-    expect(remote.scrollSensitivity).toBe(1);
-    expect(remote.fastScrollSensitivity).toBe(5);
-    // Finger drag starts as 1:1 physical scroll.
-    expect(remote.touchScrollSensitivity).toBe(1);
   });
 
   it("setTerminal updates the wheel sensitivities", () => {
@@ -666,14 +662,12 @@ describe("settings-store", () => {
     expect(terminal.fastScrollSensitivity).toBe(8);
   });
 
-  it("loadFromSettings keeps the desktop and remote wheel sensitivities separate", () => {
+  it("loadFromSettings loads the desktop wheel sensitivity", () => {
     useSettingsStore.getState().loadFromSettings({
       terminal: { scrollSensitivity: 4 } as any,
-      remote: { scrollSensitivity: 2 } as any,
     });
     const state = useSettingsStore.getState();
     expect(state.terminal.scrollSensitivity).toBe(4);
-    expect(state.remote.scrollSensitivity).toBe(2);
   });
 
   it("loadFromSettings fills missing wheel sensitivities with the defaults", () => {
@@ -684,9 +678,6 @@ describe("settings-store", () => {
     const state = useSettingsStore.getState();
     expect(state.terminal.scrollSensitivity).toBe(1);
     expect(state.terminal.fastScrollSensitivity).toBe(5);
-    expect(state.remote.scrollSensitivity).toBe(1);
-    expect(state.remote.fastScrollSensitivity).toBe(5);
-    expect(state.remote.touchScrollSensitivity).toBe(1);
   });
 
   // -- Jump-to-bottom button setting (issue #361) --
@@ -986,12 +977,6 @@ describe("settings-store", () => {
 
   it("has default automatic mobile mode width threshold", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
-    expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
-    expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
-    expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
-    expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(55);
-    expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(80);
-    expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(100);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });
@@ -1013,13 +998,6 @@ describe("settings-store", () => {
     });
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.heartbeatTimeoutSeconds).toBe(45);
-    expect(useSettingsStore.getState().remote.snapshotMaxKib).toBe(4);
-    expect(useSettingsStore.getState().remote.terminalFontSize).toBe(14);
-    expect(useSettingsStore.getState().remote.composerFontSize).toBe(16);
-    expect(useSettingsStore.getState().remote.menuFontSize).toBe(13);
-    expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(55);
-    expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(80);
-    expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(100);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");
     expect(useSettingsStore.getState().remote.customHosts).toEqual([]);
   });

@@ -502,7 +502,6 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
     }
     match (method, path) {
         (&Method::GET, "/remote/v1/session/status")
-        | (&Method::GET, "/remote/v1/display-settings")
         | (&Method::GET, "/remote/v1/navigation")
         | (&Method::GET, "/remote/v1/layouts")
         | (&Method::GET, "/remote/v1/widgets")
@@ -526,7 +525,6 @@ fn http_path_allowed(method: &Method, path: &str) -> bool {
         | (&Method::POST, "/remote/v1/update/check")
         | (&Method::POST, "/remote/v1/update/install")
         | (&Method::DELETE, "/remote/v1/notifications") => true,
-        (&Method::PUT, "/remote/v1/display-settings") => true,
         (&Method::GET, _) => terminal_read_path(path),
         (&Method::POST, _) => {
             terminal_control_path(path)
@@ -759,11 +757,11 @@ mod tests {
             &Method::POST,
             "/remote/v1/update/install"
         ));
-        assert!(http_path_allowed(
+        assert!(!http_path_allowed(
             &Method::GET,
             "/remote/v1/display-settings"
         ));
-        assert!(http_path_allowed(
+        assert!(!http_path_allowed(
             &Method::PUT,
             "/remote/v1/display-settings"
         ));

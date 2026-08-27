@@ -6,7 +6,6 @@ mod appearance;
 mod assets;
 mod attachments;
 mod auth;
-mod display_settings;
 mod font_assets;
 mod github_repo_routes;
 mod lease;

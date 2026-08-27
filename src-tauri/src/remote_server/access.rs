@@ -108,25 +108,17 @@ pub(crate) fn effective_remote_settings(app_state: &AppState) -> Result<RemoteSe
     Ok(settings)
 }
 
-/// Attach snapshot byte budget for remote clients. Clamps hand-edited
-/// settings.json values into the supported range instead of trusting them.
-pub(crate) fn effective_snapshot_max_bytes(settings: &RemoteSettings) -> usize {
-    settings.snapshot_max_kib.clamp(
-        crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
-        crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB,
-    ) as usize
-        * 1024
+/// Server-owned fallback used when a client cannot advertise a device-local
+/// history budget (for example an older Android connector).
+pub(crate) fn effective_snapshot_max_bytes() -> usize {
+    crate::constants::DEFAULT_REMOTE_SNAPSHOT_MAX_KIB as usize * 1024
 }
 
-/// Attach snapshot byte budget when the client asks for more scrollback than
-/// the owner's default budget carries (scroll-top history expansion). A request
-/// can only raise the budget inside the supported range: it never lowers the
-/// owner-configured floor and never exceeds `MAX_REMOTE_SNAPSHOT_MAX_KIB`.
-pub(crate) fn effective_attach_snapshot_max_bytes(
-    settings: &RemoteSettings,
-    requested_history_kib: Option<u32>,
-) -> usize {
-    let configured = effective_snapshot_max_bytes(settings);
+/// Attach snapshot byte budget requested by the Remote device. The request can
+/// raise, but never lower, the server fallback and cannot exceed the absolute
+/// supported ceiling.
+pub(crate) fn effective_attach_snapshot_max_bytes(requested_history_kib: Option<u32>) -> usize {
+    let configured = effective_snapshot_max_bytes();
     let Some(requested_kib) = requested_history_kib else {
         return configured;
     };
@@ -526,38 +518,21 @@ mod tests {
     }
 
     #[test]
-    fn history_expansion_only_raises_the_owner_budget_inside_the_supported_range() {
-        let settings = RemoteSettings {
-            snapshot_max_kib: 8,
-            ..RemoteSettings::default()
-        };
-
-        assert_eq!(
-            effective_attach_snapshot_max_bytes(&settings, None),
-            8 * 1024
-        );
-        // A request below the owner's budget can never shrink the attach screen.
-        assert_eq!(
-            effective_attach_snapshot_max_bytes(&settings, Some(1)),
-            8 * 1024
-        );
-        assert_eq!(
-            effective_attach_snapshot_max_bytes(&settings, Some(256)),
-            256 * 1024
-        );
+    fn device_history_budget_only_raises_the_server_fallback_inside_the_supported_range() {
+        assert_eq!(effective_attach_snapshot_max_bytes(None), 4 * 1024);
+        // A request below the fallback can never shrink the attach screen.
+        assert_eq!(effective_attach_snapshot_max_bytes(Some(1)), 4 * 1024);
+        assert_eq!(effective_attach_snapshot_max_bytes(Some(256)), 256 * 1024);
         // The Android connector mirrors this ceiling in its own constant
         // (`MainActivity.MAX_OUTPUT_HISTORY_KIB`) to reject nonsense before it
         // reaches the wire. Raising it here means raising it there too.
         assert_eq!(crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB, 1024);
         // Hand-crafted requests clamp to the supported ceiling.
         assert_eq!(
-            effective_attach_snapshot_max_bytes(&settings, Some(u32::MAX)),
+            effective_attach_snapshot_max_bytes(Some(u32::MAX)),
             crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB as usize * 1024
         );
-        assert_eq!(
-            effective_attach_snapshot_max_bytes(&settings, Some(0)),
-            8 * 1024
-        );
+        assert_eq!(effective_attach_snapshot_max_bytes(Some(0)), 4 * 1024);
     }
 
     #[test]
