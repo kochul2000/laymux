@@ -252,6 +252,9 @@ export function RemoteAccessModal() {
   const handleCreateAndroidPairing = async () => {
     setActionPending("android-create");
     setError(null);
+    setAndroidQrSvg(null);
+    setAndroidPairingPayload(null);
+    setCopied((current) => (current === "android-pairing" ? null : current));
     try {
       const created = await createAndroidPairingQr();
       setAndroidPairing(created.status);
@@ -267,10 +270,11 @@ export function RemoteAccessModal() {
   const handleRevokeAndroidPairing = async () => {
     setActionPending("android-revoke");
     setError(null);
+    setAndroidQrSvg(null);
+    setAndroidPairingPayload(null);
+    setCopied((current) => (current === "android-pairing" ? null : current));
     try {
       setAndroidPairing(await revokeAndroidPairing());
-      setAndroidQrSvg(null);
-      setAndroidPairingPayload(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

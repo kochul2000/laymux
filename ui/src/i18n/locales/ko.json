@@ -68,7 +68,7 @@
       "androidPairingRevoke": "키 폐기",
       "androidPairingRevoking": "폐기 중...",
       "androidPairingQrAlt": "Android 페어링 QR 코드",
-      "androidPairingScanHint": "5분 안에 Android 앱에서 QR을 스캔하거나 아래 값을 복사해 붙여넣으세요. 확인 완료 또는 만료 시 사라집니다.",
+      "androidPairingScanHint": "5분 안에 Android 앱에서 QR을 스캔하거나 아래 값을 복사해 붙여넣으세요. 확인 완료 또는 만료 시 사라지며, 복사한 값은 클립보드 기록이나 기기 간 동기화에 잠시 남을 수 있습니다.",
       "androidPairingCopy": "페어링 값 복사",
       "androidPairingCopied": "페어링 값 복사됨"
     }

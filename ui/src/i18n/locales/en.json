@@ -68,7 +68,7 @@
       "androidPairingRevoke": "Revoke Key",
       "androidPairingRevoking": "Revoking...",
       "androidPairingQrAlt": "Android pairing QR code",
-      "androidPairingScanHint": "Within five minutes, scan this QR in the Android app or copy and paste the value below. It disappears after confirmation or expiry.",
+      "androidPairingScanHint": "Within five minutes, scan this QR in the Android app or copy and paste the value below. It disappears after confirmation or expiry; a copied value can remain briefly in clipboard history or device sync.",
       "androidPairingCopy": "Copy Pairing Value",
       "androidPairingCopied": "Pairing Value Copied"
     }

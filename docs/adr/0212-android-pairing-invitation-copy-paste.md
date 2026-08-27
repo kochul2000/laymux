@@ -1,6 +1,6 @@
 # 0212. Android 페어링 초대는 QR과 명시적 복사·붙여넣기를 함께 제공한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-27
 - Source: 사용자 요구("QR 값 복사·붙여넣기로 QR이 안 되는 상황도 지원") · [ADR-0145](0145-android-pairing-authenticated-one-time-ack.md) · [ADR-0178](0178-android-pairing-native-material-bottom-sheet.md) · [architecture/api-contracts.md §13](../architecture/api-contracts.md)
 - Extends: ADR-0145, ADR-0178
@@ -19,7 +19,7 @@
 **하나의 5분짜리 `laymux://pair/v2` 초대를 QR과 명시적 복사·붙여넣기 두 입력 표면으로 제공하고, 두 경로를 동일한 Android 검증·저장·ACK 파이프라인에 수렴시킨다.**
 
 - 데스크톱 `create_android_pairing_qr` 응답은 `status`, `qrSvg`와 함께 `pairingPayload`를 반환한다. payload는 생성 응답에만 있고 status·revoke 응답이나 설정에는 추가하지 않는다.
-- Remote Access 모달은 payload를 DOM 텍스트·접근성 이름·로그에 넣지 않는다. pending 초대에 대한 사용자의 `페어링 값 복사` 동작만 system clipboard에 기록한다. 확인·만료·폐기 또는 모달 unmount 뒤에는 QR SVG와 payload를 더 이상 복사할 수 없다.
+- Remote Access 모달은 payload를 DOM 텍스트·접근성 이름·로그에 넣지 않는다. pending 초대에 대한 사용자의 `페어링 값 복사` 동작만 system clipboard에 기록한다. 새 발급·폐기 요청을 시작한 즉시 이전 QR SVG와 payload를 숨기며, 확인·만료 또는 모달 unmount 뒤에도 더 이상 복사할 수 없다.
 - Rust 응답 객체는 payload를 zeroizing storage에 두고 직렬화 뒤 폐기하며 `Debug`는 QR과 payload를 redaction한다. IPC를 지난 JavaScript 문자열과 system clipboard는 zeroize할 수 없다는 잔여 위험을 인정한다.
 - Android native pairing sheet는 `페어링 값 붙여넣기` action을 제공한다. action을 누른 때만 첫 clipboard item을 text로 읽고 양끝 공백을 제거한다. 빈 값은 거부하고 4 KiB를 넘는 값은 URI 파싱 전에 거부한다.
 - 붙여넣은 값은 QR scanner 결과와 같은 `PairingPayload.parse` → 선택 instance exact match → 보호 정책/Keystore 저장 → authenticated ACK 경로를 사용한다. Cloud WebView나 secure Remote WebView에는 payload를 전달하지 않는다.
