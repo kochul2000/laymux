@@ -2962,6 +2962,14 @@ function WorkspacesSection() {
       </SubGroup>
 
       <SubGroup title={t("workspaces.groupBehavior")}>
+        <ToggleRow
+          label={t("workspaces.confirmDestructiveActions")}
+          desc={t("workspaces.confirmDestructiveActionsDesc")}
+          testid="workspace-destructive-confirm-toggle"
+          checked={wsSelector.confirmDestructiveActions}
+          onChange={(value) => updateWsSelector({ confirmDestructiveActions: value })}
+        />
+
         <SettingRow label={t("workspaces.pathEllipsis")} desc={t("workspaces.pathEllipsisDesc")}>
           <FocusSelect
             data-testid="path-ellipsis-select"

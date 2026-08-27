@@ -445,6 +445,8 @@
       "pathDesc": "Git branch and current path",
       "result": "Result",
       "resultDesc": "Command results and notifications",
+      "confirmDestructiveActions": "Confirm Destructive Actions",
+      "confirmDestructiveActionsDesc": "Require two clicks for workspace hide, terminal clear, layout delete, and workspace close",
       "pathEllipsis": "Path Ellipsis",
       "pathEllipsisDesc": "Truncation direction for long paths (workspace list)",
       "ellipsisStart": "Truncate start (.../dir/file)",
@@ -819,6 +821,7 @@
       "hiddenMessage": "{{name}} was hidden from the list",
       "lastWorkspace": "The last workspace cannot be hidden",
       "hideAndMove": "Hide and move to the next workspace",
+      "hideConfirm": "Click again to hide {{name}}",
       "showAndOpenLabel": "Show {{name}} again and open it",
       "showOnlyWorkspaceLabel": "Show {{name}} again without opening it"
     },
@@ -835,7 +838,7 @@
       "duplicateTitle": "Create a copy of this layout",
       "setDefaultTitle": "Use this layout when creating new workspaces",
       "deleteTitle": "Permanently delete this layout",
-      "deleteConfirm": "Delete layout \"{{name}}\"?",
+      "deleteConfirm": "Click again to delete {{name}}",
       "renamePrompt": "Rename layout:",
       "exportNew": "Save current layout as new",
       "exportNewTitle": "Save the current workspace pane layout as a new template",
@@ -844,10 +847,12 @@
     },
     "item": {
       "clearTerminals": "Clear this workspace's terminals (Ctrl+Alt+L)",
+      "clearTerminalsConfirm": "Click again to clear {{name}}",
       "duplicateWorkspace": "Duplicate workspace (Ctrl+Alt+D)",
       "renameWorkspace": "Rename workspace (Ctrl+Alt+R)",
       "closeWorkspace": "Close workspace (Ctrl+Alt+W)",
-      "openPane": "Open {{workspace}}, pane {{number}}, {{view}}"
+      "openPane": "Open {{workspace}}, pane {{number}}, {{view}}",
+      "closeWorkspaceConfirm": "Click again to close {{name}}"
     }
   }
 }

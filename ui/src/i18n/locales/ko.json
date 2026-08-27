@@ -445,6 +445,8 @@
       "pathDesc": "Git 브랜치 및 현재 경로",
       "result": "결과",
       "resultDesc": "명령 실행 결과 및 알림",
+      "confirmDestructiveActions": "파괴적 동작 두 번 확인",
+      "confirmDestructiveActionsDesc": "워크스페이스 숨기기·터미널 지우기·레이아웃 삭제·워크스페이스 닫기를 두 번 클릭해 실행",
       "pathEllipsis": "경로 생략",
       "pathEllipsisDesc": "경로가 길 때 생략 방향 (워크스페이스 목록)",
       "ellipsisStart": "앞부분 생략 (.../dir/file)",
@@ -819,6 +821,7 @@
       "hiddenMessage": "{{name}}을(를) 목록에서 숨겼습니다",
       "lastWorkspace": "마지막 workspace는 숨길 수 없습니다",
       "hideAndMove": "숨기고 다음 workspace로 이동",
+      "hideConfirm": "{{name}}을(를) 숨기려면 다시 클릭",
       "showAndOpenLabel": "{{name}}을(를) 다시 표시하고 열기",
       "showOnlyWorkspaceLabel": "{{name}}을(를) 다시 표시만 하기"
     },
@@ -835,7 +838,7 @@
       "duplicateTitle": "이 레이아웃 복사본 만들기",
       "setDefaultTitle": "새 워크스페이스 생성 시 이 레이아웃 사용",
       "deleteTitle": "이 레이아웃 영구 삭제",
-      "deleteConfirm": "레이아웃 \"{{name}}\"을(를) 삭제할까요?",
+      "deleteConfirm": "{{name}}을(를) 삭제하려면 다시 클릭",
       "renamePrompt": "레이아웃 이름 변경:",
       "exportNew": "현재 레이아웃을 새로 저장",
       "exportNewTitle": "현재 워크스페이스 pane 배치를 새 템플릿으로 저장",
@@ -844,10 +847,12 @@
     },
     "item": {
       "clearTerminals": "이 워크스페이스의 터미널 클리어 (Ctrl+Alt+L)",
+      "clearTerminalsConfirm": "{{name}}의 터미널을 지우려면 다시 클릭",
       "duplicateWorkspace": "워크스페이스 복제 (Ctrl+Alt+D)",
       "renameWorkspace": "워크스페이스 이름 변경 (Ctrl+Alt+R)",
       "closeWorkspace": "워크스페이스 닫기 (Ctrl+Alt+W)",
-      "openPane": "{{workspace}} 워크스페이스의 {{number}}번 pane 열기, {{view}}"
+      "openPane": "{{workspace}} 워크스페이스의 {{number}}번 pane 열기, {{view}}",
+      "closeWorkspaceConfirm": "{{name}}을(를) 닫으려면 다시 클릭"
     }
   }
 }

@@ -166,6 +166,15 @@
     background: var(--accent-20);
   }
 
+  /* Destructive controls arm on the first activation. Keep the warning on
+     the control itself so the second click has the same target. */
+  .two-click-confirm-button[data-confirming="true"] {
+    background: var(--red-15) !important;
+    color: var(--red) !important;
+    box-shadow: inset 0 0 0 1px var(--red);
+    opacity: 1;
+  }
+
   /* Real buttons for surfaces that ask the user to *do* something
      (ADR-0192). Before this, action buttons were assembled inline per call
      site — accent-coloured text with a hairline border, no disabled

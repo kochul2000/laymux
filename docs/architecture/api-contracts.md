@@ -420,6 +420,31 @@ html/markdown preview는 별도 문서(iframe)라 부모 페이지의 CSS를 상
 
 이미지 확대는 CSS `transform: scale()`이 아니라 실측 자연 크기(`naturalWidth`/`naturalHeight`) 기반 실제 `width`/`height`로 구현한다(`components/ui/preview/ZoomableImage.tsx`) — transform은 레이아웃 박스를 키우지 않고 그리기만 키워서, 가운데 정렬된 flex 컨테이너의 위·왼쪽 오버플로가 `overflow: auto`로 스크롤 불가능한 음수 영역이 된다. 100%를 넘겨 확대하면 스크롤 컨테이너 정렬도 가운데에서 좌상단(`flex-start`)으로 전환해(`lib/image-zoom.ts`) 오버플로가 항상 한쪽 방향으로만 생기게 한다.
 
+### Workspace selector 설정
+
+`settings.workspaceSelector`는 workspace 목록의 표시·동작 정책을 소유한다. `confirmDestructiveActions`는 desktop `WorkspaceSelectorView`의 숨기기·터미널 지우기·layout 삭제·workspace 닫기 버튼에만 적용하며, 키바인딩·Automation·MCP·Remote action은 우회한다([ADR-0211](../adr/0211-workspace-selector-destructive-actions-require-two-activations.md)).
+
+```jsonc
+{
+  "workspaceSelector": {
+    "display": {
+      "minimap": true,
+      "environment": true,
+      "activity": true,
+      "path": true,
+      "result": true
+    },
+    "sortOrder": "manual",
+    "pathEllipsis": "start",
+    "lastInputMode": "perPane",
+    "confirmDestructiveActions": true, // 파괴적 버튼은 같은 컨트롤을 두 번 활성화해야 실행
+    "hiddenAutoCloseSeconds": 0
+  }
+}
+```
+
+`confirmDestructiveActions`가 누락되거나 boolean이 아니면 `true`로 정규화한다. `false`이면 버튼의 첫 활성화가 기존 domain action을 즉시 호출한다. 설정 UI의 Workspaces → Behavior 토글은 draft/save 흐름을 거쳐 이 값을 영구 저장한다.
+
 ### Claude Code 설정
 
 Claude Code 관련 동작(sync-cwd 전파, 세션 복원, 셀렉터 상태 메시지 구성, 세션 리미트 자동 복귀)을 제어한다.
