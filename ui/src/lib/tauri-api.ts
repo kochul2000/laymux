@@ -1266,8 +1266,16 @@ export interface DirEntry {
 }
 
 /** List directory contents via Rust std::fs::read_dir. */
-export async function listDirectory(path: string, wslDistro?: string): Promise<DirEntry[]> {
-  return invoke("list_directory", { path, wslDistro: wslDistro ?? null });
+export async function listDirectory(
+  path: string,
+  wslDistro?: string,
+  maxEntries?: number,
+): Promise<DirEntry[]> {
+  return invoke("list_directory", {
+    path,
+    wslDistro: wslDistro ?? null,
+    maxEntries: maxEntries ?? null,
+  });
 }
 
 /** Filesystem facts about a path (used by the File Explorer address bar, #278). */

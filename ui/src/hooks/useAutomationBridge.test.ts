@@ -1191,6 +1191,32 @@ describe("handleAsyncAutomationRequest", () => {
     expect(rendered.data).not.toHaveProperty("content");
   });
 
+  it("bounds an Android FileViewer result before the automation response IPC", async () => {
+    vi.mocked(readFileForViewer).mockResolvedValue({
+      kind: "text",
+      content: "\0".repeat(32),
+      truncated: false,
+    });
+
+    const result = await handleAsyncAutomationRequest({
+      requestId: "file-viewer-bounded-response",
+      category: "query",
+      target: "fileViewer",
+      method: "render",
+      params: {
+        source: "path",
+        path: "/tmp/control-bytes.txt",
+        maxBytes: 2 * 1024 * 1024,
+        maxResponseBytes: 128,
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: "Remote response exceeds the viewer limit",
+    });
+  });
+
   it("renders an explicit path without opening the desktop viewer", async () => {
     vi.mocked(readFileForViewer).mockResolvedValue({ kind: "binary", size: 4096 });
 

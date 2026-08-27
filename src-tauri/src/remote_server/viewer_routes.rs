@@ -1,4 +1,4 @@
-use axum::extract::State;
+use axum::extract::{Extension, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use crate::automation_server::helpers::bridge_request;
 use crate::automation_server::ServerState;
 use crate::constants::{
+    MAX_ANDROID_E2E_FILE_VIEWER_BYTES, MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES,
     MAX_REMOTE_FILE_VIEWER_BYTES, MAX_REMOTE_FILE_VIEWER_LIST_ENTRIES,
     MAX_REMOTE_PATH_LINK_SCREEN_CHARS, MAX_REMOTE_PATH_LINK_SCREEN_LINES,
     MAX_REMOTE_PATH_LINK_SELECTION_CHARS, MAX_REMOTE_PATH_LINK_SELECTION_LINES,
@@ -16,7 +17,10 @@ use crate::constants::{
 use crate::state::AppState;
 
 use super::json_error;
-use super::lease::require_file_viewer_capability;
+use super::lease::{
+    require_android_e2e_file_viewer_capability, require_file_viewer_capability,
+    AndroidE2eFileViewerProof,
+};
 use super::navigation_routes::lease_id_from_headers;
 
 #[derive(Debug, Deserialize)]
@@ -67,9 +71,31 @@ pub(super) struct FileViewerListRequest {
     lease_id: Option<String>,
 }
 
-struct FileViewerAuthorization {
-    lease_id: String,
-    capability: String,
+enum FileViewerAuthorization {
+    Browser {
+        lease_id: String,
+        capability: String,
+    },
+    AndroidE2e {
+        proof: AndroidE2eFileViewerProof,
+        replay_guard: crate::android_e2e::AndroidE2eReplayGuard,
+    },
+}
+
+impl FileViewerAuthorization {
+    fn max_bytes(&self) -> usize {
+        match self {
+            Self::Browser { .. } => MAX_REMOTE_FILE_VIEWER_BYTES,
+            Self::AndroidE2e { .. } => MAX_ANDROID_E2E_FILE_VIEWER_BYTES,
+        }
+    }
+
+    fn max_response_bytes(&self) -> Option<usize> {
+        match self {
+            Self::Browser { .. } => None,
+            Self::AndroidE2e { .. } => Some(MAX_ANDROID_E2E_FILE_VIEWER_RESPONSE_BYTES),
+        }
+    }
 }
 
 pub(super) async fn remote_file_viewer_status(
@@ -78,8 +104,10 @@ pub(super) async fn remote_file_viewer_status(
 ) -> Response {
     let authorization = match file_viewer_authorization(
         &server.app_state,
+        None,
         lease_id_from_headers(&headers),
         file_viewer_capability_from_headers(&headers),
+        None,
     ) {
         Ok(authorization) => authorization,
         Err(response) => return response,
@@ -88,25 +116,50 @@ pub(super) async fn remote_file_viewer_status(
     file_viewer_bridge_response(&server, &authorization, "status", json!({})).await
 }
 
+/// Android E2E-only status alias. The browser GET contract remains unchanged;
+/// a public POST cannot synthesize the crate-private proof extension.
+pub(super) async fn remote_file_viewer_status_android(
+    State(server): State<ServerState>,
+    headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
+) -> Response {
+    let Some(Extension(proof)) = proof else {
+        return json_error(
+            StatusCode::FORBIDDEN,
+            "remote file viewer capability is required or invalid",
+        );
+    };
+    let authorization = match file_viewer_authorization(
+        &server.app_state,
+        None,
+        lease_id_from_headers(&headers),
+        file_viewer_capability_from_headers(&headers),
+        Some(&proof),
+    ) {
+        Ok(authorization) => authorization,
+        Err(response) => return response,
+    };
+    file_viewer_bridge_response(&server, &authorization, "status", json!({})).await
+}
+
 pub(super) async fn remote_file_viewer_render(
     State(server): State<ServerState>,
     headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<FileViewerRenderRequest>,
 ) -> Response {
-    let lease_id = body
-        .lease_id
-        .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
     let authorization = match file_viewer_authorization(
         &server.app_state,
-        lease_id,
+        body.lease_id.as_deref(),
+        lease_id_from_headers(&headers),
         file_viewer_capability_from_headers(&headers),
+        proof.as_ref().map(|Extension(proof)| proof),
     ) {
         Ok(authorization) => authorization,
         Err(response) => return response,
     };
 
-    let params = match render_params(body) {
+    let params = match render_params(body, authorization.max_bytes()) {
         Ok(params) => params,
         Err(message) => return json_error(StatusCode::BAD_REQUEST, message),
     };
@@ -116,16 +169,15 @@ pub(super) async fn remote_file_viewer_render(
 pub(super) async fn remote_file_viewer_download(
     State(server): State<ServerState>,
     headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<FileViewerDownloadRequest>,
 ) -> Response {
-    let lease_id = body
-        .lease_id
-        .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
     let authorization = match file_viewer_authorization(
         &server.app_state,
-        lease_id,
+        body.lease_id.as_deref(),
+        lease_id_from_headers(&headers),
         file_viewer_capability_from_headers(&headers),
+        proof.as_ref().map(|Extension(proof)| proof),
     ) {
         Ok(authorization) => authorization,
         Err(response) => return response,
@@ -141,7 +193,7 @@ pub(super) async fn remote_file_viewer_download(
         "download",
         json!({
             "path": path,
-            "maxBytes": MAX_REMOTE_FILE_VIEWER_BYTES,
+            "maxBytes": authorization.max_bytes(),
         }),
     )
     .await
@@ -150,16 +202,15 @@ pub(super) async fn remote_file_viewer_download(
 pub(super) async fn remote_file_viewer_path_link(
     State(server): State<ServerState>,
     headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<FileViewerPathLinkRequest>,
 ) -> Response {
-    let lease_id = body
-        .lease_id
-        .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
     let authorization = match file_viewer_authorization(
         &server.app_state,
-        lease_id,
+        body.lease_id.as_deref(),
+        lease_id_from_headers(&headers),
         file_viewer_capability_from_headers(&headers),
+        proof.as_ref().map(|Extension(proof)| proof),
     ) {
         Ok(authorization) => authorization,
         Err(response) => return response,
@@ -175,16 +226,15 @@ pub(super) async fn remote_file_viewer_path_link(
 pub(super) async fn remote_file_viewer_list(
     State(server): State<ServerState>,
     headers: HeaderMap,
+    proof: Option<Extension<AndroidE2eFileViewerProof>>,
     Json(body): Json<FileViewerListRequest>,
 ) -> Response {
-    let lease_id = body
-        .lease_id
-        .as_deref()
-        .or_else(|| lease_id_from_headers(&headers));
     let authorization = match file_viewer_authorization(
         &server.app_state,
-        lease_id,
+        body.lease_id.as_deref(),
+        lease_id_from_headers(&headers),
         file_viewer_capability_from_headers(&headers),
+        proof.as_ref().map(|Extension(proof)| proof),
     ) {
         Ok(authorization) => authorization,
         Err(response) => return response,
@@ -200,13 +250,31 @@ pub(super) async fn remote_file_viewer_list(
 #[allow(clippy::result_large_err)] // Axum handlers return this Response directly.
 fn file_viewer_authorization(
     app_state: &AppState,
-    lease_id: Option<&str>,
-    capability: Option<&str>,
+    body_lease_id: Option<&str>,
+    header_lease_id: Option<&str>,
+    header_capability: Option<&str>,
+    android_e2e_proof: Option<&AndroidE2eFileViewerProof>,
 ) -> Result<FileViewerAuthorization, Response> {
-    require_file_viewer_capability(app_state, lease_id, capability)?;
-    Ok(FileViewerAuthorization {
+    if let Some(proof) = android_e2e_proof {
+        if header_lease_id.is_some() || header_capability.is_some() {
+            return Err(json_error(
+                StatusCode::FORBIDDEN,
+                "remote file viewer capability is required or invalid",
+            ));
+        }
+        let replay_guard =
+            require_android_e2e_file_viewer_capability(app_state, proof, body_lease_id, None)?;
+        return Ok(FileViewerAuthorization::AndroidE2e {
+            proof: proof.clone(),
+            replay_guard,
+        });
+    }
+
+    let lease_id = body_lease_id.or(header_lease_id);
+    require_file_viewer_capability(app_state, lease_id, header_capability)?;
+    Ok(FileViewerAuthorization::Browser {
         lease_id: lease_id.unwrap_or_default().to_owned(),
-        capability: capability.unwrap_or_default().to_owned(),
+        capability: header_capability.unwrap_or_default().to_owned(),
     })
 }
 
@@ -217,11 +285,11 @@ fn file_viewer_capability_from_headers(headers: &HeaderMap) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn render_params(body: FileViewerRenderRequest) -> Result<Value, &'static str> {
+fn render_params(body: FileViewerRenderRequest, max_bytes: usize) -> Result<Value, &'static str> {
     match body.source.as_str() {
         "current" => Ok(json!({
             "source": "current",
-            "maxBytes": MAX_REMOTE_FILE_VIEWER_BYTES,
+            "maxBytes": max_bytes,
         })),
         "path" => {
             let path = body.path.unwrap_or_default().trim().to_owned();
@@ -231,7 +299,7 @@ fn render_params(body: FileViewerRenderRequest) -> Result<Value, &'static str> {
             Ok(json!({
                 "source": "path",
                 "path": path,
-                "maxBytes": MAX_REMOTE_FILE_VIEWER_BYTES,
+                "maxBytes": max_bytes,
             }))
         }
         _ => Err("source must be 'current' or 'path'"),
@@ -343,8 +411,17 @@ async fn file_viewer_bridge_response(
     server: &ServerState,
     authorization: &FileViewerAuthorization,
     method: &str,
-    params: Value,
+    mut params: Value,
 ) -> Response {
+    if let Some(max_response_bytes) = authorization.max_response_bytes() {
+        let Some(params) = params.as_object_mut() else {
+            return json_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "file viewer bridge params must be an object",
+            );
+        };
+        params.insert("maxResponseBytes".to_owned(), json!(max_response_bytes));
+    }
     let result = bridge_request(server, "query", "fileViewer", method, params).await;
     file_viewer_bridge_result(&server.app_state, authorization, result)
 }
@@ -354,13 +431,31 @@ fn file_viewer_bridge_result(
     authorization: &FileViewerAuthorization,
     result: Result<Value, (StatusCode, Json<Value>)>,
 ) -> Response {
-    if let Err(response) = require_file_viewer_capability(
-        app_state,
-        Some(&authorization.lease_id),
-        Some(&authorization.capability),
-    ) {
-        return no_store(response);
-    }
+    let replay_guard = match authorization {
+        FileViewerAuthorization::Browser {
+            lease_id,
+            capability,
+        } => {
+            if let Err(response) =
+                require_file_viewer_capability(app_state, Some(lease_id), Some(capability))
+            {
+                return no_store(response);
+            }
+            None
+        }
+        FileViewerAuthorization::AndroidE2e {
+            proof,
+            replay_guard,
+        } => match require_android_e2e_file_viewer_capability(
+            app_state,
+            proof,
+            None,
+            Some(replay_guard),
+        ) {
+            Ok(current_guard) => Some(current_guard),
+            Err(response) => return no_store(response),
+        },
+    };
 
     let response = match result {
         Ok(data) if data.get("success").and_then(Value::as_bool) == Some(false) => {
@@ -378,7 +473,11 @@ fn file_viewer_bridge_result(
         Ok(data) => Json(data).into_response(),
         Err(error) => error.into_response(),
     };
-    no_store(response)
+    let mut response = no_store(response);
+    if let Some(replay_guard) = replay_guard {
+        response.extensions_mut().insert(replay_guard);
+    }
+    response
 }
 
 fn no_store(mut response: Response) -> Response {
@@ -425,7 +524,11 @@ mod tests {
 
     #[test]
     fn current_source_never_accepts_a_client_path() {
-        let params = render_params(request("current", Some("C:\\secret.txt"))).unwrap();
+        let params = render_params(
+            request("current", Some("C:\\secret.txt")),
+            MAX_REMOTE_FILE_VIEWER_BYTES,
+        )
+        .unwrap();
         assert_eq!(params["source"], "current");
         assert!(params.get("path").is_none());
         assert_eq!(params["maxBytes"], MAX_REMOTE_FILE_VIEWER_BYTES);
@@ -433,7 +536,11 @@ mod tests {
 
     #[test]
     fn explicit_path_is_trimmed_and_bounded() {
-        let params = render_params(request("path", Some("  /tmp/report.md  "))).unwrap();
+        let params = render_params(
+            request("path", Some("  /tmp/report.md  ")),
+            MAX_REMOTE_FILE_VIEWER_BYTES,
+        )
+        .unwrap();
         assert_eq!(params["path"], "/tmp/report.md");
         assert_eq!(params["maxBytes"], MAX_REMOTE_FILE_VIEWER_BYTES);
     }
@@ -441,11 +548,11 @@ mod tests {
     #[test]
     fn invalid_source_or_blank_path_is_rejected() {
         assert_eq!(
-            render_params(request("other", None)).unwrap_err(),
+            render_params(request("other", None), MAX_REMOTE_FILE_VIEWER_BYTES).unwrap_err(),
             "source must be 'current' or 'path'"
         );
         assert_eq!(
-            render_params(request("path", Some("  "))).unwrap_err(),
+            render_params(request("path", Some("  ")), MAX_REMOTE_FILE_VIEWER_BYTES,).unwrap_err(),
             "path is required when source is 'path'"
         );
     }
@@ -719,22 +826,69 @@ mod tests {
             Duration::from_secs(45),
         );
         let capability = control.issue_file_viewer_capability("lease-1");
-        FileViewerAuthorization {
+        FileViewerAuthorization::Browser {
             lease_id: "lease-1".into(),
             capability,
         }
     }
 
     #[test]
+    fn android_file_viewer_uses_the_smaller_source_budget() {
+        let app_state = AppState::default();
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let authorization = FileViewerAuthorization::AndroidE2e {
+            proof: AndroidE2eFileViewerProof::new(context, "lease-1".into(), "viewer-1".into()),
+            replay_guard: crate::android_e2e::AndroidE2eReplayGuard::new(
+                "lease-1".into(),
+                1,
+                1,
+                "desktop-7".into(),
+                "session-a".into(),
+            ),
+        };
+
+        assert_eq!(authorization.max_bytes(), MAX_ANDROID_E2E_FILE_VIEWER_BYTES);
+        assert!(authorization.max_bytes() < MAX_REMOTE_FILE_VIEWER_BYTES);
+    }
+
+    #[test]
+    fn android_file_viewer_rejects_mixed_internal_proof_and_browser_headers() {
+        let app_state = AppState::default();
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let proof = AndroidE2eFileViewerProof::new(context, "lease-1".into(), "viewer-1".into());
+
+        let response = match file_viewer_authorization(
+            &app_state,
+            None,
+            Some("lease-1"),
+            Some("viewer-1"),
+            Some(&proof),
+        ) {
+            Err(response) => response,
+            Ok(_) => panic!("mixed authorization channels must fail closed"),
+        };
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
     fn bridge_result_is_rejected_after_file_viewer_capability_revocation() {
         let app_state = AppState::default();
         let authorization = install_file_viewer_authorization(&app_state);
-        require_file_viewer_capability(
-            &app_state,
-            Some(&authorization.lease_id),
-            Some(&authorization.capability),
-        )
-        .expect("capability starts valid");
+        let FileViewerAuthorization::Browser {
+            lease_id,
+            capability,
+        } = &authorization
+        else {
+            panic!("browser authorization expected");
+        };
+        require_file_viewer_capability(&app_state, Some(lease_id), Some(capability))
+            .expect("capability starts valid");
 
         app_state
             .remote_control

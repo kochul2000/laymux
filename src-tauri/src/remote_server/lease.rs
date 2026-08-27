@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::hash::BuildHasher;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::http::StatusCode;
 use axum::response::Response;
@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use crate::android_e2e::{AndroidE2eReplayGuard, AndroidE2eRequestContext};
 use crate::constants::{
     EVENT_REMOTE_CONTROL_CHANGED, MIN_REMOTE_HEARTBEAT_TIMEOUT_SECONDS, PTY_CONTROL_JOB_TIMEOUT_MS,
     PTY_CONTROL_WAIT_POLL_MS, REMOTE_OWNER_TRANSITION_TIMEOUT_MS,
@@ -32,22 +33,38 @@ pub struct RemoteControlLease {
     pub last_heartbeat: Instant,
 }
 
-/// Which Android E2E session performed a claim. Injected into the internally
-/// re-dispatched `kind=http` request by the E2E RPC handler (ADR-0170) so the
-/// claim can bind the lease to its session's lifetime.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AndroidE2eClaimContext {
-    pub instance_id: String,
-    pub session_id: String,
-}
-
 /// The lease currently bound to an Android E2E session. Only honored while
 /// `lease_id` still names the active lease, so stale tags are inert.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AndroidE2eLeaseTag {
     pub lease_id: String,
+    pub owner_epoch: u64,
     pub instance_id: String,
     pub session_id: String,
+}
+
+/// Typed, request-local FileViewer credential extracted only by the encrypted
+/// Android E2E dispatcher. Deliberately has no `Debug`: the raw capability
+/// must never enter logs or error formatting (ADR-0208).
+#[derive(Clone)]
+pub(super) struct AndroidE2eFileViewerProof {
+    context: AndroidE2eRequestContext,
+    lease_id: String,
+    file_viewer_token: String,
+}
+
+impl AndroidE2eFileViewerProof {
+    pub(super) fn new(
+        context: AndroidE2eRequestContext,
+        lease_id: String,
+        file_viewer_token: String,
+    ) -> Self {
+        Self {
+            context,
+            lease_id,
+            file_viewer_token,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -66,6 +83,7 @@ pub struct RemoteControlState {
     transition_deadline: Option<Instant>,
     resume_capability: Option<ResumeCapability>,
     file_viewer_capability: Option<FileViewerCapability>,
+    next_file_viewer_capability_generation: u64,
 }
 
 /// Secret proof that a claim may replace/resume the lease it was issued for.
@@ -85,6 +103,7 @@ struct ResumeCapability {
 struct FileViewerCapability {
     lease_id: String,
     token_hash: [u64; 2],
+    generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -392,15 +411,16 @@ impl RemoteControlState {
     pub(crate) fn tag_android_e2e_lease(
         &mut self,
         lease_id: &str,
-        context: &AndroidE2eClaimContext,
+        context: &AndroidE2eRequestContext,
     ) {
-        if self.lease.as_ref().map(|lease| lease.lease_id.as_str()) != Some(lease_id) {
+        if self.transitioning || !self.active_lease_id_matches(lease_id) {
             return;
         }
         self.android_e2e_lease = Some(AndroidE2eLeaseTag {
             lease_id: lease_id.to_string(),
-            instance_id: context.instance_id.clone(),
-            session_id: context.session_id.clone(),
+            owner_epoch: self.owner_epoch,
+            instance_id: context.instance_id().to_string(),
+            session_id: context.session_id().to_string(),
         });
     }
 
@@ -408,7 +428,11 @@ impl RemoteControlState {
     pub(crate) fn active_android_e2e_lease(&self) -> Option<AndroidE2eLeaseTag> {
         let tag = self.android_e2e_lease.as_ref()?;
         let lease = self.lease.as_ref()?;
-        (lease.lease_id == tag.lease_id).then(|| tag.clone())
+        (!self.transitioning
+            && self.active_lease_id_matches(&tag.lease_id)
+            && lease.lease_id == tag.lease_id
+            && self.owner_epoch == tag.owner_epoch)
+            .then(|| tag.clone())
     }
 
     /// Releases the active lease when the E2E session that claimed it is gone
@@ -502,9 +526,14 @@ impl RemoteControlState {
     /// process-keyed digest bound to that lease.
     pub(crate) fn issue_file_viewer_capability(&mut self, lease_id: &str) -> String {
         let token = Uuid::new_v4().to_string();
+        self.next_file_viewer_capability_generation = self
+            .next_file_viewer_capability_generation
+            .wrapping_add(1)
+            .max(1);
         self.file_viewer_capability = Some(FileViewerCapability {
             lease_id: lease_id.to_owned(),
             token_hash: self.claim_token_hasher.hash(&token),
+            generation: self.next_file_viewer_capability_generation,
         });
         token
     }
@@ -521,6 +550,11 @@ impl RemoteControlState {
                             self.claim_token_hasher.hash(token),
                         )
                 })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_file_viewer_capability_for_test(&self) -> bool {
+        self.file_viewer_capability.is_some()
     }
 
     fn resume_capability_matches(&self, resume_token: &str) -> bool {
@@ -1196,6 +1230,85 @@ pub(crate) fn require_file_viewer_capability(
     }
 }
 
+/// Validate an Android E2E FileViewer proof and return the non-secret replay
+/// guard that names the exact authority snapshot. Registry/lock failures deny
+/// access; the conservative dead-lease cleanup helper is intentionally not
+/// reused for authorization (ADR-0208).
+#[allow(clippy::result_large_err)]
+pub(super) fn require_android_e2e_file_viewer_capability(
+    app_state: &AppState,
+    proof: &AndroidE2eFileViewerProof,
+    presented_lease_id: Option<&str>,
+    expected_guard: Option<&AndroidE2eReplayGuard>,
+) -> Result<AndroidE2eReplayGuard, Response> {
+    let forbidden = || {
+        json_error(
+            StatusCode::FORBIDDEN,
+            "remote file viewer capability is required or invalid",
+        )
+    };
+    if proof.lease_id.is_empty()
+        || proof.file_viewer_token.is_empty()
+        || presented_lease_id.is_some_and(|lease_id| lease_id != proof.lease_id)
+    {
+        return Err(forbidden());
+    }
+
+    let now_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| internal_error("System clock is before Unix epoch"))?
+        .as_secs();
+    match app_state
+        .android_e2e
+        .request_context_is_current(&proof.context, now_epoch)
+    {
+        Ok(true) => {}
+        Ok(false) => return Err(forbidden()),
+        Err(error) => return Err(internal_error(error)),
+    }
+
+    let settings = effective_remote_settings(app_state).map_err(internal_error)?;
+    let timeout = Duration::from_secs(effective_heartbeat_timeout_seconds(&settings));
+    let mut current = app_state
+        .remote_control
+        .lock_or_err()
+        .map_err(internal_error)?;
+    let now = Instant::now();
+    current.observe_lease_expiry(now, timeout);
+    current.prune_expired_claim_reservation(now);
+
+    let tag = current.active_android_e2e_lease().ok_or_else(forbidden)?;
+    let capability = current
+        .file_viewer_capability
+        .as_ref()
+        .filter(|capability| {
+            capability.lease_id == proof.lease_id
+                && token_hashes_equal(
+                    capability.token_hash,
+                    current.claim_token_hasher.hash(&proof.file_viewer_token),
+                )
+        })
+        .ok_or_else(forbidden)?;
+    if !proof.context.is_active(now_epoch)
+        || tag.lease_id != proof.lease_id
+        || tag.instance_id != proof.context.instance_id()
+        || tag.session_id != proof.context.session_id()
+    {
+        return Err(forbidden());
+    }
+    let guard = AndroidE2eReplayGuard::new(
+        tag.lease_id,
+        tag.owner_epoch,
+        capability.generation,
+        tag.instance_id,
+        tag.session_id,
+    );
+    if expected_guard.is_some_and(|expected| expected != &guard) {
+        return Err(forbidden());
+    }
+    Ok(guard)
+}
+
 pub(crate) fn active_lease_matches(app_state: &AppState, lease_id: &str) -> Result<bool, String> {
     let settings = effective_remote_settings(app_state)?;
     let timeout_seconds = effective_heartbeat_timeout_seconds(&settings);
@@ -1519,10 +1632,8 @@ mod tests {
             },
             Duration::from_secs(45),
         );
-        let context = AndroidE2eClaimContext {
-            instance_id: "desktop-7".into(),
-            session_id: "session-a".into(),
-        };
+        let e2e = crate::android_e2e::AndroidE2eState::default();
+        let context = e2e.install_test_request_context("desktop-7", "session-a", u64::MAX);
 
         // Tagging binds only the currently active lease id.
         state.tag_android_e2e_lease("lease-0", &context);
@@ -1534,6 +1645,7 @@ mod tests {
         // A stale tag from an earlier lease never releases the current one.
         let stale = AndroidE2eLeaseTag {
             lease_id: "lease-0".into(),
+            owner_epoch: tag.owner_epoch,
             instance_id: tag.instance_id.clone(),
             session_id: tag.session_id.clone(),
         };
@@ -1558,6 +1670,102 @@ mod tests {
             Duration::from_secs(45),
         );
         assert!(state.active_android_e2e_lease().is_none());
+    }
+
+    #[test]
+    fn android_file_viewer_requires_capability_and_exact_claim_binding() {
+        let app_state = AppState::default();
+        let context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let token = {
+            let mut control = app_state
+                .remote_control
+                .lock()
+                .expect("remote control lock");
+            control.advance_owner_epoch();
+            control.install_remote_lease(
+                RemoteControlLease {
+                    lease_id: "lease-1".into(),
+                    remote_addr: "relay".into(),
+                    client_name: None,
+                    last_heartbeat: Instant::now(),
+                },
+                Duration::from_secs(45),
+            );
+            let token = control.issue_file_viewer_capability("lease-1");
+            control.tag_android_e2e_lease("lease-1", &context);
+            token
+        };
+        let proof =
+            AndroidE2eFileViewerProof::new(context.clone(), "lease-1".into(), token.clone());
+        let guard = require_android_e2e_file_viewer_capability(&app_state, &proof, None, None)
+            .expect("exact proof");
+        require_android_e2e_file_viewer_capability(
+            &app_state,
+            &proof,
+            Some("lease-1"),
+            Some(&guard),
+        )
+        .expect("same receipt remains valid");
+
+        let wrong_token =
+            AndroidE2eFileViewerProof::new(context.clone(), "lease-1".into(), "wrong".into());
+        assert!(
+            require_android_e2e_file_viewer_capability(&app_state, &wrong_token, None, None,)
+                .is_err()
+        );
+
+        let other_context =
+            app_state
+                .android_e2e
+                .install_test_request_context("desktop-7", "session-b", u64::MAX);
+        let other_session = AndroidE2eFileViewerProof::new(other_context, "lease-1".into(), token);
+        assert!(
+            require_android_e2e_file_viewer_capability(&app_state, &other_session, None, None,)
+                .is_err()
+        );
+
+        let rotated_token = app_state
+            .remote_control
+            .lock()
+            .expect("remote control lock")
+            .issue_file_viewer_capability("lease-1");
+        assert!(
+            require_android_e2e_file_viewer_capability(&app_state, &proof, None, Some(&guard),)
+                .is_err(),
+            "same-lease capability rotation must invalidate the old receipt"
+        );
+        let rotated_proof =
+            AndroidE2eFileViewerProof::new(context, "lease-1".into(), rotated_token.clone());
+        let rotated_guard =
+            require_android_e2e_file_viewer_capability(&app_state, &rotated_proof, None, None)
+                .expect("rotated capability");
+
+        let lookalike_context = crate::android_e2e::AndroidE2eState::default()
+            .install_test_request_context("desktop-7", "session-a", u64::MAX);
+        let lookalike_proof =
+            AndroidE2eFileViewerProof::new(lookalike_context, "lease-1".into(), rotated_token);
+        assert!(
+            require_android_e2e_file_viewer_capability(&app_state, &lookalike_proof, None, None,)
+                .is_err(),
+            "equal session strings must not substitute for exact Arc identity"
+        );
+
+        app_state
+            .remote_control
+            .lock()
+            .expect("remote control lock")
+            .begin_remote_owner_transition(Instant::now())
+            .expect("active transition");
+        assert!(require_android_e2e_file_viewer_capability(
+            &app_state,
+            &rotated_proof,
+            None,
+            Some(&rotated_guard),
+        )
+        .is_err());
     }
 
     #[test]

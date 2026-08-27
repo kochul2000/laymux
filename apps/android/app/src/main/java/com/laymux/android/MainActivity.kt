@@ -1050,6 +1050,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             runOnUiThread { showCloudMessage("파일 저장은 Android 10 이상에서 지원됩니다.") }
             return
         }
+        if (!RemoteDownloadPolicy.isEncodedPayloadWithinBound(base64.length)) {
+            runOnUiThread { showCloudMessage("파일이 전송 한도를 넘었습니다.") }
+            return
+        }
         val bytes = try {
             Base64.decode(base64, Base64.DEFAULT)
         } catch (_: IllegalArgumentException) {

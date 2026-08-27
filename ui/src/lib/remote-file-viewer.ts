@@ -37,6 +37,138 @@ export interface RemoteFileViewerBridgeResult {
 
 const ok = (data: unknown): RemoteFileViewerBridgeResult => ({ success: true, data });
 const err = (error: string): RemoteFileViewerBridgeResult => ({ success: false, error });
+const RESPONSE_LIMIT_ERROR = "Remote response exceeds the viewer limit";
+
+function jsonStringUtf8Bytes(value: string, consume: (bytes: number) => boolean): boolean {
+  if (!consume(2)) return false; // opening and closing quotes
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (
+      code === 0x22 ||
+      code === 0x5c ||
+      code === 0x08 ||
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0c ||
+      code === 0x0d
+    ) {
+      if (!consume(2)) return false;
+    } else if (code <= 0x1f) {
+      if (!consume(6)) return false;
+    } else if (code <= 0x7f) {
+      if (!consume(1)) return false;
+    } else if (code <= 0x7ff) {
+      if (!consume(2)) return false;
+    } else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        if (!consume(4)) return false;
+        index += 1;
+      } else if (!consume(6)) {
+        return false;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      if (!consume(6)) return false;
+    } else if (!consume(3)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Check JSON's serialized UTF-8 size without first materializing the payload.
+ * FileViewer results are plain JSON values; unfamiliar prototypes, cycles and
+ * non-JSON primitives fail closed instead of invoking a user-defined `toJSON`.
+ */
+export function isJsonValueWithinUtf8Budget(value: unknown, maxBytes: number): boolean {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return false;
+  let remaining = maxBytes;
+  const consume = (bytes: number) => {
+    if (bytes > remaining) return false;
+    remaining -= bytes;
+    return true;
+  };
+  const ancestors = new WeakSet<object>();
+
+  const visit = (current: unknown, inArray: boolean): boolean => {
+    if (current === null) return consume(4);
+    if (typeof current === "string") return jsonStringUtf8Bytes(current, consume);
+    if (typeof current === "boolean") return consume(current ? 4 : 5);
+    if (typeof current === "number") {
+      const serialized = Number.isFinite(current) ? JSON.stringify(current) : "null";
+      return consume(serialized.length);
+    }
+    if (current === undefined || typeof current === "function" || typeof current === "symbol") {
+      return inArray ? consume(4) : false;
+    }
+    if (typeof current !== "object" || ancestors.has(current)) return false;
+
+    if (Array.isArray(current)) {
+      if (!consume(2)) return false;
+      ancestors.add(current);
+      try {
+        for (let index = 0; index < current.length; index += 1) {
+          if (index > 0 && !consume(1)) return false;
+          if (!visit(current[index], true)) return false;
+        }
+      } finally {
+        ancestors.delete(current);
+      }
+      return true;
+    }
+
+    if (Object.getPrototypeOf(current) !== Object.prototype) return false;
+    if (!consume(2)) return false;
+    ancestors.add(current);
+    try {
+      let emitted = 0;
+      for (const key of Object.keys(current)) {
+        const child = (current as Record<string, unknown>)[key];
+        if (child === undefined || typeof child === "function" || typeof child === "symbol") {
+          continue;
+        }
+        if (emitted > 0 && !consume(1)) return false;
+        if (!jsonStringUtf8Bytes(key, consume) || !consume(1) || !visit(child, false)) return false;
+        emitted += 1;
+      }
+    } finally {
+      ancestors.delete(current);
+    }
+    return true;
+  };
+
+  try {
+    return visit(value, false);
+  } catch {
+    return false;
+  }
+}
+
+export function boundRemoteFileViewerResult(
+  result: RemoteFileViewerBridgeResult,
+  maxResponseBytes: unknown,
+  requestId?: string,
+): RemoteFileViewerBridgeResult {
+  if (maxResponseBytes === undefined) return result;
+  const serializedValue =
+    requestId === undefined
+      ? result
+      : {
+          requestId,
+          success: result.success,
+          data: result.data ?? null,
+          error: result.error ?? null,
+        };
+  if (
+    !Number.isSafeInteger(maxResponseBytes) ||
+    (maxResponseBytes as number) <= 0 ||
+    !isJsonValueWithinUtf8Budget(serializedValue, maxResponseBytes as number)
+  ) {
+    return err(RESPONSE_LIMIT_ERROR);
+  }
+  return result;
+}
 
 /** Remote path-link 발견 트리거(ADR-0188). 서버가 이미 검사하지만 fail-closed 로 다시 본다. */
 type RemotePathLinkMode = "selection" | "point" | "screen";
@@ -164,7 +296,11 @@ export async function handleRemoteFileViewerRequest(
   }
   if (method === "list") {
     const maxEntries = params.maxEntries;
-    if (!Number.isSafeInteger(maxEntries) || (maxEntries as number) <= 0) {
+    if (
+      !Number.isSafeInteger(maxEntries) ||
+      (maxEntries as number) <= 0 ||
+      (maxEntries as number) >= Number.MAX_SAFE_INTEGER
+    ) {
       return err("maxEntries must be a positive integer");
     }
     let path: string;
@@ -184,10 +320,9 @@ export async function handleRemoteFileViewerRequest(
       if (!path) return err("path is required");
     }
     try {
-      // list_directory already sorts directories-first, name case-insensitive;
-      // the bridge only bounds the payload and resolves absolute paths so the
-      // Remote client never owns path syntax.
-      const entries = await listDirectory(path);
+      // Ask Rust for one look-ahead entry. That bounds read_dir + metadata work
+      // while preserving an exact `truncated` signal for the visible slice.
+      const entries = await listDirectory(path, undefined, (maxEntries as number) + 1);
       const bounded = entries.slice(0, maxEntries as number);
       const parent = parentPath(path);
       return ok({
