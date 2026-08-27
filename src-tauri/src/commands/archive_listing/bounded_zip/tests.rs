@@ -35,13 +35,8 @@ fn write_empty_zip_entries(path: &std::path::Path, count: usize) {
     writer.finish().expect("finish zip");
 }
 
-fn append_semantically_invalid_trailing_directory(bytes: &mut Vec<u8>) {
+fn append_trailing_directory(bytes: &mut Vec<u8>, fake_name: &[u8], extra: &[u8]) {
     let fake_central_offset = u32::try_from(bytes.len()).expect("small zip fixture");
-    let fake_name = b"fake";
-    // Structurally valid CDFH whose Unicode Path field is semantically
-    // truncated. ZipArchive rejects it and searches for an older EOCD; the
-    // bounded reader must report this newest directory's own error.
-    let invalid_unicode_extra = [0x75, 0x70, 0x01, 0x00, 0x01];
     bytes.extend_from_slice(b"PK\x01\x02");
     bytes.extend_from_slice(&20_u16.to_le_bytes());
     bytes.extend_from_slice(&20_u16.to_le_bytes());
@@ -53,17 +48,16 @@ fn append_semantically_invalid_trailing_directory(bytes: &mut Vec<u8>) {
     bytes.extend_from_slice(&0_u32.to_le_bytes());
     bytes.extend_from_slice(&0_u32.to_le_bytes());
     bytes.extend_from_slice(&(fake_name.len() as u16).to_le_bytes());
-    bytes.extend_from_slice(&(invalid_unicode_extra.len() as u16).to_le_bytes());
+    bytes.extend_from_slice(&(extra.len() as u16).to_le_bytes());
     bytes.extend_from_slice(&0_u16.to_le_bytes());
     bytes.extend_from_slice(&0_u16.to_le_bytes());
     bytes.extend_from_slice(&0_u16.to_le_bytes());
     bytes.extend_from_slice(&0_u32.to_le_bytes());
     bytes.extend_from_slice(&0_u32.to_le_bytes());
     bytes.extend_from_slice(fake_name);
-    bytes.extend_from_slice(&invalid_unicode_extra);
-    let fake_central_size =
-        u32::try_from(ZIP_CENTRAL_HEADER_LEN + fake_name.len() + invalid_unicode_extra.len())
-            .expect("small central directory fixture");
+    bytes.extend_from_slice(extra);
+    let fake_central_size = u32::try_from(ZIP_CENTRAL_HEADER_LEN + fake_name.len() + extra.len())
+        .expect("small central directory fixture");
 
     bytes.extend_from_slice(b"PK\x05\x06");
     bytes.extend_from_slice(&0_u16.to_le_bytes());
@@ -73,6 +67,25 @@ fn append_semantically_invalid_trailing_directory(bytes: &mut Vec<u8>) {
     bytes.extend_from_slice(&fake_central_size.to_le_bytes());
     bytes.extend_from_slice(&fake_central_offset.to_le_bytes());
     bytes.extend_from_slice(&0_u16.to_le_bytes());
+}
+
+fn append_semantically_invalid_trailing_directory(bytes: &mut Vec<u8>) {
+    // Structurally valid CDFH whose Unicode Path field is semantically
+    // truncated. ZipArchive rejects it and searches for an older EOCD; the
+    // bounded reader must report this newest directory's own error.
+    let invalid_unicode_extra = [0x75, 0x70, 0x01, 0x00, 0x01];
+    append_trailing_directory(bytes, b"fake", &invalid_unicode_extra);
+}
+
+fn unicode_path_extra(version: u8, crc_basis: &[u8], name: &[u8]) -> Vec<u8> {
+    let field_len = 5_usize.checked_add(name.len()).expect("small zip fixture");
+    let mut extra = Vec::with_capacity(4 + field_len);
+    extra.extend_from_slice(&0x7075_u16.to_le_bytes());
+    extra.extend_from_slice(&(field_len as u16).to_le_bytes());
+    extra.push(version);
+    extra.extend_from_slice(&crc32fast::hash(crc_basis).to_le_bytes());
+    extra.extend_from_slice(name);
+    extra
 }
 
 #[test]
@@ -173,6 +186,56 @@ fn bounded_zip_decodes_names_without_a_recovery_parser() {
         decode_zip_name(b"PK\x05\x06\xff.txt", 1 << 11),
         "PK\u{5}\u{6}\u{fffd}.txt"
     );
+}
+
+#[test]
+fn bounded_zip_rejects_duplicate_unicode_path_fields() {
+    let path = temp_path("bounded_duplicate_unicode_path.zip");
+    write_zip(&path, &[("raw.txt", b"x")]);
+    let mut bytes = std::fs::read(&path).expect("read zip fixture");
+    let first_name = b"first.txt";
+    let mut extra = unicode_path_extra(1, b"raw.txt", first_name);
+    extra.extend_from_slice(&unicode_path_extra(1, first_name, b"second.txt"));
+    append_trailing_directory(&mut bytes, b"raw.txt", &extra);
+    std::fs::write(&path, &bytes).expect("write forged zip fixture");
+
+    let error = super::super::read_archive_listing_bounded(
+        &path.to_string_lossy(),
+        ArchiveFormat::Zip,
+        bytes.len(),
+        bytes.len() as u64,
+    )
+    .expect_err("a Unicode path override must remain bound to the raw central name");
+
+    assert_eq!(
+        error,
+        "Cannot read zip archive: duplicate Unicode path field 0"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn bounded_zip_rejects_unsupported_unicode_path_version() {
+    let path = temp_path("bounded_unicode_path_version.zip");
+    write_zip(&path, &[("raw.txt", b"x")]);
+    let mut bytes = std::fs::read(&path).expect("read zip fixture");
+    let extra = unicode_path_extra(2, b"raw.txt", b"unicode.txt");
+    append_trailing_directory(&mut bytes, b"raw.txt", &extra);
+    std::fs::write(&path, &bytes).expect("write forged zip fixture");
+
+    let error = super::super::read_archive_listing_bounded(
+        &path.to_string_lossy(),
+        ArchiveFormat::Zip,
+        bytes.len(),
+        bytes.len() as u64,
+    )
+    .expect_err("only Unicode path extra version 1 is supported");
+
+    assert_eq!(
+        error,
+        "Cannot read zip archive: Unicode path field 0 uses unsupported version 2"
+    );
+    let _ = std::fs::remove_file(&path);
 }
 
 #[test]

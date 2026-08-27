@@ -1,6 +1,6 @@
 # 0208. Android E2E FileViewer는 타입화 capability와 claim binding을 함께 검증한다
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-27
 - Source: 사용자 요구("헤더를 주입하지 않는 설계", Android FileViewer 403 수정) · [api-contracts.md §13.0, §13.3.1](../architecture/api-contracts.md) · [ADR-0042](0042-remote-file-viewer-secret-capability.md) · [ADR-0146](0146-android-e2e-session-and-encrypted-remote-rpc.md) · [ADR-0170](0170-android-e2e-lease-dies-with-its-session.md)
 - Extends: ADR-0042, ADR-0146, ADR-0170

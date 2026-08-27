@@ -184,6 +184,7 @@ fn read_bounded_zip_entry(
         || raw_local_offset == u32::MAX
         || raw_disk_number == u16::MAX;
     let mut saw_zip64 = false;
+    let mut saw_unicode_path = false;
     let mut extra_cursor = 0_usize;
     while extra_cursor < extra.len() {
         let header_end = extra_cursor
@@ -222,14 +223,25 @@ fn read_bounded_zip_entry(
                 disk_number = take_zip_u32(field, &mut zip64_cursor, index)?;
             }
         } else if field_id == 0x7075 {
+            if saw_unicode_path {
+                return Err(format!(
+                    "Cannot read zip archive: duplicate Unicode path field {index}"
+                ));
+            }
+            saw_unicode_path = true;
             if field.len() < 5 {
                 return Err(format!(
                     "Cannot read zip archive: Unicode path field {index} is truncated"
                 ));
             }
-            let crc_basis = unicode_name.as_deref().unwrap_or(raw_name);
+            if field[0] != 1 {
+                return Err(format!(
+                    "Cannot read zip archive: Unicode path field {index} uses unsupported version {}",
+                    field[0]
+                ));
+            }
             let expected_crc = read_zip_u32(field, 1).unwrap_or_default();
-            if crc32fast::hash(crc_basis) != expected_crc {
+            if crc32fast::hash(raw_name) != expected_crc {
                 return Err(format!(
                     "Cannot read zip archive: Unicode path checksum {index} is invalid"
                 ));
