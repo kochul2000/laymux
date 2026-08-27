@@ -20,6 +20,9 @@
         const remoteComposerIdleOpacityInput = $("remoteComposerIdleOpacity");
         const remoteComposerFocusedOpacityInput = $("remoteComposerFocusedOpacity");
         const remoteComposerActiveOpacityInput = $("remoteComposerActiveOpacity");
+        const remoteSnapshotMaxKibInput = $("remoteSnapshotMaxKib");
+        const remoteScrollSensitivityInput = $("remoteScrollSensitivity");
+        const remoteFastScrollSensitivityInput = $("remoteFastScrollSensitivity");
         const remoteTouchScrollSensitivityInput = $("remoteTouchScrollSensitivity");
         const remoteTwoFingerScrollSensitivityInput = $(
           "remoteTwoFingerScrollSensitivity",
@@ -121,6 +124,7 @@
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
+        const remoteDisplaySettingsKey = "laymux.remote.displaySettings";
         // Composer recall feature toggles (issues #504 / #505). Only the on/off
         // boolean is surface-local in localStorage — the past-input text itself
         // is kept in a runtime Map and never persisted (see composerHistory*).
@@ -174,14 +178,28 @@
         const REMOTE_FONT_SIZE_MAX = 72;
         const REMOTE_COMPOSER_OPACITY_MIN = 20;
         const REMOTE_COMPOSER_OPACITY_MAX = 100;
+        const REMOTE_SNAPSHOT_MAX_KIB_MIN = 1;
+        const REMOTE_SNAPSHOT_MAX_KIB_MAX = 1024;
+        const SCROLL_SENSITIVITY_MIN = 0.1;
+        const SCROLL_SENSITIVITY_MAX = 20;
+        const DEFAULT_REMOTE_DISPLAY_SETTINGS = Object.freeze({
+          terminalFontSize: 14,
+          composerFontSize: 16,
+          menuFontSize: 13,
+          composerIdleOpacity: 55,
+          composerFocusedOpacity: 80,
+          composerActiveOpacity: 100,
+          snapshotMaxKib: 4,
+          scrollSensitivity: 1,
+          fastScrollSensitivity: 5,
+          touchScrollSensitivity: 1,
+          twoFingerScrollSensitivity: 5,
+        });
         const REMOTE_ATTACHMENT_MAX_BYTES = 1024 * 1024;
         const REMOTE_LONG_TEXT_ATTACHMENT_THRESHOLD_BYTES = 5 * 1024;
         const attachmentTextEncoder = new TextEncoder();
         let leaseId = null;
-        let remoteDisplaySettings = null;
-        let remoteDisplaySettingsLoading = false;
-        let remoteDisplaySettingsPending = false;
-        let remoteDisplaySettingsRevision = 0;
+        let remoteDisplaySettings = loadDeviceDisplaySettings();
         let resumeToken = null;
         let fileViewerToken = null;
         let claimAttemptRevision = 0;
@@ -413,7 +431,7 @@
         // Automatic transport recovery keeps the expanded budget while the
         // socket still opens, so a blip does not throw away paged-in history.
         // After this many consecutive failures to open it falls back to the
-        // owner budget: a flaky link must not re-drive a 1 MiB checkpoint
+        // device budget: a flaky link must not re-drive a 1 MiB checkpoint
         // serialization on the desktop every few seconds.
         const HISTORY_EXPANSION_MAX_FAILED_OPENS = 2;
         // A history attach that never produces a snapshot (dropped socket, host
@@ -509,14 +527,9 @@
 
         const defaultAppearance = Object.freeze({
           fontFamily: "'Cascadia Mono', 'Cascadia Mono', 'Consolas', monospace",
-          fontSize: 14,
           cursorStyle: "bar",
           cursorWidth: 1,
           scrollback: 10000,
-          scrollSensitivity: 1,
-          fastScrollSensitivity: 5,
-          touchScrollSensitivity: 1,
-          twoFingerScrollSensitivity: 5,
           theme: Object.freeze({
             background: "#0C0C0C",
             foreground: "#F0F0F0",
@@ -1018,48 +1031,89 @@
           };
         }
 
-        function updateRemoteDisplaySettingsControls(message = null, error = false) {
-          const editable =
-            Boolean(leaseId) &&
-            Boolean(remoteDisplaySettings?.revision) &&
-            !remoteDisplaySettingsLoading &&
-            !remoteDisplaySettingsPending;
-          remoteTerminalFontSizeInput.disabled = !editable;
-          remoteComposerFontSizeInput.disabled = !editable;
-          remoteMenuFontSizeInput.disabled = !editable;
-          remoteComposerIdleOpacityInput.disabled = !editable;
-          remoteComposerFocusedOpacityInput.disabled = !editable;
-          remoteComposerActiveOpacityInput.disabled = !editable;
-          remoteTouchScrollSensitivityInput.disabled = !editable;
-          remoteTwoFingerScrollSensitivityInput.disabled = !editable;
-          remoteDisplaySettingsStatus.textContent =
-            message ||
-            (leaseId
-              ? remoteDisplaySettingsLoading
-                ? "Loading PC settings..."
-                : "Stored on this PC."
-              : "Connect to edit PC settings.");
+        function normalizeRemoteSnapshotMaxKib(value, fallback) {
+          const parsed = Number(value);
+          if (!Number.isFinite(parsed)) return fallback;
+          return Math.min(
+            REMOTE_SNAPSHOT_MAX_KIB_MAX,
+            Math.max(REMOTE_SNAPSHOT_MAX_KIB_MIN, Math.floor(parsed)),
+          );
+        }
+
+        function normalizeRemoteDisplaySettings(settings = {}) {
+          const composerOpacities = normalizeRemoteComposerOpacities(settings);
+          return {
+            terminalFontSize: normalizeRemoteFontSize(
+              settings.terminalFontSize,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.terminalFontSize,
+            ),
+            composerFontSize: normalizeRemoteFontSize(
+              settings.composerFontSize,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.composerFontSize,
+            ),
+            menuFontSize: normalizeRemoteFontSize(
+              settings.menuFontSize,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.menuFontSize,
+            ),
+            ...composerOpacities,
+            snapshotMaxKib: normalizeRemoteSnapshotMaxKib(
+              settings.snapshotMaxKib,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.snapshotMaxKib,
+            ),
+            scrollSensitivity: normalizeScrollSensitivity(
+              settings.scrollSensitivity,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.scrollSensitivity,
+            ),
+            fastScrollSensitivity: normalizeScrollSensitivity(
+              settings.fastScrollSensitivity,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.fastScrollSensitivity,
+            ),
+            touchScrollSensitivity: normalizeScrollSensitivity(
+              settings.touchScrollSensitivity,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.touchScrollSensitivity,
+            ),
+            twoFingerScrollSensitivity: normalizeScrollSensitivity(
+              settings.twoFingerScrollSensitivity,
+              DEFAULT_REMOTE_DISPLAY_SETTINGS.twoFingerScrollSensitivity,
+            ),
+          };
+        }
+
+        function loadDeviceDisplaySettings() {
+          try {
+            const stored = JSON.parse(localStorage.getItem(remoteDisplaySettingsKey) || "null");
+            return normalizeRemoteDisplaySettings(stored || {});
+          } catch {
+            return { ...DEFAULT_REMOTE_DISPLAY_SETTINGS };
+          }
+        }
+
+        function persistDeviceDisplaySettings(settings) {
+          try {
+            localStorage.setItem(remoteDisplaySettingsKey, JSON.stringify(settings));
+            return true;
+          } catch {
+            return false;
+          }
+        }
+
+        function updateRemoteDisplaySettingsControls(
+          message = "Saved on this device.",
+          error = false,
+        ) {
+          remoteDisplaySettingsStatus.textContent = message;
           remoteDisplaySettingsStatus.classList.toggle("error", error);
         }
 
         function applyRemoteDisplaySettings(settings) {
-          const composerOpacities = normalizeRemoteComposerOpacities(settings);
-          const normalized = {
-            terminalFontSize: normalizeRemoteFontSize(settings?.terminalFontSize, 14),
-            composerFontSize: normalizeRemoteFontSize(settings?.composerFontSize, 16),
-            menuFontSize: normalizeRemoteFontSize(settings?.menuFontSize, 13),
-            ...composerOpacities,
-            touchScrollSensitivity: normalizeScrollSensitivity(
-              settings?.touchScrollSensitivity,
-              defaultAppearance.touchScrollSensitivity,
-            ),
-            twoFingerScrollSensitivity: normalizeScrollSensitivity(
-              settings?.twoFingerScrollSensitivity,
-              defaultAppearance.twoFingerScrollSensitivity,
-            ),
-            revision: typeof settings?.revision === "string" ? settings.revision : "",
-          };
+          const normalized = normalizeRemoteDisplaySettings(settings);
           remoteDisplaySettings = normalized;
+          // A raised device budget applies to the next attach, including
+          // automatic transport recovery. Never lower an expanded recovery
+          // budget here: doing so would discard history the user already
+          // paged in. A user-directed attach resets it to the exact device
+          // value in openOutput().
+          outputHistoryKib = Math.max(outputHistoryKib, normalized.snapshotMaxKib);
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
@@ -1068,6 +1122,9 @@
             normalized.composerFocusedOpacity,
           );
           remoteComposerActiveOpacityInput.value = String(normalized.composerActiveOpacity);
+          remoteSnapshotMaxKibInput.value = String(normalized.snapshotMaxKib);
+          remoteScrollSensitivityInput.value = String(normalized.scrollSensitivity);
+          remoteFastScrollSensitivityInput.value = String(normalized.fastScrollSensitivity);
           remoteTouchScrollSensitivityInput.value = String(
             normalized.touchScrollSensitivity,
           );
@@ -1095,24 +1152,9 @@
             String(normalized.composerActiveOpacity / 100),
           );
           updateComposerOpacityState();
-          for (const info of terminalInfoById.values()) {
-            if (info.appearance) {
-              info.appearance = {
-                ...info.appearance,
-                fontSize: normalized.terminalFontSize,
-                touchScrollSensitivity: normalized.touchScrollSensitivity,
-                twoFingerScrollSensitivity: normalized.twoFingerScrollSensitivity,
-              };
-            }
-          }
           const appearance = activeTerminalId && terminalInfoById.get(activeTerminalId)?.appearance
             ? terminalInfoById.get(activeTerminalId).appearance
-            : {
-                ...defaultAppearance,
-                fontSize: normalized.terminalFontSize,
-                touchScrollSensitivity: normalized.touchScrollSensitivity,
-                twoFingerScrollSensitivity: normalized.twoFingerScrollSensitivity,
-              };
+            : defaultAppearance;
           applyTerminalAppearance(appearance);
           // The drag multipliers live in module state, not the xterm option
           // bundle, so adopt them here for immediate effect on the open surface.
@@ -1120,114 +1162,26 @@
           scheduleTerminalFit();
         }
 
-        async function loadRemoteDisplaySettings({ reportErrors = true } = {}) {
-          // A same-document save owns the newest value until it settles. A
-          // drawer re-entry while PUT is in flight must not start a GET that
-          // can return the pre-save snapshot, supersede the PUT revision, and
-          // leave the controls permanently pending.
-          if (remoteDisplaySettingsPending) return;
-          const revision = ++remoteDisplaySettingsRevision;
-          remoteDisplaySettingsLoading = true;
-          updateRemoteDisplaySettingsControls();
-          let message = null;
-          let failed = false;
-          try {
-            const settings = await remoteFetch("/remote/v1/display-settings");
-            if (revision !== remoteDisplaySettingsRevision) return;
-            applyRemoteDisplaySettings(settings);
-          } catch (error) {
-            if (revision !== remoteDisplaySettingsRevision) return;
-            if (reportErrors) {
-              message = error.message || String(error);
-              failed = true;
-            }
-          } finally {
-            if (revision === remoteDisplaySettingsRevision) {
-              remoteDisplaySettingsLoading = false;
-              updateRemoteDisplaySettingsControls(message, failed);
-            }
-          }
-        }
-
-        async function saveRemoteDisplaySettings() {
-          const selectedLeaseId = leaseId;
-          const expectedRevision = remoteDisplaySettings?.revision;
-          if (!selectedLeaseId || !expectedRevision || remoteDisplaySettingsPending) return;
-          const revision = ++remoteDisplaySettingsRevision;
-          const terminalFontSize = normalizeRemoteFontSize(
-            remoteTerminalFontSizeInput.value,
-            remoteDisplaySettings?.terminalFontSize || 14,
-          );
-          const composerFontSize = normalizeRemoteFontSize(
-            remoteComposerFontSizeInput.value,
-            remoteDisplaySettings?.composerFontSize || 16,
-          );
-          const menuFontSize = normalizeRemoteFontSize(
-            remoteMenuFontSizeInput.value,
-            remoteDisplaySettings?.menuFontSize || 13,
-          );
-          const composerOpacities = normalizeRemoteComposerOpacities({
+        function saveRemoteDisplaySettings() {
+          const normalized = normalizeRemoteDisplaySettings({
+            terminalFontSize: remoteTerminalFontSizeInput.value,
+            composerFontSize: remoteComposerFontSizeInput.value,
+            menuFontSize: remoteMenuFontSizeInput.value,
             composerIdleOpacity: remoteComposerIdleOpacityInput.value,
             composerFocusedOpacity: remoteComposerFocusedOpacityInput.value,
             composerActiveOpacity: remoteComposerActiveOpacityInput.value,
+            snapshotMaxKib: remoteSnapshotMaxKibInput.value,
+            scrollSensitivity: remoteScrollSensitivityInput.value,
+            fastScrollSensitivity: remoteFastScrollSensitivityInput.value,
+            touchScrollSensitivity: remoteTouchScrollSensitivityInput.value,
+            twoFingerScrollSensitivity: remoteTwoFingerScrollSensitivityInput.value,
           });
-          const touchScrollSensitivityValue = normalizeScrollSensitivity(
-            remoteTouchScrollSensitivityInput.value,
-            remoteDisplaySettings?.touchScrollSensitivity ??
-              defaultAppearance.touchScrollSensitivity,
+          const persisted = persistDeviceDisplaySettings(normalized);
+          applyRemoteDisplaySettings(normalized);
+          updateRemoteDisplaySettingsControls(
+            persisted ? "Saved on this device." : "Could not save on this device.",
+            !persisted,
           );
-          const twoFingerScrollSensitivityValue = normalizeScrollSensitivity(
-            remoteTwoFingerScrollSensitivityInput.value,
-            remoteDisplaySettings?.twoFingerScrollSensitivity ??
-              defaultAppearance.twoFingerScrollSensitivity,
-          );
-          remoteDisplaySettingsPending = true;
-          updateRemoteDisplaySettingsControls("Saving...");
-          let reloadAfterConflict = false;
-          try {
-            const settings = await remoteFetch("/remote/v1/display-settings", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                leaseId: selectedLeaseId,
-                expectedRevision,
-                terminalFontSize,
-                composerFontSize,
-                menuFontSize,
-                ...composerOpacities,
-                touchScrollSensitivity: touchScrollSensitivityValue,
-                twoFingerScrollSensitivity: twoFingerScrollSensitivityValue,
-              }),
-            });
-            if (revision !== remoteDisplaySettingsRevision || leaseId !== selectedLeaseId) return;
-            applyRemoteDisplaySettings(settings);
-            updateRemoteDisplaySettingsControls("Saved on this PC.");
-          } catch (error) {
-            if (revision !== remoteDisplaySettingsRevision) return;
-            if (error?.status === 409) {
-              reloadAfterConflict = true;
-            } else {
-              updateRemoteDisplaySettingsControls(error.message || String(error), true);
-            }
-          } finally {
-            if (revision === remoteDisplaySettingsRevision) {
-              remoteDisplaySettingsPending = false;
-              if (leaseId !== selectedLeaseId) {
-                updateRemoteDisplaySettingsControls();
-                if (leaseId) {
-                  loadRemoteDisplaySettings({ reportErrors: false }).catch(() => {});
-                }
-              } else if (reloadAfterConflict) {
-                updateRemoteDisplaySettingsControls("PC settings changed. Reloading...");
-                loadRemoteDisplaySettings().catch(() => {});
-              } else {
-                updateRemoteDisplaySettingsControls(
-                  remoteDisplaySettingsStatus.textContent,
-                  remoteDisplaySettingsStatus.classList.contains("error"),
-                );
-              }
-            }
-          }
         }
 
         function renderPcUpdateStatus(message = null, isError = false) {
@@ -3091,7 +3045,6 @@
           notificationSection.classList.toggle("locked", !connected);
           drawerNotificationsButton.disabled = !connected;
           refreshButton.disabled = !connected;
-          updateRemoteDisplaySettingsControls();
           renderPcUpdateStatus();
           if (connected && !pcUpdateStatus && !pcUpdateRequestInFlight) {
             loadPcUpdateStatus().catch(() => {});
@@ -3290,7 +3243,6 @@
         }
 
         function normalizeAppearance(appearance = {}) {
-          const fontSize = Number(appearance.fontSize);
           const cursorWidth = Number(appearance.cursorWidth);
           const cursorStyle = ["bar", "underline", "block"].includes(appearance.cursorStyle)
             ? appearance.cursorStyle
@@ -3301,26 +3253,14 @@
             fontFamily: remoteFontIsReady(fontAssets)
               ? `'${fontAssets.family}', ${serverFontFamily}`
               : serverFontFamily,
-            fontSize: Number.isFinite(fontSize) && fontSize > 0 ? Math.floor(fontSize) : defaultAppearance.fontSize,
+            fontSize: remoteDisplaySettings.terminalFontSize,
             cursorStyle,
             cursorWidth: Number.isFinite(cursorWidth) && cursorWidth > 0 ? Math.floor(cursorWidth) : undefined,
             scrollback: defaultAppearance.scrollback,
-            scrollSensitivity: normalizeScrollSensitivity(
-              appearance.scrollSensitivity,
-              defaultAppearance.scrollSensitivity
-            ),
-            fastScrollSensitivity: normalizeScrollSensitivity(
-              appearance.fastScrollSensitivity,
-              defaultAppearance.fastScrollSensitivity
-            ),
-            touchScrollSensitivity: normalizeScrollSensitivity(
-              appearance.touchScrollSensitivity,
-              defaultAppearance.touchScrollSensitivity
-            ),
-            twoFingerScrollSensitivity: normalizeScrollSensitivity(
-              appearance.twoFingerScrollSensitivity,
-              defaultAppearance.twoFingerScrollSensitivity
-            ),
+            scrollSensitivity: remoteDisplaySettings.scrollSensitivity,
+            fastScrollSensitivity: remoteDisplaySettings.fastScrollSensitivity,
+            touchScrollSensitivity: remoteDisplaySettings.touchScrollSensitivity,
+            twoFingerScrollSensitivity: remoteDisplaySettings.twoFingerScrollSensitivity,
             theme: { ...defaultAppearance.theme, ...(appearance.theme || {}) },
           };
         }
@@ -3329,21 +3269,14 @@
         // not by xterm, so its multipliers live beside the gesture state instead
         // of in the terminal options bundle. One- and two-finger drags carry
         // separate factors so a two-finger swipe can cover more per drag.
-        let touchScrollSensitivity = defaultAppearance.touchScrollSensitivity;
-        let twoFingerScrollSensitivity =
-          defaultAppearance.twoFingerScrollSensitivity;
+        let touchScrollSensitivity = remoteDisplaySettings.touchScrollSensitivity;
+        let twoFingerScrollSensitivity = remoteDisplaySettings.twoFingerScrollSensitivity;
 
         function adoptTouchScrollSensitivity(appearance = {}) {
           const normalized = normalizeAppearance(appearance);
           touchScrollSensitivity = normalized.touchScrollSensitivity;
           twoFingerScrollSensitivity = normalized.twoFingerScrollSensitivity;
         }
-
-        // xterm throws on a non-positive sensitivity, so an older desktop that
-        // does not send the field at all, or a hand-edited settings.json, falls
-        // back to the default instead of breaking the terminal.
-        const SCROLL_SENSITIVITY_MIN = 0.1;
-        const SCROLL_SENSITIVITY_MAX = 20;
 
         function normalizeScrollSensitivity(value, fallback) {
           const parsed = Number(value);
@@ -5303,7 +5236,7 @@
         function countBadgeScale(text) {
           // Shrink factor over the badge's CSS base size (--count-badge-base)
           // so longer counts still fit; an inline px here would pin the badge
-          // and defeat the drawer's PC-owned menu font size.
+          // and defeat the drawer's device-local menu font size.
           const scales = ["1", "1", "0.95", "0.85", "0.75"];
           return scales[Math.min(text.length, scales.length - 1)];
         }
@@ -5724,7 +5657,6 @@
           if (view === "settings") {
             renderKeyPopover();
             loadPcUpdateStatus().catch(() => {});
-            if (leaseId) loadRemoteDisplaySettings().catch(() => {});
           }
         }
 
@@ -7335,7 +7267,7 @@
 
         function resetHistoryExpansion(terminalId) {
           outputHistoryTerminalId = terminalId;
-          outputHistoryKib = 0;
+          outputHistoryKib = remoteDisplaySettings.snapshotMaxKib;
           outputHistoryExhausted = false;
           outputSnapshotBytes = 0;
           lastTerminalViewportY = 0;
@@ -7344,13 +7276,9 @@
           lastTerminalUserScrollAt = 0;
         }
 
-        // The desktop budget is `max(owner setting, request)`, and the page
-        // never learns the owner setting. Deriving the next request from the
-        // screen the page actually holds keeps the request above that unknown
-        // floor: a checkpoint of N bytes came from a budget of at least N, so
-        // asking for a multiple of N always widens it until the supported
-        // ceiling. A fixed ladder would silently no-op for every owner whose
-        // `snapshotMaxKib` already sits above its first rung.
+        // The current checkpoint size is the safest basis for widening the
+        // device-owned initial budget: compression and row widths mean the
+        // requested KiB alone does not tell us how much useful history landed.
         // Returns the request to make, or why there is none: `atCeiling` means
         // the desktop may still hold older output that this client cannot ask
         // for, which is a different thing to tell the user than "the screen did
@@ -7572,7 +7500,7 @@
             scheduleTerminalFit(true);
             return;
           }
-          // A pane switch starts over at the desktop's own budget, and so does a
+          // A pane switch starts over at this device's budget, and so does a
           // user-directed re-attach of the same pane — it lands at the live tail
           // anyway. Only automatic recovery keeps the history already paged in,
           // and only while the socket still opens.
@@ -7583,8 +7511,8 @@
             !reconnecting ||
             outputReconnectAttempt >= HISTORY_EXPANSION_MAX_FAILED_OPENS
           ) {
-            outputHistoryKib = 0;
-            // The owner budget is a fresh start: whatever "nothing older" meant
+            outputHistoryKib = remoteDisplaySettings.snapshotMaxKib;
+            // The device budget is a fresh start: whatever "nothing older" meant
             // at the raised budget no longer applies.
             outputHistoryExhausted = false;
           }
@@ -8211,11 +8139,6 @@
             fileViewerToken = status.fileViewerToken || null;
             setConnected(true);
             startHeartbeat(status.heartbeatTimeoutSeconds || DEFAULT_HEARTBEAT_TIMEOUT_SECONDS);
-            // The terminal list already carries the PC-owned terminal size in
-            // its appearance. Refresh the narrow settings projection in the
-            // background so composer size follows too without delaying the
-            // first heartbeat or navigation attach.
-            loadRemoteDisplaySettings({ reportErrors: false }).catch(() => {});
             // Widgets need the token, not the lease (ADR-0124): losing control
             // to the host later does not take the indicators away.
             startWidgetPolling();
@@ -10208,7 +10131,7 @@
           cancelComposerSubmissions();
           terminalSelectionRevision += 1;
           resetTransientConnectionNotice();
-          // The next session must attach at the desktop's own budget, and a
+          // The next session must attach at this device's own budget, and a
           // pending request from this one can never be answered.
           finishHistoryExpansion();
           resetHistoryExpansion(null);
@@ -10285,33 +10208,44 @@
         // (ADR-0132). Applied before the first connect so a device that turned
         // the row off never flashes it.
         widgetStripToggle.checked = widgetStripAllowed;
+        applyRemoteDisplaySettings(remoteDisplaySettings);
+        updateRemoteDisplaySettingsControls();
 
         widgetStripToggle.addEventListener("change", () => {
           setWidgetStripAllowed(widgetStripToggle.checked);
         });
         remoteTerminalFontSizeInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteComposerFontSizeInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteMenuFontSizeInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteComposerIdleOpacityInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteComposerFocusedOpacityInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteComposerActiveOpacityInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
+        });
+        remoteSnapshotMaxKibInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteScrollSensitivityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
+        });
+        remoteFastScrollSensitivityInput.addEventListener("change", () => {
+          saveRemoteDisplaySettings();
         });
         remoteTouchScrollSensitivityInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         remoteTwoFingerScrollSensitivityInput.addEventListener("change", () => {
-          saveRemoteDisplaySettings().catch(() => {});
+          saveRemoteDisplaySettings();
         });
         checkPcUpdateButton.addEventListener("click", () => {
           loadPcUpdateStatus({ check: true }).catch(() => {});

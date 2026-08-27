@@ -1051,19 +1051,6 @@ export interface RemoteSettings {
   /** Android E2E controller lease grace after the app enters background (0..900 seconds). */
   androidBackgroundLeaseSeconds: number;
   autoMobileModeMinWidth: number;
-  snapshotMaxKib: number;
-  /** Remote terminal cell font size in pixels. */
-  terminalFontSize: number;
-  /** Remote input composer and suggestion font size in pixels. */
-  composerFontSize: number;
-  /** Remote navigation drawer (menu) base font size in pixels. */
-  menuFontSize: number;
-  /** Visible unfocused Remote Composer opacity percentage. */
-  composerIdleOpacity: number;
-  /** Empty focused Remote Composer opacity percentage. */
-  composerFocusedOpacity: number;
-  /** Draft/suggestion/IME/send-active Remote Composer opacity percentage. */
-  composerActiveOpacity: number;
   preferredHost: string;
   customHosts: string[];
   cloudEnabled: boolean;
@@ -1077,14 +1064,6 @@ export interface RemoteSettings {
   serveTerminalFont: boolean;
   /** Mirror the desktop's placed widgets onto the remote strip (ADR-0124). */
   widgets: boolean;
-  /** Wheel scroll multiplier for the remote browser terminal (xterm `scrollSensitivity`). */
-  scrollSensitivity: number;
-  /** Remote wheel multiplier while the fast-scroll modifier (Alt) is held. */
-  fastScrollSensitivity: number;
-  /** One-finger drag scrollback multiplier on the remote surface. 1 = 1:1 physical scroll. */
-  touchScrollSensitivity: number;
-  /** Two-finger drag scrollback multiplier on the remote surface. Defaults to 5. */
-  twoFingerScrollSensitivity: number;
 }
 
 export interface Settings {

@@ -1,6 +1,6 @@
 # 0200. Remote Composer 투명도는 PC 소유 3단계 표시 설정이다
 
-- Status: Accepted
+- Status: Superseded by [0209](0209-remote-display-preferences-are-device-local.md)
 - Date: 2026-08-24
 - Source: 사용자 요구("composer 영역의 투명도를 remote settings 에서 수정", "Idle 55% · Focused 80% · Active 100%", "Active 는 기본적으로 완전히 불투명") · [architecture/api-contracts.md §10·§13](../architecture/api-contracts.md) · [ADR-0173](0173-remote-display-settings-pc-owned-and-lease-gated.md)
 - Extends: ADR-0173

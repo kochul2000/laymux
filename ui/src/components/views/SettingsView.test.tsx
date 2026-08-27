@@ -2312,7 +2312,7 @@ describe("SettingsView", () => {
   });
 
   describe("Remote settings sections", () => {
-    it("splits Remote navigation into connection and display sections", async () => {
+    it("keeps only host policy in PC Remote settings", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
@@ -2321,51 +2321,25 @@ describe("SettingsView", () => {
       expect(await screen.findByTestId("remote-settings-enabled-toggle")).toBeInTheDocument();
       expect(screen.getAllByText("Remote Connection").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByTestId("remote-settings-allowed-ips-input")).toBeInTheDocument();
-
-      await user.click(screen.getByTestId("nav-remote-display"));
-
+      expect(screen.getByTestId("remote-settings-serve-terminal-font-toggle")).toBeInTheDocument();
+      expect(screen.getByTestId("remote-settings-widgets-toggle")).toBeInTheDocument();
+      expect(screen.queryByTestId("nav-remote-display")).not.toBeInTheDocument();
       expect(
-        await screen.findByTestId("remote-settings-terminal-font-size-input"),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId("remote-settings-composer-font-size-input")).toBeInTheDocument();
-      expect(screen.queryByTestId("remote-settings-enabled-toggle")).not.toBeInTheDocument();
+        screen.queryByTestId("remote-settings-terminal-font-size-input"),
+      ).not.toBeInTheDocument();
     });
 
-    it("saves PC-owned Remote terminal and composer font sizes", async () => {
+    it("saves Remote host data exposure policy from Remote Connection", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);
 
-      await user.click(screen.getByTestId("nav-remote-display"));
-      fireEvent.change(await screen.findByTestId("remote-settings-terminal-font-size-input"), {
-        target: { value: "18" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-composer-font-size-input"), {
-        target: { value: "20" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-menu-font-size-input"), {
-        target: { value: "17" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-composer-idle-opacity-input"), {
-        target: { value: "90" },
-      });
-      expect(screen.getByTestId("remote-settings-composer-idle-opacity-input")).toHaveValue(80);
-      fireEvent.change(screen.getByTestId("remote-settings-composer-idle-opacity-input"), {
-        target: { value: "45" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-composer-focused-opacity-input"), {
-        target: { value: "75" },
-      });
-      fireEvent.change(screen.getByTestId("remote-settings-composer-active-opacity-input"), {
-        target: { value: "95" },
-      });
+      await user.click(screen.getByTestId("nav-remote"));
+      await user.click(await screen.findByTestId("remote-settings-serve-terminal-font-toggle"));
+      await user.click(screen.getByTestId("remote-settings-widgets-toggle"));
       await user.click(screen.getByTestId("save-settings-btn"));
 
-      expect(useSettingsStore.getState().remote.terminalFontSize).toBe(18);
-      expect(useSettingsStore.getState().remote.composerFontSize).toBe(20);
-      expect(useSettingsStore.getState().remote.menuFontSize).toBe(17);
-      expect(useSettingsStore.getState().remote.composerIdleOpacity).toBe(45);
-      expect(useSettingsStore.getState().remote.composerFocusedOpacity).toBe(75);
-      expect(useSettingsStore.getState().remote.composerActiveOpacity).toBe(95);
+      expect(useSettingsStore.getState().remote.serveTerminalFont).toBe(true);
+      expect(useSettingsStore.getState().remote.widgets).toBe(false);
     });
 
     it("enables startup remote access with a generated token only after Save", async () => {
@@ -2423,34 +2397,6 @@ describe("SettingsView", () => {
         "fd7a:115c:a1e0::/48",
       ]);
       expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(0);
-    });
-
-    it("saves the remote wheel sensitivities without touching the desktop ones", async () => {
-      const user = userEvent.setup();
-      render(<SettingsView />);
-
-      await user.click(screen.getByTestId("nav-remote-display"));
-      const wheel = (await screen.findByTestId(
-        "remote-settings-scroll-sensitivity-input",
-      )) as HTMLInputElement;
-      fireEvent.change(wheel, { target: { value: "2.5" } });
-      const fastWheel = screen.getByTestId(
-        "remote-settings-fast-scroll-sensitivity-input",
-      ) as HTMLInputElement;
-      fireEvent.change(fastWheel, { target: { value: "50" } });
-      const touch = screen.getByTestId(
-        "remote-settings-touch-scroll-sensitivity-input",
-      ) as HTMLInputElement;
-      fireEvent.change(touch, { target: { value: "1.5" } });
-
-      await user.click(screen.getByTestId("save-settings-btn"));
-
-      const state = useSettingsStore.getState();
-      expect(state.remote.scrollSensitivity).toBe(2.5);
-      expect(state.remote.touchScrollSensitivity).toBe(1.5);
-      // Clamped to the band xterm accepts.
-      expect(state.remote.fastScrollSensitivity).toBe(20);
-      expect(state.terminal.scrollSensitivity).toBe(1);
     });
 
     it("enables Tailscale-only access and adds the required Tailnet ranges", async () => {

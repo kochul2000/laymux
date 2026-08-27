@@ -190,7 +190,7 @@ ADR 이 필요한 대표 기준:
 | [0170](0170-android-e2e-lease-dies-with-its-session.md) | Android E2E 세션으로 claim 한 lease 는 세션과 함께 죽는다 | Accepted |
 | [0172](0172-android-e2e-compat-version-gate.md) | Android E2E — 비호환 시에만 올리는 호환 번호로 연결 게이트 | Accepted |
 | [0171](0171-remote-preedit-laid-out-on-committed-cells.md) | Remote 조합 텍스트는 확정 후 셀 위에 배치한다 | Accepted |
-| [0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) | Remote 화면 설정은 PC가 소유하고 변경은 controller lease로 제한한다 | Accepted |
+| [0173](0173-remote-display-settings-pc-owned-and-lease-gated.md) | Remote 화면 설정은 PC가 소유하고 변경은 controller lease로 제한한다 | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
 | [0174](0174-github-signed-desktop-self-update.md) | PC 업데이트는 GitHub Releases와 고정 서명 키를 사용한다 | Accepted |
 | [0175](0175-remote-oauth-loopback-relay.md) | 폰에서 연 설치형 OAuth 로그인의 loopback redirect를 1회용 세션으로 PC 리스너에 중계한다 | Proposed |
 | [0176](0176-dev-android-pairing-payload-injection.md) | dev 빌드 한정으로 페어링 payload 를 MCP 로 노출하고 debug 앱 딥링크로 주입한다 | Proposed |
@@ -216,8 +216,8 @@ ADR 이 필요한 대표 기준:
 | [0196](0196-remote-coarse-pointer-attach-defers-input-focus.md) | 터치 기기의 Remote attach 는 입력 surface focus 를 선점하지 않는다 (0036 축 구분) | Proposed |
 | [0197](0197-android-update-channel-release-handoff.md) | Android 앱은 기기-로컬 채널 설정으로 릴리스 채널을 따라가고 업데이트는 GitHub 릴리스 페이지로 넘긴다 (0190 확장) | Accepted |
 | [0198](0198-remote-file-explorer-overlay.md) | Remote FileViewer 오버레이는 인-오버레이 file explorer 로 디렉터리를 탐색한다 (0184/0044/0042 확장, 0188 디렉터리 비활성 개정) | Accepted |
-| [0199](0199-remote-menu-font-size-pc-owned.md) | Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다 (0173 확장) | Accepted |
-| [0200](0200-remote-composer-opacity-state-settings.md) | Remote Composer 투명도는 PC 소유 Idle·Focused·Active 3단계 표시 설정이다 (0173 확장) | Accepted |
+| [0199](0199-remote-menu-font-size-pc-owned.md) | Remote 메뉴(내비게이션 드로어) 글자 크기를 PC 소유 display-settings 계약에 추가한다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
+| [0200](0200-remote-composer-opacity-state-settings.md) | Remote Composer 투명도는 PC 소유 Idle·Focused·Active 3단계 표시 설정이다 (0173 확장) | Superseded by [0209](0209-remote-display-preferences-are-device-local.md) |
 | [0201](0201-update-install-releases-child-file-locks.md) | 업데이트 설치기를 부르기 전에 앱이 자기 자식 프로세스를 정리한다 (0174 확장) | Accepted |
 | [0202](0202-io-commands-off-the-main-thread.md) | I/O(파일시스템·프로세스·시스템 열거)하는 Tauri 커맨드는 `#[tauri::command(async)]` 로 메인 스레드를 벗어난다 (0188 확장) | Proposed |
 | [0203](0203-remote-composer-overlays-terminal-output.md) | Remote Composer는 터미널 출력 위에 겹친다 (0200 배치·geometry 정정) | Accepted |
@@ -226,6 +226,7 @@ ADR 이 필요한 대표 기준:
 | [0206](0206-codex-normal-buffer-transcript-wheel-routing.md) | Codex normal-buffer transcript의 휠은 pager 입력으로 라우팅한다 (0142 확장) | Accepted |
 | [0207](0207-remote-composer-recall-observes-soft-keyboard-geometry.md) | Remote Composer 탭 recall은 소프트 키보드 geometry를 관측한다 (0196 확장·정정) | Accepted |
 | [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Accepted |
+| [0209](0209-remote-display-preferences-are-device-local.md) | Remote 표시·입력 감도·기본 checkpoint 예산은 기기 로컬로 소유한다 (0173·0199·0200 대체) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

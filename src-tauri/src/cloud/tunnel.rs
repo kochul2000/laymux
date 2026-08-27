@@ -2034,7 +2034,6 @@ async fn stream_terminal_output_over_tunnel(
 }
 
 async fn terminal_output_subscription_with<F, Fut>(
-    app_state: &Arc<AppState>,
     history_kib: Option<u32>,
     attach: F,
 ) -> Result<TerminalOutputSubscribedAttachment, remote_server::RenderCheckpointAttachError>
@@ -2047,10 +2046,7 @@ where
         >,
     >,
 {
-    let settings = remote_server::effective_remote_settings(app_state)
-        .map_err(remote_server::RenderCheckpointAttachError::fatal)?;
-    let snapshot_max_bytes =
-        remote_server::effective_attach_snapshot_max_bytes(&settings, history_kib);
+    let snapshot_max_bytes = remote_server::effective_attach_snapshot_max_bytes(history_kib);
     attach(snapshot_max_bytes).await
 }
 
@@ -2066,23 +2062,19 @@ async fn terminal_output_subscription(
             app_state: Arc::clone(app_state),
             app_handle: _output_checkpoint_bridge,
         };
-        terminal_output_subscription_with(
-            app_state,
-            history_kib,
-            move |snapshot_max_bytes| async move {
-                remote_server::attach_and_subscribe_render_checkpoint(
-                    &server,
-                    terminal_id,
-                    snapshot_max_bytes,
-                )
-                .await
-            },
-        )
+        terminal_output_subscription_with(history_kib, move |snapshot_max_bytes| async move {
+            remote_server::attach_and_subscribe_render_checkpoint(
+                &server,
+                terminal_id,
+                snapshot_max_bytes,
+            )
+            .await
+        })
         .await
     }
     #[cfg(test)]
     {
-        terminal_output_subscription_with(app_state, history_kib, |snapshot_max_bytes| async move {
+        terminal_output_subscription_with(history_kib, |snapshot_max_bytes| async move {
             crate::terminal_output::attach_and_subscribe_terminal_output(
                 &app_state.terminal_protocol_states,
                 terminal_id,
@@ -2727,14 +2719,11 @@ mod tests {
 
     #[tokio::test]
     async fn cloud_attach_raises_its_checkpoint_budget_for_a_history_request() {
-        let state = state_with_terminal_output_and_lease("lease-1");
-
         let observe = |history_kib: Option<u32>| {
-            let state = Arc::clone(&state);
             async move {
                 let observed = Arc::new(std::sync::Mutex::new(0usize));
                 let sink = Arc::clone(&observed);
-                let _ = terminal_output_subscription_with(&state, history_kib, move |budget| {
+                let _ = terminal_output_subscription_with(history_kib, move |budget| {
                     *sink.lock().unwrap() = budget;
                     std::future::ready(Err(remote_server::RenderCheckpointAttachError::fatal(
                         "stop after the budget is chosen",
@@ -2748,11 +2737,11 @@ mod tests {
             }
         };
 
-        let owner_budget = observe(None).await;
-        assert!(owner_budget > 0);
+        let server_fallback = observe(None).await;
+        assert!(server_fallback > 0);
         assert_eq!(observe(Some(256)).await, 256 * 1024);
-        // A request below the owner budget never shrinks the attach screen.
-        assert_eq!(observe(Some(1)).await, owner_budget);
+        // A request below the server fallback never shrinks the attach screen.
+        assert_eq!(observe(Some(1)).await, server_fallback);
     }
 
     #[tokio::test]
@@ -2766,7 +2755,7 @@ mod tests {
         let checkpoint_data = "\x1b[2J\x1b[HCHECKPOINT";
         let attach_state = Arc::clone(&state);
 
-        let mut subscribed = terminal_output_subscription_with(&state, None, move |snapshot_max_bytes| {
+        let mut subscribed = terminal_output_subscription_with(None, move |snapshot_max_bytes| {
             assert!(snapshot_max_bytes >= checkpoint_data.len());
             async move {
                 crate::terminal_output::attach_and_subscribe_terminal_output_from_render_checkpoint(

@@ -332,10 +332,10 @@ pub const TERMINAL_ATTACH_SNAPSHOT_MAX_BYTES: usize = TERMINAL_OUTPUT_MAX_DESKTO
 /// sent to a Remote client on terminal attach.
 pub const DEFAULT_REMOTE_SNAPSHOT_MAX_KIB: u32 = 4;
 
-/// Effective bounds for `remote.snapshotMaxKib`. The upper bound matches the
-/// serialized checkpoint hard cap. The current viewport, alternate buffer and
-/// restore modes remain mandatory even when their minimum serialization is
-/// larger than the configured soft budget.
+/// Effective bounds for a Remote device's local `snapshotMaxKib` request. The
+/// upper bound matches the serialized checkpoint hard cap. The current
+/// viewport, alternate buffer and restore modes remain mandatory even when
+/// their minimum serialization is larger than the requested soft budget.
 pub const MIN_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1;
 pub const MAX_REMOTE_SNAPSHOT_MAX_KIB: u32 = 1024;
 /// Absolute serialized xterm checkpoint limit, independent of its soft

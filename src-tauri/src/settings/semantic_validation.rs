@@ -453,76 +453,6 @@ fn validate_agent_commands(settings: &Settings, issues: &mut Vec<SettingsIssue>)
 
 fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
     let remote = &settings.remote;
-    range_u64(
-        issues,
-        "/remote/terminalFontSize",
-        u64::from(remote.terminal_font_size),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
-    );
-    range_u64(
-        issues,
-        "/remote/composerFontSize",
-        u64::from(remote.composer_font_size),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
-    );
-    range_u64(
-        issues,
-        "/remote/menuFontSize",
-        u64::from(remote.menu_font_size),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MIN),
-        u64::from(crate::settings::models::REMOTE_FONT_SIZE_MAX),
-    );
-    for (path, value) in [
-        ("/remote/composerIdleOpacity", remote.composer_idle_opacity),
-        (
-            "/remote/composerFocusedOpacity",
-            remote.composer_focused_opacity,
-        ),
-        (
-            "/remote/composerActiveOpacity",
-            remote.composer_active_opacity,
-        ),
-    ] {
-        range_u64(
-            issues,
-            path,
-            u64::from(value),
-            u64::from(crate::settings::models::REMOTE_COMPOSER_OPACITY_MIN),
-            u64::from(crate::settings::models::REMOTE_COMPOSER_OPACITY_MAX),
-        );
-    }
-    if remote.composer_idle_opacity > remote.composer_focused_opacity
-        || remote.composer_focused_opacity > remote.composer_active_opacity
-    {
-        issue(
-            issues,
-            "invalid_value",
-            "/remote/composerOpacity",
-            "Remote Composer opacity는 Idle ≤ Focused ≤ Active 순서여야 합니다.".into(),
-        );
-    }
-    range_scroll_sensitivity(
-        issues,
-        "/remote/scrollSensitivity",
-        remote.scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/fastScrollSensitivity",
-        remote.fast_scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/touchScrollSensitivity",
-        remote.touch_scroll_sensitivity,
-    );
-    range_scroll_sensitivity(
-        issues,
-        "/remote/twoFingerScrollSensitivity",
-        remote.two_finger_scroll_sensitivity,
-    );
     if remote.enabled && remote.auth_token.trim().is_empty() {
         issue(
             issues,
@@ -549,21 +479,6 @@ fn validate_remote(settings: &Settings, issues: &mut Vec<SettingsIssue>) {
             format!(
                 "androidBackgroundLeaseSeconds must be between 0 and {}.",
                 crate::settings::models::MAX_ANDROID_BACKGROUND_LEASE_SECONDS
-            ),
-        );
-    }
-    if !(crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB
-        ..=crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB)
-        .contains(&remote.snapshot_max_kib)
-    {
-        issue(
-            issues,
-            "out_of_range",
-            "/remote/snapshotMaxKib",
-            format!(
-                "snapshotMaxKib는 {}~{} 범위여야 합니다.",
-                crate::constants::MIN_REMOTE_SNAPSHOT_MAX_KIB,
-                crate::constants::MAX_REMOTE_SNAPSHOT_MAX_KIB
             ),
         );
     }
@@ -945,13 +860,10 @@ mod tests {
     }
 
     #[test]
-    fn out_of_band_scroll_sensitivities_are_reported_on_both_surfaces() {
+    fn out_of_band_terminal_scroll_sensitivities_are_reported() {
         let mut settings = Settings::default();
         settings.terminal.scroll_sensitivity = 0.0;
         settings.terminal.fast_scroll_sensitivity = 50.0;
-        settings.remote.scroll_sensitivity = -1.0;
-        settings.remote.fast_scroll_sensitivity = f32::NAN;
-        settings.remote.touch_scroll_sensitivity = 0.0;
 
         let issues = validate_settings(&settings);
         let out_of_range: Vec<&str> = issues
@@ -962,37 +874,6 @@ mod tests {
 
         assert!(out_of_range.contains(&"/terminal/scrollSensitivity"));
         assert!(out_of_range.contains(&"/terminal/fastScrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/scrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/fastScrollSensitivity"));
-        assert!(out_of_range.contains(&"/remote/touchScrollSensitivity"));
-    }
-
-    #[test]
-    fn remote_composer_opacity_requires_bounded_monotonic_levels() {
-        let mut settings = Settings::default();
-        settings.remote.composer_idle_opacity = 55;
-        settings.remote.composer_focused_opacity = 80;
-        settings.remote.composer_active_opacity = 100;
-        assert!(validate_settings(&settings).iter().all(|issue| {
-            !matches!(
-                issue.path.as_str(),
-                "/remote/composerIdleOpacity"
-                    | "/remote/composerFocusedOpacity"
-                    | "/remote/composerActiveOpacity"
-                    | "/remote/composerOpacity"
-            )
-        }));
-
-        settings.remote.composer_idle_opacity = 10;
-        settings.remote.composer_focused_opacity = 70;
-        settings.remote.composer_active_opacity = 60;
-        let issues = validate_settings(&settings);
-        assert!(issues.iter().any(|issue| {
-            issue.path == "/remote/composerIdleOpacity" && issue.code == "out_of_range"
-        }));
-        assert!(issues.iter().any(|issue| {
-            issue.path == "/remote/composerOpacity" && issue.code == "invalid_value"
-        }));
     }
 
     #[test]
