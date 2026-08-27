@@ -14,9 +14,10 @@ import type { Page, Route } from "@playwright/test";
  * bundle never load. This module does the server's substitution and answers the
  * resulting URLs from the committed assets.
  *
- * The readable `remote-app.js`/`.css` sources stand in for the minified
- * artifacts production serves under the same logical names — the drift between
- * the two is what `ui/src/remote/remote-page-bundle.test.ts` guards.
+ * App requests use the committed minified artifacts, like production. The
+ * readable app source imports the Lucide boundary as an ES module build input
+ * and is not itself a browser script; the drift test below the Remote source
+ * tree guarantees the committed bundle matches all of its inputs.
  */
 const remoteRoot = fileURLToPath(new URL("../../src-tauri/src/remote_server/", import.meta.url));
 
@@ -35,6 +36,12 @@ const ASSETS = [
   "remote-app.js",
   "remote-app.css",
 ] as const;
+
+function committedAssetName(logicalName: (typeof ASSETS)[number]): string {
+  if (logicalName === "remote-app.js") return "remote-app.min.js";
+  if (logicalName === "remote-app.css") return "remote-app.min.css";
+  return logicalName;
+}
 
 /**
  * The served document policy, from the same `page-csp.txt` the Rust route
@@ -74,7 +81,7 @@ export async function fulfillRemoteClientAsset(route: Route, pathname: string): 
   const asset = ASSETS.find((name) => pathname === `/remote/vendor/${name}`);
   if (!asset) return false;
   await route.fulfill({
-    path: `${remoteRoot}assets/${asset}`,
+    path: `${remoteRoot}assets/${committedAssetName(asset)}`,
     contentType: ASSET_CONTENT_TYPES[asset.split(".").pop() as string],
   });
   return true;
@@ -95,7 +102,7 @@ export async function installRemoteClientRoutes(
   for (const asset of ASSETS) {
     await page.route(`${origin}/remote/vendor/${asset}`, (route) =>
       route.fulfill({
-        path: `${remoteRoot}assets/${asset}`,
+        path: `${remoteRoot}assets/${committedAssetName(asset)}`,
         contentType: ASSET_CONTENT_TYPES[asset.split(".").pop() as string],
       }),
     );
@@ -114,24 +121,29 @@ export async function installRemoteClientRoutes(
  * variant, for layout assertions that must not run the client.
  */
 export function remoteClientMarkupWithoutXterm({ script = true } = {}): string {
-  const inline = (name: string) => readFileSync(`${remoteRoot}assets/${name}`, "utf8");
+  const inline = (name: (typeof ASSETS)[number]) =>
+    readFileSync(`${remoteRoot}assets/${committedAssetName(name)}`, "utf8");
   const html = readFileSync(`${remoteRoot}page.html`, "utf8").replace(
     `<link rel="stylesheet" href="{{ASSET:remote-app.css}}" />`,
-    `<style>\n${inline("remote-app.css")}\n</style>`,
+    () => `<style>\n${inline("remote-app.css")}\n</style>`,
   );
   if (!script) {
     return html
       .replace(/<script[\s\S]*?<\/script>/g, "")
       .replace(/<link[^>]*xterm\.css[^>]*>/g, "");
   }
+  // An inline classic script closes at the first literal `</script>`, even
+  // when those bytes occur inside a JavaScript string. Production serves this
+  // bundle externally; escape only the test helper's inline representation.
+  const appScript = inline("remote-app.js").replace(/<\/script/gi, "<\\/script");
   return html
     .replace(
       `<script src="{{ASSET:unicode-provider.js}}"></script>`,
-      `<script>\n${inline("unicode-provider.js")}\n</script>`,
+      () => `<script>\n${inline("unicode-provider.js")}\n</script>`,
     )
     .replace(
       `<script src="{{ASSET:remote-app.js}}"></script>`,
-      `<script>\n${inline("remote-app.js")}\n</script>`,
+      () => `<script>\n${appScript}\n</script>`,
     )
     .replace(/<script\s+src=[^>]*><\/script>/g, "")
     .replace(/<link[^>]*xterm\.css[^>]*>/g, "");

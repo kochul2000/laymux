@@ -50,6 +50,10 @@
         --key-bar-control-height: 26px;
         --terminal-scroll-btn-right: 26px;
       }
+      .remote-icon {
+        display: block;
+        flex: 0 0 auto;
+      }
       * { box-sizing: border-box; }
       html, body {
         width: 100%;
@@ -323,20 +327,18 @@
       .status::-webkit-scrollbar {
         display: none;
       }
-      /* Drawn, not typed. A Braille text spinner (⠋⠙⠹…) puts its ink in the
-         left or the right column of the cell depending on the frame, so the
-         glyph visibly wobbles sideways — and Consolas has no Braille block at
-         all, so every platform falls back to a different symbol font whose
-         advance no longer matches the reserved cell. A ring owns its own box. */
+      /* The shared Lucide loader owns a fixed box, avoiding symbol-font and
+         platform-dependent spinner glyphs. */
       .status-spinner {
-        display: inline-block;
+        display: inline-flex;
         width: 10px;
         height: 10px;
         margin-right: 1ch;
+        align-items: center;
+        justify-content: center;
         vertical-align: middle;
-        border: 1.5px solid currentColor;
-        border-top-color: transparent;
-        border-radius: 50%;
+      }
+      .status-spinner > .remote-icon {
         animation: status-spinner-spin 0.7s linear infinite;
       }
       .status-spinner[hidden] {
@@ -347,11 +349,10 @@
           transform: rotate(1turn);
         }
       }
-      /* Reduced motion keeps the marker, drops the movement: a closed ring. */
+      /* Reduced motion keeps the marker and drops the movement. */
       @media (prefers-reduced-motion: reduce) {
-        .status-spinner {
+        .status-spinner > .remote-icon {
           animation: none;
-          border-top-color: currentColor;
         }
       }
       .status.error {
@@ -578,16 +579,6 @@
         color: var(--accent);
         font-size: var(--fs-sm);
         font-weight: 650;
-      }
-      .menu-button {
-        flex-direction: column;
-        gap: 3px;
-      }
-      .menu-button span {
-        width: 14px;
-        height: 1px;
-        border-radius: 1px;
-        background: var(--text-primary);
       }
       .drawer-header {
         height: 32px;
@@ -864,6 +855,9 @@
         gap: 3px;
       }
       .input-layout-order button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         width: 25px;
         height: 25px;
         padding: 0;
@@ -2094,6 +2088,9 @@
         font-weight: 600;
       }
       .key-order-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         min-width: 34px;
         height: 26px;
         padding: 0 7px;
@@ -2345,7 +2342,15 @@
       }
       .oauth-relay-status.success {
         color: var(--green);
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
         font-weight: 600;
+      }
+      .oauth-relay-status-icon {
+        display: inline-flex;
+        flex: 0 0 auto;
+        margin-top: 1px;
       }
       .oauth-relay-actions {
         display: flex;

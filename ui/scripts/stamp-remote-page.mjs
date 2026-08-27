@@ -10,18 +10,21 @@ const ASSETS_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../src-tauri/src/remote_server/assets",
 );
+const REMOTE_ICONS_SOURCE = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../src/remote/remote-icons.js",
+);
 
-const sourceHash = (file) =>
-  createHash("sha256")
-    .update(readFileSync(path.join(ASSETS_DIR, file)))
-    .digest("hex")
-    .slice(0, 16);
+const fileHash = (file) =>
+  createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 16);
+
+const assetSourceHash = (file) => fileHash(path.join(ASSETS_DIR, file));
 
 const lines = [
   "GENERATED FILE - DO NOT EDIT.",
-  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css}",
+  "Sources: src-tauri/src/remote_server/assets/remote-app.{js,css} + ui/src/remote/remote-icons.js",
   "Rebuild: cd ui && npm run build:remote-page",
-  `Source-SHA256: remote-app.js=${sourceHash("remote-app.js")} remote-app.css=${sourceHash("remote-app.css")}`,
+  `Source-SHA256: remote-app.js=${assetSourceHash("remote-app.js")} remote-app.css=${assetSourceHash("remote-app.css")} remote-icons.js=${fileHash(REMOTE_ICONS_SOURCE)}`,
   "Drift from the sources is caught by ui/src/remote/remote-page-bundle.test.ts",
 ];
 
