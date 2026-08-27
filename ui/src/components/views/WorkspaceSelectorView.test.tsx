@@ -285,9 +285,21 @@ describe("WorkspaceSelectorView", () => {
     });
     useGridStore.getState().setFocusedPane(0);
     useDockStore.getState().setFocusedDock("left");
+    useSettingsStore.getState().setWorkspaceSelector({
+      display: {
+        minimap: true,
+        environment: false,
+        activity: false,
+        path: false,
+        result: false,
+      },
+      lastInputMode: "workspaceLatest",
+    });
     render(<WorkspaceSelectorView />);
 
-    await user.click(screen.getByTestId("pane-row-pane-b-right"));
+    const targetPane = screen.getByTestId("pane-row-pane-b-right");
+    expect(targetPane).toHaveAccessibleName("Open Beta, pane 2, PowerShell");
+    await user.click(targetPane);
 
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
     expect(useDockStore.getState().focusedDock).toBeNull();

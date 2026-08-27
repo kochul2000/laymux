@@ -389,6 +389,7 @@ function WorkspaceItem({
                   {visiblePanes.map((pane) => {
                     // 표시 순서와 달리 focus/minimap은 WorkspacePane[] 원본 인덱스를 사용한다.
                     const paneIndex = paneIndexById.get(pane.id) ?? -1;
+                    const paneNumber = paneNumbers.get(pane.id) ?? paneIndex + 1;
                     const isFocusedPane = isActive && gridFocused === paneIndex;
                     if (pane.view.type === "TerminalView") {
                       const termId = toTerminalId(pane.id);
@@ -424,6 +425,11 @@ function WorkspaceItem({
                           type="button"
                           key={pane.id}
                           data-testid={`pane-row-${pane.id}`}
+                          aria-label={t("item.openPane", {
+                            workspace: ws.name,
+                            number: paneNumber,
+                            view: ts.profile || pane.view.profile || "TerminalView",
+                          })}
                           onClick={(event) => {
                             event.stopPropagation();
                             onSelectPane(paneIndex, pane);
@@ -616,6 +622,11 @@ function WorkspaceItem({
                         type="button"
                         key={pane.id}
                         data-testid={`pane-row-${pane.id}`}
+                        aria-label={t("item.openPane", {
+                          workspace: ws.name,
+                          number: paneNumber,
+                          view: pane.view.type,
+                        })}
                         onClick={(event) => {
                           event.stopPropagation();
                           onSelectPane(paneIndex, pane);

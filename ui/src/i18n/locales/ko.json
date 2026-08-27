@@ -846,7 +846,8 @@
       "clearTerminals": "이 워크스페이스의 터미널 클리어 (Ctrl+Alt+L)",
       "duplicateWorkspace": "워크스페이스 복제 (Ctrl+Alt+D)",
       "renameWorkspace": "워크스페이스 이름 변경 (Ctrl+Alt+R)",
-      "closeWorkspace": "워크스페이스 닫기 (Ctrl+Alt+W)"
+      "closeWorkspace": "워크스페이스 닫기 (Ctrl+Alt+W)",
+      "openPane": "{{workspace}} 워크스페이스의 {{number}}번 pane 열기, {{view}}"
     }
   }
 }

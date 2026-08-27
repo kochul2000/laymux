@@ -695,6 +695,14 @@ test.describe("remote mobile layout", () => {
   test("enters the exact pane tapped in an inactive workspace", async ({ page }) => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
     const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setWorkspaceDisplay({
+      minimap: true,
+      environment: false,
+      activity: false,
+      path: false,
+      result: false,
+    });
+    controls.setLastInputMode("workspaceLatest");
 
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
@@ -703,6 +711,7 @@ test.describe("remote mobile layout", () => {
 
     const betaPane = page.locator('[data-workspace-item="ws-b"] [data-pane-row="p-b1"]');
     await expect(betaPane).toHaveJSProperty("tagName", "BUTTON");
+    await expect(betaPane).toHaveAccessibleName("Open Beta, pane 1, PowerShell");
     await betaPane.click();
 
     await expect

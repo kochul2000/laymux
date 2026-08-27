@@ -6371,7 +6371,7 @@ import {
             paneList.className = "workspace-pane-list";
             content.append(paneList);
             panes.forEach((pane) => {
-              paneList.append(renderPaneRow(pane, panes));
+              paneList.append(renderPaneRow(pane, panes, workspace));
             });
             if (workspaceLastInputMode() === "workspaceLatest") {
               const latestInput = latestWorkspaceInput(panes);
@@ -6438,7 +6438,7 @@ import {
           return button;
         }
 
-        function renderPaneRow(pane, panes) {
+        function renderPaneRow(pane, panes, workspace) {
           const isTerminal = isTerminalPane(pane);
           const perPaneInput = workspaceLastInputMode() === "perPane";
           const isActive = Boolean(
@@ -6457,6 +6457,13 @@ import {
           row.className = `workspace-pane-row${!perPaneInput ? " compact" : ""}${isActive ? " active" : ""}${paneHidden ? " hidden-item" : ""}`;
           row.dataset.paneRow = pane.id;
           if (canSelectTerminal) {
+            const paneNumber = pane.paneNumber || panes.findIndex((item) => item.id === pane.id) + 1;
+            const viewLabel =
+              pane.profile || pane.selectorDisplay?.environment || pane.title || "TerminalView";
+            row.setAttribute(
+              "aria-label",
+              `Open ${workspace.name || workspace.id || "Workspace"}, pane ${paneNumber}, ${viewLabel}`,
+            );
             row.addEventListener("click", (event) => {
               event.stopPropagation();
               selectTerminal(pane.terminalId, {
