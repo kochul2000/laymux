@@ -3195,9 +3195,9 @@ impl McpHandler {
     #[tool]
     async fn create_android_pairing_payload(&self) -> Result<CallToolResult, ErrorData> {
         match crate::android_pairing::create_with_payload(self.state.app_state.clone()).await {
-            Ok((qr, payload)) => Ok(CallToolResult::success(vec![Content::text(
+            Ok(qr) => Ok(CallToolResult::success(vec![Content::text(
                 serde_json::to_string_pretty(&json!({
-                    "payload": &*payload,
+                    "payload": qr.pairing_payload(),
                     "status": qr.status,
                 }))
                 .unwrap_or_default(),

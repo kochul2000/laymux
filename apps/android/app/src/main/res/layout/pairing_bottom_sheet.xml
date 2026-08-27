@@ -128,6 +128,16 @@
             android:text="@string/pairing_scan" />
 
         <com.google.android.material.button.MaterialButton
+            android:id="@+id/pairing_paste_button"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="16dp"
+            android:text="@string/pairing_paste" />
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/pairing_cancel_button"
             style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="match_parent"

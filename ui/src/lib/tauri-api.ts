@@ -373,6 +373,7 @@ export interface AndroidPairingStatus {
 export interface AndroidPairingQr {
   status: AndroidPairingStatus;
   qrSvg: string;
+  pairingPayload: string;
 }
 
 export async function getRemoteAccessStatus(): Promise<RemoteAccessStatus> {

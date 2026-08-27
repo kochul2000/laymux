@@ -7,7 +7,8 @@ import java.nio.charset.StandardCharsets
 import java.util.Arrays
 
 /**
- * Validated v2 QR payload. The secret is deliberately absent from properties,
+ * Validated v2 pairing payload from a QR scan or explicit clipboard paste.
+ * The secret is deliberately absent from properties,
  * [toString], and exception messages; callers can only take a defensive copy.
  */
 class PairingPayload private constructor(
@@ -34,6 +35,7 @@ class PairingPayload private constructor(
         const val PAIRING_ID_BYTES = 16
 
         private const val MAX_ENDPOINT_LENGTH = 2048
+        private const val MAX_PAYLOAD_LENGTH = 4096
         private const val MAX_LABEL_LENGTH = 80
         private val INSTANCE_PATTERN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
         private val PAIRING_ID_PATTERN = Regex("^[A-Za-z0-9_-]{22}$")
@@ -46,10 +48,13 @@ class PairingPayload private constructor(
             allowLoopbackHttp: Boolean = false,
             nowEpochSeconds: Long = System.currentTimeMillis() / 1_000,
         ): PairingPayload {
+            if (raw.length > MAX_PAYLOAD_LENGTH) {
+                throw invalid("페어링 값이 너무 깁니다")
+            }
             val uri = try {
                 URI(raw)
             } catch (_: Exception) {
-                throw invalid("QR 형식이 올바르지 않습니다")
+                throw invalid("페어링 값 형식이 올바르지 않습니다")
             }
             if (!uri.scheme.equals("laymux", ignoreCase = true) ||
                 !uri.host.equals("pair", ignoreCase = true) ||
@@ -58,16 +63,16 @@ class PairingPayload private constructor(
                 uri.path != "/v2" ||
                 uri.fragment != null
             ) {
-                throw invalid("지원하지 않는 Laymux 페어링 QR입니다")
+                throw invalid("지원하지 않는 Laymux 페어링 값입니다")
             }
 
             val fields = parseQuery(uri.rawQuery)
             if (!fields.keys.containsAll(REQUIRED_FIELDS)) {
-                throw invalid("페어링 QR에 필수 항목이 없습니다")
+                throw invalid("페어링 값에 필수 항목이 없습니다")
             }
             val unknown = fields.keys - ALLOWED_FIELDS
             if (unknown.isNotEmpty()) {
-                throw invalid("페어링 QR에 지원하지 않는 항목이 있습니다")
+                throw invalid("페어링 값에 지원하지 않는 항목이 있습니다")
             }
 
             val endpoint = validateEndpoint(fields.getValue("endpoint"), allowLoopbackHttp)
@@ -84,7 +89,7 @@ class PairingPayload private constructor(
             ).also { Arrays.fill(it, 0) }
             val expiresAtEpochSeconds = fields.getValue("expires").toLongOrNull()
                 ?.takeIf { it > 0 && it > nowEpochSeconds }
-                ?: throw invalid("페어링 QR이 만료됐습니다")
+                ?: throw invalid("페어링 값이 만료됐습니다")
             val label = fields["label"]?.also {
                 if (it.isBlank() ||
                     it.length > MAX_LABEL_LENGTH ||
@@ -107,18 +112,18 @@ class PairingPayload private constructor(
 
         private fun parseQuery(rawQuery: String?): Map<String, String> {
             if (rawQuery.isNullOrEmpty()) {
-                throw invalid("페어링 QR에 쿼리가 없습니다")
+                throw invalid("페어링 값에 쿼리가 없습니다")
             }
             val fields = linkedMapOf<String, String>()
             rawQuery.split('&').forEach { pair ->
                 val separator = pair.indexOf('=')
                 if (separator <= 0) {
-                    throw invalid("페어링 QR 쿼리가 올바르지 않습니다")
+                    throw invalid("페어링 값 쿼리가 올바르지 않습니다")
                 }
                 val key = decodeQueryComponent(pair.substring(0, separator))
                 val value = decodeQueryComponent(pair.substring(separator + 1))
                 if (key in fields) {
-                    throw invalid("페어링 QR에 중복 항목이 있습니다")
+                    throw invalid("페어링 값에 중복 항목이 있습니다")
                 }
                 fields[key] = value
             }
@@ -128,7 +133,7 @@ class PairingPayload private constructor(
         private fun decodeQueryComponent(value: String): String = try {
             URLDecoder.decode(value, StandardCharsets.UTF_8.name())
         } catch (_: Exception) {
-            throw invalid("페어링 QR 인코딩이 올바르지 않습니다")
+            throw invalid("페어링 값 인코딩이 올바르지 않습니다")
         }
 
         private fun validateEndpoint(raw: String, allowLoopbackHttp: Boolean): URI {

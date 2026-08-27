@@ -254,7 +254,7 @@ class PairingVault(
         }
     }
 
-    /** A stale network result must not delete a newer scan of the same QR. */
+    /** A stale network result must not delete a newer accepted pairing value. */
     @Synchronized
     fun clearIfMatches(instanceId: String, pairingId: String, clientNonce: String): Boolean {
         val metadata = storedEnvelope(instanceId)?.metadata ?: return false

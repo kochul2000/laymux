@@ -14,6 +14,7 @@ import com.laymux.android.R
 
 interface PairingSheetActions {
     fun scanPairingQr()
+    fun pastePairingValue()
     fun openConnectionSettings(instanceId: String)
     fun connectRemote()
     fun cancelRemoteConnection()
@@ -36,6 +37,7 @@ class PairingBottomSheet(
         val defaultConnectBackgroundTint: ColorStateList?,
         val defaultConnectTextColors: ColorStateList,
         val scanButton: MaterialButton,
+        val pasteButton: MaterialButton,
         val defaultScanTextColors: ColorStateList,
         val defaultScanStrokeColor: ColorStateList?,
         val defaultScanRippleColor: ColorStateList?,
@@ -116,6 +118,7 @@ class PairingBottomSheet(
             defaultConnectBackgroundTint = connectButton.backgroundTintList,
             defaultConnectTextColors = connectButton.textColors,
             scanButton = scanButton,
+            pasteButton = content.findViewById(R.id.pairing_paste_button),
             defaultScanTextColors = scanButton.textColors,
             defaultScanStrokeColor = scanButton.strokeColor,
             defaultScanRippleColor = scanButton.rippleColor,
@@ -250,6 +253,10 @@ class PairingBottomSheet(
             presentation.scanAction == PairingScanAction.HIDDEN
         ) View.GONE else View.VISIBLE
         bound.scanButton.isEnabled = presentation.scanEnabled
+        val pasteAvailable = presentation.scanAction == PairingScanAction.SCAN ||
+            presentation.scanAction == PairingScanAction.RESCAN
+        bound.pasteButton.visibility = if (pasteAvailable) View.VISIBLE else View.GONE
+        bound.pasteButton.isEnabled = presentation.scanEnabled
         bound.scanButton.text = activity.getString(
             when (presentation.scanAction) {
                 PairingScanAction.HIDDEN,
@@ -269,35 +276,45 @@ class PairingBottomSheet(
                 PairingScanAction.RESCAN,
                 -> {
                     bound.scanButton.isEnabled = false
+                    bound.pasteButton.isEnabled = false
                     actions.scanPairingQr()
                 }
                 PairingScanAction.HIDDEN -> Unit
             }
         }
+        bound.pasteButton.setOnClickListener {
+            bound.scanButton.isEnabled = false
+            bound.pasteButton.isEnabled = false
+            actions.pastePairingValue()
+        }
     }
 
     private fun renderScanEmphasis(bound: Views, emphasis: PairingScanEmphasis) {
         if (emphasis == PairingScanEmphasis.NEUTRAL) {
-            bound.scanButton.setTextColor(
-                requireNotNull(
-                    AppCompatResources.getColorStateList(
-                        activity,
-                        R.color.pairing_rescan_text,
+            listOf(bound.scanButton, bound.pasteButton).forEach { button ->
+                button.setTextColor(
+                    requireNotNull(
+                        AppCompatResources.getColorStateList(
+                            activity,
+                            R.color.pairing_rescan_text,
+                        ),
                     ),
-                ),
-            )
-            bound.scanButton.strokeColor = AppCompatResources.getColorStateList(
-                activity,
-                R.color.pairing_rescan_stroke,
-            )
-            bound.scanButton.rippleColor = AppCompatResources.getColorStateList(
-                activity,
-                R.color.pairing_rescan_ripple,
-            )
+                )
+                button.strokeColor = AppCompatResources.getColorStateList(
+                    activity,
+                    R.color.pairing_rescan_stroke,
+                )
+                button.rippleColor = AppCompatResources.getColorStateList(
+                    activity,
+                    R.color.pairing_rescan_ripple,
+                )
+            }
             return
         }
-        bound.scanButton.setTextColor(bound.defaultScanTextColors)
-        bound.scanButton.strokeColor = bound.defaultScanStrokeColor
-        bound.scanButton.rippleColor = bound.defaultScanRippleColor
+        listOf(bound.scanButton, bound.pasteButton).forEach { button ->
+            button.setTextColor(bound.defaultScanTextColors)
+            button.strokeColor = bound.defaultScanStrokeColor
+            button.rippleColor = bound.defaultScanRippleColor
+        }
     }
 }

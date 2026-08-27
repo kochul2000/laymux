@@ -411,15 +411,15 @@ describe("RemoteAccessModal", () => {
     });
   });
 
-  it("requires a cloud identity before generating an Android pairing QR", async () => {
+  it("requires a cloud identity before generating an Android pairing value", async () => {
     render(<RemoteAccessModal />);
 
     expect(await screen.findByTestId("android-pairing-section")).toBeInTheDocument();
     expect(screen.getByTestId("android-pairing-generate")).toBeDisabled();
-    expect(screen.getByText("Connect Cloud Remote before creating a pairing QR.")).toBeVisible();
+    expect(screen.getByText("Connect Cloud Remote before creating a pairing value.")).toBeVisible();
   });
 
-  it("creates an Android QR without exposing the seed or payload in the DOM", async () => {
+  it("creates an Android invitation and copies its payload without rendering the secret", async () => {
     setRemote({
       cloudEnabled: true,
       cloudInstanceId: "instance-1",
@@ -450,6 +450,18 @@ describe("RemoteAccessModal", () => {
             confirmedAt: null,
           },
           qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0" /></svg>',
+          pairingPayload:
+            "laymux://pair/v2?endpoint=https%3A%2F%2Frelay.example.test%2F&secret=copy-me",
+        });
+      }
+      if (cmd === "revoke_android_pairing") {
+        return Promise.resolve({
+          paired: false,
+          phase: "none",
+          endpoint: null,
+          instanceId: null,
+          expiresAt: null,
+          confirmedAt: null,
         });
       }
       if (cmd === "get_remote_control_status") {
@@ -458,6 +470,10 @@ describe("RemoteAccessModal", () => {
       return Promise.resolve(null);
     });
     const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
 
     render(<RemoteAccessModal />);
     await user.click(await screen.findByTestId("android-pairing-generate"));
@@ -465,9 +481,15 @@ describe("RemoteAccessModal", () => {
     expect(mockInvoke).toHaveBeenCalledWith("create_android_pairing_qr");
     const qr = await screen.findByRole("img", { name: "Android pairing QR code" });
     expect(qr.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
-    expect(screen.getByText(/QR issued · waiting for app confirmation/)).toBeVisible();
+    expect(screen.getByText(/Pairing value issued · waiting for app confirmation/)).toBeVisible();
+    await user.click(screen.getByTestId("android-pairing-copy"));
+    expect(writeText).toHaveBeenCalledWith(
+      "laymux://pair/v2?endpoint=https%3A%2F%2Frelay.example.test%2F&secret=copy-me",
+    );
     expect(document.body.textContent).not.toContain("laymux://pair/v2");
     expect(document.body.textContent).not.toContain("secret=");
+    await user.click(screen.getByTestId("android-pairing-revoke"));
+    await waitFor(() => expect(screen.queryByTestId("android-pairing-copy")).toBeNull());
   });
 
   it("does not let a delayed initial status overwrite a generated Android pairing", async () => {
@@ -506,6 +528,8 @@ describe("RemoteAccessModal", () => {
             confirmedAt: null,
           },
           qrSvg: '<svg xmlns="http://www.w3.org/2000/svg" />',
+          pairingPayload:
+            "laymux://pair/v2?endpoint=https%3A%2F%2Frelay.example.test%2F&secret=copy-me",
         });
       }
       if (cmd === "get_remote_control_status") {
