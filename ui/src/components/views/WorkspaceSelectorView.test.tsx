@@ -240,6 +240,74 @@ describe("WorkspaceSelectorView", () => {
     expect(useGridStore.getState().focusedPaneIndex).toBe(0);
   });
 
+  it("enters the exact pane clicked in an inactive workspace", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: "ws-a",
+          name: "Alpha",
+          panes: [
+            {
+              id: "pane-a",
+              x: 0,
+              y: 0,
+              w: 1,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+        {
+          id: "ws-b",
+          name: "Beta",
+          panes: [
+            {
+              id: "pane-b-left",
+              x: 0,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+            {
+              id: "pane-b-right",
+              x: 0.5,
+              y: 0,
+              w: 0.5,
+              h: 1,
+              view: { type: "TerminalView", profile: "PowerShell" },
+            },
+          ],
+        },
+      ],
+      activeWorkspaceId: "ws-a",
+    });
+    useGridStore.getState().setFocusedPane(0);
+    useDockStore.getState().setFocusedDock("left");
+    useSettingsStore.getState().setWorkspaceSelector({
+      display: {
+        minimap: true,
+        environment: false,
+        activity: false,
+        path: false,
+        result: false,
+      },
+      lastInputMode: "workspaceLatest",
+    });
+    render(<WorkspaceSelectorView />);
+
+    const targetPane = screen.getByTestId("pane-row-pane-b-right");
+    expect(targetPane).toHaveAccessibleName("Open Beta, pane 2, PowerShell");
+    await user.click(targetPane);
+
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBe("ws-b");
+    expect(useDockStore.getState().focusedDock).toBeNull();
+    expect(useDockStore.getState().focusedDockPaneId).toBeNull();
+    expect(useGridStore.getState().focusedPaneIndex).toBe(1);
+    expect(markNotificationsRead).toHaveBeenLastCalledWith(["terminal-pane-b-right"]);
+  });
+
   it("shows unread badge when notifications exist", async () => {
     useWorkspaceStore.setState({
       workspaces: [

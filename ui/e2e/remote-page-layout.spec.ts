@@ -26,6 +26,7 @@ async function routeRemoteWithWorkspaces(
   ) => void;
   setLastInputMode: (mode: "perPane" | "workspaceLatest") => void;
   visibilityRequests: Array<{ path: string; body: { hidden: boolean; leaseId: string } }>;
+  focusRequests: Array<{ terminalId: string; body: { leaseId: string } }>;
   outputAttachments: string[];
   setVisibilityFallbackWorkspaceId: (workspaceId: string | null) => void;
   setNotifications: (notifications: Array<Record<string, unknown>>, unreadCount: number) => void;
@@ -42,9 +43,11 @@ async function routeRemoteWithWorkspaces(
     path: string;
     body: { hidden: boolean; leaseId: string };
   }> = [];
+  const focusRequests: Array<{ terminalId: string; body: { leaseId: string } }> = [];
   const hiddenWorkspaceIds = new Set(options.initialHiddenWorkspaceIds ?? []);
   const hiddenPaneIds = new Set<string>();
   const outputAttachments: string[] = [];
+  let activeWorkspaceId = "ws-a";
   let notifications: Array<Record<string, unknown>> = [];
   let unreadNotificationCount = 0;
   let visibilityFallbackWorkspaceId: string | null = null;
@@ -113,17 +116,21 @@ async function routeRemoteWithWorkspaces(
           terminals: [
             { id: "term-a1", title: "A1", workspaceId: "ws-a", paneNumber: 1, appearance: {} },
             { id: "term-a2", title: "A2", workspaceId: "ws-a", paneNumber: 2, appearance: {} },
+            { id: "term-b1", title: "B1", workspaceId: "ws-b", paneNumber: 1, appearance: {} },
           ],
           activeWorkspace: {
-            id: "ws-a",
-            name: "Alpha",
-            panes: [paneWithVisibility(paneA1), paneWithVisibility(paneA2)],
+            id: activeWorkspaceId,
+            name: activeWorkspaceId === "ws-a" ? "Alpha" : "Beta",
+            panes:
+              activeWorkspaceId === "ws-a"
+                ? [paneWithVisibility(paneA1), paneWithVisibility(paneA2)]
+                : [paneWithVisibility(paneB1)],
           },
           workspaces: [
             {
               id: "ws-a",
               name: "Alpha",
-              isActive: true,
+              isActive: activeWorkspaceId === "ws-a",
               terminalPaneCount: 2,
               selectorSummary: { terminalCount: 2, lastCommand: null, latestNotification: null },
               hidden: hiddenWorkspaceIds.has("ws-a"),
@@ -133,7 +140,7 @@ async function routeRemoteWithWorkspaces(
             {
               id: "ws-b",
               name: "Beta",
-              isActive: false,
+              isActive: activeWorkspaceId === "ws-b",
               terminalPaneCount: 1,
               selectorSummary: {
                 terminalCount: 1,
@@ -198,6 +205,17 @@ async function routeRemoteWithWorkspaces(
       });
       return;
     }
+    const focusMatch = url.pathname.match(/^\/remote\/v1\/terminals\/([^/]+)\/focus$/);
+    if (focusMatch) {
+      const terminalId = decodeURIComponent(focusMatch[1]);
+      focusRequests.push({
+        terminalId,
+        body: route.request().postDataJSON() as { leaseId: string },
+      });
+      activeWorkspaceId = terminalId === "term-b1" ? "ws-b" : "ws-a";
+      await route.fulfill({ json: { focused: terminalId } });
+      return;
+    }
     if (url.pathname === "/remote/v1/navigation/spatial") {
       spatialBodies.push(route.request().postDataJSON());
       await route.fulfill({ json: { moved: false, reason: "no_other_target" } });
@@ -205,12 +223,13 @@ async function routeRemoteWithWorkspaces(
     }
     await route.fulfill({ json: {} });
   });
-  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a[12]\/output/, (socket) => {
+  await page.routeWebSocket(/\/remote\/v1\/terminals\/term-[ab][12]\/output/, (socket) => {
     const match = socket.url().match(/terminals\/([^/]+)\/output/);
     if (match) outputAttachments.push(decodeURIComponent(match[1]));
   });
   return {
     outputAttachments,
+    focusRequests,
     visibilityRequests,
     setVisibilityFallbackWorkspaceId(workspaceId) {
       visibilityFallbackWorkspaceId = workspaceId;
@@ -671,6 +690,37 @@ test.describe("remote mobile layout", () => {
     await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
     await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
     await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
+  });
+
+  test("enters the exact pane tapped in an inactive workspace", async ({ page }) => {
+    const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
+    const controls = await routeRemoteWithWorkspaces(page, spatialBodies);
+    controls.setWorkspaceDisplay({
+      minimap: true,
+      environment: false,
+      activity: false,
+      path: false,
+      result: false,
+    });
+    controls.setLastInputMode("workspaceLatest");
+
+    await page.goto("http://remote.test/remote/#token=test-token");
+    await page.locator("#connect").click();
+    await expect.poll(() => controls.outputAttachments.at(-1)).toBe("term-a1");
+    await page.locator("#navToggle").click();
+
+    const betaPane = page.locator('[data-workspace-item="ws-b"] [data-pane-row="p-b1"]');
+    await expect(betaPane).toHaveJSProperty("tagName", "BUTTON");
+    await expect(betaPane).toHaveAccessibleName("Open Beta, pane 1, PowerShell");
+    await betaPane.click();
+
+    await expect
+      .poll(() => controls.focusRequests.at(-1))
+      .toEqual({
+        terminalId: "term-b1",
+        body: { leaseId: "lease-1" },
+      });
+    await expect.poll(() => controls.outputAttachments.at(-1)).toBe("term-b1");
   });
 
   test("uses compact pane rows and one newest input line in workspaceLatest mode", async ({

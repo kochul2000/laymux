@@ -855,6 +855,9 @@ overlay caret 이 켜져 있는데도 codex 입력박스에 **어두운 1셀 블
 └───────────────────────────────┘
 ```
 
+- 워크스페이스 이름·여백을 클릭하면 `switchActiveWorkspace`가 기존 포커스 위치를 기준으로 유효한 착지 pane을 계산한다. 반대로 pane 요약 행을 클릭하면 행이 상위 workspace 클릭을 중단하고 `focusWorkspacePane(workspaceId, paneIndex)`로 **그 pane을 정확히 활성화**한다. TerminalView 행은 OS-native 알림 읽음 동기화도 해당 terminal 하나에만 적용한다([ADR-0081](../adr/0081-pane-focus-transition-single-owner.md)).
+- Remote drawer도 visible workspace의 숨기지 않은 TerminalView pane 행을 active 여부와 무관하게 선택 가능하게 렌더한다. 비활성 workspace의 행을 누르면 기존 `/remote/v1/terminals/:id/focus` 경로가 host workspace와 exact pane을 함께 활성화하고, Remote 출력 표면은 그 terminal에 attach한다. workspace 상위 행을 누르는 일반 전환은 workspace별 마지막 선택 terminal 착지 규칙을 계속 사용한다.
+
 ### 레이아웃 저장(Export New)
 
 - 현재 워크스페이스의 pane 배치를 새 레이아웃 템플릿으로 저장하는 액션(`exportAsNewLayout`)은 상단 바가 아니라 **selector 의 "New Workspace" 패널 안, 레이아웃 카드 목록 바로 아래**에 있다. 쓰는 곳과 읽는 곳이 같은 표면이라 저장 직후 새 카드가 그 자리에서 보인다. 기존 레이아웃 덮어쓰기(`exportToLayout`)는 각 카드의 ⋯ 메뉴가 계속 소유한다.

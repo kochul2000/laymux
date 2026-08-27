@@ -846,7 +846,8 @@
       "clearTerminals": "Clear this workspace's terminals (Ctrl+Alt+L)",
       "duplicateWorkspace": "Duplicate workspace (Ctrl+Alt+D)",
       "renameWorkspace": "Rename workspace (Ctrl+Alt+R)",
-      "closeWorkspace": "Close workspace (Ctrl+Alt+W)"
+      "closeWorkspace": "Close workspace (Ctrl+Alt+W)",
+      "openPane": "Open {{workspace}}, pane {{number}}, {{view}}"
     }
   }
 }
