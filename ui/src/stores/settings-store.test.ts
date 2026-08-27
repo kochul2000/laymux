@@ -975,6 +975,22 @@ describe("settings-store", () => {
     expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("perPane");
   });
 
+  it("defaults destructive workspace actions to two-click confirmation", () => {
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+  });
+
+  it("loads an explicit destructive-action confirmation opt-out and rejects invalid values", () => {
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { confirmDestructiveActions: false } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
+
+    useSettingsStore.getState().loadFromSettings({
+      workspaceSelector: { confirmDestructiveActions: "no" } as any,
+    });
+    expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+  });
+
   it("has default automatic mobile mode width threshold", () => {
     expect(useSettingsStore.getState().remote.autoMobileModeMinWidth).toBe(720);
     expect(useSettingsStore.getState().remote.preferredHost).toBe("");

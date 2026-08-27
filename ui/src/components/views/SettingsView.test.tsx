@@ -3062,6 +3062,22 @@ describe("SettingsView", () => {
       expect(useSettingsStore.getState().workspaceSelector.lastInputMode).toBe("workspaceLatest");
     });
 
+    it("defaults destructive action confirmation on and saves an opt-out", async () => {
+      const user = userEvent.setup();
+      render(<SettingsView />);
+      await user.click(screen.getByTestId("nav-workspaceDisplay"));
+
+      const toggle = screen.getByTestId("workspace-destructive-confirm-toggle") as HTMLInputElement;
+      expect(toggle.checked).toBe(true);
+
+      await user.click(toggle);
+      expect(toggle.checked).toBe(false);
+      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(true);
+
+      await user.click(screen.getByTestId("save-settings-btn"));
+      expect(useSettingsStore.getState().workspaceSelector.confirmDestructiveActions).toBe(false);
+    });
+
     it("toggling a checkbox and saving updates store", async () => {
       const user = userEvent.setup();
       render(<SettingsView />);

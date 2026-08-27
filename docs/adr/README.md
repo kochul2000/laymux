@@ -228,6 +228,7 @@ ADR 이 필요한 대표 기준:
 | [0208](0208-android-e2e-file-viewer-typed-capability.md) | Android E2E FileViewer는 타입화 capability와 exact claim binding을 함께 검증 | Accepted |
 | [0209](0209-remote-display-preferences-are-device-local.md) | Remote 표시·입력 감도·기본 checkpoint 예산은 기기 로컬로 소유한다 (0173·0199·0200 대체) | Accepted |
 | [0210](0210-remote-lucide-icon-boundary.md) | Remote 범용 아이콘도 Lucide DOM 경계에서 렌더한다 (0205·0169 확장) | Accepted |
+| [0211](0211-workspace-selector-destructive-actions-require-two-activations.md) | Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정) | Accepted |
 
 > **번호 계보:** PR #668이 ADR-0093을 `main`의 `d8e43df`로 병합했으며, 이 브랜치는 그 최신 `main`에 rebase해 ADR-0093/0094/0095의 번호 연속성과 충돌 부재를 다시 확인했다. ADR-0094는 미게시 로컬 `fix/659` 브랜치의 Proposed ADR-0094가 기록한 관측된 ACK 결정을 흡수·대체하며, ADR-0095는 미게시 로컬 `fix/661-output-ingress-bound` HEAD `7c47ac4`의 Proposed ADR-0093이 기록한 bounded envelope 결정을 흡수·대체한다. 두 donor 문서는 게시·병합·cherry-pick하지 않고 이 브랜치의 0094/0095만 각 결정의 단일 정본으로 사용한다.
 

@@ -349,6 +349,8 @@ export interface WorkspaceSelectorSettings {
   pathEllipsis: PathEllipsisMode;
   /** Last submitted input layout: per terminal pane or one latest line per workspace. */
   lastInputMode: WorkspaceLastInputMode;
+  /** Require two activations for destructive WorkspaceSelectorView controls. */
+  confirmDestructiveActions: boolean;
   /**
    * Seconds a pane/workspace must stay hidden before its terminal (PTY)
    * is automatically closed to free memory/CPU. 0 = disabled. See issue #269.
@@ -925,6 +927,7 @@ export const DEFAULT_WORKSPACE_SELECTOR: WorkspaceSelectorSettings = {
   sortOrder: "manual",
   pathEllipsis: "start",
   lastInputMode: "perPane",
+  confirmDestructiveActions: true,
   hiddenAutoCloseSeconds: 0,
 };
 
@@ -1720,6 +1723,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
           lastInputMode: validLastInputModes.includes(data.workspaceSelector.lastInputMode)
             ? data.workspaceSelector.lastInputMode
             : DEFAULT_WORKSPACE_SELECTOR.lastInputMode,
+          confirmDestructiveActions:
+            typeof data.workspaceSelector.confirmDestructiveActions === "boolean"
+              ? data.workspaceSelector.confirmDestructiveActions
+              : DEFAULT_WORKSPACE_SELECTOR.confirmDestructiveActions,
         }
       : undefined;
     // Ensure claude settings have all fields (backwards compat)

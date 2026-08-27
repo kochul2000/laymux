@@ -41,6 +41,7 @@ import { runWorkspaceClearFromUi } from "@/lib/workspace-clear-action";
 import { HiddenItemsShelf } from "./workspace-selector/HiddenItemsShelf";
 import { UndoSnackbar } from "@/components/ui/UndoSnackbar";
 import { CommandStatusIcon } from "@/components/ui/CommandStatusIcon";
+import { TwoClickConfirmButton } from "@/components/ui/TwoClickConfirmButton";
 import { getCommandStatusIconKind } from "@/lib/command-status-icon";
 import {
   BroomIcon,
@@ -128,6 +129,7 @@ function WorkspaceItem({
   onPaneDragLeave,
   onPaneDrop,
   hiddenPaneIds,
+  confirmDestructiveActions,
   canHideWorkspace,
   onSelect,
   onSelectPane,
@@ -152,6 +154,7 @@ function WorkspaceItem({
   onPaneDragLeave: (e: React.DragEvent) => void;
   onPaneDrop: (e: React.DragEvent, wsId: string) => void;
   hiddenPaneIds: Set<string>;
+  confirmDestructiveActions: boolean;
   canHideWorkspace: boolean;
   onSelect: () => void;
   onSelectPane: (paneIndex: number, pane: WorkspacePane) => void;
@@ -267,13 +270,15 @@ function WorkspaceItem({
             <ExitFade show={summary.unreadCount > 0} className="workspace-count-badge-frame">
               <CountBadge count={summary.unreadCount} testId={`unread-badge-${ws.id}`} />
             </ExitFade>
-            <button
+            <TwoClickConfirmButton
               type="button"
               data-testid={`workspace-hide-${ws.id}`}
-              onClick={(e) => {
-                e.stopPropagation();
+              onConfirm={() => {
                 onHideWorkspace();
               }}
+              confirmationEnabled={confirmDestructiveActions}
+              stopPropagation
+              confirmLabel={t("hiddenItems.hideConfirm", { name: ws.name })}
               disabled={!canHideWorkspace}
               className="hidden-item-action-btn workspace-quick-hide hover-bg cursor-pointer"
               aria-label={isActive ? t("hiddenItems.hideAndMove") : t("hiddenItems.hideFromList")}
@@ -286,16 +291,18 @@ function WorkspaceItem({
               }
             >
               <EyeIcon size={12} />
-            </button>
+            </TwoClickConfirmButton>
             {hovered && (
               <>
                 {panes.some((pane) => pane.view.type === "TerminalView") && (
-                  <button
+                  <TwoClickConfirmButton
                     data-testid={`workspace-clear-${ws.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onConfirm={() => {
                       onClearTerminals();
                     }}
+                    confirmationEnabled={confirmDestructiveActions}
+                    stopPropagation
+                    confirmLabel={t("item.clearTerminalsConfirm", { name: ws.name })}
                     className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100"
                     style={{
                       color: "var(--text-secondary)",
@@ -305,7 +312,7 @@ function WorkspaceItem({
                     title={t("item.clearTerminals")}
                   >
                     <BroomIcon size={11} />
-                  </button>
+                  </TwoClickConfirmButton>
                 )}
                 <button
                   data-testid={`workspace-duplicate-${ws.id}`}
@@ -340,22 +347,23 @@ function WorkspaceItem({
                   <PencilIcon size={11} />
                 </button>
                 {canClose && (
-                  <button
+                  <TwoClickConfirmButton
                     data-testid={`workspace-close-${ws.id}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onConfirm={() => {
                       onClose();
                     }}
-                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none opacity-50 hover:opacity-100 hover:text-[var(--red)]"
+                    confirmationEnabled={confirmDestructiveActions}
+                    stopPropagation
+                    confirmLabel={t("item.closeWorkspaceConfirm", { name: ws.name })}
+                    className="shrink-0 cursor-pointer rounded p-0.5 leading-none text-[var(--text-secondary)] opacity-50 hover:opacity-100 hover:text-[var(--red)]"
                     style={{
-                      color: "var(--text-secondary)",
                       background: "transparent",
                       border: "none",
                     }}
                     title={t("item.closeWorkspace")}
                   >
                     <XIcon size={11} />
-                  </button>
+                  </TwoClickConfirmButton>
                 )}
               </>
             )}
@@ -734,6 +742,7 @@ function LayoutCard({
   layout,
   isDefault,
   canDelete,
+  confirmDestructiveActions,
   onClick,
   onRename,
   onDuplicate,
@@ -744,6 +753,7 @@ function LayoutCard({
   layout: { id: string; name: string; panes: { x: number; y: number; w: number; h: number }[] };
   isDefault: boolean;
   canDelete: boolean;
+  confirmDestructiveActions: boolean;
   onClick: () => void;
   onRename: () => void;
   onDuplicate: () => void;
@@ -939,19 +949,20 @@ function LayoutCard({
             </button>
           )}
           {canDelete && (
-            <button
-              onClick={() => {
-                if (window.confirm(t("layout.deleteConfirm", { name: layout.name }))) {
-                  onDelete();
-                }
+            <TwoClickConfirmButton
+              onConfirm={() => {
+                onDelete();
                 setMenuOpen(false);
               }}
+              confirmationEnabled={confirmDestructiveActions}
+              confirmLabel={t("layout.deleteConfirm", { name: layout.name })}
+              confirmChildren={t("layout.deleteConfirm", { name: layout.name })}
               className="cursor-pointer px-3 py-1 text-left text-[11px]"
               style={{ color: "var(--red)", background: "transparent", border: "none" }}
               title={t("layout.deleteTitle")}
             >
               {t("layout.delete")}
-            </button>
+            </TwoClickConfirmButton>
           )}
         </div>
       )}
@@ -1053,6 +1064,9 @@ export function WorkspaceSelectorView() {
   const setWorkspaceHidden = useUiStore((s) => s.setWorkspaceHidden);
 
   const pathEllipsis = useSettingsStore((s) => s.workspaceSelector.pathEllipsis);
+  const confirmDestructiveActions = useSettingsStore(
+    (s) => s.workspaceSelector.confirmDestructiveActions,
+  );
   const workspaceSortOrder = useSettingsStore((s) => s.workspaceSelector.sortOrder);
   const setWorkspaceSelector = useSettingsStore((s) => s.setWorkspaceSelector);
   const terminalInstances = useTerminalStore((s) => s.instances);
@@ -1252,6 +1266,7 @@ export function WorkspaceSelectorView() {
               layout={layout}
               isDefault={i === 0}
               canDelete={layouts.length > 1}
+              confirmDestructiveActions={confirmDestructiveActions}
               onClick={() => handleCreateWithLayout(layout.id)}
               onRename={() => {
                 const name = window.prompt(t("layout.renamePrompt"), layout.name);
@@ -1403,6 +1418,7 @@ export function WorkspaceSelectorView() {
               onPaneDragLeave={handlePaneDragLeave}
               onPaneDrop={handlePaneDrop}
               hiddenPaneIds={wsHiddenPaneIds}
+              confirmDestructiveActions={confirmDestructiveActions}
               canHideWorkspace={
                 !isActive ||
                 findNextVisibleWorkspaceId({
