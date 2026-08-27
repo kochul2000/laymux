@@ -1,4 +1,11 @@
+import {
+  commandStatusIconName,
+  hydrateRemoteIcons,
+  setRemoteIcon,
+} from "../../../../ui/src/remote/remote-icons.js";
+
       (() => {
+        hydrateRemoteIcons(document);
         const $ = (id) => document.getElementById(id);
         const tokenInput = $("token");
         const clientNameInput = $("clientName");
@@ -105,12 +112,6 @@
           typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
         const inputModeToggleButton = $("inputModeToggle");
         const inputModeIcon = $("inputModeIcon");
-        const INPUT_MODE_ICONS = {
-          direct:
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8.5 14h7" stroke-linecap="round"/></svg>',
-          composer:
-            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 20h4L18.5 9.5a2 2 0 0 0-2.83-2.83L5 17v3z" stroke-linejoin="round"/><path d="M13.5 8.5l2.5 2.5" stroke-linecap="round"/></svg>',
-        };
         const copyPaneIdButton = $("copyPaneId");
         const spatialExclusionButton = $("spatialExclusion");
         const keyBar = $("keyBar");
@@ -1696,9 +1697,7 @@
           const icon = document.createElement("span");
           icon.className = "file-viewer-directory-icon";
           icon.setAttribute("aria-hidden", "true");
-          icon.innerHTML = entry.isDirectory
-            ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>'
-            : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+          setRemoteIcon(icon, entry.isDirectory ? "Folder" : "File");
           const name = document.createElement("span");
           name.className = "file-viewer-directory-name";
           name.textContent = entry.name;
@@ -2951,7 +2950,7 @@
             : "Switch to Composer input";
           inputModeToggleButton.title = inputModeActionLabel;
           inputModeToggleButton.setAttribute("aria-label", inputModeActionLabel);
-          inputModeIcon.innerHTML = INPUT_MODE_ICONS[composerMode ? "composer" : "direct"];
+          setRemoteIcon(inputModeIcon, composerMode ? "Pencil" : "Keyboard");
 
           const nextText = draft ? draft.text : "";
           if (composerInput.value !== nextText) composerInput.value = nextText;
@@ -3379,9 +3378,9 @@
             forwardingPaste: "Forwarding the callback to the PC...",
             forwarding: "Forwarding the sign-in result to the PC...",
             successAnswered:
-              "✓ Signed in — the PC tool answered {status}. You can close this.",
+              "Signed in — the PC tool answered {status}. You can close this.",
             successDelivered:
-              "✓ Signed in — the sign-in was delivered to the PC. You can close this.",
+              "Signed in — the sign-in was delivered to the PC. You can close this.",
             inactive: "The sign-in relay is no longer active. You can close this.",
             couldNotConfirm:
               "Could not confirm delivery — check whether the PC signed in.",
@@ -3408,9 +3407,9 @@
             forwardingPaste: "콜백을 PC로 전달하는 중...",
             forwarding: "로그인 결과를 PC로 전달하는 중...",
             successAnswered:
-              "✓ 로그인 성공 — PC 도구가 {status}로 응답했습니다. 이 창을 닫아도 됩니다.",
+              "로그인 성공 — PC 도구가 {status}로 응답했습니다. 이 창을 닫아도 됩니다.",
             successDelivered:
-              "✓ 로그인 성공 — PC로 전달됐습니다. 이 창을 닫아도 됩니다.",
+              "로그인 성공 — PC로 전달됐습니다. 이 창을 닫아도 됩니다.",
             inactive: "로그인 중계가 더 이상 활성 상태가 아닙니다. 이 창을 닫아도 됩니다.",
             couldNotConfirm:
               "전달을 확인하지 못했습니다 — PC에서 로그인됐는지 확인하세요.",
@@ -3435,7 +3434,15 @@
         // kind: "error" | "success" | "" (neutral). Success is styled distinctly
         // so a completed sign-in reads as a clear win, not just another line.
         function setOauthRelayStatus(message, kind = "") {
-          oauthRelayStatus.textContent = message;
+          oauthRelayStatus.replaceChildren();
+          if (kind === "success") {
+            const icon = document.createElement("span");
+            icon.className = "oauth-relay-status-icon";
+            setRemoteIcon(icon, "Check", { size: 12 });
+            oauthRelayStatus.append(icon, document.createTextNode(message));
+          } else {
+            oauthRelayStatus.textContent = message;
+          }
           oauthRelayStatus.classList.toggle("error", kind === "error");
           oauthRelayStatus.classList.toggle("success", kind === "success");
         }
@@ -5684,8 +5691,6 @@
         // desktop at any time, so the poll slows down instead of stopping.
         const WIDGET_IDLE_POLL_MS = 30000;
         const WIDGET_UNAVAILABLE_TEXT = "--";
-        const WIDGET_BELL_ICON =
-          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>';
         let widgetPollTimer = null;
         let widgetPollInFlight = false;
         let widgetPollActive = false;
@@ -5807,7 +5812,11 @@
           const busy = Number(item.busy) || 0;
           const dot = document.createElement("span");
           dot.className = busy > 0 ? "widget-accent" : "widget-muted";
-          dot.textContent = "●";
+          setRemoteIcon(dot, "Circle", {
+            size: 7,
+            strokeWidth: 0,
+            fill: "currentColor",
+          });
           const count = document.createElement("span");
           count.textContent = String(busy);
           const total = document.createElement("span");
@@ -5826,7 +5835,7 @@
           node.className = "widget-item";
           const icon = document.createElement("span");
           icon.className = "widget-muted";
-          icon.innerHTML = WIDGET_BELL_ICON;
+          setRemoteIcon(icon, "Bell", { size: 13 });
           const count = document.createElement("span");
           count.className = unread > 0 ? "widget-accent" : "widget-muted";
           count.textContent = String(unread);
@@ -6144,11 +6153,8 @@
           return row;
         }
 
-        function visibilityIcon(hidden, size = 14) {
-          const slash = hidden
-            ? '<path d="M2.5 11.5l9-9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>'
-            : "";
-          return `<svg width="${size}" height="${size}" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1.5 7s2.4-3.8 5.5-3.8S12.5 7 12.5 7s-2.4 3.8-5.5 3.8S1.5 7 1.5 7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="7" cy="7" r="1.7" stroke="currentColor" stroke-width="1.2"/>${slash}</svg>`;
+        function setVisibilityIcon(host, hidden, size = 14) {
+          setRemoteIcon(host, hidden ? "EyeOff" : "Eye", { size });
         }
 
         function renderHiddenWorkspaceShelf(workspaces) {
@@ -6200,7 +6206,7 @@
             restore.type = "button";
             restore.className = "visibility-button";
             restore.dataset.hiddenWorkspaceRestore = workspace.id;
-            restore.innerHTML = visibilityIcon(false, 12);
+            setVisibilityIcon(restore, false, 12);
             restore.disabled = !leaseId;
             restore.setAttribute(
               "aria-label",
@@ -6331,7 +6337,7 @@
           visibility.type = "button";
           visibility.className = "visibility-button";
           visibility.dataset.workspaceVisibility = workspace.id;
-          visibility.innerHTML = visibilityIcon(false);
+          setVisibilityIcon(visibility, false);
           visibility.disabled = !leaseId || !canHideWorkspace;
           visibility.setAttribute("aria-pressed", "false");
           const visibilityLabel = canHideWorkspace
@@ -6401,8 +6407,7 @@
           button.type = "button";
           button.className = "workspace-skip-button";
           button.dataset.workspaceSkip = workspace.id;
-          button.innerHTML =
-            '<svg data-icon="circle-minus" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg>';
+          setRemoteIcon(button, "CircleMinus", { size: 13 });
           applyWorkspaceSkipState(button, workspace.id);
           // Keep the focused input surface/keyboard like every other remote
           // control button (#482); the click still toggles via the click path.
@@ -6519,12 +6524,16 @@
               primary.append(path);
             }
 
-            if (display.result && pane.selectorStatus && pane.selectorStatus.icon) {
+            const statusIconName = commandStatusIconName(pane.selectorStatus?.icon);
+            if (display.result && statusIconName) {
               const status = document.createElement("span");
               status.className = `pane-command-status${(pane.unreadCount || 0) > 0 ? " unread" : ""}`;
-              status.textContent = pane.selectorStatus.icon;
+              setRemoteIcon(status, statusIconName, { size: 12 });
               if (pane.selectorStatus.color) status.style.color = pane.selectorStatus.color;
-              status.title = pane.selectorStatus.text || pane.lastCommand || "";
+              const statusLabel = pane.selectorStatus.text || pane.lastCommand || "Command status";
+              status.setAttribute("role", "img");
+              status.setAttribute("aria-label", statusLabel);
+              status.title = statusLabel;
               primary.append(status);
             } else if (display.result && (pane.unreadCount || 0) > 0) {
               const unread = document.createElement("span");
@@ -6552,7 +6561,7 @@
           visibility.type = "button";
           visibility.className = "visibility-button";
           visibility.dataset.paneVisibility = pane.id;
-          visibility.innerHTML = visibilityIcon(paneHidden);
+          setVisibilityIcon(visibility, paneHidden);
           visibility.disabled = !leaseId;
           visibility.setAttribute("aria-pressed", String(paneHidden));
           const visibilityLabel = paneHidden
@@ -9512,16 +9521,17 @@
           selected.textContent = `Selected: ${def.label} (${selectedZone === "main" ? "Main row" : "Keys row"})`;
           actions.append(selected);
           const actionDefs = [
-            ["First", `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
-            ["←", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
-            ["→", `Move ${accessibleName} right`, selectedIndex === selectedZoneIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
-            ["Last", `Move ${accessibleName} to end`, selectedIndex === selectedZoneIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
+            ["First", null, `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
+            [null, "ArrowLeft", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
+            [null, "ArrowRight", `Move ${accessibleName} right`, selectedIndex === selectedZoneIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
+            ["Last", null, `Move ${accessibleName} to end`, selectedIndex === selectedZoneIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
           ];
-          for (const [label, ariaLabel, disabled, action] of actionDefs) {
+          for (const [label, iconName, ariaLabel, disabled, action] of actionDefs) {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "key-order-action";
-            button.textContent = label;
+            if (iconName) setRemoteIcon(button, iconName, { size: 12 });
+            else button.textContent = label;
             button.setAttribute("aria-label", ariaLabel);
             button.disabled = disabled;
             button.addEventListener("click", (event) => {
@@ -9591,13 +9601,13 @@
 
               const controls = document.createElement("span");
               controls.className = "input-layout-order";
-              for (const [text, offset, disabled] of [
-                ["↑", -1, index === 0],
-                ["↓", 1, index === actionIds.length - 1],
+              for (const [iconName, offset, disabled] of [
+                ["ArrowUp", -1, index === 0],
+                ["ArrowDown", 1, index === actionIds.length - 1],
               ]) {
                 const button = document.createElement("button");
                 button.type = "button";
-                button.textContent = text;
+                setRemoteIcon(button, iconName, { size: 12 });
                 button.disabled = disabled;
                 button.setAttribute(
                   "aria-label",

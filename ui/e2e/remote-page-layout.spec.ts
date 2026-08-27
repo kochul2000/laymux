@@ -543,7 +543,7 @@ test.describe("remote mobile layout", () => {
 
     const exclusion = page.locator("#spatialExclusion");
     await expect(exclusion).toBeVisible();
-    await expect(exclusion.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(exclusion.locator('svg[data-remote-icon-name="CircleMinus"]')).toHaveCount(1);
     await expect(exclusion).toHaveAttribute("aria-pressed", "false");
     await expect(exclusion).toHaveAttribute("aria-label", "Exclude this pane from pane navigation");
 
@@ -597,7 +597,7 @@ test.describe("remote mobile layout", () => {
     // Every workspace with terminal panes shows the same circle-minus skip icon.
     const skipB = page.locator('[data-workspace-skip="ws-b"]');
     await expect(skipB).toBeVisible();
-    await expect(skipB.locator('svg[data-icon="circle-minus"]')).toHaveCount(1);
+    await expect(skipB.locator('svg[data-remote-icon-name="CircleMinus"]')).toHaveCount(1);
     await expect(skipB).toHaveAttribute("aria-pressed", "false");
 
     await skipB.click();
@@ -666,7 +666,9 @@ test.describe("remote mobile layout", () => {
     await expect(beta.locator(".pane-env")).toHaveText("PS");
     await expect(beta.locator(".pane-activity")).toHaveText("running");
     await expect(beta.locator(".pane-path")).toHaveText("~/work/beta");
-    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
+    const commandStatus = beta.getByRole("img", { name: "Building" });
+    await expect(commandStatus).toHaveCount(1);
+    await expect(commandStatus.locator('svg[data-remote-icon-name="Hourglass"]')).toHaveCount(1);
     await expect(beta.locator(".pane-last-input")).toHaveText("npm test");
     await expect(beta.locator(".workspace-status-line")).toHaveCount(0);
   });
@@ -908,7 +910,9 @@ test.describe("remote mobile layout", () => {
 
     const beta = page.locator(".workspace-item", { hasText: "Beta" });
     await expect(beta.locator(".pane-activity")).toHaveText("running");
-    await expect(beta.locator(".pane-command-status")).toHaveText("⏳");
+    await expect(
+      beta.locator('.pane-command-status svg[data-remote-icon-name="Hourglass"]'),
+    ).toHaveCount(1);
 
     controls.setWorkspaceDisplay({ activity: false, result: false });
     await expect(beta.locator(".pane-activity")).toHaveCount(0, { timeout: 5000 });
