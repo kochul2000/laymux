@@ -540,7 +540,7 @@ describe("tauri-api", () => {
       expect(mockInvoke).toHaveBeenCalledWith("cloud_disconnect");
     });
 
-    it("invokes the Android pairing lifecycle commands without passing a seed", async () => {
+    it("returns the copyable Android invitation only from the create command", async () => {
       const empty = { paired: false, endpoint: null, instanceId: null };
       const created = {
         status: {
@@ -549,6 +549,7 @@ describe("tauri-api", () => {
           instanceId: "instance-1",
         },
         qrSvg: "<svg />",
+        pairingPayload: "laymux://pair/v2?secret=copy-me",
       };
       mockInvoke
         .mockResolvedValueOnce(empty)

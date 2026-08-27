@@ -35,15 +35,15 @@ class PairingAckClient(
                     readBounded(connection.inputStream, RESPONSE_BYTES_LIMIT),
                 )
                 HttpURLConnection.HTTP_UNAUTHORIZED -> throw PairingAckException(
-                    "페어링 확인 정보가 올바르지 않습니다. QR을 다시 스캔하세요.",
+                    "페어링 확인 정보가 올바르지 않습니다. 새 값을 다시 받으세요.",
                     pairingInvalidated = true,
                 )
                 HttpURLConnection.HTTP_CONFLICT -> throw PairingAckException(
-                    "이 QR은 다른 Android 클라이언트가 이미 사용했습니다.",
+                    "이 페어링 값은 다른 Android 클라이언트가 이미 사용했습니다.",
                     pairingInvalidated = true,
                 )
                 HttpURLConnection.HTTP_GONE -> throw PairingAckException(
-                    "페어링 QR이 만료됐습니다. 새 QR을 스캔하세요.",
+                    "페어링 값이 만료됐습니다. 새 값을 스캔하거나 붙여넣으세요.",
                     pairingInvalidated = true,
                 )
                 HttpURLConnection.HTTP_UNAVAILABLE -> throw PairingAckException(

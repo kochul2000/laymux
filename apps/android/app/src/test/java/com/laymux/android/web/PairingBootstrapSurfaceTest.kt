@@ -22,10 +22,22 @@ class PairingBootstrapSurfaceTest {
     @Test
     fun nativeSheetKeepsOnlyConnectionActionsAndDoesNotEmbedSettingsOrWebView() {
         val layout = source("res/layout/pairing_bottom_sheet.xml").readText()
+        val sheetSource = source(
+            "java/com/laymux/android/pairing/PairingBottomSheet.kt",
+        ).readText()
+        val activitySource = source("java/com/laymux/android/MainActivity.kt").readText()
+        val selectionSource = activitySource.substringAfter("fun selectCloudInstance(")
+            .substringBefore("fun showCloudDashboard()")
 
         assertTrue(layout.contains("pairing_connect_button"))
         assertTrue(layout.contains("pairing_scan_button"))
+        assertTrue(layout.contains("pairing_paste_button"))
         assertTrue(layout.contains("pairing_cancel_button"))
+        assertTrue(sheetSource.contains("fun pastePairingValue()"))
+        assertTrue(activitySource.contains("override fun pastePairingValue()"))
+        assertTrue(activitySource.contains("clip.getItemAt(0).text"))
+        assertTrue(activitySource.contains("acceptPairingPayload(raw, policy)"))
+        assertFalse(selectionSource.contains("startPairingScan()"))
         assertFalse(layout.contains("pairing_settings_button"))
         assertFalse(layout.contains("pairing_settings_content"))
         assertFalse(layout.contains("WebView"))

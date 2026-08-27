@@ -42,7 +42,7 @@ landing/dashboard와 HttpOnly account session을 표시하고 Google login·PC �
 위임한다. Google OAuth page를 embedded WebView에서 열지 않고 Credential Manager가 받은 ID token을
 Cloud가 session-bound single-use nonce와 함께 검증한다. 이 WebView에는 E2E bridge를 설치하지 않는다.
 연결 실행용 네이티브 Material bottom sheet와 dashboard `…`에서 여는 별도 설정 dialog가
-QR·Keystore·pairing 상태를 소유하고, 별도 secure
+QR/명시적 clipboard 붙여넣기·Keystore·pairing 상태를 소유하고, 별도 secure
 WebView는 암호화 transport로 검증한 PC Remote 문서만 표시한다. APK에는 terminal·workspace·입출력
 표면을 포함하지 않으며, 이 기능은 사용자 PC에 설치된 Laymux의 `/remote/` 문서와 자산이 소유한다.
 Kotlin은 이 자산을 E2E RPC로 받아 검증한 뒤 app 전용 synthetic HTTPS origin에 제공한다.
@@ -57,10 +57,11 @@ pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연�
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
 읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
 데스크톱 Remote Access 모달은 cloud identity에 결합된 seed를 Rust에서 만들고 OS keyring에
-보관한 뒤 5분짜리 QR SVG만 표시한다. Android는 seed로 서명한 ACK를 cloud public origin의
+보관한 뒤 같은 5분짜리 초대를 QR SVG와 명시적 clipboard 복사 action으로 제공한다. Android는 QR을
+스캔하거나 사용자가 붙여넣은 동일 초대를 검증한 뒤 seed로 서명한 ACK를 cloud public origin의
 고정 relay route로 보내고, relay는 이를 해당 instance의 기존 WSS tunnel과 고정 desktop route로만
 전달한다. desktop은 첫 client nonce 하나를 확정하고 상호 HMAC proof를 반환한다
-([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md)). 새 발급은 기존 seed를
+([ADR-0145](../adr/0145-android-pairing-authenticated-one-time-ack.md), [ADR-0212](../adr/0212-android-pairing-invitation-copy-paste.md)). 새 발급은 기존 seed를
 회전하고 명시적 폐기와 cloud disconnect는 record를 삭제한다. 확인된 seed는 사용자가 생체 인증으로
 승인할 때만 메모리 전용 방향별 key로 파생된다. foreground의 성공한 암호화 RPC마다 15분 비활성
 timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadline까지 최대 15분간 key를 보존해
@@ -68,7 +69,7 @@ timeout이 갱신된다. background에서는 통신을 중지하고 현재 deadl
 AES-256-GCM ciphertext envelope만 보내고, PC 소유 Remote UI는 Android wrapper mode에서 같은 기능 코드를
 native HTTP bridge와 binary output adapter에 연결한다([ADR-0149](../adr/0149-android-thin-wrapper-runs-desktop-owned-remote-ui.md),
 [ADR-0159](../adr/0159-android-e2e-websocket-output-transport.md)). Cloud dashboard가
-선택한 instance와 저장/스캔한 QR instance가 일치해야 이 흐름에 진입한다. PC별
+선택한 instance와 저장/스캔/붙여넣은 초대의 instance가 일치해야 이 흐름에 진입한다. PC별
 `settings.remote.cloudAccessMode`는 기존 평문 Cloud browser Remote와 Android E2E를 함께 허용하거나
 Android E2E 고정 route만 허용한다. 후자는 Cloud tunnel 입구의 exact allowlist로 PC가 직접 강제하며
 Local/Tailscale Direct Remote에는 적용하지 않는다([ADR-0150](../adr/0150-desktop-owned-cloud-remote-access-policy.md)).

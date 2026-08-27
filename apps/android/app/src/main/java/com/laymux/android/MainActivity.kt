@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ContentResolver
 import android.content.ContentValues
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
@@ -248,6 +249,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             this,
             object : PairingSheetActions {
                 override fun scanPairingQr() = startPairingScan()
+
+                override fun pastePairingValue() = pastePairingValueFromClipboard()
 
                 override fun openConnectionSettings(instanceId: String) =
                     showConnectionSettings(instanceId)
@@ -769,8 +772,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         when {
             metadata != null -> connectRemote()
             else -> {
-                notifyPairingChanged(notice = "선택한 PC에 표시된 E2E QR을 스캔하세요.")
-                startPairingScan()
+                notifyPairingChanged(
+                    notice = "선택한 PC의 E2E QR을 스캔하거나 페어링 값을 붙여넣으세요.",
+                )
             }
         }
     }
@@ -1333,6 +1337,24 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             .addOnFailureListener { failScannerModuleInstall(listener) }
     }
 
+    private fun pastePairingValueFromClipboard() {
+        val policy = preparePairingPolicy() ?: return
+        val raw = try {
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            val clip = clipboard.primaryClip
+            if (clip == null || clip.itemCount == 0) null else {
+                clip.getItemAt(0).text?.toString()?.trim()
+            }
+        } catch (_: Exception) {
+            null
+        }
+        if (raw.isNullOrEmpty()) {
+            notifyPairingChanged(error = "클립보드에 페어링 값이 없습니다.")
+            return
+        }
+        acceptPairingPayload(raw, policy)
+    }
+
     private fun failScannerModuleInstall(expected: InstallStatusListener) {
         if (scannerModuleListener !== expected || !scanInFlight) return
         clearScannerModuleListener(expected)
@@ -1383,7 +1405,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             }
     }
 
-    /** Validate and persist one pairing payload string (scanner or debug deep link). */
+    /** Validate and persist one pairing payload string (scanner, clipboard, or debug deep link). */
     private fun acceptPairingPayload(raw: String, policy: PairingProtectionPolicy) {
         try {
             val debugBuild = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
@@ -1395,13 +1417,15 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 )
             ) {
                 payload.close()
-                notifyPairingChanged(error = "선택한 PC가 아닌 QR입니다. 선택한 PC의 QR을 스캔하세요.")
+                notifyPairingChanged(
+                    error = "선택한 PC의 페어링 값이 아닙니다. 선택한 PC에서 새 값을 받으세요.",
+                )
                 return
             }
-            saveScannedPairing(payload, policy)
+            saveAcceptedPairing(payload, policy)
         } catch (error: IllegalArgumentException) {
             notifyPairingChanged(
-                error = error.message ?: "지원하지 않는 페어링 QR입니다.",
+                error = error.message ?: "지원하지 않는 페어링 값입니다.",
             )
         } catch (error: Exception) {
             notifyPairingChanged(error = pairingOperationError(error))
@@ -1410,7 +1434,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
 
     /**
      * Debug-only camera bypass (emulators have no usable scanner): the desktop
-     * dev MCP tool `create_android_pairing_payload` returns the QR text, and
+     * dev MCP tool `create_android_pairing_payload` returns the pairing value, and
      * `adb shell am start -a android.intent.action.VIEW -d "<payload>"`
      * delivers it here. The intent-filter exists only in the debug manifest
      * overlay, and this guard keeps the path inert even if a release build
@@ -1431,7 +1455,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         handleDebugPairingIntent(intent)
     }
 
-    private fun saveScannedPairing(
+    private fun saveAcceptedPairing(
         payload: PairingPayload,
         policy: PairingProtectionPolicy,
     ) {
@@ -1539,7 +1563,9 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 notifyPairingChanged(error = "만료된 페어링 정보를 삭제하지 못했습니다.")
                 return
             }
-            notifyPairingChanged(error = "페어링 QR이 만료됐습니다. 새 QR을 스캔하세요.")
+            notifyPairingChanged(
+                error = "페어링 값이 만료됐습니다. 새 값을 스캔하거나 붙여넣으세요.",
+            )
             return
         }
         if (pairingAckInFlight) {
