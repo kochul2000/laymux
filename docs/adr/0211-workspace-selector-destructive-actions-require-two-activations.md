@@ -1,6 +1,6 @@
 # 0211. Workspace selector 파괴적 action은 같은 컨트롤의 연속 두 번 활성화를 요구한다 (0033·0035 정정)
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-27
 - Source: 사용자 요구 · [data-flow.md §9](../architecture/data-flow.md) · [ADR-0033](0033-hidden-items-shelf-set-contract.md) · [ADR-0035](0035-workspace-only-shelf-per-pane-hide-toggle.md)
 - Corrects: ADR-0033/0035의 desktop workspace quick-hide 즉시 실행 조항
@@ -19,7 +19,7 @@ Desktop Workspace selector의 숨기기·터미널 지우기·layout 삭제·닫
 - 첫 활성화는 해당 버튼 컴포넌트의 일시적인 confirmation 상태만 설정한다. workspace/layout/UI store와 세션에는 어떤 변경도 쓰지 않는다.
 - confirmation 상태의 같은 컨트롤을 다시 활성화할 때만 기존 domain action을 호출한다. 숨김은 `setWorkspaceHiddenWithFallback`, 터미널 지우기는 `runWorkspaceClearFromUi`, layout 삭제와 workspace 닫기는 기존 workspace store action의 소유권을 그대로 유지한다.
 - confirmation 상태에서는 대상 이름을 포함한 접근성 이름과 tooltip을 “다시 클릭” 문구로 바꾸고, danger 색으로 현재 대기 상태를 표시한다.
-- 포인터가 컨트롤을 떠나거나, focus를 잃거나, Escape를 누르거나, 메뉴/컴포넌트가 닫히면 confirmation 상태를 폐기한다. 상태는 저장하거나 다른 컨트롤로 공유하지 않는다.
+- hover가 가능한 포인터가 컨트롤을 떠나거나, focus를 잃거나, Escape를 누르거나, 메뉴/컴포넌트가 닫히거나, 설정을 껐다 다시 켜면 confirmation 상태를 폐기한다. touch pointer의 정상적인 tap 종료 후 발생하는 leave는 취소로 보지 않는다. 상태는 저장하거나 다른 컨트롤로 공유하지 않는다.
 - native `window.confirm`은 이 네 action의 확인 수단으로 사용하지 않는다. 포인터 클릭과 Enter/Space가 만드는 버튼 activation은 같은 두 단계 규칙을 따른다.
 - `workspace.clearTerminals`·`workspace.close` 키바인딩과 Automation·MCP·Remote action은 클릭 컨트롤이 아니므로 기존처럼 요청 한 번에 실행한다. 외부 API와 hidden raw state 계약은 바꾸지 않는다.
 

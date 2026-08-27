@@ -16,7 +16,12 @@ interface TwoClickConfirmButtonProps extends Omit<
  * Arms a destructive action on the first activation and runs it on the second.
  * Leaving or blurring the control cancels the transient confirmation state.
  */
-export function TwoClickConfirmButton({
+export function TwoClickConfirmButton(props: TwoClickConfirmButtonProps) {
+  const confirmationModeKey = props.confirmationEnabled === false ? "disabled" : "enabled";
+  return <StatefulTwoClickConfirmButton key={confirmationModeKey} {...props} />;
+}
+
+function StatefulTwoClickConfirmButton({
   children,
   confirmationEnabled = true,
   confirmChildren,
@@ -63,7 +68,7 @@ export function TwoClickConfirmButton({
         onKeyDown?.(event);
       }}
       onPointerLeave={(event) => {
-        setConfirming(false);
+        if (event.pointerType !== "touch") setConfirming(false);
         onPointerLeave?.(event);
       }}
     >
