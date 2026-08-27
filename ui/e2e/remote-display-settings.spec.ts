@@ -115,7 +115,12 @@ function snapshotFrames(text: string) {
   };
 }
 
-async function installApiMocks(page: Page, displayRequests: string[], outputUrls: string[] = []) {
+async function installApiMocks(
+  page: Page,
+  displayRequests: string[],
+  outputUrls: string[] = [],
+  outputClosers: Array<() => void> = [],
+) {
   await installRemoteClientRoutes(page);
   await page.route("http://remote.test/remote/v1/**", async (route) => {
     const url = new URL(route.request().url());
@@ -142,6 +147,7 @@ async function installApiMocks(page: Page, displayRequests: string[], outputUrls
   });
   await page.routeWebSocket(/\/remote\/v1\/terminals\/terminal-1\/output/, (socket) => {
     outputUrls.push(socket.url());
+    outputClosers.push(() => socket.close());
     const snapshot = snapshotFrames("ready\r\n");
     socket.send(snapshot.header);
     socket.send(snapshot.payload);
@@ -226,5 +232,66 @@ test("기기의 terminal 옵션과 checkpoint 예산을 최초 attach에 적용�
     )
     .toEqual([19, 2.5, 8]);
   await expect(page.locator("#terminal .xterm")).toBeVisible();
+  expect(displayRequests).toEqual([]);
+});
+
+test("실행 중 바꾼 checkpoint 예산은 다음 자동 attach부터 적용한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  const outputUrls: string[] = [];
+  const outputClosers: Array<() => void> = [];
+  await installApiMocks(page, displayRequests, outputUrls, outputClosers);
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#connect").click();
+
+  await expect.poll(() => outputUrls.length).toBe(1);
+  expect(new URL(outputUrls[0]).searchParams.get("historyKib")).toBe("4");
+
+  await page.locator("#remoteSnapshotMaxKib").evaluate((input) => {
+    const numberInput = input as HTMLInputElement;
+    numberInput.value = "64";
+    numberInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect
+    .poll(() =>
+      page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "null"), DISPLAY_SETTINGS_KEY),
+    )
+    .toMatchObject({ snapshotMaxKib: 64 });
+
+  outputClosers[0]();
+
+  await expect.poll(() => outputUrls.length).toBe(2);
+  expect(new URL(outputUrls[1]).searchParams.get("historyKib")).toBe("64");
+  expect(displayRequests).toEqual([]);
+});
+
+test("디바이스 저장 실패 상태는 연결 전환 뒤에도 유지한다", async ({ page }) => {
+  const displayRequests: string[] = [];
+  await installApiMocks(page, displayRequests);
+  await page.addInitScript((displaySettingsKey) => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === displaySettingsKey) throw new DOMException("storage blocked", "QuotaExceededError");
+      return originalSetItem.call(this, key, value);
+    };
+  }, DISPLAY_SETTINGS_KEY);
+
+  await page.goto("http://remote.test/remote/#token=test-token");
+  await page.locator("#remoteTerminalFontSize").evaluate((input) => {
+    const numberInput = input as HTMLInputElement;
+    numberInput.value = "22";
+    numberInput.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText(
+    "Could not save on this device.",
+  );
+
+  await page.locator("#connect").click();
+
+  await expect(page.locator(".connection-panel")).toHaveClass(/connected/);
+
+  await expect(page.locator("#remoteDisplaySettingsStatus")).toHaveText(
+    "Could not save on this device.",
+  );
   expect(displayRequests).toEqual([]);
 });

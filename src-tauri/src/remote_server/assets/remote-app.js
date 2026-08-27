@@ -1108,6 +1108,12 @@
         function applyRemoteDisplaySettings(settings) {
           const normalized = normalizeRemoteDisplaySettings(settings);
           remoteDisplaySettings = normalized;
+          // A raised device budget applies to the next attach, including
+          // automatic transport recovery. Never lower an expanded recovery
+          // budget here: doing so would discard history the user already
+          // paged in. A user-directed attach resets it to the exact device
+          // value in openOutput().
+          outputHistoryKib = Math.max(outputHistoryKib, normalized.snapshotMaxKib);
           remoteTerminalFontSizeInput.value = String(normalized.terminalFontSize);
           remoteComposerFontSizeInput.value = String(normalized.composerFontSize);
           remoteMenuFontSizeInput.value = String(normalized.menuFontSize);
@@ -3039,7 +3045,6 @@
           notificationSection.classList.toggle("locked", !connected);
           drawerNotificationsButton.disabled = !connected;
           refreshButton.disabled = !connected;
-          updateRemoteDisplaySettingsControls();
           renderPcUpdateStatus();
           if (connected && !pcUpdateStatus && !pcUpdateRequestInFlight) {
             loadPcUpdateStatus().catch(() => {});

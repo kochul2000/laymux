@@ -101,7 +101,7 @@ const ENTRIES: &[MetadataEntry] = &[
     },
     MetadataEntry {
         path: "/terminal/scrollSensitivity",
-        description: "데스크톱 터미널 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 값이 클수록 한 번 굴릴 때 더 많이 스크롤합니다. 리모트 화면은 remote.scrollSensitivity가 따로 정합니다.",
+        description: "데스크톱 터미널 마우스 휠 스크롤 배율(0.1~20, 기본 1)입니다. 값이 클수록 한 번 굴릴 때 더 많이 스크롤합니다. 리모트 화면은 각 기기의 로컬 표시 설정이 따로 정합니다.",
         sensitive: false,
         apply_mode: ApplyMode::Live,
     },
