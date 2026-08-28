@@ -296,7 +296,10 @@ test.describe("remote mobile layout", () => {
 
     await expect(page.locator("#mainActionRow")).toBeVisible();
     await expect(page.locator("footer > #terminalMeta")).toHaveCount(0);
-    const terminalMetaStyle = await page.locator("#terminalMeta").evaluate((element) => {
+    const terminalMeta = page.locator("#terminalMeta");
+    await expect(terminalMeta).not.toHaveAttribute("role", "status");
+    await expect(terminalMeta).not.toHaveAttribute("aria-live", /.+/);
+    const terminalMetaStyle = await terminalMeta.evaluate((element) => {
       const style = getComputedStyle(element);
       return {
         position: style.position,
