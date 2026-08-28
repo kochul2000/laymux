@@ -1787,6 +1787,18 @@ mod tests {
         assert!(output_stream.contains("stopSocket(!reconnecting);"));
         assert!(output_stream.contains("scheduleOutputReconnect(terminalId, outputLeaseId);"));
         assert!(output_stream.contains("openOutput(terminalId, { reconnect: true });"));
+        assert!(html.contains("const OUTPUT_ATTACH_TIMEOUT_MS = 20000;"));
+        assert!(output_stream.contains("outputPhase === \"awaiting-snapshot\""));
+        assert!(output_stream.contains("settleOutputAttach();"));
+        let socket_open = output_stream
+            .split("outputSocket.onopen = () => {")
+            .nth(1)
+            .and_then(|body| body.split("outputSocket.onmessage =").next())
+            .expect("output socket open handler must exist");
+        assert!(
+            !socket_open.contains("clearTransientConnectionNotice(\"output\""),
+            "a WebSocket open is not recovery until its first snapshot lands"
+        );
         assert!(output_stream.contains("scheduleTransientConnectionNotice"));
         assert!(output_stream.contains("let resetOnNextPayload = true;"));
         assert!(!output_stream.contains("if (!reconnecting) queueTerminalReset();"));

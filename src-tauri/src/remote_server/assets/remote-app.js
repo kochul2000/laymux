@@ -214,6 +214,7 @@ import {
         let heartbeatTimeoutMs = DEFAULT_HEARTBEAT_TIMEOUT_SECONDS * 1000;
         let lastHeartbeatOkAt = 0;
         let socket = null;
+        let outputAttachTimer = null;
         let outputReconnectTimer = null;
         let outputReconnectAttempt = 0;
         // Scroll-top history expansion (ADR-0182). `outputHistoryKib` is the
@@ -416,6 +417,10 @@ import {
         const INTERNAL_TOUCH_MULTI_TAP_DELAY_MS = 320;
         const OUTPUT_RECONNECT_INITIAL_DELAY_MS = 250;
         const OUTPUT_RECONNECT_MAX_DELAY_MS = 5000;
+        // The host may spend up to three 5-second frontend-bridge attempts
+        // stabilizing a renderer checkpoint. Leave bounded delivery slack, but
+        // never let an open, silent socket suppress output recovery forever.
+        const OUTPUT_ATTACH_TIMEOUT_MS = 20000;
         // Scroll-top history expansion budget (KiB). Each request asks for a
         // multiple of the screen the page already holds, floored so the very
         // first step is worth a re-attach and capped at the desktop's supported
@@ -4993,10 +4998,17 @@ import {
           if (resetAttempt) outputReconnectAttempt = 0;
         }
 
+        function stopOutputAttachTimeout() {
+          if (!outputAttachTimer) return;
+          clearTimeout(outputAttachTimer);
+          outputAttachTimer = null;
+        }
+
         function stopSocket(resetReconnect = true) {
           terminalOutputGeneration += 1;
           cancelComposerAgentInputHide();
           outputAttachGeometryGeneration = null;
+          stopOutputAttachTimeout();
           stopOutputReconnect(resetReconnect);
           if (resetReconnect) clearTransientConnectionNotice("output");
           composerReady = false;
@@ -7601,6 +7613,37 @@ import {
           socket = outputSocket;
           outputSocket.binaryType = "arraybuffer";
 
+          // A successful upgrade only establishes a transport. Recovery is not
+          // complete until this attach's first screen has actually landed.
+          const attachTitle =
+            (terminalId === activeTerminalId && activeTerminalTitle()) ||
+            `Connected to ${terminalId}`;
+          const settleOutputAttach = () => {
+            if (
+              outputProtocolFailed ||
+              outputGeneration !== terminalOutputGeneration ||
+              socket !== outputSocket ||
+              leaseId !== outputLeaseId ||
+              activeTerminalId !== terminalId
+            ) {
+              return;
+            }
+            stopOutputAttachTimeout();
+            outputReconnectAttempt = 0;
+            clearTransientConnectionNotice("output", attachTitle);
+            if (!reconnecting) setStatus(attachTitle);
+          };
+          outputAttachTimer = setTimeout(() => {
+            outputAttachTimer = null;
+            if (
+              outputGeneration === terminalOutputGeneration &&
+              socket === outputSocket &&
+              outputPhase === "awaiting-snapshot"
+            ) {
+              outputSocket.close();
+            }
+          }, OUTPUT_ATTACH_TIMEOUT_MS);
+
           const failOutputProtocol = (message) => {
             if (outputProtocolFailed) return;
             outputProtocolFailed = true;
@@ -7725,6 +7768,7 @@ import {
                 if (askedForHistory) {
                   reportHistoryExpansionLimit("No earlier output is available.");
                 }
+                settleOutputAttach();
               }
               if (outputAttachGeometryGeneration === outputGeneration) {
                 outputAttachGeometryGeneration = null;
@@ -7883,6 +7927,7 @@ import {
                 composerReady = true;
                 updateComposerControls();
                 scheduleTerminalFit(true);
+                settleOutputAttach();
                 });
             }
 
@@ -7897,14 +7942,6 @@ import {
 
           outputSocket.onopen = () => {
             if (socket === outputSocket && leaseId === outputLeaseId && activeTerminalId === terminalId) {
-              outputReconnectAttempt = 0;
-              // Prefer the friendly "Workspace · Pane N" context title over the
-              // raw terminal id (issue #474 header identity).
-              const attachTitle =
-                (terminalId === activeTerminalId && activeTerminalTitle()) ||
-                `Connected to ${terminalId}`;
-              clearTransientConnectionNotice("output", attachTitle);
-              if (!reconnecting) setStatus(attachTitle);
               if (focusInputOnOpen) focusInputSurfaceAfterAwait();
               if (reconnecting) heartbeat().catch((err) => handleHeartbeatError(err));
             }
@@ -7951,6 +7988,7 @@ import {
           };
           outputSocket.onclose = () => {
             if (socket === outputSocket) {
+              stopOutputAttachTimeout();
               socket = null;
               // A socket that dies before its snapshot cannot answer the
               // history request it was opened for.
