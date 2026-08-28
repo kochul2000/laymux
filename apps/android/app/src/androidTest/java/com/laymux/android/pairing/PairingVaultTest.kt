@@ -1,8 +1,14 @@
 package com.laymux.android.pairing
 
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyPermanentlyInvalidatedException
+import android.security.keystore.KeyProperties
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import java.security.KeyStore
 import java.util.Base64
+import javax.crypto.KeyGenerator
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -236,6 +242,58 @@ class PairingVaultTest {
     }
 
     @Test
+    fun biometricInvalidationDropsEverySharedPairingAndAllowsAReplacementKey() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val preferences = context.getSharedPreferences(
+            preferenceName,
+            android.content.Context.MODE_PRIVATE,
+        )
+        preferences.edit()
+            .putString("pairing:desktop-a", biometricEnvelope("desktop-a"))
+            .putString("pairing:desktop-b", biometricEnvelope("desktop-b"))
+            .commit()
+        val biometricAlias = "com.laymux.android.test.$suffix.biometric"
+        generateTestWrappingKey(biometricAlias)
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+
+        assertEquals(2, vault.loadMetadata().size)
+        assertTrue(keyStore.containsAlias(biometricAlias))
+
+        vault.recoverInvalidatedBiometricKey()
+
+        assertTrue(vault.loadMetadata().isEmpty())
+        assertEquals(PairingProtectionPolicy.BIOMETRIC, vault.protectionPolicy())
+        assertFalse(keyStore.containsAlias(biometricAlias))
+
+        generateTestWrappingKey(biometricAlias)
+        assertTrue(keyStore.containsAlias(biometricAlias))
+    }
+
+    @Test
+    fun newPairingRetriesWithTheReplacementKeyInTheSameAttempt() {
+        var initializationAttempts = 0
+        var recoveryAttempts = 0
+
+        val result = retryNewPairingAfterKeyInvalidation(
+            initialize = {
+                initializationAttempts += 1
+                if (initializationAttempts == 1) {
+                    throw KeyPermanentlyInvalidatedException()
+                }
+                "fresh-key"
+            },
+            recover = { error ->
+                recoveryAttempts += 1
+                PairingKeyInvalidatedException(error, recoverySucceeded = true)
+            },
+        )
+
+        assertEquals("fresh-key", result)
+        assertEquals(2, initializationAttempts)
+        assertEquals(1, recoveryAttempts)
+    }
+
+    @Test
     fun confirmationUpdatesOnlyTheTargetInstance() {
         vault.setProtectionPolicy(PairingProtectionPolicy.KEYSTORE_ONLY)
         savePairing("desktop-a", ByteArray(PairingPayload.SECRET_BYTES) { 1 })
@@ -327,5 +385,37 @@ class PairingVaultTest {
             val cipher = vault.prepareEncryption(PairingProtectionPolicy.KEYSTORE_ONLY)
             vault.save(it, clientNonce, PairingProtectionPolicy.KEYSTORE_ONLY, cipher)
         }
+    }
+
+    private fun biometricEnvelope(instance: String): String = JSONObject()
+        .put("version", 4)
+        .put("protection", PairingProtectionPolicy.BIOMETRIC.storageValue)
+        .put("endpoint", "https://app.laymux.com/")
+        .put("instanceId", instance)
+        .put("pairingId", pairingId)
+        .put("expiresAt", expiresAt)
+        .put("clientNonce", clientNonce)
+        .put("confirmedAt", nowEpochSeconds)
+        .put("label", JSONObject.NULL)
+        .put("iv", Base64.getEncoder().encodeToString(ByteArray(12)))
+        .put("ciphertext", Base64.getEncoder().encodeToString(ByteArray(17)))
+        .toString()
+
+    private fun generateTestWrappingKey(alias: String) {
+        val generator = KeyGenerator.getInstance(
+            KeyProperties.KEY_ALGORITHM_AES,
+            "AndroidKeyStore",
+        )
+        generator.init(
+            KeyGenParameterSpec.Builder(
+                alias,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        generator.generateKey()
     }
 }

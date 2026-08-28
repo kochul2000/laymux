@@ -2884,9 +2884,11 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         else -> "이전 작업이 끝난 뒤 다시 시도하세요."
     }
 
-    private fun pairingOperationError(error: Exception): String = when (error) {
-        is PairingKeyInvalidatedException ->
-            "생체 정보가 변경되어 페어링 키가 무효화됐습니다. 페어링을 해제한 뒤 다시 연결하세요."
+    private fun pairingOperationError(error: Exception): String = when {
+        error is PairingKeyInvalidatedException && error.recoverySucceeded ->
+            "생체 정보가 변경되어 기존 모든 PC 페어링을 폐기했습니다. 새 키로 다시 페어링하세요."
+        error is PairingKeyInvalidatedException ->
+            "생체 정보가 변경됐지만 무효화된 키를 정리하지 못했습니다. 다시 시도하세요."
         else -> "페어링 키를 안전하게 처리하지 못했습니다."
     }
 

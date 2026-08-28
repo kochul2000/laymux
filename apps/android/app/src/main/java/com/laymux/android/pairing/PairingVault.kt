@@ -6,7 +6,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyPermanentlyInvalidatedException
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import java.io.Closeable
 import java.net.URI
 import java.security.KeyStore
 import java.util.Arrays
@@ -16,45 +15,20 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-data class PairingMetadata(
-    val endpoint: String,
-    val instanceId: String,
-    val pairingId: String,
-    val expiresAtEpochSeconds: Long,
-    val clientNonce: String,
-    val confirmedAtEpochSeconds: Long?,
-    val label: String?,
-)
-
-class StoredPairing internal constructor(
-    val metadata: PairingMetadata,
-    private val secret: ByteArray,
-) : Closeable {
-    internal fun secretCopy(): ByteArray = secret.copyOf()
-
-    override fun close() {
-        Arrays.fill(secret, 0)
+internal inline fun <T> retryNewPairingAfterKeyInvalidation(
+    initialize: () -> T,
+    recover: (KeyPermanentlyInvalidatedException) -> PairingKeyInvalidatedException,
+): T = try {
+    initialize()
+} catch (error: KeyPermanentlyInvalidatedException) {
+    val invalidation = recover(error)
+    if (!invalidation.recoverySucceeded) throw invalidation
+    try {
+        initialize()
+    } catch (retryError: KeyPermanentlyInvalidatedException) {
+        throw recover(retryError)
     }
-
-    override fun toString(): String = "StoredPairing(metadata=$metadata, secret=<redacted>)"
 }
-
-class PendingPairingDecryption internal constructor(
-    val policy: PairingProtectionPolicy,
-    val metadata: PairingMetadata,
-    val cipher: Cipher,
-    internal val ciphertext: ByteArray,
-) : Closeable {
-    override fun close() {
-        Arrays.fill(ciphertext, 0)
-    }
-
-    override fun toString(): String =
-        "PendingPairingDecryption(policy=$policy, metadata=$metadata, ciphertext=<redacted>)"
-}
-
-class PairingKeyInvalidatedException(cause: Throwable) :
-    IllegalStateException("생체 정보가 변경되어 페어링 키가 무효화됐습니다", cause)
 
 /**
  * Stores one pairing envelope per desktop instance. Biometric protection is
@@ -102,13 +76,15 @@ class PairingVault(
         if (protectionPolicy() != policy) {
             throw IllegalStateException("키 보호 설정이 변경됐습니다")
         }
-        return Cipher.getInstance(CIPHER_TRANSFORMATION).apply {
-            try {
-                init(Cipher.ENCRYPT_MODE, getOrCreateWrappingKey(policy))
-            } catch (error: KeyPermanentlyInvalidatedException) {
-                throw PairingKeyInvalidatedException(error)
-            }
-        }
+        return retryNewPairingAfterKeyInvalidation(
+            initialize = {
+                // A new invitation contains a new seed, so after discarding every
+                // envelope wrapped by the dead shared key the same scan/paste can
+                // continue with a freshly generated biometric key.
+                initializeEncryptionCipher(policy)
+            },
+            recover = { error -> recoverFromKeyInvalidation(policy, error) },
+        )
     }
 
     /** The caller must authorize [cipher] with BiometricPrompt when policy is BIOMETRIC. */
@@ -201,7 +177,7 @@ class PairingVault(
                 GCMParameterSpec(GCM_TAG_BITS, envelope.iv),
             )
         } catch (error: KeyPermanentlyInvalidatedException) {
-            throw PairingKeyInvalidatedException(error)
+            throw recoverFromKeyInvalidation(envelope.policy, error)
         }
         return PendingPairingDecryption(
             policy = envelope.policy,
@@ -227,9 +203,31 @@ class PairingVault(
                 throw IllegalStateException("저장된 페어링 키 길이가 올바르지 않습니다")
             }
             StoredPairing(pending.metadata, secret)
+        } catch (error: KeyPermanentlyInvalidatedException) {
+            throw recoverFromKeyInvalidation(pending.policy, error)
         } finally {
             pending.close()
         }
+    }
+
+    /**
+     * A biometric alias is shared by every biometric envelope. Once Android
+     * invalidates it none of those records can be recovered, and retaining the
+     * alias would make even a newly scanned invitation fail on the same key.
+     */
+    @Synchronized
+    internal fun recoverInvalidatedBiometricKey() {
+        if (protectionPolicy() != PairingProtectionPolicy.BIOMETRIC) {
+            throw IllegalStateException("생체 보호 정책이 아닙니다")
+        }
+        val editor = preferences.edit()
+        pairingKeys().forEach(editor::remove)
+        if (!editor.commit()) {
+            throw IllegalStateException("무효화된 생체 키의 페어링 정보를 삭제하지 못했습니다")
+        }
+        val keyStore = androidKeyStore()
+        val alias = aliasFor(PairingProtectionPolicy.BIOMETRIC)
+        if (keyStore.containsAlias(alias)) keyStore.deleteEntry(alias)
     }
 
     @Synchronized
@@ -408,6 +406,27 @@ class PairingVault(
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(builder.build())
         return generator.generateKey()
+    }
+
+    private fun initializeEncryptionCipher(policy: PairingProtectionPolicy): Cipher =
+        Cipher.getInstance(CIPHER_TRANSFORMATION).apply {
+            init(Cipher.ENCRYPT_MODE, getOrCreateWrappingKey(policy))
+        }
+
+    private fun recoverFromKeyInvalidation(
+        policy: PairingProtectionPolicy,
+        cause: KeyPermanentlyInvalidatedException,
+    ): PairingKeyInvalidatedException {
+        if (policy != PairingProtectionPolicy.BIOMETRIC) {
+            return PairingKeyInvalidatedException(cause, recoverySucceeded = false)
+        }
+        return try {
+            recoverInvalidatedBiometricKey()
+            PairingKeyInvalidatedException(cause, recoverySucceeded = true)
+        } catch (recoveryError: Exception) {
+            cause.addSuppressed(recoveryError)
+            PairingKeyInvalidatedException(cause, recoverySucceeded = false)
+        }
     }
 
     private fun getWrappingKey(policy: PairingProtectionPolicy): SecretKey =
