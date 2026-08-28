@@ -55,7 +55,10 @@ Android native가 실패 문서를 렌더링하지 않고 session을 닫은 뒤 
 stale document로 취소된 fetch도 unavailable 응답과 구분해 session·document를 보존한다.
 pairing seed wrapping key는 기본적으로 강한 생체 인증을 암호 연산마다 요구하며, 명시적으로
 끄는 경우에만 별도 Keystore-only key를 사용한다. 상태 UI는 비밀이 아닌 pairing metadata만
-읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다.
+읽으므로 앱을 열거나 상태를 표시할 때는 생체 인증을 띄우지 않는다. 지문 등 등록 생체가
+바뀌어 Android가 공유 biometric wrapping key를 영구 무효화하면 다음 암호 연산에서 이를
+감지해 그 키로 감싼 모든 PC pairing과 무효 alias를 함께 폐기한다. 새 QR/붙여넣기 저장 중
+감지한 경우에는 같은 입력에서 새 biometric key를 생성해 재pairing을 계속한다.
 데스크톱 Remote Access 모달은 cloud identity에 결합된 seed를 Rust에서 만들고 OS keyring에
 보관한 뒤 같은 5분짜리 초대를 QR SVG와 명시적 clipboard 복사 action으로 제공한다. Android는 QR을
 스캔하거나 사용자가 붙여넣은 동일 초대를 검증한 뒤 seed로 서명한 ACK를 cloud public origin의
