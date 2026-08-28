@@ -260,7 +260,8 @@ test.describe("remote mobile layout", () => {
     const terminalMeta = page.locator("#terminalMeta");
 
     await expect(page.locator("#keyBar")).toBeHidden();
-    await expect(terminalMeta).toBeHidden();
+    await expect(terminalMeta).toHaveClass("sr-only");
+    await expect(footer.locator(":scope > #terminalMeta")).toHaveCount(0);
     expect((await footer.boundingBox())?.height).toBeLessThan(50);
     const footerButtons = await footer.locator("button:not([hidden])").evaluateAll((buttons) =>
       buttons.map((button) => ({
@@ -288,6 +289,28 @@ test.describe("remote mobile layout", () => {
       Math.max(...narrowFooter.buttonWidths) - Math.min(...narrowFooter.buttonWidths),
     ).toBeLessThan(0.1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
+  });
+
+  test("keeps terminal metadata out of the footer in wide landscape", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 390 });
+
+    await expect(page.locator("#mainActionRow")).toBeVisible();
+    await expect(page.locator("footer > #terminalMeta")).toHaveCount(0);
+    const terminalMetaStyle = await page.locator("#terminalMeta").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        position: style.position,
+        width: style.width,
+        height: style.height,
+        clip: style.clip,
+      };
+    });
+    expect(terminalMetaStyle).toEqual({
+      position: "absolute",
+      width: "1px",
+      height: "1px",
+      clip: "rect(0px, 0px, 0px, 0px)",
+    });
   });
 
   test("confines horizontal scrolling to the soft-key row", async ({ page }) => {
