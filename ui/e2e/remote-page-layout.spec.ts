@@ -527,6 +527,10 @@ test.describe("remote mobile layout", () => {
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
+    // Settings opens on its own tabbed pages; Input bar is the first.
+    await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
+    await expect(page.locator("#displaySection")).toBeHidden();
+    await page.locator('#settingsTabs [data-settings-panel="display"]').click();
     await expect(page.locator("#displaySection")).toBeVisible();
     await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
 

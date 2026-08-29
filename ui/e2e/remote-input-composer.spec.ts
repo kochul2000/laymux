@@ -647,6 +647,9 @@ async function openRemoteSettings(page: Page) {
   }
   await settings.click();
   await expect(page.locator("#drawerSettingsView")).toBeVisible();
+  // Settings is paginated; the composer toggles live on their own tab.
+  await page.locator('#settingsTabs [data-settings-panel="composer"]').click();
+  await expect(page.locator("#settingsPanelComposer")).toBeVisible();
 }
 
 async function expectedComposerHiddenDistance(page: Page, configuredLines: number) {
