@@ -93,6 +93,48 @@ afterEach(() => {
 });
 
 describe("wheel sensitivity in application-owned terminal modes", () => {
+  it("emits VT200 DEFAULT mouse reports only through onBinary", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const binary: string[] = [];
+    const data: string[] = [];
+    terminal.onBinary((chunk) => binary.push(chunk));
+    terminal.onData((chunk) => data.push(chunk));
+    await writeTerminal(terminal, "\x1b[?1000h");
+
+    terminal.element!.querySelector<HTMLElement>(".xterm-screen")!.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 1,
+        clientY: 1,
+      }),
+    );
+
+    expect(binary).toEqual(["\x1b[M !!"]);
+    expect(data).toEqual([]);
+  });
+
+  it("suppresses DEFAULT onBinary mouse reports while stdin is disabled", async () => {
+    const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
+    const binary: string[] = [];
+    terminal.onBinary((chunk) => binary.push(chunk));
+    terminal.options.disableStdin = true;
+    await writeTerminal(terminal, "\x1b[?1000h");
+
+    terminal.element!.querySelector<HTMLElement>(".xterm-screen")!.dispatchEvent(
+      new MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 1,
+        clientY: 1,
+      }),
+    );
+
+    expect(binary).toEqual([]);
+  });
+
   it("repeats mouse reports by the Alt fast-scroll multiplier", async () => {
     const terminal = mountWheelTerminal({ scrollSensitivity: 1, fastScrollSensitivity: 5 });
     const reports: string[] = [];

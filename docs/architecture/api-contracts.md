@@ -1856,6 +1856,8 @@ pub fn get_terminal_summaries_inner(
 
 **실행 컨텍스트**: 커맨드 본문이 파일시스템·프로세스 spawn·시스템 자원 열거(폰트·포트 등)에 닿으면 `#[tauri::command(async)]` 로 선언한다. sync 함수에 붙인 plain `#[tauri::command]` 는 `tauri-macros` 에서 `ExecutionContext::Blocking` 이라 본문이 앱의 main/event-loop 스레드에서 인라인 실행되고, 느린 대상(UNC·네트워크 경로, 차가운 `wsl.exe`, `netstat`)이 그대로 창 정지가 된다. `(async)` 는 sync 함수를 `sync_threadpool` 로 보내며 `invoke` 계약은 그대로다. 인메모리 상태만 만지는 커맨드와 터미널 입력/프로토콜 쓰기처럼 IPC 도착 순서가 곧 직렬화인 커맨드는 plain 으로 남긴다. 이 선택은 런타임에 관측되지 않으므로 `commands::main_thread_io` 의 표가 소스에서 어트리뷰트를 고정한다 — 커맨드를 추가·개명하면 표도 갱신한다 (ADR-0202).
 
+**xterm binary mouse 입력**: desktop 전용 `write_terminal_binary_input(id, generation, data: number[])`은 xterm 6.0.0 DEFAULT mouse `onBinary`의 `CSI M Pb Px Py`를 문자열 UTF-8 경계 없이 전달한다([ADR-0216](../adr/0216-xterm-legacy-mouse-binary-input-boundary.md)). UI는 각 code unit이 `0x00..0xff`인지 검사하고 Rust는 정확한 6바이트 형식, current PTY generation과 Local human-control owner를 다시 검증한다. command는 입력 IPC/FIFO 순서를 유지하는 plain command이며 Automation/Remote API에는 노출하지 않는다. Linux는 payload의 모든 바이트를 보존하고, Windows는 UTF-8인 ConPTY 경계에서 바뀌는 `0x80..0xff` payload를 enqueue 전에 거부한다. 실패는 재시도하지 않는 human-input delivery failure이며 SGR `onData`, protocol reply, replay와 최근 사용자 입력 모델에는 영향을 주지 않는다.
+
 **메인 스레드 직렬화에 기대지 않기**: threadpool 로 옮긴 커맨드는 동시에 실행될 수 있다. 같은 파일을 쓰는 경로는 명시적 게이트가 필요하다 — settings.json 은 `SETTINGS_WRITE_LOCK` 으로 직렬화하고 임시 파일 + `fs::rename` 으로 교체한다(이 게이트는 §14.3 의 leaf 락이다 — 보유 중에 다른 락을 잡지 않는다). pane 별 출력 캐시나 창 지오메트리처럼 파일당 writer 가 하나인 경로는 게이트를 두지 않는다.
 
 **`pub use` 재수출**: `commands/mod.rs`는 서브모듈을 `pub use *`로 재수출하여, `lib.rs`의 `generate_handler![]` 매크로가 `commands::function_name`으로 참조할 수 있게 한다. 서브모듈 분할 시에도 외부 인터페이스는 변하지 않는다.

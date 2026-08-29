@@ -110,6 +110,15 @@ pub const COLORTERM_TRUECOLOR: &str = "truecolor";
 /// trace logs are only useful when diagnosing cursor/flicker issues.
 pub const ENV_LAYMUX_PTY_TRACE: &str = "LAYMUX_PTY_TRACE";
 
+/// xterm's DEFAULT mouse encoding is the fixed-width `CSI M Pb Px Py`
+/// binary report. `onBinary` currently emits only this encoding.
+pub const XTERM_DEFAULT_MOUSE_REPORT_PREFIX: &[u8; 3] = b"\x1b[M";
+pub const XTERM_DEFAULT_MOUSE_REPORT_LEN: usize = 6;
+/// ConPTY's pseudoconsole channel is UTF-8, so only single-byte UTF-8 values
+/// can cross it without changing the fixed-width DEFAULT mouse report.
+#[cfg(windows)]
+pub const XTERM_DEFAULT_MOUSE_CONPTY_MAX_BYTE: u8 = 0x7f;
+
 /// Enables a diagnostic path where the UI tracer ships batched
 /// shadow-cursor events to the Rust side via a single `invoke` per
 /// `requestAnimationFrame` — the server-side stream is the same

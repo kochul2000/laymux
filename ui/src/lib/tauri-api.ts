@@ -88,6 +88,26 @@ export async function writeToTerminal(id: string, data: string): Promise<void> {
   return invoke("write_to_terminal", { id, data });
 }
 
+/**
+ * Preserve xterm's binary-string contract across JSON IPC. Each UTF-16 code
+ * unit represents one raw byte; passing the string itself would UTF-8 encode
+ * values above 0x7f in Rust's `String::as_bytes()` path.
+ */
+export async function writeTerminalBinaryInput(
+  id: string,
+  generation: number,
+  binary: string,
+): Promise<void> {
+  const data = Array.from(binary, (character) => {
+    const value = character.charCodeAt(0);
+    if (value > 0xff) {
+      throw new Error("xterm binary input contains a non-byte code unit");
+    }
+    return value;
+  });
+  return invoke("write_terminal_binary_input", { id, generation, data });
+}
+
 export async function writeTerminalProtocolReply(
   id: string,
   generation: number,
