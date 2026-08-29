@@ -642,7 +642,7 @@ Android 앱은 같은 브랜치의 별도 파일로 자기 채널을 따라가�
 
 Ctrl+Alt+L(및 워크스페이스 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear`)은 한 워크스페이스의 `TerminalView` pane 전부에 Ctrl+L 키 입력 하나를 그대로 뿌린다(issue #726, [ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) — pane마다 손으로 Ctrl+L을 누르는 것과 동일하고, 설정 항목은 없다.
 
-Alt+L(`pane.clearTerminal`)과 `POST /api/v1/panes/{paneId}/clear`는 포커스된 terminal pane 하나에 activity별 실제 클리어를 적용한다([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)). shell은 `paneClear.shellCommand`, Claude·Codex·Grok은 `/clear`를 제출한다. 등록되지 않은 interactive app은 문자열을 잘못 입력하지 않도록 skip한다. 격자와 dock pane을 모두 지원하고, 비터미널 pane의 단축키는 no-op, Automation 호출은 오류다.
+Alt+L(`pane.clearTerminal`), terminal pane 컨트롤 바의 빗자루 버튼, `POST /api/v1/panes/{paneId}/clear`는 대상 terminal pane 하나에 activity별 실제 클리어를 적용한다([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)). 단축키는 포커스된 pane을, 버튼과 Automation은 명시한 pane을 대상으로 한다. shell은 `paneClear.shellCommand`, Claude·Codex·Grok은 `/clear`를 제출한다. 등록되지 않은 interactive app은 문자열을 잘못 입력하지 않도록 skip한다. 격자와 dock pane을 모두 지원하고, 비터미널 pane의 단축키는 no-op, Automation 호출은 오류다.
 
 ```jsonc
 {

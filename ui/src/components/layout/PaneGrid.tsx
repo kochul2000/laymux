@@ -20,6 +20,7 @@ import {
   type TerminalRestartRequest,
 } from "@/stores/terminal-restart-store";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
+import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 export interface GridPane {
   id: string;
@@ -273,6 +274,12 @@ export function PaneGrid({
                   : undefined,
                 onSplitH: onSplitPane ? () => onSplitPane(pane.id, "horizontal") : undefined,
                 onSplitV: onSplitPane ? () => onSplitPane(pane.id, "vertical") : undefined,
+                onClearTerminal:
+                  pane.view.type === "TerminalView"
+                    ? () => {
+                        void runPaneClearFromUi(pane.id);
+                      }
+                    : undefined,
                 onClear: onSetPaneView
                   ? () => onSetPaneView(pane.id, { type: "EmptyView" })
                   : undefined,
