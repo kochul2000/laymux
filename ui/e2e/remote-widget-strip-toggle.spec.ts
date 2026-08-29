@@ -224,6 +224,8 @@ async function openDrawerSettings(page: Page) {
     await navigationToggle.click();
   }
   await settings.click();
+  // Settings is paginated; the widget bar toggle lives on the Display tab.
+  await page.locator('#settingsTabs [data-settings-panel="display"]').click();
 }
 
 test("the drawer toggle takes the widget bar down and gives the rows back", async ({ page }) => {

@@ -2,6 +2,34 @@ import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { installRemoteClientRoutes, remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
 /**
+ * Seed a v2 key-bar layout placing `softKeyIds` in the Keys row. Placement is
+ * the only activation signal, so a test that drives a specific key has to put
+ * it on the bar first.
+ */
+async function seedKeyBar(page: Page, softKeyIds: string[], expanded = true) {
+  await page.addInitScript(
+    ({ keys, open }) => {
+      localStorage.setItem(
+        "laymux.remote.keybar",
+        JSON.stringify({
+          expanded: open,
+          userKeys: [],
+          zones: {
+            main: { left: [], center: [], right: ["keyboard", "keys", "composer"] },
+            expanded: {
+              left: keys.map((id: string) => `soft:${id}`),
+              center: [],
+              right: [],
+            },
+          },
+        }),
+      );
+    },
+    { keys: softKeyIds, open: expanded },
+  );
+}
+
+/**
  * Serve the real remote page against a fixed navigation snapshot: active
  * workspace `ws-a` with two terminal panes (p-a1, p-a2) plus an inactive
  * `ws-b` whose pane/status summary remains visible. Spatial step requests are
@@ -269,7 +297,9 @@ test.describe("remote mobile layout", () => {
         minWidth: getComputedStyle(button).minWidth,
       })),
     );
-    expect(footerButtons).toHaveLength(3);
+    // Without the client script only the statically-marked-up right segment
+    // shows: Keyboard and Keys.
+    expect(footerButtons).toHaveLength(2);
     const widths = footerButtons.map(({ width }) => width);
     expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.1);
     expect(footerButtons.every(({ minWidth }) => minWidth === "54px")).toBe(true);
@@ -278,16 +308,15 @@ test.describe("remote mobile layout", () => {
     await page.setViewportSize({ width: 180, height: 844 });
     const narrowFooter = await footer.locator("#mainActionRow").evaluate((element) => ({
       clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
       buttonWidths: Array.from(
         element.querySelectorAll("button:not([hidden])"),
         (button) => button.getBoundingClientRect().width,
       ),
     }));
-    expect(narrowFooter.scrollWidth).toBeGreaterThan(narrowFooter.clientWidth);
     expect(
       Math.max(...narrowFooter.buttonWidths) - Math.min(...narrowFooter.buttonWidths),
     ).toBeLessThan(0.1);
+    // Whatever the row does internally, the document never scrolls sideways.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(180);
   });
 
@@ -317,7 +346,7 @@ test.describe("remote mobile layout", () => {
   });
 
   test("confines horizontal scrolling to the soft-key row", async ({ page }) => {
-    await page.locator("#keyRow").evaluate((row) => {
+    await page.locator('#keyRow > [data-segment="left"]').evaluate((row) => {
       for (const label of [
         "Esc",
         "Tab",
@@ -347,8 +376,9 @@ test.describe("remote mobile layout", () => {
       scrollbarWidth: getComputedStyle(row).scrollbarWidth,
       webkitScrollbarDisplay: getComputedStyle(row, "::-webkit-scrollbar").display,
       settingsInsideRow: row.querySelector("#keyBarSettings") !== null,
-      buttonRows: new Set(Array.from(row.children, (child) => (child as HTMLElement).offsetTop))
-        .size,
+      buttonRows: new Set(
+        Array.from(row.querySelectorAll(".key-btn"), (child) => (child as HTMLElement).offsetTop),
+      ).size,
     }));
 
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
@@ -364,7 +394,7 @@ test.describe("remote mobile layout", () => {
 
   test("keeps the key-bar height stable across empty and populated states", async ({ page }) => {
     const keyBar = page.locator("#keyBar");
-    const keyRow = page.locator("#keyRow");
+    const keyRow = page.locator('#keyRow > [data-segment="left"]');
     await keyBar.evaluate((bar) => {
       bar.hidden = false;
     });
@@ -399,6 +429,7 @@ test.describe("remote mobile layout", () => {
         body: "<!doctype html><title>remote test</title>",
       }),
     );
+    await seedKeyBar(page, ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"], false);
     await page.goto("http://remote.test/");
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#keyBarToggle").click();
@@ -406,8 +437,8 @@ test.describe("remote mobile layout", () => {
     // No dedicated bar row — the keys live in the toggleable key bar.
     await expect(page.locator("#navStepBar")).toHaveCount(0);
 
-    // Default "step" set: 4-way nav flick pad + four step keys, rendered
-    // ahead of the escape-sequence keys.
+    // The flick pad ships placed by default; the individual step keys are
+    // placed here because placement is what activates a key.
     const navPad = page.locator('[data-key="navPad"]');
     await expect(navPad).toHaveCount(1);
     await expect(navPad).toHaveAttribute(
@@ -496,6 +527,10 @@ test.describe("remote mobile layout", () => {
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator("#drawerBack")).toBeFocused();
     await expect(page.locator("#drawerSettingsView")).toBeVisible();
+    // Settings opens on its own tabbed pages; Input bar is the first.
+    await expect(page.locator("#settingsPanelInputBar")).toBeVisible();
+    await expect(page.locator("#displaySection")).toBeHidden();
+    await page.locator('#settingsTabs [data-settings-panel="display"]').click();
     await expect(page.locator("#displaySection")).toBeVisible();
     await expect(page.locator("#drawerWorkspaceView")).toBeHidden();
 
@@ -583,6 +618,7 @@ test.describe("remote mobile layout", () => {
     });
     await page.routeWebSocket(/\/remote\/v1\/terminals\/term-a\/output/, () => {});
 
+    await seedKeyBar(page, ["navPrev", "navNext"], false);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
 
@@ -635,6 +671,7 @@ test.describe("remote mobile layout", () => {
     const spatialBodies: Array<{ excludedPaneIds: string[]; excludedWorkspaceIds: string[] }> = [];
     await routeRemoteWithWorkspaces(page, spatialBodies);
 
+    await seedKeyBar(page, ["navPrev", "navNext"], false);
     await page.goto("http://remote.test/remote/#token=test-token");
     await page.locator("#connect").click();
     await page.locator("#navToggle").click();
@@ -1091,92 +1128,6 @@ test.describe("remote mobile layout", () => {
     }
   });
 
-  test("drags visible soft keys and offers accessible order controls", async ({ page }) => {
-    await page.route("http://remote.test/", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: "<!doctype html><title>remote test</title>",
-      }),
-    );
-    await page.goto("http://remote.test/");
-    await page.evaluate(() => {
-      localStorage.setItem(
-        "laymux.remote.keybar",
-        JSON.stringify({ visible: true, sets: [], custom: ["tab", "enter"] }),
-      );
-    });
-    await page.setContent(remoteClientMarkupWithoutXterm());
-
-    const renderedKeyIds = () =>
-      page
-        .locator("#keyRow .key-btn")
-        .evaluateAll((buttons) =>
-          buttons.map((button) => (button as HTMLButtonElement).dataset.key),
-        );
-    await expect.poll(renderedKeyIds).toEqual(["tab", "enter"]);
-
-    await page.locator("#drawerSettingsButton").click();
-    await expect(page.locator("#inputLayoutEditor")).toContainText("Key order");
-    await page.locator(".key-chip").filter({ hasText: "Esc" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["tab", "enter", "esc"]);
-
-    const orderSection = page.locator("#inputLayoutEditor > .key-order-section");
-    await expect(orderSection).toHaveCount(1);
-    expect(
-      await orderSection.evaluate((section) => section === section.parentElement?.lastElementChild),
-    ).toBe(true);
-    const paletteEscBox = await page
-      .locator(".key-chip:not(.key-order-chip)")
-      .filter({ hasText: "Esc" })
-      .boundingBox();
-    const orderEscBox = await page.locator('.key-order-chip[data-order-key="esc"]').boundingBox();
-    expect(paletteEscBox).not.toBeNull();
-    expect(orderEscBox).not.toBeNull();
-    expect(Math.abs(orderEscBox!.width - paletteEscBox!.width)).toBeLessThan(0.1);
-    expect(Math.abs(orderEscBox!.height - paletteEscBox!.height)).toBeLessThan(0.1);
-
-    const escOrderChip = page.locator('.key-order-chip[data-order-key="esc"]');
-    const tabOrderChip = page.locator('.key-order-chip[data-order-key="tab"]');
-    // The order section sits at the end of the popover's scroll area, so on a
-    // short viewport the chips start outside it. Raw mouse coordinates do not
-    // scroll the way `click()` does — without this the drag lands on nothing.
-    await escOrderChip.scrollIntoViewIfNeeded();
-    await tabOrderChip.scrollIntoViewIfNeeded();
-    const escBox = await escOrderChip.boundingBox();
-    const tabBox = await tabOrderChip.boundingBox();
-    expect(escBox).not.toBeNull();
-    expect(tabBox).not.toBeNull();
-    await page.mouse.move(escBox!.x + escBox!.width / 2, escBox!.y + escBox!.height / 2);
-    await page.mouse.down();
-    await page.waitForTimeout(250);
-    await expect(escOrderChip).toHaveClass(/dragging/);
-    await page.mouse.move(tabBox!.x + 2, tabBox!.y + tabBox!.height / 2, { steps: 4 });
-    await expect(tabOrderChip).toHaveClass(/drop-before/);
-    await page.mouse.up();
-
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
-    await expect
-      .poll(() =>
-        page.evaluate(() => {
-          const stored = JSON.parse(localStorage.getItem("laymux.remote.keybar") || "{}");
-          return stored.order.filter((id: string) => ["esc", "tab", "enter"].includes(id));
-        }),
-      )
-      .toEqual(["esc", "tab", "enter"]);
-
-    await page.reload();
-    await page.setContent(remoteClientMarkupWithoutXterm());
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
-
-    await page.locator("#drawerSettingsButton").click();
-    await page.locator('.key-order-chip[data-order-key="enter"]').click();
-    await expect(page.locator(".key-order-actions")).toBeVisible();
-    await page.getByRole("button", { name: "Move Enter to start" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["enter", "esc", "tab"]);
-    await page.getByRole("button", { name: "Reset key order" }).click();
-    await expect.poll(renderedKeyIds).toEqual(["esc", "tab", "enter"]);
-  });
-
   test("routes the first real xterm touch to Composer before snapshot readiness", async ({
     page,
   }) => {
@@ -1257,9 +1208,56 @@ test.describe("remote mobile layout", () => {
     let outputSocket: WebSocketRoute | null = null;
     await page.addInitScript(() => {
       localStorage.setItem("laymux.remote.inputMode", "direct");
+      // Placement is activation: every key this test drives has to be on the
+      // Keys row, in the order the assertion below expects.
       localStorage.setItem(
         "laymux.remote.keybar",
-        JSON.stringify({ visible: true, sets: ["nav", "edit", "ctrl", "fn"], custom: [] }),
+        JSON.stringify({
+          expanded: true,
+          userKeys: [],
+          zones: {
+            main: { left: [], center: [], right: ["keyboard", "keys"] },
+            expanded: {
+              left: [
+                "esc",
+                "tab",
+                "stab",
+                "dpad",
+                "up",
+                "down",
+                "left",
+                "right",
+                "home",
+                "end",
+                "enter",
+                "bksp",
+                "ins",
+                "del",
+                "pgup",
+                "pgdn",
+                "c-c",
+                "c-j",
+                "c-l",
+                "c-t",
+                "c-u",
+                "f1",
+                "f2",
+                "f3",
+                "f4",
+                "f5",
+                "f6",
+                "f7",
+                "f8",
+                "f9",
+                "f10",
+                "f11",
+                "f12",
+              ].map((id) => `soft:${id}`),
+              center: [],
+              right: [],
+            },
+          },
+        }),
       );
     });
     await installRemoteClientRoutes(page);
@@ -1323,17 +1321,11 @@ test.describe("remote mobile layout", () => {
       { id: "del", sequence: "\x1b[3~" },
       { id: "pgup", sequence: "\x1b[5~" },
       { id: "pgdn", sequence: "\x1b[6~" },
-      { id: "c-a", sequence: "\x01" },
       { id: "c-c", sequence: "\x03" },
-      { id: "c-d", sequence: "\x04" },
-      { id: "c-e", sequence: "\x05" },
-      { id: "c-k", sequence: "\x0b" },
+      { id: "c-j", sequence: "\n" },
       { id: "c-l", sequence: "\x0c" },
-      { id: "c-r", sequence: "\x12" },
       { id: "c-t", sequence: "\x14" },
       { id: "c-u", sequence: "\x15" },
-      { id: "c-w", sequence: "\x17" },
-      { id: "c-z", sequence: "\x1a" },
       { id: "f1", sequence: "\x1bOP" },
       { id: "f2", sequence: "\x1bOQ" },
       { id: "f3", sequence: "\x1bOR" },
@@ -1375,17 +1367,11 @@ test.describe("remote mobile layout", () => {
       "del",
       "pgup",
       "pgdn",
-      "c-a",
       "c-c",
-      "c-d",
-      "c-e",
-      "c-k",
+      "c-j",
       "c-l",
-      "c-r",
       "c-t",
       "c-u",
-      "c-w",
-      "c-z",
       "f1",
       "f2",
       "f3",
@@ -1689,7 +1675,7 @@ test.describe("remote mobile layout", () => {
       state.__releaseScrollReplay = undefined;
       release?.();
     });
-    await page.locator("#ctrlC").click();
+    await page.locator('[data-key="c-c"]').click();
     await expect.poll(() => writes.includes("\x03")).toBe(true);
     expect(writes).toEqual(["\x03"]);
   });
@@ -1802,7 +1788,7 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     await page.locator("#token").fill("test-token");
     await page.locator("#connect").click();
-    await expect(page.locator("#ctrlC")).toBeEnabled();
+    await expect(page.locator('[data-key="c-c"]')).toBeEnabled();
 
     await page.evaluate(() => {
       const testWindow = window as Window & {
@@ -1849,8 +1835,9 @@ test.describe("remote mobile layout", () => {
     await page.setContent(remoteClientMarkupWithoutXterm());
     const app = page.locator(".app");
 
-    // Default sets: "step" (5 nav keys) + "nav" (10 escape keys).
-    await expect(page.locator("#keyRow .key-btn")).toHaveCount(15);
+    // Default Keys row placement: navPad + Esc/Tab/Shift+Tab/flick pad on the
+    // left, ^J ^U ^T ^L on the right.
+    await expect(page.locator("#keyRow .key-btn")).toHaveCount(9);
     await expect(page.locator("#keyBar")).toBeHidden();
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();

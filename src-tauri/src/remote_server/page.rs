@@ -94,6 +94,33 @@ const REMOTE_PAGE_CSP_TEMPLATE: &str = include_str!("page-csp.txt");
 
 const WS_SOURCES_PLACEHOLDER: &str = "__WS_SOURCES__";
 
+const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
+
+/// What ships if even the template's own constant form will not encode. It has
+/// to name `frame-ancestors` itself: `default-src` does not cover that
+/// directive, so `default-src 'none'` alone would leave the page framable by
+/// anyone (ADR-0215).
+const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
+
+/// The origins the desktop shell's own WebView serves the app from, and the
+/// only ones allowed to frame this page (ADR-0215). Mobile mode embeds
+/// `/remote/?localApp=1` in an iframe inside that WebView, so a blanket
+/// `frame-ancestors 'none'` (ADR-0183) left the user staring at a blank
+/// overlay. `'self'` would not help: the embedder is the app origin, not the
+/// remote server's. Everything outside this list — every real web page — is
+/// still refused, so the clickjacking boundary the directive exists for holds.
+///
+/// `tauri://localhost` is the Linux/macOS WebView origin, `http://tauri.localhost`
+/// the Windows (WebView2) one. The Android app is not on this list and does not
+/// need to be: its wrapper loads the shell as a top-level document over HTTPS
+/// (ADR-0149), never framed. The Vite dev origin is compiled in only for debug
+/// builds; a shipped binary must not trust whatever answers on port 1420.
+const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
+    "tauri://localhost http://tauri.localhost http://localhost:1420"
+} else {
+    "tauri://localhost http://tauri.localhost"
+};
+
 /// The document carries the policy the Remote viewer document already had
 /// (ADR-0041), so host file bytes are never rendered by a document without one.
 /// `script-src 'self'` is the boundary that matters: the shell has no inline
@@ -107,10 +134,13 @@ pub(super) fn secure_page_response(
     mut response: Response,
     request_headers: &HeaderMap,
 ) -> Response {
-    let policy = REMOTE_PAGE_CSP_TEMPLATE.trim_end().replace(
-        WS_SOURCES_PLACEHOLDER,
-        &websocket_csp_sources(request_headers),
-    );
+    let policy = REMOTE_PAGE_CSP_TEMPLATE
+        .trim_end()
+        .replace(
+            WS_SOURCES_PLACEHOLDER,
+            &websocket_csp_sources(request_headers),
+        )
+        .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS);
     let headers = response.headers_mut();
     // Fail closed. `is_bare_authority` should make an unencodable value
     // impossible, but "the validator let something through" must not be the one
@@ -121,10 +151,11 @@ pub(super) fn secure_page_response(
             HeaderValue::from_str(
                 &REMOTE_PAGE_CSP_TEMPLATE
                     .trim_end()
-                    .replace(WS_SOURCES_PLACEHOLDER, ""),
+                    .replace(WS_SOURCES_PLACEHOLDER, "")
+                    .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS),
             )
         })
-        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
+        .unwrap_or_else(|_| HeaderValue::from_static(LAST_RESORT_CSP));
     headers.insert(header::CONTENT_SECURITY_POLICY, value);
     headers.insert(
         header::REFERRER_POLICY,
@@ -578,6 +609,31 @@ mod tests {
         assert!(settings_view.contains("id=\"displaySection\""));
         assert!(settings_view.contains("id=\"pcUpdateSection\""));
         assert!(settings_view.contains("id=\"installSection\""));
+        // Settings is paginated: one tablist, one panel per subject.
+        assert!(
+            settings_view.contains("id=\"settingsTabs\" class=\"settings-tabs\" role=\"tablist\"")
+        );
+        for panel in ["inputBar", "composer", "display", "app"] {
+            assert!(
+                settings_view.contains(&format!("role=\"tab\" data-settings-panel=\"{panel}\"")),
+                "settings tab for {panel} is missing"
+            );
+            assert!(
+                settings_view.contains(&format!(
+                    "class=\"settings-panel\" role=\"tabpanel\" data-settings-panel=\"{panel}\""
+                )),
+                "settings panel for {panel} is missing"
+            );
+        }
+        // Composer settings render in their own panel, not inside the input bar.
+        assert!(settings_view.contains("id=\"composerSettingsEditor\""));
+        // A dot on the drawer button alone would point at a page the reader
+        // cannot see once Settings opens on whichever tab they used last, so
+        // the update dot rides down to the tab that holds the update.
+        assert!(html.contains(
+            "settingsAppTabButton.classList.toggle(\"update-available\", Boolean(availableVersion));"
+        ));
+        assert!(html.contains(".settings-tab.update-available::after"));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
@@ -945,6 +1001,12 @@ mod tests {
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
+        // The embed greets the PC app's overlay so a frame that never came up
+        // is distinguishable from one that did — a refused embed still fires
+        // `load`, so this is the host's only proof (#955, ADR-0215).
+        assert!(html.contains(
+            "if (localAppMode) window.parent.postMessage({ type: \"laymux:mobile-mode-ready\" }, \"*\");"
+        ));
         assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
         assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
         assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
@@ -1214,30 +1276,30 @@ mod tests {
         assert!(html.contains("laymux.remote.keybar"));
         assert!(html.contains("const DEFAULT_KEYBAR = {"));
         assert!(html.contains("expanded: false,"));
-        assert!(html.contains("sets: [\"step\", \"nav\"],"));
-        assert!(html.contains("order: KEY_ORDER,"));
-        // Predefined sets are selectable and a custom palette exists.
+        // Placement is the only activation signal: no key sets, no custom
+        // custom-key toggle, no separate order projection.
+        assert!(!html.contains("const KEY_SETS = ["));
+        assert!(!html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(!html.contains("order: KEY_ORDER,"));
+        assert!(!html.contains("function resolveKeyIds()"));
+        assert!(html.contains("const KEY_CATEGORIES = ["));
         assert!(html.contains("id: \"nav\", name: \"Navigation\""));
         assert!(html.contains("id: \"ctrl\", name: \"Ctrl keys\""));
         assert!(html.contains("id: \"fn\", name: \"Function\""));
-        assert!(html.contains("function resolveKeyIds()"));
         assert!(html.contains("function renderKeyPopover()"));
-        // Every enabled key appears in a compact sortable grid. Long-press drag
-        // is the primary path; selection exposes keyboard/accessibility moves.
-        assert!(html.contains("function moveKey(id, offset)"));
-        assert!(html.contains("return keyBarConfig.order.filter((id) => enabled.has(id));"));
+        assert!(html.contains("function renderInputLayoutEditor()"));
+        // Chips move by long-press drag across segments, rows, and the hidden section;
+        // selection exposes the keyboard/accessibility moves.
         assert!(html.contains("const KEY_ORDER_HOLD_MS = 180;"));
-        assert!(html.contains("function installKeyOrderDrag(chip, id)"));
+        assert!(html.contains("function installChipDrag(chip, actionId)"));
         assert!(html.contains("chip.classList.add(\"dragging\");"));
         assert!(html.contains(
-            "target.classList.add(gesture.afterTarget ? \"drop-after\" : \"drop-before\");"
+            "drop.element.classList.add(drop.after ? \"drop-after\" : \"drop-before\");"
         ));
-        assert!(html.contains("title.textContent = \"Key order\";"));
-        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset key order\");"));
-        assert!(html.contains("`Move ${accessibleName} to start`"));
-        assert!(html.contains("function appendKeyToVisibleEnd(id, visibleIds)"));
-        assert!(html.contains("section.className = \"key-order-section\";"));
-        assert!(html.contains("chip.className = \"key-chip key-order-chip\";"));
+        assert!(html.contains("function installSettingsTabs()"));
+        assert!(html.contains("reset.setAttribute(\"aria-label\", \"Reset input action layout\");"));
+        assert!(html.contains("`Move ${hint} to start`"));
+        assert!(html.contains("chip.className = \"key-chip layout-chip\";"));
         // Keys reuse the existing write path via enqueueInput, no new API.
         assert!(html.contains("function sendKey(id, button = null)"));
         assert!(html.contains("if (seq) enqueueInput(seq);"));
@@ -1282,30 +1344,90 @@ mod tests {
         assert!(html.contains("keyBar.hidden = !keysVisible || !keyBarConfig.expanded;"));
     }
 
+    /// Built-in Ctrl combinations are exactly ^C ^J ^U ^T ^L; the rest of the
+    /// alphabet is registered by the user instead of shipping unused.
     #[test]
-    fn remote_page_html_contains_three_zone_input_layout_settings() {
+    fn remote_page_html_ships_five_builtin_ctrl_keys_and_user_key_registration() {
+        let html = remote_client_source();
+
+        assert!(html.contains("\"c-c\": { label: \"^C\", seq: \"\\x03\""));
+        assert!(html.contains("\"c-j\": { label: \"^J\", seq: \"\\n\""));
+        assert!(html.contains("\"c-u\": { label: \"^U\", seq: \"\\x15\""));
+        assert!(html.contains("\"c-t\": { label: \"^T\", seq: \"\\x14\""));
+        assert!(html.contains("\"c-l\": { label: \"^L\", seq: \"\\x0c\""));
+        for removed in [
+            "\"c-a\"", "\"c-d\"", "\"c-e\"", "\"c-k\"", "\"c-r\"", "\"c-w\"", "\"c-z\"",
+        ] {
+            assert!(!html.contains(removed), "{removed} should no longer ship");
+        }
+        // The dedicated Ctrl+C button is gone: it duplicated the ^C soft key with
+        // a different label for the same bytes.
+        assert!(!html.contains("id=\"ctrlC\""));
+        assert!(!html.contains("\"ctrl-c\""));
+        assert!(html.contains("\"soft:c-c\""));
+
+        // User keys share the built-in lookup, so they ride the same send path.
+        assert!(html.contains("function keyDef(id)"));
+        assert!(html.contains("return userKeyIndex.get(id) || null;"));
+        assert!(html.contains("const USER_KEY_ID_PATTERN = /^u-[a-z0-9]{1,24}$/;"));
+        assert!(html.contains("const USER_KEY_LABEL_MAX = 8;"));
+        assert!(html.contains("const USER_KEY_SEQ_MAX = 32;"));
+        assert!(html.contains("const USER_KEY_MAX = 24;"));
+        assert!(html.contains("function normalizeUserKeys(raw)"));
+        assert!(html.contains("function addUserKey(label, seq)"));
+        assert!(html.contains("function removeUserKey(id)"));
+        assert!(html.contains("function comboKeySequence(modifier, base, shift)"));
+        assert!(html.contains("String.fromCharCode(letter.charCodeAt(0) & 0x1f)"));
+        assert!(html.contains("function parseKeySequenceInput(text)"));
+        assert!(html.contains("function renderUserKeySection()"));
+    }
+
+    #[test]
+    fn remote_page_html_contains_segment_input_layout_settings() {
         let html = remote_client_source();
 
         assert!(html.contains("id=\"mainActionRow\""));
         assert!(html.contains("id=\"inputLayoutEditor\""));
         assert!(html.contains("Input bar"));
-        assert!(html.contains("const INPUT_ACTION_ZONES = [\"main\", \"expanded\", \"hidden\"]"));
-        assert!(html.contains("main: [\"ctrl-c\", \"keyboard\", \"keys\", \"send\"]"));
-        assert!(html.contains("hidden: [\"attachment\"]"));
+        // Both rows carry the three static alignment segments.
+        assert!(html.contains("const INPUT_ACTION_ROWS = [\"main\", \"expanded\"];"));
+        assert!(html.contains("const INPUT_ACTION_SEGMENTS = [\"left\", \"center\", \"right\"];"));
+        assert_eq!(
+            html.matches("<div class=\"action-segment\" data-segment=\"left\"></div>")
+                .count(),
+            2,
+            "both rows should render a static left segment"
+        );
+        assert!(html.contains("<div class=\"action-segment\" data-segment=\"center\"></div>"));
+        assert!(html.contains("class=\"action-segment\" data-segment=\"right\""));
+        // Default placement: interrupt on the left, input controls on the right.
+        assert!(html.contains(
+            "main: { left: [\"soft:c-c\"], center: [], right: [\"keyboard\", \"keys\", \"send\"] },"
+        ));
         assert!(html.contains("function normalizeInputLayoutConfig(raw)"));
-        assert!(html.contains("const KEY_ID_SET = new Set(KEY_ORDER);"));
-        assert!(html.contains("value.order.filter((id) => KEY_ID_SET.has(id))"));
-        assert!(!html.contains("value.order.filter((id) => KEY_DEFS[id])"));
-        assert!(html.contains("function projectSoftKeyOrderFromZones(zones)"));
-        assert!(html.contains("function syncKeyOrderProjection()"));
-        assert!(html.contains("function resolvePlacedKeyIdsInZone(zone)"));
-        assert!(html.contains("function moveInputAction(actionId, zone, commit = true)"));
+        assert!(html.contains("function normalizeInputZones(raw, knownIds)"));
+        // No migration path: anything that is not the v2 shape resets.
+        assert!(html.contains(
+            "if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones();"
+        ));
+        assert!(!html.contains("function projectSoftKeyOrderFromZones(zones)"));
+        assert!(!html.contains("function syncKeyOrderProjection()"));
+        assert!(html.contains("function inputActionPlacement(actionId)"));
+        assert!(html.contains(
+            "function moveInputActionTo(actionId, row, segment, index = -1, commit = true)"
+        ));
         assert!(html.contains("function renderInputSettingsPreservingScroll()"));
         assert!(html.contains("function renderInputActionRows()"));
         assert!(html.contains("function syncExpandedRowEmptyState()"));
         assert!(html.contains("actionId !== \"send\" || composerMode"));
-        assert!(html.contains("chip.dataset.orderZone = zone;"));
-        assert!(html.contains("target?.dataset.orderZone === sourceZone"));
+        assert!(html.contains("slot.dataset.dropSegment = segment;"));
+        assert!(html.contains("slot.dataset.dropRow = row;"));
+        // Keys stays a main-row-or-hidden toggle: it cannot enter the row it opens.
+        assert!(html.contains("function canPlaceInputAction(actionId, row)"));
+        // Tapping a hidden chip is "use this", not "select this".
+        assert!(html.contains("function useInputAction(actionId)"));
+        assert!(html.contains("title.textContent = \"Hidden\";"));
+        assert!(html.contains("return actionId !== \"keys\" || row === \"main\";"));
         assert!(html.contains("keyBarConfig.expanded = false;"));
         assert!(!html.contains("id=\"keyBarSettings\""));
         assert!(!html.contains("id=\"keyPopover\""));
@@ -1314,8 +1436,8 @@ mod tests {
     #[test]
     fn remote_page_html_contains_step_navigation_keys() {
         let html = remote_client_source();
-        // Step navigation lives INSIDE the soft-key toolbar as a configurable
-        // key set (issue #474): no dedicated bar row exists.
+        // Step navigation lives INSIDE the soft-key toolbar as ordinary keys
+        // (issue #474): no dedicated bar row exists.
         assert!(!html.contains("id=\"navStepBar\""));
         // Nav action keys carry `nav: [kind, direction]` instead of a byte seq.
         assert!(html.contains("navPad: { label: \"P↕N↔\", navFlick: true, navBadge: true }"));
@@ -1323,9 +1445,9 @@ mod tests {
         assert!(html.contains("navNext: { label: \"P↓\", nav: [\"spatial\", \"next\"]"));
         assert!(html.contains("notifRecent: { label: \"N←\", nav: [\"notification\", \"recent\"]"));
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
-        // Selectable via the key-set popover and enabled by default.
+        // Grouped in the hidden section, with the flick pad placed by default.
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
-        assert!(html.contains("sets: [\"step\", \"nav\"],"));
+        assert!(html.contains("\"soft:navPad\""));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.
         assert!(html.contains("const NAV_FLICK_TARGETS = {"));
         assert!(html.contains("up: [\"spatial\", \"prev\"]"));
@@ -1659,8 +1781,8 @@ mod tests {
 
         // Feature toggles live in the existing key-set popover (Remote settings
         // home), accessible and aria-labelled.
-        assert!(html.contains("function renderComposerPopoverSection()"));
-        assert!(html.contains("title.textContent = \"Composer\";"));
+        assert!(html.contains("function renderComposerSettingsSection()"));
+        assert!(html.contains("<h2 class=\"nav-section-title\">Composer</h2>"));
         assert!(html.contains("\"composerHideAgentInputToggle\""));
         assert!(html.contains("\"Hide unused agent input\""));
         assert!(html.contains("function scrollTowardComposerBottom()"));
@@ -2070,11 +2192,50 @@ mod tests {
         assert!(policy.contains("script-src 'self'"));
         assert!(policy.contains("object-src 'none'"));
         assert!(policy.contains("base-uri 'none'"));
-        assert!(policy.contains("frame-ancestors 'none'"));
         // The manifest and the PWA icons are what make the installed client
         // possible (ADR-0091); blocking them would silently un-install it.
         assert!(policy.contains("manifest-src 'self'"));
         assert!(policy.contains("img-src 'self' data:"));
+    }
+
+    /// Issue #955: `frame-ancestors 'none'` refused the desktop app's own
+    /// mobile-mode iframe, and the overlay's only exit lived inside the page
+    /// that never loaded — the app was unusable until it was killed.
+    #[test]
+    fn remote_page_lets_only_the_desktop_app_frame_it() {
+        let policy = page_policy("100.64.0.2:19281");
+        let frame_ancestors = policy
+            .split("frame-ancestors ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("frame-ancestors must be present");
+        assert!(!frame_ancestors.contains("__APP_FRAME_ANCESTORS__"));
+        // The two WebView origins Tauri serves the shell from.
+        assert!(frame_ancestors.contains("tauri://localhost"));
+        assert!(frame_ancestors.contains("http://tauri.localhost"));
+        // Still a closed allowlist: no wildcard, no `https:`, no web origin.
+        assert!(!frame_ancestors.contains('*'));
+        assert!(!frame_ancestors.contains("'self'"));
+        assert!(!frame_ancestors.contains("https://"));
+    }
+
+    /// `default-src` does not cover `frame-ancestors`, so the last-resort
+    /// header must name it or an unencodable policy would ship a framable page.
+    #[test]
+    fn last_resort_policy_still_refuses_framing() {
+        assert!(LAST_RESORT_CSP.contains("frame-ancestors 'none'"));
+        assert!(HeaderValue::from_str(LAST_RESORT_CSP).is_ok());
+    }
+
+    /// The Vite dev server is a development convenience, not something a
+    /// shipped binary should let frame the terminal it controls.
+    #[test]
+    fn remote_page_trusts_the_vite_dev_origin_only_in_debug_builds() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert_eq!(
+            policy.contains("http://localhost:1420"),
+            cfg!(debug_assertions)
+        );
     }
 
     #[test]

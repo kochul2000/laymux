@@ -151,11 +151,29 @@
               </section>
             </div><!-- /drawerConnectionView -->
             <div id="drawerSettingsView" class="drawer-view" hidden>
+              <!-- Settings grew past one scroll: the sections are paginated so a
+                   short screen shows one subject at a time. -->
+              <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings sections">
+                <button id="settingsTabInputBar" class="settings-tab" type="button" role="tab" data-settings-panel="inputBar" aria-controls="settingsPanelInputBar" aria-selected="true">Input bar</button>
+                <button id="settingsTabComposer" class="settings-tab" type="button" role="tab" data-settings-panel="composer" aria-controls="settingsPanelComposer" aria-selected="false" tabindex="-1">Composer</button>
+                <button id="settingsTabDisplay" class="settings-tab" type="button" role="tab" data-settings-panel="display" aria-controls="settingsPanelDisplay" aria-selected="false" tabindex="-1">Display</button>
+                <button id="settingsTabApp" class="settings-tab" type="button" role="tab" data-settings-panel="app" aria-controls="settingsPanelApp" aria-selected="false" tabindex="-1">App</button>
+              </div>
+              <div id="settingsPanelInputBar" class="settings-panel" role="tabpanel" data-settings-panel="inputBar" aria-labelledby="settingsTabInputBar">
               <section id="inputLayoutSection" class="nav-section" aria-label="Input bar">
               <h2 class="nav-section-title">Input bar</h2>
               <div class="nav-settings-status">Choose each action's row and order on this device.</div>
               <div id="inputLayoutEditor" class="input-layout-editor"></div>
               </section>
+              </div><!-- /settingsPanelInputBar -->
+              <div id="settingsPanelComposer" class="settings-panel" role="tabpanel" data-settings-panel="composer" aria-labelledby="settingsTabComposer" hidden>
+              <section id="composerSection" class="nav-section" aria-label="Composer">
+              <h2 class="nav-section-title">Composer</h2>
+              <div class="nav-settings-status">Recall and agent-output options for this device.</div>
+              <div id="composerSettingsEditor" class="input-layout-editor"></div>
+              </section>
+              </div><!-- /settingsPanelComposer -->
+              <div id="settingsPanelDisplay" class="settings-panel" role="tabpanel" data-settings-panel="display" aria-labelledby="settingsTabDisplay" hidden>
               <section id="displaySection" class="nav-section" aria-label="Display">
               <h2 class="nav-section-title">Display</h2>
               <!-- Device-local Remote preferences (ADR-0209). They remain
@@ -257,6 +275,8 @@
                 <span class="nav-toggle-desc">Row under the header</span>
               </label>
               </section>
+              </div><!-- /settingsPanelDisplay -->
+              <div id="settingsPanelApp" class="settings-panel" role="tabpanel" data-settings-panel="app" aria-labelledby="settingsTabApp" hidden>
               <section id="pcUpdateSection" class="nav-section" aria-label="Laymux update">
               <h2 class="nav-section-title">Laymux update</h2>
               <div class="pc-update-panel">
@@ -279,6 +299,7 @@
                 <div id="installHint" class="install-hint" hidden>iOS installs from the share sheet: Share → “Add to Home Screen”.</div>
               </div>
               </section>
+              </div><!-- /settingsPanelApp -->
             </div><!-- /drawerSettingsView -->
           </aside>
           <div class="terminal-shell">
@@ -304,7 +325,11 @@
         </div>
       </main>
       <nav id="keyBar" class="key-bar" aria-label="Special keys" hidden>
-        <div id="keyRow" class="key-row" role="group" aria-label="Keys row"></div>
+        <div id="keyRow" class="key-row" role="group" aria-label="Keys row">
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right"></div>
+        </div>
         <div id="keyFlickHint" class="key-flick-hint" data-direction="" aria-hidden="true" hidden>
           <span class="key-flick-arrow" data-flick-direction="up"><span data-remote-icon="ArrowUp" data-icon-size="12"></span></span>
           <span class="key-flick-arrow" data-flick-direction="right"><span data-remote-icon="ArrowRight" data-icon-size="12"></span></span>
@@ -315,18 +340,21 @@
       </nav>
       <footer>
         <div id="mainActionRow" class="input-action-row" role="group" aria-label="Input actions">
-          <button id="ctrlC" disabled>Ctrl+C</button>
-          <button id="focusTerminal" disabled>Keyboard</button>
-          <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
-          <button id="inputModeToggle" class="input-mode-toggle" type="button" hidden aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
-            <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
-          </button>
-          <button id="attachFile" class="attachment-button" type="button" hidden disabled aria-label="Attach image or text file" title="Attach image or text file">
-            <span data-remote-icon="Paperclip"></span>
-          </button>
-          <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
-            <span data-remote-icon="Send" data-icon-size="20"></span>
-          </button>
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right">
+            <button id="focusTerminal" disabled>Keyboard</button>
+            <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
+            <button id="inputModeToggle" class="input-mode-toggle" type="button" hidden aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
+              <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
+            </button>
+            <button id="attachFile" class="attachment-button" type="button" hidden disabled aria-label="Attach image or text file" title="Attach image or text file">
+              <span data-remote-icon="Paperclip"></span>
+            </button>
+            <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
+              <span data-remote-icon="Send" data-icon-size="20"></span>
+            </button>
+          </div>
         </div>
         <input id="attachmentInput" class="sr-only" type="file" accept="image/*,text/*,.md,.markdown,.json,.jsonl,.yaml,.yml,.toml,.xml,.csv,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.kt,.kts,.c,.h,.cpp,.hpp,.cc,.cs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.css,.scss,.html,.htm,.ini,.conf,.cfg,.env" multiple tabindex="-1" aria-hidden="true" />
       </footer>

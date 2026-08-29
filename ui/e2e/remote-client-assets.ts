@@ -52,7 +52,16 @@ function committedAssetName(logicalName: (typeof ASSETS)[number]): string {
 export function remoteClientCsp(origin: string): string {
   const template = readFileSync(`${remoteRoot}page-csp.txt`, "utf8").trimEnd();
   const { host } = new URL(origin);
-  return template.replace("__WS_SOURCES__", ` ws://${host} wss://${host}`);
+  return (
+    template
+      .replace("__WS_SOURCES__", ` ws://${host} wss://${host}`)
+      // The served allowlist is a build-fixed constant in `page.rs` (ADR-0215),
+      // and copying it here would reintroduce exactly the cross-language drift
+      // `page-csp.txt` exists to prevent. Specs load the page as a top-level
+      // document, so no spec exercises this directive — `'none'` keeps the mocked
+      // policy a valid CSP, and is the stricter of the two.
+      .replace("__APP_FRAME_ANCESTORS__", "'none'")
+  );
 }
 
 /** The shell with every `{{ASSET:...}}` pointing at `/remote/vendor/<name>`. */

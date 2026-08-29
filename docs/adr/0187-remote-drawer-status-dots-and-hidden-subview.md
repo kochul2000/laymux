@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-08-20
 - Source: 사용자 요구(2026-08-20), [ADR-0153](0153-remote-hidden-item-visibility-controls.md), [ADR-0180](0180-remote-hidden-workspace-header-icon.md), [api-contracts.md §13.3](../architecture/api-contracts.md#133-navigation-metadata)
+- Extended by: [ADR-0214](0214-remote-settings-paginates-into-tabs.md) — Settings 안에 탭 층이 생기고 그 선택만 기기 로컬로 영속한다. 최상위 drawer 하위 화면 선택은 여기 결정대로 영속하지 않는다.
 - Supersedes: [ADR-0180](0180-remote-hidden-workspace-header-icon.md)의 숫자 badge와 인라인 shelf 진입 결정
 - Amends: [ADR-0153](0153-remote-hidden-item-visibility-controls.md)의 Remote workspace 보관함 표현
 

@@ -119,11 +119,21 @@
       footer {
         border-top: 1px solid var(--border);
       }
+      /* Both input rows are three alignment segments, not one run of buttons:
+         order alone cannot express "these hug the left edge, those hug the
+         right", which is exactly what a wide screen needs. `space-between`
+         keeps the outer segments pinned to the edges and collapses the empty
+         ones to zero, so a row with only left and right content still reads
+         correctly. When content outgrows the row the free space is gone, the
+         tracks fall back to content width and the row scrolls inside itself
+         (never the document). */
       .input-action-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: auto auto auto;
+        justify-content: space-between;
         min-width: 0;
         max-width: 100%;
-        flex: 0 1 auto;
+        flex: 1 1 auto;
         align-items: center;
         gap: 8px;
         overflow-x: auto;
@@ -133,6 +143,31 @@
       }
       .input-action-row::-webkit-scrollbar {
         display: none;
+      }
+      /* No `min-width: 0` here: that would zero out the grid track's automatic
+         minimum, letting a full segment shrink past its content and overlap its
+         neighbour instead of scrolling the row. The scroll container is the row,
+         which does carry `min-width: 0`. */
+      .action-segment {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .action-segment[data-segment="left"] {
+        justify-content: flex-start;
+      }
+      .action-segment[data-segment="center"] {
+        justify-content: center;
+      }
+      .action-segment[data-segment="right"] {
+        justify-content: flex-end;
+      }
+      /* A soft key placed in the footer is a footer button, not a compact
+         key-bar key: matching the sibling box keeps the main row on one
+         visual line instead of centring a shorter key against taller ones. */
+      footer .action-segment > .key-btn {
+        height: auto;
+        padding: 5px 9px;
       }
       label {
         display: flex;
@@ -634,6 +669,70 @@
         flex-direction: column;
         overflow: auto;
       }
+      /* Settings pagination (tablist under the drawer header). The strip stays
+         put while the panel scrolls, so switching subjects never requires
+         scrolling back up first. */
+      .settings-tabs {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        min-width: 0;
+        gap: 2px;
+        padding: 4px 6px 0;
+        border-bottom: 1px solid var(--border);
+        background: var(--panel);
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .settings-tabs::-webkit-scrollbar {
+        display: none;
+      }
+      /* `1 0 auto`, not `1 1 0`: a shrinking tab would squeeze its label past
+         its own box (no ellipsis, nowrap) and the strip's overflow would never
+         engage. Growing-only tabs fill a wide drawer and scroll a narrow one. */
+      .settings-tab {
+        flex: 1 0 auto;
+        padding: 6px 8px;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .settings-tab:hover {
+        color: var(--text-secondary);
+      }
+      .settings-tab.active {
+        border-bottom-color: var(--accent);
+        color: var(--accent);
+      }
+      /* Same 5px status dot the drawer buttons use (ADR-0187), so the drawer
+         dot and the tab dot read as one trail to the update. */
+      .settings-tab.update-available {
+        position: relative;
+      }
+      .settings-tab.update-available::after {
+        position: absolute;
+        right: 2px;
+        top: 4px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
+      }
+      .settings-panel {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+      }
+      .settings-panel[hidden] {
+        display: none;
+      }
       .connection-title {
         color: var(--text-secondary);
         font-size: var(--fs-xs);
@@ -827,43 +926,105 @@
         justify-content: space-between;
         gap: 8px;
       }
-      .input-layout-heading .key-popover-title {
-        margin: 0;
-      }
-      .input-layout-row {
-        display: grid;
-        grid-template-columns: minmax(72px, 1fr) minmax(72px, auto) auto;
+      .input-layout-heading .key-order-help {
         min-width: 0;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 2px;
-        border-bottom: 1px solid var(--border);
-      }
-      .input-layout-name {
-        min-width: 0;
-        overflow: hidden;
-        color: var(--text-secondary);
-        font-size: var(--fs-sm);
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        margin-top: 0;
       }
       .input-layout-zone {
         min-width: 72px;
         padding: 3px 4px;
         color: var(--text);
         background: var(--panel-2);
+        font-size: var(--fs-xs);
       }
-      .input-layout-order {
-        display: inline-flex;
-        gap: 3px;
+      /* Row editor: the settings mirror of the bar itself — one block per row,
+         one drop slot per alignment segment. */
+      .layout-row-editor {
+        margin-top: 8px;
       }
-      .input-layout-order button {
-        display: inline-flex;
+      .layout-segment {
+        display: grid;
+        grid-template-columns: 52px minmax(0, 1fr);
+        align-items: start;
+        gap: 6px;
+        padding: 3px 0;
+      }
+      .layout-segment-label {
+        padding-top: 4px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .layout-segment-slot {
+        display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        justify-content: center;
-        width: 25px;
-        height: 25px;
-        padding: 0;
+        gap: 5px;
+        min-height: 26px;
+        padding: 2px;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+        user-select: none;
+      }
+      .layout-segment-slot.drop-active,
+      .layout-hidden.drop-active {
+        border-color: var(--accent);
+        background: var(--accent-12);
+      }
+      .layout-hidden {
+        margin-top: 10px;
+        padding: 4px;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+      }
+      .layout-hidden .key-popover-title {
+        margin-top: 0;
+      }
+      .layout-hidden-label {
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .user-key-form {
+        margin-top: 2px;
+      }
+      .user-key-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 0;
+      }
+      .user-key-label {
+        flex: 0 0 52px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+        font-weight: 600;
+      }
+      .user-key-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 3px 6px;
+        font-size: var(--fs-xs);
+      }
+      .user-key-shift {
+        flex: 0 0 auto;
+        gap: 4px;
+        color: var(--text-secondary);
+        font-size: var(--fs-xs);
+      }
+      .user-key-preview {
+        padding: 3px 0 0 58px;
+        color: var(--muted);
+        font-size: var(--fs-xs);
+      }
+      .user-key-submit {
+        justify-content: flex-end;
+      }
+      .user-key-error {
+        padding-top: 4px;
+        color: var(--danger);
+        font-size: var(--fs-xs);
       }
       .drawer-header-button {
         position: relative;
@@ -1676,10 +1837,7 @@
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        footer .input-action-row {
-          flex: 1 1 auto;
-        }
-        footer .input-action-row > button {
+        footer .action-segment > button {
           width: auto;
           min-width: 54px;
           flex: 1 0 54px;
@@ -1797,9 +1955,10 @@
         background: var(--panel);
       }
       .key-row {
-        display: flex;
+        display: grid;
+        grid-template-columns: auto auto auto;
+        justify-content: space-between;
         flex: 1 1 auto;
-        flex-wrap: nowrap;
         align-items: center;
         gap: 5px;
         min-width: 0;
@@ -1808,6 +1967,9 @@
         overflow-y: hidden;
         scrollbar-width: none;
         -webkit-overflow-scrolling: touch;
+      }
+      .key-row .action-segment {
+        gap: 5px;
       }
       .key-row::-webkit-scrollbar {
         display: none;
@@ -1916,6 +2078,10 @@
       }
       .key-row-empty {
         display: inline-flex;
+        /* The empty notice only shows when every segment is empty, so it can
+           span the whole grid row without colliding with a chip. */
+        grid-row: 1;
+        grid-column: 1 / -1;
         flex: 0 0 auto;
         align-items: center;
         height: var(--key-bar-control-height);
@@ -2003,18 +2169,6 @@
         background: var(--accent-12);
         color: var(--accent);
       }
-      .key-order-section {
-        margin-top: 10px;
-      }
-      .key-order-heading {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-      .key-order-heading .key-popover-title {
-        margin: 0;
-      }
       .key-order-reset {
         flex: 0 0 auto;
         padding: 2px 7px;
@@ -2024,35 +2178,22 @@
       .key-order-reset:hover {
         background: var(--hover-bg);
       }
-      .key-order-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 5px;
-        padding-top: 6px;
-        user-select: none;
-      }
       .key-order-zone-label {
-        flex: 0 0 100%;
         color: var(--text-secondary);
         font-size: var(--fs-xs);
         font-weight: 600;
       }
-      .key-order-zone-label[data-order-zone-label="expanded"] {
-        border-top: 1px solid var(--border);
-        margin-top: 2px;
-        padding-top: 5px;
-      }
-      .key-order-chip {
+      .layout-chip {
         position: relative;
         touch-action: none;
         cursor: grab;
       }
-      .key-order-chip.dragging {
+      .layout-chip.dragging {
         opacity: 0.45;
         cursor: grabbing;
       }
-      .key-order-chip.drop-before::before,
-      .key-order-chip.drop-after::after {
+      .layout-chip.drop-before::before,
+      .layout-chip.drop-after::after {
         position: absolute;
         top: -3px;
         bottom: -3px;
@@ -2061,10 +2202,10 @@
         background: var(--accent);
         content: "";
       }
-      .key-order-chip.drop-before::before {
+      .layout-chip.drop-before::before {
         left: -4px;
       }
-      .key-order-chip.drop-after::after {
+      .layout-chip.drop-after::after {
         right: -4px;
       }
       .key-order-help {
@@ -2102,6 +2243,10 @@
       }
       .key-order-action:hover:not(:disabled) {
         background: var(--hover-bg);
+      }
+      .key-order-danger {
+        border-color: #8b3440;
+        color: var(--danger);
       }
 
       /* Host file viewer (ADR-0184). Fills the surface rather than centring a

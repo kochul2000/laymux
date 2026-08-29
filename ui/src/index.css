@@ -526,6 +526,50 @@
     background: var(--bg-base);
   }
 
+  /* The host-drawn way back to desktop mode, shown only when the embedded page
+     never announced itself (#955). It floats over the frame instead of covering
+     it, so a late greeting does not hide a working mobile view behind a scrim. */
+  .local-mobile-mode-fallback {
+    position: absolute;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    max-width: min(420px, calc(100% - 32px));
+    padding: 16px 20px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-surface);
+    text-align: center;
+  }
+
+  .local-mobile-mode-fallback-title {
+    color: var(--text-primary);
+    font-size: var(--fs-md);
+  }
+
+  .local-mobile-mode-fallback-body {
+    color: var(--text-secondary);
+    font-size: var(--fs-sm);
+  }
+
+  .local-mobile-mode-fallback-exit {
+    height: var(--btn-h);
+    padding: 0 12px;
+    border: 1px solid var(--accent-50);
+    border-radius: var(--radius-md);
+    background: var(--accent-12);
+    color: var(--text-primary);
+    font-size: var(--fs-sm);
+  }
+
+  .local-mobile-mode-fallback-exit:hover {
+    background: var(--accent-20);
+  }
+
   .workspace-pane-row {
     max-height: var(--pane-row-max-h);
     opacity: 1;
