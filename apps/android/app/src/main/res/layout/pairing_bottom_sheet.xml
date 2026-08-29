@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -70,16 +71,44 @@
             tools:text="연결 오류"
             tools:visibility="visible" />
 
-        <TextView
-            android:id="@+id/pairing_notice"
+        <!-- The spinner sits on the notice line so an in-progress step reads as
+             "still working" instead of a static sentence. It is top-aligned so
+             it stays on the first line when the notice wraps. -->
+        <LinearLayout
+            android:id="@+id/pairing_notice_row"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="@color/laymux_notice"
+            android:orientation="horizontal"
             android:visibility="gone"
-            tools:text="연결 안내"
-            tools:visibility="visible" />
+            tools:visibility="visible">
+
+            <com.google.android.material.progressindicator.CircularProgressIndicator
+                android:id="@+id/pairing_notice_spinner"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:layout_marginTop="2dp"
+                android:layout_marginEnd="8dp"
+                android:indeterminate="true"
+                android:visibility="gone"
+                app:indicatorColor="@color/laymux_notice"
+                app:indicatorInset="0dp"
+                app:indicatorSize="16dp"
+                app:trackThickness="2dp"
+                tools:visibility="visible" />
+
+            <TextView
+                android:id="@+id/pairing_notice"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="@color/laymux_notice"
+                android:visibility="gone"
+                tools:text="연결 안내"
+                tools:visibility="visible" />
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/pairing_remote_section"

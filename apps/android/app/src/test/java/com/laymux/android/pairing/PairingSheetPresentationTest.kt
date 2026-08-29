@@ -52,10 +52,48 @@ class PairingSheetPresentationTest {
         assertFalse(presentation.scanEnabled)
     }
 
+    @Test
+    fun runningOperationKeepsTheNoticeRowUpEvenWithoutNoticeText() {
+        val presentation = presentPairingSheet(
+            state(
+                pairings = listOf(metadata(confirmed = true)),
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+                busy = true,
+            ),
+        )
+
+        assertTrue(presentation.busy)
+        assertTrue(presentation.noticeVisible)
+    }
+
+    @Test
+    fun settledNoticeShowsWithoutASpinnerAndAnEmptyIdleSheetHidesTheRow() {
+        val settled = presentPairingSheet(
+            state(
+                pairings = listOf(metadata(confirmed = true)),
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+                notice = "데스크톱과 페어링을 확인했습니다.",
+            ),
+        )
+        assertFalse(settled.busy)
+        assertTrue(settled.noticeVisible)
+
+        val idle = presentPairingSheet(
+            state(
+                pairings = listOf(metadata(confirmed = true)),
+                biometricAvailability = BiometricAvailability.AVAILABLE,
+            ),
+        )
+        assertFalse(idle.busy)
+        assertFalse(idle.noticeVisible)
+    }
+
     private fun state(
         pairings: List<PairingSheetItem>,
         biometricAvailability: BiometricAvailability,
         remoteConnecting: Boolean = false,
+        busy: Boolean = remoteConnecting,
+        notice: String? = null,
     ): PairingSheetState = PairingSheetState(
         selectedInstanceId = "desktop-a",
         pairings = pairings,
@@ -63,8 +101,9 @@ class PairingSheetPresentationTest {
         biometricAvailability = biometricAvailability,
         remoteConnected = false,
         remoteConnecting = remoteConnecting,
+        busy = busy,
         error = null,
-        notice = null,
+        notice = notice,
     )
 
     private fun metadata(confirmed: Boolean): PairingSheetItem = PairingSheetItem(

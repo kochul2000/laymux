@@ -10,6 +10,7 @@ import androidx.fragment.app.FragmentActivity
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import com.laymux.android.R
 
 interface PairingSheetActions {
@@ -31,6 +32,8 @@ class PairingBottomSheet(
         val title: TextView,
         val description: TextView,
         val error: TextView,
+        val noticeRow: View,
+        val noticeSpinner: CircularProgressIndicator,
         val notice: TextView,
         val remoteSection: View,
         val connectButton: MaterialButton,
@@ -93,7 +96,7 @@ class PairingBottomSheet(
         val presentation = presentPairingSheet(state)
 
         renderStatus(bound, state, presentation)
-        renderMessages(bound, state)
+        renderMessages(bound, state, presentation)
         renderRemote(bound, presentation)
         renderScan(bound, state, presentation)
     }
@@ -107,11 +110,18 @@ class PairingBottomSheet(
     private fun bind(content: View): Views {
         val scanButton = content.findViewById<MaterialButton>(R.id.pairing_scan_button)
         val connectButton = content.findViewById<MaterialButton>(R.id.pairing_connect_button)
+        val noticeSpinner =
+            content.findViewById<CircularProgressIndicator>(R.id.pairing_notice_spinner)
+        // hide() falls back to INVISIBLE by default, which would leave the
+        // spinner's 16dp gutter in front of a notice that is no longer busy.
+        noticeSpinner.setVisibilityAfterHide(View.GONE)
         return Views(
             statusBadge = content.findViewById(R.id.pairing_status_badge),
             title = content.findViewById(R.id.pairing_state_title),
             description = content.findViewById(R.id.pairing_state_description),
             error = content.findViewById(R.id.pairing_error),
+            noticeRow = content.findViewById(R.id.pairing_notice_row),
+            noticeSpinner = noticeSpinner,
             notice = content.findViewById(R.id.pairing_notice),
             remoteSection = content.findViewById(R.id.pairing_remote_section),
             connectButton = connectButton,
@@ -182,9 +192,18 @@ class PairingBottomSheet(
         )
     }
 
-    private fun renderMessages(bound: Views, state: PairingSheetState) {
+    private fun renderMessages(
+        bound: Views,
+        state: PairingSheetState,
+        presentation: PairingSheetPresentation,
+    ) {
         showText(bound.error, state.error)
         showText(bound.notice, state.notice)
+        bound.noticeRow.visibility =
+            if (presentation.noticeVisible) View.VISIBLE else View.GONE
+        // show()/hide() drive the indicator's own grow/shrink animation, so the
+        // spinner never freezes mid-sweep on a state update.
+        if (presentation.busy) bound.noticeSpinner.show() else bound.noticeSpinner.hide()
     }
 
     private fun showText(view: TextView, value: String?) {
