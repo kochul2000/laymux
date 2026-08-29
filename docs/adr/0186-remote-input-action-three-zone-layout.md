@@ -5,6 +5,7 @@
 - Source: issue [#889](https://github.com/kochul2000/laymux/issues/889) 및 사용자 합의(기본행 `Ctrl+C · Keyboard · Keys · Send`, Keys 확장행의 Composer 전환과 기존 특수키, 첨부 기본 숨김); [architecture/api-contracts.md §13.4](../architecture/api-contracts.md); [ADR-0004](0004-settings-vs-ui-state-separation.md); [ADR-0028](0028-remote-soft-key-toolbar.md); [ADR-0034](0034-single-send-terminal-composer.md); [ADR-0036](0036-remote-composer-layout-rule.md); [ADR-0040](0040-remote-soft-key-user-order.md); [ADR-0181](0181-remote-terminal-file-attachments.md)
 - Extends: [ADR-0028](0028-remote-soft-key-toolbar.md), [ADR-0040](0040-remote-soft-key-user-order.md)
 - Amends: [ADR-0036](0036-remote-composer-layout-rule.md)의 desktop layout Send 버튼 부재 결정
+- Amended by: [ADR-0213](0213-remote-input-action-segment-placement-and-user-keys.md) — 평탄 zone 배열이 행별 3-구역 배치로, `sets`/`custom` 활성화 모델이 "배치가 곧 활성화"로, 고정 `ctrl-c` action이 소프트키 `c-c`로 바뀌었다.
 
 ## Context
 

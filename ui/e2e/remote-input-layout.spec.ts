@@ -4,7 +4,9 @@ import { remoteClientMarkupWithoutXterm } from "./remote-client-assets";
 
 const STORAGE_KEY = "laymux.remote.keybar";
 
-async function openMarkup(page: import("@playwright/test").Page) {
+type Page = import("@playwright/test").Page;
+
+async function openMarkup(page: Page) {
   await page.route("http://remote.test/", (route) =>
     route.fulfill({ contentType: "text/html", body: "<!doctype html><title>remote test</title>" }),
   );
@@ -13,165 +15,293 @@ async function openMarkup(page: import("@playwright/test").Page) {
   await page.setContent(remoteClientMarkupWithoutXterm());
 }
 
+function segment(page: Page, row: "mainActionRow" | "keyRow", name: "left" | "center" | "right") {
+  return page.locator(`#${row} > [data-segment="${name}"]`);
+}
+
+/** Visible placed action ids of a row, in render order. */
+function renderedActions(page: Page, row: "mainActionRow" | "keyRow") {
+  return page.evaluate(
+    (rowId) =>
+      [...document.querySelectorAll(`#${rowId} [data-input-action]`)]
+        .filter((element) => !(element as HTMLElement).hidden)
+        .map((element) => (element as HTMLElement).dataset.inputAction),
+    row,
+  );
+}
+
+function storedConfig(page: Page) {
+  return page.evaluate((key) => JSON.parse(localStorage.getItem(key) || "{}"), STORAGE_KEY);
+}
+
+function chip(page: Page, actionId: string) {
+  return page.locator(`#inputLayoutEditor .layout-chip[data-layout-action="${actionId}"]`).first();
+}
+
+/** Selecting a chip is a toggle, so only click when it is not already selected. */
+async function selectChip(page: Page, actionId: string) {
+  const target = chip(page, actionId);
+  if ((await target.getAttribute("aria-pressed")) !== "true") await target.click();
+}
+
+async function place(page: Page, actionId: string, hint: string, value: string) {
+  await selectChip(page, actionId);
+  await page.getByLabel(`Place ${hint}`).selectOption(value);
+}
+
+/** Long-press drag: the chip editor commits on pointerup, never via native DnD. */
+async function dragChipOnto(page: Page, sourceId: string, targetId: string, toRightHalf = false) {
+  const from = chip(page, sourceId);
+  await from.scrollIntoViewIfNeeded();
+  const fromBox = await from.boundingBox();
+  const to = chip(page, targetId);
+  await to.scrollIntoViewIfNeeded();
+  const toBox = await to.boundingBox();
+  expect(fromBox).not.toBeNull();
+  expect(toBox).not.toBeNull();
+  await page.mouse.move(fromBox!.x + fromBox!.width / 2, fromBox!.y + fromBox!.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(250);
+  await page.mouse.move(
+    toBox!.x + (toRightHalf ? toBox!.width - 2 : 2),
+    toBox!.y + toBox!.height / 2,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+}
+
 test.describe("Remote input action layout", () => {
-  test("uses the agreed legacy-style default and keeps 390px chrome on one row", async ({
-    page,
-  }) => {
+  test("defaults to segment-aligned rows and keeps 390px chrome on one row", async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("laymux.remote.inputMode", "composer"));
     await openMarkup(page);
 
-    await expect(page.locator("#mainActionRow > button:not([hidden])")).toHaveCount(4);
     await expect
-      .poll(() =>
-        page
-          .locator("#mainActionRow > button:not([hidden])")
-          .evaluateAll((buttons) => buttons.map((button) => button.id)),
-      )
-      .toEqual(["ctrlC", "focusTerminal", "keyBarToggle", "composerSend"]);
+      .poll(() => renderedActions(page, "mainActionRow"))
+      .toEqual(["soft:c-c", "keyboard", "keys", "send"]);
+    await expect(page.locator('#mainActionRow [data-key="c-c"]')).toHaveText("^C");
     await expect(page.locator("#attachFile")).toBeHidden();
+
+    // ^C hugs the left edge and the input controls hug the right — the whole
+    // point of segments once the row is wider than its contents.
+    const geometry = await page.evaluate(() => {
+      const row = document.querySelector("#mainActionRow")!.getBoundingClientRect();
+      const first = document
+        .querySelector('#mainActionRow [data-input-action="soft:c-c"]')!
+        .getBoundingClientRect();
+      const last = document.querySelector("#composerSend")!.getBoundingClientRect();
+      return {
+        leftGap: Math.round(first.left - row.left),
+        rightGap: Math.round(row.right - last.right),
+        spread: Math.round(last.left - first.right),
+      };
+    });
+    expect(geometry.leftGap).toBeLessThanOrEqual(1);
+    expect(geometry.rightGap).toBeLessThanOrEqual(1);
+    expect(geometry.spread).toBeGreaterThan(40);
 
     await page.locator("#keyBarToggle").click();
     await expect(page.locator("#keyBar")).toBeVisible();
-    await expect(page.locator("#keyRow").first()).toContainText("P↕N↔");
-    await expect(page.locator("#keyRow > #inputModeToggle")).toHaveCount(1);
+    await expect(segment(page, "keyRow", "left")).toContainText("P↕N↔");
+    await expect(segment(page, "keyRow", "right")).toContainText("^L");
     await expect(page.locator("#keyBarSettings")).toHaveCount(0);
     await expect(page.locator("#keyPopover")).toHaveCount(0);
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
-    const visibleButtonTops = await page
-      .locator("#mainActionRow > button:not([hidden])")
-      .evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().top));
-    expect(Math.max(...visibleButtonTops) - Math.min(...visibleButtonTops)).toBeLessThanOrEqual(1);
+    // Segments are independent grid items, so "still one row" is a statement
+    // about shared vertical centres, not about equal button heights.
+    const buttonCentres = await page
+      .locator("#mainActionRow button:not([hidden])")
+      .evaluateAll((buttons) =>
+        buttons.map((button) => {
+          const rect = button.getBoundingClientRect();
+          return rect.top + rect.height / 2;
+        }),
+      );
+    expect(Math.max(...buttonCentres) - Math.min(...buttonCentres)).toBeLessThanOrEqual(1);
   });
 
-  test("moves every action between main, Keys, and hidden from drawer Settings", async ({
+  test("moves an action across rows, segments, and the hidden section from Settings", async ({
     page,
   }) => {
     await openMarkup(page);
-
     await page.locator("#drawerSettingsButton").click();
     await expect(page.locator("#inputLayoutEditor")).toBeVisible();
-    await page.getByLabel("Place Attach file").selectOption("main");
-    await page.getByLabel("Place Keyboard").selectOption("expanded");
-    await page.getByLabel("Place Esc").selectOption("main");
-    await page.getByLabel("Place Send").selectOption("expanded");
-    await page.getByLabel("Place Composer").selectOption("main");
-    await page.getByLabel("Place Ctrl+C").selectOption("hidden");
-    await page.getByLabel("Place Keys").selectOption("hidden");
-    await page.getByLabel("Move Composer earlier").click();
 
-    await expect(page.locator("#attachFile")).toBeVisible();
-    await expect(page.locator("#ctrlC")).toBeHidden();
-    await expect(page.locator("#inputModeToggle")).toBeVisible();
-    await expect(page.locator("#focusTerminal")).toBeHidden();
-    await expect(page.locator("#keyBarToggle")).toBeHidden();
-    await expect(page.locator("#keyBar")).toBeHidden();
-    await expect
-      .poll(() =>
-        page
-          .locator("#mainActionRow > [data-input-action]:not([hidden])")
-          .evaluateAll((actions) =>
-            actions.map((action) => action.getAttribute("data-input-action")),
-          ),
-      )
-      .toEqual(["attachment", "composer", "soft:esc"]);
+    await place(page, "keyboard", "Keyboard", "expanded:center");
+    await expect(segment(page, "keyRow", "center").locator("#focusTerminal")).toHaveCount(1);
 
-    const attachmentGeometry = await page.locator("#attachFile").evaluate((button) => {
-      const buttonRect = button.getBoundingClientRect();
-      const iconRect = button.querySelector("svg")!.getBoundingClientRect();
-      return {
-        buttonHeight: buttonRect.height,
-        iconWidth: iconRect.width,
-        iconHeight: iconRect.height,
-        contained:
-          iconRect.left >= buttonRect.left &&
-          iconRect.top >= buttonRect.top &&
-          iconRect.right <= buttonRect.right &&
-          iconRect.bottom <= buttonRect.bottom,
-      };
-    });
-    expect(attachmentGeometry).toEqual({
-      buttonHeight: 26,
-      iconWidth: 14,
-      iconHeight: 14,
-      contained: true,
-    });
+    await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:right");
+    await expect.poll(() => renderedActions(page, "mainActionRow")).toEqual(["keys", "soft:c-c"]);
 
-    await page.getByLabel("Place Keys").selectOption("main");
-    await page.locator("#keyBarToggle").click();
-    await expect(page.locator("#keyRow > #focusTerminal")).toHaveCount(1);
-    await expect(page.locator("#keyRow > #composerSend")).toBeHidden();
-    await page.locator("#inputModeToggle").click();
-    await expect(page.locator("#keyRow > #composerSend")).toBeVisible();
+    // Hidden round trip: unplacing hides the button, replacing restores it.
+    await place(page, "soft:c-c", "Ctrl+C (interrupt)", "hidden");
+    await expect(page.locator('#mainActionRow [data-input-action="soft:c-c"]')).toHaveCount(0);
+    await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:left");
+    await expect(segment(page, "mainActionRow", "left")).toContainText("^C");
 
-    await page.getByLabel("Place Esc").selectOption("hidden");
-    await expect(page.locator('[data-input-action="soft:esc"]')).toHaveCount(0);
-
-    await expect
-      .poll(() =>
-        page.evaluate((key) => {
-          const stored = JSON.parse(localStorage.getItem(key) || "{}");
-          return stored.zones;
-        }, STORAGE_KEY),
-      )
-      .toMatchObject({
-        main: expect.arrayContaining(["attachment", "composer", "keys"]),
-        expanded: expect.arrayContaining(["keyboard", "send"]),
-        hidden: expect.arrayContaining(["ctrl-c", "soft:esc"]),
-      });
+    const zones = (await storedConfig(page)).zones;
+    expect(zones.main.left).toEqual(["soft:c-c"]);
+    expect(zones.main.right).toEqual(["keys", "send"]);
+    expect(zones.expanded.center).toEqual(["keyboard"]);
 
     await page.reload();
     await page.setContent(remoteClientMarkupWithoutXterm());
-    await expect(page.locator("#attachFile")).toBeVisible();
-    await expect(page.locator("#ctrlC")).toBeHidden();
-    await expect(page.locator("#mainActionRow > #inputModeToggle")).toBeVisible();
-    await expect(page.locator("#keyRow > #focusTerminal")).toHaveCount(1);
-    await expect(page.locator("#keyRow > #composerSend")).toBeVisible();
+    await expect(segment(page, "mainActionRow", "left")).toContainText("^C");
+    await expect(segment(page, "keyRow", "center").locator("#focusTerminal")).toHaveCount(1);
   });
 
-  test("falls back safely from malformed storage and only shows Send in Composer", async ({
+  test("reorders inside a segment and drags across segment and row boundaries", async ({
     page,
   }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    await selectChip(page, "soft:tab");
+    await page.getByRole("button", { name: "Move Tab to start" }).click();
+    await expect
+      .poll(async () => (await storedConfig(page)).zones.expanded.left[0])
+      .toBe("soft:tab");
+    await expect(page.getByRole("button", { name: "Move Tab left" })).toBeDisabled();
+
+    // Segment and row boundaries are no longer walls: one drag crosses both.
+    await dragChipOnto(page, "soft:tab", "soft:c-l", true);
+    await expect
+      .poll(async () => (await storedConfig(page)).zones.expanded.right)
+      .toContain("soft:tab");
+
+    await dragChipOnto(page, "soft:tab", "soft:c-c", true);
+    await expect
+      .poll(() => renderedActions(page, "mainActionRow"))
+      .toEqual(["soft:c-c", "soft:tab", "keyboard", "keys"]);
+  });
+
+  test("keeps Keys out of the row it opens and closes the bar when it is unplaced", async ({
+    page,
+  }) => {
+    await openMarkup(page);
+    await page.locator("#keyBarToggle").click();
+    await expect(page.locator("#keyBar")).toBeVisible();
+    await page.locator("#drawerSettingsButton").click();
+
+    await selectChip(page, "keys");
+    await expect
+      .poll(() =>
+        page
+          .getByLabel("Place Keys")
+          .locator("option")
+          .evaluateAll((options) => options.map((option) => (option as HTMLOptionElement).value)),
+      )
+      .toEqual(["main:left", "main:center", "main:right", "hidden"]);
+
+    // A drag into the Keys row must be refused, not silently accepted.
+    await dragChipOnto(page, "keys", "soft:esc", true);
+    await expect(page.locator("#keyRow #keyBarToggle")).toHaveCount(0);
+
+    await place(page, "keys", "Keys", "hidden");
+    await expect(page.locator("#keyBarToggle")).toBeHidden();
+    await expect(page.locator("#keyBar")).toBeHidden();
+    await expect.poll(async () => (await storedConfig(page)).expanded).toBe(false);
+  });
+
+  test("tapping a hidden key uses it at once and opens its position controls", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    // One tap is "use this": it lands at the end of the Keys row and stays
+    // selected, so choosing to use a key and choosing where it goes are one
+    // gesture apart rather than two screens apart.
+    await chip(page, "soft:f1").click();
+    await expect
+      .poll(async () => (await storedConfig(page)).zones.expanded.left.at(-1))
+      .toBe("soft:f1");
+    await expect(page.getByLabel("Place F1")).toHaveValue("expanded:left");
+    await expect(page.getByRole("button", { name: "Move F1 to end" })).toBeDisabled();
+    await expect(segment(page, "keyRow", "left")).toContainText("F1");
+
+    // Keys cannot enter the row it opens, so it lands on the main row instead.
+    await place(page, "keys", "Keys", "hidden");
+    await chip(page, "keys").click();
+    await expect.poll(async () => (await storedConfig(page)).zones.main.right).toContain("keys");
+  });
+
+  test("treats placement as activation, with no set or custom toggles left", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    // Nothing gates a key any more: the sets checklist and the custom-key
+    // custom-key toggle are gone, leaving placement as the only signal.
+    await expect(page.locator("#inputLayoutEditor").getByText("Key sets")).toHaveCount(0);
+    await expect(page.locator("#inputLayoutEditor .layout-hidden")).toBeVisible();
+
+    await place(page, "soft:f1", "F1", "main:center");
+    await expect(segment(page, "mainActionRow", "center")).toContainText("F1");
+
+    await place(page, "soft:f1", "F1", "hidden");
+    await expect(segment(page, "mainActionRow", "center")).not.toContainText("F1");
+    await expect(
+      page.locator('#inputLayoutEditor .layout-hidden [data-layout-action="soft:f1"]'),
+    ).toHaveCount(1);
+  });
+
+  test("falls back to defaults for legacy and malformed storage", async ({ page }) => {
     await page.addInitScript((key) => {
       localStorage.setItem(
         key,
         JSON.stringify({
-          expanded: "yes",
-          sets: ["bad"],
-          custom: ["unknown"],
-          zones: { main: ["keys", "keys", 17], expanded: "bad", hidden: null },
+          expanded: true,
+          sets: ["nav"],
+          custom: ["c-a"],
+          order: ["esc", "tab"],
+          zones: {
+            main: ["ctrl-c", "keyboard", "keys", "send"],
+            expanded: ["composer", "soft:c-a"],
+            hidden: ["attachment"],
+          },
         }),
       );
     }, STORAGE_KEY);
     await openMarkup(page);
 
+    // The flat ADR-0186 arrays are not a v2 layout, so the bar resets instead of
+    // inventing an alignment the user never chose.
     await expect
-      .poll(() =>
-        page
-          .locator("#mainActionRow > button:not([hidden])")
-          .evaluateAll((buttons) => buttons.map((button) => button.id)),
-      )
-      .toEqual(["ctrlC", "focusTerminal", "keyBarToggle"]);
+      .poll(() => renderedActions(page, "mainActionRow"))
+      .toEqual(["soft:c-c", "keyboard", "keys"]);
+    await expect(page.locator('[data-input-action="soft:c-a"]')).toHaveCount(0);
     await expect(page.locator("#composerSend")).toBeHidden();
 
-    await page.locator("#keyBarToggle").click();
-    await expect(page.locator('#keyRow > [data-input-action="soft:esc"]')).toHaveCount(1);
+    // `expanded` is validated on its own, so the bar stays open across the
+    // zones reset.
+    await expect(page.locator("#keyBar")).toBeVisible();
+    await expect(page.locator('#keyRow [data-input-action="soft:esc"]')).toHaveCount(1);
     await page.locator("#inputModeToggle").click();
     await expect(page.locator("#composerSend")).toBeVisible();
     await page.locator("#inputModeToggle").click();
     await expect(page.locator("#composerSend")).toBeHidden();
   });
 
-  test("rejects prototype names from legacy soft-key storage", async ({ page }) => {
+  test("rejects prototype names and out-of-bounds custom keys from storage", async ({ page }) => {
     await page.addInitScript((key) => {
       localStorage.setItem(
         key,
         JSON.stringify({
           expanded: true,
-          sets: [],
-          custom: ["constructor", "__proto__"],
-          usedCustom: ["constructor", "__proto__"],
-          order: ["constructor", "__proto__"],
+          userKeys: [
+            { id: "__proto__", label: "x", seq: "x" },
+            { id: "constructor", label: "y", seq: "y" },
+            { id: "u-blank", label: "  ", seq: "z" },
+            { id: "u-toolong", label: "abcdefghij", seq: "z" },
+            { id: "u-noseq", label: "^N", seq: "" },
+            { id: "u-good", label: "^G", seq: "" },
+          ],
+          zones: {
+            main: {
+              left: ["soft:constructor", "soft:__proto__", "soft:u-good", "soft:u-noseq"],
+              center: [],
+              right: ["keys"],
+            },
+            expanded: { left: [], center: [], right: [] },
+          },
         }),
       );
     }, STORAGE_KEY);
@@ -180,56 +310,79 @@ test.describe("Remote input action layout", () => {
     await expect(
       page.locator('[data-input-action="soft:constructor"], [data-input-action="soft:__proto__"]'),
     ).toHaveCount(0);
-    await expect(page.locator("#keyRow > .key-btn")).toHaveCount(0);
-
-    await page.locator("#keyBarToggle").click();
     await expect
-      .poll(() =>
-        page.evaluate((key) => {
-          const stored = JSON.parse(localStorage.getItem(key) || "{}");
-          return {
-            custom: stored.custom,
-            usedCustom: stored.usedCustom,
-            invalidOrder: stored.order?.filter((id: string) =>
-              ["constructor", "__proto__"].includes(id),
-            ),
-            invalidZones: Object.values(stored.zones || {})
-              .flat()
-              .filter((id) => ["soft:constructor", "soft:__proto__"].includes(String(id))),
-          };
-        }, STORAGE_KEY),
+      .poll(() => renderedActions(page, "mainActionRow"))
+      .toEqual(["soft:u-good", "keys"]);
+
+    // Blank labels, over-long labels, and empty sequences are dropped one by
+    // one — a single bad entry must not take the whole list with it.
+    await page.locator("#drawerSettingsButton").click();
+    await expect(page.locator('#inputLayoutEditor [data-layout-action^="soft:u-"]')).toHaveCount(1);
+    await page.getByLabel("Custom key kind").selectOption("raw");
+    await page.getByLabel("Custom key label").fill("^Q");
+    await page.getByLabel("Custom key sequence").fill("\\x11");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { id: string }) => entry.id),
       )
-      .toEqual({ custom: [], usedCustom: [], invalidOrder: [], invalidZones: [] });
+      .toHaveLength(2);
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { id: string }) => entry.id),
+      )
+      .toContain("u-good");
   });
 
-  test("keeps zone ownership while sets and custom keys only control activation", async ({
-    page,
-  }) => {
+  test("registers a Ctrl combination custom key and deletes it again", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
 
-    await page.getByLabel("Place Esc").selectOption("main");
-    const navigationSet = page
-      .locator(".key-set-row")
-      .filter({ hasText: "Navigation" })
-      .locator('input[type="checkbox"]');
-    await navigationSet.uncheck();
-    await expect(page.locator('[data-input-action="soft:esc"]')).toHaveCount(0);
-    await page
-      .locator(".key-set-row")
-      .filter({ hasText: "Navigation" })
-      .locator('input[type="checkbox"]')
-      .check();
-    await expect(page.locator('#mainActionRow > [data-input-action="soft:esc"]')).toHaveCount(1);
+    await page.getByLabel("Custom key kind").selectOption("combo");
+    await page.getByLabel("Custom key modifier").selectOption("ctrl");
+    await page.getByLabel("Custom key base key").selectOption("g");
+    await expect(page.locator(".user-key-preview")).toContainText("^G → \\x07");
+    // Ctrl+Shift+X is the same byte as Ctrl+X, so Shift is offered only with Alt.
+    await expect(page.getByLabel("Custom key uses Shift")).toBeDisabled();
+    await page.getByRole("button", { name: "Add custom key" }).click();
 
-    const customEnter = () =>
-      page.locator(".key-chip-grid").getByRole("button", { name: "⏎", exact: true });
-    await customEnter().click();
-    await page.getByLabel("Place ⏎").selectOption("main");
-    await customEnter().click();
-    await expect(page.locator('[data-input-action="soft:enter"]')).toHaveCount(0);
-    await customEnter().click();
-    await expect(page.locator('#mainActionRow > [data-input-action="soft:enter"]')).toHaveCount(1);
+    const registered = page.locator('#keyRow [data-input-action^="soft:u-"]');
+    await expect(registered).toHaveCount(1);
+    await expect(registered).toHaveText("^G");
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
+      )
+      .toEqual(["\u0007"]);
+
+    await page.getByRole("button", { name: "Delete custom key ^G" }).click();
+    await expect(page.locator('[data-input-action^="soft:u-"]')).toHaveCount(0);
+    await expect.poll(async () => (await storedConfig(page)).userKeys).toEqual([]);
+  });
+
+  test("registers a raw escape sequence and reports invalid input", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+    await page.getByLabel("Custom key kind").selectOption("raw");
+
+    await page.getByLabel("Custom key label").fill("C→");
+    await page.getByLabel("Custom key sequence").fill("\\q");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    await expect(page.locator(".user-key-error")).toHaveText("Unknown escape \\q.");
+
+    await page.getByLabel("Custom key sequence").fill("\\e[1;5C");
+    await page.getByRole("button", { name: "Add custom key" }).click();
+    await expect(page.locator(".user-key-error")).toHaveCount(0);
+    await expect(page.locator('#keyRow [data-input-action^="soft:u-"]')).toHaveText("C→");
+    await expect
+      .poll(async () =>
+        ((await storedConfig(page)).userKeys || []).map((entry: { seq: string }) => entry.seq),
+      )
+      .toEqual(["\u001b[1;5C"]);
+
+    await page.reload();
+    await page.setContent(remoteClientMarkupWithoutXterm());
+    await expect(page.locator('#keyRow [data-input-action^="soft:u-"]')).toHaveText("C→");
   });
 
   test("updates the Keys-row empty state when Send becomes visible in Composer", async ({
@@ -241,12 +394,10 @@ test.describe("Remote input action layout", () => {
         key,
         JSON.stringify({
           expanded: true,
-          sets: [],
-          custom: [],
+          userKeys: [],
           zones: {
-            main: ["keys", "composer"],
-            expanded: ["send"],
-            hidden: ["ctrl-c", "keyboard", "attachment"],
+            main: { left: [], center: [], right: ["keys", "composer"] },
+            expanded: { left: [], center: [], right: ["send"] },
           },
         }),
       );
@@ -255,138 +406,16 @@ test.describe("Remote input action layout", () => {
 
     const emptyState = page.locator("#keyRow > .key-row-empty");
     await expect(page.locator("#keyBar")).toBeVisible();
-    await expect(page.locator("#keyRow > #composerSend")).toBeHidden();
+    await expect(page.locator("#composerSend")).toBeHidden();
     await expect(emptyState).toBeVisible();
 
-    await page.locator("#mainActionRow > #inputModeToggle").click();
-    await expect(page.locator("#keyRow > #composerSend")).toBeVisible();
+    await page.locator("#mainActionRow #inputModeToggle").click();
+    await expect(page.locator("#composerSend")).toBeVisible();
     await expect(emptyState).toHaveCount(0);
 
-    await page.locator("#mainActionRow > #inputModeToggle").click();
-    await expect(page.locator("#keyRow > #composerSend")).toBeHidden();
+    await page.locator("#mainActionRow #inputModeToggle").click();
+    await expect(page.locator("#composerSend")).toBeHidden();
     await expect(emptyState).toBeVisible();
-  });
-
-  test("projects Action placement soft-key order into Key order and reload", async ({ page }) => {
-    const renderedSoftKeys = () =>
-      page.evaluate(() =>
-        ["mainActionRow", "keyRow"].flatMap((rowId) =>
-          [...document.querySelectorAll(`#${rowId} > .key-btn`)].map(
-            (button) => (button as HTMLElement).dataset.key,
-          ),
-        ),
-      );
-    const keyOrderChips = () =>
-      page
-        .locator("#inputLayoutEditor .key-order-chip")
-        .evaluateAll((chips) => chips.map((chip) => (chip as HTMLElement).dataset.orderKey));
-    const customEnter = () =>
-      page.locator(".key-chip-grid").getByRole("button", { name: "⏎", exact: true });
-
-    await openMarkup(page);
-    await page.locator("#drawerSettingsButton").click();
-    await page.getByLabel("Move Tab earlier").click();
-    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
-    expect((await renderedSoftKeys()).indexOf("tab")).toBeLessThan(
-      (await renderedSoftKeys()).indexOf("esc"),
-    );
-    await page.getByLabel("Place Tab").selectOption("main");
-    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
-    await expect(page.locator('#mainActionRow > [data-input-action="soft:tab"]')).toHaveCount(1);
-
-    await page.reload();
-    await page.setContent(remoteClientMarkupWithoutXterm());
-    await page.locator("#drawerSettingsButton").click();
-    await expect.poll(renderedSoftKeys).toEqual(await keyOrderChips());
-
-    await customEnter().click();
-    await page.getByLabel("Move ⏎ earlier").click();
-    const configuredOrder = await renderedSoftKeys();
-    await customEnter().click();
-    await expect(page.locator('[data-input-action="soft:enter"]')).toHaveCount(0);
-    await customEnter().click();
-    await expect.poll(renderedSoftKeys).toEqual(configuredOrder);
-    await expect.poll(keyOrderChips).toEqual(configuredOrder);
-
-    await page.reload();
-    await page.setContent(remoteClientMarkupWithoutXterm());
-    await page.locator("#drawerSettingsButton").click();
-    await expect.poll(renderedSoftKeys).toEqual(configuredOrder);
-    await expect.poll(keyOrderChips).toEqual(configuredOrder);
-  });
-
-  test("limits legacy Key order controls to the selected action row", async ({ page }) => {
-    await page.addInitScript((key) => {
-      localStorage.setItem(
-        key,
-        JSON.stringify({
-          expanded: true,
-          sets: [],
-          custom: ["tab", "enter", "esc", "stab"],
-          usedCustom: ["tab", "enter", "esc", "stab"],
-          zones: {
-            main: ["ctrl-c", "keyboard", "keys", "send", "soft:tab", "soft:enter"],
-            expanded: ["composer", "soft:esc", "soft:stab"],
-            hidden: ["attachment"],
-          },
-        }),
-      );
-    }, STORAGE_KEY);
-    await openMarkup(page);
-    await page.locator("#drawerSettingsButton").click();
-
-    const tab = page.locator('.key-order-chip[data-order-key="tab"]');
-    const enter = page.locator('.key-order-chip[data-order-key="enter"]');
-    const esc = page.locator('.key-order-chip[data-order-key="esc"]');
-    await expect(tab).toHaveAttribute("data-order-zone", "main");
-    await expect(tab).toHaveAttribute("aria-describedby", "keyOrderZoneMain");
-    await expect(esc).toHaveAttribute("data-order-zone", "expanded");
-    await expect(esc).toHaveAttribute("aria-describedby", "keyOrderZoneExpanded");
-
-    await enter.click();
-    await expect(page.getByRole("button", { name: "Move Enter left" })).toBeEnabled();
-    await expect(page.getByRole("button", { name: "Move Enter right" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Move Enter to end" })).toBeDisabled();
-
-    await esc.click();
-    await expect(page.getByRole("button", { name: "Move Esc to start" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Move Esc left" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Move Esc right" })).toBeEnabled();
-
-    await enter.scrollIntoViewIfNeeded();
-    await esc.scrollIntoViewIfNeeded();
-    const enterBox = await enter.boundingBox();
-    const escBox = await esc.boundingBox();
-    expect(enterBox).not.toBeNull();
-    expect(escBox).not.toBeNull();
-    await page.mouse.move(enterBox!.x + enterBox!.width / 2, enterBox!.y + enterBox!.height / 2);
-    await page.mouse.down();
-    await page.waitForTimeout(250);
-    await page.mouse.move(escBox!.x + 2, escBox!.y + escBox!.height / 2, { steps: 4 });
-    await expect(esc).not.toHaveClass(/drop-before|drop-after/);
-    await page.mouse.up();
-
-    await expect
-      .poll(() =>
-        page
-          .locator("#mainActionRow > .key-btn")
-          .evaluateAll((buttons) => buttons.map((button) => (button as HTMLElement).dataset.key)),
-      )
-      .toEqual(["tab", "enter"]);
-    await expect
-      .poll(() =>
-        page
-          .locator("#keyRow > .key-btn")
-          .evaluateAll((buttons) => buttons.map((button) => (button as HTMLElement).dataset.key)),
-      )
-      .toEqual(["esc", "stab"]);
-    await expect
-      .poll(() =>
-        page
-          .locator(".key-order-chip")
-          .evaluateAll((chips) => chips.map((chip) => (chip as HTMLElement).dataset.orderKey)),
-      )
-      .toEqual(["tab", "enter", "esc", "stab"]);
   });
 
   test("preserves the Settings scroll position while placement changes rerender", async ({
@@ -396,18 +425,16 @@ test.describe("Remote input action layout", () => {
     await page.locator("#drawerSettingsButton").click();
 
     const settingsView = page.locator("#drawerSettingsView");
-    await page.getByLabel("Place Attach file").scrollIntoViewIfNeeded();
-    expect(await settingsView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    await page.getByLabel("Place Attach file").selectOption("expanded");
-    await expect
-      .poll(() => settingsView.evaluate((element) => element.scrollTop))
-      .toBeGreaterThan(0);
+    await settingsView.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    const before = await settingsView.evaluate((element) => element.scrollTop);
+    expect(before).toBeGreaterThan(0);
 
-    await page.getByLabel("Move Attach file earlier").scrollIntoViewIfNeeded();
-    expect(await settingsView.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-    await page.getByLabel("Move Attach file earlier").click();
+    await place(page, "attachment", "Attach file", "expanded:right");
     await expect
       .poll(() => settingsView.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
+    await expect(segment(page, "keyRow", "right").locator("#attachFile")).toHaveCount(1);
   });
 });
