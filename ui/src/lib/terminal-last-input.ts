@@ -1,6 +1,23 @@
 const MAX_DIRECT_INPUT_CHARS = 16 * 1024;
+const MAX_PENDING_CSI_CHARS = 256;
 const CSI_SEQUENCE_PATTERN = /^\x1b\[([0-?]*)([ -/]*)([@-~])/u;
-const LEGACY_MOUSE_PAYLOAD_CHARS = 3;
+
+function isIncompleteCsiSequence(value: string): boolean {
+  return value === "\u001b" || /^\x1b\[[0-?]*[ -/]*$/u.test(value);
+}
+
+function shouldContinuePendingCsi(pending: string, next: string): boolean {
+  if (!next) return true;
+  if (pending === "\u001b") return next.startsWith("[");
+  if (pending === "\u001b[") {
+    const first = next.charCodeAt(0);
+    // A parameter or intermediate byte proves that this is continuing CSI.
+    // A bare final byte may instead be ordinary input after a standalone Esc/`[`.
+    return first >= 0x20 && first <= 0x3f;
+  }
+  const combined = pending + next;
+  return CSI_SEQUENCE_PATTERN.test(combined) || isIncompleteCsiSequence(combined);
+}
 
 export function normalizeSubmittedInput(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -63,6 +80,7 @@ export interface DirectInputCapture {
 export function createDirectInputCapture(): DirectInputCapture {
   let value = "";
   let cursor = 0;
+  let pendingCsi = "";
 
   const insert = (text: string) => {
     value = value.slice(0, cursor) + text + value.slice(cursor);
@@ -77,13 +95,22 @@ export function createDirectInputCapture(): DirectInputCapture {
   const reset = () => {
     value = "";
     cursor = 0;
+    pendingCsi = "";
   };
 
   return {
     push(data: string) {
+      let input = data;
+      if (pendingCsi) {
+        if (!input) return [];
+        const pending = pendingCsi;
+        pendingCsi = "";
+        if (shouldContinuePendingCsi(pending, input)) input = pending + input;
+      }
+
       const submitted: string[] = [];
-      for (let index = 0; index < data.length; ) {
-        const rest = data.slice(index);
+      for (let index = 0; index < input.length; ) {
+        const rest = input.slice(index);
         // ECMA-48 CSI uses parameter bytes 0x30..0x3f, optional intermediate
         // bytes 0x20..0x2f, and a final byte 0x40..0x7e. In particular, SGR
         // mouse reports start their parameters with `<`; treating `<` as text
@@ -94,24 +121,6 @@ export function createDirectInputCapture(): DirectInputCapture {
           const intermediates = csi[2];
           const final = csi[3];
           index += csi[0].length;
-
-          // xterm's DEFAULT mouse encoding is the legacy `CSI M Pb Px Py`
-          // form. The three payload characters are not part of CSI grammar,
-          // so consume them explicitly instead of recording coordinates as
-          // typed text. SGR/SGR-pixels and URXVT reports are already consumed
-          // as one CSI.
-          if (!params && !intermediates && final === "M") {
-            for (
-              let payload = 0;
-              payload < LEGACY_MOUSE_PAYLOAD_CHARS && index < data.length;
-              payload += 1
-            ) {
-              const payloadCodePoint = data.codePointAt(index);
-              if (payloadCodePoint === undefined) break;
-              index += String.fromCodePoint(payloadCodePoint).length;
-            }
-            continue;
-          }
 
           const amount = Math.max(1, Number.parseInt(params, 10) || 1);
           if (!intermediates) {
@@ -126,7 +135,15 @@ export function createDirectInputCapture(): DirectInputCapture {
           continue;
         }
 
-        const codePoint = data.codePointAt(index);
+        if (isIncompleteCsiSequence(rest)) {
+          // xterm normally emits a complete user-control report at once, but
+          // callers of this stream model may split chunks. Keep only a small
+          // syntactically valid prefix; an overlong malformed prefix is dropped.
+          if (rest.length <= MAX_PENDING_CSI_CHARS) pendingCsi = rest;
+          break;
+        }
+
+        const codePoint = input.codePointAt(index);
         if (codePoint === undefined) break;
         const char = String.fromCodePoint(codePoint);
         index += char.length;
