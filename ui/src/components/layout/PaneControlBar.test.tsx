@@ -290,6 +290,39 @@ describe("PaneControlBar", () => {
     expect(defaultActions.onClear).toHaveBeenCalled();
   });
 
+  it("터미널 실제 클리어 버튼은 단축키를 표시하고 전용 동작을 호출한다", async () => {
+    const onClearTerminal = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onClearTerminal }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    const button = screen.getByTestId("pane-control-clear-terminal");
+    expect(button).toHaveAttribute("title", "Clear terminal (Alt+L)");
+    await user.click(button);
+    expect(onClearTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("터미널이 아닌 view에는 실제 클리어 버튼을 표시하지 않는다", () => {
+    render(
+      <PaneControlBar
+        currentView={{ type: "MemoView" }}
+        actions={{ ...defaultActions, onClearTerminal: vi.fn() }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    expect(screen.queryByTestId("pane-control-clear-terminal")).not.toBeInTheDocument();
+  });
+
   it("Restart View는 terminal에서만 빨간 위험 버튼으로 표시하고 동작한다", async () => {
     const onRestart = vi.fn();
     const user = userEvent.setup();
@@ -353,6 +386,27 @@ describe("PaneControlBar", () => {
 
     await user.click(pinButton);
     expect(screen.getByTestId("pane-control-pinned")).toBeInTheDocument();
+  });
+
+  it("keeps terminal clear available in the narrow hover menu", async () => {
+    stubPaneWidth(320);
+    const onClearTerminal = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <PaneControlBar
+        currentView={defaultView}
+        actions={{ ...defaultActions, onClearTerminal }}
+        hovered={true}
+      >
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("pane-control-menu-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("pane-control-menu-btn"));
+    await user.click(screen.getByTestId("pane-control-clear-terminal"));
+
+    expect(onClearTerminal).toHaveBeenCalledTimes(1);
   });
 
   // -- Narrow pane floating menu escapes pane clipping (issue #384) --
