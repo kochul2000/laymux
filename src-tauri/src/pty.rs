@@ -1122,6 +1122,121 @@ mod tests {
         )
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
+    fn make_native_binary_probe_session(
+        command_line: String,
+        startup_command: String,
+    ) -> TerminalSession {
+        TerminalSession::new(
+            "binary-input-probe".into(),
+            TerminalConfig {
+                profile: "native-binary-probe".into(),
+                command_line,
+                startup_command,
+                starting_directory: String::new(),
+                cols: 80,
+                rows: 24,
+                sync_group: "binary-input-probe".into(),
+                env: vec![],
+                advertise_true_color: true,
+            },
+        )
+    }
+
+    #[cfg(windows)]
+    fn native_binary_probe_command(
+        directory: &std::path::Path,
+    ) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let script_path = directory.join("binary-input-probe.ps1");
+        std::fs::write(
+            &script_path,
+            r#"Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class LaymuxRawConsoleInput {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr GetStdHandle(int kind);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+}
+'@
+$handle = [LaymuxRawConsoleInput]::GetStdHandle(-10)
+if (-not [LaymuxRawConsoleInput]::SetConsoleMode($handle, 0x0200)) {
+    throw "failed to enable virtual terminal input"
+}
+[Console]::WriteLine("RAW_READY")
+$stream = [Console]::OpenStandardInput()
+$bytes = New-Object byte[] 6
+$offset = 0
+while ($offset -lt $bytes.Length) {
+    $read = $stream.Read($bytes, $offset, $bytes.Length - $offset)
+    if ($read -le 0) { throw "stdin closed before the binary report completed" }
+    $offset += $read
+}
+$hex = [BitConverter]::ToString($bytes).Replace("-", "").ToLowerInvariant()
+[Console]::WriteLine("RAW_BYTES:" + $hex)
+"#,
+        )?;
+        let escaped_path = script_path.display().to_string().replace('\'', "''");
+        Ok(("powershell.exe".into(), format!("& '{escaped_path}'; exit")))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn native_binary_probe_command(
+        directory: &std::path::Path,
+    ) -> Result<(String, String), Box<dyn std::error::Error>> {
+        let script_path = directory.join("binary-input-probe.sh");
+        std::fs::write(
+            &script_path,
+            r#"stty raw -echo
+printf 'RAW_READY\r\n'
+hex="$(dd bs=1 count=6 2>/dev/null | od -An -tx1 | tr -d ' \r\n')"
+printf 'RAW_BYTES:%s\r\n' "$hex"
+"#,
+        )?;
+        Ok((format!("/bin/sh {}", script_path.display()), String::new()))
+    }
+
+    #[test]
+    #[cfg(any(windows, target_os = "linux"))]
+    fn native_pty_input_obeys_platform_binary_mouse_boundary() {
+        let directory = tempfile::tempdir().expect("binary probe tempdir");
+        let (command_line, startup_command) =
+            native_binary_probe_command(directory.path()).expect("binary probe script");
+        let session = make_native_binary_probe_session(command_line, startup_command);
+        let (tx, rx) = mpsc::channel();
+        let handle = spawn_pty_for_generation(&session, 79, move |data| {
+            let _ = tx.send(data);
+            PtyOutputControl::Continue
+        })
+        .expect("spawn native binary probe")
+        .handle;
+
+        let ready = collect_pty_output_until(&rx, "RAW_READY", PTY_OUTPUT_TIMEOUT);
+        #[cfg(windows)]
+        let report = [0x1b, b'[', b'M', 0x20, 0x7e, 0x7f];
+        #[cfg(target_os = "linux")]
+        let report = [0x1b, b'[', b'M', 0x20, 0x80, 0xff];
+        let write_result = handle.write(&report);
+        let output = collect_pty_output_until(&rx, "RAW_BYTES:", PTY_OUTPUT_TIMEOUT);
+        let _ = handle.terminate();
+
+        assert!(
+            ready.contains("RAW_READY"),
+            "probe did not become ready: {ready:?}"
+        );
+        write_result.expect("write binary report to native PTY");
+        let report_hex = report
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let expected = format!("raw_bytes:{report_hex}");
+        assert!(
+            output.to_lowercase().contains(&expected),
+            "native PTY changed binary input bytes: {output:?}"
+        );
+    }
+
     #[test]
     #[cfg(any(windows, target_os = "linux"))]
     fn native_interruptible_reader_preserves_data_and_stops_while_idle() {

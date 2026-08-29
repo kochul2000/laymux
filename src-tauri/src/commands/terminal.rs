@@ -1281,6 +1281,20 @@ pub fn write_to_terminal(
     write_to_terminal_inner(&state, &id, data.as_bytes(), HumanControlOrigin::Local)
 }
 
+/// Write an xterm `onBinary` human-input report without passing through a Rust
+/// UTF-8 `String`. The desktop adapter serializes each xterm code unit as one
+/// array element, and this command binds the report to the surface's PTY
+/// generation before entering the normal Local-owner input FIFO.
+#[tauri::command]
+pub fn write_terminal_binary_input(
+    id: String,
+    generation: u64,
+    data: Vec<u8>,
+    state: State<Arc<AppState>>,
+) -> Result<(), String> {
+    write_terminal_binary_input_inner(&state, &id, generation, &data, HumanControlOrigin::Local)
+}
+
 /// Write an xterm-generated terminal protocol reply to the PTY. Unlike human
 /// keyboard, paste, mouse, focus, and resize input, this is a response to live
 /// PTY output and must continue while a remote client owns human control.
@@ -1448,6 +1462,61 @@ pub fn write_to_terminal_inner(
         );
     }
 
+    write_human_terminal_bytes_inner(state, id, data, origin, None)
+}
+
+pub fn write_terminal_binary_input_inner(
+    state: &AppState,
+    id: &str,
+    generation: u64,
+    data: &[u8],
+    origin: HumanControlOrigin,
+) -> Result<(), String> {
+    validate_xterm_default_mouse_binary_input(data)?;
+
+    if pty_trace::is_pty_trace_enabled() {
+        tracing::info!(
+            terminal_id = %id,
+            direction = "ui-binary->pty",
+            generation,
+            bytes = data.len(),
+            signals = ?pty_trace::detect_terminal_signals(data),
+            preview = %pty_trace::summarize_terminal_bytes(data),
+            "binary PTY input"
+        );
+    }
+
+    write_human_terminal_bytes_inner(state, id, data, origin, Some(generation))
+}
+
+fn validate_xterm_default_mouse_binary_input(data: &[u8]) -> Result<(), String> {
+    if data.len() != XTERM_DEFAULT_MOUSE_REPORT_LEN
+        || !data.starts_with(XTERM_DEFAULT_MOUSE_REPORT_PREFIX)
+    {
+        return Err("unsupported xterm binary input: expected CSI M Pb Px Py".into());
+    }
+
+    #[cfg(windows)]
+    if data[XTERM_DEFAULT_MOUSE_REPORT_PREFIX.len()..]
+        .iter()
+        .any(|byte| *byte > XTERM_DEFAULT_MOUSE_CONPTY_MAX_BYTE)
+    {
+        return Err(
+            "legacy DEFAULT mouse input exceeds the ConPTY UTF-8 boundary; use SGR mouse encoding"
+                .into(),
+        );
+    }
+
+    Ok(())
+}
+
+fn write_human_terminal_bytes_inner(
+    state: &AppState,
+    id: &str,
+    data: &[u8],
+    origin: HumanControlOrigin,
+    expected_generation: Option<u64>,
+) -> Result<(), String> {
     let permit = begin_human_control_operation(state, origin, id)?;
     let handle = state
         .pty_handles
@@ -1455,6 +1524,14 @@ pub fn write_to_terminal_inner(
         .get(id)
         .cloned()
         .ok_or_else(|| format!("Session '{id}' not found"))?;
+    if let Some(generation) = expected_generation {
+        let active_generation = handle.terminal_generation();
+        if generation != active_generation {
+            return Err(format!(
+                "stale terminal binary input for '{id}': generation {generation}, active {active_generation}"
+            ));
+        }
+    }
 
     let deadline = permit.deadline();
     let pending = permit.enqueue_pty_job(|| handle.enqueue_write(data, false, deadline))?;
@@ -2307,6 +2384,89 @@ mod tests {
             &*written.lock().unwrap(),
             b"local-rawlocal-input\rremote-rawremote-input\r"
         );
+    }
+
+    #[test]
+    fn binary_input_is_generation_bound_owner_gated_and_byte_preserving() {
+        let state = AppState::new();
+        enable_test_remote_access(&state);
+        let written = Arc::new(Mutex::new(Vec::new()));
+        state.pty_handles.lock_or_err().unwrap().insert(
+            "t1".into(),
+            pty::PtyHandle::from_test_writer_for_generation(
+                Box::new(SharedTestWriter(Arc::clone(&written))),
+                7,
+            ),
+        );
+        let safe_report = [0x1b, b'[', b'M', 0x20, 0x7e, 0x7f];
+
+        write_terminal_binary_input_inner(&state, "t1", 7, &safe_report, HumanControlOrigin::Local)
+            .unwrap();
+        assert_eq!(written.lock().unwrap().as_slice(), safe_report);
+
+        let high_bit_report = [0x1b, b'[', b'M', 0x20, 0x80, 0xff];
+        #[cfg(windows)]
+        {
+            let unsupported = write_terminal_binary_input_inner(
+                &state,
+                "t1",
+                7,
+                &high_bit_report,
+                HumanControlOrigin::Local,
+            )
+            .unwrap_err();
+            assert!(unsupported.contains("ConPTY UTF-8 boundary"));
+            assert_eq!(written.lock().unwrap().as_slice(), safe_report);
+        }
+        #[cfg(not(windows))]
+        {
+            write_terminal_binary_input_inner(
+                &state,
+                "t1",
+                7,
+                &high_bit_report,
+                HumanControlOrigin::Local,
+            )
+            .unwrap();
+            assert_eq!(
+                written.lock().unwrap().as_slice(),
+                [safe_report.as_slice(), high_bit_report.as_slice()].concat()
+            );
+        }
+
+        let before_rejections = written.lock().unwrap().clone();
+        let malformed = write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            7,
+            b"not-mouse",
+            HumanControlOrigin::Local,
+        )
+        .unwrap_err();
+        assert!(malformed.contains("expected CSI M Pb Px Py"));
+        assert_eq!(*written.lock().unwrap(), before_rejections);
+
+        let stale = write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            6,
+            &safe_report,
+            HumanControlOrigin::Local,
+        )
+        .unwrap_err();
+        assert!(stale.contains("stale terminal binary input"));
+        assert_eq!(*written.lock().unwrap(), before_rejections);
+
+        set_test_remote_lease(&state, "lease-1");
+        assert!(write_terminal_binary_input_inner(
+            &state,
+            "t1",
+            7,
+            &safe_report,
+            HumanControlOrigin::Local,
+        )
+        .is_err());
+        assert_eq!(*written.lock().unwrap(), before_rejections);
     }
 
     #[test]

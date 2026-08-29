@@ -42,6 +42,7 @@ import {
 
 // Mock xterm since it requires a real DOM with canvas
 const mockOnData = vi.fn();
+const mockOnBinary = vi.fn();
 let capturedResizeHandler: ((size: { cols: number; rows: number }) => void) | null = null;
 const mockOnResize = vi.fn((handler: (size: { cols: number; rows: number }) => void) => {
   capturedResizeHandler = handler;
@@ -309,6 +310,7 @@ vi.mock("@xterm/xterm", () => ({
     });
     write = mockWrite;
     onData = mockOnData;
+    onBinary = mockOnBinary;
     onResize = mockOnResize;
     onTitleChange = mockOnTitleChange;
     onSelectionChange = mockOnSelectionChange;
@@ -359,6 +361,13 @@ vi.mock("@xterm/xterm", () => ({
         for (const listener of this.userInputListeners) listener();
       }
       const handler = mockOnData.mock.calls.at(-1)?.[0] as ((value: string) => void) | undefined;
+      handler?.(data);
+    };
+    emitBinary = (data: string) => {
+      // xterm's CoreService applies disableStdin to every binary event. Binary
+      // reports are human mouse input, never parser-generated replies.
+      if (this.options.disableStdin) return;
+      const handler = mockOnBinary.mock.calls.at(-1)?.[0] as ((value: string) => void) | undefined;
       handler?.(data);
     };
     focus = mockFocus;
@@ -541,6 +550,7 @@ const mockCreateTerminalSession = vi.fn().mockResolvedValue({
   },
 });
 const mockWriteToTerminal = vi.fn().mockResolvedValue(undefined);
+const mockWriteTerminalBinaryInput = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalBootstrapProtocolReply = vi.fn().mockResolvedValue(false);
 const mockWriteTerminalProtocolReply = vi.fn().mockResolvedValue(undefined);
 const mockWriteTerminalInput = vi.fn().mockResolvedValue(undefined);
@@ -615,6 +625,7 @@ const mockLoadTerminalOutputCache = vi
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: (...args: unknown[]) => mockCreateTerminalSession(...args),
   writeToTerminal: (...args: unknown[]) => mockWriteToTerminal(...args),
+  writeTerminalBinaryInput: (...args: unknown[]) => mockWriteTerminalBinaryInput(...args),
   writeTerminalBootstrapProtocolReply: (...args: unknown[]) =>
     mockWriteTerminalBootstrapProtocolReply(...args),
   writeTerminalProtocolReply: (...args: unknown[]) => mockWriteTerminalProtocolReply(...args),
@@ -4183,6 +4194,78 @@ describe("TerminalView", () => {
 
     // onData should be registered
     expect(mockOnData).toHaveBeenCalled();
+  });
+
+  it("forwards legacy DEFAULT mouse bytes once without recording lastUserInput", async () => {
+    const terminalId = "t-binary-mouse-input";
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    mockWriteToTerminal.mockClear();
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const report = "\x1b[M !!";
+    act(() => createdTerminals.at(-1)!.emitBinary(report));
+
+    await vi.waitFor(() => {
+      expect(mockWriteTerminalBinaryInput).toHaveBeenCalledWith(terminalId, 1, report);
+      expect(terminalInputDeliveryCounters(terminalId).succeeded).toBe(1);
+    });
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 1,
+      failed: 0,
+      attemptedBytes: 6,
+      succeededBytes: 6,
+      failedBytes: 0,
+    });
+    expect(
+      useTerminalStore.getState().instances.find((instance) => instance.id === terminalId)
+        ?.lastUserInput,
+    ).toBeUndefined();
+  });
+
+  it("reports a rejected binary mouse write once without resending it", async () => {
+    const terminalId = "t-binary-mouse-rejected";
+    mockWriteTerminalBinaryInput.mockRejectedValueOnce(new Error("IPC response lost"));
+    render(<TerminalView instanceId={terminalId} profile="PowerShell" syncGroup="" />);
+    await waitForTerminalInputReady();
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const report = "\x1b[M !!";
+    act(() => createdTerminals.at(-1)!.emitBinary(report));
+
+    await vi.waitFor(() => {
+      expect(terminalInputDeliveryCounters(terminalId).failed).toBe(1);
+    });
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledTimes(1);
+    expect(mockWriteTerminalBinaryInput).toHaveBeenCalledWith(terminalId, 1, report);
+    expect(terminalInputDeliveryCounters(terminalId)).toEqual({
+      attempts: 1,
+      succeeded: 0,
+      failed: 1,
+      attemptedBytes: 6,
+      succeededBytes: 0,
+      failedBytes: 6,
+    });
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({ terminalId, requiresAction: true, level: "error" }),
+    ]);
+  });
+
+  it("keeps binary mouse input fail-closed while Local control is unknown", async () => {
+    mockGetRemoteControlStatus.mockReturnValueOnce(new Promise(() => {}));
+    render(<TerminalView instanceId="t-binary-mouse-unknown" profile="PowerShell" syncGroup="" />);
+    await vi.waitFor(() => expect(mockOnBinary).toHaveBeenCalled());
+    mockWriteTerminalBinaryInput.mockClear();
+
+    const terminal = createdTerminals.at(-1)!;
+    expect(terminal.options.disableStdin).toBe(true);
+    act(() => terminal.emitBinary("\x1b[M !!"));
+
+    expect(mockWriteTerminalBinaryInput).not.toHaveBeenCalled();
+    expect(terminalInputDeliveryCounters("t-binary-mouse-unknown").attempts).toBe(0);
   });
 
   it("records a successful human onData write with UTF-8 byte totals", async () => {

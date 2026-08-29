@@ -18,6 +18,7 @@ import {
   attachTerminalOutput,
   acknowledgeTerminalOutput,
   writeTerminalInput,
+  writeTerminalBinaryInput,
   writeToTerminal,
   writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
@@ -167,6 +168,27 @@ describe("tauri-api", () => {
         id: "t1",
         data: "ls\n",
       });
+    });
+  });
+
+  describe("writeTerminalBinaryInput", () => {
+    it("serializes xterm Latin-1 code units as exact byte values", async () => {
+      mockInvoke.mockResolvedValue(undefined);
+
+      await writeTerminalBinaryInput("t1", 7, `\x1b[M${String.fromCharCode(0x20, 0x80, 0xff)}`);
+
+      expect(mockInvoke).toHaveBeenCalledWith("write_terminal_binary_input", {
+        id: "t1",
+        generation: 7,
+        data: [0x1b, 0x5b, 0x4d, 0x20, 0x80, 0xff],
+      });
+    });
+
+    it("rejects code units outside xterm's binary-string contract", async () => {
+      await expect(writeTerminalBinaryInput("t1", 7, "가")).rejects.toThrow(
+        "xterm binary input contains a non-byte code unit",
+      );
+      expect(mockInvoke).not.toHaveBeenCalled();
     });
   });
 

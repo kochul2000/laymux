@@ -59,6 +59,7 @@ import {
   createTerminalSession,
   type ViewerStartupRequest,
   writeToTerminal,
+  writeTerminalBinaryInput,
   writeTerminalBootstrapProtocolReply,
   writeTerminalProtocolReply,
   writeTerminalInput,
@@ -1220,6 +1221,8 @@ export function TerminalView({
     let currentParsingFrameEndCursorAuthoritative = false;
     let currentParsingAttachEpoch: number | undefined;
     let currentParsingGeneration: number | undefined;
+    /** Generation of the attachment the coordinator is currently applying. */
+    let outputGeneration: number | undefined;
     let humanDataEmissionDepth = 0;
     let pendingXtermUserInputOrigins = 0;
     let humanInputFailureNotified = false;
@@ -3448,6 +3451,34 @@ export function TerminalView({
       writeTerminalProtocolReply(instanceId, currentParsingGeneration, data).catch(() => {});
     });
 
+    // xterm emits legacy DEFAULT mouse reports as a Latin-1-style binary
+    // string, not onData. Preserve each code unit as one PTY byte and keep this
+    // human input on the same Local owner, exactly-once metrics, and failure
+    // notification path as keyboard/IME/mouse onData. Binary reports never
+    // participate in parser reply/replay routing or the recent-input model.
+    terminal.onBinary((data) => {
+      const generation = outputGeneration;
+      if (!localTerminalControlAllowed() || generation === undefined) return;
+      trace("terminal-onBinary", {
+        bytes: data.length,
+        preview: Array.from(data.slice(0, 16), (character) => character.charCodeAt(0)),
+      });
+      const attempt = beginTerminalInputDelivery(instanceId, data.length);
+      void writeTerminalBinaryInput(instanceId, generation, data).then(
+        () => {
+          settleTerminalInputDelivery(attempt, "succeeded");
+        },
+        (error: unknown) => {
+          if (!settleTerminalInputDelivery(attempt, "failed") || cancelled) return;
+          trace("terminal-human-binary-input-write-failed", {
+            bytes: data.length,
+            error: error instanceof Error ? error.name : "unknown",
+          });
+          notifyHumanInputDeliveryFailure();
+        },
+      );
+    });
+
     const nativeWindowsOutputStabilizer = new NativeWindowsOutputStabilizer();
     const wslInFrameCursorParkRecognizer = new WslInFrameCursorParkRecognizer();
     const isWindowsHost = navigator.userAgent.includes("Windows");
@@ -4180,8 +4211,6 @@ export function TerminalView({
     let outputAttachTimeoutStreak = 0;
     let outputAckTimeoutStreak = 0;
     const outputControlOperations = terminalOutputControlOperationRegistry.mount(instanceId);
-    /** Generation of the attachment the coordinator is currently applying. */
-    let outputGeneration: number | undefined;
     /** Parsed-credit sender owned by exactly one backend attach lease. */
     let outputFlowAcknowledger: TerminalOutputFlowAcknowledger | undefined;
     type OutputTransportMode = "pending" | "v2" | "v3" | "fail-stop";
