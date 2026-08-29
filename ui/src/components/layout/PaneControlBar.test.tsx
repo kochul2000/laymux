@@ -578,6 +578,32 @@ describe("PaneControlBar", () => {
     expect(trigger).toHaveFocus();
   });
 
+  it("restores Escape focus to the owning pane when hover unmounts the trigger", async () => {
+    stubPaneWidth(200);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+
+    await user.click(await screen.findByTestId("pane-control-menu-btn"));
+    await waitFor(() => expect(screen.getByTestId("pane-control-view-select")).toHaveFocus());
+
+    rerender(
+      <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={false}>
+        <div>content</div>
+      </PaneControlBar>,
+    );
+    expect(screen.queryByTestId("pane-control-menu-btn")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("pane-control-hover")).toHaveFocus();
+  });
+
   it("preserves keyboard focus when a minimized narrow pane expands into the portal", async () => {
     stubPaneWidth(200);
     useSettingsStore.setState((state) => ({

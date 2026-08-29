@@ -9,8 +9,8 @@ export interface SizeLike {
   width: number;
   height: number;
   scrollWidth?: number;
-  /** Full content height, retained even when the rendered box has max-height. */
-  scrollHeight?: number;
+  /** Full outer height, retained even when the rendered border box has max-height. */
+  intrinsicHeight?: number;
 }
 
 export interface FloatingToolbarPlacement {
@@ -76,11 +76,13 @@ export function resolveFloatingToolbarPlacement({
   const constrainedX = nonNegative(menu.scrollWidth ?? menu.width) > maxWidth + 1;
   const effectiveWidth = Math.min(nonNegative(menu.width), maxWidth);
   // ResizeObserver sees the constrained border box after max-height is applied.
-  // Keep placement decisions tied to the intrinsic content height or the menu
-  // would alternate between constrained and unconstrained on every frame.
+  // Keep placement decisions tied to the intrinsic outer height or the menu
+  // would alternate between constrained and unconstrained on every frame. A
+  // content-only scrollHeight is insufficient at the exact boundary because
+  // it excludes borders and a possible horizontal scrollbar.
   const menuHeight = Math.max(
     nonNegative(menu.height),
-    nonNegative(menu.scrollHeight ?? menu.height),
+    nonNegative(menu.intrinsicHeight ?? menu.height),
   );
   const left = clamp(
     anchor.right - effectiveWidth,

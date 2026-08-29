@@ -261,6 +261,7 @@ export function AppLayout() {
       <>
         <Dock
           position={pos}
+          isActive={dock.visible}
           activeView={dock.activeView}
           views={dock.views}
           panes={dock.panes}

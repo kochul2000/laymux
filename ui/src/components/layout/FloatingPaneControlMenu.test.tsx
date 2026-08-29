@@ -87,7 +87,7 @@ describe("FloatingPaneControlMenu", () => {
         return rect({ top: 240, right: 500, bottom: 262, left: 478 });
       }
       if (this.dataset.testid === "pane-control-floating-menu") {
-        const height = this.style.maxHeight ? Number.parseFloat(this.style.maxHeight) : 600;
+        const height = this.style.maxHeight ? Number.parseFloat(this.style.maxHeight) : 232;
         return rect({ top: 0, right: 300, bottom: height, left: 0 });
       }
       return rect({ top: 0, right: 0, bottom: 0, left: 0 });
@@ -96,7 +96,15 @@ describe("FloatingPaneControlMenu", () => {
       return this.dataset.testid === "pane-control-floating-menu" ? 300 : 0;
     });
     vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function () {
-      return this.dataset.testid === "pane-control-floating-menu" ? 600 : 0;
+      return this.dataset.testid === "pane-control-floating-menu" ? 230 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+      if (this.dataset.testid !== "pane-control-floating-menu") return 0;
+      return this.style.maxHeight ? Number.parseFloat(this.style.maxHeight) : 232;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function () {
+      if (this.dataset.testid !== "pane-control-floating-menu") return 0;
+      return this.style.maxHeight ? Number.parseFloat(this.style.maxHeight) - 2 : 230;
     });
 
     render(<Harness />);
@@ -111,7 +119,8 @@ describe("FloatingPaneControlMenu", () => {
     expect(menu.style.maxHeight).toBe("230px");
 
     // Model ResizeObserver seeing the already-constrained 230px border box.
-    // The menu must continue using its 600px scrollHeight as the natural size.
+    // scrollHeight is also 230px because it excludes the border, while the
+    // intrinsic outer box is 232px. The placement must not oscillate.
     for (let pass = 0; pass < 2; pass += 1) {
       act(() => {
         const observer = observers[0];

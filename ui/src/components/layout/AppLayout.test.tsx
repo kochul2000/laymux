@@ -200,7 +200,7 @@ describe("AppLayout", () => {
     useDockStore.getState().toggleDockVisible("left");
     render(<AppLayout />);
     // Dock content remains in DOM (inside 0px grid cell with overflow:hidden)
-    expect(screen.getByTestId("dock-left")).toBeInTheDocument();
+    expect(screen.getByTestId("dock-left")).toHaveAttribute("data-active", "false");
   });
 
   it("removes dock from DOM when toggled invisible with dockPersistState off", () => {

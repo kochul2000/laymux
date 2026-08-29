@@ -95,17 +95,19 @@ describe("resolveFloatingToolbarPlacement", () => {
     });
   });
 
-  it("keeps using intrinsic scroll height after the DOM has already been constrained", () => {
+  it("keeps using the intrinsic outer height at the border-box constraint boundary", () => {
     expect(
       resolveFloatingToolbarPlacement({
         anchor: { top: 240, right: 500, bottom: 262, left: 478 },
         pane: { top: 220, right: 520, bottom: 300, left: 200 },
         // This is the second ResizeObserver pass: the border box has already
-        // shrunk to maxHeight, while scrollHeight still carries the full menu.
+        // shrunk to the 230px maxHeight. Its 230px scrollHeight excludes the
+        // 2px border, so only the intrinsic outer height proves it still needs
+        // the constrained branch.
         menu: {
           width: 300,
           height: 230,
-          scrollHeight: 600,
+          intrinsicHeight: 232,
         },
         viewport: { width: 900, height: 500 },
       }),

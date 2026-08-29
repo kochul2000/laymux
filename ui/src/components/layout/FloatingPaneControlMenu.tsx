@@ -103,7 +103,11 @@ export function FloatingPaneControlMenu({
         width: menuRect.width,
         height: menuRect.height,
         scrollWidth: menu.scrollWidth,
-        scrollHeight: menu.scrollHeight,
+        // scrollHeight omits the border and horizontal scrollbar. Preserve
+        // their combined block-axis chrome so a constrained border box never
+        // masquerades as the menu's natural outer height on the next observer
+        // frame (notably at a 1-2px exact-fit boundary).
+        intrinsicHeight: menu.scrollHeight + Math.max(0, menu.offsetHeight - menu.clientHeight),
       },
       viewport: { width: window.innerWidth, height: window.innerHeight },
     });
@@ -154,9 +158,12 @@ export function FloatingPaneControlMenu({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      const trigger = triggerRef.current;
+      // Hover-mode anchors can unmount while the pointer crosses into this
+      // body portal. Capture the stable owner pane as the keyboard fallback so
+      // Escape never leaves focus on body after closing a manual popover.
+      const focusTarget = triggerRef.current ?? paneRef.current;
       onRequestClose();
-      trigger?.focus({ preventScroll: true });
+      focusTarget?.focus({ preventScroll: true });
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     document.addEventListener("keydown", onKeyDown, true);
@@ -164,7 +171,7 @@ export function FloatingPaneControlMenu({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [onRequestClose, triggerRef]);
+  }, [onRequestClose, paneRef, triggerRef]);
 
   // Explicit keyboard/click opens behave like a popover: move directly into
   // the portalled controls once geometry exists. Hover discovery must never

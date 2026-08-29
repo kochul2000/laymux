@@ -824,6 +824,7 @@ export function PaneControlBar({
     <PaneControlContext.Provider value={ctxValue}>
       <div
         ref={rootRef}
+        tabIndex={-1}
         className="flex h-full w-full min-w-0 flex-col overflow-hidden"
         data-testid={modeTestId}
       >
