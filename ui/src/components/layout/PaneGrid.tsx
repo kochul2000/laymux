@@ -118,7 +118,7 @@ export function PaneGrid({
   const containerRef = useRef<HTMLDivElement>(null);
   const size = useContainerSize(containerRef);
   const hoverIdleSeconds = useSettingsStore((s) => s.controlBar.hoverIdleSeconds);
-  const hover = useHoverTimer(hoverIdleSeconds);
+  const hover = useHoverTimer(hoverIdleSeconds, isActive);
   // Spatial reading-order pane numbers (issue #256). Derived from geometry, never cached.
   const paneNumbers = showPaneNumbers ? computePaneNumbers(panes) : null;
 
@@ -258,6 +258,7 @@ export function PaneGrid({
               paneId={pane.id}
               currentView={pane.view}
               hovered={isActive && isHovered}
+              isActive={isActive}
               cwdSendOn={cwdSendOn}
               cwdReceiveOn={cwdReceiveOn}
               paneNumber={paneNumbers?.get(pane.id)}

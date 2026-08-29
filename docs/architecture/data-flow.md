@@ -50,11 +50,18 @@
 | 경계선 더블클릭                   | 작은 쪽 Pane 제거, 큰 쪽이 흡수 |
 | 편집 모드에서 Pane 선택 후 Delete | 인접 Pane 중 가장 큰 것이 흡수  |
 
+### Pane 컨트롤바의 적응형 배치
+
+- `ViewHeader`를 쓰는 View는 pane 폭의 고정 임계값만으로 inline 가능 여부를 추측하지 않는다. 전체 pane 컨트롤이 나타난 커밋에서 헤더 콘텐츠의 실제 `scrollWidth/clientWidth`를 측정하고, 제목·탭처럼 축소되지 않는 원본 정보가 넘칠 때 `PaneControlBar`에 충돌을 보고한다. 한 번 실패한 필요 폭은 캐시해 작은 `⋯` anchor로 바뀐 직후 다시 inline으로 진동하지 않으며, pane이 그 폭 이상으로 넓어지면 전체 컨트롤을 다시 측정한다.
+- 충돌한 hover 컨트롤은 헤더 높이를 늘리거나 View body를 밀지 않고 `document.body`의 `position: fixed` toolbar portal로 자동 표시한다. 따라서 전환 전후 View 작업영역의 rect와 스크롤 위치는 불변이다. pinned 모드는 본문을 영구히 덮지 않도록 `⋯`를 명시적으로 눌렀을 때만 연다.
+- floating toolbar의 첫 가로 경계는 viewport가 아니라 소유 pane의 실제 폭이다. 전체 액션은 가로 flex-wrap으로 1~여러 줄에 유지한다. wrapped flex는 `safe flex-end`로 정렬해 pane보다 넓은 단일 컨트롤의 overflow가 측정·스크롤 가능한 inline-end 방향으로 나가게 하고, 그 컨트롤만 필요한 만큼 viewport 안에서 가로로 빠져나온다. viewport 자체가 그 최소 폭보다 작으면 가로 스크롤을 최종 fallback으로 둬 액션을 버리거나 화면 밖에 고정하지 않는다. 기본 margin 두 배 이하인 양의 viewport 축에서는 margin을 0으로 양보해 0px surface를 만들지 않고 해당 축 전체를 최종 스크롤 영역으로 쓴다. 세로는 먼저 anchor 바로 아래에서 **pane 안에 전부 들어가는지** 보고, 부족하면 viewport의 위쪽으로 flip한 뒤, 위도 부족할 때만 pane 경계를 넘어 아래쪽을 사용한다. 좌우는 가용 viewport margin 안으로 clamp한다. 어느 방향도 물리적으로 전체 높이를 제공하지 못하는 경우에만 더 넓은 쪽에 최대 높이와 내부 스크롤을 둬 모든 액션을 계속 접근 가능하게 한다. 이때 제약된 border box 높이를 다음 배치의 자연 높이로 되먹이지 않는다. 자연 바깥 높이는 `scrollHeight + (offsetHeight - clientHeight)`로 보존해 테두리와 가로 스크롤바까지 포함하므로, ResizeObserver가 정확한 1~2px 경계를 다시 측정해도 스크롤 배치가 진동하지 않는다. placement 계산의 SoT는 `ui/src/lib/floating-toolbar-placement.ts`다.
+- hover로 자동 열린 portal은 pane과 toolbar를 하나의 pointer 소유 영역으로 취급한다. DOM상 pane 밖으로 이동해도 toolbar로 건너가는 동안 유지되며, 둘 사이 placement gap은 짧은 exit grace로 건넌다. hover 해제로 `⋯` anchor가 언마운트돼도 열린 menu 수명 동안 마지막 anchor의 pane-relative 위치를 유지해 포인터 아래에서 점프하지 않는다. `hoverIdleSeconds` 만료처럼 추가 pointer event 없이 hover 소유권이 끝난 경우도 같은 grace 뒤 닫되, 그 사이 toolbar에 진입하면 유지한다. 소유 workspace나 `persistState`로 DOM에 남은 dock이 비활성화되면 portal·열린 상태·hover 원시 상태를 즉시 폐기해 재활성화만으로 되살아나지 않게 한다. 명시적으로 연 toolbar는 첫 액션으로 focus를 옮기며, 바깥 클릭으로 닫는다. Escape로 닫을 때는 살아 있는 trigger로 focus를 돌리고, hover 해제로 trigger가 이미 언마운트됐다면 프로그램적으로 focus 가능한 소유 pane으로 복원한다. focus를 소유하지 않은 자동 hover toolbar는 Escape에 닫히되 키를 소비하거나 현재 View의 focus를 가져오지 않는다.
+
 ### 위치 교환 (드래그&드롭, issue #377, 재설계 #386)
 
 - **Pane 컨트롤바(PaneControlBar)의 버튼 없는 빈 영역을 드래그**해 다른 Pane 위로 드롭하면 두 Pane의 `{ x, y, w, h }` 가 교환된다(view/콘텐츠는 그대로, 슬롯 위치만 swap). 별도 드래그 핸들 요소는 두지 않는다 — 좌하단/우상단 floating 핸들은 콘텐츠와 겹쳐(issue #386) 폐기했다.
 - 바 컨테이너 자체가 `draggable` 이며, `onDragStart` 에서 `e.target !== e.currentTarget` 이면(= 버튼/select 등 자식 위에서 시작) `preventDefault` 로 드래그를 취소한다 — 빈 영역(바 배경)에서 시작한 드래그만 swap 으로 처리하고, 버튼 클릭/포커스는 정상 동작한다.
-- 컨트롤바는 모드별로 다른 바(hover 오버레이 / pinned / narrow / minimized)와 ViewHeader 기반 바를 렌더하므로, 동일한 draggable 속성을 공통 헬퍼(`barDragProps`)로 만들어 현재 보이는 바 컨테이너에 일관 적용한다. ViewHeader 를 쓰는 View 는 `PaneControlContext.barDragProps` 로 전달받아 자기 바에 펼친다.
+- 컨트롤바는 모드별로 다른 바(hover 오버레이 / pinned / adaptive floating / minimized)와 ViewHeader 기반 바를 렌더하므로, 동일한 draggable 속성을 공통 헬퍼(`barDragProps`)로 만들어 현재 보이는 바 컨테이너에 일관 적용한다. ViewHeader 를 쓰는 View 는 `PaneControlContext.barDragProps` 로 전달받아 자기 바에 펼친다.
 - 네이티브 HTML5 DnD(`draggable` + `dataTransfer`)를 사용 — WorkspaceSelectorView 의 워크스페이스 재정렬과 동일 패턴. 별도 DnD 라이브러리 없음.
 - UI(`PaneGrid`)는 `onSwapPanes(srcPaneId, tgtPaneId)` 콜백만 노출하고, 실제 교환은 기존 `workspace-store.swapPanes(srcIndex, tgtIndex)`(MCP `swap_panes` 와 공유) 한 곳에서 수행한다. `WorkspaceArea` 가 paneId→paneIndex 로 변환해 연결.
 - 드래그는 활성 워크스페이스(`dndEnabled = isActive && !!onSwapPanes`)에서 바가 보일 때만 동작하며, dock(PaneGrid 재사용)은 `onSwapPanes` 미제공으로 비활성. 같은 Pane 위로 드롭하면 무시. minimized(버튼 1개)처럼 빈 영역이 거의 없는 모드는 swap 시작점이 사실상 없다.

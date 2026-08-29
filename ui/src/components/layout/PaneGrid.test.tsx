@@ -129,6 +129,21 @@ describe("PaneGrid", () => {
     expect(onPaneFocus).not.toHaveBeenCalled();
   });
 
+  it("does not revive stale hover after an inactive-to-active transition", () => {
+    useSettingsStore.setState((state) => ({
+      controlBar: { ...state.controlBar, hoverIdleSeconds: 0 },
+    }));
+    const { rerender } = render(<PaneGrid {...defaultProps} isActive />);
+    fireEvent.mouseEnter(screen.getByTestId("test-pane-0"));
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+
+    rerender(<PaneGrid {...defaultProps} isActive={false} />);
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+
+    rerender(<PaneGrid {...defaultProps} isActive />);
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+  });
+
   it("renders with containerTestId", () => {
     render(<PaneGrid {...defaultProps} containerTestId="my-grid" />);
     expect(screen.getByTestId("my-grid")).toBeInTheDocument();

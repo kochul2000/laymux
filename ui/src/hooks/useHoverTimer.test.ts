@@ -60,6 +60,21 @@ describe("useHoverTimer", () => {
     expect(result.current.hoveredId).toBe("pane-1");
   });
 
+  it("discards hover across an inactive-to-active lifecycle even with idle disabled", () => {
+    const { result, rerender } = renderHook(
+      ({ active }: { active: boolean }) => useHoverTimer(0, active),
+      { initialProps: { active: true } },
+    );
+    act(() => result.current.activate("pane-1"));
+    expect(result.current.hoveredId).toBe("pane-1");
+
+    rerender({ active: false });
+    expect(result.current.hoveredId).toBeNull();
+
+    rerender({ active: true });
+    expect(result.current.hoveredId).toBeNull();
+  });
+
   it("cleans up timer on unmount", () => {
     const { result, unmount } = renderHook(() => useHoverTimer(3));
     act(() => result.current.activate("pane-1"));

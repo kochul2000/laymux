@@ -1,5 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { useSettingsStore, type ControlBarMode } from "@/stores/settings-store";
 import { useResolvedKeybinding } from "@/lib/keybinding-registry";
 import { useOverridesStore } from "@/stores/overrides-store";
@@ -9,6 +8,7 @@ import { PaneControlContext, type PaneInputModeToggle } from "./PaneControlConte
 import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
+import { FloatingPaneControlMenu } from "./FloatingPaneControlMenu";
 import {
   BroomIcon,
   ColumnsIcon,
@@ -60,6 +60,8 @@ interface PaneControlBarProps {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
   hovered: boolean;
+  /** False while a retained background workspace is display:none. */
+  isActive?: boolean;
   /**
    * Effective CWD send/receive state for indicator display.
    *
@@ -199,19 +201,13 @@ function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
   );
 }
 
-function VerticalSep() {
-  return <div className="my-1 h-px w-4 shrink-0" style={{ background: sepClr }} />;
-}
-
 // ─── View selector ──────────────────────────────────────
 function ViewSelect({
   currentView,
   onChange,
-  compact = false,
 }: {
   currentView: ViewInstanceConfig;
   onChange: (config: ViewInstanceConfig) => void;
-  compact?: boolean;
 }) {
   const profiles = useSettingsStore((s) => s.profiles);
   const visibleProfiles = profiles.filter((p) => !p.hidden);
@@ -271,14 +267,13 @@ function ViewSelect({
       className="cursor-pointer rounded text-[11px] font-medium"
       style={{
         height: BTN_H,
-        width: compact ? BTN_MIN_W : undefined,
-        padding: compact ? "0 2px" : "0 6px",
+        padding: "0 6px",
         background: "var(--bg-surface)",
         color: "var(--text-primary)",
         border: `1px solid ${sepClr}`,
         borderRadius: "var(--radius-sm)",
         outline: "none",
-        maxWidth: compact ? BTN_MIN_W : 110,
+        maxWidth: 110,
         colorScheme: "dark",
       }}
     >
@@ -326,9 +321,9 @@ function BarContent({
   onToggleHidden,
   expanded = true,
   wrapped = false,
-  vertical = false,
   showPin = true,
   showMinimize = true,
+  testId,
 }: {
   currentView: ViewInstanceConfig;
   actions: PaneControlBarActions;
@@ -343,19 +338,18 @@ function BarContent({
   onToggleHidden?: () => void;
   expanded?: boolean;
   wrapped?: boolean;
-  vertical?: boolean;
   showPin?: boolean;
   showMinimize?: boolean;
+  testId?: string;
 }) {
-  const Separator = vertical ? VerticalSep : Sep;
-
   return (
     <div
-      className={
-        vertical
-          ? "flex shrink-0 flex-col items-center justify-start gap-0.5"
-          : `flex shrink-0 items-center justify-end gap-0.5 ${wrapped ? "max-w-[124px] flex-wrap" : ""}`
-      }
+      data-testid={testId}
+      className={`flex shrink-0 items-center gap-0.5 ${
+        wrapped
+          ? "w-full min-w-0 max-w-full flex-wrap [justify-content:safe_flex-end]"
+          : "justify-end"
+      }`}
       onClick={(e) => e.stopPropagation()}
     >
       {expanded && (
@@ -363,15 +357,11 @@ function BarContent({
           {inputModeToggle && (
             <>
               <InputModeToggleBtn toggle={inputModeToggle} />
-              <Separator />
+              <Sep />
             </>
           )}
           {actions.onChangeView && (
-            <ViewSelect
-              currentView={currentView}
-              onChange={actions.onChangeView}
-              compact={vertical}
-            />
+            <ViewSelect currentView={currentView} onChange={actions.onChangeView} />
           )}
 
           {supportsCwdSend(currentView.type) &&
@@ -383,7 +373,7 @@ function BarContent({
               const isOn = cwdSendOn ?? false;
               return (
                 <>
-                  <Separator />
+                  <Sep />
                   <BarBtn
                     testId="pane-control-cwd-send"
                     onClick={actions.onToggleCwdSend}
@@ -466,7 +456,7 @@ function BarContent({
             </BarBtn>
           )}
 
-          <Separator />
+          <Sep />
         </>
       )}
 
@@ -494,105 +484,10 @@ function BarContent({
 }
 
 /**
- * 좁은 pane(width < 360)의 컨트롤 메뉴 (issue #384).
- *
- * pane 컨테이너는 `overflow-hidden`이라 메뉴를 그 안에 렌더하면 잘려서 안 보인다.
- * 그래서 `createPortal`로 `document.body`에 띄우고 `position: fixed`로 배치해
- * pane 경계(및 어떤 stacking context)와 무관하게 항상 보이게 한다.
- *
- * 또한 이 메뉴는 PaneControlBar 루트에서 `menuOpen`만으로 렌더되므로, 사용자가
- * 떠 있는 메뉴로 커서를 옮기다 pane hover 영역을 벗어나(hovered=false) hover 바가
- * 사라져도 메뉴는 그대로 유지된다 — 예전엔 hover 바 내부에 있어 같이 사라졌다.
- */
-function NarrowControlMenu({
-  currentView,
-  actions,
-  mode,
-  onSetMode,
-  cwdSendOn,
-  cwdReceiveOn,
-  inputModeToggle,
-  paneHidden,
-  onToggleHidden,
-  position,
-  onRequestClose,
-  triggerRef,
-}: {
-  currentView: ViewInstanceConfig;
-  actions: PaneControlBarActions;
-  mode: ControlBarMode;
-  onSetMode: (m: ControlBarMode) => void;
-  cwdSendOn?: boolean;
-  cwdReceiveOn?: boolean;
-  inputModeToggle?: PaneInputModeToggle | null;
-  paneHidden?: boolean;
-  onToggleHidden?: () => void;
-  position: { top: number; right: number };
-  onRequestClose: () => void;
-  /** ⋯ 트리거 버튼. 트리거 클릭은 외부 클릭으로 보지 않는다(아래 toggle 이 닫기를 처리). */
-  triggerRef: React.RefObject<HTMLButtonElement | null>;
-}) {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  // 메뉴 밖 클릭 / Escape 로 닫기 (떠 있는 popover 표준 동작).
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      // 트리거(⋯) 클릭은 무시한다 — 그쪽 onClick(toggle)이 닫기를 담당하므로
-      // 여기서 닫으면 곧바로 다시 열려(close→toggle open) 버튼으로 못 닫게 된다.
-      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
-      onRequestClose();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onRequestClose();
-    };
-    // capture 단계로 등록해 메뉴를 연 ⋯ 버튼의 다음 클릭 등과 경합하지 않는다.
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [onRequestClose, triggerRef]);
-
-  return createPortal(
-    <div
-      ref={menuRef}
-      data-testid="pane-control-floating-menu"
-      className="fixed z-50 p-1"
-      style={{
-        top: position.top,
-        right: position.right,
-        background: "var(--bar-bg-hover)",
-        border: `1px solid ${sepClr}`,
-        borderRadius: "var(--radius-sm)",
-        boxShadow: "0 8px 18px #00000059",
-        backdropFilter: "blur(8px)",
-      }}
-      onClick={(e) => e.stopPropagation()}
-    >
-      <BarContent
-        currentView={currentView}
-        actions={actions}
-        mode={mode}
-        onSetMode={onSetMode}
-        cwdSendOn={cwdSendOn}
-        cwdReceiveOn={cwdReceiveOn}
-        inputModeToggle={inputModeToggle}
-        paneHidden={paneHidden}
-        onToggleHidden={onToggleHidden}
-        vertical
-      />
-    </div>,
-    document.body,
-  );
-}
-
-/**
  * 좁은 pane 의 ⋯ 트리거 버튼. 메뉴 자체는 PaneControlBar 루트에서 portal 로 렌더한다
  * (issue #384) — 버튼만 바 안에 두어 위치 측정 기준점(buttonRef)을 제공한다.
  */
-function NarrowControlAnchor({
+function FloatingControlAnchor({
   menuOpen,
   onToggleMenu,
   buttonRef,
@@ -715,6 +610,7 @@ export function PaneControlBar({
   currentView,
   actions,
   hovered,
+  isActive = true,
   cwdSendOn,
   cwdReceiveOn,
   paneNumber,
@@ -756,15 +652,18 @@ export function PaneControlBar({
     [paneId, setPaneOverride],
   );
   const [hasViewHeader, setHasViewHeader] = useState(false);
+  const [headerControlsOverflow, setHeaderControlsOverflow] = useState(false);
   const [leftBarContent, setLeftBarContentState] = useState<ReactNode>(null);
   const [inputModeToggle, setInputModeToggleState] = useState<PaneInputModeToggle | null>(null);
-  const [narrowMenuOpen, setNarrowMenuOpen] = useState(false);
+  const [floatingMenuReason, setFloatingMenuReason] = useState<"manual" | "hover" | null>(null);
   const showBar = mode === "pinned" || (mode === "hover" && hovered);
   const isPinned = mode === "pinned";
   const narrowBar = paneWidth > 0 && paneWidth < 360;
+  const floatingControls =
+    isActive && mode !== "minimized" && (narrowBar || headerControlsOverflow);
 
-  // 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384). ⋯ 버튼(NarrowControlAnchor)은
-  // 어느 바에 있든(pinned / hover / ViewHeader) 하나의 ref 로 위치 기준점을 공유한다.
+  // 좁은 pane 또는 ViewHeader 충돌의 떠 있는 컨트롤 메뉴. ⋯ anchor는 어느
+  // 바에 있든(pinned / hover / ViewHeader) 하나의 ref 로 위치 기준점을 공유한다.
   // 메뉴 자체는 컴포넌트 루트에서 portal 로 한 번만 렌더해 pane hover 생명주기와 분리한다.
   const menuBtnRef = useRef<HTMLButtonElement | null>(null);
   // 정상 상태에선 트리거가 한 개지만, View 가 자체 헤더를 등록하는 전환(예: 좁은 pane 을
@@ -782,36 +681,19 @@ export function PaneControlBar({
       if (menuBtnRef.current === node) menuBtnRef.current = null;
     };
   }, []);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
-  const updateMenuPosition = useCallback(() => {
-    // 트리거를 못 재면(언마운트·미배치) pane 자신의 우상단으로 떨어진다 — 뷰포트
-    // 원점(0,0)으로 떨어지면 메뉴가 자기 pane 과 무관한 화면 구석에 나타난다.
-    const btn = menuBtnRef.current?.getBoundingClientRect();
-    if (btn && btn.width > 0 && btn.height > 0) {
-      setMenuPosition({ top: btn.bottom + 2, right: Math.max(0, window.innerWidth - btn.right) });
-      return;
-    }
-    const pane = rootRef.current?.getBoundingClientRect();
-    if (!pane) return;
-    setMenuPosition({ top: pane.top + 2, right: Math.max(0, window.innerWidth - pane.right) });
+  const closeFloatingMenu = useCallback(() => setFloatingMenuReason(null), []);
+  const toggleFloatingMenu = useCallback(() => {
+    // Clicking an automatically opened hover toolbar makes it explicit instead
+    // of closing it under the pointer. A second click closes the manual menu.
+    setFloatingMenuReason((reason) => (reason === "manual" ? null : "manual"));
   }, []);
-  const closeNarrowMenu = useCallback(() => setNarrowMenuOpen(false), []);
-  const toggleNarrowMenu = useCallback(() => {
-    updateMenuPosition();
-    setNarrowMenuOpen((open) => !open);
-  }, [updateMenuPosition]);
-  // 메뉴가 열려 있는 동안 버튼 위치가 바뀔 수 있으므로(레이아웃 변화) 한 프레임 뒤 재측정.
-  useEffect(() => {
-    if (!narrowMenuOpen) return;
-    const frame = requestAnimationFrame(updateMenuPosition);
-    return () => cancelAnimationFrame(frame);
-  }, [narrowMenuOpen, updateMenuPosition]);
-  // pane 이 리사이즈로 넓어지면(narrowBar=false) ⋯ 트리거가 사라지므로 narrowMenuOpen 도
-  // 닫는다. 그러지 않으면 다시 좁아질 때(narrowBar=true) 사용자 동작 없이 메뉴가 stale-open
-  // 으로 재출현한다. effect 대신 렌더 중 state 조정(React 권장 패턴)으로 처리한다.
-  if (!narrowBar && narrowMenuOpen) setNarrowMenuOpen(false);
-  // 떠 있는 메뉴의 실제 가시성은 narrow 여부에서 파생한다(상태로 저장하지 않음).
-  const narrowMenuVisible = narrowBar && narrowMenuOpen;
+  const openControls = useCallback((reason: "manual" | "hover" = "manual") => {
+    setFloatingMenuReason((current) => (current === "manual" ? current : reason));
+  }, []);
+  // When no responsive rule needs the anchor anymore, discard stale open state
+  // so a later resize cannot resurrect an old menu.
+  if (!floatingControls && floatingMenuReason) setFloatingMenuReason(null);
+  const floatingMenuVisible = floatingControls && floatingMenuReason != null;
 
   // pane swap 드래그 속성(issue #386). 현재 보이는 바 컨테이너(pinned/hover/ViewHeader)에
   // 동일하게 적용한다. 빈 영역에서 시작한 드래그만 swap 으로 처리(아래 헬퍼 참조).
@@ -864,10 +746,10 @@ export function PaneControlBar({
 
   const paneControls = useMemo(
     () =>
-      narrowBar ? (
-        <NarrowControlAnchor
-          menuOpen={narrowMenuOpen}
-          onToggleMenu={toggleNarrowMenu}
+      floatingControls ? (
+        <FloatingControlAnchor
+          menuOpen={floatingMenuReason != null}
+          onToggleMenu={toggleFloatingMenu}
           buttonRef={setMenuBtnRef}
         />
       ) : (
@@ -888,9 +770,9 @@ export function PaneControlBar({
       actions,
       mode,
       setMode,
-      narrowBar,
-      narrowMenuOpen,
-      toggleNarrowMenu,
+      floatingControls,
+      floatingMenuReason,
+      toggleFloatingMenu,
       setMenuBtnRef,
       cwdSendOn,
       cwdReceiveOn,
@@ -901,7 +783,13 @@ export function PaneControlBar({
   );
 
   const registerHeader = useCallback(() => setHasViewHeader(true), []);
-  const unregisterHeader = useCallback(() => setHasViewHeader(false), []);
+  const unregisterHeader = useCallback(() => {
+    setHasViewHeader(false);
+    setHeaderControlsOverflow(false);
+  }, []);
+  const reportHeaderControlsOverflow = useCallback((overflow: boolean) => {
+    setHeaderControlsOverflow(overflow);
+  }, []);
   const setLeftBarContent = useCallback((node: ReactNode) => {
     setLeftBarContentState(node ?? null);
   }, []);
@@ -914,13 +802,11 @@ export function PaneControlBar({
       paneControls,
       leftPaneControls,
       mode,
+      floatingControls,
+      reportHeaderControlsOverflow,
       hovered,
       onSetMode: setMode,
-      openControls: () => {
-        // 다음 페인트에 ⋯ 버튼이 마운트되면 위치를 재측정한다(이 시점엔 ref 가 비어있을 수 있음).
-        requestAnimationFrame(updateMenuPosition);
-        setNarrowMenuOpen(true);
-      },
+      openControls,
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -936,10 +822,11 @@ export function PaneControlBar({
       paneControls,
       leftPaneControls,
       mode,
+      floatingControls,
+      reportHeaderControlsOverflow,
       hovered,
       setMode,
-      setNarrowMenuOpen,
-      updateMenuPosition,
+      openControls,
       registerHeader,
       unregisterHeader,
       leftBarContent,
@@ -957,6 +844,7 @@ export function PaneControlBar({
     <PaneControlContext.Provider value={ctxValue}>
       <div
         ref={rootRef}
+        tabIndex={-1}
         className="flex h-full w-full min-w-0 flex-col overflow-hidden"
         data-testid={modeTestId}
       >
@@ -985,9 +873,9 @@ export function PaneControlBar({
               <div className="flex-1" />
             )}
             {narrowBar ? (
-              <NarrowControlAnchor
-                menuOpen={narrowMenuOpen}
-                onToggleMenu={toggleNarrowMenu}
+              <FloatingControlAnchor
+                menuOpen={floatingMenuReason != null}
+                onToggleMenu={toggleFloatingMenu}
                 buttonRef={setMenuBtnRef}
               />
             ) : (
@@ -1041,9 +929,9 @@ export function PaneControlBar({
                 <div className="flex-1" />
               )}
               {narrowBar ? (
-                <NarrowControlAnchor
-                  menuOpen={narrowMenuOpen}
-                  onToggleMenu={toggleNarrowMenu}
+                <FloatingControlAnchor
+                  menuOpen={floatingMenuReason != null}
+                  onToggleMenu={toggleFloatingMenu}
                   buttonRef={setMenuBtnRef}
                 />
               ) : (
@@ -1068,33 +956,37 @@ export function PaneControlBar({
               onExpand={() => {
                 setMode("hover");
                 if (narrowBar) {
-                  // hover 바의 ⋯ 버튼이 마운트되면 위치를 잡아 떠 있는 메뉴를 연다.
-                  requestAnimationFrame(updateMenuPosition);
-                  setNarrowMenuOpen(true);
+                  setFloatingMenuReason("manual");
                 }
               }}
             />
           )}
         </div>
 
-        {/* 좁은 pane 의 떠 있는 컨트롤 메뉴(issue #384): pane 의 overflow-hidden /
-            stacking context 밖(document.body)으로 portal 되어 클리핑되지 않으며,
-            pane hover 가 풀려도(hovered=false → 바 언마운트) 유지된다. */}
-        {narrowMenuVisible && (
-          <NarrowControlMenu
-            currentView={currentView}
-            actions={actions}
-            mode={mode}
-            onSetMode={setMode}
-            cwdSendOn={cwdSendOn}
-            cwdReceiveOn={cwdReceiveOn}
-            inputModeToggle={inputModeToggle}
-            paneHidden={paneHidden}
-            onToggleHidden={onToggleHidden}
-            position={menuPosition}
-            onRequestClose={closeNarrowMenu}
+        {/* 좁은 pane 또는 ViewHeader 충돌의 floating toolbar: pane의
+            overflow/stacking context 밖으로 portal 되어 작업영역 크기를 바꾸지 않는다. */}
+        {floatingMenuVisible && (
+          <FloatingPaneControlMenu
+            openReason={floatingMenuReason!}
+            ownerHovered={hovered}
+            onRequestClose={closeFloatingMenu}
             triggerRef={menuBtnRef}
-          />
+            paneRef={rootRef}
+          >
+            <BarContent
+              currentView={currentView}
+              actions={actions}
+              mode={mode}
+              onSetMode={setMode}
+              cwdSendOn={cwdSendOn}
+              cwdReceiveOn={cwdReceiveOn}
+              inputModeToggle={inputModeToggle}
+              paneHidden={paneHidden}
+              onToggleHidden={onToggleHidden}
+              wrapped
+              testId="pane-control-floating-content"
+            />
+          </FloatingPaneControlMenu>
         )}
       </div>
     </PaneControlContext.Provider>
