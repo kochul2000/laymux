@@ -115,6 +115,7 @@ import com.laymux.android.web.RemoteSurfaceResumeAction
 import com.laymux.android.web.RemoteSurfaceResumePolicy
 import com.laymux.android.web.SinglePendingResult
 import com.laymux.android.web.VisibleWebSurface
+import com.laymux.android.web.WebSurfaceLayers
 import com.laymux.android.web.WebSurfaceLayerPolicy
 import com.laymux.android.web.scheduleRemoteInputFocus
 import com.laymux.android.web.stringWebMessagePayload
@@ -123,6 +124,8 @@ import com.laymux.android.web.CloudBridgeInput
 import com.laymux.android.web.CloudAuthClient
 import com.laymux.android.web.CloudAuthException
 import com.laymux.android.web.CloudCookieInstaller
+import com.laymux.android.web.CloudDocumentPresentation
+import com.laymux.android.web.CloudLoadOverlayView
 import com.laymux.android.web.CloudNavigationPolicy
 import com.laymux.android.web.CloudWebViewClient
 import com.laymux.android.web.ExternalUrlPolicy
@@ -217,6 +220,8 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     private var remoteLoadProgress = RemoteLoadProgress()
     private lateinit var remoteLoadingOverlay: LinearLayout
     private lateinit var remoteLoadingStatus: TextView
+    private lateinit var cloudLoadOverlay: CloudLoadOverlayView
+    private var cloudDocumentPresentation = CloudDocumentPresentation.LOADING
     private val remoteConnectionGeneration = AtomicLong()
     private val remoteDocumentAuthority = RemoteDocumentAuthority()
     private var secureWebViewGeneration = 0L
@@ -315,6 +320,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         webView = createWebView()
         cloudWebView = createCloudWebView()
         remoteLoadingOverlay = createRemoteLoadingOverlay()
+        cloudLoadOverlay = CloudLoadOverlayView(this, ::retryCloudDocument)
         root = FrameLayout(this).apply {
             addView(
                 cloudWebView,
@@ -332,6 +338,13 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             )
             addView(
                 remoteLoadingOverlay,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                cloudLoadOverlay,
                 FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT,
@@ -603,7 +616,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         settings.setGeolocationEnabled(false)
         settings.mediaPlaybackRequiresUserGesture = true
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-        webViewClient = CloudWebViewClient(cloudNavigation)
+        webViewClient = CloudWebViewClient(
+            cloudNavigation,
+            ::onCloudDocumentPresentationChanged,
+        )
         webChromeClient = JsDialogChromeClient(
             this@MainActivity,
             ::showWebFileChooser,
@@ -665,6 +681,41 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
                 ).apply { topMargin = (20 * density).toInt() },
             )
         }
+    }
+
+    private fun onCloudDocumentPresentationChanged(
+        presentation: CloudDocumentPresentation,
+    ) {
+        cloudDocumentPresentation = presentation
+        if (!::cloudLoadOverlay.isInitialized) return
+        cloudLoadOverlay.render(presentation)
+        applyCloudDocumentLayers(
+            WebSurfaceLayerPolicy.forSurface(visibleWebSurface, presentation),
+        )
+    }
+
+    private fun applyCloudDocumentLayers(layers: WebSurfaceLayers) {
+        if (!::cloudWebView.isInitialized) return
+        cloudWebView.isEnabled = layers.cloudInteractive
+        cloudWebView.isFocusable = layers.cloudInteractive
+        cloudWebView.isFocusableInTouchMode = layers.cloudInteractive
+        cloudWebView.importantForAccessibility = if (layers.cloudAccessible) {
+            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        } else {
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        if (!layers.cloudInteractive) cloudWebView.clearFocus()
+        cloudLoadOverlay.visibility = if (layers.cloudLoadOverlayVisible) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+    }
+
+    private fun retryCloudDocument() {
+        if (!::cloudWebView.isInitialized || isDestroyed) return
+        onCloudDocumentPresentationChanged(CloudDocumentPresentation.LOADING)
+        cloudWebView.reload()
     }
 
     private fun updateRemoteLoadProgress(update: (RemoteLoadProgress) -> RemoteLoadProgress) {
@@ -915,7 +966,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
             revokeRemoteDocument()
             if (visibleWebSurface == VisibleWebSurface.REMOTE) replaceSecureWebView()
         }
-        val layers = WebSurfaceLayerPolicy.forSurface(surface)
+        val layers = WebSurfaceLayerPolicy.forSurface(surface, cloudDocumentPresentation)
         visibleWebSurface = surface
         if (surface != VisibleWebSurface.REMOTE) {
             remoteLoadingOverlay.visibility = View.GONE
@@ -926,15 +977,7 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
         }
         cloudWebView.visibility = if (layers.cloudVisible) View.VISIBLE else View.GONE
         webView.visibility = if (layers.secureVisible) View.VISIBLE else View.GONE
-        cloudWebView.isEnabled = layers.cloudInteractive
-        cloudWebView.isFocusable = layers.cloudInteractive
-        cloudWebView.isFocusableInTouchMode = layers.cloudInteractive
-        cloudWebView.importantForAccessibility = if (layers.cloudAccessible) {
-            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
-        } else {
-            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        }
-        if (!layers.cloudInteractive) cloudWebView.clearFocus()
+        applyCloudDocumentLayers(layers)
         if (layers.secureVisible) {
             webView.bringToFront()
             webView.requestFocus()
@@ -984,7 +1027,10 @@ class MainActivity : FragmentActivity(), E2eOutputSocketCallbacks {
     }
 
     private fun cloudBridgeActionsEnabled(): Boolean =
-        WebSurfaceLayerPolicy.forSurface(visibleWebSurface).cloudBridgeEnabled
+        WebSurfaceLayerPolicy.forSurface(
+            visibleWebSurface,
+            cloudDocumentPresentation,
+        ).cloudBridgeEnabled
 
     private fun remoteBridgeActionsEnabled(documentGeneration: Long): Boolean =
         remoteDocumentAuthority.allows(
