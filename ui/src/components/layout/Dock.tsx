@@ -13,6 +13,7 @@ import { useHoverTimer } from "@/hooks/useHoverTimer";
 import { useCwdDefaultsResolver } from "./useCwdDefaultsResolver";
 import { resolvePaneCwd } from "@/lib/pane-cwd";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
+import { runPaneClearFromUi } from "@/lib/pane-clear-action";
 
 interface DockProps {
   position: DockPosition;
@@ -159,6 +160,12 @@ export function Dock({
                 : undefined,
             onSplitV:
               onSplitPane && singlePaneId ? () => onSplitPane(singlePaneId, "vertical") : undefined,
+            onClearTerminal:
+              singleView?.type === "TerminalView" && singlePaneId
+                ? () => {
+                    void runPaneClearFromUi(singlePaneId);
+                  }
+                : undefined,
             onClear:
               activeView && activeView !== "EmptyView"
                 ? singlePaneId && onSetPaneView

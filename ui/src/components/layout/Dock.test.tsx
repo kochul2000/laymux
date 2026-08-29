@@ -4,6 +4,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("@/lib/persist-session", () => ({
   persistSession: vi.fn().mockResolvedValue(undefined),
 }));
+const clearPaneFromUiMock = vi.fn().mockResolvedValue(null);
+vi.mock("@/lib/pane-clear-action", () => ({
+  runPaneClearFromUi: (paneId: string) => clearPaneFromUiMock(paneId),
+}));
 vi.mock("@/lib/tauri-api", () => ({
   createTerminalSession: vi.fn().mockResolvedValue(undefined),
   writeToTerminal: vi.fn().mockResolvedValue(undefined),
@@ -53,6 +57,7 @@ describe("Dock", () => {
     useSettingsStore.setState(useSettingsStore.getInitialState());
     useUiStore.setState(useUiStore.getInitialState());
     useTerminalStartupStore.setState(useTerminalStartupStore.getInitialState());
+    clearPaneFromUiMock.mockClear();
     // 기존 테스트는 hover를 기본 모드로 가정
     useSettingsStore.setState((s) => ({
       controlBar: { ...s.controlBar, defaultMode: "hover" },
@@ -246,6 +251,23 @@ describe("Dock", () => {
     const dock = screen.getByTestId("dock-bottom");
     fireEvent.mouseEnter(dock);
     expect(screen.getByTestId("pane-control-clear")).toBeInTheDocument();
+  });
+
+  it("터미널 실제 클리어 버튼은 단일 dock pane을 대상으로 실행한다", () => {
+    render(
+      <Dock
+        position="bottom"
+        activeView="TerminalView"
+        views={[]}
+        panes={[{ id: "dp-1", view: { type: "TerminalView" }, x: 0, y: 0, w: 1, h: 1 }]}
+      />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-bottom"));
+
+    fireEvent.click(screen.getByTestId("pane-control-clear-terminal"));
+
+    expect(clearPaneFromUiMock).toHaveBeenCalledWith("dp-1");
+    expect(clearPaneFromUiMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows clear button even when panes is empty but activeView is set", () => {

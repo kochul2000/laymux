@@ -10,6 +10,7 @@ import { useContainerSize } from "@/hooks/useContainerSize";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { supportsCwdReceive, supportsCwdSend } from "@/lib/view-cwd-capability";
 import {
+  BroomIcon,
   ColumnsIcon,
   DownloadIcon,
   EllipsisIcon,
@@ -42,6 +43,7 @@ export type { ControlBarMode } from "@/stores/settings-store";
 export interface PaneControlBarActions {
   onSplitH?: () => void;
   onSplitV?: () => void;
+  onClearTerminal?: () => void;
   onRestart?: () => void;
   onClear?: () => void;
   onDelete?: () => void;
@@ -180,6 +182,19 @@ function PropagateCwdOnceBtn({ onClick }: { onClick: () => void }) {
       title={`Propagate CWD once${keys ? ` (${keys})` : ""}`}
     >
       <UploadIcon />
+    </BarBtn>
+  );
+}
+
+function ClearTerminalBtn({ onClick }: { onClick: () => void }) {
+  const keys = useResolvedKeybinding("pane.clearTerminal");
+  return (
+    <BarBtn
+      testId="pane-control-clear-terminal"
+      onClick={onClick}
+      title={`Clear terminal${keys ? ` (${keys})` : ""}`}
+    >
+      <BroomIcon size={13} />
     </BarBtn>
   );
 }
@@ -421,6 +436,9 @@ function BarContent({
             >
               {paneHidden ? <EyeOffIcon /> : <EyeIcon />}
             </BarBtn>
+          )}
+          {currentView.type === "TerminalView" && actions.onClearTerminal && (
+            <ClearTerminalBtn onClick={actions.onClearTerminal} />
           )}
           {currentView.type === "TerminalView" && actions.onRestart && (
             <BarBtn

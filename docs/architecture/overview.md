@@ -208,7 +208,7 @@ Workspace (Independent)
 | 동작 | 진입점 | 범위 |
 | --- | --- | --- |
 | 워크스페이스 화면 클리어 | `Ctrl+Alt+L`(`workspace.clearTerminals`), WorkspaceSelectorView 행의 빗자루 버튼, `POST /api/v1/workspaces/{id}/clear` | 그 워크스페이스 **격자**의 `TerminalView` pane 전부. Dock 은 제외 ([ADR-0137](../adr/0137-workspace-clear-ctrl-l-broadcast.md)) |
-| 단일 pane 실제 클리어 | `Alt+L`(`pane.clearTerminal`), `POST /api/v1/panes/{paneId}/clear` | 사용자가 가리킨 `TerminalView` pane 하나. 격자와 Dock 모두 포함 ([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)) |
+| 단일 pane 실제 클리어 | `Alt+L`(`pane.clearTerminal`), pane 컨트롤 바의 빗자루 버튼, `POST /api/v1/panes/{paneId}/clear` | 사용자가 가리킨 `TerminalView` pane 하나. 격자와 Dock 모두 포함 ([ADR-0158](../adr/0158-activity-aware-single-pane-clear.md)) |
 
 워크스페이스 화면 클리어는 pane마다 `Ctrl+L`(`\x0c`) 하나를 그대로 브로드캐스트한다 — activity 판정도, 설정도 없다. 세션이 아직 없는 pane(`notReady`)만 건너뛰고, 작업 중인 pane에도 그대로 보낸다. 실행은 `ui/src/lib/workspace-clear.ts`의 `clearWorkspace()` 한 함수다.
 
