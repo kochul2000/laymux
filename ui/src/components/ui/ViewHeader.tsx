@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { usePaneControl } from "@/components/layout/PaneControlContext";
 import { PaneNumberBadge } from "@/components/ui/PaneNumberBadge";
 import { EllipsisIcon } from "@/components/ui/icons";
@@ -16,7 +16,8 @@ interface ViewHeaderProps {
  * View 통합 헤더.
  *
  * PaneControlContext가 있으면:
- * - pinned / hover+hovered: View 콘텐츠 + pane 제어를 한 줄에 표시
+ * - pinned / hover+hovered: 여유가 있으면 View 콘텐츠 + pane 제어를 한 줄에 표시
+ * - 실제 콘텐츠가 넘치면 ⋯ anchor + 작업영역을 바꾸지 않는 floating toolbar 표시
  * - hover+!hovered: View 콘텐츠만 표시
  * - minimized: 툴바 높이를 점유하지 않고 hover 시 ⋯ 버튼만 표시
  *
@@ -30,17 +31,80 @@ export function ViewHeader({
   testId,
 }: ViewHeaderProps) {
   const ctx = usePaneControl();
+  const rootRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const inlineRequiredWidthRef = useRef(0);
   const registerHeader = ctx?.registerHeader;
   const unregisterHeader = ctx?.unregisterHeader;
+  const reportHeaderControlsOverflow = ctx?.reportHeaderControlsOverflow;
 
   // PaneControlBar에 "ViewHeader가 존재함"을 알린다.
   useEffect(() => {
     registerHeader?.();
-    return () => unregisterHeader?.();
-  }, [registerHeader, unregisterHeader]);
+    return () => {
+      reportHeaderControlsOverflow?.(false);
+      unregisterHeader?.();
+    };
+  }, [registerHeader, reportHeaderControlsOverflow, unregisterHeader]);
 
   const showPaneControls = ctx && (ctx.mode === "pinned" || (ctx.mode === "hover" && ctx.hovered));
   const showMinimizedBtn = ctx && ctx.mode === "minimized" && ctx.hovered;
+  const floatingControls = ctx?.floatingControls ?? false;
+  const openControls = ctx?.openControls;
+
+  // Full controls remain inline only while the View's actual non-shrinking
+  // content fits. Cache the width that failed so replacing the full controls
+  // with the small anchor cannot immediately oscillate back to inline.
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const content = contentRef.current;
+    if (!root || !content || !reportHeaderControlsOverflow) return;
+
+    const measure = () => {
+      const rootWidth = root.clientWidth || root.getBoundingClientRect().width;
+      if (rootWidth <= 0) return;
+
+      if (!floatingControls && showPaneControls && controlsRef.current) {
+        const overflow = Math.max(
+          0,
+          content.scrollWidth - content.clientWidth,
+          root.scrollWidth - root.clientWidth,
+        );
+        if (overflow > 1) {
+          inlineRequiredWidthRef.current = Math.ceil(rootWidth + overflow + 4);
+          reportHeaderControlsOverflow(true);
+        } else {
+          inlineRequiredWidthRef.current = 0;
+          reportHeaderControlsOverflow(false);
+        }
+        return;
+      }
+
+      const requiredWidth = inlineRequiredWidthRef.current;
+      if (floatingControls && requiredWidth > 0 && rootWidth >= requiredWidth) {
+        inlineRequiredWidthRef.current = 0;
+        reportHeaderControlsOverflow(false);
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    observer.observe(content);
+    if (controlsRef.current) observer.observe(controlsRef.current);
+    return () => observer.disconnect();
+  }, [floatingControls, reportHeaderControlsOverflow, showPaneControls]);
+
+  // Hover mode previously exposed the full controls as soon as the pane was
+  // hovered. Preserve that discovery behavior when they move to a portal.
+  // Pinned mode keeps the compact anchor and opens explicitly, avoiding a
+  // permanent overlay over the View body.
+  useLayoutEffect(() => {
+    if (floatingControls && ctx?.mode === "hover" && ctx.hovered) {
+      openControls?.("hover");
+    }
+  }, [ctx?.hovered, ctx?.mode, floatingControls, openControls]);
 
   // Views with their own header used to keep a 28px bar even when their pane
   // was minimized. Keep the header registered (so PaneControlBar does not add
@@ -77,6 +141,7 @@ export function ViewHeader({
 
   return (
     <div
+      ref={rootRef}
       data-testid={testId}
       className={`ui-toolbar relative shrink-0 pl-2 pr-1 ${className ?? ""}`.trim()}
       style={{
@@ -85,7 +150,11 @@ export function ViewHeader({
       }}
       {...ctx?.barDragProps}
     >
-      <div className="flex min-w-0 flex-1 items-center self-stretch">
+      <div
+        ref={contentRef}
+        data-testid="view-header-content"
+        className="flex min-w-0 flex-1 items-center self-stretch"
+      >
         <PaneNumberBadge
           number={ctx?.paneNumber}
           workspaceId={ctx?.workspaceId}
@@ -98,7 +167,7 @@ export function ViewHeader({
         )}
         {title && (
           <span
-            className="ui-toolbar-title"
+            className="ui-toolbar-title shrink-0"
             style={{ color: "var(--text-secondary)", fontSize: "var(--fs-sm)", fontWeight: 600 }}
           >
             {title}
@@ -107,7 +176,11 @@ export function ViewHeader({
         {children}
       </div>
       {showPaneControls && (
-        <div data-testid="pane-control-bar-content" onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={controlsRef}
+          data-testid="pane-control-bar-content"
+          onClick={(e) => e.stopPropagation()}
+        >
           {ctx.paneControls}
         </div>
       )}

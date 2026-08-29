@@ -71,4 +71,137 @@ test.describe("GitHubView", () => {
     expect(panelBox.y + panelBox.height).toBeLessThanOrEqual(listBox.y + listBox.height + 1);
     await expect(panel).toHaveAttribute("data-placement", "up");
   });
+
+  test("overflowing pane controls float without shrinking the GitHub work area", async ({
+    appPage: page,
+  }) => {
+    await openGitHubViewInSecondPane(page);
+    // Split while the fixture is at its normal desktop size, then reproduce
+    // the responsive collision. This leaves enough width for the GitHub tabs
+    // themselves while forcing the larger control cluster onto two rows.
+    await page.setViewportSize({ width: 1000, height: 500 });
+
+    const pane = page.locator(PANE);
+    const header = pane.getByTestId("view-header-content");
+    const list = pane.getByTestId("github-list");
+    const issues = pane.getByTestId("github-tab-issues");
+    const pulls = pane.getByTestId("github-tab-pulls");
+
+    // Leave both panes so the hover toolbar is absent for the baseline rect.
+    await page.mouse.move(2, 2);
+    await expect(page.getByTestId("pane-control-floating-menu")).toHaveCount(0);
+    const listBefore = await list.boundingBox();
+    const issuesBefore = await issues.boundingBox();
+    const pullsBefore = await pulls.boundingBox();
+
+    await pane.hover({ position: { x: 12, y: 12 } });
+    const toolbar = page.getByTestId("pane-control-floating-menu");
+    await expect(toolbar).toBeVisible();
+    await expect(toolbar).toHaveAttribute("role", "toolbar");
+    const trigger = pane.getByTestId("pane-control-menu-btn");
+    await expect(toolbar).toHaveAttribute("data-placement", "up");
+    await expect
+      .poll(async () => {
+        const triggerBox = await trigger.boundingBox();
+        const currentToolbarBox = await toolbar.boundingBox();
+        if (!triggerBox || !currentToolbarBox) return Number.POSITIVE_INFINITY;
+        return Math.abs(currentToolbarBox.y + currentToolbarBox.height - (triggerBox.y - 2));
+      })
+      .toBeLessThanOrEqual(1);
+
+    const listAfter = await list.boundingBox();
+    const headerBox = await header.boundingBox();
+    const issuesBox = await issues.boundingBox();
+    const pullsBox = await pulls.boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    const paneBox = await pane.boundingBox();
+    expect(listBefore).not.toBeNull();
+    expect(listAfter).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(issuesBox).not.toBeNull();
+    expect(pullsBox).not.toBeNull();
+    expect(toolbarBox).not.toBeNull();
+    expect(paneBox).not.toBeNull();
+    if (
+      !listBefore ||
+      !listAfter ||
+      !headerBox ||
+      !issuesBox ||
+      !pullsBox ||
+      !toolbarBox ||
+      !paneBox
+    )
+      return;
+
+    // A portal overlay must not add a second layout row or change scrolling
+    // geometry, while the essential GitHub tabs stay inside the header.
+    expect(listAfter.x).toBeCloseTo(listBefore.x, 0);
+    expect(listAfter.y).toBeCloseTo(listBefore.y, 0);
+    expect(listAfter.width).toBeCloseTo(listBefore.width, 0);
+    expect(listAfter.height).toBeCloseTo(listBefore.height, 0);
+    expect(issuesBefore).not.toBeNull();
+    expect(pullsBefore).not.toBeNull();
+    if (!issuesBefore || !pullsBefore) return;
+    expect(issuesBox.x).toBeCloseTo(issuesBefore.x, 0);
+    expect(issuesBox.y).toBeCloseTo(issuesBefore.y, 0);
+    expect(pullsBox.x).toBeCloseTo(pullsBefore.x, 0);
+    expect(pullsBox.y).toBeCloseTo(pullsBefore.y, 0);
+    expect(issuesBox.x).toBeGreaterThanOrEqual(headerBox.x - 1);
+    expect(pullsBox.x + pullsBox.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
+    // This fixture's pane is only 72px tall. The wrapped menu cannot fit under
+    // the header, so the context-menu fallback flips it above without overlap.
+    expect(toolbarBox.y + toolbarBox.height).toBeLessThanOrEqual(headerBox.y + 1);
+    expect(await toolbar.evaluate((node, selector) => node.closest(selector) === null, PANE)).toBe(
+      true,
+    );
+
+    // The pane width is the first wrapping boundary: the toolbar stays beside
+    // its owner instead of stretching across neighbouring panes.
+    expect(toolbarBox.width).toBeLessThanOrEqual(paneBox.width + 1);
+    const wrappedContent = toolbar.getByTestId("pane-control-floating-content");
+    const wrappedBox = await wrappedContent.boundingBox();
+    expect(wrappedBox).not.toBeNull();
+    if (wrappedBox) expect(wrappedBox.height).toBeGreaterThan(24);
+
+    // Every action remains rendered and geometrically contained by the
+    // wrapped surface, rather than being clipped or dropped at the pane edge.
+    for (const testId of [
+      "pane-control-view-select",
+      "pane-control-cwd-receive",
+      "pane-control-split-h",
+      "pane-control-split-v",
+      "pane-control-hide",
+      "pane-control-clear",
+      "pane-control-delete",
+      "pane-control-pin",
+      "pane-control-minimize",
+    ]) {
+      const action = toolbar.getByTestId(testId);
+      await expect(action).toBeVisible();
+      const actionBox = await action.boundingBox();
+      expect(actionBox).not.toBeNull();
+      if (!actionBox) continue;
+      expect(actionBox.x).toBeGreaterThanOrEqual(toolbarBox.x - 1);
+      expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(
+        toolbarBox.x + toolbarBox.width + 1,
+      );
+      expect(actionBox.y).toBeGreaterThanOrEqual(toolbarBox.y - 1);
+      expect(actionBox.y + actionBox.height).toBeLessThanOrEqual(
+        toolbarBox.y + toolbarBox.height + 1,
+      );
+    }
+
+    // Crossing the portal gap clears pane hover and unmounts the compact
+    // trigger. The menu must retain its measured anchor instead of jumping
+    // back into the pane or disappearing under the pointer.
+    await toolbar.hover();
+    await expect(toolbar).toBeVisible();
+    await expect(trigger).toHaveCount(0);
+    const toolbarAfterCrossing = await toolbar.boundingBox();
+    expect(toolbarAfterCrossing).not.toBeNull();
+    if (toolbarAfterCrossing) {
+      expect(toolbarAfterCrossing.x).toBeCloseTo(toolbarBox.x, 0);
+      expect(toolbarAfterCrossing.y).toBeCloseTo(toolbarBox.y, 0);
+    }
+  });
 });

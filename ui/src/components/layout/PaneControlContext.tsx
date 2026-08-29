@@ -22,12 +22,19 @@ export interface PaneControlContextValue {
   leftPaneControls?: ReactNode;
   /** 현재 컨트롤 바 모드 */
   mode: ControlBarMode;
+  /**
+   * pane 폭 또는 ViewHeader의 실제 콘텐츠 충돌 때문에 전체 컨트롤을 header 밖의
+   * floating toolbar로 보내야 하는지 여부.
+   */
+  floatingControls?: boolean;
+  /** ViewHeader가 실제 inline overflow 판정을 PaneControlBar에 보고한다. */
+  reportHeaderControlsOverflow?: (overflow: boolean) => void;
   /** Pane이 hover 상태인지 */
   hovered: boolean;
   /** 모드 변경 */
   onSetMode: (m: ControlBarMode) => void;
   /** Open the floating controls menu when controls are collapsed. */
-  openControls?: () => void;
+  openControls?: (reason?: "manual" | "hover") => void;
   /** ViewHeader가 마운트되면 호출 — PaneControlBar 자체 바 렌더 억제 */
   registerHeader: () => void;
   /** ViewHeader가 언마운트되면 호출 */
