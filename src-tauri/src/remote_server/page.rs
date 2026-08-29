@@ -96,6 +96,12 @@ const WS_SOURCES_PLACEHOLDER: &str = "__WS_SOURCES__";
 
 const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
 
+/// What ships if even the template's own constant form will not encode. It has
+/// to name `frame-ancestors` itself: `default-src` does not cover that
+/// directive, so `default-src 'none'` alone would leave the page framable by
+/// anyone (ADR-0214).
+const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
+
 /// The origins the desktop shell's own WebView serves the app from, and the
 /// only ones allowed to frame this page (ADR-0214). Mobile mode embeds
 /// `/remote/?localApp=1` in an iframe inside that WebView, so a blanket
@@ -105,7 +111,9 @@ const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
 /// still refused, so the clickjacking boundary the directive exists for holds.
 ///
 /// `tauri://localhost` is the Linux/macOS WebView origin, `http://tauri.localhost`
-/// the Windows/Android one. The Vite dev origin is compiled in only for debug
+/// the Windows (WebView2) one. The Android app is not on this list and does not
+/// need to be: its wrapper loads the shell as a top-level document over HTTPS
+/// (ADR-0149), never framed. The Vite dev origin is compiled in only for debug
 /// builds; a shipped binary must not trust whatever answers on port 1420.
 const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
     "tauri://localhost http://tauri.localhost http://localhost:1420"
@@ -147,7 +155,7 @@ pub(super) fn secure_page_response(
                     .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS),
             )
         })
-        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
+        .unwrap_or_else(|_| HeaderValue::from_static(LAST_RESORT_CSP));
     headers.insert(header::CONTENT_SECURITY_POLICY, value);
     headers.insert(
         header::REFERRER_POLICY,
@@ -2184,6 +2192,14 @@ mod tests {
         assert!(!frame_ancestors.contains('*'));
         assert!(!frame_ancestors.contains("'self'"));
         assert!(!frame_ancestors.contains("https://"));
+    }
+
+    /// `default-src` does not cover `frame-ancestors`, so the last-resort
+    /// header must name it or an unencodable policy would ship a framable page.
+    #[test]
+    fn last_resort_policy_still_refuses_framing() {
+        assert!(LAST_RESORT_CSP.contains("frame-ancestors 'none'"));
+        assert!(HeaderValue::from_str(LAST_RESORT_CSP).is_ok());
     }
 
     /// The Vite dev server is a development convenience, not something a

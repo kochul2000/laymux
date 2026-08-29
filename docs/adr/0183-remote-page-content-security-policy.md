@@ -3,6 +3,7 @@
 - Status: Proposed
 - Date: 2026-08-20
 - Source: 사용자 요구(Remote FileViewer 를 새 탭에서 인페이지 오버레이로 옮기기 전 보안 선행 조건), [api-contracts.md §13](../architecture/api-contracts.md), [ADR-0041](0041-remote-served-file-viewer.md)·[ADR-0044](0044-remote-file-viewer-explicit-host-path.md)(viewer 문서 CSP), [ADR-0169](0169-remote-client-hashed-immutable-assets-and-gzip.md)(해시 자산 분리)
+- Amended by: [ADR-0214](0214-remote-page-frames-only-the-desktop-app.md) — `frame-ancestors 'none'` 이 데스크톱 앱 WebView origin 만 담은 닫힌 허용목록으로 바뀌었다.
 
 ## Context
 

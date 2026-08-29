@@ -52,19 +52,17 @@ function committedAssetName(logicalName: (typeof ASSETS)[number]): string {
 export function remoteClientCsp(origin: string): string {
   const template = readFileSync(`${remoteRoot}page-csp.txt`, "utf8").trimEnd();
   const { host } = new URL(origin);
-  return template
-    .replace("__WS_SOURCES__", ` ws://${host} wss://${host}`)
-    .replace("__APP_FRAME_ANCESTORS__", APP_FRAME_ANCESTORS);
+  return (
+    template
+      .replace("__WS_SOURCES__", ` ws://${host} wss://${host}`)
+      // The served allowlist is a build-fixed constant in `page.rs` (ADR-0214),
+      // and copying it here would reintroduce exactly the cross-language drift
+      // `page-csp.txt` exists to prevent. Specs load the page as a top-level
+      // document, so no spec exercises this directive — `'none'` keeps the mocked
+      // policy a valid CSP, and is the stricter of the two.
+      .replace("__APP_FRAME_ANCESTORS__", "'none'")
+  );
 }
-
-/**
- * Mirrors `APP_FRAME_ANCESTORS` in `page.rs` (ADR-0214) — the desktop WebView
- * origins allowed to frame the shell, plus the Vite dev origin that only debug
- * builds compile in. Specs run as top-level documents, so this value never
- * decides a result; it exists so the mocked policy stays a valid CSP with no
- * unresolved placeholder left in it.
- */
-const APP_FRAME_ANCESTORS = "tauri://localhost http://tauri.localhost http://localhost:1420";
 
 /** The shell with every `{{ASSET:...}}` pointing at `/remote/vendor/<name>`. */
 export function remoteClientPageHtml(): string {

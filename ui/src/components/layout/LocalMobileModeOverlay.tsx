@@ -25,50 +25,55 @@ function frameOrigin(url: string): string | null {
 export function LocalMobileModeOverlay() {
   const active = useLocalMobileModeStore((state) => state.active);
   const url = useLocalMobileModeStore((state) => state.url);
+  const session = useLocalMobileModeStore((state) => state.session);
   const exit = useLocalMobileModeStore((state) => state.exit);
   const { t } = useTranslation("common");
-  // Keyed by the URL they were observed for, so a new entry starts over without
-  // an effect resetting state on the way in.
-  const [readyUrl, setReadyUrl] = useState<string | null>(null);
-  const [timedOutUrl, setTimedOutUrl] = useState<string | null>(null);
+  // Keyed by the entry they were observed for. This component never unmounts
+  // (App renders it unconditionally), so without the key a later entry would
+  // inherit the earlier one's verdict.
+  const [readySession, setReadySession] = useState(0);
+  const [timedOutSession, setTimedOutSession] = useState(0);
+  const ready = readySession === session;
 
   useEffect(() => {
     if (!active || !url) return;
     const origin = frameOrigin(url);
 
     const handleMessage = (event: MessageEvent) => {
-      // The Remote page renders host files inside sandboxed iframes of its own;
-      // only the embedded page's own origin gets to drive the desktop around it.
-      if (origin !== null && event.origin !== origin) return;
+      // Only the embedded page's own origin gets to drive the desktop around
+      // it. Fail closed if the URL has no origin to compare against: the host
+      // keeps Escape and the timeout card, so refusing costs no way out.
+      if (origin === null || event.origin !== origin) return;
       const type = (event.data as { type?: string } | null)?.type;
       if (type === DESKTOP_MODE_MESSAGE) exit();
-      else if (type === READY_MESSAGE) setReadyUrl(url);
+      else if (type === READY_MESSAGE) setReadySession(session);
     };
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [active, url, exit]);
+  }, [active, url, session, exit]);
 
   useEffect(() => {
     if (!active || !url) return;
-    const timer = window.setTimeout(() => setTimedOutUrl(url), READY_TIMEOUT_MS);
+    const timer = window.setTimeout(() => setTimedOutSession(session), READY_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [active, url]);
+  }, [active, url, session]);
 
   useEffect(() => {
-    if (!active) return;
-    // Escape only reaches the host document while the frame does not have
-    // focus — which is exactly the stuck case. A live mobile view swallows it.
+    if (!active || ready) return;
+    // Escape belongs to the host only until the frame says it is running. A
+    // live mobile view owns the key for its own drawers and overlays; a frame
+    // that never greeted us owns nothing, and this is the way out.
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") exit();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [active, exit]);
+  }, [active, ready, exit]);
 
   if (!active || !url) return null;
 
-  const stuck = readyUrl !== url && timedOutUrl === url;
+  const stuck = !ready && timedOutSession === session;
 
   return (
     <div className="local-mobile-mode-overlay" data-testid="local-mobile-mode-overlay">

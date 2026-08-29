@@ -2,7 +2,8 @@
 
 - Status: Proposed
 - Date: 2026-08-29
-- Source: issue #955(모바일 모드 전환 시 빈 오버레이에 갇힘), [ADR-0183](0183-remote-page-content-security-policy.md) Decision 6 정정·확장, [ADR-0041](0041-remote-served-file-viewer.md)(viewer 문서 CSP), [api-contracts.md §13](../architecture/api-contracts.md)
+- Source: issue [#955](https://github.com/kochul2000/laymux/issues/955)(모바일 모드 전환 시 빈 오버레이에 갇힘), [ADR-0041](0041-remote-served-file-viewer.md)(viewer 문서 CSP), [api-contracts.md §7·§13](../architecture/api-contracts.md)
+- Amends: [ADR-0183](0183-remote-page-content-security-policy.md) Decision 6 의 `frame-ancestors 'none'` 결정
 
 ## Context
 
@@ -27,8 +28,9 @@ ADR-0183 은 셸에 CSP 를 도입하면서 `frame-ancestors 'none'` 으로 clic
 1. `frame-ancestors` 는 닫힌 허용목록이다. 값은 `page-csp.txt` 의 `__APP_FRAME_ANCESTORS__` 자리에 Rust 가 채워 넣으며, 목록은 `tauri://localhost` 와 `http://tauri.localhost` 두 WebView origin 이다. 와일드카드·scheme 전체 허용·`https:` 는 어느 시점에도 넣지 않는다. `'self'` 는 임베더가 remote origin 이 아니므로 답이 아니다.
 2. **Vite dev origin(`http://localhost:1420`)은 debug 빌드에만 컴파일된다.** 릴리스 바이너리는 1420 포트에 무엇이 응답하든 신뢰하지 않는다. 정책은 요청에서 읽은 값이 아니라 빌드에 고정된 상수이므로, 클라이언트가 제어하는 입력(`Host`, 쿼리 파라미터 `localApp=1`)이 프레임 허용목록을 넓히는 경로는 없다.
 3. **호스트는 임베드가 실제로 떴는지를 명시적 인사로만 판단한다.** `localApp=1` 로 부팅한 셸은 `laymux:mobile-mode-ready` 를 부모에게 보낸다. 거부된 프레임도 `load` 를 발생시키므로 `load` 는 신호로 쓰지 않는다.
-4. **호스트는 임베드가 인사하지 않아도 빠져나갈 수 있다.** 인사가 타임아웃 안에 오지 않으면 오버레이가 자기 마크업으로 "PC 모드로 돌아가기" 를 그린다. ESC 는 항상 오버레이를 닫는다 — 살아 있는 프레임은 ESC 를 자기가 삼키므로 이 키는 사실상 갇힌 상태에서만 호스트에 도달한다. 임베드 안쪽에 종료 경로의 단일 의존을 두지 않는 것이 이 조항의 요지다.
-5. **오버레이의 `postMessage` 수신은 임베드 origin 으로 제한한다.** 셸은 호스트 파일을 자기 sandbox iframe 안에서 렌더하므로, 그 중첩 문서가 `window.top` 을 통해 데스크톱 레이아웃을 바꾸는 경로를 열어 두지 않는다.
+4. **호스트는 임베드가 인사하지 않아도 빠져나갈 수 있다.** 인사가 타임아웃 안에 오지 않으면 오버레이가 자기 마크업으로 "PC 모드로 돌아가기" 를 그린다. ESC 는 **인사가 오기 전까지** 오버레이를 닫는다 — 인사한 뒤의 ESC 는 살아 있는 모바일 뷰가 자기 drawer·오버레이용으로 갖는다. 임베드 안쪽에 종료 경로의 단일 의존을 두지 않는 것이 이 조항의 요지다.
+5. **오버레이의 `postMessage` 수신은 임베드 origin 으로 제한하고, 비교할 origin 이 없으면 받지 않는다.** 셸은 호스트 파일을 자기 sandbox iframe 안에서 렌더하므로 그 중첩 문서가 `window.top` 을 통해 데스크톱 레이아웃을 바꾸는 경로를 열어 두지 않는다. URL 에서 origin 을 얻지 못하는 경우도 fail-closed 로 처리한다 — 탈출구가 ESC 와 타임아웃 카드에 따로 있으므로 거부해도 갇히지 않는다.
+6. **인사·타임아웃 판정은 URL 이 아니라 진입 회차로 키잉한다.** 같은 port·token 은 매번 같은 URL 문자열을 만들고 오버레이 컴포넌트는 언마운트되지 않으므로, URL 로 키잉하면 두 번째 진입이 첫 번째의 판정을 물려받아 4 조항의 보장이 무너진다.
 
 ## Alternatives Considered
 
@@ -41,8 +43,8 @@ ADR-0183 은 셸에 CSP 를 도입하면서 `frame-ancestors 'none'` 으로 clic
 
 ## Consequences
 
-- 정책이 빌드 타입에 따라 달라진다. `page-csp.txt` 만 읽어서는 서빙되는 정책 전체를 알 수 없고, 값은 `page.rs` 의 상수와 함께 봐야 한다. Playwright 헬퍼는 같은 자리를 dev 목록으로 치환한다 — 스펙은 top-level 문서로 돌기 때문에 이 값이 결과를 좌우하지는 않으며, 정책에 미치환 placeholder 가 남지 않게 하는 것이 목적이다.
+- 정책이 빌드 타입에 따라 달라진다. `page-csp.txt` 만 읽어서는 서빙되는 정책 전체를 알 수 없고, 값은 `page.rs` 의 상수와 함께 봐야 한다. Playwright 헬퍼는 같은 자리를 `'none'` 으로 치환한다 — 목록을 TS 로 복제하면 `page-csp.txt` 가 없애려던 cross-language drift 가 그 자리에 되살아나고, 스펙은 top-level 문서로 돌아 이 directive 를 건드리지 않기 때문이다.
 - 앱 WebView origin 이 바뀌면(Tauri 업그레이드, 새 플랫폼 추가) 모바일 모드가 조용히 빈 프레임으로 되돌아간다. 이 상수는 Tauri WebView origin 계약에 묶인 부채이고, 호스트 탈출구가 그 실패를 "앱이 죽는 사고" 대신 "돌아가기 버튼이 뜨는 상태" 로 낮춘다.
-- `laymux:mobile-mode-ready` 는 셸과 데스크톱 오버레이 사이의 계약이 된다. `laymux:desktop-mode` 와 함께 두 메시지가 이 경계의 전부이며, 둘 다 임베드 origin 에서 온 것만 받는다.
+- `laymux:mobile-mode-ready` 는 셸과 데스크톱 오버레이 사이의 계약이 된다. `laymux:desktop-mode` 와 함께 두 메시지가 이 경계의 전부이며, 둘 다 임베드 origin 에서 온 것만 받는다. 인사는 파라미터 파싱 직후 무조건 보낸다 — 토큰이 없거나 연결에 실패해도 "문서는 떴다" 는 사실은 참이고, 그 상태에서는 셸 자신의 PC 모드 버튼이 탈출구가 된다.
 - 인사 타임아웃은 오탐이 가능하다(느린 부팅). 오탐의 결과는 잘 뜬 화면 위에 카드가 한 장 뜨는 것이고, 카드는 프레임을 덮지 않으며 사용자는 무시할 수 있다. 반대 방향 오류(갇힘)의 비용이 비대칭적으로 크므로 이 방향으로 기울인다.
-- 테스트는 Rust 단위(허용목록 구성, dev origin 이 debug 빌드에만 존재, 셸이 인사를 보냄)와 UI 단위(타임아웃 뒤 호스트 버튼 노출, 인사 후 미노출, ESC 종료, 타 origin 메시지 무시)로 나눈다. 실제 WebView 에서 프레임이 뜨는지는 자동 검증 대상이 아니다 — release WebView origin 은 dev 실행으로 재현되지 않으므로, 릴리스 빌드에서 모바일 모드를 한 번 눈으로 확인한 뒤 배포한다.
+- 테스트는 Rust 단위(허용목록 구성, dev origin 이 debug 빌드에만 존재, 셸이 인사를 보냄)와 UI 단위(타임아웃 뒤 호스트 버튼 노출, 인사 후 미노출, 인사 전 ESC 종료, 타 origin 메시지 무시, 재진입 시 판정 초기화)로 나눈다. 실제 WebView 에서 프레임이 뜨는지는 자동 검증 대상이 아니다 — release WebView origin 은 dev 실행으로 재현되지 않으므로, 릴리스 빌드에서 모바일 모드를 한 번 눈으로 확인한 뒤 배포한다.

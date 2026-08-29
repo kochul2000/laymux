@@ -80,6 +80,43 @@ describe("LocalMobileModeOverlay", () => {
     expect(useLocalMobileModeStore.getState().active).toBe(false);
   });
 
+  it("ignores a ready message from another origin", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useLocalMobileModeStore.getState().enter(FRAME_URL);
+
+    render(<LocalMobileModeOverlay />);
+    postFromFrame("laymux:mobile-mode-ready", "https://evil.example");
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+
+    // A greeting the embed did not send must not suppress the host's exit.
+    expect(screen.getByTestId("local-mobile-mode-fallback")).toBeInTheDocument();
+  });
+
+  /**
+   * The overlay never unmounts (App renders it unconditionally) and the same
+   * port and token rebuild the identical URL, so a re-entry must not inherit
+   * the previous entry's verdict — in either direction.
+   */
+  it("starts its verdict over on every entry", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { enter, exit } = useLocalMobileModeStore.getState();
+
+    enter(FRAME_URL);
+    render(<LocalMobileModeOverlay />);
+    postFromFrame("laymux:mobile-mode-ready");
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(screen.queryByTestId("local-mobile-mode-fallback")).not.toBeInTheDocument();
+
+    act(() => exit());
+    act(() => enter(FRAME_URL));
+    // Same URL, second entry — this time the frame stays silent.
+    expect(screen.queryByTestId("local-mobile-mode-fallback")).not.toBeInTheDocument();
+
+    await act(() => vi.advanceTimersByTimeAsync(4000));
+    expect(screen.getByTestId("local-mobile-mode-fallback")).toBeInTheDocument();
+  });
+
   it("stays out of the way once the frame announces itself", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     useLocalMobileModeStore.getState().enter(FRAME_URL);
@@ -93,7 +130,7 @@ describe("LocalMobileModeOverlay", () => {
     expect(useLocalMobileModeStore.getState().active).toBe(true);
   });
 
-  it("exits on Escape, which only reaches the host while the frame is not focused", async () => {
+  it("exits on Escape while the frame has not announced itself", async () => {
     useLocalMobileModeStore.getState().enter(FRAME_URL);
 
     render(<LocalMobileModeOverlay />);
@@ -101,5 +138,17 @@ describe("LocalMobileModeOverlay", () => {
     await userEvent.keyboard("{Escape}");
 
     expect(useLocalMobileModeStore.getState().active).toBe(false);
+  });
+
+  it("hands Escape back to the frame once it announces itself", async () => {
+    useLocalMobileModeStore.getState().enter(FRAME_URL);
+
+    render(<LocalMobileModeOverlay />);
+    postFromFrame("laymux:mobile-mode-ready");
+
+    await userEvent.keyboard("{Escape}");
+
+    // A live mobile view owns Escape for its own drawers and overlays.
+    expect(useLocalMobileModeStore.getState().active).toBe(true);
   });
 });
