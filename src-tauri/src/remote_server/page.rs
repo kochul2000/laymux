@@ -1215,7 +1215,7 @@ mod tests {
         assert!(html.contains("const DEFAULT_KEYBAR = {"));
         assert!(html.contains("expanded: false,"));
         // Placement is the only activation signal: no key sets, no custom
-        // palette toggle, no separate order projection.
+        // custom-key toggle, no separate order projection.
         assert!(!html.contains("const KEY_SETS = ["));
         assert!(!html.contains("sets: [\"step\", \"nav\"],"));
         assert!(!html.contains("order: KEY_ORDER,"));
@@ -1226,7 +1226,7 @@ mod tests {
         assert!(html.contains("id: \"fn\", name: \"Function\""));
         assert!(html.contains("function renderKeyPopover()"));
         assert!(html.contains("function renderInputLayoutEditor()"));
-        // Chips move by long-press drag across segments, rows, and the palette;
+        // Chips move by long-press drag across segments, rows, and the hidden section;
         // selection exposes the keyboard/accessibility moves.
         assert!(html.contains("const KEY_ORDER_HOLD_MS = 180;"));
         assert!(html.contains("function installChipDrag(chip, actionId)"));
@@ -1360,8 +1360,11 @@ mod tests {
         assert!(html.contains("actionId !== \"send\" || composerMode"));
         assert!(html.contains("slot.dataset.dropSegment = segment;"));
         assert!(html.contains("slot.dataset.dropRow = row;"));
-        // Keys stays a main-row-or-palette toggle: it cannot enter the row it opens.
+        // Keys stays a main-row-or-hidden toggle: it cannot enter the row it opens.
         assert!(html.contains("function canPlaceInputAction(actionId, row)"));
+        // Tapping a hidden chip is "use this", not "select this".
+        assert!(html.contains("function useInputAction(actionId)"));
+        assert!(html.contains("title.textContent = \"Hidden\";"));
         assert!(html.contains("return actionId !== \"keys\" || row === \"main\";"));
         assert!(html.contains("keyBarConfig.expanded = false;"));
         assert!(!html.contains("id=\"keyBarSettings\""));
@@ -1380,7 +1383,7 @@ mod tests {
         assert!(html.contains("navNext: { label: \"P↓\", nav: [\"spatial\", \"next\"]"));
         assert!(html.contains("notifRecent: { label: \"N←\", nav: [\"notification\", \"recent\"]"));
         assert!(html.contains("notifOldest: { label: \"N→\", nav: [\"notification\", \"oldest\"]"));
-        // Grouped in the palette, with the flick pad placed by default.
+        // Grouped in the hidden section, with the flick pad placed by default.
         assert!(html.contains("id: \"step\", name: \"Pane/Alert nav\""));
         assert!(html.contains("\"soft:navPad\""));
         // 4-way nav flick: vertical = spatial pane step, horizontal = alerts.

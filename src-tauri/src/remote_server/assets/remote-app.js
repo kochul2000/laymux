@@ -8720,7 +8720,7 @@ import {
           f11: { label: "F11", seq: "\x1b[23~" },
           f12: { label: "F12", seq: "\x1b[24~" },
         };
-        // Stable palette order for the built-in keys.
+        // Stable listing order for the built-in keys.
         const KEY_ORDER = [
           "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
@@ -8729,7 +8729,7 @@ import {
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_ID_SET = new Set(KEY_ORDER);
-        // Palette grouping only. Membership no longer gates availability —
+        // Hidden-section grouping only. Membership no longer gates availability —
         // placement is the single activation signal, so there is nothing to
         // enable before a key can be used.
         const KEY_CATEGORIES = [
@@ -8740,7 +8740,7 @@ import {
           { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
         // Every input action lives in one of the two visible rows, inside one of
-        // three alignment segments, or nowhere at all (the palette). Segments are
+        // three alignment segments, or nowhere at all (hidden). Segments are
         // what make a wide screen usable: order alone cannot express "these hug
         // the left edge, those hug the right".
         const INPUT_ACTION_ROWS = ["main", "expanded"];
@@ -8858,7 +8858,7 @@ import {
         // flat ADR-0186 arrays included — is not migrated: the layout falls back
         // to the defaults. Inside a well-formed payload, unknown or duplicated
         // ids are dropped individually so one stale entry cannot reset a whole
-        // hand-arranged bar. Unplaced actions stay unplaced: the palette is a
+        // hand-arranged bar. Unplaced actions stay unplaced: hiding one is a
         // user decision, not a gap to backfill.
         function normalizeInputZones(raw, knownIds) {
           for (const row of INPUT_ACTION_ROWS) {
@@ -8876,7 +8876,7 @@ import {
                   continue;
                 }
                 // Keys is the one structural toggle: it may sit in the main row
-                // or the palette, never inside the row it opens.
+                // or hidden, never inside the row it opens.
                 const targetRow = actionId === "keys" && row === "expanded" ? "main" : row;
                 zones[targetRow][segment].push(actionId);
                 seen.add(actionId);
@@ -8961,7 +8961,7 @@ import {
           return INPUT_ACTION_SEGMENTS.flatMap((segment) => keyBarConfig.zones[row][segment]);
         }
 
-        // Palette contents: everything the user has not placed, in stable order.
+        // Hidden section: everything the user has not placed, in stable order.
         function unplacedInputActionIds() {
           const placed = new Set([
             ...placedInputActionIds("main"),
@@ -8991,7 +8991,7 @@ import {
         }
 
         // The single placement mutator. `row === "hidden"` sends the action back
-        // to the palette; `index < 0` appends to the segment.
+        // to the hidden section; `index < 0` appends to the segment.
         function moveInputActionTo(actionId, row, segment, index = -1, commit = true) {
           if (!isKnownInputAction(actionId)) return;
           if (
@@ -9079,12 +9079,9 @@ import {
           const id = createUserKeyId();
           keyBarConfig.userKeys.push({ id, label: trimmed, seq });
           rebuildUserKeyIndex();
-          // A key nobody can reach is not registered in any useful sense: land it
-          // at the end of the Keys row so it is one toggle away, not one more
-          // placement step away.
-          keyBarConfig.zones.expanded.left.push(softInputActionId(id));
-          selectedInputActionId = softInputActionId(id);
-          commitInputLayout();
+          // A key nobody can reach is not registered in any useful sense, so a
+          // fresh key lands exactly where a tapped hidden chip does.
+          useInputAction(softInputActionId(id));
           return "";
         }
 
@@ -9479,9 +9476,19 @@ import {
           return actionId !== "keys" || row === "main";
         }
 
+        // Tapping a hidden chip means "use this". It lands at the end of the Keys
+        // row and stays selected, so the position controls are already open next
+        // to it — deciding to use a key and deciding where it goes are one
+        // gesture apart, not two screens apart.
+        function useInputAction(actionId) {
+          const row = canPlaceInputAction(actionId, "expanded") ? "expanded" : "main";
+          selectedInputActionId = actionId;
+          moveInputActionTo(actionId, row, row === "expanded" ? "left" : "right");
+        }
+
         // Long-press drag (Pointer Events, never HTML native DnD — ADR-0040)
         // moves a chip anywhere: within a segment, across segments, across rows,
-        // or onto the palette. Tap remains the accessible path.
+        // or into the hidden section. Tap remains the accessible path.
         function installChipDrag(chip, actionId) {
           let gesture = null;
           let suppressClick = false;
@@ -9498,7 +9505,7 @@ import {
               const targetId = targetChip.dataset.layoutAction || "";
               if (targetId === actionId) return null;
               const placement = inputActionPlacement(targetId);
-              if (!placement) return { kind: "palette" };
+              if (!placement) return { kind: "hidden" };
               if (!canPlaceInputAction(actionId, placement.row)) return null;
               const rect = targetChip.getBoundingClientRect();
               return {
@@ -9514,8 +9521,8 @@ import {
               if (!canPlaceInputAction(actionId, row)) return null;
               return { kind: "segment", element: slot, row, segment: slot.dataset.dropSegment };
             }
-            const palette = element.closest("[data-drop-palette]");
-            if (palette) return { kind: "palette", element: palette };
+            const hiddenSection = element.closest("[data-drop-hidden]");
+            if (hiddenSection) return { kind: "hidden", element: hiddenSection };
             return null;
           };
 
@@ -9599,6 +9606,10 @@ import {
               event.preventDefault();
               return;
             }
+            if (!inputActionPlacement(actionId)) {
+              useInputAction(actionId);
+              return;
+            }
             selectedInputActionId = selectedInputActionId === actionId ? "" : actionId;
             renderInputSettingsPreservingScroll();
           });
@@ -9622,7 +9633,7 @@ import {
         }
 
         // Controls for the tapped chip: where it goes (row + alignment, or the
-        // palette) and where it sits inside its segment. Rendered next to the
+        // hidden) and where it sits inside its segment. Rendered next to the
         // group holding the selection so the context stays visible.
         function createChipControls(actionId) {
           const placement = inputActionPlacement(actionId);
@@ -9636,7 +9647,7 @@ import {
           selected.className = "key-order-selected";
           selected.textContent = placement
             ? `${label} · ${INPUT_ROW_LABELS[placement.row]} ${INPUT_SEGMENT_LABELS[placement.segment]}`
-            : `${label} · Palette`;
+            : `${label} · Hidden`;
           actions.append(selected);
 
           const select = document.createElement("select");
@@ -9651,10 +9662,10 @@ import {
               select.append(option);
             }
           }
-          const paletteOption = document.createElement("option");
-          paletteOption.value = "hidden";
-          paletteOption.textContent = "Palette";
-          select.append(paletteOption);
+          const hiddenOption = document.createElement("option");
+          hiddenOption.value = "hidden";
+          hiddenOption.textContent = "Hidden";
+          select.append(hiddenOption);
           select.value = placement ? `${placement.row}:${placement.segment}` : "hidden";
           select.addEventListener("click", (event) => event.stopPropagation());
           select.addEventListener("change", () => {
@@ -9765,7 +9776,7 @@ import {
           keyPopoverBody.append(section);
         }
 
-        function paletteGroups(unplaced) {
+        function hiddenGroups(unplaced) {
           const available = new Set(unplaced);
           const groups = [
             {
@@ -9790,22 +9801,22 @@ import {
           return groups.filter((group) => group.ids.length > 0);
         }
 
-        function renderPaletteSection() {
+        function renderHiddenSection() {
           const unplaced = unplacedInputActionIds();
           const section = document.createElement("section");
-          section.className = "layout-palette";
-          section.dataset.dropPalette = "true";
+          section.className = "layout-hidden";
+          section.dataset.dropHidden = "true";
           const title = document.createElement("div");
           title.className = "key-popover-title";
-          title.textContent = "Palette";
+          title.textContent = "Hidden";
           section.append(title);
           const help = document.createElement("div");
           help.className = "key-order-help";
-          help.textContent = "Not on the bar. Drag one onto a row, or tap it to place it.";
+          help.textContent = "Not on the bar. Tap one to use it, or drag it onto a row.";
           section.append(help);
-          for (const group of paletteGroups(unplaced)) {
+          for (const group of hiddenGroups(unplaced)) {
             const label = document.createElement("div");
-            label.className = "layout-palette-label";
+            label.className = "layout-hidden-label";
             label.textContent = group.name;
             section.append(label);
             const grid = document.createElement("div");
@@ -10078,7 +10089,7 @@ import {
           }
           renderInputLayoutHeading();
           for (const row of INPUT_ACTION_ROWS) renderRowEditor(row);
-          renderPaletteSection();
+          renderHiddenSection();
           renderUserKeySection();
         }
         // Composer settings share the Remote drawer Settings surface with the

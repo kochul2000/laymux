@@ -902,20 +902,20 @@
         user-select: none;
       }
       .layout-segment-slot.drop-active,
-      .layout-palette.drop-active {
+      .layout-hidden.drop-active {
         border-color: var(--accent);
         background: var(--accent-12);
       }
-      .layout-palette {
+      .layout-hidden {
         margin-top: 10px;
         padding: 4px;
         border: 1px dashed var(--border);
         border-radius: var(--radius-md);
       }
-      .layout-palette .key-popover-title {
+      .layout-hidden .key-popover-title {
         margin-top: 0;
       }
-      .layout-palette-label {
+      .layout-hidden-label {
         margin-top: 6px;
         color: var(--muted);
         font-size: var(--fs-xs);

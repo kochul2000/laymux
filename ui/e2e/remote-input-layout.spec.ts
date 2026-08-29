@@ -120,7 +120,7 @@ test.describe("Remote input action layout", () => {
     expect(Math.max(...buttonCentres) - Math.min(...buttonCentres)).toBeLessThanOrEqual(1);
   });
 
-  test("moves an action across rows, segments, and the palette from drawer Settings", async ({
+  test("moves an action across rows, segments, and the hidden section from Settings", async ({
     page,
   }) => {
     await openMarkup(page);
@@ -133,7 +133,7 @@ test.describe("Remote input action layout", () => {
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:right");
     await expect.poll(() => renderedActions(page, "mainActionRow")).toEqual(["keys", "soft:c-c"]);
 
-    // Palette round trip: unplacing hides the button, replacing restores it.
+    // Hidden round trip: unplacing hides the button, replacing restores it.
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "hidden");
     await expect(page.locator('#mainActionRow [data-input-action="soft:c-c"]')).toHaveCount(0);
     await place(page, "soft:c-c", "Ctrl+C (interrupt)", "main:left");
@@ -203,14 +203,35 @@ test.describe("Remote input action layout", () => {
     await expect.poll(async () => (await storedConfig(page)).expanded).toBe(false);
   });
 
+  test("tapping a hidden key uses it at once and opens its position controls", async ({ page }) => {
+    await openMarkup(page);
+    await page.locator("#drawerSettingsButton").click();
+
+    // One tap is "use this": it lands at the end of the Keys row and stays
+    // selected, so choosing to use a key and choosing where it goes are one
+    // gesture apart rather than two screens apart.
+    await chip(page, "soft:f1").click();
+    await expect
+      .poll(async () => (await storedConfig(page)).zones.expanded.left.at(-1))
+      .toBe("soft:f1");
+    await expect(page.getByLabel("Place F1")).toHaveValue("expanded:left");
+    await expect(page.getByRole("button", { name: "Move F1 to end" })).toBeDisabled();
+    await expect(segment(page, "keyRow", "left")).toContainText("F1");
+
+    // Keys cannot enter the row it opens, so it lands on the main row instead.
+    await place(page, "keys", "Keys", "hidden");
+    await chip(page, "keys").click();
+    await expect.poll(async () => (await storedConfig(page)).zones.main.right).toContain("keys");
+  });
+
   test("treats placement as activation, with no set or custom toggles left", async ({ page }) => {
     await openMarkup(page);
     await page.locator("#drawerSettingsButton").click();
 
     // Nothing gates a key any more: the sets checklist and the custom-key
-    // palette toggle are gone, leaving placement as the only signal.
+    // custom-key toggle are gone, leaving placement as the only signal.
     await expect(page.locator("#inputLayoutEditor").getByText("Key sets")).toHaveCount(0);
-    await expect(page.locator("#inputLayoutEditor .layout-palette")).toBeVisible();
+    await expect(page.locator("#inputLayoutEditor .layout-hidden")).toBeVisible();
 
     await place(page, "soft:f1", "F1", "main:center");
     await expect(segment(page, "mainActionRow", "center")).toContainText("F1");
@@ -218,7 +239,7 @@ test.describe("Remote input action layout", () => {
     await place(page, "soft:f1", "F1", "hidden");
     await expect(segment(page, "mainActionRow", "center")).not.toContainText("F1");
     await expect(
-      page.locator('#inputLayoutEditor .layout-palette [data-layout-action="soft:f1"]'),
+      page.locator('#inputLayoutEditor .layout-hidden [data-layout-action="soft:f1"]'),
     ).toHaveCount(1);
   });
 
