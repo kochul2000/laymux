@@ -65,7 +65,7 @@ export function Dock({
     return ws?.name ?? "";
   });
 
-  const singleHover = useHoverTimer(hoverIdleSeconds);
+  const singleHover = useHoverTimer(hoverIdleSeconds, isActive);
   const resolveCwdDefaults = useCwdDefaultsResolver("dock");
   const startupRevealedPaneIds = useTerminalStartupStore((state) => state.revealedPaneIds);
   // Restart requests live in a store, not local state (ADR-0113) — see PaneGrid.
@@ -154,7 +154,7 @@ export function Dock({
         <PaneControlBar
           paneId={singlePaneId}
           currentView={panes[0]?.view ?? { type: activeView ?? "EmptyView" }}
-          hovered={singleHover.hoveredId !== null}
+          hovered={isActive && singleHover.hoveredId !== null}
           isActive={isActive}
           cwdSendOn={singleCwdSendOn}
           cwdReceiveOn={singleCwdReceiveOn}

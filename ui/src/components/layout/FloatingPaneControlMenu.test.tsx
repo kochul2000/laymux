@@ -139,4 +139,58 @@ describe("FloatingPaneControlMenu", () => {
       expect(menu.style.maxHeight).toBe("230px");
     }
   });
+
+  it("uses the whole positive viewport instead of creating a zero-sized tiny fallback", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(_callback: ResizeObserverCallback) {}
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(16);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(16);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      if (this.dataset.testid === "owner-pane" || this.dataset.testid === "owner-trigger") {
+        return rect({ top: -10, right: 16, bottom: 26, left: 0 });
+      }
+      if (this.dataset.testid === "pane-control-floating-menu") {
+        const width = Number.parseFloat(this.style.width || "100");
+        const height = Number.parseFloat(this.style.maxHeight || "100");
+        return rect({ top: 0, right: width, bottom: height, left: 0 });
+      }
+      return rect({ top: 0, right: 0, bottom: 0, left: 0 });
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function () {
+      return this.dataset.testid === "pane-control-floating-menu" ? 100 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function () {
+      return this.dataset.testid === "pane-control-floating-menu" ? 100 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function () {
+      return this.dataset.testid === "pane-control-floating-menu" ? 100 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function () {
+      return this.dataset.testid === "pane-control-floating-menu" ? 98 : 0;
+    });
+
+    render(<Harness />);
+    act(() => {
+      for (const callback of frames.splice(0)) callback(0);
+    });
+
+    const menu = screen.getByTestId("pane-control-floating-menu");
+    await waitFor(() => expect(menu).toHaveAttribute("data-constrained", "true"));
+    expect(menu.style.width).toBe("16px");
+    expect(menu.style.maxWidth).toBe("16px");
+    expect(menu.style.maxHeight).toBe("16px");
+  });
 });

@@ -204,4 +204,68 @@ test.describe("GitHubView", () => {
       expect(toolbarAfterCrossing.y).toBeCloseTo(toolbarBox.y, 0);
     }
   });
+
+  test("keeps an intrinsically wide control reachable from a 100px pane and narrower viewport", async ({
+    appPage: page,
+  }) => {
+    await openGitHubViewInSecondPane(page);
+    const pane = page.locator(PANE);
+    // The grid's supported minimum pane width is 100px. Force that exact
+    // geometry without changing component internals so ResizeObserver and the
+    // real browser flex/scroll overflow algorithms still own the result.
+    await pane.evaluate((element) => {
+      element.style.width = "100px";
+    });
+    await pane.hover({ position: { x: 50, y: 12 } });
+
+    const toolbar = page.getByTestId("pane-control-floating-menu");
+    const trigger = pane.getByTestId("pane-control-menu-btn");
+    await expect(toolbar).toBeVisible();
+    // Make the menu explicit so viewport resizing cannot be mistaken for a
+    // pointer-exit close while this geometry is inspected.
+    await trigger.click();
+    const select = toolbar.getByTestId("pane-control-view-select");
+    await expect(select).toBeVisible();
+
+    const paneBox = await pane.boundingBox();
+    const toolbarBox = await toolbar.boundingBox();
+    const selectBox = await select.boundingBox();
+    expect(paneBox).not.toBeNull();
+    expect(toolbarBox).not.toBeNull();
+    expect(selectBox).not.toBeNull();
+    if (!paneBox || !toolbarBox || !selectBox) return;
+    expect(toolbarBox.width).toBeGreaterThan(paneBox.width);
+    expect(selectBox.x).toBeGreaterThanOrEqual(toolbarBox.x - 1);
+    expect(selectBox.x + selectBox.width).toBeLessThanOrEqual(toolbarBox.x + toolbarBox.width + 1);
+
+    // Once even the viewport is narrower than the control, the surface must
+    // stay non-zero and expose positive inline-end overflow that can actually
+    // be scrolled to. Negative inline-start overflow is not scroll-reachable.
+    await page.setViewportSize({ width: 96, height: 500 });
+    await expect(toolbar).toBeVisible();
+    await expect(toolbar).toHaveAttribute("data-constrained-x", "true");
+    const metrics = await toolbar.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      maxScrollLeft: element.scrollWidth - element.clientWidth,
+    }));
+    expect(metrics.clientWidth).toBeGreaterThan(0);
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth);
+    expect(metrics.maxScrollLeft).toBeGreaterThan(0);
+
+    await toolbar.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
+    const scrolledToolbarBox = await toolbar.boundingBox();
+    const scrolledSelectBox = await select.boundingBox();
+    expect(scrolledToolbarBox).not.toBeNull();
+    expect(scrolledSelectBox).not.toBeNull();
+    if (!scrolledToolbarBox || !scrolledSelectBox) return;
+    expect(scrolledToolbarBox.width).toBeGreaterThan(0);
+    expect(scrolledToolbarBox.x).toBeGreaterThanOrEqual(-1);
+    expect(scrolledToolbarBox.x + scrolledToolbarBox.width).toBeLessThanOrEqual(97);
+    expect(scrolledSelectBox.x + scrolledSelectBox.width).toBeLessThanOrEqual(
+      scrolledToolbarBox.x + scrolledToolbarBox.width + 1,
+    );
+  });
 });

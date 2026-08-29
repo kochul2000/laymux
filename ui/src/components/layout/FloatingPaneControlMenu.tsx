@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { createPortal } from "react-dom";
 import {
   resolveFloatingToolbarPlacement,
+  resolveFloatingToolbarAxisMargin,
   type FloatingToolbarPlacement,
   type RectLike,
 } from "@/lib/floating-toolbar-placement";
@@ -85,7 +86,8 @@ export function FloatingPaneControlMenu({
     // pane), widen only enough for that control, up to the safe viewport.
     // This write happens while the unplaced menu is hidden and is immediately
     // followed by measurement, so no intermediate geometry is painted.
-    const safeViewportWidth = Math.max(0, window.innerWidth - 16);
+    const horizontalMargin = resolveFloatingToolbarAxisMargin(window.innerWidth);
+    const safeViewportWidth = Math.max(0, window.innerWidth - horizontalMargin * 2);
     const paneMaxWidth = Math.min(Math.max(0, paneRect.width), safeViewportWidth);
     menu.style.width = `${paneMaxWidth}px`;
     menu.style.maxWidth = `${paneMaxWidth}px`;
@@ -157,6 +159,13 @@ export function FloatingPaneControlMenu({
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      const menuOwnsFocus = menuRef.current?.contains(document.activeElement) ?? false;
+      if (openReason === "hover" && !menuOwnsFocus) {
+        // Discovery-only hover UI does not own the keyboard. Close it without
+        // consuming Escape or moving focus away from the View handling the key.
+        onRequestClose();
+        return;
+      }
       event.preventDefault();
       // Hover-mode anchors can unmount while the pointer crosses into this
       // body portal. Capture the stable owner pane as the keyboard fallback so
@@ -171,7 +180,7 @@ export function FloatingPaneControlMenu({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [onRequestClose, paneRef, triggerRef]);
+  }, [onRequestClose, openReason, paneRef, triggerRef]);
 
   // Explicit keyboard/click opens behave like a popover: move directly into
   // the portalled controls once geometry exists. Hover discovery must never

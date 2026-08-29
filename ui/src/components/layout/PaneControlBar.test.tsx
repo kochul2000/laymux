@@ -471,6 +471,29 @@ describe("PaneControlBar", () => {
     );
   });
 
+  it("closes a focusless hover toolbar on Escape without consuming the key or stealing focus", async () => {
+    stubPaneWidth(200);
+    render(
+      <div>
+        <input data-testid="other-view-input" />
+        <PaneControlBar currentView={defaultView} actions={defaultActions} hovered={true}>
+          <ViewHeader title="GitHub">Issues 0</ViewHeader>
+        </PaneControlBar>
+      </div>,
+    );
+
+    await screen.findByTestId("pane-control-floating-menu");
+    const input = screen.getByTestId("other-view-input");
+    input.focus();
+    expect(input).toHaveFocus();
+
+    expect(fireEvent.keyDown(input, { key: "Escape" })).toBe(true);
+    await waitFor(() =>
+      expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument(),
+    );
+    expect(input).toHaveFocus();
+  });
+
   it("keeps the narrow menu open and actionable after the pane loses hover (issue #384)", async () => {
     // Moving the cursor toward the floating menu leaves the pane hover region.
     // The menu must stay mounted so the user can actually click its buttons.

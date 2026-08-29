@@ -130,6 +130,33 @@ describe("Dock", () => {
     expect(screen.queryByTestId("pane-control-floating-menu")).not.toBeInTheDocument();
   });
 
+  it("does not revive a single-pane hover bar when a retained dock is shown again", () => {
+    useSettingsStore.setState((state) => ({
+      controlBar: { ...state.controlBar, hoverIdleSeconds: 0 },
+    }));
+    const pane = {
+      id: "dp-hover-lifecycle",
+      view: { type: "MemoView" as const },
+      x: 0,
+      y: 0,
+      w: 1,
+      h: 1,
+    };
+    const { rerender } = render(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive />,
+    );
+    fireEvent.mouseEnter(screen.getByTestId("dock-left"));
+    expect(screen.getByTestId("pane-control-bar")).toBeInTheDocument();
+
+    rerender(
+      <Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive={false} />,
+    );
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+
+    rerender(<Dock position="left" activeView="MemoView" views={[]} panes={[pane]} isActive />);
+    expect(screen.queryByTestId("pane-control-bar")).not.toBeInTheDocument();
+  });
+
   it("renders with correct test id", () => {
     render(<Dock position="left" activeView={null} views={[]} panes={[]} />);
     expect(screen.getByTestId("dock-left")).toBeInTheDocument();

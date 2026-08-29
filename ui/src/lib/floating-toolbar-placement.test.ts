@@ -136,4 +136,25 @@ describe("resolveFloatingToolbarPlacement", () => {
       constrainedX: true,
     });
   });
+
+  it.each([16, 8, 1])(
+    "drops margins instead of collapsing a %ipx viewport fallback to zero",
+    (viewportSize) => {
+      expect(
+        resolveFloatingToolbarPlacement({
+          anchor: { top: -10, right: viewportSize, bottom: viewportSize + 10, left: 0 },
+          pane: { top: -10, right: viewportSize, bottom: viewportSize + 10, left: 0 },
+          menu: { width: 100, height: 100, scrollWidth: 100 },
+          viewport: { width: viewportSize, height: viewportSize },
+        }),
+      ).toMatchObject({
+        top: 0,
+        left: 0,
+        maxWidth: viewportSize,
+        maxHeight: viewportSize,
+        constrained: true,
+        constrainedX: true,
+      });
+    },
+  );
 });

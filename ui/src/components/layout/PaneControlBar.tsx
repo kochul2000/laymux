@@ -330,8 +330,10 @@ function BarContent({
   return (
     <div
       data-testid={testId}
-      className={`flex shrink-0 items-center justify-end gap-0.5 ${
-        wrapped ? "w-full min-w-0 max-w-full flex-wrap" : ""
+      className={`flex shrink-0 items-center gap-0.5 ${
+        wrapped
+          ? "w-full min-w-0 max-w-full flex-wrap [justify-content:safe_flex-end]"
+          : "justify-end"
       }`}
       onClick={(e) => e.stopPropagation()}
     >
