@@ -304,7 +304,11 @@
         </div>
       </main>
       <nav id="keyBar" class="key-bar" aria-label="Special keys" hidden>
-        <div id="keyRow" class="key-row" role="group" aria-label="Keys row"></div>
+        <div id="keyRow" class="key-row" role="group" aria-label="Keys row">
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right"></div>
+        </div>
         <div id="keyFlickHint" class="key-flick-hint" data-direction="" aria-hidden="true" hidden>
           <span class="key-flick-arrow" data-flick-direction="up"><span data-remote-icon="ArrowUp" data-icon-size="12"></span></span>
           <span class="key-flick-arrow" data-flick-direction="right"><span data-remote-icon="ArrowRight" data-icon-size="12"></span></span>
@@ -315,18 +319,21 @@
       </nav>
       <footer>
         <div id="mainActionRow" class="input-action-row" role="group" aria-label="Input actions">
-          <button id="ctrlC" disabled>Ctrl+C</button>
-          <button id="focusTerminal" disabled>Keyboard</button>
-          <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
-          <button id="inputModeToggle" class="input-mode-toggle" type="button" hidden aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
-            <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
-          </button>
-          <button id="attachFile" class="attachment-button" type="button" hidden disabled aria-label="Attach image or text file" title="Attach image or text file">
-            <span data-remote-icon="Paperclip"></span>
-          </button>
-          <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
-            <span data-remote-icon="Send" data-icon-size="20"></span>
-          </button>
+          <div class="action-segment" data-segment="left"></div>
+          <div class="action-segment" data-segment="center"></div>
+          <div class="action-segment" data-segment="right">
+            <button id="focusTerminal" disabled>Keyboard</button>
+            <button id="keyBarToggle" class="key-toggle" type="button" aria-pressed="false" aria-controls="keyBar" title="Toggle special-key toolbar">Keys</button>
+            <button id="inputModeToggle" class="input-mode-toggle" type="button" hidden aria-pressed="false" aria-label="Switch to Composer input" title="Switch to Composer input">
+              <span id="inputModeIcon" class="input-mode-icon" aria-hidden="true"></span>
+            </button>
+            <button id="attachFile" class="attachment-button" type="button" hidden disabled aria-label="Attach image or text file" title="Attach image or text file">
+              <span data-remote-icon="Paperclip"></span>
+            </button>
+            <button id="composerSend" class="composer-send" type="button" hidden aria-label="Send input" title="Send">
+              <span data-remote-icon="Send" data-icon-size="20"></span>
+            </button>
+          </div>
         </div>
         <input id="attachmentInput" class="sr-only" type="file" accept="image/*,text/*,.md,.markdown,.json,.jsonl,.yaml,.yml,.toml,.xml,.csv,.log,.ts,.tsx,.js,.jsx,.mjs,.cjs,.py,.rs,.go,.java,.kt,.kts,.c,.h,.cpp,.hpp,.cc,.cs,.sh,.bash,.zsh,.fish,.ps1,.bat,.cmd,.sql,.css,.scss,.html,.htm,.ini,.conf,.cfg,.env" multiple tabindex="-1" aria-hidden="true" />
       </footer>

@@ -102,7 +102,6 @@ import {
         const fileViewerBackButton = $("fileViewerBack");
         const fileExplorerHeaderButton = $("fileExplorerHeader");
         const focusTerminalButton = $("focusTerminal");
-        const ctrlCButton = $("ctrlC");
         const attachmentButton = $("attachFile");
         const attachmentInput = $("attachmentInput");
         const composerSendButton = $("composerSend");
@@ -523,7 +522,7 @@ import {
         // Tell the PC app's overlay the embed actually came up. A refused frame
         // still fires the iframe's `load`, so this greeting is the host's only
         // proof; without it the host draws its own way back to desktop mode
-        // (#955, ADR-0213).
+        // (#955, ADR-0214).
         if (localAppMode) window.parent.postMessage({ type: "laymux:mobile-mode-ready" }, "*");
         // Layout naming (canonical Enter gesture, ADR-0036/0186):
         //   desktop layout — Enter sends, Shift+Enter inserts a newline.
@@ -3864,7 +3863,6 @@ import {
 
         function updateTerminalControls() {
           const canControl = Boolean(leaseId && activeTerminalId);
-          ctrlCButton.disabled = !canControl;
           focusTerminalButton.disabled = !canControl;
           updateComposerControls();
           updateKeyBarControls();
@@ -8678,8 +8676,11 @@ import {
 
         // --- Special key toolbar (soft keys) ---
         // Each key sends a terminal control/escape sequence through the same
-        // enqueueInput -> /remote/v1/terminals/{id}/write path as Ctrl+C. No new
-        // Remote API surface. Cursor keys (arrows/Home/End) are DECCKM-aware.
+        // enqueueInput -> /remote/v1/terminals/{id}/write path the composer uses.
+        // No new Remote API surface. Cursor keys (arrows/Home/End) are
+        // DECCKM-aware. Built-in Ctrl combinations stay deliberately small — the
+        // five that earn permanent shelf space — because anything else can be
+        // registered as a user key instead of shipping as dead weight.
         const KEY_DEFS = {
           // Step-navigation keys (issue #474, ADR-0039): controller actions on
           // the lease-gated /remote/v1/navigation endpoints, not byte writes.
@@ -8706,17 +8707,11 @@ import {
           del: { label: "Del", seq: "\x1b[3~" },
           pgup: { label: "PgUp", seq: "\x1b[5~" },
           pgdn: { label: "PgDn", seq: "\x1b[6~" },
-          "c-a": { label: "^A", seq: "\x01" },
-          "c-c": { label: "^C", seq: "\x03" },
-          "c-d": { label: "^D", seq: "\x04" },
-          "c-e": { label: "^E", seq: "\x05" },
-          "c-k": { label: "^K", seq: "\x0b" },
-          "c-l": { label: "^L", seq: "\x0c" },
-          "c-r": { label: "^R", seq: "\x12" },
-          "c-t": { label: "^T", seq: "\x14" },
-          "c-u": { label: "^U", seq: "\x15" },
-          "c-w": { label: "^W", seq: "\x17" },
-          "c-z": { label: "^Z", seq: "\x1a" },
+          "c-c": { label: "^C", seq: "\x03", hint: "Ctrl+C (interrupt)" },
+          "c-j": { label: "^J", seq: "\n", hint: "Ctrl+J (line feed)" },
+          "c-u": { label: "^U", seq: "\x15", hint: "Ctrl+U (kill line)" },
+          "c-t": { label: "^T", seq: "\x14", hint: "Ctrl+T (transpose)" },
+          "c-l": { label: "^L", seq: "\x0c", hint: "Ctrl+L (clear screen)" },
           f1: { label: "F1", seq: "\x1bOP" },
           f2: { label: "F2", seq: "\x1bOQ" },
           f3: { label: "F3", seq: "\x1bOR" },
@@ -8730,25 +8725,34 @@ import {
           f11: { label: "F11", seq: "\x1b[23~" },
           f12: { label: "F12", seq: "\x1b[24~" },
         };
-        // Stable render order for both the toolbar and the custom-key palette.
+        // Stable listing order for the built-in keys.
         const KEY_ORDER = [
           "navPad", "navPrev", "navNext", "notifRecent", "notifOldest",
           "esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end",
           "enter", "bksp", "ins", "del", "pgup", "pgdn",
-          "c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z",
+          "c-c", "c-j", "c-u", "c-t", "c-l",
           "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
         ];
         const KEY_ID_SET = new Set(KEY_ORDER);
-        const KEY_SETS = [
-          { id: "step", name: "Pane/Alert nav", desc: "Flick pad · P↑P↓ pane · N←N→ alerts", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
-          { id: "nav", name: "Navigation", desc: "Arrows · Flick pad · Tab · Esc", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
-          { id: "edit", name: "Editing", desc: "Ins/Del/PgUp/PgDn", keys: ["ins", "del", "pgup", "pgdn", "bksp", "enter"] },
-          { id: "ctrl", name: "Ctrl keys", desc: "^C ^D ^Z ^R …", keys: ["c-a", "c-c", "c-d", "c-e", "c-k", "c-l", "c-r", "c-t", "c-u", "c-w", "c-z"] },
-          { id: "fn", name: "Function", desc: "F1–F12", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
+        // Hidden-section grouping only. Membership no longer gates availability —
+        // placement is the single activation signal, so there is nothing to
+        // enable before a key can be used.
+        const KEY_CATEGORIES = [
+          { id: "step", name: "Pane/Alert nav", keys: ["navPad", "navPrev", "navNext", "notifRecent", "notifOldest"] },
+          { id: "nav", name: "Navigation", keys: ["esc", "tab", "stab", "dpad", "up", "down", "left", "right", "home", "end"] },
+          { id: "edit", name: "Editing", keys: ["enter", "bksp", "ins", "del", "pgup", "pgdn"] },
+          { id: "ctrl", name: "Ctrl keys", keys: ["c-c", "c-j", "c-u", "c-t", "c-l"] },
+          { id: "fn", name: "Function", keys: ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12"] },
         ];
-        const INPUT_ACTION_ZONES = ["main", "expanded", "hidden"];
+        // Every input action lives in one of the two visible rows, inside one of
+        // three alignment segments, or nowhere at all (hidden). Segments are
+        // what make a wide screen usable: order alone cannot express "these hug
+        // the left edge, those hug the right".
+        const INPUT_ACTION_ROWS = ["main", "expanded"];
+        const INPUT_ACTION_SEGMENTS = ["left", "center", "right"];
+        const INPUT_ROW_LABELS = { main: "Main row", expanded: "Keys row" };
+        const INPUT_SEGMENT_LABELS = { left: "Left", center: "Center", right: "Right" };
         const FIXED_INPUT_ACTION_IDS = [
-          "ctrl-c",
           "keyboard",
           "keys",
           "send",
@@ -8756,7 +8760,6 @@ import {
           "attachment",
         ];
         const INPUT_ACTION_LABELS = {
-          "ctrl-c": "Ctrl+C",
           keyboard: "Keyboard",
           keys: "Keys",
           send: "Send",
@@ -8768,20 +8771,24 @@ import {
           typeof actionId === "string" && actionId.startsWith("soft:")
             ? actionId.slice(5)
             : "";
-        const ALL_INPUT_ACTION_IDS = [
-          ...FIXED_INPUT_ACTION_IDS,
-          ...KEY_ORDER.map(softInputActionId),
-        ];
+        // User-registered keys. The `u-` namespace can never collide with a
+        // built-in id (and never matches `__proto__`/`constructor`), and the
+        // bounds keep a corrupt or hostile localStorage payload from growing the
+        // toolbar without limit.
+        const USER_KEY_ID_PATTERN = /^u-[a-z0-9]{1,24}$/;
+        const USER_KEY_LABEL_MAX = 8;
+        const USER_KEY_SEQ_MAX = 32;
+        const USER_KEY_MAX = 24;
         const DEFAULT_KEYBAR = {
           expanded: false,
-          sets: ["step", "nav"],
-          custom: [],
-          usedCustom: [],
-          order: KEY_ORDER,
+          userKeys: [],
           zones: {
-            main: ["ctrl-c", "keyboard", "keys", "send"],
-            expanded: ["composer", ...KEY_ORDER.map(softInputActionId)],
-            hidden: ["attachment"],
+            main: { left: ["soft:c-c"], center: [], right: ["keyboard", "keys", "send"] },
+            expanded: {
+              left: ["composer", "soft:navPad", "soft:esc", "soft:tab", "soft:stab", "soft:dpad"],
+              center: [],
+              right: ["soft:c-j", "soft:c-u", "soft:c-t", "soft:c-l"],
+            },
           },
         };
         // 4-way nav flick mapping — mirrors the desktop shortcuts: vertical =
@@ -8795,111 +8802,105 @@ import {
         };
         const KEY_FLICK_THRESHOLD_PX = 18;
         const KEY_ORDER_HOLD_MS = 180;
-        let selectedOrderKeyId = "";
+        let selectedInputActionId = "";
 
-        function defaultInputZones(softOrder = KEY_ORDER) {
-          const normalizedSoftOrder = [
-            ...new Set([
-              ...softOrder.filter((id) => KEY_ID_SET.has(id)),
-              ...KEY_ORDER,
-            ]),
-          ];
-          return {
-            main: [...DEFAULT_KEYBAR.zones.main],
-            expanded: ["composer", ...normalizedSoftOrder.map(softInputActionId)],
-            hidden: [...DEFAULT_KEYBAR.zones.hidden],
-          };
+        function ownProperty(value, key) {
+          return value &&
+            typeof value === "object" &&
+            Object.prototype.hasOwnProperty.call(value, key)
+            ? value[key]
+            : undefined;
         }
 
-        function projectSoftKeyOrderFromZones(zones) {
-          const seen = new Set();
-          const projected = [];
-          for (const zone of INPUT_ACTION_ZONES) {
-            for (const actionId of zones[zone]) {
-              const keyId = softKeyIdFromAction(actionId);
-              if (!KEY_ID_SET.has(keyId) || seen.has(keyId)) continue;
-              seen.add(keyId);
-              projected.push(keyId);
+        function emptyInputZones() {
+          const zones = {};
+          for (const row of INPUT_ACTION_ROWS) {
+            zones[row] = {};
+            for (const segment of INPUT_ACTION_SEGMENTS) zones[row][segment] = [];
+          }
+          return zones;
+        }
+
+        function defaultInputZones() {
+          const zones = emptyInputZones();
+          for (const row of INPUT_ACTION_ROWS) {
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              zones[row][segment] = [...DEFAULT_KEYBAR.zones[row][segment]];
             }
           }
-          for (const keyId of KEY_ORDER) {
-            if (seen.has(keyId)) continue;
-            seen.add(keyId);
-            projected.push(keyId);
+          return zones;
+        }
+
+        function normalizeUserKeys(raw) {
+          if (!Array.isArray(raw)) return [];
+          const keys = [];
+          const seen = new Set();
+          for (const entry of raw) {
+            if (keys.length >= USER_KEY_MAX) break;
+            const id = ownProperty(entry, "id");
+            const label = ownProperty(entry, "label");
+            const seq = ownProperty(entry, "seq");
+            if (typeof id !== "string" || !USER_KEY_ID_PATTERN.test(id) || seen.has(id)) continue;
+            if (typeof label !== "string" || typeof seq !== "string") continue;
+            const trimmed = label.trim();
+            if (!trimmed || trimmed.length > USER_KEY_LABEL_MAX) continue;
+            if (!seq || seq.length > USER_KEY_SEQ_MAX) continue;
+            seen.add(id);
+            keys.push({ id, label: trimmed, seq });
           }
-          return projected;
+          return keys;
+        }
+
+        function knownActionIdSet(userKeys) {
+          return new Set([
+            ...FIXED_INPUT_ACTION_IDS,
+            ...KEY_ORDER.map(softInputActionId),
+            ...userKeys.map((key) => softInputActionId(key.id)),
+          ]);
+        }
+
+        // Stored zones are `{row: {left, center, right}}`. Anything else — the
+        // flat ADR-0186 arrays included — is not migrated: the layout falls back
+        // to the defaults. Inside a well-formed payload, unknown or duplicated
+        // ids are dropped individually so one stale entry cannot reset a whole
+        // hand-arranged bar. Unplaced actions stay unplaced: hiding one is a
+        // user decision, not a gap to backfill.
+        function normalizeInputZones(raw, knownIds) {
+          for (const row of INPUT_ACTION_ROWS) {
+            const rawRow = ownProperty(raw, row);
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              if (!Array.isArray(ownProperty(rawRow, segment))) return defaultInputZones();
+            }
+          }
+          const zones = emptyInputZones();
+          const seen = new Set();
+          for (const row of INPUT_ACTION_ROWS) {
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              for (const actionId of raw[row][segment]) {
+                if (typeof actionId !== "string" || !knownIds.has(actionId) || seen.has(actionId)) {
+                  continue;
+                }
+                // Keys is the one structural toggle: it may sit in the main row
+                // or hidden, never inside the row it opens.
+                const targetRow = actionId === "keys" && row === "expanded" ? "main" : row;
+                zones[targetRow][segment].push(actionId);
+                seen.add(actionId);
+              }
+            }
+          }
+          return zones;
         }
 
         function normalizeInputLayoutConfig(raw) {
           const value = raw && typeof raw === "object" ? raw : {};
-          const savedOrder = Array.isArray(value.order)
-            ? value.order.filter((id) => KEY_ID_SET.has(id))
-            : [];
-          const order = [...new Set([...savedOrder, ...KEY_ORDER])];
-          const defaults = defaultInputZones(order);
-          const zones = { main: [], expanded: [], hidden: [] };
-          const seen = new Set();
-          const rawZones = value.zones && typeof value.zones === "object" ? value.zones : {};
-          const rawZoneValues = INPUT_ACTION_ZONES.flatMap((zone) =>
-            Array.isArray(rawZones[zone]) ? rawZones[zone] : [],
+          const userKeys = normalizeUserKeys(ownProperty(value, "userKeys"));
+          const zones = normalizeInputZones(ownProperty(value, "zones"), knownActionIdSet(userKeys));
+          const keysPlaced = INPUT_ACTION_SEGMENTS.some((segment) =>
+            zones.main[segment].includes("keys"),
           );
-          const rawZonesValid =
-            INPUT_ACTION_ZONES.every((zone) => Array.isArray(rawZones[zone])) &&
-            rawZoneValues.every(
-              (actionId) =>
-                typeof actionId === "string" && ALL_INPUT_ACTION_IDS.includes(actionId),
-            ) &&
-            new Set(rawZoneValues).size === rawZoneValues.length &&
-            !rawZones.expanded.includes("keys");
-
-          for (const zone of INPUT_ACTION_ZONES) {
-            const candidates = rawZonesValid ? rawZones[zone] : [];
-            for (const actionId of candidates) {
-              if (
-                typeof actionId !== "string" ||
-                !ALL_INPUT_ACTION_IDS.includes(actionId) ||
-                seen.has(actionId)
-              ) {
-                continue;
-              }
-              // Keys is the one structural toggle: it may be present in the
-              // main row or hidden, never inside the row it opens.
-              const targetZone = actionId === "keys" && zone === "expanded" ? "main" : zone;
-              zones[targetZone].push(actionId);
-              seen.add(actionId);
-            }
-          }
-          for (const zone of INPUT_ACTION_ZONES) {
-            for (const actionId of defaults[zone]) {
-              if (seen.has(actionId)) continue;
-              zones[zone].push(actionId);
-              seen.add(actionId);
-            }
-          }
-
-          const knownSetIds = new Set(KEY_SETS.map((set) => set.id));
-          const sets =
-            Array.isArray(value.sets) && value.sets.every((id) => knownSetIds.has(id))
-              ? [...new Set(value.sets)]
-              : [...DEFAULT_KEYBAR.sets];
-          const custom = Array.isArray(value.custom)
-            ? [...new Set(value.custom.filter((id) => KEY_ID_SET.has(id)))]
-            : [];
-          const usedCustom = Array.isArray(value.usedCustom)
-            ? [...new Set(value.usedCustom.filter((id) => KEY_ID_SET.has(id)))]
-            : [...custom];
-          const expanded =
-            typeof value.expanded === "boolean"
-              ? value.expanded
-              : typeof value.visible === "boolean"
-                ? value.visible
-                : DEFAULT_KEYBAR.expanded;
           return {
-            expanded: expanded && zones.main.includes("keys"),
-            sets,
-            custom,
-            usedCustom,
-            order: projectSoftKeyOrderFromZones(zones),
+            expanded: ownProperty(value, "expanded") === true && keysPlaced,
+            userKeys,
             zones,
           };
         }
@@ -8915,6 +8916,31 @@ import {
         }
 
         let keyBarConfig = loadKeyBarConfig();
+        let userKeyIndex = new Map();
+
+        function rebuildUserKeyIndex() {
+          userKeyIndex = new Map(keyBarConfig.userKeys.map((key) => [key.id, key]));
+        }
+        rebuildUserKeyIndex();
+
+        // Single lookup for built-in and user-registered keys, so a user key is
+        // indistinguishable from a built-in one everywhere downstream (render,
+        // badge, send).
+        function keyDef(id) {
+          if (typeof id !== "string") return null;
+          if (Object.prototype.hasOwnProperty.call(KEY_DEFS, id)) return KEY_DEFS[id];
+          return userKeyIndex.get(id) || null;
+        }
+
+        function knownSoftKeyIds() {
+          return [...KEY_ORDER, ...keyBarConfig.userKeys.map((key) => key.id)];
+        }
+
+        function isKnownInputAction(actionId) {
+          if (FIXED_INPUT_ACTION_IDS.includes(actionId)) return true;
+          const keyId = softKeyIdFromAction(actionId);
+          return Boolean(keyId) && Boolean(keyDef(keyId));
+        }
 
         function saveKeyBarConfig() {
           try {
@@ -8922,112 +8948,208 @@ import {
           } catch (_) {}
         }
 
-        // Ordered union of every enabled set plus custom picks, deduped. The
-        // complete key order is stored so disabling and re-enabling a set does
-        // not discard the user's placement for its keys.
-        function resolveKeyIds() {
-          const enabled = new Set();
-          for (const set of KEY_SETS) {
-            if (keyBarConfig.sets.includes(set.id)) set.keys.forEach((id) => enabled.add(id));
-          }
-          keyBarConfig.custom.forEach((id) => enabled.add(id));
-          return keyBarConfig.order.filter((id) => enabled.has(id));
-        }
-
-        function resolvePlacedKeyIds() {
-          return ["main", "expanded"].flatMap(resolvePlacedKeyIdsInZone);
-        }
-
-        function resolvePlacedKeyIdsInZone(zone) {
-          if (zone !== "main" && zone !== "expanded") return [];
-          const enabled = new Set(resolveKeyIds());
-          return keyBarConfig.zones[zone]
-            .map(softKeyIdFromAction)
-            .filter((id) => id && enabled.has(id));
-        }
-
-        function syncKeyOrderProjection() {
-          keyBarConfig.order = projectSoftKeyOrderFromZones(keyBarConfig.zones);
-        }
-
-        function commitKeyOrder(order) {
-          keyBarConfig.order = order;
-          const rank = new Map(order.map((id, index) => [softInputActionId(id), index]));
-          for (const zone of INPUT_ACTION_ZONES) {
-            const fixedPositions = keyBarConfig.zones[zone]
-              .map((actionId, index) => ({ actionId, index }))
-              .filter(({ actionId }) => !softKeyIdFromAction(actionId));
-            const soft = keyBarConfig.zones[zone]
-              .filter((actionId) => softKeyIdFromAction(actionId))
-              .sort((left, right) => (rank.get(left) ?? 0) - (rank.get(right) ?? 0));
-            const merged = [...soft];
-            for (const { actionId, index } of fixedPositions) {
-              merged.splice(Math.min(index, merged.length), 0, actionId);
+        function inputActionPlacement(actionId) {
+          for (const row of INPUT_ACTION_ROWS) {
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              const index = keyBarConfig.zones[row][segment].indexOf(actionId);
+              if (index >= 0) return { row, segment, index };
             }
-            keyBarConfig.zones[zone] = merged;
           }
-          syncKeyOrderProjection();
+          return null;
+        }
+
+        function inputActionZone(actionId) {
+          return inputActionPlacement(actionId)?.row || "hidden";
+        }
+
+        function placedInputActionIds(row) {
+          return INPUT_ACTION_SEGMENTS.flatMap((segment) => keyBarConfig.zones[row][segment]);
+        }
+
+        // Hidden section: everything the user has not placed, in stable order.
+        function unplacedInputActionIds() {
+          const placed = new Set([
+            ...placedInputActionIds("main"),
+            ...placedInputActionIds("expanded"),
+          ]);
+          return [
+            ...FIXED_INPUT_ACTION_IDS,
+            ...knownSoftKeyIds().map(softInputActionId),
+          ].filter((actionId) => !placed.has(actionId));
+        }
+
+        function commitInputLayout(rerenderSettings = true) {
           saveKeyBarConfig();
           renderInputActionRows();
+          if (rerenderSettings) renderInputSettingsPreservingScroll();
+          scheduleTerminalFit();
         }
 
-        function reorderKey(id, targetId, afterTarget) {
-          if (id === targetId) return;
+        function removeInputAction(actionId) {
+          for (const row of INPUT_ACTION_ROWS) {
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              keyBarConfig.zones[row][segment] = keyBarConfig.zones[row][segment].filter(
+                (id) => id !== actionId,
+              );
+            }
+          }
+        }
+
+        // The single placement mutator. `row === "hidden"` sends the action back
+        // to the hidden section; `index < 0` appends to the segment.
+        function moveInputActionTo(actionId, row, segment, index = -1, commit = true) {
+          if (!isKnownInputAction(actionId)) return;
           if (
-            inputActionZone(softInputActionId(id)) !==
-            inputActionZone(softInputActionId(targetId))
+            row !== "hidden" &&
+            (!INPUT_ACTION_ROWS.includes(row) || !INPUT_ACTION_SEGMENTS.includes(segment))
           ) {
             return;
           }
-          const order = keyBarConfig.order.filter((keyId) => keyId !== id);
-          const targetIndex = order.indexOf(targetId);
-          if (targetIndex < 0) return;
-          order.splice(targetIndex + (afterTarget ? 1 : 0), 0, id);
-          commitKeyOrder(order);
-        }
-
-        function moveKey(id, offset) {
-          const visibleIds = resolvePlacedKeyIdsInZone(
-            inputActionZone(softInputActionId(id)),
-          );
-          const index = visibleIds.indexOf(id);
-          const targetIndex = index + offset;
-          if (index < 0 || targetIndex < 0 || targetIndex >= visibleIds.length) return;
-          const targetId = visibleIds[targetIndex];
-          const orderIndex = keyBarConfig.order.indexOf(id);
-          const targetOrderIndex = keyBarConfig.order.indexOf(targetId);
-          [keyBarConfig.order[orderIndex], keyBarConfig.order[targetOrderIndex]] = [
-            keyBarConfig.order[targetOrderIndex],
-            keyBarConfig.order[orderIndex],
-          ];
-          commitKeyOrder(keyBarConfig.order);
-        }
-
-        function moveKeyToEdge(id, toStart) {
-          const visibleIds = resolvePlacedKeyIdsInZone(
-            inputActionZone(softInputActionId(id)),
-          );
-          const index = visibleIds.indexOf(id);
-          if (index < 0) return;
-          const targetId = toStart ? visibleIds[0] : visibleIds[visibleIds.length - 1];
-          if (targetId === id) return;
-          reorderKey(id, targetId, !toStart);
-        }
-
-        function resetKeyOrder() {
-          selectedOrderKeyId = "";
-          commitKeyOrder([...KEY_ORDER]);
-        }
-
-        function appendKeyToVisibleEnd(id, visibleIds) {
-          if (visibleIds.includes(id) || visibleIds.length === 0) return;
-          // ADR-0040 puts a newly selected custom key at the end of the
-          // visible Keys row. Preserve a user-selected main/hidden zone;
-          // only reorder the default expanded placement.
-          if (inputActionZone(softInputActionId(id)) === "expanded") {
-            moveInputAction(softInputActionId(id), "expanded", false);
+          const targetRow = actionId === "keys" && row === "expanded" ? "main" : row;
+          removeInputAction(actionId);
+          if (targetRow === "hidden") {
+            if (actionId === "keys") keyBarConfig.expanded = false;
+          } else {
+            const list = keyBarConfig.zones[targetRow][segment];
+            list.splice(index < 0 || index > list.length ? list.length : index, 0, actionId);
           }
-          syncKeyOrderProjection();
+          if (commit) commitInputLayout();
+        }
+
+        // Drop target for a drag: land next to `targetActionId`. Removing the
+        // dragged chip first shifts later indices in the same segment by one.
+        function moveInputActionRelative(actionId, targetActionId, afterTarget) {
+          if (actionId === targetActionId) return;
+          const target = inputActionPlacement(targetActionId);
+          if (!target) return;
+          const source = inputActionPlacement(actionId);
+          let index = target.index + (afterTarget ? 1 : 0);
+          if (
+            source &&
+            source.row === target.row &&
+            source.segment === target.segment &&
+            source.index < index
+          ) {
+            index -= 1;
+          }
+          moveInputActionTo(actionId, target.row, target.segment, index);
+        }
+
+        function moveInputActionBy(actionId, offset) {
+          const placement = inputActionPlacement(actionId);
+          if (!placement) return;
+          const list = keyBarConfig.zones[placement.row][placement.segment];
+          const target = placement.index + offset;
+          if (target < 0 || target >= list.length) return;
+          [list[placement.index], list[target]] = [list[target], list[placement.index]];
+          commitInputLayout();
+        }
+
+        function moveInputActionToEdge(actionId, toStart) {
+          const placement = inputActionPlacement(actionId);
+          if (!placement) return;
+          moveInputActionTo(actionId, placement.row, placement.segment, toStart ? 0 : -1);
+        }
+
+        function resetInputActionLayout() {
+          selectedInputActionId = "";
+          keyBarConfig.expanded = false;
+          keyBarConfig.zones = defaultInputZones();
+          commitInputLayout();
+        }
+
+        function createUserKeyId() {
+          const base = Date.now().toString(36);
+          let candidate = `u-${base}`;
+          let suffix = 0;
+          while (userKeyIndex.has(candidate)) {
+            suffix += 1;
+            candidate = `u-${base}${suffix.toString(36)}`;
+          }
+          return candidate;
+        }
+
+        // Returns an error message, or "" when the key was registered.
+        function addUserKey(label, seq) {
+          if (keyBarConfig.userKeys.length >= USER_KEY_MAX) {
+            return `At most ${USER_KEY_MAX} custom keys.`;
+          }
+          const trimmed = typeof label === "string" ? label.trim() : "";
+          if (!trimmed || trimmed.length > USER_KEY_LABEL_MAX) {
+            return `Label must be 1-${USER_KEY_LABEL_MAX} characters.`;
+          }
+          if (typeof seq !== "string" || !seq || seq.length > USER_KEY_SEQ_MAX) {
+            return `Sequence must be 1-${USER_KEY_SEQ_MAX} characters.`;
+          }
+          const id = createUserKeyId();
+          keyBarConfig.userKeys.push({ id, label: trimmed, seq });
+          rebuildUserKeyIndex();
+          // A key nobody can reach is not registered in any useful sense, so a
+          // fresh key lands exactly where a tapped hidden chip does.
+          useInputAction(softInputActionId(id));
+          return "";
+        }
+
+        function removeUserKey(id) {
+          const actionId = softInputActionId(id);
+          keyBarConfig.userKeys = keyBarConfig.userKeys.filter((key) => key.id !== id);
+          rebuildUserKeyIndex();
+          removeInputAction(actionId);
+          if (selectedInputActionId === actionId) selectedInputActionId = "";
+          commitInputLayout();
+        }
+
+        // Ctrl+letter is that letter's C0 control byte; Alt prefixes ESC. Shift
+        // only changes the bytes in the Alt case — Ctrl+Shift+X is
+        // indistinguishable from Ctrl+X on the wire — so the picker offers Shift
+        // only alongside Alt.
+        function comboKeySequence(modifier, base, shift) {
+          const letter = typeof base === "string" ? base.toLowerCase() : "";
+          const ctrlByte = /^[a-z]$/.test(letter)
+            ? String.fromCharCode(letter.charCodeAt(0) & 0x1f)
+            : "";
+          if (modifier === "ctrl") return ctrlByte;
+          if (modifier === "alt") return `\x1b${shift ? letter.toUpperCase() : letter}`;
+          return ctrlByte ? `\x1b${ctrlByte}` : "";
+        }
+
+        function comboKeyLabel(modifier, base, shift) {
+          const prefix = modifier === "ctrl" ? "^" : modifier === "alt" ? "⌥" : "^⌥";
+          const letter = typeof base === "string" ? base.toLowerCase() : "";
+          const key = modifier === "alt" && !shift ? letter : letter.toUpperCase();
+          return `${prefix}${key}`;
+        }
+
+        const KEY_SEQUENCE_ESCAPES = { e: "\x1b", r: "\r", n: "\n", t: "\t", "0": "\0", "\\": "\\" };
+
+        // Accepts the escape spellings a terminal user already knows: \e, \xNN,
+        // \r, \n, \t, \0, \\. An unknown escape is an error rather than a literal
+        // backslash nobody meant to send.
+        function parseKeySequenceInput(text) {
+          let seq = "";
+          for (let index = 0; index < text.length; index += 1) {
+            const char = text[index];
+            if (char !== "\\") {
+              seq += char;
+              continue;
+            }
+            const next = text[index + 1];
+            if (next === undefined) return { error: "Sequence ends with a lone \\." };
+            if (next === "x") {
+              const hex = text.slice(index + 2, index + 4);
+              if (!/^[0-9a-fA-F]{2}$/.test(hex)) return { error: "\\x needs two hex digits." };
+              seq += String.fromCharCode(parseInt(hex, 16));
+              index += 3;
+              continue;
+            }
+            const mapped = Object.prototype.hasOwnProperty.call(KEY_SEQUENCE_ESCAPES, next)
+              ? KEY_SEQUENCE_ESCAPES[next]
+              : undefined;
+            if (mapped === undefined) return { error: `Unknown escape \\${next}.` };
+            seq += mapped;
+            index += 1;
+          }
+          return { seq };
         }
 
         function keySequence(def) {
@@ -9042,7 +9164,7 @@ import {
         // keyboard, which defeats the purpose of these no-keyboard helper keys.
         // Nav keys dispatch a step-navigation action instead of writing bytes.
         function sendKey(id, button = null) {
-          const def = KEY_DEFS[id];
+          const def = keyDef(id);
           if (!def) return;
           if (def.nav) {
             enqueueNavStep(button, def.nav[0], def.nav[1]);
@@ -9165,7 +9287,7 @@ import {
           for (const btn of document.querySelectorAll(
             "#mainActionRow button.key-btn, #keyRow button.key-btn",
           )) {
-            const def = KEY_DEFS[btn.dataset.key] || {};
+            const def = keyDef(btn.dataset.key) || {};
             if (def.nav || def.navFlick) {
               // Nav step keys need only a lease (they can navigate away from a
               // terminal-less workspace); alert keys idle at zero unread.
@@ -9185,7 +9307,7 @@ import {
           for (const btn of document.querySelectorAll(
             "#mainActionRow button.key-btn, #keyRow button.key-btn",
           )) {
-            const def = KEY_DEFS[btn.dataset.key] || {};
+            const def = keyDef(btn.dataset.key) || {};
             let badge = btn.querySelector(".key-nav-badge");
             if (!def.navBadge) continue;
             const show = !assigned && unread > 0;
@@ -9202,73 +9324,22 @@ import {
           }
         }
 
-        function inputActionZone(actionId) {
-          return (
-            INPUT_ACTION_ZONES.find((zone) => keyBarConfig.zones[zone].includes(actionId)) ||
-            "hidden"
-          );
-        }
-
-        function moveInputAction(actionId, zone, commit = true) {
-          if (!ALL_INPUT_ACTION_IDS.includes(actionId) || !INPUT_ACTION_ZONES.includes(zone)) {
-            return;
-          }
-          if (actionId === "keys" && zone === "expanded") zone = "main";
-          for (const candidate of INPUT_ACTION_ZONES) {
-            keyBarConfig.zones[candidate] = keyBarConfig.zones[candidate].filter(
-              (id) => id !== actionId,
-            );
-          }
-          keyBarConfig.zones[zone].push(actionId);
-          if (actionId === "keys" && zone === "hidden") {
-            keyBarConfig.expanded = false;
-          }
-          syncKeyOrderProjection();
-          if (!commit) return;
-          saveKeyBarConfig();
-          renderInputActionRows();
-          renderInputSettingsPreservingScroll();
-          scheduleTerminalFit();
-        }
-
-        function moveInputActionBy(actionId, offset) {
-          const zone = inputActionZone(actionId);
-          const actions = keyBarConfig.zones[zone];
-          const enabled = enabledInputActionIds();
-          const visible = actions.filter((id) => enabled.has(id));
-          const visibleIndex = visible.indexOf(actionId);
-          const targetVisibleIndex = visibleIndex + offset;
-          if (
-            visibleIndex < 0 ||
-            targetVisibleIndex < 0 ||
-            targetVisibleIndex >= visible.length
-          ) {
-            return;
-          }
-          const index = actions.indexOf(actionId);
-          const target = actions.indexOf(visible[targetVisibleIndex]);
-          [actions[index], actions[target]] = [actions[target], actions[index]];
-          syncKeyOrderProjection();
-          saveKeyBarConfig();
-          renderInputActionRows();
-          renderInputSettingsPreservingScroll();
-        }
-
-        function enabledInputActionIds() {
-          return new Set([
-            ...FIXED_INPUT_ACTION_IDS,
-            ...resolveKeyIds().map(softInputActionId),
-          ]);
-        }
-
         function inputActionLabel(actionId) {
           const keyId = softKeyIdFromAction(actionId);
-          return keyId ? KEY_DEFS[keyId]?.label || keyId : INPUT_ACTION_LABELS[actionId] || actionId;
+          if (!keyId) return INPUT_ACTION_LABELS[actionId] || actionId;
+          return keyDef(keyId)?.label || keyId;
+        }
+
+        // Accessible name for a chip/button whose visible label is a bare glyph.
+        function inputActionHint(actionId) {
+          const keyId = softKeyIdFromAction(actionId);
+          if (!keyId) return INPUT_ACTION_LABELS[actionId] || actionId;
+          const def = keyDef(keyId);
+          return def?.hint || def?.label || keyId;
         }
 
         function fixedInputActionElement(actionId) {
           return {
-            "ctrl-c": ctrlCButton,
             keyboard: focusTerminalButton,
             keys: keyBarToggleButton,
             send: composerSendButton,
@@ -9278,7 +9349,7 @@ import {
         }
 
         function createSoftKeyButton(id) {
-          const def = KEY_DEFS[id];
+          const def = keyDef(id);
           const btn = document.createElement("button");
           btn.type = "button";
           btn.className = "key-btn";
@@ -9308,12 +9379,18 @@ import {
           return btn;
         }
 
+        function rowContainer(row) {
+          return row === "main" ? mainActionRow : keyRowEl;
+        }
+
+        function rowSegmentContainer(row, segment) {
+          return rowContainer(row).querySelector(`:scope > [data-segment="${segment}"]`);
+        }
+
         function syncExpandedRowEmptyState() {
-          const enabled = enabledInputActionIds();
           const composerMode = currentInputMode() === "composer";
-          const hasVisibleAction = keyBarConfig.zones.expanded.some(
-            (actionId) =>
-              enabled.has(actionId) && (actionId !== "send" || composerMode),
+          const hasVisibleAction = placedInputActionIds("expanded").some(
+            (actionId) => actionId !== "send" || composerMode,
           );
           const current = keyRowEl.querySelector(":scope > .key-row-empty");
           if (hasVisibleAction) {
@@ -9346,6 +9423,10 @@ import {
           syncExpandedRowEmptyState();
         }
 
+        // Both rows render the same way: each segment container is filled in
+        // placement order. A fixed action that is no longer placed keeps its DOM
+        // node (and its listeners) wherever it last sat and is hidden by
+        // syncInputActionVisibility.
         function renderInputActionRows() {
           hideKeyFlickHint();
           for (const item of document.querySelectorAll(
@@ -9353,15 +9434,18 @@ import {
           )) {
             item.remove();
           }
-          const enabled = enabledInputActionIds();
-          for (const zone of ["main", "expanded"]) {
-            const container = zone === "main" ? mainActionRow : keyRowEl;
-            for (const actionId of keyBarConfig.zones[zone]) {
-              if (!enabled.has(actionId)) continue;
-              const keyId = softKeyIdFromAction(actionId);
-              const element = keyId ? createSoftKeyButton(keyId) : fixedInputActionElement(actionId);
-              element.dataset.inputAction = actionId;
-              container.append(element);
+          for (const row of INPUT_ACTION_ROWS) {
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              const container = rowSegmentContainer(row, segment);
+              if (!container) continue;
+              for (const actionId of keyBarConfig.zones[row][segment]) {
+                const keyId = softKeyIdFromAction(actionId);
+                const element = keyId
+                  ? createSoftKeyButton(keyId)
+                  : fixedInputActionElement(actionId);
+                element.dataset.inputAction = actionId;
+                container.append(element);
+              }
             }
           }
           syncInputActionVisibility();
@@ -9372,9 +9456,12 @@ import {
           renderInputActionRows();
         }
 
-        function clearKeyOrderDropMarkers() {
-          for (const chip of keyPopoverBody.querySelectorAll(".key-order-chip")) {
+        function clearChipDropMarkers() {
+          for (const chip of keyPopoverBody.querySelectorAll(".layout-chip")) {
             chip.classList.remove("drop-before", "drop-after");
+          }
+          for (const slot of keyPopoverBody.querySelectorAll(".drop-active")) {
+            slot.classList.remove("drop-active");
           }
         }
 
@@ -9389,13 +9476,59 @@ import {
           scrollSurface.scrollTop = scrollTop;
         }
 
-        function installKeyOrderDrag(chip, id) {
+        // Keys opens the expanded row, so it can never live inside it.
+        function canPlaceInputAction(actionId, row) {
+          return actionId !== "keys" || row === "main";
+        }
+
+        // Tapping a hidden chip means "use this". It lands at the end of the Keys
+        // row and stays selected, so the position controls are already open next
+        // to it — deciding to use a key and deciding where it goes are one
+        // gesture apart, not two screens apart.
+        function useInputAction(actionId) {
+          const row = canPlaceInputAction(actionId, "expanded") ? "expanded" : "main";
+          selectedInputActionId = actionId;
+          moveInputActionTo(actionId, row, row === "expanded" ? "left" : "right");
+        }
+
+        // Long-press drag (Pointer Events, never HTML native DnD — ADR-0040)
+        // moves a chip anywhere: within a segment, across segments, across rows,
+        // or into the hidden section. Tap remains the accessible path.
+        function installChipDrag(chip, actionId) {
           let gesture = null;
           let suppressClick = false;
-          const sourceZone = chip.dataset.orderZone;
 
           const releaseCapture = (pointerId) => {
             if (chip.hasPointerCapture(pointerId)) chip.releasePointerCapture(pointerId);
+          };
+
+          const dropTargetAt = (clientX, clientY) => {
+            const element = document.elementFromPoint(clientX, clientY);
+            if (!element) return null;
+            const targetChip = element.closest(".layout-chip");
+            if (targetChip) {
+              const targetId = targetChip.dataset.layoutAction || "";
+              if (targetId === actionId) return null;
+              const placement = inputActionPlacement(targetId);
+              if (!placement) return { kind: "hidden" };
+              if (!canPlaceInputAction(actionId, placement.row)) return null;
+              const rect = targetChip.getBoundingClientRect();
+              return {
+                kind: "chip",
+                element: targetChip,
+                targetId,
+                after: clientX >= rect.left + rect.width / 2,
+              };
+            }
+            const slot = element.closest("[data-drop-segment]");
+            if (slot) {
+              const row = slot.dataset.dropRow;
+              if (!canPlaceInputAction(actionId, row)) return null;
+              return { kind: "segment", element: slot, row, segment: slot.dataset.dropSegment };
+            }
+            const hiddenSection = element.closest("[data-drop-hidden]");
+            if (hiddenSection) return { kind: "hidden", element: hiddenSection };
+            return null;
           };
 
           chip.addEventListener("pointerdown", (event) => {
@@ -9406,8 +9539,7 @@ import {
               x: event.clientX,
               y: event.clientY,
               active: false,
-              targetId: "",
-              afterTarget: false,
+              drop: null,
               timer: 0,
             };
             chip.setPointerCapture(event.pointerId);
@@ -9433,18 +9565,13 @@ import {
             }
             event.preventDefault();
             event.stopPropagation();
-            clearKeyOrderDropMarkers();
-            const target = document
-              .elementFromPoint(event.clientX, event.clientY)
-              ?.closest(".key-order-chip");
-            const targetId =
-              target?.dataset.orderZone === sourceZone ? target.dataset.orderKey || "" : "";
-            gesture.targetId = targetId === id ? "" : targetId;
-            gesture.afterTarget = false;
-            if (gesture.targetId) {
-              const rect = target.getBoundingClientRect();
-              gesture.afterTarget = event.clientX >= rect.left + rect.width / 2;
-              target.classList.add(gesture.afterTarget ? "drop-after" : "drop-before");
+            clearChipDropMarkers();
+            const drop = dropTargetAt(event.clientX, event.clientY);
+            gesture.drop = drop;
+            if (drop?.kind === "chip") {
+              drop.element.classList.add(drop.after ? "drop-after" : "drop-before");
+            } else if (drop?.element) {
+              drop.element.classList.add("drop-active");
             }
             const scrollSurface = inputSettingsScrollSurface();
             const surfaceRect = scrollSurface.getBoundingClientRect();
@@ -9458,18 +9585,20 @@ import {
             const completed = gesture;
             gesture = null;
             chip.classList.remove("dragging");
-            clearKeyOrderDropMarkers();
+            clearChipDropMarkers();
             releaseCapture(completed.pointerId);
             if (!completed.active) return;
             event.preventDefault();
             event.stopPropagation();
             suppressClick = true;
-            if (shouldCommit && completed.targetId) {
-              const scrollSurface = inputSettingsScrollSurface();
-              const scrollTop = scrollSurface.scrollTop;
-              reorderKey(id, completed.targetId, completed.afterTarget);
-              renderKeyPopover();
-              scrollSurface.scrollTop = scrollTop;
+            if (!shouldCommit || !completed.drop) return;
+            const drop = completed.drop;
+            if (drop.kind === "chip") {
+              moveInputActionRelative(actionId, drop.targetId, drop.after);
+            } else if (drop.kind === "segment") {
+              moveInputActionTo(actionId, drop.row, drop.segment);
+            } else {
+              moveInputActionTo(actionId, "hidden");
             }
           };
 
@@ -9482,196 +9611,492 @@ import {
               event.preventDefault();
               return;
             }
-            const scrollSurface = inputSettingsScrollSurface();
-            const scrollTop = scrollSurface.scrollTop;
-            selectedOrderKeyId = selectedOrderKeyId === id ? "" : id;
-            renderKeyPopover();
-            scrollSurface.scrollTop = scrollTop;
+            if (!inputActionPlacement(actionId)) {
+              useInputAction(actionId);
+              return;
+            }
+            selectedInputActionId = selectedInputActionId === actionId ? "" : actionId;
+            renderInputSettingsPreservingScroll();
           });
           chip.addEventListener("contextmenu", (event) => event.preventDefault());
         }
 
-        function renderKeyOrderSection() {
-          const visibleIds = resolvePlacedKeyIds();
-          if (!visibleIds.includes(selectedOrderKeyId)) selectedOrderKeyId = "";
-          const section = document.createElement("section");
-          section.className = "key-order-section";
+        function createLayoutChip(actionId) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "key-chip layout-chip";
+          chip.dataset.layoutAction = actionId;
+          chip.textContent = inputActionLabel(actionId);
+          const hint = inputActionHint(actionId);
+          chip.title = `${hint} — hold and drag to move`;
+          chip.setAttribute("aria-label", hint);
+          const selected = selectedInputActionId === actionId;
+          chip.setAttribute("aria-pressed", selected ? "true" : "false");
+          chip.classList.toggle("selected", selected);
+          installChipDrag(chip, actionId);
+          return chip;
+        }
 
-          const heading = document.createElement("div");
-          heading.className = "key-order-heading";
-          const title = document.createElement("div");
-          title.className = "key-popover-title";
-          title.textContent = "Key order";
-          const reset = document.createElement("button");
-          reset.type = "button";
-          reset.className = "key-order-reset";
-          reset.textContent = "Reset";
-          reset.setAttribute("aria-label", "Reset key order");
-          reset.addEventListener("click", (event) => {
-            event.stopPropagation();
-            resetKeyOrder();
-            renderKeyPopover();
-          });
-          heading.append(title, reset);
-          section.append(heading);
-
-          const grid = document.createElement("div");
-          grid.className = "key-order-grid";
-          grid.setAttribute("aria-label", "Current key order");
-          for (const zone of ["main", "expanded"]) {
-            const zoneIds = resolvePlacedKeyIdsInZone(zone);
-            if (zoneIds.length === 0) continue;
-            const zoneLabel = document.createElement("div");
-            zoneLabel.className = "key-order-zone-label";
-            zoneLabel.id = zone === "main" ? "keyOrderZoneMain" : "keyOrderZoneExpanded";
-            zoneLabel.dataset.orderZoneLabel = zone;
-            zoneLabel.textContent = zone === "main" ? "Main row" : "Keys row";
-            grid.append(zoneLabel);
-            for (const id of zoneIds) {
-              const def = KEY_DEFS[id];
-              const chip = document.createElement("button");
-              chip.type = "button";
-              chip.className = "key-chip key-order-chip";
-              chip.dataset.orderKey = id;
-              chip.dataset.orderZone = zone;
-              chip.textContent = def.label;
-              chip.title = `${def.hint || def.label} — hold and drag to reorder`;
-              chip.setAttribute("aria-describedby", zoneLabel.id);
-              chip.setAttribute("aria-pressed", selectedOrderKeyId === id ? "true" : "false");
-              chip.classList.toggle("selected", selectedOrderKeyId === id);
-              installKeyOrderDrag(chip, id);
-              grid.append(chip);
-            }
-          }
-          if (visibleIds.length === 0) {
-            const empty = document.createElement("div");
-            empty.className = "key-row-empty";
-            empty.textContent = "Choose a set or custom key first.";
-            grid.append(empty);
-          }
-          section.append(grid);
-
-          const help = document.createElement("div");
-          help.className = "key-order-help";
-          help.textContent = "Hold and drag to reorder · Tap a key for move controls";
-          section.append(help);
-          keyPopoverBody.append(section);
-
-          if (!selectedOrderKeyId) return;
-          const selectedZone = inputActionZone(softInputActionId(selectedOrderKeyId));
-          const selectedZoneIds = resolvePlacedKeyIdsInZone(selectedZone);
-          const selectedIndex = selectedZoneIds.indexOf(selectedOrderKeyId);
-          const def = KEY_DEFS[selectedOrderKeyId];
-          const accessibleName = def.hint || def.label;
+        // Controls for the tapped chip: where it goes (row + alignment, or the
+        // hidden) and where it sits inside its segment. Rendered next to the
+        // group holding the selection so the context stays visible.
+        function createChipControls(actionId) {
+          const placement = inputActionPlacement(actionId);
+          const label = inputActionLabel(actionId);
+          const hint = inputActionHint(actionId);
           const actions = document.createElement("div");
           actions.className = "key-order-actions";
-          actions.setAttribute("aria-label", "Selected key order actions");
+          actions.setAttribute("aria-label", "Selected action controls");
+
           const selected = document.createElement("span");
           selected.className = "key-order-selected";
-          selected.textContent = `Selected: ${def.label} (${selectedZone === "main" ? "Main row" : "Keys row"})`;
+          selected.textContent = placement
+            ? `${label} · ${INPUT_ROW_LABELS[placement.row]} ${INPUT_SEGMENT_LABELS[placement.segment]}`
+            : `${label} · Hidden`;
           actions.append(selected);
-          const actionDefs = [
-            ["First", null, `Move ${accessibleName} to start`, selectedIndex === 0, () => moveKeyToEdge(selectedOrderKeyId, true)],
-            [null, "ArrowLeft", `Move ${accessibleName} left`, selectedIndex === 0, () => moveKey(selectedOrderKeyId, -1)],
-            [null, "ArrowRight", `Move ${accessibleName} right`, selectedIndex === selectedZoneIds.length - 1, () => moveKey(selectedOrderKeyId, 1)],
-            ["Last", null, `Move ${accessibleName} to end`, selectedIndex === selectedZoneIds.length - 1, () => moveKeyToEdge(selectedOrderKeyId, false)],
-          ];
-          for (const [label, iconName, ariaLabel, disabled, action] of actionDefs) {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "key-order-action";
-            if (iconName) setRemoteIcon(button, iconName, { size: 12 });
-            else button.textContent = label;
-            button.setAttribute("aria-label", ariaLabel);
-            button.disabled = disabled;
-            button.addEventListener("click", (event) => {
-              event.stopPropagation();
-              const scrollSurface = inputSettingsScrollSurface();
-              const scrollTop = scrollSurface.scrollTop;
-              action();
-              renderKeyPopover();
-              scrollSurface.scrollTop = scrollTop;
-            });
-            actions.append(button);
+
+          const select = document.createElement("select");
+          select.className = "input-layout-zone";
+          select.setAttribute("aria-label", `Place ${hint}`);
+          for (const row of INPUT_ACTION_ROWS) {
+            if (!canPlaceInputAction(actionId, row)) continue;
+            for (const segment of INPUT_ACTION_SEGMENTS) {
+              const option = document.createElement("option");
+              option.value = `${row}:${segment}`;
+              option.textContent = `${INPUT_ROW_LABELS[row]} · ${INPUT_SEGMENT_LABELS[segment]}`;
+              select.append(option);
+            }
           }
-          section.append(actions);
+          const hiddenOption = document.createElement("option");
+          hiddenOption.value = "hidden";
+          hiddenOption.textContent = "Hidden";
+          select.append(hiddenOption);
+          select.value = placement ? `${placement.row}:${placement.segment}` : "hidden";
+          select.addEventListener("click", (event) => event.stopPropagation());
+          select.addEventListener("change", () => {
+            const [row, segment] = select.value.split(":");
+            moveInputActionTo(actionId, row, segment);
+          });
+          actions.append(select);
+
+          if (placement) {
+            const list = keyBarConfig.zones[placement.row][placement.segment];
+            const atStart = placement.index === 0;
+            const atEnd = placement.index === list.length - 1;
+            const actionDefs = [
+              ["First", null, `Move ${hint} to start`, atStart, () => moveInputActionToEdge(actionId, true)],
+              [null, "ArrowLeft", `Move ${hint} left`, atStart, () => moveInputActionBy(actionId, -1)],
+              [null, "ArrowRight", `Move ${hint} right`, atEnd, () => moveInputActionBy(actionId, 1)],
+              ["Last", null, `Move ${hint} to end`, atEnd, () => moveInputActionToEdge(actionId, false)],
+            ];
+            for (const [text, iconName, ariaLabel, disabled, action] of actionDefs) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = "key-order-action";
+              if (iconName) setRemoteIcon(button, iconName, { size: 12 });
+              else button.textContent = text;
+              button.setAttribute("aria-label", ariaLabel);
+              button.disabled = disabled;
+              button.addEventListener("click", (event) => {
+                event.stopPropagation();
+                action();
+              });
+              actions.append(button);
+            }
+          }
+
+          const keyId = softKeyIdFromAction(actionId);
+          if (keyId && userKeyIndex.has(keyId)) {
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "key-order-action key-order-danger";
+            remove.textContent = "Delete";
+            remove.setAttribute("aria-label", `Delete custom key ${label}`);
+            remove.addEventListener("click", (event) => {
+              event.stopPropagation();
+              removeUserKey(keyId);
+            });
+            actions.append(remove);
+          }
+          return actions;
         }
 
-        function resetInputActionLayout() {
-          keyBarConfig.expanded = false;
-          keyBarConfig.order = [...KEY_ORDER];
-          keyBarConfig.zones = defaultInputZones();
-          saveKeyBarConfig();
-          renderInputActionRows();
-          renderKeyPopover();
-          scheduleTerminalFit();
-        }
-
-        function renderInputLayoutSection() {
+        function renderInputLayoutHeading() {
           const heading = document.createElement("div");
           heading.className = "input-layout-heading";
           const title = document.createElement("div");
           title.className = "key-popover-title";
-          title.textContent = "Action placement";
+          title.textContent = "Input bar";
           const reset = document.createElement("button");
           reset.type = "button";
           reset.className = "key-order-reset";
           reset.textContent = "Reset";
           reset.setAttribute("aria-label", "Reset input action layout");
-          reset.addEventListener("click", resetInputActionLayout);
+          reset.addEventListener("click", (event) => {
+            event.stopPropagation();
+            resetInputActionLayout();
+          });
           heading.append(title, reset);
           keyPopoverBody.append(heading);
 
-          const enabled = enabledInputActionIds();
-          for (const zone of INPUT_ACTION_ZONES) {
-            const actionIds = keyBarConfig.zones[zone].filter((actionId) => enabled.has(actionId));
-            for (const [index, actionId] of actionIds.entries()) {
-              const row = document.createElement("div");
-              row.className = "input-layout-row";
-              row.dataset.layoutAction = actionId;
-
-              const name = document.createElement("span");
-              name.className = "input-layout-name";
-              const label = inputActionLabel(actionId);
-              name.textContent = label;
-
-              const select = document.createElement("select");
-              select.className = "input-layout-zone";
-              select.setAttribute("aria-label", `Place ${label}`);
-              const choices = actionId === "keys" ? ["main", "hidden"] : INPUT_ACTION_ZONES;
-              for (const choice of choices) {
-                const option = document.createElement("option");
-                option.value = choice;
-                option.textContent =
-                  choice === "main" ? "Main" : choice === "expanded" ? "Keys" : "Hidden";
-                select.append(option);
-              }
-              select.value = zone;
-              select.addEventListener("change", () => moveInputAction(actionId, select.value));
-
-              const controls = document.createElement("span");
-              controls.className = "input-layout-order";
-              for (const [iconName, offset, disabled] of [
-                ["ArrowUp", -1, index === 0],
-                ["ArrowDown", 1, index === actionIds.length - 1],
-              ]) {
-                const button = document.createElement("button");
-                button.type = "button";
-                setRemoteIcon(button, iconName, { size: 12 });
-                button.disabled = disabled;
-                button.setAttribute(
-                  "aria-label",
-                  `${offset < 0 ? "Move" : "Move"} ${label} ${offset < 0 ? "earlier" : "later"}`,
-                );
-                button.addEventListener("click", () => moveInputActionBy(actionId, offset));
-                controls.append(button);
-              }
-              row.append(name, select, controls);
-              keyPopoverBody.append(row);
-            }
-          }
+          const help = document.createElement("div");
+          help.className = "key-order-help";
+          help.textContent =
+            "Hold and drag a key to move it between rows and alignments · Tap a key for move controls";
+          keyPopoverBody.append(help);
         }
 
+        function renderRowEditor(row) {
+          const selectedPlacement = selectedInputActionId
+            ? inputActionPlacement(selectedInputActionId)
+            : null;
+          const section = document.createElement("section");
+          section.className = "layout-row-editor";
+          const title = document.createElement("div");
+          title.className = "key-order-zone-label";
+          title.textContent = INPUT_ROW_LABELS[row];
+          section.append(title);
+          for (const segment of INPUT_ACTION_SEGMENTS) {
+            const group = document.createElement("div");
+            group.className = "layout-segment";
+            const label = document.createElement("span");
+            label.className = "layout-segment-label";
+            label.id = `layoutSegment-${row}-${segment}`;
+            label.textContent = INPUT_SEGMENT_LABELS[segment];
+            const slot = document.createElement("div");
+            slot.className = "layout-segment-slot";
+            slot.dataset.dropSegment = segment;
+            slot.dataset.dropRow = row;
+            slot.setAttribute("role", "group");
+            slot.setAttribute("aria-labelledby", label.id);
+            for (const actionId of keyBarConfig.zones[row][segment]) {
+              slot.append(createLayoutChip(actionId));
+            }
+            group.append(label, slot);
+            section.append(group);
+            if (selectedPlacement?.row === row && selectedPlacement.segment === segment) {
+              section.append(createChipControls(selectedInputActionId));
+            }
+          }
+          keyPopoverBody.append(section);
+        }
+
+        function hiddenGroups(unplaced) {
+          const available = new Set(unplaced);
+          const groups = [
+            {
+              name: "Actions",
+              ids: FIXED_INPUT_ACTION_IDS.filter((actionId) => available.has(actionId)),
+            },
+          ];
+          for (const category of KEY_CATEGORIES) {
+            groups.push({
+              name: category.name,
+              ids: category.keys
+                .map(softInputActionId)
+                .filter((actionId) => available.has(actionId)),
+            });
+          }
+          groups.push({
+            name: "Custom keys",
+            ids: keyBarConfig.userKeys
+              .map((key) => softInputActionId(key.id))
+              .filter((actionId) => available.has(actionId)),
+          });
+          return groups.filter((group) => group.ids.length > 0);
+        }
+
+        function renderHiddenSection() {
+          const unplaced = unplacedInputActionIds();
+          const section = document.createElement("section");
+          section.className = "layout-hidden";
+          section.dataset.dropHidden = "true";
+          const title = document.createElement("div");
+          title.className = "key-popover-title";
+          title.textContent = "Hidden";
+          section.append(title);
+          const help = document.createElement("div");
+          help.className = "key-order-help";
+          help.textContent = "Not on the bar. Tap one to use it, or drag it onto a row.";
+          section.append(help);
+          for (const group of hiddenGroups(unplaced)) {
+            const label = document.createElement("div");
+            label.className = "layout-hidden-label";
+            label.textContent = group.name;
+            section.append(label);
+            const grid = document.createElement("div");
+            grid.className = "key-chip-grid";
+            for (const actionId of group.ids) grid.append(createLayoutChip(actionId));
+            section.append(grid);
+          }
+          if (unplaced.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "key-order-help";
+            empty.textContent = "Every action is on the bar.";
+            section.append(empty);
+          }
+          if (selectedInputActionId && !inputActionPlacement(selectedInputActionId)) {
+            section.append(createChipControls(selectedInputActionId));
+          }
+          keyPopoverBody.append(section);
+        }
+
+        let userKeyFormMode = "combo";
+        let userKeyComboModifier = "ctrl";
+        let userKeyComboShift = false;
+        let userKeyComboBase = "a";
+        let userKeyRawLabel = "";
+        let userKeyRawSequence = "";
+        let userKeyFormError = "";
+
+        const COMBO_BASE_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
+        const COMBO_BASE_DIGITS = "0123456789".split("");
+
+        function comboBaseChoices(modifier) {
+          // Ctrl only has a byte for letters; Alt can prefix any printable key.
+          return modifier === "alt"
+            ? [...COMBO_BASE_LETTERS, ...COMBO_BASE_DIGITS]
+            : COMBO_BASE_LETTERS;
+        }
+
+        function describeKeySequence(seq) {
+          let out = "";
+          for (const char of seq) {
+            const code = char.codePointAt(0);
+            if (char === "\x1b") out += "\\e";
+            else if (char === "\r") out += "\\r";
+            else if (char === "\n") out += "\\n";
+            else if (char === "\t") out += "\\t";
+            else if (code < 0x20 || code === 0x7f) {
+              out += `\\x${code.toString(16).padStart(2, "0")}`;
+            } else out += char;
+          }
+          return out;
+        }
+
+        // addUserKey re-renders the editor itself, so the form fields and the
+        // error line have to reach their final values *before* it is called —
+        // otherwise the rendered form still shows the previous attempt.
+        function submitUserKeyForm() {
+          userKeyFormError = "";
+          if (userKeyFormMode === "combo") {
+            const seq = comboKeySequence(userKeyComboModifier, userKeyComboBase, userKeyComboShift);
+            if (!seq) {
+              userKeyFormError = "That combination has no terminal sequence.";
+              renderInputSettingsPreservingScroll();
+              return;
+            }
+            const error = addUserKey(
+              comboKeyLabel(userKeyComboModifier, userKeyComboBase, userKeyComboShift),
+              seq,
+            );
+            if (!error) return;
+            userKeyFormError = error;
+            renderInputSettingsPreservingScroll();
+            return;
+          }
+          const parsed = parseKeySequenceInput(userKeyRawSequence);
+          if (parsed.error) {
+            userKeyFormError = parsed.error;
+            renderInputSettingsPreservingScroll();
+            return;
+          }
+          const label = userKeyRawLabel;
+          const rawSequence = userKeyRawSequence;
+          userKeyRawLabel = "";
+          userKeyRawSequence = "";
+          const error = addUserKey(label, parsed.seq);
+          if (!error) return;
+          userKeyRawLabel = label;
+          userKeyRawSequence = rawSequence;
+          userKeyFormError = error;
+          renderInputSettingsPreservingScroll();
+        }
+
+        // Registering a key is deliberately a client-side affair: it produces the
+        // same `{label, seq}` shape a built-in key has and rides the existing
+        // write path, so nothing about the Remote API changes.
+        function renderUserKeySection() {
+          const title = document.createElement("div");
+          title.className = "key-popover-title";
+          title.textContent = "Add custom key";
+          keyPopoverBody.append(title);
+
+          const form = document.createElement("div");
+          form.className = "user-key-form";
+
+          const modeRow = document.createElement("div");
+          modeRow.className = "user-key-row";
+          const modeLabel = document.createElement("span");
+          modeLabel.className = "user-key-label";
+          modeLabel.textContent = "Kind";
+          const modeSelect = document.createElement("select");
+          modeSelect.className = "input-layout-zone";
+          modeSelect.setAttribute("aria-label", "Custom key kind");
+          for (const [value, text] of [["combo", "Combination"], ["raw", "Raw sequence"]]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            modeSelect.append(option);
+          }
+          modeSelect.value = userKeyFormMode;
+          modeSelect.addEventListener("change", () => {
+            userKeyFormMode = modeSelect.value;
+            userKeyFormError = "";
+            renderInputSettingsPreservingScroll();
+          });
+          modeRow.append(modeLabel, modeSelect);
+          form.append(modeRow);
+
+          if (userKeyFormMode === "combo") {
+            const comboRow = document.createElement("div");
+            comboRow.className = "user-key-row";
+            const comboLabel = document.createElement("span");
+            comboLabel.className = "user-key-label";
+            comboLabel.textContent = "Keys";
+
+            const modifierSelect = document.createElement("select");
+            modifierSelect.className = "input-layout-zone";
+            modifierSelect.setAttribute("aria-label", "Custom key modifier");
+            for (const [value, text] of [
+              ["ctrl", "Ctrl"],
+              ["alt", "Alt"],
+              ["ctrl-alt", "Ctrl+Alt"],
+            ]) {
+              const option = document.createElement("option");
+              option.value = value;
+              option.textContent = text;
+              modifierSelect.append(option);
+            }
+            modifierSelect.value = userKeyComboModifier;
+            modifierSelect.addEventListener("change", () => {
+              userKeyComboModifier = modifierSelect.value;
+              if (!comboBaseChoices(userKeyComboModifier).includes(userKeyComboBase)) {
+                userKeyComboBase = "a";
+              }
+              userKeyFormError = "";
+              renderInputSettingsPreservingScroll();
+            });
+
+            const baseSelect = document.createElement("select");
+            baseSelect.className = "input-layout-zone";
+            baseSelect.setAttribute("aria-label", "Custom key base key");
+            for (const base of comboBaseChoices(userKeyComboModifier)) {
+              const option = document.createElement("option");
+              option.value = base;
+              option.textContent = base.toUpperCase();
+              baseSelect.append(option);
+            }
+            baseSelect.value = userKeyComboBase;
+            baseSelect.addEventListener("change", () => {
+              userKeyComboBase = baseSelect.value;
+              userKeyFormError = "";
+              renderInputSettingsPreservingScroll();
+            });
+
+            const shiftWrap = document.createElement("label");
+            shiftWrap.className = "user-key-shift";
+            const shiftBox = document.createElement("input");
+            shiftBox.type = "checkbox";
+            shiftBox.checked = userKeyComboShift;
+            // Ctrl+Shift+X sends the same byte as Ctrl+X, so Shift is only
+            // meaningful when Alt is in the combination.
+            shiftBox.disabled = userKeyComboModifier === "ctrl";
+            shiftBox.setAttribute("aria-label", "Custom key uses Shift");
+            shiftBox.addEventListener("change", () => {
+              userKeyComboShift = shiftBox.checked;
+              userKeyFormError = "";
+              renderInputSettingsPreservingScroll();
+            });
+            const shiftText = document.createElement("span");
+            shiftText.textContent = "Shift";
+            shiftWrap.append(shiftBox, shiftText);
+
+            comboRow.append(comboLabel, modifierSelect, baseSelect, shiftWrap);
+            form.append(comboRow);
+
+            const seq = comboKeySequence(userKeyComboModifier, userKeyComboBase, userKeyComboShift);
+            const preview = document.createElement("div");
+            preview.className = "user-key-preview";
+            preview.textContent = seq
+              ? `${comboKeyLabel(userKeyComboModifier, userKeyComboBase, userKeyComboShift)} → ${describeKeySequence(seq)}`
+              : "No terminal sequence for this combination.";
+            form.append(preview);
+          } else {
+            const labelRow = document.createElement("div");
+            labelRow.className = "user-key-row";
+            const labelName = document.createElement("span");
+            labelName.className = "user-key-label";
+            labelName.textContent = "Label";
+            const labelInput = document.createElement("input");
+            labelInput.type = "text";
+            labelInput.className = "user-key-input";
+            labelInput.maxLength = USER_KEY_LABEL_MAX;
+            labelInput.placeholder = "^G";
+            labelInput.value = userKeyRawLabel;
+            labelInput.setAttribute("aria-label", "Custom key label");
+            labelInput.addEventListener("input", () => {
+              userKeyRawLabel = labelInput.value;
+            });
+            labelRow.append(labelName, labelInput);
+            form.append(labelRow);
+
+            const seqRow = document.createElement("div");
+            seqRow.className = "user-key-row";
+            const seqName = document.createElement("span");
+            seqName.className = "user-key-label";
+            seqName.textContent = "Sequence";
+            const seqInput = document.createElement("input");
+            seqInput.type = "text";
+            seqInput.className = "user-key-input";
+            seqInput.placeholder = "\\e[1;5C";
+            seqInput.value = userKeyRawSequence;
+            seqInput.setAttribute("aria-label", "Custom key sequence");
+            seqInput.addEventListener("input", () => {
+              userKeyRawSequence = seqInput.value;
+            });
+            seqRow.append(seqName, seqInput);
+            form.append(seqRow);
+
+            const hint = document.createElement("div");
+            hint.className = "user-key-preview";
+            hint.textContent = "Escapes: \\e \\xNN \\r \\n \\t \\0 \\\\";
+            form.append(hint);
+          }
+
+          const submitRow = document.createElement("div");
+          submitRow.className = "user-key-row user-key-submit";
+          const submit = document.createElement("button");
+          submit.type = "button";
+          submit.className = "key-order-action";
+          submit.textContent = "Add key";
+          submit.setAttribute("aria-label", "Add custom key");
+          submit.addEventListener("click", (event) => {
+            event.stopPropagation();
+            submitUserKeyForm();
+          });
+          submitRow.append(submit);
+          form.append(submitRow);
+
+          if (userKeyFormError) {
+            const error = document.createElement("div");
+            error.className = "user-key-error";
+            error.setAttribute("role", "alert");
+            error.textContent = userKeyFormError;
+            form.append(error);
+          }
+          keyPopoverBody.append(form);
+        }
+
+        function renderInputLayoutEditor() {
+          if (selectedInputActionId && !isKnownInputAction(selectedInputActionId)) {
+            selectedInputActionId = "";
+          }
+          renderInputLayoutHeading();
+          for (const row of INPUT_ACTION_ROWS) renderRowEditor(row);
+          renderHiddenSection();
+          renderUserKeySection();
+        }
         // Composer settings share the Remote drawer Settings surface with the
         // input layout. Configuration is persisted surface-locally; input text
         // itself remains runtime-only except for explicit attachment policy.
@@ -9813,78 +10238,8 @@ import {
 
         function renderKeyPopover() {
           keyPopoverBody.textContent = "";
-          renderInputLayoutSection();
+          renderInputLayoutEditor();
           renderComposerPopoverSection();
-          const setsTitle = document.createElement("div");
-          setsTitle.className = "key-popover-title";
-          setsTitle.textContent = "Key sets";
-          keyPopoverBody.append(setsTitle);
-          for (const set of KEY_SETS) {
-            const row = document.createElement("label");
-            row.className = "key-set-row";
-            const cb = document.createElement("input");
-            cb.type = "checkbox";
-            cb.checked = keyBarConfig.sets.includes(set.id);
-            cb.addEventListener("click", (event) => event.stopPropagation());
-            cb.addEventListener("change", (event) => {
-              event.stopPropagation();
-              const scrollSurface = inputSettingsScrollSurface();
-              const scrollTop = scrollSurface.scrollTop;
-              if (cb.checked) {
-                if (!keyBarConfig.sets.includes(set.id)) keyBarConfig.sets.push(set.id);
-              } else {
-                keyBarConfig.sets = keyBarConfig.sets.filter((id) => id !== set.id);
-              }
-              saveKeyBarConfig();
-              renderKeyRow();
-              renderKeyPopover();
-              scrollSurface.scrollTop = scrollTop;
-            });
-            const name = document.createElement("span");
-            name.className = "key-set-name";
-            name.textContent = set.name;
-            const desc = document.createElement("span");
-            desc.className = "key-set-desc";
-            desc.textContent = set.desc;
-            row.append(cb, name, desc);
-            keyPopoverBody.append(row);
-          }
-          const customTitle = document.createElement("div");
-          customTitle.className = "key-popover-title";
-          customTitle.textContent = "Custom keys";
-          keyPopoverBody.append(customTitle);
-          const grid = document.createElement("div");
-          grid.className = "key-chip-grid";
-          for (const id of KEY_ORDER) {
-            const def = KEY_DEFS[id];
-            const chip = document.createElement("button");
-            chip.type = "button";
-            chip.className = "key-chip";
-            chip.textContent = def.label;
-            chip.classList.toggle("selected", keyBarConfig.custom.includes(id));
-            chip.addEventListener("click", (event) => {
-              event.stopPropagation();
-              const scrollSurface = inputSettingsScrollSurface();
-              const scrollTop = scrollSurface.scrollTop;
-              const visibleIds = resolveKeyIds();
-              if (keyBarConfig.custom.includes(id)) {
-                keyBarConfig.custom = keyBarConfig.custom.filter((k) => k !== id);
-              } else {
-                keyBarConfig.custom.push(id);
-                if (!keyBarConfig.usedCustom.includes(id)) {
-                  keyBarConfig.usedCustom.push(id);
-                  appendKeyToVisibleEnd(id, visibleIds);
-                }
-              }
-              saveKeyBarConfig();
-              renderKeyRow();
-              renderKeyPopover();
-              scrollSurface.scrollTop = scrollTop;
-            });
-            grid.append(chip);
-          }
-          keyPopoverBody.append(grid);
-          renderKeyOrderSection();
         }
 
         function setKeyBarVisible(visible, persist = true) {
@@ -10493,10 +10848,6 @@ import {
         });
 
         syncInstallSection();
-        // Ctrl+C sends like a soft key; keep it from blurring the input surface
-        // and dismissing the keyboard (#482).
-        keepInputSurfaceFocus(ctrlCButton);
-        ctrlCButton.addEventListener("click", () => enqueueInput("\x03"));
         // Same contract as the soft keys: the toggle must read the surface's
         // real focus state on click, so the button must not steal focus first
         // (#482). keepInputSurfaceFocus guards mousedown + pointerdown.

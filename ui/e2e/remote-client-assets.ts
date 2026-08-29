@@ -58,7 +58,7 @@ export function remoteClientCsp(origin: string): string {
 }
 
 /**
- * Mirrors `APP_FRAME_ANCESTORS` in `page.rs` (ADR-0213) — the desktop WebView
+ * Mirrors `APP_FRAME_ANCESTORS` in `page.rs` (ADR-0214) — the desktop WebView
  * origins allowed to frame the shell, plus the Vite dev origin that only debug
  * builds compile in. Specs run as top-level documents, so this value never
  * decides a result; it exists so the mocked policy stays a valid CSP with no
