@@ -520,6 +520,11 @@ import {
         // changes the surrounding desktop layout rather than releasing a lease.
         desktopModeHeaderButton.hidden = !localAppMode;
         desktopModeDrawerButton.hidden = !localAppMode;
+        // Tell the PC app's overlay the embed actually came up. A refused frame
+        // still fires the iframe's `load`, so this greeting is the host's only
+        // proof; without it the host draws its own way back to desktop mode
+        // (#955, ADR-0213).
+        if (localAppMode) window.parent.postMessage({ type: "laymux:mobile-mode-ready" }, "*");
         // Layout naming (canonical Enter gesture, ADR-0036/0186):
         //   desktop layout — Enter sends, Shift+Enter inserts a newline.
         //   mobile layout  — Enter inserts a newline; the Send action submits.
