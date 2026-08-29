@@ -688,9 +688,11 @@
       .settings-tabs::-webkit-scrollbar {
         display: none;
       }
+      /* `1 0 auto`, not `1 1 0`: a shrinking tab would squeeze its label past
+         its own box (no ellipsis, nowrap) and the strip's overflow would never
+         engage. Growing-only tabs fill a wide drawer and scroll a narrow one. */
       .settings-tab {
-        flex: 1 1 0;
-        min-width: 0;
+        flex: 1 0 auto;
         padding: 6px 8px;
         border: 0;
         border-bottom: 2px solid transparent;
@@ -707,6 +709,21 @@
       .settings-tab.active {
         border-bottom-color: var(--accent);
         color: var(--accent);
+      }
+      /* Same 5px status dot the drawer buttons use (ADR-0187), so the drawer
+         dot and the tab dot read as one trail to the update. */
+      .settings-tab.update-available {
+        position: relative;
+      }
+      .settings-tab.update-available::after {
+        position: absolute;
+        right: 2px;
+        top: 4px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--yellow);
+        content: "";
       }
       .settings-panel {
         display: flex;

@@ -123,6 +123,7 @@ import {
         const keyPopoverBody = inputLayoutEditor;
         const composerSettingsBody = $("composerSettingsEditor");
         const settingsTabsEl = $("settingsTabs");
+        const settingsAppTabButton = $("settingsTabApp");
         const tokenKey = "laymux.remote.token";
         const keyBarKey = "laymux.remote.keybar";
         const inputModeKey = "laymux.remote.inputMode";
@@ -1217,7 +1218,11 @@ import {
                       : `Laymux ${status.currentVersion} is up to date.${betaChannelNote}`;
           pcUpdateStatusElement.textContent = message || status?.lastError || defaultMessage;
           pcUpdateStatusElement.classList.toggle("error", isError || Boolean(status?.lastError));
+          // The drawer button's dot says "there is an update in Settings"; with
+          // Settings paginated it has to name the page too, or it points at a
+          // tab the user cannot see.
           drawerSettingsButton.classList.toggle("update-available", Boolean(availableVersion));
+          settingsAppTabButton.classList.toggle("update-available", Boolean(availableVersion));
           checkPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !status?.enabled;
           installPcUpdateButton.hidden = !availableVersion;
           installPcUpdateButton.disabled = busy || pcUpdateRequestInFlight || !leaseId;
@@ -10267,6 +10272,9 @@ import {
           for (const element of drawerSettingsView.querySelectorAll(".settings-panel")) {
             element.hidden = element.dataset.settingsPanel !== panel;
           }
+          // Panels differ in height, so a carried-over scroll offset drops the
+          // reader into the middle of a page they have not seen yet.
+          drawerSettingsView.scrollTop = 0;
           if (!persist) return;
           try {
             localStorage.setItem(settingsPanelKey, panel);
@@ -10277,13 +10285,22 @@ import {
           for (const tab of settingsTabButtons()) {
             tab.addEventListener("click", () => setSettingsPanel(tab.dataset.settingsPanel));
             tab.addEventListener("keydown", (event) => {
-              const offset =
-                event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-              if (!offset) return;
-              event.preventDefault();
               const tabs = settingsTabButtons();
               const index = tabs.indexOf(tab);
-              const next = tabs[(index + offset + tabs.length) % tabs.length];
+              // ARIA APG tablist keys: arrows wrap, Home/End jump to the ends.
+              const target =
+                event.key === "ArrowRight"
+                  ? (index + 1) % tabs.length
+                  : event.key === "ArrowLeft"
+                    ? (index - 1 + tabs.length) % tabs.length
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? tabs.length - 1
+                        : -1;
+              if (target < 0) return;
+              event.preventDefault();
+              const next = tabs[target];
               setSettingsPanel(next.dataset.settingsPanel);
               next.focus();
             });

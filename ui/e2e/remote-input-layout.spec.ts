@@ -454,6 +454,31 @@ test.describe("Remote input action layout", () => {
     await expect(page.locator("#settingsPanelApp")).toBeVisible();
   });
 
+  test("keeps the Settings tab strip readable and scrollable at 240px", async ({ page }) => {
+    await openMarkup(page);
+    await page.setViewportSize({ width: 240, height: 844 });
+    await page.locator("#drawerSettingsButton").click();
+
+    // Tabs may only grow, never shrink: a squeezed tab pushes its label past
+    // its own box (nowrap, no ellipsis) instead of scrolling the strip.
+    const strip = await page.locator("#settingsTabs").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      overflowX: getComputedStyle(element).overflowX,
+    }));
+    expect(strip.overflowX).toBe("auto");
+    expect(strip.scrollWidth).toBeGreaterThan(strip.clientWidth);
+
+    const overflowingLabels = await page
+      .locator("#settingsTabs [data-settings-panel]")
+      .evaluateAll((tabs) =>
+        tabs.filter((tab) => tab.scrollWidth > tab.clientWidth).map((tab) => tab.textContent),
+      );
+    expect(overflowingLabels).toEqual([]);
+    // The strip scrolls inside itself; the document never does.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(240);
+  });
+
   test("falls back to the first Settings tab for an unknown stored panel", async ({ page }) => {
     await page.addInitScript(() =>
       localStorage.setItem("laymux.remote.settingsPanel", "__proto__"),

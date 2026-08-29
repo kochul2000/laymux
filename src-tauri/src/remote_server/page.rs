@@ -596,6 +596,13 @@ mod tests {
         }
         // Composer settings render in their own panel, not inside the input bar.
         assert!(settings_view.contains("id=\"composerSettingsEditor\""));
+        // A dot on the drawer button alone would point at a page the reader
+        // cannot see once Settings opens on whichever tab they used last, so
+        // the update dot rides down to the tab that holds the update.
+        assert!(html.contains(
+            "settingsAppTabButton.classList.toggle(\"update-available\", Boolean(availableVersion));"
+        ));
+        assert!(html.contains(".settings-tab.update-available::after"));
 
         assert!(html.contains("id=\"drawerNotificationsButton\""));
         assert!(html.contains("id=\"drawerConnectionButton\""));
