@@ -94,6 +94,33 @@ const REMOTE_PAGE_CSP_TEMPLATE: &str = include_str!("page-csp.txt");
 
 const WS_SOURCES_PLACEHOLDER: &str = "__WS_SOURCES__";
 
+const APP_FRAME_ANCESTORS_PLACEHOLDER: &str = "__APP_FRAME_ANCESTORS__";
+
+/// What ships if even the template's own constant form will not encode. It has
+/// to name `frame-ancestors` itself: `default-src` does not cover that
+/// directive, so `default-src 'none'` alone would leave the page framable by
+/// anyone (ADR-0215).
+const LAST_RESORT_CSP: &str = "default-src 'none'; frame-ancestors 'none'";
+
+/// The origins the desktop shell's own WebView serves the app from, and the
+/// only ones allowed to frame this page (ADR-0215). Mobile mode embeds
+/// `/remote/?localApp=1` in an iframe inside that WebView, so a blanket
+/// `frame-ancestors 'none'` (ADR-0183) left the user staring at a blank
+/// overlay. `'self'` would not help: the embedder is the app origin, not the
+/// remote server's. Everything outside this list — every real web page — is
+/// still refused, so the clickjacking boundary the directive exists for holds.
+///
+/// `tauri://localhost` is the Linux/macOS WebView origin, `http://tauri.localhost`
+/// the Windows (WebView2) one. The Android app is not on this list and does not
+/// need to be: its wrapper loads the shell as a top-level document over HTTPS
+/// (ADR-0149), never framed. The Vite dev origin is compiled in only for debug
+/// builds; a shipped binary must not trust whatever answers on port 1420.
+const APP_FRAME_ANCESTORS: &str = if cfg!(debug_assertions) {
+    "tauri://localhost http://tauri.localhost http://localhost:1420"
+} else {
+    "tauri://localhost http://tauri.localhost"
+};
+
 /// The document carries the policy the Remote viewer document already had
 /// (ADR-0041), so host file bytes are never rendered by a document without one.
 /// `script-src 'self'` is the boundary that matters: the shell has no inline
@@ -107,10 +134,13 @@ pub(super) fn secure_page_response(
     mut response: Response,
     request_headers: &HeaderMap,
 ) -> Response {
-    let policy = REMOTE_PAGE_CSP_TEMPLATE.trim_end().replace(
-        WS_SOURCES_PLACEHOLDER,
-        &websocket_csp_sources(request_headers),
-    );
+    let policy = REMOTE_PAGE_CSP_TEMPLATE
+        .trim_end()
+        .replace(
+            WS_SOURCES_PLACEHOLDER,
+            &websocket_csp_sources(request_headers),
+        )
+        .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS);
     let headers = response.headers_mut();
     // Fail closed. `is_bare_authority` should make an unencodable value
     // impossible, but "the validator let something through" must not be the one
@@ -121,10 +151,11 @@ pub(super) fn secure_page_response(
             HeaderValue::from_str(
                 &REMOTE_PAGE_CSP_TEMPLATE
                     .trim_end()
-                    .replace(WS_SOURCES_PLACEHOLDER, ""),
+                    .replace(WS_SOURCES_PLACEHOLDER, "")
+                    .replace(APP_FRAME_ANCESTORS_PLACEHOLDER, APP_FRAME_ANCESTORS),
             )
         })
-        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'none'"));
+        .unwrap_or_else(|_| HeaderValue::from_static(LAST_RESORT_CSP));
     headers.insert(header::CONTENT_SECURITY_POLICY, value);
     headers.insert(
         header::REFERRER_POLICY,
@@ -970,6 +1001,12 @@ mod tests {
         assert!(html.contains("id=\"desktopModeDrawer\""));
         assert!(html.contains("desktopModeHeaderButton.hidden = !localAppMode;"));
         assert!(html.contains("desktopModeDrawerButton.hidden = !localAppMode;"));
+        // The embed greets the PC app's overlay so a frame that never came up
+        // is distinguishable from one that did — a refused embed still fires
+        // `load`, so this is the host's only proof (#955, ADR-0215).
+        assert!(html.contains(
+            "if (localAppMode) window.parent.postMessage({ type: \"laymux:mobile-mode-ready\" }, \"*\");"
+        ));
         assert!(!html.contains("desktopModeHeaderButton.textContent = \"Close\""));
         assert!(!html.contains("desktopModeDrawerButton.textContent = \"Close\""));
         assert!(html.contains("id=\"exit\" class=\"danger\">Exit</button>"));
@@ -2155,11 +2192,50 @@ mod tests {
         assert!(policy.contains("script-src 'self'"));
         assert!(policy.contains("object-src 'none'"));
         assert!(policy.contains("base-uri 'none'"));
-        assert!(policy.contains("frame-ancestors 'none'"));
         // The manifest and the PWA icons are what make the installed client
         // possible (ADR-0091); blocking them would silently un-install it.
         assert!(policy.contains("manifest-src 'self'"));
         assert!(policy.contains("img-src 'self' data:"));
+    }
+
+    /// Issue #955: `frame-ancestors 'none'` refused the desktop app's own
+    /// mobile-mode iframe, and the overlay's only exit lived inside the page
+    /// that never loaded — the app was unusable until it was killed.
+    #[test]
+    fn remote_page_lets_only_the_desktop_app_frame_it() {
+        let policy = page_policy("100.64.0.2:19281");
+        let frame_ancestors = policy
+            .split("frame-ancestors ")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("frame-ancestors must be present");
+        assert!(!frame_ancestors.contains("__APP_FRAME_ANCESTORS__"));
+        // The two WebView origins Tauri serves the shell from.
+        assert!(frame_ancestors.contains("tauri://localhost"));
+        assert!(frame_ancestors.contains("http://tauri.localhost"));
+        // Still a closed allowlist: no wildcard, no `https:`, no web origin.
+        assert!(!frame_ancestors.contains('*'));
+        assert!(!frame_ancestors.contains("'self'"));
+        assert!(!frame_ancestors.contains("https://"));
+    }
+
+    /// `default-src` does not cover `frame-ancestors`, so the last-resort
+    /// header must name it or an unencodable policy would ship a framable page.
+    #[test]
+    fn last_resort_policy_still_refuses_framing() {
+        assert!(LAST_RESORT_CSP.contains("frame-ancestors 'none'"));
+        assert!(HeaderValue::from_str(LAST_RESORT_CSP).is_ok());
+    }
+
+    /// The Vite dev server is a development convenience, not something a
+    /// shipped binary should let frame the terminal it controls.
+    #[test]
+    fn remote_page_trusts_the_vite_dev_origin_only_in_debug_builds() {
+        let policy = page_policy("100.64.0.2:19281");
+        assert_eq!(
+            policy.contains("http://localhost:1420"),
+            cfg!(debug_assertions)
+        );
     }
 
     #[test]
